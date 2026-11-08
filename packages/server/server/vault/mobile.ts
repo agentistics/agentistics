@@ -35,7 +35,9 @@ export async function readMobile(): Promise<MobileRecord> {
   if (!r.ok) return { v: 1, passkeys: [], codeReveal: false, devices: [] }
   try {
     const o = JSON.parse(new TextDecoder().decode(r.plaintext)) as MobileRecord
-    return { v: 1, passkeys: Array.isArray(o.passkeys) ? o.passkeys : [], codeReveal: o.codeReveal === true, devices: Array.isArray(o.devices) ? o.devices : [] }
+    // COFRE.DESBLOQUEIO (owner, 2026-11-07): "the code alone" went with the authenticator code. A stored
+    // `codeReveal: true` is read as OFF, so no reveal, unlock or registration is ever decided by it again.
+    return { v: 1, passkeys: Array.isArray(o.passkeys) ? o.passkeys : [], codeReveal: false, devices: Array.isArray(o.devices) ? o.devices : [] }
   } catch { return { v: 1, passkeys: [], codeReveal: false, devices: [] } } finally { r.plaintext.fill(0) }
 }
 async function writeMobile(m: MobileRecord): Promise<void> {

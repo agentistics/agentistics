@@ -1,7 +1,9 @@
 /**
  * VAULT.PERSONAL §10 — opening the vault from a phone, end to end over HTTP with a software
- * authenticator (real P-256 + a PRF): never Hello off loopback; passkey+PRF+code or device+code (opt-in);
- * registering = code on the phone + Hello on the computer.
+ * authenticator (real P-256 + a PRF): never Hello off loopback; the passkey + PRF (the phone's
+ * biometrics) opens it. COFRE.DESBLOQUEIO (owner, 2026-11-07): no authenticator code anywhere — the
+ * phone's REQUEST asks nothing, the computer's APPROVAL asks its own proof (Hello here), and the old
+ * "device key + code" way is gone.
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { createHash, createHmac, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
@@ -9,8 +11,8 @@ import { readFile } from 'node:fs/promises'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { b64url, base32Decode, hotp, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
-import { __resetVaultForTests, __setVaultClockForTests, acceptVaultHeartbeatToken, rotateVaultHeartbeatToken, sealToFile } from './service'
+import { b64url, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
+import { __resetVaultForTests, __setVaultClockForTests, sealToFile } from './service'
 import { __resetGateForTests } from './gate'
 import { __resetPersonalForTests } from './personal'
 import { __resetMobileForTests } from './mobile'
@@ -18,13 +20,16 @@ import { __resetPhoneForTests } from './phone'
 import { handleVaultHttp } from './http'
 
 const STORE = new Map<string, Uint8Array>()
-type Fake = Protector & { gestures: number }
+type Fake = Protector & { gestures: number; deny: boolean }
 function fake(id: ProtectorId): Fake {
   const self: Fake = {
-    id, gestures: 0, label: () => id,
+    id, gestures: 0, deny: false, label: () => id,
     async probe() { return { ok: true as const } },
     async wrap(dek: Uint8Array, kid: string) { STORE.set(`${id}:${kid}`, new Uint8Array(dek)); return { ok: true as const, record: { type: id, createdAt: 'x' } } },
-    async unwrap(_r: unknown, kid: string): Promise<UnwrapResult> { if (id === 'hello') self.gestures++; const d = STORE.get(`${id}:${kid}`); return d ? { ok: true, dek: new Uint8Array(d) } : { ok: false, kind: 'missing', reason: 'gone' } },
+    async unwrap(_r: unknown, kid: string): Promise<UnwrapResult> {
+      if (id === 'hello') { self.gestures++; if (self.deny) return { ok: false, kind: 'denied', reason: 'presence-cancelled: no' } }
+      const d = STORE.get(`${id}:${kid}`); return d ? { ok: true, dek: new Uint8Array(d) } : { ok: false, kind: 'missing', reason: 'gone' }
+    },
     async remove(_r: unknown, kid: string) { STORE.delete(`${id}:${kid}`) },
     ...(id === 'hello' ? { async proveHuman() { return { ok: true as const } } } : {}),
   }
@@ -33,9 +38,8 @@ function fake(id: ProtectorId): Fake {
 
 let T = 1_800_000_000_000
 const clock = () => T
-let seed: Uint8Array
-const codeAt = () => hotp(seed, Math.floor(T / 1000 / 30))
-const next = () => { T += 30_000 }
+/** A code an old phone page might still send: never judged, never a proof. */
+const OLD_CODE = '123456'
 let hello = fake('hello'), dpapi = fake('dpapi')
 
 const RP = 'box.tail1234.ts.net'
@@ -94,21 +98,18 @@ beforeEach(async () => {
   __setVaultClockForTests(clock); __resetGateForTests(clock); __resetPersonalForTests(clock); __resetMobileForTests(clock); __resetPhoneForTests(clock)
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('x'))
   await http('POST', '/api/vault/local-proof')
-  seed = base32Decode((await http('POST', '/api/vault/authenticator/begin')).json.secret)
-  await http('POST', '/api/vault/authenticator/confirm', { code: codeAt() }); next()
-  await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() }); next()
+  await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })
   const r = await http('POST', '/api/vault/recovery/begin')
-  await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) }); next()
+  await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })
 })
 afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdir(), 'agentistics-phone-done-')), 'vault') }) })
 
-const lock = async () => { const r = await http('POST', '/api/vault/lock', { code: codeAt() }); next(); expect(r.json.ok).toBe(true) }
+const lock = async () => { const r = await http('POST', '/api/vault/lock', {}); expect(r.json.ok).toBe(true) }
 const state = async () => (await http('GET', '/api/vault/phone', undefined, PHONE)).json
 
-/** The phone asks, the computer approves with Hello. */
-async function approvedRequest(kind: 'passkey' | 'device', where: Where = PHONE, session = 'local') {
-  const q = await http('POST', '/api/vault/phone/enrol/request', { kind, label: 'Pixel', code: codeAt() }, where, session)
-  next()
+/** The phone asks (no proof of its own yet), the computer approves with Hello. */
+async function approvedRequest(kind: 'passkey', where: Where = PHONE, session = 'local') {
+  const q = await http('POST', '/api/vault/phone/enrol/request', { kind, label: 'Pixel' }, where, session)
   expect(q.json).toMatchObject({ ok: true })
   expect(q.json.match).toMatch(/^\d\d \d\d$/)
   const list = await http('GET', '/api/vault/phone/requests')
@@ -129,11 +130,11 @@ async function enrolPasskey(p = phone(), withPrf = true) {
   expect(k.json.ok).toBe(true)
   return { p, unlockable: k.json.unlockable as boolean }
 }
-async function passkeyUnlock(p: ReturnType<typeof phone>, code: string | undefined, prf?: (salt: string) => string) {
+async function passkeyUnlock(p: ReturnType<typeof phone>, prf?: (salt: string) => string, extra: Record<string, unknown> = {}) {
   const b = await http('POST', '/api/vault/phone/unlock/begin', {}, PHONE)
   expect(b.json.ok).toBe(true)
   const salt = b.json.allow[0].salt as string
-  return http('POST', '/api/vault/phone/unlock', { kind: 'passkey', challengeId: b.json.challengeId, ...p.get(b.json.challenge), prf: (prf ?? p.prf)(salt), ...(code ? { code } : {}) }, PHONE)
+  return http('POST', '/api/vault/phone/unlock', { kind: 'passkey', challengeId: b.json.challengeId, ...p.get(b.json.challenge), prf: (prf ?? p.prf)(salt), ...extra }, PHONE)
 }
 
 describe('Windows Hello is never offered off loopback', () => {
@@ -153,26 +154,26 @@ describe('Windows Hello is never offered off loopback', () => {
   })
 })
 
-describe('registering a phone takes a code on the phone AND Hello on the computer', () => {
-  test('a stolen code alone enrols nothing: no approval, no registration', async () => {
-    const q = await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey', code: codeAt() }, PHONE)
-    next()
+describe('registering a phone: the phone asks, the computer approves with its own proof', () => {
+  test('a request alone enrols nothing: no approval, no registration', async () => {
+    const q = await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey' }, PHONE)
     expect(q.json.ok).toBe(true)
     expect((await http('POST', '/api/vault/personal/mobile/register/begin', { requestId: q.json.id }, PHONE)).json.code).toBe('not-approved')
   })
-  test('the request needs the code; approving is the computer\'s, with Hello', async () => {
-    expect((await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey' }, PHONE)).status).toBe(401)
-    const q = await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey', code: codeAt() }, PHONE)
-    next()
+  test('the request asks the phone nothing (no code any more); approving is the computer\'s, with Hello — a denied Hello approves nothing', async () => {
+    const q = await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey', code: OLD_CODE }, PHONE)
+    expect(q.json.ok).toBe(true)
     expect((await http('POST', '/api/vault/phone/requests/decide', { id: q.json.id, approve: true }, PHONE)).json.code).toBe('desktop-only')
     expect((await http('GET', '/api/vault/phone/requests', undefined, PHONE)).json.code).toBe('desktop-only')
+    hello.deny = true
+    expect((await http('POST', '/api/vault/phone/requests/decide', { id: q.json.id, approve: true })).json.ok).toBe(false)
+    hello.deny = false
     const g0 = hello.gestures
     expect((await http('POST', '/api/vault/phone/requests/decide', { id: q.json.id, approve: true })).json.ok).toBe(true)
     expect(hello.gestures).toBe(g0 + 1)
   })
   test('a denial is final and an approval belongs to the session that asked', async () => {
-    const q = await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey', code: codeAt() }, PHONE)
-    next()
+    const q = await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey' }, PHONE)
     await http('POST', '/api/vault/phone/requests/decide', { id: q.json.id, approve: false })
     expect((await http('GET', `/api/vault/phone/enrol/status?id=${q.json.id}`, undefined, PHONE)).json.status).toBe('denied')
     const id = await approvedRequest('passkey')
@@ -185,42 +186,41 @@ describe('registering a phone takes a code on the phone AND Hello on the compute
     expect((await http('POST', '/api/vault/personal/mobile/register/begin', { requestId: id }, PHONE)).json.code).toBe('not-approved')
   })
   test('the phone cannot register while the vault is locked, nor from this computer', async () => {
-    expect((await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey', code: codeAt() })).json.code).toBe('not-a-phone')
+    expect((await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey' })).json.code).toBe('not-a-phone')
     await lock()
-    expect((await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey', code: codeAt() }, PHONE)).json.code).toBe('locked')
+    expect((await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey' }, PHONE)).json.code).toBe('locked')
   })
   test('a passkey needs https; plain http says how to get it', async () => {
-    const r = await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey', code: codeAt() }, PHONE_HTTP)
+    const r = await http('POST', '/api/vault/phone/enrol/request', { kind: 'passkey' }, PHONE_HTTP)
     expect(r.json.code).toBe('insecure-context')
     expect(r.json.sentence).toContain('Tailscale')
   })
 })
 
-describe('opening the vault from the phone: passkey (biometrics) + code', () => {
-  test('opens with the passkey\'s PRF and the code; no Hello; audited as "opened from Pixel"', async () => {
+describe('opening the vault from the phone: the passkey (biometrics) alone', () => {
+  test('opens with the passkey\'s PRF — no code, no Hello; audited as "opened from Pixel"; hands back the read grant', async () => {
     const { p, unlockable } = await enrolPasskey()
     expect(unlockable).toBe(true)
     await lock()
     expect(await state()).toMatchObject({ state: 'locked', passkeys: 1, loopback: false, secure: true, codeOnly: null })
     const g0 = hello.gestures
-    const r = await passkeyUnlock(p, codeAt())
+    const r = await passkeyUnlock(p)
     expect(r.json).toMatchObject({ ok: true, state: 'open' })
+    expect(typeof r.json.grant).toBe('string')
     expect(hello.gestures).toBe(g0)
     expect((await state()).state).toBe('open')
     const audit = await readFile(join(vaultDirPath, 'audit.jsonl'), 'utf8')
     expect(audit).toContain('"type":"vault.unlock","device":"Pixel"')
   })
-  test('without the code nothing is unwrapped; a wrong code keeps it locked', async () => {
+  test('a code sent beside it changes nothing (ignored, never required)', async () => {
     const { p } = await enrolPasskey()
     await lock()
-    expect((await passkeyUnlock(p, undefined)).json.code).toBe('stepup-required')
-    expect((await passkeyUnlock(p, '000000')).json.ok).toBe(false)
-    expect((await state()).state).toBe('locked')
+    expect((await passkeyUnlock(p, undefined, { code: '000000' })).json).toMatchObject({ ok: true, state: 'open' })
   })
   test('the right signature with the wrong PRF output opens nothing', async () => {
     const { p } = await enrolPasskey()
     await lock()
-    const r = await passkeyUnlock(p, codeAt(), () => b64url(new Uint8Array(randomBytes(32))))
+    const r = await passkeyUnlock(p, () => b64url(new Uint8Array(randomBytes(32))))
     expect(r.json.code).toBe('phone-key-refused')
     expect((await state()).state).toBe('locked')
   })
@@ -233,64 +233,28 @@ describe('opening the vault from the phone: passkey (biometrics) + code', () => 
   test('removing the phone on the computer removes its way in', async () => {
     const { p } = await enrolPasskey()
     const list = await http('GET', '/api/vault/personal/mobile')
-    await http('POST', '/api/vault/personal/mobile/passkeys/remove', { id: list.json.passkeys[0].id, code: codeAt() }); next()
+    await http('POST', '/api/vault/personal/mobile/passkeys/remove', { id: list.json.passkeys[0].id })
     await lock()
     expect((await http('POST', '/api/vault/phone/unlock/begin', {}, PHONE)).json.code).toBe('no-passkey')
     void p
   })
 })
 
-describe('opening with the code alone (opt-in, default off)', () => {
-  async function enrolDevice() {
-    const id = await approvedRequest('device', PHONE_HTTP)
-    const r = await http('POST', '/api/vault/phone/enrol/device', { requestId: id }, PHONE_HTTP)
-    expect(r.json.ok).toBe(true)
-    return r.json as { deviceId: string; deviceSecret: string }
-  }
-  test('off by default: a phone cannot ask for a device key', async () => {
-    expect((await http('POST', '/api/vault/phone/enrol/request', { kind: 'device', code: codeAt() }, PHONE_HTTP)).json.code).toBe('code-only-off')
+describe('COFRE.DESBLOQUEIO — "the code alone" is gone', () => {
+  test('a phone cannot ask for a device key, and "the code alone" cannot be turned on', async () => {
+    expect((await http('POST', '/api/vault/phone/enrol/request', { kind: 'device' }, PHONE_HTTP)).json.code).toBe('code-only-off')
+    const on = await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: true })
+    expect(on.json).toMatchObject({ ok: false, code: 'code-retired' })
+    expect((await http('GET', '/api/vault/personal/mobile')).json.codeReveal).toBe(false)
   })
-  test('on (code + Hello on the computer) → an approved phone opens over plain http with the code', async () => {
-    expect((await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: true, code: codeAt() })).json.ok).toBe(true); next()
-    const d = await enrolDevice()
+  test('a stored device key cannot open the vault: the "device" unlock is refused in words', async () => {
     await lock()
-    const f = (await http('GET', '/api/vault/phone', undefined, PHONE_HTTP)).json
-    expect(f.devices).toEqual([d.deviceId])
-    const g0 = hello.gestures
-    const r = await http('POST', '/api/vault/phone/unlock', { kind: 'device', deviceId: d.deviceId, deviceSecret: d.deviceSecret, code: codeAt() }, PHONE_HTTP)
-    expect(r.json).toMatchObject({ ok: true, state: 'open' })
-    expect(hello.gestures).toBe(g0)
-    expect(r.headers.get('set-cookie') ?? '').not.toContain('agentistics-vault-heartbeat') // a phone unlock never touches the tab's token
-    // Owner 2026-10-03: the unlock's code is the step-up — the list opens with no second code.
-    expect(typeof r.json.grant).toBe('string')
-    expect((await http('GET', '/api/vault', undefined, PHONE_HTTP)).status).toBe(200) // carries the grant the unlock returned
+    const r = await http('POST', '/api/vault/phone/unlock', { kind: 'device', deviceId: 'd1', deviceSecret: b64url(new Uint8Array(randomBytes(32))), code: OLD_CODE }, PHONE_HTTP)
+    expect(r.json).toMatchObject({ ok: false, code: 'device-key-retired' })
+    expect((await state()).state).toBe('locked')
   })
-  test('a phone unlock while the vault is open leaves the tab\'s heartbeat token valid', async () => {
-    await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: true, code: codeAt() }); next()
-    const d = await enrolDevice()
-    await lock()
-    const body = () => ({ kind: 'device', deviceId: d.deviceId, deviceSecret: d.deviceSecret, code: codeAt() })
-    expect((await http('POST', '/api/vault/phone/unlock', body(), PHONE_HTTP)).json.ok).toBe(true)
-    const tabToken = rotateVaultHeartbeatToken() // what the computer's tab holds
-    next()
-    const again = await http('POST', '/api/vault/phone/unlock', body(), PHONE_HTTP)
-    expect(again.headers.get('set-cookie') ?? '').not.toContain('agentistics-vault-heartbeat')
-    expect(acceptVaultHeartbeatToken(tabToken)).toBe('ok')
-  })
-  test('the code with another device\'s secret opens nothing', async () => {
-    await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: true, code: codeAt() }); next()
-    const d = await enrolDevice()
-    await lock()
-    const r = await http('POST', '/api/vault/phone/unlock', { kind: 'device', deviceId: d.deviceId, deviceSecret: b64url(new Uint8Array(randomBytes(32))), code: codeAt() }, PHONE_HTTP)
-    expect(r.json.code).toBe('phone-key-refused')
-  })
-  test('turning it off deletes every device key: the same phone is refused', async () => {
-    await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: true, code: codeAt() }); next()
-    const d = await enrolDevice()
-    await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: false, code: codeAt() }); next()
-    await lock()
-    const r = await http('POST', '/api/vault/phone/unlock', { kind: 'device', deviceId: d.deviceId, deviceSecret: d.deviceSecret, code: codeAt() }, PHONE_HTTP)
-    expect(r.json.code).toBe('phone-unknown')
+  test('turning it OFF still works (it clears what an older version left behind)', async () => {
+    expect((await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: false })).json.ok).toBe(true)
     expect((await http('GET', '/api/vault/phone', undefined, PHONE_HTTP)).json.devices).toEqual([])
   })
 })

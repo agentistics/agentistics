@@ -96,25 +96,29 @@ export const VAULT_TEXT = {
   working: { en: 'Working…', pt: 'Trabalhando…' },
   presenceWord_hello: { en: 'Windows Hello', pt: 'o Windows Hello' },
   presenceWord_fido2: { en: 'your security key', pt: 'sua chave de segurança' },
+  presenceWord_touchid: { en: 'Touch ID (or the Mac password)', pt: 'o Touch ID (ou a senha do Mac)' },
+  presenceWord_password: { en: 'the vault password', pt: 'a senha do cofre' },
   presenceName_hello: { en: 'Windows Hello', pt: 'Windows Hello' },
   presenceName_fido2: { en: 'Security key', pt: 'Chave de segurança' },
+  presenceName_touchid: { en: 'Touch ID or the Mac password', pt: 'Touch ID ou senha do Mac' },
+  presenceName_password: { en: 'A vault password of your own', pt: 'Uma senha própria do cofre' },
   presenceWord_any: { en: 'your personal confirmation', pt: 'a sua confirmação pessoal' },
   lockedIntro_presence: {
-    en: 'Your secrets are encrypted. Opening them needs {presence} and your authenticator code.',
-    pt: 'Seus segredos estão criptografados. Abri-los exige {presence} e o código do seu autenticador.',
+    en: 'Your secrets are encrypted. Opening them needs {presence}.',
+    pt: 'Seus segredos estão criptografados. Abri-los exige {presence}.',
   },
-  lockedIntro_code: {
-    en: 'Your secrets are encrypted. Opening them needs your authenticator code.',
-    pt: 'Seus segredos estão criptografados. Abri-los exige o código do seu autenticador.',
-  },
-  // The lock screen's one sentence names the presence check THIS machine's vault really has: the
-  // wrappers the service reports (Windows Hello on Windows/WSL, a security key, or neither — macOS has
-  // no presence provider, its vault is the Keychain + the authenticator code). Never a hardcoded brand.
-  lockedSub_hello: { en: 'Your secrets are protected. Unlock with Windows Hello or your code.', pt: 'Seus segredos estão protegidos. Destrave com Windows Hello ou o código.' },
-  lockedSub_fido2: { en: 'Your secrets are protected. Unlock with your security key or your code.', pt: 'Seus segredos estão protegidos. Destrave com a sua chave de segurança ou o código.' },
-  lockedSub_code: { en: 'Your secrets are protected. Unlock with your code.', pt: 'Seus segredos estão protegidos. Destrave com o código.' },
+  // The lock screen's one sentence names the way THIS machine's vault really confirms: the wrappers the
+  // service reports (Touch ID / the Mac password, Windows Hello, a key, the vault password). Never a
+  // hardcoded brand. (COFRE.DESBLOQUEIO: no app code anywhere.)
+  lockedSub_hello: { en: 'Your secrets are protected. Unlock with Windows Hello.', pt: 'Seus segredos estão protegidos. Destrave com o Windows Hello.' },
+  lockedSub_fido2: { en: 'Your secrets are protected. Unlock with your security key.', pt: 'Seus segredos estão protegidos. Destrave com a sua chave de segurança.' },
+  lockedSub_touchid: { en: 'Your secrets are protected. Unlock with Touch ID or the Mac password.', pt: 'Seus segredos estão protegidos. Destrave com o Touch ID ou a senha do Mac.' },
+  lockedSub_password: { en: 'Your secrets are protected. Unlock with the vault password.', pt: 'Seus segredos estão protegidos. Destrave com a senha do cofre.' },
+  lockedSub_plain: { en: 'Your secrets are protected.', pt: 'Seus segredos estão protegidos.' },
   unlockWith_hello: { en: 'Unlock with Windows Hello', pt: 'Destravar com o Windows Hello' },
   unlockWith_fido2: { en: 'Unlock with your security key', pt: 'Destravar com a sua chave de segurança' },
+  unlockWith_touchid: { en: 'Unlock with Touch ID', pt: 'Destravar com o Touch ID' },
+  unlockWith_password: { en: 'Unlock', pt: 'Destravar' },
   createVault: { en: 'Create the vault', pt: 'Criar o cofre' },
   createVaultHint: { en: 'There is no vault on this computer yet. Creating one takes a moment and protects it with this computer\'s own keychain.', pt: 'Ainda não há um cofre neste computador. Criar leva um instante e o protege com o chaveiro do próprio computador.' },
   createVaultPassHint: { en: 'No system keychain is available here, so protect the vault with a passphrase. Write it down — it cannot be recovered.', pt: 'Não há chaveiro do sistema disponível aqui, então proteja o cofre com uma senha. Anote-a — ela não pode ser recuperada.' },
@@ -122,45 +126,29 @@ export const VAULT_TEXT = {
   createVaultCreating: { en: 'Creating…', pt: 'Criando…' },
   unlockPlain: { en: 'Unlock', pt: 'Destravar' },
   unlocking: { en: 'Waiting for you to confirm…', pt: 'Esperando a sua confirmação…' },
-  codeLabel: { en: 'Authenticator code (6 digits)', pt: 'Código do autenticador (6 dígitos)' },
   codeConfirm: { en: 'Confirm', pt: 'Confirmar' },
-  pendingCodeHint: {
-    en: 'The key is ready. Type your code within 2 minutes — a wrong code locks it again.',
-    pt: 'A chave está pronta. Digite o código em até 2 minutos — um código errado trava de novo.',
-  },
   stepupTitle: { en: 'Confirm it is you', pt: 'Confirme que é você' },
-  stepupBody: { en: 'The list of secrets needs your authenticator code.', pt: 'A lista de segredos exige o código do seu autenticador.' },
   openLocksIn: { en: 'Open · locks in {n} min', pt: 'Aberto · trava em {n} min' },
   sec_status: { en: 'Status', pt: 'Status' },
-  gate_code: { en: 'Needs your authenticator code', pt: 'Exige o código do seu autenticador' },
-  gate_presence: { en: 'Needs your personal confirmation (Windows Hello or security key)', pt: 'Exige a sua confirmação pessoal (Windows Hello ou chave de segurança)' },
-  gate_dialog_code: { en: 'Type your current authenticator code to continue.', pt: 'Digite o código atual do seu autenticador para continuar.' },
-  gate_dialog_presence: { en: '{presence} will ask you to confirm on the device.', pt: '{presence} vai pedir a sua confirmação no dispositivo.' },
+  gate_presence: { en: 'Asks you to confirm it is you', pt: 'Pede que você confirme que é você' },
+  gate_dialog_presence: { en: '{presence} will ask you to confirm.', pt: '{presence} vai pedir a sua confirmação.' },
   gate_continue: { en: 'Continue', pt: 'Continuar' },
-  ultraTitle: { en: 'Protect your vault (2 min)', pt: 'Proteja o seu cofre (2 min)' },
+  ultraTitle: { en: 'Protect your vault (1 min)', pt: 'Proteja o seu cofre (1 min)' },
   ultraBody: {
-    en: 'Add an authenticator code, a 24-word recovery key and, where this machine has it, Windows Hello or a security key. Until then the vault keeps working exactly as before.',
-    pt: 'Adicione um código de autenticador, uma chave de recuperação de 24 palavras e, onde esta máquina tiver, o Windows Hello ou uma chave de segurança. Até lá o cofre continua funcionando exatamente como antes.',
+    en: 'Choose how the vault confirms it is you — what this computer already has (Touch ID or the Mac password, Windows Hello) or a vault password of your own — and keep the 24-word recovery key. Until then the vault keeps working exactly as before.',
+    pt: 'Escolha como o cofre confirma que é você — o que este computador já tem (Touch ID ou senha do Mac, Windows Hello) ou uma senha própria do cofre — e guarde a chave de recuperação de 24 palavras. Até lá o cofre continua funcionando exatamente como antes.',
   },
   ultraRequired: { en: 'This is your main machine: this setup is required.', pt: 'Esta é a sua máquina principal: esta configuração é obrigatória.' },
   ultraStart: { en: 'Set up', pt: 'Configurar' },
   ultraLater: { en: 'Later', pt: 'Depois' },
-  sec_authenticator: { en: 'Authenticator', pt: 'Autenticador' },
-  auth_none: { en: 'Not set up yet.', pt: 'Ainda não configurado.' },
-  auth_ready: { en: 'Set up on {date}', pt: 'Configurado em {date}' },
-  auth_lastUsed: { en: 'Last used', pt: 'Último uso' },
-  auth_never: { en: 'not used yet', pt: 'ainda não usado' },
-  auth_paused: { en: 'Paused until {date} after wrong codes.', pt: 'Pausado até {date} depois de códigos errados.' },
-  auth_frozen: {
-    en: 'Frozen after too many wrong codes. Use your recovery key: "Recover with the 24 words", on this page, on this computer.',
-    pt: 'Congelado depois de muitos códigos errados. Use a chave de recuperação: “Recuperar com as 24 palavras”, nesta página, no próprio computador.',
-  },
-  auth_setup: { en: 'Set up authenticator', pt: 'Configurar o autenticador' },
-  auth_replace: { en: 'Replace phone', pt: 'Trocar de celular' },
-  sec_presence: { en: 'Personal confirmation', pt: 'Confirmação pessoal' },
+  sec_presence: { en: 'How the vault confirms it is you', pt: 'Como o cofre confirma que é você' },
   pres_unavailable: {
-    en: 'Not available on this machine (no Windows Hello and no security-key support here). The vault stays on the system protector.',
-    pt: 'Indisponível nesta máquina (sem Windows Hello e sem suporte a chave de segurança). O cofre fica no protetor do sistema.',
+    en: 'No way to confirm is available on this machine. The vault stays on the system protector.',
+    pt: 'Nenhuma forma de confirmação está disponível nesta máquina. O cofre fica no protetor do sistema.',
+  },
+  legacy_code_note: {
+    en: 'This vault used to also ask a 6-digit app code. That is gone: it is no longer asked anywhere, and its record is removed as soon as you choose a way to confirm below.',
+    pt: 'Este cofre também pedia um código de 6 dígitos de aplicativo. Isso acabou: ele não é mais pedido em lugar nenhum, e o registro dele é apagado assim que você escolher uma forma de confirmação abaixo.',
   },
   pres_addKey: { en: 'Add a security key', pt: 'Adicionar uma chave de segurança' },
   pres_turnOff: { en: 'Turn personal confirmation off', pt: 'Desligar a confirmação pessoal' },
@@ -177,22 +165,6 @@ export const VAULT_TEXT = {
   sec_recovery: { en: 'Recovery key', pt: 'Chave de recuperação' },
   rec_created: { en: 'Created on {date}', pt: 'Criada em {date}' },
   sec_autolock: { en: 'Auto-lock', pt: 'Bloqueio automático' },
-  sec_unlock: { en: 'What unlocking asks', pt: 'O que a abertura pede' },
-  sec_unlock_d: { en: 'Whether opening the vault asks for your code as well as {presence}. Changing it asks for both.', pt: 'Se abrir o cofre pede o seu código além de {presence}. Mudar isto pede os dois.' },
-  unlock_daily: { en: 'Per day (recommended)', pt: 'Por dia (recomendado)' },
-  unlock_daily_d: {
-    en: '{presence} + code on the first unlock after the computer or agentop starts, and when the window ends; in between, re-opening after auto-lock asks only {presence}.',
-    pt: '{presence} + código na primeira abertura depois que o computador ou o agentop liga, e quando a janela acaba; nesse meio tempo, reabrir depois do bloqueio automático pede só {presence}.',
-  },
-  unlock_always: { en: '{presence} + code, always', pt: '{presence} + código, sempre' },
-  unlock_always_d: { en: 'Every unlock asks for both.', pt: 'Toda abertura pede os dois.' },
-  unlock_helloOnly: { en: 'Only {presence}', pt: 'Só {presence}' },
-  unlock_helloOnly_d: { en: 'Unlocking asks only {presence}. The code is still asked to see your secrets, change settings or recover.', pt: 'Abrir pede só {presence}. O código ainda é pedido para ver os segredos, mudar ajustes ou recuperar.' },
-  unlock_hours: { en: 'Window (hours, 1–24)', pt: 'Janela (horas, 1–24)' },
-  unlock_save: { en: 'Save', pt: 'Salvar' },
-  unlock_now_code: { en: 'The next unlock asks for the code.', pt: 'A próxima abertura pede o código.' },
-  unlock_now_window: { en: 'Until {time}, re-opening asks only {presence}.', pt: 'Até {time}, reabrir pede só {presence}.' },
-  unlock_reset: { en: 'The window survives locking the vault and restarting the computer or agentop. It starts over after a wrong code, a recovery or a reset.', pt: 'A janela continua valendo se o cofre for trancado ou se o computador ou o agentop reiniciar. Ela recomeça depois de um código errado, de uma recuperação ou de um reset.' },
   auto_save: { en: 'Save', pt: 'Salvar' },
   auto_saved: { en: 'Saved.', pt: 'Salvo.' },
   auto_invalid: { en: 'Whole minutes from 5 to 480.', pt: 'Minutos inteiros de 5 a 480.' },
@@ -203,18 +175,10 @@ export const VAULT_TEXT = {
     en: 'Nothing is lost if you stop now: the vault keeps working as before until the last step.',
     pt: 'Nada se perde se você parar agora: o cofre continua funcionando como antes até o último passo.',
   },
-  wiz_auth_title: { en: 'Set up your authenticator', pt: 'Configure o seu autenticador' },
-  wiz_auth_intro: {
-    en: 'An authenticator app (Google Authenticator, Authy, 1Password…) will show a 6-digit code every 30 seconds.',
-    pt: 'Um app autenticador (Google Authenticator, Authy, 1Password…) mostra um código de 6 dígitos a cada 30 segundos.',
-  },
-  wiz_auth_show: { en: 'Show the QR code', pt: 'Mostrar o QR code' },
-  wiz_auth_cant: { en: 'Can’t scan it?', pt: 'Não consegue escanear?' },
-  wiz_auth_type: { en: 'Type this key into the app (“enter key manually”):', pt: 'Digite esta chave no app (“inserir chave manualmente”):' },
   wiz_rec_title: { en: 'Your recovery key', pt: 'Sua chave de recuperação' },
   wiz_rec_intro: {
-    en: 'If you lose your phone or your device, these 24 words are the only way back in.',
-    pt: 'Se você perder o celular ou o dispositivo, estas 24 palavras são o único caminho de volta.',
+    en: 'If you forget your password or lose your device, these 24 words are the only way back in.',
+    pt: 'Se você esquecer a senha ou perder o dispositivo, estas 24 palavras são o único caminho de volta.',
   },
   wiz_rec_show: { en: 'Show my 24 words', pt: 'Mostrar minhas 24 palavras' },
   wiz_rec_warn: {
@@ -231,7 +195,47 @@ export const VAULT_TEXT = {
   wiz_rec_confirmBody: { en: 'To prove you have them, type the words at these positions.', pt: 'Para provar que você as tem, digite as palavras destas posições.' },
   wiz_rec_rotate: { en: 'The old recovery key stops working once you confirm this one.', pt: 'A chave de recuperação antiga deixa de funcionar quando você confirmar esta.' },
   wiz_word: { en: 'Word #{n}', pt: 'Palavra nº {n}' },
-  wiz_pres_title: { en: 'Turn on personal confirmation', pt: 'Ligue a confirmação pessoal' },
+  wiz_pres_title: { en: 'Choose how the vault confirms it is you', pt: 'Escolha como o cofre confirma que é você' },
+  wiz_method_touchid_d: { en: 'Your fingerprint, or this Mac\'s login password. Nothing to install.', pt: 'Sua digital, ou a senha de login deste Mac. Nada para instalar.' },
+  wiz_method_hello_d: { en: 'Your PIN, fingerprint or face, as Windows asks.', pt: 'Seu PIN, digital ou rosto, como o Windows pede.' },
+  wiz_method_password_d: { en: 'A password only you know. Works on any computer.', pt: 'Uma senha que só você sabe. Funciona em qualquer computador.' },
+  wiz_method_fido2_d: { en: 'A USB/NFC key you touch (YubiKey and similar).', pt: 'Uma chave USB/NFC que você toca (YubiKey e parecidas).' },
+  wiz_method_recommended: { en: 'recommended', pt: 'recomendado' },
+  wiz_method_advanced: { en: 'Advanced', pt: 'Avançado' },
+  wiz_pres_enrolTouchid: {
+    en: 'macOS will ask for Touch ID or the Mac password once. After that, each unlock asks once.',
+    pt: 'O macOS vai pedir o Touch ID ou a senha do Mac uma vez. Depois disso, cada abertura pede uma vez.',
+  },
+  wiz_pw_label: { en: 'Vault password', pt: 'Senha do cofre' },
+  wiz_pw_again: { en: 'Type it again', pt: 'Digite de novo' },
+  wiz_pw_mismatch: { en: 'The two do not match yet.', pt: 'As duas ainda não conferem.' },
+  wiz_pw_generate: { en: 'Generate a random password', pt: 'Gerar senha aleatória' },
+  wiz_pw_generated: { en: 'Your new password — store it in your password manager now. It is shown only here, once.', pt: 'Sua senha nova — guarde no seu gerenciador de senhas agora. Ela aparece só aqui, uma vez.' },
+  wiz_pw_copy: { en: 'Copy', pt: 'Copiar' },
+  wiz_pw_copied: { en: 'Copied', pt: 'Copiado' },
+  wiz_pw_go: { en: 'Protect with this password', pt: 'Proteger com esta senha' },
+  wiz_pw_how_title: { en: 'How your password is protected', pt: 'Como sua senha fica protegida' },
+  wiz_pw_how_1: {
+    en: 'It is never stored — not on disk, not in the browser. It travels once, to Agentistics on this computer.',
+    pt: 'Ela nunca é guardada — nem no disco, nem no navegador. Ela vai uma vez, só para o Agentistics neste computador.',
+  },
+  wiz_pw_how_2: {
+    en: 'There it goes through scrypt with a random salt (a slow, memory-hard derivation) to make the key that opens the vault, and is then dropped from memory.',
+    pt: 'Lá ela passa pelo scrypt com um sal aleatório (uma derivação lenta e que gasta memória) para gerar a chave que abre o cofre, e depois é descartada da memória.',
+  },
+  wiz_pw_how_3: {
+    en: 'Each wrong try costs time on purpose; after five, it waits before accepting more.',
+    pt: 'Cada tentativa errada custa tempo de propósito; depois de cinco, ele espera antes de aceitar outras.',
+  },
+  wiz_pw_how_4: {
+    en: 'Forgot it? Nobody can reset it — your 24 recovery words open the vault.',
+    pt: 'Esqueceu? Ninguém consegue redefinir — as suas 24 palavras de recuperação abrem o cofre.',
+  },
+  pw_prompt_title: { en: 'Type the vault password', pt: 'Digite a senha do cofre' },
+  pw_prompt_body: { en: 'This needs you to confirm it is you.', pt: 'Isto precisa que você confirme que é você.' },
+  pw_prompt_wrong: { en: 'That is not the vault password. Try again.', pt: 'Essa não é a senha do cofre. Tente de novo.' },
+  pw_prompt_go: { en: 'Confirm', pt: 'Confirmar' },
+  pw_forgot: { en: 'Forgot it? Use “Recover with the 24 words”.', pt: 'Esqueceu? Use “Recuperar com as 24 palavras”.' },
   wiz_pres_checkHello: {
     en: 'Agentistics checks that Windows Hello is set up on this computer. This check asks you nothing.',
     pt: 'O Agentistics confere se o Windows Hello está configurado neste computador. Este teste não pede nada a você.',
@@ -253,27 +257,26 @@ export const VAULT_TEXT = {
     pt: 'Nada no seu cofre muda até você confirmar a chave de recuperação, no último passo. Se sair antes disso, tudo fica como está agora.',
   },
   wiz_gesture_progress: { en: 'Confirmation {i} of {n}', pt: 'Confirmação {i} de {n}' },
-  wiz_pres_go: { en: 'Turn on personal confirmation', pt: 'Ligar a confirmação pessoal' },
+  wiz_pres_go: { en: 'Continue', pt: 'Continuar' },
   wiz_next: { en: 'Next', pt: 'Próximo' },
   wiz_done: { en: 'Done', pt: 'Pronto' },
   wiz_done_presence: {
-    en: 'From now on the vault opens only with {presence} and your code. It locks itself after {n} minutes without use. Keep your 24 words offline.',
-    pt: 'A partir de agora o cofre só abre com {presence} e o seu código. Ele trava sozinho depois de {n} minutos sem uso. Guarde as suas 24 palavras offline.',
+    en: 'From now on the vault opens only with {presence}. It locks itself after {n} minutes without use. Keep your 24 words offline.',
+    pt: 'A partir de agora o cofre só abre com {presence}. Ele trava sozinho depois de {n} minutos sem uso. Guarde as suas 24 palavras offline.',
   },
 
   // ── owner feedback 2026-10-02: plain words, one code, every step in one go ────────────────────
   pres_off: {
-    en: 'Off. Today the vault opens by itself when Agentistics starts, without asking for your fingerprint or PIN.',
-    pt: 'Desligada. Hoje o cofre abre sozinho quando o agentistics liga, sem pedir sua digital/PIN.',
+    en: 'Not chosen yet. Today the vault opens by itself when Agentistics starts, without asking you anything.',
+    pt: 'Ainda não escolhida. Hoje o cofre abre sozinho quando o Agentistics liga, sem pedir nada a você.',
   },
-  pres_turnOn: { en: 'Require Windows Hello', pt: 'Exigir Windows Hello' },
-  pres_turnOnKey: { en: 'Require a security key', pt: 'Exigir chave de segurança' },
+  pres_turnOn: { en: 'Choose how it confirms', pt: 'Escolher como confirma' },
   rec_none: { en: 'No recovery key yet.', pt: 'Ainda não há chave de recuperação.' },
   rec_create: { en: 'Create recovery key', pt: 'Criar chave de recuperação' },
   rec_new: { en: 'Make a new one (the old one stops working)', pt: 'Gerar uma nova (a antiga para de valer)' },
   rec_lost: {
-    en: 'Lost your phone and Windows Hello? Use "Recover with the 24 words" on this page, opened on this computer.',
-    pt: 'Perdeu o celular e o Windows Hello? Use “Recuperar com as 24 palavras” nesta página, aberta no próprio computador.',
+    en: 'Forgot the password or lost your device? Use "Recover with the 24 words" on this page, opened on this computer.',
+    pt: 'Esqueceu a senha ou perdeu o dispositivo? Use “Recuperar com as 24 palavras” nesta página, aberta no próprio computador.',
   },
   sec_hardening: { en: 'Memory protection', pt: 'Proteção da memória' },
   hard_plain1: { en: 'Other programs cannot read Agentistics’ memory', pt: 'Outros programas não conseguem ler a memória do agentistics' },
@@ -285,24 +288,16 @@ export const VAULT_TEXT = {
   auto_before: { en: 'Lock by itself after', pt: 'Trancar sozinho depois de' },
   auto_after: { en: 'minutes without use (5–480)', pt: 'minutos sem uso (5–480)' },
   auto_hint: { en: 'There is no “never”.', pt: 'Não existe “nunca”.' },
-  auth_explain: {
-    en: 'The app’s code is asked to open the vault and to change these settings.',
-    pt: 'O código do app é pedido para abrir o cofre e para mudar estas configurações.',
-  },
   tip_asks: { en: 'Will ask for: {what}', pt: 'Vai pedir: {what}' },
-  tip_code: { en: 'your authenticator code', pt: 'o código do seu autenticador' },
+  tip_code: { en: 'a confirmation', pt: 'uma confirmação' },
   tip_presence: { en: '{presence} on this computer', pt: '{presence} neste computador' },
   tip_and: { en: ' and ', pt: ' e ' },
   tip_nothing: { en: 'Nothing more is asked.', pt: 'Nada mais é pedido.' },
-  wiz_auth_scan: { en: 'Scan this, then type the 6-digit code the app shows now.', pt: 'Escaneie, depois digite o código de 6 dígitos que o app mostra agora.' },
-  wiz_auth_once: { en: 'This QR code is shown once.', pt: 'Este QR code é mostrado uma vez.' },
-  wiz_code: { en: 'Code from the app', pt: 'Código do app' },
-  wiz_oldCode: { en: 'Type the current code from your authenticator to continue.', pt: 'Digite o código atual do seu autenticador para continuar.' },
   wiz_setup_label: { en: 'Setup code (8 digits)', pt: 'Código de configuração (8 dígitos)' },
-  wiz_pres_newWords: { en: 'Turn personal confirmation on and make new recovery words', pt: 'Ligar a confirmação pessoal e criar palavras de recuperação novas' },
+  wiz_pres_newWords: { en: 'Continue and make new recovery words', pt: 'Continuar e criar palavras de recuperação novas' },
   wiz_pres_newWords_warn: {
-    en: 'Your current 24 words will stop working: turning personal confirmation on replaces the vault key. New words are made right after.',
-    pt: 'As suas 24 palavras atuais deixarão de funcionar: ligar a confirmação pessoal troca a chave do cofre. Palavras novas são criadas logo em seguida.',
+    en: 'Your current 24 words will stop working: choosing how the vault confirms replaces its key. New words are made right after.',
+    pt: 'As suas 24 palavras atuais deixarão de funcionar: escolher como o cofre confirma troca a chave dele. Palavras novas são criadas logo em seguida.',
   },
   wiz_setup_why: {
     en: 'The first setup from this page needs a code only this computer can show: run `agentop vault setup-code` in a terminal here. It works once, for 10 minutes.',
@@ -310,8 +305,8 @@ export const VAULT_TEXT = {
   },
   wiz_setup_title: { en: 'First, confirm you are at this computer', pt: 'Primeiro, confirme que você está neste computador' },
   wiz_setup_intro: {
-    en: 'Setting up the vault from a page for the first time needs a code that only this computer shows. It proves the request comes from you, not from some other page. Nothing is asked of Windows Hello or your key until this is done.',
-    pt: 'A primeira configuração do cofre por uma página precisa de um código que só este computador mostra. Ele prova que o pedido vem de você, e não de outra página. Nada é pedido ao Windows Hello ou à sua chave antes disso.',
+    en: 'Setting up the vault from a page for the first time needs a code that only this computer shows. It proves the request comes from you, not from some other page. Nothing else is asked until this is done.',
+    pt: 'A primeira configuração do cofre por uma página precisa de um código que só este computador mostra. Ele prova que o pedido vem de você, e não de outra página. Nada mais é pedido antes disso.',
   },
   wiz_setup_run: { en: 'Run this command:', pt: 'Rode este comando:' },
   wiz_setup_valid: { en: 'It prints an 8-digit code that works once, for 10 minutes.', pt: 'Ele mostra um código de 8 dígitos que vale uma vez, por 10 minutos.' },
@@ -325,16 +320,15 @@ export const VAULT_TEXT = {
   wiz_failedAt: { en: 'It stopped at: {step}. Nothing before it was lost — try again to resume from there.', pt: 'Parou em: {step}. O que veio antes foi mantido — tente de novo para continuar daqui.' },
   wiz_step_setup: { en: 'setup code', pt: 'código de configuração' },
   wiz_step_probe: { en: 'device check', pt: 'teste do dispositivo' },
-  wiz_step_authenticator: { en: 'authenticator', pt: 'autenticador' },
   wiz_step_recovery: { en: 'recovery key', pt: 'chave de recuperação' },
-  wiz_step_presence: { en: 'personal confirmation', pt: 'confirmação pessoal' },
+  wiz_step_presence: { en: 'how it confirms', pt: 'como confirma' },
   wiz_pres_intro: {
-    en: 'From now on the vault opens only with your gesture. The silent system wrapper is removed — after the new one is checked.',
-    pt: 'A partir de agora o cofre só abre com um gesto seu. O invólucro silencioso do sistema é removido — depois que o novo for conferido.',
+    en: 'From now on the vault opens only after you confirm it is you. Nothing changes in it until the last step.',
+    pt: 'A partir de agora o cofre só abre depois que você confirmar que é você. Nada muda nele até o último passo.',
   },
   wiz_done_plain: {
-    en: 'Your authenticator and recovery key are set up. The vault locks itself after {n} minutes without use. Keep your 24 words offline.',
-    pt: 'O autenticador e a chave de recuperação estão configurados. O cofre trava sozinho depois de {n} minutos sem uso. Guarde as suas 24 palavras offline.',
+    en: 'Your recovery key is set up. The vault locks itself after {n} minutes without use. Keep your 24 words offline.',
+    pt: 'A chave de recuperação está configurada. O cofre trava sozinho depois de {n} minutos sem uso. Guarde as suas 24 palavras offline.',
   },
 
   // ── VAULT.UX2: a header that explains itself, a badge and a reason per section ────────────────
@@ -342,14 +336,7 @@ export const VAULT_TEXT = {
   how1_t: { en: 'Locked', pt: 'Trancado' },
   how1_b: { en: 'Your secrets are encrypted and nobody can read them.', pt: 'Seus segredos ficam criptografados e ninguém consegue lê-los.' },
   how2_t: { en: 'You confirm it is you', pt: 'Você confirma que é você' },
-  how2_both: { en: '{presence} and the 6-digit code from your app.', pt: '{presence} e o código de 6 dígitos do seu app.' },
-  how2_always: { en: '{presence} and the 6-digit code from your app, every time.', pt: '{presence} e o código de 6 dígitos do seu app, sempre.' },
-  how2_helloOnly: { en: '{presence} alone. The code is still asked to see your secrets, change settings or recover.', pt: 'Só {presence}. O código ainda é pedido para ver os segredos, mudar ajustes ou recuperar.' },
-  how2_daily: {
-    en: '{presence} and the code on the first unlock of the day; after that, for {hours} h, {presence} alone.',
-    pt: '{presence} e o código na primeira abertura do dia; depois disso, por {hours} h, só {presence}.',
-  },
-  how2_code: { en: 'The 6-digit code from your app.', pt: 'O código de 6 dígitos do seu app.' },
+  how2_proof: { en: '{presence} — once to open, and again for anything sensitive.', pt: '{presence} — uma vez para abrir e de novo para o que for sensível.' },
   how2_nothing: { en: 'Nothing yet: it opens by itself. Set it up below to require your confirmation.', pt: 'Nada ainda: ele abre sozinho. Configure abaixo para exigir a sua confirmação.' },
   how3_t: { en: 'Open for {n} min', pt: 'Aberto por {n} min' },
   how3_b: { en: 'It locks again by itself when you stop using it.', pt: 'Ele tranca de novo sozinho quando você para de usar.' },
@@ -357,10 +344,10 @@ export const VAULT_TEXT = {
   hero_locked: { en: 'Your vault is locked', pt: 'Seu cofre está trancado' },
   sec_status_d: { en: 'Whether your secrets can be read right now, and who guards the key.', pt: 'Se os seus segredos podem ser lidos agora e quem guarda a chave.' },
   sec_presence_d: {
-    en: 'Windows Hello (PIN, fingerprint or face) or a security key: proves it is really you at the computer.',
-    pt: 'Windows Hello (PIN, digital ou rosto) ou uma chave de segurança: prova que é você mesmo no computador.',
+    en: 'Touch ID or the Mac password, Windows Hello, a vault password of your own, or a security key: proves it is really you.',
+    pt: 'Touch ID ou senha do Mac, Windows Hello, uma senha própria do cofre ou uma chave de segurança: prova que é você mesmo.',
   },
-  sec_recovery_d: { en: 'Your way back in if you lose your phone and Windows Hello: 24 words, shown once.', pt: 'Seu caminho de volta se você perder o celular e o Windows Hello: 24 palavras, mostradas uma vez.' },
+  sec_recovery_d: { en: 'Your way back in if you forget the password or lose your device: 24 words, shown once.', pt: 'Seu caminho de volta se você esquecer a senha ou perder o dispositivo: 24 palavras, mostradas uma vez.' },
   rec_offline: { en: 'Keep it offline — on paper, never in a file or a photo.', pt: 'Guarde offline — no papel, nunca em arquivo ou foto.' },
   cfu_title: { en: 'Confirm each use', pt: 'Confirmar cada uso' },
   cfu_d: { en: 'When an agent wants to use a sensitive secret, you approve that use first. Off: granted secrets are used without asking.', pt: 'Quando um agente quer usar um segredo sensível, você aprova esse uso antes. Desligado: os segredos liberados são usados sem perguntar.' },
@@ -383,6 +370,8 @@ export const VAULT_TEXT = {
   pres_addOther: { en: 'Add another way', pt: 'Adicionar outra forma' },
   pres_add_hello: { en: 'Add Windows Hello', pt: 'Adicionar Windows Hello' },
   pres_add_fido2: { en: 'Add a security key', pt: 'Adicionar uma chave de segurança' },
+  pres_add_touchid: { en: 'Add Touch ID', pt: 'Adicionar Touch ID' },
+  pres_add_password: { en: 'Add a vault password', pt: 'Adicionar uma senha do cofre' },
   pres_soon: { en: 'coming soon', pt: 'em breve' },
   pres_soon_fido2: {
     en: 'Security keys through Windows are not ready yet. Windows Hello does the same job today.',
@@ -396,9 +385,10 @@ export const VAULT_TEXT = {
   },
   wiz_local_go_hello: { en: 'Confirm with Windows Hello', pt: 'Confirmar com o Windows Hello' },
   wiz_local_go_fido2: { en: 'Confirm with your security key', pt: 'Confirmar com a chave de segurança' },
+  wiz_local_go_touchid: { en: 'Confirm with Touch ID or the Mac password', pt: 'Confirmar com o Touch ID ou a senha do Mac' },
   wiz_setup_remote: {
-    en: 'This page is not open on the computer itself (or the computer has no Windows Hello / security key), so the first setup needs the setup code from that computer.',
-    pt: 'Esta página não está aberta no próprio computador (ou ele não tem Windows Hello / chave de segurança), então a primeira configuração precisa do código de configuração daquele computador.',
+    en: 'This page is not open on the computer itself (or the computer has no Touch ID, Windows Hello or security key), so the first setup needs the setup code from that computer.',
+    pt: 'Esta página não está aberta no próprio computador (ou ele não tem Touch ID, Windows Hello ou chave de segurança), então a primeira configuração precisa do código de configuração daquele computador.',
   },
   rec_recover: { en: 'Recover with the 24 words', pt: 'Recuperar com as 24 palavras' },
   rec_recover_title: { en: 'Recover with your 24 words', pt: 'Recuperar com as suas 24 palavras' },
@@ -407,8 +397,8 @@ export const VAULT_TEXT = {
     pt: 'Digite ou cole as suas 24 palavras. Elas vão uma vez para este computador, abrem o cofre e são descartadas — nunca salvas, nunca registradas.',
   },
   rec_recover_after: {
-    en: 'The vault is open in recovery mode. Next: set up the authenticator, your personal confirmation and NEW recovery words — the old ones count as exposed.',
-    pt: 'O cofre abriu em modo de recuperação. Agora: configure o autenticador, a sua confirmação pessoal e palavras de recuperação NOVAS — as antigas contam como expostas.',
+    en: 'The vault is open in recovery mode. Next: choose how it confirms it is you, and make NEW recovery words — the old ones count as exposed.',
+    pt: 'O cofre abriu em modo de recuperação. Agora: escolha como ele confirma que é você e crie palavras de recuperação NOVAS — as antigas contam como expostas.',
   },
   rec_recover_go: { en: 'Open the vault', pt: 'Abrir o cofre' },
   rec_recover_count: { en: '{n} of 24 words', pt: '{n} de 24 palavras' },
@@ -424,21 +414,18 @@ export const VAULT_TEXT = {
   pres_offWords: { en: 'Your 24 words (main machine)', pt: 'As suas 24 palavras (máquina principal)' },
   // Owner decision 2026-10-06 — which proof each kind of action asks.
   ap_title: { en: 'What each action asks', pt: 'O que cada ação pede' },
-  ap_desc: { en: 'Choose the confirmation each kind of action asks: the authenticator code, {presence}, both, or — for reading only — nothing. Changing this asks for a confirmation too.', pt: 'Escolha a confirmação que cada tipo de ação pede: o código do autenticador, {presence}, os dois ou — só para leitura — nada. Mudar isto também pede uma confirmação.' },
+  ap_desc: { en: 'Choose whether each kind of action asks {presence} or — for reading only — nothing. Changing this asks you to confirm too.', pt: 'Escolha se cada tipo de ação pede {presence} ou — só para leitura — nada. Mudar isto também pede a sua confirmação.' },
   ap_row_d: { en: '{n} of {total} actions changed from the default', pt: '{n} de {total} ações mudadas do padrão' },
-  ap_row_default: { en: 'The defaults: {presence} to see, use and edit; code + {presence} to delete, wipe and change settings', pt: 'O padrão: {presence} para ver, usar e editar; código + {presence} para excluir, apagar e mudar ajustes' },
+  ap_row_default: { en: 'The default: {presence} for every action', pt: 'O padrão: {presence} em todas as ações' },
   ap_col_action: { en: 'Action', pt: 'Ação' },
   ap_col_proof: { en: 'Asks', pt: 'Pede' },
   ap_critical: { en: 'critical', pt: 'crítica' },
   ap_critical_hint: { en: 'Always at least one confirmation.', pt: 'Sempre pede ao menos uma confirmação.' },
   ap_default_tag: { en: 'default', pt: 'padrão' },
-  ap_c_code: { en: 'Code', pt: 'Código' },
   ap_c_gesture: { en: '{presence}', pt: '{presence}' },
-  ap_c_both: { en: 'Code + {presence}', pt: 'Código + {presence}' },
   ap_c_none: { en: 'Nothing', pt: 'Nada' },
   ap_k_open: { en: 'Open the vault', pt: 'Abrir o cofre' },
-  ap_k_open_d: { en: '{presence} always unlocks the key; set here whether the code is asked too.', pt: '{presence} sempre destrava a chave; ajuste aqui se o código também é pedido.' },
-  ap_k_open_btn: { en: 'Adjust', pt: 'Ajustar' },
+  ap_k_open_d: { en: 'Always {presence}.', pt: 'Sempre {presence}.' },
   ap_k_reveal: { en: 'Reveal / copy a value', pt: 'Revelar / copiar valor' },
   ap_k_reveal_d: { en: 'Seeing or copying a secret. A secret with "Always confirm" off asks nothing.', pt: 'Ver ou copiar um segredo. Um segredo com "Sempre confirmar" desligado não pede nada.' },
   ap_k_use: { en: 'Use in a session (grant)', pt: 'Usar em sessão (liberar)' },
@@ -452,11 +439,11 @@ export const VAULT_TEXT = {
   ap_k_wipe: { en: 'Wipe', pt: 'Apagar' },
   ap_k_wipe_d: { en: 'Erasing the vault, or its older backups.', pt: 'Apagar o cofre, ou os backups antigos dele.' },
   ap_k_settings: { en: 'Security settings', pt: 'Ajustes de segurança' },
-  ap_k_settings_d: { en: 'This table, what unlocking asks, phones and the code on the phone.', pt: 'Esta tabela, o que a abertura pede, celulares e o código no celular.' },
+  ap_k_settings_d: { en: 'This table, the auto-lock and the phones.', pt: 'Esta tabela, o bloqueio automático e os celulares.' },
   ap_k_recovery: { en: 'Recovery key', pt: 'Chave de recuperação' },
   ap_k_recovery_d: { en: 'Making new 24 words.', pt: 'Gerar 24 palavras novas.' },
-  ap_missing: { en: 'A confirmation this vault does not have yet is replaced by the other one — never by nothing.', pt: 'Uma confirmação que este cofre ainda não tem é trocada pela outra — nunca por nada.' },
-  ap_unreadable: { en: 'The saved choices could not be read, so every action asks for both until you save them again.', pt: 'As escolhas salvas não puderam ser lidas, então toda ação pede os dois até você salvá-las de novo.' },
+  ap_missing: { en: 'Until the vault has a way to confirm, nothing can be asked — choose one above.', pt: 'Enquanto o cofre não tiver uma forma de confirmação, nada pode ser pedido — escolha uma acima.' },
+  ap_unreadable: { en: 'The saved choices could not be read, so every action asks you to confirm until you save them again.', pt: 'As escolhas salvas não puderam ser lidas, então toda ação pede a sua confirmação até você salvá-las de novo.' },
   ap_save: { en: 'Save', pt: 'Salvar' },
   ap_reset: { en: 'Back to the defaults', pt: 'Voltar ao padrão' },
 } as const satisfies Record<string, Pair>
@@ -472,9 +459,16 @@ export function vtf(key: VaultKey, lang: Lang, vars: Record<string, string | num
   return VAULT_TEXT[key][lang].replace(/\{(\w+)\}/g, (_m, k: string) => String(vars[k] ?? ''))
 }
 
-/** The user's word for their presence gesture, from the wrapper kinds the vault holds. */
+/** The user's word for their way to confirm, from the wrapper kinds the vault holds (a gesture first). */
 export function presenceKey(wrappers: readonly string[]): VaultKey {
-  return wrappers.includes('hello') ? 'presenceWord_hello' : wrappers.includes('fido2') ? 'presenceWord_fido2' : 'presenceWord_any'
+  return wrappers.includes('touchid') ? 'presenceWord_touchid'
+    : wrappers.includes('hello') ? 'presenceWord_hello'
+      : wrappers.includes('fido2') ? 'presenceWord_fido2'
+        : wrappers.includes('password') ? 'presenceWord_password' : 'presenceWord_any'
+}
+/** A way to confirm, by its name (the wizard's chooser). */
+export function methodNameKey(id: string): VaultKey {
+  return id === 'touchid' ? 'presenceName_touchid' : id === 'hello' ? 'presenceName_hello' : id === 'password' ? 'presenceName_password' : 'presenceName_fido2'
 }
 
 /** The server's codes (kind / state / reason) → the table's keys. Unknown codes fall back safely. */
@@ -503,8 +497,10 @@ export function orderItems<T extends { state: string }>(items: T[]): T[] {
 }
 
 /** PURE. Which lock-screen sentence applies, from the wrappers the service reports for this machine. */
-export function lockedSubKey(wrappers: readonly string[] | null | undefined): 'lockedSub_hello' | 'lockedSub_fido2' | 'lockedSub_code' {
+export function lockedSubKey(wrappers: readonly string[] | null | undefined): 'lockedSub_hello' | 'lockedSub_fido2' | 'lockedSub_touchid' | 'lockedSub_password' | 'lockedSub_plain' {
+  if (wrappers?.includes('touchid')) return 'lockedSub_touchid'
   if (wrappers?.includes('hello')) return 'lockedSub_hello'
   if (wrappers?.includes('fido2')) return 'lockedSub_fido2'
-  return 'lockedSub_code'
+  if (wrappers?.includes('password')) return 'lockedSub_password'
+  return 'lockedSub_plain'
 }

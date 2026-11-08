@@ -113,6 +113,8 @@ export const AGENT_TOOL_NAMES = [
   // Experimental flows (2)
   'agentistics_flow_run',
   'agentistics_flow_status',
+  // Vault (1) — COFRE.DESBLOQUEIO
+  'agentistics_vault_status',
 ] as const
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]
@@ -240,6 +242,11 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   // ------------------------------------------------------------------ Tags
   agentistics_tags: { ...DATA, risk: 'R', routes: ['GET /api/tags'], reason: 'reads aggregate-only tag cards' },
   agentistics_tag_detail: { ...DATA, risk: 'R', routes: ['GET /api/tags', 'GET /api/tags/:id'], reason: 'reads one tag aggregate (counts and sums only)' },
+  // ------------------------------------------------------------------ Vault (COFRE.DESBLOQUEIO)
+  agentistics_vault_status: {
+    ...TASKS, risk: 'R', routes: ['GET /api/vault'],
+    reason: 'reads how the vault is protected (state, ways to confirm in use and offered, password rules) through an allowlist; never an item, a key id or a secret',
+  },
   // ------------------------------------------------------------------ Experimental flows (read-only host operations)
   agentistics_flow_run: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['POST /api/flows/run'], reason: 'runs only the built-in deterministic flow gates; it deletes nothing' },
   agentistics_flow_status: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['GET /api/flows/status/:runId'], reason: 'reads a durable deterministic flow run' },

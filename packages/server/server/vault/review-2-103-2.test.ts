@@ -12,9 +12,9 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { base32Decode, hotp, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
+import { type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
 import { FRESH_PRESENCE_MS, __resetVaultForTests, __setVaultClockForTests, sealToFile } from './service'
-import { REMOTE_ROWS, VAULT_ACTION_ROWS, __resetGateForTests, rowFor } from './gate'
+import { REMOTE_ROWS, VAULT_ACTION_ROWS, __resetGateForTests, mintGrant, rowFor } from './gate'
 import { __resetPersonalForTests } from './personal'
 import { handleVaultHttp } from './http'
 
@@ -39,8 +39,8 @@ function fake(id: ProtectorId): Fake {
 
 let T = 1_800_000_000_000
 const clock = () => T
-let seed: Uint8Array
-const codeAt = () => hotp(seed, Math.floor(T / 1000 / 30))
+// COFRE.DESBLOQUEIO (2026-11-07): no authenticator. A code still sent is ignored, never a proof.
+const codeAt = () => '123456'
 const next = () => { T += 30_000 }
 let dpapi = fake('dpapi'), hello = fake('hello')
 let grant: string | undefined
@@ -75,11 +75,7 @@ beforeEach(async () => {
   __setVaultClockForTests(clock); __resetGateForTests(clock); __resetPersonalForTests(clock)
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('TEST-NOT-A-SECRET'))
   expect((await http('POST', '/api/vault/local-proof')).status).toBe(200)
-  const a = await http('POST', '/api/vault/authenticator/begin', {})
-  seed = base32Decode(a.json.secret)
-  expect((await http('POST', '/api/vault/authenticator/confirm', { code: codeAt() })).status).toBe(200)
-  next()
-  expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })).status).toBe(200)
+  expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(200)
   next()
   const r = await http('POST', '/api/vault/recovery/begin', {})
   const typed = (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!)
@@ -204,21 +200,25 @@ describe('M3 — the no-proof rows are for THIS computer', () => {
       expect(rowFor(action as keyof typeof VAULT_ACTION_ROWS, { session: 'http:local', loopback: false })).toBe(row!)
     }
   })
-  test('a LAN / tailnet caller cannot list, read the inventory, import or reveal a confirm-off secret without the code', async () => {
+  test('a LAN / tailnet caller cannot list, read the inventory, import or reveal a confirm-off secret — a code no longer helps; the phone\'s grant does', async () => {
     const off = (await http('POST', '/api/vault/personal', { item: { ...secret, name: 'Off', confirmEach: false } })).json.meta.id
+    const g0 = hello.gestures
     for (const p of ['/api/vault/personal', '/api/vault/personal/grants', `/api/vault/personal/versions?id=${off}`]) {
       const r = await http('GET', p, undefined, REMOTE)
-      expect(r.status).toBe(401)
+      expect(r.json.ok === true).toBe(false)
       expect(JSON.stringify(r.json)).not.toContain('Banco')
     }
     const inv = await http('GET', '/api/vault', undefined, REMOTE)
     expect(inv.json.needsStepUp).toBe(true)
-    expect(inv.json.view.gates.list).toMatchObject({ code: true })
-    expect((await http('POST', '/api/vault/personal/import/preview', { text: 'K=1' }, REMOTE)).status).toBe(401)
-    const rv = await http('POST', '/api/vault/personal/reveal', { id: off, field: 'password' }, REMOTE)
-    expect(rv.json.value).toBeUndefined()
-    // With the code (what a phone that opened the vault already holds as its grant), it is answered.
-    const r2 = await http('POST', '/api/vault/personal/reveal', { id: off, field: 'password', code: codeAt() }, REMOTE)
+    expect(inv.json.view.gates.list).toMatchObject({ code: false, gesture: true }) // the proof, never a code
+    expect((await http('POST', '/api/vault/personal/import/preview', { text: 'K=1' }, REMOTE)).json.ok).toBe(false)
+    for (const body of [{ id: off, field: 'password' }, { id: off, field: 'password', code: codeAt() }]) {
+      const rv = await http('POST', '/api/vault/personal/reveal', body, REMOTE)
+      expect(rv.json.value).toBeUndefined()
+    }
+    expect(hello.gestures).toBe(g0) // and nothing was raised on this computer's empty desk
+    // The 'read' grant a phone gets from opening the vault with its biometrics answers it.
+    const r2 = await http('POST', '/api/vault/personal/reveal', { id: off, field: 'password' }, { ...REMOTE, grant: mintGrant('http:local', 'read') })
     expect(r2.json.value).toBe('MARKER-pw')
   })
   test('this computer still asks nothing for the list or a confirm-off reveal', async () => {

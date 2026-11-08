@@ -47,8 +47,8 @@ const BY_CODE: Record<string, { pt: string; en: string; action?: UiAction }> = {
     action: 'unlock',
   },
   'needs-authenticator': {
-    pt: 'Configure o autenticador antes da confirmação pessoal — a configuração nesta página faz os dois, na ordem certa.',
-    en: 'Set up the authenticator before personal confirmation — the setup on this page does both, in the right order.',
+    pt: 'Escolha primeiro como o cofre confirma que é você — a configuração nesta página faz isso.',
+    en: 'First choose how the vault confirms it is you — the setup on this page does it.',
     action: 'enroll',
   },
 }

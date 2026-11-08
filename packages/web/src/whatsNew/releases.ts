@@ -32,6 +32,26 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Hardware, Modo autônomo, Cofre, Esteira de entregas e Ligações agora ficam num botão só no topo; ele fica laranja quando há atividade. A janela “Uso dos planos” saiu: contas e APIs estão na página Uso.',
         en: 'Hardware, Autonomous mode, Vault, Live Delivery and Calls now sit behind one button in the top bar, which turns orange when something is going on. The “Plan usage” window is gone: accounts and APIs live on the Usage page.',
       },
+      {
+        pt: 'Cofre sem aplicativo autenticador: nenhum QR nem código de 6 dígitos em lugar nenhum. Você confirma que é você com o que o computador já tem — Touch ID ou a senha do Mac, Windows Hello, a digital do celular — ou com uma senha própria do cofre.',
+        en: 'Vault without an authenticator app: no QR and no 6-digit code anywhere. You confirm it is you with what the computer already has — Touch ID or the Mac password, Windows Hello, your phone\'s fingerprint — or with a vault password of your own.',
+      },
+      {
+        pt: 'No Mac o cofre configura sem instalar nada: o Touch ID (ou a senha do Mac) destrava, sem exigir chave de segurança nem libfido2.',
+        en: 'On a Mac the vault sets up with nothing to install: Touch ID (or the Mac password) unlocks it, with no security key or libfido2 required.',
+      },
+      {
+        pt: 'Senha do cofre: pelo menos 9 caracteres, 1 maiúscula, 2 especiais e 1 número, com cada regra marcada enquanto você digita, um botão "Gerar senha aleatória" (mostrada uma vez, com botão de copiar) e um bloco "Como sua senha fica protegida". O servidor confere as mesmas regras e pausa depois de várias tentativas erradas.',
+        en: 'Vault password: at least 9 characters, 1 uppercase, 2 special characters and 1 number, each rule ticked as you type, a "Generate a random password" button (shown once, with a copy button) and a "How your password is protected" block. The server checks the same rules and pauses after several wrong tries.',
+      },
+      {
+        pt: 'A chave de segurança (FIDO) virou opção avançada e só aparece quando o computador tem o que ela precisa. As 24 palavras de recuperação continuam iguais.',
+        en: 'The security key (FIDO) is now an advanced option, shown only when the computer has what it needs. The 24 recovery words stay the same.',
+      },
+      {
+        pt: 'Novo agentistics_vault_status: uma sessão consegue ler como o cofre está protegido (estado, formas de confirmar em uso e disponíveis, regras da senha) sem nunca ver um segredo.',
+        en: 'New agentistics_vault_status: a session can read how the vault is protected (state, ways to confirm in use and available, password rules) without ever seeing a secret.',
+      },
     ],
     fixes: [
       {
@@ -41,6 +61,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       {
         pt: 'Os cartões da Live agora mostram a porcentagem da etapa (“passo 2 de 5: implementando”), lida de fatos reais: sessão aberta, primeira edição, testes rodando, commit no ramo, entrega da sessão e os portões da QA, revisão e merge. Sem sinal, a linha continua escondida — nada é chutado.',
         en: 'Live cards now show the stage percentage (“step 2 of 5: implementing”), read from real facts: session open, first edit, tests running, a commit on the branch, the session’s handback and the QA, review and merge gates. With no signal the line stays hidden — nothing is guessed.',
+      },
+      {
+        pt: 'Cofres que já usavam o código do autenticador continuam abrindo: o código não é mais pedido, e o registro dele é apagado assim que você escolhe uma nova forma de confirmar.',
+        en: 'Vaults that already used the authenticator code keep opening: the code is no longer asked, and its record is deleted as soon as you choose a new way to confirm.',
       },
     ],
   },
