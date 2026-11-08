@@ -2101,8 +2101,15 @@ describe('reconcile: batch release PR proof, scope, antigas and the automatic ru
     expect(h.calls.session).toEqual([]) // nobody is woken per piece
   })
 
-  test('two release PRs listing the same piece are ambiguous: nothing is proven, nothing moves', async () => {
-    const h = harness({ status: 'in_review', batchPrs: { [PUBLIC]: [batchPr(1, 'lists s1', 'm1'), batchPr(2, 'also lists s1', 'm2')] }, ...GREEN }, { reviewPieces: async () => [pieces[0]!] })
+  test('two release PRs listing the same piece that shipped in the SAME release prove it together', async () => {
+    const h = harness({ status: 'in_review', batchPrs: { [PUBLIC]: [batchPr(1, 'lists s1', 'a1'.padEnd(40, '0')), batchPr(2, 'also lists s1', 'a2'.padEnd(40, '0'))] }, ...GREEN }, { reviewPieces: async () => [pieces[0]!] })
+    const dry = await h.svc.reconcile({}, 'owner')
+    expect(dry.ok && dry.entries[0]).toMatchObject({ to: 'publicado', tag: 'v2.201.1' })
+    expect(dry.ok && dry.entries[0]!.via).toContain('agree on v2.201.1')
+  })
+
+  test('two release PRs listing the same piece in DIFFERENT releases are ambiguous: nothing is proven, nothing moves', async () => {
+    const h = harness({ status: 'in_review', notContained: ['m2'], batchPrs: { [PUBLIC]: [batchPr(1, 'lists s1', 'm1'), batchPr(2, 'also lists s1', 'm2')] }, ...GREEN }, { reviewPieces: async () => [pieces[0]!] })
     const dry = await h.svc.reconcile({}, 'owner')
     expect(dry.ok && dry.entries[0]).toMatchObject({ subtaskId: 's1' })
     expect(dry.ok && dry.entries[0]!.to).toBeUndefined()

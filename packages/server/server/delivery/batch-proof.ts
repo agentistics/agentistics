@@ -25,7 +25,7 @@ export interface PieceHints { subtaskId: string; title?: string; branches: reado
 
 export type BatchMatch =
   | { ok: true; pr: BatchPr; via: string }
-  | { ok: false; reason: string; ambiguous?: boolean }
+  | { ok: false; reason: string; ambiguous?: boolean; /** The PRs that tie (ambiguous only): they prove the piece together when they all shipped in ONE release. */ candidates?: BatchPr[] }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const HEX = /\b[0-9a-f]{7,40}\b/g
@@ -72,10 +72,16 @@ export function matchBatchPr(prs: readonly BatchPr[], piece: PieceHints): BatchM
   ]
   const code = titleCode(piece.title)
   if (code) tiers.push({ via: `card name ${code} in the release PR`, hit: p => `${p.title}\n${p.body}`.toUpperCase().includes(code) })
-  for (const t of tiers) {
-    const hits = merged.filter(t.hit)
-    if (hits.length === 1) return { ok: true, pr: hits[0]!, via: t.via }
-    if (hits.length > 1) return { ok: false, ambiguous: true, reason: `ambiguous: ${hits.length} merged PRs name this piece (${hits.map(h => `#${h.number}`).join(', ')}) — not proven` }
+  const hitsByTier = tiers.map(t => ({ via: t.via, hits: merged.filter(t.hit) }))
+  for (const t of hitsByTier) {
+    if (t.hits.length === 1) return { ok: true, pr: t.hits[0]!, via: t.via }
+    if (t.hits.length > 1) {
+      // Several PRs name it at this tier: another tier's evidence may single one out (its id AND its branch point at one PR).
+      let narrowed = t.hits
+      for (const o of hitsByTier) if (o !== t && o.hits.length > 0) { const both = narrowed.filter(p => o.hits.includes(p)); if (both.length > 0) narrowed = both }
+      if (narrowed.length === 1) return { ok: true, pr: narrowed[0]!, via: `${t.via} + ${hitsByTier.find(o => o !== t && o.hits.includes(narrowed[0]!))?.via ?? 'another tier'}` }
+      return { ok: false, ambiguous: true, candidates: narrowed, reason: `ambiguous: ${narrowed.length} merged PRs name this piece (${narrowed.map(h => `#${h.number}`).join(', ')}) — not proven` }
+    }
   }
   return { ok: false, reason: 'no merged release PR names this piece (subtask id, branch or commit)' }
 }

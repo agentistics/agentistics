@@ -1385,7 +1385,16 @@ export function createDeliveryService(d: DeliveryDeps) {
       entries.push(e)
       const live = alive.has(r.subtaskId)
       const extra = hasRecord ? { branches: [], shas: [] } : await d.pieceHints?.(r.subtaskId).catch(() => null) ?? { branches: [], shas: [] }
-      const batch: BatchMatch = matchBatchPr(releasePrs, { subtaskId: r.subtaskId, ...(title ? { title } : {}), branches: [...(r.branch ? [r.branch] : []), ...extra.branches], shas: [...[r.qaSha, r.headSha].filter((s): s is string => !!s), ...extra.shas] })
+      let batch: BatchMatch = matchBatchPr(releasePrs, { subtaskId: r.subtaskId, ...(title ? { title } : {}), branches: [...(r.branch ? [r.branch] : []), ...extra.branches], shas: [...[r.qaSha, r.headSha].filter((s): s is string => !!s), ...extra.shas] })
+      // A piece worked across both repositories is named by several PRs: they prove it TOGETHER only when every one of them
+      // shipped in the SAME release (otherwise it stays ambiguous — a wrong tag would publish half-shipped work).
+      if (!batch.ok && batch.candidates && batch.candidates.length > 1 && batch.candidates.length <= 6) {
+        const tags = await Promise.all(batch.candidates.map(c => (c.repo === ENGINE_REPO ? findEnginePinTag(d.facts, repoCwd, c.mergeSha, proofs) : findPublicTag(d.facts, repoCwd, c.mergeSha, proofs))))
+        if (tags.every(t => t !== null && t === tags[0])) {
+          const lead = batch.candidates.find(c => c.repo !== ENGINE_REPO) ?? batch.candidates[0]!
+          batch = { ok: true, pr: lead, via: `${batch.candidates.length} release PRs (${batch.candidates.map(c => `#${c.number}`).join(', ')}) agree on ${tags[0]}` }
+        }
+      }
       const antiga = () => { if (hasRecord || !isAntiga({ hasRecord, live, updatedMs, nowMs })) return false; e.bucket = 'antiga'; return true }
       // SCOPE: only a piece with a record, a recent board touch or a release PR that names it is looked up at all.
       if (!inReconcileScope({ hasRecord, live, updatedMs, nowMs, mentioned: batch.ok || batch.ambiguous === true })) {
