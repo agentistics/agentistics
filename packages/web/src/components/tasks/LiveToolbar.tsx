@@ -68,10 +68,10 @@ export function LiveToolbar({
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
         <div role="group" aria-label={w.filters} data-live-filters style={{ ...group, flex: mobile ? '1 1 100%' : '1 1 auto' }}>
           {taskFilter}
-          <div data-live-tabs style={{ minWidth: 0, ...(mobile ? { flex: '1 1 100%' } : {}) }}>
+          <div data-live-tabs style={mobile ? { minWidth: 0, flex: '1 1 100%' } : { flex: '0 0 auto', width: 'max-content', minWidth: 'max-content' }}>
             <TabStrip<LiveTab>
               tabs={LIVE_TABS} value={tab} onPick={onTab} label={t => w.tab[t]} count={t => counts[t]}
-              ariaLabel={w.tabs} flush {...(mobile ? { tap: 44, variant: 'underline' as const } : {})}
+              ariaLabel={w.tabs} flush {...(mobile ? { tap: 44, variant: 'underline' as const } : { natural: true })}
             />
           </div>
         </div>
