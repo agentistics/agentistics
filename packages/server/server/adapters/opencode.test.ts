@@ -28,6 +28,20 @@ test('declared OpenCode cost survives all live consumers, without table pricing 
   expect(toConversation(s).costUSD).toBe(1.25)
 })
 
+test('tool parts are counted once per request, errors included, text/step parts ignored', () => {
+  const part = (id: string, data: object) => ({ id, message_id: 'msg_a', session_id: session.id, time_created: at + 1500, data: JSON.stringify(data) })
+  const s = parseOpencodeSession(session, [user, response()], [
+    part('p1', { type: 'tool', tool: 'bash', state: { status: 'completed' } }),
+    part('p2', { type: 'tool', tool: 'bash', state: { status: 'error' } }),
+    part('p3', { type: 'tool', tool: 'read', state: { status: 'running' } }),
+    part('p4', { type: 'text', text: 'hi' }),
+    part('p5', { type: 'step-finish' }),
+  ])!
+  expect(Object.values(s.tool_counts).reduce((a, b) => a + b, 0)).toBe(3)
+  expect(s.tool_errors).toBe(1)
+  expect(HARNESS_CAPABILITIES.opencode.tools).toBe(true)
+})
+
 test('placeholder zero usage is unavailable even when the completed message has a model', () => {
   const s = parseOpencodeSession(session, [user, response('zero', {
     finish: undefined, time: { completed: at + 2000 }, providerID: 'opencode-go', modelID: 'glm-5.3',
