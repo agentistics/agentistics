@@ -784,6 +784,8 @@ export interface PlanLimitsPayload {
   /** Plans registered in Billing for an account that has reported no window yet. */
   registered: { harness: HarnessId; account: string; plan: string; accountLabel?: string }[]
   budgets: AccountBudgetRow[]
+  /** Visible plans with no provider measurement; held out of routing, never represented as 0%. */
+  unmeasured?: { harness: HarnessId; account: string; status: 'hold'; reason: string }[]
   hiddenFromAgents: AccountBudgetRow[]
   /** Owner-only in-memory history, including accounts hidden from agents. Times are epoch ms. */
   readings: { account: string; harness: HarnessId; points: HistoryPoint[] }[]
@@ -859,7 +861,8 @@ export async function planLimitsPayload(
   // logins would show one plan's meter under the other. `meterKey` keeps the stored key for history.
   const liveOf = (h: HarnessId) => accounts.filter(a => a.id && a.harness === h && a.available && !a.retired)
   const meterKey = new Map<PlanLimits, string>()
-  const resolvedStored = stored.map(l => {
+  const resolvedStored = stored.map(l => l.source === 'opencode-cost-estimate'
+    ? { ...l, windows: [], unmeasuredReason: l.unmeasuredReason ?? 'Go quota and reset unknown: local response costs do not measure provider availability.' } : l).map(l => {
     if (l.account !== 'default') return l
     const live = liveOf(l.harness)
     const only = live.length === 1 ? live[0]! : undefined
@@ -885,7 +888,7 @@ export async function planLimitsPayload(
   }
   const belongsTo = (s: LivePlanSession, l: PlanLimits) =>
     (!s.harness || s.harness === l.harness) && s.account === l.account
-  const allBudgets: AccountBudgetRow[] = limits.map(l => {
+  const allBudgets: AccountBudgetRow[] = limits.filter(l => !l.unmeasuredReason).map(l => {
     const budget = planBudget(l, nowMs)
     // Only measured sessions enter planSlots' per-session average. Working sessions with no
     // billed tokens remain in the public live summary, without diluting the measured burn.
@@ -974,6 +977,7 @@ export async function planLimitsPayload(
   const seen = new Set<string>()
   for (const [key, pts] of persisted) {
     const mine = history.get(key)?.at(-1) ?? state.limits[key]
+    if (mine?.source === 'opencode-cost-estimate') continue
     const [harness, ...rest] = key.split(':')
     if (!pts.length || !harness || !isHarnessId(harness)) continue
     seen.add(key)
@@ -981,6 +985,7 @@ export async function planLimitsPayload(
   }
   for (const [key, list] of history) {
     const last = list.at(-1)
+    if (last?.source === 'opencode-cost-estimate') continue
     if (!last || seen.has(key)) continue
     readings.push({
       account: last.account, harness: last.harness,
@@ -1054,7 +1059,8 @@ export async function planLimitsPayload(
     const why = scheduleOffReason(h)
     if (why) publicHarnesses[h] = { spawnable: false, unavailableReason: why }
   }
-  return { harnesses: publicHarnesses, limits, registered, budgets, hiddenFromAgents, readings, freeSlots, freeSlotsByHarness, freeSlotsByAccount, unassignedLive, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
+  const unmeasured = agentVisible(limits, visibility).filter(l => l.unmeasuredReason).map(l => ({ harness: l.harness, account: l.account, status: 'hold' as const, reason: l.unmeasuredReason! }))
+  return { harnesses: publicHarnesses, limits, registered, budgets, unmeasured, hiddenFromAgents, readings, freeSlots, freeSlotsByHarness, freeSlotsByAccount, unassignedLive, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
 }
 
 /** Tests only. */

@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { readAuth, authDir, authDirCandidates } from './opencode-auth'
 import { readPreferences, updatePreferences } from './preferences'
 import { ingestFromRoot } from './plan-limits'
+import { readGoLimit, type OpencodeLimit } from './sessions/opencode-limit'
 
 const PLAN_IDS: readonly OpencodePlanId[] = ['go', 'go-plus', 'go-teams', 'zen', 'none']
 export const isPlanId = (v: unknown): v is OpencodePlanId => typeof v === 'string' && (PLAN_IDS as readonly string[]).includes(v)
@@ -67,6 +68,7 @@ export interface OpencodeUsageReply {
   reason?: 'no-go-plan' | 'unreadable'
   /** The figures are what this machine saw; the allowance is the provider's. */
   estimated: true
+  blocked?: OpencodeLimit
   now: number
 }
 
@@ -78,8 +80,9 @@ export async function opencodeUsage(now: number = Date.now()): Promise<OpencodeU
   const head = { id: plan, label: p.label, priceUsd: p.priceUsd, perMember: p.perMember === true, chosen }
   if (plan !== 'go' && plan !== 'go-plus' && plan !== 'go-teams') return { plan: head, usage: null, reason: 'no-go-plan', estimated: true, now }
   const rows = readGoCostRows(opencodeDbPath(), now)
-  if (rows === null) return { plan: head, usage: null, reason: 'unreadable', estimated: true, now }
-  return { plan: head, usage: goUsage(rows, plan, now), estimated: true, now }
+  const blocked = readGoLimit(opencodeDbPath())
+  if (rows === null) return { plan: head, usage: null, reason: 'unreadable', estimated: true, now, ...(blocked ? { blocked } : {}) }
+  return { plan: head, usage: goUsage(rows, plan, now), estimated: true, now, ...(blocked ? { blocked } : {}) }
 }
 
 export async function setOpencodePlan(plan: unknown): Promise<boolean> {
@@ -92,8 +95,8 @@ export const OPENCODE_USAGE_POLL_MS = 5 * 60_000
 
 /**
  * Feed `agentistics_plan_limits` for harness opencode: now, then every five minutes. `AGENTISTICS_OPENCODE_USAGE=0`
- * turns it off, as does a team central. The reading is an estimate (`source: opencode-cost-estimate`) and
- * is only ingested when a listed model has been used. Returns the stop function.
+ * turns it off, as does a team central. Local costs cannot measure the provider quota: publish an
+ * unmeasured plan (including any observed refusal), never estimated routing windows. Returns the stop function.
  */
 export function startOpencodeUsagePoll(): () => void {
   if (process.env.AGENTISTICS_OPENCODE_USAGE === '0' || TEAM_CENTRAL) return () => {}
@@ -102,8 +105,11 @@ export function startOpencodeUsagePoll(): () => void {
   const tick = async (): Promise<void> => {
     try {
       const r = await opencodeUsage()
-      const l = r.usage ? goPlanLimits(r.usage, r.now) : null
-      if (l) await ingestFromRoot(l, null).catch(() => false)
+      const l = goPlanLimits(r.usage ?? goUsage([], r.plan.id, r.now), r.now)
+      if (l) {
+        if (r.blocked) l.unmeasuredReason = `${r.blocked.message}. On hold; reset unknown. Waiting for provider recovery.`
+        await ingestFromRoot(l, null).catch(() => false)
+      }
     } catch { /* a failed read keeps the held record, which ages into stale on its own */ }
     if (stopped) return
     timer = setTimeout(() => { void tick() }, OPENCODE_USAGE_POLL_MS)

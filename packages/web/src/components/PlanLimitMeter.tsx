@@ -26,6 +26,14 @@ import { accountsSectionTitle, ApiUsageRows, SectionTitle, apiSectionTitle } fro
 
 type Lang = 'pt' | 'en'
 
+function Unmeasured({ limits, lang }: { limits: PlanLimits; lang: Lang }) {
+  if (!limits.unmeasuredReason) return null
+  const blocked = /Go usage limit (?:exceeded|reached)/i.test(limits.unmeasuredReason)
+  return <span data-plan-unmeasured style={{ display: 'block', fontSize: 12, overflowWrap: 'anywhere' }}>{lang === 'pt'
+    ? (blocked ? 'Go bloqueado pelo limite do provedor. Renovação desconhecida; aguardando recuperação confirmada.' : 'Quota e renovação: sem medição do provedor.')
+    : limits.unmeasuredReason}</span>
+}
+
 /** Keep computed reset times distinct from the harness's reported times. */
 function windowResetPhrase(w: PlanLimitWindow, now: number, lang: Lang): string {
   if (!windowRenewed(w, now)) return resetPhrase(w, now, lang)
@@ -89,6 +97,7 @@ export function PlanUsageRowCells({ harness, name, plan, limits: reading, now, l
         </>
         : <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>{tag}<span style={{ ...text, minWidth: 0, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span></span>}
       {note && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{note}</span>}
+      {limits && <Unmeasured limits={limits} lang={lang} />}
     </div>
     {limits ? limits.windows.map(w => <div key={windowKey(w)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang, w.scope)}</span>{(() => { const reset = ringResetPhrase(w, now, lang); return reset ? <span data-plan-ring-reset style={{ fontSize: 9.5, lineHeight: 1.2, whiteSpace: 'nowrap', color: 'var(--text-tertiary)' }}>{reset}</span> : null })()}</div>) : wrap ? null : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{waiting}</span>}
   </>
@@ -158,6 +167,7 @@ function WindowRow({ w, now, observedAt, lang, ring, forecast = true }: { w: Pla
 export function PlanSessionBlock({ limits, now, lang }: { limits: PlanLimits; now: number; lang: Lang }) {
   const stale = stalePhrase(limits, now, lang)
   return <div data-plan-limits={limits.harness} style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+    <Unmeasured limits={limits} lang={lang} />
     {limits.windows.map(w => <WindowRow key={windowKey(w)} w={w} now={now} observedAt={limits.updatedAt} lang={lang} ring={34} />)}
     <div style={{ fontSize: 10.5, color: stale ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }}>{updatedPhrase(limits, now, lang)} · {lang === 'pt' ? 'fonte' : 'source'}: {SOURCE_LABEL[limits.source][lang]}</div>
   </div>
@@ -171,17 +181,17 @@ export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedd
   const pt = lang === 'pt'
   const harness = limits?.harness ?? pending!.harness
   const plan = limits ? (limits.plan ?? limits.sourcePlan) : pending?.plan
-  const worst = limits ? Math.max(...limits.windows.map(w => currentUsedPct(w, now)), 0) : null
+  const worst = limits?.windows.length ? Math.max(...limits.windows.map(w => currentUsedPct(w, now)), 0) : null
   const early = limits?.windows.some(w => warnForecast(w, now, limits.updatedAt) !== null) ?? false
   const level = early && limitLevel(worst) === 'ok' ? 'attention' : limitLevel(worst)
-  const state = limits ? limitLevelWord(level, lang, worst) : (pt ? 'sem leitura do plano' : 'no plan reading')
+  const state = limits?.unmeasuredReason ? (pt ? 'sem medição' : 'unknown') : limits ? limitLevelWord(level, lang, worst) : (pt ? 'sem leitura do plano' : 'no plan reading')
   const stale = limits ? stalePhrase(limits, now, lang) : null
   return <div data-plan-usage-card={harness} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, padding: embedded ? 0 : 12, borderRadius: 12, background: 'var(--bg-card)', border: embedded ? undefined : '1px solid var(--border)' }}>
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <HarnessMark harness={harness} size={24} />
       <div style={{ minWidth: 0, flex: '1 1 140px', overflowWrap: 'anywhere' }}><b style={{ display: 'block', fontSize: 14 }}>{subscriptionName(harness, accountLabel)}</b>{showPlan && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{plan ?? (pt ? 'plano não registrado' : 'plan not registered')}</span>}</div>
       <div style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8, maxWidth: '100%' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, whiteSpace: 'nowrap', color: !limits ? 'var(--text-tertiary)' : level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green)' }}><LimitLevelIcon pct={worst} level={level} size={14} lang={lang} />{state}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, whiteSpace: 'nowrap', color: !limits || limits.unmeasuredReason ? 'var(--text-tertiary)' : level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green)' }}><LimitLevelIcon pct={worst} level={level} size={14} lang={lang} />{state}</span>
         {agentUse && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-secondary)' }}>
           {pt ? 'Uso por agentes' : 'Agent use'}
           <ToggleSwitch on={agentUse.on} disabled={agentUse.pending} onToggle={agentUse.onToggle} tap={isMobile ? 44 : undefined}
@@ -193,6 +203,7 @@ export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedd
       ? <AgentUseBadge view={agentUse.view} lang={lang} />
       : agentUse && !agentUse.on && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{pt ? 'Agentes não usam esta conta' : "Agents won't use this account"}</span>}
     {agentUse?.accountId && <AgentScheduleSection control={{ ...agentUse, accountId: agentUse.accountId }} who={subscriptionName(harness, accountLabel)} lang={lang} isMobile={isMobile} />}
+    {limits && <Unmeasured limits={limits} lang={lang} />}
     {limits && <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{limits.windows.map(w => <div key={windowKey(w)} style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><WindowRow w={w} now={now} observedAt={limits.updatedAt} lang={lang} ring={48} /></div>)}</div>}
     <span style={{ minHeight: 14, fontSize: 11, color: stale ? LIMIT_WARN : 'var(--text-tertiary)' }}>{limits ? updatedPhrase(limits, now, lang) : null}</span>
   </div>
@@ -281,6 +292,7 @@ export function PlanLimitsBlock({ limits, now, lang, forecast = false, header = 
         </div>
       )}
       {limits.windows.map(w => <PlanLimitMeter key={windowKey(w)} window={w} now={now} observedAt={limits.updatedAt} lang={lang} forecast={forecast} />)}
+      <Unmeasured limits={limits} lang={lang} />
       {(details || stale) && (
         <div style={{ fontSize: 10.5, color: stale ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }}>
           {details ? updatedPhrase(limits, now, lang) : stale}
