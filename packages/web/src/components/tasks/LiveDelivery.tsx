@@ -91,8 +91,8 @@ export function LiveDelivery({ lang, compact, focusSessionId, inPip, initialTask
   const plan = usePlanLimits()
   // The Publicado period is asked of the server (it decides what is sent), so it lives here, beside the fetch.
   const [period, setPeriod] = useState<LivePeriod>(() => readViewPrefs().period)
-  const { reply, error, nowMs } = useLiveDeliveries(fleet.sessions, period)
-  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} onPeriod={setPeriod} compact={compact} focusSessionId={focusSessionId} inPip={inPip} initialTaskIds={initialTaskIds} />
+  const { reply, replyPeriod, error, nowMs } = useLiveDeliveries(fleet.sessions, period)
+  return <LiveDeliveryView lang={lang} reply={reply} replyPeriod={replyPeriod} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} onPeriod={setPeriod} compact={compact} focusSessionId={focusSessionId} inPip={inPip} initialTaskIds={initialTaskIds} />
 }
 
 export interface LiveDeliveryViewProps {
@@ -100,6 +100,8 @@ export interface LiveDeliveryViewProps {
   compact?: boolean
   lang: 'pt' | 'en'
   reply: LiveReply | null
+  /** The period the reply was asked for (the hook knows it); falls back to what the server echoed in `view.period`. */
+  replyPeriod?: LivePeriod
   error: 'down' | 'refused' | null
   nowMs: number
   fleet: readonly FleetRow[]
@@ -115,7 +117,7 @@ export interface LiveDeliveryViewProps {
 }
 
 /** PURE of data sources: everything it draws comes in as props, so it is tested without mocking a store. */
-export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabels, compact, focusSessionId, initialTaskIds, inPip, onPeriod }: LiveDeliveryViewProps) {
+export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet, accountLabels, compact, focusSessionId, initialTaskIds, inPip, onPeriod }: LiveDeliveryViewProps) {
   const pt = lang === 'pt'
   const L = copy(pt)
   const isMobile = useIsMobile()
@@ -425,7 +427,8 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     </span>
   )
   // The answer on screen is for another period than the chosen one: the numbers below are the old ones until it lands.
-  const periodLoading = Boolean(reply.view?.period) && reply.view?.period !== period
+  const answeredPeriod = replyPeriod ?? reply.view?.period
+  const periodLoading = Boolean(answeredPeriod) && answeredPeriod !== period
   const showPublished = tab === 'all' || tab === 'published'
   // The server cuts each kind at its cap (the oldest go): say so, so a count is never read as the total.
   // Under a task or stage filter only the cut pieces that match it count (the server's own rule, `liveCapOmitted`).

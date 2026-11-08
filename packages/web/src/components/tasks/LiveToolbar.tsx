@@ -73,7 +73,7 @@ export function LiveToolbar({
           <div data-live-tabs style={mobile ? { minWidth: 0, flex: '1 1 100%' } : { flex: '0 0 auto', width: 'max-content', minWidth: 'max-content' }}>
             <TabStrip<LiveTab>
               tabs={LIVE_TABS} value={tab} onPick={onTab} label={t => (mobile ? w.tabShort : w.tab)[t]} count={t => counts[t]}
-              ariaLabel={w.tabs} flush {...(mobile ? { tap: 44, variant: 'underline' as const, gap: 8 } : { natural: true })}
+              ariaLabel={w.tabs} flush {...(mobile ? { tap: 44, variant: 'underline' as const, gap: 6 } : { natural: true })}
             />
           </div>
         </div>

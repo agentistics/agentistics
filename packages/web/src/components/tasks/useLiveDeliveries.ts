@@ -56,6 +56,8 @@ export function resetLiveCache(): void { lastReply = null }
 
 export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod = readViewPrefs().period) {
   const [reply, setReply] = useState<LiveReply | null>(() => cachedLiveReply(Date.now(), period))
+  // The period the reply on screen was ASKED for (known here, so the "still loading" state never depends on the server echoing it).
+  const [replyPeriod, setReplyPeriod] = useState<LivePeriod>(period)
   const periodRef = useRef(period)
   periodRef.current = period
   const [error, setError] = useState<'down' | 'refused' | null>(null)
@@ -70,7 +72,7 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
       const fresh = await res.json() as LiveReply
       lastReply = { reply: fresh, atMs: Date.now(), period: asked }
       // A slow answer for a period the person already left must not overwrite the one they chose.
-      if (asked === periodRef.current) setReply(fresh)
+      if (asked === periodRef.current) { setReply(fresh); setReplyPeriod(asked) }
       setError(null)
     } catch {
       setError('down')
@@ -117,5 +119,5 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
     return () => clearTimeout(t)
   }, [signature, load])
 
-  return { reply, error, nowMs, reload: load }
+  return { reply, replyPeriod, error, nowMs, reload: load }
 }
