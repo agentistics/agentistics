@@ -144,11 +144,11 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
           {!isMobile && (activeView === 'month' || activeView === 'week') && <VersionCards versions={shown.versions} nowMs={nowMs} pt={pt} selected={sel?.kind === 'version' ? sel.version : null} onOpen={(v, e) => open({ kind: 'version', version: v.version }, e)} />}
           {body}
           {!isMobile && (
-            <div data-cal-legend style={{ display: 'flex', gap: 14, alignItems: 'center', height: 30, flexShrink: 0, color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+            <div data-cal-legend style={{ display: 'flex', flexWrap: 'wrap', columnGap: 14, rowGap: 2, alignItems: 'center', minHeight: 30, padding: '4px 0', flexShrink: 0, color: 'var(--text-secondary)', fontSize: 11 }}>
               {(['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published'] as const).map(s => (
                 <span key={s}><i style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, marginRight: 5, background: STAGE_LABEL[s].color }} />{pt ? STAGE_LABEL[s].pt : STAGE_LABEL[s].en}</span>
               ))}
-              <span style={{ marginLeft: 'auto', color: 'var(--accent-green)' }}>◆ {pick(TEXT.legendPublished, pt)}</span>
+              <span style={{ marginLeft: 'auto', color: 'var(--accent-green)', whiteSpace: 'nowrap' }}>◆ {pick(TEXT.legendPublished, pt)}</span>
               <span style={{ color: 'var(--text-tertiary)' }}>{pick(TEXT.legendExpected, pt)}</span>
             </div>
           )}

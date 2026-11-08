@@ -158,6 +158,30 @@ export function weekRibbons(days: readonly string[], versions: readonly CalVersi
   return out
 }
 
+export interface WeekFit {
+  /** The ribbons that have a row. */
+  ribbons: Ribbon[]
+  /** Per column: how many due chips have a row. */
+  dues: number[]
+  /** Per column: how many ribbons + due chips have NO row — the number the "+N" says. */
+  more: number[]
+}
+
+/**
+ * Which chips of ONE month week get a row when only `cap` rows fit under the day numbers. Every chip that has no row is
+ * COUNTED on each day it covers (the "+N" the day-number row shows, which costs no chip row) — nothing leaves the screen
+ * without being said. A due chip is never sliced away silently.
+ */
+export function fitWeek(o: { ribbons: readonly Ribbon[]; dues: readonly number[]; cap: number }): WeekFit {
+  const lanes = o.ribbons.reduce((m, r) => Math.max(m, r.lane + 1), 0)
+  const cap = Math.max(0, o.cap)
+  const ribbons = o.ribbons.filter(r => r.lane < cap)
+  const hidden = o.ribbons.filter(r => r.lane >= cap)
+  const dues = o.dues.map(n => Math.max(0, Math.min(n, cap - lanes)))
+  const more = o.dues.map((n, i) => hidden.filter(r => r.startCol <= i && i <= r.endCol).length + (n - dues[i]!))
+  return { ribbons, dues, more }
+}
+
 // ------------------------------------------------------------------------------------------ agenda (week + mobile)
 
 export type AgendaEntry =

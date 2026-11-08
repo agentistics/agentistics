@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { CalPiece, CalVersion } from '@agentistics/core'
 import {
-  addDays, addMonths, agendaOf, byPriority, dayBlocks, monthCells, pieceSegments, rangeLabel, stepAnchor, versionDays,
+  addDays, addMonths, agendaOf, byPriority, dayBlocks, fitWeek, monthCells, pieceSegments, rangeLabel, stepAnchor, versionDays,
   weekDays, weekRibbons, weekdayMon0,
 } from './calendarModel'
 
@@ -104,6 +104,34 @@ describe('time axis', () => {
     expect(today.some(b => !b.expected)).toBe(true)
     expect(today.every(b => b.toMs <= Date.parse('2026-11-08T03:00:00.000Z'))).toBe(true)
     expect(dayBlocks(p, '2026-11-09', NOW)).toEqual([])
+  })
+  test('fitWeek: nothing is hidden when everything fits; no "+N"', () => {
+    const rs = weekRibbons(['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07', '2026-11-08'],
+      [version({ version: '1.0', state: 'published', atMs: Date.parse('2026-11-03T15:00:00Z') })], [], '2026-11-07')
+    const f = fitWeek({ ribbons: rs, dues: [0, 0, 0, 0, 0, 0, 0], cap: 3 })
+    expect(f.ribbons).toHaveLength(1)
+    expect(f.more).toEqual([0, 0, 0, 0, 0, 0, 0])
+  })
+  test('fitWeek: 4 versions on one day with room for 3 rows show 3 + a "+1" that counts the hidden one', () => {
+    const days = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07', '2026-11-08']
+    const at = Date.parse('2026-11-06T15:00:00Z')
+    const vs = ['2.200.0', '2.200.4', '2.200.5', '2.200.6'].map(v => version({ version: v, state: 'published', atMs: at }))
+    const rs = weekRibbons(days, vs, [], '2026-11-07')
+    expect(rs).toHaveLength(4)
+    const f = fitWeek({ ribbons: rs, dues: [0, 0, 0, 0, 0, 0, 0], cap: 3 })
+    expect(f.ribbons).toHaveLength(3)
+    expect(f.more[4]).toBe(1)
+    expect(f.more.reduce((a, b) => a + b, 0)).toBe(1)
+  })
+  test('fitWeek: due chips are counted too, never dropped (the old slice(0, 2))', () => {
+    const f = fitWeek({ ribbons: [], dues: [0, 5, 0, 0, 0, 0, 0], cap: 3 })
+    expect(f.dues[1]).toBe(3)
+    expect(f.more[1]).toBe(2)
+  })
+  test('fitWeek: a row too short for any chip still says how many are there', () => {
+    const f = fitWeek({ ribbons: [], dues: [1, 0, 0, 0, 0, 0, 0], cap: 0 })
+    expect(f.dues[0]).toBe(0)
+    expect(f.more[0]).toBe(1)
   })
   test('urgent sorts before low; no priority last', () => {
     const l = [piece({ key: 'n', priority: null }), piece({ key: 'l', priority: 'low' }), piece({ key: 'u', priority: 'urgent' })].sort(byPriority)

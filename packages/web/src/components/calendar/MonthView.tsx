@@ -3,89 +3,127 @@
  * runs from where its work began to the day it is expected (dashed, so "expected" is never mistaken for "happened"); a
  * version with no estimate is a single dashed marker on today that says so. Task due days are chips; renewing accounts
  * are a small icon on their day. Six rows share the height, so the page never scrolls; the day number opens that day.
+ * When a week row has fewer chip rows than chips, the day-number row says "+N" for that day (`fitWeek` counts them) and
+ * pressing it opens the day — nothing leaves the grid unsaid.
  */
+import { useLayoutEffect, useRef, useState } from 'react'
 import { RefreshCw, Flag } from 'lucide-react'
 import { brtDay, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
-import { dowShort, marksOfDay, monthCells, weekRibbons, type Ribbon } from '../../lib/calendarModel'
+import { dowShort, fitWeek, marksOfDay, monthCells, weekRibbons, type Ribbon } from '../../lib/calendarModel'
 import { TEXT, pick } from './calendarText'
 import { EXPECTED_COLOR, PUBLISHED_COLOR, VersionGlyph } from './calendarUi'
 
 const RIBBON_H = 18
 const NUM_H = 22
 
-export function MonthView({ anchor, nowMs, versions, pieces, marks, pt, onPickDay, onOpenVersion, onOpenMark, selected }: {
-  anchor: string; nowMs: number; versions: readonly CalVersion[]; pieces: readonly CalPiece[]; marks: readonly CalMark[]; pt: boolean
+/** How many chip rows fit under the day numbers in a week row `h` px tall (the "+N" sits on the number row, so it costs none). */
+export function rowsThatFit(h: number): number {
+  return Math.max(0, Math.floor((h - NUM_H - 2 + 2) / (RIBBON_H + 2)))
+}
+
+type Common = {
+  nowMs: number; versions: readonly CalVersion[]; pieces: readonly CalPiece[]; marks: readonly CalMark[]; pt: boolean
   onPickDay: (day: string) => void
   onOpenVersion: (version: string, e: React.MouseEvent) => void
   onOpenMark: (m: CalMark, e: React.MouseEvent) => void
   selected: string | null
-}) {
-  const today = brtDay(nowMs)
+}
+
+export function MonthView({ anchor, ...rest }: Common & { anchor: string }) {
+  const today = brtDay(rest.nowMs)
   const cells = monthCells(anchor)
   const weeks = Array.from({ length: 6 }, (_, i) => cells.slice(i * 7, i * 7 + 7))
   return (
     <div data-cal-month style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden', background: 'var(--bg-card)' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         {Array.from({ length: 7 }, (_, i) => (
-          <div key={i} style={{ padding: '6px 10px', fontSize: 10.5, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{dowShort(i, pt)}</div>
+          <div key={i} style={{ padding: '6px 10px', fontSize: 10.5, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{dowShort(i, rest.pt)}</div>
         ))}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateRows: 'repeat(6, minmax(0, 1fr))' }}>
-        {weeks.map((week, wi) => {
-          const days = week.map(c => c.day)
-          const ribbons = weekRibbons(days, versions, pieces, today)
-          const lanes = ribbons.reduce((m, r) => Math.max(m, r.lane + 1), 0)
+        {weeks.map((week, wi) => <WeekRow key={week[0]!.day} week={week} last={wi === 5} today={today} {...rest} />)}
+      </div>
+    </div>
+  )
+}
+
+function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, selected, onPickDay, onOpenVersion, onOpenMark }: Common & {
+  week: { day: string; inMonth: boolean }[]; last: boolean; today: string
+}) {
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const [cap, setCap] = useState(Number.POSITIVE_INFINITY)
+  useLayoutEffect(() => {
+    const el = rowRef.current
+    if (!el) return
+    // A row that cannot be measured (no layout yet) hides nothing: "unknown height" is not "no room".
+    const measure = () => { const h = el.getBoundingClientRect().height; setCap(h > 0 ? rowsThatFit(h) : Number.POSITIVE_INFINITY) }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const days = week.map(c => c.day)
+  const allRibbons = weekRibbons(days, versions, pieces, today)
+  const lanes = allRibbons.reduce((m, r) => Math.max(m, r.lane + 1), 0)
+  const dueMarks = week.map(c => marksOfDay(c.day, marks).filter((m): m is Extract<CalMark, { kind: 'task-due' }> => m.kind === 'task-due'))
+  const fit = fitWeek({ ribbons: allRibbons, dues: dueMarks.map(d => d.length), cap })
+  return (
+    <div ref={rowRef} data-cal-week style={{ position: 'relative', minHeight: 0, overflow: 'hidden', borderBottom: !last ? '1px solid var(--border)' : 0 }}>
+      <div aria-hidden style={{ position: 'absolute', inset: 0, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+        {week.map((c, i) => (
+          <div key={c.day} style={{
+            borderRight: i < 6 ? '1px solid var(--border)' : 0,
+            background: c.day === today ? 'linear-gradient(180deg, var(--anthropic-orange-dim), transparent 70%)' : !c.inMonth ? 'var(--border-subtle)' : undefined,
+          }} />
+        ))}
+      </div>
+      <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridAutoRows: `${RIBBON_H}px`, rowGap: 2, padding: '0 0 2px', minWidth: 0 }}>
+        {week.map((c, i) => {
+          const resets = marksOfDay(c.day, marks).filter(m => m.kind === 'account-reset')
           return (
-            <div key={days[0]} data-cal-week style={{ position: 'relative', minHeight: 0, overflow: 'hidden', borderBottom: wi < 5 ? '1px solid var(--border)' : 0 }}>
-              <div aria-hidden style={{ position: 'absolute', inset: 0, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
-                {week.map((c, i) => (
-                  <div key={c.day} style={{
-                    borderRight: i < 6 ? '1px solid var(--border)' : 0,
-                    background: c.day === today ? 'linear-gradient(180deg, var(--anthropic-orange-dim), transparent 70%)' : !c.inMonth ? 'var(--border-subtle)' : undefined,
-                  }} />
-                ))}
-              </div>
-              <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridAutoRows: `${RIBBON_H}px`, rowGap: 2, padding: '0 0 2px', minWidth: 0 }}>
-                {week.map((c, i) => {
-                  const resets = marksOfDay(c.day, marks).filter(m => m.kind === 'account-reset')
-                  return (
-                    <button key={c.day} type="button" data-cal-day={c.day} onClick={() => onPickDay(c.day)}
-                      aria-label={c.day} style={{
-                        gridColumn: i + 1, gridRow: 1, height: NUM_H, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 7px',
-                        background: 'none', border: 0, cursor: 'pointer', font: 'inherit', fontSize: 12, fontWeight: 500,
-                        color: c.inMonth ? 'var(--text-secondary)' : 'var(--text-tertiary)',
-                      }}>
-                      {c.day === today
-                        ? <b style={{ width: 20, height: 20, borderRadius: 10, background: 'var(--anthropic-orange)', color: '#111', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{Number(c.day.slice(8))}</b>
-                        : <span>{Number(c.day.slice(8))}</span>}
-                      {resets.length > 0 && (
-                        <span title={`${pick(TEXT.accountsRenew, pt)}: ${resets.map(m => m.kind === 'account-reset' ? m.label : '').join(', ')}`} style={{ color: 'var(--accent-cyan)', display: 'inline-flex' }}>
-                          <RefreshCw size={11} aria-hidden />
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
-                {ribbons.map(r => <RibbonBar key={r.version} r={r} pt={pt} selected={selected === r.version} onOpen={e => onOpenVersion(r.version, e)} />)}
-                {week.map((c, i) => {
-                  const dues = marksOfDay(c.day, marks).filter((m): m is Extract<CalMark, { kind: 'task-due' }> => m.kind === 'task-due')
-                  return dues.slice(0, 2).map((m, k) => (
-                    <button key={`${c.day}-${m.taskId}`} type="button" data-cal-due={m.taskId} onClick={e => onOpenMark(m, e)} title={m.label}
-                      style={{
-                        gridColumn: i + 1, gridRow: 2 + lanes + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0,
-                        border: 0, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden',
-                        color: brtDay(nowMs) > c.day ? 'var(--accent-red)' : 'var(--accent-amber)',
-                        background: brtDay(nowMs) > c.day ? 'var(--accent-red-dim)' : 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
-                      }}>
-                      <Flag size={10} aria-hidden style={{ flexShrink: 0 }} />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{pick(TEXT.due, pt)} · {m.label}</span>
-                    </button>
-                  ))
-                })}
-              </div>
-            </div>
+            <button key={c.day} type="button" data-cal-day={c.day} onClick={() => onPickDay(c.day)}
+              aria-label={c.day} style={{
+                gridColumn: i + 1, gridRow: 1, height: NUM_H, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 7px',
+                background: 'none', border: 0, cursor: 'pointer', font: 'inherit', fontSize: 12, fontWeight: 500,
+                color: c.inMonth ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+              }}>
+              {c.day === today
+                ? <b style={{ width: 20, height: 20, borderRadius: 10, background: 'var(--anthropic-orange)', color: '#111', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{Number(c.day.slice(8))}</b>
+                : <span>{Number(c.day.slice(8))}</span>}
+              {resets.length > 0 && (
+                <span title={`${pick(TEXT.accountsRenew, pt)}: ${resets.map(m => m.kind === 'account-reset' ? m.label : '').join(', ')}`} style={{ color: 'var(--accent-cyan)', display: 'inline-flex' }}>
+                  <RefreshCw size={11} aria-hidden />
+                </span>
+              )}
+            </button>
           )
         })}
+        {fit.ribbons.map(r => <RibbonBar key={r.version} r={r} pt={pt} selected={selected === r.version} onOpen={e => onOpenVersion(r.version, e)} />)}
+        {week.map((c, i) => dueMarks[i]!.slice(0, fit.dues[i]).map((m, k) => (
+          <button key={`${c.day}-${m.taskId}`} type="button" data-cal-due={m.taskId} onClick={e => onOpenMark(m, e)} title={m.label}
+            style={{
+              gridColumn: i + 1, gridRow: 2 + lanes + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0,
+              border: 0, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden',
+              color: brtDay(nowMs) > c.day ? 'var(--accent-red)' : 'var(--accent-amber)',
+              background: brtDay(nowMs) > c.day ? 'var(--accent-red-dim)' : 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
+            }}>
+            <Flag size={10} aria-hidden style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{pick(TEXT.due, pt)} · {m.label}</span>
+          </button>
+        )))}
+        {week.map((c, i) => fit.more[i]! > 0 && (
+          <button key={`more-${c.day}`} type="button" data-cal-more={c.day} onClick={() => onPickDay(c.day)}
+            title={pt ? `Mais ${fit.more[i]} neste dia — abrir o dia` : `${fit.more[i]} more on this day — open the day`}
+            style={{
+              gridColumn: i + 1, gridRow: 1, justifySelf: 'end', alignSelf: 'center', marginRight: marksOfDay(c.day, marks).some(m => m.kind === 'account-reset') ? 26 : 5,
+              height: 17, display: 'inline-flex', alignItems: 'center', padding: '0 5px', minWidth: 0, zIndex: 1,
+              border: 0, borderRadius: 8, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap',
+              color: 'var(--text-primary)', background: 'var(--bg-hover)',
+            }}>
+            +{fit.more[i]}
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -96,6 +134,7 @@ function RibbonBar({ r, pt, selected, onOpen }: { r: Ribbon; pt: boolean; select
   const color = published ? PUBLISHED_COLOR : EXPECTED_COLOR
   return (
     <button type="button" data-cal-ribbon={r.version} data-cal-state={r.state} onClick={onOpen}
+      title={`${r.version} · ${r.note === 'published' ? pick(TEXT.published, pt) : r.note === 'none' ? pick(TEXT.noEstimate, pt) : pick(TEXT.expected, pt)}`}
       style={{
         gridColumn: `${r.startCol + 1} / ${r.endCol + 2}`, gridRow: 2 + r.lane, margin: `0 ${r.contRight ? 0 : 4}px 0 ${r.contLeft ? 0 : 4}px`, height: RIBBON_H,
         display: 'flex', alignItems: 'center', gap: 4, padding: '0 6px', minWidth: 0, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden',
