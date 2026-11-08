@@ -19,6 +19,26 @@ const response = (id = 'msg_a', extra: object = {}, offset = 1000) => message(id
   tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 200, write: 30 } }, ...extra,
 }, offset)
 
+test('declared OpenCode cost survives all live consumers, without table pricing or double counting', () => {
+  const go = response('go', { providerID: 'opencode-go', modelID: 'glm-5.3', cost: 1.25 })
+  const s = parseOpencodeSession(session, [user, go, go])!
+  expect(sessionCostUSD(s)).toBe(1.25)
+  expect(unpricedTokens(s)).toBe(0)
+  expect(s.model_usage!['opencode-go/glm-5.3']!.costSource).toBe('harness')
+  expect(toConversation(s).costUSD).toBe(1.25)
+})
+
+test('placeholder zero usage is unavailable even when the completed message has a model', () => {
+  const s = parseOpencodeSession(session, [user, response('zero', {
+    finish: undefined, time: { completed: at + 2000 }, providerID: 'opencode-go', modelID: 'glm-5.3',
+    cost: 0, tokens: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+  })])!
+  expect(s.tokens_unavailable).toBe(true)
+  expect(s.model).toBe('opencode-go/glm-5.3')
+  expect(sessionCostUSD(s)).toBeNull()
+  expect(toConversation(s).costUSD).toBeUndefined()
+})
+
 /** Minimal real columns from the read-only OpenCode 1.17.9 schema dump. */
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'opencode-metrics-')); dirs.push(dir)

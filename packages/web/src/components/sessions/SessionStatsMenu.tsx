@@ -578,7 +578,7 @@ export function SessionStatsMenu({
                 <Line k={pt ? 'Cache lido / escrito' : 'Cache read / write'}
                   v={`${fmt(s.tokens.cacheRead)} / ${fmt(s.tokens.cacheWrite)}`} />
               </>
-            ) : <Absent text={na('tokens')} />}
+            ) : <Absent text={meta?.tokens_unavailable ? (pt ? 'uso não informado' : 'usage not reported') : na('tokens')} />}
           </Block>
 
           <Block title={pt ? 'Custo' : 'Cost'}>
@@ -613,7 +613,7 @@ export function SessionStatsMenu({
             )}
             {cost === null
               ? <Absent text={na('cost')} />
-              : <Line k={costBasisLabel(cost, pt)} v={money(cost.usd)} />}
+              : <Line k={cost.basis === 'api' && Object.values(meta?.model_usage ?? {}).some(u => u.costSource === 'harness') ? (pt ? 'declarado pelo harness' : 'declared by the harness') : costBasisLabel(cost, pt)} v={money(cost.usd)} />}
           </Block>
 
           {/* ASKED FOR: how long this session has been going. Two figures, not one, and the pair is

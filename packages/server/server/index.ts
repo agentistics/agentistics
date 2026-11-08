@@ -5415,7 +5415,7 @@ process.stdout.write(
 // startup path. It waits until the server has been answering for a while, runs as a low-priority
 // child, and is re-checked every half hour so an import that died resumes. Unref'd timers: they
 // never keep the process alive.
-const scheduleBackfillCheck = () => {
+const scheduleBackfillCheck = (catchUp = false) => {
   void (async () => {
     const [{ JOURNAL_ENABLED, JOURNAL_PATH, JOURNAL_BACKFILL_PATH }, { maybeStartAutoBackfill }] = await Promise.all([
       import('./config'), import('./journal/backfill'),
@@ -5427,8 +5427,8 @@ const scheduleBackfillCheck = () => {
           return Object.fromEntries(Object.entries(engineIntegrations()).flatMap(([h, i]) => i?.version ? [[h, i.version] as const] : []))
         } catch { return undefined }
       })()
-      const d = maybeStartAutoBackfill({ journalEnabled: JOURNAL_ENABLED, central: TEAM_CENTRAL, journalPath: JOURNAL_PATH, progressPath: JOURNAL_BACKFILL_PATH, env: process.env, ...(adapterVersions ? { adapterVersions } : {}) })
-    if (d.start) console.log('[journal] first import started in the background at low priority — `agentop journal status` shows its progress')
+      const d = maybeStartAutoBackfill({ catchUp, journalEnabled: JOURNAL_ENABLED, central: TEAM_CENTRAL, journalPath: JOURNAL_PATH, progressPath: JOURNAL_BACKFILL_PATH, env: process.env, ...(adapterVersions ? { adapterVersions } : {}) })
+    if (d.start) console.log('[journal] history reconciliation started in the background at low priority — `agentop journal status` shows its progress')
   })().catch(err => console.error('[journal] first import check failed:', err instanceof Error ? err.message : String(err)))
 }
 // One line with the boot's own clock, so a slow start can be read off the service's journal.
@@ -5474,8 +5474,8 @@ if (!TEAM_CENTRAL) {
     }
   })()
 }
-setTimeout(scheduleBackfillCheck, 120_000).unref()
-setInterval(scheduleBackfillCheck, 30 * 60_000).unref()
+setTimeout(() => scheduleBackfillCheck(true), 120_000).unref()
+setInterval(() => scheduleBackfillCheck(), 30 * 60_000).unref()
 // Agentask thread replies QUEUED for a session that was not running (or sat on a dialog) are typed
 // in once it can take a prompt — a reopen, a dialog answered. Never on a central (it hosts no
 // sessions) nor where the profile denies host power. One book read per tick when nothing is queued;

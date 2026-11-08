@@ -23,7 +23,7 @@
  */
 
 import {
-  HARNESS_CAPABILITIES, calcCost, contextFraction, resolveContextWindow, sessionTokens,
+  HARNESS_CAPABILITIES, sessionCostUSD, contextFraction, resolveContextWindow, sessionTokens,
   type SurfaceHarnessId, type SessionMeta, type TokenBreakdown,
 } from '@agentistics/core'
 
@@ -127,14 +127,7 @@ export function sessionStats(
     // Priced through `calcCost` with the REAL cache counters — pricing cache as fresh input is
     // roughly tenfold too high, and zeroing it prices the cheap 4% of the volume.
     costUSD: caps?.cost && tokens
-      ? calcCost({
-        inputTokens: tokens.input,
-        outputTokens: tokens.output,
-        cacheReadInputTokens: tokens.cacheRead,
-        cacheCreationInputTokens: tokens.cacheWrite,
-        webSearchRequests: 0,
-        costUSD: 0,
-      }, model ?? '')
+      ? sessionCostUSD(meta)
       : null,
     context: fraction === null ? null : { fraction, used, window },
     messages: {

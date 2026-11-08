@@ -155,6 +155,7 @@ export function rowsOfV2Messages(sessionId: string, msgs: readonly V2Message[]):
         ...(typeof model.id === 'string' ? { modelID: model.id } : {}),
         ...(typeof model.providerID === 'string' ? { providerID: model.providerID } : {}),
         ...(isObj(m.tokens) ? { tokens: m.tokens } : {}),
+        ...(typeof m.cost === 'number' && Number.isFinite(m.cost) && m.cost >= 0 ? { cost: m.cost } : {}),
         ...(typeof m.finish === 'string' && m.finish !== 'error' ? { finish: m.finish } : {}),
         ...(err || m.finish === 'error' ? { error: { name: 'error' } } : {}),
       }),

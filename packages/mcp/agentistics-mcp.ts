@@ -1527,6 +1527,8 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
               ...(s.tokens_unavailable ? {} : { estimatedCostUSD: unpriced > 0 && unpriced === input + output + cacheRead + cacheWrite ? null : Math.round(cost * 10000) / 10000 }),
               ...(unpriced > 0 ? { unpricedTokens: unpriced } : {}),
               model: s.model ?? null,
+              ...(s.tokens_unavailable ? { usageNote: 'usage not reported' } : {}),
+              ...(Object.values(s.model_usage ?? {}).some((u: any) => u.costSource === 'harness') ? { costSource: 'harness', costNote: 'declared by the harness' } : {}),
               ...(startedBy.get(s.session_id) ? { startedBy: startedBy.get(s.session_id) } : {}),
               ...(delivered.get(s.session_id) ? { deliveredStillOpen: delivered.get(s.session_id) } : {}),
             };

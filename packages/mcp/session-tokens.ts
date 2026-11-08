@@ -33,6 +33,7 @@ export function sessionTokens(s: AnySession) {
   const priced = {
     model: s.model,
     model_usage: s.model_usage,
+    tokens_unavailable: s.tokens_unavailable,
     input_tokens: input,
     output_tokens: output,
     cache_read_input_tokens: cacheRead,

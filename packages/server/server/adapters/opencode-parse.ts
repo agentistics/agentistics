@@ -69,15 +69,18 @@ export function parseOpencodeSession(
     // Pending streaming rows may contain placeholder zeros. Wait until the response settles.
     if (!d.finish && !d.error && !num(t.completed)) continue
     if (!d.tokens || typeof d.tokens !== 'object') continue
-    sawUsage = true
     const u = object(d.tokens), cache = object(u.cache)
     const i = num(u.input), o = num(u.output) + num(u.reasoning), r = num(cache.read), w = num(cache.write)
+    sawUsage ||= i + o + r + w > 0
     input += i; output += o; read += r; write += w
     const raw = str(d.modelID), provider = str(d.providerID)
     const id = raw ? opencodeModel(raw, provider) : 'unknown-opencode-model'
     const bucket = usage[id] ??= emptyModelUsage()
     bucket.inputTokens += i; bucket.outputTokens += o
     bucket.cacheReadInputTokens += r; bucket.cacheCreationInputTokens += w
+    // OpenCode initializes cost to zero even when the provider reports no usage. Positive declared
+    // cost is authoritative; free/local routes still resolve to a real zero in the shared table.
+    if (num(d.cost) > 0) { bucket.costUSD += num(d.cost); bucket.costSource = 'harness' }
     if (end >= latest) {
       latest = end
       model = raw ? id : undefined

@@ -293,7 +293,7 @@ export function SessionDrilldownBody({ session, globalModelUsage, currency, brlR
           <Kpi icon={<GitCommit size={12} />} label="Commits" value={String(session.git_commits ?? 0)} accent="var(--accent-purple, #a855f7)" />
           <Kpi
             icon={<span style={{ fontSize: 10, fontWeight: 800 }}>$</span>}
-            label={pt ? 'Custo' : 'Cost'}
+            label={Object.values(session.model_usage ?? {}).some(u => u.costSource === 'harness') ? (pt ? 'Custo declarado pelo harness' : 'Cost declared by the harness') : (pt ? 'Custo' : 'Cost')}
             value={cost !== null ? fmtCost(cost, currency, brlRate) : 'N/A'}
             accent="var(--anthropic-orange)"
           />
