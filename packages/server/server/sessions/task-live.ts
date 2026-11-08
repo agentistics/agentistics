@@ -672,7 +672,11 @@ export function buildLive(o: {
     if (!rec && stage === 'running' && liveSessions.some(s => s.label && QA_NAME.test(s.label))) stage = 'qa'
     // An ABANDONED piece is closed: a session still marked open on it (a native session that never
     // recorded its end) must not put it back on the board as running.
-    if (stage === null) stage = liveSessions.length > 0 && p.status !== 'abandoned' ? 'running' : null
+    // The same holds for a custom terminal status the vocabulary cannot map ("cancelado"): the board has no closing
+    // concept, so a closing word in the id or label is the evidence.
+    const closedWord = /abandon|cancel|closed|encerr|descart|arquiv|won'?t|wont/i
+    const closed = p.status === 'abandoned' || closedWord.test(`${p.status} ${o.statusLabel?.(p.status) ?? ''}`)
+    if (stage === null) stage = liveSessions.length > 0 && !closed ? 'running' : null
     // LEGACY in-review work (no delivery record): published once a release tag contains the commit it names;
     // with no such commit and nothing alive for 72 h it is not review work any more — it is listed apart, never dropped.
     if (!rec && stage === 'leader' && p.status === 'in_review') {

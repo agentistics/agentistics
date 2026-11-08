@@ -37,15 +37,22 @@ const IMPERATIVE = [
   'coloque', 'põe', 'ponha', 'tira', 'tire', 'deixa', 'deixe', 'continua', 'continue', 'siga', 'começa', 'comece',
   'pare', 'cancela', 'cancele', 'abre', 'abra', 'fecha', 'feche', 'mata', 'mate', 'reabre', 'reabra', 'integra',
   'integre', 'dispara', 'dispare', 'prioriza', 'priorize', 'verifica', 'verifique', 'confere', 'confira', 'refaz', 'refaça',
-  'implementar', 'corrigir', 'criar', 'adicionar', 'remover', 'enviar', 'mudar', 'trocar', 'ajustar', 'atualizar',
+  'segue', 'bora', 'vai', 'implementar', 'corrigir', 'criar', 'adicionar', 'remover', 'enviar', 'mudar', 'trocar', 'ajustar', 'atualizar',
   // en
   'fix', 'add', 'create', 'implement', 'make', 'change', 'update', 'remove', 'delete', 'send', 'run', 'build', 'write',
   'ship', 'deploy', 'release', 'merge', 'push', 'open', 'close', 'kill', 'start', 'stop', 'move', 'rename', 'replace',
   'continue', 'resume', 'check', 'review', 'investigate', 'test', 'show', 'put', 'set', 'use', 'try', 'redo', 'refactor',
 ]
-const POLITE = /\b(?:pode(?:ria|m)?|consegue|conseguiria|d[áa] pra|dá para|quero que|preciso que|precisamos|gostaria|can you|could you|would you|will you|please|por favor|i need|i want|we need)\b/i
+const POLITE = /\b(?:pode(?:ria|m)?(?!\s+ser\b)|consegue|conseguiria|d[áa] pra|dá para|quero que|preciso que|precisamos|gostaria|can you|could you|would you|will you|please|por favor|i need|i want|we need)\b/i
 
-const IMPERATIVE_RE = new RegExp(`(?:^|[.!?;:,\\n]\\s*|\\be\\s+|\\band\\s+|\\bpra\\s+|\\bto\\s+)(?:${IMPERATIVE.join('|')})\\b`, 'i')
+// Words that are also everyday nouns ("e o deploy?", "and the release?"): they count only in verb position.
+const AMBIGUOUS = new Set(['teste', 'ajuste', 'troca', 'move', 'deploy', 'release', 'build', 'test', 'check', 'review', 'update',
+  'change', 'merge', 'push', 'run', 'start', 'stop', 'set', 'put', 'use', 'show', 'open', 'close', 'ship', 'resume', 'continue', 'try', 'make'])
+const strongVerbs = IMPERATIVE.filter(v => !AMBIGUOUS.has(v))
+// An unambiguous work verb counts anywhere as a whole word (errs toward work); an ambiguous one only at the start,
+// after punctuation or after "e/and/pra/to".
+const IMPERATIVE_RE = new RegExp(
+  `\\b(?:${strongVerbs.join('|')})\\b|(?:^|[.!?;:,\\n]\\s*|\\be\\s+|\\band\\s+|\\bpra\\s+|\\bto\\s+)(?:${IMPERATIVE.join('|')})\\b`, 'i')
 
 export const QUESTION_MAX_WORDS = 12
 

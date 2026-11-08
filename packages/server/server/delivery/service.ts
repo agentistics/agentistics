@@ -1056,9 +1056,8 @@ export function createDeliveryService(d: DeliveryDeps) {
         const clocks = x.requestReminders ??= {}
         const last = clocks[p.id]
         // ONE reminder cadence per PEDIDO, not per leader: a leader change used to reset the clock and re-send at once.
-        // Only a predecessor that is no longer alive (it never saw the reminder to act on) lets the new leader hear it now.
-        const lastAlive = !!last?.leaderSessionId && sessions.some(s => s.alive && s.id === last.leaderSessionId)
-        if (last?.at && d.now() - Date.parse(last.at) < 30 * 60_000 && (last.leaderSessionId === leader || lastAlive)) return false
+        // A normal hand-off closes the predecessor minutes later, so the record survives it: the successor is not nudged again.
+        if (last?.at && d.now() - Date.parse(last.at) < 30 * 60_000) return false
         if (last?.pendingAt && d.now() - Date.parse(last.pendingAt) < 60_000) return false
         clocks[p.id] = { ...(last?.leaderSessionId === leader ? last : {}), pendingAt: iso(d), leaderSessionId: leader }
         return true
