@@ -8,6 +8,7 @@
  */
 
 import { parseLiveSort, type LiveSortId } from '@agentistics/core'
+import { startsLine } from './queueTime'
 import type { FleetRow } from '../../lib/fleet'
 import {
   fmtClock, fmtSpan, isQueued, STAGE_LABEL, LIVE_STAGES, LIVE_DEFAULTS, type HiddenReason, type LiveBlock, type LiveCard, type LiveDeliveryRecord,
@@ -62,7 +63,12 @@ function questionOf(row: FleetRow | undefined): string | null {
  * nothing is known it says so; it never guesses a reason.
  */
 export function waitingReason(c: LiveCard, fleet: readonly FleetRow[], pt: Pt): string | null {
-  if (isQueued(c)) return pt ? 'esperando vaga na máquina' : 'waiting for a machine slot'
+  if (isQueued(c)) {
+    // The card already says WHY it is not starting when the leader decided (não / agendar / the open question) or when the
+    // slot gate says a slot is free: a generic "waiting for a machine slot" beside either would contradict it.
+    if (c.d.queue || c.d.slot?.ok === true) return null
+    return pt ? 'esperando vaga na máquina' : 'waiting for a machine slot'
+  }
   // A blocked card says WHY in its own block (reason, who lifts it) — a second line would contradict it.
   if (c.d.stage === 'blocked') return null
   if (c.liveState === 'needs-you') {
@@ -296,7 +302,28 @@ export const BLOCK_WORD: Record<LiveBlock['reason'], { pt: string; en: string }>
  * PURE: the pre-dispatch line of a queued card — "claude · opus · high · conta X" and the expected slot.
  * A field nobody staged is left out (never guessed); no staged session at all answers null.
  */
-export function queueLines(d: Pick<LiveDeliveryRecord, 'staged' | 'slot'>, pt: Pt, accountName?: (harness: string, account: string) => string): { staged: string | null; slot: string | null; slotOk: boolean | null; slotRaw: string | null } {
+export function queueLines(d: Pick<LiveDeliveryRecord, 'staged' | 'slot'> & { queue?: LiveDeliveryRecord['queue'] }, pt: Pt, accountName?: (harness: string, account: string) => string, nowMs: number = Date.now()): { staged: string | null; slot: string | null; slotOk: boolean | null; slotRaw: string | null; wait: string | null } {
+  const base = queueLinesBase(d, pt, accountName)
+  return { ...base, wait: queueWaitLine(d.queue, pt, nowMs) }
+}
+
+/**
+ * PURE (FILA.PRIORIDADE): why a queued card is NOT being started even if a slot is free — the leader's `não` with its
+ * reason, an `agendar` with its hour ("começa às 14:00"), the open question, or an approval waiting for a slot.
+ */
+export function queueWaitLine(q: LiveDeliveryRecord['queue'] | undefined, pt: Pt, nowMs: number): string | null {
+  if (!q) return null
+  if (q.hold) {
+    return q.hold.kind === 'nao'
+      ? (pt ? `não por enquanto: ${q.hold.reason}` : `not for now: ${q.hold.reason}`)
+      : `${q.hold.until ? startsLine(q.hold.until, nowMs, pt) : (pt ? 'agendada' : 'scheduled')} · ${q.hold.reason}`
+  }
+  if (q.approved) return pt ? 'aprovada — abre quando houver vaga' : 'approved — opens when a slot is free'
+  if (q.asking) return pt ? 'esperando a resposta do líder' : 'waiting for the leader\'s answer'
+  return null
+}
+
+function queueLinesBase(d: Pick<LiveDeliveryRecord, 'staged' | 'slot'>, pt: Pt, accountName?: (harness: string, account: string) => string): { staged: string | null; slot: string | null; slotOk: boolean | null; slotRaw: string | null } {
   const s = d.staged
   // The account is said by NAME; one the resolver cannot name (it hands the raw `acc_…` id back) is left out rather than shown as an id.
   const accountWord = s?.account ? (s.harness && accountName ? accountName(s.harness, s.account) : s.account) : null

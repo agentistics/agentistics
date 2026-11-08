@@ -38,6 +38,11 @@ describe('what a waiting card waits for (item i)', () => {
     expect(waitingReason(card({ sessionIds: ['s'], stage: 'qa' }, f), f, true)).toBe('esperando a QA')
     expect(waitingReason(card({ sessionIds: ['s'], stage: 'merge' }, f), f, true)).toBe('esperando o CI / merge')
     expect(waitingReason(card({ stage: 'queue' }), [], true)).toBe('esperando vaga na máquina')
+    // FILA.PRIORIDADE: never a generic "waiting for a slot" beside a free slot or beside the leader's own decision
+    const queued = card({ stage: 'queue' })
+    expect(waitingReason({ ...queued, d: { ...queued.d, slot: { ok: true, reason: null, at: '' } } }, [], true)).toBeNull()
+    expect(waitingReason({ ...queued, d: { ...queued.d, slot: { ok: false, reason: 'no slot: x', at: '' } } }, [], true)).toBe('esperando vaga na máquina')
+    expect(waitingReason({ ...queued, d: { ...queued.d, queue: { hold: null, asking: true, approved: false } } }, [], true)).toBeNull()
     const dlg = [row('s', 'waiting-approval', { approvalLines: ['Posso apagar a pasta dist?', '1. Sim'] })]
     expect(waitingReason(card({ sessionIds: ['s'] }, dlg), dlg, true)).toBe('esperando resposta sua (pergunta: Posso apagar a pasta dist?)')
     expect(waitingReason(card({ sessionIds: ['s'], stage: 'running' }, f), f, true)).toBe('esperando (sem motivo conhecido)')
@@ -348,9 +353,9 @@ describe('queueLines (FLUXO.ENTREGA-DSL "Na fila")', () => {
   test('pre-dispatch line and slot, nothing guessed', async () => {
     const { queueLines } = await import('./liveCardModel')
     expect(queueLines({ staged: { harness: 'claude', model: 'opus', effort: 'high', account: 'acc_1' }, slot: { ok: true, reason: null, at: '' } }, true, () => 'pessoal'))
-      .toEqual({ staged: 'claude · opus · high · conta pessoal', slot: 'vaga: livre agora', slotOk: true, slotRaw: null })
+      .toEqual({ staged: 'claude · opus · high · conta pessoal', slot: 'vaga: livre agora', slotOk: true, slotRaw: null, wait: null })
     expect(queueLines({ staged: { harness: 'claude', model: null, effort: null, account: null }, slot: null }, false).staged).toBe('claude')
-    expect(queueLines({ staged: null, slot: null }, true)).toEqual({ staged: null, slot: null, slotOk: null, slotRaw: null })
+    expect(queueLines({ staged: null, slot: null }, true)).toEqual({ staged: null, slot: null, slotOk: null, slotRaw: null, wait: null })
     // an account nobody can name is left out — the raw `acc_…` id is not something a person reads
     expect(queueLines({ staged: { harness: 'codex', model: 'm', effort: null, account: 'acc_9f3a21' }, slot: null }, true, (_h, a) => a).staged).toBe('codex · m')
   })

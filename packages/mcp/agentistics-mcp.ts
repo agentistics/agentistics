@@ -625,6 +625,32 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_task_queue",
+    description:
+      "FILA.PRIORIDADE — read the delivery QUEUE (\"Na fila\") exactly as the task page's Fila tab shows it, from the same source, in the order pieces LEAVE: the task's priority (urgent → low), then arrival. " +
+      "Each item: `position` (in its task) and `globalPosition`, `priority`, the subtask/group (with `group.members`), the full PRE-DISPATCH (`predispatch`: harness, model, effort, account and its name, cwd, prompt), the slot gate's last verdict (`slot`; ok=false carries the raw reason such as `no slot: 4 workers running (machine ceiling 4)`), " +
+      "`hold` (the leader said `nao <motivo>` or `agendar <ISO> <motivo>`: kind, reason, until, who, `active`), `ask` (the system question to the leader: when, delivered, approved, `expiresAt` = 10 min, `onTimeout` = `sim` with autonomous mode on, `esperar` with it off), the leader, and the subtask's notes (`notes.last` the newest 3, `notes.total`). " +
+      "`recent` lists pieces the queue opened in the last 24 h with the session they opened. Pass `taskId` for one task's queue. To change the order, change the TASK's priority with `agentistics_task_edit`; to edit a piece's pre-dispatch use `agentistics_task_stage`; to start now / schedule / answer use `agentistics_task_queue_answer`; to withdraw use `agentistics_task_phase action=dequeue`.",
+    inputSchema: { type: "object", properties: { taskId: { type: "string", description: "Only this task's queued pieces. Omit for every task." } }, required: [] },
+  },
+  {
+    name: "agentistics_task_queue_answer",
+    description:
+      "FILA.PRIORIDADE — answer the queue's SYSTEM QUESTION (the message headed `[from flow fila · confirmar]` that arrives in a leader's composer when a slot opens and its piece is next), or act on a queued piece from the Fila tab. Leader of the task or owner only. " +
+      "`answer` is one of: `sim` (open the session now — if no slot is free right now the approval is kept and the next tick starts it; never opens twice), `nao <motivo>` (the piece stays queued with the reason on its card; the flow moves on to the next one), `agendar <ISO> <motivo>` (stays queued, becomes a candidate again only from that FUTURE instant, shown on the card as `começa às HH:MM`). " +
+      "A `nao` or `agendar` without a reason, and an `agendar` in the past, are refused with a sentence. Every decision is recorded as a comment on the subtask (who, why, when). With no answer in 10 minutes: autonomous mode ON → the flow carries on as `sim` and records it; OFF → it keeps waiting and reminds you. " +
+      "Set `runNow: true` instead of `answer` to run the queue flow once right now (what happens automatically when a worker ends and every minute).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subtaskId: { type: "string" },
+        answer: { type: "string", description: "`sim` | `nao <motivo>` | `agendar <ISO> <motivo>`" },
+        runNow: { type: "boolean", description: "Run the queue flow now instead of answering." },
+      },
+      required: [],
+    },
+  },
+  {
     name: "agentistics_session_groups",
     description:
       "List the user's SESSION GROUPS — the named folders in the Sessions sidebar (\"Saved to later\", \"Pelvie\", …) — with the sessions in each. A group is how a person keeps a fleet of assistants organised; every session belongs to at most one. Each member carries its `id` (the managed session id you can pass to the other tools), `title`, `state` and `harness` when the session is on this machine right now, or only its `key` when it is gone. Call this BEFORE creating a group, so you file a session under an existing one instead of making a near-duplicate. Only works on a machine, not on a central (a central has no local sessions to organise).",
@@ -1302,6 +1328,23 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           ...(typeof a.versionTarget === "string" ? { versionTarget: a.versionTarget } : {}),
           ...(typeof a.pedidoId === "string" ? { pedidoId: a.pedidoId } : {}),
         });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_queue": {
+        const a = (args ?? {}) as any;
+        // `queue/` with no task = every task's queue (the route reads an empty task as "all").
+        const body = await apiGet(`/api/deliveries/queue/${encodeURIComponent(typeof a.taskId === "string" ? a.taskId : "")}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_queue_answer": {
+        const a = (args ?? {}) as any;
+        if (a.runNow === true) {
+          const body = await apiSend("POST", "/api/deliveries/queue-next", { session: sessionProof(process.env) });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (typeof a.subtaskId !== "string" || !a.subtaskId) throw new Error("subtaskId is required");
+        if (typeof a.answer !== "string" || !a.answer.trim()) throw new Error("answer is required: sim | nao <motivo> | agendar <ISO> <motivo>");
+        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(a.subtaskId)}`, { action: "queue-answer", answer: a.answer, session: sessionProof(process.env) });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_session_groups": {

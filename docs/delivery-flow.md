@@ -75,6 +75,31 @@ Each actual transition gets its own effect/comment (`→ ci`, then `ci → publi
 publication. A human publication gate keeps the declaration in `ci`, reports the refusal as a warning,
 and rings the owner's bell once per revision. Approval and a later tick/retry finish publication.
 
+## The queue leaves by priority — `fila-proximo` (FILA.PRIORIDADE)
+
+"Na fila" has ONE order, and it is the order pieces leave in: the TASK's priority (urgent → low), then the time the piece
+entered the queue, then its id (`orderQueue`, `delivery/fila-proximo.ts`). Changing a priority — on the board, on the task
+page's Fila tab or on the Live "Na fila" card — reorders the exit. There is no second list.
+
+The flow is deterministic and spends no model. It runs when a worker session ends or is stopped (`queue-kick.ts`, coalesced),
+on the minute tick and after every answer. For each task with no open question it takes the best candidate (pre-dispatch
+complete, not on hold) whose **slot gate** passes — a question already open or an approved piece not yet started counts as
+a running worker, so two questions never promise the same last slot — and puts ONE system question to the task's leader,
+headed `[from flow fila · confirmar]`, with the piece, its place, the harness/model/effort/account it will open and why it
+is next. The leader answers with `agentistics_task_queue_answer` or `agentop flow fila responder --subtask S "<answer>"`:
+
+| answer | effect |
+|---|---|
+| `sim` | the session opens (the same claim-guarded `stage run`; if no slot is free right now the approval is kept and the tick opens it) and the leader is told it started |
+| `nao <motivo>` | the piece stays queued with the reason on its card; the flow moves on to the next piece |
+| `agendar <ISO> <motivo>` | stays queued, a candidate again only from that FUTURE instant; the card says "começa às HH:MM" |
+
+No answer in 10 minutes: with autonomous mode ON the flow carries on as `sim` (no gate waits for anyone) and records it;
+with it OFF it keeps waiting and reminds the leader every 10 minutes. Every question and decision is a comment on the
+subtask (who, why, when). The start is idempotent: the claim is taken under the store lock before anything is spawned, so
+two ticks, a tick racing a `sim`, or `stage run` called twice open exactly one session. Reads and actions are the same
+everywhere: `GET /api/deliveries/queue[/<taskId>]` (the Fila tab, the Live card, `agentop flow fila`, MCP `agentistics_task_queue`).
+
 ## Non-blocking
 
 Nothing waits. Each transition wakes whoever owns the next step: ready for QA → the leader; QA

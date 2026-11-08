@@ -129,6 +129,27 @@ export interface LiveDelivery {
   phase?: string | null
   /** A human gate the owner was ASKED about and has not answered at this revision (autonomous mode OFF). The Live card offers approve / reject for it. */
   awaitingApproval?: { phase: string } | null
+  /**
+   * FILA.PRIORIDADE — only a queued piece: why it is not starting. `hold` = the leader said `nao` (reason) or `agendar`
+   * (starts at `until`); `asking` = the question is open with the leader; `approved` = `sim` given, waiting for a slot.
+   * Null/absent = just waiting its turn.
+   */
+  queue?: { hold: { kind: 'nao' | 'agendar'; reason: string; until: string | null; by: string; atMs: number | null } | null; asking: boolean; approved: boolean } | null
+}
+
+/** PURE: the queue facts a card shows from the delivery record (a lapsed `agendar` is no hold any more). */
+export function queueOfRecord(rec: { queueHold?: { kind: 'nao' | 'agendar'; reason: string; at: string; actor: string; until?: string }; queueAsk?: { approved?: unknown } } | undefined, nowMs: number): LiveDelivery['queue'] {
+  if (!rec) return null
+  const h = rec.queueHold
+  const until = h?.until ? Date.parse(h.until) : NaN
+  const active = h && (h.kind === 'nao' || (Number.isFinite(until) && until > nowMs))
+  const asking = Boolean(rec.queueAsk && !rec.queueAsk.approved)
+  const approved = Boolean(rec.queueAsk?.approved)
+  if (!active && !asking && !approved) return null
+  return {
+    hold: active && h ? { kind: h.kind, reason: h.reason, until: h.until ?? null, by: h.actor, atMs: Date.parse(h.at) || null } : null,
+    asking, approved,
+  }
 }
 
 /** A piece the line considered and left off, with the reason — so a card never disappears without a word. */
@@ -493,6 +514,9 @@ export interface LiveDeliveryFacts {
   publishedAt?: string
   step?: number
   gates?: { vaga?: { ok: boolean; reason?: string; at: string } }
+  /** FILA.PRIORIDADE — the leader's `nao`/`agendar` and the open question (see `delivery/fila-proximo.ts`). */
+  queueHold?: { kind: 'nao' | 'agendar'; reason: string; at: string; actor: string; until?: string }
+  queueAsk?: { at: string; delivered: boolean; approved?: unknown }
   revision?: number
   humanGates?: string[]
   asked?: Record<string, number>
@@ -707,6 +731,7 @@ export function buildLive(o: {
       slot: rec?.gates?.vaga ? { ok: rec.gates.vaga.ok, reason: rec.gates.vaga.reason ?? null, at: rec.gates.vaga.at } : null,
       phase: rec?.phase ?? null,
       awaitingApproval: awaitingApprovalOf(rec),
+      queue: stage === 'queue' ? queueOfRecord(rec, o.nowMs) : null,
     })
   }
   deliveries.sort((a, b) => (b.stageSinceMs ?? 0) - (a.stageSinceMs ?? 0))

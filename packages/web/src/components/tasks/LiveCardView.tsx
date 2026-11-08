@@ -10,7 +10,7 @@
  */
 
 import React from 'react'
-import { ArrowLeft, Check, CircleDashed, Clock, CornerDownRight, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Check, CalendarClock, CircleDashed, Clock, CornerDownRight, ExternalLink } from 'lucide-react'
 import type { FleetRow } from '../../lib/fleet'
 import { accountDisplayName } from '../../lib/planLimits'
 import { describeLastAction, shortTitle } from '@agentistics/core'
@@ -148,6 +148,7 @@ export function LiveCardView(p: LiveCardViewProps) {
         </>
       )}
       {queue?.staged && <span data-live-staged style={{ fontSize: 11, color: 'var(--text-secondary)', overflowWrap: 'anywhere', lineHeight: 1.3 }}>{queue.staged}</span>}
+      {queue?.wait && <span data-live-queue-wait data-queue-kind={d.queue?.hold?.kind ?? (d.queue?.approved ? 'approved' : 'asking')} style={{ display: 'flex', gap: 5, alignItems: 'flex-start', fontSize: 11.5, color: 'var(--anthropic-orange-light)', lineHeight: 1.3, overflowWrap: 'anywhere' }}><CalendarClock size={12} aria-hidden style={{ flexShrink: 0, marginTop: 1 }} /><span>{queue.wait}</span></span>}
       {queue?.slot && <span data-live-queue-slot title={queue.slotRaw ?? undefined} style={{ fontSize: 10.5, color: queue.slotOk === false ? 'var(--accent-yellow, #e5b341)' : MUTED, overflowWrap: 'anywhere' }}>{queue.slot}</span>}
       {queued && <span data-live-time title={time.title} style={{ fontSize: 10.5, color: MUTED }}>{time.inStage}</span>}
 

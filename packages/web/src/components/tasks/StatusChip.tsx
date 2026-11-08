@@ -20,7 +20,7 @@
 import type { TaskStatusDef } from '@agentistics/core'
 import { liveStatusMap, liveStatusOrder, type BoardStatus } from './board'
 import { ChipSelect } from './ChipSelect'
-import { type Lang } from './copy'
+import { statusLabel, type Lang } from './copy'
 
 export interface StatusChipProps {
   value: string
@@ -37,7 +37,7 @@ export interface StatusChipProps {
   disabled?: boolean
 }
 
-export function StatusChip({ value, onPick, statuses, compact, block = true, disabled }: StatusChipProps) {
+export function StatusChip({ value, onPick, lang, statuses, compact, block = true, disabled }: StatusChipProps) {
   // Built here rather than passed in, so no caller can offer a different set of statuses — the
   // point of the component is that the menu is the same everywhere. Every entry's label/colour is
   // the LIVE one (a person's rename or custom status wins over any fixed word).
@@ -45,7 +45,8 @@ export function StatusChip({ value, onPick, statuses, compact, block = true, dis
   const order = liveStatusOrder(statuses)
   const options = order.map(id => ({
     value: id,
-    label: map[id]?.label ?? id,
+    // The seeded English defaults ("To do") read in the board's language; an explicit rename is kept verbatim (`statusLabel`).
+    label: statusLabel(id, lang, statuses ?? undefined) !== id ? statusLabel(id, lang, statuses ?? undefined) : (map[id]?.label ?? id),
     color: map[id]?.color ?? 'var(--text-tertiary)',
     dim: map[id]?.dim ?? 'var(--border)',
   }))
@@ -54,7 +55,7 @@ export function StatusChip({ value, onPick, statuses, compact, block = true, dis
       value={value}
       options={options}
       onPick={v => onPick(v as BoardStatus)}
-      title={map[value]?.label ?? value}
+      title={statusLabel(value, lang, statuses ?? undefined)}
       {...(compact ? { compact } : {})}
       {...(disabled ? { disabled } : {})}
       block={block}

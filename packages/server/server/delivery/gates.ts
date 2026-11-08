@@ -30,7 +30,13 @@ export function runningSessionIds(registry: ManagedSession[], backend: BackendSe
 }
 
 export interface StagedFact { prompt?: string; harness?: string; model?: string; effort?: string; account?: string; cwd?: string }
-export interface SubtaskFact { id: string; taskId: string; title: string; status: string; groupMember: boolean; parentGroupId?: string; staged?: StagedFact; blockedBy: string[] }
+export interface SubtaskFact { id: string; taskId: string; title: string; status: string; groupMember: boolean; parentGroupId?: string; staged?: StagedFact; blockedBy: string[]; /** The TASK's Agentask priority (urgent|high|medium|low) — a subtask has none of its own. */ priority?: string }
+/** What the Fila tab shows beside a queued piece, read from the board in one place (same source as the card). */
+export interface QueueExtras {
+  taskTitle: string
+  members: Array<{ id: string; title: string; status: string }>
+  notes: { total: number; last: Array<{ author: string; at: string; body: string }> }
+}
 export interface SessionFact {
   id: string; harness: string; model?: string; effort?: string; account?: string; taskId?: string; subtaskId?: string
   role?: string; label?: string; alive: boolean; cwd: string; worktree: boolean; rootPath?: string; createdAt?: string
@@ -93,6 +99,8 @@ export interface GateFacts {
   topCap(harness: string): Promise<number>
   git(cwd: string, args: string[]): Promise<string>
   gh(cwd: string, args: string[]): Promise<string>
+  /** Board-side extras for the Fila tab (group members, the subtask's notes). Optional: absent = the tab shows none. */
+  queueExtras?(subtaskId: string): Promise<QueueExtras | null>
   /** The repository checkout this process runs in, for a piece with no author session on record (`flow release`). Null = none. */
   repoCwd?(): Promise<string | null>
 }
@@ -500,7 +508,8 @@ export function defaultGateFacts(): GateFacts {
       const s = w.book.subtasks.find(x => x.id === id)
       if (!s) return null
       const st = s.stagedSession as (StagedFact & { prompt: string }) | undefined
-      return { id: s.id, taskId: s.taskId, title: s.title, status: s.status, groupMember: Boolean(s.parentGroupId), ...(s.parentGroupId ? { parentGroupId: s.parentGroupId } : {}), blockedBy: s.blockedBy ?? [], ...(st ? { staged: { prompt: st.prompt, harness: st.harness, model: st.model, effort: st.effort, account: st.account, cwd: st.cwd } } : {}) }
+      const taskRow = w.book.tasks.find(t => t.id === s.taskId)
+      return { id: s.id, taskId: s.taskId, title: s.title, status: s.status, groupMember: Boolean(s.parentGroupId), ...(s.parentGroupId ? { parentGroupId: s.parentGroupId } : {}), blockedBy: s.blockedBy ?? [], priority: (await import('../sessions/task-model')).migratePriority(taskRow?.priority), ...(st ? { staged: { prompt: st.prompt, harness: st.harness, model: st.model, effort: st.effort, account: st.account, cwd: st.cwd } } : {}) }
     },
     sessions: async () => {
       const [{ readRegistry }, { readRolesDoc, roleOfRow }, { AGENTISTICS_DATA_DIR }] = await Promise.all([import('../sessions/registry'), import('../sessions/session-roles'), import('../config')])
@@ -521,6 +530,18 @@ export function defaultGateFacts(): GateFacts {
       const [{ planLimitsPayload }, { readPreferences }] = await Promise.all([import('../plan-limits'), import('../preferences')])
       const rows = (await planLimitsPayload((await readPreferences()).billing, Date.now())).budgets
       return rows.map(b => ({ harness: b.harness, account: (b as { account?: string }).account ?? 'default', fiveHourPct: b.fiveHourPct, weekPct: b.weekPct, stale: b.stale }))
+    },
+    queueExtras: async id => {
+      const { loadTaskWorld } = await import('../sessions/task-source')
+      const { book } = await loadTaskWorld()
+      const s = book.subtasks.find(x => x.id === id)
+      if (!s) return null
+      const notes = book.comments.filter(c => c.subtaskId === id).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      return {
+        taskTitle: book.tasks.find(t => t.id === s.taskId)?.title ?? s.taskId,
+        members: book.subtasks.filter(m => m.parentGroupId === id).map(m => ({ id: m.id, title: m.title, status: m.status })),
+        notes: { total: notes.length, last: notes.slice(-3).reverse().map(c => ({ author: c.author, at: c.createdAt, body: c.body })) },
+      }
     },
     memoryBytes: async () => (await import('../cli-run')).memAvailableAnyBytes(),
     topCap: async harness => {

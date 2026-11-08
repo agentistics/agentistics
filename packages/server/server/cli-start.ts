@@ -1596,7 +1596,12 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
   return {
     backend, readRegistry, scanProcesses, loadConversations, touchSessions,
     ...(isServerProcess() ? { initialSessionLimit: INITIAL_SESSION_LIMIT } : {}),
-    endSessions: (ids, endedAt) => patchSessions(ids, { endedAt }),
+    // A worker that ended frees a slot: the queue looks at its next piece now (FILA.PRIORIDADE), not a minute from now.
+    endSessions: async (ids, endedAt) => {
+      const out = await patchSessions(ids, { endedAt })
+      if (isServerProcess()) void import('./delivery/queue-kick').then(m => m.kickQueueNext('sessão encerrada'))
+      return out
+    },
     loadHarnessSessions,
     // CONTA.IDENTIDADE: each row names the account its process runs on (`session-account.ts`).
     readAccountRegistry: async () => (await import('./harness-accounts')).readAccounts(),
