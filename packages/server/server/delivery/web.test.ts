@@ -9,6 +9,7 @@ function fakeService() {
   const ok = (fn: string) => async (...args: unknown[]) => { calls.push({ fn, args }); return { ok: true, status: 200, record: rec, warnings: [] } }
   const svc = {
     list: async () => [rec], get: async (id: string) => (id === 's1' ? rec : null), tick: async () => ({ actions: [] }),
+    reconcile: async (o: { apply?: unknown }, actor: string) => { calls.push({ fn: 'reconcile', args: [o, actor] }); return { ok: true, status: 200, apply: o.apply === true, entries: [], moved: 0, unproven: 0 } },
     transition: ok('transition'), gate: ok('gate'), block: ok('block'), unblock: ok('unblock'), approve: ok('approve'), configure: ok('configure'),
     step: ok('step'), stage: ok('stage'), stageRun: ok('stageRun'), dequeue: ok('dequeue'), merge: ok('merge'),
   } as unknown as DeliveryService
@@ -22,6 +23,15 @@ describe('/api/deliveries', () => {
     expect((await deliveryRequest('GET', '/api/deliveries', {}, { service: svc, verify })).status).toBe(200)
     expect((await deliveryRequest('GET', '/api/deliveries/s1', {}, { service: svc, verify })).status).toBe(200)
     expect((await deliveryRequest('GET', '/api/deliveries/zz', {}, { service: svc, verify })).status).toBe(404)
+  })
+  test('reconcile: dry run unless apply is exactly true; the verified session is the actor (FLUXO.CICLO-COMPLETO)', async () => {
+    const { svc, calls } = fakeService()
+    const dry = await deliveryRequest('POST', '/api/deliveries/reconcile', {}, { service: svc, verify })
+    expect(dry.status).toBe(200)
+    expect(calls.at(-1)).toEqual({ fn: 'reconcile', args: [{ apply: undefined }, 'owner'] })
+    await deliveryRequest('POST', '/api/deliveries/reconcile', { apply: true, session: { id: 'w1', token: 'good' } }, { service: svc, verify })
+    expect(calls.at(-1)).toEqual({ fn: 'reconcile', args: [{ apply: true }, 'w1'] })
+    expect((await deliveryRequest('POST', '/api/deliveries/reconcile', { apply: true, session: { id: 'w1', token: 'bad' } }, { service: svc, verify })).status).toBe(403)
   })
   test('a claimed session must prove itself; the verified id is the actor', async () => {
     const { svc, calls } = fakeService()
