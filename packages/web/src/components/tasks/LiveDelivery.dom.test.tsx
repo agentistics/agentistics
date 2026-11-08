@@ -360,6 +360,22 @@ test('HIGH 2 (real screen): a queue card\'s own slot line is not a column slot â
   expect(col.querySelectorAll('[data-live-slot]').length).toBe(3)
 })
 
+test('LIVE.PRIORIDADE: a queued card shows its priority ONCE, read-only â€” nothing on the Live changes it', async () => {
+  const q = (k: string) => ({ ...reply.deliveries[0]!, key: `t/${k}`, subtaskId: k, stage: 'queue', priority: 'high', staged: { harness: 'codex', model: 'gpt-5.5', effort: 'high' } })
+  for (const lang of ['pt', 'en'] as const) {
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props(lang), reply: { ...reply, deliveries: [q('q1'), q('q2')] } as never }))) })
+    const col = document.querySelector('[data-live-column="queue"]')!
+    expect(col.querySelectorAll('[data-live-card]').length).toBe(2)
+    for (const card of Array.from(col.querySelectorAll('[data-live-card]'))) expect(card.querySelectorAll('[data-live-priority]').length).toBe(1)
+    expect(col.querySelectorAll('[data-live-priority]').length).toBe(2)
+    expect(col.querySelector('[data-live-queue-priority]')).toBeNull()
+    expect(col.querySelector('select, [role="combobox"], [role="listbox"], [aria-haspopup]')).toBeNull()
+    expect(col.textContent).not.toMatch(/Prioridade \(muda|changes the leaving order/)
+    await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = ''
+  }
+})
+
 test('MED 6 (live worker fixture): clicking a worker in the leaders strip scrolls the BOARD sideways to its card and never moves the page', async () => {
   const proto = HTMLElement.prototype as unknown as Record<string, unknown>
   const had = { rect: proto.getBoundingClientRect, sw: Object.getOwnPropertyDescriptor(proto, 'scrollWidth'), st: proto.scrollTo }
