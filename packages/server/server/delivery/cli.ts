@@ -42,14 +42,15 @@ export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subt
   agentop flow fila proximo                            run the queue flow now (a worker ended)
   agentop flow approve --subtask S --phase P --decision approve|reject [--note …]   (the owner only — the answer to a human gate)
   agentop flow release --version <x.y.z> --merge-sha <main sha> [--repo <owner/name>] --subtask S1 --subtask S2 …   declare what the release contains (→ ci, → publicado when release.yml is green and the tag exists)
-  agentop flow tick                                   the minute watch (blocks, ci → publicado)
+  agentop flow reconcile --release [--apply] [--json]  backfill: every piece in revisao_lider/pr_merge/ci matched to its merged PR and the first release tag containing it (dry-run unless --apply)
+  agentop flow tick                                   the minute watch (blocks, merged PR → ci, ci → publicado, reminders to the leader)
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
 
 Exit codes: 0 passed/moved, 1 refused (the sentence says what is missing), 2 usage, 3 no verdict yet.
 Every gate reads the machine (git, gh, the session registry); nothing here accepts a sha, a session id or a "green" from the caller.
 `
 
-export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'tick'] as const
+export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'reconcile', 'tick'] as const
 
 /** PURE: is `agentop flow <args>` one of the delivery verbs (handled here, not by the engine)? */
 export function isDeliveryFlowVerb(args: readonly string[]): boolean {
@@ -167,6 +168,17 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
         io.out(`${i.position}\t${i.priority}\t${i.subtaskId}\t${i.title}\t${[i.predispatch.harness, i.predispatch.model, i.predispatch.effort].filter(Boolean).join('/')}\t${state}`)
       }
       if (view.items.length === 0) io.out('a fila está vazia')
+      return 0
+    }
+    case 'reconcile': {
+      // FLUXO.CICLO-COMPLETO backfill: `--release` is the only reconciliation there is; dry-run unless `--apply`.
+      if (flags.release !== 'true') { io.err('usage: agentop flow reconcile --release [--apply] [--json]'); return 2 }
+      const r = await svc.reconcile({ apply: flags.apply === 'true' }, actor)
+      if (!r.ok) return report(r, io)
+      if (flags.json === 'true') { io.out(JSON.stringify(r, null, 2)); return 0 }
+      const { reconcileLine } = await import('./ciclo')
+      io.out(r.apply ? `reconciliação aplicada: ${r.moved} peça(s) movida(s), ${r.unproven} sem prova` : `simulação (nada foi escrito — use --apply): ${r.moved} peça(s) moveriam, ${r.unproven} sem prova`)
+      for (const e of r.entries) io.out(reconcileLine(e))
       return 0
     }
     case 'tick': io.out(JSON.stringify(await svc.tick(), null, 2)); return 0
