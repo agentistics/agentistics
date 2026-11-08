@@ -21,8 +21,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'A piece waiting on its leader reminds the task\'s live leader after 30 min, then every 2 h, at most 3 times. Never you.',
       },
       {
-        pt: 'O Live ganhou abas com contagem (Em andamento, Na fila, Publicado, Tudo), e Publicado tem o próprio período (24 h, 7 dias, 30 dias, tudo). A coluna Histórico saiu, colunas vazias ficam recolhidas, e a prioridade na fila do Live agora é só para leitura.',
-        en: 'Live now has tabs with counts (In progress, Queued, Published, All), and Published has its own period (24 h, 7 days, 30 days, all). The History column is gone, empty columns stay collapsed, and priority in the Live queue is now read-only.',
+        pt: 'O Live ganhou abas com contagem (Em andamento, Na fila, Publicado, Tudo), e Publicado tem o próprio período (24 h, 7 dias, 30 dias, tudo). A coluna Histórico saiu, colunas vazias ficam recolhidas, e a prioridade na fila do Live agora é só para leitura. O filtro de tarefas ficou na altura das abas, e o carregamento da janela destacada aparece centralizado.',
+        en: 'Live now has tabs with counts (In progress, Queued, Published, All), and Published has its own period (24 h, 7 days, 30 days, all). The History column is gone, empty columns stay collapsed, and priority in the Live queue is now read-only. The task filter now matches the height of the tabs, and the pop-out window\'s loader is centred.',
       },
       {
         pt: 'Uma mensagem sua que ainda está na fila da sessão agora tem "Enviar agora" e "Interromper" na própria legenda ("entregue à sessão…"). "Enviar agora" aparece onde dá para enviar de verdade (Claude Code, com a sessão no meio de um turno); "Interromper" em qualquer assistente que aceite parar o turno. Onde não funciona, o botão simplesmente não aparece.',
