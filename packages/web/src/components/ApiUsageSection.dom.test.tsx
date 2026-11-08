@@ -187,6 +187,50 @@ describe('store', () => {
     await act(async () => { await new Promise(r => setTimeout(r, 20)) })
     expect(seen).toEqual([])
   })
+  test('a 404 after a good answer empties the list (the engine went away), unlike a 503', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => calls++ === 0
+      ? Response.json({ items: [{ id: 'a', label: 'A', status: 'ok', unit: 'credits', used: 1, limit: 2 }] })
+      : new Response('gone', { status: 404 })) as unknown as typeof fetch
+    Lib.__setApiUsageForTest(null)
+    let seen: unknown = 'unset'
+    function Probe() { seen = Lib.useApiUsage().items; return null }
+    render(h(Probe))
+    await act(async () => { await new Promise(r => setTimeout(r, 20)) })
+    expect((seen as unknown[]).length).toBe(1)
+    await act(async () => { await Lib.refreshApiUsage() })
+    expect(seen).toEqual([])
+  })
+  test('the fallback timeout timer is cleared once the request finished', () => {
+    const real = AbortSignal.timeout
+    const setT = globalThis.setTimeout, clearT = globalThis.clearTimeout
+    const cleared: unknown[] = []
+    try {
+      ;(AbortSignal as unknown as { timeout?: unknown }).timeout = undefined
+      globalThis.clearTimeout = ((t: unknown) => { cleared.push(t); return clearT(t as never) }) as typeof clearTimeout
+      const { signal, done } = Lib.timeoutSignal(60_000)
+      expect(signal.aborted).toBe(false)
+      done()
+      expect(cleared).toHaveLength(1)
+    } finally {
+      AbortSignal.timeout = real; globalThis.setTimeout = setT; globalThis.clearTimeout = clearT
+    }
+  })
+  test('after a key notice (unverified checks) the list is refreshed from the engine', async () => {
+    const item = Lib.parseApiUsage({ items: [{ id: 'k', label: 'K', status: 'no-key', unit: 'credits', config: { kind: 'api-key', status: 'missing', endpoint: '/api/engine/x/key' } }] })[0]!
+    const urls: string[] = []
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      urls.push(`${init?.method ?? 'GET'} ${String(input)}`)
+      return String(input) === Lib.API_USAGE_URL ? Response.json({ items: [] }) : Response.json({ unverified: [{ pt: 'TTS', en: 'TTS' }] })
+    }) as unknown as typeof fetch
+    const el = render(h(Section, { items: [item], now: NOW, lang: 'en' }))
+    await act(async () => { (el.querySelector('[data-api-config-open]') as HTMLButtonElement).click() })
+    const input = document.querySelector('[data-api-key-input]') as HTMLInputElement
+    await act(async () => { input.value = 'k1'; input.dispatchEvent(new Event('input', { bubbles: true })); await new Promise(r => setTimeout(r, 0)) })
+    await act(async () => { (document.querySelector('[role=dialog] button:last-of-type') as HTMLButtonElement).click(); await new Promise(r => setTimeout(r, 20)) })
+    expect(document.querySelector('[data-api-unverified]')).not.toBeNull()
+    expect(urls).toContain(`GET ${Lib.API_USAGE_URL}`)
+  })
   test('a later server failure preserves the last good list', async () => {
     let calls = 0
     globalThis.fetch = (async () => calls++ === 0

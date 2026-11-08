@@ -1,15 +1,17 @@
 /**
  * SECRETS.4 S4.8 — the `/api/vault/*` routes, one test per route INCLUDING the refusals, and the §11
- * journey end to end over HTTP: fresh machine → enrol → restart → locked → gesture + code → open →
- * auto-lock → locked. Fake protectors (a silent "dpapi", a "hello" that counts gestures) and a fake
- * clock; nothing is spawned and nothing under ~/.agentistics is touched.
+ * journey end to end over HTTP: fresh machine → enrol → restart → locked → the proof → open → auto-lock
+ * → locked. Since COFRE.DESBLOQUEIO (owner, 2026-11-07) there is no authenticator code anywhere: the
+ * proof is the way the vault confirms it is you (here a fake Windows Hello, and the REAL vault-password
+ * protector over a throwaway directory). Fake clock; nothing is spawned and nothing under ~/.agentistics
+ * is touched.
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { base32Decode, hotp, parseVaultJson, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
+import { parseVaultJson, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
 import {
   __resetVaultForTests, __setVaultClockForTests, autoLockRemainingMs, autoLockTick, ensureVaultOpen, lockVault, openFromFile, sealToFile, vaultDir, vaultStatus,
 } from './service'
@@ -35,65 +37,64 @@ function fake(id: ProtectorId): Protector & { gestures: number; cancel: boolean 
 
 let T = 1_800_000_000_000
 const clock = () => T
-const step = () => Math.floor(T / 1000 / 30)
-let seed: Uint8Array
-const codeAt = (offset = 0) => hotp(seed, step() + offset)
-const next = () => { T += 30_000 }
-const wrongCode = () => (codeAt() === '000000' ? '111111' : '000000')
+/** A code an old page might still send: never judged, never a proof. */
+const OLD_CODE = '123456'
+/** A password that meets the rules (≥ 9, 1 uppercase, 2 specials, 1 digit) — a test value, not a secret. */
+const GOOD_PW = 'Test-Only!Pw9'
 
 let dir = ''
 let dpapi = fake('dpapi')
 let hello = fake('hello')
 
-function restart(): void {
-  __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en', protectors: [dpapi, hello], autoInit: { candidates: [dpapi] } })
+function restart(withHello = true): void {
+  __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en', protectors: withHello ? [dpapi, hello] : [dpapi], autoInit: { candidates: [dpapi] }, scrypt: { N: 2 ** 10, r: 8, p: 1 } })
   __setVaultClockForTests(clock)
   __resetGateForTests(clock)
 }
 
 type J = Record<string, any>
-async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?: string, cookie?: string): Promise<{ status: number; json: J; headers: Headers }> {
-  // What the dashboard sends: same-origin, JSON (M1 refuses anything else on a POST).
-  const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}), ...(cookie ? { cookie } : {}) }
-  // VAULT.PERSONAL §10: the gesture unlock answers ONLY the page on this computer, so it is sent as one —
-  // and so are the reads (review M3: the no-proof list is the rule for a page on this computer).
-  const local = path === '/api/vault/unlock' || path === '/api/vault/activity' || path === '/api/vault/activity/arm' || path === '/api/vault/extend' || method === 'GET'
-  if (local) Object.assign(headers, { host: 'localhost:47292', origin: 'http://localhost:47292' })
-  const req = new Request(`${local ? 'http://localhost:47292' : 'http://local'}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
-  const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', ...(local ? { peer: '127.0.0.1' } : {}) })
+interface Opts { remote?: boolean; password?: string }
+/**
+ * What the dashboard sends: same-origin, JSON (M1 refuses anything else on a POST). A page ON this
+ * computer by default (loopback: the only page a dialog may be raised for); `remote` is a page from
+ * another device. `password` travels in its own header, as the page sends it.
+ */
+async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?: string, cookie?: string, o: Opts = {}): Promise<{ status: number; json: J; headers: Headers }> {
+  const headers: Record<string, string> = {
+    'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+    ...(grant ? { 'x-vault-grant': grant } : {}), ...(cookie ? { cookie } : {}), ...(o.password !== undefined ? { 'x-vault-password': o.password } : {}),
+  }
+  if (!o.remote) Object.assign(headers, { host: 'localhost:47292', origin: 'http://localhost:47292' })
+  const req = new Request(`${o.remote ? 'http://local' : 'http://localhost:47292'}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
+  const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', ...(o.remote ? {} : { peer: '127.0.0.1' }) })
   if (!res) return { status: 404, json: {}, headers: new Headers() }
   const text = await res.text()
   return { status: res.status, json: text.startsWith('{') ? JSON.parse(text) : {}, headers: res.headers }
 }
 
-/** A machine that already has its first sealed secret (so the vault exists), not yet enrolled. */
-async function fresh(): Promise<void> {
+/** A machine that already has its first sealed secret (so the vault exists), not yet protected. */
+async function fresh(withHello = true): Promise<void> {
   dir = await mkdtemp(join(tmpdir(), 'agentistics-http-'))
   STORE.clear()
   dpapi = fake('dpapi'); hello = fake('hello')
   T = 1_800_000_000_000
-  restart()
+  restart(withHello)
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('TEST-NOT-A-SECRET'))
 }
 
 /** The one-time code the service prints for a page's FIRST enrolment (review S2). */
 const setup = (): { setupCode: string } => ({ setupCode: mintSetupCode().code })
+const typedOf = (r: { json: J }) => (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!)
+const vj = () => parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!
 
-/** The wizard's whole path over HTTP; returns the 24 words. */
-async function enrolOverHttp(): Promise<string[]> {
-  const a = await http('POST', '/api/vault/authenticator/begin', setup())
-  seed = base32Decode(a.json.secret)
-  expect((await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })).status).toBe(200)
-  next()
-  // Leader decision 2: presence, THEN the recovery key (the words wrap the final data key).
-  const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })
+/** The wizard's whole path over HTTP: [the first proof] → presence → recovery LAST. Returns the 24 words. */
+async function enrolOverHttp(kind: 'hello' | 'password' = 'hello'): Promise<string[]> {
+  expect((await http('POST', '/api/vault/setup-code', setup())).status).toBe(200)
+  const p = await http('POST', '/api/vault/presence/enroll', { protector: kind }, undefined, undefined, kind === 'password' ? { password: GOOD_PW } : {})
   expect(p.status).toBe(200)
   expect(p.json.recoveryOwed).toBe(true)
-  next()
   const r = await http('POST', '/api/vault/recovery/begin', {})
-  const typed = (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!)
-  expect((await http('POST', '/api/vault/recovery/confirm', { typed })).status).toBe(200)
-  next()
+  expect((await http('POST', '/api/vault/recovery/confirm', { typed: typedOf(r) })).status).toBe(200)
   return r.json.words as string[]
 }
 
@@ -101,18 +102,21 @@ afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdi
 beforeEach(async () => { await fresh() })
 
 describe('GET /api/vault — the payload the sections read', () => {
-  test('a fresh, un-enrolled vault: state + what could be enrolled, no authenticator, no recovery', async () => {
+  test('a fresh, unprotected vault: state + the ways this machine offers, no authenticator, no recovery', async () => {
     const r = await http('GET', '/api/vault')
     expect(r.status).toBe(200)
     expect(r.headers.get('cache-control')).toBe('no-store')
     expect(r.json).toMatchObject({
-      state: 'open', authenticator: null, recoveryCreatedAt: null, presence: false, presenceAvailable: ['hello'],
-      requirePresence: false, pendingStepup: false, autoLockMinutes: 30, recoveryTodo: null,
+      state: 'open', authenticator: null, legacyAppCode: false, recoveryCreatedAt: null, presence: false, presenceAvailable: ['hello', 'password'],
+      methods: [], requirePresence: false, pendingStepup: false, autoLockMinutes: 30, recoveryTodo: null,
     })
+    expect(r.json.unlockMethods.map((m: J) => m.id)).toEqual(['hello', 'password'])
+    expect(r.json.passwordRules).toEqual({ minLength: 9, minSpecial: 2, rules: ['length', 'upper', 'special', 'digit'] })
     expect(typeof r.json.autoLockInMs).toBe('number')
     expect(Array.isArray(r.json.items)).toBe(true)
-    // the §2.4 table travels with the view, so the screen never keeps a second copy of it
-    expect(r.json.gates).toMatchObject({ list: { code: false, gesture: false, grant: false }, 'disable-presence': { code: true, gesture: true, grant: false }, 'lock-local': { code: false, gesture: false, grant: false } })
+    // the table travels with the view — and no row asks a code any more
+    expect(r.json.gates).toMatchObject({ list: { code: false, gesture: false, grant: false }, 'disable-presence': { code: false, gesture: true, grant: false }, 'lock-local': { code: false, gesture: false, grant: false } })
+    for (const g of Object.values(r.json.gates as Record<string, J>)) expect(g.code).toBe(false)
   })
 
   test('carries the hardening report as lines, and no secret-shaped field', async () => {
@@ -126,58 +130,29 @@ describe('GET /api/vault — the payload the sections read', () => {
     for (const f of ['seed', 'dek', 'secret', 'words', 'uri']) expect(blob.toLowerCase()).not.toContain(`"${f}"`)
   })
 
-  test('once enrolled and OPEN: the inventory asks no code (owner 2026-10-04) — the open vault is the proof', async () => {
+  test('once protected and OPEN: the inventory asks nothing more — the open vault is the proof', async () => {
     await enrolOverHttp()
     const r = await http('GET', '/api/vault')
     expect(r.status).toBe(200)
     expect(r.json.needsStepUp).toBeUndefined()
-    expect(Array.isArray(r.json.items)).toBe(true)
-    expect(r.json.authenticator).toBeTruthy()
+    expect(r.json.methods).toEqual(['hello'])
+    expect(r.json.authenticator).toBeNull()
   })
 })
 
-describe('POST /api/vault/authenticator/begin + confirm', () => {
-  test('begin serves the otpauth URI ONCE, no-store; a second begin is refused', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', { label: 'my-box', ...setup() })
-    expect(a.status).toBe(200)
-    expect(a.headers.get('cache-control')).toBe('no-store')
-    expect(a.json.uri).toStartWith('otpauth://totp/Agentistics:my-box?')
-    expect(a.json.secret).toMatch(/^[A-Z2-7]+$/)
-    const again = await http('POST', '/api/vault/authenticator/begin', setup())
-    expect(again).toMatchObject({ status: 403, json: { ok: false, code: 'already-served' } })
-  })
-
-  test('confirm takes ONE code: a wrong one is refused and seals nothing; the right one seals and returns the read grant', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', setup())
-    seed = base32Decode(a.json.secret)
-    const wrong = await http('POST', '/api/vault/authenticator/confirm', { code: wrongCode() })
-    expect(wrong).toMatchObject({ status: 403, json: { code: 'stepup-wrong' } })
-    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.stepup).toBeUndefined()
-    const ok = await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
-    expect(ok.status).toBe(200)
-    expect(typeof ok.json.grant).toBe('string')
-    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.stepup).toMatchObject({ digits: 6, period: 30 })
-  })
-
-  test('confirm without a begin, or with a malformed body, is refused', async () => {
-    expect((await http('POST', '/api/vault/authenticator/confirm', { code: '123456' })).json.code).toBe('no-enrolment')
-    expect((await http('POST', '/api/vault/authenticator/confirm', { code1: '123456' })).status).toBe(400) // the old two-code body is no longer a request
-    expect((await http('POST', '/api/vault/authenticator/confirm')).status).toBe(400)
-  })
-
-  test('re-enrolment (a new phone) is gated by the OLD code: without it, 401; with it, a new seed', async () => {
-    await enrolOverHttp()
-    const none = await http('POST', '/api/vault/authenticator/begin', {})
-    expect(none).toMatchObject({ status: 401, json: { code: 'stepup-required' } })
-    const old = await http('POST', '/api/vault/authenticator/begin', { code: wrongCode() })
-    expect(old.status).toBe(403)
-  })
-
-  test('on a locked vault begin is refused with the locked sentence', async () => {
-    await enrolOverHttp()
-    restart() // locked behind presence: a begin must not raise a gesture or open anything
-    const r = await http('POST', '/api/vault/authenticator/begin', {})
-    expect(r).toMatchObject({ status: 403, json: { code: 'locked' } })
+describe('the authenticator is RETIRED (owner, 2026-11-07)', () => {
+  test('begin and confirm refuse in words — no seed, no QR, no URI, on a fresh vault and on a protected one', async () => {
+    for (const phase of ['fresh', 'protected']) {
+      if (phase === 'protected') await enrolOverHttp()
+      for (const path of ['/api/vault/authenticator/begin', '/api/vault/authenticator/confirm']) {
+        const r = await http('POST', path, { code: OLD_CODE, ...setup() })
+        expect(r.json.ok).toBe(false)
+        expect(r.json.code === 'authenticator-retired' || r.status === 400).toBe(true)
+        expect(JSON.stringify(r.json)).not.toMatch(/otpauth|"secret"|"uri"/)
+      }
+    }
+    expect(existsSync(join(vaultDir(), 'totp-seed.sealed'))).toBe(false)
+    expect(vj().stepup).toBeUndefined()
   })
 })
 
@@ -190,9 +165,8 @@ describe('POST /api/vault/recovery/begin + confirm', () => {
     expect(r.json.positions).toHaveLength(3)
     const wrong = await http('POST', '/api/vault/recovery/confirm', { typed: ['zoo', 'zoo', 'zoo'] })
     expect(wrong.status === 403 ? wrong.json.code : 'matched-by-chance').toMatch(/recovery-confirm-wrong|matched-by-chance/)
-    const typed = (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!)
-    expect((await http('POST', '/api/vault/recovery/confirm', { typed })).status).toBe(200)
-    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).toContain('recovery')
+    expect((await http('POST', '/api/vault/recovery/confirm', { typed: typedOf(r) })).status).toBe(200)
+    expect(vj().wrappers.map(w => w.type)).toContain('recovery')
   })
 
   test('confirm refuses anything but exactly three words, and a confirm with nothing pending', async () => {
@@ -201,12 +175,13 @@ describe('POST /api/vault/recovery/begin + confirm', () => {
     expect((await http('POST', '/api/vault/recovery/confirm', { typed: ['a', 'b', 'c'] })).json.code).toBe('no-recovery-pending')
   })
 
-  test('a NEW recovery key on an enrolled vault is gated (code + gesture): 401 without a code, 403 with a wrong one', async () => {
+  test('a NEW recovery key on a protected vault asks the proof: a cancelled gesture refuses, a code never helps', async () => {
     await enrolOverHttp()
-    expect((await http('POST', '/api/vault/recovery/begin', {})).status).toBe(401)
-    expect((await http('POST', '/api/vault/recovery/begin', { code: wrongCode() })).status).toBe(403)
+    hello.cancel = true
+    expect((await http('POST', '/api/vault/recovery/begin', { code: OLD_CODE })).json.ok).toBe(false)
+    hello.cancel = false
     const before = hello.gestures
-    const ok = await http('POST', '/api/vault/recovery/begin', { code: codeAt() })
+    const ok = await http('POST', '/api/vault/recovery/begin', {})
     expect(ok.status).toBe(200)
     expect(hello.gestures).toBeGreaterThan(before) // the gesture was proven, not assumed
   })
@@ -214,60 +189,111 @@ describe('POST /api/vault/recovery/begin + confirm', () => {
 
 describe('POST /api/vault/recover', () => {
   test('never takes the words from a page that is not on this computer (v2.98.1: loopback only — v2981.test.ts)', async () => {
-    const r = await http('POST', '/api/vault/recover', { words: 'abandon '.repeat(24).trim() })
+    const r = await http('POST', '/api/vault/recover', { words: 'abandon '.repeat(24).trim() }, undefined, undefined, { remote: true })
     expect(r).toMatchObject({ status: 403, json: { ok: false, code: 'not-loopback' } })
     expect(r.json.sentence).not.toContain('agentop')
   })
 })
 
 describe('POST /api/vault/presence/enroll', () => {
-  test('refuses a protector that is not a presence kind (400) and an enrolment before the authenticator', async () => {
+  test('refuses a kind that is not a way to confirm (400); the FIRST one needs the first-enrolment proof, never an authenticator', async () => {
     expect((await http('POST', '/api/vault/presence/enroll', { protector: 'dpapi' })).status).toBe(400)
     expect((await http('POST', '/api/vault/presence/enroll', {})).status).toBe(400)
-    expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).json.code).toBe('needs-authenticator')
+    const r = await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })
+    expect(r.json.code).toBe('setup-code-required')
+    expect(JSON.stringify(r.json)).not.toMatch(/authenticator/i)
   })
 
   test('leader decision 2: presence comes BEFORE the recovery key, and says the key is owed', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', setup())
-    seed = base32Decode(a.json.secret)
-    await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
-    next()
-    const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })
+    expect((await http('POST', '/api/vault/setup-code', setup())).status).toBe(200)
+    const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })
     expect(p).toMatchObject({ status: 200, json: { ok: true, recoveryOwed: true } })
   })
 
-  test('is gated: no code 401, wrong code 403 with the vault untouched; the right one retires the silent wrapper', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', setup())
-    seed = base32Decode(a.json.secret)
-    await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
-    T += 11 * 60_000 // the wizard's window is over: what follows is gated again
-    expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(401)
-    expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: wrongCode() })).status).toBe(403)
-    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).not.toContain('hello')
-    const ok = await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })
-    // Leader decision 2026-10-02: presence is HELD; the silent wrapper stays until the recovery key is confirmed.
+  test('held until the words: the silent wrapper stays until the recovery key is confirmed, then retires', async () => {
+    expect((await http('POST', '/api/vault/setup-code', setup())).status).toBe(200)
+    const ok = await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })
     expect(ok).toMatchObject({ status: 200, json: { ok: true, removed: [], recoveryOwed: true } })
-    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).toEqual(['dpapi'])
+    expect(vj().wrappers.map(w => w.type)).toEqual(['dpapi'])
     const r = await http('POST', '/api/vault/recovery/begin', {})
-    expect((await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })).status).toBe(200)
-    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type).sort()).toEqual(['hello', 'recovery'])
+    expect((await http('POST', '/api/vault/recovery/confirm', { typed: typedOf(r) })).status).toBe(200)
+    expect(vj().wrappers.map(w => w.type).sort()).toEqual(['hello', 'recovery'])
+  })
+
+  test('adding a SECOND way later asks the first one (one Hello); cancelled, nothing changes', async () => {
+    await enrolOverHttp()
+    hello.cancel = true
+    expect((await http('POST', '/api/vault/presence/enroll', { protector: 'password' }, undefined, undefined, { password: GOOD_PW })).json.ok).toBe(false)
+    expect(vj().wrappers.map(w => w.type)).not.toContain('password')
+    hello.cancel = false
   })
 
   test('review S7: presence on a silent vault, long after the recovery key was made, asks for the words on a terminal', async () => {
-    await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) }) // no enrolment: refused, harmless
-    const a = await http('POST', '/api/vault/authenticator/begin', setup())
-    seed = base32Decode(a.json.secret)
-    await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
-    next()
+    expect((await http('POST', '/api/vault/setup-code', setup())).status).toBe(200)
     const r = await http('POST', '/api/vault/recovery/begin', {})
-    await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })
+    await http('POST', '/api/vault/recovery/confirm', { typed: typedOf(r) })
     T += 11 * 60_000 // the held words are gone
-    const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })
+    const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })
     expect(p.json.code).toBe('presence-needs-recovery-words')
     // v2.98.1: the page never reads a command — it offers new words instead (ui-sentence.ts).
     expect(String(p.json.sentence)).not.toContain('agentop')
     expect(String(p.json.sentence)).toContain('Make new recovery words')
-    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).toContain('dpapi')
+    expect(vj().wrappers.map(w => w.type)).toContain('dpapi')
+  })
+})
+
+describe('COFRE.DESBLOQUEIO — the vault password over HTTP (the real protector, a throwaway directory)', () => {
+  beforeEach(async () => { await fresh(false) }) // a machine with no Hello and no key: the password is its way
+
+  test('the server REFUSES a weak password — each rule — and writes nothing', async () => {
+    expect((await http('POST', '/api/vault/setup-code', setup())).status).toBe(200)
+    for (const weak of ['Ab1!@', 'abcdef1!@', 'Abcdefgh1!', 'Abcdefgh!@']) {
+      const r = await http('POST', '/api/vault/presence/enroll', { protector: 'password' }, undefined, undefined, { password: weak })
+      expect(r.json).toMatchObject({ ok: false, code: 'password-weak' })
+      expect(String(r.json.sentence)).not.toContain(weak)
+    }
+    const none = await http('POST', '/api/vault/presence/enroll', { protector: 'password' })
+    expect(none.json.code).toBe('password-required')
+    expect(vj().wrappers.map(w => w.type)).toEqual(['dpapi'])
+    expect(existsSync(join(vaultDir(), 'dek.password'))).toBe(false)
+  })
+
+  test('set up with a good password → locked at restart → the password opens it; a wrong one opens nothing', async () => {
+    const words = await enrolOverHttp('password')
+    expect(words).toHaveLength(24)
+    expect(vj().wrappers.map(w => w.type).sort()).toEqual(['password', 'recovery'])
+    const file = readFileSync(join(vaultDir(), 'dek.password'), 'utf8')
+    expect(file).not.toContain(GOOD_PW)                  // never stored
+    expect(file).toContain('"kdf":"scrypt"')
+    restart(false)
+    expect((await vaultStatus()).state).toBe('locked')
+    expect((await http('POST', '/api/vault/unlock', {})).json.code).toBe('password-required')
+    expect((await http('POST', '/api/vault/unlock', {}, undefined, undefined, { password: 'Wrong-Pass!9' })).json.code).toBe('password-wrong')
+    expect((await vaultStatus()).state).toBe('locked')
+    const u = await http('POST', '/api/vault/unlock', {}, undefined, undefined, { password: GOOD_PW })
+    expect(u.json).toMatchObject({ ok: true, state: 'open' })
+    const r = await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')
+    expect(r.ok && new TextDecoder().decode(r.plaintext)).toBe('TEST-NOT-A-SECRET')
+  })
+
+  test('a confirmed action asks the password; the wrong one is refused; the right one passes', async () => {
+    await enrolOverHttp('password')
+    const sentence = (r: { json: J }) => String(r.json.sentence ?? '')
+    const none = await http('POST', '/api/vault/auto-lock', { minutes: 10 })
+    expect(none.json.code).toBe('password-required')
+    expect(sentence(none)).toContain('vault password')
+    expect((await http('POST', '/api/vault/auto-lock', { minutes: 10 }, undefined, undefined, { password: 'Wrong-Pass!9' })).json.code).toBe('password-wrong')
+    expect((await http('POST', '/api/vault/auto-lock', { minutes: 10 }, undefined, undefined, { password: GOOD_PW })).json.ok).toBe(true)
+    expect(vj().autoLock).toEqual({ minutes: 10 })
+  })
+
+  test('five wrong passwords pause it (never a lockout): even the right one waits, then works', async () => {
+    await enrolOverHttp('password')
+    restart(false)
+    for (let i = 0; i < 5; i++) await http('POST', '/api/vault/unlock', {}, undefined, undefined, { password: `Wrong-Pass!${i}` })
+    expect((await http('POST', '/api/vault/unlock', {}, undefined, undefined, { password: GOOD_PW })).json.code).toBe('password-paused')
+    T += 61_000
+    expect((await http('POST', '/api/vault/unlock', {}, undefined, undefined, { password: GOOD_PW })).json).toMatchObject({ ok: true, state: 'open' })
   })
 })
 
@@ -276,60 +302,52 @@ describe('POST /api/vault/presence/disable', () => {
     expect((await http('POST', '/api/vault/presence/disable', {})).json.code).toBe('no-presence')
   })
 
-  test('is gated (code + gesture); the right code puts the silent wrapper back FIRST and removes the presence key', async () => {
+  test('asks the proof; the gesture puts the silent wrapper back FIRST and removes the presence key', async () => {
     await enrolOverHttp()
-    expect((await http('POST', '/api/vault/presence/disable', {})).status).toBe(401)
-    expect((await http('POST', '/api/vault/presence/disable', { code: wrongCode() })).status).toBe(403)
-    const kid = parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.kid
+    hello.cancel = true
+    expect((await http('POST', '/api/vault/presence/disable', { code: OLD_CODE })).json.ok).toBe(false)
+    hello.cancel = false
+    const kid = vj().kid
     expect(STORE.has(`hello:${kid}`)).toBe(true)
-    const ok = await http('POST', '/api/vault/presence/disable', { code: codeAt() })
+    const ok = await http('POST', '/api/vault/presence/disable', {})
     expect(ok).toMatchObject({ status: 200, json: { ok: true, replacedBy: 'dpapi' } })
-    const v = parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!
+    const v = vj()
     expect(v.wrappers.map(w => w.type).sort()).toEqual(['dpapi', 'recovery'])
     expect(STORE.has(`hello:${kid}`)).toBe(false)
     expect(STORE.has(`dpapi:${kid}`)).toBe(true)
-    next()
-    // …and a restart now opens silently, with the code still owed on the next gated action.
     restart()
     expect((await vaultStatus()).state === 'open' || (await ensureVaultOpen()) !== null).toBe(true)
   })
 
-  test("the owner's machine refuses without the recovery key — and the page can never supply it", async () => {
+  test("the owner's machine refuses without the recovery key — and a remote page can never supply it", async () => {
     await enrolOverHttp()
     const { handleVaultOp } = await import('./ops')
     const { becomeVaultHolder } = await import('./service')
     becomeVaultHolder()
     const flag = await handleVaultOp({ header: { op: 'require-presence' }, body: null, emit() {}, closed: new Promise(() => {}) })
     expect(flag.reply.ok).toBe(true)
-    const r = await http('POST', '/api/vault/presence/disable', { code: codeAt(), words: 'abandon '.repeat(24).trim() })
-    expect(r).toMatchObject({ status: 403, json: { code: 'recovery-required' } })
-    expect(r.json.sentence).not.toContain('agentop')
-    expect(r.json.action).toBe('disable-presence')
-    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.wrappers.map(w => w.type)).toContain('hello')
-    // The terminal path (the socket) with the real words works; wrong words do not.
-    const wrong = await handleVaultOp({ header: { op: 'presence-disable', code: codeAt(), words: 'abandon '.repeat(23) + 'zoo' }, body: null, emit() {}, closed: new Promise(() => {}) })
+    const r = await http('POST', '/api/vault/presence/disable', { words: 'abandon '.repeat(24).trim() }, undefined, undefined, { remote: true })
+    expect(r.json.ok).toBe(false)
+    expect(vj().wrappers.map(w => w.type)).toContain('hello')
+    // The terminal path (the socket) with wrong words does not work either.
+    const wrong = await handleVaultOp({ header: { op: 'presence-disable', words: 'abandon '.repeat(23) + 'zoo' }, body: null, emit() {}, closed: new Promise(() => {}) })
     expect(wrong.reply.ok).toBe(false)
   })
 })
 
 describe('GET /api/vault/credentials', () => {
-  test('needs a step-up (401 without a grant), then lists the presence credentials and the recovery date — never a key', async () => {
+  test('lists the presence credentials and the recovery date — never a key', async () => {
     await enrolOverHttp()
-    const no = await http('GET', '/api/vault/credentials')
-    expect(no.status).toBe(200) // metadata of an OPEN vault: no code (owner 2026-10-04)
-    const g = await http('POST', '/api/vault/stepup', { code: codeAt() })
-    expect(g.status).toBe(200)
-    next()
-    const r = await http('GET', '/api/vault/credentials', undefined, g.json.grant)
+    const r = await http('GET', '/api/vault/credentials')
     expect(r.status).toBe(200)
     expect(r.json.credentials).toEqual([{ type: 'hello', label: 'Windows Hello (fake)', createdAt: '2026-10-02T00:00:00.000Z' }])
     expect(typeof r.json.recoveryCreatedAt).toBe('string')
     expect(JSON.stringify(r.json)).not.toMatch(/dek|seed|words/i)
   })
 
-  test('refuses a grant minted for another session, and a locked vault', async () => {
+  test('a grant is bound to its session, and a locked vault refuses', async () => {
     await enrolOverHttp()
-    const g = await http('POST', '/api/vault/stepup', { code: codeAt() })
+    const g = await http('POST', '/api/vault/stepup', { code: OLD_CODE })
     const { grantValid } = await import('./gate')
     expect(grantValid(g.json.grant, 'session-B', 'read')).toBe(false)
     lockVault('user')
@@ -338,17 +356,26 @@ describe('GET /api/vault/credentials', () => {
 })
 
 describe('the routes that already existed keep their gate (stepup, lock, auto-lock, unlock, activity)', () => {
-  test('stepup: bad body 400, wrong code 403, right code a grant; lock needs the code; auto-lock is bounded', async () => {
+  test('stepup: the proof gives a grant (no code needed); lock asks nothing; auto-lock is bounded and confirmed', async () => {
     await enrolOverHttp()
-    expect((await http('POST', '/api/vault/stepup', {})).status).toBe(400)
-    expect((await http('POST', '/api/vault/stepup', { code: wrongCode() })).status).toBe(403)
-    const g = await http('POST', '/api/vault/stepup', { code: codeAt() })
+    const g0 = hello.gestures
+    const g = await http('POST', '/api/vault/stepup', { code: OLD_CODE })
     expect(g.json.grant).toBeTruthy()
+    expect(hello.gestures).toBe(g0 + 1) // the "code" field is ignored: the gesture is the proof
     expect((await http('POST', '/api/vault/auto-lock', { minutes: 4 }, g.json.grant)).status).toBe(400)   // below 5
     expect((await http('POST', '/api/vault/auto-lock', { minutes: 'never' }, g.json.grant)).status).toBe(400)
     expect((await http('POST', '/api/vault/auto-lock', { minutes: 10 }, g.json.grant)).status).toBe(200)
-    expect((await http('POST', '/api/vault/auto-lock', { minutes: 10 })).status).toBe(401)               // no grant, no code
-    expect((await http('POST', '/api/vault/lock', {})).status).toBe(200)  // locking only reduces exposure: no code
+    expect(hello.gestures).toBe(g0 + 1) // the grant stood for it
+    expect((await http('POST', '/api/vault/lock', {})).status).toBe(200)  // locking only reduces exposure
+  })
+
+  test('from another device, nothing raises a dialog on this computer', async () => {
+    await enrolOverHttp()
+    const g0 = hello.gestures
+    for (const [path, body] of [['/api/vault/auto-lock', { minutes: 10 }], ['/api/vault/recovery/begin', {}], ['/api/vault/presence/disable', {}]] as const) {
+      expect((await http('POST', path, body, undefined, undefined, { remote: true })).json.ok).toBe(false)
+    }
+    expect(hello.gestures).toBe(g0)
   })
 
   test('activity needs the rotated tab token and is throttled', async () => {
@@ -425,10 +452,9 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     const a2 = await http('POST', '/api/vault/activity/arm', { gesture: true }, grant)
     expect(a2.json.code).toBe('activity-too-soon')
     expect(tokenOf(a2)).toBeUndefined()
-    T += 25_000                                   // 30 s since the first arm
+    T += 25_000
     const a3 = await http('POST', '/api/vault/activity/arm', { gesture: true }, grant)
     expect(a3.json.ok).toBe(true)
-    // the beat clock survived the rotation: this beat is only 30 s after the first one → fine, but a fast one is not
     expect((await beat(tokenOf(a3))).json.ok).toBe(true)
     expect(autoLockRemainingMs()!).toBeGreaterThan(left - 31_000)
     T += 1_000
@@ -446,10 +472,8 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     expect(t1).not.toBe(t0)
     expect((await beat(t0)).json.code).toBe('activity-token')
     expect((await beat(t1)).json.ok).toBe(true)
-    // auto-lock invalidates
     expect(autoLockTick(T + 31 * 60_000)).toBe(true)
     expect((await beat(t1)).json.code).toBe('activity-token')
-    // a manual lock invalidates a freshly re-opened vault's token
     const t2 = tokenOf(await http('POST', '/api/vault/unlock', {}))
     lockVault('user')
     await http('POST', '/api/vault/unlock', {})
@@ -461,7 +485,6 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     await http('POST', '/api/vault/unlock', {})
     T += 10 * 60_000
     const before = autoLockRemainingMs()
-    // Even forged local provenance and a valid vault grant cannot replace the TCP peer check.
     for (const grant of [undefined, mintGrant('http:session-A', 'read')]) {
       const req = new Request('http://localhost:47292/api/vault/extend', {
         method: 'POST', headers: { host: 'localhost:47292', origin: 'http://localhost:47292',
@@ -476,7 +499,6 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
   })
 
   test('extend: fresh Hello, never a code or grant; heartbeat cookies remain local and throttled', async () => {
-    // Without a presence protector, a grant cannot stand in for Hello.
     expect((await http('POST', '/api/vault/extend', {}, mintGrant('http:session-A', 'read'))).json.code).toBe('no-presence')
     await enrolOverHttp()
     T += 10 * 60_000
@@ -484,7 +506,7 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     const g0 = hello.gestures
     const grant = mintGrant('http:session-A', 'read')
     hello.cancel = true
-    const cancelled = await http('POST', '/api/vault/extend', { code: codeAt() }, grant)
+    const cancelled = await http('POST', '/api/vault/extend', { code: OLD_CODE }, grant)
     expect(cancelled.json.code).toBe('presence-cancelled')
     expect(tokenOf(cancelled)).toBeUndefined()
     expect(autoLockRemainingMs()).toBe(before)
@@ -506,7 +528,6 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
   test('activity without a token is refused; an unknown path is not ours', async () => {
     expect((await http('POST', '/api/vault/activity', {})).json.code).toBe('activity-token')
     expect((await http('GET', '/api/vault/nope')).status).toBe(404)
-    expect((await http('GET', '/api/vault/authenticator/begin')).status).toBe(404) // GET is not a begin
   })
 
   test('activity from a non-loopback peer is refused', async () => {
@@ -521,45 +542,29 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
   })
 })
 
-describe('§11 — fresh owner machine → enrol → restart → locked → gesture + code → open → auto-lock → locked', () => {
-  test('the whole journey over HTTP', async () => {
-    // fresh: open, silent, one sealed secret
+describe('§11 — fresh owner machine → protect → restart → locked → the proof → open → auto-lock → locked', () => {
+  test('the whole journey over HTTP — no code anywhere', async () => {
     expect((await http('GET', '/api/vault')).json).toMatchObject({ state: 'open', authenticator: null, presence: false })
-
-    // enrol (authenticator → recovery key → presence), exactly the wizard's calls
     await enrolOverHttp()
-    const v = parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!
+    const v = vj()
     expect(v.wrappers.map(w => w.type).sort()).toEqual(['hello', 'recovery'])
     expect(STORE.has(`dpapi:${v.kid}`)).toBe(false) // the silent wrapper is gone
-
-    // restart: LOCKED, and nothing raised a dialog
     restart()
     const gestures = hello.gestures
     const locked = await http('GET', '/api/vault')
     expect(locked.json).toMatchObject({ state: 'locked', locked: true, presence: true })
     expect(locked.json.items).toEqual([])
     expect(hello.gestures).toBe(gestures)
-
-    // gesture (the button) → the key is open in the service but NOTHING opens until the code
+    // the gesture (the button) → OPEN at once: no code step after it
     const u = await http('POST', '/api/vault/unlock')
-    expect(u).toMatchObject({ status: 200, json: { ok: true, state: 'pending-stepup' } })
+    expect(u).toMatchObject({ status: 200, json: { ok: true, state: 'open' } })
     expect(hello.gestures).toBe(gestures + 1)
-    expect((await http('GET', '/api/vault')).json).toMatchObject({ pendingStepup: true, state: 'locked' })
-    expect((await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')).ok).toBe(false)
-
-    // the code → open AND the grant for the list: ONE code (owner 2026-10-03 — it was asked twice)
-    const uc = await http('POST', '/api/vault/unlock/code', { code: codeAt() })
-    expect(uc.status).toBe(200)
-    expect(typeof uc.json.grant).toBe('string')
-    expect((await http('GET', '/api/vault')).status).toBe(200) // the open vault lists with no further proof
-    const open = await http('GET', '/api/vault', undefined, uc.json.grant)
-    expect(open.json).toMatchObject({ state: 'open', presence: true, autoLockMinutes: 30 })
-    expect(Array.isArray(open.json.items)).toBe(true)
+    const open = await http('GET', '/api/vault')
+    expect(open.json).toMatchObject({ state: 'open', presence: true, autoLockMinutes: 30, pendingStepup: false })
     expect(open.json.autoLockInMs).toBeGreaterThan(0)
     const r = await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')
     expect(r.ok && new TextDecoder().decode(r.plaintext)).toBe('TEST-NOT-A-SECRET')
-
-    // 30 minutes without use → locked, says why, and the next read is the locked shape
+    expect((await http('POST', '/api/vault/unlock/code', { code: OLD_CODE })).json.ok).toBe(false) // nothing to complete
     expect(autoLockTick(T + 31 * 60_000)).toBe(true)
     const after = await http('GET', '/api/vault')
     expect(after.json).toMatchObject({ state: 'locked', lockedBy: 'auto-lock', locked: true })
@@ -567,62 +572,10 @@ describe('§11 — fresh owner machine → enrol → restart → locked → gest
   })
 })
 
-describe('owner decision 2026-10-02 — ONE code, no second code after the wizard', () => {
-  test('a code one step off still passes (±1); the same code never works twice (replay floor)', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', setup())
-    seed = base32Decode(a.json.secret)
-    const used = codeAt(-1)
-    expect((await http('POST', '/api/vault/authenticator/confirm', { code: used })).status).toBe(200)
-    // that very code, now as a step-up: refused as replayed
-    expect((await http('POST', '/api/vault/stepup', { code: used })).json.code).toBe('stepup-replayed')
-  })
-
-  test('five wrong codes drop the seed: the QR must be fetched again', async () => {
-    await http('POST', '/api/vault/authenticator/begin', setup())
-    for (let i = 0; i < 4; i++) expect((await http('POST', '/api/vault/authenticator/confirm', { code: wrongCode() })).json.code).toBe('stepup-wrong')
-    const fifth = await http('POST', '/api/vault/authenticator/confirm', { code: wrongCode() })
-    expect(fifth.json.sentence).toContain('Start over')
-    expect((await http('POST', '/api/vault/authenticator/confirm', { code: wrongCode() })).json.code).toBe('no-enrolment')
-  })
-
-  test('the grant from the confirm opens the inventory at once — no fresh code, no 30 s wait', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', setup())
-    seed = base32Decode(a.json.secret)
-    const ok = await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
-    const r = await http('GET', '/api/vault', undefined, ok.json.grant)
-    expect(r.status).toBe(200)
-    expect(Array.isArray(r.json.items)).toBe(true)
-  })
-
-  test('presence and the recovery key in the same wizard need NO second code; later (flow over) presence is gated again', async () => {
-    const a = await http('POST', '/api/vault/authenticator/begin', setup())
-    seed = base32Decode(a.json.secret)
-    await http('POST', '/api/vault/authenticator/confirm', { code: codeAt(0) })
-    const p = await http('POST', '/api/vault/presence/enroll', { protector: 'hello' }) // no code
-    expect(p).toMatchObject({ status: 200, json: { ok: true, removed: [], recoveryOwed: true } }) // held until the words
-    const r = await http('POST', '/api/vault/recovery/begin', {}) // no code: still inside the wizard
-    expect(r.status).toBe(200)
-    await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) })
-    // the flow is closed: adding a presence credential again asks for the code
-    expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(401)
-  })
-
-  test('without an enrolment in progress, presence still needs the code (the skip is not a hole)', async () => {
-    await enrolOverHttp()
-    next()
-    restart()
-    await http('POST', '/api/vault/unlock')
-    await http('POST', '/api/vault/unlock/code', { code: codeAt() })
-    next()
-    expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(401)
-  })
-})
-
-describe('POST /api/vault/presence/probe — the gesture check BEFORE anything changes', () => {
+describe('POST /api/vault/presence/probe — the device check BEFORE anything changes', () => {
   test('a working device passes, writes nothing and leaves no stored key behind', async () => {
     const before = readFileSync(join(vaultDir(), 'vault.json'), 'utf8')
     const keys = STORE.size
-    // Owner 2026-10-02: on a first page enrolment the setup code comes BEFORE any gesture.
     const gesturesBefore = hello.gestures
     const refused = await http('POST', '/api/vault/presence/probe', { protector: 'hello' })
     expect(refused).toMatchObject({ status: 403, json: { ok: false, code: 'setup-code-required' } })
@@ -632,7 +585,6 @@ describe('POST /api/vault/presence/probe — the gesture check BEFORE anything c
     expect(r).toMatchObject({ status: 200, json: { ok: true } })
     expect(readFileSync(join(vaultDir(), 'vault.json'), 'utf8')).toBe(before)
     expect(STORE.size).toBe(keys)
-    // Wrap only: no verifying unwrap here (the fake counts unwraps) — reproducibility is the enrolment's check.
     expect(hello.gestures).toBe(gesturesBefore)
   })
   test('the view tells the page the setup code is owed, then not owed once this session spent it', async () => {
@@ -645,11 +597,12 @@ describe('POST /api/vault/presence/probe — the gesture check BEFORE anything c
   test('progress is readable while nothing is in flight: null', async () => {
     expect((await http('GET', '/api/vault/presence/progress')).json).toMatchObject({ ok: true, progress: null })
   })
-  test('refuses a non-presence kind (400), a locked vault, and — once enrolled — an unauthenticated probe (401)', async () => {
+  test('refuses a non-presence kind (400), a locked vault, and — once protected — asks the proof', async () => {
     expect((await http('POST', '/api/vault/presence/probe', { protector: 'dpapi' })).status).toBe(400)
     await enrolOverHttp()
-    next()
-    expect((await http('POST', '/api/vault/presence/probe', { protector: 'hello' })).status).toBe(401)
+    hello.cancel = true
+    expect((await http('POST', '/api/vault/presence/probe', { protector: 'hello' })).json.ok).toBe(false)
+    hello.cancel = false
     restart()
     expect((await http('POST', '/api/vault/presence/probe', { protector: 'hello' })).json.code).toBe('locked')
   })

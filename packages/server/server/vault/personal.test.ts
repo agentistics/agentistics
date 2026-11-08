@@ -8,7 +8,7 @@ import { readdirSync, readFileSync, renameSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { base32Decode, hotp, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
+import { type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
 import { __resetVaultForTests, __setVaultClockForTests, sealToFile, vaultDir } from './service'
 import { __resetGateForTests } from './gate'
 import { __resetPersonalForTests, personalRoot } from './personal'
@@ -35,8 +35,8 @@ function fake(id: ProtectorId): Fake {
 
 let T = 1_800_000_000_000
 const clock = () => T
-let seed: Uint8Array
-const codeAt = () => hotp(seed, Math.floor(T / 1000 / 30))
+// COFRE.DESBLOQUEIO (2026-11-07): no authenticator. A code a test still sends is ignored by the gate.
+const codeAt = () => '123456'
 const next = () => { T += 30_000 }
 let dir = ''
 let dpapi = fake('dpapi'), hello = fake('hello')
@@ -64,10 +64,11 @@ async function fresh(withPresence = true): Promise<void> {
   __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en', protectors: withPresence ? [dpapi, hello] : [dpapi], autoInit: { candidates: [dpapi] } })
   __setVaultClockForTests(clock); __resetGateForTests(clock); __resetPersonalForTests(clock)
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('TEST-NOT-A-SECRET'))
+  // The first-enrolment proof: one gesture on this loopback page, or the terminal's setup code.
   if (withPresence) expect((await http('POST', '/api/vault/local-proof')).status).toBe(200)
-  const a = await http('POST', '/api/vault/authenticator/begin', withPresence ? {} : { setupCode: (await import('./gate')).mintSetupCode().code })
-  seed = base32Decode(a.json.secret)
-  expect((await http('POST', '/api/vault/authenticator/confirm', { code: codeAt() })).status).toBe(200)
+  else expect((await http('POST', '/api/vault/setup-code', { setupCode: (await import('./gate')).mintSetupCode().code })).status).toBe(200)
+  // The authenticator is gone: its routes refuse, on every vault.
+  expect((await http('POST', '/api/vault/authenticator/begin', {})).json.code).toBe('authenticator-retired')
   next()
 }
 async function presenceOn(): Promise<void> {
@@ -110,12 +111,15 @@ describe('gate rows (spec §3)', () => {
     expect(no.json.ok).toBe(false)
     expect(no.json.value).toBeUndefined()
   })
-  test('without presence, reveal asks the code fresh — a grant never stands for it', async () => {
+  test('with no way to confirm chosen yet, reveal is refused — a code never stands for it (COFRE.DESBLOQUEIO)', async () => {
     await fresh(false)
     const id = (await http('POST', '/api/vault/personal', { item: login, code: codeAt() })).json.meta.id
-    next()
-    expect((await http('POST', '/api/vault/personal/reveal', { id, field: 'password' })).status).toBe(401)
-    expect((await http('POST', '/api/vault/personal/reveal', { id, field: 'password', code: codeAt() })).json.value).toBe('MARKER-hunter2-Δ')
+    for (const body of [{ id, field: 'password' }, { id, field: 'password', code: codeAt() }]) {
+      const r = await http('POST', '/api/vault/personal/reveal', body)
+      expect(r.json.code).toBe('reveal-needs-setup')
+      expect(r.json.value).toBeUndefined()
+      expect(JSON.stringify(r.json)).not.toMatch(/authenticator|autenticador/i)
+    }
   })
   test('edit and trash ask the gesture FRESH (owner rule); a denied gesture changes nothing', async () => {
     await presenceOn()
@@ -190,18 +194,22 @@ describe('gate rows (spec §3)', () => {
     expect(batchBinding(['b', 'a'])).toBe(batchBinding(['a', 'b']))
     expect(batchBinding(['a', 'b'])).toBe('batch:2:e6169119046025e6')
   })
-  test('restore-version and purge ask the code FRESH even with a live grant, plus the gesture', async () => {
+  test('restore-version and purge ask the proof FRESH even with a live grant — a code changes nothing', async () => {
     await presenceOn()
     const m = (await http('POST', '/api/vault/personal', { item: login, code: codeAt() })).json.meta
     await http('POST', '/api/vault/personal/edit', { id: m.id, expectedVersion: 1, item: { ...login, fields: { password: 'second' } } })
-    expect((await http('POST', '/api/vault/personal/restore-version', { id: m.id, version: 1, expectedVersion: 2 })).status).toBe(401)
-    next()
-    const r = await http('POST', '/api/vault/personal/restore-version', { id: m.id, version: 1, expectedVersion: 2, code: codeAt() })
+    hello.deny = true
+    expect((await http('POST', '/api/vault/personal/restore-version', { id: m.id, version: 1, expectedVersion: 2, code: codeAt() })).json.ok).toBe(false)
+    hello.deny = false
+    const g0 = hello.gestures
+    const r = await http('POST', '/api/vault/personal/restore-version', { id: m.id, version: 1, expectedVersion: 2 })
     expect(r.json.meta.version).toBe(3)
+    expect(hello.gestures).toBe(g0 + 1)
     expect((await http('POST', '/api/vault/personal/reveal', { id: m.id, field: 'password' })).json.value).toBe('MARKER-hunter2-Δ')
-    expect((await http('POST', '/api/vault/personal/purge', { id: m.id })).status).toBe(401)
-    next()
-    expect((await http('POST', '/api/vault/personal/purge', { id: m.id, code: codeAt() })).json.ok).toBe(true)
+    hello.deny = true
+    expect((await http('POST', '/api/vault/personal/purge', { id: m.id, code: codeAt() })).json.ok).toBe(false)
+    hello.deny = false
+    expect((await http('POST', '/api/vault/personal/purge', { id: m.id })).json.ok).toBe(true)
     expect((await http('GET', '/api/vault/personal')).json.items).toHaveLength(0)
   })
   test('the table carries every personal row, so the page draws its icons from the server', async () => {

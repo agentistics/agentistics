@@ -27,10 +27,11 @@ test('MCP task_phase and task_stage use the shared gate, authenticated dequeue, 
     return 0
   } }
   const comments: string[] = []
+  const steps: string[] = []
   const registry = Array.from({ length: 79 }, (_, i) => ({ id: `lost-${i}` })) as ManagedSession[]
   const running = runningSessionIds(registry, [])
   const facts: GateFacts = {
-    subtask: async id => ['s1', 'g1'].includes(id) ? { id, taskId: 't1', title: id, status, groupMember: id === 's1' && joined, ...(id === 's1' && joined ? { parentGroupId: 'g1' } : {}), blockedBy: [], staged: id === 's1' ? draft : groupDraft } : null,
+    subtask: async id => ['s1', 'g1', 'legacy1'].includes(id) ? { id, taskId: 't1', title: id, status, groupMember: id === 's1' && joined, ...(id === 's1' && joined ? { parentGroupId: 'g1' } : {}), blockedBy: [], staged: id === 's1' ? draft : groupDraft } : null,
     sessions: async () => [
       { id: 'leader', harness: 'codex', cwd: dir, role: 'leader', alive: true, worktree: false, taskId: 't1' },
       ...registry.map(m => ({ id: m.id, harness: 'codex', cwd: dir, role: 'worker', alive: running.has(m.id), worktree: true })),
@@ -42,7 +43,7 @@ test('MCP task_phase and task_stage use the shared gate, authenticated dequeue, 
     store: createDeliveryStore(join(dir, 'deliveries.json')), facts,
     board: {
       stage: async (id, input) => { if (id === 'g1') groupDraft = input; else draft = input; return { ok: true } },
-      setPhaseStatus: async () => ({ ok: true }), setCi: async () => {}, logStep: async () => {},
+      setPhaseStatus: async () => ({ ok: true }), setCi: async () => {}, logStep: async (_t, s, n) => { steps.push(`${s}:${n}`) },
       comment: async (_t, _s, body) => { comments.push(body) }, subtaskFinished: async () => false,
     },
     autonomous: async () => true, emit: async () => {}, now: Date.now,
@@ -102,5 +103,18 @@ test('MCP task_phase and task_stage use the shared gate, authenticated dequeue, 
     expect((await call('agentistics_task_subtask', { ref: 't1', id: 's1', parentGroupId: 'g1' })).body.ok).toBe(true)
     expect((await call('agentistics_task_phase', { subtaskId: 's1' })).body.record.dequeued.reason).toContain('group g1')
     expect(groupDraft.prompt).toContain('[group member s1]')
+    // LIVE.PORCENTAGEM: a worker reports its step through the same door — for a piece with no delivery record only the board event is written.
+    const legacy = await call('agentistics_task_phase', { subtaskId: 'legacy1', action: 'step', step: 3 })
+    expect(legacy.error).toBeFalsy()
+    expect(legacy.body).toEqual({ ok: true, step: 3, recorded: 'event' })
+    expect(steps).toContain('legacy1:3')
+    // A refusal reaches the caller as an error carrying the server's own code.
+    const refused = async (args: Record<string, unknown>) => {
+      const out = await client.callTool({ name: 'agentistics_task_phase', arguments: args })
+      return { isError: out.isError, text: (out.content as Array<{ text: string }>)[0]!.text }
+    }
+    expect(await refused({ subtaskId: 'legacy1', action: 'step', step: 12 })).toMatchObject({ isError: true, text: expect.stringContaining('bad_step') })
+    expect(await refused({ subtaskId: 'nope', action: 'step', step: 2 })).toMatchObject({ isError: true, text: expect.stringContaining('no_such_subtask') })
+    expect(steps).toEqual(['legacy1:3'])
   } finally { await client.close(); api.stop(true); rmSync(dir, { recursive: true, force: true }) }
 }, 20_000)

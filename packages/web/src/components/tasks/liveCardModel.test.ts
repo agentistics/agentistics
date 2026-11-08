@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  blockLines, cardStateWord, chunk, pack, columnCollapsed, etaBoxes, fitCount, flowColumns, revealScrollLeft, mergeGone, planDepartures, snapshotOf, stageBar,
+  blockLines, cardStateWord, columnCollapsed, countOutOfView, etaBoxes, humanSlotReason, matchesColumnQuery, readViewPrefs, showColumnSearch, writeViewPrefs, revealScrollLeft, mergeGone, planDepartures, snapshotOf, stageBar,
   taskOfSession, taskOptions, timeRow, waitingReason, lingering, GONE_LINGER_MS, readCollapsedPrefs,
   cardPercent, ciChecklist, leaderCounts, locateWorker, stagePercent,
 } from './liveCardModel'
@@ -38,6 +38,11 @@ describe('what a waiting card waits for (item i)', () => {
     expect(waitingReason(card({ sessionIds: ['s'], stage: 'qa' }, f), f, true)).toBe('esperando a QA')
     expect(waitingReason(card({ sessionIds: ['s'], stage: 'merge' }, f), f, true)).toBe('esperando o CI / merge')
     expect(waitingReason(card({ stage: 'queue' }), [], true)).toBe('esperando vaga na máquina')
+    // FILA.PRIORIDADE: never a generic "waiting for a slot" beside a free slot or beside the leader's own decision
+    const queued = card({ stage: 'queue' })
+    expect(waitingReason({ ...queued, d: { ...queued.d, slot: { ok: true, reason: null, at: '' } } }, [], true)).toBeNull()
+    expect(waitingReason({ ...queued, d: { ...queued.d, slot: { ok: false, reason: 'no slot: x', at: '' } } }, [], true)).toBe('esperando vaga na máquina')
+    expect(waitingReason({ ...queued, d: { ...queued.d, queue: { hold: null, asking: true, approved: false } } }, [], true)).toBeNull()
     const dlg = [row('s', 'waiting-approval', { approvalLines: ['Posso apagar a pasta dist?', '1. Sim'] })]
     expect(waitingReason(card({ sessionIds: ['s'] }, dlg), dlg, true)).toBe('esperando resposta sua (pergunta: Posso apagar a pasta dist?)')
     expect(waitingReason(card({ sessionIds: ['s'], stage: 'running' }, f), f, true)).toBe('esperando (sem motivo conhecido)')
@@ -83,8 +88,8 @@ describe('time row — "total" is the card\'s work, never the task\'s age (item 
   })
   test('the tooltip lists the stages it passed through', () => {
     const t = timeRow(card({ trail: [{ stage: 'running', enteredMs: 0, ms: 4 * H }, { stage: 'qa', enteredMs: 1, ms: 20 * MIN }] }), NOW, true)
-    expect(t.title).toContain('executando 4h')
-    expect(t.title).toContain('em qa 20 min')
+    expect(t.title).toContain('em desenvolvimento 4h')
+    expect(t.title).toContain('qa 20 min')
   })
 })
 
@@ -94,7 +99,7 @@ describe('the two estimates (item g, b)', () => {
       stageEta: { kind: 'estimate', atMs: new Date(2026, 10, 6, 17, 46).getTime(), medianMs: H, n: 5, nextStage: 'qa' },
       publishEta: { kind: 'estimate', atMs: new Date(2026, 10, 6, 23, 30).getTime(), source: 'stages', n: 5, parts: [{ stage: 'qa', medianMs: H }] },
     }), true)!
-    expect(ok[0]).toMatchObject({ label: 'próxima etapa (em qa)', value: '~17:46', tone: 'ok' })
+    expect(ok[0]).toMatchObject({ label: 'próxima etapa (qa)', value: '~17:46', tone: 'ok' })
     expect(ok[1]).toMatchObject({ label: 'publicação', value: '~23:30' })
     expect(ok[1].title).toContain('Soma das durações típicas')
     const late = etaBoxes(rec({ stageEta: { kind: 'none', reason: 'beyond-range', typicalMs: 40 * MIN } }), true)!
@@ -108,7 +113,7 @@ describe('the two estimates (item g, b)', () => {
 describe('Bloqueado card lines (item q)', () => {
   test('reason, who lifts it, how long, where it returns', () => {
     const l = blockLines({ reason: 'limite', text: 'contas em 90%', unlocker: 'leader', originStage: 'qa' }, NOW - 42 * MIN, NOW, true)
-    expect(l).toEqual({ reason: 'bloqueado por: limite de uso / login — contas em 90%', unlocker: 'quem destrava: líder', since: 'há 42 min', origin: 'volta para: em qa' })
+    expect(l).toEqual({ reason: 'bloqueado por: limite de uso / login — contas em 90%', unlocker: 'quem destrava: líder', since: 'há 42 min', origin: 'volta para: qa' })
     expect(blockLines({ reason: 'decisao_do_dono', text: null, unlocker: 'owner', originStage: null }, null, NOW, true).unlocker).toBe('quem destrava: dono')
   })
 })
@@ -145,9 +150,9 @@ describe('Publicado is not emptied by the filters (item c)', () => {
       rec({ key: 'p', stage: 'published', taskId: 'T1', deliveredAtMs: NOW }), rec({ key: 'r', stage: 'running', taskId: 'T1' }), rec({ key: 'q', stage: 'published', taskId: 'T2' }),
     ], [])
     const shown = filterCards(cards, { taskIds: ['T1'], onlyActive: true }).map(c => c.d.key)
-    expect(shown).toEqual(['p'])
-    expect(filterCards(cards, { taskIds: ['T1', 'T2'], onlyActive: true }).map(c => c.d.key)).toEqual(['p', 'q'])
-    expect(filterCards(cards, { taskIds: [], onlyActive: false }).length).toBe(3)
+    expect(shown).toEqual(['p', 'r']) // the running piece is a flow card too: "active" is about the column, not a live agent
+    expect(filterCards(cards, { taskIds: ['T1', 'T2'], onlyActive: true }).map(c => c.d.key)).toEqual(['p', 'r', 'q'])
+    expect(filterCards(cards, { taskIds: [], onlyActive: false }).length).toBe(0) // "apenas ativas" off hides the cards of the flow columns after the queue
   })
   test('a blocked card is never hidden by the agent switch either', () => {
     const cards = joinLive([rec({ key: 'b', stage: 'blocked' })], [])
@@ -191,26 +196,32 @@ describe('columns: today\'s layout plus Publicado collapsed; the user\'s choice 
   })
 })
 
-describe('fit and chunk — no vertical scrollbar, ever', () => {
-  test('all fit -> all; otherwise as many as leave room for the +N control', () => {
-    expect(fitCount([100, 100, 100], 400, 30)).toBe(3)
-    expect(fitCount([100, 100, 100, 100], 300, 30)).toBe(2)
-    expect(fitCount([], 300, 30)).toBe(0)
+describe('column body — one vertical stack with its own scroll, and a search past three hidden cards', () => {
+  const view = { top: 100, bottom: 500 }
+  const at = (top: number, h = 100) => ({ top, bottom: top + h })
+  test('countOutOfView counts the cards wholly above or below the scroll area; a sliver counts as seen', () => {
+    expect(countOutOfView([at(100), at(210), at(320), at(430)], view)).toBe(0)
+    expect(countOutOfView([at(100), at(210), at(320), at(430), at(540), at(650)], view)).toBe(2)
+    expect(countOutOfView([at(-50), at(60), at(480), at(600)], view)).toBe(2) // 480 shows 20px: visible
+    expect(countOutOfView([], view)).toBe(0)
   })
-  test('HIGH 2: the +N is never sacrificed — when even the first card leaves no room for it, no card is forced in', () => {
-    // 4 cards of 320 in a column of 560 (the popover's): one card leaves 240 < the 38 px the control needs? it does not
-    // fit alongside, so the old `max(1, k)` drew the card and cut the "+3" below the edge.
-    expect(fitCount([320, 320, 320, 320], 340, 38)).toBe(0)
-    expect(fitCount([300, 300, 300], 560, 38)).toBe(1)
-    // every card shown + the control must fit the room, whatever the answer
-    for (const [hs, avail] of [[[320, 320, 320, 320], 340], [[100, 200, 300], 450], [[500, 500], 300]] as const) {
-      const k = fitCount(hs, avail, 38)
-      const used = hs.slice(0, k).reduce((a, h) => a + h, 0)
-      expect(k === hs.length || used + 38 <= avail).toBe(true)
-    }
+  test('the search shows ONLY with MORE than three out of view', () => {
+    expect(showColumnSearch({ outOfView: 3, query: '', wasShown: false })).toBe(false)
+    expect(showColumnSearch({ outOfView: 4, query: '', wasShown: false })).toBe(true)
+    expect(showColumnSearch({ outOfView: 0, query: '', wasShown: false })).toBe(false)
   })
-  test('a column holding one card taller than the room still shows it — there is nothing to cut', () => {
-    expect(fitCount([500], 300, 38)).toBe(1)
+  test('once shown it holds at three (it takes room itself), and a typed query never makes it vanish', () => {
+    expect(showColumnSearch({ outOfView: 3, query: '', wasShown: true })).toBe(true)
+    expect(showColumnSearch({ outOfView: 2, query: '', wasShown: true })).toBe(false)
+    expect(showColumnSearch({ outOfView: 0, query: 'abc', wasShown: false })).toBe(true)
+    expect(showColumnSearch({ outOfView: 0, query: '   ', wasShown: false })).toBe(false)
+  })
+  test('the search filters only by title or task, every word, case-folded', () => {
+    const c = (title: string, taskTitle: string) => ({ d: rec({ title, taskTitle }) })
+    expect(matchesColumnQuery(c('Fix login', 'Auth'), '')).toBe(true)
+    expect(matchesColumnQuery(c('Fix login', 'Auth'), 'LOGIN')).toBe(true)
+    expect(matchesColumnQuery(c('Fix login', 'Auth'), 'auth fix')).toBe(true)
+    expect(matchesColumnQuery(c('Fix login', 'Auth'), 'billing')).toBe(false)
   })
   test('revealScrollLeft reaches a card past the right edge, horizontally only, and never past the content', () => {
     // QA MED 6: the card ended at x=1365 on a board ending at 1223 and scrollLeft moved only 30
@@ -222,35 +233,14 @@ describe('fit and chunk — no vertical scrollbar, ever', () => {
     expect(revealScrollLeft({ scrollLeft: 0, viewLeft: 0, viewWidth: 1000, cardLeft: 10, cardWidth: 280, scrollWidth: 2000 })).toBe(0)
     expect(revealScrollLeft({ scrollLeft: 0, viewLeft: 0, viewWidth: 1000, cardLeft: 1900, cardWidth: 280, scrollWidth: 2000 })).toBe(1000)
   })
-  test('LOW 12: 246 cards become a bounded number of columns — full cards first, then one-line rows, none dropped', () => {
-    const heights = Array.from({ length: 246 }, () => 330)
-    const { full, compact } = flowColumns(heights, 560, 8, 30)
-    expect(full).toHaveLength(8)
-    expect(compact.length).toBeLessThan(15) // not 246 sub-columns
-    const seen = [...full.flat(), ...compact.flat()].sort((a, b) => a - b)
-    expect(seen).toEqual(heights.map((_, i) => i)) // every card exactly once
-    expect(compact.every(c => c.length <= Math.floor(560 / 30))).toBe(true)
-  })
-  test('a short column has no compact rows', () => {
-    expect(flowColumns([200, 200, 200, 200], 450, 8, 30).compact).toEqual([])
-  })
-  test('pack fills sub-columns by their real heights and never drops a tall card', () => {
-    expect(pack([100, 100, 100, 100, 100], 250)).toEqual([[0, 1], [2, 3], [4]])
-    expect(pack([300, 50], 250)).toEqual([[0], [1]])
-    expect(pack([], 250)).toEqual([])
-  })
-  test('an expanded column flows into sub-columns', () => {
-    expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]])
-    expect(chunk([1], 0)).toEqual([[1]])
-  })
 })
 
 describe('no card leaves in silence (item r) — a sentence per path', () => {
   const sc = (keys: string[], sig = 'f') => snapshotOf(joinLive(keys.map(k => rec({ key: k, title: `T-${k}` })), []), [], sig)
   const ctx = (o: Partial<Parameters<typeof planDepartures>[2]> = {}) => ({ allKeys: new Set<string>(), hidden: [], leaderIdsNow: new Set<string>(), nowMs: NOW, pt: true, ...o })
-  test('path 1: the agent finished and the "only active" switch hides the card', () => {
+  test('path 1: a filter of the bar hides the card', () => {
     const g = planDepartures(sc(['a']), sc([]), ctx({ allKeys: new Set(['a']) }))
-    expect(g).toEqual([expect.objectContaining({ key: 'a', title: 'T-a', reason: 'o agente terminou (filtro “só com agentes ativos”)' })])
+    expect(g).toEqual([expect.objectContaining({ key: 'a', title: 'T-a', reason: 'ficou fora dos filtros da barra' })])
   })
   test.each([
     ['no-live-session', 'a sessão encerrou e a peça segue sem agente'],
@@ -363,8 +353,58 @@ describe('queueLines (FLUXO.ENTREGA-DSL "Na fila")', () => {
   test('pre-dispatch line and slot, nothing guessed', async () => {
     const { queueLines } = await import('./liveCardModel')
     expect(queueLines({ staged: { harness: 'claude', model: 'opus', effort: 'high', account: 'acc_1' }, slot: { ok: true, reason: null, at: '' } }, true, () => 'pessoal'))
-      .toEqual({ staged: 'claude · opus · high · conta pessoal', slot: 'vaga: livre agora', slotOk: true })
+      .toEqual({ staged: 'claude · opus · high · conta pessoal', slot: 'vaga: livre agora', slotOk: true, slotRaw: null, wait: null })
     expect(queueLines({ staged: { harness: 'claude', model: null, effort: null, account: null }, slot: null }, false).staged).toBe('claude')
-    expect(queueLines({ staged: null, slot: null }, true)).toEqual({ staged: null, slot: null, slotOk: null })
+    expect(queueLines({ staged: null, slot: null }, true)).toEqual({ staged: null, slot: null, slotOk: null, slotRaw: null, wait: null })
+    // an account nobody can name is left out — the raw `acc_…` id is not something a person reads
+    expect(queueLines({ staged: { harness: 'codex', model: 'm', effort: null, account: 'acc_9f3a21' }, slot: null }, true, (_h, a) => a).staged).toBe('codex · m')
+  })
+  test('a refused slot reads in plain words and keeps the raw gate text only for the tooltip (print c304a58f)', async () => {
+    const { queueLines } = await import('./liveCardModel')
+    const raw = 'no slot: fresh plan_limits reading for codex:acc_e785a7143614; 79 workers running (machine ceiling 4)'
+    const q = queueLines({ staged: { harness: 'codex', model: null, effort: null, account: 'acc_e785a7143614' }, slot: { ok: false, reason: raw, at: '' } }, true, () => 'Principal')
+    expect(q.slot).toBe('esperando a leitura dos limites da conta Principal · esperando vaga: 79 de 4 sessões em uso')
+    expect(q.slot).not.toMatch(/acc_|plan_limits|machine ceiling|workers running/)
+    expect(q.slotRaw).toBe(raw)
+  })
+})
+
+describe('humanSlotReason — every gate refusal, in pt and en, without ids', () => {
+  const acct = (h: string, a: string) => (a === 'acc_1' ? 'Principal' : a)
+  test.each([
+    ['no slot: 4 workers running (machine ceiling 4)', 'esperando vaga: 4 de 4 sessões em uso', 'waiting for a slot: 4 of 4 sessions in use'],
+    ['no slot: 3 claude top-tier workers running (cap 2)', 'esperando vaga: 3 de 2 sessões do modelo mais forte em uso', 'waiting for a slot: 3 of 2 top-model sessions in use'],
+    ['no slot: 5 h window at 91% (≥ 85%)', 'esperando a conta liberar (janela de 5 h em 91%)', 'waiting for the account to free up (5 h window at 91%)'],
+    ['no slot: week at 97% (≥ 95%)', 'esperando a conta liberar (semana em 97%)', 'waiting for the account to free up (week at 97%)'],
+    ['no slot: free memory 1.2 GB (< 3 GB)', 'esperando memória livre', 'waiting for free memory'],
+    ['no slot: free memory unknown', 'esperando memória livre', 'waiting for free memory'],
+    ['no slot: fresh plan_limits reading for codex:acc_1', 'esperando a leitura dos limites da conta Principal', 'waiting for the limits reading of account Principal'],
+  ])('%s', (raw, pt, en) => {
+    expect(humanSlotReason(raw, true, acct)).toBe(pt)
+    expect(humanSlotReason(raw, false, acct)).toBe(en)
+  })
+  test('an account with no known name is said generically — the raw id never reaches the card', () => {
+    expect(humanSlotReason('no slot: fresh plan_limits reading for codex:acc_9f', true, (_h, a) => a)).toBe('esperando a leitura dos limites da conta')
+    expect(humanSlotReason('no slot: fresh plan_limits reading for codex:acc_9f', false)).toBe('waiting for the limits reading of the account')
+  })
+  test('several reasons are joined once each; an unknown or empty one is generic, never the raw text', () => {
+    expect(humanSlotReason('no slot: free memory unknown; free memory 1.0 GB (< 3 GB)', true)).toBe('esperando memória livre')
+    expect(humanSlotReason('no slot: something new the gate learned', true)).toBe('esperando vaga')
+    expect(humanSlotReason(null, false)).toBe('waiting for a slot')
+  })
+})
+
+describe('the filter bar choices are saved like the column preferences', () => {
+  const mem = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v) } } }
+  test('defaults: both switches on, highest priority first', () => {
+    expect(readViewPrefs(mem())).toEqual({ onlyActive: true, showQueue: true, sort: 'priority' })
+  })
+  test('round-trips, and junk falls back field by field', () => {
+    const s = mem()
+    writeViewPrefs({ onlyActive: false, showQueue: true, sort: 'recent' }, s)
+    expect(readViewPrefs(s)).toEqual({ onlyActive: false, showQueue: true, sort: 'recent' })
+    expect(readViewPrefs({ getItem: () => JSON.stringify({ onlyActive: 'x', showQueue: false, sort: 'nope' }) })).toEqual({ onlyActive: true, showQueue: false, sort: 'priority' })
+    expect(readViewPrefs({ getItem: () => 'not json' })).toEqual({ onlyActive: true, showQueue: true, sort: 'priority' })
+    expect(readViewPrefs(null)).toEqual({ onlyActive: true, showQueue: true, sort: 'priority' })
   })
 })

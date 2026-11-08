@@ -20,9 +20,10 @@
  *    similar pieces, or a piece already past the typical range, answers `none` with the reason.
  */
 
-import { subtaskDone, type Subtask, type Task, type TaskEvent } from './task-model'
+import { migratePriority, subtaskDone, type Subtask, type Task, type TaskEvent } from './task-model'
 import type { PieceTimes } from './task-times'
 import type { TaskDetail } from './task-report'
+import { deriveStep, mergeStep, type SessionActivity, type StepRecord } from './task-live-steps'
 
 export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
 export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published']
@@ -33,6 +34,10 @@ export const HAPPY_PATH: readonly LiveStage[] = ['running', 'qa', 'leader', 'mer
 export const MIN_SAMPLES = 3
 /** A published piece stays on the line this long. */
 export const PUBLISHED_WINDOW_MS = 24 * 3600_000
+/** The Histórico column lists published pieces older than the Publicado window, up to this many days back… */
+export const HISTORY_DAYS = 30
+/** …and at most this many pieces (the newest). */
+export const HISTORY_CAP = 150
 
 export type LiveEta =
   | {
@@ -104,9 +109,20 @@ export interface LiveDelivery {
   ci: LiveCiSignal | null
   /** The 1-based step the piece reported inside its CURRENT stage (a `step` event); null = nobody said, show nothing. */
   step: number | null
+  /**
+   * Where `step` came from: `reported` (the worker/flow stated it, `step` event) or `signals` (observed — an edit, a test
+   * run, a commit, the delivery record's gates; `stepSignal` names which). Null with `step`.
+   */
+  stepSource?: 'reported' | 'signals' | null
+  stepSignal?: string | null
   /** The newest thing the log says about this piece, short. Null when nothing is recorded. */
   lastAction: { text: string; atMs: number; kind?: string; from?: string; to?: string } | null
   blockedReason: string | null
+  /**
+   * The Agentask priority of the piece (urgent | high | medium | low) — the TASK's; a subtask carries none of its own, so
+   * it inherits the task's. Never `none`: an unset priority reads as `low` everywhere (`migratePriority`).
+   */
+  priority: 'urgent' | 'high' | 'medium' | 'low'
   /** Set once a published piece leaves the line. */
   deliveredAtMs: number | null
   /**
@@ -120,6 +136,27 @@ export interface LiveDelivery {
   phase?: string | null
   /** A human gate the owner was ASKED about and has not answered at this revision (autonomous mode OFF). The Live card offers approve / reject for it. */
   awaitingApproval?: { phase: string } | null
+  /**
+   * FILA.PRIORIDADE — only a queued piece: why it is not starting. `hold` = the leader said `nao` (reason) or `agendar`
+   * (starts at `until`); `asking` = the question is open with the leader; `approved` = `sim` given, waiting for a slot.
+   * Null/absent = just waiting its turn.
+   */
+  queue?: { hold: { kind: 'nao' | 'agendar'; reason: string; until: string | null; by: string; atMs: number | null } | null; asking: boolean; approved: boolean } | null
+}
+
+/** PURE: the queue facts a card shows from the delivery record (a lapsed `agendar` is no hold any more). */
+export function queueOfRecord(rec: { queueHold?: { kind: 'nao' | 'agendar'; reason: string; at: string; actor: string; until?: string }; queueAsk?: { approved?: unknown } } | undefined, nowMs: number): LiveDelivery['queue'] {
+  if (!rec) return null
+  const h = rec.queueHold
+  const until = h?.until ? Date.parse(h.until) : NaN
+  const active = h && (h.kind === 'nao' || (Number.isFinite(until) && until > nowMs))
+  const asking = Boolean(rec.queueAsk && !rec.queueAsk.approved)
+  const approved = Boolean(rec.queueAsk?.approved)
+  if (!active && !asking && !approved) return null
+  return {
+    hold: active && h ? { kind: h.kind, reason: h.reason, until: h.until ?? null, by: h.actor, atMs: Date.parse(h.at) || null } : null,
+    asking, approved,
+  }
 }
 
 /** A piece the line considered and left off, with the reason — so a card never disappears without a word. */
@@ -129,6 +166,8 @@ export interface LiveHidden { key: string; taskId: string; title: string; stage:
 export interface LiveReply {
   generatedAt: string
   deliveries: LiveDelivery[]
+  /** Published more than 24 h ago (≤ HISTORY_DAYS days, ≤ HISTORY_CAP pieces), newest first — the Histórico column. */
+  history?: LiveDelivery[]
   /** Pieces left off the line and why (bounded, NEWEST first — the ones that just left are the ones somebody asks about). */
   hidden: LiveHidden[]
   /**
@@ -172,7 +211,7 @@ export function stageOfStatus(status: string, label?: string): LiveStage | null 
 
 const QA_NAME = /(^|[^a-z])qa([^a-z]|$)|\bquality\b/i
 
-interface PieceSession { id: string; harness: string; model: string | null; effort?: string; label?: string; live: boolean; startMs: number | null }
+interface PieceSession { id: string; harness: string; model: string | null; effort?: string; label?: string; live: boolean; startMs: number | null; activity?: SessionActivity }
 
 // ---------------------------------------------------------------------------------- ETA
 
@@ -395,7 +434,7 @@ interface Piece {
   /** Unfinished dependencies (sibling subtasks / blocking tasks) the book names. */
   dependsOn: number
   /** The task's comments (each with its own `subtaskId`) — the real data keeps a legacy piece's delivered commit in its handback comment. */
-  comments: readonly { subtaskId?: string; body: string; createdAt: string }[]
+  comments: readonly { subtaskId?: string; body: string; createdAt: string; kind?: string }[]
 }
 
 /** Resolve the target carried by newer activity records and by the older human-readable detail. */
@@ -425,6 +464,7 @@ function piecesOf(d: TaskDetail): Piece[] {
         id: s.id, harness: s.harness, model: s.model, ...(s.label ? { label: s.label } : {}),
         ...(s.effort ? { effort: s.effort } : {}),
         live: !s.endedAt, startMs: ms(s.createdAt),
+        ...(s.activity ? { activity: s.activity } : {}),
       }))
   const timesOf = (id: string | null) => d.subtaskRollups.find(r => r.id === id)?.times
   const subs = d.subtasks.filter(s => !s.parentGroupId)
@@ -481,11 +521,21 @@ export interface LiveDeliveryFacts {
   /** When the release that shipped it was published (ISO) — the Publicado window starts here when the record says so. */
   publishedAt?: string
   step?: number
-  gates?: { vaga?: { ok: boolean; reason?: string; at: string } }
+  /** FILA.PRIORIDADE — the leader's `nao`/`agendar` and the open question (see `delivery/fila-proximo.ts`). */
+  queueHold?: { kind: 'nao' | 'agendar'; reason: string; at: string; actor: string; until?: string }
+  queueAsk?: { at: string; delivered: boolean; approved?: unknown }
   revision?: number
   humanGates?: string[]
   asked?: Record<string, number>
   approvals?: Record<string, { revision: number; decision: string }>
+  /** The facts the observed steps read (`task-live-steps.ts`): gate verdicts, the pushed head, the QA session and verdict, the review, the PR. */
+  gates?: Partial<Record<string, { ok: boolean; reason?: string; at: string }>>
+  headSha?: string
+  qaSessionId?: string
+  qa?: { at: string }
+  review?: { at: string }
+  pr?: number
+  mergeSha?: string
 }
 
 /** PURE: the human gate of this record waiting on an answer — asked at the CURRENT revision, not yet answered at it. */
@@ -605,6 +655,7 @@ export function buildLive(o: {
   const typicals = stageTypicals([...trails.values()])
 
   const deliveries: LiveDelivery[] = []
+  const history: LiveDelivery[] = []
   const hidden: LiveHidden[] = []
   const archived: LiveHidden[] = []
   const entry = (p: Piece, stage: LiveStage | null, reason: HiddenReason): LiveHidden =>
@@ -633,10 +684,12 @@ export function buildLive(o: {
     if (stage === null) { if (recent && p.status !== 'backlog' && p.status !== 'abandoned') hide(p, null, 'status-unplaced'); continue }
     // A recorded release states its own publish time; the board's `deliveredAt` is only when the status moved (late runs: "now").
     const deliveredAtMs = (rec?.publishedAt && stage === 'published' ? ms(rec.publishedAt) : null) ?? ms(p.deliveredAt) ?? (stage === 'published' ? ms(p.updatedAt) : null)
-    if (stage === 'published' && (deliveredAtMs === null || o.nowMs - deliveredAtMs > PUBLISHED_WINDOW_MS)) {
+    const oldPublished = stage === 'published' && (deliveredAtMs === null || o.nowMs - deliveredAtMs > PUBLISHED_WINDOW_MS)
+    if (oldPublished) {
       // Recently expired only: a year of finished work is not a departure anybody is waiting to explain.
       if (deliveredAtMs !== null && o.nowMs - deliveredAtMs <= 3 * PUBLISHED_WINDOW_MS) hide(p, stage, 'published-old')
-      continue
+      // It leaves Publicado, but not the board: the Histórico column keeps the last HISTORY_DAYS days.
+      if (deliveredAtMs === null || o.nowMs - deliveredAtMs > HISTORY_DAYS * PUBLISHED_WINDOW_MS) continue
     }
     const gate = stage === 'qa' || stage === 'adjust' || stage === 'leader' || stage === 'merge' || stage === 'ci' || stage === 'blocked'
     const staged = p.sub?.stagedSession !== undefined
@@ -662,8 +715,20 @@ export function buildLive(o: {
     const ev = lastBySubject.get(subject)
     const eta = stage === 'published' ? { kind: 'none', reason: 'not-started' } as const
       : estimateEta({ nowMs: o.nowMs, startedAtMs, harness, model, samples })
+    // THE STEP inside the stage: what a worker/the flow REPORTED (`step` events), or what the facts show (an edit, a test
+    // run, a commit, the record's gates) — the larger of the two. Nothing observable and nothing reported = null: no line.
+    const stepInfo = stage === 'published' || stage === 'queue' || stage === 'blocked' ? null : (() => {
+      const reported = stepOf(eventsBySubject.get(subject) ?? [], stageSinceMs)
+      const handback = p.comments.some(c => c.kind === 'handback' && (c.subtaskId ?? null) === (p.sub?.id ?? null) && (stageSinceMs === null || (ms(c.createdAt) ?? 0) >= stageSinceMs))
+      const derived = deriveStep({
+        stage, sinceMs: stageSinceMs, handback,
+        sessions: p.sessions.map(s => ({ id: s.id, live: s.live, isQa: !!s.label && QA_NAME.test(s.label), ...(s.activity ? { activity: s.activity } : {}) })),
+        ...(rec ? { rec: rec as StepRecord } : {}),
+      })
+      return mergeStep(reported, derived)
+    })()
     const { stageEta, publishEta } = estimateStages({ stage, origin: originStage, sinceMs: stageSinceMs, nowMs: o.nowMs, typicals, totalEta: eta })
-    deliveries.push({
+    ;(oldPublished ? history : deliveries).push({
       key: subject,
       taskId: p.task.id, taskTitle: p.task.title,
       subtaskId: p.sub?.id ?? null,
@@ -678,12 +743,15 @@ export function buildLive(o: {
       eta, workMs, trail, stageEta, publishEta,
       block: stage === 'blocked' ? blockOf({ text: rec?.block ? `${rec.block.reason}: ${rec.block.text}` : p.blockedReason, dependsOn: p.dependsOn, originStage }) : null,
       ci: stage === 'ci' ? (ciSignalOf(rec?.ci ?? ((p.sub ?? p.task) as { ci?: unknown }).ci) ?? { mergedMain: true, releaseGreen: false, tagPublished: false, tag: null, pr: null }) : null,
-      step: stage === 'published' || stage === 'queue' ? null : stepOf(eventsBySubject.get(subject) ?? [], stageSinceMs),
+      step: stepInfo?.step ?? null,
+      stepSource: stepInfo?.source ?? null,
+      stepSignal: stepInfo?.signal ?? null,
       lastAction: ev ? {
         text: (ev.detail ?? ev.kind).split('\n')[0]!.slice(0, 240), atMs: ms(ev.at) ?? o.nowMs, kind: ev.kind,
         ...(ev.from ? { from: ev.from } : {}), ...(ev.to ? { to: ev.to } : {}),
       } : null,
       blockedReason: p.blockedReason,
+      priority: migratePriority(p.task.priority) as LiveDelivery['priority'],
       deliveredAtMs: stage === 'published' ? deliveredAtMs : null,
       staged: p.sub?.stagedSession ? {
         harness: p.sub.stagedSession.harness ?? null, model: p.sub.stagedSession.model ?? null,
@@ -692,13 +760,16 @@ export function buildLive(o: {
       slot: rec?.gates?.vaga ? { ok: rec.gates.vaga.ok, reason: rec.gates.vaga.reason ?? null, at: rec.gates.vaga.at } : null,
       phase: rec?.phase ?? null,
       awaitingApproval: awaitingApprovalOf(rec),
+      queue: stage === 'queue' ? queueOfRecord(rec, o.nowMs) : null,
     })
   }
   deliveries.sort((a, b) => (b.stageSinceMs ?? 0) - (a.stageSinceMs ?? 0))
   const sessionTasks: Record<string, string> = {}
   for (const d of o.details) for (const s of d.sessions) if (!s.historical && !s.endedAt) sessionTasks[s.id] = d.task.id
   return {
-    generatedAt: new Date(o.nowMs).toISOString(), deliveries, samples: samples.length, sessionTasks,
+    generatedAt: new Date(o.nowMs).toISOString(), deliveries,
+    history: history.sort((a, b) => (b.deliveredAtMs ?? 0) - (a.deliveredAtMs ?? 0)).slice(0, HISTORY_CAP),
+    samples: samples.length, sessionTasks,
     hidden: hidden.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, HIDDEN_CAP),
     archived: archived.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, ARCHIVED_CAP), archivedTotal: archived.length,
   }

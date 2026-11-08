@@ -40,6 +40,17 @@ describe('/api/deliveries', () => {
     const { svc } = fakeService()
     expect((await deliveryRequest('POST', '/api/deliveries/s1', { action: 'skip' }, { service: svc, verify })).status).toBe(400)
   })
+  test('step: a recorded delivery goes through the record; a piece without one writes only the event', async () => {
+    const { svc, calls } = fakeService()
+    const stepEvent = async (...args: unknown[]) => { calls.push({ fn: 'stepEvent', args }); return args[0] === 'zz' ? { ok: false as const, status: 404, code: 'no_such_subtask', sentence: 'no', missing: [] } : { ok: true as const, status: 200 as const, step: args[1] as number, recorded: 'event' as const } }
+    const service = { ...svc, stepEvent } as unknown as DeliveryService
+    await deliveryRequest('POST', '/api/deliveries/s1', { action: 'step', step: 2, session: { id: 'w1', token: 'good' } }, { service, verify })
+    expect(calls.at(-1)).toEqual({ fn: 'step', args: ['s1', 2, 'w1'] })
+    const legacy = await deliveryRequest('POST', '/api/deliveries/legacy1', { action: 'step', step: 3, session: { id: 'w1', token: 'good' } }, { service, verify })
+    expect(calls.at(-1)).toEqual({ fn: 'stepEvent', args: ['legacy1', 3, 'w1'] })
+    expect(legacy).toEqual({ status: 200, body: { ok: true, step: 3, recorded: 'event' } })
+    expect((await deliveryRequest('POST', '/api/deliveries/zz', { action: 'step', step: 3 }, { service, verify })).status).toBe(404)
+  })
   test('dequeue forwards the free-text reason and verified actor; forged proof refuses', async () => {
     const { svc, calls } = fakeService()
     const body = { action: 'dequeue', reason: 'already delivered', session: { id: 'w1', token: 'good' } }

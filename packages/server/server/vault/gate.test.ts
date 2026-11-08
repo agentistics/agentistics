@@ -16,7 +16,7 @@ import {
   sealToFile, unlockWithGesture, vaultDir, vaultStatus,
 } from './service'
 import {
-  VAULT_ACTION_ROWS, __resetGateForTests, beginAuthenticator, mintSetupCode, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
+  VAULT_ACTION_ROWS, __resetGateForTests, acceptSetupCode, beginAuthenticator, mintSetupCode, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
   enrolPresence, grantValid, mintGrant, recoverWithWords, requireVaultStepUp, setAutoLockMinutes, stepUpState, addPassphraseAllowed,
   type VaultAction,
 } from './gate'
@@ -42,16 +42,17 @@ function fake(id: ProtectorId): Protector & { gestures: number; cancel: boolean 
 
 let T = 1_800_000_000_000
 const clock = () => T
-const step = () => Math.floor(T / 1000 / 30)
-let seed: Uint8Array
-const codeAt = (offset = 0) => hotp(seed, step() + offset)
-/** Every accepted code burns its step (replay): move to the next one. */
+// COFRE.DESBLOQUEIO (2026-11-07): no authenticator, no seed. A "code" a test passes is IGNORED by the gate.
+const codeAt = (_offset = 0) => '123456'
 const next = () => { T += 30_000 }
 
 let dir = ''
 let dpapi = fake('dpapi')
 let hello = fake('hello')
-const S = { session: 'session-A' }
+/** A page ON this computer (loopback): the only page a gesture may be raised for (COFRE.DESBLOQUEIO). */
+const S = { session: 'session-A', loopback: true }
+/** The same session from another device (a LAN / tailnet page): never a dialog on this computer. */
+const REMOTE = { session: 'session-A' }
 const MARK = 'TEST-NOT-A-SECRET-' + randomBytes(6).toString('hex')
 
 function restart(): void {
@@ -60,21 +61,16 @@ function restart(): void {
   __resetGateForTests(clock)
 }
 
-/** The §7.3 owner flow: vault (silent) → authenticator → recovery key → presence (silent removed). */
+/** The owner flow (COFRE.DESBLOQUEIO): vault (silent) → presence → recovery key (silent removed). No authenticator. */
 async function ownerMachine(): Promise<{ words: string[] }> {
   dir = await mkdtemp(join(tmpdir(), 'agentistics-gate-'))
   dpapi = fake('dpapi'); hello = fake('hello')
   restart()
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode(MARK))
   // The page's first enrolment carries the one-time setup code the service printed (review S2).
-  const a = await beginAuthenticator({ ...S, setupCode: mintSetupCode().code }, 'test-box')
-  if (!a.ok) throw new Error(a.sentence)
-  seed = base32Decode(a.secret)
-  expect(a.uri).toStartWith('otpauth://totp/Agentistics:test-box?')
-  // The URI is served ONCE.
-  expect((await beginAuthenticator({ ...S, setupCode: mintSetupCode().code }, 'test-box')).ok).toBe(false)
-  expect((await confirmAuthenticator(codeAt(0), S)).ok).toBe(true)
-  next()
+  expect((await acceptSetupCode({ ...S, setupCode: mintSetupCode().code })).ok).toBe(true)
+  // The authenticator is gone from every channel.
+  expect((await beginAuthenticator(S, 'test-box')).ok).toBe(false)
   // Leader decision 2: presence BEFORE the recovery key (presence replaces the data key; the words are
   // made LAST so they wrap the final key and are never kept in memory across steps).
   const p = await enrolPresence('hello', { ...S, code: codeAt() })
@@ -97,7 +93,7 @@ describe('the owner flow, then a restart (§1.2, §2.2)', () => {
     await ownerMachine()
     const v = parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!
     expect(v.wrappers.map(w => w.type).sort()).toEqual(['hello', 'recovery'])
-    expect(v.stepup).toMatchObject({ digits: 6, period: 30 })
+    expect(v.stepup).toBeUndefined() // COFRE.DESBLOQUEIO: no authenticator is ever recorded again
     expect(STORE.has(`dpapi:${v.kid}`)).toBe(false)
 
     restart()
@@ -111,38 +107,15 @@ describe('the owner flow, then a restart (§1.2, §2.2)', () => {
     expect(!r.ok && !r.absent && r.code).toBe('presence-required')
   })
 
-  test('gesture → pending-stepup: NOTHING opens until the code; a wrong code zeroes the key (bytes asserted)', async () => {
+  test('COFRE.DESBLOQUEIO: the gesture ALONE opens it — no code is owed, nothing waits, a code endpoint has nothing to complete', async () => {
     await ownerMachine()
     restart()
-    expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'pending-stepup' })
-    const pending = pendingUnlock()!
-    const dekRef = pending.dek
-    expect(dekRef.some(b => b !== 0)).toBe(true)
-    expect(await ensureVaultOpen()).toBeNull()
-    expect((await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')).ok).toBe(false)
-    const wrong = await completeUnlock('000000' === codeAt() ? '111111' : '000000')
-    expect(wrong.ok).toBe(false)
-    expect(dekRef.every(b => b === 0)).toBe(true)
+    const g0 = hello.gestures
+    expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' })
+    expect(hello.gestures - g0).toBe(1)
     expect(pendingUnlock()).toBeNull()
-    expect((await vaultStatus()).state).toBe('locked')
-    // and the right one, after a fresh gesture
-    expect((await unlockWithGesture()).ok).toBe(true)
-    expect((await completeUnlock(codeAt())).ok).toBe(true)
-    next()
     const r = await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')
     expect(r.ok && new TextDecoder().decode(r.plaintext)).toBe(MARK)
-  })
-
-  test('pending-stepup expires at 120 s and zeroes the key', async () => {
-    await ownerMachine()
-    restart()
-    await unlockWithGesture()
-    const dekRef = pendingUnlock()!.dek
-    T += 119_000
-    expect(pendingUnlock()).not.toBeNull()
-    T += 2_000
-    expect(pendingUnlock()).toBeNull()
-    expect(dekRef.every(b => b === 0)).toBe(true)
     expect((await completeUnlock(codeAt())).ok).toBe(false)
   })
 
@@ -161,41 +134,37 @@ describe('§2.4 — every row of the table', () => {
 
   const rows = Object.entries(VAULT_ACTION_ROWS).filter(([a]) => a !== 'unlock') as [VaultAction, (typeof VAULT_ACTION_ROWS)[VaultAction]][]
   for (const [action, row] of rows) {
-    test(`${action}: code ${row.code ? 'yes' : 'no'}, gesture ${row.gesture ? 'yes' : 'no'}, grant ${row.grant ?? 'none'}`, async () => {
-      // A personal-secret row is the DESKTOP rule on a loopback page (off loopback the gesture is a phone
-      // passkey token — tested in mobile.test.ts).
+    // COFRE.DESBLOQUEIO (owner, 2026-11-07): every row that asked the code OR the gesture now asks the
+    // person's ONE proof — here Windows Hello. A code is never asked and never helps.
+    test(`${action}: asks ${row.code || row.gesture ? 'the proof' : 'nothing'}${row.code && !row.gesture && row.grant ? ', reusable for 5 min' : row.code || row.gesture ? ', fresh' : ''}`, async () => {
       if (action === 'personal-grant') return // VAULT.UI2: loopback needs no proof, a phone needs its passkey — see the dedicated describe below
-      // Review M3: a no-proof row is the rule for THIS computer (a remote caller owes the code — review-2-103-2.test.ts).
-      const C = action === 'extend-open' || action.startsWith('personal-') || (!row.code && !row.gesture) ? { ...S, loopback: true } : S
       if (!row.code && !row.gesture) {
-        expect((await requireVaultStepUp(action, C)).ok).toBe(true)
+        expect((await requireVaultStepUp(action, S)).ok).toBe(true)
         return
       }
-      if (!row.code) {
-        // Gesture only (§10 the computer's approval of a phone): no code asked, Hello raised, fresh, no grant.
-        const g0 = hello.gestures
-        const ok = await requireVaultStepUp(action, C)
-        expect(ok).toMatchObject({ ok: true })
-        expect(ok.ok && ok.grant).toBeFalsy()
-        expect(hello.gestures - g0).toBe(1)
-        return
-      }
-      expect(await requireVaultStepUp(action, C)).toMatchObject({ ok: false, code: 'stepup-required' })
       const g0 = hello.gestures
-      const ok = await requireVaultStepUp(action, { ...C, code: codeAt() })
-      next()
+      const ok = await requireVaultStepUp(action, S)
       expect(ok.ok).toBe(true)
-      expect(hello.gestures - g0).toBe(row.gesture ? 1 : 0)
-      if (row.grant) {
+      expect(hello.gestures - g0).toBe(1)
+      // A code is not a proof: with the gesture cancelled, the code changes nothing.
+      hello.cancel = true
+      expect((await requireVaultStepUp(action, { ...S, code: codeAt() })).ok).toBe(false)
+      hello.cancel = false
+      if (row.code && !row.gesture && row.grant) {
+        // What only asked the CODE keeps its 5-minute grant: the proof once, then reused — this session only.
         const grant = ok.ok ? ok.grant : undefined
         expect(grant).toBeString()
-        expect((await requireVaultStepUp(action, { ...C, grant })).ok).toBe(true)                       // reused
-        expect((await requireVaultStepUp(action, { ...C, session: 'session-B', grant })).ok).toBe(false)     // bound to the session
-      } else {
-        // destructive: a grant from a read step-up is NOT accepted
-        const read = await requireVaultStepUp('set-auto-lock', { ...S, code: codeAt() })
-        next()
-        expect((await requireVaultStepUp(action, { ...C, grant: read.ok ? read.grant : undefined })).ok).toBe(false)
+        const g1 = hello.gestures
+        expect((await requireVaultStepUp(action, { ...S, grant })).ok).toBe(true)
+        expect(hello.gestures).toBe(g1)                                                   // reused
+        expect((await requireVaultStepUp(action, { ...S, session: 'session-B', grant })).ok).toBe(true)
+        expect(hello.gestures).toBe(g1 + 1)                                               // bound to the session: asked again
+      } else if (row.gesture) {
+        // A fresh proof: a read grant never stands for it.
+        const read = await requireVaultStepUp('set-auto-lock', S)
+        const g1 = hello.gestures
+        expect((await requireVaultStepUp(action, { ...S, grant: read.ok ? read.grant : undefined })).ok).toBe(true)
+        expect(hello.gestures).toBe(g1 + 1)
       }
     })
   }
@@ -206,9 +175,13 @@ describe('§2.4 — every row of the table', () => {
   })
 
   test('lock and lock-local ask nothing (locking only reduces exposure); set-auto-lock is gated; set-auto-lock refuses "never"', async () => {
+    const g0 = hello.gestures
     expect((await requireVaultStepUp('lock', S)).ok).toBe(true)
-    expect((await requireVaultStepUp('set-auto-lock', S)).ok).toBe(false)
     expect((await requireVaultStepUp('lock-local', S)).ok).toBe(true)
+    expect(hello.gestures).toBe(g0)
+    hello.cancel = true
+    expect((await requireVaultStepUp('set-auto-lock', S)).ok).toBe(false)
+    hello.cancel = false
     expect((await setAutoLockMinutes('never', { ...S, code: codeAt() })).ok).toBe(false)
     expect((await setAutoLockMinutes(0, { ...S, code: codeAt() })).ok).toBe(false)
     expect((await setAutoLockMinutes(45, { ...S, code: codeAt() })).ok).toBe(true)
@@ -255,9 +228,7 @@ describe('VAULT.UI2 — the grant for a :vault chip, and the extension of an ope
 
   test('locked → one unlock → an OFF secret then goes with no more prompts until it locks again', async () => {
     lockVault('user')
-    await unlockWithGesture()
-    expect((await completeUnlock(codeAt())).ok).toBe(true)
-    next()
+    expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' })
     const g0 = hello.gestures
     for (let i = 0; i < 3; i++) expect((await requireVaultStepUp('personal-grant-open', { ...S, loopback: true })).ok).toBe(true)
     expect(hello.gestures - g0).toBe(0)
@@ -267,7 +238,14 @@ describe('VAULT.UI2 — the grant for a :vault chip, and the extension of an ope
 
   test('a remote origin never gets a Hello prompt: an ON secret wants the phone passkey token', async () => {
     const g0 = hello.gestures
-    expect(await requireVaultStepUp('personal-grant', S)).toMatchObject({ ok: false, code: 'mobile-gesture-required' })
+    expect(await requireVaultStepUp('personal-grant', REMOTE)).toMatchObject({ ok: false, code: 'mobile-gesture-required' })
+    expect(hello.gestures - g0).toBe(0)
+  })
+  test('COFRE.DESBLOQUEIO: nothing raises a dialog on an empty desk — not even what used to ask only the code', async () => {
+    const g0 = hello.gestures
+    for (const a of ['set-auto-lock', 'reset', 'set-auth-policy', 'create-recovery'] as VaultAction[]) {
+      expect(await requireVaultStepUp(a, REMOTE)).toMatchObject({ ok: false, code: 'mobile-gesture-required' })
+    }
     expect(hello.gestures - g0).toBe(0)
   })
 
@@ -290,7 +268,7 @@ describe('VAULT.UI2 — the grant for a :vault chip, and the extension of an ope
       expect(await requireVaultStepUp('extend-open', { ...S, loopback: true, ...proof })).toMatchObject({ ok: false, code: 'presence-cancelled' })
       expect(autoLockRemainingMs()).toBe(before)
     }
-    expect(await requireVaultStepUp('extend-open', { ...S, code: codeAt() })).toMatchObject({ ok: false, code: 'mobile-gesture-required' })
+    expect(await requireVaultStepUp('extend-open', { ...REMOTE, code: codeAt() })).toMatchObject({ ok: false, code: 'mobile-gesture-required' })
     hello.cancel = false
   })
 
@@ -361,46 +339,32 @@ describe('VAULT.UI2 — a provider session start prompts at most ONCE (owner, 20
   })
 })
 
-describe('§2.3 on the host: the counter is on disk, and 20 failures freeze (and lock)', () => {
-  test('frozen → every gated action refused, the vault locked, until recover', async () => {
-    const { words } = await ownerMachine()
-    for (let i = 0; i < 20; i++) {
-      const s = await stepUpState()
-      if (s.pausedUntilMs) T = s.pausedUntilMs + 1
-      await requireVaultStepUp('set-auto-lock', { ...S, code: '000000' === codeAt() ? '111111' : '000000' })
-    }
-    expect((await stepUpState()).frozen).toBe(true)
-    expect(existsSync(join(vaultDir(), 'stepup.json'))).toBe(true)
-    expect((await vaultStatus()).lockedBy).toBe('stepup-frozen')
-    // a "restart" does not reset it (the file is read back)
-    restart()
-    expect((await stepUpState()).frozen).toBe(true)
-    expect(await requireVaultStepUp('set-auto-lock', { ...S, code: codeAt() })).toMatchObject({ ok: false, code: 'stepup-frozen' })
-    // recover lifts it into recovery mode
-    expect((await recoverWithWords(words.join(' '))).ok).toBe(true)
+describe('COFRE.DESBLOQUEIO: a code is never judged, so nothing can be frozen by one', () => {
+  test('twenty wrong codes count nothing, write no counter and lock nothing', async () => {
+    await ownerMachine()
+    for (let i = 0; i < 20; i++) { T += 16 * 60_000; await requireVaultStepUp('set-auto-lock', { ...S, code: '000000' }) }
     expect((await stepUpState()).frozen).toBe(false)
+    expect((await stepUpState()).failures).toBe(0)
+    expect(existsSync(join(vaultDir(), 'stepup.json'))).toBe(false)
+    expect((await vaultStatus()).lockedBy).not.toBe('stepup-frozen')
   })
 })
 
 describe('§4.3 / §12.4 recovery', () => {
-  test('recover → recovery mode refuses everything but the three re-enrolment steps; afterwards the old words are dead', async () => {
+  test('recover → recovery mode refuses everything but the two re-enrolment steps; afterwards the old words are dead', async () => {
     const { words } = await ownerMachine()
     restart()
     expect((await recoverWithWords(words.slice(0, 23).join(' '))).ok).toBe(false)
     const r = await recoverWithWords(words.map(w => w.slice(0, 4)).join(' '))
-    expect(r).toMatchObject({ ok: true, todo: ['presence', 'authenticator', 'recovery'] })
+    // COFRE.DESBLOQUEIO: no authenticator step — a way to confirm, and new words.
+    expect(r).toMatchObject({ ok: true, todo: ['presence', 'recovery'] })
     for (const a of ['list', 'reset', 'rekey', 'set-auto-lock', 'disable-presence'] as VaultAction[]) {
       expect(await requireVaultStepUp(a, { ...S, code: codeAt() })).toMatchObject({ ok: false, code: 'recovery-mode' })
     }
-    // (a) presence, (b) authenticator, (c) a NEW recovery key — none needs the lost factors, and all
-    // three answer the local terminal's channel only (review M2: never an HTTP session)
+    // (a) presence, (b) a NEW recovery key — neither needs the lost factors, and both answer the local
+    // terminal's channel only (review M2: never an HTTP session)
     const SOCK = { session: 'socket' }
     expect((await enrolPresence('hello', SOCK)).ok).toBe(true)
-    const a = await beginAuthenticator(SOCK, 'test-box')
-    if (!a.ok) throw new Error(a.sentence)
-    seed = base32Decode(a.secret)
-    expect((await confirmAuthenticator(codeAt(0))).ok).toBe(true)
-    next()
     const k = await beginRecoveryKey(SOCK)
     if (!k.ok) throw new Error(k.sentence)
     expect((await confirmRecoveryKey(k.positions.map(p => k.words[p - 1]!))).ok).toBe(true)
@@ -411,16 +375,14 @@ describe('§4.3 / §12.4 recovery', () => {
     expect((await recoverWithWords(k.words.join(' '))).ok).toBe(true)
   })
 
-  test('the words, the seed and the codes never appear in the audit trail or the vault files', async () => {
+  test('the words never appear in the audit trail or the vault files', async () => {
     const { words } = await ownerMachine()
     restart()
     await recoverWithWords(words.join(' '))
     const audit = readFileSync(join(vaultDir(), 'audit.jsonl'), 'utf8')
     const vjson = readFileSync(join(vaultDir(), 'vault.json'), 'utf8')
-    const step = readFileSync(join(vaultDir(), 'stepup.json'), 'utf8')
-    for (const blob of [audit, vjson, step]) {
+    for (const blob of [audit, vjson]) {
       expect(blob).not.toContain(words.slice(0, 3).join(' '))
-      expect(blob).not.toContain(Buffer.from(seed).toString('hex'))
       expect(blob).not.toContain(MARK)
     }
     expect(audit).toContain('vault.recovered')
@@ -453,9 +415,7 @@ describe('§5.1 / §12.5 auto-lock', () => {
   test('a presence vault that auto-locked says so, and stays locked until a gesture', async () => {
     await ownerMachine()
     restart()
-    await unlockWithGesture()
-    expect((await completeUnlock(codeAt())).ok).toBe(true)
-    next()
+    expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' })
     expect(autoLockTick(T + 31 * 60_000)).toBe(true)
     expect(await ensureVaultOpen()).toBeNull()
     expect((await vaultStatus()).sentence).toBe(refusalSentence('auto-locked', 'en', { minutes: 30, presence: 'Windows Hello' }))
@@ -466,166 +426,86 @@ describe('§5.1 / §12.5 auto-lock', () => {
 
 import { autoLockRemainingMs, extendAutoLock, lockVault, unlockWindowAnchor, unlockWindowHint, unlockWindowSettled, UNLOCK_WINDOW_FILE } from './service'
 import { writeFileSync } from 'node:fs'
-import { setUnlockPolicy, unlockPolicyView } from './gate'
+import { disablePresence, setUnlockPolicy } from './gate'
+import { readVaultView } from './inventory'
 
-const H = 3_600_000
-/** A full gesture+code unlock from a cold (just restarted) service. */
+/** An unlock from a cold (just restarted) service: since COFRE.DESBLOQUEIO, the gesture alone. */
 async function coldUnlock(): Promise<void> {
-  expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'pending-stepup' })
-  expect((await completeUnlock(codeAt())).ok).toBe(true)
-  next()
+  expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' })
 }
-/** Auto-lock (NOT a restart): the in-memory window must survive it. */
-const autoLock = () => lockVault('auto-lock')
 
-describe('unlock policy — per day (the DEFAULT): code on the first unlock, Hello alone inside the window', () => {
-  test('absent from vault.json reads as daily / 24 h, and the first unlock after start owes the code', async () => {
+// The "unlock policy" (always / hello-only / per-day CODE window) existed only to decide when the
+// authenticator code was owed at an unlock. With the code gone (owner, 2026-11-07) every unlock is the
+// person's proof alone, whatever a vault.json from before says.
+describe('COFRE.DESBLOQUEIO — every unlock is the proof alone, whatever an older unlock policy says', () => {
+  for (const mode of ['always', 'daily', 'hello-only'] as const) {
+    test(`a vault that recorded "${mode}" opens with the gesture alone, cold and after a lock`, async () => {
+      await ownerMachine()
+      const v = parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!
+      writeFileSync(join(vaultDir(), 'vault.json'), JSON.stringify({ ...v, unlockPolicy: { mode, hours: 12 } }))
+      restart()
+      await coldUnlock()
+      lockVault('auto-lock'); T += 25 * 3_600_000
+      await coldUnlock()
+      expect(unlockWindowAnchor()).toBeNull()
+    })
+  }
+  test('setting the policy is still a protected setting (the proof, fresh) and refuses what is not a policy', async () => {
     await ownerMachine()
-    restart()
-    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.unlockPolicy).toBeUndefined()
-    expect(unlockPolicyView(null)).toMatchObject({ mode: 'daily', hours: 24, chosen: false, codeNextUnlock: true })
-    await coldUnlock()
-    expect(unlockWindowAnchor()).not.toBeNull()
-  })
-  test('a re-open after auto-lock inside the window is the gesture ALONE — one Hello, no code', async () => {
-    await ownerMachine()
-    restart()
-    await coldUnlock()
-    autoLock()
-    T += 3 * H
-    const g = hello.gestures
-    expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' })
-    expect(hello.gestures).toBe(g + 1)
-    expect(pendingUnlock()).toBeNull()
-  })
-  test('the window is anchored to the last gesture+CODE unlock, not to a Hello-only re-open, and expires at N hours', async () => {
-    await ownerMachine()
-    restart()
-    await coldUnlock()
-    autoLock(); T += 23 * H
-    expect(await unlockWithGesture()).toMatchObject({ state: 'open' }) // Hello alone, does NOT move the anchor
-    autoLock(); T += 1 * H + 1_000                                     // 24 h after the code unlock
-    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
-  })
-  test('VAULT.UX-R2: a MANUAL lock counts the same as an auto-lock — Hello alone inside 24 h, the code at 24 h', async () => {
-    await ownerMachine()
-    restart()
-    await coldUnlock()
-    lockVault('user'); T += 5 * H
-    expect(await unlockWithGesture()).toMatchObject({ state: 'open' })
-    lockVault('user'); T += 18 * H + 59 * 60_000                       // 23 h 59 min after the code
-    expect(await unlockWithGesture()).toMatchObject({ state: 'open' })
-    lockVault('user'); T += 60_000                                      // exactly 24 h
-    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
-  })
-  test('VAULT.UX-R2: the window SURVIVES a service restart (it is per machine, in the vault directory)', async () => {
-    await ownerMachine()
-    restart()
-    await coldUnlock()
-    await unlockWindowSettled()
-    expect(existsSync(join(vaultDir(), UNLOCK_WINDOW_FILE))).toBe(true)
-    restart() // the service process is new
-    expect(unlockWindowAnchor()).toBeNull() // memory starts empty …
-    T += 6 * H
-    expect(await unlockWithGesture()).toMatchObject({ state: 'open' }) // … and the file restores it after the gesture
-    expect(unlockWindowAnchor()).not.toBeNull()
-    lockVault('user'); restart(); T += 18 * H
-    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' }) // 24 h: the code again
-  })
-  test('VAULT.UX-R2: the countdown is stated on a COLD, LOCKED service (the hint reads the file; the gate still verifies)', async () => {
-    await ownerMachine()
-    restart()
-    await coldUnlock()
-    await unlockWindowSettled()
-    const kid = parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.kid
-    lockVault('user'); restart(); T += 5 * H
-    const hint = await unlockWindowHint(kid)
-    expect(hint).not.toBeNull()
-    const v = unlockPolicyView(null, hint)
-    expect(v.codeNextUnlock).toBe(false)
-    expect(Date.parse(v.windowEndsAt!)).toBe(hint! + 24 * H)
-    expect(await unlockWindowHint('0'.repeat(16))).toBeNull() // another vault's kid: no clock
-  })
-  test('VAULT.UX-R2: a window file that does not verify under the vault key is ignored — the code is asked', async () => {
-    await ownerMachine()
-    restart()
-    await coldUnlock()
-    await unlockWindowSettled()
-    const path = join(vaultDir(), UNLOCK_WINDOW_FILE)
-    const j = JSON.parse(readFileSync(path, 'utf8'))
-    writeFileSync(path, JSON.stringify({ ...j, atMs: j.atMs + 3 * H })) // moved forward by hand: MAC no longer matches
-    restart(); T += 22 * H
-    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
-  })
-  test('ANY failed code drops the window', async () => {
-    await ownerMachine()
-    restart()
-    await coldUnlock()
-    const wrong = codeAt() === '000000' ? '111111' : '000000'
-    expect((await requireVaultStepUp('set-auto-lock', { ...S, code: wrong })).ok).toBe(false)
-    expect(unlockWindowAnchor()).toBeNull()
-    autoLock()
-    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
-    await unlockWindowSettled()
-    expect(existsSync(join(vaultDir(), UNLOCK_WINDOW_FILE))).toBe(false) // and off disk: a restart cannot bring it back
-  })
-  test('recovery drops the window', async () => {
-    const { words } = await ownerMachine()
-    restart()
-    await coldUnlock()
-    autoLock()
-    expect((await recoverWithWords(words.join(' '))).ok).toBe(true)
-    expect(unlockWindowAnchor()).toBeNull()
-  })
-  test('a configurable window: 1 hour', async () => {
-    await ownerMachine()
-    restart()
-    await coldUnlock()
-    expect((await setUnlockPolicy({ mode: 'daily', hours: 1 }, { ...S, code: codeAt() })).ok).toBe(true)
-    next()
-    autoLock(); T += 30 * 60_000
-    expect(await unlockWithGesture()).toMatchObject({ state: 'open' })
-    autoLock(); T += 31 * 60_000
-    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
-  })
-})
-
-describe('unlock policy — always (Hello + code every time)', () => {
-  test('every unlock owes the code, auto-lock or not', async () => {
-    await ownerMachine()
-    expect((await setUnlockPolicy({ mode: 'always', hours: 12 }, { ...S, code: codeAt() })).ok).toBe(true)
-    next()
-    restart()
-    await coldUnlock()
-    autoLock(); T += 60_000
-    expect(await unlockWithGesture()).toMatchObject({ state: 'pending-stepup' })
-  })
-})
-
-describe('unlock policy — Hello only', () => {
-  test('the gesture alone opens it, even cold; the code is still asked for the inventory', async () => {
-    await ownerMachine()
-    expect((await setUnlockPolicy({ mode: 'hello-only', hours: 12 }, { ...S, code: codeAt() })).ok).toBe(true)
-    next()
-    restart()
-    expect(await unlockWithGesture()).toMatchObject({ ok: true, state: 'open' })
-    const l = await requireVaultStepUp('set-auto-lock', S)
-    expect(!l.ok && l.code).toBe('stepup-required')
-  })
-})
-
-describe('changing the policy is gated by the code AND the gesture, and refuses what is not a policy', () => {
-  test('no code → refused; a bad mode or hours → refused in words; the right code + gesture → written', async () => {
-    await ownerMachine()
-    expect((await setUnlockPolicy({ mode: 'hello-only', hours: 12 }, S)).ok).toBe(false)
     for (const bad of [{ mode: 'never', hours: 12 }, { mode: 'daily', hours: 0 }, { mode: 'daily', hours: 25 }, { mode: 'daily', hours: 1.5 }]) {
-      const r = await setUnlockPolicy(bad, { ...S, code: codeAt() })
+      const r = await setUnlockPolicy(bad, S)
       expect(!r.ok && r.code).toBe('bad-request')
     }
-    const g = hello.gestures
-    expect((await setUnlockPolicy({ mode: 'daily', hours: 8 }, { ...S, code: codeAt() })).ok).toBe(true)
-    expect(hello.gestures).toBeGreaterThan(g)
-    expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!.unlockPolicy).toEqual({ mode: 'daily', hours: 8 })
-    expect(VAULT_ACTION_ROWS['set-unlock-policy']).toEqual({ code: true, gesture: true, grant: null })
+    hello.cancel = true
+    expect((await setUnlockPolicy({ mode: 'daily', hours: 8 }, S)).ok).toBe(false)
+    hello.cancel = false
+  })
+})
+
+describe('COFRE.DESBLOQUEIO — migration: a vault that still records an authenticator', () => {
+  /** A vault as an older version left it: an authenticator recorded, its sealed seed and counter on disk. */
+  async function legacy(): Promise<void> {
+    await ownerMachine()
+    const v = parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!
+    writeFileSync(join(vaultDir(), 'vault.json'), JSON.stringify({ ...v, stepup: { enrolledAt: '2026-10-01T00:00:00.000Z', digits: 6, period: 30 }, unlockPolicy: { mode: 'always', hours: 24 } }))
+    writeFileSync(join(vaultDir(), 'totp-seed.sealed'), 'legacy-seed-placeholder')
+    writeFileSync(join(vaultDir(), 'stepup.json'), JSON.stringify({ v: 1, failures: 3, lastStep: 1, pausedUntilMs: null, frozen: false }))
+    restart()
+  }
+  test('it keeps opening — with the gesture alone; the code is never asked', async () => {
+    await legacy()
+    await coldUnlock()
+    const g0 = hello.gestures
+    expect((await requireVaultStepUp('set-auto-lock', S)).ok).toBe(true)
+    expect(hello.gestures - g0).toBe(1)
+  })
+  test('the view never reports it as enrolled, only as a legacy fact', async () => {
+    await legacy()
+    await coldUnlock()
+    const view = await readVaultView([], async () => [], S.session, true)
+    expect(view.authenticator).toBeNull()
+    expect(view.legacyAppCode).toBe(true)
+  })
+  test('setting up a new way to confirm DROPS it: vault.json loses the record, the seed and the counter are deleted', async () => {
+    await legacy()
+    await coldUnlock()
+    const SOCK = { session: 'socket' }
+    // a second way (the first already protects the vault): hello is there, so add it again via the socket's flow
+    const v0 = parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!
+    expect(v0.stepup).toBeDefined()
+    // Retire through a real enrolment: turn presence off (back to silent), then on again.
+    const off = await disablePresence(SOCK)
+    expect(off.ok).toBe(true)
+    const on = await enrolPresence('hello', { ...SOCK, replaceRecovery: true })
+    expect(on.ok).toBe(true)
+    const k = await beginRecoveryKey(SOCK)
+    if (!k.ok) throw new Error(k.sentence)
+    expect((await confirmRecoveryKey(k.positions.map(p => k.words[p - 1]!), SOCK)).ok).toBe(true)
+    const v = parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))!
+    expect(v.stepup).toBeUndefined()
+    expect(v.unlockPolicy).toBeUndefined()
+    expect(existsSync(join(vaultDir(), 'totp-seed.sealed'))).toBe(false)
+    expect(existsSync(join(vaultDir(), 'stepup.json'))).toBe(false)
+    expect(readFileSync(join(vaultDir(), 'audit.jsonl'), 'utf8')).toContain('vault.authenticator-retired')
   })
 })

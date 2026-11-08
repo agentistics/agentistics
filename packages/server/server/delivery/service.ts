@@ -24,6 +24,10 @@ import {
 import { judgePredispatch, releaseFailed, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
 import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
 import { sharedQueueArea } from './queue-fit'
+import {
+  ASK_TIMEOUT_MS, holdState, orderQueue, parseQueueAnswer, planQueue, QUEUE_HEADER, questionText, reminderDue, startClaimLive, whyNext,
+  type QueueAnswer, type QueueItem,
+} from './fila-proximo'
 
 export interface DeliveryBoard {
   /** Move the subtask's board status to the one this phase is shown under (created when missing). */
@@ -41,7 +45,7 @@ export interface DeliveryBoard {
 
 export interface DeliveryNotify {
   /** Type into a session's composer (the leader, the author, the QA). Never the owner. */
-  session(sessionId: string, text: string): Promise<boolean>
+  session(sessionId: string, text: string, header?: string): Promise<boolean>
   /** The owner's bell — INFORMATIONAL (`aviso`) always; `decisao` only ever with autonomous mode OFF. */
   owner(text: string, kind: 'aviso' | 'decisao'): Promise<void>
 }
@@ -62,7 +66,29 @@ export interface DeliveryDeps {
   now(): number
   /** Canonical ORQ.H1/H4 pedidos, read from the engine; null = temporarily unreadable. */
   requests?(): Promise<OwnerRequestFact[] | null>
+  /** The name a person gave an account ("Vini"); null = none known (the question then leaves the account out, never an id). */
+  accountName?(harness: string, account: string): Promise<string | null>
 }
+
+/** FILA.PRIORIDADE — one queued piece as the Fila tab, the Live card and the MCP read it (ONE source). */
+export interface QueueViewItem {
+  subtaskId: string; taskId: string; title: string; taskTitle: string
+  /** urgent | high | medium | low — the task's. */
+  priority: string
+  /** 1-based place among THIS task's queued pieces, and among all of them (the leaving order). */
+  position: number; globalPosition: number
+  since: string
+  group: { members: Array<{ id: string; title: string; status: string }> } | null
+  predispatch: { ok: boolean; missing?: string[]; harness: string | null; model: string | null; effort: string | null; account: string | null; accountName: string | null; cwd: string | null; prompt: string }
+  /** The slot gate's last verdict (raw sentence; the screen says it in plain words). */
+  slot: { ok: boolean; reason: string | null; at: string } | null
+  hold: { kind: 'nao' | 'agendar'; reason: string; at: string; actor: string; until?: string; active: boolean } | null
+  ask: { at: string; delivered: boolean; approved: boolean; expiresAt: string; leaderSessionId?: string; onTimeout: 'sim' | 'esperar' } | null
+  leaderSessionId: string | null; leaderAlive: boolean
+  notes: { total: number; last: Array<{ author: string; at: string; body: string }> }
+}
+export interface QueueViewRecent { subtaskId: string; taskId: string; title: string; phase: string; at: string; actor: string; auto: boolean; sessionId: string | null }
+export interface QueueView { generatedAt: string; autonomous: boolean; total: number; items: QueueViewItem[]; recent: QueueViewRecent[] }
 
 export interface OwnerRequestFact { id: string; taskId?: string; sessionId: string; text: string; at: string; state: string; linkedSubtaskIds: string[] }
 export interface ReleasePiece { subtaskId: string; phase: Phase; /** false = it was already declared for this very release and nothing was touched. */ changed: boolean }
@@ -73,6 +99,9 @@ export type ReleaseReply =
 export type DeliveryReply =
   | { ok: true; status: 200; record: DeliveryRecord; warnings: string[]; skipped?: unknown; gate?: GateVerdict }
   | { ok: false; status: number; code: string; sentence: string; missing: string[]; record?: DeliveryRecord; gate?: GateVerdict }
+
+/** The answer of a step report on a piece with no delivery record: the event is all that was written. */
+export type StepEventReply = { ok: true; status: 200; step: number; recorded: 'event' } | Extract<DeliveryReply, { ok: false }>
 
 const fail = (status: number, code: string, sentence: string, missing: string[] = [], record?: DeliveryRecord): Extract<DeliveryReply, { ok: false }> => ({ ok: false, status, code, sentence, missing, ...(record ? { record } : {}) })
 const refused = (p: TransitionRefusal, record?: DeliveryRecord): DeliveryReply => fail(refusalStatus(p), p.code, p.sentence, p.missing, record)
@@ -358,6 +387,20 @@ export function createDeliveryService(d: DeliveryDeps) {
     return { ok: true, status: 200, record: after, warnings: [] }
   }
 
+  /**
+   * The same report for a piece with NO delivery record (a legacy piece the flow never adopted): only the board's
+   * `step` event is written — no record is created, so reporting a step never moves a piece into the flow.
+   * The Live reads that event through `stepOf`, exactly as it does for a recorded delivery.
+   */
+  const stepEvent = async (subtaskId: string, n: unknown, actor: string): Promise<StepEventReply> => {
+    if (!SUB_ID.test(subtaskId)) return fail(400, 'bad_subtask', 'invalid subtask id')
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 9) return fail(400, 'bad_step', 'step must be an integer 1..9')
+    const sub = await d.facts.subtask(subtaskId)
+    if (!sub) return fail(404, 'no_such_subtask', `subtask ${subtaskId} does not exist on the board`)
+    await d.board.logStep(sub.taskId, subtaskId, n, actor)
+    return { ok: true, status: 200, step: n, recorded: 'event' }
+  }
+
   /** P4 — write the pre-dispatch (staged session) on the subtask and open its delivery at `fila`. */
   const stage = async (subtaskId: string, draft: Record<string, unknown>, actor: string, opts: { leaderSessionId?: string; versionTarget?: string; pedidoId?: string; pedidoIds?: readonly string[] } = {}): Promise<DeliveryReply> => {
     const sub = await d.facts.subtask(subtaskId)
@@ -411,10 +454,31 @@ export function createDeliveryService(d: DeliveryDeps) {
       const v = await runGate(g, got, d.facts)
       if (!v.ok) { await d.store.update(doc => absorb(doc.deliveries[subtaskId]!, g, v)); return fail(422, 'portao', `${g}: ${v.reason}`, v.missing ?? []) }
     }
-    const spawned = await d.spawn(got, { ...(sub?.staged ?? {}) })
-    if (!spawned.ok) return fail(422, 'spawn_failed', spawned.message)
+    // ONE session per piece: the claim is taken UNDER the store lock before anything is spawned, so two ticks, a tick and a
+    // leader's `sim`, or two CLI calls can never open two sessions for the same queued piece (FILA.PRIORIDADE idempotency).
+    const claim = await d.store.update(doc => {
+      const c = doc.deliveries[subtaskId]
+      if (!c || c.phase !== 'fila' || c.dequeued) return 'gone' as const
+      if (startClaimLive(c.queueAsk, d.now())) return 'busy' as const
+      const created = !c.queueAsk
+      c.queueAsk = { ...(c.queueAsk ?? { at: iso(d), delivered: true }), startingAt: iso(d) }
+      return created ? 'claimed-new' as const : 'claimed' as const
+    })
+    if (claim === 'busy') return fail(409, 'ja_iniciando', 'another call is already opening this piece\'s session', [], got)
+    if (claim === 'gone') return fail(409, 'revisao_obsoleta', 'the piece left the queue meanwhile', [], (await d.store.get(subtaskId)) ?? got)
+    const release = () => d.store.update(doc => {
+      const c = doc.deliveries[subtaskId]
+      if (!c?.queueAsk) return
+      delete c.queueAsk.startingAt
+      if (claim === 'claimed-new') delete c.queueAsk
+    }).catch(() => undefined)
+    let spawned: Awaited<ReturnType<NonNullable<DeliveryDeps['spawn']>>>
+    try { spawned = await d.spawn(got, { ...(sub?.staged ?? {}) }) } catch (e) { await release(); throw e }
+    if (!spawned.ok) { await release(); return fail(422, 'spawn_failed', spawned.message) }
     await d.store.update(doc => { doc.deliveries[subtaskId]!.authorSessionId = spawned.sessionId })
-    return transition(subtaskId, 'executando', { detail: `sessão ${spawned.sessionId} aberta pelo pré-dispatch` }, actor)
+    const moved = await transition(subtaskId, 'executando', { detail: `sessão ${spawned.sessionId} aberta pelo pré-dispatch` }, actor)
+    if (!moved.ok) await release()
+    return moved
   }
 
   /** `agentop flow qa open`: start the QA session in ANOTHER model (refused up front when it is the author's or Sonnet over Sonnet). */
@@ -621,6 +685,272 @@ export function createDeliveryService(d: DeliveryDeps) {
     const run = tickChain.then(guarded, guarded)
     tickChain = run.catch(() => undefined)
     return run
+  }
+
+  // ------------------------------------------------------------------------------------------------ FILA.PRIORIDADE
+
+  const ASK_AUTHOR = 'flow:fila'
+  /** The flow's own message to a leader: header + body, never the standard nudge wrapper. */
+  const tellLeader = async (leader: string | undefined, body: string): Promise<boolean> => {
+    if (!leader) return false
+    return d.notify.session(leader, body, QUEUE_HEADER).catch(() => false)
+  }
+  const note = (r: Pick<DeliveryRecord, 'taskId' | 'subtaskId'>, text: string) => d.board.comment(r.taskId, r.subtaskId, `[fluxo fila] ${text}`).catch(() => undefined)
+  const accountLabel = async (harness?: string, account?: string): Promise<string | undefined> => {
+    if (!harness || !account) return undefined
+    const n = await d.accountName?.(harness, account).catch(() => null)
+    return n && !/^acc_/i.test(n) ? n : undefined
+  }
+
+  /** Queued, startable pieces with the board facts the order and the question need. */
+  const queueItems = async (): Promise<Array<QueueItem & { rec: DeliveryRecord; sub: NonNullable<Awaited<ReturnType<GateFacts['subtask']>>> }>> => {
+    const out: Array<QueueItem & { rec: DeliveryRecord; sub: NonNullable<Awaited<ReturnType<GateFacts['subtask']>>> }> = []
+    for (const rec of Object.values((await d.store.read()).deliveries)) {
+      if (rec.phase !== 'fila' || rec.dequeued) continue
+      const sub = await d.facts.subtask(rec.subtaskId).catch(() => null)
+      if (!sub || sub.groupMember || ['in_review', 'done', 'abandoned', 'blocked'].includes(sub.status)) continue
+      out.push({ subtaskId: rec.subtaskId, taskId: rec.taskId, title: sub.title, priority: sub.priority ?? 'low', since: rec.createdAt, ...(rec.queueHold ? { hold: rec.queueHold } : {}), ...(rec.queueAsk ? { ask: rec.queueAsk } : {}), rec, sub })
+    }
+    return orderQueue(out)
+  }
+
+  /** The recorded leader when alive, else the task's newest live leader; null = nobody reachable. */
+  const liveLeader = (it: { rec: DeliveryRecord; taskId: string; subtaskId: string }, sessions: readonly SessionFact[] | null): string | null =>
+    it.rec.leaderSessionId && sessions?.some(s => s.id === it.rec.leaderSessionId && s.alive) ? it.rec.leaderSessionId : (sessions ? leaderFor(sessions, it.taskId, it.subtaskId) : null)
+
+  /** Slots already promised: a question still open or an approved piece not yet started counts as a running worker. */
+  const phantomsOf = (items: ReadonlyArray<QueueItem & { sub: { staged?: { harness?: string; model?: string; account?: string } } }>, except?: string): SessionFact[] =>
+    items.filter(i => i.ask && i.subtaskId !== except).map(i => ({
+      id: `ask:${i.subtaskId}`, harness: i.sub.staged?.harness ?? '', ...(i.sub.staged?.model ? { model: i.sub.staged.model } : {}), ...(i.sub.staged?.account ? { account: i.sub.staged.account } : {}),
+      role: 'worker', alive: true, cwd: '', worktree: false,
+    }))
+
+  const slotWith = async (rec: DeliveryRecord, phantoms: SessionFact[]): Promise<GateVerdict> => {
+    const real = phantoms.length ? { ...d.facts, sessions: async () => [...await d.facts.sessions(), ...phantoms] } : d.facts
+    return runGate('vaga', rec, real)
+  }
+
+  const storeSlot = (subtaskId: string, v: GateVerdict) => d.store.update(x => {
+    const c = x.deliveries[subtaskId]
+    if (c && c.phase === 'fila') c.gates.vaga = { ok: v.ok, at: iso(d), revision: c.revision, ...(v.evidence ? { evidence: v.evidence } : {}), ...(v.reason ? { reason: v.reason } : {}), ...(v.missing?.length ? { missing: v.missing } : {}) }
+  }).catch(() => undefined)
+
+  /** Open the session of an APPROVED piece. Idempotent: the claim inside `stageRun` lets exactly one caller through. */
+  const startApproved = async (subtaskId: string, actor: string, auto: boolean): Promise<DeliveryReply> => {
+    const before = await d.store.get(subtaskId)
+    if (!before) return fail(404, 'no_delivery', 'this piece has no delivery record')
+    const out = await stageRun(subtaskId, actor)
+    if (!out.ok) return out
+    const r = out.record
+    await d.store.update(x => { const c = x.deliveries[subtaskId]; if (c) c.queueStarted = { at: iso(d), actor, auto, sessionId: c.authorSessionId ?? '' } }).catch(() => undefined)
+    const title = (await d.facts.subtask(subtaskId).catch(() => null))?.title ?? subtaskId
+    await note(r, `entrou em andamento: sessão ${r.authorSessionId ?? '?'} aberta (${auto ? 'sem resposta em 10 min, modo autônomo ligado: seguiu como sim' : `sim de ${actor}`}).`)
+    await tellLeader(r.leaderSessionId, `[from flow fila · aviso]\n"${title}" (${subtaskId}) entrou em andamento: sessão ${r.authorSessionId ?? '?'}${auto ? ' — aberta sozinha, sem resposta sua em 10 min com o modo autônomo ligado' : ''}.`)
+    await d.emit('fila.iniciada', { subtarefa: subtaskId, taskId: r.taskId, auto }).catch(() => undefined)
+    return { ...out, record: (await d.store.get(subtaskId)) ?? r }
+  }
+
+  /** The leader's (or owner's) answer. `sim` starts the piece; `nao` / `agendar` keep it queued with the reason on the card. */
+  const answerQueue = async (subtaskId: string, input: unknown, actor: string, opts: { auto?: boolean } = {}): Promise<DeliveryReply> => {
+    const got = await d.store.get(subtaskId)
+    if (!got) return fail(404, 'no_delivery', 'this piece has no delivery record')
+    if (!(await leads(got, actor))) return fail(403, 'leader_only', 'only the task leader or owner may answer for a queued piece')
+    const parsed = parseQueueAnswer(input, d.now())
+    if (!parsed.ok) return fail(400, 'resposta_invalida', parsed.sentence)
+    const a: QueueAnswer = parsed.answer
+    if (got.phase !== 'fila') {
+      // The second answer to a question that already opened the session is the same answer, not an error.
+      if (a.kind === 'sim' && got.queueStarted) return { ok: true, status: 200, record: got, warnings: ['already started: nothing was opened twice'] }
+      return fail(422, 'fase_pulada', `only a queued piece is answered; this one is in ${got.phase}`, [], got)
+    }
+    if (got.dequeued) return fail(422, 'fora_da_fila', 'this piece was dequeued; stage it explicitly before answering', [], got)
+    const at = iso(d)
+    const who = opts.auto ? 'o fluxo (sem resposta em 10 min, modo autônomo ligado)' : actor
+    if (a.kind === 'sim') {
+      const applied = await d.store.update(x => {
+        const c = x.deliveries[subtaskId]
+        if (!c || c.phase !== 'fila' || c.dequeued) return null
+        const had = c.queueAsk?.approved
+        c.queueAsk = { ...(c.queueAsk ?? { at, delivered: true }), approved: had ?? { at, actor, auto: opts.auto === true } }
+        delete c.queueHold
+        c.updatedAt = at
+        return { already: Boolean(had) }
+      })
+      if (!applied) return fail(409, 'revisao_obsoleta', 'the piece left the queue meanwhile', [], (await d.store.get(subtaskId)) ?? got)
+      if (!applied.already) await note(got, `decisão: sim — ${who}, ${at}. A sessão abre quando o portão de vaga passar.`)
+      const started = await startApproved(subtaskId, actor, opts.auto === true)
+      if (started.ok) return started
+      // No slot (or a gate) right now: the approval stays, the next tick starts it — the answer itself was accepted.
+      if (started.code === 'portao' || started.code === 'ja_iniciando') return { ok: true, status: 200, record: (await d.store.get(subtaskId)) ?? got, warnings: [`approved; ${started.sentence}`] }
+      return started
+    }
+    const hold = a.kind === 'nao'
+      ? { kind: 'nao' as const, reason: a.reason, at, actor }
+      : { kind: 'agendar' as const, reason: a.reason, at, actor, until: a.until }
+    const applied = await d.store.update(x => {
+      const c = x.deliveries[subtaskId]
+      if (!c || c.phase !== 'fila' || c.dequeued) return null
+      const same = c.queueHold && c.queueHold.kind === hold.kind && c.queueHold.reason === hold.reason && c.queueHold.until === hold.until && !c.queueAsk
+      if (same) return { already: true }
+      c.queueHold = hold
+      delete c.queueAsk
+      c.updatedAt = at
+      return { already: false }
+    })
+    if (!applied) return fail(409, 'revisao_obsoleta', 'the piece left the queue meanwhile', [], (await d.store.get(subtaskId)) ?? got)
+    if (!applied.already) {
+      await note(got, a.kind === 'nao'
+        ? `decisão: não — ${who}, ${at}. Motivo: ${a.reason}. Continua na fila; o fluxo passa ao próximo.`
+        : `decisão: agendar — ${who}, ${at}. Começa em ${a.until}. Motivo: ${a.reason}.`)
+      await d.emit('fila.respondida', { subtarefa: subtaskId, taskId: got.taskId, decisao: a.kind }).catch(() => undefined)
+    }
+    // A slot this piece was holding is free again for the next one.
+    if (!applied.already) void queueNext().catch(() => undefined)
+    return { ok: true, status: 200, record: (await d.store.get(subtaskId)) ?? got, warnings: applied.already ? ['already recorded: nothing changed'] : [] }
+  }
+
+  /**
+   * `fila-proximo`: run when a worker ends, on the minute tick and after an answer. Deterministic, no model. In order:
+   * the 10-minute timeouts (autonomous → `sim`; otherwise a reminder), questions that never reached the leader, approved pieces
+   * waiting for a slot, and then ONE new question per task for the best piece whose slot gate passes.
+   */
+  const queueNextOnce = async (actions: string[] = []): Promise<{ actions: string[] }> => {
+    // A host that cannot start sessions has nothing to ask about.
+    if (!d.spawn) return { actions }
+    const now = d.now()
+    let items = await queueItems()
+    if (items.length === 0) return { actions }
+    const plan = planQueue(items, now)
+    const sessions = await d.facts.sessions().catch(() => null)
+    // 1) unanswered for 10 min
+    for (const it of plan.expired) {
+      const autonomous = await d.autonomous(it.rec.leaderSessionId).catch(() => true)
+      if (autonomous) {
+        const out = await answerQueue(it.subtaskId, 'sim', ASK_AUTHOR, { auto: true })
+        actions.push(`fila-timeout-sim ${it.subtaskId}:${out.ok}`)
+      } else if (it.ask && reminderDue(it.ask, now)) {
+        const sent = await tellLeader(liveLeader(it, sessions) ?? it.rec.leaderSessionId, `[from flow fila · lembrete]\nAinda espero sua resposta sobre "${it.title}" (${it.subtaskId}): sim | nao <motivo> | agendar <ISO> <motivo>. O modo autônomo está desligado, então eu continuo esperando.`)
+        await d.store.update(x => { const c = x.deliveries[it.subtaskId]; if (c?.queueAsk && !c.queueAsk.approved) c.queueAsk.remindedAt = iso(d) })
+        actions.push(`fila-lembrete ${it.subtaskId}:${sent}`)
+      }
+    }
+    // 2) a question that never reached the leader is typed again (until it does or the timeout decides)
+    for (const it of plan.undelivered) {
+      if (plan.expired.includes(it)) continue
+      const leader = liveLeader(it, sessions)
+      if (!leader) continue
+      const text = await composeQuestion(it, items)
+      if (await tellLeader(leader, text)) {
+        await d.store.update(x => { const c = x.deliveries[it.subtaskId]; if (c?.queueAsk) { c.queueAsk.delivered = true; c.queueAsk.leaderSessionId = leader } })
+        actions.push(`fila-pergunta-reenviada ${it.subtaskId}`)
+      }
+    }
+    // 3) approved, waiting for a slot
+    items = await queueItems()
+    for (const it of items.filter(i => i.ask?.approved && !startClaimLive(i.ask, now))) {
+      const out = await startApproved(it.subtaskId, it.ask!.approved!.actor, it.ask!.approved!.auto)
+      actions.push(`fila-inicia ${it.subtaskId}:${out.ok ? 'ok' : out.code}`)
+    }
+    // 4) new questions
+    items = await queueItems()
+    const fresh = planQueue(items, now)
+    if (fresh.candidates.length === 0) return { actions }
+    const phantoms = phantomsOf(items)
+    const asked = new Set<string>()
+    for (const it of fresh.candidates) {
+      if (asked.has(it.taskId)) continue
+      if (!judgePredispatch(it.sub).ok) continue
+      const verdict = await slotWith(it.rec, phantoms)
+      await storeSlot(it.subtaskId, verdict)
+      if (!verdict.ok) { actions.push(`fila-sem-vaga ${it.subtaskId}`); continue }
+      const leader = liveLeader(it, sessions)
+      const claimed = await d.store.update(x => {
+        const c = x.deliveries[it.subtaskId]
+        if (!c || c.phase !== 'fila' || c.dequeued || c.queueAsk || holdState(c.queueHold, now) !== null) return false
+        c.queueAsk = { at: iso(d), delivered: false, ...(leader ? { leaderSessionId: leader } : {}) }
+        if (leader && !c.leaderSessionId) c.leaderSessionId = leader
+        c.updatedAt = iso(d)
+        return true
+      })
+      if (!claimed) continue
+      asked.add(it.taskId)
+      const next = { ...it, ask: { at: iso(d), delivered: false } }
+      phantoms.push(...phantomsOf([next]))
+      const text = await composeQuestion(next, items.map(i => (i.subtaskId === it.subtaskId ? next : i)))
+      const sent = leader ? await tellLeader(leader, text) : false
+      if (sent) await d.store.update(x => { const c = x.deliveries[it.subtaskId]; if (c?.queueAsk) c.queueAsk.delivered = true })
+      await note(it.rec, `pergunta ao líder: posso abrir "${it.title}" agora? (${sent ? 'entregue' : 'o líder não foi alcançado; tento de novo a cada minuto'}). Sem resposta em 10 min: ${await d.autonomous(it.rec.leaderSessionId).catch(() => true) ? 'o modo autônomo está ligado, então segue como sim' : 'o modo autônomo está desligado, então eu espero e lembro'}.`)
+      await d.emit('fila.pergunta', { subtarefa: it.subtaskId, taskId: it.taskId, entregue: sent }).catch(() => undefined)
+      actions.push(`fila-pergunta ${it.subtaskId}:${sent}`)
+    }
+    return { actions }
+  }
+
+  const composeQuestion = async (it: QueueItem & { sub: { staged?: { harness?: string; model?: string; effort?: string; account?: string } } }, items: readonly QueueItem[]): Promise<string> => {
+    const ordered = orderQueue(items)
+    const position = ordered.findIndex(x => x.subtaskId === it.subtaskId) + 1
+    const s = it.sub.staged
+    const accountName = await accountLabel(s?.harness, s?.account)
+    return questionText({
+      subtaskId: it.subtaskId, title: it.title, priority: it.priority, position: position || 1, total: ordered.length,
+      ...(s?.harness ? { harness: s.harness } : {}), ...(s?.model ? { model: s.model } : {}), ...(s?.effort ? { effort: s.effort } : {}), ...(accountName ? { accountName } : {}),
+      why: whyNext({ priority: it.priority, position: position || 1, total: ordered.length, slot: 'o portão de vaga passou (teto da máquina, limites da conta e memória)' }),
+    })
+  }
+
+  /** Serialised with the tick: a worker ending and the minute tick never run the flow at the same time. */
+  const queueNext = (): Promise<{ actions: string[] }> => {
+    const guarded = async () => { try { return await queueNextOnce([]) } catch (e) { if (e instanceof DeliveryStoreUnreadable) return { actions: [`store-unreadable: ${e.message}`] }; throw e } }
+    const run = tickChain.then(guarded, guarded)
+    tickChain = run.catch(() => undefined)
+    return run
+  }
+
+  /** What the Fila tab, the Live card and the MCP read: the queue in leaving order, with every fact the screen shows. */
+  const queueView = async (taskId?: string): Promise<QueueView> => {
+    const now = d.now()
+    const items = await queueItems()
+    const autonomous = await d.autonomous().catch(() => true)
+    const sessions = await d.facts.sessions().catch(() => [] as SessionFact[])
+    const rows: QueueViewItem[] = []
+    let globalPos = 0
+    const perTask = new Map<string, number>()
+    for (const it of items) {
+      globalPos++
+      const taskPos = (perTask.get(it.taskId) ?? 0) + 1
+      perTask.set(it.taskId, taskPos)
+      if (taskId && it.taskId !== taskId) continue
+      const extras = await d.facts.queueExtras?.(it.subtaskId).catch(() => null)
+      const rec = it.rec
+      const staged = it.sub.staged
+      const hold = holdState(rec.queueHold, now)
+      const pre = judgePredispatch(it.sub)
+      rows.push({
+        subtaskId: it.subtaskId, taskId: it.taskId, title: it.title, taskTitle: extras?.taskTitle ?? it.taskId, priority: it.priority,
+        position: taskPos, globalPosition: globalPos, since: rec.createdAt,
+        group: extras && extras.members.length ? { members: extras.members } : null,
+        predispatch: { ok: pre.ok, ...(pre.missing?.length ? { missing: pre.missing } : {}),
+          harness: staged?.harness ?? null, model: staged?.model ?? null, effort: staged?.effort ?? null, account: staged?.account ?? null,
+          accountName: (await accountLabel(staged?.harness, staged?.account)) ?? null, cwd: staged?.cwd ?? null, prompt: staged?.prompt ?? '' },
+        slot: rec.gates.vaga ? { ok: rec.gates.vaga.ok, reason: rec.gates.vaga.reason ?? null, at: rec.gates.vaga.at } : null,
+        hold: rec.queueHold ? { ...rec.queueHold, active: hold !== null } : null,
+        ask: rec.queueAsk ? {
+          at: rec.queueAsk.at, delivered: rec.queueAsk.delivered, approved: Boolean(rec.queueAsk.approved),
+          expiresAt: new Date(Date.parse(rec.queueAsk.at) + ASK_TIMEOUT_MS).toISOString(), ...(rec.queueAsk.leaderSessionId ? { leaderSessionId: rec.queueAsk.leaderSessionId } : {}),
+          onTimeout: autonomous ? 'sim' : 'esperar',
+        } : null,
+        leaderSessionId: rec.leaderSessionId ?? null,
+        leaderAlive: Boolean(rec.leaderSessionId && sessions.some(s => s.id === rec.leaderSessionId && s.alive)),
+        notes: extras?.notes ?? { total: 0, last: [] },
+      })
+    }
+    const recent: QueueViewRecent[] = []
+    for (const r of Object.values((await d.store.read()).deliveries)) {
+      if (!r.queueStarted || (taskId && r.taskId !== taskId) || now - Date.parse(r.queueStarted.at) > 24 * 3600_000) continue
+      recent.push({ subtaskId: r.subtaskId, taskId: r.taskId, title: (await d.facts.subtask(r.subtaskId).catch(() => null))?.title ?? r.subtaskId, phase: r.phase, at: r.queueStarted.at, actor: r.queueStarted.actor, auto: r.queueStarted.auto, sessionId: r.queueStarted.sessionId || r.authorSessionId || null })
+    }
+    recent.sort((a, b) => b.at.localeCompare(a.at))
+    return { generatedAt: iso(d), autonomous, total: items.length, items: rows, recent }
   }
 
   /** A withdrawal keeps its evidence, without pretending that work ran or a release was published. */
@@ -861,6 +1191,8 @@ export function createDeliveryService(d: DeliveryDeps) {
       c.updatedAt = at
       delete c.origin
       delete c.step
+      delete c.queueAsk
+      delete c.queueHold
       return true
     })
     if (!moved || closedOnBoard) return false
@@ -992,6 +1324,8 @@ export function createDeliveryService(d: DeliveryDeps) {
       const v = await runGate('vaga', r, d.facts)
       await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && c.phase === 'fila') { c.gates.vaga = { ok: v.ok, at: iso(d), revision: c.revision, ...(v.evidence ? { evidence: v.evidence } : {}), ...(v.reason ? { reason: v.reason } : {}), ...(v.missing?.length ? { missing: v.missing } : {}) } } })
     }
+    // FILA.PRIORIDADE — `fila-proximo`: the next queued piece, when a slot is free. It never breaks the rest of the tick.
+    await queueNextOnce(actions).catch(e => { if (e instanceof DeliveryStoreUnreadable) throw e; actions.push(`fila-erro: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`) })
     const releaseVerdicts = new Map<string, GateVerdict>()
     for (const r of records.filter(x => x.phase === 'ci')) {
       // Back off the gh polling: a piece that has sat in `ci` a while is polled less often (a tenth of its age, 1..10 min).
@@ -1035,6 +1369,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     // An unreadable store REFUSES the write (and keeps a copy of the file) instead of letting any verb replace it with an empty book.
     transition: safe((id: string, to: unknown, input: TransitionInput, actor: string) => transition(id, to, input, actor)),
     gate: safe(gate), block: safe(block), unblock: safe(unblock), approve: safe(approve), configure: safe(configure), step: safe(step),
+    stepEvent: async (id: string, n: unknown, actor: string): Promise<StepEventReply> => { try { return await stepEvent(id, n, actor) } catch (e) { return fail(500, 'step_erro', `the step could not be recorded (${e instanceof Error ? e.message.split('\n')[0] : String(e)})`) } },
     // An I/O error on the batch write is a clean, structured refusal (the single store write landed entirely or not at all), never an uncaught throw.
     release: async (o: { version: unknown; mergeSha: unknown; subtaskIds: unknown; repo?: unknown }, actor: string): Promise<ReleaseReply> => {
       try { return await release(o, actor) } catch (e) {
@@ -1042,6 +1377,7 @@ export function createDeliveryService(d: DeliveryDeps) {
         return fail(500, 'store_erro', `the release could not be written (${e instanceof Error ? e.message.split('\n')[0] : String(e)}); the batch write is all-or-nothing and the verb is idempotent — run it again`) as Extract<DeliveryReply, { ok: false }>
       }
     },
+    queueNext, answerQueue: safe(answerQueue), queueView,
     stage: safe(stage), stageRun: safe(stageRun), dequeue: safe(dequeue), foldGroupMember, qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,
   }
 }

@@ -383,7 +383,11 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     const action = typeof b.action === 'string' ? b.action : ''
     const target = typeof b.target === 'string' ? b.target.slice(0, 200) : ''
     if (!/^(?:personal-(?:reveal|edit|trash|restore|restore-version|purge|group-delete|grant)|use-approve|extend-open)$/.test(action)) return reply(bad())
-    const g = action === 'extend-open' ? await gate.prepareExtendOpenGesture() : await step('personal-list', b)
+    // COFRE.DESBLOQUEIO: asking for an assertion is asking for the PROOF itself — the passkey's signature
+    // (the phone's biometrics) is what mints the single-use token, bound to this action and target. It
+    // used to cost the code first; with the code gone it needs only an open vault (not frozen, not in
+    // recovery) and a registered passkey, exactly like keep-open always did.
+    const g = await gate.prepareExtendOpenGesture()
     if (!g.ok) return reply(g)
     const r = await mobile.beginAssertion(session, `${action}:${target}`, rpId, origin)
     if (!r.ok) return reply(fail('no-passkey', 'This device has no passkey registered for the vault yet.', 'Este aparelho ainda não tem uma passkey registrada para o cofre.'))
@@ -406,6 +410,9 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
   if (path === '/api/vault/personal/mobile/code-reveal') {
     if (!loopback) return reply(desktopOnly())
     if (typeof b.enabled !== 'boolean') return reply(bad())
+    // COFRE.DESBLOQUEIO (2026-11-07): there is no code any more, so "the code alone" can only be turned OFF
+    // (which still clears any device key left behind by an older version).
+    if (b.enabled) return reply(fail('code-retired', 'There is no authenticator code any more; a phone confirms with its biometrics (passkey).', 'Não existe mais código de autenticador; o celular confirma com a digital (passkey).'))
     const g = await step('mobile-code-reveal', b)
     if (!g.ok) return reply(g)
     await mobile.setCodeReveal(b.enabled)

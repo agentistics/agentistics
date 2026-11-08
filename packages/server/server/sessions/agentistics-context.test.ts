@@ -264,6 +264,13 @@ describe('role line follows the stored role', () => {
     expect(contextText({ ...base, role: 'worker' })).not.toContain(marker)
     expect(contextText({ ...base, role: 'leader' })).toContain('Becoming leader: call agentistics_session_role with role "leader"')
   })
+  test('a worker on a subtask is told how to report its Live step; a leader or a taskless worker is not', () => {
+    const w = contextText({ ...base, role: 'worker', taskId: 't1', subtaskId: 'sub1' })
+    expect(w).toContain('Live step:')
+    expect(w).toContain('agentistics_task_phase { subtaskId: "sub1", action: "step"')
+    expect(contextText({ ...base, role: 'worker', taskId: 't1' })).not.toContain('Live step:')
+    expect(contextText({ ...base, role: 'leader', taskId: 't1', subtaskId: 'sub1' })).not.toContain('Live step:')
+  })
   test('the leader briefing points at agentistics_session_role', () => {
     expect(contextText(base)).toContain('agentistics_session_role')
   })

@@ -49,6 +49,8 @@ import { boardCopy, type Lang } from './copy'
 import { RailSection } from './RailSection'
 import { TaskChips, TaskMoreMenu } from './TaskChips'
 import { SubtaskTable } from './SubtaskTable'
+import { TaskQueueTab } from './TaskQueueTab'
+import { useTaskQueue } from './useTaskQueue'
 import { LeaderCards, TaskSessionsTab } from './TaskSessionsTab'
 import { BlockedSubtaskResolve } from './BlockedSubtaskResolve'
 import { useStagedFire } from './useStagedFire'
@@ -841,7 +843,7 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
   )
 }
 
-export const DELIVERY_TABS = ['threads', 'overview', 'sessions', 'comments', 'subtasks', 'files', 'activity', 'about'] as const
+export const DELIVERY_TABS = ['threads', 'overview', 'sessions', 'comments', 'subtasks', 'queue', 'files', 'activity', 'about'] as const
 export type DeliveryTab = typeof DELIVERY_TABS[number]
 
 export interface DeliveryDetailProps {
@@ -877,6 +879,8 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
   // The board's LIVE status list — fetched here rather than threaded from every caller (the page
   // and the session aside's Task tab both mount this component fresh).
   const { statuses } = useTaskStatuses()
+  // FILA.PRIORIDADE — this task's queue, read once here so the tab's count and the tab itself agree (the full page only).
+  const queueState = useTaskQueue(id, !dense)
 
   // FIRING a staged session — the one shared implementation (`useStagedFire`); a refused filing
   // reuses the EXACT dialog the ordinary session-filing flow already opens for this delivery.
@@ -906,6 +910,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
     ]
     : [
       ['subtasks', copy.tabs.subtasks, detail.subtasks.length],
+      ['queue', lang === 'pt' ? 'Fila' : 'Queue', queueState.queue?.items.length ?? 0],
       ['threads', tc.tabThreads, threadInboxCount],
       ['sessions', copy.tabs.sessions, detail.sessions.length],
       ['overview', tc.tabMetrics, 0],
@@ -1078,6 +1083,10 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
           {tab === 'sessions' && <TaskSessionsTab detail={detail} lang={lang} />}
 
           {tab === 'comments' && <CommentsTab id={id} detail={detail} onChanged={reload} lang={lang} />}
+
+          {tab === 'queue' && (
+            <TaskQueueTab taskId={id} detail={detail} lang={lang} reload={reload} queueState={queueState} onOpenNotes={(sid, title) => setSubThread({ id: sid, title })} />
+          )}
 
           {tab === 'subtasks' && (
             <SubtaskTable

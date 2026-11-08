@@ -39,20 +39,30 @@ test('no vault text tells the person to run a command (setup-code is the one fal
   }
 })
 
-test('"Presence" is called "Personal confirmation" everywhere the page says it', () => {
-  expect(vt('sec_presence', 'pt')).toBe('Confirmação pessoal')
-  expect(vt('sec_presence', 'en')).toBe('Personal confirmation')
-  expect(vt('sec_presence_d', 'pt')).toBe('Windows Hello (PIN, digital ou rosto) ou uma chave de segurança: prova que é você mesmo no computador.')
+test('"Presence" is said as how the vault confirms it is you, naming every way there is', () => {
+  expect(vt('sec_presence', 'pt')).toBe('Como o cofre confirma que é você')
+  expect(vt('sec_presence', 'en')).toBe('How the vault confirms it is you')
+  for (const s of ['Touch ID', 'Windows Hello', 'senha própria do cofre', 'chave de segurança']) expect(vt('sec_presence_d', 'pt')).toContain(s)
   for (const [k, v] of Object.entries(VAULT_TEXT)) expect(v.pt, k).not.toMatch(/[Pp]resença/)
 })
 
-test('the lock-screen sentence names the presence check the machine really has (a Mac has none)', () => {
-  expect(lockedSubKey(['hello', 'authenticator'])).toBe('lockedSub_hello')
+test('the lock-screen sentence names the way this vault really confirms (a Mac never reads Windows Hello)', () => {
+  expect(lockedSubKey(['hello', 'recovery'])).toBe('lockedSub_hello')
   expect(lockedSubKey(['fido2'])).toBe('lockedSub_fido2')
+  expect(lockedSubKey(['keychain', 'touchid'])).toBe('lockedSub_touchid')
+  expect(lockedSubKey(['password'])).toBe('lockedSub_password')
   for (const w of [['keychain'], [], null, undefined]) {
     const k = lockedSubKey(w)
-    expect(k).toBe('lockedSub_code')
+    expect(k).toBe('lockedSub_plain')
     expect(vt(k, 'en')).not.toContain('Windows Hello')
     expect(vt(k, 'pt')).not.toContain('Windows Hello')
+  }
+})
+
+// COFRE.DESBLOQUEIO (owner 2026-11-07): no QR, no 6-digit app code, no authenticator — anywhere on the page.
+test('no vault text asks for an authenticator, a 6-digit code or a QR', () => {
+  for (const [k, v] of Object.entries(VAULT_TEXT)) {
+    if (k === 'legacy_code_note') continue // the one sentence that says the old code is gone
+    for (const s of [v.en, v.pt]) expect(s, k).not.toMatch(/authenticator|autenticador|TOTP|\bQR\b|6 d[ií]git/i)
   }
 })

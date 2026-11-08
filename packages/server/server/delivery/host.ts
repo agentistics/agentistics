@@ -71,9 +71,11 @@ export function defaultDeliveryBoard(): DeliveryBoard {
 
 export function defaultDeliveryNotify(): DeliveryNotify {
   return {
-    async session(sessionId, text) {
+    async session(sessionId, text, header) {
       const { runFleetAction } = await import('../sessions/fleet-web')
-      const out = await runFleetAction('en', { action: 'prompt', id: sessionId, text: `[from flow entrega · nudge]\n${text}` })
+      // A system QUESTION (`fila · confirmar`) carries its own header line inside `text`; every other nudge wears the standard one.
+      const body = header === undefined ? `[from flow entrega · nudge]\n${text}` : text
+      const out = await runFleetAction('en', { action: 'prompt', id: sessionId, text: body })
       return out.ok
     },
     async owner(text, kind) {
@@ -137,13 +139,20 @@ async function mergePr(r: DeliveryRecord): Promise<{ ok: true; mergeSha: string;
   }
 }
 
+/** The name a person gave an account (nickname, else the harness's own label); never the raw id. */
+async function accountNameOf(harness: string, account: string): Promise<string | null> {
+  const { readAccounts } = await import('../harness-accounts')
+  const row = (await readAccounts()).accounts.find(a => a.id === account && a.harness === harness)
+  return row ? (row.nickname?.trim() || row.label?.trim() || null) : null
+}
+
 let cached: DeliveryService | null = null
 /** The process's delivery service (one store path, one set of deps). */
 export function deliveryService(overrides: Partial<DeliveryDeps> = {}): DeliveryService {
   if (cached && Object.keys(overrides).length === 0) return cached
   const svc = createDeliveryService({
     store: createDeliveryStore(), facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
-    autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, now: () => Date.now(), ...overrides,
+    autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, accountName: accountNameOf, now: () => Date.now(), ...overrides,
   })
   if (Object.keys(overrides).length === 0) cached = svc
   return svc

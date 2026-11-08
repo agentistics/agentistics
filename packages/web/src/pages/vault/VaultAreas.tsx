@@ -7,18 +7,18 @@
  */
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FingerprintPattern, Laptop, Smartphone, Usb } from 'lucide-react'
+import { FingerprintPattern, KeyRound, Laptop, Smartphone, Usb } from 'lucide-react'
 import { ConfirmModal, DialogActions, Toggle, dialogButtonStyle } from '../settings/primitives'
 import { Err } from '../../components/MfaSetup'
 import { PhoneEnrol } from '../../components/vault/VaultUnlock'
-import { AutoLockRow, Gate, HardeningBlock, HowStrip, Note, UnlockPolicyRow, presWordOf, soonKinds, unlockModeKey } from '../../components/vault/VaultFlows'
-import { addableKinds, authPolicyChanged, minutesLeft, remainingMs, type Reply } from '../../lib/vaultApi'
+import { AutoLockRow, Gate, HardeningBlock, HowStrip, Note, presWordOf, soonKinds } from '../../components/vault/VaultFlows'
+import { addableKinds, authPolicyChanged, minutesLeft, remainingMs, type Reply, type UnlockMethodId } from '../../lib/vaultApi'
 import { AuthPolicyTable } from '../../components/vault/AuthPolicyTable'
-import { vt, vtf } from '../../lib/vaultText'
+import { methodNameKey, vt, vtf } from '../../lib/vaultText'
 import { pt_, type PKey } from '../../lib/personalText'
 import { wipeBackupHistory } from '../../lib/vaultPersonal'
-import { hasPasskeyHere, passkeySupport, removePasskey, setCodeReveal, type MobileState } from '../../lib/passkey'
-import { clearStalePhones, phoneFacts, readDeviceKey, removeDevice } from '../../lib/phoneVault'
+import { hasPasskeyHere, passkeySupport, removePasskey, type MobileState } from '../../lib/passkey'
+import { clearStalePhones, phoneFacts, removeDevice } from '../../lib/phoneVault'
 import type { VaultControls } from './useVaultControls'
 import { CustomTypesRow } from '../../components/vault/KindTypes'
 import { AfterRows, AreaHead, InfoBlocks, LearnMore, Pill, Rows, Sheet, VaultRow, dangerOutline, hotBtn, pageBtn } from './vaultUi'
@@ -50,51 +50,49 @@ export function MethodsArea({ lang, isMobile, c, mobile, isPhone, onGoDevices }:
   if (!view) return null
   const btn = pageBtn(isMobile)
   const hot = hotBtn(isMobile)
-  const styleFor = (id: 'authenticator' | 'presence') => (c.primary === id ? hot : btn)
   const addable = addableKinds(view)
   const soon = soonKinds(view)
-  const hasHello = view.wrappers.includes('hello')
-  const hasKey = view.wrappers.includes('fido2')
-  // A kind gets a row when this machine offers it or it is already on; "coming soon" stays a row too.
-  const helloRow = hasHello || view.presenceAvailable.includes('hello')
-  const keyRow = hasKey || view.presenceAvailable.includes('fido2') || soon.includes('fido2')
-  const turnOn = (k: 'hello' | 'fido2') => {
-    // The first presence runs the whole missing flow; another kind beside one already on is "add another way".
-    if (view.presence) { c.setWizardKind(k); c.setWizard(['presence']) } else c.startSetup('presence')
+  const turnOn = (k: UnlockMethodId) => {
+    // The first way to confirm runs the whole missing flow on that kind; another beside one already on is "add another way".
+    c.setWizardKind(k)
+    if (view.presence) c.setWizard(['presence']); else c.startSetup('presence')
   }
-  const presenceAction = (k: 'hello' | 'fido2', on: boolean) => on
+  // COFRE.DESBLOQUEIO: one row per way this machine offers (or already holds), in the server's order —
+  // the security key last and only when its tools are here (it is the advanced one).
+  const offered: UnlockMethodId[] = (view.unlockMethods ?? []).map(m => m.id)
+  const rows = (['touchid', 'hello', 'password', 'fido2'] as const).filter(k => view.wrappers.includes(k) || offered.includes(k) || (k === 'fido2' && soon.includes('fido2')))
+  const methodDesc: Record<UnlockMethodId, string> = {
+    touchid: vt('wiz_method_touchid_d', lang), hello: vt('wiz_method_hello_d', lang), password: vt('wiz_method_password_d', lang), fido2: vt('wiz_method_fido2_d', lang),
+  }
+  const presenceAction = (k: UnlockMethodId, on: boolean) => on
     ? <button type="button" style={btn} onClick={() => setManage(true)}>{t('manage')}</button>
-    : addable.includes(k) || (!view.presence && view.presenceAvailable.includes(k))
+    : addable.includes(k) || (!view.presence && offered.includes(k))
       ? (
-        <button type="button" style={view.presence ? btn : styleFor('presence')} onClick={() => turnOn(k)}
-          title={c.tip('enroll-presence')} aria-label={`${t('activate')}. ${c.tip('enroll-presence')}`}>
-          {t('activate')} {view.presence && <Gate code={c.g('enroll-presence').code} gesture={c.g('enroll-presence').gesture} lang={lang} />}
+        <button type="button" style={view.presence ? btn : c.primary === 'presence' ? hot : btn} onClick={() => turnOn(k)}
+          title={c.tip('enroll-presence')} aria-label={`${vt(`pres_add_${k}`, lang)}. ${c.tip('enroll-presence')}`}>
+          {view.presence ? vt(`pres_add_${k}`, lang) : t('activate')} {view.presence && <Gate gesture={c.g('enroll-presence').gesture} lang={lang} />}
         </button>
       )
       : null
   const passkeys = mobile?.passkeys.length ?? 0
   const here = isPhone && mobile ? hasPasskeyHere(mobile, typeof window !== 'undefined' ? window.location.hostname : '') : false
-  const auth = view.authenticator
-  const authTone = auth?.frozen ? 'bad' : auth?.pausedUntil ? 'warn' : auth ? 'ok' : 'off'
-  const authStatus = auth?.frozen ? t('st_frozen') : auth?.pausedUntil ? t('st_paused') : auth ? t('st_active') : t('st_missing')
   return (
     <section data-vault-area="methods">
       <AreaHead title={t('tab_methods')} desc={t('area_methods_d')} isMobile={isMobile} />
+      {view.legacyAppCode && <div style={{ marginBottom: 10 }}><Note>{vt('legacy_code_note', lang)}</Note></div>}
       <Rows>
-        {helloRow && (
-          <VaultRow data="hello" isMobile={isMobile} title={vt('presenceName_hello', lang)} desc={t('m_hello_d')}
-            status={<Pill tone={hasHello ? 'ok' : 'off'} text={hasHello ? t('st_active') : t('st_off')} />}>
-            {presenceAction('hello', hasHello)}
-          </VaultRow>
-        )}
-        {keyRow && (
-          <VaultRow data="fido2" isMobile={isMobile} title={t('m_key')}
-            desc={!hasKey && soon.includes('fido2') ? vt('pres_soon_fido2', lang) : t('m_key_d')}
-            status={<Pill tone={hasKey ? 'ok' : 'off'} text={hasKey ? t('st_active') : soon.includes('fido2') && !view.presenceAvailable.includes('fido2') ? t('st_soon') : t('st_off')} />}>
-            {presenceAction('fido2', hasKey)}
-          </VaultRow>
-        )}
-        {!helloRow && !keyRow && (
+        {rows.map(k => {
+          const on = view.wrappers.includes(k)
+          const soonOnly = !on && !offered.includes(k) && soon.includes(k)
+          return (
+            <VaultRow key={k} data={k} isMobile={isMobile} title={vt(methodNameKey(k), lang)}
+              desc={soonOnly && k === 'fido2' ? vt('pres_soon_fido2', lang) : methodDesc[k]}
+              status={<Pill tone={on ? 'ok' : 'off'} text={on ? t('st_active') : soonOnly ? t('st_soon') : t('st_off')} />}>
+              {presenceAction(k, on)}
+            </VaultRow>
+          )
+        })}
+        {rows.length === 0 && (
           <VaultRow data="presence-none" isMobile={isMobile} title={vt('sec_presence', lang)} desc={vt('pres_unavailable', lang)}
             status={<Pill tone="off" text={vt('badge_na', lang)} />} />
         )}
@@ -102,20 +100,6 @@ export function MethodsArea({ lang, isMobile, c, mobile, isPhone, onGoDevices }:
           desc={isPhone ? (here ? t('phoneReady') : t('m_passkey_none')) : passkeys > 0 ? t('m_passkey_d', { n: passkeys }) : t('m_passkey_none')}
           status={<Pill tone={passkeys > 0 || here ? 'ok' : 'off'} text={passkeys > 0 || here ? t('st_active') : t('st_off')} />}>
           <button type="button" style={btn} onClick={onGoDevices}>{t('manage')}</button>
-        </VaultRow>
-        <VaultRow data="authenticator" isMobile={isMobile} title={t('m_code')}
-          desc={auth
-            ? (auth.pausedUntil ? vtf('auth_paused', lang, { date: fmtFull(auth.pausedUntil, lang) }) : t('m_code_d', { date: auth.lastUsedAt ? fmtDate(auth.lastUsedAt, lang) : vt('auth_never', lang) }))
-            : t('m_code_none')}
-          status={<Pill tone={authTone} text={authStatus} />}
-          extra={auth?.frozen ? <div style={{ marginTop: 8 }}><Note tone="bad">{vt('auth_frozen', lang)}</Note></div> : undefined}>
-          {auth ? (
-            <button type="button" style={btn} onClick={() => c.setWizard(['authenticator'])} title={c.tip('enroll-authenticator')} aria-label={`${vt('auth_replace', lang)}. ${c.tip('enroll-authenticator')}`}>
-              {vt('auth_replace', lang)} <Gate code={c.g('enroll-authenticator').code} gesture={c.g('enroll-authenticator').gesture} lang={lang} />
-            </button>
-          ) : (
-            <button type="button" style={styleFor('authenticator')} onClick={() => c.startSetup('authenticator')} title={vt('ultraBody', lang)}>{t('setupNow')}</button>
-          )}
         </VaultRow>
       </Rows>
       <AfterRows><LearnMore label={t('learnUnlock')} onClick={() => setLearn(true)} /></AfterRows>
@@ -126,7 +110,7 @@ export function MethodsArea({ lang, isMobile, c, mobile, isPhone, onGoDevices }:
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>{vt('sec_presence_d', lang)}</div>
           {(c.creds?.credentials ?? []).map(cr => (
             <div key={`${cr.type}-${cr.createdAt}`} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--border)' }}>
-              {cr.type === 'hello' ? <FingerprintPattern size={14} /> : <Usb size={14} />}
+              {cr.type === 'fido2' ? <Usb size={14} /> : cr.type === 'password' ? <KeyRound size={14} /> : <FingerprintPattern size={14} />}
               <span style={{ fontSize: 13, flex: 1, minWidth: 0 }}>{cr.label}</span>
               <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{vtf('pres_since', lang, { date: fmtDate(cr.createdAt, lang) })}</span>
             </div>
@@ -140,7 +124,7 @@ export function MethodsArea({ lang, isMobile, c, mobile, isPhone, onGoDevices }:
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>{vt('pres_offConsequence', lang)}</div>
                   <button type="button" style={dangerOutline(isMobile)} onClick={() => { setManage(false); c.ask('presence-off') }}
                     title={c.tip('disable-presence')} aria-label={`${vt('pres_turnOff', lang)}. ${c.tip('disable-presence')}`}>
-                    {vt('pres_turnOff', lang)} <Gate code={c.g('disable-presence').code} gesture={c.g('disable-presence').gesture} lang={lang} />
+                    {vt('pres_turnOff', lang)} <Gate gesture={c.g('disable-presence').gesture} lang={lang} />
                   </button>
                 </>
               )}
@@ -152,7 +136,6 @@ export function MethodsArea({ lang, isMobile, c, mobile, isPhone, onGoDevices }:
           footer={<DialogActions><button type="button" onClick={() => setLearn(false)} style={dialogButtonStyle('secondary', isMobile)}>{t('close')}</button></DialogActions>}>
           <HowStrip view={view} lang={lang} isMobile={isMobile} minutes={view.autoLockMinutes} presWord={c.presWord} />
           <InfoBlocks blocks={[
-            { h: t('m_code'), body: vt('auth_explain', lang) },
             { h: vt('sec_presence', lang), body: view.presence ? vt('sec_presence_d', lang) : vt('pres_off', lang) },
           ]} />
         </Sheet>
@@ -170,15 +153,12 @@ export function DevicesArea({ lang, isMobile, mobile, isPhone, host, gated, onCh
   const [error, setError] = useState<string | null>(null)
   const [stale, setStale] = useState(0)
   const [howAdd, setHowAdd] = useState(false)
-  const [learnCode, setLearnCode] = useState(false)
   const [remove, setRemove] = useState<null | { id: string; label: string; kind: 'passkey' | 'device' }>(null)
   useEffect(() => { if (!isPhone) void phoneFacts().then(f => { if (f.ok) setStale(f.stale) }) }, [isPhone, mobile])
   const btn = pageBtn(isMobile)
   const run = (p: Promise<Reply<unknown>>) => { setError(null); void p.then(r => { if (r.ok) onChanged(); else setError(r.sentence || t('network')) }) }
   const support = typeof window !== 'undefined' ? passkeySupport(window) : 'unsupported'
   const here = mobile ? hasPasskeyHere(mobile, host) : false
-  const device = readDeviceKey()
-  const deviceHere = Boolean(device && mobile?.codeReveal && mobile.devices?.some(d => d.id === device.deviceId))
 
   if (isPhone) {
     // §10: register through the request the computer approves; once this phone works, say so.
@@ -186,8 +166,8 @@ export function DevicesArea({ lang, isMobile, mobile, isPhone, host, gated, onCh
       <section data-vault-area="devices">
         <AreaHead title={t('tab_devices')} desc={t('area_devices_d')} isMobile={isMobile} />
         <Rows>
-          {(here || deviceHere)
-            ? <VaultRow data="this-phone" isMobile={isMobile} icon={<Smartphone size={16} />} title={t('dev_thisPhone')} desc={here ? t('phoneReady') : t('phoneCodeOn')} status={<Pill tone="ok" text={t('st_trusted')} />} />
+          {here
+            ? <VaultRow data="this-phone" isMobile={isMobile} icon={<Smartphone size={16} />} title={t('dev_thisPhone')} desc={t('phoneReady')} status={<Pill tone="ok" text={t('st_trusted')} />} />
             : <PhoneEnrol lang={lang} isMobile={isMobile} onDone={onChanged} />}
         </Rows>
         {support === 'unsupported' && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 10 }}>{t('phoneUnsupported')}</div>}
@@ -216,37 +196,22 @@ export function DevicesArea({ lang, isMobile, mobile, isPhone, host, gated, onCh
         {passkeys.length === 0 && devices.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '4px 2px' }}>{t('phoneNone')}</div>}
         {stale > 0 && (
           <VaultRow data="stale" isMobile={isMobile} title={t('phoneStale', { n: stale })} status={<Pill tone="warn" text={String(stale)} />}>
-            <button type="button" style={btn} onClick={() => run(gated(cd => clearStalePhones(cd), { action: 'mobile-passkey-remove', target: '' }))}>{t('phoneStaleClear')}</button>
+            <button type="button" style={btn} onClick={() => run(gated(() => clearStalePhones(), { action: 'mobile-passkey-remove', target: '' }))}>{t('phoneStaleClear')}</button>
           </VaultRow>
         )}
       </Rows>
       {error && <div style={{ marginTop: 8 }}><Err text={error} /></div>}
-      {mobile && (
-        <AfterRows>
-          <VaultRow data="code-reveal" isMobile={isMobile} title={t('codeOnPhone')}
-            desc={<>{t('codeOnPhone_d')} <LearnMore label={t('learnMore')} onClick={() => setLearnCode(true)} /></>}>
-            <Toggle on={mobile.codeReveal} label={t('codeOnPhone')}
-              onToggle={() => run(gated(cd => setCodeReveal(!mobile.codeReveal, cd), { action: 'mobile-code-reveal', target: '' }))} />
-          </VaultRow>
-        </AfterRows>
-      )}
 
       <ConfirmModal open={remove !== null} title={t('removeTitle', { name: remove?.label ?? '' })} message={t('removePhoneMsg')} confirmLabel={t('phoneRemove')} cancelLabel={t('cancel')}
         onCancel={() => setRemove(null)} onConfirm={() => {
           const r = remove; setRemove(null)
           if (!r) return
-          run(gated(cd => (r.kind === 'passkey' ? removePasskey(r.id, cd) : removeDevice(r.id, cd)), { action: 'mobile-passkey-remove', target: r.id }))
+          run(gated(cd => (r.kind === 'passkey' ? removePasskey(r.id, cd) : removeDevice(r.id)), { action: 'mobile-passkey-remove', target: r.id }))
         }} />
       {howAdd && (
         <Sheet closeLabel={t('close')} isMobile={isMobile} title={t('addPhone')} onClose={() => setHowAdd(false)}
           footer={<DialogActions><button type="button" onClick={() => setHowAdd(false)} style={dialogButtonStyle('secondary', isMobile)}>{t('close')}</button></DialogActions>}>
           <InfoBlocks blocks={[{ body: t('phoneDesktopIntro') }, { body: t('phoneLockedRegister') }, { body: t('phoneInsecure') }]} />
-        </Sheet>
-      )}
-      {learnCode && (
-        <Sheet closeLabel={t('close')} isMobile={isMobile} title={t('codeOnPhone')} onClose={() => setLearnCode(false)}
-          footer={<DialogActions><button type="button" onClick={() => setLearnCode(false)} style={dialogButtonStyle('secondary', isMobile)}>{t('close')}</button></DialogActions>}>
-          <InfoBlocks blocks={[{ body: t('phoneCodeToggle') }, { body: t('phoneCodeCost') }]} />
         </Sheet>
       )}
     </section>
@@ -260,7 +225,7 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
 }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
   const navigate = useNavigate()
-  const [edit, setEdit] = useState<null | 'autolock' | 'policy' | 'auth'>(null)
+  const [edit, setEdit] = useState<null | 'autolock' | 'auth'>(null)
   const [learn, setLearn] = useState(false)
   const [wipeAsk, setWipeAsk] = useState(false)
   const view = c.view
@@ -268,7 +233,6 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
   const btn = pageBtn(isMobile)
   const left = remainingMs(view.autoLockInMs, c.reportedAt, c.now)
   const pres = presWordOf(view, lang)
-  const policy = view.unlockPolicy ?? { mode: 'daily' as const, hours: 24, chosen: false, codeNextUnlock: true, windowEndsAt: null }
   const close = () => setEdit(null)
   const recoveryDesc = view.recoveryCreatedAt ? vtf('rec_created', lang, { date: fmtDate(view.recoveryCreatedAt, lang) }) : vt('rec_none', lang)
   return (
@@ -278,21 +242,15 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
         <VaultRow data="state" isMobile={isMobile} title={t('set_state')}
           desc={left !== null ? t('set_state_d', { n: minutesLeft(left) }) : vt('state_open', lang)} status={<Pill tone="ok" text={t('st_open')} />}>
           <button type="button" style={btn} onClick={() => c.ask('lock')} disabled={!view.canLock} title={c.tip('lock')} aria-label={`${vt('lockNow', lang)}. ${c.tip('lock')}`}>
-            {vt('lockNow', lang)} <Gate code={c.g('lock').code} gesture={c.g('lock').gesture} lang={lang} />
+            {vt('lockNow', lang)} <Gate gesture={c.g('lock').gesture} lang={lang} />
           </button>
         </VaultRow>
         <VaultRow data="autolock" isMobile={isMobile} title={vt('sec_autolock', lang)} desc={t('set_autolock_d', { n: view.autoLockMinutes })}>
           <button type="button" style={btn} onClick={() => setEdit('autolock')} title={c.tip('set-auto-lock')}>{t('change')}</button>
         </VaultRow>
         <VaultRow data="confirm-each-use" isMobile={isMobile} title={vt('cfu_title', lang)} desc={vt('cfu_d', lang)}>
-          <Toggle on={view.confirmEachUse === true} label={vt('cfu_title', lang)} onToggle={() => c.ask('confirm-each-use', undefined, undefined, undefined, view.confirmEachUse !== true)} />
+          <Toggle on={view.confirmEachUse === true} label={vt('cfu_title', lang)} onToggle={() => c.ask('confirm-each-use', undefined, undefined, view.confirmEachUse !== true)} />
         </VaultRow>
-        {view.presence && view.authenticator && (
-          <VaultRow data="policy" isMobile={isMobile} title={vt('sec_unlock', lang)}
-            desc={[vt(unlockModeKey(policy.mode), lang).replace('{presence}', pres), policy.windowEndsAt && !policy.codeNextUnlock ? vtf('unlock_now_window', lang, { time: fmtTime(policy.windowEndsAt, lang), presence: pres }) : policy.codeNextUnlock && policy.mode !== 'hello-only' ? vt('unlock_now_code', lang) : ''].filter(Boolean).join(' · ')}>
-            <button type="button" style={btn} onClick={() => setEdit('policy')} title={c.tip('set-unlock-policy')}>{t('change')}</button>
-          </VaultRow>
-        )}
         {view.authPolicy && view.authPolicy.rows.length > 0 && (
           <VaultRow data="authpolicy" isMobile={isMobile} title={vt('ap_title', lang)}
             desc={authPolicyChanged(view.authPolicy.rows) > 0
@@ -308,7 +266,7 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
             title={view.recoveryCreatedAt ? c.tip('rotate-recovery') : vt('ultraBody', lang)}
             onClick={() => (view.recoveryCreatedAt ? c.setWizard(['recovery']) : c.startSetup('recovery'))}>
             {view.recoveryCreatedAt ? t('rec_new_short') : vt('rec_create', lang)}
-            <Gate code={c.g('rotate-recovery').code && Boolean(view.recoveryCreatedAt)} gesture={c.g('rotate-recovery').gesture && Boolean(view.recoveryCreatedAt)} lang={lang} />
+            <Gate gesture={c.g('rotate-recovery').gesture && Boolean(view.recoveryCreatedAt)} lang={lang} />
           </button>
         </VaultRow>
         {c.canRecover && (
@@ -343,21 +301,12 @@ export function SettingsArea({ lang, isMobile, c, isPhone, gated, onFlash }: {
             onSave={m => { close(); c.ask('autolock', m) }} />
         </Sheet>
       )}
-      {edit === 'policy' && (
-        <Sheet closeLabel={t('close')} isMobile={isMobile} title={vt('sec_unlock', lang)} onClose={close}
-          footer={<DialogActions><button type="button" onClick={close} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel')}</button></DialogActions>}>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 12 }}>{vtf('sec_unlock_d', lang, { presence: pres })}</div>
-          <UnlockPolicyRow view={view} lang={lang} isMobile={isMobile} gate={c.g('set-unlock-policy')} btn={hotBtn(isMobile)}
-            onSave={p => { close(); c.ask('unlock-policy', undefined, p) }} />
-        </Sheet>
-      )}
       {edit === 'auth' && (
         <Sheet closeLabel={t('close')} isMobile={isMobile} title={vt('ap_title', lang)} onClose={close} wide
           footer={<DialogActions><button type="button" onClick={close} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel')}</button></DialogActions>}>
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 12 }}>{vtf('ap_desc', lang, { presence: pres })}</div>
           <AuthPolicyTable view={view} lang={lang} isMobile={isMobile} gate={c.g('set-auth-policy')} btn={hotBtn(isMobile)}
-            onOpenUnlock={view.presence && view.authenticator ? () => setEdit('policy') : undefined}
-            onSave={d => { close(); c.ask('auth-policy', undefined, undefined, d) }} />
+            onSave={d => { close(); c.ask('auth-policy', undefined, d) }} />
         </Sheet>
       )}
       {learn && (

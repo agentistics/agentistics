@@ -25,66 +25,71 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { usePlanLimits } from '../../lib/planLimits'
 import { pathOfView } from '../../lib/tasksViewRoute'
 import { fitHeight, holdPageFit, reserveBelow } from '../../lib/pageFit'
-import { microLabel, surface } from './board'
+import { button, microLabel, surface } from './board'
 import {
-  LIVE_STAGES, orderQueueFirstUp, STAGE_LABEL, byStage, filterCards, fmtClock, fmtSpan, joinLive, summarize, LIVE_DEFAULTS,
+  LIVE_STAGES, orderColumns, STAGE_LABEL, byStage, filterCards, fmtClock, fmtSpan, joinLive, summarize,
   type StageFilter, type LiveCard, type LiveReply, type LiveStage,
 } from './liveDeliveryModel'
 import {
-  columnCollapsed, fitCount, flowColumns, GONE_LINGER_MS, locateWorker, revealScrollLeft, stageBar, mergeGone, pack, planDepartures, readCollapsedPrefs, sinceWord,
-  snapshotOf, taskOfSession, taskOptions, writeCollapsedPrefs, type CollapsedPrefs, type BoardSnapshot, type Gone, type LocateAnswer,
+  columnCollapsed, GONE_LINGER_MS, locateWorker, revealScrollLeft, stageBar, mergeGone, planDepartures, readCollapsedPrefs, readViewPrefs, sinceWord,
+  snapshotOf, taskOfSession, taskOptions, writeCollapsedPrefs, writeViewPrefs, type CollapsedPrefs, type BoardSnapshot, type Gone, type LocateAnswer,
 } from './liveCardModel'
+import type { LiveSortId } from '@agentistics/core'
 import { LiveCardView } from './LiveCardView'
 import { LiveApprove } from './LiveApprove'
+import { LiveQueuePriority } from './LiveQueuePriority'
+import { LiveColumn } from './LiveColumn'
 import { LiveLeaders } from './LiveLeaders'
 import type { LeaderWorker } from './liveDeliveryModel'
 import { LiveTaskFilter } from './LiveTaskFilter'
-import { PipPortal, requestPipWindow, type OpenedWindow } from './livePip'
+import { dayLabel, groupHistory } from './liveHistoryModel'
+import { sessionLinks } from './liveSessionLinks'
+import { LiveToolbar } from './LiveToolbar'
+import { requestPipWindow } from './livePip'
+import { registerPip, usePip } from './livePipStore'
 import { useLiveDeliveries } from './useLiveDeliveries'
 import { flashHeader, flyCard, intersects, recolorBar, ring, transitionKind, type Box } from './liveDeliveryFx'
 
+const HISTORY_COLOR = '#6b7280'
 const reducedMotion = (): boolean => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } }
 
-const COL_W = 280, COL_GAP = 8, COLLAPSED_W = 40, MORE_H = 30, CARD_GAP = 8
-/**
- * An expanded column flows its cards into sub-columns to the right. Past this many FULL-card sub-columns the rest
- * are one-line rows (QA LOW 12: 246 cards made 246 sub-columns, 72 188 px wide) — still every one of them, still
- * clickable, still only a horizontal scroll.
- */
-const MAX_FULL_SUBCOLS = 8, COMPACT_W = 230, ROW_H = 26
-
-const copy = (pt: boolean) => pt ? {
-  title: 'Live Delivery', onlyActive: 'só com agentes ativos',
+/** Every word the Live draws, in both languages — nothing on this screen is written inline in a component. */
+export const copy = (pt: boolean) => pt ? {
+  title: 'Esteira de entregas ao vivo',
   deliveries: (n: number) => `${n} ${n === 1 ? 'entrega ativa' : 'entregas ativas'}`,
   agents: (n: number) => `${n} ${n === 1 ? 'agente trabalhando' : 'agentes trabalhando'}`,
   next: (t: string) => `próxima entrega prevista ${t}`, noNext: 'sem entrega com estimativa',
   live: 'atualizado ao vivo', empty: 'Nada nesta etapa',
   down: 'Não consegui ler as entregas agora.', refused: 'O quadro não está disponível neste perfil.',
   loading: 'Carregando entregas…', none: 'Nenhuma entrega ativa agora.',
-  delivered: 'publicado', allSteps: 'Todas as etapas', external: 'abrir janela externa', externalBlocked: 'O navegador bloqueou a janela externa.',
-  more: (n: number) => `+${n}`, less: 'menos', collapse: 'Recolher coluna', expand: 'Abrir coluna',
+  delivered: 'publicado', allSteps: 'Todas as etapas', external: 'Janela externa', externalTip: 'Abrir a esteira numa janela externa', externalBlocked: 'O navegador bloqueou a janela externa.',
+  collapse: 'Recolher coluna', expand: 'Abrir coluna',
+  history: 'Histórico', publishedNote: 'Os cartões ficam 24 h aqui; depois vão para o Histórico.',
+  searchColumn: 'Buscar nesta coluna…', noMatch: 'Nenhum cartão corresponde.', clearSearch: 'Limpar',
   archivedBtn: (n: number) => `Revisões antigas · ${n}`, archivedNote: 'Em revisão há mais de 72 h, sem sessão viva e sem commit publicado conhecido — saíram da coluna “Revisão do líder”.', archivedMore: (n: number) => `e mais ${n}`,
   left: 'saiu', recentLeft: (n: number) => `saíram há pouco (${n})`, noneLeft: 'Ninguém saiu do quadro nos últimos minutos.',
 } : {
-  title: 'Live Delivery', onlyActive: 'only with active agents',
+  title: 'Live Delivery',
   deliveries: (n: number) => `${n} active ${n === 1 ? 'delivery' : 'deliveries'}`,
   agents: (n: number) => `${n} ${n === 1 ? 'agent working' : 'agents working'}`,
   next: (t: string) => `next delivery expected ${t}`, noNext: 'no delivery has an estimate',
   live: 'updated live', empty: 'Nothing in this stage',
   down: 'Could not read the deliveries right now.', refused: 'The board is not available on this profile.',
   loading: 'Loading deliveries…', none: 'No active delivery right now.',
-  delivered: 'published', allSteps: 'All steps', external: 'open in a window', externalBlocked: 'The browser blocked the external window.',
-  more: (n: number) => `+${n}`, less: 'less', collapse: 'Collapse column', expand: 'Open column',
+  delivered: 'published', allSteps: 'All steps', external: 'External window', externalTip: 'Open the line in an external window', externalBlocked: 'The browser blocked the external window.',
+  collapse: 'Collapse column', expand: 'Open column',
+  history: 'History', publishedNote: 'Cards stay here for 24 h, then move to History.',
+  searchColumn: 'Search this column…', noMatch: 'No card matches.', clearSearch: 'Clear',
   archivedBtn: (n: number) => `Older reviews · ${n}`, archivedNote: 'In review for over 72 h, no live session and no known published commit — they left the “Leader review” column.', archivedMore: (n: number) => `and ${n} more`,
   left: 'left', recentLeft: (n: number) => `left recently (${n})`, noneLeft: 'Nothing left the board in the last minutes.',
 }
 
 /** The hooks wrapper: the shared fleet stream, the plan-limits account labels and the live read model. */
-export function LiveDelivery({ lang, compact, focusSessionId, inPip }: { lang: 'pt' | 'en'; compact?: boolean; focusSessionId?: string | null; inPip?: boolean }) {
+export function LiveDelivery({ lang, compact, focusSessionId, inPip, initialTaskIds }: { lang: 'pt' | 'en'; compact?: boolean; focusSessionId?: string | null; inPip?: boolean; initialTaskIds?: readonly string[] }) {
   const { fleet } = useFleet(lang)
   const plan = usePlanLimits()
   const { reply, error, nowMs } = useLiveDeliveries(fleet.sessions)
-  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} compact={compact} focusSessionId={focusSessionId} inPip={inPip} />
+  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} compact={compact} focusSessionId={focusSessionId} inPip={inPip} initialTaskIds={initialTaskIds} />
 }
 
 export interface LiveDeliveryViewProps {
@@ -110,13 +115,16 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   const L = copy(pt)
   const isMobile = useIsMobile()
   const navigate = useNavigate()
-  const [taskIds, setTaskIds] = useState<readonly string[]>(initialTaskIds ?? LIVE_DEFAULTS.taskIds)
-  const [onlyActive, setOnlyActive] = useState(LIVE_DEFAULTS.onlyActive)
-  const [stageFilter, setStageFilter] = useState<StageFilter>(LIVE_DEFAULTS.stage)
+  const [taskIds, setTaskIds] = useState<readonly string[]>(initialTaskIds ?? [])
+  // The filter bar's switches and the sort are saved like the column preferences (this browser).
+  const [view, setView] = useState(() => readViewPrefs())
+  const { onlyActive, showQueue, sort } = view
+  const setViewPref = useCallback((patch: Partial<typeof view>) => setView(v => { const n = { ...v, ...patch }; writeViewPrefs(n); return n }), [])
+  const [stageFilter, setStageFilter] = useState<StageFilter>('all')
   const [prefs, setPrefs] = useState<CollapsedPrefs>(() => readCollapsedPrefs())
-  const [expandedCols, setExpandedCols] = useState<Partial<Record<LiveStage, boolean>>>({})
+  // Each column's own search text (the field appears when more than three cards are out of view).
+  const [queries, setQueries] = useState<Partial<Record<LiveStage, string>>>({})
   const [openPub, setOpenPub] = useState<ReadonlySet<string>>(new Set())
-  const [pip, setPip] = useState<OpenedWindow | null>(null)
   const [pipNote, setPipNote] = useState(false)
   const [gone, setGone] = useState<Gone[]>([])
   const [showGone, setShowGone] = useState(false)
@@ -124,8 +132,15 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   const [clock, setClock] = useState(() => Date.now())
 
   const cards = useMemo(() => joinLive(reply?.deliveries ?? [], fleet), [reply, fleet])
-  const shown = useMemo(() => filterCards(cards, { taskIds, onlyActive }), [cards, taskIds, onlyActive])
-  const columns = useMemo(() => orderQueueFirstUp(byStage(shown), shown), [shown])
+  const shown = useMemo(() => filterCards(cards, { taskIds, onlyActive, showQueue }), [cards, taskIds, onlyActive, showQueue])
+  const columns = useMemo(() => orderColumns(byStage(shown), sort), [shown, sort])
+  // The Histórico column: pieces published more than 24 h ago. ALWAYS closed when the screen opens (not saved), opens on click.
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyQuery, setHistoryQuery] = useState('')
+  const historyCards = useMemo(
+    () => joinLive(reply?.history ?? [], fleet).filter(c => taskIds.length === 0 || taskIds.includes(c.d.taskId)),
+    [reply, fleet, taskIds],
+  )
   const visibleStages = stageFilter === 'all' ? LIVE_STAGES : LIVE_STAGES.filter(s => s === stageFilter)
   const sum = useMemo(() => summarize(shown, nowMs), [shown, nowMs])
   const options = useMemo(() => taskOptions(cards, nowMs), [cards, nowMs])
@@ -143,7 +158,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
 
   // Nothing leaves the board without a word: diff the board against its last self.
   const snap = useRef<BoardSnapshot | null>(null)
-  const filterSig = `${taskIds.join(',')}|${onlyActive}`
+  const filterSig = `${taskIds.join(',')}|${onlyActive}|${showQueue}`
   useEffect(() => {
     if (!reply) return
     const next = snapshotOf(shown, leaders, filterSig)
@@ -237,6 +252,9 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       if (kind === 'none' || r.width === 0) continue
       // Out of sight at either end: no ghost over unrelated screen.
       if (!intersects(r, view)) continue
+      // A card scrolled out of its OWN column is out of sight too (columns scroll on their own).
+      const body = el.closest<HTMLElement>('[data-live-colbody]')
+      if (body) { const b = body.getBoundingClientRect(); if (!intersects(r, { left: b.left, top: b.top, width: b.width, height: b.height })) continue }
       const from = { ...prev.box, left: prev.box.left - moved }
       flights.push(() => {
         el.style.opacity = '0'
@@ -291,16 +309,23 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   const requestLocate = useCallback((a: Extract<LocateAnswer, { kind: 'card' }>) => {
     setStageFilter(f => (f === 'all' || f === a.stage ? f : 'all'))
     setPrefs(p => { if (p[a.stage] === false) return p; const n = { ...p, [a.stage]: false }; writeCollapsedPrefs(n); return n })
+    // A search typed in that column would hide the very card being looked for.
+    setQueries(q => (q[a.stage] ? { ...q, [a.stage]: '' } : q))
     setLocateReq(r => ({ key: a.key, stage: a.stage, n: (r?.n ?? 0) + 1 }))
   }, [])
   useEffect(() => {
     if (!locateReq) return
     const root = boardRef.current
-    let frames = 0, expandedOnce = false, raf = 0
+    let frames = 0, raf = 0
     const tryFind = () => {
-      const el = root?.querySelector<HTMLElement>(`[data-live-card="${CSS.escape(locateReq.key)}"], [data-live-compact="${CSS.escape(locateReq.key)}"]`)
+      const el = root?.querySelector<HTMLElement>(`[data-live-card="${CSS.escape(locateReq.key)}"]`)
       if (el) {
-        // Horizontal only, on the BOARD's own scroller: the page must not move (QA MED 6, and HIGH 1's no-vertical-scroll rule).
+        // Two scrollers, neither of them the page: the column's own (vertical) and the board's (horizontal) — the page must not move (QA MED 6, HIGH 1).
+        const body = el.closest<HTMLElement>('[data-live-colbody]')
+        if (body) {
+          const b = body.getBoundingClientRect(), c = el.getBoundingClientRect()
+          if (c.top < b.top || c.bottom > b.bottom) body.scrollTo?.({ top: Math.max(0, body.scrollTop + (c.top - b.top) - Math.max(0, (b.height - c.height) / 2)), behavior: reducedMotion() ? 'auto' : 'smooth' })
+        }
         if (root) {
           const v = root.getBoundingClientRect(), c = el.getBoundingClientRect()
           root.scrollTo?.({ left: revealScrollLeft({ scrollLeft: root.scrollLeft, viewLeft: v.left, viewWidth: v.width, cardLeft: c.left, cardWidth: c.width, scrollWidth: root.scrollWidth }), behavior: reducedMotion() ? 'auto' : 'smooth' })
@@ -308,20 +333,20 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         ring(el, 'var(--accent-purple)', 2000)
         return
       }
-      // Cut off by "+N": open that column's extra sub-columns once, then keep looking.
-      if (frames === 6 && !expandedOnce) { expandedOnce = true; setExpandedCols(m => ({ ...m, [locateReq.stage]: true })) }
       if (frames++ < 40) raf = requestAnimationFrame(tryFind)
     }
     raf = requestAnimationFrame(tryFind)
     return () => cancelAnimationFrame(raf)
   }, [locateReq])
 
+  // The window belongs to `livePipStore` (and is drawn by `LivePipHost`), never to this component: this one
+  // unmounts when the popover closes or the route changes, and used to take the window with it.
+  const pip = usePip()
   const openExternal = useCallback(async () => {
     const r = await requestPipWindow({ width: 540, height: 680, fallbackUrl: `${window.location.origin}${pathOfView('live')}` })
-    if (r.kind === 'pip') setPip(r)
+    if (r.kind === 'pip') registerPip(r.win, taskIds)
     else if (r.kind === 'blocked') setPipNote(true)
-  }, [])
-  useEffect(() => () => { setPip(p => { if (p?.kind === 'pip') try { p.win.close() } catch { /* already closed */ } return null }) }, [])
+  }, [taskIds])
 
   if (error === 'refused') return <Note text={L.refused} />
   if (reply === null && error !== 'down') return <CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" />
@@ -329,6 +354,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
 
   const open = (c: LiveCard) => {
     const id = c.agents[0]?.id ?? c.d.sessionIds[0]
+    if (inPip) { try { window.focus() } catch { /* not allowed */ } }
     navigate(id ? `/sessions/${encodeURIComponent(id)}` : `/tasks/${encodeURIComponent(c.d.taskId)}`)
   }
   const leaderOf = (c: LiveCard): string | null => {
@@ -337,12 +363,19 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     return l ? plainLeaderName(l.title) : null
   }
   const roleOf = (c: LiveCard): 'leader' | 'worker' => (c.agents.some(a => leaderIds.has(a.id)) ? 'leader' : 'worker')
+  const openSession = (id: string) => {
+    // From the external window the main window is where the session opens: bring it forward.
+    if (inPip) { try { window.focus() } catch { /* not allowed */ } }
+    navigate(`/sessions/${encodeURIComponent(id)}`)
+  }
   const renderCard = (c: LiveCard, embedded = false) => (
     <div key={c.d.key} style={{ display: 'grid', gap: 4, minWidth: 0 }}>
       <LiveCardView
+        links={sessionLinks(c, fleet, leaders)} onOpenSession={openSession}
         c={c} cards={cards} nowMs={nowMs} pt={pt} fleet={fleet} accountLabels={accountLabels} runtime={reply.runtime}
-        leaderName={leaderOf(c)} role={roleOf(c)} mobile={isMobile} onOpen={open} embedded={embedded} cameFrom={moved[c.d.key]?.from ?? null}
+        leaderName={leaderOf(c)} role={roleOf(c)} mobile={isMobile} onOpen={open} embedded={embedded} sort={sort} cameFrom={moved[c.d.key]?.from ?? null}
       />
+      {c.d.stage === 'queue' && !embedded && <LiveQueuePriority taskId={c.d.taskId} priority={c.d.priority} pt={pt} />}
       {c.d.awaitingApproval && c.d.subtaskId && <LiveApprove subtaskId={c.d.subtaskId} phase={c.d.awaitingApproval.phase} pt={pt} mobile={isMobile} />}
     </div>
   )
@@ -366,75 +399,78 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       </div>
     )
   }
-  const cardsOf = (s: LiveStage) => columns[s]
-  // One line per card for the overflow of a huge column: where it is, who runs it, and a way in.
-  const renderCompact = (c: LiveCard) => (
-    <button type="button" data-live-compact={c.d.key} onClick={() => open(c)} title={c.d.title}
-      style={{ ...surface, display: 'flex', alignItems: 'center', gap: 6, width: '100%', boxSizing: 'border-box', height: ROW_H, padding: '0 8px', cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontSize: 11.5, textAlign: 'left', minWidth: 0 }}>
-      <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: c.liveState === 'working' ? 'var(--accent-green, #3ecf8e)' : c.liveState === 'needs-you' ? 'var(--accent-red, #ff5f5f)' : 'var(--text-tertiary)' }} />
-      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortTitle(c.d.title, 40)}</span>
-    </button>
+  const historyOrdered = groupHistory(historyCards, nowMs, pt).flatMap(g => g.cards)
+  const historyHeading = (c: LiveCard, prev: LiveCard | undefined): string | null => {
+    const label = dayLabel(c.d.deliveredAtMs ?? 0, nowMs, pt)
+    return !prev || dayLabel(prev.d.deliveredAtMs ?? 0, nowMs, pt) !== label ? label : null
+  }
+  // Phone: one more section under the stages, closed until tapped, same accordion rows as Publicado.
+  const renderHistoryMobile = () => historyOrdered.length === 0 ? null : (
+    <section data-live-column="history" data-collapsed={historyOpen ? '0' : '1'} style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+      <header
+        role="button" tabIndex={0} aria-expanded={historyOpen} data-live-colhead onClick={() => setHistoryOpen(v => !v)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHistoryOpen(v => !v) } }}
+        style={{ borderTop: `3px solid ${HISTORY_COLOR}`, padding: '10px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 44, cursor: 'pointer' }}
+      >
+        <span style={{ fontWeight: 700, fontSize: 13 }}>{L.history}</span>
+        <span style={{ ...microLabel, fontSize: 11 }}>{historyOrdered.length} {historyOpen ? '▴' : '▾'}</span>
+      </header>
+      {historyOpen && historyOrdered.map((c, i) => {
+        const h = historyHeading(c, historyOrdered[i - 1])
+        return (
+          <React.Fragment key={c.d.key}>
+            {h && <span data-live-group-head style={{ ...microLabel, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.05em' }}>{h}</span>}
+            {renderPub(c)}
+          </React.Fragment>
+        )
+      })}
+    </section>
   )
+  // The short line under the title: how many pieces and agents. The ETA and "updated live" are the tooltip.
+  const summaryLine = [L.deliveries(sum.deliveries), L.agents(sum.agentsWorking)].join(' · ')
+  const summaryTitle = [sum.nextEtaMs !== null ? L.next(fmtClock(sum.nextEtaMs)) : L.noNext, L.live].join(' · ')
 
-  const summaryLine = [
-    L.deliveries(sum.deliveries), L.agents(sum.agentsWorking),
-    sum.nextEtaMs !== null ? L.next(fmtClock(sum.nextEtaMs)) : L.noNext, L.live,
-  ].join(' · ')
-
+  // The right-hand group of the bar: view and actions (older reviews, recently left, the external window, the leaders).
   const pillBtn = (active: boolean): React.CSSProperties => ({
-    display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 30, padding: '0 12px',
-    borderRadius: 999, fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
-    border: `1px solid ${active ? 'var(--anthropic-orange)' : 'var(--border)'}`,
-    background: active ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
+    ...button(isMobile), gap: 6, flexShrink: 0, borderRadius: 999, padding: '0 12px',
+    borderColor: active ? 'var(--anthropic-orange)' : 'var(--border)',
+    background: active ? 'var(--anthropic-orange-dim)' : 'transparent',
     color: active ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)',
   })
-  const filters = (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
-      <LiveTaskFilter options={options} chosen={taskIds} onChange={setTaskIds} pt={pt} mobile={isMobile} />
-      {!isMobile && <button
-        type="button" className="ag-tap" aria-pressed={stageFilter === 'all'} data-live-allsteps onClick={() => setStageFilter(stageFilter === 'all' ? (LIVE_STAGES.find(s => columns[s].length > 0) ?? 'running') : 'all')}
-        style={pillBtn(stageFilter === 'all')}
-      >{L.allSteps}</button>}
-      <button type="button" className="ag-tap" aria-pressed={onlyActive} onClick={() => setOnlyActive(v => !v)} style={pillBtn(onlyActive)}>
-        <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--anthropic-orange)' }} />{L.onlyActive}
-      </button>
+  const actions = (
+    <>
       {gone.length > 0 && (
         <button type="button" className="ag-tap" data-live-gone-toggle data-fresh={gone.some(g => clock - g.atMs < GONE_LINGER_MS) ? '1' : '0'} aria-pressed={showGone} onClick={() => setShowGone(v => !v)}
           style={{ ...pillBtn(showGone || gone.some(g => clock - g.atMs < GONE_LINGER_MS)), transition: reducedMotion() ? 'none' : 'background .4s, border-color .4s' }}>{L.recentLeft(gone.length)}</button>
       )}
       {(reply?.archivedTotal ?? 0) > 0 && (
-        <button type="button" className="ag-tap" data-live-archived-toggle aria-pressed={showArchived} onClick={() => setShowArchived(v => !v)} title={L.archivedNote} style={{ ...pillBtn(showArchived), minHeight: isMobile ? 44 : 30 }}>{L.archivedBtn(reply!.archivedTotal!)}</button>
+        <button type="button" className="ag-tap" data-live-archived-toggle aria-pressed={showArchived} onClick={() => setShowArchived(v => !v)} title={L.archivedNote} style={pillBtn(showArchived)}>{L.archivedBtn(reply!.archivedTotal!)}</button>
       )}
       {!isMobile && !inPip && (
-        <button type="button" className="ag-tap" data-live-external onClick={() => void openExternal()} disabled={pip?.kind === 'pip'} title={L.external} style={{ ...pillBtn(false), opacity: pip?.kind === 'pip' ? 0.5 : 1 }}>
+        <button type="button" className="ag-tap" data-live-external onClick={() => void openExternal()} disabled={pip !== null} title={L.externalTip} style={{ ...pillBtn(false), opacity: pip !== null ? 0.5 : 1 }}>
           <ExternalLink size={13} aria-hidden />{L.external}
         </button>
       )}
-    </div>
+      {!compact && !inPip && (
+        <LiveLeaders
+          leaders={leaders} runtime={reply.runtime} accountLabels={accountLabels} nowMs={nowMs} lang={lang} mobile={isMobile}
+          locate={(w: LeaderWorker) => locateWorker(w, shown, cards)} onLocate={a => requestLocate(a)}
+          onOpen={id => navigate(`/sessions/${encodeURIComponent(id)}`)}
+        />
+      )}
+    </>
   )
 
   const header = (
     <div style={{ display: 'grid', gap: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 650 }}>
-          <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-red, #ff5f5f)' }} />{L.title}
-        </span>
-        <span data-live-summary style={{
-          fontSize: 12, color: 'var(--text-tertiary)', flex: isMobile ? undefined : '0 1 auto', minWidth: isMobile ? 0 : 220,
-          ...(isMobile ? { flexBasis: '100%', order: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' } : {}),
-        }}>{summaryLine}</span>
-        {/* The Líderes button follows the summary, as in the approved preview (QA MED 8). */}
-        {!compact && !inPip && (
-          <LiveLeaders
-            leaders={leaders} runtime={reply.runtime} accountLabels={accountLabels} nowMs={nowMs} lang={lang} mobile={isMobile}
-            locate={(w: LeaderWorker) => locateWorker(w, shown, cards)} onLocate={a => requestLocate(a)}
-            onOpen={id => navigate(`/sessions/${encodeURIComponent(id)}`)}
-          />
-        )}
-        {!isMobile && <span style={{ flex: 1 }} />}
-        {!isMobile && filters}
-      </div>
-      {isMobile && filters}
+      <LiveToolbar
+        pt={pt} mobile={isMobile} title={L.title} summary={summaryLine} summaryTitle={summaryTitle}
+        taskFilter={<LiveTaskFilter options={options} chosen={taskIds} onChange={setTaskIds} pt={pt} mobile={isMobile} />}
+        stageAll={isMobile ? undefined : { active: stageFilter === 'all', onClick: () => setStageFilter(stageFilter === 'all' ? (LIVE_STAGES.find(s => columns[s].length > 0) ?? 'running') : 'all') }}
+        onlyActive={onlyActive} showQueue={showQueue} sort={sort}
+        onOnlyActive={v => setViewPref({ onlyActive: v })} onShowQueue={v => setViewPref({ showQueue: v })} onSort={(s: LiveSortId) => setViewPref({ sort: s })}
+        actions={actions}
+      />
       {pipNote && <span role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{L.externalBlocked}</span>}
       {showArchived && (reply?.archived?.length ?? 0) > 0 && (
         <div data-live-archived-list style={{ ...surface, padding: '8px 10px', display: 'grid', gap: 5, fontSize: 11.5 }}>
@@ -461,13 +497,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     </div>
   )
 
-  const pipPortal = pip?.kind === 'pip' ? (
-    <PipPortal win={pip.win} onClose={() => setPip(null)}>
-      <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet} accountLabels={accountLabels} compact inPip initialTaskIds={taskIds} />
-    </PipPortal>
-  ) : null
-
-  if (reply.deliveries.length === 0 && leaders.length === 0 && gone.length === 0) return <div style={{ display: 'grid', gap: 12 }}>{header}<Note text={L.none} />{pipPortal}</div>
+  if (reply.deliveries.length === 0 && leaders.length === 0 && gone.length === 0 && historyCards.length === 0) return <div style={{ display: 'grid', gap: 12 }}>{header}<Note text={L.none} /></div>
 
   if (isMobile) {
     const chip = (active: boolean): React.CSSProperties => ({
@@ -510,8 +540,8 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
               {s === 'published' ? columns[s].map(renderPub) : columns[s].map(c => renderCard(c))}
             </section>
           ))}
+          {renderHistoryMobile()}
         </div>
-        {pipPortal}
       </div>
     )
   }
@@ -519,149 +549,34 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   return (
     <div ref={wrapRef} style={{ display: 'grid', gap: 12, gridTemplateRows: 'auto minmax(0, 1fr)', height: compact ? '100%' : (fitH ?? 560), minHeight: compact ? 0 : 420 }}>
       {header}
-      {/* HORIZONTAL scroll only: columns fit the height they are given, the rest flows sideways. */}
-      <div ref={boardRef} className="ag-scroll" data-live-board style={{ display: 'flex', gap: COL_GAP, overflowX: 'auto', overflowY: 'hidden', alignItems: 'stretch', padding: '6px 2px 10px', minHeight: 0 }}>
+      {/* The PAGE scrolls horizontally only; each column is one vertical stack that scrolls on its own. */}
+      <div ref={boardRef} className="ag-scroll" data-live-board style={{ display: 'flex', gap: 8, overflowX: 'auto', overflowY: 'hidden', alignItems: 'stretch', padding: '6px 2px 10px', minHeight: 0 }}>
         {visibleStages.map(s => (
-          <Column
-            key={s} stage={s} pt={pt} cards={cardsOf(s)} prefs={prefs} L={L}
-            expanded={!!expandedCols[s]} onExpanded={v => setExpandedCols(m => ({ ...m, [s]: v }))}
+          <LiveColumn
+            key={s} stage={s} pt={pt} cards={columns[s]} collapsed={columnCollapsed(s, columns[s].length, prefs)}
+            words={{ empty: L.empty, collapse: L.collapse, expand: L.expand, searchPlaceholder: L.searchColumn, noMatch: L.noMatch, clear: L.clearSearch }}
+            query={queries[s] ?? ''} onQuery={q => setQueries(m => ({ ...m, [s]: q }))}
             onToggle={() => {
-              const was = columnCollapsed(s, cardsOf(s).length, prefs)
+              const was = columnCollapsed(s, columns[s].length, prefs)
               const next = { ...prefs, [s]: !was }
               setPrefs(next); writeCollapsedPrefs(next)
             }}
-            render={s === 'published' ? renderPub : renderCard} renderCompact={renderCompact}
-            sig={s === 'published' ? [...openPub].join(',') : ''}
+            render={s === 'published' ? renderPub : renderCard}
+            note={s === 'published' ? L.publishedNote : undefined}
           />
         ))}
+        {stageFilter === 'all' && historyOrdered.length > 0 && (
+          <LiveColumn
+            key="history" stage="published" pt={pt} cards={historyOrdered} collapsed={!historyOpen}
+            override={{ id: 'history', label: L.history, color: HISTORY_COLOR }}
+            words={{ empty: L.empty, collapse: L.collapse, expand: L.expand, searchPlaceholder: L.searchColumn, noMatch: L.noMatch, clear: L.clearSearch }}
+            query={historyQuery} onQuery={setHistoryQuery}
+            onToggle={() => setHistoryOpen(v => !v)}
+            render={renderPub} groupHeading={historyHeading}
+          />
+        )}
       </div>
-      {pipPortal}
     </div>
-  )
-}
-
-/**
- * One stage column. Collapsed it is the thin vertical strip empty columns always were; open it shows
- * the cards that FIT the height and a "+N" that flows the rest into extra sub-columns to the right —
- * measured, not guessed, and never a vertical scroll bar.
- */
-function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, render, renderCompact, sig }: {
-  stage: LiveStage; pt: boolean; cards: LiveCard[]; prefs: CollapsedPrefs; L: ReturnType<typeof copy>
-  expanded: boolean; onExpanded: (v: boolean) => void; onToggle: () => void
-  render: (c: LiveCard) => React.ReactNode; renderCompact: (c: LiveCard) => React.ReactNode; sig: string
-}) {
-  const collapsed = columnCollapsed(stage, cards.length, prefs)
-  const label = STAGE_LABEL[stage][pt ? 'pt' : 'en']
-  const bodyRef = useRef<HTMLDivElement>(null)
-  const [m, setM] = useState<{ heights: number[]; avail: number } | null>(null)
-  // Cards of a column that was just collapsed stay mounted for the width animation to play over them.
-  const [lingerOpen, setLingerOpen] = useState(false)
-  const wasCollapsed = useRef(collapsed)
-  useEffect(() => {
-    if (!wasCollapsed.current && collapsed && !reducedMotion()) {
-      setLingerOpen(true)
-      const t = setTimeout(() => setLingerOpen(false), 230)
-      wasCollapsed.current = collapsed
-      return () => clearTimeout(t)
-    }
-    wasCollapsed.current = collapsed
-    return undefined
-  }, [collapsed])
-
-  const signature = useMemo(
-    () => cards.map(c => `${c.d.key}:${c.liveState}:${c.d.lastAction?.text.length ?? 0}:${c.d.block ? 1 : 0}`).join('|') + `#${expanded}#${sig}`,
-    [cards, expanded, sig],
-  )
-  useLayoutEffect(() => { setM(null) }, [signature])
-  useLayoutEffect(() => {
-    if (m !== null || collapsed) return
-    const el = bodyRef.current
-    if (!el) return
-    const slots = Array.from(el.querySelectorAll<HTMLElement>('[data-live-slot]'))
-    const heights = slots.map(x => x.getBoundingClientRect().height + CARD_GAP)
-    setM({ heights, avail: el.clientHeight })
-  }, [m, collapsed, signature])
-  useEffect(() => {
-    // The height the column is given changes with the window and with the header above it.
-    const el = bodyRef.current
-    if (!el || collapsed || typeof ResizeObserver === 'undefined') return
-    let last = el.clientHeight
-    const ro = new ResizeObserver(() => { if (Math.abs(el.clientHeight - last) > 2) { last = el.clientHeight; setM(null) } })
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [collapsed])
-
-  // An unlaid-out body (no height at all: a hidden tab, a test DOM) says nothing about fit — show everything rather than cut by a measurement that is not one.
-  const shownCount = m && m.avail > 0 ? fitCount(m.heights, m.avail, MORE_H + CARD_GAP) : cards.length
-  const cut = m !== null && shownCount < cards.length
-  // Full cards fill the first sub-columns; what is left becomes one-line rows (never dropped, never a vertical scroll).
-  const flow = m && expanded && cut ? flowColumns(m.heights, m.avail, MAX_FULL_SUBCOLS, ROW_H + 4) : null
-  const packs = flow ? flow.full : null
-  const compactCols = flow ? flow.compact : []
-  const cols = packs ? packs.length : 1
-  const width = collapsed ? COLLAPSED_W : cols * COL_W + compactCols.length * COMPACT_W + (cols + compactCols.length - 1) * COL_GAP
-  const mountBody = !collapsed || lingerOpen
-  const slot = (c: LiveCard) => <div key={c.d.key} data-live-slot style={{ minWidth: 0 }}>{render(c)}</div>
-  const slotStyle: React.CSSProperties = { display: 'grid', gap: CARD_GAP, alignContent: 'start', minWidth: 0, width: COL_W, flex: '0 0 auto' }
-
-  return (
-    <section
-      data-live-column={stage} data-collapsed={collapsed ? '1' : '0'}
-      style={{
-        flex: `0 0 ${width}px`, width, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden',
-        opacity: cards.length === 0 && collapsed ? 0.5 : 1,
-        transition: reducedMotion() ? 'none' : 'flex-basis .2s ease, width .2s ease, opacity .2s ease',
-      }}
-    >
-      <header
-        role="button" tabIndex={0} aria-expanded={!collapsed} aria-label={`${label} — ${collapsed ? L.expand : L.collapse}`}
-        title={collapsed ? L.expand : L.collapse} data-live-colhead onClick={onToggle}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}
-        style={{
-          borderTop: `3px solid ${STAGE_LABEL[stage].color}`, padding: '8px 4px 2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6,
-          cursor: 'pointer', flexShrink: 0, ...(collapsed ? { flexDirection: 'column', gap: 6 } : {}),
-        }}
-      >
-        <span style={{ fontWeight: 700, fontSize: 13, ...(collapsed ? { writingMode: 'vertical-rl', whiteSpace: 'nowrap' } : {}) }}>{label}</span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          {!collapsed && expanded && cut && (
-            <button type="button" data-live-less className="ag-tap" onClick={e => { e.stopPropagation(); onExpanded(false) }}
-              style={{ background: 'none', border: 0, color: 'var(--anthropic-orange-light)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>{L.less}</button>
-          )}
-          <span style={{ ...microLabel, fontSize: 11 }}>{cards.length}</span>
-          {!collapsed && <span aria-hidden data-live-colchev style={{ ...microLabel, fontSize: 13, lineHeight: 1 }}>‹</span>}
-        </span>
-      </header>
-      {mountBody && (
-        <div
-          ref={bodyRef} data-live-colbody
-          style={{
-            flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', gap: COL_GAP, alignItems: 'flex-start',
-            opacity: collapsed ? 0 : 1, transition: reducedMotion() ? 'none' : 'opacity .15s ease', pointerEvents: collapsed ? 'none' : undefined,
-          }}
-        >
-          {packs ? [...packs.map((idxs, k) => (
-            <div key={k} data-live-subcol style={slotStyle}>
-              {idxs.map(i => slot(cards[i]!))}
-            </div>
-          )), ...compactCols.map((idxs, k) => (
-            <div key={`c${k}`} data-live-subcol data-compact="1" style={{ ...slotStyle, width: COMPACT_W, gap: 4 }}>
-              {idxs.map(i => <div key={cards[i]!.d.key} style={{ minWidth: 0 }}>{renderCompact(cards[i]!)}</div>)}
-            </div>
-          ))] : (
-            <div style={slotStyle}>
-              {(m ? cards.slice(0, shownCount) : cards).map(slot)}
-              {cut && (
-                <button type="button" data-live-more className="ag-tap" onClick={() => onExpanded(true)}
-                  style={{ minHeight: MORE_H, borderRadius: 8, border: '1px dashed var(--border)', background: 'transparent', color: 'var(--anthropic-orange-light)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600 }}
-                >{L.more(cards.length - shownCount)}</button>
-              )}
-              {cards.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>{L.empty}</span>}
-            </div>
-          )}
-        </div>
-      )}
-    </section>
   )
 }
 

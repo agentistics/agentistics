@@ -19,7 +19,7 @@ export function liveActivity(fleet: readonly FleetRow[]): LiveActivity {
 }
 
 export function shortcutLabel(a: LiveActivity, pt: boolean): string {
-  const base = pt ? 'Live Delivery' : 'Live Delivery'
+  const base = pt ? 'Esteira de entregas ao vivo' : 'Live Delivery'
   const parts: string[] = []
   if (a.waiting > 0) parts.push(pt ? `${a.waiting} esperando você` : `${a.waiting} waiting on you`)
   if (a.working > 0) parts.push(pt ? `${a.working} trabalhando` : `${a.working} working`)

@@ -16,7 +16,7 @@
  */
 
 import type { CSSProperties, ReactNode } from 'react'
-import { ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronUp, Eye, EyeOff, LayoutGrid, Plus, RotateCcw, Rows3, Search, Settings2, SlidersHorizontal, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronUp, Eye, EyeOff, LayoutGrid, Plus, RotateCcw, Rows3, Settings2, SlidersHorizontal, X } from 'lucide-react'
 import { PRIORITY_ORDER, type SortSpec, type TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { BOARD_SORTS } from './BoardArrange'
@@ -26,6 +26,7 @@ import type { BoardView, GroupBy, LaneKey } from './boardPrefs'
 import { LANE_KEYS } from './boardPrefs'
 import type { Lang } from './copy'
 import { PanelMenu } from './PickerMenu'
+import { SearchField } from './SearchField'
 import { moveStatus } from './statusDefaults'
 import { segmentBadge } from './ViewBar'
 
@@ -68,7 +69,7 @@ const T = (lang: Lang) => lang === 'pt'
     wip: 'Limite de cards por coluna', wipNote: 'O limite avisa, nunca bloqueia.',
     hideEmpty: 'Ocultar grupos vazios', compose: 'Compor em andamento', manage: 'Status e tipos',
     restore: 'Restaurar padrão', up: 'Subir', down: 'Descer', hide: 'Ocultar', show: 'Mostrar',
-    search: 'Buscar', metrics: 'Métricas', board: 'Quadro', table: 'Tabela', live: 'Entrega ao vivo', newTask: 'Nova tarefa',
+    search: 'Buscar', metrics: 'Métricas', board: 'Quadro', table: 'Tabela', live: 'Esteira de entregas', newTask: 'Nova tarefa',
     none: 'Nenhuma raia', repo: 'Repositório', harness: 'Harness', priority: 'Prioridade',
     asc: 'Crescente', desc: 'Decrescente', hiding: (n: number) => `${n} oculto${n === 1 ? '' : 's'}`,
     clear: 'Remover', handOrder: 'Ordem manual',
@@ -283,13 +284,7 @@ export function AgentaskToolbar({ lang, q, onQ, state, actions, statuses, onView
     color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
   })
   const search: ReactNode = (
-    <div style={{ position: 'relative', flex: mobile ? 1 : '0 1 280px', minWidth: 0 }}>
-      <Search size={14} style={{ position: 'absolute', left: 11, top: mobile ? 15 : 9, color: 'var(--text-tertiary)' }} />
-      <input
-        aria-label={t.search} style={{ ...field(mobile), paddingLeft: 32, ...(mobile ? {} : { height: 32 }) }}
-        value={q} placeholder={t.search} onChange={e => onQ(e.target.value)}
-      />
-    </div>
+    <SearchField value={q} onChange={onQ} placeholder={t.search} mobile={mobile} style={{ flex: mobile ? 1 : '0 1 280px' }} />
   )
   const viewLabel = (
     <>

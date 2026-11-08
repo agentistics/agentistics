@@ -73,6 +73,9 @@ export const AGENT_TOOL_NAMES = [
   // FLUXO.ENTREGA-DSL (2)
   'agentistics_task_phase',
   'agentistics_task_stage',
+  // FILA.PRIORIDADE (2)
+  'agentistics_task_queue',
+  'agentistics_task_queue_answer',
   // Session groups (3)
   'agentistics_session_groups',
   'agentistics_session_group_create',
@@ -110,6 +113,8 @@ export const AGENT_TOOL_NAMES = [
   // Experimental flows (2)
   'agentistics_flow_run',
   'agentistics_flow_status',
+  // Vault (1) — COFRE.DESBLOQUEIO
+  'agentistics_vault_status',
 ] as const
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]
@@ -184,6 +189,14 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
     ...TASKS, risk: 'W', routes: ['POST /api/deliveries/:subtask'],
     reason: 'writes the pre-dispatch (staged session draft) on a subtask and opens its delivery in the queue; nothing starts until stage-run passes the predispatch and vaga gates',
   },
+  agentistics_task_queue: {
+    ...TASKS, risk: 'R', routes: ['GET /api/deliveries/queue/:task'],
+    reason: 'reads the delivery queue in leaving order with every fact the Fila tab shows (priority, pre-dispatch, slot verdict, hold, open question, notes); read only',
+  },
+  agentistics_task_queue_answer: {
+    ...TASKS, risk: 'W', routes: ['POST /api/deliveries/:subtask', 'POST /api/deliveries/queue-next'],
+    reason: 'answers the queue question (sim opens the session through the same claim-guarded stage run; nao/agendar keep the piece queued with a recorded reason); leader of the task or owner only, every decision is a comment on the subtask',
+  },
   agentistics_wait: {
     ...GROUPS, risk: 'W', routes: ['POST /api/flows/wait'],
     reason: 'registers, acknowledges or cancels the calling session\'s OWN durable wait (closed condition set); the wake goes through the composer path; sender verified',
@@ -229,6 +242,11 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   // ------------------------------------------------------------------ Tags
   agentistics_tags: { ...DATA, risk: 'R', routes: ['GET /api/tags'], reason: 'reads aggregate-only tag cards' },
   agentistics_tag_detail: { ...DATA, risk: 'R', routes: ['GET /api/tags', 'GET /api/tags/:id'], reason: 'reads one tag aggregate (counts and sums only)' },
+  // ------------------------------------------------------------------ Vault (COFRE.DESBLOQUEIO)
+  agentistics_vault_status: {
+    ...TASKS, risk: 'R', routes: ['GET /api/vault'],
+    reason: 'reads how the vault is protected (state, ways to confirm in use and offered, password rules) through an allowlist; never an item, a key id or a secret',
+  },
   // ------------------------------------------------------------------ Experimental flows (read-only host operations)
   agentistics_flow_run: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['POST /api/flows/run'], reason: 'runs only the built-in deterministic flow gates; it deletes nothing' },
   agentistics_flow_status: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['GET /api/flows/status/:runId'], reason: 'reads a durable deterministic flow run' },

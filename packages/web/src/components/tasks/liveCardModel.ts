@@ -2,14 +2,16 @@
  * liveCardModel — PURE. Every sentence and every decision the Live card (option A) draws:
  * the state word, what a waiting card is waiting for, the stage bar, the time row, the two
  * estimate boxes, the Bloqueado line, which tasks are "recent", which columns start collapsed,
- * how many cards fit a column, and which cards just left the board and why.
+ * when a column offers its search, and which cards just left the board and why.
  *
  * Nothing here reads the clock or a store: `nowMs` and the fleet come in, so each rule has a test.
  */
 
+import { parseLiveSort, type LiveSortId } from '@agentistics/core'
+import { startsLine } from './queueTime'
 import type { FleetRow } from '../../lib/fleet'
 import {
-  fmtClock, fmtSpan, isQueued, STAGE_LABEL, LIVE_STAGES, type HiddenReason, type LiveBlock, type LiveCard, type LiveDeliveryRecord,
+  fmtClock, fmtSpan, isQueued, STAGE_LABEL, LIVE_STAGES, LIVE_DEFAULTS, type HiddenReason, type LiveBlock, type LiveCard, type LiveDeliveryRecord,
   type LiveHidden, type LiveStage, type StageVisit, type WorkerWord,
 } from './liveDeliveryModel'
 
@@ -61,7 +63,12 @@ function questionOf(row: FleetRow | undefined): string | null {
  * nothing is known it says so; it never guesses a reason.
  */
 export function waitingReason(c: LiveCard, fleet: readonly FleetRow[], pt: Pt): string | null {
-  if (isQueued(c)) return pt ? 'esperando vaga na máquina' : 'waiting for a machine slot'
+  if (isQueued(c)) {
+    // The card already says WHY it is not starting when the leader decided (não / agendar / the open question) or when the
+    // slot gate says a slot is free: a generic "waiting for a machine slot" beside either would contradict it.
+    if (c.d.queue || c.d.slot?.ok === true) return null
+    return pt ? 'esperando vaga na máquina' : 'waiting for a machine slot'
+  }
   // A blocked card says WHY in its own block (reason, who lifts it) — a second line would contradict it.
   if (c.d.stage === 'blocked') return null
   if (c.liveState === 'needs-you') {
@@ -150,6 +157,31 @@ export function cardPercent(d: Pick<LiveDeliveryRecord, 'stage' | 'ci' | 'step'>
     return stagePercent('ci', step, pt, d.ci.tagPublished)
   }
   return stagePercent(d.stage, d.step, pt)
+}
+
+const SIGNAL_WORD: Record<string, { pt: string; en: string }> = {
+  session: { pt: 'a sessão está aberta', en: 'the session is open' },
+  edit: { pt: 'a sessão editou arquivos', en: 'the session edited files' },
+  tests: { pt: 'a sessão rodou testes', en: 'the session ran tests' },
+  commit: { pt: 'houve um commit no ramo da peça', en: 'there is a commit on the piece\'s branch' },
+  handback: { pt: 'a sessão entregou (handback)', en: 'the session handed back' },
+  browser: { pt: 'a QA abriu o navegador', en: 'QA drove a browser' },
+  verdict: { pt: 'o veredito da QA foi registrado', en: 'the QA verdict is recorded' },
+  'deletions-gate': { pt: 'o portão de apagados rodou', en: 'the deletions gate ran' },
+  review: { pt: 'a decisão do líder foi registrada', en: 'the leader\'s decision is recorded' },
+  pr: { pt: 'o PR existe', en: 'the PR exists' },
+  merged: { pt: 'o PR foi mergeado', en: 'the PR is merged' },
+  stage: { pt: 'a peça entrou nesta etapa', en: 'the piece entered this stage' },
+}
+
+/** PURE: where the shown step comes from, in words — "relatado pelo worker" or the observed fact. Null = nothing to say. */
+export function stepSourceNote(d: Pick<LiveDeliveryRecord, 'stepSource' | 'stepSignal'>, pt: Pt): string | null {
+  if (d.stepSource === 'reported') return pt ? 'passo relatado pelo worker ou pelo fluxo' : 'step reported by the worker or the flow'
+  if (d.stepSource === 'signals') {
+    const w = d.stepSignal ? SIGNAL_WORD[d.stepSignal]?.[pt ? 'pt' : 'en'] : undefined
+    return pt ? `passo lido de fatos observados${w ? `: ${w}` : ''}` : `step read from observed facts${w ? `: ${w}` : ''}`
+  }
+  return null
 }
 
 export interface CiLine { key: 'merge' | 'release' | 'tag'; done: boolean; text: string }
@@ -295,11 +327,70 @@ export const BLOCK_WORD: Record<LiveBlock['reason'], { pt: string; en: string }>
  * PURE: the pre-dispatch line of a queued card — "claude · opus · high · conta X" and the expected slot.
  * A field nobody staged is left out (never guessed); no staged session at all answers null.
  */
-export function queueLines(d: Pick<LiveDeliveryRecord, 'staged' | 'slot'>, pt: Pt, accountName?: (harness: string, account: string) => string): { staged: string | null; slot: string | null; slotOk: boolean | null } {
+export function queueLines(d: Pick<LiveDeliveryRecord, 'staged' | 'slot'> & { queue?: LiveDeliveryRecord['queue'] }, pt: Pt, accountName?: (harness: string, account: string) => string, nowMs: number = Date.now()): { staged: string | null; slot: string | null; slotOk: boolean | null; slotRaw: string | null; wait: string | null } {
+  const base = queueLinesBase(d, pt, accountName)
+  return { ...base, wait: queueWaitLine(d.queue, pt, nowMs) }
+}
+
+/**
+ * PURE (FILA.PRIORIDADE): why a queued card is NOT being started even if a slot is free — the leader's `não` with its
+ * reason, an `agendar` with its hour ("começa às 14:00"), the open question, or an approval waiting for a slot.
+ */
+export function queueWaitLine(q: LiveDeliveryRecord['queue'] | undefined, pt: Pt, nowMs: number): string | null {
+  if (!q) return null
+  if (q.hold) {
+    return q.hold.kind === 'nao'
+      ? (pt ? `não por enquanto: ${q.hold.reason}` : `not for now: ${q.hold.reason}`)
+      : `${q.hold.until ? startsLine(q.hold.until, nowMs, pt) : (pt ? 'agendada' : 'scheduled')} · ${q.hold.reason}`
+  }
+  if (q.approved) return pt ? 'aprovada — abre quando houver vaga' : 'approved — opens when a slot is free'
+  if (q.asking) return pt ? 'esperando a resposta do líder' : 'waiting for the leader\'s answer'
+  return null
+}
+
+function queueLinesBase(d: Pick<LiveDeliveryRecord, 'staged' | 'slot'>, pt: Pt, accountName?: (harness: string, account: string) => string): { staged: string | null; slot: string | null; slotOk: boolean | null; slotRaw: string | null } {
   const s = d.staged
-  const staged = s ? [s.harness, s.model, s.effort, s.account ? `${pt ? 'conta' : 'account'} ${s.harness && accountName ? accountName(s.harness, s.account) : s.account}` : null].filter(Boolean).join(' · ') || null : null
-  if (!d.slot) return { staged, slot: s ? (pt ? 'vaga: ainda não checada' : 'slot: not checked yet') : null, slotOk: null }
-  return { staged, slot: d.slot.ok ? (pt ? 'vaga: livre agora' : 'slot: free now') : `${pt ? 'vaga' : 'slot'}: ${d.slot.reason ?? (pt ? 'sem vaga' : 'no slot')}`, slotOk: d.slot.ok }
+  // The account is said by NAME; one the resolver cannot name (it hands the raw `acc_…` id back) is left out rather than shown as an id.
+  const accountWord = s?.account ? (s.harness && accountName ? accountName(s.harness, s.account) : s.account) : null
+  const accountPart = accountWord && accountWord !== s?.account && !/^acc_/i.test(accountWord) ? `${pt ? 'conta' : 'account'} ${accountWord}` : null
+  const staged = s ? [s.harness, s.model, s.effort, accountPart].filter(Boolean).join(' · ') || null : null
+  if (!d.slot) return { staged, slot: s ? (pt ? 'vaga: ainda não checada' : 'slot: not checked yet') : null, slotOk: null, slotRaw: null }
+  // The gate's own sentence is English, carries account ids and is for the log: the card says it in a few plain words,
+  // and the raw text stays in the tooltip (`slotRaw`) for whoever needs the detail.
+  return {
+    staged, slotOk: d.slot.ok, slotRaw: d.slot.ok ? null : d.slot.reason,
+    slot: d.slot.ok ? (pt ? 'vaga: livre agora' : 'slot: free now') : humanSlotReason(d.slot.reason, pt, accountName),
+  }
+}
+
+/**
+ * PURE: the `vaga` gate's refusal (`delivery/gates.ts` `judgeVaga`: "no slot: a; b; c") in a few words a person reads —
+ * "esperando vaga: 4 de 4 sessões em uso", "esperando a conta Codex liberar", "esperando memória livre". Ids never appear;
+ * a part it does not recognise is said generically, never copied raw. Missing text = "no slot".
+ */
+export function humanSlotReason(raw: string | null | undefined, pt: Pt, accountName?: (harness: string, account: string) => string): string {
+  const generic = pt ? 'esperando vaga' : 'waiting for a slot'
+  const body = (raw ?? '').replace(/^no slot:\s*/i, '').trim()
+  if (!body) return generic
+  // A name, never an id: with no label known the account resolver hands the raw id back, and that must not reach a card.
+  const acct = (h: string, a: string): string | null => {
+    const n = accountName ? accountName(h, a) : null
+    return n && n !== a && !/^acc_/i.test(n) ? n : null
+  }
+  const parts = body.split(/;\s*/).map(x => x.trim()).filter(Boolean).map((part): string => {
+    let m: RegExpMatchArray | null
+    if ((m = part.match(/^(\d+) workers running \(machine ceiling (\d+)\)/))) return pt ? `esperando vaga: ${m[1]} de ${m[2]} sessões em uso` : `waiting for a slot: ${m[1]} of ${m[2]} sessions in use`
+    if ((m = part.match(/^(\d+) \S+ top-tier workers running \(cap (\d+)\)/))) return pt ? `esperando vaga: ${m[1]} de ${m[2]} sessões do modelo mais forte em uso` : `waiting for a slot: ${m[1]} of ${m[2]} top-model sessions in use`
+    if ((m = part.match(/^fresh plan_limits reading for ([^:\s]+):(\S+)/))) {
+      const a = acct(m[1]!, m[2]!)
+      return pt ? `esperando a leitura dos limites${a ? ` da conta ${a}` : ' da conta'}` : `waiting for the limits reading${a ? ` of account ${a}` : ' of the account'}`
+    }
+    if ((m = part.match(/^5 h window at (\d+)%/))) return pt ? `esperando a conta liberar (janela de 5 h em ${m[1]}%)` : `waiting for the account to free up (5 h window at ${m[1]}%)`
+    if ((m = part.match(/^week at (\d+)%/))) return pt ? `esperando a conta liberar (semana em ${m[1]}%)` : `waiting for the account to free up (week at ${m[1]}%)`
+    if (/^free memory/.test(part)) return pt ? 'esperando memória livre' : 'waiting for free memory'
+    return generic
+  })
+  return [...new Set(parts)].join(pt ? ' · ' : ' · ')
 }
 const UNLOCKER_WORD = { leader: { pt: 'líder', en: 'leader' }, owner: { pt: 'dono', en: 'owner' }, self: { pt: 'destrava sozinho', en: 'lifts by itself' } }
 
@@ -374,6 +465,26 @@ export function writeCollapsedPrefs(p: CollapsedPrefs, storage: Pick<Storage, 's
 }
 function safeStorage(): Storage | null { try { return window.localStorage } catch { return null } }
 
+/** The filter bar's saved choices — kept like the column preferences above (this browser, this origin). */
+export interface LiveViewPrefs { onlyActive: boolean; showQueue: boolean; sort: LiveSortId }
+const VIEW_KEY = 'agentistics.live.view.v1'
+export function readViewPrefs(storage: Pick<Storage, 'getItem'> | null = safeStorage()): LiveViewPrefs {
+  const dflt: LiveViewPrefs = { onlyActive: LIVE_DEFAULTS.onlyActive, showQueue: LIVE_DEFAULTS.showQueue, sort: LIVE_DEFAULTS.sort }
+  try {
+    const raw = storage?.getItem(VIEW_KEY)
+    if (!raw) return dflt
+    const p = JSON.parse(raw) as Record<string, unknown>
+    return {
+      onlyActive: typeof p.onlyActive === 'boolean' ? p.onlyActive : dflt.onlyActive,
+      showQueue: typeof p.showQueue === 'boolean' ? p.showQueue : dflt.showQueue,
+      sort: parseLiveSort(p.sort),
+    }
+  } catch { return dflt }
+}
+export function writeViewPrefs(p: LiveViewPrefs, storage: Pick<Storage, 'setItem'> | null = safeStorage()): void {
+  try { storage?.setItem(VIEW_KEY, JSON.stringify(p)) } catch { /* a private window: the choice lasts until reload */ }
+}
+
 /** The leader cards' open/closed memory, per leader. Absent = collapsed (the default). */
 const LEADER_KEY = 'agentistics.live.leaders.open.v1'
 export function readOpenLeaders(storage: Pick<Storage, 'getItem'> | null = safeStorage()): Record<string, boolean> {
@@ -381,27 +492,6 @@ export function readOpenLeaders(storage: Pick<Storage, 'getItem'> | null = safeS
 }
 export function writeOpenLeaders(p: Record<string, boolean>, storage: Pick<Storage, 'setItem'> | null = safeStorage()): void {
   try { storage?.setItem(LEADER_KEY, JSON.stringify(p)) } catch { /* see above */ }
-}
-
-/**
- * PURE: how many cards fit a column. `heights` are the measured cards (gap included), `avail` the
- * room under the column header, `reserve` what the "+N" control needs when something is cut.
- *
- * The "+N" is NEVER sacrificed: when not even the first card leaves room for it, the answer is 0 and the
- * column shows the control alone (it expands into the cards). The old "always at least one card" forced the
- * first card in and the control fell below the column's edge, where `overflow:hidden` cut it — cards that
- * vanished with no way to reach them (QA HIGH 2). A column holding ONE card that is itself taller than the
- * room keeps showing it (clipped): there is nothing to cut, so there is no control to lose.
- */
-export function fitCount(heights: readonly number[], avail: number, reserve: number): number {
-  const total = heights.reduce((a, h) => a + h, 0)
-  if (total <= avail) return heights.length
-  let used = 0, k = 0
-  for (const h of heights) {
-    if (used + h > avail - reserve) break
-    used += h; k++
-  }
-  return heights.length === 1 ? 1 : k
 }
 
 /**
@@ -416,37 +506,44 @@ export function revealScrollLeft(o: { scrollLeft: number; viewLeft: number; view
   return Math.max(0, Math.min(Math.round(want), Math.max(0, o.scrollWidth - o.viewWidth)))
 }
 
+// ------------------------------------------------------------------------------------ column body
+
 /**
- * PURE: lay measured card heights into sub-columns of at most `avail` each (greedy, in order). A card
- * taller than a whole column still gets its own — it is clipped, never dropped.
+ * A column is ONE vertical stack with its own scroll (owner, 07/11): the grid of full cards plus compact rows
+ * and the "+N" control are gone. The page stays free of vertical scroll; only a column's body scrolls.
  */
-export function pack(heights: readonly number[], avail: number): number[][] {
-  const cols: number[][] = []
-  let used = 0
-  heights.forEach((h, i) => {
-    const cur = cols[cols.length - 1]
-    if (!cur || used + h > avail) { cols.push([i]); used = h } else { cur.push(i); used += h }
-  })
-  return cols
+
+/** A column's search appears once MORE than this many cards are out of view. */
+export const COLUMN_SEARCH_AFTER = 3
+
+/**
+ * PURE: how many cards are NOT visible in the column's scroll area — entirely above or below the viewport.
+ * `rects` are the cards' vertical extents and `view` the scroll area's, in the same coordinate space. A card
+ * that shows even a few pixels counts as visible: a half-visible card is one the reader can already see.
+ */
+export function countOutOfView(rects: readonly { top: number; bottom: number }[], view: { top: number; bottom: number }): number {
+  let n = 0
+  for (const r of rects) if (r.bottom <= view.top + 1 || r.top >= view.bottom - 1) n++
+  return n
 }
 
 /**
- * PURE: where an expanded column's cards go. The first `maxFull` sub-columns hold FULL cards (packed by their
- * measured heights); every card past them becomes a one-line row, `rowH` tall, packed into as many extra
- * sub-columns as `avail` allows. Every index appears exactly once — a 246-card column used to be 246 sub-columns
- * (QA LOW 12) and is now a bounded number of full ones plus a few dozen rows per column.
+ * PURE: is the column's search shown? Only when more than three cards are out of view, and never while
+ * something is typed in it (a filter that removes cards must not make its own field disappear). Once shown it
+ * holds on a hair longer than it took to appear (the field takes room, which hides one more card) so it
+ * cannot flicker at the threshold.
  */
-export function flowColumns(heights: readonly number[], avail: number, maxFull: number, rowH: number): { full: number[][]; compact: number[][] } {
-  const all = pack(heights, avail)
-  return { full: all.slice(0, maxFull), compact: chunk(all.slice(maxFull).flat(), Math.max(1, Math.floor(avail / rowH))) }
+export function showColumnSearch(o: { outOfView: number; query: string; wasShown: boolean }): boolean {
+  if (o.query.trim() !== '') return true
+  return o.wasShown ? o.outOfView >= COLUMN_SEARCH_AFTER : o.outOfView > COLUMN_SEARCH_AFTER
 }
 
-/** PURE: split into the sub-columns an expanded column flows into (horizontal growth, never a scrollbar). */
-export function chunk<T>(xs: readonly T[], size: number): T[][] {
-  const n = Math.max(1, size)
-  const out: T[][] = []
-  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n))
-  return out
+/** PURE: the column search — a card matches when the query appears in its title, its task, or its subtask (case-folded, every word). */
+export function matchesColumnQuery(c: Pick<LiveCard, 'd'>, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return true
+  const hay = `${c.d.title} ${c.d.taskTitle}`.toLowerCase()
+  return words.every(w => hay.includes(w))
 }
 
 // ------------------------------------------------------------------------------------ departures
@@ -478,7 +575,7 @@ export function snapshotOf(shown: readonly LiveCard[], leaders: readonly { id: s
 
 /**
  * PURE: what left the board between two snapshots and WHY. Every path has its own sentence:
- *  - still in the unfiltered cards but not shown -> the "only active agents" switch (the agent finished);
+ *  - still in the unfiltered cards but not shown -> the filter bar (task, "apenas ativas", "exibir itens na fila");
  *  - named in the server's `hidden` -> that reason;
  *  - nowhere -> removed from the book (deleted, moved to a group, out of the window).
  * A change of the user's own filters is not a departure — they asked for it — so it reports nothing.
@@ -493,7 +590,7 @@ export function planDepartures(
   for (const [key, was] of prev.cards) {
     if (next.cards.has(key)) continue
     let reason: string
-    if (ctx.allKeys.has(key)) reason = ctx.pt ? 'o agente terminou (filtro “só com agentes ativos”)' : 'the agent finished (“only with active agents” filter)'
+    if (ctx.allKeys.has(key)) reason = ctx.pt ? 'ficou fora dos filtros da barra' : 'it is outside the filter bar’s filters'
     else if (hiddenBy.has(key)) reason = hiddenWord(hiddenBy.get(key)!.reason, ctx.pt)
     else reason = ctx.pt ? 'removido do quadro (tarefa apagada, agrupada ou fora da janela)' : 'removed from the board (task deleted, grouped or out of the window)'
     out.push({ key, title: was.title, reason, atMs: ctx.nowMs, kind: 'card' })

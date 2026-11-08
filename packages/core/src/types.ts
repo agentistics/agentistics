@@ -419,6 +419,13 @@ export interface SessionMeta {
    * dropped nothing. See `compactsFromClaudeJsonl`.
    */
   compact_count?: number
+  /**
+   * How many times the session RAN a test suite (a shell command whose verb is a test runner — `countTestCommands`).
+   * Read by the Live to place a piece on its "running the tests" step. **Absent = this session's transcript was not
+   * read for it** (a harness that does not count, or a record older than the field) — the Live then draws no test
+   * step rather than a guess; `0` is a real answer ("read it, no tests"). Claude's transcript only, for now.
+   */
+  test_runs?: number
   compact_ms?: number
   compact_dropped_tokens?: number
   /** Skill invocations by name (`superpowers:brainstorming`), from the `Skill` tool_use.
