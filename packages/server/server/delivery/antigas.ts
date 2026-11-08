@@ -26,6 +26,8 @@ export interface ReviewPieceFacts {
   handbackMs?: number | null
   /** The last reconcile suspects it shipped (weak evidence): then it is a decision to make, not work still waiting. */
   suggested?: boolean
+  /** The last reconcile could not look the piece up (no repository known, gh unreadable, quota): "no proof" has not been established. */
+  unchecked?: boolean
 }
 
 /**
@@ -34,7 +36,7 @@ export interface ReviewPieceFacts {
  * than `DELIVERY_WAITS_MS` went unanswered and joins the group, where it is a 1-click decision, never a silent one.
  */
 export function isAntiga(f: ReviewPieceFacts): boolean {
-  if (f.hasRecord || f.live) return false
+  if (f.hasRecord || f.live || f.unchecked) return false
   // An unknown age is NOT old: a piece whose date cannot be read stays where it is (never moved on a guess).
   if (f.updatedMs === null) return false
   if (!f.suggested && f.handbackMs != null && f.nowMs - f.handbackMs <= DELIVERY_WAITS_MS) return false

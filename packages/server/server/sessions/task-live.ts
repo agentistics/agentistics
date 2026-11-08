@@ -640,6 +640,8 @@ export function buildLive(o: {
   suggestions?: ReadonlyMap<string, { repo: string; pr: number; tag?: string; via: string }>
   /** Subtasks the last reconcile proved shipped (not yet moved, e.g. the automatic run is off). */
   proven?: ReadonlySet<string>
+  /** Subtasks the last reconcile could NOT look up: not "no proof", so never drawn as old. */
+  unchecked?: ReadonlySet<string>
 }): LiveReply {
   const samples: Sample[] = []
   const candidates: Piece[] = []
@@ -690,7 +692,7 @@ export function buildLive(o: {
         let handbackMs: number | null = null
         for (const c of p.comments) if (c.kind === 'handback' && (c.subtaskId ?? null) === (p.sub?.id ?? null)) handbackMs = Math.max(handbackMs ?? 0, ms(c.createdAt) ?? 0)
         // A piece the last reconcile proved shipped is on its way to Publicado, not a decision to make.
-        isOld = !(p.sub && o.proven?.has(p.sub.id)) && isAntiga({ hasRecord: false, live: liveSessions.length > 0, updatedMs: ms(p.updatedAt), nowMs: o.nowMs, handbackMs, suggested: !!(p.sub && o.suggestions?.has(p.sub.id)) })
+        isOld = !(p.sub && o.proven?.has(p.sub.id)) && isAntiga({ hasRecord: false, live: liveSessions.length > 0, updatedMs: ms(p.updatedAt), nowMs: o.nowMs, handbackMs, suggested: !!(p.sub && o.suggestions?.has(p.sub.id)), unchecked: !!(p.sub && o.unchecked?.has(p.sub.id)) })
       }
     }
     // Only what could have been a card a moment ago is worth a departure line: an abandoned/backlog piece,

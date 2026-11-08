@@ -103,7 +103,7 @@ export interface ReviewPiece {
   hints?: { branches: string[]; shas: string[]; heads?: DeclaredHead[]; prs?: number[]; latest?: string[] }
 }
 
-export interface ReconcileSummary { published: number; toCi: number; ciRed: number; /** The release could not be READ: the piece did not move. */ unknown: number; antigas: number; stay: number }
+export interface ReconcileSummary { published: number; toCi: number; ciRed: number; /** The release could not be READ: the piece did not move. */ unknown: number; antigas: number; /** Pieces the run could NOT look up (no repository known, gh unreadable, quota): not "no proof", and retried. */ unchecked: number; stay: number }
 export type ReconcileReply =
   | { ok: true; status: 200; apply: boolean; entries: ReconcileEntry[]; moved: number; unproven: number; summary: ReconcileSummary; gh: number; /** Set when the run stopped early (quota): what it did not reach is untouched, the next run continues. */ stopped?: 'budget' | 'rate-limit' }
   | Extract<DeliveryReply, { ok: false }>
@@ -1445,7 +1445,15 @@ export function createDeliveryService(d: DeliveryDeps) {
       if (live && r.phase !== 'ci') { e.reason = 'sessão viva: fica'; continue }
       const antiga = () => { if (hasRecord || !isAntiga({ hasRecord, live, updatedMs, nowMs, handbackMs, suggested: !!e.suggestion })) return false; e.bucket = 'antiga'; return true }
       // The quota ran out: what was not reached is not judged. It stays exactly where it is and the next run continues from here.
-      if (meter.stopped()) { e.reason = `não verificada nesta rodada (${meter.stopped()})`; antiga(); continue }
+      // "No proof" is said only of a piece that was LOOKED UP. One that could not be (nothing known about where it worked, gh unreadable, the quota
+      // spent) is "could not check": it is not offered as antiga as if it had been, and the next run tries it again.
+      const unchecked = (why: 'no-repos' | 'gh' | 'budget', reason: string) => {
+        e.unchecked = why
+        e.reason = `could not be checked: ${reason}. Not a lack of proof — it will be tried again on a later run`
+        if (why !== 'budget') proofs.outcomes.set(r.subtaskId, { unchecked: why })
+      }
+      if (meter.stopped()) { if (hasRecord) e.reason = `não verificada nesta rodada (${meter.stopped()})`; else unchecked('budget', `this run reached its ${meter.stopped() === 'rate-limit' ? 'GitHub rate limit' : 'GitHub call budget'} before this piece`); continue }
+      if (!hasRecord && repos && repos.length === 0) { unchecked('no-repos', 'no repository is known for this piece (no session of it recorded where it worked)'); continue }
       // A RECORDED piece has its own evidence (qaSha, its PR): `findMergedPr` checks the sha QA approved. A batch PR must never go
       // over that check (H3: an older PR of the same branch published work whose real review was still open).
       const extra = hasRecord ? null : hints ?? await d.pieceHints?.(r.subtaskId).catch(() => null) ?? { branches: [], shas: [] }
@@ -1460,6 +1468,11 @@ export function createDeliveryService(d: DeliveryDeps) {
           const lead = batch.candidates.find(c => c.repo !== ENGINE_REPO) ?? batch.candidates[0]!
           batch = { ok: true, pr: lead, via: `${batch.candidates.length} release PRs (${batch.candidates.map(c => `#${c.number}`).join(', ')}) agree on ${tags[0]}` }
         }
+      }
+      // Nothing proved it, but part of what could have is unread: that is not "no proof".
+      if (!batch.ok && !hasRecord && (repos ?? PRODUCT_REPOS).some(x => proofs.unreadable.has(x) || !prsByRepo.has(x))) {
+        unchecked((repos ?? PRODUCT_REPOS).some(x => proofs.unreadable.has(x)) ? 'gh' : 'budget', `GitHub's list of merged PRs could not be read (is gh installed and signed in?)`)
+        continue
       }
       // Weak evidence (the card's name, a branch in a PR's text, a tie across releases) moves nothing: it is what the person sees beside the card.
       if (!batch.ok) {
@@ -1485,7 +1498,7 @@ export function createDeliveryService(d: DeliveryDeps) {
         batchProof = { repo: batch.pr.repo, pr: batch.pr.number, mergeSha: batch.pr.mergeSha, via: `${batch.via} (${batch.pr.repo}#${batch.pr.number})`, releaseRepo }
         Object.assign(e, { pr: batch.pr.number, mergeSha: batch.pr.mergeSha, via: batchProof.via, repo: batch.pr.repo })
         tagWanted = await tagOf(batch.pr) // null = not released yet (the gate says so)
-        if (meter.stopped()) { delete e.pr; delete e.mergeSha; delete e.via; delete e.repo; e.reason = `não verificada nesta rodada (${meter.stopped()})`; antiga(); continue }
+        if (meter.stopped()) { delete e.pr; delete e.mergeSha; delete e.via; delete e.repo; unchecked('budget', `this run reached its GitHub limit while reading the release of its PR`); continue }
         if (batch.pr.repo === ENGINE_REPO && !tagWanted) { e.reason = `engine PR #${batch.pr.number} merged (${batch.pr.mergeSha.slice(0, 9)}), but no public release pins it yet`; if (!antiga()) e.reason += ' — fica'; continue }
         probe = { ...probe, phase: 'ci', releaseRepo, mergeSha: batch.pr.mergeSha, ...(tagWanted ? { tag: tagWanted } : {}), ...(batch.pr.repo === ENGINE_REPO ? {} : { pr: batch.pr.number }), mergeDetected: { at, pr: batch.pr.number, via: batchProof.via } }
         if (probe.versionTarget === 'next') delete probe.versionTarget
@@ -1565,6 +1578,7 @@ export function createDeliveryService(d: DeliveryDeps) {
       ciRed: planned.filter(e => e.to === 'ci' && e.releaseGate === 'red').length,
       unknown: entries.filter(e => e.releaseGate === 'unknown').length,
       antigas: entries.filter(e => e.bucket === 'antiga').length,
+      unchecked: entries.filter(e => e.unchecked).length,
       stay: entries.filter(e => !(e.to && e.applied !== false) && e.bucket !== 'antiga').length,
     }
     await saveProof()
@@ -1594,7 +1608,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     const pieces = await d.reviewPieces?.().catch(() => []) ?? []
     const piecesById = new Map(pieces.map(p => [p.id, p]))
     const proofs = await loadProof()
-    const facts = (p: ReviewPiece) => ({ hasRecord: false, live: alive.has(p.id), updatedMs: msOf(p.updatedAt), handbackMs: msOf(p.handbackAt), suggested: !!proofs.outcomes.get(p.id)?.suggestion, nowMs })
+    const facts = (p: ReviewPiece) => ({ hasRecord: false, live: alive.has(p.id), updatedMs: msOf(p.updatedAt), handbackMs: msOf(p.handbackAt), suggested: !!proofs.outcomes.get(p.id)?.suggestion, unchecked: !!proofs.outcomes.get(p.id)?.unchecked, nowMs })
     const doc = await d.store.read()
     let ids: string[] = []
     if (o.all === true || o.all === 'true') {

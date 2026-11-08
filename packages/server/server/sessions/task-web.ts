@@ -145,6 +145,7 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
         return {
           suggestions: new Map([...outcomes].flatMap(([id, o]) => (o.suggestion ? [[id, o.suggestion] as const] : []))),
           proven: new Set([...outcomes].flatMap(([id, o]) => (o.proven ? [id] : []))),
+          unchecked: new Set([...outcomes].flatMap(([id, o]) => (o.unchecked ? [id] : []))),
         }
       } catch { return {} }
     })()

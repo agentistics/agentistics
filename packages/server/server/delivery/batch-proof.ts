@@ -194,14 +194,21 @@ export function hintsFromText(text: string, atMs?: number): DeliveryHints {
   const prs = new Set<number>()
   const add = (branch: string, sha: string, line: string, index: number) => {
     if (FILE_LIKE.test(branch) || !shaLike(sha)) return
-    if (NOT_THE_DELIVERY.test(line.slice(Math.max(0, index - 30), index))) return
+    // Everything BEFORE the sha on its line: a base keyword counts however far it sits from it (a 30-character window let a far base through).
+    if (NOT_THE_DELIVERY.test(line.slice(0, index))) return
     heads.set(branch, { branch, sha: sha.toLowerCase(), ...(atMs !== undefined ? { atMs } : {}) })
   }
   for (const line of text.split('\n')) {
+    // A line that says the work was left out declares nothing, whatever else it names.
+    if (LEFT_OUT.test(line)) continue
     for (const m of line.matchAll(BRANCH_THEN_SHA)) add(m[1]!, m[2]!, line, m.index)
     for (const m of line.matchAll(SHA_THEN_BRANCH)) add(m[2]!, m[1]!, line, m.index)
-    for (const m of line.toLowerCase().matchAll(FULL_SHA)) if (!NOT_THE_DELIVERY.test(line.slice(Math.max(0, m.index - 30), m.index))) shas.add(m[0])
-    if (!NOT_THE_DELIVERY.test(line)) for (const m of line.matchAll(/\bPR\s*(?:draft\s*)?#(\d+)/gi)) prs.add(Number(m[1]))
+    for (const m of line.toLowerCase().matchAll(FULL_SHA)) if (!NOT_THE_DELIVERY.test(line.slice(0, m.index))) shas.add(m[0])
+    if (!NOT_THE_DELIVERY.test(line)) {
+      // Two different PR numbers on one line: which is the delivery's is a guess, so none is read.
+      const numbers = new Set([...line.matchAll(/\bPR\s*(?:draft\s*)?#(\d+)/gi)].map(m => Number(m[1])))
+      if (numbers.size === 1) for (const n of numbers) prs.add(n)
+    }
   }
   return { branches: [...heads.keys()], shas: [...shas], heads: [...heads.values()], prs: [...prs] }
 }
@@ -241,13 +248,17 @@ export interface ProofCache {
   verdicts: Map<string, { ok: boolean; at: number; verdict: unknown }>
   /** The last run's conclusion per piece: what the Live shows beside an old card, and what "All" must not archive. */
   outcomes: Map<string, PieceOutcome>
+  /** Repositories whose merged PRs gh could not list in THIS process, with nothing known from before: a read that did not happen. Never persisted. */
+  unreadable: Set<string>
   /** The automatic run: when it may run again, and how the last one went. */
   auto: { nextAt: number; failures: number; last?: AutoRunReport }
 }
-export interface PieceOutcome { proven?: boolean; suggestion?: { repo: string; pr: number; tag?: string; via: string } }
+/** Why a piece was NOT judged: "no proof" is only ever said of a piece that was actually looked up. */
+export type UncheckedWhy = 'no-repos' | 'gh' | 'budget'
+export interface PieceOutcome { proven?: boolean; suggestion?: { repo: string; pr: number; tag?: string; via: string }; /** The last run could not look this piece up: it is neither proven nor "antiga". */ unchecked?: UncheckedWhy }
 export interface AutoRunReport { at: string; ms: number; gh: number; summary?: unknown; stopped?: string }
 
-export const newProofCache = (nowMs = 0): ProofCache => ({ nowMs, prs: new Map(), commits: new Map(), pins: new Map(), tags: new Map(), contains: new Map(), localTags: new Map(), verdicts: new Map(), outcomes: new Map(), auto: { nextAt: 0, failures: 0 } })
+export const newProofCache = (nowMs = 0): ProofCache => ({ nowMs, prs: new Map(), commits: new Map(), pins: new Map(), tags: new Map(), contains: new Map(), localTags: new Map(), verdicts: new Map(), outcomes: new Map(), unreadable: new Set(), auto: { nextAt: 0, failures: 0 } })
 
 const PROOF_CACHE_VERSION = 1
 /** PURE. The cache as a JSON document (only what is safe to believe later: an unknown answer is not kept). */
@@ -438,7 +449,8 @@ export async function loadBatchPrs(f: GateFacts, cwd: string, repo: string, cach
   type Row = { number?: number; title?: string; body?: string; mergedAt?: string; headRefName?: string; headRefOid?: string; baseRefName?: string; mergeCommit?: { oid?: string } | null }
   let failed = false
   const raw = json<Row[] | null>(await f.gh(cwd, ['pr', 'list', '-R', repo, '--state', 'merged', '--limit', String(BATCH_PR_LIMIT), '--json', 'number,title,body,mergedAt,headRefName,headRefOid,baseRefName,mergeCommit']).catch(() => { failed = true; return 'null' }), null)
-  if (failed || !Array.isArray(raw)) return hit?.list ?? []
+  if (failed || !Array.isArray(raw)) { if (!hit) cache.unreadable.add(repo); return hit?.list ?? [] }
+  cache.unreadable.delete(repo)
   const rows = raw.flatMap((p): BatchPr[] => (typeof p.number === 'number' && p.mergeCommit?.oid
     ? [{ repo, number: p.number, title: p.title ?? '', body: p.body ?? '', mergeSha: p.mergeCommit.oid, ...(p.mergedAt ? { mergedAt: p.mergedAt } : {}), ...(p.headRefName ? { headRefName: p.headRefName } : {}), ...(p.headRefOid ? { headRefOid: p.headRefOid } : {}), ...(p.baseRefName ? { baseRefName: p.baseRefName } : {}) }]
     : []))

@@ -107,6 +107,24 @@ describe('matchBatchPr — which merged release PR lists a piece', () => {
     expect(hintsFromText(`based on ${'ab12'.repeat(10)}`).shas).toEqual([])
     expect(hintsFromText('depends on PR #12').prs).toEqual([])
   })
+  test('QA r2 M-1: a base sha is not the delivery however far it sits from the keyword', () => {
+    const sha = 'ab12'.repeat(10)
+    expect(hintsFromText(`rebased on top of origin/main, the branch was cut from the release that came out last week, base ${sha}`).shas).toEqual([])
+    expect(hintsFromText(`Based on the state of the repository as it was before the sweep started, at ${sha}`).shas).toEqual([])
+    expect(hintsFromText(`base is the tip of origin/main as of this morning and the work sits on fix/far-away @ 4444444`).heads).toEqual([])
+    expect(hintsFromText(`delivered in ${sha}`).shas).toEqual([sha])
+  })
+  test('QA r2: a line that says the work was left out declares nothing', () => {
+    expect(hintsFromText('Fica para o próximo lote: fix/atalho @ 4444444 (not included here)').heads).toEqual([])
+    expect(hintsFromText(`not included in this release: ${'ab12'.repeat(10)}`).shas).toEqual([])
+    expect(hintsFromText('PR #77 deferred to the next batch').prs).toEqual([])
+    expect(hintsFromText('fix/atalho @ 4444444 ok').heads).toHaveLength(1)
+  })
+  test('QA r2: two different PR numbers on one line are not read, in doubt the person decides', () => {
+    expect(hintsFromText('PR #77 (o PR #12 é o do outro grupo)').prs).toEqual([])
+    expect(hintsFromText('PR #77 verde, PR #77 mesclado').prs).toEqual([77])
+    expect(hintsFromText('PR #77\nPR #78').prs).toEqual([77, 78])
+  })
   test('the last statement of a branch is the commit it stood at', () => {
     const h = hintsFromHandbacks([{ body: 'feat/x @ aaaa1111', atMs: 1 }, { body: 'feat/x @ bbbb2222', atMs: 2 }])
     expect(h.heads).toEqual([{ branch: 'feat/x', sha: 'bbbb2222', atMs: 2 }])

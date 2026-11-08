@@ -57,6 +57,8 @@ interface World {
   commitPulls?: Record<string, Array<Record<string, unknown>>>
   /** CICLO.RECONCILE-2: merged PRs (title, body, mergeCommit…) per repository, as `pr list -R <repo> --limit 300` answers. */
   batchPrs?: Record<string, Array<Record<string, unknown>>>
+  /** `gh pr list` fails (gh missing, no token, offline). */
+  batchFail?: boolean
   /** The public tag → the engine commit its `engine.pin` names; and the pins that contain the engine commit under test. */
   pins?: Record<string, string>
   pinContains?: string[]
@@ -96,6 +98,7 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
       calls.gh.push(a)
       calls.ghCwd.push(_cwd)
       // CICLO.RECONCILE-2: the batch read of a repository's merged PRs (title + body), one call per repository.
+      if (a.startsWith('pr list') && a.includes('--limit 300') && w.batchFail) throw new Error('gh: not logged in')
       if (a.startsWith('pr list') && a.includes('--limit 300')) return JSON.stringify(w.batchPrs?.[args[args.indexOf('-R') + 1]!] ?? [])
       if (a.includes('contents/engine.pin?ref=')) { const pin = w.pins?.[/ref=(\S+)/.exec(a)![1]!]; if (!pin) throw new Error('gh: HTTP 404'); return Buffer.from(JSON.stringify({ ref: pin })).toString('base64') }
       if (a.includes('agentistics-engine/compare/')) return JSON.stringify({ status: w.pinContains?.includes(a.split('...')[1]!.split(' ')[0]!) ? 'ahead' : 'diverged' })
@@ -2189,14 +2192,14 @@ describe('reconcile: batch release PR proof, scope, antigas and the automatic ru
     expect(await h.svc.get('s1')).toBeNull()
   })
 
-  test('with no gh token nothing is proven and nothing breaks — the old cards still go to antigas', async () => {
+  test('with no gh token nothing is proven and nothing breaks — the old cards are "could not check", not antigas (QA r2 M-2)', async () => {
     const h = harness({ status: 'in_review' }, { reviewPieces: async () => pieces, autoReconcile: true, autoReconcileAwait: true })
     h.facts.gh = async () => { throw new Error('gh: To get started with GitHub CLI, please run: gh auth login') }
     const t = await h.svc.tick()
     expect(t.actions.some(a => a.startsWith('auto-reconcile'))).toBe(true)
     expect(await h.svc.get('s1')).toBeNull()
     const dry = await h.svc.reconcile({}, 'owner')
-    expect(dry.ok && dry.summary).toMatchObject({ published: 0, antigas: 2 })
+    expect(dry.ok && dry.summary).toMatchObject({ published: 0, antigas: 0, unchecked: 2 })
   })
 
   test('antigas actions: archive abandons with a comment, publish marks done, recent / recorded / worker requests are refused; never deletes', async () => {
@@ -2419,6 +2422,35 @@ describe('QA pins: reconcile never moves real work, and does not spend the quota
     expect(first).toBeGreaterThan(0)
     await h.svc.reconcile({}, 'owner')
     expect(h.calls.gh.length).toBe(first)
+  })
+
+  test('QA r2 M-2: a piece whose repository is unknown was NOT checked: it says so, is not offered as antiga, and is retried next run', async () => {
+    const old = { ...piece, updatedAt: '2026-11-01T00:00:00Z', repos: [] as string[] }
+    const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [old], pieceHints: async () => ({ branches: [], shas: [] }), closeLegacy: async () => ({ ok: true }) })
+    const out = await h.svc.reconcile({}, 'owner')
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    expect(out.entries[0]).toMatchObject({ unchecked: 'no-repos' })
+    expect(out.entries[0]!.bucket).toBeUndefined()
+    expect(out.entries[0]!.reason).toMatch(/could not be checked/i)
+    expect(out.summary).toMatchObject({ antigas: 0, unchecked: 1 })
+    const all = await h.svc.antigas({ action: 'archive', all: true }, 'owner')
+    expect(all.ok && all.done).toEqual([])
+    const again = await h.svc.reconcile({}, 'owner')
+    expect(again.ok && again.entries[0]).toMatchObject({ unchecked: 'no-repos' })
+  })
+
+  test('QA r2 M-2: with gh unable to list PRs the piece is "could not check", not "no proof"; once gh answers, the same piece is judged', async () => {
+    const old = { ...piece, updatedAt: '2026-11-01T00:00:00Z' }
+    const h = harness({ status: 'in_review', sessions: [], batchFail: true }, { reviewPieces: async () => [old], pieceHints: async () => ({ branches: [], shas: [] }) })
+    const out = await h.svc.reconcile({}, 'owner')
+    expect(out.ok && out.entries[0]).toMatchObject({ unchecked: 'gh' })
+    expect(out.ok && out.entries[0]!.bucket).toBeUndefined()
+    expect(out.ok && out.summary).toMatchObject({ antigas: 0, unchecked: 1 })
+    h.w.batchFail = false
+    const next = await h.svc.reconcile({}, 'owner')
+    expect(next.ok && next.entries[0]!.unchecked).toBeUndefined()
+    expect(next.ok && next.entries[0]!.bucket).toBe('antiga')
   })
 
   test('MED "All" in the old-cards group answers without a whole gh walk: the person is waiting on a button', async () => {

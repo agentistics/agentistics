@@ -51,6 +51,7 @@ const T = (pt: boolean) => pt ? {
   confirmPublishTitle: (n: number) => `Marcar ${n} ${n === 1 ? 'peça' : 'peças'} como publicadas?`,
   confirmPublish: 'Elas vão para concluídas sem prova, porque você está dizendo que saíram. Uma peça que ainda espera alguém não é tocada.',
   unreachable: 'Não consegui falar com o servidor. Nada mudou nesta peça.',
+  whyFewer: (shown: number, n: number) => `${shown} ${shown === 1 ? 'peça' : 'peças'} na lista, mas "Todas" age em ${n}: ${shown - n === 1 ? 'a outra é uma tarefa' : `as outras ${shown - n} são tarefas`} sem subtarefas, e essas só se decidem abrindo a tarefa.`,
 } : {
   title: (n: number) => `Old, no record · ${n}`,
   note: 'No proof of release, no live session and untouched for over 24 h. Decide each one: nothing is deleted and nothing leaves here by itself.',
@@ -65,6 +66,7 @@ const T = (pt: boolean) => pt ? {
   confirmPublishTitle: (n: number) => `Mark ${n} ${n === 1 ? 'piece' : 'pieces'} as published?`,
   confirmPublish: 'They go to done with no proof, because you are saying they shipped. A piece still waiting on somebody is not touched.',
   unreachable: 'Could not reach the server. Nothing changed on this piece.',
+  whyFewer: (shown: number, n: number) => `${shown} ${shown === 1 ? 'piece' : 'pieces'} listed, but "All" acts on ${n}: ${shown - n === 1 ? 'the other one is a task' : `the other ${shown - n} are tasks`} with no subtasks, and those can only be decided by opening the task.`,
 }
 
 export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAntigasProps) {
@@ -132,18 +134,19 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   return (
     <>
       <ConfirmModal
-        open={open} title={L.title(items.length)} message={L.note} tone="default" confirmLabel={L.close} cancelLabel={L.close}
+        open={open} title={L.title(visible.length)} message={L.note} tone="default" confirmLabel={L.close} cancelLabel={L.close}
         onConfirm={onClose} onCancel={onClose} maxWidth={720} mobileSheet focusPanel layer={mobile ? 2000 : 300} footer={footer}
       >
         <div data-live-antigas style={{ display: 'grid', gap: 10, fontSize: 12, minWidth: 0 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <input data-live-antigas-version value={version} onChange={e => setVersion(e.target.value)} placeholder={L.version} aria-label={L.version} style={{ ...field, width: mobile ? '100%' : 130 }} />
-            <button type="button" data-live-antigas-all-publish disabled={busy || actionable.length === 0} onClick={() => setAsking('publish')} style={btn(true)}>{L.publish} · {L.all(actionable.length)}</button>
+            <button type="button" data-live-antigas-all-publish disabled={busy || actionable.length === 0} onClick={() => setAsking('publish')} style={btn()}>{L.publish} · {L.all(actionable.length)}</button>
             <input data-live-antigas-reason value={reason} onChange={e => setReason(e.target.value)} placeholder={L.reason} aria-label={L.reason} style={{ ...field, width: mobile ? '100%' : 160 }} />
             <button type="button" data-live-antigas-all-archive disabled={busy || actionable.length === 0} onClick={() => setAsking('archive')} style={btn()}>{L.archive} · {L.all(actionable.length)}</button>
           </div>
+          {visible.length !== actionable.length && <p data-live-antigas-why style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: 11.5 }}>{L.whyFewer(visible.length, actionable.length)}</p>}
           {/* On a phone the sheet itself is the one scroller, with its footer pinned; a second one inside it fights the thumb. */}
-          <ul className="ag-scroll" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8, ...(mobile ? {} : { maxHeight: '46vh', overflowY: 'auto' as const, overscrollBehavior: 'contain' as const }) }}>
+          <ul className="ag-scroll" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8, ...(mobile ? {} : { maxHeight: 'calc(46vh / var(--ui-zoom, 1))', overflowY: 'auto' as const, overscrollBehavior: 'contain' as const }) }}>
             {visible.map(a => {
               const out = a.subtaskId ? outcomes[a.subtaskId] : undefined
               return (
