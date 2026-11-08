@@ -1,5 +1,6 @@
 /**
- * fleetFilter.ts — PURE. Applying the dashboard's global filters to the LIVE fleet.
+ * fleetFilter.ts — PURE. Applying an explicit session scope to the LIVE fleet.
+ * Session surfaces use `SESSION_LIST_FILTERS`; metric header filters must never scope their rows.
  *
  * The filters were built to scope METRICS — a date range, a set of projects, a set of models. A
  * fleet is not metrics: it is what is running now. So only the dimensions that mean something about

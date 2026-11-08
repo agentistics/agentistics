@@ -89,6 +89,7 @@ import { TranscriptModal } from './components/TranscriptModal'
 import type { PrefsDraft, AppContext } from './lib/app-context'
 import { NayDock } from './components/nay/NayDock'
 import { dockActiveOnly } from './lib/nayDock'
+import { SESSION_LIST_FILTERS } from './lib/sessionScope'
 import { UpdateModal } from './components/UpdateModal'
 import { setPendingUpdate } from './lib/pendingUpdate'
 import { WhatsNewModal } from './components/WhatsNewModal'
@@ -553,8 +554,7 @@ function SideNav({
   onCommitWidth: (w: number) => void
   theme: Theme; onToggleTheme: () => void; onToggleLang: () => void; onExport: () => void
   principal?: IamAccount
-  /** The SAME filters/switch the shared header's `FiltersBar` edits — see `App.tsx`'s own state.
-   *  `SideNav` only reads them, to hand to `SessionsAside`; it owns neither. */
+  /** Session controls are independent of the metric header. SideNav only reads their scope. */
   sessionsFilters: Filters
   sessionsActiveOnly: boolean
   /**
@@ -1239,6 +1239,8 @@ export default function AppLayout() {
   // Only the sessions workspace offers the handle, but whatever it is dragged to applies to both.
   const liveAsideWidth = asideWidth
   const inSessionsWorkspace = isSessionsWorkspace(location.pathname)
+  const sessionsFilters = SESSION_LIST_FILTERS
+  const sessionsActiveOnly = inSessionsWorkspace
   // The fixed aside's real width: the list (or the collapsed rail), plus the Sessões area's own
   // area rail and its gap. Every inset that clears the aside reads this one figure.
   const leftAsideW = (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth) + (inSessionsWorkspace ? AREA_RAIL_W + PANEL_GAP : 0)
@@ -3155,6 +3157,7 @@ export default function AppLayout() {
     derived,
     statsCache,
     filters, setFilters, activeOnly, setActiveOnly,
+    sessionsFilters, sessionsActiveOnly,
     availableProjects, availableHarnesses,
     lang, theme, currency, setCurrency, textScale, setTextScale, brlRate,
     billing, saveBilling, costBasis, setCostBasis, planBasis, billingReady, openBillingSetup,
@@ -4101,8 +4104,8 @@ export default function AppLayout() {
         onToggleLang={() => { const next = lang === 'pt' ? 'en' : 'pt'; setLang(next); if (next === 'pt') setCurrency('BRL'); else if (currency === 'BRL') setCurrency('USD') }}
         onExport={() => navigate('/export')}
         principal={iam?.account}
-        sessionsFilters={filters}
-        sessionsActiveOnly={activeOnly}
+        sessionsFilters={sessionsFilters}
+        sessionsActiveOnly={sessionsActiveOnly}
         filtersOpen={sessionsFiltersOpen}
         filtersCount={sessionsActiveFilterCount}
         onToggleFilters={toggleSessionsFilters}
@@ -4570,8 +4573,8 @@ export default function AppLayout() {
           lang={lang}
           isMobile={isMobile}
           ctx={appCtx}
-          filters={filters}
-          activeOnly={dockActiveOnly(inSessionsWorkspace, activeOnly)}
+          filters={sessionsFilters}
+          activeOnly={dockActiveOnly(inSessionsWorkspace, sessionsActiveOnly)}
           {...(!promptRequested && renderUpdatePrompt ? { renderUpdatePrompt } : {})}
         />
       )}
