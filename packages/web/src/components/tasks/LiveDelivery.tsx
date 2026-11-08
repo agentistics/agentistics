@@ -37,6 +37,7 @@ import {
 import type { LiveSortId } from '@agentistics/core'
 import { LiveCardView } from './LiveCardView'
 import { LiveApprove } from './LiveApprove'
+import { LiveAntigas } from './LiveAntigas'
 import { LiveQueuePriority } from './LiveQueuePriority'
 import { LiveColumn } from './LiveColumn'
 import { LiveLeaders } from './LiveLeaders'
@@ -66,7 +67,7 @@ export const copy = (pt: boolean) => pt ? {
   collapse: 'Recolher coluna', expand: 'Abrir coluna',
   history: 'Histórico', publishedNote: 'Os cartões ficam 24 h aqui; depois vão para o Histórico.',
   searchColumn: 'Buscar nesta coluna…', noMatch: 'Nenhum cartão corresponde.', clearSearch: 'Limpar',
-  archivedBtn: (n: number) => `Revisões antigas · ${n}`, archivedNote: 'Em revisão há mais de 72 h, sem sessão viva e sem commit publicado conhecido — saíram da coluna “Revisão do líder”.', archivedMore: (n: number) => `e mais ${n}`,
+  archivedBtn: (n: number) => `Antigas sem registro · ${n}`, archivedNote: 'Em revisão há mais de 24 h, sem sessão viva e sem prova de publicação — saíram da coluna “Revisão do líder”.', archivedMore: (n: number) => `e mais ${n}`,
   left: 'saiu', recentLeft: (n: number) => `saíram há pouco (${n})`, noneLeft: 'Ninguém saiu do quadro nos últimos minutos.',
 } : {
   title: 'Live Delivery',
@@ -80,7 +81,7 @@ export const copy = (pt: boolean) => pt ? {
   collapse: 'Collapse column', expand: 'Open column',
   history: 'History', publishedNote: 'Cards stay here for 24 h, then move to History.',
   searchColumn: 'Search this column…', noMatch: 'No card matches.', clearSearch: 'Clear',
-  archivedBtn: (n: number) => `Older reviews · ${n}`, archivedNote: 'In review for over 72 h, no live session and no known published commit — they left the “Leader review” column.', archivedMore: (n: number) => `and ${n} more`,
+  archivedBtn: (n: number) => `Old, no record · ${n}`, archivedNote: 'In review for over 24 h, no live session and no proof of release — they left the “Leader review” column.', archivedMore: (n: number) => `and ${n} more`,
   left: 'left', recentLeft: (n: number) => `left recently (${n})`, noneLeft: 'Nothing left the board in the last minutes.',
 }
 
@@ -473,15 +474,8 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       />
       {pipNote && <span role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{L.externalBlocked}</span>}
       {showArchived && (reply?.archived?.length ?? 0) > 0 && (
-        <div data-live-archived-list style={{ ...surface, padding: '8px 10px', display: 'grid', gap: 5, fontSize: 11.5 }}>
-          <span style={{ color: 'var(--text-tertiary)' }}>{L.archivedNote}</span>
-          <span style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 10px', maxHeight: isMobile ? undefined : 66, overflow: 'hidden' }}>
-            {reply!.archived!.map(a => (
-              <button key={a.key} type="button" data-live-archived={a.key} onClick={() => navigate(`/tasks/${encodeURIComponent(a.taskId)}`)} title={a.title}
-                style={{ background: 'none', border: 0, padding: 0, minHeight: isMobile ? 44 : undefined, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5, color: 'var(--text-secondary)', textAlign: 'left' }}>{shortTitle(a.title, 38)}</button>
-            ))}
-            {(reply!.archivedTotal ?? 0) > reply!.archived!.length && <span style={{ color: 'var(--text-tertiary)' }}>{L.archivedMore(reply!.archivedTotal! - reply!.archived!.length)}</span>}
-          </span>
+        <div data-live-archived-list style={{ ...surface, padding: 0 }}>
+          <LiveAntigas items={reply!.archived!} total={reply!.archivedTotal ?? reply!.archived!.length} pt={pt} mobile={isMobile} onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)} />
         </div>
       )}
       {showGone && (

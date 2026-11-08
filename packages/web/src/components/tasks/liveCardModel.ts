@@ -559,7 +559,7 @@ const HIDDEN_WORD: Record<HiddenReason, { pt: string; en: string }> = {
   'status-unplaced': { pt: 'status sem etapa reconhecida', en: 'status with no known stage' },
   'published-old': { pt: 'publicado há mais de 24 h', en: 'published over 24 h ago' },
   'queue-idle': { pt: 'saiu da fila (sessão em espera removida)', en: 'left the queue (staged session removed)' },
-  'legacy-review-old': { pt: 'em revisão há mais de 72 h, sem sessão viva e sem commit publicado', en: 'in review for over 72 h, no live session and no published commit' },
+  'legacy-review-old': { pt: 'em revisão há mais de 24 h, sem sessão viva e sem prova de publicação', en: 'in review for over 24 h, no live session and no proof of release' },
 }
 export const hiddenWord = (r: HiddenReason, pt: Pt): string => HIDDEN_WORD[r][pt ? 'pt' : 'en']
 

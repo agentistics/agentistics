@@ -147,11 +147,32 @@ async function accountNameOf(harness: string, account: string): Promise<string |
 }
 
 /** Board subtasks shown In review / PR · merge / CI (the backfill adopts the ones with no delivery record). Group members excluded. */
-async function boardReviewPieces(): Promise<Array<{ id: string; taskId: string; title: string; status: string }>> {
+async function boardReviewPieces(): Promise<Array<{ id: string; taskId: string; title: string; status: string; updatedAt?: string }>> {
   const { loadTaskWorld } = await import('../sessions/task-source')
   const { book } = await loadTaskWorld()
   const wanted = new Set([PHASE_STATUS.revisao_lider.id, PHASE_STATUS.pr_merge.id, PHASE_STATUS.ci.id])
-  return book.subtasks.filter(s => wanted.has(s.status) && !s.parentGroupId).map(s => ({ id: s.id, taskId: s.taskId, title: s.title, status: s.status }))
+  return book.subtasks.filter(s => wanted.has(s.status) && !s.parentGroupId).map(s => ({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}) }))
+}
+
+/** The branches and commit shas a legacy piece's own board notes and comments mention (the batch PR text is matched against them). */
+async function boardPieceHints(subtaskId: string): Promise<{ branches: string[]; shas: string[] }> {
+  const [{ loadTaskWorld }, { hintsFromText }] = await Promise.all([import('../sessions/task-source'), import('./batch-proof')])
+  const { book } = await loadTaskWorld()
+  const sub = book.subtasks.find(s => s.id === subtaskId)
+  const text = [sub?.notes ?? '', ...book.comments.filter(c => c.subtaskId === subtaskId).map(c => c.body)].join('\n')
+  return hintsFromText(text)
+}
+
+/** `antigas`: closes a record-less old piece on the board — done (marked published) or abandoned (archived). Never deletes. */
+async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Promise<{ ok: true } | { ok: false; message: string }> {
+  const m = await import('../sessions/task-web')
+  if (to === 'abandoned' && !(await m.listStatuses()).some(s => s.id === 'abandoned')) {
+    const made = await m.createStatus({ label: 'Abandoned', color: '#6b7280' })
+    if (!made.ok) return { ok: false, message: made.message }
+    if (made.status.id !== 'abandoned') return { ok: false, message: `the board has no "abandoned" status and the one just created is ${made.status.id}` }
+  }
+  const out = await m.patchSubtask(subtaskId, { status: to as never })
+  return out.ok ? { ok: true } : { ok: false, message: out.message }
 }
 
 let cached: DeliveryService | null = null
@@ -162,7 +183,9 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
   const svc = createDeliveryService({
     store, facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
     autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, accountName: accountNameOf, now: () => Date.now(),
-    reviewPieces: boardReviewPieces,
+    reviewPieces: boardReviewPieces, pieceHints: boardPieceHints, closeLegacy: closeLegacyPiece,
+    // Only the process-wide service (the server's tick) reconciles by itself; a CLI one-shot never does.
+    autoReconcile: Object.keys(overrides).length === 0 && process.env.AGENTISTICS_AUTO_RECONCILE !== '0',
     ...overrides,
   })
   if (Object.keys(overrides).length === 0) cached = svc

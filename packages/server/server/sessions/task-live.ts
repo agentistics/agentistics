@@ -23,6 +23,7 @@
 import { migratePriority, subtaskDone, type Subtask, type Task, type TaskEvent } from './task-model'
 import type { PieceTimes } from './task-times'
 import type { TaskDetail } from './task-report'
+import { ANTIGA_AFTER_MS } from '../delivery/antigas'
 import { deriveStep, mergeStep, type SessionActivity, type StepRecord } from './task-live-steps'
 
 export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
@@ -161,7 +162,7 @@ export function queueOfRecord(rec: { queueHold?: { kind: 'nao' | 'agendar'; reas
 
 /** A piece the line considered and left off, with the reason — so a card never disappears without a word. */
 export type HiddenReason = 'no-live-session' | 'status-unplaced' | 'published-old' | 'queue-idle' | 'legacy-review-old'
-export interface LiveHidden { key: string; taskId: string; title: string; stage: LiveStage | null; reason: HiddenReason; atMs: number | null }
+export interface LiveHidden { key: string; taskId: string; /** The subtask (absent for a task-level piece): what the "Antigas" actions are addressed to. */ subtaskId?: string; title: string; stage: LiveStage | null; reason: HiddenReason; atMs: number | null }
 
 export interface LiveReply {
   generatedAt: string
@@ -506,8 +507,8 @@ export function shasIn(text: string | null | undefined): string[] {
 export const HIDDEN_CAP = 300
 /** How many archived legacy-review pieces a reply lists (the count is always complete). */
 export const ARCHIVED_CAP = 60
-/** A legacy `in_review` piece (no delivery record) with no live session older than this is "Publicado (antigos)", not review work. */
-export const LEGACY_REVIEW_MS = 72 * 3600_000
+/** A legacy `in_review` piece (no delivery record) with no live session older than this is "Antigas sem registro", not review work (owner 08/11: 24 h; ONE constant with the reconcile, `delivery/antigas.ts`). */
+export const LEGACY_REVIEW_MS = ANTIGA_AFTER_MS
 /** A piece untouched for longer than this was not on the board a moment ago, so its absence is not a departure. */
 export const RECENT_HIDDEN_MS = 6 * 3600_000
 
@@ -659,7 +660,7 @@ export function buildLive(o: {
   const hidden: LiveHidden[] = []
   const archived: LiveHidden[] = []
   const entry = (p: Piece, stage: LiveStage | null, reason: HiddenReason): LiveHidden =>
-    ({ key: p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id, taskId: p.task.id, title: p.sub?.title ?? p.task.title, stage, reason, atMs: ms(p.updatedAt) })
+    ({ key: p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id, taskId: p.task.id, ...(p.sub ? { subtaskId: p.sub.id } : {}), title: p.sub?.title ?? p.task.title, stage, reason, atMs: ms(p.updatedAt) })
   const hide = (p: Piece, stage: LiveStage | null, reason: HiddenReason) => { hidden.push(entry(p, stage, reason)) }
   for (const p of candidates) {
     // A task-level piece (a task with no subtasks) is keyed by its TASK id in the delivery book, exactly as a subtask is by its own.

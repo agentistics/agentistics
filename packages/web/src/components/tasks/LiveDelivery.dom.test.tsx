@@ -322,12 +322,15 @@ test('HIGH 3: old legacy reviews are not 246 cards — they are one counted, lis
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: r as never }))) })
   const btn = document.querySelector('[data-live-archived-toggle]') as HTMLElement
-  expect(btn.textContent).toBe('Older reviews · 246')
+  expect(btn.textContent).toBe('Old, no record · 246')
   expect(document.querySelector('[data-live-archived-list]')).toBeNull()
   await act(async () => btn.click())
   const list = document.querySelector('[data-live-archived-list]')!
-  expect(list.textContent).toContain('over 72 h')
+  expect(list.textContent).toContain('over 24 h')
   expect(list.querySelectorAll('[data-live-archived]').length).toBe(3)
+  // one-click actions: per card and for the whole group (the subtask id is what they are addressed to)
+  expect(list.querySelector('[data-live-antigas-all-publish]')).not.toBeNull()
+  expect(list.querySelector('[data-live-antigas-all-archive]')).not.toBeNull()
   expect(list.textContent).toContain('and 243 more')
 })
 
