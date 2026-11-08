@@ -103,8 +103,9 @@ export interface ProofCache {
   pins: Map<string, string | null>
   tags: { list: string[] | null; shas: Map<string, string>; complete: boolean }
   contains: Map<string, boolean | null>
+  localTags: Map<string, string | null>
 }
-export const newProofCache = (): ProofCache => ({ prs: new Map(), pins: new Map(), tags: { list: null, shas: new Map(), complete: false }, contains: new Map() })
+export const newProofCache = (): ProofCache => ({ prs: new Map(), pins: new Map(), tags: { list: null, shas: new Map(), complete: false }, contains: new Map(), localTags: new Map() })
 
 const TAG_PAGES = 5
 
@@ -130,6 +131,17 @@ async function publicTags(f: GateFacts, cwd: string, cache: ProofCache): Promise
  * listing) — a walk that ran off a partial page proves nothing, so it answers null. null also when nothing contains it yet.
  */
 export async function findPublicTag(f: GateFacts, cwd: string, mergeSha: string, cache: ProofCache): Promise<string | null> {
+  // LOCAL FIRST: `git tag --contains` answers from the checkout in milliseconds. Tags are created in order, so if the first
+  // containing tag were missing locally every containing tag would be, and the list would be empty (→ the gh bisect below).
+  const key = `local:${mergeSha}`
+  if (!cache.contains.has(key)) {
+    const out = await f.git(cwd, ['tag', '--contains', mergeSha, '--sort=version:refname']).catch(() => '')
+    const first = out.split('\n').map(s => s.trim()).find(t => RELEASE_TAG.test(t)) ?? null
+    cache.localTags.set(mergeSha, first)
+    cache.contains.set(key, first !== null)
+  }
+  const local = cache.localTags.get(mergeSha)
+  if (local) return local
   const tags = await publicTags(f, cwd, cache)
   const has = async (tag: string): Promise<boolean | null> => {
     const sha = cache.tags.shas.get(tag)
