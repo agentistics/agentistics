@@ -188,7 +188,7 @@ describe('delivery service', () => {
 
   test('failed request wakes retry; a linked member whose group is staged needs no reminder', async () => {
     const request = { id: 'p-1', taskId: 't1', sessionId: 'old', text: 'Fix the queue', at: '2026-11-07T01:00:00.000Z', state: 'linked', linkedSubtaskIds: ['s1'] }
-    const h = harness({ wakeOk: false }, { requests: async () => [request] })
+    const h = harness({ wakeOk: false, sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1' }] }, { requests: async () => [request] })
     const base = h.facts.subtask
     h.facts.subtask = async id => { const s = await base(id); return s ? { ...s, staged: undefined } : null }
     expect((await h.svc.tick()).actions).toContain('request-wake-failed leader:p-1')
@@ -212,9 +212,61 @@ describe('delivery service', () => {
       expect(h.calls.session).toEqual([])
     })
 
+    // FLUXO.ALARMES (rows 23, 41): the pieces were dequeued by the leader to open by hand and had a live QA filed.
+    const linked = () => req({ state: 'linked', linkedSubtaskIds: ['s1'] })
+    const unstaged = (h: ReturnType<typeof harness>) => { const base = h.facts.subtask; h.facts.subtask = async id => { const s = await base(id); return s ? { ...s, staged: undefined } : null } }
+    const wakes = (a: string[]) => a.filter(x => x.startsWith('request-wake'))
+
+    test('a dequeued piece with a LIVE session is not "unstaged": no reminder (rows 23, 41)', async () => {
+      const h = harness({}, { requests: async () => [linked()] })
+      await h.svc.stage('s1', {}, 'leader', { pedidoId: 'p-1' })
+      expect((await h.svc.dequeue('s1', 'opened by hand', 'leader')).ok).toBe(true)
+      unstaged(h)
+      h.advance(60 * 60_000)
+      expect(wakes((await h.svc.tick()).actions)).toEqual([])
+      expect(h.calls.session).toEqual([])
+    })
+
+    test('a request whose piece has a live session and no draft is not chased either', async () => {
+      const h = harness({}, { requests: async () => [linked()] })
+      unstaged(h)
+      expect(wakes((await h.svc.tick()).actions)).toEqual([])
+    })
+
+    test('a real unstaged request still warns', async () => {
+      const h = harness({ sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1' }] }, { requests: async () => [linked()] })
+      unstaged(h)
+      expect(wakes((await h.svc.tick()).actions)).toContain('request-wake leader:p-1')
+    })
+
+    test('a dequeued piece with no session and no draft warns ONCE, after 10 minutes', async () => {
+      const h = harness({ sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1' }] }, { requests: async () => [linked()] })
+      await h.svc.stage('s1', {}, 'leader', { pedidoId: 'p-1' })
+      expect((await h.svc.dequeue('s1', 'opened by hand', 'leader')).ok).toBe(true)
+      unstaged(h)
+      h.advance(5 * 60_000)
+      expect(wakes((await h.svc.tick()).actions)).toEqual([])
+      h.advance(6 * 60_000)
+      expect(wakes((await h.svc.tick()).actions)).toContain('request-wake leader:p-1')
+      h.advance(2 * 60 * 60_000)
+      expect(wakes((await h.svc.tick()).actions)).toEqual([])
+      expect(h.calls.session).toHaveLength(1)
+    })
+
+    test('a live session that appears between the loop and the send cancels the reminder', async () => {
+      const h = harness({ sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1' }] }, { requests: async () => [linked()] })
+      unstaged(h)
+      let calls = 0
+      const sessions = h.facts.sessions
+      h.facts.sessions = async () => { calls++; const all = await sessions(); return calls > 1 ? [...all, { id: 'qa', harness: 'claude', role: 'worker', alive: true, cwd: '/r', worktree: false, taskId: 't1', subtaskId: 's1' }] : all }
+      const out = await h.svc.tick()
+      expect(h.calls.session).toEqual([])
+      expect(out.actions.some(a => a.startsWith('request-wake-skipped'))).toBe(true)
+    })
+
     test('completeness is judged AGAIN right before the send: a piece staged in between cancels the reminder (item 3)', async () => {
       const request = req({ state: 'linked', linkedSubtaskIds: ['s1'] })
-      const h = harness({}, { requests: async () => [request] })
+      const h = harness({ sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1' }] }, { requests: async () => [request] })
       const base = h.facts.subtask
       // The loop's read says "no staging"; by the time the reminder would be typed, the leader has staged it.
       let reads = 0
