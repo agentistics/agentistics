@@ -20,6 +20,8 @@
  */
 import type { DeliveryCi, DeliveryRecord, GateName } from './machine'
 import { reconcileSessions } from '../sessions/session-ref'
+import { hasEffortConcept } from '../sessions/live-runtime'
+import { ISOLATION_ENV } from '../account-isolation'
 import type { BackendSession, ManagedSession } from '../sessions/types'
 
 /** The backend, also used by the fleet, proves liveness; a lost registry row reserves no slot. */
@@ -132,6 +134,17 @@ export function isTopTier(harness: string, model: string | undefined): boolean {
   return /opus|fable|-pro\b/.test(m)
 }
 
+/**
+ * PURE (FLUXO.AVISOS 5): is the owner's TOP-TIER cap of a provider already used up, counting `adding` more workers of that
+ * tier? One rule for the slot gate (`judgeVaga`) and for every `agentop session` door that starts a worker. Leaders and
+ * sessions that are not running reserve nothing. Null = room (or the model is not top tier at all).
+ */
+export function topTierFull(harness: string, model: string | undefined, sessions: readonly SessionFact[], cap: number, adding = 1): { running: number; cap: number } | null {
+  if (!isTopTier(harness, model)) return null
+  const running = sessions.filter(x => x.alive && x.role !== 'leader' && x.harness === harness && isTopTier(x.harness, x.model)).length
+  return running + adding > cap ? { running, cap } : null
+}
+
 /** PURE: the model family, for "never Sonnet over Sonnet". */
 export function modelFamily(model: string | undefined): string {
   const m = (model ?? '').toLowerCase()
@@ -173,19 +186,37 @@ export function judgePredispatch(sub: SubtaskFact | null): GateVerdict {
   if (!sub) return no('the subtask does not exist on the board', ['subtarefa'])
   if (sub.groupMember) return no('a group member never receives a session — stage it on the group', ['subtarefa (não membro de grupo)'])
   const s = sub.staged ?? {}
-  const missing = (['prompt', 'harness', 'model', 'effort', 'account'] as const).filter(k => !s[k]?.trim()).map(k => (k === 'prompt' ? 'brief/prompt' : k))
+  const harness = s.harness?.trim()
+  // FLUXO.AVISOS 4: ask only for what THIS harness uses. An effort the harness has no concept of, or an account on a harness
+  // that cannot keep a second login apart, is not "missing" — the leader was sent in circles for fields that did nothing.
+  // With no harness yet, both stay required (the harness itself is what is missing).
+  const needs = ['prompt', 'harness', 'model', ...(!harness || hasEffortConcept(harness) ? ['effort'] : []), ...(!harness || harnessHasAccounts(harness) ? ['account'] : [])] as const
+  const missing = needs.filter(k => !(s as Record<string, string | undefined>)[k]?.trim()).map(k => (k === 'prompt' ? 'brief/prompt' : k))
   if (missing.length) return no(`pre-dispatch incomplete: ${missing.join(', ')}`, missing)
-  return { ok: true, evidence: { harness: s.harness, model: s.model, effort: s.effort, account: s.account, promptChars: s.prompt!.length, subtaskId: sub.id } }
+  return { ok: true, evidence: { harness: s.harness, model: s.model, effort: s.effort ?? null, account: stagedAccount(s), promptChars: s.prompt!.length, subtaskId: sub.id } }
+}
+
+/** PURE: can this harness keep a second login apart (an isolation variable exists for it)? Otherwise it only has `default`. */
+export function harnessHasAccounts(harness: string): boolean {
+  return !!(ISOLATION_ENV as Record<string, string | null | undefined>)[harness]
+}
+
+/** PURE: the account a staged session runs under — the staged one, else `default` for a harness with no accounts. */
+export function stagedAccount(s: StagedFact): string | undefined {
+  const named = s.account?.trim()
+  if (named) return named
+  return s.harness && !harnessHasAccounts(s.harness.trim()) ? 'default' : undefined
 }
 
 /** PURE. Is there room to start the staged session now? */
 export function judgeVaga(sub: SubtaskFact | null, o: { sessions: readonly SessionFact[]; budgets: readonly BudgetFact[]; memoryBytes: number | null; topCap: number }): GateVerdict {
   const s = sub?.staged
-  if (!s?.harness || !s.account) return no('the vaga gate reads the staged harness and account — run predispatch first', ['pré-dispatch'])
+  const account = s ? stagedAccount(s) : undefined
+  if (!s?.harness || !account) return no('the vaga gate reads the staged harness and account — run predispatch first', ['pré-dispatch'])
   const missing: string[] = []
-  const evidence: Record<string, unknown> = { harness: s.harness, account: s.account, model: s.model }
-  const row = o.budgets.find(b => !b.stale && b.harness === s.harness && b.account === s.account)
-  if (!row) missing.push(`fresh plan_limits reading for ${s.harness}:${s.account}`)
+  const evidence: Record<string, unknown> = { harness: s.harness, account, model: s.model }
+  const row = o.budgets.find(b => !b.stale && b.harness === s.harness && b.account === account)
+  if (!row) missing.push(`fresh plan_limits reading for ${s.harness}:${account}`)
   else {
     evidence.fiveHourPct = row.fiveHourPct; evidence.weekPct = row.weekPct
     if (row.fiveHourPct >= FIVE_HOUR_CEILING) missing.push(`5 h window at ${row.fiveHourPct}% (≥ ${FIVE_HOUR_CEILING}%)`)
@@ -197,7 +228,7 @@ export function judgeVaga(sub: SubtaskFact | null, o: { sessions: readonly Sessi
   if (isTopTier(s.harness, s.model)) {
     const top = workers.filter(x => x.harness === s.harness && isTopTier(x.harness, x.model)).length
     evidence.topTier = { running: top, cap: o.topCap }
-    if (top >= o.topCap) missing.push(`${top} ${s.harness} top-tier workers running (cap ${o.topCap})`)
+    if (topTierFull(s.harness, s.model, o.sessions, o.topCap)) missing.push(`${top} ${s.harness} top-tier workers running (cap ${o.topCap})`)
   }
   evidence.memoryBytes = o.memoryBytes
   if (o.memoryBytes === null) missing.push('free memory unknown')
