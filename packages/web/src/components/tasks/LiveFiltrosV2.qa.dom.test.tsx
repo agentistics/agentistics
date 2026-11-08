@@ -4,7 +4,7 @@ import { act, createElement } from 'react'
 import type { Root } from 'react-dom/client'
 
 /**
- * QA LIVE.FILTROS-V2 (e3dce1394). `test.failing` = a bug found by this QA: once fixed, bun reports it, and the fix turns
+ * QA LIVE.FILTROS-V2 (e3dce1394). Bug found by this QA, fixed in round 2:
  * it into a plain `test`. On the desktop, a tab with nothing to show draws nine sideways column names and no sentence
  * (the phone says "Nada nesta etapa"); "Em andamento" is the tab the screen OPENS on, so this is the first thing a person
  * sees on a quiet machine, and it reads as a board that failed to load.
@@ -31,7 +31,7 @@ beforeEach(() => localStorage.clear())
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = ''; localStorage.clear() })
 afterAll(async () => GlobalRegistrator.unregister())
 
-test.failing('MED: on the desktop, "Em andamento" with nothing in it SAYS so', async () => {
+test('MED: on the desktop, "Em andamento" with nothing in it SAYS so', async () => {
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   const reply = { generatedAt: new Date().toISOString(), samples: 0, deliveries: [queued] }
   await act(async () => {

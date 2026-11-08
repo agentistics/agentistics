@@ -23,23 +23,19 @@ const reducedMotion = (): boolean => { try { return window.matchMedia('(prefers-
 
 export interface LiveColumnWords { empty: string; collapse: string; expand: string; searchPlaceholder: string; noMatch: string; clear: string }
 
-export function LiveColumn({ stage, pt, cards, collapsed, words, query, onQuery, onToggle, render, override, note, groupHeading, headerExtra, emptyText }: {
+export function LiveColumn({ stage, pt, cards, collapsed, words, query, onQuery, onToggle, render, note, headerExtra, emptyText }: {
   stage: LiveStage; pt: boolean; cards: readonly LiveCard[]; collapsed: boolean; words: LiveColumnWords
   query: string; onQuery: (q: string) => void; onToggle: () => void
   render: (c: LiveCard) => React.ReactNode
-  /** The Histórico column: the same column, under its own id, name and colour. */
-  override?: { id: string; label: string; color: string }
   /** One informative line under the header. */
   note?: string
-  /** A heading drawn above a card when it opens a new group (history: the day). */
-  groupHeading?: (c: LiveCard, prev: LiveCard | undefined) => string | null
   /** Drawn in the header where the count goes (Publicado: its period picker). Stops propagation itself. */
   headerExtra?: React.ReactNode
   /** What an OPEN column with no card says (default: `words.empty`). */
   emptyText?: string
 }) {
-  const label = override?.label ?? STAGE_LABEL[stage][pt ? 'pt' : 'en']
-  const color = override?.color ?? STAGE_LABEL[stage].color
+  const label = STAGE_LABEL[stage][pt ? 'pt' : 'en']
+  const color = STAGE_LABEL[stage].color
   const bodyRef = useRef<HTMLDivElement>(null)
   const [searchShown, setSearchShown] = useState(false)
   // Cards of a column that was just collapsed stay mounted for the width animation to play over them.
@@ -85,7 +81,7 @@ export function LiveColumn({ stage, pt, cards, collapsed, words, query, onQuery,
 
   return (
     <section
-      data-live-column={override?.id ?? stage} data-collapsed={collapsed ? '1' : '0'}
+      data-live-column={stage} data-collapsed={collapsed ? '1' : '0'}
       style={{
         flex: `0 0 ${width}px`, width, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden',
         opacity: cards.length === 0 && collapsed ? 0.5 : 1,
@@ -131,15 +127,7 @@ export function LiveColumn({ stage, pt, cards, collapsed, words, query, onQuery,
             opacity: collapsed ? 0 : 1, transition: reducedMotion() ? 'none' : 'opacity .15s ease', pointerEvents: collapsed ? 'none' : undefined,
           }}
         >
-          {visible.map((c, i) => {
-            const heading = groupHeading?.(c, visible[i - 1])
-            return (
-              <React.Fragment key={c.d.key}>
-                {heading && <span data-live-group-head style={{ ...microLabel, fontSize: 10.5, padding: '4px 4px 0', textTransform: 'uppercase', letterSpacing: '.05em' }}>{heading}</span>}
-                <div data-live-slot style={{ minWidth: 0 }}>{render(c)}</div>
-              </React.Fragment>
-            )
-          })}
+          {visible.map(c => <div key={c.d.key} data-live-slot style={{ minWidth: 0 }}>{render(c)}</div>)}
           {cards.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>{emptyText ?? words.empty}</span>}
           {cards.length > 0 && visible.length === 0 && (
             <span data-live-col-nomatch style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>

@@ -34,9 +34,9 @@ export const HAPPY_PATH: readonly LiveStage[] = ['running', 'qa', 'leader', 'mer
 export const MIN_SAMPLES = 3
 /** A published piece stays on the line this long. */
 export const PUBLISHED_WINDOW_MS = 24 * 3600_000
-/** The Histórico column lists published pieces older than the Publicado window, up to this many days back… */
+/** Published pieces older than 24 h stay readable (Publicado's longer periods), up to this many days back… */
 export const HISTORY_DAYS = 365
-/** …and at most this many pieces (the newest). */
+/** …and at most this many pieces of each kind (the newest). The reply states how many the cap left out. */
 export const HISTORY_CAP = 400
 
 export type LiveEta =
@@ -168,8 +168,12 @@ export interface LiveHidden { key: string; taskId: string; title: string; stage:
 export interface LiveReply {
   generatedAt: string
   deliveries: LiveDelivery[]
-  /** Published more than 24 h ago (≤ HISTORY_DAYS days, ≤ HISTORY_CAP pieces), newest first — the Histórico column. */
+  /** Published more than 24 h ago (≤ HISTORY_DAYS days, ≤ HISTORY_CAP pieces), newest first — read by Publicado's longer periods. */
   history?: LiveDelivery[]
+  /** How many such pieces exist BEFORE the HISTORY_CAP cut (the list above holds at most the cap). */
+  historyTotal?: number
+  /** Same, for `oldReviews`. */
+  oldReviewsTotal?: number
   /** Legacy reviews nobody is on (the `archived` list, as full pieces marked `old`): drawn only by the "Tudo" tab. */
   oldReviews?: LiveDelivery[]
   /** Pieces left off the line and why (bounded, NEWEST first — the ones that just left are the ones somebody asks about). */
@@ -694,7 +698,7 @@ export function buildLive(o: {
     if (oldPublished) {
       // Recently expired only: a year of finished work is not a departure anybody is waiting to explain.
       if (deliveredAtMs !== null && o.nowMs - deliveredAtMs <= 3 * PUBLISHED_WINDOW_MS) hide(p, stage, 'published-old')
-      // It leaves Publicado, but not the board: the Histórico column keeps the last HISTORY_DAYS days.
+      // It leaves the 24 h window, but not the board: Publicado's longer periods keep the last HISTORY_DAYS days.
       if (deliveredAtMs === null || o.nowMs - deliveredAtMs > HISTORY_DAYS * PUBLISHED_WINDOW_MS) continue
     }
     const gate = stage === 'qa' || stage === 'adjust' || stage === 'leader' || stage === 'merge' || stage === 'ci' || stage === 'blocked'
@@ -777,6 +781,7 @@ export function buildLive(o: {
     generatedAt: new Date(o.nowMs).toISOString(), deliveries,
     history: history.sort((a, b) => (b.deliveredAtMs ?? 0) - (a.deliveredAtMs ?? 0)).slice(0, HISTORY_CAP),
     oldReviews: oldReviews.sort((a, b) => (b.stageSinceMs ?? 0) - (a.stageSinceMs ?? 0)).slice(0, HISTORY_CAP),
+    historyTotal: history.length, oldReviewsTotal: oldReviews.length,
     samples: samples.length, sessionTasks,
     hidden: hidden.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, HIDDEN_CAP),
     archived: archived.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, ARCHIVED_CAP), archivedTotal: archived.length,

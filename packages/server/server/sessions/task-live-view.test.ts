@@ -105,6 +105,36 @@ describe('the leader model is the transcript\'s, not the harness default (MED 9)
     expect(v.leaders[0]!.workers[0]!.model).toBe('claude-sonnet-5-5')
     expect(v.deliveries[0]!.agents[0]!.model).toBe('claude-sonnet-5-5')
   })
+  test('LOW-6: when the cap cut older pieces the view says how many, and only where it matters', () => {
+    const H = 3600_000, NOWMS = 400 * H
+    const hist = [d({ key: 'p40', stage: 'published', deliveredAtMs: NOWMS - 40 * 24 * H })]
+    const capped = { ...reply([]), history: hist, historyTotal: 5 }
+    const v = (filters: object) => describeLive({ reply: capped, rows: [], leaderIds: new Set(), nowMs: NOWMS, filters }).view
+    expect(v({ tab: 'published', period: 'all' }).capped).toEqual({ cap: 400, omitted: 4 })
+    expect(v({ tab: 'all', period: 'all' }).capped).toEqual({ cap: 400, omitted: 4 })
+    // 24 h: the oldest kept piece is already outside it, so nothing the cap cut could have been inside.
+    expect(v({ tab: 'published', period: '24h' }).capped).toBeNull()
+    expect(v({ tab: 'queue', period: 'all' }).capped).toBeNull()
+    expect(describeLive({ reply: { ...reply([]), history: hist }, rows: [], leaderIds: new Set(), nowMs: NOWMS, filters: { period: 'all' } }).view.capped).toBeNull()
+  })
+  test('LOW-7: the view states the EFFECTIVE tab and period, and which were defaulted', () => {
+    const run = (filters: object) => describeLive({ reply: reply([]), rows: [], leaderIds: new Set(), nowMs: NOW, filters }).view
+    expect(run({})).toMatchObject({ tab: 'all', period: '24h', defaulted: ['tab', 'period'] })
+    expect(run({ tab: 'queue' })).toMatchObject({ tab: 'queue', period: '24h', defaulted: ['period'] })
+    expect(run({ tab: 'queue', period: '7d' }).defaulted).toEqual([])
+  })
+  test('LOW-8: a live worker on a piece published over 24 h ago is not listed as "published" under its leader', () => {
+    const H = 3600_000, NOWMS = 400 * H
+    const old = d({ key: 'old', stage: 'published', deliveredAtMs: NOWMS - 48 * H, sessionIds: ['w1'] })
+    const fresh = d({ key: 'fresh', stage: 'published', deliveredAtMs: NOWMS - H, sessionIds: ['w2'] })
+    const v = describeLive({
+      reply: { ...reply([fresh]), history: [old] }, leaderIds: new Set(['L']), nowMs: NOWMS,
+      rows: [row('L', 'working'), row('w1', 'working', { parentSessionId: 'L' }), row('w2', 'working', { parentSessionId: 'L' })],
+    })
+    const ws = v.leaders[0]!.workers
+    expect(ws.find(w => w.id === 'w1')).toMatchObject({ stage: null, cardKey: null })
+    expect(ws.find(w => w.id === 'w2')).toMatchObject({ stage: 'published', cardKey: 'fresh' })
+  })
   test('with no observation the registry model stays, and none stays null', () => {
     const v = describeLive({ reply: reply([]), rows: [row('L', 'working', { model: 'opus' }), row('M', 'working')], leaderIds: new Set(['L', 'M']), nowMs: NOW })
     expect(v.leaders.map(l => l.model)).toEqual(['opus', null])

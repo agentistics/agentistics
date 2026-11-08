@@ -41,34 +41,32 @@ const REPLY: LiveReply = {
   oldReviews: [piece({ key: 'old', stage: 'leader', old: true })],
 } as unknown as LiveReply
 
-/** What the browser holds after `fetch('/api/tasks/live')`: the view with no filters, through JSON. */
-const wire = () => JSON.parse(JSON.stringify(describeLive({ reply: REPLY, rows: [], leaderIds: new Set(), nowMs: NOW }))) as {
-  deliveries: LiveDeliveryRecord[]; history?: LiveDeliveryRecord[]; oldReviews?: LiveDeliveryRecord[]
+type P = '24h' | '7d' | '30d' | 'all'
+/** What the browser holds after `fetch('/api/tasks/live?tab=all&period=<p>')` (the one request the screen makes), through JSON. */
+const wire = (period: P) => JSON.parse(JSON.stringify(describeLive({ reply: REPLY, rows: [], leaderIds: new Set(), nowMs: NOW, filters: { tab: 'all', period } }))) as {
+  deliveries: LiveDeliveryRecord[]
 }
 /** The cards exactly as `LiveDelivery.tsx` builds them. */
-const screenCards = () => {
-  const r = wire()
-  return joinLive([...r.deliveries, ...(r.history ?? []), ...(r.oldReviews ?? [])], [])
-}
+const screenCards = (period: P) => joinLive(wire(period).deliveries, [])
 
-const drawn = (period: '24h' | '7d' | '30d' | 'all') =>
-  filterCards(screenCards(), { taskIds: [], tab: 'published', period, nowMs: NOW }).map(c => c.d.key).sort()
-const countsAgree = (period: '24h' | '7d' | '30d' | 'all') => {
+const drawn = (period: P) =>
+  filterCards(screenCards(period), { taskIds: [], tab: 'published', period, nowMs: NOW }).map(c => c.d.key).sort()
+const countsAgree = (period: P) => {
   const mcp = describeLive({ reply: REPLY, rows: [], leaderIds: new Set(), nowMs: NOW, filters: { tab: 'published', period } }).view.counts
-  expect(tabCounts(screenCards(), { taskIds: [], period, nowMs: NOW })).toEqual(mcp)
+  expect(tabCounts(screenCards(period), { taskIds: [], period, nowMs: NOW })).toEqual(mcp)
 }
 
 describe('HIGH: the Publicado period reaches the SCREEN', () => {
   test('24h: the Publicado tab draws the last 24 h', () => expect(drawn('24h')).toEqual(['p2h']))
   test('24h: the screen\'s counts equal the MCP tool\'s', () => countsAgree('24h'))
-  test.failing('7d: the Publicado tab draws what the period covers', () => expect(drawn('7d')).toEqual(['p2h', 'p3d']))
-  test.failing('7d: the screen\'s counts equal the MCP tool\'s', () => countsAgree('7d'))
-  test.failing('30d: the Publicado tab draws what the period covers', () => expect(drawn('30d')).toEqual(['p2h', 'p20d', 'p3d']))
-  test.failing('30d: the screen\'s counts equal the MCP tool\'s', () => countsAgree('30d'))
-  test.failing('all: the Publicado tab draws what the period covers', () => expect(drawn('all')).toEqual(['p2h', 'p20d', 'p3d', 'p60d']))
-  test.failing('all: the screen\'s counts equal the MCP tool\'s', () => countsAgree('all'))
+  test('7d: the Publicado tab draws what the period covers', () => expect(drawn('7d')).toEqual(['p2h', 'p3d']))
+  test('7d: the screen\'s counts equal the MCP tool\'s', () => countsAgree('7d'))
+  test('30d: the Publicado tab draws what the period covers', () => expect(drawn('30d')).toEqual(['p20d', 'p2h', 'p3d']))
+  test('30d: the screen\'s counts equal the MCP tool\'s', () => countsAgree('30d'))
+  test('all: the Publicado tab draws what the period covers', () => expect(drawn('all')).toEqual(['p20d', 'p2h', 'p3d', 'p60d']))
+  test('all: the screen\'s counts equal the MCP tool\'s', () => countsAgree('all'))
   test('an old legacy review reaches the screen, in Tudo only', () => {
-    const cards = screenCards()
+    const cards = screenCards('all')
     expect(filterCards(cards, { taskIds: [], tab: 'all', period: '24h', nowMs: NOW }).map(c => c.d.key)).toContain('old')
     for (const tab of ['active', 'queue', 'published'] as const) {
       expect(filterCards(cards, { taskIds: [], tab, period: 'all', nowMs: NOW }).map(c => c.d.key)).not.toContain('old')
@@ -79,7 +77,7 @@ describe('HIGH: the Publicado period reaches the SCREEN', () => {
 describe('MED: an old legacy review does not bury the live ones', () => {
   // Real board, 08/11: Revisão do líder holds 239 cards, 201 old; the first 12 are all old and the last live one is at
   // position 238. Same priority ties on "longest in the stage", and an old one is old BY DEFINITION (over 72 h).
-  test.failing('in a column, every current card comes before the old ones, under the default sort', () => {
+  test('in a column, every current card comes before the old ones, under the default sort', () => {
     const cards = joinLive([
       { ...piece({ key: 'current', stage: 'leader', stageSinceMs: NOW - H }) },
       { ...piece({ key: 'antiga', stage: 'leader', old: true, stageSinceMs: NOW - 800 * H }) },

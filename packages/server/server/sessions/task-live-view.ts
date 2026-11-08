@@ -10,10 +10,10 @@
  */
 
 import {
-  humanizeAction, liveComparator, LIVE_SORT_DEFAULT, liveTabCounts, liveTabMatches, plainLeaderName,
+  humanizeAction, inPublishedPeriod, liveComparator, LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, liveTabCounts, liveTabMatches, plainLeaderName,
   type LiveLang, type LivePeriod, type LiveSortId, type LiveTab,
 } from '@agentistics/core'
-import { LIVE_STAGES, type LiveDelivery, type LiveReply, type LiveStage } from './task-live'
+import { HISTORY_CAP, LIVE_STAGES, type LiveDelivery, type LiveReply, type LiveStage } from './task-live'
 
 /** The slice of a fleet row this module reads (a `ControlSession` satisfies it). */
 export interface FleetRowLite {
@@ -99,8 +99,6 @@ export interface LiveView {
   generatedAt: string
   samples: number
   hidden: LiveReply['hidden']
-  archived: LiveReply['archived']
-  archivedTotal: number
   sessionTasks: LiveReply['sessionTasks']
   runtime: Record<string, RuntimeFacts>
   summary: {
@@ -111,8 +109,11 @@ export interface LiveView {
   /**
    * The tab and period this answer is for, and the count of EVERY tab under the same task filter and period —
    * the very numbers the screen's tabs print (`liveTabCounts`, `@agentistics/core`). `deliveries` is that tab.
+   * `tab` / `period` are the EFFECTIVE values (missing or invalid input falls back to `all` / `24h`; `defaulted`
+   * names the ones that did). `capped` is set when the per-kind cap left older pieces out of this answer, so a
+   * count is never mistaken for the total: `omitted` pieces are missing, the oldest ones.
    */
-  view: { tab: LiveTab; period: LivePeriod; counts: Record<LiveTab, number> }
+  view: { tab: LiveTab; period: LivePeriod; counts: Record<LiveTab, number>; defaulted: string[]; capped: { cap: number; omitted: number } | null }
   leaders: LeaderView[]
 }
 
@@ -161,8 +162,8 @@ export function describeLive(o: {
   const byId = new Map(o.rows.map(r => [r.id, r]))
   const titleOf = (id: string) => { const t = byId.get(id)?.title; return t ? plainLeaderName(t) : undefined }
   const f = o.filters ?? {}
-  // History (published beyond 24 h) and the old legacy reviews carry no live agents by definition; they ride the
-  // same pipe as every other piece, and the tab + period decide which of them show.
+  // History (published beyond 24 h) and the old legacy reviews ride the same pipe as every other piece (a worker
+  // can still be filed on one, so agents are joined for them too); the tab + period decide which of them show.
   const all: LiveDeliveryView[] = [...o.reply.deliveries, ...(o.reply.history ?? []), ...(o.reply.oldReviews ?? [])].map(d => {
     const agents: LiveAgentView[] = d.sessionIds.flatMap(id => {
       const r = byId.get(id)
@@ -184,8 +185,10 @@ export function describeLive(o: {
   // A piece whose only sessions are LEADERS is the leader's own filing, not delivery work: the leader
   // has its card in the band, and a column card would show the task's age as "total".
   const leaderOnly = (d: LiveDeliveryView) => d.sessionIds.length > 0 && d.sessionIds.every(id => o.leaderIds.has(id))
+  // EFFECTIVE values: a caller that names no (or an invalid) tab gets `all`, no period gets `24h`; `view.defaulted` says so.
   const tab: LiveTab = f.tab ?? 'all'
-  const period: LivePeriod = f.period ?? '24h'
+  const period: LivePeriod = f.period ?? LIVE_PERIOD_DEFAULT
+  const defaulted = [...(f.tab ? [] : ['tab']), ...(f.period ? [] : ['period'])]
   const cmp = liveComparator(f.sort ?? LIVE_SORT_DEFAULT)
   // The tab counts are asked of the task-filtered set only (as the screen's are): a stage / stalled filter narrows the
   // list, not the tabs.
@@ -202,7 +205,8 @@ export function describeLive(o: {
   etas.sort((a, b) => a.atMs - b.atMs)
 
   const pieceOf = new Map<string, LiveDeliveryView>()
-  for (const d of all) for (const id of d.sessionIds) pieceOf.set(id, d)
+  // A piece published more than 24 h ago is history: a worker still filed on it is not "delivering" it.
+  for (const d of all) if (d.stage !== 'published' || inPublishedPeriod(d.deliveredAtMs, LIVE_PERIOD_DEFAULT, o.nowMs)) for (const id of d.sessionIds) pieceOf.set(id, d)
   const leaders: LeaderView[] = o.rows.filter(r => o.leaderIds.has(r.id) && (ALIVE.has(r.state) || DOWN.has(r.state))).map(r => {
     const workers = o.rows.filter(w => w.parentSessionId === r.id && !o.leaderIds.has(w.id) && ALIVE.has(w.state))
     const awaiting = [r, ...workers].filter(x => x.state === 'waiting-approval').map(x => ({ id: x.id, title: x.title }))
@@ -225,16 +229,28 @@ export function describeLive(o: {
     }
   })
 
+  // The 400-per-kind cap cuts the OLDEST published / old-review pieces. Say so when the cut could matter for this
+  // tab and period, so a count never passes as the total.
+  const keptHistory = o.reply.history ?? []
+  const omittedHistory = Math.max(0, (o.reply.historyTotal ?? keptHistory.length) - keptHistory.length)
+  const oldestKept = keptHistory.reduce<number | null>((m, d) => d.deliveredAtMs === null ? m : m === null ? d.deliveredAtMs : Math.min(m, d.deliveredAtMs), null)
+  const historyMatters = omittedHistory > 0 && (tab === 'published' || tab === 'all')
+    && (period === 'all' || (oldestKept !== null && inPublishedPeriod(oldestKept, period, o.nowMs)))
+  const keptOld = o.reply.oldReviews ?? []
+  const omittedOld = tab === 'all' ? Math.max(0, (o.reply.oldReviewsTotal ?? keptOld.length) - keptOld.length) : 0
+  const omitted = (historyMatters ? omittedHistory : 0) + omittedOld
+  const capped = omitted > 0 ? { cap: HISTORY_CAP, omitted } : null
+
   return {
     generatedAt: o.reply.generatedAt, samples: o.reply.samples,
-    hidden: o.reply.hidden ?? [], archived: o.reply.archived ?? [], archivedTotal: o.reply.archivedTotal ?? 0, sessionTasks: o.reply.sessionTasks ?? {}, runtime: o.runtime ?? {},
+    hidden: o.reply.hidden ?? [], sessionTasks: o.reply.sessionTasks ?? {}, runtime: o.runtime ?? {},
     summary: {
       deliveries: active.length,
       agentsWorking: new Set(active.flatMap(d => d.agents.filter(a => a.state === 'working').map(a => a.id))).size,
       stalled: active.filter(d => d.stalled).length,
       nextEta: etas[0] ?? null,
     },
-    deliveries, view: { tab, period, counts }, leaders,
+    deliveries, view: { tab, period, counts, defaulted, capped }, leaders,
   }
 }
 

@@ -319,7 +319,7 @@ test('MED 7: the last action is said in the UI language, not as `on subtask "<ti
 test('old legacy reviews are no separate button: they sit in "Tudo" (counted), marked old, and are not "In progress"', async () => {
   localStorage.clear()
   const old = Array.from({ length: 3 }, (_, i) => ({ ...reply.deliveries[0]!, key: `t/o${i}`, subtaskId: `o${i}`, title: `Old review ${i}`, stage: 'leader', sessionIds: [], old: true }))
-  const r = { ...reply, deliveries: [], oldReviews: old }
+  const r = { ...reply, deliveries: old }
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: r as never }))) })
   expect(document.querySelector('[data-live-archived-toggle]')).toBeNull()

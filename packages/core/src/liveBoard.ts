@@ -76,7 +76,7 @@ export const LIVE_SORTS: readonly LiveSortId[] = ['priority', 'time-in-stage', '
 export const LIVE_SORT_DEFAULT: LiveSortId = 'priority'
 
 /** The slice of a delivery the order reads. */
-export interface LiveSortable { key: string; priority?: string | null; stageSinceMs: number | null }
+export interface LiveSortable { key: string; priority?: string | null; stageSinceMs: number | null; old?: boolean }
 
 /**
  * PURE: 0 = urgent … last = low. Absent, a legacy `none` and an unknown word rank as `low`, exactly as
@@ -98,11 +98,16 @@ const longestInStage = (a: LiveSortable, b: LiveSortable): number =>
  *   - `recent`        entered the stage most recently first.
  */
 export function liveComparator(sort: LiveSortId): (a: LiveSortable, b: LiveSortable) => number {
-  switch (sort) {
-    case 'time-in-stage': return (a, b) => longestInStage(a, b) || a.key.localeCompare(b.key)
-    case 'recent': return (a, b) => (b.stageSinceMs ?? -Infinity) - (a.stageSinceMs ?? -Infinity) || a.key.localeCompare(b.key)
-    default: return (a, b) => priorityRank(a.priority) - priorityRank(b.priority) || longestInStage(a, b) || a.key.localeCompare(b.key)
-  }
+  const inner = ((): ((a: LiveSortable, b: LiveSortable) => number) => {
+    switch (sort) {
+      case 'time-in-stage': return (a, b) => longestInStage(a, b) || a.key.localeCompare(b.key)
+      case 'recent': return (a, b) => (b.stageSinceMs ?? -Infinity) - (a.stageSinceMs ?? -Infinity) || a.key.localeCompare(b.key)
+      default: return (a, b) => priorityRank(a.priority) - priorityRank(b.priority) || longestInStage(a, b) || a.key.localeCompare(b.key)
+    }
+  })()
+  // Whatever the sort, inside a column the current cards come before the "antiga" ones: an old legacy review is old BY
+  // DEFINITION, so "longest in the stage" would otherwise bury every live card under them.
+  return (a, b) => Number(a.old === true) - Number(b.old === true) || inner(a, b)
 }
 
 /** PURE: a stored/typed sort id → a known one (anything else is the default). */

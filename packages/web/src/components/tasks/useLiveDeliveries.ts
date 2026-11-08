@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { debounceWithMaxWait } from '../../lib/debounceMaxWait'
 import { subscribeEvent } from '../../lib/eventStream'
 import type { FleetRow } from '../../lib/fleet'
+import type { LivePeriod } from '@agentistics/core'
 import type { LiveReply } from './liveDeliveryModel'
+import { readViewPrefs } from './liveCardModel'
 
 /**
  * The Live Delivery read model, kept fresh by the app's own push channels — never a poll of its own:
@@ -19,10 +21,17 @@ export const LIVE_HEARTBEAT_MS = 60_000
  * closed many times) paints from it at once while the fresh read lands behind it — no blocking fetch
  * between the pointer and the first useful paint.
  */
-let lastReply: { reply: LiveReply; atMs: number } | null = null
+let lastReply: { reply: LiveReply; atMs: number; period: LivePeriod } | null = null
+
+/**
+ * The ONE request the screen makes: every tab, inside the chosen Publicado period. The tabs, counts and
+ * columns are then drawn from this answer with the same rules the server (and the MCP tool) applies, so a
+ * period changes what the server SENDS rather than what the screen pretends to cut.
+ */
+export const liveUrl = (period: LivePeriod): string => `/api/tasks/live?tab=all&period=${period}`
 export const LIVE_CACHE_MAX_AGE_MS = 10 * 60_000
-export function cachedLiveReply(nowMs = Date.now()): LiveReply | null {
-  return lastReply && nowMs - lastReply.atMs < LIVE_CACHE_MAX_AGE_MS ? lastReply.reply : null
+export function cachedLiveReply(nowMs = Date.now(), period: LivePeriod = readViewPrefs().period): LiveReply | null {
+  return lastReply && lastReply.period === period && nowMs - lastReply.atMs < LIVE_CACHE_MAX_AGE_MS ? lastReply.reply : null
 }
 /**
  * Warm the cache before anyone asks: the Sessions bar calls this shortly after it mounts and again on
@@ -34,8 +43,9 @@ export function prefetchLiveReply(): Promise<void> {
   if (prefetching) return prefetching
   prefetching = (async () => {
     try {
-      const res = await fetch('/api/tasks/live')
-      if (res.ok) lastReply = { reply: await res.json() as LiveReply, atMs: Date.now() }
+      const period = readViewPrefs().period
+      const res = await fetch(liveUrl(period))
+      if (res.ok) lastReply = { reply: await res.json() as LiveReply, atMs: Date.now(), period }
     } catch { /* the view reports its own errors */ } finally { prefetching = null }
   })()
   return prefetching
@@ -44,19 +54,23 @@ export function prefetchLiveReply(): Promise<void> {
 /** Test hook. */
 export function resetLiveCache(): void { lastReply = null }
 
-export function useLiveDeliveries(fleet: readonly FleetRow[]) {
-  const [reply, setReply] = useState<LiveReply | null>(() => cachedLiveReply())
+export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod = readViewPrefs().period) {
+  const [reply, setReply] = useState<LiveReply | null>(() => cachedLiveReply(Date.now(), period))
+  const periodRef = useRef(period)
+  periodRef.current = period
   const [error, setError] = useState<'down' | 'refused' | null>(null)
   const [nowMs, setNowMs] = useState(() => Date.now())
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/tasks/live')
+      const asked = periodRef.current
+      const res = await fetch(liveUrl(asked))
       if (res.status === 403 || res.status === 404) { setError('refused'); return }
       if (!res.ok) { setError('down'); return }
       const fresh = await res.json() as LiveReply
-      lastReply = { reply: fresh, atMs: Date.now() }
-      setReply(fresh)
+      lastReply = { reply: fresh, atMs: Date.now(), period: asked }
+      // A slow answer for a period the person already left must not overwrite the one they chose.
+      if (asked === periodRef.current) setReply(fresh)
       setError(null)
     } catch {
       setError('down')
@@ -90,6 +104,12 @@ export function useLiveDeliveries(fleet: readonly FleetRow[]) {
     () => fleet.filter(r => r.state !== 'closed' && r.state !== 'exited').map(r => `${r.id}:${r.state}`).sort().join('|'),
     [fleet],
   )
+  // A new period is a new question: ask again at once (the server decides what Publicado holds).
+  const firstPeriod = useRef(true)
+  useEffect(() => {
+    if (firstPeriod.current) { firstPeriod.current = false; return }
+    void load()
+  }, [period, load])
   const first = useRef(true)
   useEffect(() => {
     if (first.current) { first.current = false; return }

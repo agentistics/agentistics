@@ -130,7 +130,7 @@ test('columns with cards are open, empty ones collapsed — and no column shows 
 })
 
 test('an old legacy review is drawn only in "Tudo", marked "antiga", and is never "Em andamento"', async () => {
-  const r = { ...replyOf([piece('r', 'running', { sessionIds: ['s1'] })]), oldReviews: [piece('o', 'leader', { old: true })] }
+  const r = replyOf([piece('r', 'running', { sessionIds: ['s1'] }), piece('o', 'leader', { old: true })])
   await mount(props('pt', r))
   expect(keysIn('leader')).toEqual(['o'])
   expect(document.querySelector('[data-live-card="o"] [data-live-old]')!.textContent).toBe('antiga')

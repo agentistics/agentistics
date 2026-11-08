@@ -21,8 +21,7 @@ const reply = {
   }, {
     key: 't/pub', taskId: 't', taskTitle: 'Task', subtaskId: 'pub', title: 'Fresh piece', status: 'done', stage: 'published', stageSinceMs: null, startedAtMs: null,
     sessionIds: [], harnesses: ['claude'], models: [], eta: { kind: 'none', reason: 'not-started' }, lastAction: null, blockedReason: null, deliveredAtMs: Date.now() - 3600_000,
-  }],
-  history: [{
+  }, {
     key: 't/old', taskId: 't', taskTitle: 'Task', subtaskId: 'old', title: 'Old piece', status: 'done', stage: 'published', stageSinceMs: null, startedAtMs: null,
     sessionIds: [], harnesses: ['claude'], models: [], eta: { kind: 'none', reason: 'not-started' }, lastAction: null, blockedReason: null, deliveredAtMs: new Date().setHours(0, 0, 0, 0) - 3600_000 /* 23:00 yesterday on the local clock, whatever time the suite runs */,
   }],

@@ -54,7 +54,7 @@ export function Muted({ text }: { text: string }) {
  * enough — this is the same lesson CLAUDE.md already states for the flex/grid item default: it must
  * be overridden at EVERY level of the ancestor chain, not only the deepest one.
  */
-export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, count, tap, flush, ariaLabel, variant = 'segmented', natural }: {
+export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, count, tap, flush, ariaLabel, variant = 'segmented', natural, gap }: {
   tabs: readonly T[]
   /** The selected tab, or null when none is (a surface showing something the tabs do not name). */
   value: T | null
@@ -77,11 +77,13 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, c
   variant?: 'segmented' | 'underline'
   /** Segmented only: each tab takes the width of its own label instead of an equal share (a strip that must never truncate). */
   natural?: boolean
+  /** Underline only: the space between tabs (default 22). A strip that must fit a phone narrows it. */
+  gap?: number
 }) {
   if (variant === 'underline') {
     return (
       <div role="tablist" aria-label={ariaLabel} style={{
-        display: 'flex', gap: 22, marginBottom: flush ? 0 : 18, minWidth: 0, overflowX: 'auto',
+        display: 'flex', gap: gap ?? 22, marginBottom: flush ? 0 : 18, minWidth: 0, overflowX: 'auto',
         borderBottom: '1px solid var(--border)', scrollbarWidth: 'none',
       }}>
         {tabs.map(id => {

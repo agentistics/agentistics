@@ -79,11 +79,9 @@ export interface LeaderRecord {
 }
 export interface LiveReply {
   generatedAt: string; deliveries: LiveDeliveryRecord[]; leaders?: LeaderRecord[]; samples: number
-  /** Published more than 24 h ago (inside Publicado's longer periods); absent from an older server. */
-  history?: LiveDeliveryRecord[]
-  /** Legacy reviews nobody is on, as pieces marked `old`: only the "Tudo" tab draws them. */
-  oldReviews?: LiveDeliveryRecord[]
-  hidden?: LiveHidden[]; archived?: LiveHidden[]; archivedTotal?: number; sessionTasks?: Record<string, string>; runtime?: Record<string, RuntimeFacts>
+  /** What the server answered for (`?tab=all&period=…`): `capped` is set when the per-kind cap left older pieces out. */
+  view?: { period?: string; capped?: { cap: number; omitted: number } | null }
+  hidden?: LiveHidden[]; sessionTasks?: Record<string, string>; runtime?: Record<string, RuntimeFacts>
 }
 
 export interface LiveAgent {

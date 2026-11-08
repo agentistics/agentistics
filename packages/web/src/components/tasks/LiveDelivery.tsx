@@ -17,7 +17,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ExternalLink } from 'lucide-react'
+import { Check, ChevronDown, ExternalLink } from 'lucide-react'
 import { LIVE_PERIODS, plainLeaderName, type LivePeriod, type LiveTab } from '@agentistics/core'
 import { CenteredLoader } from '../CenteredLoader'
 import { useFleet, type FleetRow } from '../../lib/fleet'
@@ -65,6 +65,7 @@ export const copy = (pt: boolean) => pt ? {
   collapse: 'Recolher coluna', expand: 'Abrir coluna',
   period: 'Período do Publicado', periods: { '24h': 'últimas 24 h', '7d': '7 dias', '30d': '30 dias', all: 'tudo' } as Record<LivePeriod, string>,
   noPublished: 'Nada publicado neste período.',
+  capped: (n: number, cap: number) => `Lista cortada em ${cap} por tipo: ${n} ${n === 1 ? 'peça mais antiga ficou' : 'peças mais antigas ficaram'} de fora. Os números acima não são o total.`,
   searchColumn: 'Buscar nesta coluna…', noMatch: 'Nenhum cartão corresponde.', clearSearch: 'Limpar',
   left: 'saiu', recentLeft: (n: number) => `saíram há pouco (${n})`, noneLeft: 'Ninguém saiu do quadro nos últimos minutos.',
 } : {
@@ -79,6 +80,7 @@ export const copy = (pt: boolean) => pt ? {
   collapse: 'Collapse column', expand: 'Open column',
   period: 'Published period', periods: { '24h': 'last 24 h', '7d': '7 days', '30d': '30 days', all: 'all' } as Record<LivePeriod, string>,
   noPublished: 'Nothing published in this period.',
+  capped: (n: number, cap: number) => `List cut at ${cap} per kind: ${n} older ${n === 1 ? 'piece is' : 'pieces are'} left out. The numbers above are not the total.`,
   searchColumn: 'Search this column…', noMatch: 'No card matches.', clearSearch: 'Clear',
   left: 'left', recentLeft: (n: number) => `left recently (${n})`, noneLeft: 'Nothing left the board in the last minutes.',
 }
@@ -87,8 +89,10 @@ export const copy = (pt: boolean) => pt ? {
 export function LiveDelivery({ lang, compact, focusSessionId, inPip, initialTaskIds }: { lang: 'pt' | 'en'; compact?: boolean; focusSessionId?: string | null; inPip?: boolean; initialTaskIds?: readonly string[] }) {
   const { fleet } = useFleet(lang)
   const plan = usePlanLimits()
-  const { reply, error, nowMs } = useLiveDeliveries(fleet.sessions)
-  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} compact={compact} focusSessionId={focusSessionId} inPip={inPip} initialTaskIds={initialTaskIds} />
+  // The Publicado period is asked of the server (it decides what is sent), so it lives here, beside the fetch.
+  const [period, setPeriod] = useState<LivePeriod>(() => readViewPrefs().period)
+  const { reply, error, nowMs } = useLiveDeliveries(fleet.sessions, period)
+  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} onPeriod={setPeriod} compact={compact} focusSessionId={focusSessionId} inPip={inPip} initialTaskIds={initialTaskIds} />
 }
 
 export interface LiveDeliveryViewProps {
@@ -106,10 +110,12 @@ export interface LiveDeliveryViewProps {
   initialTaskIds?: readonly string[]
   /** Rendered inside the external window: no button to open another, fills that window. */
   inPip?: boolean
+  /** The person chose another Publicado period: whoever fetches must ask the server again. */
+  onPeriod?: (p: LivePeriod) => void
 }
 
 /** PURE of data sources: everything it draws comes in as props, so it is tested without mocking a store. */
-export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabels, compact, focusSessionId, initialTaskIds, inPip }: LiveDeliveryViewProps) {
+export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabels, compact, focusSessionId, initialTaskIds, inPip, onPeriod }: LiveDeliveryViewProps) {
   const pt = lang === 'pt'
   const L = copy(pt)
   const isMobile = useIsMobile()
@@ -118,7 +124,10 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   // The filter bar's switches and the sort are saved like the column preferences (this browser).
   const [view, setView] = useState(() => readViewPrefs())
   const { tab, period, sort } = view
-  const setViewPref = useCallback((patch: Partial<typeof view>) => setView(v => { const n = { ...v, ...patch }; writeViewPrefs(n); return n }), [])
+  const setViewPref = useCallback((patch: Partial<typeof view>) => {
+    setView(v => { const n = { ...v, ...patch }; writeViewPrefs(n); return n })
+    if (patch.period) onPeriod?.(patch.period)
+  }, [onPeriod])
   const [stageFilter, setStageFilter] = useState<StageFilter>('all')
   const [prefs, setPrefs] = useState<CollapsedPrefs>(() => readCollapsedPrefs())
   // Each column's own search text (the field appears when more than three cards are out of view).
@@ -129,9 +138,9 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   const [showGone, setShowGone] = useState(false)
   const [clock, setClock] = useState(() => Date.now())
 
-  // ONE set of cards feeds both the tab counts and the columns: what is published earlier (`history`) and the old
-  // legacy reviews ride the same pipe, and the tab + Publicado's period decide which of them are drawn.
-  const cards = useMemo(() => joinLive([...(reply?.deliveries ?? []), ...(reply?.history ?? []), ...(reply?.oldReviews ?? [])], fleet), [reply, fleet])
+  // ONE set of cards feeds both the tab counts and the columns. The server already answered for the chosen period
+  // (`?tab=all&period=…`: everything, Publicado inside its period), so the tab only picks among what it sent.
+  const cards = useMemo(() => joinLive(reply?.deliveries ?? [], fleet), [reply, fleet])
   const shown = useMemo(() => filterCards(cards, { taskIds, tab, period, nowMs }), [cards, taskIds, tab, period, nowMs])
   const counts = useMemo(() => tabCounts(cards, { taskIds, period, nowMs }), [cards, taskIds, period, nowMs])
   const columns = useMemo(() => orderColumns(byStage(shown), sort), [shown, sort])
@@ -387,7 +396,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
           type="button" aria-expanded={isOpen} onClick={() => togglePub(c.d.key)} className="ag-tap" title={c.d.title}
           style={{ ...surface, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', minWidth: 0, fontSize: 11.5, ...(isOpen ? { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 } : {}) }}
         >
-          <span aria-hidden style={{ transform: isOpen ? 'none' : 'rotate(-90deg)', transition: reducedMotion() ? 'none' : 'transform .2s', flexShrink: 0 }}>▾</span>
+          <ChevronDown size={13} aria-hidden style={{ transform: isOpen ? 'none' : 'rotate(-90deg)', transition: reducedMotion() ? 'none' : 'transform .2s', flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}>{c.d.title}</span>
           <span style={{ color: 'var(--text-tertiary)', fontSize: 10.5, flexShrink: 0 }}>{when}</span>
         </button>
@@ -407,15 +416,18 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
           <div data-live-period-menu style={{ display: 'grid', gap: 2 }}>
             {LIVE_PERIODS.map(p => (
               <button key={p} type="button" data-live-period={p} aria-pressed={period === p} style={menuRowStyle(isMobile, period === p)} onClick={() => { setViewPref({ period: p }); close() }}>
-                <span style={{ flex: 1 }}>{L.periods[p]}</span>{period === p && <span aria-hidden>✓</span>}
+                <span style={{ flex: 1 }}>{L.periods[p]}</span>{period === p && <Check size={13} aria-hidden />}
               </button>
             ))}
           </div>
         )}
-      ><span data-live-period-current>{L.periods[period]}</span> <span aria-hidden>▾</span></PanelMenu>
+      ><span data-live-period-current>{L.periods[period]}</span> <ChevronDown size={12} aria-hidden /></PanelMenu>
     </span>
   )
   const showPublished = tab === 'all' || tab === 'published'
+  // The server cuts each kind at its cap (the oldest go): say so, so a count is never read as the total.
+  const capped = reply.view?.capped
+  const capNote = capped && showPublished ? L.capped(capped.omitted, capped.cap) : null
   // The short line under the title: how many pieces and agents. The ETA and "updated live" are the tooltip.
   const summaryLine = [L.deliveries(sum.deliveries), L.agents(sum.agentsWorking)].join(' · ')
   const summaryTitle = [sum.nextEtaMs !== null ? L.next(fmtClock(sum.nextEtaMs)) : L.noNext, L.live].join(' · ')
@@ -458,6 +470,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         actions={actions}
       />
       {pipNote && <span role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{L.externalBlocked}</span>}
+      {capNote && <span role="status" data-live-capped style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{capNote}</span>}
       {showGone && (
         <ul data-live-gone-list style={{ ...surface, listStyle: 'none', margin: 0, padding: '8px 10px', display: 'grid', gap: 3, fontSize: 11.5 }}>
           {gone.length === 0 && <li style={{ color: 'var(--text-tertiary)' }}>{L.noneLeft}</li>}
@@ -486,7 +499,8 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     return (
       <div style={{ display: 'grid', gap: 10 }}>
         {header}
-        <div
+        {/* A single stage needs no chips to move between: the tab already says how many, once. */}
+        {mobileStages.length > 1 && <div
           ref={chipRowRef} className="ag-scroll" role="tablist" data-live-stagerow
           style={{
             display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto', overflowY: 'hidden', flexShrink: 0,
@@ -494,14 +508,14 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
             scrollSnapType: 'x proximity', scrollPaddingLeft: 12, scrollBehavior: reducedMotion() ? 'auto' : 'smooth', WebkitOverflowScrolling: 'touch',
           }}
         >
-          <button role="tab" data-chip="all" className="ag-tap" aria-selected={stageFilter === 'all'} onClick={() => setStageFilter('all')} style={chip(stageFilter === 'all')}>{L.allSteps} · {shown.length}</button>
+          <button role="tab" data-chip="all" className="ag-tap" aria-selected={stageFilter === 'all'} onClick={() => setStageFilter('all')} style={chip(stageFilter === 'all')}>{L.allSteps}</button>
           {/* Only the stages that hold something: no chip, and no section, says a zero for nothing. */}
           {mobileStages.map(s => (
             <button key={s} role="tab" data-chip={s} className="ag-tap" aria-selected={s === stageFilter} onClick={() => setStageFilter(s)} style={chip(s === stageFilter)}>
               {STAGE_LABEL[s][pt ? 'pt' : 'en']} · {columns[s].length}
             </button>
           ))}
-        </div>
+        </div>}
         <div ref={boardRef} style={{ display: 'grid', gap: 10, paddingTop: 6 }}>
           {mobileStages.filter(s => stageFilter === 'all' || s === stageFilter).map(s => (
             <section key={s} data-live-column={s} style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
@@ -511,7 +525,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
                   padding: '6px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 44,
                 }}>
                   <span style={{ fontWeight: 700, fontSize: 13 }}>{STAGE_LABEL[s][pt ? 'pt' : 'en']}</span>
-                  {s === 'published' ? periodPicker : <span style={{ ...microLabel, fontSize: 11 }}>{columns[s].length}</span>}
+                  {s === 'published' ? periodPicker : null}
                 </header>
               )}
               {s === 'published' && columns[s].length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>{L.noPublished}</span>}
@@ -529,7 +543,9 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       {header}
       {/* The PAGE scrolls horizontally only; each column is one vertical stack that scrolls on its own. */}
       <div ref={boardRef} className="ag-scroll" data-live-board style={{ display: 'flex', gap: 8, overflowX: 'auto', overflowY: 'hidden', alignItems: 'stretch', padding: '6px 2px 10px', minHeight: 0 }}>
-        {visibleStages.map(s => (
+        {/* An empty tab says so (the phone's own sentence) instead of drawing nine bare column names. Publicado keeps its column: the period picker lives there. */}
+        {shown.length === 0 && !showPublished && <div style={{ flex: 1, minWidth: 0 }}><Note text={L.empty} /></div>}
+        {(shown.length === 0 ? (showPublished ? (['published'] as LiveStage[]) : []) : visibleStages).map(s => (
           <LiveColumn
             key={s} stage={s} pt={pt} cards={columns[s]} collapsed={columnCollapsed(s, columns[s].length, prefs, s === 'published' && showPublished)}
             words={{ empty: L.empty, collapse: L.collapse, expand: L.expand, searchPlaceholder: L.searchColumn, noMatch: L.noMatch, clear: L.clearSearch }}
