@@ -125,26 +125,45 @@ async function publicTags(f: GateFacts, cwd: string, cache: ProofCache): Promise
  */
 export async function findPublicTag(f: GateFacts, cwd: string, mergeSha: string, cache: ProofCache): Promise<string | null> {
   const tags = await publicTags(f, cwd, cache)
-  let first: string | null = null
-  let ended = false
-  for (const tag of tags) {
+  const has = async (tag: string): Promise<boolean | null> => {
     const sha = cache.tags.shas.get(tag)
     if (!sha) return null
     const key = `pub:${mergeSha}...${sha}`
-    let has = cache.contains.get(key)
-    if (has === undefined) {
-      if (sha === mergeSha) has = true
+    let v = cache.contains.get(key)
+    if (v === undefined) {
+      if (sha === mergeSha) v = true
       else {
         const st = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${DEFAULT_RELEASE_REPO}/compare/${mergeSha}...${sha}`, '--jq', '{status: .status}']).catch(() => '{}'), {}).status
-        has = st ? st === 'ahead' || st === 'identical' : null
+        v = st ? st === 'ahead' || st === 'identical' : null
       }
-      cache.contains.set(key, has)
+      cache.contains.set(key, v)
     }
-    if (has === null) return null
-    if (!has) { ended = true; break }
-    first = tag
+    return v
   }
-  return ended || cache.tags.complete ? first : null
+  const idx = await bisectFirst(tags, has)
+  // A listing that ran off a partial page proves nothing when even the oldest tag read still contains the commit.
+  if (idx !== null && idx === tags.length - 1 && !cache.tags.complete) return null
+  return idx === null ? null : tags[idx]!
+}
+
+/**
+ * PURE-ish. `tags` newest first; containment is monotonic (once a release contains a commit every later one does), so the
+ * containing tags are a prefix. Returns the index of the OLDEST containing tag (the first release), or null when the newest
+ * does not contain it or any answer is unreadable. O(log n) look-ups instead of one per tag.
+ */
+export async function bisectFirst(tags: readonly string[], has: (tag: string) => Promise<boolean | null>): Promise<number | null> {
+  if (tags.length === 0) return null
+  const top = await has(tags[0]!)
+  if (top !== true) return null
+  let lo = 0 // known containing
+  let hi = tags.length // exclusive upper bound; tags[hi..] unknown/not containing
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2)
+    const v = await has(tags[mid]!)
+    if (v === null) return null
+    if (v) lo = mid; else hi = mid
+  }
+  return lo
 }
 
 /** Merged PRs of a repository (title, body, merge commit), newest first. Never throws: an unreadable source is an empty list. */
@@ -184,14 +203,7 @@ export async function findEnginePinTag(f: GateFacts, cwd: string, engineSha: str
     cache.contains.set(key, v)
     return v
   }
-  let first: string | null = null
-  for (const tag of tagList.slice(0, ENGINE_TAG_WALK)) {
-    const pin = await pinOf(tag)
-    if (!pin) break
-    const has = await containsOf(pin)
-    if (has === null) return null // unreadable: never guess a release
-    if (!has) break
-    first = tag
-  }
-  return first
+  // A tag with no readable pin (before the engine existed) does not contain the commit.
+  const idx = await bisectFirst(tagList.slice(0, ENGINE_TAG_WALK), async tag => { const pin = await pinOf(tag); return pin ? containsOf(pin) : false })
+  return idx === null ? null : tagList[idx]!
 }

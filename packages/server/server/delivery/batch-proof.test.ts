@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { findEnginePinTag, hintsFromText, loadBatchPrs, matchBatchPr, newProofCache, textNamesBranch, textNamesSha, titleCode, type BatchPr } from './batch-proof'
+import { bisectFirst, findEnginePinTag, hintsFromText, loadBatchPrs, matchBatchPr, newProofCache, textNamesBranch, textNamesSha, titleCode, type BatchPr } from './batch-proof'
 import type { GateFacts } from './gates'
 
 const pr = (n: number, body: string, over: Partial<BatchPr> = {}): BatchPr => ({ repo: 'agentistics/agentistics', number: n, title: `release PR ${n}`, body, mergeSha: `merge${n}`.padEnd(40, '0'), ...over })
@@ -52,6 +52,27 @@ describe('matchBatchPr — which merged release PR lists a piece', () => {
     expect(h.shas).toContain('957b63e07')
     expect(h.shas).not.toContain('decadeface')
     expect(h.branches).toContain('feat/live-atalho')
+  })
+})
+
+describe('bisectFirst — the first release containing a commit in O(log n) look-ups', () => {
+  const tags = ['v5', 'v4', 'v3', 'v2', 'v1']
+  const run = async (containing: number) => { let calls = 0; const r = await bisectFirst(tags, async t => { calls++; return tags.indexOf(t) < containing }); return { r, calls } }
+  test('finds the oldest containing tag', async () => {
+    expect((await run(5)).r).toBe(4)
+    expect((await run(3)).r).toBe(2)
+    expect((await run(1)).r).toBe(0)
+  })
+  test('nothing contains it yet → null; an unreadable answer → null', async () => {
+    expect((await run(0)).r).toBeNull()
+    expect(await bisectFirst(tags, async () => null)).toBeNull()
+  })
+  test('uses far fewer look-ups than the tag count on a long list', async () => {
+    const many = Array.from({ length: 200 }, (_, i) => `v${i}`)
+    let calls = 0
+    const idx = await bisectFirst(many, async t => { calls++; return Number(t.slice(1)) < 120 })
+    expect(idx).toBe(119)
+    expect(calls).toBeLessThan(12)
   })
 })
 
