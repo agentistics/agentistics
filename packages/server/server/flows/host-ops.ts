@@ -5,6 +5,7 @@ import { join, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { gitEnv } from '../backup/repo-probe'
 import { sessaoComPapelHostOp } from '../sessions/spawn-gate'
+import { lastMessageTo } from '../sessions/last-message'
 import { ambienteHostOps } from './ambiente-host'
 import { processHostOps } from './process-ops'
 import { stalledHostOps } from './stalled-host'
@@ -514,6 +515,14 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
       if ('refused' in target) return target
       const row = await workDeps.session(id).catch(() => null)
       return { ok: true, ...ownsNoCode(row?.label, target), sessionId: id }
+    },
+    // FLUXO.AVISOS: the newest message typed INTO the session by someone else; the engine's `fechar-entregue` keeps a worker
+    // open when this is newer than its final handback (kind='handback' is ignored there). Nothing known = ok:false.
+    'ultima-mensagem-sessao': async (value: unknown) => {
+      const id = sessionOf(value)
+      if (!id) return refuse('session id is required', ['sessionId'])
+      const m = lastMessageTo(id)
+      return m ? { ok: true, ...m, sessionId: id } : { ok: false, sessionId: id }
     },
     ...ambienteHostOps(),
     'sessao-parada': async (value: unknown) => {

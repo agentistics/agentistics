@@ -56,6 +56,9 @@ from `payload.title`.
 typed (the composer would follow or reopen it). `alvo-trabalho` says `gone` / `notRepo` / `goneWorktree` instead of a plain ok, and
 `sessao-sem-codigo` answers whether a session owns code at all (a QA or probe session, or one whose folder is bare or gone with no
 worktree of its own): the close flow then needs only the final handback plus a stopped session, decided in the host, never by a model.
+`ultima-mensagem-sessao` (`{sessionId}` → `{ok, at, from?, kind?}`) reports the newest message typed INTO a session by
+someone else (a leader's `agentistics_session_message` or the composer), so the close flow can keep a worker open when it
+got new work after its final handback. Held in memory; nothing known is `ok: false`.
 
 A `agentistics_wait` handback condition takes an optional `match` (case-insensitive substring of the handback
 text). Without it the wait fires on any handback from that session, as before.

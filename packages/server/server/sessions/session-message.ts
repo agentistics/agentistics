@@ -15,6 +15,7 @@
 
 import { resolveSessionForGroup } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
+import { noteMessageTo } from './last-message'
 import { intermediateNote, judgeHandback, type HandbackVerdict } from './handback-intent'
 
 export const MESSAGE_KINDS = ['handback', 'block', 'question'] as const
@@ -147,6 +148,7 @@ export async function sendSessionMessage(
     return fail('not_delivered', sent.message)
   }
   lastSent.set(pair, t)
+  noteMessageTo(target.id, t, { from: senderId, kind })
 
   let mirrored = false
   // FLUXO.AVISOS 8: an `awaiting` handback — or one whose text says it is part N of M — is one slice of a longer piece. It is
