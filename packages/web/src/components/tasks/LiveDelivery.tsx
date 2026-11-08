@@ -37,6 +37,7 @@ import {
 import type { LiveSortId } from '@agentistics/core'
 import { LiveCardView } from './LiveCardView'
 import { LiveApprove } from './LiveApprove'
+import { LiveAntigas } from './LiveAntigas'
 import { LiveQueuePriority } from './LiveQueuePriority'
 import { LiveColumn } from './LiveColumn'
 import { LiveLeaders } from './LiveLeaders'

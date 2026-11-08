@@ -54,7 +54,14 @@ export async function deliveryRequest(method: string, path: string, body: Record
   if (rest === 'reconcile') {
     const r = await d.service.reconcile({ apply: body.apply }, actor)
     return r.ok
-      ? { status: 200, body: { ok: true, apply: r.apply, moved: r.moved, unproven: r.unproven, entries: r.entries } }
+      ? { status: 200, body: { ok: true, apply: r.apply, moved: r.moved, unproven: r.unproven, summary: r.summary, entries: r.entries } }
+      : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing } }
+  }
+  if (rest === 'antigas') {
+    // The "Antigas sem registro" group: { action: 'publish'|'archive', ids?: string[], all?: boolean, version?, reason? }.
+    const r = await d.service.antigas({ action: body.action, ids: body.ids, all: body.all, version: body.version, reason: body.reason }, actor)
+    return r.ok
+      ? { status: 200, body: { ok: true, action: r.action, done: r.done } }
       : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing } }
   }
   if (rest === 'release') {

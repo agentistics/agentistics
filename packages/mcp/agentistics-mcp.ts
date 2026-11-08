@@ -582,7 +582,9 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "dequeue", "tick", "step", "configure", "approve", "stage-run", "merge", "release", "reconcile"] },
+        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "dequeue", "tick", "step", "configure", "approve", "stage-run", "merge", "release", "reconcile", "antigas"] },
+        antigasAction: { type: "string", enum: ["publish", "archive"], description: "antigas: 'publish' marks the old record-less pieces published (optional `version`), 'archive' abandons them with an optional `reason`. Targets: `subtaskIds`, or `all` = every piece the reconcile classifies as antiga. Never deletes; a leader or the owner" },
+        all: { type: "boolean", description: "antigas: act on every old piece in the group \"Antigas sem registro\"" },
         apply: { type: "boolean", description: "reconcile: write the moves (a leader of the task, or the owner). Absent/false = dry run: the report only" },
         subtaskId: { type: "string" },
         version: { type: "string", description: "release: the version the pieces shipped in, x.y.z" },
@@ -598,7 +600,7 @@ const TOOLS: Tool[] = [
         phase: { type: "string", description: "approve: the phase whose human gate is answered" },
         decision: { type: "string", enum: ["approve", "reject"] },
         note: { type: "string" },
-        reason: { type: "string", description: "dequeue: required free-text audit reason (leader only); block: dependencia | pedido_de_bloqueio | limite | maquina | externo | fora_das_autorizacoes" },
+        reason: { type: "string", description: "dequeue: required free-text audit reason (leader only); block: dependencia | pedido_de_bloqueio | limite | maquina | externo | fora_das_autorizacoes; antigas archive: why (kept in the comment)" },
         text: { type: "string" },
         step: { type: "number" },
         patch: { type: "object" },
@@ -1323,6 +1325,13 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         if (action === "reconcile") {
           // The backfill: same service as `agentop flow reconcile --release`; dry run unless `apply`.
           const body = await apiSend("POST", "/api/deliveries/reconcile", { apply: a.apply === true, session: sessionProof(process.env) });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (action === "antigas") {
+          // "Antigas sem registro": `antigasAction` publish|archive over `subtaskIds` (or `all`); never deletes.
+          const body = await apiSend("POST", "/api/deliveries/antigas", {
+            action: a.antigasAction, ids: a.subtaskIds, all: a.all === true, version: a.version, reason: a.reason, session: sessionProof(process.env),
+          });
           return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
         }
         if (action !== "tick" && (typeof a.subtaskId !== "string" || !a.subtaskId)) throw new Error("subtaskId is required");

@@ -36,7 +36,7 @@ export interface LiveBlock { reason: BlockReason; text: string | null; unlocker:
 export interface LiveCiSignal { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null }
 export interface StageVisit { stage: LiveStage; enteredMs: number; ms: number }
 export type HiddenReason = 'no-live-session' | 'status-unplaced' | 'published-old' | 'queue-idle' | 'legacy-review-old'
-export interface LiveHidden { key: string; taskId: string; title: string; stage: LiveStage | null; reason: HiddenReason; atMs?: number | null }
+export interface LiveHidden { key: string; taskId: string; subtaskId?: string; title: string; stage: LiveStage | null; reason: HiddenReason; atMs?: number | null }
 export interface RuntimeFacts { model?: string; effort?: string; effortConcept: boolean }
 
 /** Mirror of the server's `LiveDelivery` (`task-live.ts`). The newer fields are optional: an older server omits them. */

@@ -67,7 +67,35 @@ first release tag that contains the merge. Dry run by default: a report of what 
 or `→ publicado`) and what could not be proven, with the reason. `--apply` (a leader of the task or
 the owner) writes it through the ordinary transitions, whose gates run; the writes are attributed
 to `flow:reconcile`, which wakes nobody and rings no bell per piece. Running it again changes
-nothing. `server/delivery/machine.ts` is the table (pure); `gates.ts` checks evidence;
+nothing.
+
+**CICLO.RECONCILE-2 — what counts as proof, and who runs it.**
+
+- *Batch release PRs.* Legacy pieces shipped inside a batch release PR and carry no pr/branch/sha of
+  their own. `batch-proof.ts` reads ONE page per repository (public + engine) of merged PRs (title,
+  body, merge commit) and `matchBatchPr` (pure) names the one PR that lists the piece: first its
+  subtask id, then its branch / commit shas (the record's, or the ones its own board comments
+  mention), then the card's `CODE.NAME`. A tier naming several PRs is **ambiguous = not proven**.
+  The merge commit is the PR's own, read from gh, never the caller's. A public PR then needs the
+  first green release tag containing it; an **engine** PR needs the first public tag whose
+  `engine.pin` ref contains the engine commit (`findEnginePinTag`). A green tag declares the piece
+  exactly as `flow release` does (one atomic write, attributed to `flow:reconcile`, with a comment
+  "publicado na vX.Y.Z — prova: PR #N"). A merged PR whose release run is red is reported as
+  `→ ci (release vermelha)`, apart from `→ publicado`.
+- *Scope.* The backfill looks up only pieces with a delivery record, touched on the board within 30
+  days, or named by a release PR (`antigas.ts` `inReconcileScope`); older ones spend no gh call.
+- *It runs by itself.* `tick` starts a reconcile (apply, proven pieces only) on its first run after
+  the server starts and every 30 min after, single-flight, in the background; with no gh token
+  nothing is proven and nothing breaks. Off in a CLI one-shot and with `AGENTISTICS_AUTO_RECONCILE=0`.
+- *Antigas sem registro.* A record-less piece in review, older than 24 h, with no live session
+  and no proof leaves the "Revisão do líder" column for a collapsed group on the Live with one click
+  per card and for the group: **Marcar publicado** (optional version) and **Arquivar** (abandoned,
+  reason in the comment). Never deletes. HTTP `POST /api/deliveries/antigas`
+  `{action: publish|archive, ids | all, version?, reason?}`, MCP `agentistics_task_phase
+  action=antigas antigasAction=… subtaskIds|all`, CLI `agentop flow antigas publish|archive
+  (--subtask S | --all)`. A piece with a delivery record is refused (it is not "antiga").
+
+`server/delivery/machine.ts` is the table (pure); `gates.ts` checks evidence;
 `service.ts` is the one door every surface uses; `store.ts` keeps one record per subtask in
 `<dataDir>/deliveries.json` under the cross-process file lock.
 

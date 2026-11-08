@@ -23,6 +23,8 @@ import {
 } from './machine'
 import { DEFAULT_RELEASE_REPO, findMergedPr, judgePredispatch, releaseFailed, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
 import { MERGE_PHASES, MERGE_SCAN_PER_TICK, currentNote, mergeScanDue, mergeScanOrder, planReviewNudges, type ReconcileEntry } from './ciclo'
+import { ENGINE_REPO, findEnginePinTag, loadBatchPrs, matchBatchPr, newProofCache, type BatchMatch } from './batch-proof'
+import { antigaComment, inReconcileScope, isAntiga, type AntigaAction } from './antigas'
 import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
 import { sharedQueueArea } from './queue-fit'
 import {
@@ -70,11 +72,26 @@ export interface DeliveryDeps {
   /** The name a person gave an account ("Vini"); null = none known (the question then leaves the account out, never an id). */
   accountName?(harness: string, account: string): Promise<string | null>
   /** Board pieces shown In review / PR · merge / CI with NO delivery record yet (the backfill adopts them). Optional. */
-  reviewPieces?(): Promise<Array<{ id: string; taskId: string; title: string; status: string }>>
+  reviewPieces?(): Promise<Array<{ id: string; taskId: string; title: string; status: string; /** When the board last touched it (ISO). */ updatedAt?: string }>>
+  /** Branch names and commit shas the board's own notes/comments of a legacy piece mention (read-only; the PR text is matched against them). */
+  pieceHints?(subtaskId: string): Promise<{ branches: string[]; shas: string[] }>
+  /** Archives / marks published a record-less old piece on the board (`antigas`). Optional (no board = refused). */
+  closeLegacy?(subtaskId: string, to: 'done' | 'abandoned'): Promise<{ ok: true } | { ok: false; message: string }>
+  /** The automatic reconcile (first tick, then every 30 min) is ON only where the host asks for it. */
+  autoReconcile?: boolean
+  /** Tests: the automatic reconcile runs inside the tick (awaited) instead of in the background. */
+  autoReconcileAwait?: boolean
+  /** The automatic reconcile's cadence (default 30 min). */
+  autoReconcileEveryMs?: number
 }
 
+export interface ReconcileSummary { published: number; toCi: number; ciRed: number; antigas: number; stay: number }
 export type ReconcileReply =
-  | { ok: true; status: 200; apply: boolean; entries: ReconcileEntry[]; moved: number; unproven: number }
+  | { ok: true; status: 200; apply: boolean; entries: ReconcileEntry[]; moved: number; unproven: number; summary: ReconcileSummary }
+  | Extract<DeliveryReply, { ok: false }>
+
+export type AntigasReply =
+  | { ok: true; status: 200; action: 'publish' | 'archive'; done: Array<{ subtaskId: string; ok: boolean; reason?: string }> }
   | Extract<DeliveryReply, { ok: false }>
 
 /** FILA.PRIORIDADE — one queued piece as the Fila tab, the Live card and the MCP read it (ONE source). */
@@ -1346,28 +1363,80 @@ export function createDeliveryService(d: DeliveryDeps) {
     if (apply && !(actor === 'owner' || actor.startsWith('flow:') || isLeader)) return fail(403, 'so_o_lider', 'only a leader (or the owner) applies the reconciliation; a dry run is open to anyone')
     const doc = await d.store.read()
     const at = iso(d)
-    const pieces: DeliveryRecord[] = Object.values(doc.deliveries).filter(r => !r.dequeued && (MERGE_PHASES.includes(r.phase) || r.phase === 'ci'))
+    const nowMs = d.now()
+    // A piece is "alive" when a session of it runs now (a task-level piece is keyed by its task id).
+    const alive = new Set(sessions.filter(s => s.alive).map(s => s.subtaskId ?? s.taskId).filter((x): x is string => !!x))
+    interface Piece { r: DeliveryRecord; hasRecord: boolean; updatedMs: number | null; title?: string }
+    const pieces: Piece[] = Object.values(doc.deliveries).filter(r => !r.dequeued && (MERGE_PHASES.includes(r.phase) || r.phase === 'ci'))
+      .map(r => ({ r, hasRecord: true, updatedMs: Date.parse(r.updatedAt) || null }))
     for (const p of (await d.reviewPieces?.().catch(() => []) ?? [])) {
       if (doc.deliveries[p.id] || !SUB_ID.test(p.id)) continue
-      pieces.push(newDelivery({ subtaskId: p.id, taskId: p.taskId, at, phase: adoptPhase(p.status) }))
+      pieces.push({ r: newDelivery({ subtaskId: p.id, taskId: p.taskId, at, phase: adoptPhase(p.status) }), hasRecord: false, updatedMs: p.updatedAt ? Date.parse(p.updatedAt) || null : null, title: p.title })
     }
+    // ONE read of each repository's merged PRs per run (title + body carry the batch release's piece list).
+    const proofs = newProofCache()
+    const repoCwd = (await d.facts.repoCwd?.().catch(() => null)) ?? '.'
+    const releasePrs = pieces.length ? [...await loadBatchPrs(d.facts, repoCwd, DEFAULT_RELEASE_REPO, proofs), ...await loadBatchPrs(d.facts, repoCwd, ENGINE_REPO, proofs)] : []
+    const verdicts = new Map<string, GateVerdict>()
     const entries: ReconcileEntry[] = []
-    for (const r of pieces.sort((a, b) => a.subtaskId.localeCompare(b.subtaskId))) {
-      const title = (await d.facts.subtask(r.subtaskId).catch(() => null))?.title
+    for (const { r, hasRecord, updatedMs, title: boardTitle } of pieces.sort((a, b) => a.r.subtaskId.localeCompare(b.r.subtaskId))) {
+      const title = boardTitle ?? (await d.facts.subtask(r.subtaskId).catch(() => null))?.title
       const e: ReconcileEntry = { subtaskId: r.subtaskId, taskId: r.taskId, ...(title ? { title } : {}), from: r.phase }
       entries.push(e)
+      const live = alive.has(r.subtaskId)
+      const extra = hasRecord ? { branches: [], shas: [] } : await d.pieceHints?.(r.subtaskId).catch(() => null) ?? { branches: [], shas: [] }
+      const batch: BatchMatch = matchBatchPr(releasePrs, { subtaskId: r.subtaskId, ...(title ? { title } : {}), branches: [...(r.branch ? [r.branch] : []), ...extra.branches], shas: [...[r.qaSha, r.headSha].filter((s): s is string => !!s), ...extra.shas] })
+      const antiga = () => { if (hasRecord || !isAntiga({ hasRecord, live, updatedMs, nowMs })) return false; e.bucket = 'antiga'; return true }
+      // SCOPE: only a piece with a record, a recent board touch or a release PR that names it is looked up at all.
+      if (!inReconcileScope({ hasRecord, live, updatedMs, nowMs, mentioned: batch.ok || batch.ambiguous === true })) {
+        e.reason = antiga() ? 'antiga sem registro: sem prova de entrega, sem sessão viva, parada há mais de 30 dias' : 'fora do escopo do backfill (sem registro, parada há mais de 30 dias) e com sessão viva'
+        continue
+      }
       let probe: DeliveryRecord = structuredClone(r)
-      if (r.phase !== 'ci' || !r.mergeSha) {
+      let tagWanted: string | null = null
+      let batchProof: { repo: string; pr: number; mergeSha: string; via: string } | null = null
+      if (batch.ok) {
+        // The merge commit is gh's (the PR's), never the caller's. An ENGINE PR ships in the first public tag whose engine.pin contains it.
+        batchProof = { repo: batch.pr.repo, pr: batch.pr.number, mergeSha: batch.pr.mergeSha, via: `${batch.via} (${batch.pr.repo}#${batch.pr.number})` }
+        Object.assign(e, { pr: batch.pr.number, mergeSha: batch.pr.mergeSha, via: batchProof.via, repo: batch.pr.repo })
+        if (batch.pr.repo === ENGINE_REPO) {
+          tagWanted = await findEnginePinTag(d.facts, repoCwd, batch.pr.mergeSha, proofs)
+          if (!tagWanted) { e.reason = `engine PR #${batch.pr.number} merged (${batch.pr.mergeSha.slice(0, 9)}), but no public release pins it yet`; if (!antiga()) e.reason += ' — fica'; continue }
+        }
+        probe = { ...probe, phase: 'ci', releaseRepo: DEFAULT_RELEASE_REPO, mergeSha: batch.pr.mergeSha, ...(batch.pr.repo === ENGINE_REPO ? { tag: tagWanted! } : { pr: batch.pr.number }), mergeDetected: { at, pr: batch.pr.number, via: batchProof.via } }
+        if (probe.versionTarget === 'next') delete probe.versionTarget
+      } else if (r.phase !== 'ci' || !r.mergeSha) {
         const found = await findMergedPr(r, d.facts, { search: true })
-        if (!found.ok) { e.reason = found.reason; continue }
+        if (!found.ok) {
+          e.reason = batch.ambiguous ? `${batch.reason}; ${found.reason}` : found.reason
+          if (antiga()) e.reason = `antiga sem registro: ${e.reason}`
+          continue
+        }
         Object.assign(e, { pr: found.pr, mergeSha: found.mergeSha, via: found.via })
         probe = { ...probe, phase: 'ci', pr: found.pr, mergeSha: found.mergeSha, mergeDetected: { at, pr: found.pr, via: found.via }, ...(found.branch && !probe.branch ? { branch: found.branch } : {}) }
         if (probe.versionTarget === 'next') delete probe.versionTarget
       } else Object.assign(e, { ...(r.pr ? { pr: r.pr } : {}), mergeSha: r.mergeSha })
-      const v = await runGate('release', probe, d.facts)
+      // One release verdict per merge commit (or per engine tag) per run: siblings of one batch PR share it.
+      const vKey = tagWanted ? `tag:${tagWanted}` : `sha:${probe.releaseRepo ?? ''}:${probe.mergeSha}`
+      let v = verdicts.get(vKey)
+      if (!v) { v = await runGate('release', probe, d.facts); verdicts.set(vKey, v) }
       if (v.ok) { e.to = 'publicado'; if (v.patch?.tag) e.tag = v.patch.tag }
-      else { e.to = r.phase === 'ci' ? undefined : 'ci'; e.reason = `release: ${v.reason ?? 'sem evidência'}`; if (!e.to) continue }
+      else {
+        e.to = r.phase === 'ci' ? undefined : 'ci'
+        e.reason = `release: ${v.reason ?? 'sem evidência'}`
+        if (e.to) e.releaseGate = releaseFailed(v) ? 'red' : 'pending'
+        if (!e.to) continue
+      }
       if (!apply) continue
+      // ---- a batch-proven piece with a green tag: declared exactly as a leader's `flow release` would (one atomic write).
+      if (batchProof && v.ok && e.tag) {
+        const rel = await release({ version: e.tag.replace(/^v/, ''), mergeSha: batchProof.mergeSha, subtaskIds: [r.subtaskId], repo: DEFAULT_RELEASE_REPO }, RECONCILE_ACTOR)
+        const piece = rel.ok ? rel.pieces[0] : undefined
+        e.applied = rel.ok && piece?.phase === 'publicado'
+        if (!e.applied) { e.reason = rel.ok ? `release declared but the piece is in ${piece?.phase ?? '?'}: ${rel.warnings.join('; ')}` : rel.sentence; e.to = rel.ok ? 'ci' : undefined }
+        else await d.board.comment(r.taskId, r.subtaskId, `[fluxo entrega] publicado na ${e.tag} — prova: PR #${batchProof.pr}${batchProof.repo === ENGINE_REPO ? ' (engine)' : ''}, ${batchProof.via}.`).catch(() => undefined)
+        continue
+      }
       // ---- write: through the ordinary transitions, each running its own gates.
       if (!(await leads(r, actor))) { e.applied = false; e.reason = 'only the leader of this task (or the owner) applies it'; continue }
       const got = await ensure(r.subtaskId)
@@ -1391,10 +1460,90 @@ export function createDeliveryService(d: DeliveryDeps) {
         const pub = await transition(r.subtaskId, 'publicado', { detail: `reconciliação: ${e.tag ?? 'tag'} verde contém o merge` }, RECONCILE_ACTOR, new Map([['release', v]]))
         e.applied = pub.ok
         if (!pub.ok) { e.reason = pub.sentence; e.to = 'ci' }
+        else await d.board.comment(r.taskId, r.subtaskId, `[fluxo entrega] publicado na ${e.tag ?? 'tag'} — prova: PR #${e.pr ?? '?'}, ${e.via ?? 'merge'}.`).catch(() => undefined)
       } else e.applied = true
     }
     const moved = entries.filter(e => e.to && e.applied !== false).length
-    return { ok: true, status: 200, apply, entries, moved, unproven: entries.length - moved }
+    const planned = entries.filter(e => e.to && e.applied !== false)
+    const summary: ReconcileSummary = {
+      published: planned.filter(e => e.to === 'publicado').length,
+      toCi: planned.filter(e => e.to === 'ci' && e.releaseGate !== 'red').length,
+      ciRed: planned.filter(e => e.to === 'ci' && e.releaseGate === 'red').length,
+      antigas: entries.filter(e => e.bucket === 'antiga').length,
+      stay: entries.filter(e => !(e.to && e.applied !== false) && e.bucket !== 'antiga').length,
+    }
+    return { ok: true, status: 200, apply, entries, moved, unproven: entries.length - moved, summary }
+  }
+
+  /**
+   * "Antigas sem registro": one-click actions on the legacy pieces that left "Revisão do líder" (no proof, nobody alive, > 24 h).
+   * `publish` marks the piece done on the board, `archive` abandons it with a comment. NEVER deletes. A piece with a delivery
+   * record, or one that is not an old record-less in-review piece, is refused (it is not "antiga"). With `all`, the targets are the
+   * pieces a dry reconcile classifies as antiga right now (a piece the reconcile can prove shipped is never archived by the group).
+   */
+  const antigas = async (o: { action: unknown; ids?: unknown; all?: unknown; version?: unknown; reason?: unknown }, actor: string): Promise<AntigasReply> => {
+    if (o.action !== 'publish' && o.action !== 'archive') return fail(400, 'bad_action', 'action must be publish or archive')
+    const action: AntigaAction = o.action
+    const sessions = await d.facts.sessions().catch(() => [] as SessionFact[])
+    if (!(actor === 'owner' || actor.startsWith('flow:') || sessions.some(s => s.id === actor && s.role === 'leader'))) return fail(403, 'so_o_lider', 'only a leader (or the owner) acts on the old pieces')
+    if (!d.closeLegacy) return fail(501, 'sem_quadro', 'this host cannot close board pieces')
+    const version = typeof o.version === 'string' && /^v?\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(o.version.trim()) ? o.version.trim().replace(/^v/, '') : undefined
+    if (typeof o.version === 'string' && o.version.trim() && !version) return fail(400, 'bad_version', 'version must look like 2.203.0 (or be left empty)')
+    const reason = typeof o.reason === 'string' && o.reason.trim() ? o.reason.trim().slice(0, 500) : undefined
+    let ids: string[] = []
+    if (o.all === true || o.all === 'true') {
+      const dry = await reconcile({ apply: false }, actor)
+      if (!dry.ok) return dry
+      ids = dry.entries.filter(e => e.bucket === 'antiga').map(e => e.subtaskId)
+    } else {
+      const raw = Array.isArray(o.ids) ? o.ids : typeof o.ids === 'string' ? o.ids.split(',') : []
+      ids = [...new Set(raw.filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean))]
+    }
+    if (!ids.length) return { ok: true, status: 200, action, done: [] }
+    const bad = ids.find(id => !SUB_ID.test(id))
+    if (bad) return fail(400, 'bad_subtask', `invalid subtask id ${bad}`)
+    const pieces = await d.reviewPieces?.().catch(() => []) ?? []
+    const nowMs = d.now()
+    const alive = new Set(sessions.filter(s => s.alive).map(s => s.subtaskId ?? s.taskId).filter((x): x is string => !!x))
+    const done: Array<{ subtaskId: string; ok: boolean; reason?: string }> = []
+    for (const id of ids) {
+      const piece = pieces.find(p => p.id === id)
+      if (await d.store.get(id)) { done.push({ subtaskId: id, ok: false, reason: 'the piece has a delivery record: it is not "antiga" (use the flow verbs)' }); continue }
+      if (!piece) { done.push({ subtaskId: id, ok: false, reason: 'the piece is not in review on the board' }); continue }
+      if (!isAntiga({ hasRecord: false, live: alive.has(id), updatedMs: piece.updatedAt ? Date.parse(piece.updatedAt) || null : null, nowMs })) { done.push({ subtaskId: id, ok: false, reason: 'the piece is recent or has a live session: it is still review work' }); continue }
+      const out = await d.closeLegacy(id, action === 'publish' ? 'done' : 'abandoned').catch(e => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) }))
+      if (!out.ok) { done.push({ subtaskId: id, ok: false, reason: out.message }); continue }
+      await d.board.comment(piece.taskId, id, antigaComment(action, { version, reason })).catch(() => undefined)
+      await d.emit('entrega.antiga', { subtarefa: id, acao: action }).catch(() => undefined)
+      done.push({ subtaskId: id, ok: true })
+    }
+    return { ok: true, status: 200, action, done }
+  }
+
+  /**
+   * AUTOMATIC reconcile (every user, no leader needed): once after the store loads (the first tick) and then every 30 min, in
+   * APPLY mode for what is proven. Single flight, off the minute's hot path (a background promise) unless a test awaits it.
+   * No gh token or no network = nothing proven and nothing moved (the antigas rule still shows the old cards apart). Idempotent:
+   * a moved piece leaves the scope, so a second run writes nothing.
+   */
+  let autoAt = 0
+  let autoRun: Promise<void> | null = null
+  const autoReconcile = async (actions: string[]): Promise<void> => {
+    if (!d.autoReconcile) return
+    const every = d.autoReconcileEveryMs ?? 30 * 60_000
+    if (autoRun || (autoAt > 0 && d.now() - autoAt < every)) return
+    autoAt = d.now()
+    const run = (async () => {
+      try {
+        const r = await reconcile({ apply: true }, RECONCILE_ACTOR)
+        actions.push(r.ok ? `auto-reconcile ${r.summary.published}+${r.summary.toCi + r.summary.ciRed}/${r.entries.length}` : `auto-reconcile-recusado ${r.code}`)
+      } catch (e) {
+        if (e instanceof DeliveryStoreUnreadable) { actions.push('auto-reconcile-store-ilegivel'); return }
+        actions.push(`auto-reconcile-erro: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`)
+      } finally { autoRun = null }
+    })()
+    autoRun = run
+    if (d.autoReconcileAwait) await run
   }
 
   const tickOnce = async (): Promise<{ actions: string[] }> => {
@@ -1530,6 +1679,8 @@ export function createDeliveryService(d: DeliveryDeps) {
     }
     // FLUXO.CICLO-COMPLETO — whatever still waits on a person is reminded to the task's LIVE leader on a timer.
     await nudgeLeaders(sessions, actions).catch(e => { if (e instanceof DeliveryStoreUnreadable) throw e; actions.push(`nudge-erro: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`) })
+    // CICLO.RECONCILE-2 — the review column cleans itself: proven pieces move without anyone running a verb.
+    await autoReconcile(actions)
     return { actions }
   }
 
@@ -1550,6 +1701,12 @@ export function createDeliveryService(d: DeliveryDeps) {
     },
     reconcile: async (o: { apply?: unknown }, actor: string): Promise<ReconcileReply> => {
       try { return await reconcile(o, actor) } catch (e) {
+        if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
+        throw e
+      }
+    },
+    antigas: async (o: { action: unknown; ids?: unknown; all?: unknown; version?: unknown; reason?: unknown }, actor: string): Promise<AntigasReply> => {
+      try { return await antigas(o, actor) } catch (e) {
         if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
         throw e
       }

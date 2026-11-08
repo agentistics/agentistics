@@ -43,6 +43,7 @@ export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subt
   agentop flow approve --subtask S --phase P --decision approve|reject [--note …]   (the owner only — the answer to a human gate)
   agentop flow release --version <x.y.z> --merge-sha <main sha> [--repo <owner/name>] --subtask S1 --subtask S2 …   declare what the release contains (→ ci, → publicado when release.yml is green and the tag exists)
   agentop flow reconcile --release [--apply] [--json]  backfill: every piece in revisao_lider/pr_merge/ci matched to its merged PR and the first release tag containing it (dry-run unless --apply)
+  agentop flow antigas publish|archive (--subtask S … | --all) [--version x.y.z] [--reason …]   the "Antigas sem registro" group: mark published / archive (abandoned) — never deletes
   agentop flow tick                                   the minute watch (blocks, merged PR → ci, ci → publicado, reminders to the leader)
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
 
@@ -50,7 +51,7 @@ Exit codes: 0 passed/moved, 1 refused (the sentence says what is missing), 2 usa
 Every gate reads the machine (git, gh, the session registry); nothing here accepts a sha, a session id or a "green" from the caller.
 `
 
-export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'reconcile', 'tick'] as const
+export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'reconcile', 'antigas', 'tick'] as const
 
 /** PURE: is `agentop flow <args>` one of the delivery verbs (handled here, not by the engine)? */
 export function isDeliveryFlowVerb(args: readonly string[]): boolean {
@@ -177,8 +178,19 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
       if (!r.ok) return report(r, io)
       if (flags.json === 'true') { io.out(JSON.stringify(r, null, 2)); return 0 }
       const { reconcileLine } = await import('./ciclo')
-      io.out(r.apply ? `reconciliação aplicada: ${r.moved} peça(s) movida(s), ${r.unproven} sem prova` : `simulação (nada foi escrito — use --apply): ${r.moved} peça(s) moveriam, ${r.unproven} sem prova`)
+      const s = r.summary
+      io.out(`${r.apply ? 'reconciliação aplicada' : 'simulação (nada foi escrito — use --apply)'}: → publicado ${s.published} · → ci ${s.toCi} · → ci (release vermelha) ${s.ciRed} · → antigas ${s.antigas} · ficam em revisão ${s.stay}`)
       for (const e of r.entries) io.out(reconcileLine(e))
+      return 0
+    }
+    case 'antigas': {
+      // `agentop flow antigas publish|archive [--subtask S …|--all] [--version X] [--reason text]`
+      const action = flags.action ?? pos[1]
+      if (action !== 'publish' && action !== 'archive') { io.err('usage: agentop flow antigas publish|archive (--subtask S [--subtask S…] | --all) [--version 2.203.0] [--reason text]'); return 2 }
+      const r = await svc.antigas({ action, ids: flags.subtask ? [flags.subtask] : undefined, all: flags.all === 'true', version: flags.version, reason: flags.reason }, actor)
+      if (!r.ok) return report(r, io)
+      if (flags.json === 'true') { io.out(JSON.stringify(r, null, 2)); return 0 }
+      for (const x of r.done) io.out(`${x.subtaskId}\t${x.ok ? 'ok' : `recusada: ${x.reason ?? '?'}`}`)
       return 0
     }
     case 'tick': io.out(JSON.stringify(await svc.tick(), null, 2)); return 0

@@ -115,13 +115,19 @@ export interface ReconcileEntry {
   tag?: string
   via?: string
   reason?: string
+  /** The repository of the proof PR when it is not the public one (an engine PR). */
+  repo?: string
+  /** `to: 'ci'` only: the first release run is red (it will not publish) vs not finished/tagged yet. */
+  releaseGate?: 'red' | 'pending'
+  /** No proof and nothing alive: the piece leaves "Revisão do líder" for the collapsed group "Antigas sem registro". */
+  bucket?: 'antiga'
   /** `apply` only: the write happened (false = refused: `reason`). */
   applied?: boolean
 }
 
 /** PURE. The report's one-line rendering (CLI). */
 export function reconcileLine(e: ReconcileEntry): string {
-  const what = e.to ? `${e.from} → ${e.to}` : `${e.from} (fica)`
+  const what = e.to ? `${e.from} → ${e.to}${e.releaseGate === 'red' ? ' (release vermelha)' : ''}` : e.bucket === 'antiga' ? `${e.from} → antigas` : `${e.from} (fica)`
   const facts = [e.pr ? `PR #${e.pr}` : '', e.mergeSha ? e.mergeSha.slice(0, 9) : '', e.tag ?? ''].filter(Boolean).join(' ')
   const state = e.applied === undefined ? '' : e.applied ? ' ✔' : ' ✘'
   return `${e.subtaskId}\t${what}${state}${facts ? `\t${facts}` : ''}${e.reason ? `\t${e.reason}` : ''}`
