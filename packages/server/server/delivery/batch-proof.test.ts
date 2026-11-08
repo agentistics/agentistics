@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { bisectFirst, findEnginePinTag, hintsFromText, loadBatchPrs, matchBatchPr, newProofCache, textNamesBranch, textNamesSha, titleCode, type BatchPr } from './batch-proof'
+import { bisectFirst, findEnginePinTag, hintsFromHandbacks, hintsFromText, hydrateProofCache, loadBatchPrs, matchBatchPr, meterFacts, newProofCache, serializeProofCache, textNamesBranch, textNamesSha, titleCode, type BatchPr } from './batch-proof'
 import type { GateFacts } from './gates'
 
 const pr = (n: number, body: string, over: Partial<BatchPr> = {}): BatchPr => ({ repo: 'agentistics/agentistics', number: n, title: `release PR ${n}`, body, mergeSha: `merge${n}`.padEnd(40, '0'), ...over })
@@ -11,17 +11,48 @@ describe('matchBatchPr — which merged release PR lists a piece', () => {
     expect(r.ok && r.pr.number).toBe(1329)
     expect(r.ok && r.pr.mergeSha).toBe('merge1329'.padEnd(40, '0'))
   })
-  test('the branch name as a whole token names it (a longer branch does not)', () => {
+  test('a branch named in a PR\'s text is a SUGGESTION, never proof; a longer branch is not even that', () => {
     const body = 'external Codex sessions (fix/externas-tocar-codex) and (fix/metricas-soma, fix/opencode-metricas-v2)'
-    expect(matchBatchPr([pr(1329, body)], piece({ branches: ['fix/metricas-soma'] })).ok).toBe(true)
-    expect(matchBatchPr([pr(1329, 'fix/metricas-soma-v2 only')], piece({ branches: ['fix/metricas-soma'] })).ok).toBe(false)
+    const named = matchBatchPr([pr(1329, body)], piece({ branches: ['fix/metricas-soma'] }))
+    expect(named.ok).toBe(false)
+    expect(!named.ok && named.suggestion?.pr.number).toBe(1329)
+    const longer = matchBatchPr([pr(1329, 'fix/metricas-soma-v2 only')], piece({ branches: ['fix/metricas-soma'] }))
+    expect(!longer.ok && longer.suggestion).toBeUndefined()
     expect(textNamesBranch('x f/ab', 'f/ab')).toBe(false) // too short to be a name
     expect(textNamesBranch('x main', 'main')).toBe(false) // no namespace: a word, not a branch
   })
-  test('a commit sha (a prefix either way, ≥7 chars) names it', () => {
-    expect(matchBatchPr([pr(5, 'commits: 2c06a8b56 and deadbeef1')], piece({ shas: ['2c06a8b56c0ffee0000000000000000000000000'] })).ok).toBe(true)
-    expect(textNamesSha('only abcdef', ['abcdef0123456'])).toBe(false) // 6 chars is not a sha
-    expect(textNamesSha('deadbeef', ['0123456789abcdef'])).toBe(false) // a different commit
+  test('a declared commit proves a PR only when it is one of the PR\'s OWN commits (a short one resolves to a full one); text quoting it proves nothing', () => {
+    const full = '2c06a8b56c0ffee0000000000000000000000000'
+    expect(matchBatchPr([pr(5, 'no mention', { commits: [full] })], piece({ heads: [{ branch: 'fix/x', sha: '2c06a8b56' }] })).ok).toBe(true)
+    expect(matchBatchPr([pr(5, 'no mention', { commits: [full] })], piece({ shas: [full] })).ok).toBe(true)
+    expect(matchBatchPr([pr(5, 'commits: 2c06a8b56 and deadbeef1')], piece({ heads: [{ branch: 'fix/x', sha: '2c06a8b56' }] })).ok).toBe(false)
+    expect(matchBatchPr([pr(5, `pinned at ${full}`)], piece({ shas: [full] })).ok).toBe(true) // the full sha, stated in the PR itself
+    expect(textNamesSha('only 2c06a8b56', [full])).toBe(false) // a prefix is not the commit
+    expect(textNamesSha('deadbeef', ['0123456789abcdef'])).toBe(false)
+  })
+  test('the PR of the declared branch proves it only when merged AFTER that declaration (an older round of the branch does not)', () => {
+    const at = Date.parse('2026-11-06T12:00:00Z')
+    const head = { headRefName: 'feat/x', mergedAt: '2026-11-07T00:00:00Z' }
+    expect(matchBatchPr([pr(5, '', head)], piece({ heads: [{ branch: 'feat/x', sha: 'abc1234', atMs: at }] })).ok).toBe(true)
+    expect(matchBatchPr([pr(5, '', { ...head, mergedAt: '2026-11-05T00:00:00Z' })], piece({ heads: [{ branch: 'feat/x', sha: 'abc1234', atMs: at }] })).ok).toBe(false)
+  })
+  test('a PR number the delivery states proves it, unless two of the card\'s repositories have that number', () => {
+    expect(matchBatchPr([pr(10, 'x', { repo: 'a/engine' })], piece({ prs: [10] })).ok).toBe(true)
+    expect(matchBatchPr([pr(10, 'x', { repo: 'a/engine' }), pr(10, 'y', { repo: 'a/public' })], piece({ prs: [10] })).ok).toBe(false)
+  })
+  test('H4: only PRs of the card\'s own repositories count, whatever they say', () => {
+    expect(matchBatchPr([pr(5, 'lists s-8728082f37')], piece({ repos: ['acme/shop'] })).ok).toBe(false)
+    expect(matchBatchPr([pr(5, 'lists s-8728082f37', { repo: 'acme/shop' })], piece({ repos: ['acme/shop'] })).ok).toBe(true)
+    expect(matchBatchPr([pr(5, 'lists s-8728082f37')], piece({ repos: [] })).ok).toBe(false)
+  })
+  test('M3: a PR into dev never proves anything; a PR merged before the card existed cannot have shipped it', () => {
+    expect(matchBatchPr([pr(5, 'lists s-8728082f37', { baseRefName: 'dev' })], piece()).ok).toBe(false)
+    expect(matchBatchPr([pr(5, 'lists s-8728082f37', { baseRefName: 'main' })], piece()).ok).toBe(true)
+    expect(matchBatchPr([pr(5, 'lists s-8728082f37', { mergedAt: '2026-10-01T00:00:00Z' })], piece({ createdMs: Date.parse('2026-11-01T00:00:00Z') })).ok).toBe(false)
+  })
+  test('a line saying the piece was left out is not evidence, in any language it was written', () => {
+    expect(matchBatchPr([pr(5, 'Fica para o próximo lote: s-8728082f37')], piece()).ok).toBe(false)
+    expect(matchBatchPr([pr(5, 's-8728082f37 (not included here)\nother line')], piece()).ok).toBe(false)
   })
   test('two different PRs naming the piece are AMBIGUOUS — nothing is proven', () => {
     const r = matchBatchPr([pr(1, 'lists s-8728082f37'), pr(2, 'also lists s-8728082f37')], piece())
@@ -29,7 +60,8 @@ describe('matchBatchPr — which merged release PR lists a piece', () => {
     expect(!r.ok && r.ambiguous).toBe(true)
   })
   test('a tie at one tier is narrowed by another tier\'s evidence; a tie that stays carries its candidates', () => {
-    const narrowed = matchBatchPr([pr(1, 'lists fix/metricas-soma'), pr(2, 'lists fix/metricas-soma and s-8728082f37')], piece({ branches: ['fix/metricas-soma'] }))
+    const full = 'a'.repeat(39) + '1'
+    const narrowed = matchBatchPr([pr(1, 'lists s-8728082f37'), pr(2, 'lists s-8728082f37', { commits: [full] })], piece({ shas: [full] }))
     expect(narrowed.ok && narrowed.pr.number).toBe(2)
     const tie = matchBatchPr([pr(1, 'lists s-8728082f37'), pr(2, 'lists s-8728082f37')], piece())
     expect(!tie.ok && tie.candidates?.map(c => c.number)).toEqual([1, 2])
@@ -43,21 +75,75 @@ describe('matchBatchPr — which merged release PR lists a piece', () => {
   })
   test('no PR names it → not proven, with the reason', () => {
     const r = matchBatchPr([pr(1, 'nothing here')], piece())
-    expect(!r.ok && r.reason).toContain('no merged release PR names')
+    expect(!r.ok && r.reason).toContain('no merged release PR proves')
   })
   test('a PR with no merge commit never counts', () => {
     expect(matchBatchPr([{ ...pr(1, 's-8728082f37'), mergeSha: '' }], piece()).ok).toBe(false)
   })
-  test('the card\'s CODE.NAME is the last resort', () => {
+  test('the card\'s CODE.NAME never moves anything: it becomes a suggestion, as a whole word', () => {
     expect(titleCode('METRICAS.SOMA — fix totals')).toBe('METRICAS.SOMA')
     expect(titleCode('Implement and validate x')).toBeNull()
-    expect(matchBatchPr([pr(7, 'ElevenLabs voices (JARVIS.ELEVEN-VOZES)')], piece({ title: 'JARVIS.ELEVEN-VOZES' })).ok).toBe(true)
+    const named = matchBatchPr([pr(7, 'ElevenLabs voices (JARVIS.ELEVEN-VOZES)')], piece({ title: 'JARVIS.ELEVEN-VOZES' }))
+    expect(named.ok).toBe(false)
+    expect(!named.ok && named.suggestion?.pr.number).toBe(7)
+    const left = matchBatchPr([pr(7, 'Fica para o próximo lote: LIVE.ATALHO')], piece({ title: 'LIVE.ATALHO' }))
+    expect(!left.ok && left.suggestion).toBeUndefined()
   })
-  test('hints are read from free text: branches and shas with a digit', () => {
-    const h = hintsFromText('PR #1343 verde → squash 957b63e07; ramo feat/live-atalho. decadeface is a word')
-    expect(h.shas).toContain('957b63e07')
-    expect(h.shas).not.toContain('decadeface')
-    expect(h.branches).toContain('feat/live-atalho')
+  test('what a delivery statement declares: a branch WITH its commit, a full sha, a PR number; nothing else on the line is read', () => {
+    const h = hintsFromText('Ramo fix/voz-bugs-2 @ 422bb0c0, push OK. PR #1343 verde. decadeface is a word; see docs/plan-limits.md and feat/mentioned')
+    expect(h.heads).toEqual([{ branch: 'fix/voz-bugs-2', sha: '422bb0c0' }])
+    expect(h.branches).toEqual(['fix/voz-bugs-2'])
+    expect(h.prs).toEqual([1343])
+    expect(h.shas).toEqual([])
+    expect(hintsFromText('feat/run-rm-test-foundation 7ef51fa1 (push ok)').heads[0]).toEqual({ branch: 'feat/run-rm-test-foundation', sha: '7ef51fa1' })
+    expect(hintsFromText('Ramo fix/x, commit cb04dfe5, sem PR').heads[0]).toEqual({ branch: 'fix/x', sha: 'cb04dfe5' })
+    expect(hintsFromText('commit 092a27f5fd pushed to perf/live-delivery (ok)').heads[0]).toEqual({ branch: 'perf/live-delivery', sha: '092a27f5fd' })
+    expect(hintsFromText(`delivered in ${'ab12'.repeat(10)}`).shas).toEqual(['ab12'.repeat(10)])
+    expect(hintsFromText(`based on ${'ab12'.repeat(10)}`).shas).toEqual([])
+    expect(hintsFromText('depends on PR #12').prs).toEqual([])
+  })
+  test('the last statement of a branch is the commit it stood at', () => {
+    const h = hintsFromHandbacks([{ body: 'feat/x @ aaaa1111', atMs: 1 }, { body: 'feat/x @ bbbb2222', atMs: 2 }])
+    expect(h.heads).toEqual([{ branch: 'feat/x', sha: 'bbbb2222', atMs: 2 }])
+  })
+})
+
+describe('the proof cache and the meter — a second run asks nothing, a third of the quota is left alone', () => {
+  test('survives JSON: what gh answered comes back, an unknown answer does not', () => {
+    const c = newProofCache(100)
+    c.contains.set('a...b', true)
+    c.contains.set('c...d', null)
+    c.localTags.set('sha1', 'v1.2.3')
+    c.tags.set('o/r', { list: ['v1.2.3'], shas: new Map([['v1.2.3', 'x']]), complete: true, at: 100 })
+    c.commits.set('o/r', { at: 100, byPr: new Map([[7, ['oid']]]) })
+    c.outcomes.set('s-1', { proven: true })
+    c.auto.nextAt = 500
+    const back = hydrateProofCache(JSON.parse(JSON.stringify(serializeProofCache(c))), 200)
+    expect(back.contains.get('a...b')).toBe(true)
+    expect(back.contains.has('c...d')).toBe(false)
+    expect(back.localTags.get('sha1')).toBe('v1.2.3')
+    expect(back.tags.get('o/r')?.shas.get('v1.2.3')).toBe('x')
+    expect(back.commits.get('o/r')?.byPr.get(7)).toEqual(['oid'])
+    expect(back.outcomes.get('s-1')?.proven).toBe(true)
+    expect(back.auto.nextAt).toBe(500)
+  })
+  test('junk on disk is an empty cache, never a throw', () => {
+    expect(hydrateProofCache({ version: 1, prs: 'nope' }, 1).prs.size).toBe(0)
+    expect(hydrateProofCache(null, 1).prs.size).toBe(0)
+  })
+  test('the meter stops at the budget and at a rate limit, and every later call fails at once', async () => {
+    let real = 0
+    const base = { gh: async () => { real++; return 'x' } } as unknown as GateFacts
+    const m = meterFacts(base, 2)
+    await m.facts.gh('.', ['a']); await m.facts.gh('.', ['b'])
+    await expect(m.facts.gh('.', ['c'])).rejects.toThrow('budget')
+    expect(m.stopped()).toBe('budget')
+    expect(real).toBe(2)
+    const limited = meterFacts({ gh: async () => { throw new Error('gh: API rate limit exceeded for user') } } as unknown as GateFacts, 9)
+    await expect(limited.facts.gh('.', ['a'])).rejects.toThrow('rate limit')
+    expect(limited.stopped()).toBe('rate-limit')
+    await expect(limited.facts.gh('.', ['b'])).rejects.toThrow('gh skipped')
+    expect(limited.calls()).toBe(1)
   })
 })
 

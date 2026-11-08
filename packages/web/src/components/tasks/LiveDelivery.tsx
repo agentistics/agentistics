@@ -68,6 +68,7 @@ export const copy = (pt: boolean) => pt ? {
   noPublished: 'Nada publicado neste período.',
   capped: (n: number, cap: number) => `Lista cortada em ${cap} por tipo: ${n} ${n === 1 ? 'peça mais antiga ficou' : 'peças mais antigas ficaram'} de fora. Os números acima não são o total.`,
   searchColumn: 'Buscar nesta coluna…', noMatch: 'Nenhum cartão corresponde.', clearSearch: 'Limpar',
+  antigas: (n: number) => `Antigas · ${n}`, antigasTip: 'Peças antigas sem prova de publicação: decida cada uma em um clique.',
   left: 'saiu', recentLeft: (n: number) => `saíram há pouco (${n})`, noneLeft: 'Ninguém saiu do quadro nos últimos minutos.',
 } : {
   title: 'Live Delivery',
@@ -83,6 +84,7 @@ export const copy = (pt: boolean) => pt ? {
   noPublished: 'Nothing published in this period.',
   capped: (n: number, cap: number) => `List cut at ${cap} per kind: ${n} older ${n === 1 ? 'piece is' : 'pieces are'} left out. The numbers above are not the total.`,
   searchColumn: 'Search this column…', noMatch: 'No card matches.', clearSearch: 'Clear',
+  antigas: (n: number) => `Old · ${n}`, antigasTip: 'Old pieces with no proof of release: decide each one in one click.',
   left: 'left', recentLeft: (n: number) => `left recently (${n})`, noneLeft: 'Nothing left the board in the last minutes.',
 }
 
@@ -137,6 +139,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   const [pipNote, setPipNote] = useState(false)
   const [gone, setGone] = useState<Gone[]>([])
   const [showGone, setShowGone] = useState(false)
+  const [showAntigas, setShowAntigas] = useState(false)
   const [clock, setClock] = useState(() => Date.now())
 
   // ONE set of cards feeds both the tab counts and the columns. The server already answered for the chosen period
@@ -428,6 +431,13 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   // The answer on screen is for another period than the chosen one: the numbers below are the old ones until it lands.
   const periodLoading = Boolean(reply.view?.period) && reply.view?.period !== period
   const showPublished = tab === 'all' || tab === 'published'
+  // "Antigas sem registro": filtros v2 keeps them in "Tudo", at the bottom of "Revisão do líder"; that column's header opens the group.
+  const oldCards = cards.filter(c => c.d.old && (taskIds.length === 0 || taskIds.includes(c.d.taskId)))
+  const antigasOffered = tab === 'all' && oldCards.length > 0
+  const antigasTrigger = (
+    <button type="button" className="ag-tap" data-live-antigas-open onClick={e => { e.stopPropagation(); setShowAntigas(true) }} onKeyDown={e => e.stopPropagation()} title={L.antigasTip}
+      style={{ ...button(isMobile), minHeight: isMobile ? 36 : 22, padding: '0 8px', fontSize: 11, flexShrink: 0 }}>{L.antigas(oldCards.length)}</button>
+  )
   // The server cuts each kind at its cap (the oldest go): say so, so a count is never read as the total.
   // Under a task or stage filter only the cut pieces that match it count (the server's own rule, `liveCapOmitted`).
   const capFacts = reply.view?.capFacts
@@ -480,6 +490,11 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       {error === 'down' && <span role="alert" data-live-stale-error style={{ fontSize: 12, color: 'var(--accent-red)' }}>{L.down}</span>}
       {periodLoading && !error && <CenteredLoader size={40} label={L.loading} testId="agentask-live-period-loading" />}
       {capNote && <span role="status" data-live-capped style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{capNote}</span>}
+      <LiveAntigas
+        open={showAntigas} pt={pt} mobile={isMobile} onClose={() => setShowAntigas(false)}
+        items={oldCards.map(c => ({ key: c.d.key, taskId: c.d.taskId, subtaskId: c.d.subtaskId, title: c.d.title, ...(c.d.suggestion ? { suggestion: c.d.suggestion } : {}) }))}
+        onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}
+      />
       {showGone && (
         <ul data-live-gone-list style={{ ...surface, listStyle: 'none', margin: 0, padding: '8px 10px', display: 'grid', gap: 3, fontSize: 11.5 }}>
           {gone.length === 0 && <li style={{ color: 'var(--text-tertiary)' }}>{L.noneLeft}</li>}
@@ -528,13 +543,13 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         <div ref={boardRef} style={{ display: 'grid', gap: 10, paddingTop: 6 }}>
           {mobileStages.filter(s => stageFilter === 'all' || s === stageFilter).map(s => (
             <section key={s} data-live-column={s} style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
-              {(stageFilter === 'all' || s === 'published') && (
+              {(stageFilter === 'all' || s === 'published' || (s === 'leader' && antigasOffered)) && (
                 <header data-live-stage-head style={{
                   position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg-surface)', borderTop: `3px solid ${STAGE_LABEL[s].color}`,
                   padding: '6px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 44,
                 }}>
                   <span style={{ fontWeight: 700, fontSize: 13 }}>{STAGE_LABEL[s][pt ? 'pt' : 'en']}</span>
-                  {s === 'published' ? periodPicker : null}
+                  {s === 'published' ? periodPicker : s === 'leader' && antigasOffered ? antigasTrigger : null}
                 </header>
               )}
               {s === 'published' && columns[s].length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>{L.noPublished}</span>}
@@ -565,7 +580,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
               setPrefs(next); writeCollapsedPrefs(next)
             }}
             render={s === 'published' ? renderPub : renderCard}
-            {...(s === 'published' ? { headerExtra: periodPicker, emptyText: L.noPublished } : {})}
+            {...(s === 'published' ? { headerExtra: periodPicker, emptyText: L.noPublished } : s === 'leader' && antigasOffered ? { headerExtra: <>{columns.leader.length > oldCards.length && <span data-live-colcount style={{ ...microLabel, fontSize: 11 }}>{columns.leader.length - oldCards.length}</span>}{antigasTrigger}</> } : {})}
           />
         ))}
       </div>

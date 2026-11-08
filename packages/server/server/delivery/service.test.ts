@@ -1997,7 +1997,7 @@ describe('FLUXO.CICLO-COMPLETO — no stage after the review depends on someone 
   })
 
   test('reconcile --release: dry run reports what would move and what cannot be proven; --apply writes it and announces nothing per piece', async () => {
-    const h = harness({ status: 'in_review', prList: { 's1 in:title,body': [MERGED_PR] }, tags: [{ name: 'v2.201.1', commit: { sha: 'tag2011' } }], releaseRuns: [{ databaseId: 3, status: 'completed', conclusion: 'success', headSha: 'tag2011', updatedAt: '2026-11-07T04:00:00Z' }] }, {
+    const h = harness({ status: 'in_review', sessions: [{ id: 'leader', harness: 'claude', model: 'claude-opus-5-5', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1' }], batchPrs: { 'agentistics/agentistics': [{ number: 7, title: 'release', body: 'lists s1', mergeCommit: { oid: 'abcdef1234567'.padEnd(40, '0') } }] }, tags: [{ name: 'v2.201.1', commit: { sha: 'tag2011' } }], releaseRuns: [{ databaseId: 3, status: 'completed', conclusion: 'success', headSha: 'tag2011', updatedAt: '2026-11-07T04:00:00Z' }] }, {
       reviewPieces: async () => [{ id: 's1', taskId: 't1', title: 's1', status: 'in_review' }, { id: 's2', taskId: 't1', title: 's2', status: 'in_review' }],
     })
     const dry = await h.svc.reconcile({}, 'owner')
@@ -2005,7 +2005,7 @@ describe('FLUXO.CICLO-COMPLETO — no stage after the review depends on someone 
     if (!dry.ok) return
     expect(dry.apply).toBe(false)
     expect(dry.entries.find(e => e.subtaskId === 's1')).toMatchObject({ from: 'revisao_lider', to: 'publicado', pr: 7, tag: 'v2.201.1' })
-    expect(dry.entries.find(e => e.subtaskId === 's2')?.reason).toContain('no merged PR proven')
+    expect(dry.entries.find(e => e.subtaskId === 's2')?.reason).toContain('no merged release PR proves')
     expect(await h.svc.get('s1')).toBeNull() // nothing written
     // A worker cannot apply it.
     const denied = await h.svc.reconcile({ apply: true }, 'author')
@@ -2014,8 +2014,8 @@ describe('FLUXO.CICLO-COMPLETO — no stage after the review depends on someone 
     expect(applied.ok && applied.entries.find(e => e.subtaskId === 's1')).toMatchObject({ to: 'publicado', applied: true })
     const rec = (await h.svc.get('s1'))!
     expect(rec.phase).toBe('publicado')
-    // Adopted from the board's In review, then the two reconciliation moves.
-    expect(rec.history.map(x => `${x.to}:${x.actor}`)).toEqual(['revisao_lider:flow:entrega', 'ci:flow:reconcile', 'publicado:flow:reconcile'])
+    // Adopted from the board's In review, then declared released as one atomic write (the batch route, the same as a leader's `flow release`).
+    expect(rec.history.at(-1)).toMatchObject({ to: 'publicado', actor: 'flow:reconcile' })
     expect(await h.svc.get('s2')).toBeNull()
     expect(h.calls.owner).toEqual([])
     expect(h.calls.session).toEqual([])
@@ -2083,9 +2083,11 @@ describe('reconcile: batch release PR proof, scope, antigas and the automatic ru
     { id: 's2', taskId: 't1', title: 's2', status: 'in_review', updatedAt: ageH(48) }, // old, unproven → antiga
     { id: 's3', taskId: 't2', title: 's3', status: 'in_review', updatedAt: ageH(24 * 90) }, // out of scope → antiga with no lookup
   ]
+  // The piece's own worker has ended: a LIVE session is never moved (H3), which every other test here is not about.
+  const LEADER_ONLY = { sessions: [{ id: 'leader', harness: 'claude', model: 'claude-opus-5-5', role: 'leader', alive: true, cwd: '/r', worktree: false, rootPath: '/r', taskId: 't1' }] }
 
   test('a merged batch PR that lists the piece proves it: mergeSha is the PR\'s own, the first green tag publishes it, a comment names the proof', async () => {
-    const h = harness({ status: 'in_review', batchPrs: { [PUBLIC]: [batchPr(1329, 'METRICAS fixes s1 (fix/x)', 'abcdef1329000000000000000000000000000000')] }, ...GREEN }, { reviewPieces: async () => pieces })
+    const h = harness({ status: 'in_review', ...LEADER_ONLY, batchPrs: { [PUBLIC]: [batchPr(1329, 'METRICAS fixes s1 (fix/x)', 'abcdef1329000000000000000000000000000000')] }, ...GREEN }, { reviewPieces: async () => pieces })
     const dry = await h.svc.reconcile({}, 'owner')
     expect(dry.ok).toBe(true)
     if (!dry.ok) return
@@ -2102,14 +2104,14 @@ describe('reconcile: batch release PR proof, scope, antigas and the automatic ru
   })
 
   test('two release PRs listing the same piece that shipped in the SAME release prove it together', async () => {
-    const h = harness({ status: 'in_review', batchPrs: { [PUBLIC]: [batchPr(1, 'lists s1', 'a1'.padEnd(40, '0')), batchPr(2, 'also lists s1', 'a2'.padEnd(40, '0'))] }, ...GREEN }, { reviewPieces: async () => [pieces[0]!] })
+    const h = harness({ status: 'in_review', ...LEADER_ONLY, batchPrs: { [PUBLIC]: [batchPr(1, 'lists s1', 'a1'.padEnd(40, '0')), batchPr(2, 'also lists s1', 'a2'.padEnd(40, '0'))] }, ...GREEN }, { reviewPieces: async () => [pieces[0]!] })
     const dry = await h.svc.reconcile({}, 'owner')
     expect(dry.ok && dry.entries[0]).toMatchObject({ to: 'publicado', tag: 'v2.201.1' })
     expect(dry.ok && dry.entries[0]!.via).toContain('agree on v2.201.1')
   })
 
   test('two release PRs listing the same piece in DIFFERENT releases are ambiguous: nothing is proven, nothing moves', async () => {
-    const h = harness({ status: 'in_review', notContained: ['m2'], batchPrs: { [PUBLIC]: [batchPr(1, 'lists s1', 'm1'), batchPr(2, 'also lists s1', 'm2')] }, ...GREEN }, { reviewPieces: async () => [pieces[0]!] })
+    const h = harness({ status: 'in_review', ...LEADER_ONLY, notContained: ['m2'], batchPrs: { [PUBLIC]: [batchPr(1, 'lists s1', 'm1'), batchPr(2, 'also lists s1', 'm2')] }, ...GREEN }, { reviewPieces: async () => [pieces[0]!] })
     const dry = await h.svc.reconcile({}, 'owner')
     expect(dry.ok && dry.entries[0]).toMatchObject({ subtaskId: 's1' })
     expect(dry.ok && dry.entries[0]!.to).toBeUndefined()
@@ -2118,7 +2120,7 @@ describe('reconcile: batch release PR proof, scope, antigas and the automatic ru
   })
 
   test('a merged PR whose release run is RED is counted apart: → ci (release vermelha), never "published"', async () => {
-    const h = harness({ status: 'in_review', batchPrs: { [PUBLIC]: [batchPr(1329, 'lists s1', 'abcdef1329000000000000000000000000000000')] }, tags: GREEN.tags, releaseRuns: [{ databaseId: 3, status: 'completed', conclusion: 'failure', headSha: 'tag2011', updatedAt: '2026-11-07T04:00:00Z' }] }, { reviewPieces: async () => [pieces[0]!] })
+    const h = harness({ status: 'in_review', ...LEADER_ONLY, batchPrs: { [PUBLIC]: [batchPr(1329, 'lists s1', 'abcdef1329000000000000000000000000000000')] }, tags: GREEN.tags, releaseRuns: [{ databaseId: 3, status: 'completed', conclusion: 'failure', headSha: 'tag2011', updatedAt: '2026-11-07T04:00:00Z' }] }, { reviewPieces: async () => [pieces[0]!] })
     const dry = await h.svc.reconcile({}, 'owner')
     expect(dry.ok).toBe(true)
     if (!dry.ok) return
@@ -2128,7 +2130,7 @@ describe('reconcile: batch release PR proof, scope, antigas and the automatic ru
 
   test('an ENGINE PR ships in the first public tag whose engine.pin contains its commit', async () => {
     const h = harness({
-      status: 'in_review', batchPrs: { [ENGINE]: [batchPr(62, 'voice beta s1', 'e0e0e062e0000000000000000000000000000000')] }, ...GREEN,
+      status: 'in_review', ...LEADER_ONLY, batchPrs: { [ENGINE]: [batchPr(62, 'voice beta s1', 'e0e0e062e0000000000000000000000000000000')] }, ...GREEN,
       pins: { 'v2.201.1': 'aaaa1111' }, pinContains: ['aaaa1111'],
     }, { reviewPieces: async () => [pieces[0]!] })
     const dry = await h.svc.reconcile({}, 'owner')
@@ -2139,7 +2141,7 @@ describe('reconcile: batch release PR proof, scope, antigas and the automatic ru
   })
 
   test('an ENGINE PR no public release pins yet stays, with the reason', async () => {
-    const h = harness({ status: 'in_review', batchPrs: { [ENGINE]: [batchPr(62, 'voice s1', 'e0e0e062e0000000000000000000000000000000')] }, ...GREEN, pins: { 'v2.201.1': 'aaaa1111' }, pinContains: [] }, { reviewPieces: async () => [pieces[0]!] })
+    const h = harness({ status: 'in_review', ...LEADER_ONLY, batchPrs: { [ENGINE]: [batchPr(62, 'voice s1', 'e0e0e062e0000000000000000000000000000000')] }, ...GREEN, pins: { 'v2.201.1': 'aaaa1111' }, pinContains: [] }, { reviewPieces: async () => [pieces[0]!] })
     const dry = await h.svc.reconcile({}, 'owner')
     expect(dry.ok && dry.entries[0]!.to).toBeUndefined()
     expect(dry.ok && dry.entries[0]!.reason).toContain('no public release pins it yet')
@@ -2164,7 +2166,7 @@ describe('reconcile: batch release PR proof, scope, antigas and the automatic ru
   })
 
   test('the automatic run: first tick applies what is proven, runs at 30 min cadence, and a second run changes nothing', async () => {
-    const h = harness({ status: 'in_review', batchPrs: { [PUBLIC]: [batchPr(1329, 'lists s1', 'abcdef1329000000000000000000000000000000')] }, ...GREEN }, { reviewPieces: async () => pieces, autoReconcile: true, autoReconcileAwait: true })
+    const h = harness({ status: 'in_review', ...LEADER_ONLY, batchPrs: { [PUBLIC]: [batchPr(1329, 'lists s1', 'abcdef1329000000000000000000000000000000')] }, ...GREEN }, { reviewPieces: async () => pieces, autoReconcile: true, autoReconcileAwait: true })
     expect((await h.svc.tick()).actions.some(a => a.startsWith('auto-reconcile '))).toBe(true)
     expect((await h.svc.get('s1'))?.phase).toBe('publicado')
     const history = (await h.svc.get('s1'))!.history.length
@@ -2222,10 +2224,134 @@ describe('reconcile: batch release PR proof, scope, antigas and the automatic ru
   })
 })
 
-// QA pins (qa-reconcile-2.md). Each `test.failing` states the CORRECT behaviour and passes while the bug exists; a fix removes `.failing`.
+// r2 — the rest of the QA's list that the pins below do not state.
+describe('reconcile r2: the card\'s repository, the quota, and the buttons', () => {
+  const PUBLIC = 'agentistics/agentistics'
+  const SHA = 'abcdef1329000000000000000000000000000000'
+  const GREEN = { tags: [{ name: 'v2.201.1', commit: { sha: 'tag2011' } }], releaseRuns: [{ databaseId: 3, status: 'completed', conclusion: 'success', headSha: 'tag2011', updatedAt: '2026-11-07T04:00:00Z' }] }
+  const old = { id: 's2', taskId: 't1', title: 's2', status: 'in_review', updatedAt: '2026-11-01T00:00:00Z' }
+  const fresh = { id: 's1', taskId: 't1', title: 's1', status: 'in_review', updatedAt: new Date(Date.parse('2026-11-07T02:00:00Z') - 2 * 3600_000).toISOString() }
+  const listing = (body: string, over: Record<string, unknown> = {}) => ({ number: 7, title: 'release', body, mergedAt: '2026-11-06T00:00:00Z', mergeCommit: { oid: SHA }, ...over })
+
+  test('H4: a card of another repository is read against THAT repository, and our PRs prove nothing for it', async () => {
+    const h = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [listing('lists s1')] }, ...GREEN }, { reviewPieces: async () => [{ ...fresh, repos: ['acme/shop'] }] })
+    const out = await h.svc.reconcile({}, 'owner')
+    expect(out.ok && out.entries[0]!.to).toBeUndefined()
+    expect(h.calls.gh.some(g => g.includes(`-R ${PUBLIC}`))).toBe(false)
+    expect(h.calls.gh.some(g => g.includes('-R acme/shop'))).toBe(true)
+  })
+
+  test('H4: a card with no known repository is not compared with anything', async () => {
+    const h = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [listing('lists s1')] }, ...GREEN }, { reviewPieces: async () => [{ ...fresh, repos: [] }] })
+    const out = await h.svc.reconcile({}, 'owner')
+    expect(out.ok && out.entries[0]!.to).toBeUndefined()
+    expect(h.calls.gh.filter(g => g.startsWith('pr list'))).toEqual([])
+  })
+
+  test('H4: a merged PR in a repository with no release of ours says merged and moves nothing', async () => {
+    const h = harness({ status: 'in_review', sessions: [], batchPrs: { 'acme/shop': [listing('lists s1')] }, tags: [], releaseRuns: [] }, { reviewPieces: async () => [{ ...fresh, repos: ['acme/shop'] }] })
+    const out = await h.svc.reconcile({}, 'owner')
+    expect(out.ok && out.entries[0]).toMatchObject({ pr: 7, repo: 'acme/shop' })
+    expect(out.ok && out.entries[0]!.to).toBeUndefined()
+  })
+
+  test('H5: a rate limit stops the run at once: nothing unread is judged, and the automatic run waits longer each time', async () => {
+    const logged: string[] = []
+    const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [fresh, old], autoReconcile: true, autoReconcileAwait: true, log: l => logged.push(l) })
+    let calls = 0
+    h.facts.gh = async (_c, args) => { if (args.includes('rate_limit')) return '{}'; calls++; throw new Error('gh: API rate limit exceeded') }
+    await h.svc.tick()
+    expect(calls).toBe(1)
+    expect(logged.some(l => l.includes('auto-reconcile') && l.includes('rate-limit'))).toBe(true) // L2: the run's result is logged
+    await h.svc.tick()
+    expect(calls).toBe(1) // not due yet
+    h.advance(31 * 60_000)
+    await h.svc.tick()
+    expect(calls).toBe(1) // backing off: 2x the cadence
+    h.advance(31 * 60_000)
+    await h.svc.tick()
+    expect(calls).toBe(2)
+  })
+
+  test('H5: with the quota below a third the automatic run does not start', async () => {
+    const logged: string[] = []
+    const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [fresh], autoReconcile: true, autoReconcileAwait: true, log: l => logged.push(l) })
+    const asked: string[] = []
+    h.facts.gh = async (_c, args) => { asked.push(args.join(' ')); return JSON.stringify({ remaining: 900, limit: 5000 }) }
+    await h.svc.tick()
+    expect(asked.filter(a => !a.includes('rate_limit'))).toEqual([])
+    expect(logged.some(l => l.includes('adiada'))).toBe(true)
+  })
+
+  test('H5: what gh answered survives a restart: a new service over the same store asks nothing again', async () => {
+    let saved: unknown = null
+    const proofStore = { load: async () => saved, save: async (doc: unknown) => { saved = JSON.parse(JSON.stringify(doc)) } }
+    const a = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [listing('lists s1')] }, ...GREEN }, { reviewPieces: async () => [fresh], proofStore })
+    await a.svc.reconcile({}, 'owner')
+    expect(a.calls.gh.length).toBeGreaterThan(0)
+    const b = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [listing('lists s1')] }, ...GREEN }, { reviewPieces: async () => [fresh], proofStore })
+    const out = await b.svc.reconcile({}, 'owner')
+    expect(out.ok && out.entries[0]).toMatchObject({ to: 'publicado', tag: 'v2.201.1' })
+    expect(b.calls.gh).toEqual([])
+  })
+
+  test('L1: a release that could not be READ is "unknown": the piece does not move and is not called red', async () => {
+    const h = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [listing('lists s1')] }, ...GREEN }, { reviewPieces: async () => [fresh] })
+    const real = h.facts.gh
+    h.facts.gh = async (c, args) => { if (args[0] === 'run') throw new Error('gh: HTTP 502'); return real(c, args) }
+    const out = await h.svc.reconcile({}, 'owner')
+    expect(out.ok && out.entries[0]).toMatchObject({ releaseGate: 'unknown' })
+    expect(out.ok && out.entries[0]!.to).toBeUndefined()
+    expect(out.ok && out.summary).toMatchObject({ unknown: 1, ciRed: 0, toCi: 0, published: 0 })
+  })
+
+  test('H6: `expect` is the number the person saw: a different one changes nothing', async () => {
+    const closed: string[] = []
+    const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [old], closeLegacy: async id => { closed.push(id); return { ok: true } } })
+    const out = await h.svc.antigas({ action: 'archive', all: true, expect: 5 }, 'owner')
+    expect(!out.ok && out.code).toBe('count_changed')
+    expect(closed).toEqual([])
+    expect((await h.svc.antigas({ action: 'archive', all: true, expect: 1 }, 'owner')).ok).toBe(true)
+    expect(closed).toEqual(['s2'])
+  })
+
+  test('H6: the client gave up: the pieces not reached are left alone, and the reply says so', async () => {
+    const closed: string[] = []
+    const ac = new AbortController()
+    const two = [old, { ...old, id: 's3' }]
+    const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => two, closeLegacy: async id => { closed.push(id); ac.abort(); return { ok: true } } })
+    const out = await h.svc.antigas({ action: 'archive', ids: ['s2', 's3'] }, 'owner', ac.signal)
+    expect(closed).toEqual(['s2'])
+    expect(out.ok && out.stopped).toBe(true)
+  })
+
+  test('M1: `All` leaves out what the last run proved and a delivery still waiting on its leader', async () => {
+    const closed: string[] = []
+    const waiting = { ...old, id: 's3', handbackAt: '2026-11-06T00:00:00Z' }
+    const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [old, waiting], closeLegacy: async id => { closed.push(id); return { ok: true } } })
+    const out = await h.svc.antigas({ action: 'archive', all: true }, 'owner')
+    expect(out.ok && out.done.map(x => x.subtaskId)).toEqual(['s2'])
+    expect(closed).toEqual(['s2'])
+  })
+
+  test('M2: the board\'s code never reaches the person: a human sentence with a machine-readable way out', async () => {
+    const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [old], closeLegacy: async () => ({ ok: false, message: 'done_needs_session' }) })
+    const out = await h.svc.antigas({ action: 'publish', ids: ['s2'] }, 'owner')
+    expect(out.ok && out.done[0]).toMatchObject({ ok: false, code: 'no_session' })
+    expect(out.ok && out.done[0]!.reason).not.toContain('done_needs_session')
+  })
+
+  test('weak evidence is shown, never acted on', async () => {
+    const h = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [listing('LIVE.ATALHO shipped')] }, ...GREEN }, { reviewPieces: async () => [{ ...fresh, title: 'LIVE.ATALHO · atalho' }] })
+    const out = await h.svc.reconcile({ apply: true }, 'owner')
+    expect(out.ok && out.entries[0]!.to).toBeUndefined()
+    expect(out.ok && out.entries[0]!.suggestion).toMatchObject({ pr: 7, repo: PUBLIC })
+    expect(await h.svc.get('s1')).toBeNull()
+  })
+})
+
+// QA pins (qa-reconcile-2.md): the bugs are fixed, the pins stay as plain tests.
 describe('QA pins: reconcile never moves real work, and does not spend the quota twice', () => {
-  /** `QA_PINS_SHOW=1 bun test …` runs them as plain tests, to read each failure. */
-  const pin = process.env.QA_PINS_SHOW ? test : test.failing
   const PUBLIC = 'agentistics/agentistics'
   const SHA = 'abcdef1329000000000000000000000000000000'
   const batchPr = (number: number, body: string, oid = SHA, over: Record<string, unknown> = {}) => ({ number, title: `release ${number}`, body, mergedAt: '2026-11-06T00:00:00Z', headRefName: `release-${number}`, headRefOid: `h${number}`, mergeCommit: { oid }, ...over })
@@ -2237,14 +2363,14 @@ describe('QA pins: reconcile never moves real work, and does not spend the quota
     expect((await h.svc.transition('s1', 'revisao_lider', { verdict: 'APROVADO', findings: 'green' }, 'qa')).ok).toBe(true)
   }
 
-  pin('HIGH a piece with a LIVE session is never moved, whatever a PR says', async () => {
+  test('HIGH a piece with a LIVE session is never moved, whatever a PR says', async () => {
     const h = harness({ status: 'in_review', batchPrs: { [PUBLIC]: [batchPr(1329, 'lists s1')] }, ...GREEN }, { reviewPieces: async () => [piece] })
     expect(h.w.sessions.some(s => s.subtaskId === 's1' && s.alive)).toBe(true)
     const out = await h.svc.reconcile({ apply: true }, 'owner')
     expect(out.ok && out.entries[0]!.to).toBeUndefined()
   })
 
-  pin('HIGH a piece QA approved and waiting for its leader is not published by an OLDER PR from the same branch', async () => {
+  test('HIGH a piece QA approved and waiting for its leader is not published by an OLDER PR from the same branch', async () => {
     const h = harness({ batchPrs: { [PUBLIC]: [batchPr(5, 'first round', SHA, { headRefName: 'feat/x', headRefOid: 'older-head' })] }, ...GREEN })
     await toReview(h)
     const out = await h.svc.reconcile({ apply: true }, 'owner')
@@ -2252,27 +2378,27 @@ describe('QA pins: reconcile never moves real work, and does not spend the quota
     expect((await h.svc.get('s1'))!.phase).toBe('revisao_lider')
   })
 
-  pin('HIGH a PR merged before the card existed cannot have shipped it', async () => {
+  test('HIGH a PR merged before the card existed cannot have shipped it', async () => {
     const created = { ...piece, createdAt: '2026-11-07T00:00:00Z' }
     const h = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [batchPr(12, 'names fix/mine', SHA, { mergedAt: '2026-10-29T00:00:00Z' })] }, ...GREEN }, { reviewPieces: async () => [created], pieceHints: async () => ({ branches: ['fix/mine'], shas: [] }) })
     const out = await h.svc.reconcile({}, 'owner')
     expect(out.ok && out.entries[0]!.to).toBeUndefined()
   })
 
-  pin('HIGH ties: two PRs naming only what the card was built ON do not prove the card, even in one release', async () => {
+  test('HIGH ties: two PRs naming only what the card was built ON do not prove the card, even in one release', async () => {
     const h = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [batchPr(1, 'fix/base-a done', 'a1'.padEnd(40, '0')), batchPr(2, 'fix/base-a again', 'a2'.padEnd(40, '0'))] }, ...GREEN }, { reviewPieces: async () => [piece], pieceHints: async () => ({ branches: ['fix/mine', 'fix/base-a'], shas: [] }) })
     const out = await h.svc.reconcile({}, 'owner')
     expect(out.ok && out.entries[0]!.to).toBeUndefined()
   })
 
-  pin('MED a PR into dev is not a release PR: its merge commit never reaches a tag, the piece goes to ci and stays there', async () => {
+  test('MED a PR into dev is not a release PR: its merge commit never reaches a tag, the piece goes to ci and stays there', async () => {
     const h = harness({ status: 'in_review', sessions: [], tags: [], releaseRuns: [], batchPrs: { [PUBLIC]: [batchPr(1248, 'lists s1', SHA, { baseRefName: 'dev' })] } }, { reviewPieces: async () => [piece] })
     const out = await h.svc.reconcile({}, 'owner')
     expect(out.ok && out.entries[0]!.to).toBeUndefined()
     expect(h.calls.gh.find(g => g.includes('--limit 300'))).toContain('baseRefName')
   })
 
-  pin('HIGH with nothing new, the second run spends no gh call on what the first one already read', async () => {
+  test('HIGH with nothing new, the second run spends no gh call on what the first one already read', async () => {
     const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [piece], pieceHints: async () => ({ branches: [], shas: [] }) })
     await h.svc.reconcile({}, 'owner')
     const first = h.calls.gh.length
@@ -2281,7 +2407,7 @@ describe('QA pins: reconcile never moves real work, and does not spend the quota
     expect(h.calls.gh.length).toBe(first)
   })
 
-  pin('MED "All" in the old-cards group answers without a whole gh walk: the person is waiting on a button', async () => {
+  test('MED "All" in the old-cards group answers without a whole gh walk: the person is waiting on a button', async () => {
     const old = { ...piece, updatedAt: '2026-11-01T00:00:00Z' }
     const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [old], closeLegacy: async () => ({ ok: true }) })
     const out = await h.svc.antigas({ action: 'archive', all: true }, 'owner')

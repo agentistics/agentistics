@@ -23,7 +23,7 @@
 import { migratePriority, subtaskDone, type Subtask, type Task, type TaskEvent } from './task-model'
 import type { PieceTimes } from './task-times'
 import type { TaskDetail } from './task-report'
-import { ANTIGA_AFTER_MS } from '../delivery/antigas'
+import { ANTIGA_AFTER_MS, isAntiga } from '../delivery/antigas'
 import { deriveStep, mergeStep, type SessionActivity, type StepRecord } from './task-live-steps'
 
 export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
@@ -106,8 +106,10 @@ export interface LiveDelivery {
   stageEta: LiveStageEta
   publishEta: LivePublishEta
   block: LiveBlock | null
-  /** A legacy review with no live session for over 72 h: shown (marked "antiga") only in "Tudo". */
+  /** "Antiga sem registro" (`delivery/antigas.ts`): shown (marked "antiga") only in "Tudo", where its group decides it in one click. */
   old?: boolean
+  /** An old card only: what the last reconcile suspects shipped it. Weak evidence: it moved nothing, the person may accept it. */
+  suggestion?: { repo: string; pr: number; tag?: string; via: string }
   /** Only in the CI stage, and only when the flow stated it. */
   ci: LiveCiSignal | null
   /** The 1-based step the piece reported inside its CURRENT stage (a `step` event); null = nobody said, show nothing. */
@@ -508,7 +510,7 @@ export function shasIn(text: string | null | undefined): string[] {
 
 /** The most hidden rows a reply carries — a bound, not a policy: the newest are the ones that just left. */
 export const HIDDEN_CAP = 300
-/** A legacy `in_review` piece (no delivery record) with no live session older than this is "Antigas sem registro", not review work (owner 08/11: 24 h; ONE constant with the reconcile, `delivery/antigas.ts`). */
+/** A legacy `in_review` piece (no delivery record) with no live session older than this is a candidate for "Antigas sem registro" (owner 08/11: 24 h; ONE constant with the reconcile, `delivery/antigas.ts`). */
 export const LEGACY_REVIEW_MS = ANTIGA_AFTER_MS
 /** A piece untouched for longer than this was not on the board a moment ago, so its absence is not a departure. */
 export const RECENT_HIDDEN_MS = 6 * 3600_000
@@ -634,6 +636,8 @@ export function buildLive(o: {
   deliveries?: ReadonlyMap<string, LiveDeliveryFacts>
   /** Commit ids (as `legacyReviewShas` named them) that a published release tag contains — a legacy review piece naming one is Publicado. */
   publishedShas?: ReadonlySet<string>
+  /** Per subtask: the last reconcile's weak evidence (`delivery/batch-proof.ts`), shown beside an old card. */
+  suggestions?: ReadonlyMap<string, { repo: string; pr: number; tag?: string; via: string }>
 }): LiveReply {
   const samples: Sample[] = []
   const candidates: Piece[] = []
@@ -679,7 +683,12 @@ export function buildLive(o: {
     if (!rec && stage === 'leader' && p.status === 'in_review') {
       const subj = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
       if (legacyShaGroups(p, eventsBySubject.get(subj)).some(g => g.every(sha => o.publishedShas?.has(sha)))) stage = 'published'
-      else if (liveSessions.length === 0 && o.nowMs - (ms(p.updatedAt) ?? o.nowMs) > LEGACY_REVIEW_MS) { isOld = true }
+      else {
+        // ONE rule with the reconcile (`delivery/antigas.ts`): age alone does not take a delivery still waiting on its leader out of the column.
+        let handbackMs: number | null = null
+        for (const c of p.comments) if (c.kind === 'handback' && (c.subtaskId ?? null) === (p.sub?.id ?? null)) handbackMs = Math.max(handbackMs ?? 0, ms(c.createdAt) ?? 0)
+        isOld = isAntiga({ hasRecord: false, live: liveSessions.length > 0, updatedMs: ms(p.updatedAt), nowMs: o.nowMs, handbackMs })
+      }
     }
     // Only what could have been a card a moment ago is worth a departure line: an abandoned/backlog piece,
     // or a todo nobody staged, was never on the board and fills the reply with nothing anyone is missing.
@@ -755,7 +764,7 @@ export function buildLive(o: {
       } : null,
       blockedReason: p.blockedReason,
       priority: migratePriority(p.task.priority) as LiveDelivery['priority'],
-      ...(isOld ? { old: true } : {}),
+      ...(isOld ? { old: true, ...(p.sub && o.suggestions?.get(p.sub.id) ? { suggestion: o.suggestions.get(p.sub.id)! } : {}) } : {}),
       deliveredAtMs: stage === 'published' ? deliveredAtMs : null,
       staged: p.sub?.stagedSession ? {
         harness: p.sub.stagedSession.harness ?? null, model: p.sub.stagedSession.model ?? null,

@@ -266,7 +266,12 @@ export function judgeRelease(o: { mergeSha?: string; runs: ReadonlyArray<Release
 
 /** PURE: was the release FAILURE final (so the flow goes back to the leader), or is it still running? */
 export function releaseFailed(v: GateVerdict): boolean {
-  return !v.ok && /failed/.test(v.reason ?? '')
+  return !v.ok && /failed/.test(v.reason ?? '') && !releaseUnknown(v)
+}
+
+/** PURE. The release gate could not ANSWER (gh unreachable, a search paused half way): that is "don't know", never "failed" and never "not yet". */
+export function releaseUnknown(v: GateVerdict): boolean {
+  return !v.ok && /could not be read|search paused/.test(v.reason ?? '')
 }
 
 /** PURE. Judge the salvo check runs: every one concluded green (success/skipped/neutral). Failed, pending and absent all refuse. */
@@ -312,7 +317,7 @@ const json = <T>(s: string, fallback: T): T => { try { return JSON.parse(s) as T
 export const DEFAULT_RELEASE_REPO = 'agentistics/agentistics'
 
 /** One PR as gh describes it (`pr view|list --json …` or the REST `commits/<sha>/pulls` row, normalised). */
-export interface PrCandidate { number: number; state: string; headRefOid?: string; headRefName?: string; mergeSha?: string; mergedAt?: string }
+export interface PrCandidate { number: number; state: string; headRefOid?: string; headRefName?: string; mergeSha?: string; mergedAt?: string; baseRefName?: string }
 
 /**
  * PURE. FLUXO.CICLO-COMPLETO — which merged PR is THIS piece's. Only MERGED PRs with a merge commit count. When the piece
@@ -320,7 +325,8 @@ export interface PrCandidate { number: number; state: string; headRefOid?: strin
  * two different candidates are ambiguous and prove nothing (a wrong PR would publish a piece that never shipped).
  */
 export function pickMergedPr(cands: readonly PrCandidate[], shas: readonly string[]): { ok: true; pr: PrCandidate } | { ok: false; reason: string } {
-  const merged = [...new Map(cands.filter(c => c.state === 'MERGED' && c.mergeSha).map(c => [c.number, c] as const)).values()]
+  // A PR into `dev` is not a delivery: its merge commit never reaches a tag (M3).
+  const merged = [...new Map(cands.filter(c => c.state === 'MERGED' && c.mergeSha && c.baseRefName !== 'dev').map(c => [c.number, c] as const)).values()]
   if (merged.length === 0) return { ok: false, reason: cands.length ? `no MERGED PR among ${cands.map(c => `#${c.number} (${c.state})`).join(', ')}` : 'no PR found for this piece' }
   const wanted = shas.filter(Boolean)
   const byHead = wanted.length ? merged.filter(c => c.headRefOid && wanted.includes(c.headRefOid)) : []
@@ -339,9 +345,9 @@ async function repoOf(r: DeliveryRecord, f: GateFacts, author: SessionFact | nul
 }
 const repoArgs = (slug: string | null) => (slug ? ['-R', slug] : [])
 const repoPath = (slug: string | null) => slug ?? '{owner}/{repo}'
-const PR_FIELDS = 'number,state,headRefOid,headRefName,mergeCommit,mergedAt'
-type PrJson = { number?: number; state?: string; headRefOid?: string; headRefName?: string; mergeCommit?: { oid?: string } | null; mergedAt?: string }
-const fromPrJson = (p: PrJson): PrCandidate | null => (typeof p.number === 'number' ? { number: p.number, state: p.state ?? '', ...(p.headRefOid ? { headRefOid: p.headRefOid } : {}), ...(p.headRefName ? { headRefName: p.headRefName } : {}), ...(p.mergeCommit?.oid ? { mergeSha: p.mergeCommit.oid } : {}), ...(p.mergedAt ? { mergedAt: p.mergedAt } : {}) } : null)
+const PR_FIELDS = 'number,state,headRefOid,headRefName,baseRefName,mergeCommit,mergedAt'
+type PrJson = { number?: number; state?: string; headRefOid?: string; headRefName?: string; baseRefName?: string; mergeCommit?: { oid?: string } | null; mergedAt?: string }
+const fromPrJson = (p: PrJson): PrCandidate | null => (typeof p.number === 'number' ? { number: p.number, state: p.state ?? '', ...(p.baseRefName ? { baseRefName: p.baseRefName } : {}), ...(p.headRefOid ? { headRefOid: p.headRefOid } : {}), ...(p.headRefName ? { headRefName: p.headRefName } : {}), ...(p.mergeCommit?.oid ? { mergeSha: p.mergeCommit.oid } : {}), ...(p.mergedAt ? { mergedAt: p.mergedAt } : {}) } : null)
 
 export type MergedPrFinding = { ok: true; pr: number; mergeSha: string; headSha?: string; branch?: string; via: string } | { ok: false; reason: string }
 
@@ -542,6 +548,9 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
                     search.page = page
                     return no(`release run search paused after ${searched - 1} runs (${compares} comparisons); resumes at page ${page} next poll`, ['release.yml verde'], { searched: searched - 1, nextPage: page })
                   }
+                  // A checkout that holds both commits answers for free (this walk was 2.533 of the reconcile's 3.275 calls, CICLO.RECONCILE-2 H5).
+                  const local = (await f.git(cwd, ['rev-list', '--count', `${tagSha}..${sha}`]).catch(() => '')).trim()
+                  if (/^\d+$/.test(local)) { checked.set(sha, local === '0'); if (checked.get(sha)) { contained = [run]; break }; continue }
                   compares += 1
                   const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${repoPath}/compare/${sha}...${tagSha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
                   if (!cmp.status) {

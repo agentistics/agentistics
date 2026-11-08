@@ -584,7 +584,8 @@ const TOOLS: Tool[] = [
       properties: {
         action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "dequeue", "tick", "step", "configure", "approve", "stage-run", "merge", "release", "reconcile", "antigas"] },
         antigasAction: { type: "string", enum: ["publish", "archive"], description: "antigas: 'publish' marks the old record-less pieces published (optional `version`), 'archive' abandons them with an optional `reason`. Targets: `subtaskIds`, or `all` = every piece the reconcile classifies as antiga. Never deletes; a leader or the owner" },
-        all: { type: "boolean", description: "antigas: act on every old piece in the group \"Antigas sem registro\"" },
+        all: { type: "boolean", description: "antigas: act on every old piece in the group \"Antigas sem registro\" (answers from the board at once; a piece the last reconcile proved is left out)" },
+        expect: { type: "number", description: "antigas: the size of the group you saw; a different size refuses (409 count_changed) and nothing changes" },
         apply: { type: "boolean", description: "reconcile: write the moves (a leader of the task, or the owner). Absent/false = dry run: the report only" },
         subtaskId: { type: "string" },
         version: { type: "string", description: "release: the version the pieces shipped in, x.y.z" },
@@ -1330,7 +1331,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         if (action === "antigas") {
           // "Antigas sem registro": `antigasAction` publish|archive over `subtaskIds` (or `all`); never deletes.
           const body = await apiSend("POST", "/api/deliveries/antigas", {
-            action: a.antigasAction, ids: a.subtaskIds, all: a.all === true, version: a.version, reason: a.reason, session: sessionProof(process.env),
+            action: a.antigasAction, ids: a.subtaskIds, all: a.all === true, expect: a.expect, version: a.version, reason: a.reason, session: sessionProof(process.env),
           });
           return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
         }

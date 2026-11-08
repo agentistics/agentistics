@@ -327,7 +327,47 @@ test('old legacy reviews are no separate button: they sit in "Tudo" (counted), m
   expect(tabs).toEqual(['In progress0', 'Queued0', 'Published0', 'All3'])
   await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
   expect(document.querySelectorAll('[data-live-column="leader"] [data-live-old]').length).toBe(3)
+  // Their home: the column's header opens the group, and every number on the screen is the number of pieces it lists.
+  const open = document.querySelector('[data-live-antigas-open]') as HTMLElement
+  expect(open.textContent).toBe('Old · 3')
+  expect(document.querySelector('[data-live-antigas]')).toBeNull()
+  await act(async () => open.click())
+  const group = document.querySelector('[data-live-antigas]')!
+  expect(group.querySelectorAll('[data-live-archived]').length).toBe(3)
+  expect(group.querySelector('[data-live-antigas-all-archive]')!.textContent).toBe('Archive · All (3)')
   localStorage.clear()
+})
+
+test('H6: "All" asks first, sends exactly the ids it counted, answers in batches; M2: a board refusal is a sentence with a way out', async () => {
+  localStorage.clear()
+  const old = Array.from({ length: 25 }, (_, i) => ({ ...reply.deliveries[0]!, key: `t/o${i}`, subtaskId: `o${i}`, title: `Old review ${i}`, stage: 'leader', sessionIds: [], old: true }))
+  localStorage.setItem('agentask.live.view', JSON.stringify({ tab: 'all' }))
+  const sent: Array<{ ids: string[]; expect: number; action: string }> = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { ids: string[]; expect: number; action: string }
+    sent.push(body)
+    return new Response(JSON.stringify({ ok: true, done: body.ids.map((id, i) => (i === 0 && id === 'o0' ? { subtaskId: id, ok: false, code: 'no_session', reason: 'x' } : { subtaskId: id, ok: true })) }), { status: 200 })
+  }) as typeof fetch
+  try {
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: { ...reply, deliveries: old } as never }))) })
+    await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-open]') as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-all-archive]') as HTMLElement).click())
+    expect(sent).toEqual([]) // nothing happens before the answer
+    expect(document.body.textContent).toContain('Archive 25 pieces?')
+    const buttons = Array.from(document.querySelectorAll('button')).filter(b => b.textContent === 'Archive')
+    await act(async () => { buttons.at(-1)!.click(); await new Promise(r => setTimeout(r, 10)) })
+    expect(sent.map(s => s.ids.length)).toEqual([20, 5])
+    expect(sent.every(s => s.action === 'archive' && s.expect === s.ids.length)).toBe(true)
+    // What the board refused stays, in words, with a way out; what it took left the list.
+    const list = document.querySelector('[data-live-antigas]')!
+    expect(list.querySelectorAll('[data-live-archived]').length).toBe(1)
+    expect(list.querySelector('[data-live-antiga-error]')!.textContent).toContain('No session was filed')
+    expect(list.querySelector('[data-live-antiga-error]')!.textContent).not.toContain('done_needs_session')
+    expect(list.querySelector('[data-live-antiga-open]')).not.toBeNull()
+  } finally { globalThis.fetch = realFetch; localStorage.clear() }
 })
 
 test('LOW 11: on a phone the Líderes pill, its rows and the filter chip\'s remove control are 44 px targets', async () => {

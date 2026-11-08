@@ -48,8 +48,10 @@ export interface LiveDeliveryRecord {
   stageEta?: LiveStageEta; publishEta?: LivePublishEta; block?: LiveBlock | null
   /** The Agentask priority (urgent | high | medium | low); a subtask inherits its task's. Absent from an older server = low. */
   priority?: string
-  /** A legacy review with nobody on it for over 72 h: drawn with an "antiga" tag, in "Tudo" only. */
+  /** "Antiga sem registro": drawn with an "antiga" tag, in "Tudo" only, and decided in one click in its group. */
   old?: boolean
+  /** An old card only: what the last reconcile suspects shipped it (weak evidence: it moved nothing). */
+  suggestion?: { repo: string; pr: number; tag?: string; via: string }
   ci?: LiveCiSignal | null; step?: number | null
   /** Where `step` came from: stated by the worker/flow (`reported`) or read off observed facts (`signals`, named by `stepSignal`). */
   stepSource?: 'reported' | 'signals' | null; stepSignal?: string | null

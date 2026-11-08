@@ -139,7 +139,13 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
       metas: w.metas.values(),
     })
     const publishedShas = publishedAmong([...pieces.keys()], nowMs, undefined, dirsFor)
-    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas })
+    const suggestions = await (async () => {
+      try {
+        const { outcomes } = await (await import('../delivery/host')).deliveryService().proofOutcomes()
+        return new Map([...outcomes].flatMap(([id, o]) => (o.suggestion ? [[id, o.suggestion] as const] : [])))
+      } catch { return undefined }
+    })()
+    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas, ...(suggestions ? { suggestions } : {}) })
     const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result
     return result

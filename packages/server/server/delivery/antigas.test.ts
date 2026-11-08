@@ -21,6 +21,21 @@ describe('antigas classification', () => {
   })
 })
 
+describe('M1: real pending work is not old by age alone', () => {
+  const nowMs = Date.parse('2026-11-08T12:00:00Z')
+  const base = { hasRecord: false, live: false, nowMs, updatedMs: nowMs - 3 * 24 * 3600_000 }
+  test('a delivery that reported to its leader in the last 7 days stays in review', () => {
+    expect(isAntiga({ ...base, handbackMs: nowMs - 2 * 24 * 3600_000 })).toBe(false)
+  })
+  test('a handback nobody answered for over 7 days joins the group, where it is a decision', () => {
+    expect(isAntiga({ ...base, handbackMs: nowMs - 8 * 24 * 3600_000 })).toBe(true)
+  })
+  test('no delivery statement at all: the 24 h rule', () => {
+    expect(isAntiga(base)).toBe(true)
+    expect(isAntiga({ ...base, handbackMs: null })).toBe(true)
+  })
+})
+
 describe('reconcile scope', () => {
   const base = { hasRecord: false, live: false, nowMs: NOW, mentioned: false }
   test('a record, a release-PR mention or a touch within 30 days is in scope; older and unmentioned is not', () => {

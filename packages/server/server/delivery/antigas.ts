@@ -9,6 +9,8 @@
 
 /** A record-less in-review piece with no live session older than this is "antiga" (owner 08/11: 24 h). */
 export const ANTIGA_AFTER_MS = 24 * 3600_000
+/** A delivery that reported to its leader this recently is waiting for a decision, whatever its age otherwise. */
+export const DELIVERY_WAITS_MS = 7 * 24 * 3600_000
 /** The backfill adopts a record-less piece only when the board touched it within this window (or a release PR names it). */
 export const RECONCILE_SCOPE_MS = 30 * 24 * 3600_000
 
@@ -20,13 +22,20 @@ export interface ReviewPieceFacts {
   /** When the board last touched the piece (ms); null = unknown. */
   updatedMs: number | null
   nowMs: number
+  /** When its delivery last reported to its leader (a handback), if ever: real work waiting on a person is not old by age alone. */
+  handbackMs?: number | null
 }
 
-/** PURE. Is this record-less piece in review "antiga" (no record, nobody alive on it, untouched for over 24 h)? */
+/**
+ * PURE. Is this record-less piece in review "antiga"? No record, nobody alive on it, untouched for over 24 h AND no delivery
+ * statement waiting on its leader (M1, leader 08/11: age alone must not take real pending work out of the column). A handback older
+ * than `DELIVERY_WAITS_MS` went unanswered and joins the group, where it is a 1-click decision, never a silent one.
+ */
 export function isAntiga(f: ReviewPieceFacts): boolean {
   if (f.hasRecord || f.live) return false
   // An unknown age is NOT old: a piece whose date cannot be read stays where it is (never moved on a guess).
   if (f.updatedMs === null) return false
+  if (f.handbackMs != null && f.nowMs - f.handbackMs <= DELIVERY_WAITS_MS) return false
   return f.nowMs - f.updatedMs > ANTIGA_AFTER_MS
 }
 

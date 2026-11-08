@@ -146,22 +146,84 @@ async function accountNameOf(harness: string, account: string): Promise<string |
   return row ? (row.nickname?.trim() || row.label?.trim() || null) : null
 }
 
-/** Board subtasks shown In review / PR · merge / CI (the backfill adopts the ones with no delivery record). Group members excluded. */
-async function boardReviewPieces(): Promise<Array<{ id: string; taskId: string; title: string; status: string; updatedAt?: string }>> {
-  const { loadTaskWorld } = await import('../sessions/task-source')
-  const { book } = await loadTaskWorld()
-  const wanted = new Set([PHASE_STATUS.revisao_lider.id, PHASE_STATUS.pr_merge.id, PHASE_STATUS.ci.id])
-  return book.subtasks.filter(s => wanted.has(s.status) && !s.parentGroupId).map(s => ({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}) }))
+/** PURE. A git remote as the `owner/name` gh takes; null when it is not one (a local path, another forge's odd form). */
+export function repoSlug(remoteKey: string | null | undefined): string | null {
+  const m = /^github\.com\/([^/]+\/[^/]+)$/.exec(remoteKey ?? '')
+  return m ? m[1]! : null
 }
 
-/** The branches and commit shas a legacy piece's own board notes and comments mention (the batch PR text is matched against them). */
-async function boardPieceHints(subtaskId: string): Promise<{ branches: string[]; shas: string[] }> {
-  const [{ loadTaskWorld }, { hintsFromText }] = await Promise.all([import('../sessions/task-source'), import('./batch-proof')])
-  const { book } = await loadTaskWorld()
-  const sub = book.subtasks.find(s => s.id === subtaskId)
-  const text = [sub?.notes ?? '', ...book.comments.filter(c => c.subtaskId === subtaskId).map(c => c.body)].join('\n')
-  return hintsFromText(text)
+/** The repository each directory belongs to, once per process: a card's sessions name a handful of worktrees. */
+const repoOfCwd = new Map<string, string | null>()
+async function slugOfCwd(cwd: string): Promise<string | null> {
+  const known = repoOfCwd.get(cwd)
+  if (known !== undefined) return known
+  const [{ existsSync }, { dirname }, { normalizeGitRemote }, { getGitRemote }] = await Promise.all([import('node:fs'), import('node:path'), import('@agentistics/core'), import('../git')])
+  // A removed worktree still names its repository through the folder that held it (`<repo>/.worktrees/<name>`); a path that no longer leads anywhere says nothing.
+  let dir = cwd
+  for (let up = 0; up < 6 && dir !== dirname(dir) && !existsSync(dir); up++) dir = dirname(dir)
+  const slug = existsSync(dir) ? repoSlug(normalizeGitRemote((await getGitRemote(dir).catch(() => '')) ?? '')) : null
+  repoOfCwd.set(cwd, slug)
+  return slug
 }
+
+/**
+ * Board subtasks shown In review / PR · merge / CI (the backfill adopts the ones with no delivery record). Group members excluded.
+ * Each carries the facts of ITS OWN work: when it last handed back and which repositories its worker sessions ran in (H4: a card is
+ * never compared with somebody else's PRs). A card with no such session has `repos: []`: nothing can be proven for it.
+ */
+async function boardReviewPieces(): Promise<import('./service').ReviewPiece[]> {
+  const [{ loadTaskWorld }, { readRegistry }] = await Promise.all([import('../sessions/task-source'), import('../sessions/registry')])
+  const { book } = await loadTaskWorld()
+  const wanted = new Set([PHASE_STATUS.revisao_lider.id, PHASE_STATUS.pr_merge.id, PHASE_STATUS.ci.id])
+  const subs = book.subtasks.filter(s => wanted.has(s.status) && !s.parentGroupId)
+  const ids = new Set(subs.map(s => s.id))
+  const lastHandback = new Map<string, string>()
+  for (const c of book.comments) if (c.subtaskId && ids.has(c.subtaskId) && c.kind === 'handback' && c.createdAt > (lastHandback.get(c.subtaskId) ?? '')) lastHandback.set(c.subtaskId, c.createdAt)
+  const cwds = new Map<string, Set<string>>()
+  const recorded = new Map<string, Set<string>>()
+  for (const r of await readRegistry().catch(() => [])) {
+    const sub = (r as { subtaskId?: string }).subtaskId
+    if (!sub || !ids.has(sub) || (r as { role?: string }).role === 'leader') continue
+    // The repository recorded at spawn (the one moment the directory is provably there) outranks asking git now.
+    if (r.repo?.repo?.includes('/')) (recorded.get(sub) ?? recorded.set(sub, new Set()).get(sub)!).add(r.repo.repo)
+    else if (r.cwd) (cwds.get(sub) ?? cwds.set(sub, new Set()).get(sub)!).add(r.cwd)
+  }
+  const out: import('./service').ReviewPiece[] = []
+  for (const s of subs) {
+    const repos = new Set<string>(recorded.get(s.id) ?? [])
+    for (const cwd of cwds.get(s.id) ?? []) { const slug = await slugOfCwd(cwd); if (slug) repos.add(slug) }
+    const handbackAt = lastHandback.get(s.id)
+    out.push({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}), ...(s.createdAt ? { createdAt: s.createdAt } : {}), ...(handbackAt ? { handbackAt } : {}), repos: [...repos] })
+  }
+  return out
+}
+
+/** What a legacy piece's delivery declared: its HANDBACKS only. Notes and every other comment are talk about the work, never a statement of what shipped (H1). */
+async function boardPieceHints(subtaskId: string): Promise<{ branches: string[]; shas: string[]; heads: import('./batch-proof').DeclaredHead[]; prs: number[] }> {
+  const [{ loadTaskWorld }, { hintsFromHandbacks }] = await Promise.all([import('../sessions/task-source'), import('./batch-proof')])
+  const { book } = await loadTaskWorld()
+  const handbacks = book.comments.filter(c => c.subtaskId === subtaskId && c.kind === 'handback').sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  return hintsFromHandbacks(handbacks.map(c => ({ body: c.body, ...(Date.parse(c.createdAt) ? { atMs: Date.parse(c.createdAt) } : {}) })))
+}
+
+/** `<dataDir>/delivery-proof-cache.json`: what gh already answered, so a restart resumes the reconcile instead of starting over. A cache: never a source of truth. */
+function proofCacheFile(): { load(): Promise<unknown>; save(doc: unknown): Promise<void> } {
+  const path = async () => (await import('node:path')).join(process.env.AGENTISTICS_DIR ?? (await import('node:path')).join(process.env.HOME ?? '', '.agentistics'), 'delivery-proof-cache.json')
+  return {
+    async load() { return JSON.parse(await (await import('node:fs/promises')).readFile(await path(), 'utf8')) },
+    async save(doc) {
+      const fs = await import('node:fs/promises')
+      const p = await path()
+      const tmp = `${p}.${process.pid}.tmp`
+      await fs.writeFile(tmp, JSON.stringify(doc), { mode: 0o600 })
+      await fs.rename(tmp, p)
+    },
+  }
+}
+
+/** Only the running server reconciles by itself: it asks for it at boot, so `agentop flow tick` (a CLI one-shot) never does (L3). */
+let autoReconcileEnabled = false
+export function enableAutoReconcile(): void { autoReconcileEnabled = process.env.AGENTISTICS_AUTO_RECONCILE !== '0' }
 
 /** `antigas`: closes a record-less old piece on the board — done (marked published) or abandoned (archived). Never deletes. */
 async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -184,8 +246,9 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
     store, facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
     autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, accountName: accountNameOf, now: () => Date.now(),
     reviewPieces: boardReviewPieces, pieceHints: boardPieceHints, closeLegacy: closeLegacyPiece,
-    // Only the process-wide service (the server's tick) reconciles by itself; a CLI one-shot never does.
-    autoReconcile: Object.keys(overrides).length === 0 && process.env.AGENTISTICS_AUTO_RECONCILE !== '0',
+    autoReconcile: () => autoReconcileEnabled,
+    proofStore: proofCacheFile(),
+    log: line => console.log(line),
     ...overrides,
   })
   if (Object.keys(overrides).length === 0) cached = svc
