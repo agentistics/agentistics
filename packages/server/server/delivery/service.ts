@@ -23,7 +23,7 @@ import {
 } from './machine'
 import { DEFAULT_RELEASE_REPO, findMergedPr, judgePredispatch, releaseFailed, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
 import { MERGE_PHASES, MERGE_SCAN_PER_TICK, currentNote, mergeScanDue, mergeScanOrder, planReviewNudges, type ReconcileEntry } from './ciclo'
-import { ENGINE_REPO, findEnginePinTag, loadBatchPrs, matchBatchPr, newProofCache, type BatchMatch } from './batch-proof'
+import { ENGINE_REPO, findEnginePinTag, findPublicTag, loadBatchPrs, matchBatchPr, newProofCache, type BatchMatch } from './batch-proof'
 import { antigaComment, inReconcileScope, isAntiga, type AntigaAction } from './antigas'
 import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
 import { sharedQueueArea } from './queue-fit'
@@ -1402,8 +1402,8 @@ export function createDeliveryService(d: DeliveryDeps) {
         if (batch.pr.repo === ENGINE_REPO) {
           tagWanted = await findEnginePinTag(d.facts, repoCwd, batch.pr.mergeSha, proofs)
           if (!tagWanted) { e.reason = `engine PR #${batch.pr.number} merged (${batch.pr.mergeSha.slice(0, 9)}), but no public release pins it yet`; if (!antiga()) e.reason += ' — fica'; continue }
-        }
-        probe = { ...probe, phase: 'ci', releaseRepo: DEFAULT_RELEASE_REPO, mergeSha: batch.pr.mergeSha, ...(batch.pr.repo === ENGINE_REPO ? { tag: tagWanted! } : { pr: batch.pr.number }), mergeDetected: { at, pr: batch.pr.number, via: batchProof.via } }
+        } else tagWanted = await findPublicTag(d.facts, repoCwd, batch.pr.mergeSha, proofs) // null = not released yet (the gate says so)
+        probe = { ...probe, phase: 'ci', releaseRepo: DEFAULT_RELEASE_REPO, mergeSha: batch.pr.mergeSha, ...(tagWanted ? { tag: tagWanted } : {}), ...(batch.pr.repo === ENGINE_REPO ? {} : { pr: batch.pr.number }), mergeDetected: { at, pr: batch.pr.number, via: batchProof.via } }
         if (probe.versionTarget === 'next') delete probe.versionTarget
       } else if (r.phase !== 'ci' || !r.mergeSha) {
         const found = await findMergedPr(r, d.facts, { search: true })
