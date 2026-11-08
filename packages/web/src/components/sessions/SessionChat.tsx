@@ -85,7 +85,7 @@ import {
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { isNayCwd, modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
-import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
+import { personQueuedCount, queuedBubbleActions, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
@@ -2230,6 +2230,21 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     setStopping(false)
     if (!out.ok) setNotice(out.message)
   }
+  /**
+   * FLUXO.AVISOS 10 — the actions on a QUEUED message's own caption. The same verbs as the pill under the conversation and
+   * the stop button (`sendNow` / `stopNow` above): nothing is performed here, the rule for which to offer is the pure
+   * `queuedBubbleActions`, and an action that cannot work on this harness or right now is simply not drawn.
+   */
+  const queuedActionsFor = (text: string) => {
+    const a = queuedBubbleActions({
+      text, harness: session.harness, working, dialogOpen: blocked, personQueued: queuedPersonCount,
+      sendNowRunning: sendNowRun?.kind === 'running', stopEnabled: stopEnabled && !stopping, pt,
+    })
+    return {
+      ...(a.sendNow ? { sendNow: { ...a.sendNow, run: () => void sendNow() } } : {}),
+      ...(a.interrupt ? { interrupt: { ...a.interrupt, run: () => void stopNow() } } : {}),
+    }
+  }
 
   /** The memory gate refused the last Reopen: "Reabrir mesmo assim" is offered, behind a confirmation. */
   const [reopenForceable, setReopenForceable] = useState(false)
@@ -2701,6 +2716,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               anchorId={echoAnchorId(session.id, q.text)}
               awaiting
               awaitingWorking={working}
+              awaitingActions={queuedActionsFor(q.text)}
               onQuoteClick={onSentQuote}
               {...(q.at !== undefined ? { awaitingSinceMs: Math.max(0, now - q.at) } : {})}
             />
