@@ -153,6 +153,7 @@ export function contextText(i: ContextInput): string {
       `This session belongs to Agentask task ${i.taskId}${i.taskTitle ? ` "${i.taskTitle}"` : ''}${sub}. Record progress there: comment on the subtask (or the task) at each milestone and move its status; never mark it done before the user validates.`,
       'Board lifecycle: you are filed on this task/subtask (in_progress); a handback (kind=handback via agentistics_session_message) moves your subtask to in_review (if the board has that status); it becomes done only after approval.',
     )
+    if (worker && i.subtaskId) lines.push(`Live step: the Live card derives your step by itself from real signals (session open, first edit, a test run, a commit, your handback). When you know better, report it: agentistics_task_phase { subtaskId: "${i.subtaskId}", action: "step", step: <1..5> } — running: 1 reading, 2 implementing, 3 testing, 4 saving (commit), 5 handing over.`)
   } else {
     lines.push('This session is not linked to a task. Follow flow step "Task" above unless this is a quick question.')
   }

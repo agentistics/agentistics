@@ -19,6 +19,7 @@ import { isHistoricalRow } from './task-historical'
 import { isNativeRow, nativeRollupSession } from './task-native'
 import { rollupAttempt, type AttemptRollup, type RollupSession } from './task-rollup'
 import { scopedTaskStats, taskStats, type TaskStats } from './task-stats'
+import { sessionActivityOf, type SessionActivity } from './task-live-steps'
 import type { BoardRow } from './types'
 
 /** A rollup row: an attempt, or the sessions of a task that name no attempt. */
@@ -69,6 +70,11 @@ export interface TaskSessionRow {
    *  `RollupSession.meta`. Read straight off `SessionMeta.model` (`data.ts` resolves it from the
    *  JSONL when not already in session-meta); never a second guess at what the session ran. */
   model: string | null
+  /**
+   * What the conversation DID (file edits, test runs, commits, a browser pass) — the facts the Live's per-stage step reads
+   * (`task-live-steps.ts`). Absent when the conversation is not in the store: nothing was read, so no signal.
+   */
+  activity?: SessionActivity
   /** Null when the conversation is not in the store — see `RollupSession.meta`. */
   tokens: number | null
   costUSD: number | null
@@ -643,6 +649,7 @@ export function buildTaskDetail(o: {
         ...(r.label ? { label: r.label } : {}),
         ...(typeof (r as { effort?: unknown }).effort === 'string' ? { effort: (r as { effort: string }).effort } : {}),
         ...(r.conversationId ? { conversationId: r.conversationId } : {}),
+        ...(sessionActivityOf(meta) ? { activity: sessionActivityOf(meta)! } : {}),
         ...(isHistoricalRow(r) ? { historical: true } : {}),
         ...(isNativeRow(r) ? { native: true } : {}),
         ...(isNativeRow(r)

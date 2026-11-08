@@ -38,6 +38,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Peças na fila não somem mais por causa do filtro de agentes: “ativo” agora quer dizer “está numa coluna do fluxo”, não “tem agente rodando”.',
         en: 'Queued pieces no longer vanish behind the agents filter: “active” now means “sits in a flow column”, not “has a running agent”.',
       },
+      {
+        pt: 'Os cartões da Live agora mostram a porcentagem da etapa (“passo 2 de 5: implementando”), lida de fatos reais: sessão aberta, primeira edição, testes rodando, commit no ramo, entrega da sessão e os portões da QA, revisão e merge. Sem sinal, a linha continua escondida — nada é chutado.',
+        en: 'Live cards now show the stage percentage (“step 2 of 5: implementing”), read from real facts: session open, first edit, tests running, a commit on the branch, the session’s handback and the QA, review and merge gates. With no signal the line stays hidden — nothing is guessed.',
+      },
     ],
   },
   '2.201.2': {

@@ -74,7 +74,14 @@ export async function deliveryRequest(method: string, path: string, body: Record
     case 'queue-answer': return out(await d.service.answerQueue(subtaskId, body.answer ?? { decision: body.decision, reason: body.reason, at: body.at }, actor))
     case 'approve': return out(await d.service.approve(subtaskId, body.phase, body.decision, str(body.note), session === null))
     case 'configure': return out(await d.service.configure(subtaskId, (body.patch ?? {}) as Record<string, unknown>, actor))
-    case 'step': return out(await d.service.step(subtaskId, body.step, actor))
+    case 'step': {
+      // A piece the flow never adopted has no record to hold the step: only the board's `step` event is written.
+      if (await d.service.get(subtaskId)) return out(await d.service.step(subtaskId, body.step, actor))
+      const r = await d.service.stepEvent(subtaskId, body.step, actor)
+      return r.ok
+        ? { status: 200, body: { ok: true, step: r.step, recorded: r.recorded } }
+        : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing } }
+    }
     case 'stage': {
       const draft = (body.draft ?? {}) as Record<string, unknown>
       return out(await d.service.stage(subtaskId, draft, actor, {

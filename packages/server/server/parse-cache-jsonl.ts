@@ -89,7 +89,8 @@ export async function cachedParseSession(
 // last-wins inside a subagent file, and a background fork is nested by its own `meta.parentAgentId`.
 // Same bytes, different numbers: exactly the case this stamp exists for.
 // v7: activity days follow the machine's local calendar, not UTC.
-const SESSION_SHAPE = 'v7'
+// v8: `test_runs` was added (test-runner commands counted from the Bash tool calls) — the Live's "running the tests" step.
+const SESSION_SHAPE = 'v8'
 
 /** Everything `scanProjectDir` needs from a transcript whose session already exists in
  *  Claude's own session-meta — which carries none of it. */
@@ -112,6 +113,8 @@ export interface EnrichResult {
   compact: CompactStats
   /** Skill invocations by name; `{}` is a real answer once the transcript has been read. */
   skillUses: Record<string, number>
+  /** How many test-runner commands the transcript's shell calls ran (`countTestCommands`); `0` is a real answer once read. */
+  testRuns: number
   /**
    * The message ids whose usage THIS transcript counted, or null when the session invoked no agent.
    *
@@ -154,7 +157,8 @@ export interface EnrichResult {
 // (`claimSessionUsage`). A v4 row carries no ids, so the enrichment it feeds would double-count every
 // fork's replayed launch forever on a finished session.
 // v6: rebuild daily activity buckets in the machine's local calendar.
-const ENRICH_SHAPE = 'v6'
+// v7: `testRuns` was added to EnrichResult.
+const ENRICH_SHAPE = 'v7'
 
 /**
  * The whole enrichment of one transcript, cached as a unit.
@@ -204,6 +208,7 @@ export async function cachedEnrich(
     compact: finishCompacts(state.compact),
     // Copied, not shared — the walk goes on writing to it. See `finishClaudeSession`.
     skillUses: { ...state.skillUses },
+    testRuns: state.testRuns,
     mainUsageIds: metrics.totalInvocations > 0 ? [...state.countedUsage.keys()] : null,
   }
   cache.set('enrich', stamp, result, variant)

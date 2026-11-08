@@ -100,6 +100,9 @@ export type DeliveryReply =
   | { ok: true; status: 200; record: DeliveryRecord; warnings: string[]; skipped?: unknown; gate?: GateVerdict }
   | { ok: false; status: number; code: string; sentence: string; missing: string[]; record?: DeliveryRecord; gate?: GateVerdict }
 
+/** The answer of a step report on a piece with no delivery record: the event is all that was written. */
+export type StepEventReply = { ok: true; status: 200; step: number; recorded: 'event' } | Extract<DeliveryReply, { ok: false }>
+
 const fail = (status: number, code: string, sentence: string, missing: string[] = [], record?: DeliveryRecord): Extract<DeliveryReply, { ok: false }> => ({ ok: false, status, code, sentence, missing, ...(record ? { record } : {}) })
 const refused = (p: TransitionRefusal, record?: DeliveryRecord): DeliveryReply => fail(refusalStatus(p), p.code, p.sentence, p.missing, record)
 const iso = (d: DeliveryDeps) => new Date(d.now()).toISOString()
@@ -382,6 +385,20 @@ export function createDeliveryService(d: DeliveryDeps) {
     const after = await d.store.update(doc => { const c = doc.deliveries[subtaskId]!; c.step = n; c.updatedAt = iso(d); return structuredClone(c) })
     await d.board.logStep(after.taskId, subtaskId, n, actor)
     return { ok: true, status: 200, record: after, warnings: [] }
+  }
+
+  /**
+   * The same report for a piece with NO delivery record (a legacy piece the flow never adopted): only the board's
+   * `step` event is written — no record is created, so reporting a step never moves a piece into the flow.
+   * The Live reads that event through `stepOf`, exactly as it does for a recorded delivery.
+   */
+  const stepEvent = async (subtaskId: string, n: unknown, actor: string): Promise<StepEventReply> => {
+    if (!SUB_ID.test(subtaskId)) return fail(400, 'bad_subtask', 'invalid subtask id')
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 9) return fail(400, 'bad_step', 'step must be an integer 1..9')
+    const sub = await d.facts.subtask(subtaskId)
+    if (!sub) return fail(404, 'no_such_subtask', `subtask ${subtaskId} does not exist on the board`)
+    await d.board.logStep(sub.taskId, subtaskId, n, actor)
+    return { ok: true, status: 200, step: n, recorded: 'event' }
   }
 
   /** P4 — write the pre-dispatch (staged session) on the subtask and open its delivery at `fila`. */
@@ -1352,6 +1369,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     // An unreadable store REFUSES the write (and keeps a copy of the file) instead of letting any verb replace it with an empty book.
     transition: safe((id: string, to: unknown, input: TransitionInput, actor: string) => transition(id, to, input, actor)),
     gate: safe(gate), block: safe(block), unblock: safe(unblock), approve: safe(approve), configure: safe(configure), step: safe(step),
+    stepEvent: async (id: string, n: unknown, actor: string): Promise<StepEventReply> => { try { return await stepEvent(id, n, actor) } catch (e) { return fail(500, 'step_erro', `the step could not be recorded (${e instanceof Error ? e.message.split('\n')[0] : String(e)})`) } },
     // An I/O error on the batch write is a clean, structured refusal (the single store write landed entirely or not at all), never an uncaught throw.
     release: async (o: { version: unknown; mergeSha: unknown; subtaskIds: unknown; repo?: unknown }, actor: string): Promise<ReleaseReply> => {
       try { return await release(o, actor) } catch (e) {
