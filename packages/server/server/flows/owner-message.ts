@@ -13,6 +13,8 @@
 import { createHash } from 'node:crypto'
 import { isOwnerTurn } from '../sessions/handoff-relay'
 import type { ManagedSession } from '../sessions/types'
+import type { OwnerQuestion } from '../delivery/store'
+import { classifyOwnerMessage } from './owner-intent'
 import type { EngineCommand } from '@agentistics/engine-api'
 
 /** The mandatory owner-request path uses the engine's own switches, not a second request store. */
@@ -63,9 +65,14 @@ export interface OwnerMessageDeps {
   mode(): Promise<string | undefined>
   emit(event: { type: string; id: string; payload: Record<string, unknown> }): Promise<unknown>
   now(): number
+  /** FLUXO.CICLO-COMPLETO 7(b): hold a leader-bound QUESTION instead of emitting it (absent = questions are emitted like any message). */
+  holdQuestion?(q: Omit<OwnerQuestion, 'state'>): Promise<void>
 }
 
-export type OwnerMessageOutcome = 'emitted' | 'flows-off' | 'no-engine' | 'not-composer' | 'not-owner' | 'no-session' | 'no-role'
+export type OwnerMessageOutcome = 'emitted' | 'flows-off' | 'no-engine' | 'not-composer' | 'not-owner' | 'no-session' | 'no-role' | 'handoff' | 'held-question'
+
+/** The owner-message id (conversation + instant + text): the composer's, a relay's and a promoted question's all agree on it. */
+export const ownerMessageId = (conversationId: string, at: string, text: string) => `owner.message:${conversationId}:${at}:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`
 
 /**
  * PURE. A composer prompt from the web/TUI as the owner sends it: `action: prompt` and NO session proof at
@@ -77,9 +84,11 @@ export function isOwnerComposerRequest(body: { action?: unknown; session?: unkno
   return body.action === 'prompt' && body.session === undefined && body.callerVerified !== true
 }
 
-export async function emitOwnerMessage(req: { id: string; text?: string; channel?: string; action?: unknown; session?: unknown; callerVerified?: unknown }, deps: OwnerMessageDeps, source: { at?: string; conversationId?: string } = {}): Promise<OwnerMessageOutcome> {
+export async function emitOwnerMessage(req: { id: string; text?: string; channel?: string; action?: unknown; session?: unknown; callerVerified?: unknown; handoff?: unknown }, deps: OwnerMessageDeps, source: { at?: string; conversationId?: string; asRequest?: boolean } = {}): Promise<OwnerMessageOutcome> {
   if (!deps.flowsOn()) return 'flows-off'
   if (!isOwnerComposerRequest(req)) return 'not-composer'
+  // FLUXO.CICLO-COMPLETO 7(a): asking a leader to hand off is never the owner's request (the button's fixed sentence, a hint).
+  if (req.handoff === true) return 'handoff'
   const text = (req.text ?? '').trim()
   if (!isOwnerTurn({ role: 'user', text })) return 'not-owner'
   const row = await deps.row(req.id)
@@ -88,11 +97,23 @@ export async function emitOwnerMessage(req: { id: string; text?: string; channel
   if (role !== 'leader' && role !== 'worker') return 'no-role'
   const at = source.at && Number.isFinite(Date.parse(source.at)) ? source.at : new Date(deps.now()).toISOString()
   const conversationId = source.conversationId ?? row.conversationId ?? row.id
+  // FLUXO.CICLO-COMPLETO 7(b): a QUESTION to a leader is held; it becomes a request only if the leader never answers it. A relayed
+  // question (a hand-off's) is not re-registered at all: the successor is told to answer it, and the original was held already.
+  if (role === 'leader' && !source.asRequest && classifyOwnerMessage(text) === 'question') {
+    if (req.channel === 'handoff-relay') return 'held-question'
+    if (deps.holdQuestion) {
+      await deps.holdQuestion({
+        id: ownerMessageId(conversationId, at, text), sessionId: row.id, conversationId, text, at, channel: req.channel ?? 'app',
+        ...(row.taskId ? { taskId: row.taskId } : {}), ...(row.subtaskId ? { subtaskId: row.subtaskId } : {}),
+      })
+      return 'held-question'
+    }
+  }
   if (req.channel === 'handoff-relay' && await deps.recorded?.(conversationId, text, at, row.taskId)) return 'emitted'
   const mode = await deps.mode().catch(() => undefined)
   const emitted = await deps.emit({
     type: 'owner.message',
-    id: `owner.message:${conversationId}:${at}:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`,
+    id: ownerMessageId(conversationId, at, text),
     payload: {
       sessionId: row.id, conversationId, text, attachments: [], at, channel: req.channel ?? 'app', role,
       ...(row.taskId ? { taskId: row.taskId } : {}), ...(row.subtaskId ? { subtaskId: row.subtaskId } : {}),
@@ -135,5 +156,24 @@ export function defaultOwnerMessageDeps(): OwnerMessageDeps {
       return engine()!.flows!.emit!(event)
     },
     now: () => Date.now(),
+    holdQuestion: async q => {
+      const [{ createDeliveryStore }, { holdOwnerQuestion }] = await Promise.all([import('../delivery/store'), import('./owner-questions')])
+      await holdOwnerQuestion(createDeliveryStore(), q)
+    },
   }
+}
+
+/** A held question nobody answered becomes an ordinary owner request: same conversation, same instant, same id. */
+export async function promoteOwnerQuestion(q: OwnerQuestion, deps = defaultOwnerMessageDeps()): Promise<boolean> {
+  const out = await emitOwnerMessage({ id: q.sessionId, action: 'prompt', channel: q.channel, text: q.text }, deps, { at: q.at, conversationId: q.conversationId, asRequest: true })
+  return out === 'emitted'
+}
+
+/** The conversation a held question went to, for `questionsTick` (null = unreadable now). */
+export async function ownerQuestionTurns(q: OwnerQuestion): Promise<Array<{ role: string; text: string; at?: string; system?: unknown }> | null> {
+  const row = ownerMessageTarget(q.sessionId, await (await import('../sessions/registry')).readRegistry())
+  if (!row) return null
+  const { readSessionTurns } = await import('../sessions/handoff-relay-io')
+  const got = await readSessionTurns(row, { recent: true })
+  return 'unavailable' in got ? null : got.turns
 }

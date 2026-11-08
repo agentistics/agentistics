@@ -592,8 +592,10 @@ export async function start(
     context: await spawnAccountContext(asked ? [] : [cmd.harness]),
   })
   if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, lang === 'pt' ? 'pt' : 'en')); return 1 }
+  // FLUXO.CICLO-COMPLETO 7(a): the successor's first prompt is the PREDECESSOR's words — headed so no later relay replays it as the owner's.
+  const prompt = cmd.handoff && cmd.prompt ? (await import('../flows/owner-intent')).markSuccessorPrompt(cmd.prompt, parentSessionIdForPlan) : cmd.prompt
   const planned = planSpawn({
-    harness: cmd.harness, cwd, prompt: cmd.prompt, model: launch.model, effort: launch.effort, mode: launch.mode,
+    harness: cmd.harness, cwd, prompt, model: launch.model, effort: launch.effort, mode: launch.mode,
     ...(logFile ? { logFile } : {}),
     conversationId: offeredConversationId,
     context: ctx,
@@ -660,7 +662,7 @@ export async function start(
   await writeContextFile(planned.plan)
   try {
     if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-    await managedSpawn(backend, { id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}), structured: structuredIntentOf({ harness: cmd.harness, origin: cmd.background ? 'background' : 'terminal', prompt: cmd.prompt, mode: launch.mode }, { ...launch, ctx, conversationId: offeredConversationId, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }), ...spawnPromptArg(planned.plan, cmd.harness),
+    await managedSpawn(backend, { id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}), structured: structuredIntentOf({ harness: cmd.harness, origin: cmd.background ? 'background' : 'terminal', prompt, mode: launch.mode }, { ...launch, ctx, conversationId: offeredConversationId, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }), ...spawnPromptArg(planned.plan, cmd.harness),
       ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
     })
   } catch (e) {

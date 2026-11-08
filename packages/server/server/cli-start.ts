@@ -2271,13 +2271,16 @@ export async function spawnManaged(req: {
       ...storedContextRole,
     }), !!req.handoff))
   const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
+  // FLUXO.CICLO-COMPLETO 7(a): a hand-off successor's first prompt is the predecessor's words, headed as such, so no later
+  // relay replays it as the owner's request.
+  const spawnPrompt = req.prompt && req.handoff ? (await import('./flows/owner-intent')).markSuccessorPrompt(req.prompt, req.parentSessionId) : req.prompt
   const planned = planSpawn({
     harness: req.harness,
     cwd: req.cwd,
     ...(logFile ? { logFile } : {}),
     ...(req.resumeId ? { resumeId: req.resumeId } : {}),
     context: ctx,
-    ...(req.prompt ? { prompt: req.prompt } : {}),
+    ...(spawnPrompt ? { prompt: spawnPrompt } : {}),
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
     ...(mode ? { mode } : {}),
@@ -2379,7 +2382,7 @@ export async function spawnManaged(req: {
         ? { initialPrompt: { ...planned.plan.initialPrompt, ...(rulesFor(req.harness) ? { rules: rulesFor(req.harness)! } : {}) } }
         : {}),
       // F2.0 — the same spawn in a structured driver's terms; tmux ignores it (`structured-backend.ts`).
-      structured: structuredIntentOf({ ...req, ...(mode ? { mode } : {}), origin: spawnOriginOf(req.origin, req.attach) }, {
+      structured: structuredIntentOf({ ...req, ...(spawnPrompt ? { prompt: spawnPrompt } : {}), ...(mode ? { mode } : {}), origin: spawnOriginOf(req.origin, req.attach) }, {
         model, effort, ctx, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } },
         // The language of the screen that asked (the host is built per request language): QA F2.
         lang: lang === 'pt' ? 'pt' : 'en',

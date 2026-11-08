@@ -12,7 +12,62 @@ bloqueado ← any phase but publicado, and back to the STORED origin only
 ```
 
 A transition outside the table is refused with HTTP 422 `fase_pulada` and a sentence naming what
-is missing. `server/delivery/machine.ts` is the table (pure); `gates.ts` checks evidence;
+is missing. Since FLUXO.CICLO-COMPLETO the review has one more exit: `revisao_lider → ci` when the
+tick finds the piece's PR already MERGED (the merge is the leader's review; the same `delecoes` +
+`mergeado` gates prove it).
+
+## Coverage — who or what moves each stage (FLUXO.CICLO-COMPLETO)
+
+No stage depends on someone remembering: each one either moves on evidence the minute tick reads, or
+has a timed reminder to the LIVE leader of the task (never the owner).
+
+| stage | moved by | if nobody acts |
+|---|---|---|
+| pedido (owner message) | the composer records it (`owner-message.ts`); the engine's `pedido-do-dono` / `encaixe-do-pedido` place it. A hand-off request, a successor's `--handoff -p` prompt and a relayed question are never recorded; a plain QUESTION to a leader is held and recorded `answered` by the leader's reply (`owner-questions.ts`) | unanswered question → promoted to a request after 30 min; an unstaged request → the leader is reminded after 10 min (`watchRequests`) |
+| fila | `fila-proximo`: the queue asks the leader `sim / nao / agendar` | autonomous mode: the 10-min timeout carries on as `sim`; OFF: reminded every 10 min |
+| executando | the author (`agentistics_task_phase to=qa`; `salvo` gate) | the block watch if blocked; the Live shows the derived step |
+| qa | the QA session's verdict (`to=revisao_lider` / `to=ajuste`, `qa-modelo` gate) | — |
+| ajuste | the author back to `qa` (`salvo`) | — |
+| revisao_lider | the leader (`to=pr_merge` / `to=ajuste`), **or the tick** when it finds the PR merged (→ `ci`) | reminder to the live leader at 30 min, then every 2 h, max 3 |
+| pr_merge | `agentop flow merge`, **or the tick** when it finds the PR merged (→ `ci`) | a refused merge gate is recorded as the tick note and reminded like a review |
+| ci | **the tick**: the first tag that contains the merge, its release.yml run green (→ `publicado`) | a red run is recorded and reminded (a declared or detected piece is never bounced back) |
+| publicado | — | — |
+
+### Merge detection
+
+Each tick looks up at most 10 pieces in `revisao_lider` / `pr_merge` (never looked up first, then
+the oldest look-up), with a back-off of a tenth of the time in the phase (1–10 min).
+`findMergedPr` (`gates.ts`) asks gh, in this order, using only what the piece records: its PR
+number, its branch (`pr list --state merged --head`), the PR that contains the sha QA approved or the
+pushed head (`commits/<sha>/pulls`), and the branch its author worktree still sits on. Exactly one
+MERGED PR must remain (one from the approved sha wins); two are ambiguous and prove nothing. The
+transition to `ci` then runs the edge's own gates — a merge from another sha, not on main, or one
+that deleted files is refused, the sentence is stored as the piece's `tickNote` (`tickReason` in
+`agentistics_task_phase action=get`), and the piece stays where it is. A detected piece carries
+`mergeDetected`: like a declared release it is published by the first tag that CONTAINS the merge
+(a planned `versionTarget` is a plan, not proof) and never bounced back by a red run of the merge
+commit.
+
+### Reminders to the leader
+
+`planReviewNudges` (`delivery/ciclo.ts`, pure): a piece in `revisao_lider` — or in `pr_merge` / `ci`
+with a refused gate — waiting ≥ 30 min since it entered the phase (a leader action on it restarts
+the clock) gets one reminder, then one every 2 h, at most 3 per phase and revision. The target is
+the newest LIVE leader of the task (the successor after a hand-off), else the recorded leader if
+alive; with none, the attempt is stamped and retried in 30 min. One message per leader per tick
+lists every due piece with the tick's reason. The owner is never reminded.
+
+### Backfill — `agentop flow reconcile --release`
+
+`agentop flow reconcile --release [--apply] [--json]` (HTTP `POST /api/deliveries/reconcile`
+`{apply}`, MCP `agentistics_task_phase action=reconcile apply=true|false`) matches every piece in
+`revisao_lider` / `pr_merge` / `ci` — and every board subtask shown there with no record yet — to
+its merged PR (the routes above plus a merged PR whose title/body names the subtask id) and the
+first release tag that contains the merge. Dry run by default: a report of what would move (`→ ci`
+or `→ publicado`) and what could not be proven, with the reason. `--apply` (a leader of the task or
+the owner) writes it through the ordinary transitions, whose gates run; the writes are attributed
+to `flow:reconcile`, which wakes nobody and rings no bell per piece. Running it again changes
+nothing. `server/delivery/machine.ts` is the table (pure); `gates.ts` checks evidence;
 `service.ts` is the one door every surface uses; `store.ts` keeps one record per subtask in
 `<dataDir>/deliveries.json` under the cross-process file lock.
 
@@ -145,8 +200,9 @@ can approve — the board's own convention, so with autonomous OFF the gate is a
 
 ## Doors
 
-- HTTP: `GET /api/deliveries[/<subtaskId>]`, `POST /api/deliveries/<subtaskId>` (`action`),
-  `POST /api/deliveries/tick` — `localShell`.
+- HTTP: `GET /api/deliveries[/<subtaskId>]` (the list also carries `questions`; one record also
+  `tickReason`), `POST /api/deliveries/<subtaskId>` (`action`), `POST /api/deliveries/tick`,
+  `POST /api/deliveries/reconcile` — `localShell`.
 - MCP: `agentistics_task_phase`, `agentistics_task_stage`.
 - CLI (`agentop flow --help` lists them): `agentop flow gate|phase|entrega|stage run|qa open|ajustes open|wait qa-verdict|merge|block|unblock|approve|release|tick`,
   `agentop task stage <subtaskId> …` (exit 0 = passed).

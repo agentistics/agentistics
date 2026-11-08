@@ -308,6 +308,93 @@ export function pickReleaseTag(tags: ReadonlyArray<{ name: string; sha: string }
 
 const json = <T>(s: string, fallback: T): T => { try { return JSON.parse(s) as T } catch { return fallback } }
 
+/** The repository a release belongs to when nothing on the piece names one. */
+export const DEFAULT_RELEASE_REPO = 'agentistics/agentistics'
+
+/** One PR as gh describes it (`pr view|list --json …` or the REST `commits/<sha>/pulls` row, normalised). */
+export interface PrCandidate { number: number; state: string; headRefOid?: string; headRefName?: string; mergeSha?: string; mergedAt?: string }
+
+/**
+ * PURE. FLUXO.CICLO-COMPLETO — which merged PR is THIS piece's. Only MERGED PRs with a merge commit count. When the piece
+ * knows the sha QA approved (or the pushed head), a PR from that head wins; otherwise exactly ONE merged PR must remain —
+ * two different candidates are ambiguous and prove nothing (a wrong PR would publish a piece that never shipped).
+ */
+export function pickMergedPr(cands: readonly PrCandidate[], shas: readonly string[]): { ok: true; pr: PrCandidate } | { ok: false; reason: string } {
+  const merged = [...new Map(cands.filter(c => c.state === 'MERGED' && c.mergeSha).map(c => [c.number, c] as const)).values()]
+  if (merged.length === 0) return { ok: false, reason: cands.length ? `no MERGED PR among ${cands.map(c => `#${c.number} (${c.state})`).join(', ')}` : 'no PR found for this piece' }
+  const wanted = shas.filter(Boolean)
+  const byHead = wanted.length ? merged.filter(c => c.headRefOid && wanted.includes(c.headRefOid)) : []
+  if (byHead.length === 1) return { ok: true, pr: byHead[0]! }
+  if (merged.length === 1) return { ok: true, pr: merged[0]! }
+  return { ok: false, reason: `ambiguous: ${merged.length} merged PRs match (${merged.map(c => `#${c.number}`).join(', ')}) and none is from the approved sha` }
+}
+
+/** Where gh is asked about a piece: the author's checkout, else the repository the piece (or the default) names. */
+async function repoOf(r: DeliveryRecord, f: GateFacts, author: SessionFact | null): Promise<{ cwd: string; slug: string | null } | null> {
+  if (r.releaseRepo) return { cwd: (await f.repoCwd?.().catch(() => null)) ?? author?.rootPath ?? author?.cwd ?? '.', slug: r.releaseRepo }
+  const cwd = author?.rootPath ?? author?.cwd
+  if (cwd) return { cwd, slug: null }
+  const fallback = await f.repoCwd?.().catch(() => null)
+  return fallback ? { cwd: fallback, slug: DEFAULT_RELEASE_REPO } : null
+}
+const repoArgs = (slug: string | null) => (slug ? ['-R', slug] : [])
+const repoPath = (slug: string | null) => slug ?? '{owner}/{repo}'
+const PR_FIELDS = 'number,state,headRefOid,headRefName,mergeCommit,mergedAt'
+type PrJson = { number?: number; state?: string; headRefOid?: string; headRefName?: string; mergeCommit?: { oid?: string } | null; mergedAt?: string }
+const fromPrJson = (p: PrJson): PrCandidate | null => (typeof p.number === 'number' ? { number: p.number, state: p.state ?? '', ...(p.headRefOid ? { headRefOid: p.headRefOid } : {}), ...(p.headRefName ? { headRefName: p.headRefName } : {}), ...(p.mergeCommit?.oid ? { mergeSha: p.mergeCommit.oid } : {}), ...(p.mergedAt ? { mergedAt: p.mergedAt } : {}) } : null)
+
+export type MergedPrFinding = { ok: true; pr: number; mergeSha: string; headSha?: string; branch?: string; via: string } | { ok: false; reason: string }
+
+/**
+ * FLUXO.CICLO-COMPLETO — find the merged PR of a piece, from what the piece itself records: its PR number, its branch, the
+ * PR that contains the sha QA approved (or the pushed head), the branch its author's worktree still sits on, and — only for
+ * the one-shot backfill (`search`) — a merged PR whose title/body names the subtask id. Each route is a FACT gh states; a
+ * piece with none of them is "not provable", said in a sentence, never guessed. Never throws.
+ */
+export async function findMergedPr(r: DeliveryRecord, f: GateFacts, opts: { search?: boolean } = {}): Promise<MergedPrFinding> {
+  try {
+    const sessions = await f.sessions().catch(() => [] as SessionFact[])
+    const author = authorOf(r, sessions)
+    const repo = await repoOf(r, f, author)
+    if (!repo) return { ok: false, reason: 'the repository of the piece is not known (no author checkout, no repository recorded)' }
+    const shas = [r.qaSha, r.headSha].filter((s): s is string => !!s)
+    const tried: string[] = []
+    const settle = (cands: PrCandidate[], via: string): MergedPrFinding | null => {
+      const pick = pickMergedPr(cands, shas)
+      if (!pick.ok) { tried.push(`${via}: ${pick.reason}`); return null }
+      return { ok: true, pr: pick.pr.number, mergeSha: pick.pr.mergeSha!, ...(pick.pr.headRefOid ? { headSha: pick.pr.headRefOid } : {}), ...(pick.pr.headRefName ? { branch: pick.pr.headRefName } : {}), via }
+    }
+    const list = async (args: string[]) => {
+      const raw = json<PrJson[]>(await f.gh(repo.cwd, ['pr', 'list', ...repoArgs(repo.slug), '--state', 'merged', ...args, '--json', PR_FIELDS, '--limit', '10']).catch(() => '[]'), [])
+      return (Array.isArray(raw) ? raw : []).map(fromPrJson).filter((c): c is PrCandidate => !!c)
+    }
+    if (r.pr) {
+      const one = fromPrJson(json<PrJson>(await f.gh(repo.cwd, ['pr', 'view', String(r.pr), ...repoArgs(repo.slug), '--json', PR_FIELDS]).catch(() => '{}'), {}))
+      const got = one ? settle([one], `PR #${r.pr}`) : (tried.push(`PR #${r.pr}: gh did not describe it`), null)
+      if (got) return got
+    }
+    if (r.branch) { const got = settle(await list(['--head', r.branch]), `branch ${r.branch}`); if (got) return got }
+    for (const sha of shas) {
+      const rows = json<Array<{ number?: number; state?: string; merged_at?: string | null; merge_commit_sha?: string | null; head?: { sha?: string; ref?: string } }>>(await f.gh(repo.cwd, ['api', `repos/${repoPath(repo.slug)}/commits/${sha}/pulls`]).catch(() => '[]'), [])
+      const cands = (Array.isArray(rows) ? rows : []).flatMap(p => (typeof p.number === 'number' ? [{ number: p.number, state: p.merged_at ? 'MERGED' : (p.state ?? '').toUpperCase(), ...(p.head?.sha ? { headRefOid: p.head.sha } : {}), ...(p.head?.ref ? { headRefName: p.head.ref } : {}), ...(p.merged_at && p.merge_commit_sha ? { mergeSha: p.merge_commit_sha } : {}), ...(p.merged_at ? { mergedAt: p.merged_at } : {}) }] : []))
+      const got = settle(cands, `sha ${sha.slice(0, 9)}`)
+      if (got) return got
+    }
+    // The branch each author worktree filed on this piece still sits on (a legacy piece never recorded its branch).
+    const branches = new Set<string>()
+    for (const s of sessions) {
+      if (s.subtaskId !== r.subtaskId || s.role === 'leader' || !s.worktree) continue
+      const b = (await f.git(s.cwd, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim()
+      if (b && b !== 'main' && b !== 'dev' && b !== r.branch) branches.add(b)
+    }
+    for (const b of branches) { const got = settle(await list(['--head', b]), `worktree branch ${b}`); if (got) return got }
+    if (opts.search) { const got = settle(await list(['--search', `${r.subtaskId} in:title,body`]), `search ${r.subtaskId}`); if (got) return got }
+    return { ok: false, reason: tried.length ? `no merged PR proven — ${tried.join('; ')}` : 'no merged PR proven: the piece records no PR, branch or sha and no author worktree names one' }
+  } catch (e) {
+    return { ok: false, reason: `the merged PR could not be looked up (${e instanceof Error ? e.message.split('\n')[0] : String(e)})` }
+  }
+}
+
 // Only negative ancestry facts survive polls: commits and a resolved tag SHA are immutable. A new
 // first page restarts pagination (offsets may have shifted). Never cache a run's mutable verdict.
 interface ReleaseSearch { page: number; firstPage: string; checked: Map<string, boolean> }
@@ -356,26 +443,26 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
         return { ok: true, evidence: { branch: r.branch, head: remote, qaSha: r.qaSha } }
       }
       case 'delecoes': {
-        const author = authorOf(r, await f.sessions())
-        const cwd = author?.rootPath ?? author?.cwd
-        if (!cwd) return no('the repository of the delivery is not known', ['repositório'])
+        const repo = await repoOf(r, f, authorOf(r, await f.sessions()))
+        if (!repo) return no('the repository of the delivery is not known', ['repositório'])
+        const cwd = repo.cwd
         let pr = r.pr
-        if (!pr && r.branch) pr = json<{ number?: number }>(await f.gh(cwd, ['pr', 'view', r.branch, '--json', 'number']).catch(() => '{}'), {}).number
+        if (!pr && r.branch) pr = json<{ number?: number }>(await f.gh(cwd, ['pr', 'view', r.branch, ...repoArgs(repo.slug), '--json', 'number']).catch(() => '{}'), {}).number
         if (!pr) return no('no PR is known for this delivery', ['PR aberto'])
-        const files = json<Array<{ filename: string; status: string }>>(await f.gh(cwd, ['api', '--paginate', `repos/{owner}/{repo}/pulls/${pr}/files?per_page=100`]), [])
+        const files = json<Array<{ filename: string; status: string }>>(await f.gh(cwd, ['api', '--paginate', `repos/${repoPath(repo.slug)}/pulls/${pr}/files?per_page=100`]), [])
         return judgeDeletions(Array.isArray(files) ? files : [], r.allowDeletions?.paths ?? [], pr)
       }
       case 'mergeado': {
-        const author = authorOf(r, await f.sessions())
-        const cwd = author?.rootPath ?? author?.cwd
-        if (!cwd) return no('the repository of the delivery is not known', ['repositório'])
+        const repo = await repoOf(r, f, authorOf(r, await f.sessions()))
+        if (!repo) return no('the repository of the delivery is not known', ['repositório'])
+        const cwd = repo.cwd
         const ref = r.pr ? String(r.pr) : r.branch
         if (!ref) return no('no PR or branch recorded', ['PR'])
-        const view = json<{ number?: number; state?: string; headRefOid?: string; mergeCommit?: { oid?: string } | null }>(await f.gh(cwd, ['pr', 'view', ref, '--json', 'number,state,headRefOid,mergeCommit']), {})
+        const view = json<{ number?: number; state?: string; headRefOid?: string; mergeCommit?: { oid?: string } | null }>(await f.gh(cwd, ['pr', 'view', ref, ...repoArgs(repo.slug), '--json', 'number,state,headRefOid,mergeCommit']), {})
         let onMain: boolean | null = null
         const oid = view.mergeCommit?.oid
         if (view.state === 'MERGED' && oid) {
-          const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/{owner}/{repo}/compare/${oid}...main`, '--jq', '{status: .status}']).catch(() => '{}'), {})
+          const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${repoPath(repo.slug)}/compare/${oid}...main`, '--jq', '{status: .status}']).catch(() => '{}'), {})
           onMain = cmp.status === 'ahead' || cmp.status === 'identical' ? true : cmp.status ? false : null
         }
         return judgeMerged({ view, ...(r.qaSha ? { qaSha: r.qaSha } : {}), onMain })
@@ -392,7 +479,9 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
           : author?.rootPath ?? author?.cwd ?? (await f.repoCwd?.().catch(() => null)) ?? undefined
         if (!cwd) return no('the repository of the delivery is not known', ['repositório'])
         const repoPath = slug ?? '{owner}/{repo}'
-        const wanted = r.tag ?? (r.versionTarget && /^\d/.test(r.versionTarget) ? `v${r.versionTarget}` : null)
+        // A DECLARED release names its tag. A piece the flow saw MERGED (no declaration) is published by the first tag that
+        // CONTAINS its merge commit — a planned `versionTarget` is a plan, not proof that the tag carries the merge.
+        const wanted = r.tag ?? (r.versionTarget && /^\d/.test(r.versionTarget) && (r.declaredRelease || !r.mergeSha) ? `v${r.versionTarget}` : null)
         if (!r.mergeSha && !wanted) return no('no merge sha recorded', ['sha do merge'])
         const runList = ['run', 'list', ...(slug ? ['-R', slug] : []), '--workflow', 'release.yml', '--json', 'databaseId,status,conclusion,headSha,updatedAt', '--limit', '50']
         const runsRaw = json<ReleaseRun[]>(await f.gh(cwd, runList), [])
@@ -476,7 +565,7 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
             runs.push(...pageRuns)
           }
         }
-        return judgeRelease({ mergeSha: r.mergeSha, runs, ...(contained ? { contained } : {}), tag, tagSha, wanted, declared: Boolean(r.declaredRelease), pr: r.pr ?? null })
+        return judgeRelease({ mergeSha: r.mergeSha, runs, ...(contained ? { contained } : {}), tag, tagSha, wanted, declared: Boolean(r.declaredRelease || r.mergeDetected), pr: r.pr ?? null })
       }
     }
   } catch (error) {

@@ -25,6 +25,26 @@ export interface DeliveryDoc {
   preserved?: Record<string, unknown>
   /** Cadence only. Requests themselves stay in the engine's canonical pedidos document. */
   requestReminders?: Record<string, { at?: string; pendingAt?: string; leaderSessionId?: string }>
+  /**
+   * FLUXO.CICLO-COMPLETO item 7 — owner QUESTIONS to a leader, held back from the request flow (`owner-questions.ts`): never a
+   * pedido while `waiting`; `answered` once the leader's reply landed; `promoted` = it got no answer and became a request.
+   */
+  ownerQuestions?: Record<string, OwnerQuestion>
+}
+
+export interface OwnerQuestion {
+  id: string
+  sessionId: string
+  conversationId: string
+  taskId?: string
+  subtaskId?: string
+  text: string
+  at: string
+  channel: string
+  state: 'waiting' | 'answered' | 'promoted'
+  /** answered: the tail of the leader's reply, and when it landed. */
+  answer?: { at: string; note: string }
+  promotedAt?: string
 }
 
 const SAFE_ID = /^[A-Za-z0-9_.:-]{1,120}$/
@@ -53,6 +73,7 @@ export function parseDeliveryDocStrict(text: string): DeliveryDoc {
   if (!isRec(raw)) throw new Error('the document is not an object')
   const out: DeliveryDoc = { version: 1, deliveries: {} }
   if (isRec(raw.requestReminders)) out.requestReminders = raw.requestReminders as NonNullable<DeliveryDoc['requestReminders']>
+  if (isRec(raw.ownerQuestions)) out.ownerQuestions = raw.ownerQuestions as NonNullable<DeliveryDoc['ownerQuestions']>
   const d = isRec(raw.deliveries) ? raw.deliveries : {}
   const kept: Record<string, unknown> = isRec(raw.preserved) ? { ...raw.preserved } : {}
   for (const [id, r] of Object.entries(d)) {
@@ -73,7 +94,7 @@ export function serializeDeliveryDoc(doc: DeliveryDoc): string {
   const deliveries: Record<string, unknown> = { ...doc.deliveries }
   const preserved: Record<string, unknown> = {}
   for (const [id, r] of Object.entries(doc.preserved ?? {})) { if (id in deliveries) preserved[id] = r; else deliveries[id] = r }
-  return JSON.stringify({ version: 1, deliveries, ...(doc.requestReminders ? { requestReminders: doc.requestReminders } : {}), ...(Object.keys(preserved).length ? { preserved } : {}) }, null, 2) + '\n'
+  return JSON.stringify({ version: 1, deliveries, ...(doc.requestReminders ? { requestReminders: doc.requestReminders } : {}), ...(doc.ownerQuestions && Object.keys(doc.ownerQuestions).length ? { ownerQuestions: doc.ownerQuestions } : {}), ...(Object.keys(preserved).length ? { preserved } : {}) }, null, 2) + '\n'
 }
 
 export interface DeliveryStore {
