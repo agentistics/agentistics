@@ -247,6 +247,20 @@ describe('delivery service', () => {
       expect(body).not.toContain('attachments')
       expect(body.length).toBeLessThan(500)
     })
+
+    // QA 2.202.1 FINDING F3 — the "already nudged" record does not survive the NORMAL hand-off: the successor kills the
+    // predecessor minutes after taking over, and from that moment `lastAlive` is false, so the successor is nudged at
+    // once for the same pedido the predecessor was nudged about 3 minutes earlier (2 nudges in 3 min, one per leader).
+    test.failing('QA F3: the 30-minute cadence per pedido survives a completed leader switch (predecessor closed)', async () => {
+      const h = harness({}, { requests: async () => [req()] })
+      expect((await h.svc.tick()).actions).toContain('request-wake leader:p-1')
+      h.w.sessions = [...h.w.sessions, { id: 'leader-b', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1', createdAt: '2026-11-07T03:00:00Z' }]
+      h.advance(60_000)
+      await h.svc.tick()
+      h.w.sessions = h.w.sessions.map(s => (s.id === 'leader' ? { ...s, alive: false } : s)) // successor closes the old leader
+      h.advance(2 * 60_000)
+      expect((await h.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
+    })
   })
 
   test('a staged member joining a group is folded into that group once', async () => {
