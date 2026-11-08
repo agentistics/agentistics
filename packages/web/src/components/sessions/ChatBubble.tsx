@@ -1305,7 +1305,7 @@ export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
   const event = parsed?.kind === 'rename' && (props.awaiting || props.turn.pending) ? null : parsed
   if (event) return event.sender
     ? <FleetSystemEventRow event={event} lang={props.lang} at={props.turn.at} />
-    : <SystemEventRow event={event} pt={props.lang === 'pt'} sessionId={props.sessionId} defaultOpen={event.kind === 'flow'} />
+    : <SystemEventRow event={event} pt={props.lang === 'pt'} sessionId={props.sessionId} />
   const surfaceText = props.turn.role === 'user' ? surfaceTurnText(props.turn.text) : null
   if (surfaceText !== null) return <ChatBubbleInner {...props} surfaceSubmitted turn={{ ...props.turn, text: surfaceText }} />
   return <ChatBubbleInner {...props} />

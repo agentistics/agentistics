@@ -243,10 +243,12 @@ test('surface turns render the person bubble and mic chip without the transport 
   expect(html).not.toContain('aria-expanded="false"')
 })
 
-test('a flow nudge renders as a system card with the flow icon, name and text — never a user bubble', () => {
+test('a flow nudge renders as a COLLAPSED system card with the flow icon and name — never a user bubble', () => {
   const html = renderToStaticMarkup(<ChatBubble turn={turn('[from flow trabalho-sem-commit · nudge]\ncommit what you have xyzzy-nudge')} lang="en" harness="claude" sessionId="s1" />)
   expect(html).toContain('Flow trabalho-sem-commit · nudge')
-  expect(html).toContain('xyzzy-nudge')
+  // Closed like every other system notice (owner 07/11): the body only shows once the row is opened.
+  expect(html).toContain('aria-expanded="false"')
+  expect(html).not.toContain('xyzzy-nudge')
   expect(html).toContain('lucide-workflow')
   expect(html).not.toContain('lucide-user')
   const wait = parseSystemEvent('[from flow wait · nudge]\nw-1 generation 1')
