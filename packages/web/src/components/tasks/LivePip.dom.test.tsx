@@ -62,18 +62,17 @@ test('the external window outlives the component that opened it (the popover/rou
   delete (window as unknown as { documentPictureInPicture?: unknown }).documentPictureInPicture
 })
 
-test('Histórico is closed on load, opens on click, groups by day; Publicado explains the 24 h rule', async () => {
+test('there is no Histórico column: Publicado keeps the last 24 h and a longer period brings the older piece into the same column', async () => {
+  localStorage.clear(); localStorage.setItem('agentistics.live.view.v2', JSON.stringify({ tab: 'all', period: '7d' }))
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, props))) })
   await act(async () => { await new Promise(r => setTimeout(r, 20)) })
-  const col = document.querySelector('[data-live-column="history"]') as HTMLElement
-  expect(col.getAttribute('data-collapsed')).toBe('1')
-  await act(async () => (document.querySelector('[data-live-column="published"] [data-live-colhead]') as HTMLElement).click())
-  expect(document.querySelector('[data-live-column="published"] [data-live-col-note]')!.textContent).toContain('24 h')
-  await act(async () => (col.querySelector('[data-live-colhead]') as HTMLElement).click())
+  expect(document.querySelector('[data-live-column="history"]')).toBeNull()
+  const col = document.querySelector('[data-live-column="published"]') as HTMLElement
   expect(col.getAttribute('data-collapsed')).toBe('0')
+  expect(col.textContent).toContain('Fresh piece')
   expect(col.textContent).toContain('Old piece')
-  expect(col.querySelector('[data-live-group-head]')!.textContent).toBe('ontem')
+  localStorage.clear()
 })
 
 test('a card offers "abrir sessão" for its live session, and clicking it does not open the card', async () => {

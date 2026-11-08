@@ -7,7 +7,10 @@
  * simply not live — it is never invented back from the book.
  */
 
-import { LIVE_FLOW_DEFAULTS, LIVE_SORT_DEFAULT, liveComparator, stageVisible, type LiveSortId } from '@agentistics/core'
+import {
+  LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, LIVE_TAB_DEFAULT, liveComparator, liveTabCounts, liveTabMatches,
+  type LivePeriod, type LiveSortId, type LiveTab, type LiveTabbable,
+} from '@agentistics/core'
 import type { FleetRow } from '../../lib/fleet'
 import { modelDisplay } from '../../lib/modelDisplay'
 
@@ -45,6 +48,8 @@ export interface LiveDeliveryRecord {
   stageEta?: LiveStageEta; publishEta?: LivePublishEta; block?: LiveBlock | null
   /** The Agentask priority (urgent | high | medium | low); a subtask inherits its task's. Absent from an older server = low. */
   priority?: string
+  /** A legacy review with nobody on it for over 72 h: drawn with an "antiga" tag, in "Tudo" only. */
+  old?: boolean
   ci?: LiveCiSignal | null; step?: number | null
   /** Where `step` came from: stated by the worker/flow (`reported`) or read off observed facts (`signals`, named by `stepSignal`). */
   stepSource?: 'reported' | 'signals' | null; stepSignal?: string | null
@@ -74,8 +79,10 @@ export interface LeaderRecord {
 }
 export interface LiveReply {
   generatedAt: string; deliveries: LiveDeliveryRecord[]; leaders?: LeaderRecord[]; samples: number
-  /** Published more than 24 h ago (the Histórico column); absent from an older server. */
+  /** Published more than 24 h ago (inside Publicado's longer periods); absent from an older server. */
   history?: LiveDeliveryRecord[]
+  /** Legacy reviews nobody is on, as pieces marked `old`: only the "Tudo" tab draws them. */
+  oldReviews?: LiveDeliveryRecord[]
   hidden?: LiveHidden[]; archived?: LiveHidden[]; archivedTotal?: number; sessionTasks?: Record<string, string>; runtime?: Record<string, RuntimeFacts>
 }
 
@@ -129,20 +136,31 @@ export function joinLive(
 export interface LiveFilters {
   /** Tasks to show; empty = every task. Several at once (the Live task filter is multi-select). */
   taskIds: readonly string[]
-  /** "apenas ativas": the cards of the columns AFTER the queue (Bloqueado … Publicado). */
-  onlyActive: boolean
-  /** "exibir itens na fila": the cards of the Na fila column. Absent = on (an older caller). */
-  showQueue?: boolean
+  /** The tab (Em andamento · Na fila · Publicado · Tudo) and Publicado's period — the rules live in core (`liveBoard.ts`). */
+  tab: LiveTab
+  period: LivePeriod
+  nowMs: number
 }
 
 /**
- * The Live view's defaults: every task, every step, BOTH switches on (everything in the flow is shown),
+ * The Live view's defaults: every task, every step, the "Em andamento" tab, Publicado over the last 24 h,
  * highest priority first. The filter rules themselves live in `@agentistics/core` (`liveBoard.ts`) so the MCP
  * tool answers by the very same ones.
  */
 export type StageFilter = 'all' | LiveStage
-export const LIVE_DEFAULTS: { taskIds: readonly string[]; onlyActive: boolean; showQueue: boolean; stage: StageFilter; sort: LiveSortId } =
-  { taskIds: [], ...LIVE_FLOW_DEFAULTS, stage: 'all', sort: LIVE_SORT_DEFAULT }
+export const LIVE_DEFAULTS: { taskIds: readonly string[]; tab: LiveTab; period: LivePeriod; stage: StageFilter; sort: LiveSortId } =
+  { taskIds: [], tab: LIVE_TAB_DEFAULT, period: LIVE_PERIOD_DEFAULT, stage: 'all', sort: LIVE_SORT_DEFAULT }
+
+/** The card as the tab rules read it. */
+const tabbable = (c: LiveCard): LiveTabbable => ({ stage: c.d.stage, deliveredAtMs: c.d.deliveredAtMs, old: c.d.old === true, liveState: c.liveState })
+
+/** PURE: the cards of one task filter (empty = every task) — what the tab counts are counted over. */
+export const ofTasks = (cards: readonly LiveCard[], taskIds: readonly string[]): LiveCard[] =>
+  taskIds.length === 0 ? [...cards] : cards.filter(c => taskIds.includes(c.d.taskId))
+
+/** PURE: the number each tab prints — from the SAME cards the columns draw, through core's one rule. */
+export const tabCounts = (cards: readonly LiveCard[], f: Pick<LiveFilters, 'taskIds' | 'period' | 'nowMs'>): Record<LiveTab, number> =>
+  liveTabCounts(ofTasks(cards, f.taskIds).map(tabbable), f.period, f.nowMs)
 
 /** A piece sitting in the queue column is waiting for a slot: it is drawn dimmed and never gets an ETA verdict. */
 export const isQueued = (c: LiveCard): boolean => c.d.stage === 'queue'
@@ -187,9 +205,7 @@ export function cardPills(
 }
 
 export function filterCards(cards: readonly LiveCard[], f: LiveFilters): LiveCard[] {
-  return cards.filter(c =>
-    (f.taskIds.length === 0 || f.taskIds.includes(c.d.taskId))
-    && stageVisible(c.d.stage, { onlyActive: f.onlyActive, showQueue: f.showQueue ?? true }))
+  return ofTasks(cards, f.taskIds).filter(c => liveTabMatches(f.tab, tabbable(c), f.period, f.nowMs))
 }
 
 export function byStage(cards: readonly LiveCard[]): Record<LiveStage, LiveCard[]> {
@@ -209,7 +225,7 @@ export function orderColumns(cols: Record<LiveStage, LiveCard[]>, sort: LiveSort
 export interface LiveSummary { deliveries: number; agentsWorking: number; nextEtaMs: number | null }
 
 export function summarize(cards: readonly LiveCard[], nowMs: number): LiveSummary {
-  const active = cards.filter(c => c.d.stage !== 'published')
+  const active = cards.filter(c => c.d.stage !== 'published' && !c.d.old)
   const etas = active.flatMap(c => c.d.eta.kind === 'estimate' && c.d.eta.atMs >= nowMs ? [c.d.eta.atMs] : [])
   return {
     deliveries: active.length,

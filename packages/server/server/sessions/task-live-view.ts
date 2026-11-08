@@ -9,7 +9,10 @@
  * a decision). A worker belongs to a leader through the `parentSessionId` the registry recorded.
  */
 
-import { humanizeAction, liveComparator, LIVE_SORT_DEFAULT, plainLeaderName, stageVisible, type LiveLang, type LiveSortId } from '@agentistics/core'
+import {
+  humanizeAction, liveComparator, LIVE_SORT_DEFAULT, liveTabCounts, liveTabMatches, plainLeaderName,
+  type LiveLang, type LivePeriod, type LiveSortId, type LiveTab,
+} from '@agentistics/core'
 import { LIVE_STAGES, type LiveDelivery, type LiveReply, type LiveStage } from './task-live'
 
 /** The slice of a fleet row this module reads (a `ControlSession` satisfies it). */
@@ -105,8 +108,11 @@ export interface LiveView {
     nextEta: { atMs: number; title: string; confidence: string } | null
   }
   deliveries: LiveDeliveryView[]
-  /** The Histórico column: published more than 24 h ago (newest first), filtered by `task` like the screen. */
-  history: LiveDeliveryView[]
+  /**
+   * The tab and period this answer is for, and the count of EVERY tab under the same task filter and period —
+   * the very numbers the screen's tabs print (`liveTabCounts`, `@agentistics/core`). `deliveries` is that tab.
+   */
+  view: { tab: LiveTab; period: LivePeriod; counts: Record<LiveTab, number> }
   leaders: LeaderView[]
 }
 
@@ -135,10 +141,11 @@ export function workerWord(state: string, stage: LiveStage | null): WorkerWord {
 }
 
 /**
- * The screen's own switches, answered by the same rules (`@agentistics/core` `liveBoard.ts`): `onlyActive` and
- * `showQueue` default to ON (everything shown); `sort` orders each stage's cards (default: highest priority first).
+ * The screen's own choices, answered by the same rules (`@agentistics/core` `liveBoard.ts`): the `tab`
+ * (active | queue | published | all — an API caller that names none gets `all`, the screen opens on `active`),
+ * the Publicado `period` (24h default) and `sort` (default: highest priority first).
  */
-export interface LiveFilters { task?: string; stage?: LiveStage; stalledOnly?: boolean; onlyActive?: boolean; showQueue?: boolean; sort?: LiveSortId }
+export interface LiveFilters { task?: string; stage?: LiveStage; stalledOnly?: boolean; tab?: LiveTab; period?: LivePeriod; sort?: LiveSortId }
 
 export function describeLive(o: {
   reply: LiveReply
@@ -154,7 +161,9 @@ export function describeLive(o: {
   const byId = new Map(o.rows.map(r => [r.id, r]))
   const titleOf = (id: string) => { const t = byId.get(id)?.title; return t ? plainLeaderName(t) : undefined }
   const f = o.filters ?? {}
-  const all: LiveDeliveryView[] = o.reply.deliveries.map(d => {
+  // History (published beyond 24 h) and the old legacy reviews carry no live agents by definition; they ride the
+  // same pipe as every other piece, and the tab + period decide which of them show.
+  const all: LiveDeliveryView[] = [...o.reply.deliveries, ...(o.reply.history ?? []), ...(o.reply.oldReviews ?? [])].map(d => {
     const agents: LiveAgentView[] = d.sessionIds.flatMap(id => {
       const r = byId.get(id)
       return r && (ALIVE.has(r.state) || DOWN.has(r.state))
@@ -175,23 +184,19 @@ export function describeLive(o: {
   // A piece whose only sessions are LEADERS is the leader's own filing, not delivery work: the leader
   // has its card in the band, and a column card would show the task's age as "total".
   const leaderOnly = (d: LiveDeliveryView) => d.sessionIds.length > 0 && d.sessionIds.every(id => o.leaderIds.has(id))
-  const flow = { onlyActive: f.onlyActive ?? true, showQueue: f.showQueue ?? true }
+  const tab: LiveTab = f.tab ?? 'all'
+  const period: LivePeriod = f.period ?? '24h'
   const cmp = liveComparator(f.sort ?? LIVE_SORT_DEFAULT)
-  const deliveries = all.filter(d => !leaderOnly(d)).filter(d =>
-    (!needle || d.taskId === f.task || d.taskTitle.toLowerCase().includes(needle))
-    && (!f.stage || d.stage === f.stage)
-    && stageVisible(d.stage, flow)
-    && (!f.stalledOnly || d.stalled))
+  // The tab counts are asked of the task-filtered set only (as the screen's are): a stage / stalled filter narrows the
+  // list, not the tabs.
+  const ofTask = all.filter(d => !leaderOnly(d)).filter(d => !needle || d.taskId === f.task || d.taskTitle.toLowerCase().includes(needle))
+  const counts = liveTabCounts(ofTask, period, o.nowMs)
+  const deliveries = ofTask
+    .filter(d => liveTabMatches(tab, d, period, o.nowMs) && (!f.stage || d.stage === f.stage) && (!f.stalledOnly || d.stalled))
     // Stage by stage, as the screen's columns are; within a stage the chosen order.
     .sort((a, b) => LIVE_STAGES.indexOf(a.stage) - LIVE_STAGES.indexOf(b.stage) || cmp(a, b))
 
-  // Old publications carry no live agents by definition; they honour the same task filter as the screen.
-  const history: LiveDeliveryView[] = (o.reply.history ?? [])
-    .filter(d => !needle || d.taskId === f.task || d.taskTitle.toLowerCase().includes(needle))
-    .filter(d => !f.stage || d.stage === f.stage)
-    .map(d => ({ ...d, agents: [], liveState: 'none' as LiveState, stalled: false }))
-
-  const active = deliveries.filter(d => d.stage !== 'published')
+  const active = deliveries.filter(d => d.stage !== 'published' && !d.old)
   const etas = active.flatMap(d => d.eta.kind === 'estimate' && d.eta.atMs >= o.nowMs
     ? [{ atMs: d.eta.atMs, title: d.title, confidence: d.eta.confidence }] : [])
   etas.sort((a, b) => a.atMs - b.atMs)
@@ -229,7 +234,7 @@ export function describeLive(o: {
       stalled: active.filter(d => d.stalled).length,
       nextEta: etas[0] ?? null,
     },
-    deliveries, history, leaders,
+    deliveries, view: { tab, period, counts }, leaders,
   }
 }
 

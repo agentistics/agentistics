@@ -35,9 +35,9 @@ export const MIN_SAMPLES = 3
 /** A published piece stays on the line this long. */
 export const PUBLISHED_WINDOW_MS = 24 * 3600_000
 /** The Histórico column lists published pieces older than the Publicado window, up to this many days back… */
-export const HISTORY_DAYS = 30
+export const HISTORY_DAYS = 365
 /** …and at most this many pieces (the newest). */
-export const HISTORY_CAP = 150
+export const HISTORY_CAP = 400
 
 export type LiveEta =
   | {
@@ -105,6 +105,8 @@ export interface LiveDelivery {
   stageEta: LiveStageEta
   publishEta: LivePublishEta
   block: LiveBlock | null
+  /** A legacy review with no live session for over 72 h: shown (marked "antiga") only in "Tudo". */
+  old?: boolean
   /** Only in the CI stage, and only when the flow stated it. */
   ci: LiveCiSignal | null
   /** The 1-based step the piece reported inside its CURRENT stage (a `step` event); null = nobody said, show nothing. */
@@ -168,6 +170,8 @@ export interface LiveReply {
   deliveries: LiveDelivery[]
   /** Published more than 24 h ago (≤ HISTORY_DAYS days, ≤ HISTORY_CAP pieces), newest first — the Histórico column. */
   history?: LiveDelivery[]
+  /** Legacy reviews nobody is on (the `archived` list, as full pieces marked `old`): drawn only by the "Tudo" tab. */
+  oldReviews?: LiveDelivery[]
   /** Pieces left off the line and why (bounded, NEWEST first — the ones that just left are the ones somebody asks about). */
   hidden: LiveHidden[]
   /**
@@ -656,6 +660,7 @@ export function buildLive(o: {
 
   const deliveries: LiveDelivery[] = []
   const history: LiveDelivery[] = []
+  const oldReviews: LiveDelivery[] = []
   const hidden: LiveHidden[] = []
   const archived: LiveHidden[] = []
   const entry = (p: Piece, stage: LiveStage | null, reason: HiddenReason): LiveHidden =>
@@ -669,6 +674,7 @@ export function buildLive(o: {
     let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfStatus(p.status, o.statusLabel?.(p.status))
     if (stored?.dequeued && stage === 'queue') { hide(p, stage, 'queue-idle'); continue }
     const liveSessions = p.sessions.filter(s => s.live)
+    let isOld = false
     if (!rec && stage === 'running' && liveSessions.some(s => s.label && QA_NAME.test(s.label))) stage = 'qa'
     if (stage === null) stage = liveSessions.length > 0 ? 'running' : null
     // LEGACY in-review work (no delivery record): published once a release tag contains the commit it names;
@@ -676,7 +682,7 @@ export function buildLive(o: {
     if (!rec && stage === 'leader' && p.status === 'in_review') {
       const subj = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
       if (legacyShaGroups(p, eventsBySubject.get(subj)).some(g => g.every(sha => o.publishedShas?.has(sha)))) stage = 'published'
-      else if (liveSessions.length === 0 && o.nowMs - (ms(p.updatedAt) ?? o.nowMs) > LEGACY_REVIEW_MS) { archived.push(entry(p, 'leader', 'legacy-review-old')); continue }
+      else if (liveSessions.length === 0 && o.nowMs - (ms(p.updatedAt) ?? o.nowMs) > LEGACY_REVIEW_MS) { archived.push(entry(p, 'leader', 'legacy-review-old')); isOld = true }
     }
     // Only what could have been a card a moment ago is worth a departure line: an abandoned/backlog piece,
     // or a todo nobody staged, was never on the board and fills the reply with nothing anyone is missing.
@@ -728,7 +734,7 @@ export function buildLive(o: {
       return mergeStep(reported, derived)
     })()
     const { stageEta, publishEta } = estimateStages({ stage, origin: originStage, sinceMs: stageSinceMs, nowMs: o.nowMs, typicals, totalEta: eta })
-    ;(oldPublished ? history : deliveries).push({
+    ;(isOld ? oldReviews : oldPublished ? history : deliveries).push({
       key: subject,
       taskId: p.task.id, taskTitle: p.task.title,
       subtaskId: p.sub?.id ?? null,
@@ -752,6 +758,7 @@ export function buildLive(o: {
       } : null,
       blockedReason: p.blockedReason,
       priority: migratePriority(p.task.priority) as LiveDelivery['priority'],
+      ...(isOld ? { old: true } : {}),
       deliveredAtMs: stage === 'published' ? deliveredAtMs : null,
       staged: p.sub?.stagedSession ? {
         harness: p.sub.stagedSession.harness ?? null, model: p.sub.stagedSession.model ?? null,
@@ -769,6 +776,7 @@ export function buildLive(o: {
   return {
     generatedAt: new Date(o.nowMs).toISOString(), deliveries,
     history: history.sort((a, b) => (b.deliveredAtMs ?? 0) - (a.deliveredAtMs ?? 0)).slice(0, HISTORY_CAP),
+    oldReviews: oldReviews.sort((a, b) => (b.stageSinceMs ?? 0) - (a.stageSinceMs ?? 0)).slice(0, HISTORY_CAP),
     samples: samples.length, sessionTasks,
     hidden: hidden.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, HIDDEN_CAP),
     archived: archived.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, ARCHIVED_CAP), archivedTotal: archived.length,

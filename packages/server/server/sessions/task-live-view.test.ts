@@ -31,13 +31,31 @@ describe('describeLive', () => {
     expect(run({ stage: 'qa' })).toEqual(['1'])
     expect(run({ stalledOnly: true })).toEqual(['3'])
   })
-  test('the screen\'s switches (same rules as the web): "apenas ativas" is the stages after the queue, "exibir fila" the queue', () => {
-    const ds = [d({ key: 'q', stage: 'queue' }), d({ key: 'b', stage: 'blocked' }), d({ key: 'r', stage: 'running' }), d({ key: 'p', stage: 'published', deliveredAtMs: 1 })]
-    const run = (filters: object) => describeLive({ reply: reply(ds), rows: [], leaderIds: new Set(), nowMs: NOW, filters }).deliveries.map(x => x.key)
-    expect(run({})).toEqual(['q', 'b', 'r', 'p'])
-    expect(run({ onlyActive: true, showQueue: false })).toEqual(['b', 'r', 'p'])
-    expect(run({ onlyActive: false, showQueue: true })).toEqual(['q'])
-    expect(run({ onlyActive: false, showQueue: false })).toEqual([])
+  test('the screen\'s tabs (same rules as the web): Em andamento = somebody on it, Na fila, Publicado in its period, Tudo', () => {
+    const H = 3600_000, NOWMS = 400 * H
+    const ds = [
+      d({ key: 'q', stage: 'queue' }), d({ key: 'b', stage: 'blocked' }), d({ key: 'r', stage: 'running', sessionIds: ['w'] }),
+      d({ key: 'p', stage: 'published', deliveredAtMs: NOWMS - 2 * H }), d({ key: 'p3', stage: 'published', deliveredAtMs: NOWMS - 72 * H }),
+    ]
+    const hist = [d({ key: 'p40', stage: 'published', deliveredAtMs: NOWMS - 40 * 24 * H })]
+    const old = [d({ key: 'o', stage: 'leader', old: true })]
+    const view = (filters: object) => describeLive({
+      reply: { ...reply(ds), history: hist, oldReviews: old }, rows: [row('w', 'working')], leaderIds: new Set(), nowMs: NOWMS, filters,
+    })
+    const keys = (filters: object) => view(filters).deliveries.map(x => x.key)
+    expect(keys({ tab: 'active' })).toEqual(['r'])
+    expect(keys({ tab: 'queue' })).toEqual(['q'])
+    expect(keys({ tab: 'published' })).toEqual(['p'])
+    expect(keys({ tab: 'published', period: '7d' })).toEqual(['p', 'p3'])
+    expect(keys({ tab: 'published', period: 'all' })).toEqual(['p', 'p3', 'p40'])
+    expect(keys({ tab: 'all', period: '7d' })).toEqual(['q', 'b', 'r', 'o', 'p', 'p3'])
+    expect(keys({})).toEqual(keys({ tab: 'all' }))
+    // The counts are the screen's tab numbers, and each equals the list that tab returns.
+    const v = view({ tab: 'all', period: '7d' }).view
+    expect(v.counts).toEqual({ active: 1, queue: 1, published: 2, all: 6 })
+    for (const tab of ['active', 'queue', 'published', 'all'] as const) expect(view({ tab, period: '7d' }).deliveries).toHaveLength(v.counts[tab])
+    // The old review never counts as active work.
+    expect(view({ tab: 'all' }).summary.deliveries).toBe(3)
   })
   test('each stage is listed highest priority first (ties: longest in the stage); `sort` changes it', () => {
     const ds = [

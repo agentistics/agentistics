@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { act, createElement } from 'react'
 import type { Root } from 'react-dom/client'
@@ -30,6 +30,8 @@ beforeAll(async () => {
   Router = (await import('react-router-dom')).MemoryRouter
   Live = (await import('./LiveDelivery')).LiveDeliveryView
 })
+// Several fixtures here are agent-less pieces; "Tudo" draws every piece in its column. The tab tests clear it and use the default.
+beforeEach(() => { localStorage.clear(); localStorage.setItem('agentistics.live.view.v2', JSON.stringify({ tab: 'all' })) })
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = '' })
 afterAll(async () => GlobalRegistrator.unregister())
 
@@ -48,18 +50,17 @@ test('draws the nine stages, the cards in them, the summary and an honest "no es
   expect(document.querySelector('[data-live-card="t/a"]')!.getAttribute('data-alert')).toBeNull()
 })
 
-test('"Apenas ativas" is ON by default and keeps the flow cards; turning it off hides them (and it is remembered)', async () => {
+test('opens on "Em andamento" (agents working or waiting, 2 here); "Na fila" is empty and the choice is remembered', async () => {
   localStorage.clear()
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, props('pt')))) })
   await act(async () => { await new Promise(r => setTimeout(r, 20)) })
-  const toggle = document.querySelector('[data-live-only-active]') as HTMLElement
-  expect(toggle.textContent).toContain('Apenas ativas')
-  expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  const tabs = () => Array.from(document.querySelectorAll('[data-live-tabs] [role="tab"]'))
+  expect(tabs().map(t => [t.textContent, t.getAttribute('aria-selected')])).toEqual([['Em andamento2', 'true'], ['Na fila0', 'false'], ['Publicado0', 'false'], ['Tudo2', 'false']])
   expect(document.querySelectorAll('[data-live-card]').length).toBe(2)
-  await act(async () => toggle.click())
+  await act(async () => (tabs()[1] as HTMLElement).click())
   expect(document.querySelectorAll('[data-live-card]').length).toBe(0)
-  expect(JSON.parse(localStorage.getItem('agentistics.live.view.v1')!)).toMatchObject({ onlyActive: false, showQueue: true })
+  expect(JSON.parse(localStorage.getItem('agentistics.live.view.v2')!)).toMatchObject({ tab: 'queue', period: '24h' })
   localStorage.clear()
 })
 
@@ -116,20 +117,19 @@ const withPublished = {
   ],
 }
 
-test('columns: today\'s layout, Publicado collapsed even with items; the header toggles and the choice is remembered', async () => {
-  localStorage.clear()
+test('columns: with cards = open, empty = collapsed (no zero shown); the header toggles and the choice is remembered', async () => {
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: withPublished as never }))) })
   const col = (s: string) => document.querySelector(`[data-live-column="${s}"]`) as HTMLElement
   expect(col('running').getAttribute('data-collapsed')).toBe('0')
   expect(col('merge').getAttribute('data-collapsed')).toBe('1') // empty: the thin strip it always was
-  expect(col('published').getAttribute('data-collapsed')).toBe('1') // items, but collapsed by default
-  expect(col('published').textContent).toContain('1')
+  expect(col('merge').querySelector('[data-live-colcount]')).toBeNull()
+  expect(col('published').getAttribute('data-collapsed')).toBe('0') // it has a card in its period: open
   await act(async () => (col('published').querySelector('[data-live-colhead]') as HTMLElement).click())
-  expect(col('published').getAttribute('data-collapsed')).toBe('0')
+  expect(col('published').getAttribute('data-collapsed')).toBe('1')
   await act(async () => (col('running').querySelector('[data-live-colhead]') as HTMLElement).click())
   expect(col('running').getAttribute('data-collapsed')).toBe('1')
-  expect(JSON.parse(localStorage.getItem('agentistics.live.collapsed.v1')!)).toEqual({ published: false, running: true })
+  expect(JSON.parse(localStorage.getItem('agentistics.live.collapsed.v1')!)).toEqual({ published: true, running: true })
 })
 
 test('Publicado: every card is an accordion row; clicking opens the full card in place', async () => {
@@ -316,19 +316,18 @@ test('MED 7: the last action is said in the UI language, not as `on subtask "<ti
   expect(document.querySelector('[data-live-last]')!.textContent).toBe('commented on the subtask')
 })
 
-test('HIGH 3: old legacy reviews are not 246 cards — they are one counted, listed, explained button; nothing is silent', async () => {
-  const archived = Array.from({ length: 3 }, (_, i) => ({ key: `t/o${i}`, taskId: 't', title: `Old review ${i}`, stage: 'leader', reason: 'legacy-review-old', atMs: 1 }))
-  const r = { ...reply, deliveries: [], archived, archivedTotal: 246 }
+test('old legacy reviews are no separate button: they sit in "Tudo" (counted), marked old, and are not "In progress"', async () => {
+  localStorage.clear()
+  const old = Array.from({ length: 3 }, (_, i) => ({ ...reply.deliveries[0]!, key: `t/o${i}`, subtaskId: `o${i}`, title: `Old review ${i}`, stage: 'leader', sessionIds: [], old: true }))
+  const r = { ...reply, deliveries: [], oldReviews: old }
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: r as never }))) })
-  const btn = document.querySelector('[data-live-archived-toggle]') as HTMLElement
-  expect(btn.textContent).toBe('Older reviews · 246')
-  expect(document.querySelector('[data-live-archived-list]')).toBeNull()
-  await act(async () => btn.click())
-  const list = document.querySelector('[data-live-archived-list]')!
-  expect(list.textContent).toContain('over 72 h')
-  expect(list.querySelectorAll('[data-live-archived]').length).toBe(3)
-  expect(list.textContent).toContain('and 243 more')
+  expect(document.querySelector('[data-live-archived-toggle]')).toBeNull()
+  const tabs = Array.from(document.querySelectorAll('[data-live-tabs] [role="tab"]')).map(t => t.textContent)
+  expect(tabs).toEqual(['In progress0', 'Queued0', 'Published0', 'All3'])
+  await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
+  expect(document.querySelectorAll('[data-live-column="leader"] [data-live-old]').length).toBe(3)
+  localStorage.clear()
 })
 
 test('LOW 11: on a phone the Líderes pill, its rows and the filter chip\'s remove control are 44 px targets', async () => {

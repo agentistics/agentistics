@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test'
-import { dayLabel, groupHistory, HISTORY_MAX_GROUPS } from './liveHistoryModel'
 import { sessionLinks } from './liveSessionLinks'
 import { joinLive, type LeaderRecord, type LiveDeliveryRecord } from './liveDeliveryModel'
 import type { FleetRow } from '../../lib/fleet'
@@ -13,27 +12,6 @@ const rec = (over: Partial<LiveDeliveryRecord> = {}): LiveDeliveryRecord => ({
 })
 const row = (id: string, title = id): FleetRow => ({
   id, title, harness: 'claude', cwd: '/x', project: 'p', state: 'working', stateLabel: 'working', actionable: false, attachCommand: '', verbs: [],
-})
-
-describe('Histórico — grouped by day, newest first, bounded', () => {
-  test('groups pieces of one day together, newest day first', () => {
-    const cards = joinLive([
-      rec({ key: 'a', deliveredAtMs: NOW - 30 * H }), rec({ key: 'b', deliveredAtMs: NOW - 31 * H }), rec({ key: 'c', deliveredAtMs: NOW - 5 * D }),
-    ], [])
-    const g = groupHistory(cards, NOW, true)
-    expect(g.map(x => x.cards.map(c => c.d.key))).toEqual([['a', 'b'], ['c']])
-    expect(g[0]!.label).toBe('ontem')
-  })
-  test('keeps at most ten days and ignores a piece with no publication time', () => {
-    const cards = joinLive([...Array.from({ length: 14 }, (_, i) => rec({ key: `k${i}`, deliveredAtMs: NOW - (i + 2) * D })), rec({ key: 'none' })], [])
-    const g = groupHistory(cards, NOW, false)
-    expect(g).toHaveLength(HISTORY_MAX_GROUPS)
-    expect(g.flatMap(x => x.cards).some(c => c.d.key === 'none')).toBe(false)
-  })
-  test('day labels', () => {
-    expect(dayLabel(NOW - 2 * H, NOW, false)).toBe('today')
-    expect(dayLabel(NOW - 3 * D, NOW, true)).toBe('04/11')
-  })
 })
 
 describe('abrir sessão — author, QA and leader links', () => {

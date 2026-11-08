@@ -23,7 +23,7 @@ const reducedMotion = (): boolean => { try { return window.matchMedia('(prefers-
 
 export interface LiveColumnWords { empty: string; collapse: string; expand: string; searchPlaceholder: string; noMatch: string; clear: string }
 
-export function LiveColumn({ stage, pt, cards, collapsed, words, query, onQuery, onToggle, render, override, note, groupHeading }: {
+export function LiveColumn({ stage, pt, cards, collapsed, words, query, onQuery, onToggle, render, override, note, groupHeading, headerExtra, emptyText }: {
   stage: LiveStage; pt: boolean; cards: readonly LiveCard[]; collapsed: boolean; words: LiveColumnWords
   query: string; onQuery: (q: string) => void; onToggle: () => void
   render: (c: LiveCard) => React.ReactNode
@@ -33,6 +33,10 @@ export function LiveColumn({ stage, pt, cards, collapsed, words, query, onQuery,
   note?: string
   /** A heading drawn above a card when it opens a new group (history: the day). */
   groupHeading?: (c: LiveCard, prev: LiveCard | undefined) => string | null
+  /** Drawn in the header where the count goes (Publicado: its period picker). Stops propagation itself. */
+  headerExtra?: React.ReactNode
+  /** What an OPEN column with no card says (default: `words.empty`). */
+  emptyText?: string
 }) {
   const label = override?.label ?? STAGE_LABEL[stage][pt ? 'pt' : 'en']
   const color = override?.color ?? STAGE_LABEL[stage].color
@@ -99,7 +103,9 @@ export function LiveColumn({ stage, pt, cards, collapsed, words, query, onQuery,
       >
         <span style={{ fontWeight: 700, fontSize: 13, ...(collapsed ? { writingMode: 'vertical-rl', whiteSpace: 'nowrap' } : {}) }}>{label}</span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ ...microLabel, fontSize: 11 }}>{query.trim() ? `${visible.length}/${cards.length}` : cards.length}</span>
+          {/* No column shows a zero for nothing: an empty column is its name alone. */}
+          {headerExtra && !collapsed ? headerExtra
+            : cards.length > 0 && <span data-live-colcount style={{ ...microLabel, fontSize: 11 }}>{query.trim() ? `${visible.length}/${cards.length}` : cards.length}</span>}
           {!collapsed && <span aria-hidden data-live-colchev style={{ ...microLabel, fontSize: 13, lineHeight: 1 }}>‹</span>}
         </span>
       </header>
@@ -134,7 +140,7 @@ export function LiveColumn({ stage, pt, cards, collapsed, words, query, onQuery,
               </React.Fragment>
             )
           })}
-          {cards.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>{words.empty}</span>}
+          {cards.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>{emptyText ?? words.empty}</span>}
           {cards.length > 0 && visible.length === 0 && (
             <span data-live-col-nomatch style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>
               {words.noMatch} <button type="button" onClick={() => onQuery('')} style={{ background: 'none', border: 0, padding: 0, color: 'var(--anthropic-orange-light)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5 }}>{words.clear}</button>

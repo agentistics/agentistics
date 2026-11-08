@@ -19,8 +19,8 @@ test('a click on the popover surface goes; on a card or control it does not', ()
   expect(popoverClickGoes(t(true))).toBe(false)
 })
 
-test('Live opens with both switches ON, all tasks, all steps, highest priority first', () => {
-  expect(LIVE_DEFAULTS).toEqual({ taskIds: [], onlyActive: true, showQueue: true, stage: 'all', sort: 'priority' })
+test('Live opens on "Em andamento", all tasks, all steps, Publicado over 24 h, highest priority first', () => {
+  expect(LIVE_DEFAULTS).toEqual({ taskIds: [], tab: 'active', period: '24h', stage: 'all', sort: 'priority' })
 })
 
 test('queued cards are recognised and numbered oldest first', () => {
