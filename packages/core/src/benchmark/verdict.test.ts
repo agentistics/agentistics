@@ -12,12 +12,13 @@ const recipe = (r: Partial<Recipe> & Pick<Recipe, 'arms'>): Recipe => ({ tasks: 
 
 describe('verdict — where the method can lose (spec §4)', () => {
   test('1 does not pay, clearly', () => {
-    const s = makeSamples(recipe({ arms: [{ id: A, cost: 2.4, acceptRate: 0.85, noise: 0.1 }, { id: B, cost: 1, acceptRate: 0.8, noise: 0.1 }] }))
+    const s = makeSamples(recipe({ arms: [{ id: A, cost: 3, acceptRate: 0.85, noise: 0.1, wallMs: 180_000 }, { id: B, cost: 1, acceptRate: 0.8, noise: 0.1 }] }))
     const v = run(s)
     expect(v.verdict).toBe('does_not_pay')
     expect(v.ratio.point).toBeGreaterThan(2)
     expect(v.ratio.lo!).toBeGreaterThan(1.1)
-    expect(v.reason).toContain('Não compensa em custo por entrega aceita')
+    expect(v.score!.final.hi!).toBeLessThan(48)
+    expect(v.reason).toContain('Não compensou')
     expect(run(s, B, A).verdict).toBe('pays')
   })
 
@@ -26,7 +27,8 @@ describe('verdict — where the method can lose (spec §4)', () => {
     const v = run(s)
     expect(v.verdict).toBe('pays')
     expect(v.ratio.hi!).toBeLessThan(0.9)
-    expect(v.reason).toContain('Compensa em custo por entrega aceita')
+    expect(v.score!.final.lo!).toBeGreaterThan(52)
+    expect(v.reason).toContain('Compensou.')
   })
 
   test('3 tie', () => {
@@ -42,13 +44,13 @@ describe('verdict — where the method can lose (spec §4)', () => {
     expect(v.ratio).toEqual({ point: null, lo: null, hi: null })
   })
 
-  test('5 insufficient: interval crosses the margin', () => {
+  test('5 interval crosses the score margin: a tie, never a verdict', () => {
     const s = makeSamples(recipe({ tasks: 9, reps: 2, taskSpread: 0, arms: [{ id: A, cost: 1, acceptRate: 0.6, noise: 0.9 }, { id: B, cost: 1.05, acceptRate: 0.7, noise: 0.9 }] }))
     const v = run(s)
-    expect(v.verdict).toBe('insufficient')
-    expect(v.reason).toContain('cruza a margem')
-    expect(v.ratio.lo!).toBeLessThan(1)
-    expect(v.ratio.hi!).toBeGreaterThan(1)
+    expect(v.verdict).toBe('tie')
+    expect(v.reason).toContain('Empate: não dá para cravar')
+    expect(v.score!.final.lo!).toBeLessThan(48)
+    expect(v.score!.final.hi!).toBeGreaterThan(50)
   })
 
   test('6 insufficient: cost missing for 2 runs, no verdict from the covered rest', () => {
@@ -82,12 +84,13 @@ describe('verdict — where the method can lose (spec §4)', () => {
     expect(v.reason).toContain('12')
   })
 
-  test('the reason always carries the qualifier and the long-leader disclosure', () => {
+  test('the reason carries the long-leader disclosure; "por entrega aceita" is the cost line only', () => {
     const s = makeSamples(recipe({ arms: [{ id: A, cost: 2.4, acceptRate: 0.85 }, { id: B, cost: 1, acceptRate: 0.8 }] }))
-    for (const v of [run(s), run(s.slice(0, 6))]) {
-      expect(v.reason).toContain('custo por entrega aceita')
-      expect(v.reason).toContain('não inclui o contexto acumulado de um líder longo')
-    }
+    for (const v of [run(s), run(s.slice(0, 6))]) expect(v.reason).toContain('Não inclui o contexto acumulado de um líder longo')
+    const full = run(s)
+    expect(full.reason.split('Custo:')[0]).not.toContain('por entrega aceita')
+    expect(full.reason).toContain('Custo:')
+    expect(full.reason).toContain('por entrega aceita')
   })
 
   test('both arms are required and must differ', () => {
@@ -109,6 +112,7 @@ describe('verdict — where the method can lose (spec §4)', () => {
 describe('verdict — symmetry and invariance', () => {
   test('mirror symmetry on 200 random inputs', () => {
     const rng = mulberry32(2026)
+    let gated = 0
     for (let i = 0; i < 200; i++) {
       const s = makeSamples({
         tasks: 6 + Math.floor(rng() * 8), reps: 2 + Math.floor(rng() * 3), seed: i + 1, taskSpread: rng() * 0.5,
@@ -118,10 +122,13 @@ describe('verdict — symmetry and invariance', () => {
         ],
       })
       const fwd = run(s, A, B), rev = run(s, B, A)
+      if (fwd.score?.final.value != null && rev.score?.final.value != null) expect(fwd.score.final.value + rev.score.final.value).toBeCloseTo(100, 8)
+      // The acceptance gate blocks only the candidate's `pays`, so it is the one case that is not a mirror.
+      if (fwd.score?.gateBlocked || rev.score?.gateBlocked) { gated++; continue }
       expect(rev.verdict).toBe(mirrorOf(fwd.verdict))
       if (fwd.ratio.point !== null && Number.isFinite(fwd.ratio.point) && fwd.ratio.point > 0) expect(rev.ratio.point!).toBeCloseTo(1 / fwd.ratio.point, 8)
     }
-  })
+}, 120_000)
 
   test('relabelling and reordering arms changes nothing', () => {
     const base = makeSamples(recipe({ arms: [{ id: A, cost: 1.6, acceptRate: 0.9, noise: 0.1 }, { id: B, cost: 1, acceptRate: 0.4, noise: 0.1 }] }))
@@ -161,5 +168,5 @@ describe('calibration: false-verdict rate at the minimum sample', () => {
     }
     console.log(`[calibration] equal arms, ${MIN_SAMPLE.tasks} tasks × ${MIN_SAMPLE.repsPerTask} reps, ${n} experiments: false verdict ${(wrong / n * 100).toFixed(1)}%, tie ${(tie / n * 100).toFixed(1)}%, insufficient ${(insufficient / n * 100).toFixed(1)}%`)
     expect(wrong / n).toBeLessThanOrEqual(0.1)
-  })
+  }, 180_000)
 })

@@ -78,8 +78,64 @@ export interface Run {
   costUSD: Covered<number>
 }
 
+export type ScoreType = 'quality' | 'cost' | 'time' | 'reliability'
+export type ScoreTypeStatus = 'better' | 'worse' | 'tie' | 'missing'
+
+/** One raw metric, both sides kept. `ratio` > 1 = the candidate is better. */
+export interface ScoreMetricResult {
+  id: string
+  type: ScoreType
+  kind: 'rate-higher' | 'rate-lower' | 'count' | 'lower-better'
+  candidate: number | null
+  reference: number | null
+  /** Sample behind a rate (runs or tasks); null for the others. */
+  nCandidate: number | null
+  nReference: number | null
+  ratio: number | null
+  /** Why it could not be measured; null when it was. */
+  missing: string | null
+}
+
+export interface ScoreTypeResult {
+  max: number
+  points: number | null
+  /** Integer points for display; they sum to the rounded final. Null when the type is unmeasured. */
+  displayPoints: number | null
+  /** Geometric mean of the type's measured metric ratios. */
+  ratio: number | null
+  status: ScoreTypeStatus
+  metrics: ScoreMetricResult[]
+  /** Ids of metrics left out because they could not be measured (never counted as 0). */
+  missing: string[]
+}
+
+export interface ScoreSensitivityRow {
+  name: string
+  weights: Record<ScoreType, number>
+  final: number | null
+  lo: number | null
+  hi: number | null
+  verdict: Verdict | null
+}
+
+/** The score of the candidate against the reference (method v1). Final = Σ points; the mirror sums to 100. */
+export interface ScoreResult {
+  methodVersion: 'v1'
+  types: Record<ScoreType, ScoreTypeResult>
+  final: { value: number | null; lo: number | null; hi: number | null; display: number | null; nullReason: string | null }
+  /** Evidence only, outside the score: QA rounds / discarded work per run, per arm. Null = not recorded. */
+  rework: Record<string, number | null>
+  /** Supporting line, not a fourth verdict. */
+  sensitivity: { result: 'firm' | 'depends_on_weights' | null; rows: ScoreSensitivityRow[] }
+  /** The acceptance gate blocked `pays` (candidate accepted fewer runs than the reference beyond the margin). */
+  gateBlocked: boolean
+}
+
 export interface VerdictResult {
   verdict: Verdict
+  /** The score behind the verdict; null when the verdict is `insufficient` before anything was computed. */
+  score: ScoreResult | null
+  methodVersion: 'v1'
   candidate: string
   reference: string
   /** The size bucket this verdict covers; never one global verdict across buckets. */

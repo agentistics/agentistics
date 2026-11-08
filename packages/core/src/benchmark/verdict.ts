@@ -1,28 +1,26 @@
 /**
  * The one verdict function. Four outcomes: pays / does_not_pay / tie / insufficient.
  *
- * Question asked about a PAIR of arms (candidate vs reference, both required, no default). The
- * result is the exact mirror when the two are swapped (pays ↔ does_not_pay). The code never looks
- * at an arm id or label except to tell the two apart.
+ * Question asked about a PAIR of arms (candidate vs reference, both required, no default). Method v1
+ * (DECISAO-PESOS.md): the verdict comes from the interval of the SCORE (score.ts) — `pays` if the
+ * whole interval is above 52, `does_not_pay` if below 48, else `tie`. Too little data wins over all
+ * of it (`insufficient`). The cost ratio (cost per accepted delivery) stays as evidence in `ratio`.
  *
- * Primary measure: cost per accepted delivery (CPA). Margin of practical equivalence is
- * log-symmetric: the candidate is cheaper when the whole interval is below 1/(1+delta), dearer
- * when above 1+delta. (A linear 1−delta would not mirror: the mirror of 0.9 is 1/0.9.)
+ * Swapping the arms mirrors the result exactly (finals add to 100) — except when the acceptance gate
+ * fires: it blocks only the candidate's `pays`, so there the swapped call is not a mirror.
+ * The code never looks at an arm id or label except to tell the two apart.
  */
-import type { CpaSample, SizeBucket, VerdictResult } from './contract'
+import type { SizeBucket, VerdictResult } from './contract'
+import { computeScore, verdictOfScore, type RunSample } from './score'
 import { bootstrapRatio } from './stats'
 
 export const MIN_SAMPLE = { tasks: 8, repsPerTask: 2, acceptedPerArm: 5 } as const
 export const DEFAULT_DELTA = 0.1
 export const DEFAULT_RESAMPLES = 10_000
-export const SCOPE_NOTE = 'Em custo por entrega aceita; não inclui o contexto acumulado de um líder longo.'
+export const SCOPE_NOTE = 'Não inclui o contexto acumulado de um líder longo.'
 
-/** A run reduced to what the verdict reads; optional fields feed only the secondary figures. */
-export interface VerdictSample extends CpaSample {
-  wallMs?: number | null
-  /** Defects found by the evaluator + hidden tests; null = not evaluated. */
-  defects?: number | null
-  humanInterventions?: number | null
+/** A run reduced to what the verdict reads; optional fields feed the score and the secondary figures. */
+export interface VerdictSample extends RunSample {
   /** Per harness: sessions the run opened and how many of them are priced. */
   harnesses?: Record<string, { sessions: number; withCost: number }>
 }
@@ -41,6 +39,7 @@ export interface VerdictInput {
 
 const mean = (v: readonly number[]): number | null => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : null)
 const pct = (x: number): string => `${Math.round(x * 100)}%`
+const n1 = (x: number | null): string => (x === null ? '—' : Number.isFinite(x) ? x.toFixed(2) : '∞')
 
 export function verdict(input: VerdictInput): VerdictResult {
   const { candidate, reference, size } = input
@@ -85,7 +84,7 @@ export function verdict(input: VerdictInput): VerdictResult {
   }
 
   const base = {
-    candidate, reference, size, delta, seed: input.seed, resamples,
+    candidate, reference, size, delta, seed: input.seed, resamples, methodVersion: 'v1' as const,
     sample: {
       tasks: goodTasks.size,
       runsCandidate: runsOf(candidate).length, runsReference: runsOf(reference).length,
@@ -94,8 +93,9 @@ export function verdict(input: VerdictInput): VerdictResult {
     minimum: { ...MIN_SAMPLE },
     secondary, coverage,
   }
-  const insufficient = (reason: string, ratio: VerdictResult['ratio'] = { point: null, lo: null, hi: null }): VerdictResult =>
-    ({ ...base, verdict: 'insufficient', ratio, reason: `${reason} ${SCOPE_NOTE}` })
+  const noRatio = { point: null, lo: null, hi: null }
+  const insufficient = (reason: string, ratio: VerdictResult['ratio'] = noRatio, score: VerdictResult['score'] = null): VerdictResult =>
+    ({ ...base, verdict: 'insufficient', score, ratio, reason: `${reason} ${SCOPE_NOTE}` })
 
   if (input.cap) return insufficient(`O experimento parou no limite de custo; ${input.cap.skippedCells} execuções não rodaram.`)
   if (goodTasks.size < MIN_SAMPLE.tasks) {
@@ -109,32 +109,37 @@ export function verdict(input: VerdictInput): VerdictResult {
   }
   if (unmeasured > 0) return insufficient(`Custo ausente em ${unmeasured} execuç${unmeasured > 1 ? 'ões' : 'ão'}.`)
 
+  // Evidence: the cost-per-accepted ratio and its interval.
   const b = bootstrapRatio(used, candidate, reference, input.seed, resamples)
   const ratio = {
     point: Number.isNaN(b.logPoint) ? null : Math.exp(b.logPoint),
     lo: Number.isNaN(b.logLo) ? null : Math.exp(b.logLo),
     hi: Number.isNaN(b.logHi) ? null : Math.exp(b.logHi),
   }
-  if (Number.isNaN(b.logLo) || Number.isNaN(b.logHi)) return insufficient('Não foi possível calcular a razão de custo.', ratio)
-
-  const zeroNote = accC === 0 ? ` ${candidate} aceitou 0 de ${runsOf(candidate).length}.` : accR === 0 ? ` ${reference} aceitou 0 de ${runsOf(reference).length}.` : ''
-  const m = Math.log(1 + delta)
-  const range = ratio.lo !== null && ratio.hi !== null ? ` (intervalo ${ratio.lo.toFixed(2)}–${Number.isFinite(ratio.hi) ? ratio.hi.toFixed(2) : '∞'}, margem ${pct(delta)})` : ''
-  const mk = (v: VerdictResult['verdict'], text: string): VerdictResult => ({ ...base, verdict: v, ratio, reason: `${text}${range}${zeroNote} ${SCOPE_NOTE}` })
-  if (b.logHi < -m) return mk('pays', 'Compensa em custo por entrega aceita: o candidato custa menos por entrega.')
-  if (b.logLo > m) return mk('does_not_pay', 'Não compensa em custo por entrega aceita: o candidato custa mais por entrega.')
-  if (b.logLo >= -m && b.logHi <= m) return mk('tie', 'Empate em custo por entrega aceita: diferença dentro da margem.')
-
-  // Straddles a boundary: how many more tasks would it take (half-width shrinks with 1/√tasks)?
-  let more = ''
-  if (Number.isFinite(b.logPoint) && Number.isFinite(b.logLo) && Number.isFinite(b.logHi)) {
-    const p = b.logPoint
-    const hw = p < -m ? b.logHi - p : p > m ? p - b.logLo : Math.max(b.logHi - p, p - b.logLo)
-    const need = p < -m ? -m - p : p > m ? p - m : Math.min(m - p, p + m)
-    if (need > 0 && hw > need) {
-      const extra = Math.ceil(goodTasks.size * ((hw / need) ** 2 - 1))
-      more = ` Cerca de ${extra} tarefas a mais estreitariam o suficiente.`
-    }
+  const score = computeScore({ samples: used, candidate, reference, seed: input.seed, resamples, delta })
+  if (score.final.value === null || score.final.lo === null || score.final.hi === null) {
+    return insufficient(score.final.nullReason ?? 'Não foi possível calcular a nota.', ratio, score)
   }
-  return mk('insufficient', `Os dados ainda não separam os braços: o intervalo cruza a margem.${more}`)
+
+  const f = score.final
+  const costLine = `Custo: ${n1(ratio.point)}× o custo por entrega aceita do outro lado (menor é melhor para o candidato; intervalo ${n1(ratio.lo)}–${n1(ratio.hi)}).`
+  const zeroNote = accC === 0 ? ` ${candidate} aceitou 0 de ${runsOf(candidate).length}.` : accR === 0 ? ` ${reference} aceitou 0 de ${runsOf(reference).length}.` : ''
+  const sens = score.sensitivity.result === 'firm' ? ' Resultado firme com outros pesos.' : score.sensitivity.result === 'depends_on_weights' ? ' Depende dos pesos.' : ''
+  const head = `Nota ${f.display} de 100 (margem ${Math.round(f.lo!)}–${Math.round(f.hi!)}; 50 é empate).`
+  const mk = (v: VerdictResult['verdict'], text: string): VerdictResult =>
+    ({ ...base, verdict: v, score, ratio, reason: `${text} ${head} ${costLine}${zeroNote}${sens} ${SCOPE_NOTE}` })
+
+  const v = scoreVerdict(score)
+  if (v === 'pays') return mk('pays', 'Compensou.')
+  if (v === 'does_not_pay') return mk('does_not_pay', 'Não compensou.')
+  const blocked = score.gateBlocked ? ` O candidato aceitou menos entregas (${pct(accC / runsOf(candidate).length)} contra ${pct(accR / runsOf(reference).length)}); sem "Compensou" nesse caso.` : ''
+  return mk('tie', `Empate: não dá para cravar.${blocked}`)
+}
+
+/** Verdict of the main (method v1) weights: the score's own interval, after the gate. */
+function scoreVerdict(score: NonNullable<VerdictResult['score']>): VerdictResult['verdict'] {
+  const { lo, hi } = score.final
+  if (lo === null || hi === null) return 'insufficient'
+  const v = verdictOfScore(lo, hi)
+  return v === 'pays' && score.gateBlocked ? 'tie' : v
 }
