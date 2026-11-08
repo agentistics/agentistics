@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  ARCHIVED_CAP, HIDDEN_CAP, awaitingApprovalOf, blockOf, buildLive, ciSignalOf, estimateEta, legacyReviewShas, shasIn, stageOfStatus, stepOf, estimateStages, nextStageOf, stageTypicals, trailOf, type StageTypical, type StageVisit,
+  HIDDEN_CAP, awaitingApprovalOf, blockOf, buildLive, ciSignalOf, estimateEta, legacyReviewShas, shasIn, stageOfStatus, stepOf, estimateStages, nextStageOf, stageTypicals, trailOf, type StageTypical, type StageVisit,
 } from './task-live'
 import { describeLive, workerWord, type FleetRowLite } from './task-live-view'
 import type { TaskDetail } from './task-report'
@@ -230,7 +230,7 @@ describe('a card never leaves without a word (item r) — one test per path that
 
 describe('the leaders band', () => {
   const row = (id: string, state: string, x: Partial<FleetRowLite> = {}): FleetRowLite => ({ id, title: id, harness: 'claude', state, ...x })
-  const reply = (ds: object[]) => ({ generatedAt: 'x', deliveries: ds as never, samples: 0, hidden: [], archived: [], archivedTotal: 0, sessionTasks: {} })
+  const reply = (ds: object[]) => ({ generatedAt: 'x', deliveries: ds as never, samples: 0, hidden: [], sessionTasks: {} })
   test('the last action is a sentence, never JSON, and the leader carries its effort', () => {
     const v = describeLive({
       reply: reply([]),
@@ -385,9 +385,9 @@ describe('Publicado from a release tag, and the legacy review archive (HIGH 3)',
     const subs = Array.from({ length: 80 }, (_, i) => reviewSub(`o${i}`, 100 + i))
     const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: subs as never, sessions: [] })] })
     expect(r.deliveries).toHaveLength(0)
-    expect(r.archivedTotal).toBe(80)
-    expect(r.archived).toHaveLength(ARCHIVED_CAP)
-    expect(r.archived[0]).toMatchObject({ reason: 'legacy-review-old', title: 'Sub o0' })
+    expect(r.oldReviewsTotal).toBe(80)
+    expect(r.oldReviews).toHaveLength(80)
+    expect(r.oldReviews?.[0]).toMatchObject({ old: true, title: 'Sub o0' })
   })
   test('a fresh review card, or one with a live session, stays in Revisão do líder; a delivery record exempts it', () => {
     const details = [detail({
@@ -396,7 +396,7 @@ describe('Publicado from a release tag, and the legacy review archive (HIGH 3)',
     })]
     const r = buildLive({ nowMs: NOW, events: [], details, deliveries: new Map([['flow', { phase: 'revisao_lider' }]]) })
     expect(r.deliveries.map(d => d.subtaskId).sort()).toEqual(['alive', 'flow', 'fresh'])
-    expect(r.archivedTotal).toBe(0)
+    expect(r.oldReviewsTotal).toBe(0)
   })
 })
 

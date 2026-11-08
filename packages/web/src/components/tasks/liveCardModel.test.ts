@@ -144,19 +144,21 @@ describe('harness · model · effort on every card (item e)', () => {
   })
 })
 
-describe('Publicado is not emptied by the filters (item c)', () => {
-  test('a published piece has no live agent and must survive "only with active agents" and a task filter', () => {
+describe('Publicado is not emptied by the task filter', () => {
+  const f = (over: Partial<Parameters<typeof filterCards>[1]>) => ({ taskIds: [], tab: 'all' as const, period: '24h' as const, nowMs: NOW, ...over })
+  test('a published piece has no live agent and survives a task filter in "Tudo" and in "Publicado"', () => {
     const cards = joinLive([
-      rec({ key: 'p', stage: 'published', taskId: 'T1', deliveredAtMs: NOW }), rec({ key: 'r', stage: 'running', taskId: 'T1' }), rec({ key: 'q', stage: 'published', taskId: 'T2' }),
+      rec({ key: 'p', stage: 'published', taskId: 'T1', deliveredAtMs: NOW }), rec({ key: 'r', stage: 'running', taskId: 'T1' }), rec({ key: 'q', stage: 'published', taskId: 'T2', deliveredAtMs: NOW }),
     ], [])
-    const shown = filterCards(cards, { taskIds: ['T1'], onlyActive: true }).map(c => c.d.key)
-    expect(shown).toEqual(['p', 'r']) // the running piece is a flow card too: "active" is about the column, not a live agent
-    expect(filterCards(cards, { taskIds: ['T1', 'T2'], onlyActive: true }).map(c => c.d.key)).toEqual(['p', 'r', 'q'])
-    expect(filterCards(cards, { taskIds: [], onlyActive: false }).length).toBe(0) // "apenas ativas" off hides the cards of the flow columns after the queue
+    expect(filterCards(cards, f({ taskIds: ['T1'] })).map(c => c.d.key)).toEqual(['p', 'r'])
+    expect(filterCards(cards, f({ taskIds: ['T1', 'T2'], tab: 'published' })).map(c => c.d.key)).toEqual(['p', 'q'])
+    // "Em andamento" is about somebody on it: the running piece here has no agent, so nothing is in progress.
+    expect(filterCards(cards, f({ tab: 'active' })).length).toBe(0)
   })
-  test('a blocked card is never hidden by the agent switch either', () => {
+  test('a blocked card is in "Tudo" (it has its real column) but not "Em andamento" while nobody is on it', () => {
     const cards = joinLive([rec({ key: 'b', stage: 'blocked' })], [])
-    expect(filterCards(cards, { taskIds: [], onlyActive: true })).toHaveLength(1)
+    expect(filterCards(cards, f({}))).toHaveLength(1)
+    expect(filterCards(cards, f({ tab: 'active' }))).toHaveLength(0)
   })
 })
 
@@ -177,13 +179,16 @@ describe('task filter: Recentes first, and which task a session belongs to', () 
   })
 })
 
-describe('columns: today\'s layout plus Publicado collapsed; the user\'s choice wins (item d)', () => {
+describe('columns: a column with cards is open, an empty one is collapsed; the user\'s choice wins (filtros v2)', () => {
   test('defaults', () => {
     expect(columnCollapsed('running', 3, {})).toBe(false)
     expect(columnCollapsed('qa', 0, {})).toBe(true)
-    expect(columnCollapsed('published', 9, {})).toBe(true)
+    expect(columnCollapsed('published', 9, {})).toBe(false)
+    expect(columnCollapsed('published', 0, {})).toBe(true)
+    // Publicado stays open while its tab shows (its period picker is in the header), even with nothing in the period.
+    expect(columnCollapsed('published', 0, {}, true)).toBe(false)
     expect(columnCollapsed('running', 3, { running: true })).toBe(true)
-    expect(columnCollapsed('published', 9, { published: false })).toBe(false)
+    expect(columnCollapsed('published', 9, { published: true })).toBe(true)
     expect(columnCollapsed('qa', 0, { qa: false })).toBe(false)
   })
   test('persisted prefs ignore junk', () => {
@@ -396,15 +401,15 @@ describe('humanSlotReason — every gate refusal, in pt and en, without ids', ()
 
 describe('the filter bar choices are saved like the column preferences', () => {
   const mem = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v) } } }
-  test('defaults: both switches on, highest priority first', () => {
-    expect(readViewPrefs(mem())).toEqual({ onlyActive: true, showQueue: true, sort: 'priority' })
+  test('defaults: "Em andamento", Publicado over 24 h, highest priority first', () => {
+    expect(readViewPrefs(mem())).toEqual({ tab: 'active', period: '24h', sort: 'priority' })
   })
   test('round-trips, and junk falls back field by field', () => {
     const s = mem()
-    writeViewPrefs({ onlyActive: false, showQueue: true, sort: 'recent' }, s)
-    expect(readViewPrefs(s)).toEqual({ onlyActive: false, showQueue: true, sort: 'recent' })
-    expect(readViewPrefs({ getItem: () => JSON.stringify({ onlyActive: 'x', showQueue: false, sort: 'nope' }) })).toEqual({ onlyActive: true, showQueue: false, sort: 'priority' })
-    expect(readViewPrefs({ getItem: () => 'not json' })).toEqual({ onlyActive: true, showQueue: true, sort: 'priority' })
-    expect(readViewPrefs(null)).toEqual({ onlyActive: true, showQueue: true, sort: 'priority' })
+    writeViewPrefs({ tab: 'published', period: '7d', sort: 'recent' }, s)
+    expect(readViewPrefs(s)).toEqual({ tab: 'published', period: '7d', sort: 'recent' })
+    expect(readViewPrefs({ getItem: () => JSON.stringify({ tab: 'x', period: '30d', sort: 'nope' }) })).toEqual({ tab: 'active', period: '30d', sort: 'priority' })
+    expect(readViewPrefs({ getItem: () => 'not json' })).toEqual({ tab: 'active', period: '24h', sort: 'priority' })
+    expect(readViewPrefs(null)).toEqual({ tab: 'active', period: '24h', sort: 'priority' })
   })
 })

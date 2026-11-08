@@ -31,7 +31,9 @@ beforeAll(async () => {
   Live = (await import('./LiveDelivery')).LiveDeliveryView
   realRect = HTMLElement.prototype.getBoundingClientRect
 })
-beforeEach(() => { localStorage.clear() })
+const VIEW_KEY = 'agentistics.live.view.v2'
+// Most fixtures here are agent-less pieces; "Tudo" is the tab that draws every piece in its column. The tab tests below set their own.
+beforeEach(() => { localStorage.clear(); localStorage.setItem(VIEW_KEY, JSON.stringify({ tab: 'all' })) })
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = ''; HTMLElement.prototype.getBoundingClientRect = realRect; localStorage.clear() })
 afterAll(async () => GlobalRegistrator.unregister())
 
@@ -60,54 +62,80 @@ test('the stage columns carry the new names: "Em desenvolvimento" and "QA"', asy
   expect(document.body.textContent).not.toContain('Executando')
 })
 
-test('ONE bar, two groups: filters (tasks, steps, apenas ativas, fila, order) and view/actions (older reviews, window)', async () => {
-  const withArchive = { ...replyOf([piece('a', 'running')]), archivedTotal: 3, archived: [] }
-  await mount(props('pt', withArchive))
+test('ONE bar, two groups: filters (task picker + the four tabs with counts) and view/actions (sort icon, window); no pills', async () => {
+  await mount(props('pt', replyOf([piece('a', 'running')])))
   const bar = document.querySelector('[data-live-toolbar]')!
   const filters = bar.querySelector('[data-live-filters]')!, actions = bar.querySelector('[data-live-actions]')!
   expect(filters.querySelector('[data-live-taskfilter]')).not.toBeNull()
-  expect(filters.querySelector('[data-live-allsteps]')).not.toBeNull()
-  expect(filters.querySelector('[data-live-only-active]')).not.toBeNull()
-  expect(filters.querySelector('[data-live-show-queue]')).not.toBeNull()
-  expect(filters.textContent).toContain('Ordenar')
-  expect(actions.querySelector('[data-live-archived-toggle]')).not.toBeNull()
+  const tabs = Array.from(filters.querySelectorAll('[role="tab"]')).map(t => t.textContent)
+  expect(tabs).toEqual(['Em andamento0', 'Na fila0', 'Publicado0', 'Tudo1'])
+  // the old pills are gone, and the sort + the window moved to the right-hand group
+  for (const gone of ['[data-live-allsteps]', '[data-live-only-active]', '[data-live-show-queue]', '[data-live-archived-toggle]']) expect(bar.querySelector(gone)).toBeNull()
+  expect(actions.querySelector('[aria-label^="Ordenar"]')).not.toBeNull()
   expect(actions.querySelector('[data-live-external]')).not.toBeNull()
-  // nothing from the right-hand group leaks into the filters, and the other way round
   expect(filters.querySelector('[data-live-external]')).toBeNull()
-  expect(actions.querySelector('[data-live-only-active]')).toBeNull()
   // the summary line is short: no ETA sentence in the line itself (it is the tooltip)
   const sum = document.querySelector('[data-live-summary]') as HTMLElement
   expect(sum.textContent).toBe('1 entrega ativa · 0 agentes trabalhando')
   expect(sum.getAttribute('title')).toContain('atualizado ao vivo')
 })
 
-test('a QUEUED piece (never has an agent) is shown with the chips on; "exibir itens na fila" switches the column and is remembered', async () => {
-  await mount(props('pt', replyOf([piece('q', 'queue'), piece('r', 'running')])))
-  const show = () => document.querySelector('[data-live-show-queue]') as HTMLElement
-  expect(show().textContent).toContain('Exibir itens na fila')
-  expect(show().getAttribute('aria-pressed')).toBe('true')
+const tabBtn = (name: string) => Array.from(document.querySelectorAll('[data-live-tabs] [role="tab"]')).find(t => t.textContent?.startsWith(name)) as HTMLElement
+const shownKeys = () => Array.from(document.querySelectorAll('[data-live-card], [data-live-pubrow]')).map(e => e.getAttribute('data-live-card') ?? e.getAttribute('data-live-pubrow')).sort()
+
+test('the tabs choose what is drawn, their counts equal what the columns then hold, and the choice is remembered', async () => {
+  const all = replyOf([
+    piece('q', 'queue'), piece('b', 'blocked'), piece('r', 'running', { sessionIds: ['s1'] }),
+    piece('p', 'published', { deliveredAtMs: NOW - 3_600_000 }), piece('p2', 'published', { deliveredAtMs: NOW - 3 * 86_400_000 }),
+  ])
+  await mount(props('pt', all))
+  const counts = () => Array.from(document.querySelectorAll('[data-live-tabs] [role="tab"]')).map(t => t.textContent)
+  expect(counts()).toEqual(['Em andamento1', 'Na fila1', 'Publicado1', 'Tudo4'])
+  // "Tudo": every piece in its column, Publicado inside its 24 h period
+  expect(shownKeys()).toEqual(['b', 'p', 'q', 'r'])
+  expect(shownKeys().length).toBe(Number(tabBtn('Tudo').textContent!.replace(/\D/g, '')))
+  await act(async () => tabBtn('Em andamento').click())
+  expect(shownKeys()).toEqual(['r'])
+  expect(JSON.parse(localStorage.getItem(VIEW_KEY)!)).toMatchObject({ tab: 'active' })
+  await act(async () => tabBtn('Na fila').click())
+  expect(shownKeys()).toEqual(['q'])
   expect(keysIn('queue')).toEqual(['q'])
-  await act(async () => show().click())
-  expect(keysIn('queue')).toEqual([])
-  expect(keysIn('running')).toEqual(['r'])
-  expect(JSON.parse(localStorage.getItem('agentistics.live.view.v1')!)).toMatchObject({ onlyActive: true, showQueue: false })
-  await act(async () => show().click())
-  expect(keysIn('queue')).toEqual(['q'])
+  await act(async () => tabBtn('Publicado').click())
+  expect(shownKeys()).toEqual(['p'])
 })
 
-test('the four combinations of the two chips on screen', async () => {
-  const all = replyOf([piece('q', 'queue'), piece('b', 'blocked'), piece('r', 'running'), piece('p', 'published', { deliveredAtMs: NOW })])
-  localStorage.setItem('agentistics.live.collapsed.v1', JSON.stringify({ published: false }))
+test('Publicado has its own period (24 h by default, then 7 d, 30 d, all) in its header; there is no Histórico column', async () => {
+  const all = replyOf([piece('p', 'published', { deliveredAtMs: NOW - 3_600_000 }), piece('p3', 'published', { deliveredAtMs: NOW - 3 * 86_400_000 })])
   await mount(props('pt', all))
-  const press = async (sel: string) => { await act(async () => (document.querySelector(sel) as HTMLElement).click()) }
-  const shown = () => Array.from(document.querySelectorAll('[data-live-card], [data-live-pubrow]')).map(e => e.getAttribute('data-live-card') ?? e.getAttribute('data-live-pubrow')).sort()
-  expect(shown()).toEqual(['b', 'p', 'q', 'r'])
-  await press('[data-live-show-queue]')
-  expect(shown()).toEqual(['b', 'p', 'r'])
-  await press('[data-live-only-active]')
-  expect(shown()).toEqual([])
-  await press('[data-live-show-queue]')
-  expect(shown()).toEqual(['q'])
+  expect(document.querySelector('[data-live-column="history"]')).toBeNull()
+  const cur = () => document.querySelector('[data-live-column="published"] [data-live-period-current]')!.textContent
+  expect(cur()).toBe('últimas 24 h')
+  expect(shownKeys()).toEqual(['p'])
+  await act(async () => (document.querySelector('[data-live-column="published"] [aria-label^="Período do Publicado"]') as HTMLElement).click())
+  await act(async () => (document.querySelector('[data-live-period="7d"]') as HTMLElement).click())
+  expect(cur()).toBe('7 dias')
+  expect(shownKeys()).toEqual(['p', 'p3'])
+  expect(JSON.parse(localStorage.getItem(VIEW_KEY)!)).toMatchObject({ period: '7d' })
+  expect(tabBtn('Publicado').textContent).toBe('Publicado2')
+})
+
+test('columns with cards are open, empty ones collapsed — and no column shows a zero for nothing', async () => {
+  await mount(props('pt', replyOf([piece('r', 'running', { sessionIds: ['s1'] })])))
+  const col = (s: string) => document.querySelector(`[data-live-column="${s}"]`) as HTMLElement
+  expect(col('running').getAttribute('data-collapsed')).toBe('0')
+  expect(col('qa').getAttribute('data-collapsed')).toBe('1')
+  expect(col('qa').querySelector('[data-live-colcount]')).toBeNull()
+  expect(col('running').querySelector('[data-live-colcount]')!.textContent).toBe('1')
+  expect(document.body.textContent).not.toContain('Nada nesta etapa')
+})
+
+test('an old legacy review is drawn only in "Tudo", marked "antiga", and is never "Em andamento"', async () => {
+  const r = replyOf([piece('r', 'running', { sessionIds: ['s1'] }), piece('o', 'leader', { old: true })])
+  await mount(props('pt', r))
+  expect(keysIn('leader')).toEqual(['o'])
+  expect(document.querySelector('[data-live-card="o"] [data-live-old]')!.textContent).toBe('antiga')
+  await act(async () => tabBtn('Em andamento').click())
+  expect(keysIn('leader')).toEqual([])
 })
 
 test('columns are ONE vertical stack with their own scroll: no grid, no compact rows, no "+N"', async () => {
@@ -175,13 +203,13 @@ test('DEFAULT order is highest priority first; "Ordenar" switches to time in sta
   ]
   await mount(props('en', replyOf(ds)))
   expect(keysIn('running')).toEqual(['urgent-new', 'high-old', 'high-new', 'low-old'])
-  const trigger = Array.from(document.querySelectorAll('[data-live-filters] button')).find(b => b.textContent?.includes('Sort:')) as HTMLElement
-  expect(trigger.textContent).toContain('Priority')
+  const trigger = document.querySelector('[data-live-actions] [aria-label^="Sort:"]') as HTMLElement
+  expect(trigger.getAttribute('aria-label')).toContain('Priority')
   await act(async () => trigger.click())
   await act(async () => (document.querySelector('[data-live-sort="time-in-stage"]') as HTMLElement).click())
   expect(keysIn('running')).toEqual(['low-old', 'high-old', 'high-new', 'urgent-new'])
-  expect(JSON.parse(localStorage.getItem('agentistics.live.view.v1')!).sort).toBe('time-in-stage')
-  const again = Array.from(document.querySelectorAll('[data-live-filters] button')).find(b => b.textContent?.includes('Sort:')) as HTMLElement
+  expect(JSON.parse(localStorage.getItem(VIEW_KEY)!).sort).toBe('time-in-stage')
+  const again = document.querySelector('[data-live-actions] [aria-label^="Sort:"]') as HTMLElement
   await act(async () => again.click())
   await act(async () => (document.querySelector('[data-live-sort="recent"]') as HTMLElement).click())
   expect(keysIn('running')).toEqual(['urgent-new', 'high-new', 'high-old', 'low-old'])

@@ -1,40 +1,41 @@
 /**
- * LiveToolbar — the Live Delivery's filter bar, drawn the way the Agentask toolbar is (`button()`, `PanelMenu`,
- * `menuRowStyle`, one row, a trailing group) instead of a pile of loose pills (owner, 07/11).
+ * LiveToolbar — the Live Delivery's filter bar, option C of "filtros v2" (owner, 08/11): the main choice is a
+ * strip of TABS with counts instead of a pile of pills.
  *
  *   ● Esteira de entregas ao vivo · 3 entregas · 2 agentes
- *   [ tarefas ▾ ] [ Todas as etapas ] [ Apenas ativas ] [ Exibir itens na fila ] [ Ordenar: Prioridade ▾ ]   ····   [ Revisões antigas ] [ Janela externa ] [ Líderes ]
- *   └──────────────────────── FILTROS ─────────────────────────────┘                                         └──────── VISÃO / AÇÕES ────────┘
+ *   [ tarefas ▾ ]  [ Em andamento 6 | Na fila 9 | Publicado 3 | Tudo 167 ]   ····   [ ⇅ ] [ ↗ ] [ Líderes ]
+ *   └──────────── FILTROS ─────────────────────────────┘                          └─ VISÃO / AÇÕES ─┘
  *
- * It decides nothing: the page owns every value; this file is the shape and the words.
+ * The tab strip is the app's own `TabStrip` (`sessions/formBits.tsx`, with its `count`), the sort is the
+ * `PanelMenu` the Agentask toolbar uses, shrunk to an icon. It decides nothing: the page owns every value;
+ * this file is the shape and the words.
  */
 
 import type { CSSProperties, ReactNode } from 'react'
 import { ArrowDownWideNarrow, Check } from 'lucide-react'
-import { LIVE_SORTS, type LiveSortId } from '@agentistics/core'
+import { LIVE_SORTS, LIVE_TABS, type LiveSortId, type LiveTab } from '@agentistics/core'
+import { TabStrip } from '../sessions/formBits'
 import { button } from './board'
 import { menuRowStyle, PanelMenu } from './PickerMenu'
 
 const WORDS = (pt: boolean) => pt ? {
-  filters: 'Filtros', actions: 'Visão e ações',
-  onlyActive: 'Apenas ativas', showQueue: 'Exibir itens na fila',
-  onlyActiveTip: 'Mostra os cartões das etapas depois da fila: Bloqueado, Em desenvolvimento, QA, Ajuste, Revisão do líder, PR / merge, CI e Publicado.',
-  showQueueTip: 'Mostra os cartões da coluna Na fila.',
-  allSteps: 'Todas as etapas', sort: 'Ordenar',
+  filters: 'Filtros', actions: 'Visão e ações', tabs: 'O que mostrar',
+  tab: { active: 'Em andamento', queue: 'Na fila', published: 'Publicado', all: 'Tudo' } as Record<LiveTab, string>,
+  tabShort: { active: 'Andamento', queue: 'Fila', published: 'Publicado', all: 'Tudo' } as Record<LiveTab, string>,
+  sort: 'Ordenar',
   sorts: { priority: 'Prioridade', 'time-in-stage': 'Tempo na etapa', recent: 'Mais recente' } as Record<LiveSortId, string>,
   sortNote: 'Prioridade: da mais alta para a mais baixa; empate pelo que está há mais tempo na etapa.',
 } : {
-  filters: 'Filters', actions: 'View and actions',
-  onlyActive: 'Only active', showQueue: 'Show queued items',
-  onlyActiveTip: 'Shows the cards of the stages after the queue: Blocked, In development, QA, Adjusting, Leader review, PR / merge, CI and Published.',
-  showQueueTip: 'Shows the cards of the Queued column.',
-  allSteps: 'All steps', sort: 'Sort',
+  filters: 'Filters', actions: 'View and actions', tabs: 'What to show',
+  tab: { active: 'In progress', queue: 'Queued', published: 'Published', all: 'All' } as Record<LiveTab, string>,
+  tabShort: { active: 'Active', queue: 'Queued', published: 'Published', all: 'All' } as Record<LiveTab, string>,
+  sort: 'Sort',
   sorts: { priority: 'Priority', 'time-in-stage': 'Time in stage', recent: 'Most recent' } as Record<LiveSortId, string>,
   sortNote: 'Priority: highest first; a tie goes to the card that has been in the stage longest.',
 }
 
 export function LiveToolbar({
-  pt, mobile, title, summary, summaryTitle, taskFilter, stageAll, onlyActive, showQueue, sort, onOnlyActive, onShowQueue, onSort, actions,
+  pt, mobile, title, summary, summaryTitle, taskFilter, tab, counts, onTab, sort, onSort, actions,
 }: {
   pt: boolean
   mobile: boolean
@@ -44,25 +45,16 @@ export function LiveToolbar({
   summaryTitle: string
   /** The task multi-select, already built (it owns its chips). */
   taskFilter: ReactNode
-  /** The "all steps" toggle; absent on a phone (the stage chips below do that job there). */
-  stageAll?: { active: boolean; onClick: () => void }
-  onlyActive: boolean
-  showQueue: boolean
+  tab: LiveTab
+  /** What each tab prints — counted from the very cards the columns draw. */
+  counts: Record<LiveTab, number>
+  onTab: (t: LiveTab) => void
   sort: LiveSortId
-  onOnlyActive: (v: boolean) => void
-  onShowQueue: (v: boolean) => void
   onSort: (s: LiveSortId) => void
-  /** Leaders, older reviews, recently left, open in a window — the right-hand group. */
+  /** Leaders, recently left, open in a window — the right-hand group. */
   actions: ReactNode
 }) {
   const w = WORDS(pt)
-  const chip = (on: boolean): CSSProperties => ({
-    ...button(mobile), gap: 6, flexShrink: 0,
-    borderRadius: 999, padding: '0 12px',
-    borderColor: on ? 'var(--anthropic-orange)' : 'var(--border)',
-    background: on ? 'var(--anthropic-orange-dim)' : 'transparent',
-    color: on ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)',
-  })
   const group: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }
   return (
     <div data-live-toolbar style={{ display: 'grid', gap: 8 }}>
@@ -78,18 +70,17 @@ export function LiveToolbar({
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
         <div role="group" aria-label={w.filters} data-live-filters style={{ ...group, flex: mobile ? '1 1 100%' : '1 1 auto' }}>
           {taskFilter}
-          {stageAll && (
-            <button type="button" className="ag-tap" aria-pressed={stageAll.active} data-live-allsteps onClick={stageAll.onClick} style={chip(stageAll.active)}>{w.allSteps}</button>
-          )}
-          <button type="button" className="ag-tap" aria-pressed={onlyActive} data-live-only-active title={w.onlyActiveTip} onClick={() => onOnlyActive(!onlyActive)} style={chip(onlyActive)}>
-            <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--anthropic-orange)' }} />{w.onlyActive}
-          </button>
-          <button type="button" className="ag-tap" aria-pressed={showQueue} data-live-show-queue title={w.showQueueTip} onClick={() => onShowQueue(!showQueue)} style={chip(showQueue)}>
-            <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--anthropic-orange)' }} />{w.showQueue}
-          </button>
+          <div data-live-tabs style={mobile ? { minWidth: 0, flex: '1 1 100%' } : { flex: '0 0 auto', width: 'max-content', minWidth: 'max-content' }}>
+            <TabStrip<LiveTab>
+              tabs={LIVE_TABS} value={tab} onPick={onTab} label={t => (mobile ? w.tabShort : w.tab)[t]} count={t => counts[t]}
+              ariaLabel={w.tabs} flush {...(mobile ? { tap: 44, variant: 'underline' as const, gap: 6 } : { natural: true })}
+            />
+          </div>
+        </div>
+        <div role="group" aria-label={w.actions} data-live-actions style={{ ...group, ...(mobile ? { flex: '1 1 100%' } : { marginLeft: 'auto', justifyContent: 'flex-end' }) }}>
           <PanelMenu
-            title={w.sort} width={250} ariaLabel={`${w.sort}: ${w.sorts[sort]}`}
-            triggerStyle={{ ...button(mobile), gap: 6, flexShrink: 0 }} triggerClassName="ag-tap"
+            title={w.sort} width={250} ariaLabel={`${w.sort}: ${w.sorts[sort]}`} align="right"
+            triggerStyle={{ ...button(mobile), gap: 6, flexShrink: 0, padding: '0 10px' }} triggerClassName="ag-tap"
             render={close => (
               <div data-live-sort-menu style={{ display: 'grid', gap: 2 }}>
                 {LIVE_SORTS.map(s => (
@@ -101,10 +92,8 @@ export function LiveToolbar({
               </div>
             )}
           >
-            <ArrowDownWideNarrow size={14} aria-hidden />{w.sort}: <b data-live-sort-current style={{ fontWeight: 600 }}>{w.sorts[sort]}</b>
+            <ArrowDownWideNarrow size={14} aria-hidden /><b hidden data-live-sort-current>{w.sorts[sort]}</b>
           </PanelMenu>
-        </div>
-        <div role="group" aria-label={w.actions} data-live-actions style={{ ...group, ...(mobile ? { flex: '1 1 100%' } : { marginLeft: 'auto', justifyContent: 'flex-end' }) }}>
           {actions}
         </div>
       </div>

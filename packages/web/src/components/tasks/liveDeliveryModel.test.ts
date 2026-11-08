@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  byStage, orderColumns, queuePosition, etaText, filterCards, fmtSpan, joinLive, liveStateOf, summarize,
+  byStage, orderColumns, queuePosition, etaText, filterCards, fmtSpan, joinLive, liveStateOf, summarize, tabCounts,
   type LiveCard, type LiveDeliveryRecord,
 } from './liveDeliveryModel'
 import type { FleetRow } from '../../lib/fleet'
@@ -53,27 +53,59 @@ describe('filters, grouping, summary', () => {
     rec({ key: '2', taskId: 'B', sessionIds: [], stage: 'leader' }),
     rec({ key: '3', taskId: 'B', sessionIds: ['c'], stage: 'published', deliveredAtMs: 1 }),
   ], [row('a', 'working'), row('c', 'exited')])
-  test('"apenas ativas" is about the flow, not about a live agent: a card in ANY flow column survives it', () => {
-    // Owner 07/11: "active" = the card sits in a flow column. The old rule demanded a RUNNING session, so the review card '2' (no agent) vanished.
-    expect(filterCards(cards, { taskIds: [], onlyActive: true }).map(c => c.d.key)).toEqual(['1', '2', '3'])
-    expect(filterCards(cards, { taskIds: ['B'], onlyActive: false, showQueue: true }).map(c => c.d.key)).toEqual([])
-    expect(filterCards(cards, { taskIds: ['A', 'B'], onlyActive: true }).map(c => c.d.key)).toEqual(['1', '2', '3'])
+  const NOWMS = 1_000 * 3600_000
+  const f = (over: Partial<Parameters<typeof filterCards>[1]> = {}) => ({ taskIds: [], tab: 'all' as const, period: '24h' as const, nowMs: NOWMS, ...over })
+  test('"Em andamento" is somebody working or waiting, past the queue — a card with nobody on it is not in progress', () => {
+    // Piece '1' has a working agent; '2' (leader review, no agent) is waiting on a person's review, not in progress.
+    expect(filterCards(cards, f({ tab: 'active' })).map(c => c.d.key)).toEqual(['1'])
+    // "Tudo" keeps every piece in its real column; Publicado is inside its period ('3' was published at t=1 ms: long ago).
+    expect(filterCards(cards, f({ tab: 'all' })).map(c => c.d.key)).toEqual(['1', '2'])
+    expect(filterCards(cards, f({ tab: 'all', period: 'all' })).map(c => c.d.key)).toEqual(['1', '2', '3'])
+    expect(filterCards(cards, f({ tab: 'all', taskIds: ['B'] })).map(c => c.d.key)).toEqual(['2'])
+    expect(filterCards(cards, f({ tab: 'active', taskIds: ['B'] }))).toEqual([])
   })
-  test('the four combinations of "apenas ativas" x "exibir itens na fila"', () => {
-    const mk = (key: string, stage: LiveDeliveryRecord['stage']) => rec({ key, stage })
-    const all = joinLive([mk('q', 'queue'), mk('b', 'blocked'), mk('r', 'running'), mk('qa', 'qa'), mk('l', 'leader'), mk('m', 'merge'), mk('c', 'ci'), mk('p', 'published')], [])
-    const keys = (onlyActive: boolean, showQueue: boolean) => filterCards(all, { taskIds: [], onlyActive, showQueue }).map(c => c.d.key)
-    const after = ['b', 'r', 'qa', 'l', 'm', 'c', 'p']
-    expect(keys(true, true)).toEqual(['q', ...after])            // both on (the default): everything in the flow
-    expect(keys(true, false)).toEqual(after)                       // active only: Bloqueado onward, queue hidden
-    expect(keys(false, true)).toEqual(['q'])                       // queue only
-    expect(keys(false, false)).toEqual([])                         // neither
+  test('the tabs: Na fila is the queue, Publicado is its own period (24 h, 7 d, 30 d, all), an old review shows only in Tudo', () => {
+    const H = 3600_000
+    const mk = (key: string, stage: LiveDeliveryRecord['stage'], over: Partial<LiveDeliveryRecord> = {}) => rec({ key, stage, ...over })
+    const all = joinLive([
+      mk('q', 'queue'), mk('r', 'running', { sessionIds: ['w'] }), mk('l', 'leader'),
+      mk('old', 'leader', { old: true, sessionIds: ['w'] }),
+      mk('p1', 'published', { deliveredAtMs: NOWMS - 2 * H }), mk('p3', 'published', { deliveredAtMs: NOWMS - 3 * 24 * H }), mk('p40', 'published', { deliveredAtMs: NOWMS - 40 * 24 * H }),
+    ], [row('w', 'working')])
+    const keys = (tab: 'active' | 'queue' | 'published' | 'all', period: '24h' | '7d' | '30d' | 'all') => filterCards(all, f({ tab, period })).map(c => c.d.key)
+    expect(keys('active', '24h')).toEqual(['r'])                    // not the queue, not published, not the old review
+    expect(keys('queue', '24h')).toEqual(['q'])
+    expect(keys('published', '24h')).toEqual(['p1'])
+    expect(keys('published', '7d')).toEqual(['p1', 'p3'])
+    expect(keys('published', '30d')).toEqual(['p1', 'p3'])
+    expect(keys('published', 'all')).toEqual(['p1', 'p3', 'p40'])
+    expect(keys('all', '24h')).toEqual(['q', 'r', 'l', 'old', 'p1'])
   })
-  test('a queued piece NEVER has an agent and is still shown by the default switches (print ee004953)', () => {
+  test('THE COUNTS MATCH THE COLUMNS: each tab prints exactly the number of cards its columns hold, for every period and task filter', () => {
+    const H = 3600_000
+    const mk = (key: string, stage: LiveDeliveryRecord['stage'], over: Partial<LiveDeliveryRecord> = {}) => rec({ key, stage, ...over })
+    const all = joinLive([
+      mk('q1', 'queue', { taskId: 'A' }), mk('q2', 'queue', { taskId: 'B' }), mk('r', 'running', { sessionIds: ['w'], taskId: 'A' }), mk('qa', 'qa', { sessionIds: ['x'], taskId: 'B' }),
+      mk('l', 'leader'), mk('old', 'leader', { old: true }), mk('b', 'blocked'),
+      mk('p1', 'published', { deliveredAtMs: NOWMS - 2 * H, taskId: 'A' }), mk('p5', 'published', { deliveredAtMs: NOWMS - 5 * 24 * H, taskId: 'B' }), mk('p40', 'published', { deliveredAtMs: NOWMS - 40 * 24 * H }),
+    ], [row('w', 'working'), row('x', 'waiting')])
+    for (const period of ['24h', '7d', '30d', 'all'] as const) {
+      for (const taskIds of [[], ['A'], ['B'], ['A', 'B']] as string[][]) {
+        const counts = tabCounts(all, { taskIds, period, nowMs: NOWMS })
+        for (const tab of ['active', 'queue', 'published', 'all'] as const) {
+          const columns = byStage(filterCards(all, { taskIds, tab, period, nowMs: NOWMS }))
+          const inColumns = Object.values(columns).reduce((n, cs) => n + cs.length, 0)
+          expect(counts[tab]).toBe(inColumns)
+        }
+      }
+    }
+    expect(tabCounts(all, { taskIds: [], period: '24h', nowMs: NOWMS })).toEqual({ active: 2, queue: 2, published: 1, all: 8 })
+  })
+  test('a queued piece NEVER has an agent and still belongs to "Na fila" and "Tudo"', () => {
     const q = joinLive([rec({ key: 'q', stage: 'queue', sessionIds: [] })], [])
-    expect(filterCards(q, { taskIds: [], onlyActive: true, showQueue: true })).toHaveLength(1)
-    // an older caller that knows no `showQueue` keeps the queue visible
-    expect(filterCards(q, { taskIds: [], onlyActive: true })).toHaveLength(1)
+    expect(filterCards(q, f({ tab: 'queue' }))).toHaveLength(1)
+    expect(filterCards(q, f({ tab: 'all' }))).toHaveLength(1)
+    expect(filterCards(q, f({ tab: 'active' }))).toHaveLength(0)
   })
   test('stages group and the summary ignores published', () => {
     expect(byStage(cards).leader).toHaveLength(1)

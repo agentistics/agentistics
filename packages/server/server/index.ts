@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises'
 import { PORT, WEB_PORT, TEAM_CENTRAL, TEAM_PASSWORD, TEAM_ORG, INGEST_ONLY } from './config'
 import type { Server, ServerWebSocket } from 'bun'
 import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
-import { featureOn, parseLiveSort } from '@agentistics/core'
+import { featureOn, LIVE_PERIODS, LIVE_TABS, parseLiveSort, type LivePeriod, type LiveTab } from '@agentistics/core'
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { sendTelemetry } from './telemetry'
@@ -2453,9 +2453,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         ...(url.searchParams.get('task') ? { task: url.searchParams.get('task')! } : {}),
         ...(stage ? { stage } : {}),
         ...(url.searchParams.get('stalled') === '1' ? { stalledOnly: true } : {}),
-        // The screen's own switches (the web keeps its choice in the browser; an agent passes it here): `0` turns one off.
-        ...(url.searchParams.get('onlyActive') === '0' ? { onlyActive: false } : {}),
-        ...(url.searchParams.get('showQueue') === '0' ? { showQueue: false } : {}),
+        // The screen's tab and Publicado period (the web keeps its choice in the browser; an agent passes it here).
+        // A missing OR invalid tab/period is not passed on: the reply falls back to `tab=all`, `period=24h` and says so in `view.defaulted`.
+        ...(LIVE_TABS.includes(url.searchParams.get('tab') as LiveTab) ? { tab: url.searchParams.get('tab') as LiveTab } : {}),
+        ...(LIVE_PERIODS.includes(url.searchParams.get('period') as LivePeriod) ? { period: url.searchParams.get('period') as LivePeriod } : {}),
         ...(url.searchParams.has('sort') ? { sort: parseLiveSort(url.searchParams.get('sort')) } : {}),
       }))
     }

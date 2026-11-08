@@ -7,7 +7,7 @@
  * Nothing here reads the clock or a store: `nowMs` and the fleet come in, so each rule has a test.
  */
 
-import { parseLiveSort, type LiveSortId } from '@agentistics/core'
+import { parseLivePeriod, parseLiveSort, parseLiveTab, type LivePeriod, type LiveSortId, type LiveTab } from '@agentistics/core'
 import { startsLine } from './queueTime'
 import type { FleetRow } from '../../lib/fleet'
 import {
@@ -444,9 +444,13 @@ export function taskOfSession(
 
 export type CollapsedPrefs = Partial<Record<LiveStage, boolean>>
 
-/** PURE: is a column drawn collapsed? The user's choice wins; else today's layout (empty ones) plus Publicado. */
-export function columnCollapsed(stage: LiveStage, count: number, prefs: CollapsedPrefs): boolean {
-  return prefs[stage] ?? (count === 0 || stage === 'published')
+/**
+ * PURE: is a column drawn collapsed? The user's choice wins; else a column with cards is OPEN and an empty one is
+ * collapsed (filtros v2). Publicado is the one empty column that stays open while its tab is showing — its header
+ * carries the period picker, and "nothing published in this period" is an answer to read, not a gap.
+ */
+export function columnCollapsed(stage: LiveStage, count: number, prefs: CollapsedPrefs, keepOpen = false): boolean {
+  return prefs[stage] ?? (count === 0 && !keepOpen)
 }
 
 const PREFS_KEY = 'agentistics.live.collapsed.v1'
@@ -466,19 +470,16 @@ export function writeCollapsedPrefs(p: CollapsedPrefs, storage: Pick<Storage, 's
 function safeStorage(): Storage | null { try { return window.localStorage } catch { return null } }
 
 /** The filter bar's saved choices — kept like the column preferences above (this browser, this origin). */
-export interface LiveViewPrefs { onlyActive: boolean; showQueue: boolean; sort: LiveSortId }
-const VIEW_KEY = 'agentistics.live.view.v1'
+export interface LiveViewPrefs { tab: LiveTab; period: LivePeriod; sort: LiveSortId }
+// v2: the two v1 switches (apenas ativas / exibir fila) became the tabs; the old key is simply never read again.
+const VIEW_KEY = 'agentistics.live.view.v2'
 export function readViewPrefs(storage: Pick<Storage, 'getItem'> | null = safeStorage()): LiveViewPrefs {
-  const dflt: LiveViewPrefs = { onlyActive: LIVE_DEFAULTS.onlyActive, showQueue: LIVE_DEFAULTS.showQueue, sort: LIVE_DEFAULTS.sort }
+  const dflt: LiveViewPrefs = { tab: LIVE_DEFAULTS.tab, period: LIVE_DEFAULTS.period, sort: LIVE_DEFAULTS.sort }
   try {
     const raw = storage?.getItem(VIEW_KEY)
     if (!raw) return dflt
     const p = JSON.parse(raw) as Record<string, unknown>
-    return {
-      onlyActive: typeof p.onlyActive === 'boolean' ? p.onlyActive : dflt.onlyActive,
-      showQueue: typeof p.showQueue === 'boolean' ? p.showQueue : dflt.showQueue,
-      sort: parseLiveSort(p.sort),
-    }
+    return { tab: parseLiveTab(p.tab), period: parseLivePeriod(p.period), sort: parseLiveSort(p.sort) }
   } catch { return dflt }
 }
 export function writeViewPrefs(p: LiveViewPrefs, storage: Pick<Storage, 'setItem'> | null = safeStorage()): void {

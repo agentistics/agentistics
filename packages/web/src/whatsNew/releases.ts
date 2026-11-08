@@ -10,21 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.202.2': {
-    features: [],
-    fixes: [
-      {
-        pt: 'Uma pergunta curta sua é respondida na conversa, sem virar subtarefa nem gerar lembretes. Se o líder perceber que era trabalho, ainda pode ligá-la a uma subtarefa.',
-        en: 'A short question of yours is answered in the conversation, with no subtask and no reminders. If the leader sees it was real work, they can still link it to a subtask.',
-      },
-      {
-        pt: 'Os avisos ao líder citam só o título do seu pedido, não a mensagem inteira, o que gasta menos tokens.',
-        en: 'Notices to the leader quote only the title of your request, not the whole message, which uses fewer tokens.',
-      },
-    ],
-  },
   '2.203.0': {
     features: [
+      {
+        pt: 'O ciclo das entregas anda sozinho depois da revisão: quando o PR de uma peça é mergeado ela vai para CI, e vira Publicado quando sai a primeira versão com o merge. As peças que ficavam paradas em "Revisão do líder" deixam de depender de alguém movê-las.',
+        en: 'The delivery cycle moves by itself after the review: once a piece\'s PR is merged it goes to CI, and becomes Published when the first release with that merge is out. Pieces no longer wait in "Leader review" for someone to move them.',
+      },
+      {
+        pt: 'Uma peça esperando o líder gera um lembrete ao líder vivo da tarefa depois de 30 min e de novo a cada 2 h, no máximo 3 vezes. Nunca a você.',
+        en: 'A piece waiting on its leader reminds the task\'s live leader after 30 min, then every 2 h, at most 3 times. Never you.',
+      },
+      {
+        pt: 'O Live ganhou abas com contagem (Em andamento, Na fila, Publicado, Tudo), e Publicado tem o próprio período (24 h, 7 dias, 30 dias, tudo). A coluna Histórico saiu, colunas vazias ficam recolhidas, e a prioridade na fila do Live agora é só para leitura.',
+        en: 'Live now has tabs with counts (In progress, Queued, Published, All), and Published has its own period (24 h, 7 days, 30 days, all). The History column is gone, empty columns stay collapsed, and priority in the Live queue is now read-only.',
+      },
       {
         pt: 'Uma mensagem sua que ainda está na fila da sessão agora tem "Enviar agora" e "Interromper" na própria legenda ("entregue à sessão…"). "Enviar agora" aparece onde dá para enviar de verdade (Claude Code, com a sessão no meio de um turno); "Interromper" em qualquer assistente que aceite parar o turno. Onde não funciona, o botão simplesmente não aparece.',
         en: 'A message of yours that is still queued in the session now has "Send now" and "Interrupt" on its own caption ("delivered to the session…"). "Send now" shows where it can really work (Claude Code, mid-turn); "Interrupt" on any assistant that accepts stopping the turn. Where neither can work, no button is drawn.',
@@ -54,6 +53,31 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       {
         pt: 'Sessões encerradas (ou que nunca tiveram código próprio, como as de QA) não recebem mais aviso de "fechar entrega", e uma pasta de trabalho que já sumiu deixa de travar o fechamento.',
         en: 'Sessions that already ended (or never had code of their own, like QA sessions) no longer get a "close delivery" notice, and a work folder that is already gone no longer blocks the close.',
+      },
+      {
+        pt: 'Reclamação, áudio ou anexo sem texto não viram mais um cartão de trabalho: o líder responde na conversa.',
+        en: 'A complaint, a voice note or an attachment with no text no longer becomes a work card: the leader answers in the conversation.',
+      },
+      {
+        pt: 'O lembrete de pedido confere de novo antes de avisar: uma peça com sessão viva, ou retirada da fila para abrir à mão, não é mais tratada como esquecida.',
+        en: 'The request reminder checks again before warning: a piece with a live session, or taken off the queue to be opened by hand, is no longer treated as forgotten.',
+      },
+      {
+        pt: 'Uma nova rodada numa peça em revisão leva o cartão de volta para QA ou Em desenvolvimento enquanto a sessão roda, e uma sessão perdida num reinício não segura mais o cartão ali.',
+        en: 'A new round on a piece under review moves its card back to QA or In development while the session runs, and a session lost in a reboot no longer holds the card there.',
+      },
+    ],
+  },
+  '2.202.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uma pergunta curta sua é respondida na conversa, sem virar subtarefa nem gerar lembretes. Se o líder perceber que era trabalho, ainda pode ligá-la a uma subtarefa.',
+        en: 'A short question of yours is answered in the conversation, with no subtask and no reminders. If the leader sees it was real work, they can still link it to a subtask.',
+      },
+      {
+        pt: 'Os avisos ao líder citam só o título do seu pedido, não a mensagem inteira, o que gasta menos tokens.',
+        en: 'Notices to the leader quote only the title of your request, not the whole message, which uses fewer tokens.',
       },
     ],
   },
