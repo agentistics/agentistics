@@ -38,6 +38,35 @@ export function packIntervals<T extends { fromMs: number; toMs: number }>(events
   return out
 }
 
+export type ColumnItem =
+  | { kind: 'card'; id: string; top: number; height: number; hidden: number }
+  | { kind: 'chip'; top: number; height: number; count: number }
+
+/**
+ * A thin phone column (week, 3 days) never splits into lanes: it shows ONE full-width card per stretch of overlapping time,
+ * then a single "+N" chip right under it counting what that card hides. One minute is one pixel, every target is at least
+ * `minPx` tall, and an event that would start inside a card's footprint (or the chip's) joins the hidden count — so no two
+ * targets of a column ever overlap.
+ */
+export function placeColumn(events: readonly { id: string; fromMs: number; toMs: number }[], d0: number, minPx = 44): ColumnItem[] {
+  const sorted = [...events].sort((a, b) => a.fromMs - b.fromMs || b.toMs - a.toMs)
+  const out: ColumnItem[] = []
+  let i = 0
+  while (i < sorted.length) {
+    const e = sorted[i++]!
+    const top = (e.fromMs - d0) / 60_000
+    const height = Math.max(minPx, (e.toMs - e.fromMs) / 60_000)
+    let end = top + height, hidden = 0
+    while (i < sorted.length && (sorted[i]!.fromMs - d0) / 60_000 < end) {
+      hidden++; i++
+      if (hidden === 1) end += minPx // the chip's footprint is reserved as soon as there is something to count
+    }
+    out.push({ kind: 'card', id: e.id, top, height, hidden })
+    if (hidden > 0) out.push({ kind: 'chip', top: top + height, height: minPx, count: hidden })
+  }
+  return out
+}
+
 // ------------------------------------------------------------------------------------------ day arithmetic
 
 /** `yyyy-MM-dd` + n days (calendar arithmetic on the string; no zone involved). */

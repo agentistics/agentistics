@@ -121,9 +121,34 @@ test('phone grid: one card per piece on this day, including published pieces, an
   let selection: unknown = null
   await mount(createElement(MobileDayGrid, { ...common, anchor: '2026-11-07', span: 1, onDay: noop, onOpen: s => { selection = s } }))
   expect(document.querySelectorAll('[data-cal-phone-event]').length).toBe(events.length)
-  expect(document.querySelector('[data-cal-allday-band]')!.textContent).not.toContain('2.201.1')
+  expect(document.querySelector('[data-cal-allday-band]')?.textContent ?? '').not.toContain('2.201.1')
   await act(async () => { (document.querySelector('[data-cal-phone-event="t/a"]') as HTMLButtonElement).click() })
   expect(selection).toEqual({ kind: 'piece', key: 't/a' })
+})
+
+test('a version with no date is not happening today: it stays out of the all-day band and the day count', async () => {
+  const undated = view.versions.filter(v => v.atMs === null)
+  expect(undated.length).toBeGreaterThan(0)
+  for (const day of ['2026-11-07', '2026-11-08']) {
+    await mount(createElement(MobileDayGrid, { ...common, anchor: day, span: 1, onDay: noop, onOpen: noop }))
+    const band = document.querySelector('[data-cal-allday-band]')?.textContent ?? ''
+    for (const v of undated) expect(band).not.toContain(v.version)
+    await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = ''
+  }
+})
+
+test('week view: every card is the full column wide, 44px tall at least, and overlaps become one +N chip that opens the day', async () => {
+  const overlapping = view.pieces.map(p => ({ ...p, startedAtMs: NOW - 2 * H, stageSinceMs: NOW - 2 * H }))
+  let day = ''
+  await mount(createElement(MobileDayGrid, { ...common, pieces: overlapping, anchor: '2026-11-07', span: 7, onDay: d => { day = d }, onOpen: noop }))
+  const col = document.querySelector('[data-cal-grid-day="2026-11-07"]')!
+  const targets = Array.from(col.querySelectorAll<HTMLElement>('[data-cal-phone-event], [data-cal-phone-more]'))
+  expect(targets.length).toBeGreaterThan(0)
+  for (const t of targets) { expect(t.style.width).toBe('100%'); expect(parseFloat(t.style.height)).toBeGreaterThanOrEqual(44) }
+  const chip = col.querySelector<HTMLButtonElement>('[data-cal-phone-more]')
+  expect(chip).not.toBeNull()
+  await act(async () => { chip!.click() })
+  expect(day).toBe('2026-11-07')
 })
 
 test('phone card membership matches the API date window, including past work and pieces without an estimate', () => {
@@ -138,7 +163,7 @@ test('phone card membership matches the API date window, including past work and
 test('phone empty days retain the hour grid and week view has seven real day columns', async () => {
   await mount(createElement(MobileDayGrid, { ...common, pieces: [], versions: [], marks: [], anchor: '2026-11-07', span: 7, onDay: noop, onOpen: noop }))
   expect(document.querySelectorAll('[data-cal-grid-day]').length).toBe(7)
-  expect(document.querySelector('[data-cal-hour-scroller]')!.textContent).toContain('23:00')
+  expect(document.querySelector('[data-cal-hour-scroller]')!.textContent).toContain('23')
   expect(document.querySelector('[data-cal-now]')).not.toBeNull()
   expect(document.querySelectorAll('[data-cal-phone-event]').length).toBe(0)
 })

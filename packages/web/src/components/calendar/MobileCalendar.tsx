@@ -42,7 +42,7 @@ export function MobileCalendar(p: {
       onTouchEnd={e => { const t = e.changedTouches[0]; if (t && start.current) p.onDay(swipeDay(p.anchor, t.clientX - start.current.x, t.clientY - start.current.y, 7)); start.current = null }}>
       {days.map((day, i) => <button type="button" key={day} className="cal-phone-button cal-phone-weekday" aria-label={rangeLabel('day', day, p.pt)} aria-pressed={day === p.anchor} aria-current={day === today ? 'date' : undefined} onClick={() => p.onDay(day)}><small>{dowShort(i, p.pt).slice(0, 1)}</small><span>{Number(day.slice(8))}</span></button>)}
     </div>
-    {!p.ready ? p.body : p.view === 'month' ? month : p.view === 'schedule' || p.view === 'agenda' ? p.body : <MobileDayGrid {...p} span={p.view === 'week' ? 7 : p.view === 'three' ? 3 : 1} />}
+    {!p.ready ? p.body : p.view === 'month' ? month : p.view === 'schedule' || p.view === 'agenda' ? p.body : <MobileDayGrid {...p} onOpenDay={d => { p.onDay(d); p.onView('day') }} span={p.view === 'week' ? 7 : p.view === 'three' ? 3 : 1} />}
     {sheet && <CalendarSheet title={pick(sheet === 'filters' ? TEXT.filters : TEXT.title, p.pt)} closeLabel={pick(TEXT.close, p.pt)} onClose={() => setSheet(null)}>
       {sheet === 'filters' ? p.filters : <>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><button className="cal-phone-button" type="button" aria-label={pick(TEXT.prev, p.pt)} onClick={() => p.onDay(addMonths(p.anchor, -1))}><ChevronLeft size={18} /></button><b>{rangeLabel('month', p.anchor, p.pt)}</b><button className="cal-phone-button" type="button" aria-label={pick(TEXT.next, p.pt)} onClick={() => p.onDay(addMonths(p.anchor, 1))}><ChevronRight size={18} /></button></div>

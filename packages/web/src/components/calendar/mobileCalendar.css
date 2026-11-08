@@ -8,7 +8,9 @@
 .cal-phone-weekday span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; }
 .cal-phone-weekday[aria-current=date] span, .cal-phone-month [aria-current=date] { background: var(--anthropic-orange); color: var(--bg-primary); }
 .cal-phone-weekday[aria-pressed=true] span { outline: 1px solid var(--anthropic-orange); outline-offset: 2px; }
-.cal-phone-allday { display: flex; width: 100%; text-align: left; justify-content: flex-start; background: var(--anthropic-orange-dim); margin-bottom: 2px; }
+/* Compact all-day rows (at most 3 + "+N more"): 32px each instead of 44, so two versions take ~70px, not 180. */
+.cal-phone-allday, .cal-phone-allday-more { display: flex; width: 100%; min-height: 32px; height: 32px; padding: 0 8px; text-align: left; justify-content: flex-start; background: var(--anthropic-orange-dim); margin-bottom: 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cal-phone-allday-more { background: transparent; color: var(--text-secondary); }
 .cal-phone-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: 24px repeat(6, minmax(44px, 1fr)); flex: 1; min-height: 0; overflow-y: auto; text-align: center; }
 .cal-phone-month .cal-phone-button { flex-direction: column; gap: 4px; padding: 2px; min-width: 0; }
 .cal-phone-sheet { color: var(--text-primary); }

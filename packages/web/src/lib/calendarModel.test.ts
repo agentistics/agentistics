@@ -2,8 +2,36 @@ import { describe, expect, test } from 'bun:test'
 import type { CalPiece, CalVersion } from '@agentistics/core'
 import {
   addDays, addMonths, agendaOf, byPriority, dayBlocks, fitWeek, monthCells, pieceSegments, rangeLabel, stepAnchor, versionDays,
-  weekDays, weekRibbons, weekdayMon0, packIntervals, swipeDay,
+  weekDays, weekRibbons, weekdayMon0, packIntervals, swipeDay, placeColumn,
 } from './calendarModel'
+
+describe('placeColumn (thin phone columns: one full-width card, overlaps become a +N chip)', () => {
+  const MIN = 60_000
+  const ev = (id: string, fromMin: number, durMin: number) => ({ id, fromMs: fromMin * MIN, toMs: (fromMin + durMin) * MIN })
+  test('separate events each keep a card and say nothing more', () => {
+    const out = placeColumn([ev('a', 600, 60), ev('b', 720, 60)], 0)
+    expect(out.map(i => i.kind)).toEqual(['card', 'card'])
+    expect(out.every(i => i.kind === 'card' && i.hidden === 0)).toBe(true)
+  })
+  test('overlapping events show the first card and ONE chip below it counting the rest', () => {
+    const out = placeColumn([ev('a', 600, 90), ev('b', 620, 30), ev('c', 640, 30)], 0)
+    expect(out.map(i => i.kind)).toEqual(['card', 'chip'])
+    const [card, chip] = out
+    expect(card).toMatchObject({ id: 'a', top: 600, height: 90, hidden: 2 })
+    expect(chip).toMatchObject({ top: 690, height: 44, count: 2 })
+  })
+  test('short events never produce a target under 44px, and ones inside its footprint are hidden', () => {
+    const out = placeColumn([ev('a', 600, 5), ev('b', 610, 5), ev('c', 660, 5), ev('d', 700, 5)], 0)
+    for (const i of out) expect(i.height).toBeGreaterThanOrEqual(44)
+    expect(out.map(i => i.kind)).toEqual(['card', 'chip', 'card'])
+    expect(out[1]).toMatchObject({ kind: 'chip', count: 2 }) // b (610) and c (660, inside the chip's 644..688)
+    expect(out[2]).toMatchObject({ kind: 'card', id: 'd' })
+  })
+  test('no two targets of a column overlap', () => {
+    const out = placeColumn(Array.from({ length: 12 }, (_, i) => ev(`e${i}`, i * 17, 25)), 0)
+    for (let i = 1; i < out.length; i++) expect(out[i]!.top).toBeGreaterThanOrEqual(out[i - 1]!.top + out[i - 1]!.height)
+  })
+})
 
 const NOW = Date.parse('2026-11-07T18:40:00.000Z') // Sat 07/11 15h40 BRT
 const H = 3600_000

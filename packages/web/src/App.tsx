@@ -978,6 +978,10 @@ export default function AppLayout() {
     location.pathname === '/custom'
     || (location.pathname === '/compare' && new URLSearchParams(location.search).get('mode') === 'filter')
 
+  // The Delivery calendar has its own filter sheet; the app's filter and totals bars do not act on it, and on a
+  // phone they take ~140px from the hour grid.
+  const isDeliveryCalendarRoute = location.pathname === '/tasks/calendar'
+
   /** Which filter dimensions a page can actually react to. Top usage ranks by member, team,
    *  machine, presence, repo, tag, project and model, so those narrow it meaningfully — harness is
    *  left out because the page already breaks every dimension down per harness. Every other page
@@ -4221,7 +4225,7 @@ export default function AppLayout() {
             (a slim summary row) so it doesn't eat the viewport while scrolling;
             the harness chips sit on their own row above the date/projects/models
             controls. Desktop always shows the full bar. */}
-        {data && !isCustomPage && !inSessionsWorkspace && isMobile && (
+        {data && !isCustomPage && !isDeliveryCalendarRoute && !inSessionsWorkspace && isMobile && (
           <div style={{ borderTop: '1px solid var(--border)', width: '100%', boxSizing: 'border-box' }}>
             {/* Collapsed slim row — visible only when minimized; tap to expand. */}
             {filtersCollapsed && (
