@@ -209,10 +209,13 @@ export function stageOfStatus(status: string, label?: string): LiveStage | null 
   return null
 }
 
-const LEADER_NAME = /l[ií]der|leader/i
+// A WHOLE word ("[ LÍDER ] - Motor", "Leader of X"), never a substring: "Leaderboard UI" is a worker.
+const LEADER_NAME = /(^|[^\p{L}])(l[ií]der|leader)([^\p{L}]|$)/iu
+// A registry heartbeat older than this means the session is not being seen any more (a reboot leaves a `lost` row with no endedAt).
+const STALE_HEARTBEAT_MS = 10 * 60_000
 const QA_NAME =/(^|[^a-z])qa([^a-z]|$)|\bquality\b/i
 
-interface PieceSession { id: string; harness: string; model: string | null; effort?: string; label?: string; live: boolean; startMs: number | null; activity?: SessionActivity }
+interface PieceSession { id: string; harness: string; model: string | null; effort?: string; label?: string; live: boolean; seenMs?: number; startMs: number | null; activity?: SessionActivity }
 
 // ---------------------------------------------------------------------------------- ETA
 
@@ -465,6 +468,7 @@ function piecesOf(d: TaskDetail): Piece[] {
         id: s.id, harness: s.harness, model: s.model, ...(s.label ? { label: s.label } : {}),
         ...(s.effort ? { effort: s.effort } : {}),
         live: !s.endedAt, startMs: ms(s.createdAt),
+        ...(typeof s.lastSeenMs === 'number' && Number.isFinite(s.lastSeenMs) ? { seenMs: s.lastSeenMs } : {}),
         ...(s.activity ? { activity: s.activity } : {}),
       }))
   const timesOf = (id: string | null) => d.subtaskRollups.find(r => r.id === id)?.times
@@ -684,7 +688,9 @@ export function buildLive(o: {
     // review; the leader is never a round. Derived on read only: nothing is written, the delivery record is untouched.
     if (!rec && p.status === 'in_review' && stage === 'leader') {
       const since = ms(p.updatedAt)
-      const round = since === null ? [] : liveSessions.filter(s => s.startMs !== null && s.startMs > since && !(s.label && LEADER_NAME.test(s.label)))
+      const round = since === null ? [] : liveSessions.filter(s => s.startMs !== null && s.startMs > since
+        // A `lost` row (reboot) has no endedAt but a frozen heartbeat: it is not a round. No stamp = unknown, stays live.
+        && (s.seenMs === undefined || o.nowMs - s.seenMs <= STALE_HEARTBEAT_MS) && !(s.label && LEADER_NAME.test(s.label)))
       if (round.length > 0) stage = round.some(s => s.label && QA_NAME.test(s.label)) ? 'qa' : 'running'
     }
     // LEGACY in-review work (no delivery record): published once a release tag contains the commit it names;

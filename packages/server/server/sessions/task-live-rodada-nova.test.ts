@@ -46,6 +46,20 @@ describe('a new round on a piece in review', () => {
     const ended = detail('in_review', [sess('s1', REVIEW_AT + 10 * 60_000, { endedAt: iso(NOW - 60_000) })])
     expect(stageOf(ended)).toBe('leader')
   })
+  test('a session the reboot left lost (no endedAt, stale heartbeat) does not hold the card', () => {
+    // Real registry shape: no endedAt, `lastSeenMs` frozen at the last heartbeat before the machine went down.
+    const lost = sess('s1', REVIEW_AT + 10 * 60_000, { lastSeenMs: REVIEW_AT + 20 * 60_000 })
+    expect(stageOf(detail('in_review', [lost]))).toBe('leader')
+  })
+  test('a session with a fresh heartbeat still moves the card', () => {
+    expect(stageOf(detail('in_review', [sess('s1', REVIEW_AT + 10 * 60_000, { lastSeenMs: NOW - 30_000 })]))).toBe('running')
+  })
+  test('a worker named Leaderboard UI is a round, not the leader', () => {
+    expect(stageOf(detail('in_review', [sess('s1', REVIEW_AT + 10 * 60_000, { label: 'Leaderboard UI' })]))).toBe('running')
+  })
+  test('the English leader label also holds', () => {
+    expect(stageOf(detail('in_review', [sess('s1', REVIEW_AT + 10 * 60_000, { label: '[ LEADER ] - Engine' })]))).toBe('leader')
+  })
   test('a piece with a delivery record at revisao_lider stays leader', () => {
     const deliveries = new Map([['a', { phase: 'revisao_lider' }]]) as never
     expect(stageOf(detail('in_review', [sess('s1', REVIEW_AT + 10 * 60_000)]), deliveries)).toBe('leader')
