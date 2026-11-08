@@ -496,13 +496,16 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_live_delivery",
     description:
-      "What is being DELIVERED right now — the Live Delivery line, the same source as the screen. Use it to answer \"what is running\", \"when does X ship\" and \"is anything stalled\". Returns a `summary` (active deliveries, agents working, stalled, the next delivery with an estimate), the active `deliveries` with their stage (queue, running, qa, adjust, leader, merge, published), the agents on each (harness, model, account, live state), time in the stage and in total, the ETA with its source and confidence (`kind: none` means there is NO estimate — say so, never invent a time), the last action, and the `leaders` band (each leader's current action, its workers and what waits on a decision — leaders are never deliveries). Filters: `task` (id or part of the title), `stage`, `stalledOnly`.",
+      "What is being DELIVERED right now — the Live Delivery line, the same source as the screen. Use it to answer \"what is running\", \"when does X ship\" and \"is anything stalled\". Returns a `summary` (active deliveries, agents working, stalled, the next delivery with an estimate), the active `deliveries` with their stage (queue, running, qa, adjust, leader, merge, published), the agents on each (harness, model, account, live state), time in the stage and in total, the ETA with its source and confidence (`kind: none` means there is NO estimate — say so, never invent a time), the last action, and the `leaders` band (each leader's current action, its workers and what waits on a decision — leaders are never deliveries). Each delivery carries its Agentask `priority` (urgent | high | medium | low; a subtask inherits its task's). Filters: `task` (id or part of the title), `stage`, `stalledOnly`, and the screen's own switches — `onlyActive` (the stages after the queue; default true) and `showQueue` (the Na fila column; default true), pass false to turn one off — plus `sort` (how each stage lists its cards; default `priority`, highest first, ties by longest in the stage). Stage names on screen: queue = Na fila, running = Em desenvolvimento, qa = QA. `history` is the screen's Histórico column: pieces published more than 24 h ago (up to 30 days, newest first, same `task` filter, no live agents) — Publicado keeps a card for 24 h and then it moves there.",
     inputSchema: {
       type: "object",
       properties: {
         task: { type: "string", description: "A task id or part of its title." },
         stage: { type: "string", enum: ["queue", "running", "qa", "adjust", "leader", "merge", "published"] },
         stalledOnly: { type: "boolean", description: "Only deliveries that need a person, lost an agent or are blocked." },
+        onlyActive: { type: "boolean", description: "The screen's \"apenas ativas\": the cards of the stages after the queue. Default true; false hides them." },
+        showQueue: { type: "boolean", description: "The screen's \"exibir itens na fila\": the cards of the Na fila column. Default true; false hides them." },
+        sort: { type: "string", enum: ["priority", "time-in-stage", "recent"], description: "Order within each stage. Default priority (highest first, ties by longest in the stage)." },
       },
       required: [],
     },

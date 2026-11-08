@@ -14,7 +14,7 @@ let createRoot: typeof import('react-dom/client').createRoot
 let router: typeof import('react-router-dom')
 let hostMod: typeof import('./EngineSurfaceHost')
 let indicatorMod: typeof import('./EngineSurfaceIndicator')
-let treeMod: typeof import('./nav/AreaTree')
+let groupMod: typeof import('./nav/TopBarGroup')
 let state: typeof import('../lib/engineSurfaceHost')
 let caps: typeof import('../lib/engineCapsBus')
 let buttonsMod: typeof import('./EngineSurfaceButtons')
@@ -26,12 +26,13 @@ beforeAll(async () => {
   GlobalRegistrator.register({ width: 1200, height: 800 })
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never
+  ;(globalThis as { EventSource?: unknown }).EventSource = class { addEventListener() {} removeEventListener() {} close() {} }
   ;(globalThis as { fetch?: unknown }).fetch = async () => new Response(JSON.stringify(status), { status: 200 })
   createRoot = (await import('react-dom/client')).createRoot
   router = await import('react-router-dom')
   hostMod = await import('./EngineSurfaceHost')
   indicatorMod = await import('./EngineSurfaceIndicator')
-  treeMod = await import('./nav/AreaTree')
+  groupMod = await import('./nav/TopBarGroup')
   state = await import('../lib/engineSurfaceHost')
   caps = await import('../lib/engineCapsBus')
   buttonsMod = await import('./EngineSurfaceButtons')
@@ -40,6 +41,12 @@ afterAll(async () => { setSystemTime(); globalThis.fetch = originalFetch; await 
 
 const rail = { id: 'demo', placement: 'rail', icon: 'sparkles', label: { pt: 'Demo PT', en: 'Demo' }, module: '/api/engine/x/demo/mount.js' }
 const settle = (ms = 20) => act(async () => { await new Promise(r => setTimeout(r, ms)) })
+
+/** Opens the grid button's popover when it is closed (a click on a row closes it). */
+async function openGroup(host: HTMLElement) {
+  if (host.querySelector('[data-topbar-group-popover]')) return
+  await act(async () => { (host.querySelector('[data-topbar-group]') as HTMLElement).click() })
+}
 
 async function mount(el: ReturnType<typeof h>) {
   const host = document.createElement('div')
@@ -58,8 +65,9 @@ function app(go: { nav: NavigateFunction | null; path: string }) {
     const loc = useLocation()
     go.path = loc.pathname
     return h('div', null,
-      h('header', { 'data-testid': 'bar' }, h(indicatorMod.EngineSurfaceIndicators, { lang: 'en', tickMs: 10 })),
-      h(treeMod.AreaTree, { lang: 'en', pathname: loc.pathname }),
+      h('header', { 'data-testid': 'bar' }, h(indicatorMod.EngineSurfaceIndicators, { lang: 'en', tickMs: 10 }),
+        // The `rail` entry (Ligações) lives in the top bar's grid button; host-only rows are off here.
+        h(groupMod.TopBarGroup, { lang: 'en', enabled: false })),
       h('main', null, h(Outlet)))
   }
   function Page() { const { surfaceId = '' } = useParams(); return h(hostMod.EngineSurfacePage, { key: surfaceId, surfaceId, lang: 'en' }) }
@@ -160,7 +168,8 @@ describe('beta tag on a rail entry', () => {
     status = { present: true, surfaces: [surface] }
     caps.invalidateEngineCaps()
     const view = await mount(app({ nav: null, path: '' }))
-    const link = view.host.querySelector('a[data-engine-rail="demo"]') as HTMLElement
+    await openGroup(view.host)
+    const link =view.host.querySelector('a[data-engine-rail="demo"]') as HTMLElement
     const tag = Array.from(link.querySelectorAll('span')).find(e => e.textContent === 'beta')
     await act(async () => { view.root.unmount() })
     view.host.remove()
@@ -188,12 +197,14 @@ describe('rail page, keepAlive and indicator', () => {
     const view = await mount(app(go))
     const surfaceHost = await mount(h(hostMod.EngineSurfaceHost, { load: async () => ({ mount(el: HTMLElement) { calls.push('mount'); el.textContent = 'page-body' }, unmount() { calls.push('unmount') } }) }))
     const entry = () => view.host.querySelector('a[data-engine-rail="demo"]') as HTMLAnchorElement
+    await openGroup(view.host)
     expect(entry().getAttribute('href')).toBe('/x/demo')
     expect(entry().getAttribute('title')).toBe('Demo')
     expect(entry().getAttribute('aria-current')).toBeNull()
     await act(async () => { entry().click() })
     await settle()
     expect(go.path).toBe('/x/demo')
+    await openGroup(view.host)
     expect(entry().getAttribute('aria-current')).toBe('page')
     const page = view.host.querySelector('[data-engine-page="demo"]') as HTMLElement
     expect(page.textContent).toBe('page-body')

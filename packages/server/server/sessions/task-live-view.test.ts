@@ -6,7 +6,7 @@ const NOW = 1_000_000
 const d = (over: Partial<LiveDelivery>): LiveDelivery => ({
   key: 't/a', taskId: 't', taskTitle: 'Task', subtaskId: 'a', title: 'Piece', status: 'in_progress', stage: 'running',
   stageSinceMs: 0, startedAtMs: 0, sessionIds: [], harnesses: [], models: [], eta: { kind: 'none', reason: 'no-history' },
-  lastAction: null, blockedReason: null, deliveredAtMs: null,
+  lastAction: null, blockedReason: null, deliveredAtMs: null, priority: 'low',
   workMs: null, efforts: [], trail: [], stageEta: { kind: 'none', reason: 'no-history' }, publishEta: { kind: 'none', reason: 'no-history' }, block: null, ci: null, step: null, ...over,
 })
 const reply = (ds: LiveDelivery[]): LiveReply => ({ generatedAt: 'x', deliveries: ds, samples: 0, hidden: [], archived: [], archivedTotal: 0, sessionTasks: {} })
@@ -30,6 +30,25 @@ describe('describeLive', () => {
     expect(run({ task: 'alp' })).toEqual(['1'])
     expect(run({ stage: 'qa' })).toEqual(['1'])
     expect(run({ stalledOnly: true })).toEqual(['3'])
+  })
+  test('the screen\'s switches (same rules as the web): "apenas ativas" is the stages after the queue, "exibir fila" the queue', () => {
+    const ds = [d({ key: 'q', stage: 'queue' }), d({ key: 'b', stage: 'blocked' }), d({ key: 'r', stage: 'running' }), d({ key: 'p', stage: 'published', deliveredAtMs: 1 })]
+    const run = (filters: object) => describeLive({ reply: reply(ds), rows: [], leaderIds: new Set(), nowMs: NOW, filters }).deliveries.map(x => x.key)
+    expect(run({})).toEqual(['q', 'b', 'r', 'p'])
+    expect(run({ onlyActive: true, showQueue: false })).toEqual(['b', 'r', 'p'])
+    expect(run({ onlyActive: false, showQueue: true })).toEqual(['q'])
+    expect(run({ onlyActive: false, showQueue: false })).toEqual([])
+  })
+  test('each stage is listed highest priority first (ties: longest in the stage); `sort` changes it', () => {
+    const ds = [
+      d({ key: 'low', stage: 'running', priority: 'low', stageSinceMs: 10 }), d({ key: 'urg', stage: 'running', priority: 'urgent', stageSinceMs: 900 }),
+      d({ key: 'hi-old', stage: 'running', priority: 'high', stageSinceMs: 5 }), d({ key: 'hi-new', stage: 'running', priority: 'high', stageSinceMs: 50 }),
+      d({ key: 'qa-low', stage: 'qa', priority: 'low' }), d({ key: 'qa-urg', stage: 'qa', priority: 'urgent' }),
+    ]
+    const run = (filters: object) => describeLive({ reply: reply(ds), rows: [], leaderIds: new Set(), nowMs: NOW, filters }).deliveries.map(x => x.key)
+    expect(run({})).toEqual(['urg', 'hi-old', 'hi-new', 'low', 'qa-urg', 'qa-low'])
+    expect(run({ sort: 'recent' })).toEqual(['urg', 'hi-new', 'low', 'hi-old', 'qa-low', 'qa-urg'].map(k => k))
+    expect(run({ sort: 'time-in-stage' })).toEqual(['hi-old', 'low', 'hi-new', 'urg', 'qa-low', 'qa-urg'])
   })
   test('leaders are their own band, never a delivery: current action, workers, awaiting', () => {
     const v = describeLive({

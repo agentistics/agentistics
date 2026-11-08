@@ -10,17 +10,20 @@
  */
 
 import React from 'react'
-import { ArrowLeft, Check, CircleDashed, Clock, CornerDownRight } from 'lucide-react'
+import { ArrowLeft, Check, CircleDashed, Clock, CornerDownRight, ExternalLink } from 'lucide-react'
 import type { FleetRow } from '../../lib/fleet'
 import { accountDisplayName } from '../../lib/planLimits'
 import { describeLastAction, shortTitle } from '@agentistics/core'
+import type { LiveSortId } from '@agentistics/core'
 import { RoleChip } from '../sessions/RoleChip'
 import { surface } from './board'
+import { LivePriorityChip } from './LivePriorityChip'
 import {
   cardPills, isQueued, queuePosition, STAGE_LABEL, type LiveCard, type LiveStage, type RuntimeFacts,
 } from './liveDeliveryModel'
 import { blockLines, cardPercent, cardStateWord, ciChecklist, etaBoxes, queueLines, stageBar, timeRow, waitingReason } from './liveCardModel'
 import { LiveOdometer } from './LiveOdometer'
+import { openSessionWord, SESSION_LINK_WORD, type SessionLink } from './liveSessionLinks'
 
 const STATE_COLOR = {
   working: 'var(--accent-green, #3ecf8e)', waiting: 'var(--text-tertiary)',
@@ -45,13 +48,18 @@ export interface LiveCardViewProps {
   cameFrom?: LiveStage | null
   /** Inside the Publicado accordion the card is the expanded body of a row: no outer border radius games. */
   embedded?: boolean
+  /** The order the columns are drawn in — a queued card's "1º / 2º" is its place in THAT order. */
+  sort?: LiveSortId
+  /** "abrir sessão" links (author / QA / leader). The card itself is a button, so each link is a role=link span. */
+  links?: readonly SessionLink[]
+  onOpenSession?: (id: string) => void
 }
 
 export function LiveCardView(p: LiveCardViewProps) {
   const { c, nowMs, pt, mobile } = p
   const d = c.d
   const queued = isQueued(c)
-  const pos = queuePosition(p.cards, c)
+  const pos = queuePosition(p.cards, c, p.sort)
   const agent = c.agents[0]
   const pills = cardPills(c, a => (a.accountId ? accountDisplayName(p.accountLabels, a.harness, a.accountId) : null), pt ? 'conta' : 'account', p.runtime, pt)
   const stateWord = cardStateWord(c, pt)
@@ -85,7 +93,10 @@ export function LiveCardView(p: LiveCardViewProps) {
           <ArrowLeft size={10} aria-hidden />{pt ? 'veio de' : 'came from'} {STAGE_LABEL[p.cameFrom][pt ? 'pt' : 'en']} · {pt ? 'agora' : 'now'}
         </span>
       )}
-      <span title={d.title} data-live-title style={{ fontWeight: 650, fontSize: 12, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{shortTitle(d.title)}</span>
+      <span style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
+        <span title={d.title} data-live-title style={{ flex: 1, minWidth: 0, fontWeight: 650, fontSize: 12, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{shortTitle(d.title)}</span>
+        <LivePriorityChip priority={d.priority} pt={pt} />
+      </span>
       {ctx && <span style={{ fontSize: 11, color: MUTED, overflowWrap: 'anywhere', lineHeight: 1.3 }}>{ctx}</span>}
 
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11.5, minWidth: 0 }}>
@@ -137,7 +148,7 @@ export function LiveCardView(p: LiveCardViewProps) {
         </>
       )}
       {queue?.staged && <span data-live-staged style={{ fontSize: 11, color: 'var(--text-secondary)', overflowWrap: 'anywhere', lineHeight: 1.3 }}>{queue.staged}</span>}
-      {queue?.slot && <span data-live-queue-slot style={{ fontSize: 10.5, color: queue.slotOk === false ? 'var(--accent-yellow, #e5b341)' : MUTED, overflowWrap: 'anywhere' }}>{queue.slot}</span>}
+      {queue?.slot && <span data-live-queue-slot title={queue.slotRaw ?? undefined} style={{ fontSize: 10.5, color: queue.slotOk === false ? 'var(--accent-yellow, #e5b341)' : MUTED, overflowWrap: 'anywhere' }}>{queue.slot}</span>}
       {queued && <span data-live-time title={time.title} style={{ fontSize: 10.5, color: MUTED }}>{time.inStage}</span>}
 
       {boxes && !queued && (
@@ -159,6 +170,19 @@ export function LiveCardView(p: LiveCardViewProps) {
             <span key={l.key} data-ci-line={l.key} data-done={l.done ? '1' : '0'} style={{ display: 'flex', alignItems: 'center', gap: 5, color: l.done ? 'var(--accent-green, #26b573)' : MUTED }}>
               {l.done ? <Check size={11} aria-hidden /> : <CircleDashed size={11} aria-hidden />}{l.text}
             </span>
+          ))}
+        </span>
+      )}
+      {p.links && p.links.length > 0 && p.onOpenSession && (
+        <span data-live-session-links style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', paddingTop: 5, borderTop: '1px dashed var(--border)' }}>
+          {p.links.map(l => (
+            <span
+              key={l.id} role="link" tabIndex={0} data-live-session-link={l.role}
+              aria-label={`${openSessionWord(pt)} — ${SESSION_LINK_WORD[l.role][pt ? 'pt' : 'en']}`}
+              onClick={e => { e.stopPropagation(); p.onOpenSession!(l.id) }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); p.onOpenSession!(l.id) } }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--anthropic-orange-light)', cursor: 'pointer', minHeight: mobile ? 32 : undefined, textDecoration: 'underline', textUnderlineOffset: 2 }}
+            ><ExternalLink size={11} aria-hidden />{SESSION_LINK_WORD[l.role][pt ? 'pt' : 'en']} · {openSessionWord(pt)}</span>
           ))}
         </span>
       )}

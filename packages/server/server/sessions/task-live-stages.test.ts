@@ -27,6 +27,24 @@ const sess = (id: string, subtaskId: string | null, extra: object = {}) => ({
 })
 const ev = (id: string, at: number, extra: Partial<TaskEvent>): TaskEvent => ({ id, taskId: 't1', actor: 'x', kind: 'status', at: iso(at), ...extra })
 
+describe('every delivery carries the Agentask priority (a subtask has none of its own: it inherits its task\'s)', () => {
+  const live = (task: object) => buildLive({
+    nowMs: NOW, events: [],
+    details: [detail({ subtasks: [sub('a', 'in_progress')] as never, sessions: [sess('s1', 'a')] as never }, task)],
+  }).deliveries[0]!
+  test('the task\'s priority reaches its subtask pieces and its own task-level piece', () => {
+    expect(live({ priority: 'urgent' }).priority).toBe('urgent')
+    expect(live({ priority: 'high' }).priority).toBe('high')
+    const taskLevel = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [], sessions: [sess('s1', null)] as never }, { priority: 'medium' })] }).deliveries[0]!
+    expect(taskLevel.priority).toBe('medium')
+  })
+  test('absent, the legacy none and a typo are low — never `none` and never medium', () => {
+    expect(live({}).priority).toBe('low')
+    expect(live({ priority: 'none' }).priority).toBe('low')
+    expect(live({ priority: 'asap' }).priority).toBe('low')
+  })
+})
+
 describe('"total" is the piece\'s real work, never the task\'s age', () => {
   test('a 52-day-old task with a piece started 90 minutes ago reports 90 minutes', () => {
     const r = buildLive({
@@ -189,6 +207,14 @@ describe('a card never leaves without a word (item r) — one test per path that
     const h = hiddenOf([sub('a', 'done', { deliveredAt: iso(NOW - 30 * H) }), sub('b', 'done', { deliveredAt: iso(NOW - 400 * 24 * H) })])
     expect(h.map(x => [x.key, x.reason])).toEqual([['t1/a', 'published-old']])
   })
+  test('published more than 24 h ago lands in history (newest first), a year-old one does not', () => {
+    const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [
+      sub('a', 'done', { deliveredAt: iso(NOW - 30 * H) }), sub('b', 'done', { deliveredAt: iso(NOW - 5 * 24 * H) }),
+      sub('c', 'done', { deliveredAt: iso(NOW - 400 * 24 * H) }), sub('d', 'done', { deliveredAt: iso(NOW - 2 * H) }),
+    ] as never, sessions: [] as never })] })
+    expect((r.history ?? []).map(x => x.key)).toEqual(['t1/a', 't1/b'])
+    expect(r.deliveries.map(x => x.key)).toEqual(['t1/d'])
+  })
   test('queue entry that lost its staged session -> queue-idle', () => {
     expect(hiddenOf([sub('a', 'todo', { updatedAt: iso(NOW - H) })])).toEqual([expect.objectContaining({ reason: 'queue-idle', stage: 'queue' })])
     expect(hiddenOf([sub('a', 'todo', { updatedAt: iso(NOW - 30 * H) })])).toEqual([])
@@ -227,7 +253,7 @@ describe('the leaders band', () => {
     expect(workerWord('waiting-approval', 'blocked')).toBe('needs-you')
   })
   test('a leader\'s own filing is not a column card', () => {
-    const d = { key: 't1', taskId: 't1', taskTitle: 'Engine', subtaskId: null, title: 'Engine', status: 'in_progress', stage: 'running', stageSinceMs: 0, startedAtMs: 0, sessionIds: ['L'], harnesses: [], models: [], efforts: [], eta: { kind: 'none', reason: 'no-history' }, workMs: null, trail: [], stageEta: { kind: 'none', reason: 'no-history' }, publishEta: { kind: 'none', reason: 'no-history' }, block: null, lastAction: null, blockedReason: null, deliveredAtMs: null }
+    const d = { key: 't1', taskId: 't1', taskTitle: 'Engine', subtaskId: null, title: 'Engine', status: 'in_progress', stage: 'running', stageSinceMs: 0, startedAtMs: 0, sessionIds: ['L'], harnesses: [], models: [], efforts: [], eta: { kind: 'none', reason: 'no-history' }, workMs: null, trail: [], stageEta: { kind: 'none', reason: 'no-history' }, publishEta: { kind: 'none', reason: 'no-history' }, block: null, lastAction: null, blockedReason: null, priority: 'low', deliveredAtMs: null }
     const v = describeLive({ reply: reply([d]), rows: [row('L', 'working')], leaderIds: new Set(['L']), nowMs: NOW })
     expect(v.deliveries).toEqual([])
     expect(v.leaders[0]!.taskId).toBe('t1')
