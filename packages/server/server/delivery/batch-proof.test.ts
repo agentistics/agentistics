@@ -221,6 +221,23 @@ describe('loadBatchPrs / findEnginePinTag — gh, once per run', () => {
     const f = { gh: async () => { throw new Error('gh: not logged in') } } as unknown as GateFacts
     expect(await loadBatchPrs(f, '/r', 'o/r', newProofCache())).toEqual([])
   })
+  test('the swallowed reason is kept (first line, no token) so the entry can say WHY gh was unreadable', async () => {
+    const cache = newProofCache()
+    const f = { gh: async () => { throw new Error('gh: HTTP 401 with ghp_abcdefghijklmnopqrstuvwxyz0123456789\nsecond line') } } as unknown as GateFacts
+    await loadBatchPrs(f, '/r', 'o/r', cache)
+    const why = cache.unreadableWhy.get('o/r') ?? ''
+    expect(why).toContain('HTTP 401')
+    expect(why).not.toContain('ghp_abcdef')
+    expect(why).not.toContain('second line')
+    // gh answered, but not with a PR list (the shape of the spawn-guard bug: an undefined answer)
+    const odd = newProofCache()
+    await loadBatchPrs({ gh: async () => undefined } as unknown as GateFacts, '/r', 'o/r', odd)
+    expect(odd.unreadableWhy.get('o/r')).toContain('not a PR list')
+    // a later good read clears it
+    const ok = { gh: async () => '[]' } as unknown as GateFacts
+    await loadBatchPrs(ok, '/r', 'o/r', cache)
+    expect(cache.unreadableWhy.has('o/r')).toBe(false)
+  })
   test('the engine commit ships in the FIRST public tag whose engine.pin contains it', async () => {
     const pins: Record<string, string> = { 'v2.200.0': 'aaaaaaa1', 'v2.200.4': 'bbbbbbb2', 'v2.200.5': 'ccccccc3', 'v2.199.0': 'ddddddd0' }
     const contains = new Set(['aaaaaaa1', 'bbbbbbb2', 'ccccccc3']) // the commit is in these pins; not in v2.199.0's

@@ -250,6 +250,8 @@ export interface ProofCache {
   outcomes: Map<string, PieceOutcome>
   /** Repositories whose merged PRs gh could not list in THIS process, with nothing known from before: a read that did not happen. Never persisted. */
   unreadable: Set<string>
+  /** WHY each unreadable repository could not be read (one line, no token): the entry says it instead of a bare "could not be read". Never persisted. */
+  unreadableWhy: Map<string, string>
   /** The automatic run: when it may run again, and how the last one went. */
   auto: { nextAt: number; failures: number; last?: AutoRunReport }
 }
@@ -258,7 +260,7 @@ export type UncheckedWhy = 'no-repos' | 'gh' | 'budget'
 export interface PieceOutcome { proven?: boolean; suggestion?: { repo: string; pr: number; tag?: string; via: string }; /** The last run could not look this piece up: it is neither proven nor "antiga". */ unchecked?: UncheckedWhy }
 export interface AutoRunReport { at: string; ms: number; gh: number; summary?: unknown; stopped?: string }
 
-export const newProofCache = (nowMs = 0): ProofCache => ({ nowMs, prs: new Map(), commits: new Map(), pins: new Map(), tags: new Map(), contains: new Map(), localTags: new Map(), verdicts: new Map(), outcomes: new Map(), unreadable: new Set(), auto: { nextAt: 0, failures: 0 } })
+export const newProofCache = (nowMs = 0): ProofCache => ({ nowMs, prs: new Map(), commits: new Map(), pins: new Map(), tags: new Map(), contains: new Map(), localTags: new Map(), verdicts: new Map(), outcomes: new Map(), unreadable: new Set(), unreadableWhy: new Map(), auto: { nextAt: 0, failures: 0 } })
 
 const PROOF_CACHE_VERSION = 1
 /** PURE. The cache as a JSON document (only what is safe to believe later: an unknown answer is not kept). */
@@ -442,15 +444,23 @@ async function loadPrCommits(f: GateFacts, cwd: string, repo: string, wanted: re
   return slot.byPr
 }
 
+/** One line of a failure for a person to read: the first line, any GitHub token shape masked, bounded. */
+export function oneLineReason(e: unknown): string {
+  const text = e instanceof Error ? e.message : String(e)
+  return (text.split('\n')[0] ?? '').replace(/\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '***').slice(0, 160)
+}
+
 /** Merged PRs of a repository (title, body, base, merge commit, commit list), newest first. Never throws: an unreadable source keeps what was known. */
 export async function loadBatchPrs(f: GateFacts, cwd: string, repo: string, cache: ProofCache): Promise<BatchPr[]> {
   const hit = cache.prs.get(repo)
   if (hit && fresh(cache, hit.at)) return hit.list
   type Row = { number?: number; title?: string; body?: string; mergedAt?: string; headRefName?: string; headRefOid?: string; baseRefName?: string; mergeCommit?: { oid?: string } | null }
   let failed = false
-  const raw = json<Row[] | null>(await f.gh(cwd, ['pr', 'list', '-R', repo, '--state', 'merged', '--limit', String(BATCH_PR_LIMIT), '--json', 'number,title,body,mergedAt,headRefName,headRefOid,baseRefName,mergeCommit']).catch(() => { failed = true; return 'null' }), null)
-  if (failed || !Array.isArray(raw)) { if (!hit) cache.unreadable.add(repo); return hit?.list ?? [] }
+  let why = ''
+  const raw = json<Row[] | null>(await f.gh(cwd, ['pr', 'list', '-R', repo, '--state', 'merged', '--limit', String(BATCH_PR_LIMIT), '--json', 'number,title,body,mergedAt,headRefName,headRefOid,baseRefName,mergeCommit']).catch((e: unknown) => { failed = true; why = oneLineReason(e); return 'null' }), null)
+  if (failed || !Array.isArray(raw)) { if (!hit) { cache.unreadable.add(repo); cache.unreadableWhy.set(repo, why || 'gh answered with something that is not a PR list') } return hit?.list ?? [] }
   cache.unreadable.delete(repo)
+  cache.unreadableWhy.delete(repo)
   const rows = raw.flatMap((p): BatchPr[] => (typeof p.number === 'number' && p.mergeCommit?.oid
     ? [{ repo, number: p.number, title: p.title ?? '', body: p.body ?? '', mergeSha: p.mergeCommit.oid, ...(p.mergedAt ? { mergedAt: p.mergedAt } : {}), ...(p.headRefName ? { headRefName: p.headRefName } : {}), ...(p.headRefOid ? { headRefOid: p.headRefOid } : {}), ...(p.baseRefName ? { baseRefName: p.baseRefName } : {}) }]
     : []))

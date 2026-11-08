@@ -1471,7 +1471,7 @@ export function createDeliveryService(d: DeliveryDeps) {
       }
       // Nothing proved it, but part of what could have is unread: that is not "no proof".
       if (!batch.ok && !hasRecord && (repos ?? PRODUCT_REPOS).some(x => proofs.unreadable.has(x) || !prsByRepo.has(x))) {
-        unchecked((repos ?? PRODUCT_REPOS).some(x => proofs.unreadable.has(x)) ? 'gh' : 'budget', `GitHub's list of merged PRs could not be read (is gh installed and signed in?)`)
+        unchecked((repos ?? PRODUCT_REPOS).some(x => proofs.unreadable.has(x)) ? 'gh' : 'budget', `GitHub's list of merged PRs could not be read (is gh installed and signed in?${(repos ?? PRODUCT_REPOS).map(x => proofs.unreadableWhy.get(x)).find(Boolean) ? ` — ${(repos ?? PRODUCT_REPOS).map(x => proofs.unreadableWhy.get(x)).find(Boolean)}` : ''})`)
         continue
       }
       // Weak evidence (the card's name, a branch in a PR's text, a tie across releases) moves nothing: it is what the person sees beside the card.
