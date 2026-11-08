@@ -95,10 +95,57 @@ const json = <T>(s: string, fallback: T): T => { try { return JSON.parse(s) as T
 export interface ProofCache {
   prs: Map<string, BatchPr[]>
   pins: Map<string, string | null>
-  tags: { list: string[] | null }
+  tags: { list: string[] | null; shas: Map<string, string>; complete: boolean }
   contains: Map<string, boolean | null>
 }
-export const newProofCache = (): ProofCache => ({ prs: new Map(), pins: new Map(), tags: { list: null }, contains: new Map() })
+export const newProofCache = (): ProofCache => ({ prs: new Map(), pins: new Map(), tags: { list: null, shas: new Map(), complete: false }, contains: new Map() })
+
+const TAG_PAGES = 5
+
+/** The public release tags (`vN.N.N`), newest first BY VERSION, with their commits; read once per run (up to 500 tags). */
+async function publicTags(f: GateFacts, cwd: string, cache: ProofCache): Promise<string[]> {
+  if (cache.tags.list) return cache.tags.list
+  const semver = (t: string) => t.slice(1).split('.').map(Number)
+  const names: string[] = []
+  for (let page = 1; page <= TAG_PAGES; page++) {
+    const rows = json<Array<{ name?: string; commit?: { sha?: string } }>>(await f.gh(cwd, ['api', `repos/${DEFAULT_RELEASE_REPO}/tags?per_page=100&page=${page}`]).catch(() => '[]'), [])
+    const list = Array.isArray(rows) ? rows : []
+    for (const t of list) if (t.name && RELEASE_TAG.test(t.name)) { names.push(t.name); if (t.commit?.sha) cache.tags.shas.set(t.name, t.commit.sha) }
+    if (list.length < 100) { cache.tags.complete = true; break }
+  }
+  // The API's own order is not a version order.
+  cache.tags.list = names.sort((a, b) => { const x = semver(a); const y = semver(b); return (y[0]! - x[0]!) || (y[1]! - x[1]!) || (y[2]! - x[2]!) })
+  return cache.tags.list
+}
+
+/**
+ * The FIRST public release tag that contains a public commit: walk the tags newest to oldest while each still contains it; the
+ * last one that did is the first release. The walk must END at a tag that does not contain it (or at the end of a complete
+ * listing) — a walk that ran off a partial page proves nothing, so it answers null. null also when nothing contains it yet.
+ */
+export async function findPublicTag(f: GateFacts, cwd: string, mergeSha: string, cache: ProofCache): Promise<string | null> {
+  const tags = await publicTags(f, cwd, cache)
+  let first: string | null = null
+  let ended = false
+  for (const tag of tags) {
+    const sha = cache.tags.shas.get(tag)
+    if (!sha) return null
+    const key = `pub:${mergeSha}...${sha}`
+    let has = cache.contains.get(key)
+    if (has === undefined) {
+      if (sha === mergeSha) has = true
+      else {
+        const st = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${DEFAULT_RELEASE_REPO}/compare/${mergeSha}...${sha}`, '--jq', '{status: .status}']).catch(() => '{}'), {}).status
+        has = st ? st === 'ahead' || st === 'identical' : null
+      }
+      cache.contains.set(key, has)
+    }
+    if (has === null) return null
+    if (!has) { ended = true; break }
+    first = tag
+  }
+  return ended || cache.tags.complete ? first : null
+}
 
 /** Merged PRs of a repository (title, body, merge commit), newest first. Never throws: an unreadable source is an empty list. */
 export async function loadBatchPrs(f: GateFacts, cwd: string, repo: string, cache: ProofCache): Promise<BatchPr[]> {
@@ -119,13 +166,7 @@ export async function loadBatchPrs(f: GateFacts, cwd: string, repo: string, cach
  * null = not released yet (or not readable). Pins and ancestry are immutable, so both are cached for the run.
  */
 export async function findEnginePinTag(f: GateFacts, cwd: string, engineSha: string, cache: ProofCache): Promise<string | null> {
-  if (!cache.tags.list) {
-    const rows = json<Array<{ name?: string }>>(await f.gh(cwd, ['api', `repos/${DEFAULT_RELEASE_REPO}/tags?per_page=100`]).catch(() => '[]'), [])
-    const semver = (t: string) => t.slice(1).split('.').map(Number)
-    // Newest first BY VERSION (the API's own order is not a version order).
-    cache.tags.list = (Array.isArray(rows) ? rows : []).flatMap(t => (t.name && RELEASE_TAG.test(t.name) ? [t.name] : []))
-      .sort((a, b) => { const x = semver(a); const y = semver(b); return (y[0]! - x[0]!) || (y[1]! - x[1]!) || (y[2]! - x[2]!) })
-  }
+  const tagList = await publicTags(f, cwd, cache)
   const pinOf = async (tag: string): Promise<string | null> => {
     if (cache.pins.has(tag)) return cache.pins.get(tag)!
     const b64 = (await f.gh(cwd, ['api', `repos/${DEFAULT_RELEASE_REPO}/contents/engine.pin?ref=${tag}`, '--jq', '.content']).catch(() => '')).trim()
@@ -144,7 +185,7 @@ export async function findEnginePinTag(f: GateFacts, cwd: string, engineSha: str
     return v
   }
   let first: string | null = null
-  for (const tag of cache.tags.list.slice(0, ENGINE_TAG_WALK)) {
+  for (const tag of tagList.slice(0, ENGINE_TAG_WALK)) {
     const pin = await pinOf(tag)
     if (!pin) break
     const has = await containsOf(pin)
