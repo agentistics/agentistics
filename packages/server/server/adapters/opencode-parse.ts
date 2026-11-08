@@ -2,6 +2,7 @@
  * step-finish parts repeat it. Reasoning is additive (OpenCode 1.17.9 session.getUsage).
  * https://github.com/anomalyco/opencode/blob/v1.17.9/packages/opencode/src/session/session.ts
  */
+import { canonicalTool } from '../harness-activity'
 import { activeMinutesOf, emptyModelUsage, isLocalModelId, type ModelUsage, type SessionMeta, type TurnEvent } from '@agentistics/core'
 
 export interface OpencodeSessionRow {
@@ -47,8 +48,16 @@ export function parseOpencodeSession(
   let model: string | undefined, context: number | undefined, window: number | undefined
   let latest = -1, latestContext = -1, firstPrompt = ''
   const text = new Map<string, string>()
+  const toolCounts: Record<string, number> = {}
+  let toolErrors = 0
   for (const p of [...parts].sort((a, b) => a.time_created - b.time_created || a.id.localeCompare(b.id))) {
     const d = json(p.data)
+    // One `tool` part is one request, whatever state it ended in (completed / error / still running).
+    if (d.type === 'tool' && typeof d.tool === 'string' && d.tool) {
+      const name = canonicalTool('opencode', d.tool)
+      toolCounts[name] = (toolCounts[name] ?? 0) + 1
+      if (object(d.state).status === 'error') toolErrors++
+    }
     if (d.type === 'text' && typeof d.text === 'string' && !d.synthetic && !d.ignored) {
       text.set(p.message_id, (text.get(p.message_id) ?? '') + d.text)
     }
@@ -109,8 +118,8 @@ export function parseOpencodeSession(
     input_tokens: input, output_tokens: output, cache_read_input_tokens: read, cache_creation_input_tokens: write,
     ...(sawUsage ? { model_usage: usage } : { tokens_unavailable: true as const }),
     model, context_tokens: context, context_window: window,
-    tool_counts: {}, tool_output_tokens: {}, agent_file_reads: {}, languages: [], git_commits: 0, git_pushes: 0,
-    first_prompt: firstPrompt, user_interruptions: 0, user_response_times: [], tool_errors: 0,
+    tool_counts: toolCounts, tool_output_tokens: {}, agent_file_reads: {}, languages: [], git_commits: 0, git_pushes: 0,
+    first_prompt: firstPrompt, user_interruptions: 0, user_response_times: [], tool_errors: toolErrors,
     tool_error_categories: {}, uses_task_agent: false, uses_mcp: false, uses_web_search: false, uses_web_fetch: false,
     lines_added: 0, lines_removed: 0, files_modified: 0, message_hours: hours, user_message_timestamps: timestamps,
     harness: 'opencode', _source: 'jsonl',
