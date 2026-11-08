@@ -10,14 +10,24 @@ import { fileIdentity } from './shadow'
 
 const NOW = Date.parse('2026-10-03T12:00:00Z')
 const progress = (p: Partial<BackfillProgress>): BackfillProgress => ({
-  v: 1, identity: 'id-1', state: 'running', startedAt: '2026-10-03T11:00:00Z', updatedAt: '2026-10-03T11:59:00Z', written: 0, ...p,
+  v: 1, historyVersion: 1, identity: 'id-1', state: 'running', startedAt: '2026-10-03T11:00:00Z', updatedAt: '2026-10-03T11:59:00Z', written: 0, ...p,
 })
 const plan = (o: Partial<Parameters<typeof planAutoBackfill>[0]> = {}) => planAutoBackfill({
   journalEnabled: true, central: false, optedOut: false, progress: null, journalIdentity: 'id-1', nowMs: NOW, staleMs: 10 * 60_000, ...o,
 })
 
 describe('planAutoBackfill: the first import starts by itself, once', () => {
+  test('an old completed import catches up the gap left while live feeding was off', () => {
+    const old = progress({ state: 'done', completedAt: '2026-10-03T11:30:00Z', historyVersion: undefined })
+    expect(plan({ progress: old })).toEqual({ start: true })
+    expect(backfillComplete(old, 'id-1')).toBe(false)
+  })
   test('a journal never imported: start', () => expect(plan()).toEqual({ start: true }))
+  test('restart reconciles history written while the feeder was stopped, even after a current import', () => {
+    const done = progress({ state: 'done', completedAt: '2026-10-03T11:30:00Z' })
+    expect(plan({ progress: done, catchUp: true })).toEqual({ start: true })
+    expect(plan({ progress: progress({ state: 'running' }), catchUp: true })).toEqual({ start: false, reason: 'running-elsewhere' })
+  })
   test('journal off, a central, or opted out: never', () => {
     expect(plan({ journalEnabled: false })).toEqual({ start: false, reason: 'journal-off' })
     expect(plan({ central: true })).toEqual({ start: false, reason: 'central' })

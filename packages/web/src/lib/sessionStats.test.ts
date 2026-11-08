@@ -62,6 +62,14 @@ test('a window the harness DECLARED outranks the table', () => {
   expect(s.context?.window).toBe(128_000)
 })
 
+test('OpenCode declared cost reaches the live stats menu instead of an unknown model zero', () => {
+  const model = 'opencode-go/glm-5.3'
+  const s = sessionStats('opencode', 's1', meta({ harness: 'opencode', model,
+    model_usage: { [model]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 1.25, costSource: 'harness' } },
+  }))
+  expect(s.costUSD).toBe(1.25)
+})
+
 test('no window anywhere means NO bar, not a 0%', () => {
   const s = sessionStats('claude', 's1', meta({ model: 'a-model-nobody-has-priced' }))
   expect(s.context).toBeNull()

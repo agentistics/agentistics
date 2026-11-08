@@ -125,6 +125,6 @@ describe('the host speaks 1.4', () => {
     const unsubscribe = h.fleet!.subscribe(() => {})
     unsubscribe()
     // The test environment sets neither AGENTISTICS_JOURNAL nor AGENTISTICS_JOURNAL_LIVE.
-    expect(h.flag('live')).toBe(false)
+    expect(h.flag('live')).toBe(true)
   })
 })

@@ -10,12 +10,21 @@ import { fileIdentity } from './journal/shadow'
 describe('a real import records its progress, and its completion, for the projections', () => {
   test('ran to its end: done, completedAt, bound to this journal file', async () => {
     const progressPath = join(mkdtempSync(join(tmpdir(), 'jprog-')), 'p.json')
-    const code = await runJournalImport(['--harness', 'claude', '--json'], { integrations: {}, progressPath })
+    const code = await runJournalImport(['--json'], { integrations: {}, progressPath })
     expect(code).toBe(0)
     const p = readBackfillProgress(progressPath)!
     expect(p.state).toBe('done')
     expect(p.completedAt).toBeDefined()
     expect(backfillComplete(p, fileIdentity(JOURNAL_PATH))).toBe(true)
+  })
+
+  test('a filtered manual import cannot certify the whole history migration', async () => {
+    const progressPath = join(mkdtempSync(join(tmpdir(), 'jprog-')), 'p.json')
+    expect(await runJournalImport(['--harness', 'claude', '--json'], { integrations: {}, progressPath })).toBe(0)
+    const p = readBackfillProgress(progressPath)!
+    expect(p.state).toBe('done')
+    expect(p.historyVersion).toBeUndefined()
+    expect(backfillComplete(p, fileIdentity(JOURNAL_PATH))).toBe(false)
   })
 
   test('a dry run records nothing', async () => {

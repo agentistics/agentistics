@@ -1607,6 +1607,8 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
               // Same reading as the sessions screen (`contextReading`): the window is what the harness declared,
               // then the verified table. A route nobody states a window for reports the tokens and a null window.
               ...contextFields(s),
+              ...(s.tokens_unavailable ? { usageNote: 'usage not reported' } : {}),
+              ...(Object.values(s.model_usage ?? {}).some((u: any) => u.costSource === 'harness') ? { costSource: 'harness', costNote: 'declared by the harness' } : {}),
               ...(startedBy.get(s.session_id) ? { startedBy: startedBy.get(s.session_id) } : {}),
               ...(delivered.get(s.session_id) ? { deliveredStillOpen: delivered.get(s.session_id) } : {}),
             };

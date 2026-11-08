@@ -2,6 +2,29 @@
 
 All cost and token calculations use a single source of truth: `packages/core/src/types.ts` (imported as `@agentistics/core`). No layer duplicates the pricing logic.
 
+## Keeping harness history current
+
+The journal feeder is enabled by default for every installation with an engine integration.
+`AGENTISTICS_JOURNAL_LIVE=0` (also `false`, `off`, `no`) explicitly disables it;
+`AGENTISTICS_JOURNAL=0` disables the journal and its feeder together. The feeder observes growth
+without replaying history on its first tick.
+
+Two minutes after the server starts listening, a low-priority child reconciles history, including
+sessions written while the service was stopped. Existing installations also reconcile the gap left
+by earlier versions whose feeder defaulted off. The existing import cursors and unique event IDs
+make repeated imports idempotent. This work stays outside startup, uses bounded batches, pauses
+under memory pressure, and reports progress through `agentop journal status` and the dashboard's
+history notification. `AGENTISTICS_JOURNAL_BACKFILL=0` opts out of automatic reconciliation.
+
+Only a full, unfiltered history import records the current reconciliation version. An earlier
+completed import is pending until it has reconciled; a partial manual import cannot certify the
+machine's whole history. Interrupted work is retried by the existing periodic check.
+
+OpenCode's positive `message.cost` is preserved as **declared by the harness**, rather than
+replaced with a table estimate. Placeholder zero token counters in a session with no measured
+usage are **usage not reported**. Known free/local models with measured usage still have a real
+zero cost; an unknown route with only a default zero cost stays unpriced.
+
 ## What the word "tokens" means
 
 **A token figure is always all four billed counters:** `input + output + cacheRead + cacheWrite`.

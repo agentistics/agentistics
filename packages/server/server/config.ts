@@ -7,6 +7,7 @@ import { resolveDataDir } from './data-dir'
 import { loadEnvConfig } from './env-config'
 import { opencodePaths } from './opencode-paths'
 import { featureOn, type HarnessId } from '@agentistics/core'
+import { journalLiveEnabled } from './journal/live-flag'
 
 loadEnvConfig()
 
@@ -96,11 +97,9 @@ export const JOURNAL_PATH = process.env.AGENTISTICS_JOURNAL_DIR
 export const JOURNAL_ENABLED = featureOn('journal', process.env)
 // The live path (LIVE.3, P4 A5.3): an engine's file-tail and attention producer feed the journal
 // between builds. Effective ONLY with `AGENTISTICS_JOURNAL` — it feeds that journal and nothing else.
-// **Absent reads as OFF**, same affirmative-only parsing. Read by the host and handed to an engine as
+// ON by default; only 0/false/off/no disables it. Read by the host and handed to an engine as
 // `flag('live')` (engine-api 1.4); the engine reads no environment.
-export const JOURNAL_LIVE_ENABLED = JOURNAL_ENABLED && ['1', 'true', 'on', 'yes'].includes(
-  (process.env.AGENTISTICS_JOURNAL_LIVE ?? '').trim().toLowerCase(),
-)
+export const JOURNAL_LIVE_ENABLED = journalLiveEnabled(JOURNAL_ENABLED, process.env.AGENTISTICS_JOURNAL_LIVE)
 // What the WRITING process reports about itself (counters since boot), for `agentop journal status`
 // to read from a different process. It sits beside the journal, whichever directory that is.
 // Both side-files below are written as literal `join`s, like `JOURNAL_PATH`, so
