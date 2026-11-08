@@ -12,6 +12,7 @@ export const REQUEST_EXCERPT_CHARS = 80
 export function requestReminderText(pedidos: ReadonlyArray<{ id: string; text: string }>): string {
   const list = pedidos.map(p => `- ${p.id}: «${nudgeExcerpt(p.text, REQUEST_EXCERPT_CHARS)}»`).join('\n')
   return `[entrega pedidos] Pedidos do dono sem pré-dispatch completo há pelo menos 10 min:\n${list}\n` +
-    'Crie ou encaixe a subtarefa/grupo e prepare com agentistics_task_stage (prompt, harness, model, pedidoId — effort e account só quando o harness os usa). ' +
-    'O texto completo de cada pedido está em PEDIDOS ABERTOS DO DONO. Decida e registre; o dono não é chamado.'
+    'PRIMEIRO responda ao dono na conversa; só depois registre, encaixe ou encerre. Pergunta ou reclamação: só responda. ' +
+    'Trabalho: encaixe a subtarefa e prepare com agentistics_task_stage (prompt, harness, model, pedidoId; effort/account só se o harness usa). ' +
+    'Texto completo em PEDIDOS ABERTOS DO DONO.'
 }

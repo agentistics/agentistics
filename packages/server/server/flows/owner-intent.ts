@@ -16,13 +16,15 @@
  *  - word boundaries are Unicode-aware: "publicação" does not contain the verb "publica"
  */
 
-export type OwnerIntent = 'question' | 'work'
+/** `complaint`: the owner says a previous answer missed or never came. Not work (no subtask), not a question to close
+ *  as answered — it is the opposite: an answer is OWED. The engine must keep it open and surface it, see docs/owner-request-queue.md. */
+export type OwnerIntent = 'question' | 'work' | 'complaint'
 
 /** Attachment references and pasted blobs are not words the owner wrote. */
 export function ownerTextWords(text: string): string {
   return withoutQuotePrefixes(text)
     .replace(/!?\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/(?:^|\s)(?:\/|~\/|[A-Za-z]:\\)[^\s]*\.(?:png|jpe?g|gif|webp|pdf|txt|md|log|json|csv)\b/gi, ' ')
+    .replace(/(?:^|\s)(?:\/|~\/|[A-Za-z]:\\)[^\s]*\.(?:png|jpe?g|gif|webp|pdf|txt|md|log|json|csv|m4a|mp3|ogg|oga|opus|wav|aac|flac|weba|mp4|mov|webm|mkv)\b/gi, ' ')
     .replace(/https?:\/\/\S+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -50,6 +52,8 @@ const ADDED = [
   'documente', 'prepara', 'prepare', 'finaliza', 'finalize', 'termina', 'termine', 'olha', 'olhe', 'procura', 'procure',
   'pesquisa', 'pesquise', 'estuda', 'estude', 'volta', 'volte', 'renomeia', 'renomeie', 'separa', 'separe', 'alinhar',
   'alinha', 'alinhe', 'testar',
+  // answering IS the request ("responde as coisas que eu falei"); the past tense "respondeu" is a complaint, not this
+  'responde', 'responda', 'responder', 'explica', 'explique', 'esclarece', 'esclareça',
 ]
 const POLITE = /(?<![\p{L}\p{N}])(?:pode(?:ria|m)?(?!\s+ser(?![\p{L}\p{N}]))|consegue|conseguiria|d[áa] pra|dá para|quero|preciso|precisa|precisamos|gostaria|tem que|deve|can you|could you|would you|will you|please|por favor|i need|i want|we need)(?![\p{L}\p{N}])/iu
 
@@ -68,6 +72,25 @@ const STRONG_RE = new RegExp(`${LB}(?:${STRONG_VERBS.join('|')})${RB}`, 'iu')
 /** A text this short with no verb and no "?" is a bare answer ("opcao C", "status"); a longer one is a report. */
 export const QUESTION_MAX_WORDS = 3
 
+/**
+ * A complaint about a PREVIOUS ANSWER, with no new request in it ("vc n me respondeu", "não era isso que eu pedi").
+ * Short on purpose: a long message that contains the phrase also carries content, and content stays `work`.
+ */
+const COMPLAINT_MAX_WORDS = 12
+const COMPLAINT_RE = new RegExp(
+  `${LB}(?:` +
+  // "vc n me respondeu", "você não respondeu", "ninguém me respondeu", "ignorou", "esqueceu de responder"
+  `(?:(?:vc|voc[êe]|tu|ningu[ée]m)\\s+)?(?:n|n[ãa]o|nunca)\\s+(?:me\\s+|a\\s+|o\\s+)?(?:respond(?:eu|eram|estes?)|entend(?:eu|eram)|ouv(?:iu|iram)|viu|leu|fez|atendeu|resolveu)|` +
+  `(?:vc|voc[êe])\\s+(?:me\\s+)?(?:ignorou|esqueceu(?:\\s+de\\s+(?:responder|mim))?)|` +
+  // "não era isso", "não foi isso que eu pedi", "isso não é o que eu falei"
+  `n[ãa]o\\s+(?:era|foi|[ée])\\s+(?:isso|assim|esse|essa)(?:\\s+que\\s+eu\\s+(?:pedi|falei|disse|quis))?|` +
+  `isso\\s+n[ãa]o\\s+(?:era|[ée]|foi)\\s+o\\s+que\\s+eu\\s+(?:pedi|falei|disse|quis)|` +
+  `n[ãa]o\\s+(?:era|foi)\\s+o\\s+que\\s+eu\\s+(?:pedi|falei|disse|quis)` +
+  `)${RB}`, 'iu')
+/** An interrogative OPENING with no "?" typed (dictated messages rarely carry one): "qual a versão atual", "oq é isso". */
+const INTERROGATIVE_OPENING_RE = new RegExp(
+  `^(?:e\\s+)?(?:qual|quais|quando|onde|como|quem|quanto|quantos?|quantas?|por\\s?que|porque|pq|pra\\s+que|o\\s+que|oq|que\\s+horas|será|sera|tem\\s+como)${RB}`, 'iu')
+
 export function ownerIntent(text: string): OwnerIntent {
   const own = ownerTextWords(text.split('\n').filter(l => !/^\s*>/.test(l)).join('\n'))
   const words = own || ownerTextWords(text)
@@ -77,6 +100,9 @@ export function ownerIntent(text: string): OwnerIntent {
   if (POLITE.test(words)) return 'work'
   if (/[?？]\s*["')\]]*$/.test(words)) return VERB_POSITION_RE.test(words) ? 'work' : 'question'
   if (VERB_POSITION_RE.test(words) || STRONG_RE.test(words)) return 'work'
+  if (words.split(' ').length <= COMPLAINT_MAX_WORDS && COMPLAINT_RE.test(words)) return 'complaint'
+  // Nothing asks for work, and the text opens like a question: it is one, "?" or not (same 15-word cap in the engine).
+  if (INTERROGATIVE_OPENING_RE.test(words)) return 'question'
   return words.split(' ').length <= QUESTION_MAX_WORDS ? 'question' : 'work'
 }
 
