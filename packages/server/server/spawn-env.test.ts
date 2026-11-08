@@ -51,4 +51,25 @@ describe('installSpawnEnvGuard — a child does NOT inherit the dropped keys (QA
     // An explicit env is the caller's, minus the dropped keys — process.env's later edits included.
     expect(out.bunExplicit).toBe('XKEEP=k,XLATER=set-after-start')
   })
+
+  it('execFile and exec stay promisifiable: `{stdout, stderr}`, not the bare string (the server read gh as undefined)', () => {
+    // The wrapper lost `util.promisify.custom`, so promisify(execFile) resolved with the STRING and `.stdout` was undefined: every
+    // gh read in the server (delivery reconcile) silently looked like "gh unreadable" while the same code worked in a script.
+    const script = `
+      const { installSpawnEnvGuard } = await import(${JSON.stringify(join(import.meta.dir, 'spawn-env.ts'))})
+      installSpawnEnvGuard(['XDROP_A'])
+      const cp = await import('node:child_process')
+      const { promisify } = await import('node:util')
+      const a = await promisify(cp.execFile)('echo', ['hi'])
+      const b = await promisify(cp.exec)('echo hi')
+      const c = await promisify(cp.execFile)('env')
+      const bad = await promisify(cp.execFile)('false').then(() => 'resolved', e => typeof e.stdout)
+      console.log(JSON.stringify({ a: [typeof a, a && a.stdout], b: [typeof b, b && b.stdout], dropped: /XDROP_A/.test(c.stdout), bad }))`
+    const r = Bun.spawnSync([process.execPath, '-e', script], { env: { ...process.env, XDROP_A: '1' } })
+    const out = JSON.parse(r.stdout.toString().trim().split('\n').pop()!)
+    expect(out.a).toEqual(['object', 'hi\n'])
+    expect(out.b).toEqual(['object', 'hi\n'])
+    expect(out.dropped).toBe(false) // the promisified path still goes through the guard
+    expect(out.bad).toBe('string') // a failure still carries stdout on the error
+  })
 })

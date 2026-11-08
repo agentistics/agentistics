@@ -17,6 +17,7 @@
  * environment for a caller that builds one explicitly.
  */
 import { readFileSync } from 'node:fs'
+import { promisify } from 'node:util'
 
 /** PURE: `env` without `keys`, `undefined` values dropped (a spawn's env holds strings). */
 export function withoutKeys(env: Record<string, string | undefined>, keys: readonly string[]): Record<string, string> {
@@ -104,7 +105,22 @@ export function installSpawnEnvGuard(keys: readonly string[]): void {
   for (const api of ['spawn', 'spawnSync', 'execFile', 'execFileSync', 'fork', 'exec', 'execSync'] as const) {
     const orig = cp[api]
     if (typeof orig !== 'function') continue
-    cp[api] = function (this: unknown, ...a: unknown[]) { return orig.apply(this, withChildEnv(api, a, decide)) }
+    const wrapped = function (this: unknown, ...a: unknown[]) { return orig.apply(this, withChildEnv(api, a, decide)) }
+    // `exec` and `execFile` carry `util.promisify.custom` (it makes the promise resolve `{stdout, stderr}`). Without it promisify
+    // resolves with the bare string, and every `(await promisify(execFile)(...)).stdout` in the server reads undefined.
+    // The original's custom promisifier would call the ORIGINAL (unguarded) function, so ours goes through the wrapper.
+    if (api === 'exec' || api === 'execFile') {
+      const custom = (...a: unknown[]) => {
+        let child: unknown
+        const p = new Promise((resolve, reject) => {
+          child = wrapped.call(undefined, ...a, (err: (Error & { stdout?: unknown; stderr?: unknown }) | null, stdout: unknown, stderr: unknown) => (err ? reject(Object.assign(err, { stdout, stderr })) : resolve({ stdout, stderr })))
+        }) as Promise<unknown> & { child?: unknown }
+        p.child = child
+        return p
+      }
+      Object.defineProperty(wrapped, promisify.custom, { value: custom, enumerable: false })
+    }
+    cp[api] = wrapped
   }
   const bun = Bun as unknown as Record<'spawn' | 'spawnSync', (...a: unknown[]) => unknown>
   const spawn = bun.spawn.bind(Bun), spawnSync = bun.spawnSync.bind(Bun)
