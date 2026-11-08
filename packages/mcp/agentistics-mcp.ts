@@ -268,10 +268,15 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_create",
     description:
-      "Create a task. A title is required; a description is optional. Creating a title that already exists returns the existing task rather than a duplicate, so this is safe to call before filing work under a name you are not sure exists.",
+      "Create a task. A title is required; a description is optional. Set `priority` (urgent | high | medium | low — default low, and nobody chose a default) and `type` (an id from agentistics_task_types) when you know them: a board of defaults orders nothing. Creating a title that already exists returns the existing task rather than a duplicate (its priority and type are left alone — use agentistics_task_edit), so this is safe to call before filing work under a name you are not sure exists.",
     inputSchema: {
       type: "object",
-      properties: { title: { type: "string" }, detail: { type: "string" } },
+      properties: {
+        title: { type: "string" },
+        detail: { type: "string" },
+        priority: { type: "string", enum: ["urgent", "high", "medium", "low"], description: "Defaults to low. Decides the order of the queue and of the Live delivery line." },
+        type: { type: "string", description: "A type id from agentistics_task_types (an unknown one is dropped)." },
+      },
       required: ["title"],
     },
   },
@@ -402,7 +407,8 @@ const TOOLS: Tool[] = [
         },
         status: {
           type: "string",
-          enum: ["backlog", "todo", "in_progress", "blocked", "in_review", "done", "abandoned"],
+          description:
+            "A status id this board currently has — call agentistics_task_statuses for the live list (the vocabulary is editable, so it is NOT fixed here). The four every board starts with are todo | in_progress | blocked | done.",
         },
         dueDate: { type: "string" },
         startDate: { type: "string" },
@@ -710,7 +716,7 @@ const TOOLS: Tool[] = [
         to: { type: "string", description: "The target session reference." },
         kind: { type: "string", enum: ["handback", "block", "question"] },
         body: { type: "string", description: "The message." },
-        awaiting: { type: "string", description: "kind=handback only: what you stopped waiting for (marks the handback as intermediate; the worker is not closed). Omit on a final handback." },
+        awaiting: { type: "string", description: "kind=handback only: what you stopped waiting for (marks the handback as intermediate: the worker is not closed, your subtask stays in_progress and the leader's check-in does not list it as delivered). A text that says it is part N of M (\"parte 2 de 5\", \"2/5\", \"seguindo com…\") with no awaiting is read the same way, and the reply tells you so. Omit on the FINAL handback." },
       },
       required: ["to", "kind", "body"],
     },
@@ -1120,7 +1126,12 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       }
       case "agentistics_task_create": {
         const a = args as any;
-        const body = await apiSend("POST", "/api/tasks", { title: a?.title, detail: a?.detail });
+        const body = await apiSend("POST", "/api/tasks", {
+          title: a?.title,
+          detail: a?.detail,
+          ...(typeof a?.priority === "string" ? { priority: a.priority } : {}),
+          ...(typeof a?.type === "string" ? { type: a.type } : {}),
+        });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_status": {

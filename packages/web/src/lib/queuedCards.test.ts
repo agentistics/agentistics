@@ -1,5 +1,41 @@
 import { describe, expect, test } from 'bun:test'
-import { personQueuedCount, visibleQueued } from './queuedCards'
+import { personQueuedCount, queuedBubbleActions, visibleQueued } from './queuedCards'
+
+describe('queuedBubbleActions (FLUXO.AVISOS 10)', () => {
+  const base = { text: 'corrige a coluna', harness: 'claude', working: true, dialogOpen: false, personQueued: 1, sendNowRunning: false, stopEnabled: true, pt: false }
+  test('claude, mid-turn: both actions, in the reader\'s language', () => {
+    const a = queuedBubbleActions(base)
+    expect(a.sendNow?.label).toBe('Send now')
+    expect(a.interrupt?.label).toBe('Interrupt')
+    expect(queuedBubbleActions({ ...base, pt: true }).sendNow?.label).toBe('Enviar agora')
+    expect(queuedBubbleActions({ ...base, pt: true }).interrupt?.label).toBe('Interromper')
+  })
+  test('the hint says the whole queue goes when there is more than one message', () => {
+    expect(queuedBubbleActions({ ...base, personQueued: 3 }).sendNow?.hint).toContain('all 3 queued messages')
+    expect(queuedBubbleActions({ ...base, personQueued: 3, pt: true }).sendNow?.hint).toContain('3 mensagens da fila')
+  })
+  test('a harness with no measured send-now keystroke gets Interrupt only (when its stop verb works), never Send now', () => {
+    for (const harness of ['codex', 'gemini', 'copilot', 'kimi', 'antigravity', 'opencode']) {
+      const a = queuedBubbleActions({ ...base, harness })
+      expect(a.sendNow).toBeNull()
+      expect(a.interrupt).not.toBeNull()
+      expect(queuedBubbleActions({ ...base, harness, stopEnabled: false })).toEqual({ sendNow: null, interrupt: null })
+    }
+  })
+  test('hidden when it cannot work: idle session, a dialog open, a send-now already running', () => {
+    expect(queuedBubbleActions({ ...base, working: false })).toEqual({ sendNow: null, interrupt: null })
+    expect(queuedBubbleActions({ ...base, dialogOpen: true })).toEqual({ sendNow: null, interrupt: null })
+    expect(queuedBubbleActions({ ...base, sendNowRunning: true }).sendNow).toBeNull()
+    expect(queuedBubbleActions({ ...base, stopEnabled: false }).interrupt).toBeNull()
+    expect(queuedBubbleActions({ ...base, stopEnabled: false }).sendNow).not.toBeNull()
+  })
+  test('a system notice in the queue offers nothing (it is not the person\'s message)', () => {
+    for (const text of ['[from session ab12 · block]\nblocked', '[from agentistics · away]\naway', 'Run the leadership check-in now.']) {
+      expect(queuedBubbleActions({ ...base, text })).toEqual({ sendNow: null, interrupt: null })
+    }
+    expect(queuedBubbleActions({ ...base, text: 'plain words' }).sendNow).not.toBeNull()
+  })
+})
 
 const q = [{ text: 'hello there', at: 1 }]
 

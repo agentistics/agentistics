@@ -21,6 +21,8 @@ import { GROUPINGS, sessionRunning } from '@agentistics/tui/control/sessions'
 import { controlStrings, sessionWordBook } from '@agentistics/tui/control/i18n'
 import { wrapText } from '@agentistics/tui/control/surface'
 import { parseSessionArgs, LS_DEFAULT, type BatchSpec, type SessionCommand } from './cli-parse'
+import { checkTopTier } from './top-tier-gate'
+import { readHarnessDefaults } from './harness-defaults'
 import { cliStrings } from '../cli-i18n'
 import { resolveLang, type CliLang } from '../cli-lang'
 import { readPreferences } from '../preferences'
@@ -606,6 +608,11 @@ export async function start(
   // process. A refusal here means nothing below this point runs: no id is minted, no row is
   // written, nothing is spawned. `--force` still goes through this check, so the override note
   // is printed from the SAME place a plain refusal would have been.
+  // FLUXO.AVISOS 5: the owner's top-tier cap binds this door exactly as it binds the delivery flow's slot gate.
+  if (await checkTopTier(
+    [{ harness: cmd.harness, model: launch.model ?? (await readHarnessDefaults(cmd.harness).catch(() => undefined))?.model, role: wantedRole }],
+    cmd.force ?? false, lang, cmd.json ?? false,
+  )) return 1
   if (reportAdmission(
     await admitOrWait(1, cmd.force ?? false, lang, cmd.json ?? false), lang, cmd.json ?? false,
   )) return 1
@@ -872,7 +879,7 @@ export async function batch(
   const gateCaller = callerId ? ((batchDeps.provesCaller ? await batchDeps.provesCaller(callerId) : (await callerProof(callerId, async () => (backend as { listPanePids?: () => Promise<Map<string, number>> }).listPanePids?.())) === 'proven') ? callerId : null) : undefined
   if (gateCaller === null) { console.error(UNPROVEN_SESSION); return 1 }
   const gateParent = gateCaller ? (await parentLinkOf(gateCaller, { followHandoff: true })).parentSessionId : undefined
-  const gates = []
+  const gates: Awaited<ReturnType<typeof spawnGate>>[] = []
   for (const [index, spec] of cmd.specs.entries()) {
     const filing = plans[index]!
     gates.push(await (batchDeps.spawnGate ?? spawnGate)({
@@ -898,6 +905,15 @@ export async function batch(
   // is admitted or refused as a UNIT (see `spawn-admission.ts`'s docstring on `fits`: half a batch
   // is a plan nobody approved). Refused BEFORE the task book is even touched, so a refused batch
   // creates no task, no attempt, and spawns nothing.
+  // FLUXO.AVISOS 5: the whole batch counts together against the top-tier cap, refused as a unit like the memory gate.
+  if (await checkTopTier(
+    await Promise.all(cmd.specs.map(async (spec, i) => ({
+      harness: spec.harness,
+      model: spec.model ?? (await readHarnessDefaults(spec.harness).catch(() => undefined))?.model,
+      role: (gates[i] as { role?: string } | undefined)?.role ?? spec.role,
+    }))),
+    cmd.force ?? false, lang, cmd.json ?? false,
+  )) return 1
   if (reportAdmission(
     await admitOrWait(cmd.specs.length, cmd.force ?? false, lang, cmd.json ?? false),
     lang, cmd.json ?? false,
@@ -1105,6 +1121,11 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
   // fully running has no business being refused for memory it does not need.
   if (plan.reopen.length > 0) {
     const lang = await resolveLang()
+    // FLUXO.AVISOS 5: a reopen starts assistants too — the top-tier cap counts them.
+    if (await checkTopTier(
+      plan.reopen.map(r => ({ harness: r.entry.harness, model: r.entry.model, role: r.entry.leader ? 'leader' : undefined })),
+      force, lang, json,
+    )) return 1
     if (reportAdmission(
       await admitOrWait(plan.reopen.length, force, lang, json), lang, json,
     )) return 1

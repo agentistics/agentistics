@@ -219,6 +219,14 @@ export interface RouteRecommendation {
   /** Every other routable `{harness, account}`, same-harness accounts included. */
   accountAlternatives: { harness: HarnessId; account: string }[]
   cadence: { parallel: number; note: string }
+  /**
+   * FLUXO.AVISOS 6: harnesses the router could NOT judge — no reading at all, or only a stale one (a meter nobody has read for
+   * 10 min). They are never recommended and never listed as alternatives; they are named here so "not offered" cannot be mistaken
+   * for "full". Absent when every harness the router knows has a fresh reading.
+   */
+  unknown?: { harness: HarnessId; why: 'stale' | 'no-reading' }[]
+  /** `fresh` whenever a harness is recommended (only fresh readings are eligible); `none` when nothing fresh could be routed. */
+  confidence: 'fresh' | 'none'
 }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
@@ -727,6 +735,8 @@ export function routeRecommendation(
   budgets: readonly AccountBudget[],
   kind: RouteKind,
   authorHarness?: string,
+  /** `visibleHarnesses`: the harnesses the reader may be told about (the plan-limits body's own `harnesses` map, spawnable ones). */
+  opts: { visibleHarnesses?: readonly HarnessId[] } = {},
 ): RouteRecommendation {
   // A row with model groups is several independent pools: one candidate per group, so a group on
   // hold no longer holds the other. Under `qa`, a group that includes the author's vendor is dropped.
@@ -742,12 +752,21 @@ export function routeRecommendation(
   })
   // Routing aggregates fold only registered accounts, so an unregistered meter can never make a
   // harness look available when every account that could take work is held.
-  const aggregates = new Map(harnessAggregate(budgets.filter(b => b.plan !== 'unregistered')).map(a => [a.harness, a]))
+  const aggregates = new Map(harnessAggregate(budgets.filter(b => b.plan !== 'unregistered' && !b.stale)).map(a => [a.harness, a]))
   const eligibleHarness = (agg: HarnessAggregate) =>
     eligibleAccounts(agg.harness).length > 0 && agg.status !== 'hold' && agg.harness !== (kind === 'qa' ? authorHarness : undefined)
   const eligibleAccounts = (h: HarnessId) =>
     // Tight is a budget warning, not a pause: only hold crosses the 5h/week stop thresholds.
-    budgets.filter(b => b.harness === h && b.spawnable !== false && b.plan !== 'unregistered' && !b.yieldsTo && b.status !== 'hold')
+    // FLUXO.AVISOS 6: a STALE reading is a meter nobody has read for a while — it can only be wrong in the direction of
+    // "start more work", so it never takes a recommendation (it is named under `unknown` instead).
+    budgets.filter(b => b.harness === h && b.spawnable !== false && b.plan !== 'unregistered' && !b.yieldsTo && b.status !== 'hold' && !b.stale)
+  // Only harnesses the CALLER may see: a harness hidden from agents (a disabled account) is never named, not even as unknown.
+  const knownHarnesses = [...new Set<HarnessId>([...(opts.visibleHarnesses ?? []), ...budgets.map(b => b.harness)])]
+  const unknownList = knownHarnesses.flatMap((h): { harness: HarnessId; why: 'stale' | 'no-reading' }[] => {
+    const rows = budgets.filter(b => b.harness === h && b.plan !== 'unregistered')
+    return rows.some(b => !b.stale) ? [] : [{ harness: h, why: rows.length ? 'stale' : 'no-reading' }]
+  })
+  const unknown = unknownList.length ? { unknown: unknownList } : {}
   const harnesses = [...aggregates.values()].filter(eligibleHarness)
   const ordered = [...harnesses].sort((a, b) => {
     const ap = a.paceStatus === 'under' ? 0 : 1
@@ -761,14 +780,19 @@ export function routeRecommendation(
   const chosen = ordered.find(a => preference.some(([h]) => h === a.harness))
   const pickAgg = chosen ?? ordered[0]
   const noRoute = (): RouteRecommendation => {
+    const base = { harness: null, alternatives: [], accountAlternatives: [], confidence: 'none' as const, ...unknown }
     if (budgets.length && budgets.every(b => b.spawnable === false)) {
-      return { harness: null, reason: 'No harness can start a new session.', alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Install or repair a harness before opening workers.' } }
+      return { ...base, reason: 'No harness can start a new session.', cadence: { parallel: 0, note: 'Install or repair a harness before opening workers.' } }
     }
     if (budgets.length && budgets.every(b => b.status === 'hold')) {
       const earliest = Math.min(...budgets.map(b => b.pauseUntil ?? b.weekResetsAt))
-      return { harness: null, reason: `all plans on hold until ${new Date(earliest).toISOString()}`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
+      return { ...base, reason: `all plans on hold until ${new Date(earliest).toISOString()}`, cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
     }
-    return { harness: null, reason: `No eligible plan for ${kind}.`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Check plan registration, account availability, and author-harness exclusions.' } }
+    const registered = budgets.filter(b => b.plan !== 'unregistered' && b.spawnable !== false && b.status !== 'hold')
+    if (registered.length && registered.every(b => b.stale)) {
+      return { ...base, reason: `No fresh plan_limits reading for ${kind}: ${[...new Set(registered.map(b => b.harness))].join(', ')} ${registered.length === 1 ? 'was' : 'were'} last read more than ${PLAN_LIMITS_STALE_MS / 60_000} minutes ago.`, cadence: { parallel: 0, note: 'Read the plan windows again before opening workers; a stale meter is never trusted.' } }
+    }
+    return { ...base, reason: `No eligible plan for ${kind}.`, cadence: { parallel: 0, note: 'Check plan registration, account availability, and author-harness exclusions.' } }
   }
   if (!pickAgg) return noRoute()
   const candidates = eligibleAccounts(pickAgg.harness)
@@ -795,6 +819,8 @@ export function routeRecommendation(
     alternatives,
     accountAlternatives,
     cadence: { parallel, note: pick.note ?? 'Keep one worker running.' },
+    confidence: 'fresh',
+    ...unknown,
   }
 }
 
