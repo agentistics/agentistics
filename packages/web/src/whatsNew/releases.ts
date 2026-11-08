@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.202.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uma pergunta curta sua é respondida na conversa, sem virar subtarefa nem gerar lembretes. Se o líder perceber que era trabalho, ainda pode ligá-la a uma subtarefa.',
+        en: 'A short question of yours is answered in the conversation, with no subtask and no reminders. If the leader sees it was real work, they can still link it to a subtask.',
+      },
+      {
+        pt: 'Os avisos ao líder citam só o título do seu pedido, não a mensagem inteira, o que gasta menos tokens.',
+        en: 'Notices to the leader quote only the title of your request, not the whole message, which uses fewer tokens.',
+      },
+    ],
+  },
   '2.202.1': {
     features: [],
     fixes: [
