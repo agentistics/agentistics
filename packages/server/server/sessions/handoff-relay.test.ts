@@ -430,3 +430,29 @@ describe('HANDOFF.RELAY — injected session messages are labelled, never the ow
     expect(txt).not.toContain('Responda ao dono')
   })
 })
+
+describe('FLUXO.CICLO-COMPLETO 7a — a successor never relays its own spawn prompt as the owner', () => {
+  const at = (min: number) => new Date(Date.UTC(2026, 10, 7, 20, min)).toISOString()
+  const successor = row({ id: 'lead-2', handoffFrom: 'lead-1', createdAt: at(0) })
+  it('a legacy unmarked --handoff -p prompt (the first user turn, right after the spawn) is dropped; the owner turn after it stays', async () => {
+    const turns: ChatTurn[] = [
+      { role: 'user', text: 'Leia leader/HANDOFF.md e assuma. Pendências: p-6c864908a6d1…', at: at(1) },
+      { role: 'assistant', text: 'Assumi.', at: at(2) },
+      { role: 'user', text: 'Implementa o export CSV', at: at(30) },
+      { role: 'assistant', text: 'Vou fazer.', at: at(31) },
+    ]
+    const got = await captureHandoffRelay(successor, async () => ({ turns }))
+    expect(got.owner?.map(o => o.text)).toEqual(['Implementa o export CSV'])
+    expect(got.section).not.toContain('Pendências')
+  })
+  it('a marked prompt is never an owner turn at all, and an owner message long after the spawn is not mistaken for one', async () => {
+    const turns: ChatTurn[] = [
+      { role: 'user', text: '[from session lead-1 · passagem]\nLeia leader/HANDOFF.md e assuma', at: at(1) },
+      { role: 'user', text: 'quando sai?', at: at(40) },
+    ]
+    expect((await captureHandoffRelay(successor, async () => ({ turns }))).owner?.map(o => o.text)).toEqual(['quando sai?'])
+    // A session NOT born from a hand-off keeps its first turn (it is the owner's).
+    const fresh = row({ id: 'solo', createdAt: at(0) })
+    expect((await captureHandoffRelay(fresh, async () => ({ turns: [{ role: 'user', text: 'Implementa X', at: at(1) }] }))).owner?.map(o => o.text)).toEqual(['Implementa X'])
+  })
+})

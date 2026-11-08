@@ -48,6 +48,10 @@ interface World {
   notContained?: string[]
   /** short sha → the full one git resolves it to (`rev-parse --verify <sha>^{commit}`). */
   fullShas?: Record<string, string>
+  /** `gh pr list --state merged …` (FLUXO.CICLO-COMPLETO merge detection); keyed by the `--head` / `--search` value, `*` = any. */
+  prList?: Record<string, Array<Record<string, unknown>>>
+  /** `gh api repos/…/commits/<sha>/pulls`, by sha. */
+  commitPulls?: Record<string, Array<Record<string, unknown>>>
 }
 
 function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
@@ -83,6 +87,12 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
       const a = args.join(' ')
       calls.gh.push(a)
       calls.ghCwd.push(_cwd)
+      if (a.startsWith('pr list')) {
+        const key = args[args.indexOf('--head') + 1] && args.includes('--head') ? args[args.indexOf('--head') + 1]! : args.includes('--search') ? args[args.indexOf('--search') + 1]! : '*'
+        return JSON.stringify(w.prList?.[key] ?? w.prList?.['*'] ?? [])
+      }
+      const pulls = /commits\/([^/]+)\/pulls$/.exec(a)
+      if (pulls) return JSON.stringify(w.commitPulls?.[pulls[1]!] ?? [])
       if (a.includes('check-runs') && w.checksError) throw new Error('gh: HTTP 502')
       if (a.includes('check-runs')) return JSON.stringify({ check_runs: w.checkRuns })
       if (a.includes('/files')) return JSON.stringify(w.prFiles)
@@ -1874,5 +1884,177 @@ describe('PUBLICADO.MANIFESTO r4 — bounded polling and transition effects', ()
     expect(!reply.ok && reply.code).toBe('store_erro')
     expect(await real.read()).toEqual(before)
     for (const key of ['comments', 'status', 'emits', 'owner', 'ci'] as const) expect(h.calls[key]).toEqual(effects[key])
+  })
+})
+
+describe('FLUXO.CICLO-COMPLETO — no stage after the review depends on someone remembering', () => {
+  const MERGED_PR = { number: 7, state: 'MERGED', headRefOid: 'abc123', headRefName: 'feat/x', mergeCommit: { oid: 'merge1' }, mergedAt: '2026-11-07T03:00:00Z' }
+  const toReview = async (h: ReturnType<typeof harness>) => {
+    await walkToQa(h.svc)
+    expect((await h.svc.transition('s1', 'revisao_lider', { verdict: 'APROVADO', findings: 'green' }, 'qa')).ok).toBe(true)
+  }
+
+  test('the leader merged the PR and never moved the piece: the tick moves revisao_lider → ci, then publishes from the tag that contains the merge', async () => {
+    const h = harness({ prList: { 'feat/x': [MERGED_PR] } })
+    await toReview(h)
+    const t1 = await h.svc.tick()
+    expect(t1.actions).toContain('merge-detected s1:#7')
+    let rec = (await h.svc.get('s1'))!
+    expect(rec.phase).toBe('ci')
+    expect(rec).toMatchObject({ pr: 7, mergeSha: 'merge1', mergeDetected: { pr: 7, via: 'branch feat/x' } })
+    expect(rec.gates.mergeado?.ok).toBe(true)
+    expect(rec.gates.delecoes?.ok).toBe(true)
+    expect(rec.review).toMatchObject({ decision: 'ok', by: 'flow:entrega' })
+    // ci → publicado: the first tag containing the merge (the planned 2.200.8 is a plan, not proof).
+    h.w.tags = [{ name: 'v2.201.1', commit: { sha: 'tag2011' } }]
+    h.w.releaseRuns = [{ databaseId: 3, status: 'completed', conclusion: 'success', headSha: 'tag2011', updatedAt: '2026-11-07T04:00:00Z' }]
+    h.advance(61_000)
+    expect((await h.svc.tick()).actions).toContain('publish s1:true')
+    rec = (await h.svc.get('s1'))!
+    expect(rec.phase).toBe('publicado')
+    expect(rec.tag).toBe('v2.201.1')
+    expect(rec.history.map(x => x.to)).toEqual(['executando', 'qa', 'revisao_lider', 'ci', 'publicado'])
+  })
+
+  test('a merge from another sha is REFUSED with the reason, recorded as the tick note, and never loops', async () => {
+    const h = harness({ prList: { 'feat/x': [{ ...MERGED_PR, headRefOid: 'other99' }] }, pr: { number: 7, state: 'MERGED', headRefOid: 'other99', mergeCommit: { oid: 'merge1' } } })
+    await toReview(h)
+    const t1 = await h.svc.tick()
+    expect(t1.actions.some(a => a.startsWith('merge-refused s1'))).toBe(true)
+    const rec = (await h.svc.get('s1'))!
+    expect(rec.phase).toBe('revisao_lider')
+    expect(rec.tickNote).toMatchObject({ phase: 'revisao_lider', failed: true })
+    expect(rec.tickNote!.reason).toContain('not the sha QA approved')
+    expect(rec.mergeDetected).toBeUndefined()
+    // The next tick inside the back-off does not look again (no loop of gh calls / transitions).
+    const before = h.calls.gh.length
+    expect((await h.svc.tick()).actions.filter(a => a.startsWith('merge'))).toEqual([])
+    expect(h.calls.gh.length).toBe(before)
+  })
+
+  test('no PR found: the piece stays with a readable reason; the PR found later moves it', async () => {
+    const h = harness()
+    await toReview(h)
+    expect((await h.svc.tick()).actions).toContain('merge-none s1')
+    expect((await h.svc.get('s1'))!.tickNote?.reason).toContain('no merged PR proven')
+    h.w.prList = { 'feat/x': [MERGED_PR] }
+    h.advance(61_000)
+    expect((await h.svc.tick()).actions).toContain('merge-detected s1:#7')
+  })
+
+  test('a merged PR is found from the sha QA approved when the piece records no branch', async () => {
+    const store = createDeliveryStore(join(dir, 'deliveries.json'))
+    const h = harness({ commitPulls: { abc123: [{ number: 9, state: 'closed', merged_at: '2026-11-07T03:00:00Z', merge_commit_sha: 'merge1', head: { sha: 'abc123', ref: 'feat/y' } }] }, pr: { number: 9, state: 'MERGED', headRefOid: 'abc123', mergeCommit: { oid: 'merge1' } } }, { store })
+    await toReview(h)
+    await store.update(doc => { delete doc.deliveries.s1!.branch })
+    const t = await h.svc.tick()
+    expect(t.actions).toContain('merge-detected s1:#9')
+  })
+
+  test('the review reminder goes to the LIVE leader (the successor after a hand-off) at 30 min, then every 2 h, at most 3 — never the owner', async () => {
+    const h = harness()
+    await toReview(h)
+    const reminders = () => h.calls.session.filter(s => s.text.includes('[entrega revisão]'))
+    h.advance(29 * 60_000)
+    await h.svc.tick()
+    expect(reminders()).toHaveLength(0)
+    // The recorded leader handed off: the successor (newest live leader of the task) is the one reminded.
+    h.w.sessions = h.w.sessions.map(s => (s.id === 'leader' ? { ...s, alive: false } : s))
+    h.w.sessions.push({ id: 'leader2', harness: 'claude', model: 'claude-opus-5-5', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1', createdAt: '2026-11-07T05:00:00Z' })
+    h.advance(2 * 60_000)
+    await h.svc.tick()
+    expect(reminders().map(r => r.id)).toEqual(['leader2'])
+    expect(reminders()[0]!.text).toContain('s1')
+    expect(reminders()[0]!.text).toContain('no merged PR proven')
+    for (let i = 0; i < 2; i++) { h.advance(60 * 60_000); await h.svc.tick() }
+    expect(reminders()).toHaveLength(2) // the second one, 2 h after the first
+    for (let i = 0; i < 10; i++) { h.advance(60 * 60_000); await h.svc.tick() }
+    expect(reminders()).toHaveLength(3) // capped
+    expect(h.calls.owner).toEqual([])
+    expect((await h.svc.get('s1'))!.reviewNudge).toMatchObject({ phase: 'revisao_lider', sent: 3 })
+  })
+
+  test('a leader action restarts the reminder clock', async () => {
+    const h = harness()
+    await toReview(h)
+    h.advance(25 * 60_000)
+    await h.svc.configure('s1', { versionTarget: '2.203.0' }, 'leader')
+    h.advance(10 * 60_000)
+    await h.svc.tick()
+    expect(h.calls.session.filter(s => s.text.includes('[entrega revisão]'))).toHaveLength(0)
+    h.advance(21 * 60_000)
+    await h.svc.tick()
+    expect(h.calls.session.filter(s => s.text.includes('[entrega revisão]'))).toHaveLength(1)
+  })
+
+  test('reconcile --release: dry run reports what would move and what cannot be proven; --apply writes it and announces nothing per piece', async () => {
+    const h = harness({ status: 'in_review', prList: { 's1 in:title,body': [MERGED_PR] }, tags: [{ name: 'v2.201.1', commit: { sha: 'tag2011' } }], releaseRuns: [{ databaseId: 3, status: 'completed', conclusion: 'success', headSha: 'tag2011', updatedAt: '2026-11-07T04:00:00Z' }] }, {
+      reviewPieces: async () => [{ id: 's1', taskId: 't1', title: 's1', status: 'in_review' }, { id: 's2', taskId: 't1', title: 's2', status: 'in_review' }],
+    })
+    const dry = await h.svc.reconcile({}, 'owner')
+    expect(dry.ok).toBe(true)
+    if (!dry.ok) return
+    expect(dry.apply).toBe(false)
+    expect(dry.entries.find(e => e.subtaskId === 's1')).toMatchObject({ from: 'revisao_lider', to: 'publicado', pr: 7, tag: 'v2.201.1' })
+    expect(dry.entries.find(e => e.subtaskId === 's2')?.reason).toContain('no merged PR proven')
+    expect(await h.svc.get('s1')).toBeNull() // nothing written
+    // A worker cannot apply it.
+    const denied = await h.svc.reconcile({ apply: true }, 'author')
+    expect(!denied.ok && denied.code).toBe('so_o_lider')
+    const applied = await h.svc.reconcile({ apply: true }, 'leader')
+    expect(applied.ok && applied.entries.find(e => e.subtaskId === 's1')).toMatchObject({ to: 'publicado', applied: true })
+    const rec = (await h.svc.get('s1'))!
+    expect(rec.phase).toBe('publicado')
+    // Adopted from the board's In review, then the two reconciliation moves.
+    expect(rec.history.map(x => `${x.to}:${x.actor}`)).toEqual(['revisao_lider:flow:entrega', 'ci:flow:reconcile', 'publicado:flow:reconcile'])
+    expect(await h.svc.get('s2')).toBeNull()
+    expect(h.calls.owner).toEqual([])
+    expect(h.calls.session).toEqual([])
+    // Idempotent: a second run finds nothing left to move for s1.
+    const again = await h.svc.reconcile({ apply: true }, 'leader')
+    expect(again.ok && again.entries.map(e => e.subtaskId)).toEqual(['s2'])
+  })
+
+  test('e2e: an owner WORK request walks pedido → fila → executando → qa → revisao_lider → ci → publicado, the post-review stages through the tick only', async () => {
+    const { classifyOwnerMessage } = await import('../flows/owner-intent')
+    const { emitOwnerMessage } = await import('../flows/owner-message')
+    const ask = 'Implementa o botão de exportar CSV na tela de custos'
+    expect(classifyOwnerMessage(ask)).toBe('request')
+    const events: Array<{ id: string; payload: Record<string, unknown> }> = []
+    const outcome = await emitOwnerMessage({ id: 'leader', action: 'prompt', text: ask }, {
+      flowsOn: () => true, row: async () => ({ id: 'leader', conversationId: 'conv-l', taskId: 't1' }), roleOf: async () => 'leader',
+      mode: async () => undefined, emit: async e => { events.push(e); return true }, now: () => Date.parse('2026-11-07T02:00:00Z'),
+      holdQuestion: async () => { throw new Error('a work request is never held') },
+    })
+    expect(outcome).toBe('emitted')
+    const pedido = { id: 'p-e2e000000001', taskId: 't1', sessionId: 'leader', text: ask, at: '2026-11-07T02:00:00.000Z', state: 'open', linkedSubtaskIds: [] as string[] }
+    let spawned = 0
+    const h = harness({ prList: { 'feat/x': [MERGED_PR] } }, {
+      requests: async () => [pedido],
+      spawn: async () => { spawned++; return { ok: true as const, sessionId: 'author' } },
+    })
+    // The leader stages the piece for the pedido (the existing intake path).
+    expect((await h.svc.stage('s1', { prompt: 'do it', harness: 'claude', model: 'claude-opus-5-5', effort: 'high', account: 'acc_1' }, 'leader', { leaderSessionId: 'leader', pedidoId: pedido.id })).ok).toBe(true)
+    // fila → executando: the queue asks the leader; with autonomous mode the 10-min timeout carries on as "sim".
+    await h.svc.tick()
+    h.advance(11 * 60_000)
+    await h.svc.tick()
+    expect(spawned).toBe(1)
+    expect((await h.svc.get('s1'))!.phase).toBe('executando')
+    // The author and the QA report (agent acts, as in production).
+    expect((await h.svc.transition('s1', 'qa', {}, 'author')).ok).toBe(true)
+    expect((await h.svc.transition('s1', 'revisao_lider', { verdict: 'APROVADO', findings: 'green' }, 'qa')).ok).toBe(true)
+    // From here on NOTHING but the tick: merged PR → ci, green tag → publicado.
+    h.advance(61_000)
+    expect((await h.svc.tick()).actions).toContain('merge-detected s1:#7')
+    h.w.tags = [{ name: 'v2.203.0', commit: { sha: 'tag2030' } }]
+    h.w.releaseRuns = [{ databaseId: 5, status: 'completed', conclusion: 'success', headSha: 'tag2030', updatedAt: '2026-11-07T05:00:00Z' }]
+    h.advance(61_000)
+    expect((await h.svc.tick()).actions).toContain('publish s1:true')
+    const rec = (await h.svc.get('s1'))!
+    expect(rec.phase).toBe('publicado')
+    expect(rec.pedidoIds).toEqual([pedido.id])
+    expect(rec.history.map(x => x.to)).toEqual(['executando', 'qa', 'revisao_lider', 'ci', 'publicado'])
+    expect(h.calls.owner.every(o => o.kind === 'aviso')).toBe(true)
   })
 })

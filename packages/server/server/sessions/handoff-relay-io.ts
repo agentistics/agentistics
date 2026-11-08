@@ -10,7 +10,7 @@
 import type { ChatTurn } from '@agentistics/core'
 import { transcriptReaderFor } from './harness-transcript'
 import {
-  forwardHasContent, forwardText, isOwnerTurn, planForward, planRelay, relaySection, type RelayForward,
+  forwardHasContent, forwardText, isOwnerTurn, planForward, planRelay, relaySection, spawnPromptIndex, type RelayForward,
 } from './handoff-relay'
 import { stat } from 'node:fs/promises'
 import { cliStrings } from '../cli-i18n'
@@ -98,13 +98,17 @@ export async function captureHandoffRelay(
 ): Promise<CapturedRelay> {
   const got = await read(parent)
   if ('unavailable' in got) return { section: relaySection(parent.id, null, got.unavailable), awaiting: false }
+  // A predecessor born from a hand-off opened with ITS predecessor's `--handoff -p` words: never the owner's (FLUXO.CICLO-COMPLETO
+  // 7a — a relay replayed that prompt as an owner request). New prompts carry a header; this drops a legacy unmarked one.
+  const skip = parent.handoffFrom ? spawnPromptIndex(got.turns, parent.createdAt) : -1
+  const turns = skip >= 0 ? got.turns.filter((_, i) => i !== skip) : got.turns
   // "Since the predecessor's previous hand-off": a predecessor born from a hand-off starts there.
-  const relay = planRelay(got.turns, parent.handoffFrom ? parent.createdAt : undefined)
+  const relay = planRelay(turns, parent.handoffFrom ? parent.createdAt : undefined)
   return {
     section: relaySection(parent.id, relay),
     ...(relay.cursor ? { cursor: relay.cursor } : {}),
     awaiting: relay.unanswered,
-    owner: originalOwners(got.turns, relay.owner),
+    owner: originalOwners(turns, relay.owner),
     source: { id: parent.id, conversationId: parent.conversationId, createdAt: parent.createdAt },
   }
 }

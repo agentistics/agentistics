@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.203.0': {
+    features: [
+      {
+        pt: 'O ciclo das entregas fecha sozinho: quando o PR de uma peça é mergeado, ela vai para CI sem ninguém mover, e vira Publicado quando sai a primeira versão que contém o merge.',
+        en: 'The delivery cycle closes by itself: once a piece\'s PR is merged it moves to CI without anyone moving it, and becomes Published when the first release containing the merge is out.',
+      },
+      {
+        pt: 'Uma peça esperando o líder (revisão, ou um portão recusado) gera um lembrete ao líder vivo da tarefa depois de 30 min, e de novo a cada 2 h, no máximo 3 vezes — nunca a você.',
+        en: 'A piece waiting on its leader (review, or a refused gate) reminds the task\'s live leader after 30 min, then every 2 h, at most 3 times — never you.',
+      },
+      {
+        pt: 'Peças antigas já publicadas que ficaram presas em "Revisão do líder" podem ser acertadas de uma vez (simulação primeiro, com o motivo de cada uma que não se pôde provar).',
+        en: 'Old pieces that were already released but stuck in "Leader review" can be settled in one go (a dry run first, with the reason for each one that could not be proven).',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Pedir a passagem de liderança e o texto que abre a sessão sucessora não viram mais "pedidos do dono" nem peças na fila.',
+        en: 'Asking for a leadership hand-off, and the text that opens the successor session, no longer turn into "owner requests" or queued pieces.',
+      },
+      {
+        pt: 'Uma pergunta simples ao líder (ex.: "quando sai?") não vira mais pedido nem lembrete: fica como respondida quando o líder responde.',
+        en: 'A plain question to the leader (e.g. "when does it ship?") no longer becomes a request or a reminder: it is marked answered once the leader replies.',
+      },
+    ],
+  },
   '2.202.0': {
     features: [
       {

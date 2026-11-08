@@ -817,7 +817,10 @@ async function runFleetActionOnce(
       // THE RESPONSE IS NOT HELD FOR A SLOW PANE. `promptSession` is a chain of tmux spawns under
       // the pane's write lock; past `PROMPT_ACK_MS` the keys are in flight, so the browser is told
       // the message was accepted and a LATE failure is raised as a notification instead.
-      const raced = await withDeadline(host.promptSession(req.id, text), PROMPT_ACK_MS, late => {
+      // FLUXO.CICLO-COMPLETO 7(a): a hand-off REQUEST is typed under a header, so no relay or classifier ever reads it as the owner's
+      // own request (an already-headed text — the automatic hint — is left as it is).
+      const typed = req.handoff === true ? (await import('../flows/owner-intent')).markHandoffRequest(text) : text
+      const raced = await withDeadline(host.promptSession(req.id, typed), PROMPT_ACK_MS, late => {
         if ('value' in late && late.value.ok) { void record(); return }
         const message = 'value' in late ? late.value.message : (lang === 'pt' ? 'A mensagem não foi entregue.' : 'The message was not delivered.')
         void import('../sse').then(m => m.broadcastNotification({ type: 'error', title: 'Message not delivered', message })).catch(() => {})

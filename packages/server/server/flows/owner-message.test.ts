@@ -141,3 +141,57 @@ test('LEADER-2: the plain composer rule — no session proof AND the classifier;
   expect(await emitOwnerMessage({ action: 'kill', id: 'lead', text: 'x' }, d)).toBe('not-composer')
   expect(events).toHaveLength(1)
 })
+
+test('FLUXO.CICLO-COMPLETO 7a — a hand-off request is never an owner request, and reaches the leader under a header', async () => {
+  const owner = await import('./owner-message')
+  const fleet = await import('../sessions/fleet-web')
+  const { d, events } = deps()
+  const hook = spyOn(owner, 'defaultOwnerMessageDeps').mockReturnValue(d)
+  const typed: string[] = []
+  fleet.__setFleetHostForTest('en', {
+    sessions: async () => ({ sessions: [] }),
+    promptSession: async (_id: string, text: string) => { typed.push(text); return { ok: true, message: 'sent' } },
+  } as never)
+  try {
+    const button = 'Quero passar a liderança agora. Prepare o arquivo durável de passagem com estado, decisões, sessões ativas e fila.'
+    expect((await fleet.runFleetAction('en', { action: 'prompt', id: 'lead', text: button, handoff: true })).ok).toBe(true)
+    expect(events).toHaveLength(0)
+    expect(typed[0]!.startsWith('[from agentistics · passagem]\n')).toBe(true)
+    expect(await emitOwnerMessage({ id: 'lead', action: 'prompt', text: button, handoff: true }, d)).toBe('handoff')
+    // The legacy unmarked sentence (old transcripts, relays) is refused by the classifier too.
+    expect(await emitOwnerMessage({ id: 'lead', action: 'prompt', text: button }, d)).toBe('not-owner')
+    // A real work request on the same composer still records.
+    expect((await fleet.runFleetAction('en', { action: 'prompt', id: 'lead', text: 'Corrige o alinhamento do card de custos' })).ok).toBe(true)
+    expect(events).toHaveLength(1)
+  } finally { hook.mockRestore(); fleet.__setFleetHostForTest('en', null) }
+})
+
+test('FLUXO.CICLO-COMPLETO 7a — relayed predecessor messages: a successor prompt and relayed questions never become requests', async () => {
+  const { d, events } = deps({ recorded: async () => false })
+  await emitRelayedOwnerMessages('lead', { id: 'old', conversationId: 'conv-old' }, [
+    { text: '[from session old1 · passagem]\nLeia o arquivo de passagem e assuma', at: '2026-10-29T11:00:00.000Z' },
+    { text: 'quando sai as coisas?', at: '2026-10-29T11:01:00.000Z' },
+    { text: 'Implementa o export CSV', at: '2026-10-29T11:02:00.000Z' },
+  ], d)
+  expect(events.map(e => e.payload.text)).toEqual(['Implementa o export CSV'])
+})
+
+test('FLUXO.CICLO-COMPLETO 7b — a question to a leader is HELD (no owner.message); a work request and a worker message keep their path', async () => {
+  const held: Array<{ id: string; text: string; conversationId: string; at: string }> = []
+  const { d, events } = deps({ holdQuestion: async q => { held.push(q) } })
+  expect(await emitOwnerMessage({ id: 'lead', action: 'prompt', text: 'quando sai as coisas?' }, d, { at: '2026-11-08T01:40:00.000Z' })).toBe('held-question')
+  expect(events).toHaveLength(0)
+  expect(held).toEqual([expect.objectContaining({ text: 'quando sai as coisas?', conversationId: 'conv-l', at: '2026-11-08T01:40:00.000Z', sessionId: 'lead', taskId: 't-1' })])
+  expect(held[0]!.id).toBe(owner_id('conv-l', '2026-11-08T01:40:00.000Z', 'quando sai as coisas?'))
+  expect(await emitOwnerMessage({ id: 'lead', action: 'prompt', text: 'Implementa o export CSV na tela de custos' }, d)).toBe('emitted')
+  expect(await emitOwnerMessage({ id: 'wk', action: 'prompt', text: 'quando termina?' }, d)).toBe('emitted') // a worker's: the comment path
+  expect(events).toHaveLength(2)
+  // Promotion: the same question emitted as an ordinary request, with the composer's own id.
+  const { promoteOwnerQuestion } = await import('./owner-message')
+  expect(await promoteOwnerQuestion({ ...held[0]!, sessionId: 'lead', channel: 'app', state: 'waiting' }, d)).toBe(true)
+  expect(events.at(-1)!.id).toBe(owner_id('conv-l', '2026-11-08T01:40:00.000Z', 'quando sai as coisas?'))
+})
+
+function owner_id(conversationId: string, at: string, text: string): string {
+  return `owner.message:${conversationId}:${at}:${require('node:crypto').createHash('sha256').update(text).digest('hex').slice(0, 12)}`
+}

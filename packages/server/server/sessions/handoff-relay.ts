@@ -18,6 +18,7 @@
  * share the user's role in every transcript and must not be relayed as if the owner had said them.
  */
 import { parseInjectedHeader, type ChatTurn } from '@agentistics/core'
+import { isHandoffText } from '../flows/owner-intent'
 
 /** At most this many owner messages travel; older ones are named by count. */
 export const RELAY_MAX_OWNER_MESSAGES = 10
@@ -30,8 +31,25 @@ const NOT_OWNER = /^(?:\[from session\b|\[from agentistics\b|\[from flow\b|<agen
 export function isOwnerTurn(turn: Pick<ChatTurn, 'role' | 'text' | 'system'>): boolean {
   if (turn.role !== 'user' || turn.system) return false
   const text = turn.text.trim()
-  // A header makes it someone else's even inside the harness's `<pasted_content>` wrapper.
-  return text.length > 0 && !NOT_OWNER.test(text) && !parseInjectedHeader(text)
+  // A header makes it someone else's even inside the harness's `<pasted_content>` wrapper. The hand-off button's sentence from
+  // before it carried a header is not the owner's request either (FLUXO.CICLO-COMPLETO 7a).
+  return text.length > 0 && !NOT_OWNER.test(text) && !parseInjectedHeader(text) && !isHandoffText(text)
+}
+
+/** A hand-off successor's first prompt lands within this long of its spawn (the `--handoff -p` text). */
+export const SPAWN_PROMPT_WINDOW_MS = 3 * 60_000
+
+/**
+ * PURE. The index of the turn that is a SPAWN PROMPT (the predecessor's `--handoff -p` words) in a successor's transcript from
+ * before that prompt carried a header: the FIRST user turn, landed within `SPAWN_PROMPT_WINDOW_MS` of the spawn. -1 = none.
+ */
+export function spawnPromptIndex(turns: readonly ChatTurn[], spawnedAt: string | undefined): number {
+  const spawned = Date.parse(spawnedAt ?? '')
+  if (!Number.isFinite(spawned)) return -1
+  const i = turns.findIndex(t => t.role === 'user' && !t.system && t.text.trim().length > 0)
+  if (i < 0) return -1
+  const at = Date.parse(turns[i]!.at ?? '')
+  return Number.isFinite(at) && at >= spawned - 60_000 && at - spawned <= SPAWN_PROMPT_WINDOW_MS ? i : -1
 }
 
 /** "Sessão <id> (handback)" for a message another session typed in; null for everything else. */

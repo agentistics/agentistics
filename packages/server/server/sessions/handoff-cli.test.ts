@@ -105,7 +105,8 @@ describe('agentop session --handoff — the CLI flow', () => {
     const intents: Array<StructuredIntent | undefined> = []
     const backend = mkBackend(async (_id, structured) => { intents.push(structured) })
     expect(await runHandoff('ho-protocol', 'claude', backend, async () => true)).toBe(0)
-    expect(intents[0]).toMatchObject({ harness: 'claude', origin: 'background', prompt: 'x', mode: 'no-questions' })
+    // FLUXO.CICLO-COMPLETO 7a: the successor's first prompt is the predecessor's words, headed so no relay replays it as the owner's.
+    expect(intents[0]).toMatchObject({ harness: 'claude', origin: 'background', prompt: '[from session ho-protocol · passagem]\nx', mode: 'no-questions' })
     expect(intents[0]?.instructions?.text).toContain('agentistics')
     expect(intents[0]?.mcp?.[0]?.name).toBe('agentistics')
   }, 60_000)
