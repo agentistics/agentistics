@@ -4,12 +4,20 @@ import type { GateFacts } from './gates'
 
 const pr = (n: number, body: string, over: Partial<BatchPr> = {}): BatchPr => ({ repo: 'agentistics/agentistics', number: n, title: `release PR ${n}`, body, mergeSha: `merge${n}`.padEnd(40, '0'), ...over })
 const piece = (over: Partial<Parameters<typeof matchBatchPr>[1]> = {}) => ({ subtaskId: 's-8728082f37', branches: [], shas: [], ...over })
+/** A commit, and a piece whose delivery declared it. */
+const HEAD = '2c06a8b56c0ffee0000000000000000000000000'
+const own = piece({ heads: [{ branch: 'fix/x', sha: '2c06a8b56' }] })
+const carrying = (n: number, over: Partial<BatchPr> = {}) => pr(n, '', { commits: [HEAD], ...over })
 
 describe('matchBatchPr — which merged release PR lists a piece', () => {
-  test('the subtask id in the body names the PR; the merge commit is the PR\'s own', () => {
-    const r = matchBatchPr([pr(1, 'unrelated'), pr(1329, 'fixes s-8728082f37 and more')], piece())
+  test('the subtask id in a PR\'s text is a SUGGESTION, never proof (leader, 08/11); a proven PR\'s merge commit is its own', () => {
+    const named = matchBatchPr([pr(1, 'unrelated'), pr(1329, 'fixes s-8728082f37 and more')], piece())
+    expect(named.ok).toBe(false)
+    expect(!named.ok && named.suggestion?.pr.number).toBe(1329)
+    const r = matchBatchPr([pr(1, 'unrelated'), pr(1329, '', { commits: [HEAD] })], own)
     expect(r.ok && r.pr.number).toBe(1329)
     expect(r.ok && r.pr.mergeSha).toBe('merge1329'.padEnd(40, '0'))
+    expect(r.ok && r.via).toContain('fix/x @ 2c06a8b56')
   })
   test('a branch named in a PR\'s text is a SUGGESTION, never proof; a longer branch is not even that', () => {
     const body = 'external Codex sessions (fix/externas-tocar-codex) and (fix/metricas-soma, fix/opencode-metricas-v2)'
@@ -38,47 +46,44 @@ describe('matchBatchPr — which merged release PR lists a piece', () => {
   })
   test('a PR number the delivery states proves it, unless two of the card\'s repositories have that number', () => {
     expect(matchBatchPr([pr(10, 'x', { repo: 'a/engine' })], piece({ prs: [10] })).ok).toBe(true)
-    expect(matchBatchPr([pr(10, 'x', { repo: 'a/engine' }), pr(10, 'y', { repo: 'a/public' })], piece({ prs: [10] })).ok).toBe(false)
+    expect(matchBatchPr([pr(10, 'x', { repo: 'a/engine' }), pr(10, 'y', { repo: 'a/public', mergeSha: 'other'.padEnd(40, '0') })], piece({ prs: [10] })).ok).toBe(false)
+    expect(matchBatchPr([pr(10, 'x', { repo: 'old/name' }), pr(10, 'x', { repo: 'new/name' })], piece({ prs: [10] })).ok).toBe(true) // one merge under two names of a renamed repository
   })
   test('H4: only PRs of the card\'s own repositories count, whatever they say', () => {
-    expect(matchBatchPr([pr(5, 'lists s-8728082f37')], piece({ repos: ['acme/shop'] })).ok).toBe(false)
-    expect(matchBatchPr([pr(5, 'lists s-8728082f37', { repo: 'acme/shop' })], piece({ repos: ['acme/shop'] })).ok).toBe(true)
-    expect(matchBatchPr([pr(5, 'lists s-8728082f37')], piece({ repos: [] })).ok).toBe(false)
+    expect(matchBatchPr([carrying(5)], { ...own, repos: ['acme/shop'] }).ok).toBe(false)
+    expect(matchBatchPr([carrying(5, { repo: 'acme/shop' })], { ...own, repos: ['acme/shop'] }).ok).toBe(true)
+    expect(matchBatchPr([carrying(5)], { ...own, repos: [] }).ok).toBe(false)
   })
   test('M3: a PR into dev never proves anything; a PR merged before the card existed cannot have shipped it', () => {
-    expect(matchBatchPr([pr(5, 'lists s-8728082f37', { baseRefName: 'dev' })], piece()).ok).toBe(false)
-    expect(matchBatchPr([pr(5, 'lists s-8728082f37', { baseRefName: 'main' })], piece()).ok).toBe(true)
-    expect(matchBatchPr([pr(5, 'lists s-8728082f37', { mergedAt: '2026-10-01T00:00:00Z' })], piece({ createdMs: Date.parse('2026-11-01T00:00:00Z') })).ok).toBe(false)
+    expect(matchBatchPr([carrying(5, { baseRefName: 'dev' })], own).ok).toBe(false)
+    expect(matchBatchPr([carrying(5, { baseRefName: 'main' })], own).ok).toBe(true)
+    expect(matchBatchPr([carrying(5, { mergedAt: '2026-10-01T00:00:00Z' })], { ...own, createdMs: Date.parse('2026-11-01T00:00:00Z') }).ok).toBe(false)
   })
-  test('a line saying the piece was left out is not evidence, in any language it was written', () => {
-    expect(matchBatchPr([pr(5, 'Fica para o próximo lote: s-8728082f37')], piece()).ok).toBe(false)
-    expect(matchBatchPr([pr(5, 's-8728082f37 (not included here)\nother line')], piece()).ok).toBe(false)
+  test('a line saying the piece was left out is not even a suggestion, in any language it was written', () => {
+    const portuguese = matchBatchPr([pr(5, 'Fica para o próximo lote: s-8728082f37')], piece())
+    expect(!portuguese.ok && portuguese.suggestion).toBeUndefined()
+    const english = matchBatchPr([pr(5, 's-8728082f37 (not included here)\nother line')], piece())
+    expect(!english.ok && english.suggestion).toBeUndefined()
   })
-  test('two different PRs naming the piece are AMBIGUOUS — nothing is proven', () => {
-    const r = matchBatchPr([pr(1, 'lists s-8728082f37'), pr(2, 'also lists s-8728082f37')], piece())
+  test('two different PRs carrying the declared commit are AMBIGUOUS — nothing is proven, they stay as candidates', () => {
+    const r = matchBatchPr([carrying(1), carrying(2)], own)
     expect(r.ok).toBe(false)
     expect(!r.ok && r.ambiguous).toBe(true)
+    expect(!r.ok && r.candidates?.map(c => c.number)).toEqual([1, 2])
   })
-  test('a tie at one tier is narrowed by another tier\'s evidence; a tie that stays carries its candidates', () => {
-    const full = 'a'.repeat(39) + '1'
-    const narrowed = matchBatchPr([pr(1, 'lists s-8728082f37'), pr(2, 'lists s-8728082f37', { commits: [full] })], piece({ shas: [full] }))
+  test('a tie at one tier is narrowed by another tier\'s evidence', () => {
+    const narrowed = matchBatchPr([carrying(1), carrying(2)], { ...own, prs: [2] })
     expect(narrowed.ok && narrowed.pr.number).toBe(2)
-    const tie = matchBatchPr([pr(1, 'lists s-8728082f37'), pr(2, 'lists s-8728082f37')], piece())
-    expect(!tie.ok && tie.candidates?.map(c => c.number)).toEqual([1, 2])
   })
   test('the same PR seen twice (two lists) is one candidate, not an ambiguity', () => {
-    expect(matchBatchPr([pr(9, 'has s-8728082f37'), pr(9, 'has s-8728082f37')], piece()).ok).toBe(true)
-  })
-  test('a unique id hit wins over a looser branch hit in another PR', () => {
-    const r = matchBatchPr([pr(1, 'fix/metricas-soma'), pr(2, 's-8728082f37')], piece({ branches: ['fix/metricas-soma'] }))
-    expect(r.ok && r.pr.number).toBe(2)
+    expect(matchBatchPr([carrying(9), carrying(9)], own).ok).toBe(true)
   })
   test('no PR names it → not proven, with the reason', () => {
     const r = matchBatchPr([pr(1, 'nothing here')], piece())
     expect(!r.ok && r.reason).toContain('no merged release PR proves')
   })
   test('a PR with no merge commit never counts', () => {
-    expect(matchBatchPr([{ ...pr(1, 's-8728082f37'), mergeSha: '' }], piece()).ok).toBe(false)
+    expect(matchBatchPr([{ ...carrying(1), mergeSha: '' }], own).ok).toBe(false)
   })
   test('the card\'s CODE.NAME never moves anything: it becomes a suggestion, as a whole word', () => {
     expect(titleCode('METRICAS.SOMA — fix totals')).toBe('METRICAS.SOMA')
@@ -105,6 +110,16 @@ describe('matchBatchPr — which merged release PR lists a piece', () => {
   test('the last statement of a branch is the commit it stood at', () => {
     const h = hintsFromHandbacks([{ body: 'feat/x @ aaaa1111', atMs: 1 }, { body: 'feat/x @ bbbb2222', atMs: 2 }])
     expect(h.heads).toEqual([{ branch: 'feat/x', sha: 'bbbb2222', atMs: 2 }])
+    expect(h.latest).toEqual(['bbbb2222'])
+  })
+  test('an earlier round that shipped does not ship the later one: the PR is only a suggestion', () => {
+    const first = 'a'.repeat(39) + '1'
+    const last = 'b'.repeat(39) + '2'
+    const hints = hintsFromHandbacks([{ body: `commit ${first} pushed` }, { body: `round 2: ${last}` }])
+    const stale = matchBatchPr([pr(5, '', { commits: [first] })], piece(hints))
+    expect(stale.ok).toBe(false)
+    expect(!stale.ok && stale.suggestion?.pr.number).toBe(5)
+    expect(matchBatchPr([pr(6, '', { commits: [first, last] })], piece(hints)).ok).toBe(true)
   })
 })
 

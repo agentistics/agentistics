@@ -638,6 +638,8 @@ export function buildLive(o: {
   publishedShas?: ReadonlySet<string>
   /** Per subtask: the last reconcile's weak evidence (`delivery/batch-proof.ts`), shown beside an old card. */
   suggestions?: ReadonlyMap<string, { repo: string; pr: number; tag?: string; via: string }>
+  /** Subtasks the last reconcile proved shipped (not yet moved, e.g. the automatic run is off). */
+  proven?: ReadonlySet<string>
 }): LiveReply {
   const samples: Sample[] = []
   const candidates: Piece[] = []
@@ -687,7 +689,8 @@ export function buildLive(o: {
         // ONE rule with the reconcile (`delivery/antigas.ts`): age alone does not take a delivery still waiting on its leader out of the column.
         let handbackMs: number | null = null
         for (const c of p.comments) if (c.kind === 'handback' && (c.subtaskId ?? null) === (p.sub?.id ?? null)) handbackMs = Math.max(handbackMs ?? 0, ms(c.createdAt) ?? 0)
-        isOld = isAntiga({ hasRecord: false, live: liveSessions.length > 0, updatedMs: ms(p.updatedAt), nowMs: o.nowMs, handbackMs })
+        // A piece the last reconcile proved shipped is on its way to Publicado, not a decision to make.
+        isOld = !(p.sub && o.proven?.has(p.sub.id)) && isAntiga({ hasRecord: false, live: liveSessions.length > 0, updatedMs: ms(p.updatedAt), nowMs: o.nowMs, handbackMs, suggested: !!(p.sub && o.suggestions?.has(p.sub.id)) })
       }
     }
     // Only what could have been a card a moment ago is worth a departure line: an abandoned/backlog piece,

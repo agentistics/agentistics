@@ -1,7 +1,7 @@
 /**
  * LiveAntigas — the group "Antigas sem registro": legacy cards with no proof of release, nobody alive on them, untouched for over
  * 24 h and no delivery still waiting on its leader. Filtros v2 keeps them in "Tudo", marked, at the bottom of "Revisão do líder";
- * this dialog, opened from that column's header, is where they are DECIDED: one click per card, one for the whole group.
+ * this dialog, opened from that tab's bar, is where they are DECIDED: one click per card, one for the whole group.
  *
  * Both actions go through `POST /api/deliveries/antigas`, the same door the CLI (`agentop flow antigas`) and the MCP use. Nothing
  * is ever deleted. The group action asks first and says the number it will act on; that number IS the list of ids it sends, in
@@ -35,7 +35,7 @@ type Action = 'publish' | 'archive'
 interface Outcome { ok: boolean; reason?: string; code?: 'no_session' }
 
 /** How many pieces one request carries: the answer stays immediate and the group can be stopped between two of them. */
-export const ANTIGAS_CHUNK = 20
+export const ANTIGAS_CHUNK = 5
 
 const T = (pt: boolean) => pt ? {
   title: (n: number) => `Antigas sem registro · ${n}`,
@@ -75,6 +75,7 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({})
   const [asking, setAsking] = useState<Action | null>(null)
   const stopper = useRef<AbortController | null>(null)
+  const stopRequested = useRef(false)
   useEffect(() => () => stopper.current?.abort(), [])
   const busy = progress !== null
   // What the screen lists is what the group button acts on: a piece already decided here leaves both at once.
@@ -104,8 +105,10 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
     const ids = [...actionable]
     const ac = new AbortController()
     stopper.current = ac
+    stopRequested.current = false
     setProgress({ done: 0, total: ids.length })
-    for (let at = 0; at < ids.length && !ac.signal.aborted; at += ANTIGAS_CHUNK) {
+    // "Stop" lets the batch in flight finish, so the list says exactly what happened; leaving the screen aborts it (the server then stops too).
+    for (let at = 0; at < ids.length && !stopRequested.current && !ac.signal.aborted; at += ANTIGAS_CHUNK) {
       await send(action, ids.slice(at, at + ANTIGAS_CHUNK), version.trim() || undefined, ac.signal)
       setProgress({ done: Math.min(ids.length, at + ANTIGAS_CHUNK), total: ids.length })
     }
@@ -119,9 +122,10 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   })
   const field: React.CSSProperties = { minHeight: mobile ? 44 : 30, fontSize: mobile ? 16 : 12, padding: '0 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'inherit', minWidth: 0, boxSizing: 'border-box' }
   const footer = (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+    // The phone sheet scrolls as one: Stop and Close stay on its floor, like the dialog's own buttons.
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center', flexWrap: 'wrap', ...(mobile ? { position: 'sticky' as const, bottom: 0, zIndex: 1, background: 'var(--bg-card)', padding: '8px 0 2px', boxShadow: '0 -8px 8px -8px rgba(0,0,0,0.35)' } : {}) }}>
       {progress && <span role="status" data-live-antigas-progress style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{L.busy(progress.done, progress.total)}</span>}
-      {progress && stopper.current && <button type="button" data-live-antigas-stop onClick={() => stopper.current?.abort()} style={btn()}>{L.stop}</button>}
+      {progress && stopper.current && <button type="button" data-live-antigas-stop onClick={() => { stopRequested.current = true }} style={btn()}>{L.stop}</button>}
       <button type="button" data-live-antigas-close onClick={onClose} style={{ ...button(mobile) }}>{L.close}</button>
     </div>
   )
@@ -129,7 +133,7 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
     <>
       <ConfirmModal
         open={open} title={L.title(items.length)} message={L.note} tone="default" confirmLabel={L.close} cancelLabel={L.close}
-        onConfirm={onClose} onCancel={onClose} maxWidth={720} mobileSheet focusPanel layer={300} footer={footer}
+        onConfirm={onClose} onCancel={onClose} maxWidth={720} mobileSheet focusPanel layer={mobile ? 2000 : 300} footer={footer}
       >
         <div data-live-antigas style={{ display: 'grid', gap: 10, fontSize: 12, minWidth: 0 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -138,7 +142,8 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
             <input data-live-antigas-reason value={reason} onChange={e => setReason(e.target.value)} placeholder={L.reason} aria-label={L.reason} style={{ ...field, width: mobile ? '100%' : 160 }} />
             <button type="button" data-live-antigas-all-archive disabled={busy || actionable.length === 0} onClick={() => setAsking('archive')} style={btn()}>{L.archive} · {L.all(actionable.length)}</button>
           </div>
-          <ul className="ag-scroll" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8, maxHeight: mobile ? '50dvh' : '46vh', overflowY: 'auto', overscrollBehavior: 'contain' }}>
+          {/* On a phone the sheet itself is the one scroller, with its footer pinned; a second one inside it fights the thumb. */}
+          <ul className="ag-scroll" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8, ...(mobile ? {} : { maxHeight: '46vh', overflowY: 'auto' as const, overscrollBehavior: 'contain' as const }) }}>
             {visible.map(a => {
               const out = a.subtaskId ? outcomes[a.subtaskId] : undefined
               return (
@@ -169,7 +174,7 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
         </div>
       </ConfirmModal>
       <ConfirmModal
-        open={asking !== null} layer={320} tone={asking === 'archive' ? 'danger' : 'default'} focusCancel
+        open={asking !== null} layer={mobile ? 2020 : 320} tone={asking === 'archive' ? 'danger' : 'default'} focusCancel
         title={asking === 'archive' ? L.confirmArchiveTitle(actionable.length) : L.confirmPublishTitle(actionable.length)}
         message={asking === 'archive' ? L.confirmArchive : L.confirmPublish}
         confirmLabel={asking === 'archive' ? L.archive : L.publish} cancelLabel={L.cancel}

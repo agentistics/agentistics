@@ -30,6 +30,9 @@ describe('M1: real pending work is not old by age alone', () => {
   test('a handback nobody answered for over 7 days joins the group, where it is a decision', () => {
     expect(isAntiga({ ...base, handbackMs: nowMs - 8 * 24 * 3600_000 })).toBe(true)
   })
+  test('a recent handback with a suspicion that it shipped is a decision to make, not work waiting', () => {
+    expect(isAntiga({ ...base, handbackMs: nowMs - 2 * 24 * 3600_000, suggested: true })).toBe(true)
+  })
   test('no delivery statement at all: the 24 h rule', () => {
     expect(isAntiga(base)).toBe(true)
     expect(isAntiga({ ...base, handbackMs: null })).toBe(true)

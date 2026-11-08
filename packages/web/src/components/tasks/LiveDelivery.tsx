@@ -431,13 +431,12 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   // The answer on screen is for another period than the chosen one: the numbers below are the old ones until it lands.
   const periodLoading = Boolean(reply.view?.period) && reply.view?.period !== period
   const showPublished = tab === 'all' || tab === 'published'
-  // "Antigas sem registro": filtros v2 keeps them in "Tudo", at the bottom of "Revisão do líder"; that column's header opens the group.
+  // "Antigas sem registro": filtros v2 keeps them in "Tudo", at the bottom of "Revisão do líder". That tab's bar opens the group: a button in
+  // that column's header sits off screen at 1280 px, behind the columns to its left.
   const oldCards = cards.filter(c => c.d.old && (taskIds.length === 0 || taskIds.includes(c.d.taskId)))
-  const antigasOffered = tab === 'all' && oldCards.length > 0
-  const antigasTrigger = (
-    <button type="button" className="ag-tap" data-live-antigas-open onClick={e => { e.stopPropagation(); setShowAntigas(true) }} onKeyDown={e => e.stopPropagation()} title={L.antigasTip}
-      style={{ ...button(isMobile), minHeight: isMobile ? 36 : 22, padding: '0 8px', fontSize: 11, flexShrink: 0 }}>{L.antigas(oldCards.length)}</button>
-  )
+  const antigasTrigger = tab === 'all' && oldCards.length > 0 ? (
+    <button type="button" className="ag-tap" data-live-antigas-open onClick={() => setShowAntigas(true)} title={L.antigasTip} style={{ ...button(isMobile), flexShrink: 0 }}>{L.antigas(oldCards.length)}</button>
+  ) : null
   // The server cuts each kind at its cap (the oldest go): say so, so a count is never read as the total.
   // Under a task or stage filter only the cut pieces that match it count (the server's own rule, `liveCapOmitted`).
   const capFacts = reply.view?.capFacts
@@ -458,6 +457,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   })
   const actions = (
     <>
+      {antigasTrigger}
       {gone.length > 0 && (
         <button type="button" className="ag-tap" data-live-gone-toggle data-fresh={gone.some(g => clock - g.atMs < GONE_LINGER_MS) ? '1' : '0'} aria-pressed={showGone} onClick={() => setShowGone(v => !v)}
           style={{ ...pillBtn(showGone || gone.some(g => clock - g.atMs < GONE_LINGER_MS)), transition: reducedMotion() ? 'none' : 'background .4s, border-color .4s' }}>{L.recentLeft(gone.length)}</button>
@@ -510,6 +510,10 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
 
   if (cards.length === 0 && leaders.length === 0 && gone.length === 0) return <div style={{ display: 'grid', gap: 12 }}>{header}<Note text={L.none} /></div>
 
+  // The group's sheet covers the whole phone, and every piece it decides is a board write that refreshes the Live: redrawing a few
+  // hundred cards nobody can see, once per write, pegged the page until the tab crashed (measured at 390 px, 180 pieces).
+  if (isMobile && showAntigas) return <div style={{ display: 'grid', gap: 10 }}>{header}</div>
+
   if (isMobile) {
     // Stages with cards, in order; Publicado also stays while its tab shows (its period picker lives in its header).
     const mobileStages = LIVE_STAGES.filter(s => columns[s].length > 0 || (s === 'published' && showPublished))
@@ -543,13 +547,13 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         <div ref={boardRef} style={{ display: 'grid', gap: 10, paddingTop: 6 }}>
           {mobileStages.filter(s => stageFilter === 'all' || s === stageFilter).map(s => (
             <section key={s} data-live-column={s} style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
-              {(stageFilter === 'all' || s === 'published' || (s === 'leader' && antigasOffered)) && (
+              {(stageFilter === 'all' || s === 'published') && (
                 <header data-live-stage-head style={{
                   position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg-surface)', borderTop: `3px solid ${STAGE_LABEL[s].color}`,
                   padding: '6px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 44,
                 }}>
                   <span style={{ fontWeight: 700, fontSize: 13 }}>{STAGE_LABEL[s][pt ? 'pt' : 'en']}</span>
-                  {s === 'published' ? periodPicker : s === 'leader' && antigasOffered ? antigasTrigger : null}
+                  {s === 'published' ? periodPicker : null}
                 </header>
               )}
               {s === 'published' && columns[s].length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>{L.noPublished}</span>}
@@ -580,7 +584,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
               setPrefs(next); writeCollapsedPrefs(next)
             }}
             render={s === 'published' ? renderPub : renderCard}
-            {...(s === 'published' ? { headerExtra: periodPicker, emptyText: L.noPublished } : s === 'leader' && antigasOffered ? { headerExtra: <>{columns.leader.length > oldCards.length && <span data-live-colcount style={{ ...microLabel, fontSize: 11 }}>{columns.leader.length - oldCards.length}</span>}{antigasTrigger}</> } : {})}
+            {...(s === 'published' ? { headerExtra: periodPicker, emptyText: L.noPublished } : {})}
           />
         ))}
       </div>

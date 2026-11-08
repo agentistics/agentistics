@@ -177,8 +177,14 @@ async function boardReviewPieces(): Promise<import('./service').ReviewPiece[]> {
   const wanted = new Set([PHASE_STATUS.revisao_lider.id, PHASE_STATUS.pr_merge.id, PHASE_STATUS.ci.id])
   const subs = book.subtasks.filter(s => wanted.has(s.status) && !s.parentGroupId)
   const ids = new Set(subs.map(s => s.id))
+  const { hintsFromHandbacks } = await import('./batch-proof')
   const lastHandback = new Map<string, string>()
-  for (const c of book.comments) if (c.subtaskId && ids.has(c.subtaskId) && c.kind === 'handback' && c.createdAt > (lastHandback.get(c.subtaskId) ?? '')) lastHandback.set(c.subtaskId, c.createdAt)
+  const handbacks = new Map<string, Array<{ body: string; createdAt: string }>>()
+  for (const c of book.comments) {
+    if (!c.subtaskId || !ids.has(c.subtaskId) || c.kind !== 'handback') continue
+    if (c.createdAt > (lastHandback.get(c.subtaskId) ?? '')) lastHandback.set(c.subtaskId, c.createdAt)
+    ;(handbacks.get(c.subtaskId) ?? handbacks.set(c.subtaskId, []).get(c.subtaskId)!).push(c)
+  }
   const cwds = new Map<string, Set<string>>()
   const recorded = new Map<string, Set<string>>()
   for (const r of await readRegistry().catch(() => [])) {
@@ -193,17 +199,11 @@ async function boardReviewPieces(): Promise<import('./service').ReviewPiece[]> {
     const repos = new Set<string>(recorded.get(s.id) ?? [])
     for (const cwd of cwds.get(s.id) ?? []) { const slug = await slugOfCwd(cwd); if (slug) repos.add(slug) }
     const handbackAt = lastHandback.get(s.id)
-    out.push({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}), ...(s.createdAt ? { createdAt: s.createdAt } : {}), ...(handbackAt ? { handbackAt } : {}), repos: [...repos] })
+    // What its delivery declared: its HANDBACKS only. Notes and every other comment are talk about the work, never a statement of what shipped (H1).
+    const hints = hintsFromHandbacks((handbacks.get(s.id) ?? []).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(c => ({ body: c.body, ...(Date.parse(c.createdAt) ? { atMs: Date.parse(c.createdAt) } : {}) })))
+    out.push({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}), ...(s.createdAt ? { createdAt: s.createdAt } : {}), ...(handbackAt ? { handbackAt } : {}), repos: [...repos], hints })
   }
   return out
-}
-
-/** What a legacy piece's delivery declared: its HANDBACKS only. Notes and every other comment are talk about the work, never a statement of what shipped (H1). */
-async function boardPieceHints(subtaskId: string): Promise<{ branches: string[]; shas: string[]; heads: import('./batch-proof').DeclaredHead[]; prs: number[] }> {
-  const [{ loadTaskWorld }, { hintsFromHandbacks }] = await Promise.all([import('../sessions/task-source'), import('./batch-proof')])
-  const { book } = await loadTaskWorld()
-  const handbacks = book.comments.filter(c => c.subtaskId === subtaskId && c.kind === 'handback').sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  return hintsFromHandbacks(handbacks.map(c => ({ body: c.body, ...(Date.parse(c.createdAt) ? { atMs: Date.parse(c.createdAt) } : {}) })))
 }
 
 /** `<dataDir>/delivery-proof-cache.json`: what gh already answered, so a restart resumes the reconcile instead of starting over. A cache: never a source of truth. */
@@ -245,7 +245,7 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
   const svc = createDeliveryService({
     store, facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
     autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, accountName: accountNameOf, now: () => Date.now(),
-    reviewPieces: boardReviewPieces, pieceHints: boardPieceHints, closeLegacy: closeLegacyPiece,
+    reviewPieces: boardReviewPieces, closeLegacy: closeLegacyPiece,
     autoReconcile: () => autoReconcileEnabled,
     proofStore: proofCacheFile(),
     log: line => console.log(line),

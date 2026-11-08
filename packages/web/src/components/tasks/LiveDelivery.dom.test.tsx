@@ -359,7 +359,7 @@ test('H6: "All" asks first, sends exactly the ids it counted, answers in batches
     expect(document.body.textContent).toContain('Archive 25 pieces?')
     const buttons = Array.from(document.querySelectorAll('button')).filter(b => b.textContent === 'Archive')
     await act(async () => { buttons.at(-1)!.click(); await new Promise(r => setTimeout(r, 10)) })
-    expect(sent.map(s => s.ids.length)).toEqual([20, 5])
+    expect(sent.map(s => s.ids.length)).toEqual([5, 5, 5, 5, 5])
     expect(sent.every(s => s.action === 'archive' && s.expect === s.ids.length)).toBe(true)
     // What the board refused stays, in words, with a way out; what it took left the list.
     const list = document.querySelector('[data-live-antigas]')!

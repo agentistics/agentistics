@@ -27,8 +27,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [
       {
-        pt: 'A coluna "Revisão do líder" se limpa sozinha: o trabalho entregue vai para Publicado sem ninguém mexer, e os cartões antigos sem prova de entrega vão para o grupo "Antigas sem registro", com "Marcar publicado" e "Arquivar" em um clique.',
-        en: 'The "Leader review" column cleans itself up: delivered work moves to Published on its own, and old cards with no proof of delivery go to the "Old, no record" group, with one-click "Mark published" and "Archive".',
+        pt: 'A coluna "Revisão do líder" se limpa sozinha: o trabalho com prova de entrega vai para Publicado sem ninguém mexer, e o que ninguém consegue provar fica no grupo "Antigas" (botão na aba Tudo), para você decidir em um clique. Trabalho com sessão viva ou entrega recente nunca se move sozinho.',
+        en: 'The "Leader review" column cleans itself up: work with proof of delivery moves to Published on its own, and what nobody can prove waits in the "Old" group (a button on the All tab) for you to decide in one click. Work with a live session or a recent delivery never moves by itself.',
       },
       {
         pt: 'As peças que ficavam paradas em "Revisão do líder" depois de mergeadas e publicadas agora andam sozinhas até Publicado.',

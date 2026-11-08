@@ -7,12 +7,11 @@
  *
  *   STRONG (moves a piece), all from what the piece's OWN delivery declared, checked against gh's facts of a PR that merged into
  *   the default branch of the CARD'S repository, after the card existed:
- *     1. the subtask id, on a line of the PR that does not say the piece was left out;
- *     2. a declared commit that is a real commit of that PR (`commits`, gh's list: a short declared sha resolves to a full one);
- *     3. the PR whose head is the declared branch, merged after that declaration;
- *     4. a PR number the delivery's handback states (unambiguous across the card's repositories).
- *   WEAK (never moves anything, shown as a SUGGESTION in "Antigas"): the card's whole CODE.NAME, or a declared branch named in the
- *   PR's text.
+ *     1. a declared commit that is a real commit of that PR (`commits`, gh's list: a short declared sha resolves to a full one);
+ *     2. the PR whose head is the declared branch, merged after that declaration;
+ *     3. a PR number the delivery's handback states (unambiguous across the card's repositories).
+ *   WEAK (never moves anything, shown as a SUGGESTION in "Antigas"): the piece's id or the card's whole CODE.NAME in the PR's text,
+ *   or a declared branch named there. Text is somebody's sentence; only the three above are gh's facts (leader, 08/11).
  *
  * A PR into `dev` proves nothing: its merge commit never reaches a tag. The merge commit always comes from gh, never the caller.
  * Everything gh answered is kept in a `ProofCache`, which survives restarts (see `service.ts`): commits, ancestry and a green tag
@@ -27,7 +26,7 @@ const RELEASE_TAG = /^v\d+\.\d+\.\d+$/
 /** Pull requests read per repository per refresh (newest first). */
 export const BATCH_PR_LIMIT = 300
 /** Tags walked when looking for the first public release that pins an engine commit. */
-const ENGINE_TAG_WALK = 60
+const ENGINE_TAG_WALK = 200
 /** What may change on GitHub (new PRs, new tags) is asked again after this long; what cannot change is never asked twice. */
 export const PROOF_REFRESH_MS = 60 * 60_000
 /** Pages of 100 PRs read for their commit lists; only the pages holding PRs not read before. */
@@ -51,6 +50,8 @@ export interface PieceHints {
   heads?: readonly DeclaredHead[]
   /** PR numbers the delivery's handback states. */
   prs?: readonly number[]
+  /** The commits of the LAST statement that named any: an earlier round that shipped does not ship the later one. Absent = every declared commit counts. */
+  latest?: readonly string[]
   /** The repositories of the card (`owner/name`); absent = the host could not say, every PR passed in is considered. */
   repos?: readonly string[]
   /** When the card was created: a PR merged before it cannot have shipped it. */
@@ -101,7 +102,6 @@ export function textNamesCode(text: string, code: string): boolean {
   return linesNaming(text, l => re.test(l))
 }
 
-const rank = (pr: BatchPr) => `${pr.repo}#${pr.number}`
 const mergedMs = (p: BatchPr) => (p.mergedAt ? Date.parse(p.mergedAt) || null : null)
 
 /**
@@ -111,43 +111,56 @@ const mergedMs = (p: BatchPr) => (p.mergedAt ? Date.parse(p.mergedAt) || null : 
  */
 export function matchBatchPr(prs: readonly BatchPr[], piece: PieceHints): BatchMatch {
   const merged = [...new Map(prs.filter(p => p.mergeSha && isReleaseBase(p.baseRefName) && (!piece.repos || piece.repos.includes(p.repo))
-    && !(piece.createdMs != null && mergedMs(p) !== null && mergedMs(p)! < piece.createdMs)).map(p => [rank(p), p] as const)).values()]
+    // Keyed by the merge commit: a renamed repository answers under both names, and one merge is one PR however many names reach it.
+    && !(piece.createdMs != null && mergedMs(p) !== null && mergedMs(p)! < piece.createdMs)).map(p => [p.mergeSha, p] as const)).values()]
   const heads = piece.heads ?? []
   const stated = new Map<number, number>()
   for (const p of merged) stated.set(p.number, (stated.get(p.number) ?? 0) + 1)
   const oidsOf = (p: BatchPr) => [...(p.commits ?? []), ...(p.headRefOid ? [p.headRefOid] : [])]
   const fullShas = piece.shas.filter(s => s.length === 40)
+  const counts = (sha: string) => !piece.latest || piece.latest.includes(sha)
+  const carries = (p: BatchPr, full: readonly string[], short: readonly DeclaredHead[]): boolean => {
+    const oids = oidsOf(p)
+    return full.some(s => oids.includes(s)) || short.some(h => h.sha.length >= 7 && oids.some(o => o.startsWith(h.sha))) || textNamesSha(`${p.title}\n${p.body}`, full)
+  }
   const tiers: Array<{ via: string; hit: (p: BatchPr) => boolean }> = [
-    { via: 'subtask id in the release PR', hit: p => linesNaming(`${p.title}\n${p.body}`, l => l.includes(piece.subtaskId)) },
-    { via: 'declared commit in the release PR', hit: p => {
-      const oids = oidsOf(p)
-      return fullShas.some(s => oids.includes(s)) || heads.some(h => h.sha.length >= 7 && oids.some(o => o.startsWith(h.sha))) || textNamesSha(`${p.title}\n${p.body}`, fullShas)
-    } },
+    { via: 'declared commit in the release PR', hit: p => carries(p, fullShas.filter(counts), heads.filter(h => counts(h.sha))) },
     { via: 'PR of the declared branch', hit: p => heads.some(h => p.headRefName === h.branch && (h.atMs === undefined || mergedMs(p) === null || mergedMs(p)! >= h.atMs - DECLARE_SKEW_MS)) },
     { via: 'PR number stated by the delivery', hit: p => (piece.prs ?? []).includes(p.number) && stated.get(p.number) === 1 },
   ]
+  // The proof says WHICH commit: a person reading "published" must be able to check it without re-running anything.
+  const named = (via: string, p: BatchPr): string => {
+    if (!via.includes('declared commit')) return via
+    const oids = oidsOf(p)
+    const full = fullShas.find(s => counts(s) && oids.includes(s))
+    const head = heads.find(h => counts(h.sha) && h.sha.length >= 7 && oids.some(o => o.startsWith(h.sha)))
+    return full ? `${via}: ${full.slice(0, 12)}` : head ? `${via}: ${head.branch} @ ${head.sha.slice(0, 12)}` : via
+  }
   const hitsByTier = tiers.map(t => ({ via: t.via, hits: merged.filter(t.hit) }))
   for (const t of hitsByTier) {
-    if (t.hits.length === 1) return { ok: true, pr: t.hits[0]!, via: t.via }
+    if (t.hits.length === 1) return { ok: true, pr: t.hits[0]!, via: named(t.via, t.hits[0]!) }
     if (t.hits.length > 1) {
       // Several PRs at this tier: another tier's evidence may single one out (its id AND its commit point at one PR).
       let narrowed = t.hits
       for (const o of hitsByTier) if (o !== t && o.hits.length > 0) { const both = narrowed.filter(p => o.hits.includes(p)); if (both.length > 0) narrowed = both }
-      if (narrowed.length === 1) return { ok: true, pr: narrowed[0]!, via: `${t.via} + ${hitsByTier.find(o => o !== t && o.hits.includes(narrowed[0]!))?.via ?? 'another tier'}` }
+      if (narrowed.length === 1) return { ok: true, pr: narrowed[0]!, via: named(`${t.via} + ${hitsByTier.find(o => o !== t && o.hits.includes(narrowed[0]!))?.via ?? 'another tier'}`, narrowed[0]!) }
       return { ok: false, ambiguous: true, candidates: narrowed, reason: `ambiguous: ${narrowed.length} merged PRs prove this piece (${narrowed.map(h => `#${h.number}`).join(', ')}) — not proven` }
     }
   }
-  const suggestion = suggestBatchPr(merged, piece)
-  return { ok: false, reason: 'no merged release PR proves this piece (subtask id, declared commit, its branch or its PR number)', ...(suggestion ? { suggestion } : {}) }
+  // A PR carrying an EARLIER commit of this delivery: it probably shipped a previous round, so the person decides.
+  const earlier = merged.filter(p => carries(p, fullShas, heads)).sort((a, b) => (mergedMs(b) ?? 0) - (mergedMs(a) ?? 0))[0]
+  const suggestion = earlier ? { pr: earlier, via: 'an earlier commit of this delivery is in this PR; the last one it declared is not' } : suggestBatchPr(merged, piece)
+  return { ok: false, reason: 'no merged release PR proves this piece (declared commit, its branch or its PR number)', ...(suggestion ? { suggestion } : {}) }
 }
 
-/** PURE. The newest PR with WEAK evidence (the card's name, or a declared branch named in its text). It moves nothing. */
+/** PURE. The newest PR with WEAK evidence (the piece's id or the card's name in its text, or a declared branch named there). It moves nothing. */
 function suggestBatchPr(merged: readonly BatchPr[], piece: PieceHints): BatchSuggestion | null {
   const code = titleCode(piece.title)
   const atOf = new Map((piece.heads ?? []).map(h => [h.branch, h.atMs]))
   const newest = [...merged].sort((a, b) => (mergedMs(b) ?? 0) - (mergedMs(a) ?? 0))
   for (const p of newest) {
     const text = `${p.title}\n${p.body}`
+    if (linesNaming(text, l => l.includes(piece.subtaskId))) return { pr: p, via: `the PR's text names ${piece.subtaskId}` }
     const branch = piece.branches.find(b => {
       const at = atOf.get(b)
       if (at !== undefined && mergedMs(p) !== null && mergedMs(p)! < at - DECLARE_SKEW_MS) return false
@@ -168,7 +181,7 @@ const shaLike = (s: string) => /\d/.test(s)
 const BRANCH_THEN_SHA = new RegExp(`(?<![\\w/.-])(${BRANCH_TOKEN})\`?\\s*(?:@|\\bat\\b|,?\\s*commit\\b|,?\\s*sha\\b)?\\s*\`?(${SHA_TOKEN})(?![\\w-])`, 'gi')
 const SHA_THEN_BRANCH = new RegExp(`(?<![\\w-])(${SHA_TOKEN})\`?\\s+(?:pushed to|pushed on|no ramo|na branch|on branch|em)\\s+\`?(${BRANCH_TOKEN})`, 'gi')
 
-export interface DeliveryHints { branches: string[]; shas: string[]; heads: DeclaredHead[]; prs: number[] }
+export interface DeliveryHints { branches: string[]; shas: string[]; heads: DeclaredHead[]; prs: number[]; /** See `PieceHints.latest`. */ latest?: string[] }
 
 /**
  * PURE. What ONE delivery statement declares. Only a branch WITH its commit is a declared branch (a file path, a branch somebody
@@ -198,13 +211,16 @@ export function hintsFromHandbacks(handbacks: ReadonlyArray<{ body: string; atMs
   const heads = new Map<string, DeclaredHead>()
   const shas = new Set<string>()
   const prs = new Set<number>()
+  let latest: string[] = []
   for (const h of handbacks) {
     const one = hintsFromText(h.body, h.atMs)
     for (const x of one.heads) heads.set(x.branch, x)
     for (const s of one.shas) shas.add(s)
     for (const n of one.prs) prs.add(n)
+    const named = [...one.heads.map(x => x.sha), ...one.shas]
+    if (named.length) latest = named
   }
-  return { branches: [...heads.keys()], shas: [...shas], heads: [...heads.values()], prs: [...prs] }
+  return { branches: [...heads.keys()], shas: [...shas], heads: [...heads.values()], prs: [...prs], ...(latest.length ? { latest } : {}) }
 }
 
 const json = <T>(s: string, fallback: T): T => { try { return JSON.parse(s) as T } catch { return fallback } }

@@ -24,6 +24,8 @@ export interface ReviewPieceFacts {
   nowMs: number
   /** When its delivery last reported to its leader (a handback), if ever: real work waiting on a person is not old by age alone. */
   handbackMs?: number | null
+  /** The last reconcile suspects it shipped (weak evidence): then it is a decision to make, not work still waiting. */
+  suggested?: boolean
 }
 
 /**
@@ -35,7 +37,7 @@ export function isAntiga(f: ReviewPieceFacts): boolean {
   if (f.hasRecord || f.live) return false
   // An unknown age is NOT old: a piece whose date cannot be read stays where it is (never moved on a guess).
   if (f.updatedMs === null) return false
-  if (f.handbackMs != null && f.nowMs - f.handbackMs <= DELIVERY_WAITS_MS) return false
+  if (!f.suggested && f.handbackMs != null && f.nowMs - f.handbackMs <= DELIVERY_WAITS_MS) return false
   return f.nowMs - f.updatedMs > ANTIGA_AFTER_MS
 }
 

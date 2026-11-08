@@ -95,7 +95,7 @@ export function LiveCardView(p: LiveCardViewProps) {
       )}
       <span style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
         <span title={d.title} data-live-title style={{ flex: 1, minWidth: 0, fontWeight: 650, fontSize: 12, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{shortTitle(d.title)}</span>
-        {d.old && <span data-live-old title={pt ? 'Revisão de antes do fluxo, sem prova de publicação e sem ninguém nela. Decida no grupo Antigas, no topo desta coluna.' : 'A review from before the flow, with no proof of release and nobody on it. Decide it in the Old group, at the top of this column.'} style={{ flexShrink: 0, fontSize: 10, padding: '1px 6px', borderRadius: 999, border: '1px solid var(--border)', color: 'var(--text-tertiary)' }}>{pt ? 'antiga' : 'old'}</span>}
+        {d.old && <span data-live-old title={pt ? 'Revisão de antes do fluxo, sem prova de publicação e sem ninguém nela. Decida no botão Antigas, na barra desta aba.' : 'A review from before the flow, with no proof of release and nobody on it. Decide it from the Old button, in this tab\'s bar.'} style={{ flexShrink: 0, fontSize: 10, padding: '1px 6px', borderRadius: 999, border: '1px solid var(--border)', color: 'var(--text-tertiary)' }}>{pt ? 'antiga' : 'old'}</span>}
         <LivePriorityChip priority={d.priority} pt={pt} />
       </span>
       {ctx && <span style={{ fontSize: 11, color: MUTED, overflowWrap: 'anywhere', lineHeight: 1.3 }}>{ctx}</span>}
