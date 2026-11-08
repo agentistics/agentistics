@@ -42,7 +42,7 @@ import {
 import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import {
   ChevronLeft, Eye, FileText, FolderTree, MessagesSquare, Plus, TerminalSquare,
-  X as XIcon, ArrowRight, MessageCircle, PanelLeft, PanelLeftClose, SquareTerminal, ChevronDown,
+  X as XIcon, ArrowRight, MessageCircle, PanelLeft, PanelLeftClose, SquareTerminal, ChevronDown, Radio,
 } from 'lucide-react'
 import { setNayFabShownInSession, useNayFabShownInSession } from '../lib/nayFabVisibility'
 import { StudioHost, type StudioHostProps } from '../components/sessions/StudioHost'
@@ -96,6 +96,7 @@ import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
 import { NotificationBell } from '../components/NotificationBell'
 import { TopBarGroup } from '../components/nav/TopBarGroup'
+import { LivePreview } from '../components/tasks/LivePreview'
 import { ArtifactsAside } from '../components/sessions/ArtifactsAside'
 import { HardwarePanel } from '../components/sessions/HardwarePanel'
 import { UnsavedChangesGuard } from '../components/sessions/UnsavedChangesGuard'
@@ -2207,6 +2208,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const [drawerLimitsOpen, setDrawerLimitsOpen] = useState(false)
   const [drawerSessionOpen, setDrawerSessionOpen] = useState(false)
   const [drawerActionsOpen, setDrawerActionsOpen] = useState(false)
+  /** LIVE.ATALHO on a phone: the session bar is title-only, so the drawer's Live row opens the preview sheet here. */
+  const [phoneLiveOpen, setPhoneLiveOpen] = useState(false)
   const [drawerCheckinOpen, setDrawerCheckinOpen] = useState(false)
   const openSessionDrawer = useCallback(() => {
     window.history.pushState({ ...(window.history.state ?? {}), [SESSION_DRAWER_STATE]: true }, '')
@@ -3099,6 +3102,14 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
                   on: nayFabShown,
                   onSelect: () => setNayFabShownInSession(!nayFabShown),
                 },
+                /* LIVE.ATALHO — the Live of THIS session's task as a bottom sheet over the session (the
+                   desktop gets the same preview from the top-bar group); the URL stays on the session. */
+                {
+                  id: 'live',
+                  label: 'Live',
+                  icon: <Radio size={18} />,
+                  onSelect: () => { closeSessionDrawer(); setPhoneLiveOpen(true) },
+                },
                 {
                   id: 'filters',
                   label: pt ? 'Filtros' : 'Filters',
@@ -3117,6 +3128,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           </>
         ), { open: drawerActionsOpen, toggle: () => setDrawerActionsOpen(v => !v) })}
       </Drawer>
+      <LivePreview lang={tPt} open={phoneLiveOpen} onClose={() => setPhoneLiveOpen(false)} focusSessionId={selected.id} />
       </>
     )
   } else if (isMobile) {
