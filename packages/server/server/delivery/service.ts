@@ -1850,8 +1850,8 @@ export function createDeliveryService(d: DeliveryDeps) {
         return fail(500, 'store_erro', `the release could not be written (${e instanceof Error ? e.message.split('\n')[0] : String(e)}); the batch write is all-or-nothing and the verb is idempotent — run it again`) as Extract<DeliveryReply, { ok: false }>
       }
     },
-    reconcile: async (o: { apply?: unknown }, actor: string): Promise<ReconcileReply> => {
-      try { return await reconcile(o, actor) } catch (e) {
+    reconcile: async (o: { apply?: unknown }, actor: string, opts?: { budget?: number }): Promise<ReconcileReply> => {
+      try { return await reconcile(o, actor, opts) } catch (e) {
         if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
         throw e
       }
