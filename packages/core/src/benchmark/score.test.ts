@@ -181,8 +181,31 @@ describe('acceptance gate', () => {
     expect(v.verdict).toBe('pays')
   })
 
-  test('the gate blocks only the candidate: the swapped call says it does not pay', () => {
-    const v = verdict({ samples: cheapAndFast(), candidate: B, reference: A, size: 'M', seed: 3, resamples: 1500 })
-    expect(v.verdict).toBe('does_not_pay')
+  test('symmetric: the swapped call is the same tie, with the gate fired on both sides', () => {
+    const fwd = verdict({ samples: cheapAndFast(), candidate: A, reference: B, size: 'M', seed: 3, resamples: 1500 })
+    const rev = verdict({ samples: cheapAndFast(), candidate: B, reference: A, size: 'M', seed: 3, resamples: 1500 })
+    expect(rev.score!.final.hi!).toBeLessThan(48)
+    expect(rev.score!.gateBlocked).toBe(true)
+    expect(rev.score!.gateBlocked).toBe(fwd.score!.gateBlocked)
+    expect(rev.verdict).toBe('tie')
+    expect(rev.reason).toContain('sem "Compensou"')
+    for (let k = 0; k < fwd.score!.sensitivity.rows.length; k++) {
+      expect(rev.score!.sensitivity.rows[k]!.verdict).toBe(fwd.score!.sensitivity.rows[k]!.verdict)
+    }
+  })
+})
+
+describe('interval per type', () => {
+  test('lo ≤ points ≤ hi per type, and swapping the arms mirrors them (max − hi, max − lo)', () => {
+    const samples = base()
+    const f = score(samples)
+    const r = computeScore({ samples, candidate: B, reference: A, seed: 1, resamples: 1000, delta: 0.1 })
+    for (const t of SCORE_TYPES) {
+      const x = f.types[t], y = r.types[t]
+      expect(x.lo).not.toBeNull(); expect(x.hi).not.toBeNull()
+      expect(x.lo!).toBeLessThanOrEqual(x.hi!)
+      expect(x.lo! + y.hi!).toBeCloseTo(x.max, 8)
+      expect(x.hi! + y.lo!).toBeCloseTo(x.max, 8)
+    }
   })
 })

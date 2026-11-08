@@ -123,9 +123,13 @@ describe('verdict — symmetry and invariance', () => {
       })
       const fwd = run(s, A, B), rev = run(s, B, A)
       if (fwd.score?.final.value != null && rev.score?.final.value != null) expect(fwd.score.final.value + rev.score.final.value).toBeCloseTo(100, 8)
-      // The acceptance gate blocks only the candidate's `pays`, so it is the one case that is not a mirror.
-      if (fwd.score?.gateBlocked || rev.score?.gateBlocked) { gated++; continue }
+      // The acceptance gate is symmetric: it mirrors like everything else.
+      expect(rev.score?.gateBlocked).toBe(fwd.score?.gateBlocked)
+      if (fwd.score?.gateBlocked) gated++
       expect(rev.verdict).toBe(mirrorOf(fwd.verdict))
+      if (fwd.score?.sensitivity.rows.length) for (let k = 0; k < fwd.score.sensitivity.rows.length; k++) {
+        expect(rev.score!.sensitivity.rows[k]!.verdict).toBe(mirrorOf(fwd.score.sensitivity.rows[k]!.verdict as Verdict))
+      }
       if (fwd.ratio.point !== null && Number.isFinite(fwd.ratio.point) && fwd.ratio.point > 0) expect(rev.ratio.point!).toBeCloseTo(1 / fwd.ratio.point, 8)
     }
 }, 120_000)

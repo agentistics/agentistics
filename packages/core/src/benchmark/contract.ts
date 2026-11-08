@@ -99,6 +99,9 @@ export interface ScoreMetricResult {
 export interface ScoreTypeResult {
   max: number
   points: number | null
+  /** Interval of the points from the same bootstrap resamples as the final. Data only: the status stays the 1.25 rule on the point. */
+  lo: number | null
+  hi: number | null
   /** Integer points for display; they sum to the rounded final. Null when the type is unmeasured. */
   displayPoints: number | null
   /** Geometric mean of the type's measured metric ratios. */
@@ -127,7 +130,7 @@ export interface ScoreResult {
   rework: Record<string, number | null>
   /** Supporting line, not a fourth verdict. */
   sensitivity: { result: 'firm' | 'depends_on_weights' | null; rows: ScoreSensitivityRow[] }
-  /** The acceptance gate blocked `pays` (candidate accepted fewer runs than the reference beyond the margin). */
+  /** The acceptance gate blocked the winner the score would declare (the side that would win accepted fewer runs than the other beyond the margin), in either direction. */
   gateBlocked: boolean
 }
 

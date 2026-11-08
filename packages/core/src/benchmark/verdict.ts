@@ -6,8 +6,9 @@
  * whole interval is above 52, `does_not_pay` if below 48, else `tie`. Too little data wins over all
  * of it (`insufficient`). The cost ratio (cost per accepted delivery) stays as evidence in `ratio`.
  *
- * Swapping the arms mirrors the result exactly (finals add to 100) — except when the acceptance gate
- * fires: it blocks only the candidate's `pays`, so there the swapped call is not a mirror.
+ * Swapping the arms mirrors the result exactly (finals add to 100), gate included: the gate is
+ * symmetric — it blocks whichever side the score would declare the winner when that side accepted
+ * fewer runs than the other beyond the margin.
  * The code never looks at an arm id or label except to tell the two apart.
  */
 import type { SizeBucket, VerdictResult } from './contract'
@@ -132,7 +133,10 @@ export function verdict(input: VerdictInput): VerdictResult {
   const v = scoreVerdict(score)
   if (v === 'pays') return mk('pays', 'Compensou.')
   if (v === 'does_not_pay') return mk('does_not_pay', 'Não compensou.')
-  const blocked = score.gateBlocked ? ` O candidato aceitou menos entregas (${pct(accC / runsOf(candidate).length)} contra ${pct(accR / runsOf(reference).length)}); sem "Compensou" nesse caso.` : ''
+  const rc = accC / runsOf(candidate).length, rr = accR / runsOf(reference).length
+  const blocked = score.gateBlocked
+    ? ` O lado que levaria a melhor aceitou menos entregas (${rc < rr ? candidate : reference}: ${pct(Math.min(rc, rr))} contra ${pct(Math.max(rc, rr))}); sem "Compensou" nem "Não compensou" nesse caso.`
+    : ''
   return mk('tie', `Empate: não dá para cravar.${blocked}`)
 }
 
@@ -141,5 +145,5 @@ function scoreVerdict(score: NonNullable<VerdictResult['score']>): VerdictResult
   const { lo, hi } = score.final
   if (lo === null || hi === null) return 'insufficient'
   const v = verdictOfScore(lo, hi)
-  return v === 'pays' && score.gateBlocked ? 'tie' : v
+  return score.gateBlocked ? 'tie' : v
 }

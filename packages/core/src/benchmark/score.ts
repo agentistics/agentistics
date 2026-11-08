@@ -187,9 +187,9 @@ export const statusOf = (r: number | null): ScoreTypeStatus => (r === null ? 'mi
 
 export interface TypeRatios { metrics: ScoreMetricResult[]; ratio: Record<ScoreType, number | null> }
 
-export function typeRatios(clusters: readonly Cluster[]): TypeRatios {
+export function typeRatios(clusters: readonly Cluster[], exclude: readonly string[] = []): TypeRatios {
   const cand = sideOf(clusters, c => c.cand), ref = sideOf(clusters, c => c.ref)
-  const metrics = METRICS.map(d => metricResult(d, cand, ref))
+  const metrics = METRICS.filter(d => !exclude.includes(d.id)).map(d => metricResult(d, cand, ref))
   const ratio = {} as Record<ScoreType, number | null>
   for (const t of SCORE_TYPES) {
     const g = geoMean(metrics.filter(m => m.type === t && m.ratio !== null).map(m => m.ratio!))
@@ -231,12 +231,14 @@ export interface ScoreInput {
   resamples: number
   /** Margin for the acceptance gate (default 0.1). */
   delta: number
+  /** Metric ids to leave out. Analysis only (which metric makes the noise); never set by a verdict. */
+  excludeMetrics?: readonly string[]
 }
 
 /** Bootstrap the final score (and every sensitivity set) over tasks; one shared resample sequence. */
 export function computeScore(input: ScoreInput): ScoreResult {
   const clusters = clusterRuns(input.samples, input.candidate, input.reference)
-  const { metrics, ratio } = typeRatios(clusters)
+  const { metrics, ratio } = typeRatios(clusters, input.excludeMetrics)
   const finalPoint = finalOf(ratio, WEIGHTS_V1)
 
   const types = {} as Record<ScoreType, ScoreTypeResult>
@@ -244,7 +246,7 @@ export function computeScore(input: ScoreInput): ScoreResult {
     const ms = metrics.filter(m => m.type === t)
     types[t] = {
       max: WEIGHTS_V1[t], ratio: ratio[t], status: statusOf(ratio[t]),
-      points: ratio[t] === null ? null : WEIGHTS_V1[t] * share(ratio[t]!), displayPoints: null,
+      points: ratio[t] === null ? null : WEIGHTS_V1[t] * share(ratio[t]!), lo: null, hi: null, displayPoints: null,
       metrics: ms, missing: ms.filter(m => m.ratio === null).map(m => m.id),
     }
   }
@@ -275,13 +277,16 @@ export function computeScore(input: ScoreInput): ScoreResult {
   // bootstrap: same index sequence as stats.ts (T draws per resample from the same seed)
   const sets = [{ name: 'method v1', weights: WEIGHTS_V1 }, ...SENSITIVITY_WEIGHTS]
   const draws: number[][] = sets.map(() => [])
+  const typeDraws = {} as Record<ScoreType, number[]>
+  for (const t of SCORE_TYPES) typeDraws[t] = []
   const rng = mulberry32(input.seed)
   const T = clusters.length
   const pick = new Array<Cluster>(T)
   for (let r = 0; r < input.resamples; r++) {
     for (let k = 0; k < T; k++) pick[k] = clusters[Math.floor(rng() * T)]!
-    const rr = typeRatios(pick).ratio
+    const rr = typeRatios(pick, input.excludeMetrics).ratio
     sets.forEach((s, i) => { const f = finalOf(rr, s.weights); if (f !== null) draws[i]!.push(f) })
+    for (const t of SCORE_TYPES) if (rr[t] !== null) typeDraws[t].push(WEIGHTS_V1[t] * share(rr[t]!))
   }
   const interval = (v: number[]) => {
     if (!v.length) return null
@@ -290,12 +295,20 @@ export function computeScore(input: ScoreInput): ScoreResult {
     return { lo: v[Math.floor(0.025 * k)]!, hi: v[Math.ceil(0.975 * k)]! }
   }
 
-  // acceptance gate: the candidate may not be called `pays` with fewer accepted runs than the reference beyond the margin
+  for (const t of SCORE_TYPES) {
+    const iv = interval(typeDraws[t])
+    if (iv) { types[t].lo = iv.lo; types[t].hi = iv.hi }
+  }
+
+  // acceptance gate, symmetric: the side the score would declare the winner may not have fewer accepted
+  // runs than the other beyond the margin. Candidate winning with fewer -> tie; reference winning with fewer -> tie.
   const cs = sideOf(clusters, c => c.cand), rs = sideOf(clusters, c => c.ref)
   const rateC = cs.runs.length ? acceptedOf(cs) / cs.runs.length : 0
   const rateR = rs.runs.length ? acceptedOf(rs) / rs.runs.length : 0
-  const gate = rateC < rateR / (1 + input.delta)
-  const decide = (lo: number, hi: number): Verdict => { const v = verdictOfScore(lo, hi); return v === 'pays' && gate ? 'tie' : v }
+  const candFewer = rateC < rateR / (1 + input.delta)
+  const refFewer = rateR < rateC / (1 + input.delta)
+  const blocks = (v: Verdict) => (v === 'pays' && candFewer) || (v === 'does_not_pay' && refFewer)
+  const decide = (lo: number, hi: number): Verdict => { const v = verdictOfScore(lo, hi); return blocks(v) ? 'tie' : v }
 
   const rows: ScoreSensitivityRow[] = []
   for (let i = 0; i < sets.length; i++) {
@@ -306,7 +319,7 @@ export function computeScore(input: ScoreInput): ScoreResult {
   const main = rows[0]!
   const sens = rows.slice(1)
   const allKnown = rows.every(r => r.verdict !== null)
-  const gateBlocked = main.lo !== null && main.hi !== null && verdictOfScore(main.lo, main.hi) === 'pays' && gate
+  const gateBlocked = main.lo !== null && main.hi !== null && blocks(verdictOfScore(main.lo, main.hi))
   return {
     ...empty, gateBlocked,
     final: { value: finalPoint, lo: main.lo, hi: main.hi, display, nullReason: main.lo === null ? 'Não foi possível calcular a margem.' : null },
