@@ -23,9 +23,15 @@ describe('queuedBubbleActions (FLUXO.AVISOS 10)', () => {
     expect(queuedBubbleActions({ ...base, pt: true }).sendNow?.label).toBe('Enviar agora')
     expect(queuedBubbleActions({ ...base, pt: true }).interrupt?.label).toBe('Interromper')
   })
-  test('the hint says the whole queue goes when there is more than one message', () => {
-    expect(queuedBubbleActions({ ...base, personQueued: 3 }).sendNow?.hint).toContain('all 3 queued messages')
-    expect(queuedBubbleActions({ ...base, personQueued: 3, pt: true }).sendNow?.hint).toContain('3 mensagens da fila')
+  test('with two or more waiting messages the balloons carry no send-now link: the pill under the conversation is the one control', () => {
+    for (const personQueued of [2, 3, 5]) {
+      expect(queuedBubbleActions({ ...base, personQueued }).sendNow).toBeNull()
+    }
+    expect(queuedBubbleActions({ ...base, personQueued: 3 }).interrupt).not.toBeNull()
+  })
+  test('with exactly one waiting message the link inside the balloon says it sends this message', () => {
+    expect(queuedBubbleActions(base).sendNow?.hint).toContain('this message')
+    expect(queuedBubbleActions({ ...base, pt: true }).sendNow?.hint).toContain('esta mensagem')
   })
   test('a harness with no measured send-now keystroke gets Interrupt only (when its stop verb works), never Send now', () => {
     for (const harness of ['codex', 'gemini', 'copilot', 'kimi', 'antigravity', 'opencode']) {

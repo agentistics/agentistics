@@ -30,7 +30,10 @@ export function queuedBubbleActions(i: {
 }): QueuedBubbleActions {
   const person = parseSystemEvent(i.text) === null
   const pt = i.pt
-  const sendNow = person && !i.sendNowRunning
+  // ONE control per action: a single waiting message is served by this link, two or more by the pill
+  // under the conversation (`sendNowPillOffered`) — every send-now sends the whole queue, so a link on
+  // each balloon beside the pill is three buttons for one act.
+  const sendNow = person && !i.sendNowRunning && i.personQueued <= 1
     && sendNowShown({ harness: i.harness, working: i.working, queuedCount: i.personQueued, dialogOpen: i.dialogOpen })
   const interrupt = person && i.working && i.stopEnabled && !i.dialogOpen
   return {
