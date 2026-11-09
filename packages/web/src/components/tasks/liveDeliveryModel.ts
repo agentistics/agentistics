@@ -20,7 +20,7 @@ export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running',
 export type LiveEta =
   | {
       kind: 'estimate'; atMs: number; plusMinusMs: number; confidence: 'low' | 'medium' | 'high'
-      basis: { n: number; scope: 'harness-model' | 'harness'; harness: string; model: string | null; medianMs: number }
+      basis: { n: number; scope: 'type-harness-model' | 'type-harness' | 'harness-model' | 'harness' | 'general' | 'bootstrap' | 'stages'; harness: string; model: string | null; medianMs: number }
     }
   | { kind: 'none'; reason: 'no-history' | 'not-started' | 'beyond-range' }
 
@@ -28,7 +28,7 @@ export type LiveStageEta =
   | { kind: 'estimate'; atMs: number; medianMs: number; n: number; nextStage: LiveStage | null }
   | { kind: 'none'; reason: 'no-history' | 'beyond-range' | 'not-started' | 'final'; typicalMs?: number; n?: number }
 export type LivePublishEta =
-  | { kind: 'estimate'; atMs: number; source: 'stages' | 'total'; n: number; parts: { stage: LiveStage; medianMs: number }[] }
+  | { kind: 'estimate'; atMs: number; source: 'stages' | 'total' | 'general' | 'bootstrap' | 'revised-overrun'; n: number; parts: { stage: LiveStage; medianMs: number }[] }
   | { kind: 'none'; reason: 'no-history' | 'beyond-range' | 'not-started' | 'final' }
 export type BlockReason = 'dependencia' | 'pedido_de_bloqueio' | 'limite' | 'maquina' | 'externo' | 'fora_das_autorizacoes' | 'decisao_do_dono'
 export interface LiveBlock { reason: BlockReason; text: string | null; unlocker: 'leader' | 'owner' | 'self'; originStage: LiveStage | null }

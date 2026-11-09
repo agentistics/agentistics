@@ -345,12 +345,14 @@ describe('estimates never contradict each other (MED 5)', () => {
       stage: 'leader', origin: null, sinceMs: NOW - 70 * MIN, nowMs: NOW, typicals: { leader: typ(60 * MIN) },
       totalEta: { kind: 'estimate', atMs: NOW, plusMinusMs: 1, confidence: 'low', basis: { n: 4, scope: 'harness', harness: 'claude', model: null, medianMs: 1 } },
     })
-    expect(r.stageEta).toMatchObject({ kind: 'none', reason: 'beyond-range' })
-    expect(r.publishEta).toMatchObject({ kind: 'none', reason: 'beyond-range' })
+    expect(r.stageEta).toMatchObject({ kind: 'estimate', overrun: true })
+    expect(r.publishEta).toMatchObject({ kind: 'estimate' })
+    if (r.publishEta.kind === 'estimate') expect(r.publishEta.atMs).toBeGreaterThan(NOW)
   })
-  test('the whole-piece estimate is none (not "now") once the piece is past the median', () => {
-    const samples = [1, 2, 3].map(i => ({ harness: 'claude', model: 'opus', durationMs: i * H }))
-    expect(estimateEta({ nowMs: NOW, startedAtMs: NOW - 3 * H, harness: 'claude', model: 'opus', samples })).toMatchObject({ kind: 'none', reason: 'beyond-range' })
+  test('the whole-piece estimate retains a future approximation past the median', () => {
+    const samples = [1, 2, 3].map(i => ({ harness: 'claude', model: 'opus', durationMs: i * H,
+      endpoint: 'publication' as const, startedAtMs: NOW - (24 + i) * H, completedAtMs: NOW - 24 * H }))
+    expect(estimateEta({ nowMs: NOW, startedAtMs: NOW - 3 * H, harness: 'claude', model: 'opus', samples })).toMatchObject({ kind: 'estimate', overrun: true })
     const ok = estimateEta({ nowMs: NOW, startedAtMs: NOW - 30 * MIN, harness: 'claude', model: 'opus', samples })
     expect(ok.kind === 'estimate' && ok.atMs > NOW).toBe(true)
   })

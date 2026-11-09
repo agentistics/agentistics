@@ -7,7 +7,8 @@
  */
 
 import { join } from 'node:path'
-import { buildLive, legacyReviewShaPieces } from './task-live'
+import { buildLive, legacyReviewShaPieces, prepareForecastHistory, FORECAST_BUCKET_MS, FORECAST_METHOD_VERSION, type ForecastHistory } from './task-live'
+import { readForecastAnchors, saveForecastAnchors } from './task-forecast-cache'
 import { dirsForShas } from './release-repos'
 import { publishedAmong } from './release-tags'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
@@ -45,7 +46,7 @@ import { chatAttachmentRef, compareBy, repoShortName, sanitizeCommentAttachments
 import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './task-files'
 import type { TaskDetail, TaskListRow } from './task-report'
 import { onBookWrite } from './task-store'
-import { MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
+import { JOURNAL_STAMPS_PATH, MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
 
 export interface TaskListReply {
   tasks: TaskListRow[]
@@ -75,7 +76,15 @@ export interface TaskDetailReply {
 type LiveBuildCache = { key: string; builtAtMs: number; reply: Awaited<ReturnType<typeof buildLive>> }
 let liveBuildCache: LiveBuildCache | null = null
 let liveBuildInFlight: { key: string; promise: Promise<LiveBuildCache> } | null = null
+let forecastHistoryCache: { key: string; history: ForecastHistory } | null = null
 const LIVE_REPLY_MAX_AGE_MS = 5_000
+
+/** Background ownership of persistence: GET only fills the in-memory projection. */
+export async function persistLiveForecastAnchors(): Promise<void> {
+  if (!liveBuildCache) return
+  const r = liveBuildCache.reply
+  await saveForecastAnchors([...r.deliveries, ...(r.oldReviews ?? [])])
+}
 
 /** The atomic rename gives the book a stable mtime/size version without reading its JSON twice. */
 async function fileVersion(file: string): Promise<string> {
@@ -92,8 +101,10 @@ async function liveSourceVersion(): Promise<string> {
   const { defaultDeliveriesPath } = await import('../delivery/store')
   // The reconcile's proof cache decides which pieces are old / proven / unchecked, so a run that rewrites it must not be served a stale split.
   const proofFile = join(process.env.AGENTISTICS_DIR ?? join(process.env.HOME ?? '', '.agentistics'), 'delivery-proof-cache.json')
-  const [tasks, sessions, deliveries, proofs] = await Promise.all([fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE), fileVersion(defaultDeliveriesPath()), fileVersion(proofFile)])
-  return `${tasks}|${sessions}|${deliveries}|${proofs}`
+  const [tasks, sessions, deliveries, proofs, activity] = await Promise.all([
+    fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE), fileVersion(defaultDeliveriesPath()), fileVersion(proofFile), fileVersion(JOURNAL_STAMPS_PATH),
+  ])
+  return `${tasks}|${sessions}|${deliveries}|${proofs}|${activity}|${FORECAST_METHOD_VERSION}`
 }
 
 // A write is the fast invalidation path; the stat key also catches writes made by another process.
@@ -161,7 +172,15 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
         return (s: { id: string; conversationId?: string }) => roleOfRow(doc.roles, s)
       } catch { return undefined }
     })()
-    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas, ...(roleOf ? { roleOf } : {}), ...proof })
+    const forecastKey = `${key}|${Math.floor(nowMs / FORECAST_BUCKET_MS)}`
+    if (forecastHistoryCache?.key !== forecastKey) {
+      forecastHistoryCache = { key: forecastKey, history: prepareForecastHistory({
+        details, events: w.book.events, nowMs, deliveries, statusLabel: id => labels.get(id),
+      }) }
+    }
+    const overrunAnchors = await readForecastAnchors()
+    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas,
+      forecastHistory: forecastHistoryCache.history, overrunAnchors, ...(roleOf ? { roleOf } : {}), ...proof })
     const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result
     return result

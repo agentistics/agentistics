@@ -293,6 +293,16 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
     log: line => console.log(line),
     ...overrides,
   })
+  // Cache persistence follows the existing background cadence. A Live GET never writes
+  // forecasts to the book, and persisting the anchor requires no extra per-piece probes.
+  if (Object.keys(overrides).length === 0) {
+    const tick = svc.tick
+    svc.tick = async (...args: Parameters<typeof tick>) => {
+      const result = await tick(...args)
+      await (await import('../sessions/task-web')).persistLiveForecastAnchors().catch(() => {})
+      return result
+    }
+  }
   if (Object.keys(overrides).length === 0) cached = svc
   return svc
 }
