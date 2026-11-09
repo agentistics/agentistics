@@ -45,13 +45,13 @@ describe('R2 — a strong verb anywhere overrides a trailing "?": plain question
 })
 
 describe('R3 — real work that is still `question`: the engine records it answered, with no subtask and no reminder', () => {
-  test('R: urgent or defect reports with no listed verb', () => {
+  test('R: an urgent demand is a card; a defect report with no request verb is not (FLUXO.CARD-SEM-PEDIDO: when unsure, no card)', () => {
+    each(['hotfix pelo amor de Deus'], 'work')
     each([
-      'hotfix pelo amor de Deus',
       'cara erro critico, eu n to conseguindo reabrir uma sessao do opencode',
       'esses avisos do fluxo estão vindo abertos invés de fechados',
       'ainda n ta aparecendo as porcentagens',
-    ], 'work')
+    ], 'question')
   })
   test('R: requests whose verb is not in the list', () => {
     each(['precisa alinhar isso daqui ao canto esquerdo tambem.', 'tudo deve ter mcp para os agentes poderem usar', 'quero url do tailscale rs'], 'work')
