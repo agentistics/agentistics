@@ -252,10 +252,11 @@ describe('the leaders band', () => {
     expect(workerWord('waiting', 'blocked')).toBe('blocked')
     expect(workerWord('waiting-approval', 'blocked')).toBe('needs-you')
   })
-  test('a leader\'s own filing is not a column card', () => {
+  test('a leader\'s own filing is one card while the task has no open piece (its clock is the leader session\'s)', () => {
     const d = { key: 't1', taskId: 't1', taskTitle: 'Engine', subtaskId: null, title: 'Engine', status: 'in_progress', stage: 'running', stageSinceMs: 0, startedAtMs: 0, sessionIds: ['L'], harnesses: [], models: [], efforts: [], eta: { kind: 'none', reason: 'no-history' }, workMs: null, trail: [], stageEta: { kind: 'none', reason: 'no-history' }, publishEta: { kind: 'none', reason: 'no-history' }, block: null, lastAction: null, blockedReason: null, priority: 'low', deliveredAtMs: null }
     const v = describeLive({ reply: reply([d]), rows: [row('L', 'working')], leaderIds: new Set(['L']), nowMs: NOW })
-    expect(v.deliveries).toEqual([])
+    expect(v.deliveries.map(x => x.key)).toEqual(['t1'])
+    expect(v.deliveries[0]!.leaderPiece).toBe(true)
     expect(v.leaders[0]!.taskId).toBe('t1')
   })
 })
