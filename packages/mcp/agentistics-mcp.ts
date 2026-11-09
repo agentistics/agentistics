@@ -423,7 +423,7 @@ const TOOLS: Tool[] = [
         done: {
           type: "boolean",
           description:
-            "Send ALONE with `id` (no other field) for the tick — `{id, done}` is a fast path straight to the done/todo transition. Sent TOGETHER with `parentGroupId` (or any other named field below) in the same call, `done` is silently dropped rather than applied — this tool forwards only the named fields when one is present. Send them as two separate calls instead: join/leave the group first, then set `done` in its own call.",
+            "Send with `id` to tick (true -> status `done`) or untick (false -> `todo`). Alone it is the fast path; together with named fields (title, dates, status, parentGroupId, …) it is applied in the SAME edit — never dropped. A `status` that contradicts it (done=true with status `in_review`) is refused. With `parentGroupId` the tool joins the group first and then closes. `done` is still refused without a session filed under the subtask (done_needs_session).",
         },
         status: {
           type: "string",
@@ -446,7 +446,7 @@ const TOOLS: Tool[] = [
         parentGroupId: {
           type: "string",
           description:
-            "Join this subtask (named by `id`) to the group whose id this names — a group of the SAME parent task. Pass an empty string to leave the current group. Refused (422, `invalid_group`) if the id is not an actual group of this task, or if this subtask is itself a group. Refused (422, `subtask_has_sessions`) if this subtask already has a session filed on it — detach it first. **Do not send `done` in this same call** — see `done`'s own description; make it a second call.",
+            "Join this subtask (named by `id`) to the group whose id this names — a group of the SAME parent task. Pass an empty string to leave the current group. Refused (422, `invalid_group`) if the id is not an actual group of this task, or if this subtask is itself a group. Refused (422, `subtask_has_sessions`) if this subtask already has a session filed on it — detach it first. **With `done` in the same call the tool joins first and then closes, in order.**",
         },
       },
       required: ["ref"],
@@ -1252,16 +1252,34 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         // was silently dropped — a subtask genuinely can be blocked by a sibling (`Subtask.blockedBy`,
         // enforced server-side in `patchSubtask`/`task-attach.ts`), this tool just never offered it.
         const blockedBy = Array.isArray(a?.blockedBy) ? { blockedBy: a.blockedBy } : {};
-        // NOTE: when ANY named column (incl. `parentGroupId`) is present, this branch never
-        // forwards `done` at all — a caller combining `parentGroupId` with `done: true` in one call
-        // gets no error and `done` is just dropped. The same is true of every other named column
-        // (`status`, `dueDate`, …); fixing that general mechanism is a bigger, separate change and
-        // deliberately out of scope here. The `parentGroupId`/`done` case is instead documented as a
-        // limitation on both fields' own tool-schema descriptions above: callers are told to send
-        // them as two separate calls.
+        // `done` beside a named column used to be DROPPED with an ok answer, so a leader that sent
+        // `{id, title, done: true}` believed it had closed a piece that stayed in review. The route
+        // derives `done` from `status`, so `done` is translated into `status` here: true -> "done",
+        // false -> "todo" (the same transition the bare tick makes). A `status` that contradicts it is
+        // REFUSED, never half-applied. The route validates group membership against the post-patch state, so
+        // `parentGroupId` + done is two writes in order: join first, then close.
+        const wantsDone = typeof a?.done === "boolean" ? (a.done as boolean) : undefined;
+        const doneStatus = wantsDone === undefined ? undefined : wantsDone ? "done" : "todo";
+        if (a?.id !== undefined && doneStatus !== undefined && named.length > 0 && typeof a?.status === "string" && (wantsDone ? a.status !== "done" : a.status === "done")) {
+          throw new Error(`agentistics_task_subtask: done=${wantsDone} conflicts with status="${a.status}" — send one of them (status "${doneStatus}" is what done=${wantsDone} means).`);
+        }
+        const edit = (withStatus: boolean, omit: string[] = []) => ({
+          id: a.id,
+          ...Object.fromEntries(named.filter(c => !omit.includes(c) && (c !== "status" || withStatus)).map(c => [c, a[c]])),
+          ...(withStatus && doneStatus !== undefined && typeof a?.status !== "string" ? { status: doneStatus } : {}),
+          ...blockedBy,
+        });
+        const joining = a?.id !== undefined && doneStatus !== undefined && typeof a?.parentGroupId === "string" && a.parentGroupId !== "";
+        if (joining) {
+          // Join first (the route checks membership against the post-patch state), then close.
+          const path = `/api/tasks/${encodeURIComponent(String(a?.ref))}/subtasks`;
+          await apiSend("POST", path, edit(false));
+          const body = await apiSend("POST", path, { id: a.id, status: typeof a?.status === "string" ? a.status : doneStatus });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
         const payload = a?.id !== undefined
           ? (named.length > 0 || Array.isArray(a?.blockedBy)
-            ? { id: a.id, ...Object.fromEntries(named.map(c => [c, a[c]])), ...blockedBy }
+            ? edit(true)
             : { id: a.id, done: a?.done === true })
           // `isGroup: true` creates a GROUP (§F.1) instead of an ordinary subtask — creation only,
           // `addSubtask` offers no way to change it afterwards.
