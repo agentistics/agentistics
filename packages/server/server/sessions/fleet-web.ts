@@ -775,6 +775,13 @@ async function runFleetActionOnce(
     }
     case 'prompt': {
       if (!host.promptSession) return { ok: false, message: s.sessionsNoHost }
+      let taskNote: string | undefined
+      if (req.asTask !== undefined) {
+        const { registerComposerTask } = await import('../flows/composer-task')
+        const registered = await registerComposerTask(req, lang)
+        if (!registered.ok) return registered
+        taskNote = registered.note
+      }
       // EXT.OPEN: an EXTERNAL row has no pane to type into. The first write CONTINUES its conversation
       // here (`external-continue.ts`): asked once, then the existing takeover ends the process and the
       // same id is resumed with this message as its first prompt.
@@ -782,6 +789,7 @@ async function runFleetActionOnce(
       // A second hand-off request while the first has a live successor would start another successor. While it is only
       // `preparing` the request can still be repeated — that is how an ignoring leader is asked again.
       if (req.handoff === true && await handoffAlreadyRunning(req.id)) return { ok: false, message: s.sessionsHandoffRunning }
+      const deliveredText = taskNote ? `${text}\n\n[agentistics · ${taskNote}]` : text
       // Taken BEFORE the message is typed, so the record can never be stamped later than the turn
       // the harness writes for it — the resolver refuses a record from after the turn it is asked
       // about, and a submit that waits on the pane takes hundreds of milliseconds.
@@ -793,12 +801,13 @@ async function runFleetActionOnce(
         // The common CONFIRMED send path: web, TUI and late acknowledgements all record the request once.
         try {
           const m = await import('../flows/owner-message')
-          await m.emitOwnerMessage(req, m.defaultOwnerMessageDeps(), { at: new Date(sentAtMs).toISOString() })
+          if (req.asTask === undefined) await m.emitOwnerMessage(req, m.defaultOwnerMessageDeps(), { at: new Date(sentAtMs).toISOString() })
         } catch { console.warn('[owner-request] confirmed message could not be recorded; check the official request flows') }
         if (req.handoff === true) await patchSession(req.id, { handoffRequestedAt: new Date(sentAtMs).toISOString() })
         // FLUXO.AVISOS: the newest message typed INTO this session (host op `ultima-mensagem-sessao`).
         try { (await import('./last-message')).noteMessageTo(req.id, sentAtMs) } catch { /* a view, never the record */ }
         await recordComposerMessage(req.id, text)
+        if (taskNote) await recordComposerMessage(req.id, deliveredText)
         void (async () => {
           try {
             const row = (await host.sessions?.())?.sessions.find(r => r.id === req.id || r.conversationId === req.id)
@@ -807,6 +816,7 @@ async function runFleetActionOnce(
             // hold the echo (and any attachment record) under the ROW id; `readSessionChat` migrates the echo and reads the record under both keys once the link lands.
             if (conv) {
               await recordComposerMessage(conv, text)
+              if (taskNote) await recordComposerMessage(conv, deliveredText)
               recordPrompt(conv, text)
             } else if (row) recordPrompt(row.id, text)
             const carried = attachmentMessageOf(conv || row?.id || '', sentAtMs, text)
@@ -819,7 +829,7 @@ async function runFleetActionOnce(
       // THE RESPONSE IS NOT HELD FOR A SLOW PANE. `promptSession` is a chain of tmux spawns under
       // the pane's write lock; past `PROMPT_ACK_MS` the keys are in flight, so the browser is told
       // the message was accepted and a LATE failure is raised as a notification instead.
-      const raced = await withDeadline(host.promptSession(req.id, text), PROMPT_ACK_MS, late => {
+      const raced = await withDeadline(host.promptSession(req.id, deliveredText), PROMPT_ACK_MS, late => {
         if ('value' in late && late.value.ok) { void record(); return }
         const message = 'value' in late ? late.value.message : (lang === 'pt' ? 'A mensagem não foi entregue.' : 'The message was not delivered.')
         void import('../sse').then(m => m.broadcastNotification({ type: 'error', title: 'Message not delivered', message })).catch(() => {})
@@ -838,11 +848,11 @@ async function runFleetActionOnce(
             if (holder?.kind === 'managed') redirectedId = holder.id
           }
         } catch { /* delivery still owns the outcome and reports a late failure above */ }
-        return { ok: true, message: (lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.'), ...(redirectedId ? { id: redirectedId } : {}) }
+        return { ok: true, message: taskNote ?? (lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.'), ...(redirectedId ? { id: redirectedId } : {}) }
       }
       const out = raced.value
       if (out.ok) await record()
-      return out
+      return out.ok && taskNote ? { ...out, message: taskNote } : out
     }
     case 'cycleMode':
       if (!host.cycleSessionMode) return { ok: false, message: s.sessionsNoHost }

@@ -5,6 +5,18 @@ import {
 } from './deliveryCalendar'
 
 const NOW = Date.parse('2026-11-07T18:40:00.000Z') // 15:40 BRT, Sat 07
+
+test('composer subtask priority and due date take precedence over its parent on Live and record-only calendar entries', () => {
+  const reply = buildCalendar({ nowMs: NOW, resets: [],
+    tasks: [{ id: 't1', title: 'Parent', status: 'in_progress', priority: 'low', dueDate: '2026-11-20' }],
+    subtasks: [{ id: 's1', taskId: 't1', title: 'Explicit', priority: 'urgent', dueDate: '2026-11-12' },
+      { id: 's2', taskId: 't1', title: 'Queued', priority: 'high', dueDate: '2026-11-13' }],
+    lives: [live({ key: 't1/s1', taskId: 't1', stage: 'queue' })],
+    records: [{ subtaskId: 's2', taskId: 't1', phase: 'fila' }],
+  })
+  expect(reply.pieces.find(p => p.subtaskId === 's1')).toMatchObject({ priority: 'urgent', dueDate: '2026-11-12' })
+  expect(reply.pieces.find(p => p.subtaskId === 's2')).toMatchObject({ priority: 'high', dueDate: '2026-11-13' })
+})
 const H = 3600_000
 
 const live = (o: Partial<CalLiveInput> & { key: string; taskId: string; stage: CalLiveInput['stage'] }): CalLiveInput => ({

@@ -1529,3 +1529,10 @@ tr:focus-within .ag-row-actions,
 @keyframes ag-live-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(62,207,142,.55); } 50% { box-shadow: 0 0 0 5px rgba(62,207,142,0); } }
 .ag-live-pulse { animation: ag-live-pulse 1.8s ease-out infinite; }
 @media (prefers-reduced-motion: reduce) { .ag-live-pulse { animation: none; } }
+/* Session composer task controls share the desktop/mobile control geometry. */
+:root { --ag-composer-control: 32px; }
+.ag-composer-task-control { height: var(--ag-composer-control); box-sizing: border-box; font-family: inherit; color: var(--text-secondary); background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; }
+@media (max-width: 768px) {
+  :root { --ag-composer-control: 44px; }
+  .ag-composer-task-control { min-height: 44px; font-size: 16px; }
+}

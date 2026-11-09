@@ -5,9 +5,9 @@
  *
  * A pedido is a request for WORK. The owner also asks the leader questions ("e o deploy?", "por que falhou?"),
  * and every one of those used to become a high-priority "Pedido do dono" that the delivery tick then nudged
- * the leader about — 8 automatic nudges in an hour on the Mac leader, most of them for questions that had
- * already been answered. The host classifies the text; the engine decides what to do with the answer
- * (a `question` is recorded already answered: no subtask, no reminder).
+ * the leader about — 8 automatic nudges in an hour on the Mac leader. New composer messages only use
+ * this result as an optional suggestion (OFF by default); the explicit clipboard gesture owns registration.
+ * Existing request reminders still classify legacy records so questions are never chased as work.
  *
  * FLUXO.CARD-SEM-PEDIDO: the rule errs toward NO card. Only a clear request is `work`; thanks, goodbyes, remarks,
  * reports and questions about his own English used to become cards (and a nudge each). The message reaches the leader
@@ -22,6 +22,11 @@
 /** `complaint`: the owner says a previous answer missed or never came. Not work (no subtask), not a question to close
  *  as answered — it is the opposite: an answer is OWED. The engine must keep it open and surface it, see docs/owner-request-queue.md. */
 export type OwnerIntent = 'question' | 'work' | 'complaint'
+
+/** Optional hint only. Missing preference is OFF, even for a confidently classified request. */
+export function ownerTaskSuggestion(text: string, enabled = false): boolean {
+  return enabled === true && text.trim() !== '' && ownerIntent(text) === 'work'
+}
 
 /** Attachment references and pasted blobs are not words the owner wrote. */
 export function ownerTextWords(text: string): string {

@@ -476,6 +476,10 @@ export type TaskThread = TaskThreadRecord
  * `status` is `done`. See docs/superpowers/specs/2026-09-10-task-session-hierarchy-design.md §4.2.
  */
 export interface Subtask {
+  /** Explicit composer registration, persisted for retry/restart deduplication and MCP readers. */
+  ownerRequest?: { messageId: string; sessionId: string; conversationId: string; at: string; text: string; pedidoId: string }
+  priority?: TaskPriority
+  assignee?: 'leader' | 'worker'
   id: string
   taskId: string
   title: string

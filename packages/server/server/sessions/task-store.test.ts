@@ -32,6 +32,14 @@ async function store() {
 }
 
 describe('createTaskStore', () => {
+  it('checks review blockers inside the write lock, including direct store callers', async () => {
+    const { s } = await store()
+    await s.upsertTask(task('t1', { status: 'in_progress' }))
+    await s.upsertSubtask(subtask('s1', 't1', { status: 'blocked' }))
+    expect(await s.patchTask('t1', { status: 'in_review' })).toBe(false)
+    expect((await s.read()).tasks[0]!.status).toBe('in_progress')
+    expect(await s.patchTask('t1', { status: 'in_review' }, { allowOpenSubtasks: true })).toBe(true)
+  })
   it('reads an empty book when the file does not exist', async () => {
     const { s } = await store()
     expect(await s.read()).toEqual({

@@ -34,10 +34,10 @@ function world() {
 describe('item 1 — an answered owner message is never re-queued', () => {
   test('queued message, transcript clock 9 min off the composer clock, relayed after an answer → one pedido', async () => {
     const x = world()
-    expect(await emitOwnerMessage({ action: 'prompt', id: 'old', text: 'quando sai as coisas?' }, x.d, { at: '2026-11-08T04:00:00.000Z' })).toBe('emitted')
+    expect(await emitOwnerMessage({ action: 'prompt', id: 'old', text: 'quando sai as coisas?' }, x.d, { at: '2026-11-08T04:00:00.000Z' })).toBe('not-task')
     x.tick(30 * 60_000)
     await emitRelayedOwnerMessages('lead', { id: 'old', conversationId: 'conv-old' }, [{ at: '2026-11-08T04:09:00.000Z', text: 'quando sai as coisas?' }], x.d)
-    expect(x.events).toHaveLength(1)
+    expect(x.events).toHaveLength(0) // The explicit task gesture is required for original sends too.
   })
 
   test('the ledger match is by text with no time window for the relay (a day later is still a duplicate)', async () => {
@@ -45,7 +45,7 @@ describe('item 1 — an answered owner message is never re-queued', () => {
     await emitOwnerMessage({ action: 'prompt', id: 'old', text: 'corrige a coluna de histórico' }, x.d, { at: '2026-11-08T04:00:00.000Z' })
     x.tick(20 * 60 * 60_000)
     await emitRelayedOwnerMessages('lead', { id: 'old', conversationId: 'conv-old' }, [{ at: '2026-11-09T00:00:00.000Z', text: 'corrige  a coluna de histórico ' }], x.d)
-    expect(x.events).toHaveLength(1)
+    expect(x.events).toHaveLength(0)
   })
 
   test('captureHandoffRelay flags a turn answered by a later assistant text; the relay then skips it even without a ledger', async () => {
@@ -65,7 +65,7 @@ describe('item 2 — hand-off prompt, relay and questions never become owner wor
   test('the hand-off prompt (handoff:true) emits nothing, and its sentence is not an owner turn in the relay', async () => {
     const x = world()
     const pt = 'Quero passar a liderança agora. Prepare o arquivo durável de passagem com estado, decisões, sessões ativas e fila.'
-    expect(await emitOwnerMessage({ action: 'prompt', id: 'lead', text: pt, handoff: true }, x.d)).toBe('handoff')
+    expect(await emitOwnerMessage({ action: 'prompt', id: 'lead', text: pt, handoff: true }, x.d)).toBe('not-task')
     expect(isOwnerTurn({ role: 'user', text: pt })).toBe(false)
     expect(planRelay([{ role: 'user', text: pt, at: '2026-11-08T04:00:00.000Z' }] as never).owner).toHaveLength(0)
     expect(x.events).toHaveLength(0)
@@ -76,7 +76,7 @@ describe('item 2 — hand-off prompt, relay and questions never become owner wor
     await emitOwnerMessage({ action: 'prompt', id: 'old', text: 'o que sai na próxima?' }, x.d, { at: '2026-11-08T04:00:00.000Z' })
     x.tick(15_000)
     await emitRelayedOwnerMessages('lead', { id: 'old', conversationId: 'conv-old' }, [{ at: '2026-11-08T04:03:00.000Z', text: 'o que sai na próxima?' }], x.d)
-    expect(x.events).toHaveLength(1)
+    expect(x.events).toHaveLength(0)
   })
 
   test('real cases from 08/11: answers and plain questions are questions, an explicit work request is work', () => {
