@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { act, createElement } from 'react'
 import type { Root } from 'react-dom/client'
+import { MemoryRouter, Route, Routes, useNavigate, useSearchParams } from 'react-router-dom'
 import { brtDayStartMs, buildCalendar, filterCalendar, type CalendarReply } from '@agentistics/core'
 import { stripVersions, versionWhen } from './VersionCards'
 import { icsQuery } from './DeliveryCalendar'
@@ -185,4 +186,43 @@ test('phone schedule reserves scrollable space after the timeline for its final 
   const track = document.querySelector<HTMLElement>('[data-cal-schedule-track]')!
   expect(track.style.paddingRight).toBe('220px')
   expect(track.style.paddingBottom).toBe('64px')
+})
+
+test('phone week: the "+N" chip and a card that hides others open THAT day — calDay and calView land in ONE URL change', async () => {
+  // Two setQuery navigations in one tap race: the second is built from the pre-first params and wins, so calDay
+  // was lost and the Day view fell back to today. Opening a day must be ONE URL change carrying both.
+  const overlapping = view.pieces.map(p => ({ ...p, startedAtMs: NOW - 2 * H, stageSinceMs: NOW - 2 * H }))
+  let dayCalls = 0, viewCalls = 0
+  const Harness = () => {
+    const [query, setQuery] = useSearchParams()
+    const back = useNavigate()
+    const anchor = /^\d{4}-\d{2}-\d{2}$/.test(query.get('calDay') ?? '') ? query.get('calDay')! : '2026-11-07'
+    const calView = (query.get('calView') ?? 'week') as 'day' | 'three' | 'week' | 'month' | 'schedule' | 'agenda'
+    return <>
+      <span data-test-url={query.toString()} />
+      <button data-test-back type="button" onClick={() => back(-1)} />
+      <MobileCalendar {...common} pieces={overlapping} anchor={anchor} view={calView} ready body={null} filters={null} filterCount={0}
+        exportIcs={noop} onOpen={noop}
+        onDay={d => { dayCalls++; setQuery(q => { q.set('calDay', d); return q }, { replace: true }) }}
+        onView={v => { viewCalls++; setQuery(q => { q.set('calView', v); return q }, { replace: true }) }}
+        onOpenDay={d => { setQuery(q => { q.set('calDay', d); q.set('calView', 'day'); return q }) }} />
+    </>
+  }
+  await mount(createElement(MemoryRouter, { initialEntries: ['/tasks/calendar?calView=week'] },
+    createElement(Routes, null, createElement(Route, { path: '/tasks/calendar', element: createElement(Harness) }))))
+  const col = document.querySelector('[data-cal-grid-day="2026-11-07"]')!
+  const chip = col.querySelector<HTMLButtonElement>('[data-cal-phone-more]')
+  expect(chip).not.toBeNull()
+  await act(async () => { chip!.click() })
+  const url = document.querySelector('[data-test-url]')!.getAttribute('data-test-url')!
+  expect(url).toContain('calDay=2026-11-07')
+  expect(url).toContain('calView=day')
+  expect(document.querySelectorAll('[data-cal-grid-day]').length).toBe(1)
+  expect(document.querySelector('[data-cal-grid-day]')!.getAttribute('data-cal-grid-day')).toBe('2026-11-07')
+  expect(dayCalls).toBe(0); expect(viewCalls).toBe(0)
+  // A card that hides others opens the day the same way as its chip.
+  await act(async () => { (document.querySelector('[data-test-back]') as HTMLButtonElement).click() }) // back to the week, as a phone's Back button does
+  await act(async () => { (document.querySelector('[data-cal-grid-day="2026-11-07"] [data-cal-phone-event]') as HTMLButtonElement).click() })
+  expect(document.querySelector('[data-test-url]')!.getAttribute('data-test-url')!).toContain('calDay=2026-11-07')
+  expect(document.querySelector('[data-cal-grid-day]')!.getAttribute('data-cal-grid-day')).toBe('2026-11-07')
 })

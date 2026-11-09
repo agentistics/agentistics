@@ -120,6 +120,9 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
 
   if (isMobile) return <div ref={ref} data-cal-root style={{ height: height ?? undefined, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
     <MobileCalendar anchor={anchor} onDay={d => { setAnchor(d); setSel(null) }} view={phoneView} onView={v => { setQuery(q => { q.set('calView', v); return q }, { replace: true }); setSel(null) }}
+      // Opening a day is ONE URL change (day + view together, two setQuery calls race and lose the day) and it is
+      // PUSHED, not replaced, so the phone's Back returns to the Week/3-days it came from.
+      onOpenDay={d => { setQuery(q => { q.set('calDay', d); q.set('calView', 'day'); return q }); setSel(null) }}
       nowMs={nowMs} pt={pt} versions={shown?.versions ?? []} pieces={shown?.pieces ?? []} marks={shown?.marks ?? []} onOpen={open} ready={!!shown}
       filterCount={Number(filters.tasks !== 'active') + filters.versions.length + filters.stages.length + filters.harnesses.length + filters.priorities.length + Number(filters.confirmedOnly)}
       exportIcs={exportIcs} filters={reply && <CalendarFilters value={filters} onChange={setFilters} pieces={reply.pieces} harnessOf={harnessOf} versionList={versionList} pt={pt} mobile={false} shown={caption} />}
