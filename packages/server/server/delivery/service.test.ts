@@ -2540,6 +2540,38 @@ describe('reconcile r2: the card\'s repository, the quota, and the buttons', () 
     expect(b.calls.gh).toEqual([])
   })
 
+  test('LIMPEZA.ANTIGAS: the Live reads the outcomes ANOTHER process wrote (the CLI run), not a copy loaded once', async () => {
+    // One file, two services: the server (which answers the Live) and a `flow reconcile` CLI process.
+    let saved: unknown = null
+    let stamp = 0
+    const proofStore = { load: async () => saved, save: async (doc: unknown) => { saved = JSON.parse(JSON.stringify(doc)); stamp++ }, stamp: async () => String(stamp) }
+    const server = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [old], proofStore })
+    // The server answered once while the file said "could not check" (an earlier, budget-limited automatic run).
+    saved = { version: 1, prs: [], commits: [], pins: [], tags: [], contains: [], localTags: [], verdicts: [], outcomes: [['s2', { unchecked: 'budget' }]], auto: { nextAt: 0, failures: 0 } }
+    stamp++
+    expect((await server.svc.proofOutcomes()).outcomes.get('s2')).toEqual({ unchecked: 'budget' })
+    // The CLI process then judges the same piece and saves: nothing proves it, so its outcome is EMPTY (and the piece is "antiga").
+    const cli = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [old], proofStore })
+    const out = await cli.svc.reconcile({ apply: true }, 'owner')
+    expect(out.ok && out.entries[0]).toMatchObject({ bucket: 'antiga' })
+    // The Live asks the server's service again: it must see what the CLI concluded, the way the screen and the reconcile report agree.
+    expect((await server.svc.proofOutcomes()).outcomes.get('s2')?.unchecked).toBeUndefined()
+  })
+
+  test('LIMPEZA.ANTIGAS: a run in progress keeps its own cache: a stamp change underneath does not swap it', async () => {
+    let saved: unknown = null
+    let stamp = 0
+    const proofStore = { load: async () => saved, save: async (doc: unknown) => { saved = JSON.parse(JSON.stringify(doc)); stamp++ }, stamp: async () => String(stamp) }
+    const h = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [listing('lists s2')] }, ...GREEN }, { pieceHints: DECLARED(7), reviewPieces: async () => [old], proofStore })
+    const real = h.facts.gh
+    let during: Awaited<ReturnType<typeof h.svc.proofOutcomes>> | null = null
+    h.facts.gh = async (c, args) => { if (!during) { stamp++; during = await h.svc.proofOutcomes() } return real(c, args) }
+    const out = await h.svc.reconcile({ apply: true }, 'owner')
+    expect(out.ok).toBe(true)
+    expect(during).not.toBeNull()
+    expect((await h.svc.proofOutcomes()).outcomes.get('s2')?.proven).toBe(true)
+  })
+
   test('L1: a release that could not be READ is "unknown": the piece does not move and is not called red', async () => {
     const h = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [listing('lists s1')] }, ...GREEN }, { pieceHints: DECLARED(7), reviewPieces: async () => [fresh] })
     const real = h.facts.gh
