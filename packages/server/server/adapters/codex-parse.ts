@@ -25,6 +25,7 @@ function* parseCodexSteps(content: string, fallbackId: string): Generator<void, 
   let inputTokens = 0
   let outputTokens = 0
   let cacheRead = 0
+  let bankedInput = 0, bankedCache = 0, bankedOutput = 0
   /**
    * The context gauge's two halves, both stated by Codex itself.
    *
@@ -87,9 +88,16 @@ function* parseCodexSteps(content: string, fallbackId: string): Generator<void, 
       if (u) {
         const cached = u.cached_input_tokens ?? 0
         const totalInput = u.input_tokens ?? 0
-        inputTokens = Math.max(0, totalInput - cached)
+        const nextInput = Math.max(0, totalInput - cached)
+        const nextOutput = u.output_tokens ?? outputTokens
+        // A cumulative counter that goes DOWN is a restarted series (a resume): what the previous
+        // series spent is banked, not dropped — the journal's replay counts every series too.
+        if (nextInput < inputTokens || cached < cacheRead || nextOutput < outputTokens) {
+          bankedInput += inputTokens; bankedCache += cacheRead; bankedOutput += outputTokens
+        }
+        inputTokens = nextInput
         cacheRead = cached
-        outputTokens = u.output_tokens ?? outputTokens
+        outputTokens = nextOutput
       }
       const last = data.info?.last_token_usage
       const sent = last?.input_tokens ?? 0
@@ -187,9 +195,9 @@ function* parseCodexSteps(content: string, fallbackId: string): Generator<void, 
     languages: [],
     git_commits: gitCommits,
     git_pushes: gitPushes,
-    input_tokens: inputTokens,
-    output_tokens: outputTokens,
-    cache_read_input_tokens: cacheRead,
+    input_tokens: bankedInput + inputTokens,
+    output_tokens: bankedOutput + outputTokens,
+    cache_read_input_tokens: bankedCache + cacheRead,
     cache_creation_input_tokens: 0,
     // Both absent rather than zero — see the declarations above.
     ...(contextTokens > 0 ? { context_tokens: contextTokens } : {}),
