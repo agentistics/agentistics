@@ -284,7 +284,7 @@ export function AgentaskToolbar({ lang, q, onQ, state, actions, statuses, onView
     color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
   })
   const search: ReactNode = (
-    <SearchField value={q} onChange={onQ} placeholder={t.search} mobile={mobile} style={{ flex: mobile ? 1 : '0 1 280px' }} />
+    <SearchField value={q} onChange={onQ} placeholder={t.search} mobile={mobile} style={mobile ? { flex: 1 } : { flex: '1 1 120px', maxWidth: 280, minWidth: 0 }} />
   )
   const viewLabel = (
     <>

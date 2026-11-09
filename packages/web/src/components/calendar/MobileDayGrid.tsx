@@ -54,8 +54,8 @@ export function MobileDayGrid(p: MobileGridProps) {
         <span>{untimed.length}</span>{collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
       </button>
       {!collapsed && <div style={{ flex: 1, minWidth: 0 }}>
-        {(expanded ? untimed : untimed.slice(0, 3)).map(e => <button type="button" className="cal-phone-button cal-phone-allday" key={e.id} onClick={ev => p.onOpen(e.selection, ev)}>{span > 1 && `${e.day.slice(8)} · `}{e.title}</button>)}
-        {untimed.length > 3 && <button className="cal-phone-button cal-phone-allday-more" type="button" onClick={() => setExpanded(!expanded)}>{expanded ? pick(TEXT.collapse, pt) : `+${untimed.length - 3} ${pick(TEXT.more, pt)}`}</button>}
+        {(expanded ? untimed : untimed.slice(0, 3)).map(e => <button type="button" className="cal-phone-button cal-phone-allday" data-cal-allday-row={e.day} key={e.id} onClick={ev => p.onOpen(e.selection, ev)}>{span > 1 && `${e.day.slice(8)} · `}{e.title}</button>)}
+        {untimed.length > 3 && <button className="cal-phone-button cal-phone-allday-more" data-cal-allday-more={untimed.length - 3} type="button" onClick={() => setExpanded(!expanded)}>{expanded ? pick(TEXT.collapse, pt) : `+${untimed.length - 3} ${pick(TEXT.more, pt)}`}</button>}
       </div>}
     </div>}
     <div ref={scroller} data-cal-hour-scroller style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
@@ -80,7 +80,7 @@ export function MobileDayGrid(p: MobileGridProps) {
             // Thin columns (Week, 3 days): one full-width card per stretch of time, the rest counted in a "+N" chip. Both open the day.
             const byId = new Map(raw.map(e => [e.id, e]))
             cards = placeColumn(raw, d0).map(item => {
-              if (item.kind === 'chip') return <button type="button" className="cal-phone-button" data-cal-phone-more key={`more:${item.top}`} aria-label={`+${item.count} · ${day}`} onClick={openDay} style={{ position: 'absolute', top: item.top, left: 0, width: '100%', height: item.height, minWidth: 0, padding: 0, fontWeight: 700, border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>+{item.count}</button>
+              if (item.kind === 'chip') return <button type="button" className="cal-phone-button" data-cal-phone-more={item.count} data-cal-phone-more-day={day} key={`more:${item.top}`} aria-label={`+${item.count} · ${day}`} onClick={openDay} style={{ position: 'absolute', top: item.top, left: 0, width: '100%', height: item.height, minWidth: 0, padding: 0, fontWeight: 700, border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>+{item.count}</button>
               const e = byId.get(item.id)!
               return <button type="button" className="cal-phone-event" data-cal-phone-event={e.id} key={e.id} title={`${e.title} · ${clock(e.fromMs)}`} aria-label={`${e.title} · ${clock(e.fromMs)}`} onClick={ev => (item.hidden > 0 ? openDay() : p.onOpen(e.selection, ev))} style={{ ...cardStyle(e), top: item.top, left: 0, width: '100%', height: item.height }}>{label(e)}</button>
             })

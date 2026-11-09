@@ -36,7 +36,7 @@ export function DayView({ day, nowMs, versions, pieces, marks, pt, onOpenPiece, 
   const nowTop = isToday ? pct(nowMs, d0, d0 + DAY_MS) : null
 
   return (
-    <div data-cal-day-view style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-card)', overflow: 'hidden' }}>
+    <div data-cal-day-view data-cal-day={day} data-cal-count={cols.length} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-card)', overflow: 'hidden' }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '7px 10px', borderBottom: '1px solid var(--border)', flexShrink: 0, minHeight: 36, flexWrap: 'wrap' }}>
         <span style={{ width: GUTTER - 10, fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.1 }}>{pick(TEXT.allDay, pt)}</span>
         {allDay.length === 0 && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>}
@@ -78,7 +78,7 @@ export function DayView({ day, nowMs, versions, pieces, marks, pt, onOpenPiece, 
               </div>
             </div>
             {cols.map(p => (
-              <div key={p.key} style={{ flex: `1 0 ${COL_MIN}px`, minWidth: 0, borderLeft: '1px solid var(--border)' }}>
+              <div key={p.key} data-cal-day-card={p.key} style={{ flex: `1 0 ${COL_MIN}px`, minWidth: 0, borderLeft: '1px solid var(--border)' }}>
                 <div style={{ height: 40, position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', padding: '5px 8px', overflow: 'hidden' }}>
                   <div title={p.title} style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</div>
                   <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[p.version, p.harness].filter(Boolean).join(' · ')}</div>

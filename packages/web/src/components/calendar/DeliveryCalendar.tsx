@@ -135,17 +135,19 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
 
   return (
     <div ref={ref} data-cal-root style={{ height: height ?? undefined, minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 8, flexWrap: isMobile ? 'nowrap' : 'wrap', paddingBottom: 8, flexShrink: 0 }}>
-        <h1 style={{ margin: 0, fontSize: isMobile ? 17 : 15, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, whiteSpace: isMobile ? 'normal' : 'nowrap', marginRight: 4, flex: isMobile ? '1 1 0' : undefined, minWidth: 0 }}>
+      {/* Desktop is exactly TWO rows, the same in every engine: this one (title, views, navigation, export — never
+          wrapping, the date range gives way with an ellipsis) and the filters row below it. */}
+      <div data-cal-nav style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', paddingBottom: 8, flexShrink: 0, minWidth: 0 }}>
+        <h1 style={{ margin: 0, fontSize: isMobile ? 17 : 15, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, whiteSpace: isMobile ? 'normal' : 'nowrap', marginRight: 4, flex: isMobile ? '1 1 0' : '0 0 auto', minWidth: 0 }}>
           <CalendarDays size={17} aria-hidden style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
-          <span>{pick(TEXT.title, pt)}</span><BetaTag what={pick(TEXT.beta, pt)} lang={lang} />
+          <span title={pick(TEXT.title, pt)}>{pick(TEXT.titleShort, pt)}</span><BetaTag what={pick(TEXT.beta, pt)} lang={lang} />
         </h1>
-        {!isMobile && <div style={{ flexShrink: 0, width: 350, ['--mode-min-height' as string]: '24px' }}><SegmentedTabs tabs={tabs} value={activeView} onChange={go} ariaLabel={pick(TEXT.title, pt)} containerName="cal-views" /></div>}
+        {!isMobile && <div data-cal-view-tabs style={{ flexShrink: 0, width: 350, ['--mode-min-height' as string]: '24px' }}><SegmentedTabs tabs={tabs} value={activeView} onChange={go} ariaLabel={pick(TEXT.title, pt)} containerName="cal-views" /></div>}
         <button type="button" data-cal-today onClick={() => { setAnchor(brtDay(Date.now())); setSel(null) }} className={isMobile ? 'ag-tap' : undefined} style={navBtn}>{pick(TEXT.today, pt)}</button>
         {!isMobile && <>
           <button type="button" aria-label={pick(TEXT.prev, pt)} onClick={() => step(-1)} className={tapIcon} style={navBtn}><ChevronLeft size={15} /></button>
           <button type="button" aria-label={pick(TEXT.next, pt)} onClick={() => step(1)} className={tapIcon} style={navBtn}><ChevronRight size={15} /></button>
-          <span data-cal-range style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap' }}>{rangeLabel(activeView, anchor, pt)}</span>
+          <span data-cal-range style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{rangeLabel(activeView, anchor, pt)}</span>
         </>}
         {!isMobile && <span style={{ flex: 1 }} />}
         <button type="button" data-cal-export onClick={exportIcs} aria-label={pick(TEXT.exportIcs, pt)} title={pick(TEXT.exportIcs, pt)} className={tapIcon} style={navBtn}>

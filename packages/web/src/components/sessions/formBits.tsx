@@ -100,7 +100,7 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, c
               style={{
                 // A strip told to pack tight (`gap` under 12) also tightens label↔count, so 3-digit counts fit a 360px phone.
                 display: 'inline-flex', alignItems: 'center', gap: gap !== undefined && gap < 12 ? 4 : 6, flexShrink: 0, whiteSpace: 'nowrap',
-                minHeight: tap ?? undefined, padding: '10px 2px', marginBottom: -1, cursor: 'pointer',
+                minHeight: tap ?? undefined, minWidth: tap ?? undefined, justifyContent: 'center', padding: '10px 2px', marginBottom: -1, cursor: 'pointer',
                 border: 'none', borderBottom: `2px solid ${on ? 'var(--anthropic-orange)' : 'transparent'}`,
                 background: 'transparent', fontFamily: 'inherit', fontSize: 12, fontWeight: on ? 650 : 500,
                 color: on ? 'var(--anthropic-orange)' : 'var(--text-secondary)',

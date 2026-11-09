@@ -7,6 +7,8 @@ const t = (pt: string, en: string): L => ({ pt, en })
 
 export const TEXT = {
   title: t('Calendário de entregas', 'Delivery calendar'),
+  /** The heading on the desktop bar, where every px goes to the date range; the full name stays on its tooltip and the views' label. */
+  titleShort: t('Calendário', 'Calendar'),
   today: t('Hoje', 'Today'),
   filters: t('Filtros', 'Filters'),
   threeDays: t('3 dias', '3 days'),
