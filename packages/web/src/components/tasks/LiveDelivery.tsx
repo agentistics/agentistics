@@ -42,7 +42,7 @@ import { LiveQueuePriority } from './LiveQueuePriority'
 import { LiveColumn } from './LiveColumn'
 import { LiveLeaders } from './LiveLeaders'
 import type { LeaderWorker } from './liveDeliveryModel'
-import { LiveTaskFilter } from './LiveTaskFilter'
+import { LiveTaskChips, LiveTaskFilter } from './LiveTaskFilter'
 import { sessionLinks } from './liveSessionLinks'
 import { LiveToolbar } from './LiveToolbar'
 import { menuRowStyle, PanelMenu } from './PickerMenu'
@@ -94,8 +94,8 @@ export function LiveDelivery({ lang, compact, focusSessionId, inPip, initialTask
   const plan = usePlanLimits()
   // The Publicado period is asked of the server (it decides what is sent), so it lives here, beside the fetch.
   const [period, setPeriod] = useState<LivePeriod>(() => readViewPrefs().period)
-  const { reply, error, nowMs } = useLiveDeliveries(fleet.sessions, period)
-  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} onPeriod={setPeriod} compact={compact} focusSessionId={focusSessionId} inPip={inPip} initialTaskIds={initialTaskIds} />
+  const { reply, replyPeriod, error, nowMs } = useLiveDeliveries(fleet.sessions, period)
+  return <LiveDeliveryView lang={lang} reply={reply} replyPeriod={replyPeriod} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} onPeriod={setPeriod} compact={compact} focusSessionId={focusSessionId} inPip={inPip} initialTaskIds={initialTaskIds} />
 }
 
 export interface LiveDeliveryViewProps {
@@ -103,6 +103,8 @@ export interface LiveDeliveryViewProps {
   compact?: boolean
   lang: 'pt' | 'en'
   reply: LiveReply | null
+  /** The period the reply was asked for (the hook knows it); falls back to what the server echoed in `view.period`. */
+  replyPeriod?: LivePeriod
   error: 'down' | 'refused' | null
   nowMs: number
   fleet: readonly FleetRow[]
@@ -118,7 +120,7 @@ export interface LiveDeliveryViewProps {
 }
 
 /** PURE of data sources: everything it draws comes in as props, so it is tested without mocking a store. */
-export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabels, compact, focusSessionId, initialTaskIds, inPip, onPeriod }: LiveDeliveryViewProps) {
+export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet, accountLabels, compact, focusSessionId, initialTaskIds, inPip, onPeriod }: LiveDeliveryViewProps) {
   const pt = lang === 'pt'
   const L = copy(pt)
   const isMobile = useIsMobile()
@@ -360,7 +362,12 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   }, [taskIds])
 
   if (error === 'refused') return <Note text={L.refused} />
-  if (reply === null && error !== 'down') return <CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" />
+  if (reply === null && error !== 'down') {
+    // The pop-out (popover, sheet, PiP window) is not the viewport: a `screen` loader centred on the page and
+    // drew beside the popup's middle. Inside it the loader fills the popup's own box instead.
+    if (compact) return <div data-live-loading-box style={{ position: 'relative', height: '100%', minHeight: 240 }}><CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" placement="fill" /></div>
+    return <CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" />
+  }
   if (reply === null) return <Note text={L.down} />
 
   const open = (c: LiveCard) => {
@@ -386,7 +393,6 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         c={c} cards={cards} nowMs={nowMs} pt={pt} fleet={fleet} accountLabels={accountLabels} runtime={reply.runtime}
         leaderName={leaderOf(c)} role={roleOf(c)} mobile={isMobile} onOpen={open} embedded={embedded} sort={sort} cameFrom={moved[c.d.key]?.from ?? null}
       />
-      {c.d.stage === 'queue' && !embedded && <LiveQueuePriority taskId={c.d.taskId} priority={c.d.priority} pt={pt} />}
       {c.d.awaitingApproval && c.d.subtaskId && <LiveApprove subtaskId={c.d.subtaskId} phase={c.d.awaitingApproval.phase} pt={pt} mobile={isMobile} />}
     </div>
   )
@@ -429,7 +435,8 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     </span>
   )
   // The answer on screen is for another period than the chosen one: the numbers below are the old ones until it lands.
-  const periodLoading = Boolean(reply.view?.period) && reply.view?.period !== period
+  const answeredPeriod = replyPeriod ?? reply.view?.period
+  const periodLoading = Boolean(answeredPeriod) && answeredPeriod !== period
   const showPublished = tab === 'all' || tab === 'published'
   // "Antigas sem registro": filtros v2 keeps them in "Tudo", at the bottom of "Revisão do líder". That tab's bar opens the group: a button in
   // that column's header sits off screen at 1280 px, behind the columns to its left.
@@ -482,6 +489,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       <LiveToolbar
         pt={pt} mobile={isMobile} title={L.title} summary={summaryLine} summaryTitle={summaryTitle}
         taskFilter={<LiveTaskFilter options={options} chosen={taskIds} onChange={setTaskIds} pt={pt} mobile={isMobile} />}
+        taskChips={<LiveTaskChips options={options} chosen={taskIds} onChange={setTaskIds} pt={pt} mobile={isMobile} />}
         tab={tab} counts={counts} onTab={(t: LiveTab) => { setViewPref({ tab: t }); setStageFilter('all') }}
         sort={sort} onSort={(s: LiveSortId) => setViewPref({ sort: s })}
         actions={actions}

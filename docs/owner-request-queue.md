@@ -48,6 +48,28 @@ brief or group the pieces through `agentistics_task_subtask`. Joining an already
 copies its brief into the group's pre-dispatch once and withdraws its former queue record with a
 comment; the minute tick retries a missed fold. Group members never produce their own card.
 
+### FLUXO.AVISOS — fewer, truer notices (2.202.1 / 2.203.0)
+
+- **Only work is chased.** A pedido whose text the host rule calls a question (`intent: question`, see
+  `docs/experimental-flows.md`) is never reminded and creates no subtask; the leader answers it in its reply.
+- **The reminder is re-judged at send time.** The tick reserves a reminder, then re-reads the request, the subtask facts and the
+  leader right before typing; a request that was staged in between, closed, or whose leader died is dropped and the reservation
+  released (`request-wake-skipped` in the tick actions). The cadence is ONE per pedido (30 min), not one per leader: a newer leader
+  hears the reminder at once only when the one that already got it is gone. The engine's `demanda` flow must not send its own
+  second reminder; the host's is the only sender.
+- **The reminder is short:** the pedido id and its first ~80 characters (no attachment paths); the full text is in the leader's
+  PEDIDOS ABERTOS DO DONO section.
+- **Pre-dispatch asks only for what the harness uses.** `effort` only where the harness has an effort concept; `account` only where
+  it can keep a second login apart (otherwise the account is `default` and the slot gate reads that budget row).
+- **`agentop session` start / batch / reopen honour the owner's top-tier cap** exactly like the `vaga` gate (`topTierFull`): a full
+  provider tier refuses with a sentence, `--force` overrides it out loud. Leaders and hand-offs are never refused.
+- **Plan limits never recommend a stale or missing reading.** `agentistics_plan_limits` / `GET /api/plan-limits` routing ignores
+  rows not read in the last 10 minutes; `recommendation.unknown` names the harnesses it could not judge (`stale` / `no-reading`) and
+  `recommendation.confidence` is `fresh` or `none`.
+- **Queued messages can be sent or interrupted from their own caption** (web): the existing send-now verb (claude, mid-turn, no
+  dialog) and interrupt verb (any harness whose stop is enabled); hidden otherwise.
+- `agentistics_task_create` takes `priority` and `type`; the subtask tool no longer freezes a status list.
+
 Read-only checks on macOS after installing the reviewed build:
 
 ```sh

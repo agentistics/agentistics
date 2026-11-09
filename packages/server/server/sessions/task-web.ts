@@ -318,7 +318,7 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
 }
 
 /** Create a task. Title is required; a description is not — a task nobody described is a task. */
-export async function createTask(o: { title: string; detail?: string; type?: string }): Promise<Task | null> {
+export async function createTask(o: { title: string; detail?: string; type?: string; /** urgent | high | medium | low; absent = low. FLUXO.AVISOS 9. */ priority?: string }): Promise<Task | null> {
   const title = o.title.trim()
   if (!title) return null
   const w = await loadTaskWorld()
@@ -334,7 +334,8 @@ export async function createTask(o: { title: string; detail?: string; type?: str
     id: newTaskId(),
     title,
     status: 'todo',
-    priority: 'low',
+    // Said at creation (`agentistics_task_create`), else `low`: a board of defaults nobody chose means priority means nothing.
+    priority: o.priority !== undefined ? migratePriority(o.priority) : 'low',
     createdAt: now,
     updatedAt: now,
     ...(o.detail?.trim() ? { detail: o.detail.trim() } : {}),
@@ -583,7 +584,7 @@ export async function addComment(
     newThread?: { title: string; kind?: ThreadKind }
     /** A VERIFIED session id — the route verifies (`session-identity.ts`), never this function. */
     session?: string
-    message?: { to: string; kind: 'handback' | 'block' | 'question' }
+    message?: { to: string; kind: 'handback' | 'block' | 'question'; /** FLUXO.AVISOS 8: one slice of a longer piece, not the end of it. */ intermediate?: boolean }
     /** The person wrote it on the board (no session identity). */
     owner?: boolean
     /** What the record is (handback, block, decision). Absent = a note. */

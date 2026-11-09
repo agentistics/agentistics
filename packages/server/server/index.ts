@@ -2577,12 +2577,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(found)
     }
     if (url.pathname === '/api/tasks' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string }
+      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string; priority?: string }
       const { createTask } = await import('./sessions/task-web')
+      // FLUXO.AVISOS 9: an unknown priority word is refused, never silently stored as `low`.
+      if (body.priority !== undefined && !['urgent', 'high', 'medium', 'low'].includes(body.priority)) return json({ error: 'bad_priority', message: 'priority must be urgent | high | medium | low' }, 400)
       const made = await createTask({
         title: body.title ?? '',
         ...(body.detail !== undefined ? { detail: body.detail } : {}),
         ...(typeof body.type === 'string' ? { type: body.type } : {}),
+        ...(body.priority !== undefined ? { priority: body.priority } : {}),
       })
       if (!made) return json({ error: 'title_required' }, 400)
       return json({ task: made })

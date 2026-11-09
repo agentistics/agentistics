@@ -50,6 +50,8 @@ export interface TaskSessionRow {
   subtaskId: string | null
   createdAt: string
   endedAt?: string
+  /** The registry's last heartbeat (epoch ms). Frozen on a row the machine lost; absent when never stamped. */
+  lastSeenMs?: number
   label?: string
   /** The reasoning effort the session was started with (registry), when one was asked for. */
   effort?: string
@@ -649,6 +651,7 @@ export function buildTaskDetail(o: {
         subtaskId: r.subtaskId ?? null,
         createdAt: r.createdAt,
         ...(r.endedAt ? { endedAt: r.endedAt } : {}),
+        ...(typeof r.lastSeenMs === 'number' && Number.isFinite(r.lastSeenMs) ? { lastSeenMs: r.lastSeenMs } : {}),
         ...(r.label ? { label: r.label } : {}),
         ...(typeof (r as { effort?: unknown }).effort === 'string' ? { effort: (r as { effort: string }).effort } : {}),
         ...(r.conversationId ? { conversationId: r.conversationId } : {}),

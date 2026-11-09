@@ -156,6 +156,19 @@ test('"only with active agents" does not empty Publicado, with or without a task
   localStorage.clear()
 })
 
+test('toolbar: chips live on their own row under the controls, never inside the row they would push; tabs are 32px', async () => {
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: reply as never, initialTaskIds: ['t'] }))) })
+  const controls = document.querySelector('[data-live-controls]') as HTMLElement
+  const chips = document.querySelector('[data-live-chips]') as HTMLElement
+  expect(controls).not.toBeNull()
+  expect(chips).not.toBeNull()
+  expect(controls.contains(chips)).toBe(false)
+  expect(controls.nextElementSibling).toBe(chips)
+  expect(controls.querySelector('[data-live-actions]')).not.toBeNull()
+  expect((document.querySelector('[data-live-tabs] [role="tablist"]') as HTMLElement).style.height).toBe('32px')
+})
+
 test('opened from a session: filtered by its task as a removable chip; other tasks stay reachable', async () => {
   const two = { ...reply, sessionTasks: { s1: 't' }, deliveries: [...reply.deliveries, { ...reply.deliveries[0]!, key: 'u/a', taskId: 'u', taskTitle: 'Other task', sessionIds: [] }] }
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
@@ -400,12 +413,12 @@ test('run lock + end of run: a 409 antigas_running stops the batch with one sent
 
 test('LOW 11: on a phone the Líderes pill, its rows and the filter chip\'s remove control are 44 px targets', async () => {
   const { LiveLeaders } = await import('./LiveLeaders')
-  const { LiveTaskFilter } = await import('./LiveTaskFilter')
+  const { LiveTaskChips } = await import('./LiveTaskFilter')
   const leader = { id: 'L', title: 'Motor', harness: 'claude', model: null, state: 'working', currentAction: null, workers: [{ id: 'w', title: 'w', state: 'working', stage: 'running', word: 'working', cardKey: 't/a' }], awaiting: [] }
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   const mk = (mobile: boolean) => createElement(Router, null,
     createElement(LiveLeaders, { leaders: [leader] as never, nowMs: Date.now(), lang: 'pt', locate: () => ({ kind: 'none' as const }), onLocate: () => {}, onOpen: () => {}, mobile }),
-    createElement(LiveTaskFilter, { options: [{ value: 't', label: 'Task', recent: true, live: 1 }], chosen: ['t'], onChange: () => {}, pt: true, mobile }))
+    createElement(LiveTaskChips, { options: [{ value: 't', label: 'Task', recent: true, live: 1 }], chosen: ['t'], onChange: () => {}, pt: true, mobile }))
   await act(async () => { root!.render(mk(true)) })
   expect((document.querySelector('#live-leaders-head') as HTMLElement).style.minHeight).toBe('44px')
   await act(async () => (document.querySelector('#live-leaders-head') as HTMLElement).click())
@@ -414,7 +427,7 @@ test('LOW 11: on a phone the Líderes pill, its rows and the filter chip\'s remo
   expect((document.querySelector('[data-live-worker="w"]') as HTMLElement).style.minHeight).toBe('44px')
   expect(document.querySelector('[data-live-chip-hit]')).not.toBeNull()
   await act(async () => { root!.render(mk(false)) })
-  expect((document.querySelector('#live-leaders-head') as HTMLElement).style.minHeight).toBe('28px')
+  expect((document.querySelector('#live-leaders-head') as HTMLElement).style.minHeight).toBe('32px')
   expect(document.querySelector('[data-live-chip-hit]')).toBeNull()
 })
 
@@ -426,6 +439,22 @@ test('HIGH 2 (real screen): a queue card\'s own slot line is not a column slot �
   expect(col.querySelectorAll('[data-live-card]').length).toBe(3)
   expect(col.querySelectorAll('[data-live-queue-slot]').length).toBe(3)
   expect(col.querySelectorAll('[data-live-slot]').length).toBe(3)
+})
+
+test('LIVE.PRIORIDADE: a queued card shows its priority ONCE, read-only — nothing on the Live changes it', async () => {
+  const q = (k: string) => ({ ...reply.deliveries[0]!, key: `t/${k}`, subtaskId: k, stage: 'queue', priority: 'high', staged: { harness: 'codex', model: 'gpt-5.5', effort: 'high' } })
+  for (const lang of ['pt', 'en'] as const) {
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props(lang), reply: { ...reply, deliveries: [q('q1'), q('q2')] } as never }))) })
+    const col = document.querySelector('[data-live-column="queue"]')!
+    expect(col.querySelectorAll('[data-live-card]').length).toBe(2)
+    for (const card of Array.from(col.querySelectorAll('[data-live-card]'))) expect(card.querySelectorAll('[data-live-priority]').length).toBe(1)
+    expect(col.querySelectorAll('[data-live-priority]').length).toBe(2)
+    expect(col.querySelector('[data-live-queue-priority]')).toBeNull()
+    expect(col.querySelector('select, [role="combobox"], [role="listbox"], [aria-haspopup]')).toBeNull()
+    expect(col.textContent).not.toMatch(/Prioridade \(muda|changes the leaving order/)
+    await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = ''
+  }
 })
 
 test('MED 6 (live worker fixture): clicking a worker in the leaders strip scrolls the BOARD sideways to its card and never moves the page', async () => {

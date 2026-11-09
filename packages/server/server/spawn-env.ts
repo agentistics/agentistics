@@ -106,19 +106,17 @@ export function installSpawnEnvGuard(keys: readonly string[]): void {
     const orig = cp[api]
     if (typeof orig !== 'function') continue
     const wrapped = function (this: unknown, ...a: unknown[]) { return orig.apply(this, withChildEnv(api, a, decide)) }
-    // `exec` and `execFile` carry `util.promisify.custom` (it makes the promise resolve `{stdout, stderr}`). Without it promisify
-    // resolves with the bare string, and every `(await promisify(execFile)(...)).stdout` in the server reads undefined.
-    // The original's custom promisifier would call the ORIGINAL (unguarded) function, so ours goes through the wrapper.
-    if (api === 'exec' || api === 'execFile') {
-      const custom = (...a: unknown[]) => {
-        let child: unknown
-        const p = new Promise((resolve, reject) => {
-          child = wrapped.call(undefined, ...a, (err: (Error & { stdout?: unknown; stderr?: unknown }) | null, stdout: unknown, stderr: unknown) => (err ? reject(Object.assign(err, { stdout, stderr })) : resolve({ stdout, stderr })))
-        }) as Promise<unknown> & { child?: unknown }
-        p.child = child
-        return p
-      }
-      Object.defineProperty(wrapped, promisify.custom, { value: custom, enumerable: false })
+    // `exec` and `execFile` carry `util.promisify.custom`, which makes `promisify(execFile)` resolve to `{ stdout, stderr }`.
+    // A plain wrapper drops it and `promisify` falls back to the callback's FIRST value (the stdout string), so every
+    // `.stdout` read after the guard came back undefined. The wrapper gets its own custom, over the same env decision.
+    for (const key of Reflect.ownKeys(orig)) {
+      if (key === promisify.custom || key === 'length' || key === 'name' || key === 'prototype') continue
+      const d = Object.getOwnPropertyDescriptor(orig, key)
+      if (d) Object.defineProperty(wrapped, key, d)
+    }
+    const custom = (orig as unknown as Record<symbol, ((...a: unknown[]) => unknown) | undefined>)[promisify.custom]
+    if (typeof custom === 'function') {
+      Object.defineProperty(wrapped, promisify.custom, { value: function (this: unknown, ...a: unknown[]) { return custom.apply(this, withChildEnv(api, a, decide)) }, enumerable: false, configurable: true, writable: true })
     }
     cp[api] = wrapped
   }
