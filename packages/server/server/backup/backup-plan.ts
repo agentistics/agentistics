@@ -361,6 +361,12 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     why: 'A cache of the latest published version.',
   },
   {
+    pattern: '.agentistics/forecast-anchors.json', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — the estimator derives the same hourly boundary from the real start',
+    why: 'Only overrun bucket anchors, persisted by the delivery tick. Forecasts and immutable '
+      + 'dispatch predictions are not stored here. Losing this cache does not shift a bucket.',
+  },
+  {
     pattern: '.agentistics/upgrade-progress.json', match: 'prefix', reason: 'runtime',
     restoreWith: 'nothing',
     why: 'What an upgrade running on THIS machine says about itself, read by the page that started '
