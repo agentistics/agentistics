@@ -15,11 +15,8 @@ export interface ComposerTaskDeps {
 type Request = { id: string; text?: string; messageId?: string; asTask?: unknown; action?: unknown; session?: unknown; callerVerified?: unknown }
 export type ComposerTaskResult = { ok: true; subtask: Subtask; note: string } | { ok: false; message: string }
 
-/** The only future forecast integration point. Forecasts remain calculated on server projections. */
-function requestForecast(_subtask: Subtask): void {
-  // TODO(feat/registro-previsao, slice 6): call resolvePieceForecast once available on main;
-  // do not store a guessed date or let the browser supply calculated forecast fields.
-}
+// Forecast: none is stored here. buildLive runs resolvePieceForecast over every open piece (a queued one gets the
+// bootstrap/general interval, flagged queueTimeUnknown), so the registered subtask carries its server forecast on read.
 
 /** Registration precedes delivery, so a refusal leaves the draft intact. */
 export async function registerComposerTask(req: Request, lang: 'pt' | 'en', d = defaultComposerTaskDeps()): Promise<ComposerTaskResult> {
@@ -65,7 +62,6 @@ async function registerOnce(req: Request, lang: 'pt' | 'en', d: ComposerTaskDeps
       if (checked.output?.pedido?.state !== 'linked' || !checked.output.pedido.linkedSubtaskIds?.includes(subtask.id)) return { ok: false, message: pt ? 'O pedido foi salvo, mas não vinculado. Tente enviar novamente.' : 'The request was saved, but not linked. Retry sending.' }
     }
   }
-  requestForecast(subtask)
   return { ok: true, subtask, note: pt ? `Registrado como tarefa: ${subtask.title}` : `Registered as task: ${subtask.title}` }
 }
 
