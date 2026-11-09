@@ -153,7 +153,15 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
         }
       } catch { return {} }
     })()
-    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas, ...proof })
+    // The stored session roles (a small file): a leader/worker whose folder or label says "qa" is not the QA's.
+    const roleOf = await (async () => {
+      try {
+        const [{ readRolesDoc, roleOfRow }, { AGENTISTICS_DATA_DIR }] = await Promise.all([import('./session-roles'), import('../config')])
+        const doc = await readRolesDoc(AGENTISTICS_DATA_DIR)
+        return (s: { id: string; conversationId?: string }) => roleOfRow(doc.roles, s)
+      } catch { return undefined }
+    })()
+    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas, ...(roleOf ? { roleOf } : {}), ...proof })
     const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result
     return result

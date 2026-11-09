@@ -54,7 +54,7 @@ function Entry({ e, pt, marks, selected, h }: { e: AgendaEntry; pt: boolean; mar
     <button type="button" data-cal-entry="piece" onClick={ev => h.onOpenPiece(p.key, ev)} style={box(selected === p.key)}>
       <span style={{ fontSize: 13, fontWeight: 600 }}>{p.title}</span>
       <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
-        <StageChip stage={p.stage} pt={pt} />{e.state === 'expected' ? pick(TEXT.expected, pt) : pick(TEXT.published, pt)}<PriorityFlag priority={p.priority} pt={pt} />
+        <StageChip stage={p.stage} pt={pt} />{e.state === 'expected' ? pick(TEXT.expected, pt) : e.state === 'started' ? pick(TEXT.noEstimate, pt) : pick(TEXT.published, pt)}<PriorityFlag priority={p.priority} pt={pt} />
       </span>
     </button>
   )
