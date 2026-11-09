@@ -359,7 +359,7 @@ test('LOW 11: on a phone the Líderes pill, its rows and the filter chip\'s remo
   expect((document.querySelector('[data-live-worker="w"]') as HTMLElement).style.minHeight).toBe('44px')
   expect(document.querySelector('[data-live-chip-hit]')).not.toBeNull()
   await act(async () => { root!.render(mk(false)) })
-  expect((document.querySelector('#live-leaders-head') as HTMLElement).style.minHeight).toBe('28px')
+  expect((document.querySelector('#live-leaders-head') as HTMLElement).style.minHeight).toBe('32px')
   expect(document.querySelector('[data-live-chip-hit]')).toBeNull()
 })
 

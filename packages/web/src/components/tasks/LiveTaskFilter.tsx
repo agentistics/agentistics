@@ -41,7 +41,7 @@ export function LiveTaskFilter({ options, chosen, onChange, pt, mobile }: {
     // `display: contents`: the picker is a flex item of the toolbar's filter row (same line as the tabs), and
     // the chips sit on a line of their own below it, so selecting tasks never moves or grows the first row.
     <div data-live-taskfilter style={{ display: 'contents' }}>
-      <div style={{ minWidth: mobile ? 0 : 160, flex: mobile ? '1 1 100%' : '0 1 180px' }}>
+      <div style={{ minWidth: mobile ? 0 : 130, flex: mobile ? '1 1 100%' : '0 1 180px' }}>
         <MultiPicker
           options={opts}
           onCommit={v => onChange([...chosen, ...v.filter(x => !chosen.includes(x))])}
