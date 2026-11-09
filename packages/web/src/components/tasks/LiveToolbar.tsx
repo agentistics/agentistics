@@ -70,7 +70,7 @@ export function LiveToolbar({
         }}>{summary}</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }} data-live-controls>
-        <div role="group" aria-label={w.filters} data-live-filters style={{ ...group, flex: mobile ? '1 1 100%' : '1 1 auto' }}>
+        <div role="group" aria-label={w.filters} data-live-filters style={{ ...group, ...(mobile ? { flex: '1 1 100%' } : { flex: '1 1 auto', flexWrap: 'nowrap' }) }}>
           {taskFilter}
           <div data-live-tabs style={mobile ? { minWidth: 0, flex: '1 1 100%' } : { flex: '0 0 auto', width: 'max-content', minWidth: 'max-content' }}>
             <TabStrip<LiveTab>
@@ -79,7 +79,7 @@ export function LiveToolbar({
             />
           </div>
         </div>
-        <div role="group" aria-label={w.actions} data-live-actions style={{ ...group, ...(mobile ? { flex: '1 1 100%' } : { marginLeft: 'auto', justifyContent: 'flex-end' }) }}>
+        <div role="group" aria-label={w.actions} data-live-actions style={{ ...group, ...(mobile ? { flex: '1 1 100%' } : { marginLeft: 'auto', justifyContent: 'flex-end', alignSelf: 'flex-start', flexWrap: 'nowrap' }) }}>
           <PanelMenu
             title={w.sort} width={250} ariaLabel={`${w.sort}: ${w.sorts[sort]}`} align="right"
             triggerStyle={{ ...button(mobile), gap: 6, flexShrink: 0, padding: '0 10px' }} triggerClassName="ag-tap"
