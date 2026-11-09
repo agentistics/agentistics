@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
-import { brtDay, brtDayStartMs, pieceSpan, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
+import { brtDay, brtDayStartMs, pieceDayPresence, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
 import { addDays, clock, DAY_MS, packIntervals, placeColumn, swipeDay, weekDays } from '../../lib/calendarModel'
 import { stageColor, EXPECTED_COLOR, PUBLISHED_COLOR } from './calendarUi'
 import { TEXT, pick } from './calendarText'
@@ -17,9 +17,10 @@ export function phoneEvents(day: string, p: Pick<MobileGridProps, 'nowMs' | 'pie
   const events: PhoneEvent[] = []
   const d0 = brtDayStartMs(day), end = d0 + DAY_MS
   for (const piece of p.pieces) {
-    const span = pieceSpan(piece)
-    if (!span || span.endMs < d0 || span.startMs >= end) continue
-    events.push({ id: piece.key, title: piece.title, color: stageColor(piece.stage), fromMs: Math.max(d0, span.startMs), toMs: Math.min(end, span.endMs), expected: span.startMs > p.nowMs, selection: { kind: 'piece', key: piece.key } })
+    const blocks = pieceDayPresence(piece, day, p.nowMs) // the same rule as the API's window and the desktop Day
+    if (blocks.length === 0) continue
+    const fromMs = Math.min(...blocks.map(b => b.fromMs)), toMs = Math.max(...blocks.map(b => b.toMs))
+    events.push({ id: piece.key, title: piece.title, color: stageColor(piece.stage), fromMs, toMs: Math.max(toMs, Math.min(end, fromMs + 30 * 60_000)), expected: blocks.every(b => b.expected), selection: { kind: 'piece', key: piece.key } })
   }
   for (const v of p.versions) if (v.atMs !== null && brtDay(v.atMs) === day) events.push({ id: `version:${v.version}`, title: v.version, color: v.state === 'published' ? PUBLISHED_COLOR : EXPECTED_COLOR, fromMs: v.atMs, toMs: v.atMs + 30 * 60_000, expected: v.state !== 'published', selection: { kind: 'version', version: v.version } })
   for (const m of p.marks) if (m.kind === 'account-reset' && brtDay(m.atMs) === day) events.push({ id: `reset:${m.account}:${m.window}`, title: m.label, color: 'var(--accent-cyan)', fromMs: m.atMs, toMs: m.atMs + 30 * 60_000, expected: true, selection: { kind: 'mark', mark: m } })

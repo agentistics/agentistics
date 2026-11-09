@@ -7,7 +7,7 @@
  * Every day is a BRT day (`brtDay`), whatever zone the browser is in.
  */
 import {
-  brtDay, brtDayStartMs, brtParts, CAL_STAGES,
+  brtDay, brtDayStartMs, brtParts, CAL_STAGES, pieceDayPresence,
   type CalMark, type CalPiece, type CalPriority, type CalStage, type CalVersion,
 } from '@agentistics/core'
 
@@ -279,18 +279,8 @@ export interface DayBlock { piece: CalPiece; stage: CalStage; fromMs: number; to
 
 /** The blocks one piece draws on one day column: where it is now, then (dashed) the expected rest. Clipped to the day. */
 export function dayBlocks(p: CalPiece, day: string, nowMs: number): DayBlock[] {
-  const d0 = brtDayStartMs(day), d1 = d0 + DAY_MS
-  const out: DayBlock[] = []
-  const clip = (stage: CalStage, from: number, to: number, expected: boolean) => {
-    const f = Math.max(from, d0), t = Math.min(to, d1)
-    if (t > f) out.push({ piece: p, stage, fromMs: f, toMs: t, expected })
-  }
-  if (p.stage === 'published') return out
-  const since = p.stageSinceMs ?? p.startedAtMs
-  const leave = p.stageEta.kind === 'estimate' ? p.stageEta.atMs : null
-  if (since !== null) clip(p.stage, since, leave ?? Math.max(nowMs, since + 15 * 60_000), false)
-  if (p.publishEta.kind === 'estimate') clip(p.stage, Math.max(leave ?? nowMs, nowMs), p.publishEta.atMs, true)
-  return out
+  // Core's `piecePresence` is the ONE rule (also the API's window): real activity, or start -> ETA, never "open since".
+  return pieceDayPresence(p, day, nowMs).map(b => ({ piece: p, stage: p.stage, fromMs: b.fromMs, toMs: b.toMs, expected: b.expected }))
 }
 
 /** Which pieces have anything on that day — a column in the Dia view. */

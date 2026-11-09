@@ -4,7 +4,7 @@
  * anything on that day — where it is now (solid) and the expected rest (dashed, "prev."). The grid scrolls inside
  * itself and opens on the current hour; the page never scrolls.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { brtDay, brtDayStartMs, brtParts, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
 import { agendaOf, clock, dayBlocks, DAY_MS, pct, piecesOnDay } from '../../lib/calendarModel'
@@ -13,6 +13,7 @@ import { EXPECTED_COLOR, PUBLISHED_COLOR, VersionGlyph, stageColor, stageName } 
 
 const HOUR_H = 38
 const COL_MIN = 168
+export const MAX_COLS = 6
 const GUTTER = 48
 
 export function DayView({ day, nowMs, versions, pieces, marks, pt, onOpenPiece, onOpenVersion, onOpenMark, selected }: {
@@ -23,7 +24,10 @@ export function DayView({ day, nowMs, versions, pieces, marks, pt, onOpenPiece, 
   selected: string | null
 }) {
   const d0 = brtDayStartMs(day), isToday = brtDay(nowMs) === day
-  const cols = piecesOnDay(pieces, day, nowMs)
+  const all = piecesOnDay(pieces, day, nowMs)
+  // Never more than MAX_COLS narrow columns: the rest is ONE "+N" column whose list opens on demand.
+  const cols = all.slice(0, MAX_COLS), rest = all.slice(MAX_COLS)
+  const [more, setMore] = useState(false)
   const allDay = agendaOf(day, { versions, pieces, marks })
   const scroller = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -36,7 +40,7 @@ export function DayView({ day, nowMs, versions, pieces, marks, pt, onOpenPiece, 
   const nowTop = isToday ? pct(nowMs, d0, d0 + DAY_MS) : null
 
   return (
-    <div data-cal-day-view data-cal-day={day} data-cal-count={cols.length} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-card)', overflow: 'hidden' }}>
+    <div data-cal-day-view data-cal-day={day} data-cal-count={all.length} data-cal-columns={cols.length} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-card)', overflow: 'hidden' }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '7px 10px', borderBottom: '1px solid var(--border)', flexShrink: 0, minHeight: 36, flexWrap: 'wrap' }}>
         <span style={{ width: GUTTER - 10, fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.1 }}>{pick(TEXT.allDay, pt)}</span>
         {allDay.length === 0 && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>}
@@ -70,7 +74,7 @@ export function DayView({ day, nowMs, versions, pieces, marks, pt, onOpenPiece, 
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)', fontSize: 12.5, padding: 20, textAlign: 'center' }}>{pick(TEXT.emptyTitle, pt)}</div>
       ) : (
         <div ref={scroller} style={{ flex: 1, minHeight: 0, overflow: 'auto', position: 'relative' }}>
-          <div style={{ display: 'flex', minWidth: GUTTER + cols.length * COL_MIN, position: 'relative' }}>
+          <div style={{ display: 'flex', minWidth: GUTTER + (cols.length + (rest.length ? 1 : 0)) * COL_MIN, position: 'relative' }}>
             <div style={{ width: GUTTER, flexShrink: 0, position: 'sticky', left: 0, zIndex: 3, background: 'var(--bg-card)' }}>
               <div style={{ height: 40, position: 'sticky', top: 0, background: 'var(--bg-card)', zIndex: 4 }} />
               <div style={{ position: 'relative', height: 24 * HOUR_H }}>
@@ -105,6 +109,24 @@ export function DayView({ day, nowMs, versions, pieces, marks, pt, onOpenPiece, 
                 </div>
               </div>
             ))}
+            {rest.length > 0 && (
+              <div data-cal-day-more={rest.length} style={{ flex: `1 0 ${COL_MIN}px`, minWidth: 0, borderLeft: '1px solid var(--border)' }}>
+                <div style={{ height: 40, position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', padding: '5px 8px' }}>
+                  <button type="button" aria-expanded={more} onClick={() => setMore(!more)} className="ag-tap"
+                    style={{ height: 28, padding: '0 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', font: 'inherit', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    +{rest.length} {pick(TEXT.more, pt)}
+                  </button>
+                </div>
+                <div hidden={!more} style={{ display: more ? 'grid' : 'none', gap: 4, padding: 6, alignContent: 'start' }}>
+                  {rest.map(p => (
+                    <button key={p.key} type="button" data-cal-day-card={p.key} title={p.title} onClick={e => onOpenPiece(p.key, e)}
+                      style={{ textAlign: 'left', padding: '4px 6px', borderRadius: 5, border: `1px solid ${stageColor(p.stage)}`, background: 'var(--bg-card)', color: 'var(--text-primary)', font: 'inherit', fontSize: 11, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {p.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {nowTop !== null && (
               <div data-cal-now aria-hidden style={{ position: 'absolute', left: 0, right: 0, top: 40 + (nowTop / 100) * 24 * HOUR_H, borderTop: '1.5px solid var(--accent-red)', zIndex: 2, pointerEvents: 'none' }}>
                 <span style={{ position: 'absolute', left: 2, top: -9, background: 'var(--accent-red)', color: '#fff', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 9 }}>{clock(nowMs)}</span>

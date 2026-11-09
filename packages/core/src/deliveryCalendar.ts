@@ -286,13 +286,58 @@ export function pieceSpan(p: CalPiece): { startMs: number; endMs: number } | nul
   return { startMs: Math.min(s, e), endMs: Math.max(s, e) }
 }
 
-const touches = (span: { startMs: number; endMs: number } | null, f: CalFilters): boolean => {
-  if (f.fromMs === undefined && f.toMs === undefined) return true
-  if (!span) return false
-  return span.endMs >= (f.fromMs ?? -Infinity) && span.startMs <= (f.toMs ?? Infinity)
+/** A piece that has not finished only "was on" a day it did something, and on today only if that was in the last 24h. */
+export const RECENT_ACTIVITY_MS = 24 * 3600_000
+const BLIP_MS = 15 * 60_000
+
+export interface CalPresence { fromMs: number; toMs: number; expected: boolean }
+
+/**
+ * THE one rule for "what is on a day" — the Day and phone Week views draw from it and the API's date window filters
+ * with it, so the screen and `GET /api/deliveries/calendar?from=&to=` can never count differently.
+ *  - published: start → publication.
+ *  - open with a FUTURE publish ETA: start → ETA (real until now, expected after).
+ *  - open with no ETA or an ETA already past: NOT stretched across the days between; only the instants of real
+ *    activity (start, stage entries from the trail, the current stage's start), plus now when the last one is < 24h old.
+ *  - no activity data at all: nothing — a piece is never extended on the strength of nothing.
+ */
+export function piecePresence(p: CalPiece, nowMs: number): CalPresence[] {
+  const start = p.startedAtMs ?? p.stageSinceMs
+  if (p.publishedAtMs !== null) {
+    const s = start ?? p.publishedAtMs
+    return [{ fromMs: Math.min(s, p.publishedAtMs), toMs: Math.max(Math.max(s, p.publishedAtMs), Math.min(s, p.publishedAtMs) + BLIP_MS), expected: false }]
+  }
+  const eta = p.publishEta.kind === 'estimate' ? p.publishEta.atMs : null
+  if (eta !== null && eta >= nowMs) {
+    const out: CalPresence[] = []
+    if (start !== null && start < nowMs) out.push({ fromMs: start, toMs: nowMs, expected: false })
+    out.push({ fromMs: Math.max(nowMs, start ?? nowMs), toMs: Math.max(eta, nowMs + BLIP_MS), expected: true })
+    return out
+  }
+  const at = [p.startedAtMs, p.stageSinceMs, ...p.trail.map(v => v.enteredMs)].filter((x): x is number => x !== null && Number.isFinite(x))
+  if (at.length === 0) return []
+  const out: CalPresence[] = at.map(a => ({ fromMs: a, toMs: a + BLIP_MS, expected: false }))
+  const last = Math.max(...at)
+  if (last >= nowMs - RECENT_ACTIVITY_MS) out.push({ fromMs: last, toMs: Math.max(nowMs, last + BLIP_MS), expected: false })
+  return out
 }
 
-export function pieceMatches(p: CalPiece, f: CalFilters): boolean {
+/** The presence clipped to one BRT day. */
+export function pieceDayPresence(p: CalPiece, day: string, nowMs: number): CalPresence[] {
+  const d0 = brtDayStartMs(day), d1 = d0 + 86_400_000
+  return piecePresence(p, nowMs).flatMap(b => {
+    const from = Math.max(b.fromMs, d0), to = Math.min(b.toMs, d1)
+    return to > from ? [{ fromMs: from, toMs: to, expected: b.expected }] : []
+  })
+}
+export const pieceOnDay = (p: CalPiece, day: string, nowMs: number): boolean => pieceDayPresence(p, day, nowMs).length > 0
+
+const touches = (p: CalPiece, f: CalFilters, nowMs: number): boolean => {
+  if (f.fromMs === undefined && f.toMs === undefined) return true
+  return piecePresence(p, nowMs).some(b => b.toMs > (f.fromMs ?? -Infinity) && b.fromMs <= (f.toMs ?? Infinity))
+}
+
+export function pieceMatches(p: CalPiece, f: CalFilters, nowMs: number = Date.now()): boolean {
   if ((f.tasks ?? 'active') === 'active' && !p.active) return false
   if (f.task) {
     const q = f.task.toLowerCase()
@@ -304,7 +349,7 @@ export function pieceMatches(p: CalPiece, f: CalFilters): boolean {
   if (f.harnesses?.length && (!p.harness || !f.harnesses.includes(p.harness))) return false
   if (f.priorities?.length && (!p.priority || !f.priorities.includes(p.priority))) return false
   if (f.confirmedOnly && !p.confirmed) return false
-  return touches(pieceSpan(p), f)
+  return touches(p, f, nowMs)
 }
 
 export interface CalendarView { pieces: CalPiece[]; versions: CalVersion[]; marks: CalMark[] }
@@ -315,7 +360,7 @@ export interface CalendarView { pieces: CalPiece[]; versions: CalVersion[]; mark
  * priority — narrowing by those is a question about pieces, not about releases.
  */
 export function filterCalendar(reply: CalendarReply, f: CalFilters = {}): CalendarView {
-  const pieces = reply.pieces.filter(p => pieceMatches(p, f))
+  const pieces = reply.pieces.filter(p => pieceMatches(p, f, reply.nowMs))
   const keep = new Set(pieces.map(p => p.key))
   const narrowsPieces = !!(f.task || f.subtaskId || f.stages?.length || f.harnesses?.length || f.priorities?.length || f.confirmedOnly)
   const versions = reply.versions.filter(v => {
