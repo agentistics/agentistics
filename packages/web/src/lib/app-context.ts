@@ -52,11 +52,12 @@ export interface AppContext {
   // filters
   filters: Filters
   setFilters: React.Dispatch<React.SetStateAction<Filters>>
-  /** The fleet's own "only what is running" switch — see `FiltersBar`'s `onActiveOnlyChange` doc
-   *  comment. Lives here (not in `Filters`) so the Sessions workspace's mobile FiltersBar can read
-   *  and write the SAME state the desktop shared header already does, computed once in App.tsx. */
+  /** Metric header's active-session scope. */
   activeOnly: boolean
   setActiveOnly: (v: boolean) => void
+  /** Session lists ignore metric controls; their own search and quick filters still apply. */
+  sessionsFilters: Filters
+  sessionsActiveOnly: boolean
   /** The SAME memoized values the desktop header's `FiltersBar` already gets — computed once in
    *  App.tsx from `data`/`filters`, so the mobile Sessions workspace's own `FiltersBar` can reuse
    *  them verbatim instead of re-deriving (and risking disagreeing with) the same filter options.

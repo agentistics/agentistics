@@ -411,6 +411,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const ctx = useOutletContext<AppContext>()
   const {
     lang, isCentral, theme, filters, setFilters, activeOnly, setActiveOnly,
+    sessionsFilters, sessionsActiveOnly,
     availableProjects, sessionCountByProject, models, availableHarnesses, derived,
     data, currency, brlRate,
   } = ctx
@@ -767,8 +768,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
 
   /** The fleet as the aside is showing it — one narrowing, read by both. */
   const overviewRows = useMemo(
-    () => filterFleet({ rows: fleet.rows, filters, activeOnly }).rows,
-    [fleet.rows, filters, activeOnly],
+    () => filterFleet({ rows: fleet.rows, filters: sessionsFilters, activeOnly: sessionsActiveOnly }).rows,
+    [fleet.rows, sessionsFilters, sessionsActiveOnly],
   )
 
   /**
@@ -3215,8 +3216,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             historyLoading={fleet.historyLoading}
             closedTotal={fleet.closedTotal ?? 0}
             unsupported={unsupported}
-            filters={filters}
-            activeOnly={activeOnly}
+            filters={sessionsFilters}
+            activeOnly={sessionsActiveOnly}
             {...(fleet.unavailable ? { unavailable: fleet.unavailable } : {})}
             stale={stale}
             rowsById={rowIndex}
