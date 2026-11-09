@@ -1246,6 +1246,15 @@ export async function attachSession(
     const sub = w.book.subtasks.find(s => s.id === plan.subtaskId)
     const next = sub ? statusAfterAttach(sub.status) : null
     if (next) await patchSubtask(plan.subtaskId, { status: next })
+    if (sub?.ownerRequest) {
+      const { effectiveRole } = await import('./session-roles')
+      const current = (await w.store.read()).subtasks.find(s => s.id === sub.id)
+      if (current) {
+        const now = new Date().toISOString()
+        await w.store.upsertSubtask({ ...current, startedAt: current.startedAt ?? now, startDate: current.startDate ?? current.startedAt ?? now,
+          assignee: await effectiveRole(row) === 'worker' ? 'worker' : 'leader' })
+      }
+    }
   }
 
   // The record first, then LIVE git. Every row written before `ManagedSession.repo` existed carries
@@ -1473,6 +1482,14 @@ export async function fileNativeSession(o: {
   const label = link.label ?? o.sessionId
   const advanced = statusAfterAttach(task.status)
   if (advanced) await markTask(task.id, advanced, label)
+  if (plan.subtaskId) {
+    const sub = w.book.subtasks.find(s => s.id === plan.subtaskId)
+    if (sub?.ownerRequest) {
+      const now = new Date().toISOString()
+      await w.store.upsertSubtask({ ...sub, status: statusAfterAttach(sub.status) ?? sub.status,
+        startedAt: sub.startedAt ?? now, startDate: sub.startDate ?? now, assignee: 'worker', updatedAt: now })
+    }
+  }
   await w.store.logEvents([event(task.id, label, 'session', { to: o.sessionId, detail: 'agentistics · native' })])
   return { ok: true, id: link.id, ...(movedFrom ? { movedFrom } : {}) }
 }
@@ -1525,10 +1542,12 @@ export async function markTask(
   o: {
     /** Why, in the blocker's own words. Required by `blocked` unless a blocking TASK is named. */
     reason?: string
+    /** Explicit caller decision after seeing the still-open top-level pieces. */
+    allowOpenSubtasks?: boolean
     /** Blocking task ids to set as part of the same move — the other way to answer "why". */
     blockedBy?: readonly string[]
   } = {},
-): Promise<{ ok: boolean; evidence?: DeliveryEvidence; message?: string }> {
+): Promise<{ ok: boolean; evidence?: DeliveryEvidence; message?: string; openSubtaskIds?: string[] }> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return { ok: false, message: 'no_such_task' }
@@ -1539,6 +1558,10 @@ export async function markTask(
   // already does. Checked BEFORE any of the status-specific gates below: a `to` that names nothing
   // is not "this move is missing a reason", it is not a move at all.
   if (!isKnownStatusId(to, w.book.statuses)) return { ok: false, message: 'unknown_status' }
+  if (to === 'in_review' && o.allowOpenSubtasks !== true) {
+    const open = w.book.subtasks.filter(s => s.taskId === task.id && !s.parentGroupId && !['done', 'abandoned'].includes(s.status))
+    if (open.length) return { ok: false, message: 'open_subtasks', openSubtaskIds: open.map(s => s.id) }
+  }
 
   const now = new Date().toISOString()
   const reason = o.reason?.trim() ?? ''
@@ -1591,7 +1614,7 @@ export async function markTask(
   // bubbles up through `patchSubtask`, and it is judged and stamped here rather than there so a
   // task moved straight from the board (never touching a subtask at all) still gets one.
   const startsNow = !task.startedAt && marksStart(task.status, to)
-  await w.store.patchTask(task.id, {
+  const moved = await w.store.patchTask(task.id, {
     status: to,
     updatedAt: now,
     ...(done && !task.deliveredAt ? { deliveredAt: now } : {}),
@@ -1599,7 +1622,8 @@ export async function markTask(
     // The reason belongs to THIS block. Leaving `blocked` clears it: a sentence that outlived its
     // block reads as current, which is worse than none.
     ...(to === 'blocked' ? { blockedReason: reason } : { blockedReason: '' }),
-  })
+  }, { allowOpenSubtasks: o.allowOpenSubtasks })
+  if (!moved) return { ok: false, message: to === 'in_review' ? 'open_subtasks' : 'no_such_task' }
   // Attempts only ever settle when the TASK settles. An in-progress task leaves them running.
   if (done || to === 'abandoned') {
     for (const a of w.book.attempts.filter(a => a.taskId === task.id && a.status === 'running')) {
@@ -1618,6 +1642,7 @@ export async function markTask(
     // The log carries the reason with the move, so "why was this blocked on Tuesday" survives the
     // task being unblocked and the field being cleared.
     ...(to === 'blocked' && reason ? { detail: reason } : {}),
+    ...(to === 'in_review' && o.allowOpenSubtasks === true ? { detail: 'Explicit review override with open subtasks' } : {}),
   })])
 
   const prefs = await readPreferences().catch(() => null)

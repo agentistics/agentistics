@@ -39,7 +39,7 @@ export function ComposerShell({ hidden, dimmed, children }: {
 
 /** The controls, on their own line under the text. */
 export function ComposerToolbar({ children }: { children: ReactNode }) {
-  return <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{children}</div>
+  return <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>{children}</div>
 }
 
 export interface ComposerAttachment { path: string; name: string }

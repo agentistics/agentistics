@@ -250,6 +250,7 @@ function authText(s: AwayState): string {
 }
 
 export interface AwayBriefingOptions {
+  lang?: 'pt' | 'en'
   /** True when the briefing already carries the plan-limits rule (agentistics_plan_limits is
    *  available): the away line then POINTS at it instead of repeating it. */
   planLimitsInBriefing?: boolean
@@ -281,8 +282,8 @@ const PLAN_LIMITS_RULE = 'before opening sessions read agentistics_plan_limits a
 
 /**
  * The briefing line(s) for a session being started while the owner is away. Empty when inactive —
- * a session started after `until` is never told the owner is out. A LEADER gets four lines (scope,
- * pacing, quality, communication): autonomous mode must make a leader run the fleet at least as carefully
+ * a session started after `until` is never told the owner is out. A LEADER gets scope,
+ * pacing, quality, communication and registration: autonomous mode must make a leader run the fleet at least as carefully
  * as when the owner is watching — never burn tokens without producing.
  */
 export function awayBriefingLines(
@@ -305,6 +306,9 @@ export function awayBriefingLines(
       `Autonomous pacing (do not burn tokens without producing): ${pacing}. Never run more than ${s.maxWorkers} workers at once; ${topCapsText(s)}; pause one worker when free RAM drops under ${AWAY_MIN_FREE_RAM_GB} GB. Pick each model by the task, per the model-balance rule (strongest tier: design, coordination, hard bugs; mid tier: scoped implementation; light tier: probes), on whichever provider has room.`,
       `Autonomous quality: QA by a different model from the author, tests only in throwaway runs (agentop run --rm); ${releases}.`,
       "Autonomous communication: workers report ONLY to their leader through agentistics_session_message; leaders decide within the authorisations, record each decision (task comment or hand-off file), and never end a turn on a question. A warning or decision that cannot wait goes to the owner as an informational notice (agentistics_session_away with `notice`, shown in their bell and Nay), never as a question or a blocked turn. At a hand-off, write in the hand-off file and in the successor's prompt what is authorised (agentistics tells the successor too).",
+      o.lang === 'pt'
+        ? 'Registro autônomo: cada trabalho deve estar em uma subtarefa com prioridade, início, responsável (líder ou worker) e a sessão vinculada. Mova os status in_progress → in_review para Live, Calendário e Benchmark acompanharem. Antes de implementar diretamente, o líder vincula a si mesmo à sua própria subtarefa.'
+        : 'Autonomous registration: every piece of work must have a subtask with priority, start, assignee (leader or worker), and its session filed on it. Move statuses in_progress → in_review so Live, Calendar and Benchmark can follow it. Before implementing directly, a leader files itself on its own subtask.',
     ]
   }
   if (role === 'worker') {

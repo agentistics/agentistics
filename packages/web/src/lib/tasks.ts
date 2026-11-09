@@ -8,6 +8,8 @@
  */
 
 import { debounceWithMaxWait } from './debounceMaxWait'
+import { beginStatusWrite, requestReviewOverride } from './statusWrites'
+import { pushLocalNotification } from './notifications'
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { subscribeEvent } from './eventStream'
 import { peekTaskList, putTaskList, subscribeTaskList, type TaskListEntry } from './taskListStore'
@@ -334,6 +336,9 @@ export interface TaskComment {
 
 export type TaskThread = TaskThreadRecord
 export interface Subtask {
+  priority?: TaskPriorityId
+  assignee?: 'leader' | 'worker'
+  ownerRequest?: { messageId: string; sessionId: string; conversationId: string; at: string; text: string; pedidoId: string }
   id: string
   taskId: string
   title: string
@@ -660,12 +665,15 @@ export function useTaskDetail(ref: string | undefined, filters?: Filters) {
  * nothing this shape names, so there is nothing to ask about.
  */
 export type StatusRefusalReason =
-  | 'done_needs_session' | 'invalid_group' | 'subtask_has_sessions' | 'group_field_conflict'
+  | 'done_needs_session' | 'invalid_group' | 'subtask_has_sessions' | 'group_field_conflict' | 'open_subtasks'
 const STATUS_REFUSAL_REASONS: readonly StatusRefusalReason[] =
-  ['done_needs_session', 'invalid_group', 'subtask_has_sessions', 'group_field_conflict']
+  ['done_needs_session', 'invalid_group', 'subtask_has_sessions', 'group_field_conflict', 'open_subtasks']
 export type StatusWriteResult = { ok: true } | { ok: false; reason?: StatusRefusalReason }
 
 async function postStatus(path: string, body: unknown): Promise<StatusWriteResult> {
+  const subtaskId = (body as { id?: unknown })?.id
+  const end = beginStatusWrite(typeof subtaskId === 'string' ? `${path}#${subtaskId}` : path)
+  const fail = (reason: string) => pushLocalNotification({ type: 'error', code: 'tasks.status_failed', meta: { reason } })
   try {
     const res = await fetch(path, {
       method: 'POST',
@@ -677,27 +685,36 @@ async function postStatus(path: string, body: unknown): Promise<StatusWriteResul
     // filed, or a group write it cannot honor — every one of them names a piece of work this
     // request cannot do YET. Read the body for WHICH one; anything else stays a bare refusal.
     if (res.status === 422) {
-      const refused = await res.json().catch(() => null) as { message?: string } | null
+      const refused = await res.json().catch(() => null) as { message?: string; openSubtaskIds?: string[] } | null
+      if (refused?.message === 'open_subtasks' && await requestReviewOverride(refused.openSubtaskIds?.length ?? 0)) {
+        return await postStatus(path, { ...(body as Record<string, unknown>), allowOpenSubtasks: true })
+      }
       if (refused?.message && (STATUS_REFUSAL_REASONS as readonly string[]).includes(refused.message)) {
+        if (refused.message !== 'open_subtasks') fail(refused.message)
         return { ok: false, reason: refused.message as StatusRefusalReason }
       }
     }
+    fail('write_failed')
     return { ok: false }
   } catch {
+    fail('network_error')
     return { ok: false }
+  } finally {
+    end()
   }
 }
 
 export function markTask(
   ref: string,
   status: TaskStatus,
-  o: { reason?: string; blockedBy?: string[]; actor?: string } = {},
+  o: { reason?: string; blockedBy?: string[]; actor?: string; allowOpenSubtasks?: boolean } = {},
 ): Promise<StatusWriteResult> {
   return postStatus(`/api/tasks/${encodeURIComponent(ref)}`, {
     status,
     ...(o.reason ? { reason: o.reason } : {}),
     ...(o.blockedBy ? { blockedBy: o.blockedBy } : {}),
     ...(o.actor ? { actor: o.actor } : {}),
+    ...(o.allowOpenSubtasks === true ? { allowOpenSubtasks: true } : {}),
   })
 }
 

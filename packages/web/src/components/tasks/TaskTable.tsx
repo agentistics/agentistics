@@ -247,6 +247,7 @@ function cellFor(
     case 'status': return (
       <StatusChip
         compact
+        taskId={row.task.id}
         value={row.task.status}
         lang={lang}
         statuses={statuses}
@@ -565,10 +566,10 @@ function SubtaskRows({
               <td key={id} data-subtask-col={id} style={{ ...cellBox, width: subtaskWidths[id], textAlign: def.numeric ? 'right' : 'left', ...tint }}>
                 {id === 'status'
                   ? (
-                    <ChipSelect
+                    <StatusChip
                       compact
+                      taskId={t.taskId} subtaskId={t.id} lang={lang} statuses={statuses}
                       value={t.status}
-                      options={statusOptions(liveStatusMap(statuses), liveStatusOrder(statuses))}
                       onPick={v => void onPatch(t.id, { status: v as TaskStatus })}
                     />
                   )
@@ -655,6 +656,8 @@ export interface TaskTableProps {
   lang?: 'pt' | 'en'
   /** Details already fetched for expanded rows — subtasks come from here. */
   details: Map<string, TaskDetail>
+  loadingDetails?: ReadonlySet<string>
+  detailErrors?: ReadonlySet<string>
   /** The board's per-status totals while `rows` is only step one of the split load: a status group
    *  shows its TRUE size from the first paint, and is not dropped as empty before its rows arrive. */
   statusTotals?: Record<string, number>
@@ -1185,6 +1188,13 @@ export function TaskTable(p: TaskTableProps) {
                       // own column count, which is what makes their filler come out to zero.
                       const renderSubtaskGrid = (effectiveCols: number) => (
                         <>
+                          {(p.loadingDetails?.has(row.task.id) || !detail) && !p.detailErrors?.has(row.task.id) && (
+                            <tr><td colSpan={effectiveCols + 2} role="status" style={cellBox}>{p.lang === 'pt' ? 'Carregando subtarefas…' : 'Loading subtasks…'}</td></tr>
+                          )}
+                          {p.detailErrors?.has(row.task.id) && <tr><td colSpan={effectiveCols + 2} role="alert" style={cellBox}>
+                            {p.lang === 'pt' ? 'Não foi possível carregar as subtarefas. ' : 'Could not load subtasks. '}
+                            <button type="button" onClick={() => p.onExpand(row.task.id)}>{p.lang === 'pt' ? 'Tentar novamente' : 'Retry'}</button>
+                          </td></tr>}
                           <tr style={{ background: 'var(--bg-surface)' }}>
                             <td style={{ padding: '5px 10px' }} />
                             {/* The title column is always shown — never in the "Subtask columns"

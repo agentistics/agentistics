@@ -92,7 +92,7 @@ export interface TaskStore {
   upsertTask(task: Task): Promise<void>
   upsertAttempt(attempt: Attempt): Promise<void>
   /** False when no record carries that id — never a silent success. */
-  patchTask(id: string, patch: TaskPatch): Promise<boolean>
+  patchTask(id: string, patch: TaskPatch, o?: { allowOpenSubtasks?: boolean }): Promise<boolean>
   patchAttempt(id: string, patch: AttemptPatch): Promise<boolean>
   addComment(c: TaskComment): Promise<void>
   /**
@@ -112,6 +112,8 @@ export interface TaskStore {
   updateThread(id: string, fn: (t: TaskThread) => TaskThread): Promise<boolean>
   updateComment(id: string, fn: (c: TaskComment) => TaskComment): Promise<boolean>
   upsertSubtask(t: Subtask): Promise<void>
+  /** Atomic insert-if-absent by message id; retries never overwrite progress. */
+  registerComposerSubtask(t: Subtask): Promise<Subtask | null>
   removeSubtask(id: string): Promise<boolean>
   addFile(f: TaskFile): Promise<void>
   /** Removes the RECORD. The bytes on disk are the caller's to unlink — see `task-files.ts`. */
@@ -423,6 +425,12 @@ function sanitizeThread(raw: unknown): TaskThread | null {
   }
 }
 
+function validOwnerRequest(v: unknown): v is NonNullable<Subtask['ownerRequest']> {
+  if (!v || typeof v !== 'object') return false
+  const r = v as Record<string, unknown>
+  return ['messageId', 'sessionId', 'conversationId', 'at', 'text', 'pedidoId'].every(k => typeof r[k] === 'string' && r[k] !== '')
+}
+
 function sanitizeSubtask(raw: unknown): Subtask | null {
   if (!raw || typeof raw !== 'object') return null
   const t = raw as Record<string, unknown>
@@ -433,6 +441,9 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
   const status = migrateStatus(t.status) ?? (t.done === true ? 'done' : 'todo')
   return {
     id, taskId, title,
+    ...(typeof t.priority === 'string' && ['urgent', 'high', 'medium', 'low'].includes(t.priority) ? { priority: t.priority as TaskPriority } : {}),
+    ...(t.assignee === 'leader' || t.assignee === 'worker' ? { assignee: t.assignee } : {}),
+    ...(validOwnerRequest(t.ownerRequest) ? { ownerRequest: t.ownerRequest } : {}),
     status,
     // Derived, never trusted from the file: two fields for one fact drift, and a row saying
     // `done: false, status: 'done'` has no correct reading.
@@ -690,6 +701,21 @@ export function createTaskStore(file: string): TaskStore {
 
   return {
     read,
+    registerComposerSubtask(subtask) {
+      return enqueue(async () => {
+        const book = await read()
+        const request = subtask.ownerRequest
+        if (!request || !book.tasks.some(t => t.id === subtask.taskId)) return null
+        const existing = book.subtasks.find(s => s.ownerRequest?.messageId === request.messageId)
+        if (existing) return existing
+        const registered: TaskEvent = { id: `e-${subtask.id.slice(2)}`, taskId: subtask.taskId, subtaskId: subtask.id,
+          actor: 'owner:composer', kind: 'create', at: request.at, detail: subtask.title, to: subtask.status }
+        await write({ ...book, subtasks: [...book.subtasks, subtask],
+          tasks: book.tasks.map(t => t.id === subtask.taskId ? { ...t, updatedAt: request.at } : t),
+          events: [...book.events, registered].slice(-MAX_EVENTS) })
+        return subtask
+      })
+    },
     upsertTask(task) {
       return enqueue(async () => {
         const book = await read()
@@ -705,13 +731,14 @@ export function createTaskStore(file: string): TaskStore {
         })
       })
     },
-    patchTask(id, patch) {
+    patchTask(id, patch, o) {
       return enqueue(async () => {
         const book = await read()
         const target = book.tasks.find(t => t.id === id)
         // Nothing to change: writing anyway would touch the file, and pointlessly clear a pending
         // corrupt-quarantine, for a no-op.
         if (!target) return false
+        if (patch.status === 'in_review' && o?.allowOpenSubtasks !== true && book.subtasks.some(s => s.taskId === id && !s.parentGroupId && !['done', 'abandoned'].includes(s.status))) return false
         const next = { ...target, ...patch }
         await write({ ...book, tasks: book.tasks.map(t => (t.id === id ? next : t)) })
         return true

@@ -20,7 +20,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Loader } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { scrollIsOutside } from '../../lib/popoverScroll'
 import { surface } from './board'
@@ -37,6 +37,8 @@ export interface ChipSelectProps {
   options: readonly ChipOption[]
   onPick: (v: string) => void
   disabled?: boolean
+  pending?: boolean
+  pendingLabel?: string
   /** Tight cells (a table row) get less padding; a rail or a form gets the roomier one. */
   compact?: boolean
   /** Fill the column it sits in. Off for the batch bar, where it sits among other buttons. */
@@ -58,8 +60,9 @@ export function chipStyle(color: string, dim: string): CSSProperties {
 const PANEL_MAX = 340
 
 export function ChipSelect({
-  value, options, onPick, disabled, compact, block = true, title,
+  value, options, onPick, disabled: disabledProp, pending, pendingLabel = 'Saving', compact, block = true, title,
 }: ChipSelectProps) {
+  const disabled = disabledProp || pending
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const [at, setAt] = useState<{ left: number; top?: number; bottom?: number; width: number } | null>(null)
@@ -114,6 +117,7 @@ export function ChipSelect({
         ref={trigger}
         onClick={e => { e.stopPropagation(); toggle() }}
         disabled={disabled}
+        aria-busy={pending || undefined}
         title={title}
         style={{
           width: block ? '100%' : undefined,
@@ -125,6 +129,7 @@ export function ChipSelect({
         }}
       >
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{current.label}</span>
+        {pending && <Loader size={12} className="ag-working-spin" aria-label={pendingLabel} />}
         {!disabled && <ChevronDown size={compact ? 10 : 12} style={{ flexShrink: 0, opacity: 0.75 }} />}
       </button>
       {open && at && createPortal(
@@ -145,6 +150,7 @@ export function ChipSelect({
                 // their meaning; these sit in a `gap: 2` list, where a projected box covers the row
                 // above and its bottom band selects the row below.
                 key={o.value}
+                disabled={disabled}
                 onClick={e => {
                   e.stopPropagation()
                   setOpen(false)

@@ -2292,7 +2292,7 @@ describe('FLUXO.CICLO-COMPLETO — no stage after the review depends on someone 
     const ask = 'Implementa o botão de exportar CSV na tela de custos'
     // The owner's composer message is recorded as an owner request (the engine turns it into the pedido below).
     const events: Array<{ id: string; payload: Record<string, unknown> }> = []
-    const outcome = await emitOwnerMessage({ id: 'leader', action: 'prompt', text: ask }, {
+    const outcome = await emitOwnerMessage({ id: 'leader', action: 'prompt', text: ask, asTask: { priority: 'medium' } }, {
       flowsOn: () => true, row: async () => ({ id: 'leader', conversationId: 'conv-l', taskId: 't1' }), roleOf: async () => 'leader',
       mode: async () => undefined, emit: async e => { events.push(e); return true }, now: () => Date.parse('2026-11-07T02:00:00Z'),
     })
