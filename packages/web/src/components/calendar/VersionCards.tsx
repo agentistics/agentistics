@@ -3,7 +3,7 @@
  * planned one with its expected day (or the plain words "no estimate"), its confidence and a bar of where its pieces
  * stand. A card is a view of core's `CalVersion`; it asserts nothing the version does not carry.
  */
-import { brtDay, type CalVersion } from '@agentistics/core'
+import { brtDay, compareVersions, type CalVersion } from '@agentistics/core'
 import { clock, dowShort, relativeDay, stageSegments, weekdayMon0 } from '../../lib/calendarModel'
 import { TEXT, pick } from './calendarText'
 import { Confidence, EXPECTED_COLOR, PUBLISHED_COLOR, VersionGlyph, stageColor } from './calendarUi'
@@ -12,7 +12,14 @@ import { Confidence, EXPECTED_COLOR, PUBLISHED_COLOR, VersionGlyph, stageColor }
 export function stripVersions(versions: readonly CalVersion[]): CalVersion[] {
   const planned = versions.filter(v => v.state === 'planned')
   const published = versions.filter(v => v.state === 'published' && v.atMs !== null).sort((a, b) => b.atMs! - a.atMs!).slice(0, 1)
-  return [...published, ...planned]
+  // A version below the newest published release has no remaining place in the
+  // strip when it lacks release evidence: it was skipped or folded into a later
+  // release, not a pending shipment with an ETA still to discover.
+  const newest = published[0]
+  const visiblePlanned = newest?.taggedRelease
+    ? planned.filter(v => compareVersions(v.version, newest.version) > 0)
+    : planned
+  return [...published, ...visiblePlanned]
 }
 
 /** PURE: the card's second line — when it shipped, or when it is expected, in words. */

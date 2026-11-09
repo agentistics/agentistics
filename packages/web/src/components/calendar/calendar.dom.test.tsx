@@ -101,6 +101,12 @@ test('version cards: the last published one plus every planned one, each with it
   expect(document.querySelectorAll('[data-cal-version]').length).toBe(3)
 })
 
+test('version cards hide an untagged older plan once a tagged release is known', () => {
+  const latest = view.versions.find(v => v.version === '2.201.1')!
+  const older = { ...view.versions.find(v => v.version === '2.202.0')!, version: '2.200.9' }
+  expect(stripVersions([{ ...latest, taggedRelease: true }, older]).map(v => v.version)).toEqual(['2.201.1'])
+})
+
 test('filters: the UI shape converts to core filters; the default is "tasks being worked on" and is not "active filtering"', () => {
   expect(toCalFilters(DEFAULT_FILTERS)).toEqual({ tasks: 'active' })
   expect(filtersActive(DEFAULT_FILTERS)).toBe(false)

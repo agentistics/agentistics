@@ -80,6 +80,23 @@ describe('buildCalendar', () => {
     expect(v.basis).toBe('partial')
     expect(v.atMs).toBe(NOW + 6 * H)
   })
+  test('a tagged green release is published even when one sibling piece is still open', () => {
+    const r = buildCalendar({
+      nowMs: NOW,
+      lives: [
+        live({ key: 'rel/open', taskId: 'rel', stage: 'running', publishEta: { kind: 'none', reason: 'no-history' } }),
+        live({ key: 'rel/done', taskId: 'rel', stage: 'published', deliveredAtMs: NOW - H }),
+      ],
+      records: [
+        { subtaskId: 'open', taskId: 'rel', phase: 'executando', versionTarget: '2.203.0' },
+        { subtaskId: 'done', taskId: 'rel', phase: 'publicado', versionTarget: '2.203.0', tag: 'v2.203.0', publishedAt: '2026-11-07T16:20:00.000Z' },
+      ],
+      tasks: [{ id: 'rel', title: 'Release', status: 'in_progress' }], subtasks: [], resets: [],
+    })
+    expect(r.versions).toContainEqual(expect.objectContaining({
+      version: '2.203.0', state: 'published', basis: 'published', atMs: Date.parse('2026-11-07T16:20:00.000Z'),
+    }))
+  })
   test('a version whose every piece cannot estimate has NO date', () => {
     const r = buildCalendar({
       nowMs: NOW, lives: [live({ key: 'x/y', taskId: 'x', stage: 'queue', eta: { kind: 'none' }, publishEta: { kind: 'none', reason: 'not-started' } })],
