@@ -44,7 +44,7 @@ import { toControlSession } from './control-session'
 import { cliStrings } from '../cli-i18n'
 import { loadConsolidatedSession } from '../consolidate'
 import { toConversation } from './conversations'
-import { migratePrompts, pendingFor, type PendingPrompt } from './pending-prompts'
+import { migratePrompts, pendingFor, strandedFor, type PendingPrompt } from './pending-prompts'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './harness-session-file'
 import { transcriptAvailability, transcriptSentence, type TranscriptAvailability } from './transcript-availability'
 import type { SessionConversationLink } from '@agentistics/core'
@@ -178,6 +178,12 @@ export interface ChatPayload {
    * long it has been waiting instead of drawing a bubble with no age.
    */
   pending?: PendingPrompt[]
+  /**
+   * MENSAGENS.KILL — what was handed to this session and never read, for a session that is NOT running
+   * (killed, crashed, finished). Offered back to the person to resend; never resent by itself. Present only
+   * when the session is not live — a live session's waiting messages are `pending`.
+   */
+  stranded?: PendingPrompt[]
   /**
    * Already-localized: these turns are the END of a longer conversation.
    *
@@ -325,8 +331,10 @@ async function readSessionChatCore(
         : undefined
       return { turns: [], live, ...(queued.length > 0 ? { pending: queued } : {}), ...(linkNote ? { linkNote } : {}) }
     }
+    const strandedUnlinked = strandedFor(row.id, [])
     return {
       turns: [],
+      ...(strandedUnlinked.length > 0 ? { stranded: strandedUnlinked } : {}),
       unavailable: row.conversationBlind ?? (lang === 'pt'
         ? 'Esta sessão ainda não tem uma conversa vinculada, então não há transcrição para ler.'
         : 'This session has no linked conversation yet, so there is no transcript to read.'),
@@ -407,8 +415,10 @@ async function readSessionChatCore(
       ...(lastActivityMs !== undefined ? { lastActivityMs } : {}),
       ...(retentionDays !== undefined ? { retentionDays } : {}),
     })
+    const strandedGone = strandedFor(conversationId, [])
     return {
       turns: [],
+      ...(strandedGone.length > 0 ? { stranded: strandedGone } : {}),
       unavailable: transcriptSentence(availability, lang, row.harness, lastActivityMs) ?? '',
       transcript: availability,
       live,
@@ -479,7 +489,11 @@ export async function finishChatRead(
   // What is still waiting, judged against the user turns THIS read returned. The window matters and
   // is the right one: a message queued a minute ago cannot be older than the last 400 turns, and
   // comparing against a wider slice would cost a second read to learn nothing.
-  let pending = pendingFor(conversationId, read.turns.filter(t => t.role === 'user').map(t => t.text))
+  const userTexts = read.turns.filter(t => t.role === 'user').map(t => t.text)
+  // A session that is not running will never read what it was handed: those messages are STRANDED, kept
+  // however long ago (MENSAGENS.KILL), instead of waiting "delivered — not read yet" until the live ceiling.
+  let pending = live ? pendingFor(conversationId, userTexts) : []
+  let stranded = live ? [] : strandedFor(conversationId, userTexts)
   // Read once per chat load, not per turn: the log is one small append-only file and the view
   // resolves against it locally. Omitted when there is nothing recorded, so a machine that never
   // attached anything carries no field at all.
@@ -489,6 +503,7 @@ export async function finishChatRead(
   if (anyGrant()) {
     read.turns = await scrubDeep(id, read.turns)
     pending = await scrubDeep(id, pending)
+    stranded = await scrubDeep(id, stranded)
   }
   return {
     turns: read.turns,
@@ -497,6 +512,7 @@ export async function finishChatRead(
     ...(messages.length > 0 ? { attachmentMessages: messages } : {}),
     live,
     ...(pending.length > 0 ? { pending } : {}),
+    ...(stranded.length > 0 ? { stranded } : {}),
     ...(read.older
       ? {
           older: lang === 'pt'

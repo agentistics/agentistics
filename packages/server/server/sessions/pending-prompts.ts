@@ -50,6 +50,14 @@ export interface PendingPrompt {
  */
 export const PENDING_TTL_MS = 20 * 60 * 1000
 
+/**
+ * How long an entry that the live view gave up on is still KEPT, to be offered back when its session
+ * is killed (MENSAGENS.KILL). The live ceiling above stops a dropped message from haunting a RUNNING
+ * session; it must not also erase it, because the person who killed a hung session needs exactly those
+ * words again. Two weeks is far past any session's life and still bounded.
+ */
+export const STRANDED_KEEP_MS = 14 * 24 * 60 * 60 * 1000
+
 /** The most entries kept per conversation — a runaway sender cannot grow this without bound. */
 const MAX_PER_SESSION = 50
 const MAX_TOTAL = 500
@@ -104,8 +112,10 @@ export function recordPrompt(conversationId: string, text: string, now = Date.no
   load()
   if (conversationId === '' || text.trim() === '') return
   const list = byConversation.get(conversationId) ?? []
-  list.push({ text, at: now })
-  byConversation.set(conversationId, list.slice(-MAX_PER_SESSION))
+  // A resend of words still held (stranded or expired) REPLACES the old copy: one message, one entry.
+  const rest = list.filter(p => p.text !== text)
+  rest.push({ text, at: now })
+  byConversation.set(conversationId, rest.slice(-MAX_PER_SESSION))
   trimTotal()
   persist()
 }
@@ -124,13 +134,29 @@ export function pendingFor(
   load()
   const list = byConversation.get(conversationId)
   if (list === undefined || list.length === 0) return []
-  const fresh = list.filter(p => now - p.at < PENDING_TTL_MS)
-  const stillWaiting = new Set(pendingEchoes(fresh.map(p => p.text), userTurns))
-  const kept = fresh.filter(p => stillWaiting.has(p.text))
+  // Past the live ceiling an entry is HIDDEN from a running session but KEPT (see STRANDED_KEEP_MS).
+  const held = list.filter(p => now - p.at < STRANDED_KEEP_MS)
+  const stillWaiting = new Set(pendingEchoes(held.map(p => p.text), userTurns))
+  const kept = held.filter(p => stillWaiting.has(p.text))
   if (kept.length === 0) byConversation.delete(conversationId)
   else byConversation.set(conversationId, kept)
-  if (fresh.length !== list.length || kept.length !== fresh.length) persist()
-  return kept
+  if (held.length !== list.length || kept.length !== held.length) persist()
+  return kept.filter(p => now - p.at < PENDING_TTL_MS)
+}
+
+/**
+ * What a session that is NO LONGER RUNNING was handed and never read — everything still held, however
+ * old, until the transcript accounts for it (a reopened conversation that already carries the text
+ * retires it) or `STRANDED_KEEP_MS` passes. Offered to the person, never re-sent by itself: the session
+ * may have been killed because of these very messages.
+ */
+export function strandedFor(
+  conversationId: string,
+  userTurns: readonly string[],
+  now = Date.now(),
+): PendingPrompt[] {
+  pendingFor(conversationId, userTurns, now)
+  return [...(byConversation.get(conversationId) ?? [])]
 }
 
 /**

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, reloadPrompts, resetPrompts, usePromptStoreForTests } from './pending-prompts'
+import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, reloadPrompts, resetPrompts, strandedFor, STRANDED_KEEP_MS, usePromptStoreForTests } from './pending-prompts'
 import { parseAntigravityChat } from './antigravity-chat'
 import { parseCodexChat } from './codex-chat'
 import { parseCopilotChat } from './copilot-chat'
@@ -150,5 +150,40 @@ describe('local command acknowledgements', () => {
     reloadPrompts()
     expect(pendingFor(CONV, [command]).map(p => p.text)).toEqual([prompt])
     expect(pendingFor(CONV, [command, prompt])).toEqual([])
+  })
+})
+
+describe('MENSAGENS.KILL — what was typed into a session that died is not lost', () => {
+  const HOUR = 60 * 60 * 1000
+  it('a message queued behind a hung session is STRANDED after a kill, long past the live TTL', () => {
+    recordPrompt(CONV, 'please run the migration', 0)
+    // the session hung; the live view gave up on it after the ceiling...
+    expect(pendingFor(CONV, [], PENDING_TTL_MS + 1)).toEqual([])
+    // ...and it was killed hours later: the message is still there to be resent.
+    expect(strandedFor(CONV, [], 3 * HOUR).map(p => p.text)).toEqual(['please run the migration'])
+  })
+  it('survives a server restart', () => {
+    recordPrompt(CONV, 'one', 0)
+    pendingFor(CONV, [], PENDING_TTL_MS + 1)
+    reloadPrompts()
+    expect(strandedFor(CONV, [], HOUR).map(p => p.text)).toEqual(['one'])
+  })
+  it('a reopened conversation that already carries the text does not offer it again', () => {
+    recordPrompt(CONV, 'hello there', 0)
+    expect(strandedFor(CONV, ['hello there'], HOUR)).toEqual([])
+    expect(strandedFor(CONV, [], HOUR)).toEqual([])
+  })
+  it('a resend replaces the stranded copy instead of duplicating it', () => {
+    recordPrompt(CONV, 'again', 0)
+    recordPrompt(CONV, 'again', 2 * HOUR)
+    expect(strandedFor(CONV, [], 3 * HOUR)).toEqual([{ text: 'again', at: 2 * HOUR }])
+  })
+  it('is bounded: a message nobody resent for weeks stops being offered', () => {
+    recordPrompt(CONV, 'old', 0)
+    expect(strandedFor(CONV, [], STRANDED_KEEP_MS + 1)).toEqual([])
+  })
+  it('is held under the row id for a session that never linked a conversation', () => {
+    recordPrompt('row-x', 'first', 0)
+    expect(strandedFor('row-x', [], HOUR).map(p => p.text)).toEqual(['first'])
   })
 })
