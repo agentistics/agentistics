@@ -176,3 +176,15 @@ test('a route with no stated window keeps its context level but draws no gauge',
     expect(c.contextTokens).toBe(330)
   } finally { db.close() }
 })
+
+test('tool parts in the SQLite store reach the session (the loader used to select text parts only)', () => {
+  const { path, db } = fixture()
+  try {
+    const tool = (id: string, status: string) => db.query('INSERT INTO part VALUES (?,?,?,?,?,?)')
+      .run(id, 'msg_a', session.id, at + 1500, at + 1500, JSON.stringify({ type: 'tool', tool: 'bash', state: { status, output: 'x'.repeat(1000) } }))
+    tool('prt_t1', 'completed'); tool('prt_t2', 'error')
+    const [s] = loadOpencodeDb(path, {})
+    expect(Object.values(s!.tool_counts).reduce((a, b) => a + b, 0)).toBe(2)
+    expect(s!.tool_errors).toBe(1)
+  } finally { db.close() }
+})
