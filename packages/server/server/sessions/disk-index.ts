@@ -4,7 +4,7 @@ import type { Dirent } from 'node:fs'
 import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { classifyGitFile, shouldPruneDirectory, type ScannedDir } from './dir-scan'
+import { classifyGitFile, isPrivateMacPath, shouldPruneDirectory, type ScannedDir } from './dir-scan'
 
 export const DISK_INDEX_SLICE_MS = 100
 export const DISK_INDEX_TICK_MS = 2_000
@@ -39,6 +39,11 @@ export interface DiskCrawlerOptions {
   depth?: number
   now?: () => number
   sliceMs?: number
+  /** Test seams: home, platform and the two filesystem reads. */
+  home?: string
+  platform?: NodeJS.Platform
+  statDir?: (path: string) => Promise<{ mtimeMs: number }>
+  readDir?: (path: string) => Promise<Dirent<string>[]>
 }
 
 function hashRoot(root: string): string {
@@ -120,8 +125,10 @@ export class DiskCrawler {
     const deadline = now + this.sliceMs
     while (this.state.queue.length && this.now() < deadline) {
       const task = this.state.queue.shift()!
+      // Also drops entries a previous run persisted: a private folder is never stat'ed or listed here.
+      if (this.isPrivate(task.path)) continue
       let mtimeMs = 0
-      try { mtimeMs = (await stat(task.path)).mtimeMs } catch { continue }
+      try { mtimeMs = (await (this.options.statDir ?? stat)(task.path)).mtimeMs } catch { continue }
       const unchanged = this.state.visited[task.path] === mtimeMs
       this.state.visited[task.path] = mtimeMs
       if (unchanged && this.state.dirs[task.path]) {
@@ -131,13 +138,13 @@ export class DiskCrawler {
       }
       this.state.candidates = this.state.candidates.filter(c => c.path !== task.path && !c.path.startsWith(`${task.path}/`))
       let entries: Dirent<string>[] = []
-      try { entries = await readdir(task.path, { withFileTypes: true, encoding: 'utf8' }) } catch { this.state.dirs[task.path] = { mtimeMs, children: [] }; continue }
+      try { entries = await (this.options.readDir ?? ((p: string) => readdir(p, { withFileTypes: true, encoding: 'utf8' })))(task.path) } catch { this.state.dirs[task.path] = { mtimeMs, children: [] }; continue }
       const marker = await projectMarker(entries, task.path)
       if (task.depth > 0 && (marker.repo || marker.worktree)) {
         this.state.candidates.push({ path: task.path, name: baseName(task.path), repo: marker.repo, worktree: marker.worktree })
       }
       const children: Task[] = task.depth < this.depth ? entries
-        .filter(e => e.isDirectory() && !shouldPruneDirectory(e.name))
+        .filter(e => e.isDirectory() && !shouldPruneDirectory(e.name) && !this.isPrivate(join(task.path, e.name)))
         .slice(0, MAX_ENTRIES).map(e => ({ path: join(task.path, e.name), depth: task.depth + 1 })) : []
       this.state.dirs[task.path] = { mtimeMs, children }
       this.state.queue.push(...children)
@@ -152,7 +159,11 @@ export class DiskCrawler {
     return { root: this.state.root, visited: Object.keys(this.state.visited).length, queued: this.state.queue.length, candidates: this.state.candidates.length, complete: this.state.queue.length === 0 && this.state.completedAt > 0 }
   }
 
-  candidates(): ScannedDir[] { return [...this.state.candidates] }
+  candidates(): ScannedDir[] { return this.state.candidates.filter(c => !this.isPrivate(c.path)) }
+
+  private isPrivate(path: string): boolean {
+    return isPrivateMacPath(path, this.options.home, this.options.platform)
+  }
 }
 
 export interface DiskIndexSnapshot { candidates: ScannedDir[]; progress: DiskIndexProgress[]; indexing: boolean }

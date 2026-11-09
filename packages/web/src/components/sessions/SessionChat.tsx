@@ -85,7 +85,7 @@ import {
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { isNayCwd, modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
-import { personQueuedCount, queuedBubbleActions, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
+import { personQueuedCount, queuedBubbleActions, sendNowPillOffered, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
@@ -2725,7 +2725,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           {/* Only the person's queued messages offer send-now and contribute to its count.
               The action still submits the harness's whole queue, including any system notices. */}
           <SendNowControl
-            offered={showSendNow}
+            offered={sendNowPillOffered(showSendNow, queuedPersonCount)}
             count={queuedPersonCount}
             run={sendNowRun}
             pt={pt}

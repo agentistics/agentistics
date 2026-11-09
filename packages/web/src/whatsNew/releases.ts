@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.203.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'No Mac, o agentistics não pede mais acesso à Mesa, Documentos, Fotos e outras pastas privadas só por procurar projetos. Elas só são lidas quando você mesmo as abre.',
+        en: 'On Mac, agentistics no longer asks for access to Desktop, Documents, Photos and other private folders just by looking for projects. They are read only when you open them yourself.',
+      },
+    ],
+  },
   '2.203.0': {
     features: [
       {

@@ -47,6 +47,16 @@ export function queuedBubbleActions(i: {
   }
 }
 
+/**
+ * The pill under the conversation. A single waiting message already carries its own "Send now"
+ * (`queuedBubbleActions`), so drawing the pill too showed two buttons for one message. The pill is
+ * for two or more, where it is the one control that says it sends the whole queue. `shown` is the
+ * same per-harness rule (`sendNowShown`) both buttons obey, so no harness loses the action.
+ */
+export function sendNowPillOffered(shown: boolean, personQueued: number): boolean {
+  return shown && personQueued >= 2
+}
+
 export interface QueuedCard { text: string; at?: number }
 
 /** Only the person's messages offer send-now; injected notices still appear in the queue. */
