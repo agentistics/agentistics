@@ -19,8 +19,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [
       {
-        pt: 'A coluna "Revisão do líder" ficou limpa: as peças que já têm prova de que saíram em uma versão vão para Publicado sozinhas, e as antigas, sem nenhum registro, saem da coluna com um clique. Nada é apagado.',
-        en: 'The "Leader review" column is cleaned up: pieces with proof they shipped in a release move to Published on their own, and old ones with no record leave the column in one click. Nothing is deleted.',
+        pt: 'Limpeza da coluna "Revisão do líder": as peças que já têm prova de que saíram em uma versão vão para Publicado sozinhas, e as antigas, sem nenhum registro, saem da coluna com um clique. Nada é apagado.',
+        en: 'Cleanup of the "Leader review" column: pieces with proof they shipped in a release move to Published on their own, and old ones with no record leave the column in one click. Nothing is deleted.',
       },
       {
         pt: 'Nos cartões do Live, o tempo ao lado da porcentagem agora é o da rodada atual.',
