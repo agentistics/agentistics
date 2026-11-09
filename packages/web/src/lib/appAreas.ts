@@ -62,6 +62,7 @@ export const APP_AREAS: readonly Area[] = [
     { id: 'metrics', path: '/tasks/metrics', labelPt: 'Métricas', labelEn: 'Metrics' },
     { id: 'table', path: '/tasks/table', labelPt: 'Tabela', labelEn: 'Table' },
     { id: 'live', path: '/tasks/live', labelPt: 'Live', labelEn: 'Live' },
+    { id: 'calendar', path: '/tasks/calendar', labelPt: 'Calendário', labelEn: 'Calendar', beta: true },
     { id: 'activity', path: '/tasks/activity', labelPt: 'Atividade', labelEn: 'Activity' },
   ] },
   { id: 'usage', icon: 'gauge', beta: true, labelPt: 'Uso', labelEn: 'Usage', pages: [

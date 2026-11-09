@@ -51,7 +51,6 @@ export function LiveTaskFilter({ options, chosen, onChange, pt, mobile }: {
           selectAllLabel={pt ? 'Selecionar todas' : 'Select all'}
           emptyLabel={pt ? 'Nenhuma tarefa' : 'No tasks'}
           panelMinWidth={360}
-          triggerHeight={mobile ? 44 : 32}
         />
       </div>
     </div>

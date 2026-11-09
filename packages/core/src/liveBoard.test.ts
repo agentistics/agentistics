@@ -14,6 +14,12 @@ describe('the tabs and the Publicado period (filtros v2)', () => {
     expect(parseLivePeriod('30d')).toBe('30d')
     expect(parseLivePeriod('1y')).toBe('24h')
   })
+  test('r9: Concluído follows the period like Publicado, so "Tudo" does not draw every completed card by default', () => {
+    expect(liveTabMatches('all', c('completed', { deliveredAtMs: NOW - 2 * H }), '24h', NOW)).toBe(true)
+    expect(liveTabMatches('all', c('completed', { deliveredAtMs: NOW - 90 * H }), '24h', NOW)).toBe(false)
+    expect(liveTabMatches('all', c('completed'), '24h', NOW)).toBe(false)
+    expect(liveTabMatches('all', c('completed'), 'all', NOW)).toBe(true)
+  })
   test('Em andamento = somebody working or waiting, past the queue and not old; a published piece is never in progress', () => {
     const t = (x: LiveTabbable) => liveTabMatches('active', x, '24h', NOW)
     expect(t(c('running', { liveState: 'working' }))).toBe(true)

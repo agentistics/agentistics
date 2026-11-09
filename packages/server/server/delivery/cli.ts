@@ -43,6 +43,7 @@ export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subt
   agentop flow approve --subtask S --phase P --decision approve|reject [--note …]   (the owner only — the answer to a human gate)
   agentop flow release --version <x.y.z> --merge-sha <main sha> [--repo <owner/name>] --subtask S1 --subtask S2 …   declare what the release contains (→ ci, → publicado when release.yml is green and the tag exists)
   agentop flow reconcile --release [--apply] [--json]  backfill: every piece in revisao_lider/pr_merge/ci matched to its merged PR and the first release tag containing it (dry-run unless --apply)
+  agentop flow antigas publish|archive (--subtask S[,S…] | --all [--expect N]) [--version x.y.z] [--reason …]   the "Antigas sem registro" group: mark published / archive (abandoned) — never deletes; --expect refuses if the group is not that size
   agentop flow tick                                   the minute watch (blocks, merged PR → ci, ci → publicado, reminders to the leader)
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
 
@@ -50,7 +51,7 @@ Exit codes: 0 passed/moved, 1 refused (the sentence says what is missing), 2 usa
 Every gate reads the machine (git, gh, the session registry); nothing here accepts a sha, a session id or a "green" from the caller.
 `
 
-export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'reconcile', 'tick'] as const
+export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'reconcile', 'antigas', 'tick', 'calendario'] as const
 
 /** PURE: is `agentop flow <args>` one of the delivery verbs (handled here, not by the engine)? */
 export function isDeliveryFlowVerb(args: readonly string[]): boolean {
@@ -177,9 +178,30 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
       if (!r.ok) return report(r, io)
       if (flags.json === 'true') { io.out(JSON.stringify(r, null, 2)); return 0 }
       const { reconcileLine } = await import('./ciclo')
-      io.out(r.apply ? `reconciliação aplicada: ${r.moved} peça(s) movida(s), ${r.unproven} sem prova` : `simulação (nada foi escrito — use --apply): ${r.moved} peça(s) moveriam, ${r.unproven} sem prova`)
+      const s = r.summary
+      io.out(`${r.apply ? 'reconciliação aplicada' : 'simulação (nada foi escrito — use --apply)'}: → publicado ${s.published} · → ci ${s.toCi} · → ci (release vermelha) ${s.ciRed} · release ilegível ${s.unknown} · → antigas ${s.antigas} · ficam em revisão ${s.stay} · chamadas gh ${r.gh}${r.stopped ? ` · parou: ${r.stopped}, a próxima rodada continua` : ''}`)
       for (const e of r.entries) io.out(reconcileLine(e))
       return 0
+    }
+    case 'antigas': {
+      // `agentop flow antigas publish|archive [--subtask S[,S…]|--all [--expect N]] [--version X] [--reason text]`
+      const action = flags.action ?? pos[1]
+      if (action !== 'publish' && action !== 'archive' && action !== 'conclude') { io.err('usage: agentop flow antigas publish|archive|conclude (--subtask S[,S…] | --all [--expect N]) [--version 2.203.0] [--reason text]'); return 2 }
+      const r = await svc.antigas({ action, ...(flags.preview === 'true' ? { preview: true } : {}), ids: flags.subtask, all: flags.all === 'true', ...(flags.expect ? { expect: flags.expect } : {}), version: flags.version, reason: flags.reason }, actor)
+      if (!r.ok) return report(r, io)
+      if (flags.json === 'true') { io.out(JSON.stringify(r, null, 2)); return 0 }
+      if (r.preview) io.out(`${r.preview.conclude} concluídas, ${r.preview.archive} arquivadas`)
+      for (const x of r.done) io.out(`${x.subtaskId}\t${x.ok ? `ok${x.how ? ` (${x.how})` : ''}` : `recusada: ${x.reason ?? '?'}`}`)
+      return 0
+    }
+    case 'calendario': {
+      // The Delivery calendar, filtered — the same read the screen and `agentistics_delivery_calendar` use. Read-only.
+      const { deliveryCalendar, answerCalendar, calendarFiltersOf } = await import('./calendar')
+      const q = new URLSearchParams()
+      for (const [flag, param] of [['task', 'task'], ['subtask', 'subtask'], ['version', 'version'], ['stage', 'stage'], ['harness', 'harness'], ['priority', 'priority'], ['from', 'from'], ['to', 'to']] as const) if (flags[flag]) q.set(param, flags[flag]!)
+      if (flags.all === 'true') q.set('all', '1')
+      if (flags.confirmed === 'true') q.set('confirmed', '1')
+      io.out(JSON.stringify(answerCalendar(await deliveryCalendar(), calendarFiltersOf(q)), null, 2)); return 0
     }
     case 'tick': io.out(JSON.stringify(await svc.tick(), null, 2)); return 0
     default: io.err('unknown delivery verb'); return 2

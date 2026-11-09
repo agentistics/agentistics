@@ -30,7 +30,7 @@ const out = (r: DeliveryReply): WebReply => (r.ok
 
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
 
-export async function deliveryRequest(method: string, path: string, body: Record<string, unknown>, d: DeliveryWebDeps): Promise<WebReply> {
+export async function deliveryRequest(method: string, path: string, body: Record<string, unknown>, d: DeliveryWebDeps, signal?: AbortSignal): Promise<WebReply> {
   const rest = path.replace(/^\/api\/deliveries\/?/, '')
   if (method === 'GET' && rest === '') return { status: 200, body: { deliveries: await d.service.list() } }
   // FILA.PRIORIDADE — the queue in leaving order (`/queue` = every task, `/queue/<taskId>` = one task's), the Fila tab's and the MCP's one source.
@@ -54,7 +54,15 @@ export async function deliveryRequest(method: string, path: string, body: Record
   if (rest === 'reconcile') {
     const r = await d.service.reconcile({ apply: body.apply }, actor)
     return r.ok
-      ? { status: 200, body: { ok: true, apply: r.apply, moved: r.moved, unproven: r.unproven, entries: r.entries } }
+      ? { status: 200, body: { ok: true, apply: r.apply, moved: r.moved, unproven: r.unproven, summary: r.summary, gh: r.gh, ...(r.stopped ? { stopped: r.stopped } : {}), entries: r.entries } }
+      : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing } }
+  }
+  if (rest === 'antigas') {
+    // The "Antigas sem registro" group: { action: 'publish'|'archive', ids?: string[], all?: boolean, expect?: number, version?, reason? }.
+    // `signal` is the request's: a client that gave up stops the work, it does not finish behind a screen that said it failed.
+    const r = await d.service.antigas({ action: body.action, preview: body.preview, ids: body.ids, all: body.all, expect: body.expect, version: body.version, reason: body.reason }, actor, signal)
+    return r.ok
+      ? { status: 200, body: { ok: true, action: r.action, done: r.done, ...(r.preview ? { preview: r.preview } : {}), ...(r.stopped ? { stopped: true } : {}) } }
       : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing } }
   }
   if (rest === 'release') {

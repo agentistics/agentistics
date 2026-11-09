@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'bun:test'
-import { capList, fmtDateTime, NA } from './board'
+import { button, capList, fmtDateTime, NA } from './board'
+
+describe('button — the app control standard', () => {
+  it('is 32px on desktop and a 44x44 target on a phone, icon-only included', () => {
+    expect(button(false).height).toBe(32)
+    expect(button(false).minWidth).toBeUndefined()
+    expect(button(true).height).toBe(44)
+    expect(button(true).minWidth).toBe(44)
+  })
+})
 
 describe('capList', () => {
   it('shows everything and reports no extra when the list already fits', () => {

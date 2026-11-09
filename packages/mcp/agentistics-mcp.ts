@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { liveDeliveryQuery } from "./live-delivery-args";
+import { deliveryCalendarQuery } from "./delivery-calendar-args";
 import { flowStatusRunId } from './flow-status'
 import { sessionRoleBody } from "./session-role-args";
 import "./orphan-guard-boot";
@@ -99,6 +100,12 @@ const CATALOG = [
   { id: "sessions.highlights", label: "Highlights",       category: "sessions", defaultW: 12, defaultH: 6, minW: 6, minH: 3, description: "Record-breaking sessions" },
   { id: "sessions.recent",     label: "Recent sessions",  category: "sessions", defaultW: 12, defaultH: 7, minW: 6, minH: 4, description: "List of most recent sessions" },
 ];
+
+async function apiGetText(path: string) {
+  const res = await fetch(`${API}${path}`);
+  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}`);
+  return res.text();
+}
 
 async function apiGet(path: string) {
   const res = await fetch(`${API}${path}`);
@@ -508,7 +515,7 @@ const TOOLS: Tool[] = [
       type: "object",
       properties: {
         task: { type: "string", description: "A task id or part of its title." },
-        stage: { type: "string", enum: ["queue", "running", "qa", "adjust", "leader", "merge", "published"] },
+        stage: { type: "string", enum: ["queue", "blocked", "running", "qa", "adjust", "leader", "merge", "ci", "completed", "published"] },
         stalledOnly: { type: "boolean", description: "Only deliveries that need a person, lost an agent or are blocked." },
         tab: { type: "string", enum: ["active", "queue", "published", "all"], description: "The screen's tab: active (Em andamento), queue (Na fila), published (Publicado) or all (Tudo). Default all." },
         period: { type: "string", enum: ["24h", "7d", "30d", "all"], description: "How far back Publicado reaches. Default 24h." },
@@ -579,6 +586,28 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: { ref: { type: "string" } }, required: ["ref"] },
   },
   {
+    name: "agentistics_delivery_calendar",
+    description:
+      "BETA. The DELIVERY CALENDAR — when each piece of work started, when it is expected to ship, which release version it rides and when a version really went out; the same source and rules as the \"Calendário de entregas\" screen (`agentop flow calendario` prints the same). Returns `pieces` (task, subtask, stage, `version`, harness/model, priority, `startedAtMs`, `stageEta` and `publishEta` — `kind: none` means there is NO estimate: say so, never invent a time — `publishedAtMs`, `dueDate`, `confirmed`, `late`), `versions` (each with `state` published|planned, `atMs` = the real publication or the LATEST piece estimate, `basis` published|estimate|partial|none, the pieces and the count per stage) and `marks` (an account's usage window renewing, a task's due day). Times are epoch ms; day arguments are BRT days (America/Sao_Paulo). By default only pieces of tasks being worked on now; pass `all` for the history too. Filters: `task` (id or part of the title), `subtask`, `version` (one or a list), `stage`, `harness`, `priority`, `from`/`to` (yyyy-MM-dd or an ISO instant — keeps what touches the period), `confirmedOnly` (published or a medium/high-confidence estimate). `format: \"ics\"` returns the filtered view as an .ics file instead of JSON.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "A task id or part of its title." },
+        subtask: { type: "string", description: "A subtask id." },
+        version: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "A release version (2.202.0) or a list." },
+        stage: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "queue, blocked, running, qa, adjust, leader, merge, ci, published — one or a list." },
+        harness: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+        priority: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "urgent, high, medium, low." },
+        from: { type: "string", description: "Start of the period: yyyy-MM-dd (BRT) or an ISO instant." },
+        to: { type: "string", description: "End of the period (inclusive)." },
+        all: { type: "boolean", description: "Include pieces of tasks not being worked on now (history)." },
+        confirmedOnly: { type: "boolean", description: "Only published pieces or those with a medium/high-confidence estimate." },
+        format: { type: "string", enum: ["json", "ics"] },
+      },
+      required: [],
+    },
+  },
+  {
     name: "agentistics_task_phase",
     description:
       "FLUXO.CICLO-COMPLETO — the minute `tick` also moves a piece in revisao_lider or pr_merge to ci BY ITSELF once its PR is merged (found from the piece's PR number, branch, the PR containing the sha QA approved, or its author worktree's branch; the merge gates `delecoes` + `mergeado` still run, and a refusal leaves the piece where it is with the reason), publishes ci pieces from the FIRST tag that contains the merge, and reminds the LIVE leader of the task (never the owner) of a piece waiting on them for 30 min, then every 2 h, at most 3 times. `get` with a `subtaskId` returns `tickReason`: why the tick has not moved it. `reconcile` (no `subtaskId`; `apply` true to write) is the one-shot BACKFILL: every piece in revisao_lider/pr_merge/ci matched to its merged PR and the first release tag containing it — a report of what moves and what cannot be proven, with the reason. " +
@@ -588,7 +617,11 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "dequeue", "tick", "step", "configure", "approve", "stage-run", "merge", "release", "reconcile"] },
+        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "dequeue", "tick", "step", "configure", "approve", "stage-run", "merge", "release", "reconcile", "antigas"] },
+        antigasAction: { type: "string", enum: ["publish", "archive", "conclude"], description: "antigas: 'conclude' (the screen's one click) completes the pieces with a session and archives the ones without; add `preview` to read the counts without changing anything. 'publish' marks the old record-less pieces published (optional `version`), 'archive' abandons them with an optional `reason`. Targets: `subtaskIds`, or `all` = every piece the reconcile classifies as antiga. Never deletes; a leader or the owner" },
+        preview: { type: "boolean", description: "antigas conclude: only count what the click would do (concluded vs archived); changes nothing" },
+        all: { type: "boolean", description: "antigas: act on every old piece in the group \"Antigas sem registro\" (answers from the board at once; a piece the last reconcile proved is left out)" },
+        expect: { type: "number", description: "antigas: the size of the group you saw; a different size refuses (409 count_changed) and nothing changes" },
         apply: { type: "boolean", description: "reconcile: write the moves (a leader of the task, or the owner). Absent/false = dry run: the report only" },
         subtaskId: { type: "string" },
         version: { type: "string", description: "release: the version the pieces shipped in, x.y.z" },
@@ -604,7 +637,7 @@ const TOOLS: Tool[] = [
         phase: { type: "string", description: "approve: the phase whose human gate is answered" },
         decision: { type: "string", enum: ["approve", "reject"] },
         note: { type: "string" },
-        reason: { type: "string", description: "dequeue: required free-text audit reason (leader only); block: dependencia | pedido_de_bloqueio | limite | maquina | externo | fora_das_autorizacoes" },
+        reason: { type: "string", description: "dequeue: required free-text audit reason (leader only); block: dependencia | pedido_de_bloqueio | limite | maquina | externo | fora_das_autorizacoes; antigas archive: why (kept in the comment)" },
         text: { type: "string" },
         step: { type: "number" },
         patch: { type: "object" },
@@ -1315,6 +1348,12 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiSend("DELETE", `/api/tasks/${encodeURIComponent(ref)}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
+      case "agentistics_delivery_calendar": {
+        const q = deliveryCalendarQuery(args as any);
+        if ((args as any)?.format === "ics") return { content: [{ type: "text", text: await apiGetText(`/api/deliveries/calendar${q}`) }] };
+        const body = await apiGet(`/api/deliveries/calendar${q}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
       case "agentistics_task_phase": {
         const a = (args ?? {}) as any;
         const action = typeof a.action === "string" ? a.action : "get";
@@ -1334,6 +1373,13 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         if (action === "reconcile") {
           // The backfill: same service as `agentop flow reconcile --release`; dry run unless `apply`.
           const body = await apiSend("POST", "/api/deliveries/reconcile", { apply: a.apply === true, session: sessionProof(process.env) });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (action === "antigas") {
+          // "Antigas sem registro": `antigasAction` publish|archive over `subtaskIds` (or `all`); never deletes.
+          const body = await apiSend("POST", "/api/deliveries/antigas", {
+            action: a.antigasAction, ids: a.subtaskIds, all: a.all === true, preview: a.preview === true, expect: a.expect, version: a.version, reason: a.reason, session: sessionProof(process.env),
+          });
           return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
         }
         if (action !== "tick" && (typeof a.subtaskId !== "string" || !a.subtaskId)) throw new Error("subtaskId is required");

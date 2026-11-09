@@ -9,7 +9,7 @@ test('every view round-trips through its route', () => {
 
 test('the Agentask area lists each real view and highlights the active one', () => {
   const pages = APP_AREAS.find(a => a.id === 'tasks')!.pages
-  expect(pages.map(p => p.id)).toEqual(['board', 'metrics', 'table', 'live', 'activity'])
+  expect(pages.map(p => p.id)).toEqual(['board', 'metrics', 'table', 'live', 'calendar', 'activity'])
   expect(areaOfPath('/tasks/live')!.page!.id).toBe('live')
   expect(areaOfPath('/tasks/t-123')!.page!.id).toBe('board')
   expect(areaOfPath('/tasks')!.page!.id).toBe('board')

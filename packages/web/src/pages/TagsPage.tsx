@@ -801,7 +801,7 @@ export default function TagsPage() {
                   pairing of a single-value Select with a separate "several" button forced that
                   decision before the list was even visible. */}
               <Field label={pt ? 'Valor' : 'Value'}>
-                <MultiPicker
+                <MultiPicker tall
                   options={availableOptions}
                   onCommit={addPickedSources}
                   placeholder={pt ? 'Buscar e selecionar…' : 'Search and select…'}
@@ -856,7 +856,7 @@ export default function TagsPage() {
                 />
               </Field>
               <Field label={pt ? 'Valor' : 'Value'}>
-                <MultiPicker
+                <MultiPicker tall
                   options={filterOptions}
                   onCommit={addPickedFilters}
                   placeholder={pt ? 'Buscar e selecionar…' : 'Search and select…'}
@@ -987,7 +987,7 @@ export default function TagsPage() {
                   sources). Granted accounts show as removable chips below. */}
               {accounts.length > 0 && (
                 <Field label={pt ? 'Adicionar conta' : 'Add account'}>
-                  <MultiPicker
+                  <MultiPicker tall
                     options={accounts
                       .filter(a => a.id !== me?.id && !sharedWith.includes(a.id))
                       .map(a => ({ value: a.id, label: `${a.name} (${a.email})` }))}

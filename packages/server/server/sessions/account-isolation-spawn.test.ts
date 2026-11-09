@@ -101,7 +101,9 @@ for (const root of [null, '/accounts/selected-extra']) {
       const deadline = Date.now() + 3000
       let value: string | undefined
       while (Date.now() < deadline) {
-        try { value = readFileSync(output, 'utf8'); break } catch { await Bun.sleep(20) }
+        // The file exists a moment before its content does: keep polling until it is non-empty.
+        try { value = readFileSync(output, 'utf8'); if (value !== '') break } catch { /* not created yet */ }
+        await Bun.sleep(20)
       }
       expect(value).toBe(root ?? 'ABSENT')
       // The sole pane exits with the script; its private tmux server exits automatically.

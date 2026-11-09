@@ -21,8 +21,10 @@ import {
   EDGES, GATES, adoptPhase, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
   refusalStatus, unlockerOf, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
 } from './machine'
-import { DEFAULT_RELEASE_REPO, findMergedPr, judgePredispatch, releaseFailed, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
+import { DEFAULT_RELEASE_REPO, findMergedPr, judgePredispatch, releaseFailed, releaseUnknown, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
 import { MERGE_PHASES, MERGE_SCAN_PER_TICK, currentNote, mergeScanDue, mergeScanOrder, planReviewNudges, type ReconcileEntry } from './ciclo'
+import { AUTO_RUN_GH_BUDGET, ENGINE_REPO, MANUAL_RUN_GH_BUDGET, PROOF_REFRESH_MS, findEnginePinTag, findPublicTag, hydrateProofCache, loadBatchPrs, matchBatchPr, meterFacts, serializeProofCache, type AutoRunReport, type BatchMatch, type BatchPr, type DeclaredHead, type ProofCache } from './batch-proof'
+import { antigaComment, inReconcileScope, isAntiga, type AntigaAction } from './antigas'
 import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
 import { sharedQueueArea } from './queue-fit'
 import { ownerIntent } from '../flows/owner-intent'
@@ -72,11 +74,50 @@ export interface DeliveryDeps {
   /** The name a person gave an account ("Vini"); null = none known (the question then leaves the account out, never an id). */
   accountName?(harness: string, account: string): Promise<string | null>
   /** Board pieces shown In review / PR · merge / CI with NO delivery record yet (the backfill adopts them). Optional. */
-  reviewPieces?(): Promise<Array<{ id: string; taskId: string; title: string; status: string }>>
+  reviewPieces?(): Promise<ReviewPiece[]>
+  /** What the piece's OWN delivery declared in its handbacks: branch @ commit, full commits, PR numbers (read-only; matched against gh's facts). */
+  pieceHints?(subtaskId: string): Promise<{ branches: string[]; shas: string[]; heads?: DeclaredHead[]; prs?: number[]; latest?: string[] }>
+  /** Archives / completes a record-less old piece on the board (`antigas`), without implying release proof. Optional. */
+  hasSession?(subtaskId: string): Promise<boolean>
+  /** Same question for many pieces with ONE read of the board (the preview asks for hundreds; one world load per id took 11 s). */
+  hasSessions?(ids: readonly string[]): Promise<Set<string>>
+  /** The pieces the Live screen lists as "antigas": THE one predicate (the screen, the dialog, the CLI, the MCP and the action all read it). null = unreadable. */
+  oldPieces?(): Promise<Array<{ id: string; taskId: string }> | null>
+  closeLegacy?(subtaskId: string, to: 'done' | 'abandoned'): Promise<{ ok: true } | { ok: false; message: string }>
+  /** The automatic reconcile (first tick, then on its cadence) is ON only where the host asks for it; a function is asked on every tick. */
+  autoReconcile?: boolean | (() => boolean)
+  /** Tests: the automatic reconcile runs inside the tick (awaited) instead of in the background. */
+  autoReconcileAwait?: boolean
+  /** The automatic reconcile's shortest cadence (default 30 min; it also waits 3x what the last run took). */
+  autoReconcileEveryMs?: number
+  /** Where what gh answered survives a restart (absent: this process only). A cache: a failed read or write costs one run, never a wrong answer. */
+  proofStore?: { load(): Promise<unknown>; save(doc: unknown): Promise<void> }
+  /** One line per automatic run (L2: its result used to be invisible). */
+  log?(line: string): void
 }
 
+export interface ReviewPiece {
+  hasOpenChildren?: boolean
+  id: string; taskId: string; title: string; status: string
+  /** When the board last touched it (ISO). */
+  updatedAt?: string
+  /** When the card was created (ISO): a PR merged before it cannot have shipped it. */
+  createdAt?: string
+  /** When its delivery last handed back (ISO): real work waiting on a person is not old by age alone. */
+  handbackAt?: string
+  /** The repositories (`owner/name`) of the sessions that worked on it. `[]` = none known: nothing can be proven. Absent = the host cannot say. */
+  repos?: string[]
+  /** What its delivery declared, read in the same pass over the board (a piece-by-piece read of a real board took minutes). Absent: `pieceHints` is asked. */
+  hints?: { branches: string[]; shas: string[]; heads?: DeclaredHead[]; prs?: number[]; latest?: string[] }
+}
+
+export interface ReconcileSummary { published: number; toCi: number; ciRed: number; /** The release could not be READ: the piece did not move. */ unknown: number; antigas: number; /** Pieces the run could NOT look up (no repository known, gh unreadable, quota): not "no proof", and retried. */ unchecked: number; stay: number }
 export type ReconcileReply =
-  | { ok: true; status: 200; apply: boolean; entries: ReconcileEntry[]; moved: number; unproven: number }
+  | { ok: true; status: 200; apply: boolean; entries: ReconcileEntry[]; moved: number; unproven: number; summary: ReconcileSummary; gh: number; /** Set when the run stopped early (quota): what it did not reach is untouched, the next run continues. */ stopped?: 'budget' | 'rate-limit' }
+  | Extract<DeliveryReply, { ok: false }>
+
+export type AntigasReply =
+  | { ok: true; status: 200; action: 'publish' | 'archive' | 'conclude'; /** conclude + preview: what the click would do. */ preview?: { conclude: number; archive: number }; done: Array<{ subtaskId: string; ok: boolean; how?: 'concluded' | 'archived'; reason?: string; /** The board asks for a session before `done`. */ code?: 'no_session' }>; /** The caller gave up: the pieces not listed were not touched. */ stopped?: boolean }
   | Extract<DeliveryReply, { ok: false }>
 
 /** FILA.PRIORIDADE — one queued piece as the Fila tab, the Live card and the MCP read it (ONE source). */
@@ -145,7 +186,25 @@ const safe = <A extends unknown[]>(fn: (...a: A) => Promise<DeliveryReply>) => a
   try { return await fn(...a) } catch (e) { if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message); throw e }
 }
 
+/** The repositories this product ships from: a card whose host cannot say its repository is read against these. */
+const PRODUCT_REPOS: readonly string[] = [DEFAULT_RELEASE_REPO, ENGINE_REPO]
+/** A person's board can span many repositories; each costs reads. The rest is simply not proven. */
+const MAX_PROOF_REPOS = 12
+const PROOF_SAVE_EVERY_CALLS = 25
+const AUTO_EVERY_MS = 30 * 60_000
+const AUTO_BACKOFF_MAX_MS = 6 * 3600_000
+/** Below this share of the core quota the automatic run waits: the person's own work comes first. */
+const AUTO_MIN_QUOTA_ROOM = 1 / 3
+const msOf = (iso: string | undefined): number | null => (iso ? Date.parse(iso) || null : null)
+
 export function createDeliveryService(d: DeliveryDeps) {
+  let proofCache: ProofCache | null = null
+  const loadProof = async (): Promise<ProofCache> => {
+    if (!proofCache) proofCache = hydrateProofCache(await d.proofStore?.load().catch(() => null) ?? null, d.now())
+    proofCache.nowMs = d.now()
+    return proofCache
+  }
+  const saveProof = async (): Promise<void> => { if (proofCache) await d.proofStore?.save(serializeProofCache(proofCache)).catch(() => undefined) }
   /** The record, created at `fila` on first use (a subtask that exists on the board). */
   const ensure = async (subtaskId: string, o: { versionTarget?: string; humanGates?: Phase[]; leaderSessionId?: string } = {}): Promise<DeliveryRecord | DeliveryReply> => {
     if (!SUB_ID.test(subtaskId)) return fail(400, 'bad_subtask', 'invalid subtask id')
@@ -1385,35 +1444,159 @@ export function createDeliveryService(d: DeliveryDeps) {
    * FIRST release tag containing the merge. Dry-run by default: the report says what would move and what cannot be proven, with
    * the reason. `apply` writes through the ordinary transitions (their gates run; `flow:reconcile` announces nothing per piece).
    */
-  const reconcile = async (o: { apply?: unknown }, actor: string): Promise<ReconcileReply> => {
+  const reconcile = async (o: { apply?: unknown }, actor: string, opts: { budget?: number } = {}): Promise<ReconcileReply> => {
     const apply = o.apply === true || o.apply === 'true'
     const sessions = await d.facts.sessions().catch(() => [] as SessionFact[])
     const isLeader = sessions.some(s => s.id === actor && s.role === 'leader')
     if (apply && !(actor === 'owner' || actor.startsWith('flow:') || isLeader)) return fail(403, 'so_o_lider', 'only a leader (or the owner) applies the reconciliation; a dry run is open to anyone')
     const doc = await d.store.read()
     const at = iso(d)
-    const pieces: DeliveryRecord[] = Object.values(doc.deliveries).filter(r => !r.dequeued && (MERGE_PHASES.includes(r.phase) || r.phase === 'ci'))
+    const nowMs = d.now()
+    // A piece is "alive" when a session of it runs now (a task-level piece is keyed by its task id).
+    const alive = new Set(sessions.filter(s => s.alive).map(s => s.subtaskId ?? s.taskId).filter((x): x is string => !!x))
+    interface Piece { r: DeliveryRecord; hasRecord: boolean; updatedMs: number | null; title?: string; createdMs: number | null; handbackMs: number | null; repos?: string[]; hints?: ReviewPiece['hints']; status?: string; hasOpenChildren?: boolean }
+    const pieces: Piece[] = Object.values(doc.deliveries).filter(r => !r.dequeued && (MERGE_PHASES.includes(r.phase) || r.phase === 'ci'))
+      .map(r => ({ r, hasRecord: true, updatedMs: Date.parse(r.updatedAt) || null, createdMs: null, handbackMs: null }))
     for (const p of (await d.reviewPieces?.().catch(() => []) ?? [])) {
       if (doc.deliveries[p.id] || !SUB_ID.test(p.id)) continue
-      pieces.push(newDelivery({ subtaskId: p.id, taskId: p.taskId, at, phase: adoptPhase(p.status) }))
+      pieces.push({ r: newDelivery({ subtaskId: p.id, taskId: p.taskId, at, phase: adoptPhase(p.status) }), hasRecord: false, updatedMs: msOf(p.updatedAt), title: p.title, createdMs: msOf(p.createdAt), handbackMs: msOf(p.handbackAt), status: p.status, hasOpenChildren: p.hasOpenChildren, ...(p.repos ? { repos: p.repos } : {}), ...(p.hints ? { hints: p.hints } : {}) })
+    }
+    // What gh already answered survives the run and a restart, so a run only asks for what is new. The meter is what keeps one
+    // run inside its share of the quota: past it (or on "rate limit") every further read fails at once and the rest waits.
+    const proofs = await loadProof()
+    const meter = meterFacts(d.facts, opts.budget ?? MANUAL_RUN_GH_BUDGET)
+    const facts = meter.facts
+    const repoCwd = (await d.facts.repoCwd?.().catch(() => null)) ?? '.'
+    // ONE read of each repository the cards belong to (H4: never ours for somebody else's card).
+    const reposOf = (p: Piece): readonly string[] => p.repos ?? PRODUCT_REPOS
+    const wanted = [...new Set(pieces.filter(p => !p.hasRecord && !alive.has(p.r.subtaskId)).flatMap(reposOf))].slice(0, MAX_PROOF_REPOS)
+    const prsByRepo = new Map<string, BatchPr[]>()
+    for (const repo of wanted) prsByRepo.set(repo, await loadBatchPrs(facts, repoCwd, repo, proofs))
+    const tagOf = (c: BatchPr) => (c.repo === ENGINE_REPO ? findEnginePinTag(facts, repoCwd, c.mergeSha, proofs) : findPublicTag(facts, repoCwd, c.mergeSha, proofs, c.repo))
+    const verdicts = new Map<string, GateVerdict>()
+    const releaseVerdict = async (key: string, probe: DeliveryRecord): Promise<GateVerdict> => {
+      const inRun = verdicts.get(key)
+      if (inRun) return inRun
+      const kept = proofs.verdicts.get(key)
+      if (kept && (kept.ok || nowMs - kept.at < PROOF_REFRESH_MS)) { const v = kept.verdict as GateVerdict; verdicts.set(key, v); return v }
+      const v = await runGate('release', probe, facts)
+      verdicts.set(key, v)
+      if (!releaseUnknown(v) && !meter.stopped()) proofs.verdicts.set(key, { ok: v.ok, at: nowMs, verdict: v })
+      return v
     }
     const entries: ReconcileEntry[] = []
-    for (const r of pieces.sort((a, b) => a.subtaskId.localeCompare(b.subtaskId))) {
-      const title = (await d.facts.subtask(r.subtaskId).catch(() => null))?.title
+    let savedAtCalls = 0
+    for (const { r, hasRecord, updatedMs, title: boardTitle, createdMs, handbackMs, repos, hints, status, hasOpenChildren } of pieces.sort((a, b) => a.r.subtaskId.localeCompare(b.r.subtaskId))) {
+      const title = boardTitle ?? (await d.facts.subtask(r.subtaskId).catch(() => null))?.title
       const e: ReconcileEntry = { subtaskId: r.subtaskId, taskId: r.taskId, ...(title ? { title } : {}), from: r.phase }
       entries.push(e)
+      // A restart in the middle resumes from here: what this run already paid for is on disk.
+      if (meter.calls() - savedAtCalls >= PROOF_SAVE_EVERY_CALLS) { savedAtCalls = meter.calls(); await saveProof() }
+      const live = alive.has(r.subtaskId)
+      // H3: somebody is on it. A PR, however well it names the piece, says nothing about what that session is doing now.
+      if (live && r.phase !== 'ci') { e.reason = 'sessão viva: fica'; continue }
+      // A piece this run PROVED shipped is on its way to Published, never "old": the screen and "All" already leave it out, so the count must too.
+      const antiga = () => { const outcome = proofs.outcomes.get(r.subtaskId); if (!isAntiga({ hasRecord, status, hasOpenChildren, proven: outcome?.proven, live, updatedMs, nowMs, handbackMs, suggested: !!e.suggestion, unchecked: !!e.unchecked, uncheckedWhy: e.unchecked })) return false; e.bucket = 'antiga'; return true }
+      // The quota ran out: what was not reached is not judged. It stays exactly where it is and the next run continues from here.
+      // "No proof" is said only of a piece that was LOOKED UP. One that could not be (nothing known about where it worked, gh unreadable, the quota
+      // spent) is "could not check": it is not offered as antiga as if it had been, and the next run tries it again.
+      const unchecked = (why: 'no-repos' | 'gh' | 'budget', reason: string) => {
+        e.unchecked = why
+        e.reason = `could not be checked: ${reason}. Not a lack of proof — it will be tried again on a later run`
+        proofs.outcomes.set(r.subtaskId, { unchecked: why })
+      }
+      if (!hasRecord && repos && repos.length === 0) { unchecked('no-repos', 'no repository is known for this piece (no session of it recorded where it worked)'); antiga(); continue }
+      if (meter.stopped()) { if (hasRecord) e.reason = `não verificada nesta rodada (${meter.stopped()})`; else unchecked('budget', `this run reached its ${meter.stopped() === 'rate-limit' ? 'GitHub rate limit' : 'GitHub call budget'} before this piece`); continue }
+      // A RECORDED piece has its own evidence (qaSha, its PR): `findMergedPr` checks the sha QA approved. A batch PR must never go
+      // over that check (H3: an older PR of the same branch published work whose real review was still open).
+      const extra = hasRecord ? null : hints ?? await d.pieceHints?.(r.subtaskId).catch(() => null) ?? { branches: [], shas: [] }
+      let batch: BatchMatch = extra
+        ? matchBatchPr((repos ?? PRODUCT_REPOS).flatMap(x => prsByRepo.get(x) ?? []), { subtaskId: r.subtaskId, ...(title ? { title } : {}), ...extra, createdMs, repos: repos ?? PRODUCT_REPOS })
+        : { ok: false, reason: 'a recorded piece is proven by its own PR' }
+      // A piece worked across both repositories is proven by several PRs: TOGETHER only when every one of them shipped in the
+      // SAME release (otherwise it stays ambiguous — a wrong tag would publish half-shipped work).
+      if (!batch.ok && batch.candidates && batch.candidates.length > 1 && batch.candidates.length <= 6) {
+        const tags = await Promise.all(batch.candidates.map(tagOf))
+        if (tags.every(t => t !== null && t === tags[0])) {
+          const lead = batch.candidates.find(c => c.repo !== ENGINE_REPO) ?? batch.candidates[0]!
+          batch = { ok: true, pr: lead, via: `${batch.candidates.length} release PRs (${batch.candidates.map(c => `#${c.number}`).join(', ')}) agree on ${tags[0]}` }
+        }
+      }
+      // Nothing proved it, but part of what could have is unread: that is not "no proof".
+      if (!batch.ok && !hasRecord && (repos ?? PRODUCT_REPOS).some(x => proofs.unreadable.has(x) || !prsByRepo.has(x))) {
+        unchecked((repos ?? PRODUCT_REPOS).some(x => proofs.unreadable.has(x)) ? 'gh' : 'budget', `GitHub's list of merged PRs could not be read (is gh installed and signed in?${(repos ?? PRODUCT_REPOS).map(x => proofs.unreadableWhy.get(x)).find(Boolean) ? ` — ${(repos ?? PRODUCT_REPOS).map(x => proofs.unreadableWhy.get(x)).find(Boolean)}` : ''})`)
+        continue
+      }
+      // Weak evidence (the card's name, a branch in a PR's text, a tie across releases) moves nothing: it is what the person sees beside the card.
+      if (!batch.ok) {
+        const weak = batch.suggestion ?? (batch.candidates?.length ? { pr: batch.candidates[0]!, via: batch.reason } : null)
+        if (weak) {
+          const tag = await tagOf(weak.pr).catch(() => null)
+          e.suggestion = { repo: weak.pr.repo, pr: weak.pr.number, ...(tag ? { tag } : {}), via: weak.via }
+        }
+      }
+      proofs.outcomes.set(r.subtaskId, { ...(batch.ok ? { proven: true } : {}), ...(e.suggestion ? { suggestion: e.suggestion } : {}) })
+      // SCOPE: only a piece with a record, a recent board touch or a release PR that proves it is looked up at all.
+      if (!inReconcileScope({ hasRecord, live, updatedMs, nowMs, mentioned: batch.ok || batch.ambiguous === true })) {
+        e.reason = antiga() ? 'antiga sem registro: sem prova de entrega, sem sessão viva, parada há mais de 30 dias' : 'fora do escopo do backfill (sem registro, parada há mais de 30 dias)'
+        continue
+      }
       let probe: DeliveryRecord = structuredClone(r)
-      if (r.phase !== 'ci' || !r.mergeSha) {
-        const found = await findMergedPr(r, d.facts, { search: true })
+      let tagWanted: string | null = null
+      let batchProof: { repo: string; pr: number; mergeSha: string; via: string; releaseRepo: string } | null = null
+      if (batch.ok) {
+        // The merge commit is gh's (the PR's), never the caller's. An ENGINE PR ships in the first public tag whose engine.pin
+        // contains it; any other PR is released by ITS OWN repository (H4).
+        const releaseRepo = batch.pr.repo === ENGINE_REPO ? DEFAULT_RELEASE_REPO : batch.pr.repo
+        batchProof = { repo: batch.pr.repo, pr: batch.pr.number, mergeSha: batch.pr.mergeSha, via: `${batch.via} (${batch.pr.repo}#${batch.pr.number})`, releaseRepo }
+        Object.assign(e, { pr: batch.pr.number, mergeSha: batch.pr.mergeSha, via: batchProof.via, repo: batch.pr.repo })
+        tagWanted = await tagOf(batch.pr) // null = not released yet (the gate says so)
+        if (meter.stopped()) { delete e.pr; delete e.mergeSha; delete e.via; delete e.repo; unchecked('budget', `this run reached its GitHub limit while reading the release of its PR`); continue }
+        if (batch.pr.repo === ENGINE_REPO && !tagWanted) { e.reason = `engine PR #${batch.pr.number} merged (${batch.pr.mergeSha.slice(0, 9)}), but no public release pins it yet`; if (!antiga()) e.reason += ' — fica'; continue }
+        probe = { ...probe, phase: 'ci', releaseRepo, mergeSha: batch.pr.mergeSha, ...(tagWanted ? { tag: tagWanted } : {}), ...(batch.pr.repo === ENGINE_REPO ? {} : { pr: batch.pr.number }), mergeDetected: { at, pr: batch.pr.number, via: batchProof.via } }
+        if (probe.versionTarget === 'next') delete probe.versionTarget
+      } else if (!hasRecord) {
+        // A record-less piece has nothing of its own to look up (no PR, branch or sha): what it declared was matched above, for free.
+        e.reason = batch.reason
+        if (antiga()) e.reason = `antiga sem registro: ${e.reason}`
+        continue
+      } else if (r.phase !== 'ci' || !r.mergeSha) {
+        const found = await findMergedPr(r, facts, { search: true })
         if (!found.ok) { e.reason = found.reason; continue }
         Object.assign(e, { pr: found.pr, mergeSha: found.mergeSha, via: found.via })
         probe = { ...probe, phase: 'ci', pr: found.pr, mergeSha: found.mergeSha, mergeDetected: { at, pr: found.pr, via: found.via }, ...(found.branch && !probe.branch ? { branch: found.branch } : {}) }
         if (probe.versionTarget === 'next') delete probe.versionTarget
       } else Object.assign(e, { ...(r.pr ? { pr: r.pr } : {}), mergeSha: r.mergeSha })
-      const v = await runGate('release', probe, d.facts)
+      // One release verdict per merge commit (or per tag), kept across runs: siblings of one batch PR share it.
+      const v = await releaseVerdict(tagWanted ? `tag:${probe.releaseRepo ?? ''}:${tagWanted}` : `sha:${probe.releaseRepo ?? ''}:${probe.mergeSha}`, probe)
       if (v.ok) { e.to = 'publicado'; if (v.patch?.tag) e.tag = v.patch.tag }
-      else { e.to = r.phase === 'ci' ? undefined : 'ci'; e.reason = `release: ${v.reason ?? 'sem evidência'}`; if (!e.to) continue }
+      else {
+        // A repository with no release flow of ours has no `ci` to wait in and no run to read: merged is said, nothing moves (H4), and
+        // the person decides, with the PR in front of them.
+        if (batchProof && !meter.stopped() && !PRODUCT_REPOS.includes(batchProof.repo)) {
+          e.reason = `PR #${batchProof.pr} merged in ${batchProof.repo}, which has no release to read`
+          e.suggestion = { repo: batchProof.repo, pr: batchProof.pr, ...(tagWanted ? { tag: tagWanted } : {}), via: batchProof.via }
+          proofs.outcomes.set(r.subtaskId, { suggestion: e.suggestion })
+          antiga()
+          continue
+        }
+        // L1: "could not read it" is not "it failed": the piece does not move on a read that did not happen.
+        if (releaseUnknown(v) || meter.stopped()) { e.releaseGate = 'unknown'; e.reason = `release: ${v.reason ?? 'sem evidência'}`; antiga(); continue }
+        e.to = r.phase === 'ci' ? undefined : 'ci'
+        e.reason = `release: ${v.reason ?? 'sem evidência'}`
+        if (e.to) e.releaseGate = releaseFailed(v) ? 'red' : 'pending'
+        if (!e.to) { antiga(); continue }
+      }
       if (!apply) continue
+      // ---- a batch-proven piece with a green tag: declared exactly as a leader's `flow release` would (one atomic write).
+      if (batchProof && v.ok && e.tag) {
+        const rel = await release({ version: e.tag.replace(/^v/, ''), mergeSha: batchProof.mergeSha, subtaskIds: [r.subtaskId], repo: batchProof.releaseRepo }, RECONCILE_ACTOR)
+        const piece = rel.ok ? rel.pieces[0] : undefined
+        e.applied = rel.ok && piece?.phase === 'publicado'
+        if (!e.applied) { e.reason = rel.ok ? `release declared but the piece is in ${piece?.phase ?? '?'}: ${rel.warnings.join('; ')}` : rel.sentence; e.to = rel.ok ? 'ci' : undefined }
+        else await d.board.comment(r.taskId, r.subtaskId, `[fluxo entrega] publicado na ${e.tag} — prova: PR #${batchProof.pr}${batchProof.repo === ENGINE_REPO ? ' (engine)' : ''}, ${batchProof.via}.`).catch(() => undefined)
+        continue
+      }
       // ---- write: through the ordinary transitions, each running its own gates.
       if (!(await leads(r, actor))) { e.applied = false; e.reason = 'only the leader of this task (or the owner) applies it'; continue }
       const got = await ensure(r.subtaskId)
@@ -1437,10 +1620,168 @@ export function createDeliveryService(d: DeliveryDeps) {
         const pub = await transition(r.subtaskId, 'publicado', { detail: `reconciliação: ${e.tag ?? 'tag'} verde contém o merge` }, RECONCILE_ACTOR, new Map([['release', v]]))
         e.applied = pub.ok
         if (!pub.ok) { e.reason = pub.sentence; e.to = 'ci' }
+        else await d.board.comment(r.taskId, r.subtaskId, `[fluxo entrega] publicado na ${e.tag ?? 'tag'} — prova: PR #${e.pr ?? '?'}, ${e.via ?? 'merge'}.`).catch(() => undefined)
       } else e.applied = true
     }
     const moved = entries.filter(e => e.to && e.applied !== false).length
-    return { ok: true, status: 200, apply, entries, moved, unproven: entries.length - moved }
+    const planned = entries.filter(e => e.to && e.applied !== false)
+    const summary: ReconcileSummary = {
+      published: planned.filter(e => e.to === 'publicado').length,
+      toCi: planned.filter(e => e.to === 'ci' && e.releaseGate !== 'red').length,
+      ciRed: planned.filter(e => e.to === 'ci' && e.releaseGate === 'red').length,
+      unknown: entries.filter(e => e.releaseGate === 'unknown').length,
+      antigas: entries.filter(e => e.bucket === 'antiga').length,
+      unchecked: entries.filter(e => e.unchecked).length,
+      stay: entries.filter(e => !(e.to && e.applied !== false) && e.bucket !== 'antiga').length,
+    }
+    await saveProof()
+    const stopped = meter.stopped()
+    return { ok: true, status: 200, apply, entries, moved, unproven: entries.length - moved, summary, gh: meter.calls(), ...(stopped ? { stopped } : {}) }
+  }
+
+  /**
+   * "Antigas sem registro": one-click actions on the legacy pieces that left "Revisão do líder" (no proof, nobody alive, > 24 h,
+   * no delivery statement still waiting). `publish` marks the piece done on the board, `archive` abandons it with a comment. NEVER
+   * deletes. A piece with a delivery record, or one that is not an old record-less in-review piece, is refused (it is not "antiga").
+   * H6: it answers from what the board says right now, never from a reconcile inside the click: `ids` (what the screen shows and
+   * counted) or `all` = every antiga except those the last run proved. `expect` = the number the person saw; a different number
+   * refuses. `signal`: the caller gave up, so the pieces not reached yet are left alone.
+   */
+  const antigas = async (o: { action: unknown; preview?: unknown; ids?: unknown; all?: unknown; version?: unknown; reason?: unknown; expect?: unknown }, actor: string, signal?: AbortSignal): Promise<AntigasReply> => {
+    if (o.action !== 'publish' && o.action !== 'archive' && o.action !== 'conclude') return fail(400, 'bad_action', 'action must be publish, archive or conclude')
+    const action: AntigaAction = o.action
+    const sessions = await d.facts.sessions().catch(() => [] as SessionFact[])
+    if (!(actor === 'owner' || actor.startsWith('flow:') || sessions.some(s => s.id === actor && s.role === 'leader'))) return fail(403, 'so_o_lider', 'only a leader (or the owner) acts on the old pieces')
+    if (!d.closeLegacy) return fail(501, 'sem_quadro', 'this host cannot close board pieces')
+    const version = typeof o.version === 'string' && /^v?\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(o.version.trim()) ? o.version.trim().replace(/^v/, '') : undefined
+    if (typeof o.version === 'string' && o.version.trim() && !version) return fail(400, 'bad_version', 'version must look like 2.203.0 (or be left empty)')
+    const reason = typeof o.reason === 'string' && o.reason.trim() ? o.reason.trim().slice(0, 500) : undefined
+    const nowMs = d.now()
+    const alive = new Set(sessions.filter(s => s.alive).map(s => s.subtaskId ?? s.taskId).filter((x): x is string => !!x))
+    const pieces = await d.reviewPieces?.().catch(() => []) ?? []
+    const piecesById = new Map(pieces.map(p => [p.id, p]))
+    const proofs = await loadProof()
+    const facts = (p: ReviewPiece) => ({ hasRecord: false, status: p.status, hasOpenChildren: p.hasOpenChildren, proven: proofs.outcomes.get(p.id)?.proven, live: alive.has(p.id), updatedMs: msOf(p.updatedAt), handbackMs: msOf(p.handbackAt), suggested: !!proofs.outcomes.get(p.id)?.suggestion, unchecked: !!proofs.outcomes.get(p.id)?.unchecked, uncheckedWhy: proofs.outcomes.get(p.id)?.unchecked, nowMs })
+    const doc = await d.store.read()
+    // ONE predicate: when the host can say which pieces the Live lists as antigas, that list decides membership everywhere below.
+    // Every chunk of a running batch writes the board (which drops the Live's cache), so a chunk reuses the set read when the batch began
+    // (30 s); a preview or an `all` always reads afresh. The write boundary (`closeLegacy`) still re-checks open children.
+    const fresh = o.all === true || o.all === 'true' || o.preview === true || o.preview === 'true' || !oldCache || d.now() - oldCache.at > 30_000
+    if (fresh) oldCache = { at: d.now(), v: await d.oldPieces?.().catch(() => null) ?? null }
+    const liveOld = oldCache!.v
+    const liveById = liveOld ? new Map(liveOld.map(p => [p.id, p])) : null
+    const isOld = (id: string): boolean => liveById ? liveById.has(id) && !proofs.outcomes.get(id)?.proven : (() => { const p = piecesById.get(id); return !!p && isAntiga(facts(p)) })()
+    const taskOf = (id: string): string | undefined => piecesById.get(id)?.taskId ?? liveById?.get(id)?.taskId
+    let ids: string[] = []
+    if (o.all === true || o.all === 'true') {
+      ids = liveById
+        ? [...liveById.keys()].filter(id => !doc.deliveries[id] && isOld(id))
+        : pieces.filter(p => !doc.deliveries[p.id] && isAntiga(facts(p)) && !proofs.outcomes.get(p.id)?.proven).map(p => p.id)
+    } else {
+      const raw = Array.isArray(o.ids) ? o.ids : typeof o.ids === 'string' ? o.ids.split(',') : []
+      ids = [...new Set(raw.filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean))]
+    }
+    if (o.expect !== undefined && o.expect !== null && Number(o.expect) !== ids.length) return fail(409, 'count_changed', `the group now has ${ids.length} pieces, not ${String(o.expect)}: nothing was changed, look again`)
+    if (!ids.length) return { ok: true, status: 200, action, done: [] }
+    const bad = ids.find(id => !SUB_ID.test(id))
+    if (bad) return fail(400, 'bad_subtask', `invalid subtask id ${bad}`)
+    if (action === 'conclude' && (o.preview === true || o.preview === 'true')) {
+      let conclude = 0
+      let archive = 0
+      const eligible = ids.filter(id => !doc.deliveries[id] && isOld(id))
+      const withSession = d.hasSessions ? await d.hasSessions(eligible).catch(() => null) : null
+      for (const id of eligible) {
+        const has = withSession ? withSession.has(id) : (!d.hasSession || await d.hasSession(id).catch(() => true))
+        if (has) conclude++
+        else archive++
+      }
+      return { ok: true, status: 200, action, preview: { conclude, archive }, done: [] }
+    }
+    const done: Array<{ subtaskId: string; ok: boolean; how?: 'concluded' | 'archived'; reason?: string; code?: 'no_session' }> = []
+    for (const id of ids) {
+      if (signal?.aborted) return { ok: true, status: 200, action, done, stopped: true }
+      const taskId = taskOf(id)
+      if (doc.deliveries[id]) { done.push({ subtaskId: id, ok: false, reason: 'the piece has a delivery record: it is not "antiga" (use the flow verbs)' }); continue }
+      if (!taskId) { done.push({ subtaskId: id, ok: false, reason: 'the piece is not in review on the board' }); continue }
+      if (!isOld(id)) { done.push({ subtaskId: id, ok: false, reason: 'the piece is recent, has a live session or a delivery still waiting: it is still review work' }); continue }
+      // Proven shipped, waiting for its reconcile to move it: archiving it as abandoned would write down the opposite of what is known.
+      if (action === 'archive' && proofs.outcomes.get(id)?.proven) { done.push({ subtaskId: id, ok: false, reason: 'the last reconcile proved this piece shipped: it goes to Published, it is not abandoned' }); continue }
+      const close = (to: 'done' | 'abandoned') => d.closeLegacy!(id, to).catch(e => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) }))
+      let how: 'concluded' | 'archived' | undefined
+      let out = await close(action === 'archive' ? 'abandoned' : 'done')
+      if (action === 'conclude') {
+        how = 'concluded'
+        // The session gate stays: a piece with no session is not marked done, it is archived (never deleted).
+        if (!out.ok && /done_needs_session/.test(out.message) && !proofs.outcomes.get(id)?.proven) { out = await close('abandoned'); how = 'archived' }
+      }
+      if (!out.ok) {
+        // M2: the board's own code means nothing to a person; say what is missing and leave the way out to the screen (archive, or open the task).
+        if (/done_needs_session/.test(out.message)) done.push({ subtaskId: id, ok: false, code: 'no_session', reason: 'no session is filed on this piece, so the board cannot mark it done: archive it, or open the task and file the conversation that delivered it' })
+        else done.push({ subtaskId: id, ok: false, reason: out.message })
+        continue
+      }
+      const applied = how === 'archived' ? 'archive' : action === 'conclude' ? 'publish' : action
+      await d.board.comment(taskId, id, antigaComment(applied, { version, reason })).catch(() => undefined)
+      await d.emit('entrega.antiga', { subtarefa: id, acao: applied }).catch(() => undefined)
+      done.push({ subtaskId: id, ok: true, ...(how ? { how } : {}) })
+    }
+    return { ok: true, status: 200, action, done }
+  }
+
+  /**
+   * AUTOMATIC reconcile (every user, no leader needed): after the store loads and then on its cadence, in APPLY mode for what is
+   * proven. Single flight, off the minute's hot path (a background promise) unless a test awaits it. No gh token or no network =
+   * nothing proven and nothing moved. Idempotent: a moved piece leaves the scope, so a second run writes nothing.
+   * H5: the next run is at least `every` away AND at least 3x what this one took; a run that hit GitHub's limit (or found the quota
+   * below a third) waits longer each time, up to AUTO_BACKOFF_MAX_MS. All of it is kept in the proof cache, so a restart resumes
+   * instead of starting over.
+   */
+  let antigasRunning: number | null = null // when the running call took the lock
+  let oldCache: { at: number; v: Array<{ id: string; taskId: string }> | null } | null = null
+  const ANTIGAS_LOCK_MS = 10 * 60_000
+  let autoRun: Promise<void> | null = null
+  const autoReconcile = async (actions: string[]): Promise<void> => {
+    if (!(typeof d.autoReconcile === 'function' ? d.autoReconcile() : d.autoReconcile)) return
+    if (autoRun) return
+    const proofs = await loadProof()
+    const now = d.now()
+    if (now < proofs.auto.nextAt) return
+    const every = d.autoReconcileEveryMs ?? AUTO_EVERY_MS
+    proofs.auto.nextAt = now + every // a crash mid-run must not start another at once
+    const log = (line: string) => { actions.push(line); d.log?.(`[delivery] ${line}`) }
+    const run = (async () => {
+      const finish = (report: AutoRunReport, wait: number) => { proofs.auto.last = report; proofs.auto.nextAt = d.now() + wait }
+      try {
+        const room = await quotaRoom()
+        if (room !== null && room < AUTO_MIN_QUOTA_ROOM) {
+          proofs.auto.failures += 1
+          const wait = Math.min(AUTO_BACKOFF_MAX_MS, every * 2 ** proofs.auto.failures)
+          finish({ at: iso(d), ms: 0, gh: 1, stopped: 'quota-low' }, wait)
+          log(`auto-reconcile adiada: cota do GitHub em ${Math.round(room * 100)}%; próxima em ${Math.round(wait / 60_000)} min`)
+          return
+        }
+        const startedMs = d.now()
+        const r = await reconcile({ apply: true }, RECONCILE_ACTOR, { budget: AUTO_RUN_GH_BUDGET })
+        if (!r.ok) { finish({ at: iso(d), ms: d.now() - startedMs, gh: 0, stopped: r.code }, every); log(`auto-reconcile-recusado ${r.code}`); return }
+        const ms = d.now() - startedMs
+        proofs.auto.failures = r.stopped === 'rate-limit' ? proofs.auto.failures + 1 : 0
+        const wait = r.stopped === 'rate-limit' ? Math.min(AUTO_BACKOFF_MAX_MS, every * 2 ** proofs.auto.failures) : Math.max(every, ms * 3)
+        finish({ at: iso(d), ms, gh: r.gh, summary: r.summary, ...(r.stopped ? { stopped: r.stopped } : {}) }, wait)
+        log(`auto-reconcile ${r.summary.published}+${r.summary.toCi + r.summary.ciRed}/${r.entries.length} antigas ${r.summary.antigas} gh ${r.gh}${r.stopped ? ` parou: ${r.stopped}` : ''}`)
+      } catch (e) {
+        finish({ at: iso(d), ms: 0, gh: 0, stopped: 'error' }, every)
+        if (e instanceof DeliveryStoreUnreadable) { log('auto-reconcile-store-ilegivel'); return }
+        log(`auto-reconcile-erro: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`)
+      } finally { autoRun = null; await saveProof() }
+    })()
+    autoRun = run
+    if (d.autoReconcileAwait) await run
+  }
+  /** The share of the core quota still free (0..1); null = could not tell (no token, a fake): the run itself will find out. `rate_limit` itself costs nothing. */
+  const quotaRoom = async (): Promise<number | null> => {
+    const cwd = (await d.facts.repoCwd?.().catch(() => null)) ?? '.'
+    const raw = await d.facts.gh(cwd, ['api', 'rate_limit', '--jq', '.resources.core']).catch(() => '')
+    try { const c = JSON.parse(raw) as { remaining?: unknown; limit?: unknown }; return typeof c.remaining === 'number' && typeof c.limit === 'number' && c.limit > 0 ? c.remaining / c.limit : null } catch { return null }
   }
 
   const tickOnce = async (): Promise<{ actions: string[] }> => {
@@ -1576,6 +1917,8 @@ export function createDeliveryService(d: DeliveryDeps) {
     }
     // FLUXO.CICLO-COMPLETO — whatever still waits on a person is reminded to the task's LIVE leader on a timer.
     await nudgeLeaders(sessions, actions).catch(e => { if (e instanceof DeliveryStoreUnreadable) throw e; actions.push(`nudge-erro: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`) })
+    // CICLO.RECONCILE-2 — the review column cleans itself: proven pieces move without anyone running a verb.
+    await autoReconcile(actions)
     return { actions }
   }
 
@@ -1594,11 +1937,38 @@ export function createDeliveryService(d: DeliveryDeps) {
         return fail(500, 'store_erro', `the release could not be written (${e instanceof Error ? e.message.split('\n')[0] : String(e)}); the batch write is all-or-nothing and the verb is idempotent — run it again`) as Extract<DeliveryReply, { ok: false }>
       }
     },
-    reconcile: async (o: { apply?: unknown }, actor: string): Promise<ReconcileReply> => {
-      try { return await reconcile(o, actor) } catch (e) {
+    reconcile: async (o: { apply?: unknown }, actor: string, opts?: { budget?: number }): Promise<ReconcileReply> => {
+      try { return await reconcile(o, actor, opts) } catch (e) {
         if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
         throw e
       }
+    },
+    /** What the last automatic run did and the last run concluded per piece (the Live's suggestion beside an old card). */
+    proofOutcomes: async () => { const c = await loadProof(); return { outcomes: c.outcomes, auto: c.auto } },
+    antigas: async (o: { action: unknown; preview?: unknown; ids?: unknown; all?: unknown; version?: unknown; reason?: unknown; expect?: unknown }, actor: string, signal?: AbortSignal): Promise<AntigasReply> => {
+      // ONE run at a time: two writers over the same pieces would count the same piece twice and make the screen's "N of M" a lie.
+      // The lock is this closure's own flag, in memory: a restart starts free, and `finally` frees it on finish, abort and throw alike.
+      // A call that never returns (a hung board write) would hold it for good, so the hold is a lease: past ANTIGAS_LOCK_MS it is stale.
+      // A PREVIEW only reads: it takes no lock, or a click made while it loads is refused for a run that does not exist.
+      // A simulation request must never write: only `conclude` can be simulated, so any other action asked with a preview (or a
+      // preview value that is not a clear yes/no) is refused before the lock and before anything is read.
+      const wantsPreview = o.preview === true || o.preview === 'true'
+      const noPreview = o.preview === undefined || o.preview === null || o.preview === false || o.preview === 'false'
+      if (!wantsPreview && !noPreview) return fail(400, 'bad_preview', 'preview must be true or false')
+      if (wantsPreview && o.action !== 'conclude') return fail(400, 'preview_only_conclude', 'preview only simulates "conclude"; publish and archive cannot be simulated, so nothing was changed: ask without preview to act, or preview "conclude"')
+      if (wantsPreview) {
+        try { return await antigas(o, actor, signal) } catch (e) {
+          if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
+          throw e
+        }
+      }
+      if (antigasRunning !== null && d.now() - antigasRunning < ANTIGAS_LOCK_MS) return fail(409, 'antigas_running', 'another run on the old pieces is already going: wait for it to finish, then look again')
+      const mine = d.now()
+      antigasRunning = mine
+      try { return await antigas(o, actor, signal) } catch (e) {
+        if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
+        throw e
+      } finally { if (antigasRunning === mine) antigasRunning = null }
     },
     queueNext, answerQueue: safe(answerQueue), queueView,
     stage: safe(stage), stageRun: safe(stageRun), dequeue: safe(dequeue), foldGroupMember, qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,
