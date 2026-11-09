@@ -75,6 +75,8 @@ export interface CalVersion {
   /** Published: the real instant. Planned: the latest piece ETA (null when no piece can say). */
   atMs: number | null
   basis: 'published' | 'estimate' | 'partial' | 'none'
+  /** True when publication was proven by a release tag and its green run. */
+  taggedRelease?: boolean
   /** Lowest confidence among the pieces that carry an estimate. */
   confidence: CalConfidence | null
   pieceKeys: string[]
@@ -220,6 +222,18 @@ export function buildCalendar(o: {
   // ---- versions: the pieces that ride one release, and when it ships (or shipped).
   const byVersion = new Map<string, CalPiece[]>()
   for (const p of pieces) if (p.version) { const l = byVersion.get(p.version); if (l) l.push(p); else byVersion.set(p.version, [p]) }
+  // A release is a version-level fact. One release record can carry the tag and the
+  // green release run's completion even while sibling pieces still have stale phases.
+  // Keep this separate from piece publication so a partial record cannot turn a real
+  // release into a planned version with "no estimate".
+  const releasePublishedAt = new Map<string, number>()
+  for (const r of o.records) {
+    const version = pickVersion(r.versionTarget)
+    const publishedAt = parseMs(r.publishedAt)
+    if (!version || !r.tag || publishedAt === null) continue
+    const previous = releasePublishedAt.get(version)
+    if (previous === undefined || publishedAt > previous) releasePublishedAt.set(version, publishedAt)
+  }
   const versions: CalVersion[] = []
   for (const [version, ps] of byVersion) {
     const stageCounts: Partial<Record<CalStage, number>> = {}
@@ -227,6 +241,11 @@ export function buildCalendar(o: {
     const allPublished = ps.every(p => p.stage === 'published')
     const confs = ps.flatMap(p => (p.publishEta.kind === 'estimate' && p.publishEta.confidence ? [p.publishEta.confidence] : []))
     const lowest = confs.length ? confs.reduce((a, b) => (RANK[b] < RANK[a] ? b : a)) : null
+    const releaseAtMs = releasePublishedAt.get(version)
+    if (releaseAtMs !== undefined) {
+      versions.push({ version, state: 'published', atMs: releaseAtMs, basis: 'published', taggedRelease: true, confidence: null, pieceKeys: ps.map(p => p.key), stageCounts })
+      continue
+    }
     if (allPublished) {
       const times = ps.flatMap(p => (p.publishedAtMs !== null ? [p.publishedAtMs] : []))
       versions.push({ version, state: 'published', atMs: times.length ? Math.max(...times) : null, basis: times.length ? 'published' : 'none', confidence: null, pieceKeys: ps.map(p => p.key), stageCounts })
