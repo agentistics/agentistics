@@ -401,6 +401,9 @@ export function SessionStatsMenu({
           {Math.floor(s.context.fraction * 100)}%
         </span>
       )}
+      {!s.context && s.contextUsed !== null && (
+        <span style={{ fontWeight: 650 }} title={pt ? 'limite não informado' : 'limit not reported'}>{fmt(s.contextUsed)}</span>
+      )}
     </>
   )
 
@@ -540,6 +543,8 @@ export function SessionStatsMenu({
                   v={`${fmt(s.context.used)} / ${fmt(s.context.window)}`}
                 />
               </>
+            ) : s.contextUsed !== null ? (
+              <Line k={pt ? 'limite não informado' : 'limit not reported'} v={`${fmt(s.contextUsed)} ${pt ? 'tokens' : 'tokens'}`} />
             ) : <Absent text={na('contextWindow')} />}
           </Block>
 
@@ -706,6 +711,27 @@ export function SessionStatsMenu({
     // a bare icon, when the session has no measurable context: a control with nothing to show is
     // the confident-zero shape this product refuses everywhere else, and `s.context` is the one
     // fact that decides whether the ring has anything to draw at all.
+    if (!s.context && s.contextUsed !== null) {
+      // Measured but no window is known (a gateway or local route): the meter stays, as the tokens
+      // used instead of a percentage, and says the limit is not reported. No ring: a ring is a fraction.
+      const label = pt ? `Métricas desta sessão — ${fmt(s.contextUsed)} tokens, limite não informado` : `This session’s metrics — ${fmt(s.contextUsed)} tokens, limit not reported`
+      return (
+        <div ref={boxRef} style={{ position: 'relative', flexShrink: 0, display: 'flex' }}>
+          <button
+            onClick={() => setOpen(v => !v)} aria-expanded={open} aria-label={label} title={label}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', height: 30, minWidth: 30, padding: '0 8px',
+              borderRadius: 15, flexShrink: 0, fontSize: 11, fontWeight: 700, color: 'var(--text-primary)',
+              fontVariantNumeric: 'tabular-nums',
+              border: open ? '1px solid var(--anthropic-orange)' : '1px solid var(--border)', background: 'transparent', cursor: 'pointer',
+            }}
+          >
+            {fmt(s.contextUsed)}
+          </button>
+          {panel}
+        </div>
+      )
+    }
     if (!s.context) return null
     const pct = Math.floor(s.context.fraction * 100)
     // OWNER FEEDBACK (2026-09-27): the first pass read too small to make out at a glance — a control

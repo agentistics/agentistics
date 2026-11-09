@@ -116,6 +116,20 @@ describe('buildSessionViews', () => {
     expect(other!.activity).toBeUndefined()
   })
 
+  it('OPENCODE.METRICAS-GATEWAY: a measured context with NO known window still reaches the row', () => {
+    const conv = {
+      sessionId: 'ses_gw', title: 'gateway', lastActivityMs: 1, startedMs: 0, harness: 'opencode' as const, cwd: '/repo/ws',
+      resumable: true, firstPrompt: '', contextTokens: 12_000,
+    }
+    const [v] = buildSessionViews({
+      reconciled: [], activity: new Map(),
+      processes: [proc({ harness: 'opencode', cwd: '/repo/ws', sessionId: 'ses_gw', pid: 7 })],
+      conversations: [conv],
+    })
+    expect(v!.contextTokens).toBe(12_000)
+    expect(v!.contextWindow).toBeUndefined()
+  })
+
   it('OPENCODE.ATIVAS-TUI: each tab of one opencode TUI is its own row, named by its own session', () => {
     const conv = (sessionId: string, title: string) => ({
       sessionId, title, lastActivityMs: 1, startedMs: 0, harness: 'opencode' as const, cwd: '/repo/ws', resumable: true, firstPrompt: '',
