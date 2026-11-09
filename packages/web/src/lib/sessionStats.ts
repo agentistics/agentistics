@@ -23,7 +23,7 @@
  */
 
 import {
-  HARNESS_CAPABILITIES, calcCost, contextReading, sessionTokens,
+  HARNESS_CAPABILITIES, calcCost, contextReading, hasModelPrice, sessionTokens,
   type SurfaceHarnessId, type SessionMeta, type TokenBreakdown,
 } from '@agentistics/core'
 
@@ -125,7 +125,8 @@ export function sessionStats(
     conversation: caps?.tokens && !meta.tokens_unavailable ? { input: num(meta.input_tokens), output: num(meta.output_tokens) } : null,
     // Priced through `calcCost` with the REAL cache counters — pricing cache as fresh input is
     // roughly tenfold too high, and zeroing it prices the cheap 4% of the volume.
-    costUSD: caps?.cost && tokens
+    // A route with no known price (a gateway, a local model) has an UNKNOWN cost: `calcCost` would say 0.
+    costUSD: caps?.cost && tokens && hasModelPrice(model ?? '')
       ? calcCost({
         inputTokens: tokens.input,
         outputTokens: tokens.output,

@@ -91,6 +91,14 @@ test('a gateway route with no known window still reports the tokens used, never 
   expect(s.contextUsed).toBe(12_000)
 })
 
+test('a route with no known price has an UNKNOWN cost, never 0, and keeps its tokens', () => {
+  const s = sessionStats('opencode', 's1', meta({
+    harness: 'opencode', model: 'acme-gw/upx/fable-5.1', input_tokens: 1000, output_tokens: 500,
+  } as Partial<SessionMeta>))
+  expect(s.costUSD).toBeNull()
+  expect(s.tokens).not.toBeNull()
+})
+
 test('contextUsed is absent when nothing was measured, and when the window is known', () => {
   expect(sessionStats('opencode', 's1', meta({ harness: 'opencode', model: 'acme-gw/x' })).contextUsed).toBeNull()
   const known = sessionStats('opencode', 's1', meta({
