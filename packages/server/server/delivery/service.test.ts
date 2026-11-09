@@ -2565,11 +2565,44 @@ describe('reconcile r2: the card\'s repository, the quota, and the buttons', () 
     const h = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [listing('lists s2')] }, ...GREEN }, { pieceHints: DECLARED(7), reviewPieces: async () => [old], proofStore })
     const real = h.facts.gh
     let during: Awaited<ReturnType<typeof h.svc.proofOutcomes>> | null = null
-    h.facts.gh = async (c, args) => { if (!during) { stamp++; during = await h.svc.proofOutcomes() } return real(c, args) }
+    h.facts.gh = async (c, args) => { if (!during) { saved = { version: 1, prs: [], commits: [], pins: [], tags: [], contains: [], localTags: [], verdicts: [], outcomes: [['x', { unchecked: 'budget' }]], auto: { nextAt: 0, failures: 0 } }; stamp++; during = await h.svc.proofOutcomes() } return real(c, args) }
     const out = await h.svc.reconcile({ apply: true }, 'owner')
     expect(out.ok).toBe(true)
     expect(during).not.toBeNull()
     expect((await h.svc.proofOutcomes()).outcomes.get('s2')?.proven).toBe(true)
+    // The run's own outcomes are what the file holds afterwards: nothing swapped the cache and nothing was lost.
+    expect(JSON.stringify(saved)).toContain('"s2"')
+    expect((await h.svc.proofOutcomes()).outcomes.has('x')).toBe(false)
+  })
+
+  test('LIMPEZA.ANTIGAS: a reload that cannot read the file keeps every outcome, does not advance the stamp, and a later good file is loaded', async () => {
+    const good = { version: 1, prs: [], commits: [], pins: [], tags: [], contains: [], localTags: [], verdicts: [], outcomes: [['s1', { unchecked: 'budget' }], ['s2', { unchecked: 'budget' }]], auto: { nextAt: 0, failures: 0 } }
+    let saved: unknown = good
+    let broken = false
+    let stamp = 1
+    const lines: string[] = []
+    const proofStore = {
+      load: async () => { if (broken) throw new SyntaxError('Unexpected end of JSON input'); return saved },
+      save: async (doc: unknown) => { saved = JSON.parse(JSON.stringify(doc)); stamp++ },
+      stamp: async () => String(stamp),
+    }
+    const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [old], proofStore, log: l => { lines.push(l) } })
+    expect((await h.svc.proofOutcomes()).outcomes.size).toBe(2)
+    // Another process is half way through writing: the stamp moved and the file does not parse.
+    broken = true
+    stamp++
+    expect((await h.svc.proofOutcomes()).outcomes.size).toBe(2)
+    expect((await h.svc.proofOutcomes()).outcomes.size).toBe(2)
+    expect(lines.filter(l => l.includes('proof cache')).length).toBeLessThanOrEqual(1)
+    // The next save must not write an empty cache over the file.
+    saved = { sentinel: true }
+    await h.svc.reconcile({ apply: true }, 'owner').catch(() => undefined)
+    expect(JSON.stringify(saved)).toContain('"s1"')
+    // A good file later is still picked up (the stamp was not consumed by the failed read).
+    broken = false
+    saved = { ...good, outcomes: [['s1', { unchecked: 'budget' }], ['s2', { unchecked: 'budget' }], ['s3', { unchecked: 'budget' }]] }
+    stamp++
+    expect((await h.svc.proofOutcomes()).outcomes.size).toBe(3)
   })
 
   test('L1: a release that could not be READ is "unknown": the piece does not move and is not called red', async () => {

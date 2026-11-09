@@ -203,6 +203,7 @@ export function createDeliveryService(d: DeliveryDeps) {
   let proofStamp: string | null = null
   /** Reconcile runs in progress in THIS process: while one holds the cache, nothing swaps it from underneath. */
   let proofRuns = 0
+  let proofReloadWarned = false
   const loadProof = async (): Promise<ProofCache> => {
     const stamp = await d.proofStore?.stamp?.().catch(() => null) ?? null
     if (!proofCache) {
@@ -211,10 +212,18 @@ export function createDeliveryService(d: DeliveryDeps) {
     } else if (proofRuns === 0 && stamp !== null && stamp !== proofStamp) {
       // The Live (this process) answers from these outcomes, and `agentop flow reconcile` runs in another process and saves
       // its own: a copy loaded once keeps judging the pieces by a run nobody remembers (LIMPEZA.ANTIGAS-FALTANTES). Same object, new content.
-      const disk = hydrateProofCache(await d.proofStore?.load().catch(() => null) ?? null, d.now())
-      const keepAuto = proofCache.auto
-      Object.assign(proofCache, disk, { unreadable: proofCache.unreadable, unreadableWhy: proofCache.unreadableWhy, auto: keepAuto.nextAt >= disk.auto.nextAt ? keepAuto : disk.auto })
-      proofStamp = stamp
+      // A file that cannot be read or parsed (a half-written one, the other process mid-write) is NOT an empty cache: keep what is in memory
+      // and leave the stamp alone, so the next good file is still picked up and the next save does not write an empty cache over every outcome.
+      const raw = await d.proofStore?.load().catch(() => undefined)
+      if (raw === undefined || raw === null || typeof raw !== 'object') {
+        if (!proofReloadWarned) { proofReloadWarned = true; d.log?.('[delivery] proof cache: the stored file could not be read; keeping the outcomes in memory') }
+      } else {
+        proofReloadWarned = false
+        const disk = hydrateProofCache(raw, d.now())
+        const keepAuto = proofCache.auto
+        Object.assign(proofCache, disk, { unreadable: proofCache.unreadable, unreadableWhy: proofCache.unreadableWhy, auto: keepAuto.nextAt >= disk.auto.nextAt ? keepAuto : disk.auto })
+        proofStamp = stamp
+      }
     }
     proofCache.nowMs = d.now()
     return proofCache
