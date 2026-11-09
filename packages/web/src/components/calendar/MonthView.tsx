@@ -9,7 +9,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { RefreshCw, Flag } from 'lucide-react'
 import { brtDay, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
-import { dowShort, fitWeek, marksOfDay, monthCells, weekRibbons, type Ribbon } from '../../lib/calendarModel'
+import { dowShort, fitWeek, marksOfDay, monthCells, piecesOnDay, weekRibbons, type Ribbon } from '../../lib/calendarModel'
 import { TEXT, pick } from './calendarText'
 import { EXPECTED_COLOR, PUBLISHED_COLOR, VersionGlyph } from './calendarUi'
 
@@ -114,7 +114,8 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
         )))}
         {week.map((c, i) => fit.more[i]! > 0 && (
           <button key={`more-${c.day}`} type="button" data-cal-more={c.day} onClick={() => onPickDay(c.day)}
-            title={pt ? `Mais ${fit.more[i]} neste dia — abrir o dia` : `${fit.more[i]} more on this day — open the day`}
+            // "+N" counts ONLY the month cell's own rows that had no room (version ribbons and due dates); the day's pieces are not drawn here.
+            title={pt ? `+${fit.more[i]}: versões e prazos sem espaço nesta célula (${piecesOnDay(pieces, c.day, nowMs).length} peças no dia) — abrir o dia` : `+${fit.more[i]}: versions and due dates without room in this cell (${piecesOnDay(pieces, c.day, nowMs).length} pieces that day) — open the day`}
             style={{
               gridColumn: i + 1, gridRow: 1, justifySelf: 'end', alignSelf: 'center', marginRight: marksOfDay(c.day, marks).some(m => m.kind === 'account-reset') ? 26 : 5,
               height: 17, display: 'inline-flex', alignItems: 'center', padding: '0 5px', minWidth: 0, zIndex: 1,

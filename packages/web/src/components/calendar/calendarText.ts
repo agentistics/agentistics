@@ -38,6 +38,7 @@ export const TEXT = {
   urgentToLow: t('urgente → baixa', 'urgent → low'),
   emptyTitle: t('Nada para mostrar neste período', 'Nothing to show in this period'),
   emptyHint: t('Ajuste os filtros ou volte para hoje.', 'Adjust the filters or go back to today.'),
+  emptyDay: t('Nada neste dia', 'Nothing on this day'),
   emptyAll: t('Nenhuma entrega no calendário ainda.', 'No deliveries on the calendar yet.'),
   loadError: t('Não foi possível ler o calendário.', 'The calendar could not be read.'),
   retry: t('Tentar de novo', 'Try again'),

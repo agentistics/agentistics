@@ -39,6 +39,8 @@ export function MobileDayGrid(p: MobileGridProps) {
     // A version with no date is not happening on any day, today included, so it is never listed here (the API's
     // date window omits it too). It stays reachable in the Schedule view, which labels it "sem estimativa".
   ])
+  // A day with nothing on it says so (the hour grid alone reads as a screen that failed to load).
+  const emptyDay = span === 1 && untimed.length === 0 && phoneEvents(anchor, p).length === 0
   useEffect(() => {
     const minutes = (nowMs - brtDayStartMs(today)) / 60_000
     if (scroller.current) scroller.current.scrollTop = Math.max(0, (days.includes(today) ? minutes : 8 * 60) - 120)
@@ -60,6 +62,7 @@ export function MobileDayGrid(p: MobileGridProps) {
       onTouchStart={e => { const t = e.touches[0]; if (t) start.current = { x: t.clientX, y: t.clientY } }}
       onTouchEnd={e => { const t = e.changedTouches[0]; if (t && start.current) p.onDay(swipeDay(anchor, t.clientX - start.current.x, t.clientY - start.current.y, 1)); start.current = null }}>
       {/* 24h of grid plus room so 23:00 scrolls fully above the bottom navigation and the chat button. */}
+      {emptyDay && <div data-cal-empty-day role="status" style={{ position: 'sticky', top: 0, zIndex: 3, height: 0, overflow: 'visible', pointerEvents: 'none' }}><div style={{ margin: '12px auto 0', width: 'fit-content', maxWidth: '85%', padding: '8px 12px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12.5, textAlign: 'center' }}>{pick(TEXT.emptyDay, pt)}</div></div>}
       <div data-cal-grid-body style={{ height: 'calc(1440px + 148px + env(safe-area-inset-bottom, 0px))', display: 'flex', position: 'relative' }}>
         {/* Thin views give the gutter up to the columns (hour number only): at 360px the page content is ~328px wide, and seven columns of 44px leave ~20px. */}
         <div style={{ width: span === 1 ? 44 : 14, flexShrink: 0, position: 'relative' }}>{Array.from({ length: 24 }, (_, h) => <span key={h} style={{ position: 'absolute', top: h * 60, left: 0, fontSize: span === 1 ? 10 : 9, color: 'var(--text-tertiary)' }}>{String(h).padStart(2, '0')}{span === 1 ? ':00' : ''}</span>)}</div>

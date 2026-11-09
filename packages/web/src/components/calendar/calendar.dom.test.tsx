@@ -226,3 +226,24 @@ test('phone week: the "+N" chip and a card that hides others open THAT day — c
   expect(document.querySelector('[data-test-url]')!.getAttribute('data-test-url')!).toContain('calDay=2026-11-07')
   expect(document.querySelector('[data-cal-grid-day]')!.getAttribute('data-cal-grid-day')).toBe('2026-11-07')
 })
+
+test('all-day band with 5 rows: shows 3 and "+2 more", expands to all 5, then collapses', async () => {
+  const marks = Array.from({ length: 5 }, (_, i) => ({ kind: 'task-due' as const, day: '2026-11-08', taskId: `d${i}`, label: `Prazo ${i}`, priority: null }))
+  await mount(createElement(MobileDayGrid, { ...common, marks, anchor: '2026-11-08', span: 1, onDay: noop, onOpen: noop }))
+  const rows = () => document.querySelectorAll('[data-cal-allday-band] .cal-phone-allday').length
+  expect(rows()).toBe(3)
+  const more = document.querySelector('.cal-phone-allday-more') as HTMLButtonElement
+  expect(more.textContent).toContain('+2')
+  await act(async () => { more.click() })
+  expect(rows()).toBe(5)
+  await act(async () => { (document.querySelector('.cal-phone-allday-more') as HTMLButtonElement).click() })
+  expect(rows()).toBe(3)
+})
+
+test('an empty day says so instead of drawing only the hour grid', async () => {
+  await mount(createElement(MobileDayGrid, { ...common, pieces: [], versions: [], marks: [], anchor: '2026-09-29', span: 1, onDay: noop, onOpen: noop }))
+  expect(document.querySelector('[data-cal-empty-day]')?.textContent ?? '').not.toBe('')
+  await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = ''
+  await mount(createElement(MobileDayGrid, { ...common, anchor: '2026-11-07', span: 1, onDay: noop, onOpen: noop }))
+  expect(document.querySelector('[data-cal-empty-day]')).toBeNull()
+})
