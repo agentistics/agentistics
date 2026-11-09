@@ -226,6 +226,19 @@ function proofCacheFile(): { load(): Promise<unknown>; save(doc: unknown): Promi
 let autoReconcileEnabled = false
 export function enableAutoReconcile(): void { autoReconcileEnabled = process.env.AGENTISTICS_AUTO_RECONCILE !== '0' }
 
+/** Whether the board would let this piece be marked done (a session is filed under it): the same rule `markTask`/`patchSubtask` apply. */
+async function pieceHasSession(id: string): Promise<boolean> {
+  const { loadTaskWorld } = await import('../sessions/task-source')
+  const { rowsOfTask, subtaskHasSession } = await import('../sessions/task-report')
+  const w = await loadTaskWorld()
+  const task = w.book.tasks.find(t => t.id === id)
+  if (task) return rowsOfTask(task, w.rollupRows).length > 0
+  const sub = w.book.subtasks.find(s => s.id === id)
+  if (!sub) return false
+  if (sub.parentGroupId) return true // a group member is exempt from the gate
+  return subtaskHasSession({ id: sub.taskId }, id, w.rollupRows)
+}
+
 /** `antigas`: closes a record-less old piece — done (completed without release proof) or abandoned (archived). Never deletes. */
 async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Promise<{ ok: true } | { ok: false; message: string }> {
   const m = await import('../sessions/task-web')
@@ -253,7 +266,7 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
   const svc = createDeliveryService({
     store, facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
     autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, accountName: accountNameOf, now: () => Date.now(),
-    reviewPieces: boardReviewPieces, closeLegacy: closeLegacyPiece,
+    reviewPieces: boardReviewPieces, closeLegacy: closeLegacyPiece, hasSession: pieceHasSession,
     autoReconcile: () => autoReconcileEnabled,
     proofStore: proofCacheFile(),
     log: line => console.log(line),

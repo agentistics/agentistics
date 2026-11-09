@@ -76,6 +76,7 @@ export interface DeliveryDeps {
   /** What the piece's OWN delivery declared in its handbacks: branch @ commit, full commits, PR numbers (read-only; matched against gh's facts). */
   pieceHints?(subtaskId: string): Promise<{ branches: string[]; shas: string[]; heads?: DeclaredHead[]; prs?: number[]; latest?: string[] }>
   /** Archives / completes a record-less old piece on the board (`antigas`), without implying release proof. Optional. */
+  hasSession?(subtaskId: string): Promise<boolean>
   closeLegacy?(subtaskId: string, to: 'done' | 'abandoned'): Promise<{ ok: true } | { ok: false; message: string }>
   /** The automatic reconcile (first tick, then on its cadence) is ON only where the host asks for it; a function is asked on every tick. */
   autoReconcile?: boolean | (() => boolean)
@@ -110,7 +111,7 @@ export type ReconcileReply =
   | Extract<DeliveryReply, { ok: false }>
 
 export type AntigasReply =
-  | { ok: true; status: 200; action: 'publish' | 'archive'; done: Array<{ subtaskId: string; ok: boolean; reason?: string; /** The board asks for a session before `done`. */ code?: 'no_session' }>; /** The caller gave up: the pieces not listed were not touched. */ stopped?: boolean }
+  | { ok: true; status: 200; action: 'publish' | 'archive' | 'conclude'; /** conclude + preview: what the click would do. */ preview?: { conclude: number; archive: number }; done: Array<{ subtaskId: string; ok: boolean; how?: 'concluded' | 'archived'; reason?: string; /** The board asks for a session before `done`. */ code?: 'no_session' }>; /** The caller gave up: the pieces not listed were not touched. */ stopped?: boolean }
   | Extract<DeliveryReply, { ok: false }>
 
 /** FILA.PRIORIDADE — one queued piece as the Fila tab, the Live card and the MCP read it (ONE source). */
@@ -1596,8 +1597,8 @@ export function createDeliveryService(d: DeliveryDeps) {
    * counted) or `all` = every antiga except those the last run proved. `expect` = the number the person saw; a different number
    * refuses. `signal`: the caller gave up, so the pieces not reached yet are left alone.
    */
-  const antigas = async (o: { action: unknown; ids?: unknown; all?: unknown; version?: unknown; reason?: unknown; expect?: unknown }, actor: string, signal?: AbortSignal): Promise<AntigasReply> => {
-    if (o.action !== 'publish' && o.action !== 'archive') return fail(400, 'bad_action', 'action must be publish or archive')
+  const antigas = async (o: { action: unknown; preview?: unknown; ids?: unknown; all?: unknown; version?: unknown; reason?: unknown; expect?: unknown }, actor: string, signal?: AbortSignal): Promise<AntigasReply> => {
+    if (o.action !== 'publish' && o.action !== 'archive' && o.action !== 'conclude') return fail(400, 'bad_action', 'action must be publish, archive or conclude')
     const action: AntigaAction = o.action
     const sessions = await d.facts.sessions().catch(() => [] as SessionFact[])
     if (!(actor === 'owner' || actor.startsWith('flow:') || sessions.some(s => s.id === actor && s.role === 'leader'))) return fail(403, 'so_o_lider', 'only a leader (or the owner) acts on the old pieces')
@@ -1623,7 +1624,18 @@ export function createDeliveryService(d: DeliveryDeps) {
     if (!ids.length) return { ok: true, status: 200, action, done: [] }
     const bad = ids.find(id => !SUB_ID.test(id))
     if (bad) return fail(400, 'bad_subtask', `invalid subtask id ${bad}`)
-    const done: Array<{ subtaskId: string; ok: boolean; reason?: string; code?: 'no_session' }> = []
+    if (action === 'conclude' && (o.preview === true || o.preview === 'true')) {
+      let conclude = 0
+      let archive = 0
+      for (const id of ids) {
+        const piece = piecesById.get(id)
+        if (!piece || doc.deliveries[id] || !isAntiga(facts(piece))) continue
+        if (!d.hasSession || await d.hasSession(id).catch(() => true)) conclude++
+        else archive++
+      }
+      return { ok: true, status: 200, action, preview: { conclude, archive }, done: [] }
+    }
+    const done: Array<{ subtaskId: string; ok: boolean; how?: 'concluded' | 'archived'; reason?: string; code?: 'no_session' }> = []
     for (const id of ids) {
       if (signal?.aborted) return { ok: true, status: 200, action, done, stopped: true }
       const piece = piecesById.get(id)
@@ -1632,16 +1644,24 @@ export function createDeliveryService(d: DeliveryDeps) {
       if (!isAntiga(facts(piece))) { done.push({ subtaskId: id, ok: false, reason: 'the piece is recent, has a live session or a delivery still waiting: it is still review work' }); continue }
       // Proven shipped, waiting for its reconcile to move it: archiving it as abandoned would write down the opposite of what is known.
       if (action === 'archive' && proofs.outcomes.get(id)?.proven) { done.push({ subtaskId: id, ok: false, reason: 'the last reconcile proved this piece shipped: it goes to Published, it is not abandoned' }); continue }
-      const out = await d.closeLegacy(id, action === 'publish' ? 'done' : 'abandoned').catch(e => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) }))
+      const close = (to: 'done' | 'abandoned') => d.closeLegacy!(id, to).catch(e => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) }))
+      let how: 'concluded' | 'archived' | undefined
+      let out = await close(action === 'archive' ? 'abandoned' : 'done')
+      if (action === 'conclude') {
+        how = 'concluded'
+        // The session gate stays: a piece with no session is not marked done, it is archived (never deleted).
+        if (!out.ok && /done_needs_session/.test(out.message) && !proofs.outcomes.get(id)?.proven) { out = await close('abandoned'); how = 'archived' }
+      }
       if (!out.ok) {
         // M2: the board's own code means nothing to a person; say what is missing and leave the way out to the screen (archive, or open the task).
         if (/done_needs_session/.test(out.message)) done.push({ subtaskId: id, ok: false, code: 'no_session', reason: 'no session is filed on this piece, so the board cannot mark it done: archive it, or open the task and file the conversation that delivered it' })
         else done.push({ subtaskId: id, ok: false, reason: out.message })
         continue
       }
-      await d.board.comment(piece.taskId, id, antigaComment(action, { version, reason })).catch(() => undefined)
-      await d.emit('entrega.antiga', { subtarefa: id, acao: action }).catch(() => undefined)
-      done.push({ subtaskId: id, ok: true })
+      const applied = how === 'archived' ? 'archive' : action === 'conclude' ? 'publish' : action
+      await d.board.comment(piece.taskId, id, antigaComment(applied, { version, reason })).catch(() => undefined)
+      await d.emit('entrega.antiga', { subtarefa: id, acao: applied }).catch(() => undefined)
+      done.push({ subtaskId: id, ok: true, ...(how ? { how } : {}) })
     }
     return { ok: true, status: 200, action, done }
   }
@@ -1862,7 +1882,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     },
     /** What the last automatic run did and the last run concluded per piece (the Live's suggestion beside an old card). */
     proofOutcomes: async () => { const c = await loadProof(); return { outcomes: c.outcomes, auto: c.auto } },
-    antigas: async (o: { action: unknown; ids?: unknown; all?: unknown; version?: unknown; reason?: unknown; expect?: unknown }, actor: string, signal?: AbortSignal): Promise<AntigasReply> => {
+    antigas: async (o: { action: unknown; preview?: unknown; ids?: unknown; all?: unknown; version?: unknown; reason?: unknown; expect?: unknown }, actor: string, signal?: AbortSignal): Promise<AntigasReply> => {
       // ONE run at a time: two writers over the same pieces would count the same piece twice and make the screen's "N of M" a lie.
       // The lock is this closure's own flag, in memory: a restart starts free, and `finally` frees it on finish, abort and throw alike.
       // A call that never returns (a hung board write) would hold it for good, so the hold is a lease: past ANTIGAS_LOCK_MS it is stale.

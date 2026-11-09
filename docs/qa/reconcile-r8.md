@@ -162,3 +162,14 @@ Changed files:
 - packages/web/src/components/tasks/LiveDelivery.dom.test.tsx
 - packages/web/src/components/tasks/liveCardModel.ts
 - packages/web/src/components/tasks/liveDeliveryModel.ts
+
+## r9 addendum
+
+- One click: `Concluir · Todas (N)` calls `conclude` (service `antigas`, also the MCP `antigasAction: conclude` and
+  `agentop flow antigas conclude`). Pieces with a session complete, the rest are archived in the same call (the session gate
+  is unchanged; nothing is deleted). The dialog first reads `preview` ("N concluídas, M arquivadas") from the same service.
+  Evidence replay: 189 acted, 156 concluded + 33 archived, Antigas 0 after the single click.
+- Load cost of the Concluído stage (Tudo 262 -> 758 cards): client render in happy-dom, median of 3, 263 cards 1568 ms
+  against 758 cards 3922 ms (+2354 ms, over the 1 s limit). Concluído now rides the Publicado period (default 24 h; undated
+  ones only with period "Todos"), applied server-side (so the MCP answers the same) and in the tabs/counts.
+  "Em andamento" is unaffected (27 ms). Not measured: a real browser, and server build time alone.

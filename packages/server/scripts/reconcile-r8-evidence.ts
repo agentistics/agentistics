@@ -47,6 +47,7 @@ const service = createDeliveryService({
     else if (captured && !repos.length) repos.push('example/fixture-repo')
     return { ...p, repos, handbackAt: handbacks.at(-1)?.createdAt, hints: hintsFromHandbacks(handbacks.map(c => ({ body: c.body, atMs: Date.parse(c.createdAt) }))) }
   }),
+  hasSession: async id => { const p = book.subtasks.find(s => s.id === id) ?? book.tasks.find(t => t.id === id); return !!p && ('taskId' in p ? subtaskHasSession({ id: p.taskId }, id, rows) : rowsOfTask(p, rows).length > 0) },
   closeLegacy: async (id, to) => {
     const p = book.subtasks.find(s => s.id === id) ?? book.tasks.find(t => t.id === id)
     if (!p) return { ok: false, message: 'missing evidence piece' }
@@ -69,31 +70,30 @@ const view = () => describeLive({
     suggestions: new Map([...outcomes].flatMap(([id, o]) => o.suggestion ? [[id, o.suggestion] as const] : [])),
     unchecked: new Set([...outcomes].filter(([, o]) => o.unchecked).map(([id]) => id)),
     uncheckedWhy: new Map([...outcomes].flatMap(([id, o]) => o.unchecked ? [[id, o.unchecked] as const] : [])),
-  }), rows: [], leaderIds: new Set(), nowMs,
+  }), rows: [], leaderIds: new Set(), nowMs, filters: { period: 'all' },
 })
 const before = view()
 const screenIds = before.deliveries.filter(d => d.old).map(d => d.subtaskId ?? d.taskId).sort()
 const dryIds = dry.entries.filter(e => e.bucket === 'antiga').map(e => e.subtaskId).sort()
 if (JSON.stringify(screenIds) !== JSON.stringify(dryIds)) throw new Error(`screen/dry set mismatch: screen only ${screenIds.filter(id => !dryIds.includes(id))}; dry only ${dryIds.filter(id => !screenIds.includes(id))}`)
-const out = await service.antigas({ action: 'publish', all: true, expect: screenIds.length }, 'owner')
+const out = await service.antigas({ action: 'conclude', all: true, expect: screenIds.length }, 'owner')
 if (!out.ok) throw new Error('evidence action refused')
 if (JSON.stringify(out.done.map(d => d.subtaskId).sort()) !== JSON.stringify(screenIds)) throw new Error('screen/action set mismatch')
 const afterComplete = view()
 const afterCompleteDry = await service.reconcile({}, 'owner')
 if (!afterCompleteDry.ok) throw new Error(afterCompleteDry.sentence)
 if (afterCompleteDry.summary.antigas !== afterComplete.deliveries.filter(d => d.old).length) throw new Error('remaining count differs after completion')
-for (const d of out.done) if (d.ok && !afterComplete.deliveries.some(c => (c.subtaskId ?? c.taskId) === d.subtaskId && c.stage === 'completed')) throw new Error(`completed card vanished: ${d.subtaskId}`)
-const archived = await service.antigas({ action: 'archive', all: true }, 'owner')
-if (!archived.ok || archived.done.some(d => !d.ok)) throw new Error('archive fallback failed')
+for (const d of out.done) if (d.ok && d.how !== 'archived' && !afterComplete.deliveries.some(c => (c.subtaskId ?? c.taskId) === d.subtaskId && c.stage === 'completed')) throw new Error(`completed card vanished: ${d.subtaskId}`)
+const archived = { done: out.done.filter(d => d.ok && d.how === 'archived') } // one click: no second step
 const after = view()
 if (book.tasks.length + book.subtasks.length !== bookPieces) throw new Error('a board piece was deleted')
 const afterDry = await service.reconcile({}, 'owner')
 if (!afterDry.ok) throw new Error(afterDry.sentence)
 if (after.deliveries.some(d => d.old) || afterDry.summary.antigas !== 0) throw new Error('old pieces remain after the complete in-memory run')
-for (const d of out.done) if (d.ok && !after.deliveries.some(c => (c.subtaskId ?? c.taskId) === d.subtaskId && c.stage === 'completed')) throw new Error(`completed card vanished: ${d.subtaskId}`)
+for (const d of out.done) if (d.ok && d.how !== 'archived' && !after.deliveries.some(c => (c.subtaskId ?? c.taskId) === d.subtaskId && c.stage === 'completed')) throw new Error(`completed card vanished: ${d.subtaskId}`)
 const stages = ['queue', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'completed', 'published']
 const report = (name: string, v: typeof before, count: number | null) => ({ name, antiga: v.deliveries.filter(d => d.old).length, dry: count, ...Object.fromEntries(stages.map(s => [s, v.deliveries.filter(d => d.stage === s).length])), all: v.deliveries.length })
-console.log('ASSUMPTIONS: QA r7 copied fixture; clock fixed at live-before.generatedAt; liveness from captured sessionIds; no tag proofs; empty PR lists reproduce the captured zero-match run. Actions mutate memory only. Completion honors the session gate; unfiled pieces then use Archive explicitly, remain in the book and leave the Live by that explicit action.')
+console.log('ASSUMPTIONS: QA r7 copied fixture; clock fixed at live-before.generatedAt; liveness from captured sessionIds; no tag proofs; empty PR lists reproduce the captured zero-match run. Actions mutate memory only. ONE click (conclude): pieces with a session complete, the others are archived, none deleted.')
 console.table([
   report('r7 captured before', capturedBefore, capturedDry.summary.antigas),
   report('r7 captured after', capturedAfter, null),
@@ -101,7 +101,7 @@ console.table([
   report('r8 after complete', afterComplete, afterCompleteDry.summary.antigas),
   report('r8 replay after', after, afterDry.summary.antigas),
 ])
-console.log('Completion attempts:', out.done.length, 'completed:', out.done.filter(d => d.ok).length, 'refused (no session):', out.done.filter(d => !d.ok).length, 'then explicitly archived:', archived.done.length, 'Same screen/dry/action ids: true')
+console.log('Completion attempts:', out.done.length, 'completed:', out.done.filter(d => d.ok).length, 'refused:', out.done.filter(d => !d.ok).length, 'archived in the same click:', archived.done.length, 'Same screen/dry/action ids: true')
 const r6 = await Bun.file(join(source, '..', 'qa-reconcile-2-r6', 'live-fixture-1.json')).json()
 const r6Old = new Set<string>(r6.deliveries.filter((d: { old?: boolean }) => d.old).map((d: { key: string }) => d.key))
 const r7Old = new Set<string>(capturedBefore.deliveries.filter((d: { old?: boolean }) => d.old).map((d: { key: string }) => d.key))

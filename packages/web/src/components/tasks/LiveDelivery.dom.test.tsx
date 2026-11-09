@@ -334,7 +334,7 @@ test('old legacy reviews are no separate button: they sit in "Tudo" (counted), m
   await act(async () => open.click())
   const group = document.querySelector('[data-live-antigas]')!
   expect(group.querySelectorAll('[data-live-archived]').length).toBe(3)
-  expect(group.querySelector('[data-live-antigas-all-archive]')!.textContent).toBe('Archive · All (3)')
+  expect(group.querySelector('[data-live-antigas-all]')!.textContent).toBe('Conclude · All (3)')
   localStorage.clear()
 })
 
@@ -346,7 +346,7 @@ test('H6: "All" asks first, sends exactly the ids it counted, answers in batches
   const realFetch = globalThis.fetch
   globalThis.fetch = (async (_url: string, init: RequestInit) => {
     const body = JSON.parse(String(init.body)) as { ids: string[]; expect: number; action: string }
-    sent.push(body)
+    if (!(body as { preview?: boolean }).preview) sent.push(body)
     return new Response(JSON.stringify({ ok: true, done: body.ids.map((id, i) => (i === 0 && id === 'o0' ? { subtaskId: id, ok: false, code: 'no_session', reason: 'x' } : { subtaskId: id, ok: true })) }), { status: 200 })
   }) as typeof fetch
   try {
@@ -354,13 +354,13 @@ test('H6: "All" asks first, sends exactly the ids it counted, answers in batches
     await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: { ...reply, deliveries: old } as never }))) })
     await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
     await act(async () => (document.querySelector('[data-live-antigas-open]') as HTMLElement).click())
-    await act(async () => (document.querySelector('[data-live-antigas-all-archive]') as HTMLElement).click())
-    expect(sent).toEqual([]) // nothing happens before the answer
-    expect(document.body.textContent).toContain('Archive 25 pieces?')
-    const buttons = Array.from(document.querySelectorAll('button')).filter(b => b.textContent === 'Archive')
+    await act(async () => (document.querySelector('[data-live-antigas-all]') as HTMLElement).click())
+    expect(sent.filter(s => !(s as { preview?: boolean }).preview)).toEqual([]) // nothing happens before the answer
+    expect(document.body.textContent).toContain('Conclude 25 pieces in one go?')
+    const buttons = Array.from(document.querySelectorAll('button')).filter(b => b.textContent === 'Conclude')
     await act(async () => { buttons.at(-1)!.click(); await new Promise(r => setTimeout(r, 10)) })
     expect(sent.map(s => s.ids.length)).toEqual([5, 5, 5, 5, 5])
-    expect(sent.every(s => s.action === 'archive' && s.expect === s.ids.length)).toBe(true)
+    expect(sent.every(s => s.action === 'conclude' && s.expect === s.ids.length)).toBe(true)
     // What the board refused stays, in words, with a way out; what it took left the list.
     const list = document.querySelector('[data-live-antigas]')!
     expect(list.querySelectorAll('[data-live-archived]').length).toBe(1)
@@ -377,6 +377,7 @@ test('run lock + end of run: a 409 antigas_running stops the batch with one sent
   let calls = 0
   const realFetch = globalThis.fetch
   globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    if ((JSON.parse(String(init.body)) as { preview?: boolean }).preview) return new Response(JSON.stringify({ ok: true, done: [], preview: { conclude: 0, archive: 25 } }), { status: 200 })
     calls++
     const body = JSON.parse(String(init.body)) as { ids: string[] }
     if (calls === 1) return new Response(JSON.stringify({ ok: true, done: body.ids.map(id => ({ subtaskId: id, ok: true })) }), { status: 200 })
@@ -387,8 +388,8 @@ test('run lock + end of run: a 409 antigas_running stops the batch with one sent
     await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: { ...reply, deliveries: old } as never }))) })
     await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
     await act(async () => (document.querySelector('[data-live-antigas-open]') as HTMLElement).click())
-    await act(async () => (document.querySelector('[data-live-antigas-all-archive]') as HTMLElement).click())
-    const buttons = Array.from(document.querySelectorAll('button')).filter(b => b.textContent === 'Archive')
+    await act(async () => (document.querySelector('[data-live-antigas-all]') as HTMLElement).click())
+    const buttons = Array.from(document.querySelectorAll('button')).filter(b => b.textContent === 'Conclude')
     await act(async () => { buttons.at(-1)!.click(); await new Promise(r => setTimeout(r, 10)) })
     expect(calls).toBe(2) // the refused chunk ends the batch: no further request is made
     const list = document.querySelector('[data-live-antigas]')!

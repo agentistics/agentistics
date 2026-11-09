@@ -186,11 +186,12 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
     case 'antigas': {
       // `agentop flow antigas publish|archive [--subtask S[,S…]|--all [--expect N]] [--version X] [--reason text]`
       const action = flags.action ?? pos[1]
-      if (action !== 'publish' && action !== 'archive') { io.err('usage: agentop flow antigas publish|archive (--subtask S[,S…] | --all [--expect N]) [--version 2.203.0] [--reason text]'); return 2 }
-      const r = await svc.antigas({ action, ids: flags.subtask, all: flags.all === 'true', ...(flags.expect ? { expect: flags.expect } : {}), version: flags.version, reason: flags.reason }, actor)
+      if (action !== 'publish' && action !== 'archive' && action !== 'conclude') { io.err('usage: agentop flow antigas publish|archive|conclude (--subtask S[,S…] | --all [--expect N]) [--version 2.203.0] [--reason text]'); return 2 }
+      const r = await svc.antigas({ action, ...(flags.preview === 'true' ? { preview: true } : {}), ids: flags.subtask, all: flags.all === 'true', ...(flags.expect ? { expect: flags.expect } : {}), version: flags.version, reason: flags.reason }, actor)
       if (!r.ok) return report(r, io)
       if (flags.json === 'true') { io.out(JSON.stringify(r, null, 2)); return 0 }
-      for (const x of r.done) io.out(`${x.subtaskId}\t${x.ok ? 'ok' : `recusada: ${x.reason ?? '?'}`}`)
+      if (r.preview) io.out(`${r.preview.conclude} concluídas, ${r.preview.archive} arquivadas`)
+      for (const x of r.done) io.out(`${x.subtaskId}\t${x.ok ? `ok${x.how ? ` (${x.how})` : ''}` : `recusada: ${x.reason ?? '?'}`}`)
       return 0
     }
     case 'tick': io.out(JSON.stringify(await svc.tick(), null, 2)); return 0

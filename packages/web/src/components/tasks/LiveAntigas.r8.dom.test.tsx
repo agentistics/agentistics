@@ -19,11 +19,12 @@ afterEach(async () => {
 })
 afterAll(() => GlobalRegistrator.unregister())
 
-test('task and subtask cards count and act through the same dialog', async () => {
-  const sent: object[] = []
+test('one click: the dialog previews "N concluídas, M arquivadas" and a single confirm concludes the whole group', async () => {
+  const sent: Record<string, unknown>[] = []
   globalThis.fetch = (async (_url, options) => {
     const body = JSON.parse(String(options?.body)); sent.push(body)
-    return Response.json({ done: body.ids.map((id: string) => ({ subtaskId: id, ok: true })) })
+    if (body.preview) return Response.json({ ok: true, action: 'conclude', done: [], preview: { conclude: 1, archive: 1 } })
+    return Response.json({ done: body.ids.map((id: string) => ({ subtaskId: id, ok: true, how: id === 's-a7e7d9df9f' ? 'concluded' : 'archived' })) })
   }) as typeof fetch
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => root!.render(createElement(Antigas, {
@@ -33,14 +34,16 @@ test('task and subtask cards count and act through the same dialog', async () =>
       { key: 't-e1dea7cd6f/s-a7e7d9df9f', taskId: 't-e1dea7cd6f', subtaskId: 's-a7e7d9df9f', title: 'REFS.1' },
     ],
   })))
-  expect(document.querySelector('[data-live-antigas-all-publish]')?.textContent).toContain('Todas (2)')
-  expect(document.querySelector('[data-live-antiga-publish="t-d9e9fff3f6"]')).not.toBeNull()
-  await act(async () => (document.querySelector('[data-live-antigas-all-publish]') as HTMLElement).click())
-  expect(document.body.textContent).toContain('Concluído · sem prova de release')
-  // The confirmation is a real UI action, with no HTTP server behind the fetch stub.
-  const confirm = Array.from(document.querySelectorAll('button')).findLast(b => b.textContent === 'Marcar concluído')
+  expect(document.querySelector('[data-live-antigas-all-publish]')).toBeNull()
+  expect(document.querySelector('[data-live-antigas-all-archive]')).toBeNull()
+  expect(document.querySelector('[data-live-antigas-all]')?.textContent).toContain('Todas (2)')
+  await act(async () => { (document.querySelector('[data-live-antigas-all]') as HTMLElement).click(); await new Promise(r => setTimeout(r, 10)) })
+  expect(sent[0]).toMatchObject({ action: 'conclude', preview: true })
+  expect(document.body.textContent).toContain('1 concluída, 1 arquivada')
+  const confirm = Array.from(document.querySelectorAll('button')).findLast(b => b.textContent === 'Concluir')
   expect(confirm).toBeDefined()
   await act(async () => { confirm!.click(); await new Promise(r => setTimeout(r, 10)) })
-  expect(sent).toEqual([{ action: 'publish', ids: ['t-d9e9fff3f6', 's-a7e7d9df9f'], expect: 2 }])
+  expect(sent[1]).toEqual({ action: 'conclude', ids: ['t-d9e9fff3f6', 's-a7e7d9df9f'], expect: 2 })
+  expect(sent).toHaveLength(2)
   expect(document.querySelectorAll('[data-live-archived]')).toHaveLength(0)
 })

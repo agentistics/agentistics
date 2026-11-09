@@ -2517,4 +2517,24 @@ describe('QA pins: reconcile never moves real work, and does not spend the quota
     expect(refused.ok && refused.done[0]?.ok).toBe(false)
     expect(closed).toEqual(['t-d9e9fff3f6'])
   })
+
+  test('r9 one click: conclude completes the pieces with a session and archives the ones without, previewing both counts', async () => {
+    const withSession = { ...piece, id: 's-a7e7d9df9f', updatedAt: '2026-11-01T00:00:00Z', repos: [] as string[] }
+    const noSession = { ...piece, id: 's-b7e7d9df9f', updatedAt: '2026-11-01T00:00:00Z', repos: [] as string[] }
+    const calls: string[] = []
+    const h = harness({ status: 'in_review', sessions: [] }, {
+      reviewPieces: async () => [withSession, noSession],
+      hasSession: async id => id === withSession.id,
+      closeLegacy: async (id, to) => { calls.push(`${id}:${to}`); return to === 'done' && id === noSession.id ? { ok: false, message: 'done_needs_session' } : { ok: true } },
+    })
+    const preview = await h.svc.antigas({ action: 'conclude', all: true, preview: true }, 'owner')
+    expect(preview.ok && preview.preview).toEqual({ conclude: 1, archive: 1 })
+    expect(calls).toEqual([])
+    const out = await h.svc.antigas({ action: 'conclude', all: true, expect: 2 }, 'owner')
+    expect(out.ok && out.done).toEqual([
+      { subtaskId: withSession.id, ok: true, how: 'concluded' },
+      { subtaskId: noSession.id, ok: true, how: 'archived' },
+    ])
+    expect(calls).toEqual([`${withSession.id}:done`, `${noSession.id}:done`, `${noSession.id}:abandoned`])
+  })
 })

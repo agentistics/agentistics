@@ -59,7 +59,7 @@ export function inReconcileScope(f: ReviewPieceFacts & { mentioned: boolean }): 
   return f.nowMs - f.updatedMs <= RECONCILE_SCOPE_MS
 }
 
-export type AntigaAction = 'publish' | 'archive'
+export type AntigaAction = 'publish' | 'archive' | 'conclude'
 
 /** PURE. The comment a one-click action leaves on the piece (the reason is the owner's/leader's, never invented). */
 export function antigaComment(action: AntigaAction, o: { version?: string; reason?: string }): string {

@@ -13,7 +13,7 @@ const detail = (subtasks: object[], sessions: object[] = [], taskExtra = {}) => 
   task: { ...task, ...taskExtra }, subtasks, rows: sessions, metas: new Map(), attempts: [], comments: [], files: [], costOf: () => 0,
 } as never)
 const view = (details: ReturnType<typeof detail>[], extra = {}) => describeLive({
-  reply: buildLive({ details, nowMs, events: [], ...extra }), rows: [], leaderIds: new Set(), nowMs,
+  reply: buildLive({ details, nowMs, events: [], ...extra }), rows: [], leaderIds: new Set(), nowMs, filters: { period: 'all' },
 })
 
 test('r7 no-repos s-a7e7d9df9f stays antiga before and after the lookup cache is populated', () => {
@@ -29,8 +29,15 @@ test('r7 empty group s-97ca9d04b5 cannot go back to queue after a manual complet
 
 test('r7 s-3c7e645a58 remains in Tudo after completion even if its only filed sessions are leaders', () => {
   const reply = buildLive({ details: [detail([sub('s-3c7e645a58', { status: 'done', done: true, updatedAt: new Date(nowMs).toISOString(), deliveredAt: '2026-10-16T11:43:46.892Z' })], [{ id: 'leader', taskId, subtaskId: 's-3c7e645a58', harness: 'claude', createdAt: old, endedAt: old }])], nowMs, events: [] })
-  const result = describeLive({ reply, rows: [], leaderIds: new Set(['leader']), nowMs })
+  const result = describeLive({ reply, rows: [], leaderIds: new Set(['leader']), nowMs, filters: { period: 'all' } })
   expect(result.deliveries.find(d => d.subtaskId === 's-3c7e645a58')).toMatchObject({ stage: 'completed' })
+})
+
+test('r9: by default Tudo carries Concluído only inside the period; period "all" brings the rest', () => {
+  const details = [detail([sub('s-3c7e645a58', { status: 'done', done: true })])]
+  const at = (period?: 'all') => describeLive({ reply: buildLive({ details, nowMs, events: [] }), rows: [], leaderIds: new Set(), nowMs, ...(period ? { filters: { period } } : {}) })
+  expect(at().deliveries).toHaveLength(0)
+  expect(at('all').deliveries).toHaveLength(1)
 })
 
 test('task-level Cold start is eligible by the same age rule', () => {

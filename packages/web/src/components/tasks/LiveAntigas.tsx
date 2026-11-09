@@ -31,7 +31,7 @@ export interface LiveAntigasProps {
   onOpen: (taskId: string) => void
 }
 
-type Action = 'publish' | 'archive'
+type Action = 'publish' | 'archive' | 'conclude'
 interface Outcome { ok: boolean; reason?: string; code?: 'no_session' }
 
 /** How many pieces one request carries: the answer stays immediate and the group can be stopped between two of them. */
@@ -48,6 +48,9 @@ const T = (pt: boolean) => pt ? {
   taskLevel: 'Tarefa sem subtarefas: decida abrindo a tarefa.',
   confirmArchiveTitle: (n: number) => `Arquivar ${n} ${n === 1 ? 'peça' : 'peças'}?`,
   confirmArchive: 'Elas saem da revisão como abandonadas. Nada é apagado, mas para voltar é preciso abrir cada tarefa. Uma peça que ainda espera alguém não é tocada.',
+  concludeAll: 'Concluir', counts: (c: number, a: number) => `${c} ${c === 1 ? 'concluída' : 'concluídas'}, ${a} ${a === 1 ? 'arquivada' : 'arquivadas'}`,
+  confirmConcludeTitle: (n: number) => `Concluir ${n} ${n === 1 ? 'peça' : 'peças'} de uma vez?`,
+  confirmConclude: 'Quem tem sessão vai para Concluído, sem prova de release; quem não tem é arquivada. Nada é apagado. Uma peça que ainda espera alguém não é tocada.',
   confirmPublishTitle: (n: number) => `Marcar ${n} ${n === 1 ? 'peça' : 'peças'} como concluídas?`,
   confirmPublish: 'Elas vão para Concluído · sem prova de release, visíveis em Tudo. Publicado exige prova de release. Uma peça que ainda espera alguém não é tocada.',
   unreachable: 'Não consegui falar com o servidor. Nada mudou nesta peça.',
@@ -65,6 +68,9 @@ const T = (pt: boolean) => pt ? {
   taskLevel: 'A task with no subtasks: decide it by opening the task.',
   confirmArchiveTitle: (n: number) => `Archive ${n} ${n === 1 ? 'piece' : 'pieces'}?`,
   confirmArchive: 'They leave review as abandoned. Nothing is deleted, but bringing one back means opening its task. A piece still waiting on somebody is not touched.',
+  concludeAll: 'Conclude', counts: (c: number, a: number) => `${c} completed, ${a} archived`,
+  confirmConcludeTitle: (n: number) => `Conclude ${n} ${n === 1 ? 'piece' : 'pieces'} in one go?`,
+  confirmConclude: 'Pieces with a session go to Completed, no release proof; the rest are archived. Nothing is deleted. A piece still waiting on somebody is not touched.',
   confirmPublishTitle: (n: number) => `Mark ${n} ${n === 1 ? 'piece' : 'pieces'} as completed?`,
   confirmPublish: 'They go to Completed · no release proof, visible in All. Published requires release proof. A piece still waiting on somebody is not touched.',
   unreachable: 'Could not reach the server. Nothing changed on this piece.',
@@ -81,6 +87,7 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({})
   const [asking, setAsking] = useState<Action | null>(null)
   const [summary, setSummary] = useState<{ done: number; left: number; stopped: boolean } | null>(null)
+  const [preview, setPreview] = useState<{ conclude: number; archive: number } | null>(null)
   const stopper = useRef<AbortController | null>(null)
   const stopRequested = useRef(false)
   useEffect(() => () => stopper.current?.abort(), [])
@@ -114,6 +121,16 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
     setSummary(null)
     await send(action, [id], chosenVersion ?? (version.trim() || undefined))
     setProgress(null)
+  }
+  /** The dialog says beforehand what the one click will do, from the server's own count (the same one the MCP reads). */
+  const askConclude = async () => {
+    setPreview(null)
+    setAsking('conclude')
+    try {
+      const res = await fetch('/api/deliveries/antigas', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'conclude', preview: true, ids: actionable, expect: actionable.length }) })
+      const body = await res.json().catch(() => ({})) as { preview?: { conclude: number; archive: number } }
+      if (res.ok && body.preview) setPreview(body.preview)
+    } catch { /* the dialog still opens, without the split */ }
   }
   const group = async (action: Action) => {
     const ids = [...actionable]
@@ -159,9 +176,8 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
         <div data-live-antigas style={{ display: 'grid', gap: 10, fontSize: 12, minWidth: 0 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <input data-live-antigas-version value={version} onChange={e => setVersion(e.target.value)} placeholder={L.version} aria-label={L.version} style={{ ...field, width: mobile ? '100%' : 130 }} />
-            <button type="button" data-live-antigas-all-publish disabled={busy || actionable.length === 0} onClick={() => setAsking('publish')} style={btn()}>{L.publish} · {L.all(actionable.length)}</button>
             <input data-live-antigas-reason value={reason} onChange={e => setReason(e.target.value)} placeholder={L.reason} aria-label={L.reason} style={{ ...field, width: mobile ? '100%' : 160 }} />
-            <button type="button" data-live-antigas-all-archive disabled={busy || actionable.length === 0} onClick={() => setAsking('archive')} style={btn()}>{L.archive} · {L.all(actionable.length)}</button>
+            <button type="button" data-live-antigas-all disabled={busy || actionable.length === 0} onClick={() => void askConclude()} style={btn(true)}>{L.concludeAll} · {L.all(actionable.length)}</button>
           </div>
           {summary && !busy && <p role="status" data-live-antigas-summary style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 12 }}>{L.summary(summary.done, summary.left, summary.stopped)}</p>}
           {visible.length !== actionable.length && <p data-live-antigas-why style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: 11.5 }}>{L.whyFewer(visible.length, actionable.length)}</p>}
@@ -197,9 +213,9 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
       </ConfirmModal>
       <ConfirmModal
         open={asking !== null} layer={mobile ? 2020 : 320} tone={asking === 'archive' ? 'danger' : 'default'} focusCancel
-        title={asking === 'archive' ? L.confirmArchiveTitle(actionable.length) : L.confirmPublishTitle(actionable.length)}
-        message={asking === 'archive' ? L.confirmArchive : L.confirmPublish}
-        confirmLabel={asking === 'archive' ? L.archive : L.publish} cancelLabel={L.cancel}
+        title={asking === 'conclude' ? L.confirmConcludeTitle(actionable.length) : asking === 'archive' ? L.confirmArchiveTitle(actionable.length) : L.confirmPublishTitle(actionable.length)}
+        message={asking === 'conclude' ? `${preview ? `${L.counts(preview.conclude, preview.archive)}. ` : ''}${L.confirmConclude}` : asking === 'archive' ? L.confirmArchive : L.confirmPublish}
+        confirmLabel={asking === 'conclude' ? L.concludeAll : asking === 'archive' ? L.archive : L.publish} cancelLabel={L.cancel}
         onCancel={() => setAsking(null)}
         onConfirm={() => { const a = asking; setAsking(null); if (a) void group(a) }}
       />

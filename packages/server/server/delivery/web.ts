@@ -60,9 +60,9 @@ export async function deliveryRequest(method: string, path: string, body: Record
   if (rest === 'antigas') {
     // The "Antigas sem registro" group: { action: 'publish'|'archive', ids?: string[], all?: boolean, expect?: number, version?, reason? }.
     // `signal` is the request's: a client that gave up stops the work, it does not finish behind a screen that said it failed.
-    const r = await d.service.antigas({ action: body.action, ids: body.ids, all: body.all, expect: body.expect, version: body.version, reason: body.reason }, actor, signal)
+    const r = await d.service.antigas({ action: body.action, preview: body.preview, ids: body.ids, all: body.all, expect: body.expect, version: body.version, reason: body.reason }, actor, signal)
     return r.ok
-      ? { status: 200, body: { ok: true, action: r.action, done: r.done, ...(r.stopped ? { stopped: true } : {}) } }
+      ? { status: 200, body: { ok: true, action: r.action, done: r.done, ...(r.preview ? { preview: r.preview } : {}), ...(r.stopped ? { stopped: true } : {}) } }
       : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing } }
   }
   if (rest === 'release') {
