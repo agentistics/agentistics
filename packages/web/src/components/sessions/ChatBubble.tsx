@@ -168,6 +168,11 @@ export interface ChatBubbleProps {
    */
   awaitingActions?: { sendNow?: AwaitingAction; interrupt?: AwaitingAction }
   /**
+   * MENSAGENS.KILL: this message was handed to a session that is no longer running, so nothing will read it. The caption
+   * says so and offers the one action (put it back in the composer) instead of the "not read yet" wait.
+   */
+  stranded?: AwaitingAction
+  /**
    * Quote THIS turn in the composer. Absent where the session cannot be written to — a reply
    * control on a row that will refuse the message is a control that teaches the wrong thing.
    *
@@ -382,7 +387,7 @@ function SystemNote({ note, noteRef, pt, sessionId }: { note: string; noteRef?: 
 /** One action on a queued message's caption: its words and what it runs. */
 export interface AwaitingAction { label: string; hint: string; run: () => void }
 
-const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, awaitingActions, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant, surfaceSubmitted }: ChatBubbleProps & { surfaceSubmitted?: boolean }) {
+const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, awaitingActions, stranded, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant, surfaceSubmitted }: ChatBubbleProps & { surfaceSubmitted?: boolean }) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
@@ -1075,7 +1080,31 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
         {/* The label sits INSIDE the bubble, under the text: it is a fact about this message, and
             a line floating beside the bubble would read as another message. `role="status"` so a
             screen reader is told, since the fading alone says nothing to one. */}
-        {awaiting && (() => {
+        {awaiting && stranded && (
+          <div role="status" data-testid="stranded-caption" style={{
+            display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', fontSize: 10,
+            color: 'var(--anthropic-orange)', alignSelf: mine ? 'flex-end' : 'flex-start',
+          }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+              <Clock size={10} style={{ flexShrink: 0 }} />
+              <span>{pt ? 'Não chegou a ser lida — a sessão não está mais rodando.' : 'Never read — the session is no longer running.'}</span>
+            </span>
+            <button
+              type="button"
+              onClick={stranded.run}
+              title={stranded.hint}
+              aria-label={`${stranded.label}. ${stranded.hint}`}
+              data-testid="stranded-resend"
+              style={{
+                border: 'none', background: 'transparent', padding: '0 2px', cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', minHeight: isMobile ? 44 : 32,
+                fontFamily: 'inherit', fontSize: 10, fontWeight: 600, textDecoration: 'underline',
+                color: 'var(--anthropic-orange)',
+              }}
+            >{stranded.label}</button>
+          </div>
+        )}
+        {awaiting && !stranded && (() => {
           // The wording is `echoStatus`'s, not this file's — see it for why the sentence leads with
           // DELIVERY rather than with waiting.
           const st = echoStatus(awaitingSinceMs ?? null, awaitingWorking === true, pt ? 'pt' : 'en')

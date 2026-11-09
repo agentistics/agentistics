@@ -42,6 +42,7 @@ export function nativeSessionStats(o: {
     conversation: tokens ? { input: tokens.input, output: tokens.output } : null,
     costUSD: allPriced ? billed.reduce((n, r) => n + r.costUSD!, 0) : null,
     context: gauge ? { fraction: gauge.fraction, used: gauge.tokens, window: gauge.window } : null,
+    contextUsed: null,
     messages: o.turns === null ? null : {
       user: said.filter(t => t.role === 'user').length,
       assistant: said.filter(t => t.role === 'assistant').length,

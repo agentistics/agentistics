@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.204.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'OpenCode: o medidor de contexto não some mais para rotas sem janela conhecida, e o custo que não tem preço conhecido aparece como "desconhecido" em vez de zero.',
+        en: 'OpenCode: the context meter no longer disappears for routes with no known window, and a cost with no known price shows as "unknown" instead of zero.',
+      },
+      {
+        pt: 'OpenCode: a tela da sessão passa a mostrar o trabalho em andamento sem esperar o fim da resposta.',
+        en: 'OpenCode: the session screen now shows work in flight without waiting for the reply to finish.',
+      },
+      {
+        pt: 'Ao encerrar uma sessão, as mensagens que ela nunca leu não se perdem mais: ficam em "Nunca lidas" por 14 dias, e você pode colocá-las de volta na caixa de mensagem ou copiá-las. Nada é reenviado sozinho.',
+        en: 'When you end a session, messages it never read are no longer lost: they stay under "Never read" for 14 days, and you can put them back in the message box or copy them. Nothing is resent on its own.',
+      },
+      {
+        pt: 'No celular, o painel de filtros do Calendário é uma coluna alinhada, sem a caixa do interruptor, e o seletor múltiplo cabe na tela e não se perde ao rolar.',
+        en: 'On the phone, the Calendar filters panel is one aligned column without the switch box, and the multi picker fits the screen and survives scrolling.',
+      },
+    ],
+  },
   '2.204.0': {
     features: [
       {

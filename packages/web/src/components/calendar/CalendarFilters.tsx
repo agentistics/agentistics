@@ -53,13 +53,13 @@ export function filtersActive(f: UiFilters): boolean {
   return f.tasks !== 'active' || f.versions.length + f.stages.length + f.harnesses.length + f.priorities.length > 0 || f.confirmedOnly
 }
 
-function Multi({ label, options, chosen, labelOf, onChange, pt, mobile }: {
-  label: string; options: { value: string; label: string }[]; chosen: readonly string[]; labelOf: (v: string) => string; onChange: (v: string[]) => void; pt: boolean; mobile: boolean
+function Multi({ label, options, chosen, labelOf, onChange, pt, mobile, sheet }: {
+  label: string; options: { value: string; label: string }[]; chosen: readonly string[]; labelOf: (v: string) => string; onChange: (v: string[]) => void; pt: boolean; mobile: boolean; sheet: boolean
 }) {
   const left = options.filter(o => !chosen.includes(o.value))
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: mobile ? 'nowrap' : 'wrap', minWidth: 0, flexShrink: 0 }}>
-      <div style={{ width: mobile ? 130 : 116, flexShrink: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: mobile && !sheet ? 'nowrap' : 'wrap', minWidth: 0, flexShrink: 0 }}>
+      <div data-cal-field style={sheet ? { width: '100%' } : { width: mobile ? 130 : 116, flexShrink: 0 }}>
         <MultiPicker
           options={left} onCommit={v => onChange([...chosen, ...v.filter(x => !chosen.includes(x))])}
           placeholder={label} searchPlaceholder={`${label}…`} confirmLabel={n => pick(TEXT.confirmAdd(n), pt)}
@@ -77,11 +77,13 @@ function Multi({ label, options, chosen, labelOf, onChange, pt, mobile }: {
   )
 }
 
-export function CalendarFilters({ value, onChange, pieces, harnessOf, versionList, showVersions = true, pt, mobile, shown }: {
+export function CalendarFilters({ value, onChange, pieces, harnessOf, versionList, showVersions = true, pt, mobile, sheet = false, shown }: {
   value: UiFilters; onChange: (f: UiFilters) => void; pieces: readonly CalPiece[]
   /** Display name of a harness id (`HARNESS_LABELS`). */
   harnessOf: (id: string) => string
   versionList: readonly string[]; showVersions?: boolean; pt: boolean; mobile: boolean
+  /** Inside the phone's Filters sheet: one column, every field the same full width, left-aligned. */
+  sheet?: boolean
   /** The count caption on the right: `9 pieces · 4 versions · BRT`. */
   shown: string
 }) {
@@ -95,9 +97,11 @@ export function CalendarFilters({ value, onChange, pieces, harnessOf, versionLis
 
   return (
     // A phone gets ONE row that scrolls sideways (the mockup's), a desktop wraps.
-    <div data-cal-filters style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: mobile ? 'nowrap' : 'wrap', overflowX: mobile ? 'auto' : undefined, paddingBottom: 8, minWidth: 0, flexShrink: 0 }}>
-      <div style={{ minWidth: mobile ? 220 : 200, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Filter size={13} aria-hidden style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
+    <div data-cal-filters data-cal-sheet={sheet || undefined} style={sheet
+      ? { display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 12, paddingTop: 12, minWidth: 0 }
+      : { display: 'flex', alignItems: 'center', gap: 8, flexWrap: mobile ? 'nowrap' : 'wrap', overflowX: mobile ? 'auto' : undefined, paddingBottom: 8, minWidth: 0, flexShrink: 0 }}>
+      <div data-cal-field style={sheet ? { display: 'flex', alignItems: 'center', gap: 6, width: '100%' } : { minWidth: mobile ? 220 : 200, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+        {!sheet && <Filter size={13} aria-hidden style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />}
         <div style={{ flex: 1, minWidth: 0 }}>
           <Select control
             value={value.tasks} onChange={v => set({ tasks: v })} searchable searchPlaceholder={pick(TEXT.searchTask, pt)}
@@ -105,19 +109,19 @@ export function CalendarFilters({ value, onChange, pieces, harnessOf, versionLis
           />
         </div>
       </div>
-      <Multi label={pick(TEXT.stage, pt)} pt={pt} mobile={mobile} chosen={value.stages} labelOf={v => stageName(v as CalStage, pt)}
+      <Multi label={pick(TEXT.stage, pt)} pt={pt} mobile={mobile} sheet={sheet} chosen={value.stages} labelOf={v => stageName(v as CalStage, pt)}
         options={CAL_STAGES.map(s => ({ value: s, label: stageName(s, pt) }))} onChange={v => set({ stages: v as CalStage[] })} />
-      {showVersions && <Multi label={pick(TEXT.version, pt)} pt={pt} mobile={mobile} chosen={value.versions} labelOf={v => v}
+      {showVersions && <Multi label={pick(TEXT.version, pt)} pt={pt} mobile={mobile} sheet={sheet} chosen={value.versions} labelOf={v => v}
         options={versionList.map(v => ({ value: v, label: v }))} onChange={v => set({ versions: v })} />}
-      <Multi label={pick(TEXT.harness, pt)} pt={pt} mobile={mobile} chosen={value.harnesses} labelOf={harnessOf}
+      <Multi label={pick(TEXT.harness, pt)} pt={pt} mobile={mobile} sheet={sheet} chosen={value.harnesses} labelOf={harnessOf}
         options={harnesses.map(h => ({ value: h, label: harnessOf(h) }))} onChange={v => set({ harnesses: v })} />
-      <Multi label={pick(TEXT.priority, pt)} pt={pt} mobile={mobile} chosen={value.priorities} labelOf={v => pick(PRIORITY_LABEL[v as CalPriority], pt)}
+      <Multi label={pick(TEXT.priority, pt)} pt={pt} mobile={mobile} sheet={sheet} chosen={value.priorities} labelOf={v => pick(PRIORITY_LABEL[v as CalPriority], pt)}
         options={CAL_PRIORITIES.map(p => ({ value: p, label: pick(PRIORITY_LABEL[p], pt) }))} onChange={v => set({ priorities: v as CalPriority[] })} />
-      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer', minHeight: mobile ? 44 : undefined }}>
+      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer', minHeight: mobile ? 44 : undefined, width: sheet ? '100%' : undefined }}>
         <ToggleSwitch on={value.confirmedOnly} onToggle={() => set({ confirmedOnly: !value.confirmedOnly })} label={pick(TEXT.onlyConfirmed, pt)} {...(mobile ? { tap: 44 } : {})} />
         {pick(TEXT.onlyConfirmed, pt)}
       </label>
-      <span style={{ flex: 1 }} />
+      {!sheet && <span style={{ flex: 1 }} />}
       <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', flexShrink: 0 }}>{shown}</span>
     </div>
   )

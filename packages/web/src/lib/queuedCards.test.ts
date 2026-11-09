@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { personQueuedCount, queuedBubbleActions, sendNowPillOffered, visibleQueued } from './queuedCards'
+import { personQueuedCount, queuedBubbleActions, sendNowPillOffered, strandedCards, visibleQueued } from './queuedCards'
 
 describe('sendNowPillOffered — one "Send now" per waiting message', () => {
   test('a single waiting message is served by the button inside it, so the pill stays away', () => {
@@ -124,5 +124,24 @@ describe('personQueuedCount', () => {
       { text: '[from agentistics · away]\naway' },
       { text: 'Run the leadership check-in now.' },
     ])).toBe(0)
+  })
+})
+
+describe('strandedCards — what a killed session never read (MENSAGENS.KILL)', () => {
+  const srv = [{ text: 'run the migration', at: 1 }, { text: 'and then deploy', at: 2 }]
+  test('a running session offers nothing: its waiting messages are the queue', () => {
+    expect(strandedCards({ ended: false, stranded: srv, queued: [{ text: 'x' }], draft: '' })).toEqual([])
+  })
+  test('after the kill the server list is offered in the order it was sent', () => {
+    expect(strandedCards({ ended: true, stranded: [srv[1]!, srv[0]!], queued: [], draft: '' }).map(c => c.text))
+      .toEqual(['run the migration', 'and then deploy'])
+  })
+  test('the tab\'s own echoes are offered too, once, when the server has no copy (any harness)', () => {
+    const out = strandedCards({ ended: true, stranded: [srv[0]!], queued: [{ text: 'run the migration' }, { text: 'local only' }], draft: '' })
+    expect(out.map(c => c.text)).toEqual(['run the migration', 'local only'])
+  })
+  test('a message already put back in the composer is not offered a second time', () => {
+    const out = strandedCards({ ended: true, stranded: srv, queued: [], draft: 'run the migration\n\n' })
+    expect(out.map(c => c.text)).toEqual(['and then deploy'])
   })
 })

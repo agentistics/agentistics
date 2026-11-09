@@ -25,7 +25,7 @@ import {
 import { createAgentAuditSink } from "./agent-audit.js";
 import { taskCommentRequest } from "./task-comment-args.js";
 import { sessionProof } from "./session-proof.js";
-import { nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
+import { HARNESS_CAPABILITIES, contextReading, nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
 import { planLimitsTool } from "./plan-limits-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
 import { vaultStatusTool } from "./vault-tool.js";
@@ -40,6 +40,19 @@ const API = process.env.AGENTISTICS_API ?? "http://localhost:47291";
 
 // Hidden by default: the native harness is experimental, and `ListTools` re-derives this per gate answer.
 const HARNESS_PARAM = harnessParam(false);
+
+/** The context gauge's facts for one session, from the SAME rule the screen uses. Absent when the harness has no gauge or nothing was measured. */
+function contextFields(s: any): Record<string, unknown> {
+  if (!(HARNESS_CAPABILITIES as any)[sessionHarness(s)]?.contextWindow) return {};
+  const r = contextReading({ context_tokens: s.context_tokens, context_window: s.context_window, model: s.model });
+  if (r.used === null) return {};
+  return {
+    contextTokens: r.used,
+    contextWindow: r.window,
+    contextFraction: r.fraction,
+    ...(r.window === null ? { contextLimit: "not reported" } : {}),
+  };
+}
 
 /** The server's gate (`GET /api/engine` → `nativeVisibleFrom`). An unreachable server reads as hidden. */
 async function nativeVisibleNow(): Promise<boolean> {
@@ -1591,6 +1604,9 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
               ...(s.tokens_unavailable ? {} : { estimatedCostUSD: unpriced > 0 && unpriced === input + output + cacheRead + cacheWrite ? null : Math.round(cost * 10000) / 10000 }),
               ...(unpriced > 0 ? { unpricedTokens: unpriced } : {}),
               model: s.model ?? null,
+              // Same reading as the sessions screen (`contextReading`): the window is what the harness declared,
+              // then the verified table. A route nobody states a window for reports the tokens and a null window.
+              ...contextFields(s),
               ...(startedBy.get(s.session_id) ? { startedBy: startedBy.get(s.session_id) } : {}),
               ...(delivered.get(s.session_id) ? { deliveredStillOpen: delivered.get(s.session_id) } : {}),
             };

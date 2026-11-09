@@ -60,6 +60,7 @@ import { splitImageAttachments } from '../../lib/attachmentPreview'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { scratchKey, sessionScratch } from '../../lib/sessionScratch'
+import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { chatReadAt, firstFrameStale, refreshChat, subscribeChat } from '../../lib/chatFeed'
 import { composerMaxHeight } from '../../lib/composerHeight'
 import { isPickerSelectKey } from '../../lib/pickerKeys'
@@ -85,7 +86,8 @@ import {
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { isNayCwd, modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
-import { personQueuedCount, queuedBubbleActions, sendNowPillOffered, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
+import { personQueuedCount, queuedBubbleActions, sendNowPillOffered, shouldRestoreDraft, strandedCards, visibleQueued } from '../../lib/queuedCards'
+import { StrandedList } from './StrandedList'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
@@ -175,6 +177,8 @@ interface ChatPayload {
   older?: string
   /** Messages the SERVER is holding for this conversation — see `pending-prompts.ts`. */
   pending?: { text: string; at: number }[]
+  /** MENSAGENS.KILL: handed to a session that is not running and never read — offered back (see `strandedCards`). */
+  stranded?: { text: string; at: number }[]
   /**
    * What agentop typed into this session's pane, and when — so a `[Image #N]` marker the harness
    * substituted for a path can find its file again. Absent when nothing was ever attached here.
@@ -1519,6 +1523,18 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [echo, payload?.pending, turns, deliveredTick, loadedId, session.id])
 
+  // Not running: the server says so (`live: false`) or the row does — a structured source's payload is always `live`.
+  const sessionEnded = payload?.live === false || !sessionRunning(session)
+  const strandedList = useMemo(
+    () => strandedCards({ ended: sessionEnded, stranded: payload?.stranded, queued, draft }),
+    [sessionEnded, payload?.stranded, queued, draft],
+  )
+
+  const putBackStranded = (text: string) => {
+    editDraft(prev => appendToDraft(prev, text))
+    editEcho(list => list.filter(t => t !== text))
+  }
+
   /** A clock, so an ageing echo ages on screen instead of freezing at its first render. */
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -2607,6 +2623,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         </p>
         {payload.recorded && <RecordedBlock recorded={payload.recorded} pt={pt} />}
         {(payload.attention ?? []).map((m, i) => <AttentionMarkLine key={`am-${i}`} mark={m} pt={pt} />)}
+        <div style={{ margin: '12px 0 0', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'stretch', width: '100%' }}>
+          <StrandedList cards={strandedList} sessionId={session.id} harness={session.harness} lang={lang} now={now} onPutBack={putBackStranded} composer={false} />
+        </div>
         <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--text-tertiary)', opacity: 0.8 }}>
           {pt
             ? 'A visão de terminal continua disponível para esta sessão.'
@@ -2705,7 +2724,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               carries the same text — so it is drawn as one: faded, with the wait said in words
               under it. It used to be indistinguishable from a delivered message, and on a session
               mid-turn the wait is minutes. */}
-          {queued.map((q, i) => (
+          {(sessionEnded ? [] : queued).map((q, i) => (
             <ChatBubble
               key={`echo-${i}`}
               turn={{ role: 'user', text: q.text }}
@@ -2721,6 +2740,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               {...(q.at !== undefined ? { awaitingSinceMs: Math.max(0, now - q.at) } : {})}
             />
           ))}
+
+          {/* MENSAGENS.KILL — what this session was handed and never read, offered back to be resent. */}
+          <StrandedList cards={strandedList} sessionId={session.id} harness={session.harness} lang={lang} now={now} onPutBack={putBackStranded} composer />
 
           {/* Only the person's queued messages offer send-now and contribute to its count.
               The action still submits the harness's whole queue, including any system notices. */}

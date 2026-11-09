@@ -72,7 +72,7 @@ import { tabStripEdgeFade, tabStripFadeMask } from '../lib/tabStripEdge'
 import { PanelRail, panelTile } from '../components/sessions/PanelRail'
 import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
 import type { HarnessId } from '@agentistics/core'
-import { freedBytes } from '@agentistics/core'
+import { freedBytes, fmt } from '@agentistics/core'
 import type { AppContext } from '../lib/app-context'
 import { reopenSession } from '../lib/reopeningStore'
 import { loadClosedFleet, useFleet, useFleetIndex, type FleetActionId } from '../lib/fleet'
@@ -2990,6 +2990,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               <ContextRing fraction={ctxStats.context.fraction} size={22} />
               <span style={{ fontWeight: 650 }}>{Math.floor(ctxStats.context.fraction * 100)}%</span>
             </>
+          ) : ctxStats?.contextUsed != null ? (
+            <span style={{ fontWeight: 650 }} title={pt ? 'limite não informado' : 'limit not reported'}>{fmt(ctxStats.contextUsed)}</span>
           ) : null,
           <SessionStatsMenu
             inline
