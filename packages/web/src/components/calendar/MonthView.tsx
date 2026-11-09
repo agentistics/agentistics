@@ -71,7 +71,12 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
   const dueMarks = week.map(c => marksOfDay(c.day, marks).filter((m): m is Extract<CalMark, { kind: 'task-due' }> => m.kind === 'task-due'))
   // Pieces with no version and no estimate (a leader working alone) sit on the day their work began, after the due chips.
   const started = week.map(c => startedPiecesOfDay(c.day, pieces))
-  const fit = fitWeek({ ribbons: allRibbons, dues: dueMarks.map((d, i) => d.length + started[i]!.length), cap })
+  // The work in progress outranks release context: one row is reserved for these chips before ribbons and due chips share the rest.
+  const reserve = Number.isFinite(cap) ? Math.min(Math.max(0, ...started.map(s => s.length)), cap) : Number.POSITIVE_INFINITY
+  const baseFit = fitWeek({ ribbons: allRibbons, dues: dueMarks.map(d => d.length), cap: Number.isFinite(reserve) ? cap - reserve : cap })
+  const shownStarted = started.map(s => s.slice(0, Number.isFinite(reserve) ? reserve : s.length))
+  const fit = { ...baseFit, more: baseFit.more.map((n, i) => n + started[i]!.length - shownStarted[i]!.length) }
+  const chipBase = 2 + Math.min(lanes, Number.isFinite(reserve) ? cap - reserve : lanes) + Math.max(0, ...fit.dues)
   return (
     <div ref={rowRef} data-cal-week style={{ position: 'relative', minHeight: 0, overflow: 'hidden', borderBottom: !last ? '1px solid var(--border)' : 0 }}>
       <div aria-hidden style={{ position: 'absolute', inset: 0, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
@@ -116,10 +121,10 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{pick(TEXT.due, pt)} · {m.label}</span>
           </button>
         )))}
-        {week.map((c, i) => started[i]!.slice(0, Math.max(0, fit.dues[i]! - dueMarks[i]!.length)).map((p, k) => (
+        {week.map((c, i) => shownStarted[i]!.map((p, k) => (
           <button key={`${c.day}-${p.key}`} type="button" data-cal-started={p.key} onClick={e => onOpenPiece?.(p.key, e)} title={`${p.title} · ${pick(TEXT.noEstimate, pt)}`}
             style={{
-              gridColumn: i + 1, gridRow: 2 + lanes + dueMarks[i]!.length + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0,
+              gridColumn: i + 1, gridRow: chipBase + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0,
               border: `1px dashed ${stageColor(p.stage)}`, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden',
               color: 'var(--text-primary)', background: 'transparent',
             }}>
