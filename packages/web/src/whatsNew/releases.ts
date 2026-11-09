@@ -14,24 +14,24 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     features: [],
     fixes: [
       {
-        pt: 'OpenCode Go: o limite que o provedor não informa aparece como "desconhecido" em vez de uma estimativa local disfarçada, e o plano fica em espera quando o provedor recusa por limite.',
+        pt: 'OpenCode Go: o limite que o provedor não informa aparece como "sem medição" em vez de uma estimativa local disfarçada, e o plano fica em espera quando o provedor recusa por limite.',
         en: 'OpenCode Go: a limit the provider does not publish shows as "unknown" instead of a local estimate posing as quota, and the plan is put on hold when the provider refuses for usage limit.',
       },
       {
-        pt: 'Os filtros de métricas do topo não mexem mais nas telas de sessões: a lista e a conversa continuam completas.',
-        en: 'The metric filters at the top no longer affect the sessions screens: the list and the conversation stay complete.',
+        pt: 'Os filtros do topo não mexem mais na lista de Sessões nem no chat flutuante. A lista tem o seu próprio menu Filtros, que muda só ela. O calendário da visão geral ainda acompanha o topo.',
+        en: 'The top filters no longer change the Sessions list or the floating chat. The list has its own Filters menu, which changes only the list. The overview calendar still follows the top bar.',
       },
       {
-        pt: 'Mensagens na fila mostram um só botão "enviar agora"; o atalho sob a conversa só aparece com duas ou mais mensagens esperando.',
-        en: 'Queued messages show a single "send now" button; the shortcut under the conversation only appears with two or more waiting messages.',
+        pt: 'Com uma mensagem na fila, o "Enviar agora" fica no próprio balão; com duas ou mais, só a pílula "Enviar agora" sob a conversa, que envia a fila inteira. Vale para sessões do Claude.',
+        en: 'With one queued message, "Send now" sits in the bubble itself; with two or more, only the "Send now" pill under the conversation, which sends the whole queue. This applies to Claude sessions.',
       },
       {
         pt: 'Agradecimentos, despedidas e comentários soltos não viram mais cartão para você; só um pedido claro vira cartão, e a mensagem continua chegando ao líder.',
         en: 'Thanks, goodbyes and passing remarks no longer become a card for you; only a clear request does, and the message still reaches the leader.',
       },
       {
-        pt: 'No Mac, o agentistics não pede mais acesso à Mesa, Documentos, Fotos e outras pastas privadas só por procurar projetos. Elas só são lidas quando você mesmo as abre.',
-        en: 'On Mac, agentistics no longer asks for access to Desktop, Documents, Photos and other private folders just by looking for projects. They are read only when you open them yourself.',
+        pt: 'No Mac, o agentistics não varre mais pastas privadas (Mesa, Documentos, Fotos…) em segundo plano atrás de projetos; elas só são lidas quando você mesmo as abre.',
+        en: 'On Mac, agentistics no longer scans private folders (Desktop, Documents, Photos…) in the background looking for projects; they are read only when you open them yourself.',
       },
     ],
   },
