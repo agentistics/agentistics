@@ -33,7 +33,7 @@ export function ToggleSwitch({ on, onToggle, disabled = false, label, tap }: Tog
       disabled={disabled}
       onClick={onToggle}
       style={{
-        position: 'relative', width: 32, height: 18, borderRadius: 9,
+        position: 'relative', width: 32, height: 18, minHeight: 0, minWidth: 0, borderRadius: 9,
         border: 'none', background: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
         cursor: disabled ? 'default' : 'pointer', padding: 0,
         transition: 'background 0.2s', flexShrink: 0,

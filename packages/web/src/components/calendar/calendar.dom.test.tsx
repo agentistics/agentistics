@@ -256,3 +256,32 @@ test('phone all-day rows and the "+N more" control are 44px touch targets', asyn
   expect(rule).toContain('height: 44px')
   expect(rule).not.toMatch(/\b32px/)
 })
+
+test('filters sheet: one left-aligned column, every field the same full width, no floating offset', async () => {
+  const { CalendarFilters } = await import('./CalendarFilters')
+  await mount(createElement(CalendarFilters, { value: DEFAULT_FILTERS, onChange: noop, pieces: reply.pieces, harnessOf: (h: string) => h, versionList: ['2.202.0'], pt: true, mobile: true, sheet: true, shown: '3 peças' }))
+  const root = document.querySelector('[data-cal-filters]') as HTMLElement
+  expect(root.style.flexDirection).toBe('column'); expect(root.style.alignItems).toBe('stretch')
+  const fields = Array.from(document.querySelectorAll('[data-cal-field]')) as HTMLElement[]
+  expect(fields.length).toBe(5)
+  for (const f of fields) expect(f.style.width).toBe('100%')
+})
+
+test('switch with a tap target shows only the pill: no painted box, and a global min-height cannot grow it', async () => {
+  const { ToggleSwitch } = await import('../ToggleSwitch')
+  await mount(createElement(ToggleSwitch, { on: false, onToggle: noop, label: 'x', tap: 44 }))
+  let b = document.querySelector('[role="switch"]') as HTMLElement
+  expect(b.style.background).toBe('transparent'); expect(b.style.minHeight).toMatch(/^0(px)?$/)
+  await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = ''
+  await mount(createElement(ToggleSwitch, { on: false, onToggle: noop, label: 'x' }))
+  b = document.querySelector('[role="switch"]') as HTMLElement
+  expect(b.style.minHeight).toMatch(/^0(px)?$/)
+})
+
+test('the phone filters sheet is built in sheet mode and its CSS no longer styles every sheet button', async () => {
+  const { readFileSync } = await import('node:fs')
+  const dir = new URL('.', import.meta.url)
+  expect(readFileSync(new URL('./DeliveryCalendar.tsx', dir), 'utf8')).toMatch(/mobile sheet shown=/)
+  const css = readFileSync(new URL('./mobileCalendar.css', dir), 'utf8')
+  expect(css).not.toMatch(/\[data-cal-filters\] button/)
+})
