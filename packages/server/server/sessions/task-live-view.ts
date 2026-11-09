@@ -189,13 +189,17 @@ export function describeLive(o: {
   // the band and adds no duplicate card. With none, the leader IS doing the work, and the filing is ONE card, marked
   // `leaderPiece`, whose clock is the leader session's own start — never the task's age.
   const openTasks = new Set(all.filter(d => d.subtaskId !== null && !d.old && d.stage !== 'published' && d.stage !== 'completed').map(d => d.taskId))
-  const isLeaderFiling = (d: LiveDeliveryView) => d.subtaskId === null && d.stage === 'running' && d.sessionIds.length > 0 && d.sessionIds.every(id => o.leaderIds.has(id))
+  // A task that rolled up to `done` (its last subtask finished) while a leader filed on it is still LIVE keeps that one
+  // card: the leader is still there. A dead, exited or lost leader on a done task gets none, or old tasks would return.
+  const liveLeaderOn = (d: LiveDeliveryView) => d.sessionIds.some(id => o.leaderIds.has(id) && ALIVE.has(byId.get(id)?.state ?? ''))
+  const isLeaderFiling = (d: LiveDeliveryView) => d.subtaskId === null && d.sessionIds.length > 0 && d.sessionIds.every(id => o.leaderIds.has(id))
+    && (d.stage === 'running' || (d.stage === 'completed' && !d.old && liveLeaderOn(d)))
   const leaderOnly = (d: LiveDeliveryView) => isLeaderFiling(d) && openTasks.has(d.taskId)
   const asLeaderPiece = (d: LiveDeliveryView): LiveDeliveryView => {
     if (!isLeaderFiling(d)) return d
     const since = Math.min(...d.sessionIds.map(id => byId.get(id)?.createdMs ?? Infinity))
     const at = Number.isFinite(since) ? since : null
-    return { ...d, leaderPiece: true, startedAtMs: at, stageSinceMs: at, workMs: null, eta: { kind: 'none', reason: 'not-started' }, ...(d.round ? { round: { ...d.round, startedAtMs: at } } : {}) }
+    return { ...d, leaderPiece: true, stage: 'running', deliveredAtMs: null, startedAtMs: at, stageSinceMs: at, workMs: null, eta: { kind: 'none', reason: 'not-started' }, ...(d.round ? { round: { ...d.round, startedAtMs: at } } : {}) }
   }
   // EFFECTIVE values: a caller that names no (or an invalid) tab gets `all`, no period gets `24h`; `view.defaulted` says so.
   const tab: LiveTab = f.tab ?? 'all'

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import type { CalPiece, CalVersion } from '@agentistics/core'
+import { brtDay, buildCalendar, filterCalendar, type CalPiece, type CalVersion } from '@agentistics/core'
 import {
-  addDays, addMonths, agendaOf, byPriority, dayBlocks, fitWeek, monthCells, pieceSegments, rangeLabel, stepAnchor, versionDays,
+  startedPiecesOfDay, addDays, addMonths, agendaOf, byPriority, dayBlocks, fitWeek, monthCells, pieceSegments, rangeLabel, stepAnchor, versionDays,
   weekDays, weekRibbons, weekdayMon0, packIntervals, swipeDay, placeColumn,
 } from './calendarModel'
 
@@ -177,5 +177,36 @@ describe('time axis', () => {
   test('urgent sorts before low; no priority last', () => {
     const l = [piece({ key: 'n', priority: null }), piece({ key: 'l', priority: 'low' }), piece({ key: 'u', priority: 'urgent' })].sort(byPriority)
     expect(l.map(x => x.key)).toEqual(['u', 'l', 'n'])
+  })
+})
+
+describe('a piece with no version and no estimate is placed by its start (LIVE.EM-ANDAMENTO-E-LIDER r2)', () => {
+  const NOW = Date.parse('2026-11-09T15:00:00.000Z')
+  const START = NOW - 600_000
+  // The shape `delivery/calendar.ts` hands the builder for a leader working alone: task level, running, no estimate.
+  const reply = buildCalendar({
+    nowMs: NOW,
+    lives: [{
+      key: 't', taskId: 't', taskTitle: 'Engine', subtaskId: null, title: 'Engine', stage: 'running', startedAtMs: START, stageSinceMs: START,
+      harnesses: ['claude'], models: ['opus'], eta: { kind: 'none' }, stageEta: { kind: 'none' }, publishEta: { kind: 'none', reason: 'no-history' }, deliveredAtMs: null,
+    }],
+    records: [], tasks: [{ id: 't', title: 'Engine', status: 'in_progress' }], subtasks: [], resets: [],
+  })
+  const day = brtDay(START)
+  const pieces = filterCalendar(reply, { tasks: 'active' }).pieces
+
+  test('the week / phone agenda lists it on the day the work began', () => {
+    const e = agendaOf(day, { versions: [], pieces, marks: [] })
+    expect(e.map(x => x.kind === 'piece' && x.piece.key)).toEqual(['t'])
+    expect(e[0]).toMatchObject({ kind: 'piece', state: 'started', atMs: START })
+  })
+  test('the month cell has a chip for it on that day, and not on another', () => {
+    expect(startedPiecesOfDay(day, pieces).map(p => p.key)).toEqual(['t'])
+    expect(startedPiecesOfDay(brtDay(START - 2 * 86_400_000), pieces)).toEqual([])
+  })
+  test('a piece with an estimate keeps its estimate day; one with a version stays on its release', () => {
+    const withEta = { ...pieces[0]!, publishEta: { kind: 'estimate' as const, atMs: NOW + 5 * 86_400_000, confidence: 'low' as const } }
+    expect(startedPiecesOfDay(day, [withEta])).toEqual([])
+    expect(startedPiecesOfDay(day, [{ ...pieces[0]!, version: '2.205.0' }])).toEqual([])
   })
 })

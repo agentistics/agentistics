@@ -161,6 +161,27 @@ describe('a leader working alone gets a card (LIVE.EM-ANDAMENTO-E-LIDER)', () =>
     expect(v.deliveries.map(x => x.key).sort()).toEqual(['t', 't/a', 't/b'])
     expect(v.deliveries.find(x => x.key === 't')!.leaderPiece).toBe(true)
   })
+  // r2: the last subtask finishing rolls the task up to done; a LIVE leader filed on it keeps its one card.
+  const doneTask = d({ key: 't', subtaskId: null, title: 'Task', status: 'done', stage: 'completed', sessionIds: ['L'], startedAtMs: 1, stageSinceMs: 1, deliveredAtMs: NOW })
+  const finishedSub = d({ key: 't/a', subtaskId: 'a', stage: 'completed', deliveredAtMs: NOW })
+  const runDone = (state: string) => describeLive({
+    reply: reply([doneTask, finishedSub]), rows: [row('L', state, { createdMs: 777 })], leaderIds: new Set(['L']), nowMs: NOW, filters: { tab: 'active' },
+  })
+  for (const state of ['working', 'waiting', 'waiting-approval']) {
+    test(`task rolled up to done, leader ${state}: it keeps its one leader card`, () => {
+      const v = runDone(state)
+      expect(v.deliveries.map(x => x.key)).toEqual(['t'])
+      expect(v.deliveries[0]).toMatchObject({ leaderPiece: true, stage: 'running', startedAtMs: 777 })
+    })
+  }
+  test('task rolled up to done, leader exited or gone: no card (old tasks do not come back)', () => {
+    expect(runDone('exited').deliveries).toEqual([])
+    expect(runDone('lost').deliveries).toEqual([])
+  })
+  test('a done task with a live WORKER (no leader) gets no leader card', () => {
+    const v = describeLive({ reply: reply([doneTask, finishedSub]), rows: [row('L', 'working')], leaderIds: new Set(), nowMs: NOW, filters: { tab: 'active' } })
+    expect(v.deliveries).toEqual([])
+  })
   test('a worker piece is never marked as a leader piece', () => {
     const v = describeLive({ reply: reply([d({ key: 'w', subtaskId: null, sessionIds: ['W'] })]), rows: [row('W', 'working')], leaderIds: new Set(), nowMs: NOW })
     expect(v.deliveries[0]!.leaderPiece).toBeUndefined()

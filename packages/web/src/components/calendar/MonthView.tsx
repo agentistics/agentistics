@@ -9,9 +9,9 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { RefreshCw, Flag } from 'lucide-react'
 import { brtDay, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
-import { dowShort, fitWeek, marksOfDay, monthCells, piecesOnDay, weekRibbons, type Ribbon } from '../../lib/calendarModel'
+import { dowShort, fitWeek, marksOfDay, monthCells, piecesOnDay, startedPiecesOfDay, weekRibbons, type Ribbon } from '../../lib/calendarModel'
 import { TEXT, pick } from './calendarText'
-import { EXPECTED_COLOR, PUBLISHED_COLOR, VersionGlyph } from './calendarUi'
+import { EXPECTED_COLOR, PUBLISHED_COLOR, VersionGlyph, stageColor } from './calendarUi'
 
 const RIBBON_H = 18
 const NUM_H = 22
@@ -26,6 +26,8 @@ type Common = {
   onPickDay: (day: string) => void
   onOpenVersion: (version: string, e: React.MouseEvent) => void
   onOpenMark: (m: CalMark, e: React.MouseEvent) => void
+  /** Opens a piece placed by its start alone (no version, no estimate). */
+  onOpenPiece?: (key: string, e: React.MouseEvent) => void
   selected: string | null
 }
 
@@ -47,7 +49,7 @@ export function MonthView({ anchor, ...rest }: Common & { anchor: string }) {
   )
 }
 
-function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, selected, onPickDay, onOpenVersion, onOpenMark }: Common & {
+function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, selected, onPickDay, onOpenVersion, onOpenMark, onOpenPiece }: Common & {
   week: { day: string; inMonth: boolean }[]; last: boolean; today: string
 }) {
   const rowRef = useRef<HTMLDivElement | null>(null)
@@ -67,7 +69,9 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
   const allRibbons = weekRibbons(days, versions, pieces, today)
   const lanes = allRibbons.reduce((m, r) => Math.max(m, r.lane + 1), 0)
   const dueMarks = week.map(c => marksOfDay(c.day, marks).filter((m): m is Extract<CalMark, { kind: 'task-due' }> => m.kind === 'task-due'))
-  const fit = fitWeek({ ribbons: allRibbons, dues: dueMarks.map(d => d.length), cap })
+  // Pieces with no version and no estimate (a leader working alone) sit on the day their work began, after the due chips.
+  const started = week.map(c => startedPiecesOfDay(c.day, pieces))
+  const fit = fitWeek({ ribbons: allRibbons, dues: dueMarks.map((d, i) => d.length + started[i]!.length), cap })
   return (
     <div ref={rowRef} data-cal-week style={{ position: 'relative', minHeight: 0, overflow: 'hidden', borderBottom: !last ? '1px solid var(--border)' : 0 }}>
       <div aria-hidden style={{ position: 'absolute', inset: 0, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
@@ -110,6 +114,17 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
             }}>
             <Flag size={10} aria-hidden style={{ flexShrink: 0 }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{pick(TEXT.due, pt)} · {m.label}</span>
+          </button>
+        )))}
+        {week.map((c, i) => started[i]!.slice(0, Math.max(0, fit.dues[i]! - dueMarks[i]!.length)).map((p, k) => (
+          <button key={`${c.day}-${p.key}`} type="button" data-cal-started={p.key} onClick={e => onOpenPiece?.(p.key, e)} title={`${p.title} · ${pick(TEXT.noEstimate, pt)}`}
+            style={{
+              gridColumn: i + 1, gridRow: 2 + lanes + dueMarks[i]!.length + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0,
+              border: `1px dashed ${stageColor(p.stage)}`, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden',
+              color: 'var(--text-primary)', background: 'transparent',
+            }}>
+            <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, flexShrink: 0, background: stageColor(p.stage) }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</span>
           </button>
         )))}
         {week.map((c, i) => fit.more[i]! > 0 && (

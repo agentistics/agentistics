@@ -111,7 +111,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
     )
     const common = { nowMs, versions: shown.versions, pieces: shown.pieces, marks: shown.marks, pt, selected: selectedId }
     switch (activeView) {
-      case 'month': return <MonthView {...common} anchor={anchor} onPickDay={d => { setAnchor(d); setView(isMobile ? 'agenda' : 'day'); setSel(null) }} onOpenVersion={handlers.onOpenVersion} onOpenMark={handlers.onOpenMark} />
+      case 'month': return <MonthView {...common} anchor={anchor} onPickDay={d => { setAnchor(d); setView(isMobile ? 'agenda' : 'day'); setSel(null) }} onOpenVersion={handlers.onOpenVersion} onOpenMark={handlers.onOpenMark} onOpenPiece={handlers.onOpenPiece} />
       case 'schedule': return <ScheduleView {...common} anchor={anchor} {...handlers} mobile={isMobile} />
       case 'day': return <DayView {...common} day={anchor} {...handlers} />
       case 'week': return isMobile
