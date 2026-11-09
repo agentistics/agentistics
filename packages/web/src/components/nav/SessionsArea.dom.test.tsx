@@ -40,7 +40,7 @@ for (const lang of ['pt', 'en'] as const) test(`mobile deep link navigates leade
   expect(sheet.textContent).not.toContain('Check-ins')
   const folded = sheet.querySelector<HTMLButtonElement>(`button[aria-label="${lang === 'pt' ? 'Expandir Sessões' : 'Expand Sessions'}"]`)!
   await act(async () => folded.click())
-  const area = sheet.querySelector('button[aria-expanded="true"]')!
+  const area = sheet.querySelector('button[aria-expanded="true"][aria-label]')!
   expect(area.getAttribute('aria-label')).toBe(lang === 'pt' ? 'Recolher Sessões' : 'Collapse Sessions')
   expect(sheet.querySelector('.lucide-crown')).toBeNull()
   expect(sheet.querySelector('a[aria-current="page"]')?.getAttribute('href')).toBe('/leadership/away')
