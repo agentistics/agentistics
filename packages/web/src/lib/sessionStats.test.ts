@@ -82,3 +82,20 @@ test('tokens_unavailable: the source stated no usage, so tokens, pair and cost a
   expect(s.conversation).toBeNull()
   expect(s.costUSD).toBeNull()
 })
+
+test('a gateway route with no known window still reports the tokens used, never a vanished meter', () => {
+  const s = sessionStats('opencode', 's1', meta({
+    harness: 'opencode', model: 'acme-gw/upx/fable-5.1', context_tokens: 12_000,
+  } as Partial<SessionMeta>))
+  expect(s.context).toBeNull()
+  expect(s.contextUsed).toBe(12_000)
+})
+
+test('contextUsed is absent when nothing was measured, and when the window is known', () => {
+  expect(sessionStats('opencode', 's1', meta({ harness: 'opencode', model: 'acme-gw/x' })).contextUsed).toBeNull()
+  const known = sessionStats('opencode', 's1', meta({
+    harness: 'opencode', context_tokens: 100, context_window: 1000,
+  } as Partial<SessionMeta>))
+  expect(known.contextUsed).toBeNull()
+  expect(known.context?.fraction).toBe(0.1)
+})

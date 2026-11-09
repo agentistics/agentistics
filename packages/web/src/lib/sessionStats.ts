@@ -23,7 +23,7 @@
  */
 
 import {
-  HARNESS_CAPABILITIES, calcCost, contextFraction, resolveContextWindow, sessionTokens,
+  HARNESS_CAPABILITIES, calcCost, contextReading, sessionTokens,
   type SurfaceHarnessId, type SessionMeta, type TokenBreakdown,
 } from '@agentistics/core'
 
@@ -39,6 +39,8 @@ export interface SessionStats {
   costUSD: number | null
   /** 0..n, unclamped — see the header. `null` when either half is unknown. */
   context: { fraction: number; used: number; window: number } | null
+  /** Tokens in context when they were measured but NO window is known (a gateway or local route): the screen shows them with "limit not reported". `null` otherwise. */
+  contextUsed: number | null
   messages: { user: number; assistant: number } | null
   /** How many subagent invocations ran, and what they cost. `null` when the harness has no agents. */
   subagents: { count: number; tokens: number; costUSD: number } | null
@@ -73,6 +75,7 @@ export function sessionStats(
     conversation: null,
     costUSD: null,
     context: null,
+    contextUsed: null,
     messages: null,
     subagents: null,
     git: null,
@@ -84,15 +87,11 @@ export function sessionStats(
   const tokens = caps?.tokens && !meta.tokens_unavailable ? sessionTokens(meta) : null
   const model = typeof meta.model === 'string' && meta.model !== '' ? meta.model : null
 
-  // The window the HARNESS declared outranks the table — it knows the deployment and any per-session
-  // cap, which a model id cannot express. Same order `SessionMeta.context_window` is given
-  // everywhere else.
-  const declared = num((meta as { context_window?: number }).context_window)
-  const window = declared > 0
-    ? declared
-    : (model ? resolveContextWindow(model)?.tokens ?? 0 : 0)
-  const used = num((meta as { context_tokens?: number }).context_tokens)
-  const fraction = caps?.contextWindow ? contextFraction(used, window) : null
+  // The window the HARNESS declared outranks the table (`contextReading`, shared with the MCP).
+  const reading = caps?.contextWindow ? contextReading({ ...meta, ...(model ? { model } : {}) }) : null
+  const used = reading?.used ?? 0
+  const window = reading?.window ?? 0
+  const fraction = reading?.fraction ?? null
 
   /**
    * ABSENT `agentMetrics` IS NOT AN EMPTY LIST, and reading it as one is rule 2 of this file broken
@@ -137,6 +136,7 @@ export function sessionStats(
       }, model ?? '')
       : null,
     context: fraction === null ? null : { fraction, used, window },
+    contextUsed: reading && fraction === null && reading.used !== null ? reading.used : null,
     messages: {
       user: num(meta.user_message_count),
       assistant: num(meta.assistant_message_count),

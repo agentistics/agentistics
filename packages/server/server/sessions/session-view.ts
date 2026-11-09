@@ -239,7 +239,7 @@ export interface SessionView {
   /** Assistant responses of the conversation (`Conversation.calls`). */
   calls?: number
   costUSD?: number
-  /** How full the context window was on the last turn, and out of how much. Both or neither. */
+  /** How full the context window was on the last turn, and out of how much. The level alone is a reading (a gateway route may state no window); a window never travels without it. */
   contextTokens?: number
   contextWindow?: number
   /**
@@ -769,9 +769,8 @@ export function buildSessionViews(o: {
       ...(conv?.turns ? { turns: conv.turns } : {}),
       ...(conv?.calls ? { calls: conv.calls } : {}),
       ...(conv?.costUSD !== undefined ? { costUSD: conv.costUSD } : {}),
-      ...(conv?.contextTokens !== undefined && conv.contextWindow !== undefined
-        ? { contextTokens: conv.contextTokens, contextWindow: conv.contextWindow }
-        : {}),
+      ...(conv?.contextTokens !== undefined ? { contextTokens: conv.contextTokens } : {}),
+      ...(conv?.contextWindow !== undefined ? { contextWindow: conv.contextWindow } : {}),
       ...(conv?.lastUserMessageMs !== undefined ? { lastUserMessageMs: conv.lastUserMessageMs } : {}),
       ...(o.sessionHardware?.get(r.id)
         ? {
@@ -925,9 +924,8 @@ export function buildSessionViews(o: {
       ...(conv?.turns ? { turns: conv.turns } : {}),
       ...(conv?.calls ? { calls: conv.calls } : {}),
       ...(conv?.costUSD !== undefined ? { costUSD: conv.costUSD } : {}),
-      ...(conv?.contextTokens !== undefined && conv.contextWindow !== undefined
-        ? { contextTokens: conv.contextTokens, contextWindow: conv.contextWindow }
-        : {}),
+      ...(conv?.contextTokens !== undefined ? { contextTokens: conv.contextTokens } : {}),
+      ...(conv?.contextWindow !== undefined ? { contextWindow: conv.contextWindow } : {}),
       searchFields: {
         name: scopeText(ownName, conv?.title),
         folder: scopeText(p.cwd),
@@ -1059,9 +1057,8 @@ export function buildSessionViews(o: {
       ...(c.turns ? { turns: c.turns } : {}),
       ...(c.calls ? { calls: c.calls } : {}),
       ...(c.costUSD !== undefined ? { costUSD: c.costUSD } : {}),
-      ...(c.contextTokens !== undefined && c.contextWindow !== undefined
-        ? { contextTokens: c.contextTokens, contextWindow: c.contextWindow }
-        : {}),
+      ...(c.contextTokens !== undefined ? { contextTokens: c.contextTokens } : {}),
+      ...(c.contextWindow !== undefined ? { contextWindow: c.contextWindow } : {}),
       // BOTH names are searchable, or the row is displayed under a name that cannot be used to
       // find it — which is the complaint arriving by the other door. They share the `name` scope:
       // which of the two the user typed is not a distinction worth reporting, and the row already

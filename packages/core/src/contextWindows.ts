@@ -95,3 +95,30 @@ export function contextFraction(
   if (window <= 0 || used < 0) return null
   return used / window
 }
+
+/**
+ * What a session's context gauge can say — ONE reading shared by the screen and the MCP.
+ *
+ * The window is, in order: what the harness declared (OpenCode's own provider config or catalog,
+ * codex's `model_context_window`), then the verified table. Nothing is guessed from a substring, so
+ * a gateway route (`upx/fable-5.1`, an OpenRouter or LiteLLM alias) that nobody states a limit for
+ * has NO window — and then the tokens used are still reported and the limit is said to be unknown,
+ * never a percentage and never a vanished meter.
+ */
+export interface ContextReading {
+  /** Tokens in context on the last turn; `null` when nothing was measured. */
+  used: number | null
+  /** The window, `null` when nobody states one. */
+  window: number | null
+  /** Used / window, unclamped; `null` unless both halves are known. */
+  fraction: number | null
+}
+
+export function contextReading(
+  meta: { context_tokens?: number; context_window?: number; model?: string },
+): ContextReading {
+  const ok = (n: number | undefined): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0
+  const used = ok(meta.context_tokens) ? meta.context_tokens : null
+  const window = ok(meta.context_window) ? meta.context_window : (resolveContextWindow(meta.model)?.tokens ?? null)
+  return { used, window, fraction: used !== null && window !== null ? contextFraction(used, window) : null }
+}

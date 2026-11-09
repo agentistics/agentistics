@@ -850,6 +850,8 @@ export interface ControlSession {
     used: string
     window: string
   }
+  /** The context level, formatted, when it was measured but no window is known (no `context`). */
+  contextUsed?: string
   /** Everything this row can be found by, KEPT APART BY WHAT IT IS — including a closed
    *  conversation's opening prompt, which is what a person remembers about work they put down.
    *  Separate fields are what let the screen say WHICH of them a query matched. */

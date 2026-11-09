@@ -670,7 +670,7 @@ export function detailTabLines(
     } else body.push(sentence('why', native ? w.metricsNative : w.metricsNone))
     body.push(s.context
       ? { key: 'ctx', label: w.context, value: `${s.context.label}  ·  ${s.context.used} / ${s.context.window}` }
-      : { key: 'ctx', label: w.context, value: w.contextNA })
+      : { key: 'ctx', label: w.context, value: s.contextUsed ? `${s.contextUsed}  ·  ${w.contextNA}` : w.contextNA })
     if (s.turns) body.push({ key: 'turns', label: w.turns, value: String(s.turns) })
   }
   const strip: DetailLine = {
@@ -807,6 +807,9 @@ export function detailLines(s: ControlSession, labels: {
       label: labels.context,
       value: `${s.context.label}  ·  ${s.context.used} / ${s.context.window}`,
     })
+  } else if (s.contextUsed) {
+    // Measured, window unknown (a gateway or local route): the level is a fact, the limit is not.
+    out.push({ key: 'context', label: labels.context, value: s.contextUsed })
   }
   // Where it continues from. Under the metrics because it is the fact you copy rather than read.
   if (s.conversationId) {
