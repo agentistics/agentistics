@@ -159,7 +159,7 @@ export function LiveLeaders({ leaders, runtime, accountLabels, nowMs, lang, loca
     <span ref={wrap} data-live-leaders data-open={open ? '1' : '0'} style={{ position: 'relative', display: 'inline-block' }}>
       <button
         type="button" id="live-leaders-head" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(v => !v)} className="ag-tap"
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: mobile ? 44 : 28, padding: '0 10px', borderRadius: 999, border: '1px solid var(--accent-purple)', background: 'none', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12, cursor: 'pointer' }}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: mobile ? 44 : 32, padding: '0 10px', borderRadius: 999, border: '1px solid var(--accent-purple)', background: 'none', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12, cursor: 'pointer' }}
       >
         <span data-live-leaders-label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--accent-purple)', fontWeight: 600 }}><Crown size={12} aria-hidden />{pt ? 'Líderes' : 'Leaders'} {leaders.length}</span>
         <span data-live-leaders-counts style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>

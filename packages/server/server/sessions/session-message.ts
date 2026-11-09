@@ -15,6 +15,8 @@
 
 import { resolveSessionForGroup } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
+import { noteMessageTo } from './last-message'
+import { intermediateNote, judgeHandback, type HandbackVerdict } from './handback-intent'
 
 export const MESSAGE_KINDS = ['handback', 'block', 'question'] as const
 export type MessageKind = (typeof MESSAGE_KINDS)[number]
@@ -53,7 +55,7 @@ export interface MessageDeps {
   /** The task/subtask the sender is filed on, from the registry. */
   senderTask: (senderId: string) => Promise<SenderTask>
   /** Record the mirror comment on the board. */
-  comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string; message?: { to: string; kind: MessageKind } }) => Promise<{ ok: boolean }>
+  comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string; message?: { to: string; kind: MessageKind; intermediate?: boolean } }) => Promise<{ ok: boolean }>
   /** `handback` from a session filed on a subtask: move that subtask in_progress → in_review. */
   handbackSubtask?: (subtaskId: string) => Promise<void>
   /**
@@ -79,7 +81,7 @@ export function handbackFlowEvent(senderId: string, to: string, at: number, file
 }
 
 export type MessageReply =
-  | { ok: true; to: string; kind: MessageKind; delivered: true; message: string; mirrored: boolean }
+  | { ok: true; to: string; kind: MessageKind; delivered: true; message: string; mirrored: boolean; /** FLUXO.AVISOS 8: read as one slice of a longer piece. */ intermediate?: boolean }
   | { ok: false; code: string; message: string; matches?: string[] }
 
 const MESSAGES: Record<string, string> = {
@@ -146,8 +148,12 @@ export async function sendSessionMessage(
     return fail('not_delivered', sent.message)
   }
   lastSent.set(pair, t)
+  noteMessageTo(target.id, t, { from: senderId, kind })
 
   let mirrored = false
+  // FLUXO.AVISOS 8: an `awaiting` handback — or one whose text says it is part N of M — is one slice of a longer piece. It is
+  // recorded and delivered, but it does not move the subtask to review and is not listed as delivered in the check-in.
+  const verdict = kind === 'handback' ? judgeHandback(body, awaiting) : { intermediate: false } as HandbackVerdict
   const filed = await deps.senderTask(senderId).catch((): SenderTask => ({}))
   if (filed.taskId) {
     const res = await deps.comment(filed.taskId, {
@@ -156,13 +162,16 @@ export async function sendSessionMessage(
       ...(filed.subtaskId ? { subtaskId: filed.subtaskId } : {}),
       ...(kind !== 'question' ? { kind } : {}),
       session: senderId,
-      message: { to: target.id, kind },
+      message: { to: target.id, kind, ...(verdict.intermediate ? { intermediate: true } : {}) },
     }).catch(() => ({ ok: false }))
     mirrored = res.ok
-    if (kind === 'handback' && filed.subtaskId && deps.handbackSubtask) await deps.handbackSubtask(filed.subtaskId).catch(() => {})
+    if (kind === 'handback' && !verdict.intermediate && filed.subtaskId && deps.handbackSubtask) await deps.handbackSubtask(filed.subtaskId).catch(() => {})
   }
-  if (kind === 'handback' && deps.handbackEvent) void deps.handbackEvent(handbackFlowEvent(senderId, target.id, t, filed, { text: body.slice(0, HANDBACK_TEXT_MAX), ...(awaiting ? { awaiting } : {}) })).catch(() => {})
-  return { ok: true, to: target.id, kind, delivered: true, message: sent.message ?? 'Delivered.', mirrored }
+  // The engine reads `awaiting` as "do not close this worker between phases": an inferred slice is sent the same way.
+  const eventAwaiting = awaiting || (verdict.source === 'inferred' ? `progress: ${verdict.marker}`.slice(0, AWAITING_MAX) : '')
+  if (kind === 'handback' && deps.handbackEvent) void deps.handbackEvent(handbackFlowEvent(senderId, target.id, t, filed, { text: body.slice(0, HANDBACK_TEXT_MAX), ...(eventAwaiting ? { awaiting: eventAwaiting } : {}) })).catch(() => {})
+  const note = verdict.source === 'inferred' && verdict.marker ? ` ${intermediateNote(verdict.marker)}` : ''
+  return { ok: true, to: target.id, kind, delivered: true, message: `${sent.message ?? 'Delivered.'}${note}`, mirrored, ...(verdict.intermediate ? { intermediate: true } : {}) }
 }
 
 export function messageStatus(out: MessageReply): number {

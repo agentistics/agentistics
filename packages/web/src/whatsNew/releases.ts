@@ -10,6 +10,64 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.203.0': {
+    features: [
+      {
+        pt: 'O ciclo das entregas anda sozinho depois da revisão: quando o PR de uma peça é mergeado ela vai para CI, e vira Publicado quando sai a primeira versão com o merge. As peças que ficavam paradas em "Revisão do líder" deixam de depender de alguém movê-las.',
+        en: 'The delivery cycle moves by itself after the review: once a piece\'s PR is merged it goes to CI, and becomes Published when the first release with that merge is out. Pieces no longer wait in "Leader review" for someone to move them.',
+      },
+      {
+        pt: 'Uma peça esperando o líder gera um lembrete ao líder vivo da tarefa depois de 30 min e de novo a cada 2 h, no máximo 3 vezes. Nunca a você.',
+        en: 'A piece waiting on its leader reminds the task\'s live leader after 30 min, then every 2 h, at most 3 times. Never you.',
+      },
+      {
+        pt: 'O Live ganhou abas com contagem (Em andamento, Na fila, Publicado, Tudo), e Publicado tem o próprio período (24 h, 7 dias, 30 dias, tudo). A coluna Histórico saiu, colunas vazias ficam recolhidas, e a prioridade na fila do Live agora é só para leitura. O filtro de tarefas ficou na altura das abas, e o carregamento da janela destacada aparece centralizado.',
+        en: 'Live now has tabs with counts (In progress, Queued, Published, All), and Published has its own period (24 h, 7 days, 30 days, all). The History column is gone, empty columns stay collapsed, and priority in the Live queue is now read-only. The task filter now matches the height of the tabs, and the pop-out window\'s loader is centred.',
+      },
+      {
+        pt: 'Uma mensagem sua que ainda está na fila da sessão agora tem "Enviar agora" e "Interromper" na própria legenda ("entregue à sessão…"). "Enviar agora" aparece onde dá para enviar de verdade (Claude Code, com a sessão no meio de um turno); "Interromper" em qualquer assistente que aceite parar o turno. Onde não funciona, o botão simplesmente não aparece.',
+        en: 'A message of yours that is still queued in the session now has "Send now" and "Interrupt" on its own caption ("delivered to the session…"). "Send now" shows where it can really work (Claude Code, mid-turn); "Interrupt" on any assistant that accepts stopping the turn. Where neither can work, no button is drawn.',
+      },
+      {
+        pt: 'Criar uma tarefa pelo MCP agora aceita prioridade e tipo, e a lista de status de uma subtarefa não é mais fixa — vale a do seu quadro.',
+        en: 'Creating a task through the MCP now accepts a priority and a type, and a subtask\'s status list is no longer fixed — your board\'s own list applies.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'O pré-dispatch deixou de exigir "esforço" e "conta" de assistentes que não usam esses campos: pede só o que o assistente escolhido realmente usa.',
+        en: 'Pre-dispatch no longer demands "effort" and "account" from assistants that do not use them: it asks only for what the chosen assistant really uses.',
+      },
+      {
+        pt: 'Abrir sessões pela linha de comando (iniciar, lote, reabrir) agora respeita o teto de modelos de topo por provedor, como a fila já respeitava; "--force" passa por cima e avisa que passou.',
+        en: 'Opening sessions from the command line (start, batch, reopen) now respects the per-provider cap on top-tier models, as the queue already did; "--force" overrides it and says so.',
+      },
+      {
+        pt: 'A recomendação de limites de uso não sugere mais uma conta cuja leitura está velha ou ausente, e diz quais assistentes não deu para avaliar.',
+        en: 'The usage-limits recommendation no longer suggests an account whose reading is stale or missing, and says which assistants it could not judge.',
+      },
+      {
+        pt: 'Uma entrega parcial ("parte 2 de 5") não manda mais a subtarefa para revisão nem aparece como entregue no check-in: só a entrega final conta.',
+        en: 'A partial handback ("part 2 of 5") no longer moves the subtask to review or shows up as delivered in the check-in: only the final one counts.',
+      },
+      {
+        pt: 'Sessões encerradas (ou que nunca tiveram código próprio, como as de QA) não recebem mais aviso de "fechar entrega", e uma pasta de trabalho que já sumiu deixa de travar o fechamento.',
+        en: 'Sessions that already ended (or never had code of their own, like QA sessions) no longer get a "close delivery" notice, and a work folder that is already gone no longer blocks the close.',
+      },
+      {
+        pt: 'Reclamação, áudio ou anexo sem texto não viram mais um cartão de trabalho: o líder responde na conversa.',
+        en: 'A complaint, a voice note or an attachment with no text no longer becomes a work card: the leader answers in the conversation.',
+      },
+      {
+        pt: 'O lembrete de pedido confere de novo antes de avisar: uma peça com sessão viva, ou retirada da fila para abrir à mão, não é mais tratada como esquecida.',
+        en: 'The request reminder checks again before warning: a piece with a live session, or taken off the queue to be opened by hand, is no longer treated as forgotten.',
+      },
+      {
+        pt: 'Uma nova rodada numa peça em revisão leva o cartão de volta para QA ou Em desenvolvimento enquanto a sessão roda, e uma sessão perdida num reinício não segura mais o cartão ali.',
+        en: 'A new round on a piece under review moves its card back to QA or In development while the session runs, and a session lost in a reboot no longer holds the card there.',
+      },
+    ],
+  },
   '2.202.2': {
     features: [],
     fixes: [

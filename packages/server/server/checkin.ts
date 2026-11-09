@@ -49,6 +49,8 @@ export function checkinActivity(events: readonly TaskEvent[], leader: string): u
     if (!e.detail) return []
     try {
       const { message } = JSON.parse(e.detail)
+      // FLUXO.AVISOS 8: a handback that said it is one slice of a longer piece (`awaiting`, or "parte 2 de 5") is not delivered work.
+      if (message?.kind === 'handback' && message.intermediate === true) return []
       return message?.to === leader && ['handback', 'block', 'question'].includes(message.kind)
         ? [{ id: e.id, kind: message.kind, at: e.at, taskId: e.taskId, actor: e.actor }] : []
     } catch { return [] }

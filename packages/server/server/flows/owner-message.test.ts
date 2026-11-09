@@ -114,7 +114,7 @@ test('FLUXO.AVISOS item 2: the event carries the intent and a clean title (no at
   await emitOwnerMessage({ action: 'prompt', id: 'lead', text: 'e o deploy?' }, d)
   await emitOwnerMessage({ action: 'prompt', id: 'lead', text: '> a coluna está cortada\ncorrige /home/me/.agentistics/attachments/158e1f81-image.png' }, d)
   expect(events.map(e => e.payload.intent)).toEqual(['question', 'work'])
-  expect(events[1]!.payload.title).toBe('a coluna está cortada corrige')
+  expect(events[1]!.payload.title).toBe('corrige') // the quoted line is not the owner's words (FLUXO.CITACAO)
   expect(events[1]!.payload.text).toContain('/attachments/158e1f81-image.png') // the literal text is untouched
 })
 

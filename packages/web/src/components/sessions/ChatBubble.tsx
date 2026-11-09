@@ -163,6 +163,11 @@ export interface ChatBubbleProps {
   /** Whether the session is mid-turn — the reason an unread message is normal rather than stuck. */
   awaitingWorking?: boolean
   /**
+   * FLUXO.AVISOS 10: what the caption may DO about the wait — the existing send-now / interrupt verbs, offered only where
+   * they can work (`queuedBubbleActions` decides; an absent entry is a button that is not drawn).
+   */
+  awaitingActions?: { sendNow?: AwaitingAction; interrupt?: AwaitingAction }
+  /**
    * Quote THIS turn in the composer. Absent where the session cannot be written to — a reply
    * control on a row that will refuse the message is a control that teaches the wrong thing.
    *
@@ -374,7 +379,10 @@ function SystemNote({ note, noteRef, pt, sessionId }: { note: string; noteRef?: 
   )
 }
 
-const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant, surfaceSubmitted }: ChatBubbleProps & { surfaceSubmitted?: boolean }) {
+/** One action on a queued message's caption: its words and what it runs. */
+export interface AwaitingAction { label: string; hint: string; run: () => void }
+
+const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, awaitingActions, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant, surfaceSubmitted }: ChatBubbleProps & { surfaceSubmitted?: boolean }) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
@@ -1073,7 +1081,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
           const st = echoStatus(awaitingSinceMs ?? null, awaitingWorking === true, pt ? 'pt' : 'en')
           return (
             <div role="status" style={{
-              display: 'flex', alignItems: 'center', gap: 5,
+              display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap',
               fontSize: 10,
               // A wait long enough to be worth a second look is the ONLY one that changes colour.
               // Colouring every unread message would make the ordinary case look like a fault,
@@ -1081,8 +1089,28 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
               color: st.notable ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
               alignSelf: mine ? 'flex-end' : 'flex-start',
             }}>
-              <Clock size={10} style={{ flexShrink: 0 }} />
-              <span>{st.text}</span>
+              {/* The clock stays with its sentence: only the actions wrap onto their own line on a narrow screen. */}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                <Clock size={10} style={{ flexShrink: 0 }} />
+                <span>{st.text}</span>
+              </span>
+              {([awaitingActions?.sendNow, awaitingActions?.interrupt] as const).map((a, k) => a && (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={a.run}
+                  // A text action keeps its natural size; `.ag-tap` projects the 44px touch target on a phone (index.css).
+                  className="ag-tap"
+                  title={a.hint}
+                  aria-label={`${a.label}. ${a.hint}`}
+                  data-testid={k === 0 ? 'queued-send-now' : 'queued-interrupt'}
+                  style={{
+                    border: 'none', background: 'transparent', padding: '0 2px', cursor: 'pointer',
+                    fontFamily: 'inherit', fontSize: 10, fontWeight: 600, textDecoration: 'underline',
+                    color: 'var(--anthropic-orange)',
+                  }}
+                >{a.label}</button>
+              ))}
             </div>
           )
         })()}

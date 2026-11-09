@@ -1282,8 +1282,10 @@ export function Select({ value, onChange, options, placeholder, disabled, search
  */
 export function MultiPicker({
   options, onCommit, placeholder, searchPlaceholder, confirmLabel, selectAllLabel, emptyLabel, disabled,
-  defaultOpenForTest, panelMinWidth,
+  defaultOpenForTest, panelMinWidth, triggerHeight,
 }: {
+  /** Trigger height in px (default 44, the form number); a toolbar row passes its own control height. */
+  triggerHeight?: number
   /** `heading` draws a section title instead of a row (no box, never selectable); `hint` is the right-aligned count. */
   options: { value: string; label: string; disabled?: boolean; hint?: string; heading?: boolean }[]
   /** The list never opens narrower than this (px, capped to the screen): a trigger can be small, long titles are not. */
@@ -1388,7 +1390,8 @@ export function MultiPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         style={{
-          width: '100%', padding: '8px 11px', minHeight: 44, boxSizing: 'border-box',
+          width: '100%', boxSizing: 'border-box',
+          ...(triggerHeight ? { padding: '0 11px', height: triggerHeight } : { padding: '8px 11px', minHeight: 44 }),
           background: 'var(--bg-elevated)',
           border: `1px solid ${open ? 'var(--anthropic-orange)' : 'var(--border)'}`,
           borderRadius: 8, fontSize: 13, color: 'var(--text-tertiary)', fontFamily: 'inherit',

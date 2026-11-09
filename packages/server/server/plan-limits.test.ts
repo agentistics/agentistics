@@ -1168,8 +1168,13 @@ test('two real Claude Max accounts both keep capacity and routing, even when one
   expect(stale.yieldsTo).toBeUndefined()
   expect(stale.freeSlots).toBeGreaterThan(0)
   expect(body.freeSlotsByAccount[b.id]).toBeGreaterThan(0)
+  // FLUXO.AVISOS 6: the rows keep their capacity on screen, but a STALE meter never takes a recommendation — A is at its
+  // limit, B was last read three hours ago, so the router says it cannot judge instead of sending work to a dead reading.
   const rec = routeRecommendation(body.budgets, 'lead')
-  expect(rec.account).toBe(b.id)
+  expect(rec.account).not.toBe(b.id)
+  expect(rec.harness).not.toBe('claude')
+  expect(rec.confidence).toBe('none')
+  expect(rec.reason).toContain('No fresh plan_limits reading')
 })
 
 

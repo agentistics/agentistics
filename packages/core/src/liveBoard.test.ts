@@ -1,17 +1,46 @@
 import { describe, expect, test } from 'bun:test'
-import { LIVE_FLOW_DEFAULTS, LIVE_SORT_DEFAULT, liveComparator, parseLiveSort, priorityRank, stageVisible, type LiveBoardStage } from './liveBoard'
+import {
+  LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, LIVE_TAB_DEFAULT, inPublishedPeriod, liveComparator, liveTabCounts, liveTabMatches, parseLivePeriod, parseLiveSort,
+  parseLiveTab, priorityRank, type LiveTabbable,
+} from './liveBoard'
 
-describe('stageVisible — the two switches of the filter bar', () => {
-  const STAGES: LiveBoardStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published']
-  const shown = (f: { onlyActive: boolean; showQueue: boolean }) => STAGES.filter(s => stageVisible(s, f))
-  test('both on (the default) shows every column of the flow', () => {
-    expect(LIVE_FLOW_DEFAULTS).toEqual({ onlyActive: true, showQueue: true })
-    expect(shown(LIVE_FLOW_DEFAULTS)).toEqual(STAGES)
+describe('the tabs and the Publicado period (filtros v2)', () => {
+  const H = 3600_000, NOW = 1000 * H
+  const c = (stage: LiveTabbable['stage'], over: Partial<LiveTabbable> = {}): LiveTabbable => ({ stage, liveState: 'none', ...over })
+  test('defaults and parsing: the screen opens on Em andamento over 24 h; junk falls back', () => {
+    expect([LIVE_TAB_DEFAULT, LIVE_PERIOD_DEFAULT]).toEqual(['active', '24h'])
+    expect(parseLiveTab('queue')).toBe('queue')
+    expect(parseLiveTab('history')).toBe('active')
+    expect(parseLivePeriod('30d')).toBe('30d')
+    expect(parseLivePeriod('1y')).toBe('24h')
   })
-  test('"apenas ativas" is every column AFTER the queue; "exibir itens na fila" is the queue', () => {
-    expect(shown({ onlyActive: true, showQueue: false })).toEqual(STAGES.slice(1))
-    expect(shown({ onlyActive: false, showQueue: true })).toEqual(['queue'])
-    expect(shown({ onlyActive: false, showQueue: false })).toEqual([])
+  test('Em andamento = somebody working or waiting, past the queue and not old; a published piece is never in progress', () => {
+    const t = (x: LiveTabbable) => liveTabMatches('active', x, '24h', NOW)
+    expect(t(c('running', { liveState: 'working' }))).toBe(true)
+    expect(t(c('qa', { liveState: 'waiting' }))).toBe(true)
+    expect(t(c('leader', { liveState: 'needs-you' }))).toBe(true)
+    expect(t(c('running', { liveState: 'down' }))).toBe(false)
+    expect(t(c('blocked'))).toBe(false)
+    expect(t(c('queue', { liveState: 'working' }))).toBe(false)
+    expect(t(c('leader', { liveState: 'working', old: true }))).toBe(false)
+    expect(t(c('published', { liveState: 'working', deliveredAtMs: NOW }))).toBe(false)
+  })
+  test('Publicado honours its period at the edges; an undated piece is only in "all"', () => {
+    expect(inPublishedPeriod(NOW - 24 * H, '24h', NOW)).toBe(true)
+    expect(inPublishedPeriod(NOW - 24 * H - 1, '24h', NOW)).toBe(false)
+    expect(inPublishedPeriod(NOW - 7 * 24 * H, '7d', NOW)).toBe(true)
+    expect(inPublishedPeriod(NOW - 31 * 24 * H, '30d', NOW)).toBe(false)
+    expect(inPublishedPeriod(NOW - 900 * 24 * H, 'all', NOW)).toBe(true)
+    expect(inPublishedPeriod(null, '30d', NOW)).toBe(false)
+    expect(inPublishedPeriod(null, 'all', NOW)).toBe(true)
+  })
+  test('counts: Tudo keeps the real column of everything, published only inside the period', () => {
+    const list = [
+      c('queue'), c('running', { liveState: 'working' }), c('leader', { old: true }), c('blocked'),
+      c('published', { deliveredAtMs: NOW - H }), c('published', { deliveredAtMs: NOW - 50 * H }),
+    ]
+    expect(liveTabCounts(list, '24h', NOW)).toEqual({ active: 1, queue: 1, published: 1, all: 5 })
+    expect(liveTabCounts(list, '7d', NOW)).toEqual({ active: 1, queue: 1, published: 2, all: 6 })
   })
 })
 

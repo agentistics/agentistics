@@ -268,10 +268,15 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_create",
     description:
-      "Create a task. A title is required; a description is optional. Creating a title that already exists returns the existing task rather than a duplicate, so this is safe to call before filing work under a name you are not sure exists.",
+      "Create a task. A title is required; a description is optional. Set `priority` (urgent | high | medium | low — default low, and nobody chose a default) and `type` (an id from agentistics_task_types) when you know them: a board of defaults orders nothing. Creating a title that already exists returns the existing task rather than a duplicate (its priority and type are left alone — use agentistics_task_edit), so this is safe to call before filing work under a name you are not sure exists.",
     inputSchema: {
       type: "object",
-      properties: { title: { type: "string" }, detail: { type: "string" } },
+      properties: {
+        title: { type: "string" },
+        detail: { type: "string" },
+        priority: { type: "string", enum: ["urgent", "high", "medium", "low"], description: "Defaults to low. Decides the order of the queue and of the Live delivery line." },
+        type: { type: "string", description: "A type id from agentistics_task_types (an unknown one is dropped)." },
+      },
       required: ["title"],
     },
   },
@@ -402,7 +407,8 @@ const TOOLS: Tool[] = [
         },
         status: {
           type: "string",
-          enum: ["backlog", "todo", "in_progress", "blocked", "in_review", "done", "abandoned"],
+          description:
+            "A status id this board currently has — call agentistics_task_statuses for the live list (the vocabulary is editable, so it is NOT fixed here). The four every board starts with are todo | in_progress | blocked | done.",
         },
         dueDate: { type: "string" },
         startDate: { type: "string" },
@@ -497,15 +503,15 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_live_delivery",
     description:
-      "What is being DELIVERED right now — the Live Delivery line, the same source as the screen. Use it to answer \"what is running\", \"when does X ship\" and \"is anything stalled\". Returns a `summary` (active deliveries, agents working, stalled, the next delivery with an estimate), the active `deliveries` with their stage (queue, running, qa, adjust, leader, merge, published), the agents on each (harness, model, account, live state), time in the stage and in total, the step inside the stage (`step`, with `stepSource` = `reported` or `signals` and `stepSignal` naming the observed fact — null `step` means nothing is observable, say so; the screen then draws no percent), the ETA with its source and confidence (`kind: none` means there is NO estimate — say so, never invent a time), the last action, and the `leaders` band (each leader's current action, its workers and what waits on a decision — leaders are never deliveries). Each delivery carries its Agentask `priority` (urgent | high | medium | low; a subtask inherits its task's). Filters: `task` (id or part of the title), `stage`, `stalledOnly`, and the screen's own switches — `onlyActive` (the stages after the queue; default true) and `showQueue` (the Na fila column; default true), pass false to turn one off — plus `sort` (how each stage lists its cards; default `priority`, highest first, ties by longest in the stage). Stage names on screen: queue = Na fila, running = Em desenvolvimento, qa = QA. `history` is the screen's Histórico column: pieces published more than 24 h ago (up to 30 days, newest first, same `task` filter, no live agents) — Publicado keeps a card for 24 h and then it moves there.",
+      "What is being DELIVERED right now — the Live Delivery line, the same source as the screen. Use it to answer \"what is running\", \"when does X ship\" and \"is anything stalled\". Returns a `summary` (active deliveries, agents working, stalled, the next delivery with an estimate), the active `deliveries` with their stage (queue, running, qa, adjust, leader, merge, published), the agents on each (harness, model, account, live state), time in the stage and in total, the step inside the stage (`step`, with `stepSource` = `reported` or `signals` and `stepSignal` naming the observed fact — null `step` means nothing is observable, say so; the screen then draws no percent), the ETA with its source and confidence (`kind: none` means there is NO estimate — say so, never invent a time), the last action, and the `leaders` band (each leader's current action, its workers and what waits on a decision — leaders are never deliveries). Each delivery carries its Agentask `priority` (urgent | high | medium | low; a subtask inherits its task's). Filters: `task` (id or part of the title), `stage`, `stalledOnly`, and the screen's own tabs — `tab`: `active` (Em andamento: only what has an agent working or waiting), `queue` (Na fila), `published` (Publicado) or `all` (Tudo: every piece in its real column, old legacy reviews marked `old`; the default here, while the screen opens on `active`) — and `period`, the Publicado period: `24h` (default), `7d`, `30d` or `all`. The answer's `view` carries `{tab, period, counts, defaulted, capped}`: `tab`/`period` are the EFFECTIVE values (a missing or invalid one falls back to `all` / `24h`, and `defaulted` names which did), `counts` is the count of EVERY tab under the same `task` filter and period, the very numbers the screen's tabs print, and `capped` (`{cap, omitted}`, else null) says the list was cut at 400 pieces per kind and that many older ones are NOT in the answer — then a count is not the total. Plus `sort` (how each stage lists its cards; default `priority`, highest first, ties by longest in the stage). Stage names on screen: queue = Na fila, running = Em desenvolvimento, qa = QA. There is no Histórico column any more: a piece published earlier is in `deliveries` whenever `period` covers it.",
     inputSchema: {
       type: "object",
       properties: {
         task: { type: "string", description: "A task id or part of its title." },
         stage: { type: "string", enum: ["queue", "running", "qa", "adjust", "leader", "merge", "published"] },
         stalledOnly: { type: "boolean", description: "Only deliveries that need a person, lost an agent or are blocked." },
-        onlyActive: { type: "boolean", description: "The screen's \"apenas ativas\": the cards of the stages after the queue. Default true; false hides them." },
-        showQueue: { type: "boolean", description: "The screen's \"exibir itens na fila\": the cards of the Na fila column. Default true; false hides them." },
+        tab: { type: "string", enum: ["active", "queue", "published", "all"], description: "The screen's tab: active (Em andamento), queue (Na fila), published (Publicado) or all (Tudo). Default all." },
+        period: { type: "string", enum: ["24h", "7d", "30d", "all"], description: "How far back Publicado reaches. Default 24h." },
         sort: { type: "string", enum: ["priority", "time-in-stage", "recent"], description: "Order within each stage. Default priority (highest first, ties by longest in the stage)." },
       },
       required: [],
@@ -575,13 +581,15 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_phase",
     description:
+      "FLUXO.CICLO-COMPLETO — the minute `tick` also moves a piece in revisao_lider or pr_merge to ci BY ITSELF once its PR is merged (found from the piece's PR number, branch, the PR containing the sha QA approved, or its author worktree's branch; the merge gates `delecoes` + `mergeado` still run, and a refusal leaves the piece where it is with the reason), publishes ci pieces from the FIRST tag that contains the merge, and reminds the LIVE leader of the task (never the owner) of a piece waiting on them for 30 min, then every 2 h, at most 3 times. `get` with a `subtaskId` returns `tickReason`: why the tick has not moved it. `reconcile` (no `subtaskId`; `apply` true to write) is the one-shot BACKFILL: every piece in revisao_lider/pr_merge/ci matched to its merged PR and the first release tag containing it — a report of what moves and what cannot be proven, with the reason. " +
       "`tick` also enables the mandatory owner-request/placement flows through the official engine switches and reads canonical pedidos; after 10 minutes without complete staging it wakes the current live task leader, including after a handoff or restart, and never asks the owner. " +
       "Queue actions: `dequeue` withdraws a queued piece with a required free-text `reason` (task leader or owner only), keeps the draft/history, and refuses dispatch until explicitly restaged; `tick` reconciles stale queued pieces against board review/done/abandoned and records a comment. Vacancy counts live backend processes; lost/exited/closed sessions reserve no slots. " +
       "FLUXO.ENTREGA-DSL — read or move a DELIVERY (one subtask) through its fixed phases: fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado, plus bloqueado (from any phase, back to the stored origin only). Any transition outside that table is REFUSED (422 `fase_pulada`) with a sentence naming what is missing — executando → revisao_lider, ajuste → revisao_lider and every other skip included. The gates each edge needs are run BY THE SERVER from evidence (predispatch, vaga, salvo = sha on origin per ls-remote, qa-modelo = QA model ≠ author model from the registry and never Sonnet over Sonnet, cabeca = the pushed branch is still at the sha QA tested, delecoes = no file deleted outright by the PR, mergeado = gh says the PR is MERGED, the merge commit is on origin/main and the PR head is the sha QA approved — the merge sha is READ FROM THE PR, never from you, release = the batch's version tag exists AND the release.yml run that produced it is green, read in the repository the release recorded); salvo needs every check run on the pushed head to have concluded green (pending or absent refuse); you never pass proof. `action`: `get` (default; omit `subtaskId` to list every delivery) | `phase` (`to` + what that edge reads: `verdict` APROVADO/REPROVADO + `findings` from qa, `reviewedSha` = the sha QA approved for revisao_lider → pr_merge, `detail` for a request for change or a failure reason) | `gate` (`name`: run ONE gate and record its evidence) | `block` (`reason` one of dependencia, pedido_de_bloqueio, limite, maquina, externo, fora_das_autorizacoes; `text`) | `unblock` (`detail`; the leader of the task or the owner — an owner-decision block only the owner) | `step` (`step` 1..9: the step of the current phase, for the Live %. The Live already DERIVES the step from real signals — a session open, a file edit, a test run, a commit, the gates, the PR — so report only when you know better; the card shows the larger of the two and says which it is. Works for a legacy piece with no delivery record too: only the board's `step` event is written, nothing is adopted into the flow) | `configure` (the LEADER of the task or the owner only; `patch`: versionTarget, humanGates [phases needing the owner's approval — skipped and recorded as 'pulado: modo autônomo' while autonomous mode is on], leaderSessionId, pr, tag, allowDeletions {paths, reason}; the QA and author sessions are never settable — the host records them from the sessions it opened and the registry) | `approve` (`phase`, `decision` approve|reject, `note`: answers a human gate the owner was ASKED about; a session identity is deliberately not sent, the owner answers through this same door as the Live card button and `agentop flow approve`) | `stage-run` (predispatch + vaga gates, then start the staged session and move to executando) | `merge` (delecoes gate, squash-merge the PR, move to ci; a failure goes back to revisao_lider) | `release` (the LEADER of the task or the owner DECLARES what a release contains: `version` x.y.z, `mergeSha` = the commit on main carrying it (information only; 40 characters, or a short sha the server resolves), optional `repo` = owner/name (default agentistics/agentistics), `subtaskIds` = every piece in it; no `subtaskId`. Each piece gets its record (a legacy one is adopted), versionTarget/mergeSha/tag/repo, goes to ci and then to publicado as soon as the tag `v<version>` exists and the release.yml run that produced it is green — read by the server from the TAG, not from the sha — with the release's own publish time; a declared piece is never sent back to revisao_lider by the tick (a red tag run keeps it in ci and wakes the leader once); done/abandoned/blocked/unknown/other-task pieces refuse the whole batch, which is written in ONE store write; a second run changes nothing). In autonomous mode nothing here ever asks or waits for the owner.",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "dequeue", "tick", "step", "configure", "approve", "stage-run", "merge", "release"] },
+        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "dequeue", "tick", "step", "configure", "approve", "stage-run", "merge", "release", "reconcile"] },
+        apply: { type: "boolean", description: "reconcile: write the moves (a leader of the task, or the owner). Absent/false = dry run: the report only" },
         subtaskId: { type: "string" },
         version: { type: "string", description: "release: the version the pieces shipped in, x.y.z" },
         mergeSha: { type: "string", description: "release: the commit on main that carries the release (information only: stored on the record; a short sha is resolved to 40 characters or refused). The publication evidence is the version tag's own green release.yml run" },
@@ -708,7 +716,7 @@ const TOOLS: Tool[] = [
         to: { type: "string", description: "The target session reference." },
         kind: { type: "string", enum: ["handback", "block", "question"] },
         body: { type: "string", description: "The message." },
-        awaiting: { type: "string", description: "kind=handback only: what you stopped waiting for (marks the handback as intermediate; the worker is not closed). Omit on a final handback." },
+        awaiting: { type: "string", description: "kind=handback only: what you stopped waiting for (marks the handback as intermediate: the worker is not closed, your subtask stays in_progress and the leader's check-in does not list it as delivered). A text that says it is part N of M (\"parte 2 de 5\", \"2/5\", \"seguindo com…\") with no awaiting is read the same way, and the reply tells you so. Omit on the FINAL handback." },
       },
       required: ["to", "kind", "body"],
     },
@@ -1118,7 +1126,12 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       }
       case "agentistics_task_create": {
         const a = args as any;
-        const body = await apiSend("POST", "/api/tasks", { title: a?.title, detail: a?.detail });
+        const body = await apiSend("POST", "/api/tasks", {
+          title: a?.title,
+          detail: a?.detail,
+          ...(typeof a?.priority === "string" ? { priority: a.priority } : {}),
+          ...(typeof a?.type === "string" ? { type: a.type } : {}),
+        });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_status": {
@@ -1316,6 +1329,11 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           const body = await apiSend("POST", "/api/deliveries/release", {
             version: a.version, mergeSha: a.mergeSha, repo: a.repo, subtaskIds: a.subtaskIds, session: sessionProof(process.env),
           });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (action === "reconcile") {
+          // The backfill: same service as `agentop flow reconcile --release`; dry run unless `apply`.
+          const body = await apiSend("POST", "/api/deliveries/reconcile", { apply: a.apply === true, session: sessionProof(process.env) });
           return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
         }
         if (action !== "tick" && (typeof a.subtaskId !== "string" || !a.subtaskId)) throw new Error("subtaskId is required");

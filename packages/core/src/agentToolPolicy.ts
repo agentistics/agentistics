@@ -182,8 +182,8 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
     reason: 'types a message into another session through the composer path; additive, rate-limited, sender verified',
   },
   agentistics_task_phase: {
-    ...TASKS, risk: 'W', routes: ['GET /api/deliveries', 'GET /api/deliveries/:subtask', 'POST /api/deliveries/:subtask', 'POST /api/deliveries/release'],
-    reason: 'reads or moves a delivery through the fixed phase table; release declares which pieces a release shipped (leader/owner only; the host still reads the green run and the tag); a skipped phase is refused (422 fase_pulada) and every gate is checked by the host from evidence, never from the caller',
+    ...TASKS, risk: 'W', routes: ['GET /api/deliveries', 'GET /api/deliveries/:subtask', 'POST /api/deliveries/:subtask', 'POST /api/deliveries/release', 'POST /api/deliveries/reconcile'],
+    reason: 'reads or moves a delivery through the fixed phase table; release declares which pieces a release shipped (leader/owner only; the host still reads the green run and the tag); reconcile backfills merged/released pieces (dry run unless apply, leader/owner only); a skipped phase is refused (422 fase_pulada) and every gate is checked by the host from evidence, never from the caller',
   },
   agentistics_task_stage: {
     ...TASKS, risk: 'W', routes: ['POST /api/deliveries/:subtask'],

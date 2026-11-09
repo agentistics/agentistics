@@ -8,9 +8,10 @@ type CenteredLoaderProps = {
    * `screen` (default): the loader stands for a whole screen that is still loading, so it sits in
    * the middle of the VIEWPORT on both axes, like the boot splash — a page container rarely has a
    * definite height, so centring inside it left the loader near the top. `area`: centred inside a
-   * panel that does have a height (the chat panel).
+   * panel that does have a height (the chat panel). `fill`: centred in the nearest POSITIONED ancestor, on both
+   * axes — for a popup/window that is smaller than, or offset from, the viewport (the Live pop-out).
    */
-  placement?: 'screen' | 'area'
+  placement?: 'screen' | 'area' | 'fill'
 }
 
 /** A loader for an area whose entire visible surface is waiting to render. */
@@ -22,6 +23,8 @@ export function CenteredLoader({ label, size = 56, testId = 'centered-loader', p
       data-placement={placement}
       style={placement === 'screen'
         ? { ...centre, position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 5 }
+        : placement === 'fill'
+        ? { ...centre, position: 'absolute', inset: 0, pointerEvents: 'none' }
         : { ...centre, flex: '1 1 auto', height: '100%', minHeight: 160, padding: 24, boxSizing: 'border-box' }}
     >
       <AgentisticsLoader size={size} label={label} />

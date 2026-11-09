@@ -796,6 +796,8 @@ async function runFleetActionOnce(
           await m.emitOwnerMessage(req, m.defaultOwnerMessageDeps(), { at: new Date(sentAtMs).toISOString() })
         } catch { console.warn('[owner-request] confirmed message could not be recorded; check the official request flows') }
         if (req.handoff === true) await patchSession(req.id, { handoffRequestedAt: new Date(sentAtMs).toISOString() })
+        // FLUXO.AVISOS: the newest message typed INTO this session (host op `ultima-mensagem-sessao`).
+        try { (await import('./last-message')).noteMessageTo(req.id, sentAtMs) } catch { /* a view, never the record */ }
         await recordComposerMessage(req.id, text)
         void (async () => {
           try {
