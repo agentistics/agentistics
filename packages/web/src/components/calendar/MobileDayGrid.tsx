@@ -72,8 +72,8 @@ export function MobileDayGrid(p: MobileGridProps) {
         <span>{untimed.length}</span>{collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
       </button>
       {!collapsed && <div style={{ flex: 1, minWidth: 0 }}>
-        {(expanded ? untimed : untimed.slice(0, 3)).map(e => <button type="button" className="cal-phone-button cal-phone-allday" data-cal-allday-row={e.day} key={e.id} onClick={ev => p.onOpen(e.selection, ev)}>{span > 1 && `${e.day.slice(8)} · `}{e.title}</button>)}
-        {untimed.length > 3 && <button className="cal-phone-button cal-phone-allday-more" data-cal-allday-more={untimed.length - 3} type="button" onClick={() => setExpanded(!expanded)}>{expanded ? pick(TEXT.collapse, pt) : `+${untimed.length - 3} ${pick(TEXT.more, pt)}`}</button>}
+        {(expanded ? untimed : untimed.slice(0, 2)).map(e => <button type="button" className="cal-phone-button cal-phone-allday" data-cal-allday-row={e.day} key={e.id} onClick={ev => p.onOpen(e.selection, ev)}>{span > 1 && `${e.day.slice(8)} · `}{e.title}</button>)}
+        {untimed.length > 2 && <button className="cal-phone-button cal-phone-allday-more" data-cal-allday-more={untimed.length - 2} type="button" onClick={() => setExpanded(!expanded)}>{expanded ? pick(TEXT.collapse, pt) : `+${untimed.length - 2} ${pick(TEXT.more, pt)}`}</button>}
       </div>}
     </div>}
     <div ref={scroller} data-cal-hour-scroller style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: wideDay ? 'auto' : 'hidden', overscrollBehavior: 'contain', touchAction: wideDay ? 'pan-x pan-y' : 'pan-y' }}
