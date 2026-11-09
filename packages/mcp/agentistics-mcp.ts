@@ -1260,7 +1260,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         // `parentGroupId` + done is two writes in order: join first, then close.
         const wantsDone = typeof a?.done === "boolean" ? (a.done as boolean) : undefined;
         const doneStatus = wantsDone === undefined ? undefined : wantsDone ? "done" : "todo";
-        if (a?.id !== undefined && doneStatus !== undefined && named.length > 0 && typeof a?.status === "string" && a.status !== doneStatus) {
+        if (a?.id !== undefined && doneStatus !== undefined && named.length > 0 && typeof a?.status === "string" && (wantsDone ? a.status !== "done" : a.status === "done")) {
           throw new Error(`agentistics_task_subtask: done=${wantsDone} conflicts with status="${a.status}" — send one of them (status "${doneStatus}" is what done=${wantsDone} means).`);
         }
         const edit = (withStatus: boolean, omit: string[] = []) => ({

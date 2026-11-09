@@ -48,6 +48,11 @@ test('agentistics_task_subtask forwards done beside named columns and refuses a 
     // bare tick unchanged
     await call({ id: 's1', done: true })
     expect(seen).toEqual([{ id: 's1', done: true }])
+    // done=false with a non-done status is a reopen into that status, not a conflict.
+    expect((await call({ id: 's1', status: 'in_review', done: false })).isError).toBe(false)
+    expect(seen).toEqual([{ id: 's1', status: 'in_review' }])
+    expect((await call({ id: 's1', status: 'done', done: false })).isError).toBe(true)
+    expect(seen).toEqual([])
     // done_needs_session still surfaces as an error
     refuseDone = true
     const refused = await call({ id: 's1', title: 'X', done: true })
