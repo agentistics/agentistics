@@ -1,6 +1,8 @@
 /**
  * owner-intent.ts — FLUXO.AVISOS: what an owner message ASKS FOR, decided by a deterministic host rule.
  *
+ * Quoted or forwarded lines ("> ", "> >") are never the owner's words (FLUXO.CITACAO).
+ *
  * A pedido is a request for WORK. The owner also asks the leader questions ("e o deploy?", "por que falhou?"),
  * and every one of those used to become a high-priority "Pedido do dono" that the delivery tick then nudged
  * the leader about — 8 automatic nudges in an hour on the Mac leader, most of them for questions that had
@@ -22,7 +24,7 @@ export type OwnerIntent = 'question' | 'work' | 'complaint'
 
 /** Attachment references and pasted blobs are not words the owner wrote. */
 export function ownerTextWords(text: string): string {
-  return withoutQuotePrefixes(text)
+  return text
     .replace(/!?\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/(?:^|\s)(?:\/|~\/|[A-Za-z]:\\)[^\s]*\.(?:png|jpe?g|gif|webp|pdf|txt|md|log|json|csv|m4a|mp3|ogg|oga|opus|wav|aac|flac|weba|mp4|mov|webm|mkv)\b/gi, ' ')
     .replace(/https?:\/\/\S+/g, ' ')
@@ -91,9 +93,23 @@ const COMPLAINT_RE = new RegExp(
 const INTERROGATIVE_OPENING_RE = new RegExp(
   `^(?:e\\s+)?(?:qual|quais|quando|onde|como|quem|quanto|quantos?|quantas?|por\\s?que|porque|pq|pra\\s+que|o\\s+que|oq|que\\s+horas|será|sera|tem\\s+como)${RB}`, 'iu')
 
+const isQuoted = (l: string): boolean => /^\s*>/.test(l)
+const hasQuote = (text: string): boolean => text.split('\n').some(isQuoted)
+/** The lines the owner wrote themselves: a quoted or forwarded line ("> ", "> >", ">") is someone else's text, at any depth. */
+function ownLines(text: string): string {
+  return text.split('\n').filter(l => !isQuoted(l)).join('\n')
+}
+
+/** The owner's own words; a message that is ONLY a quote has none, so it is labelled by what was quoted (it is never a card). */
+function titleWords(text: string): string {
+  return ownerTextWords(ownLines(text)) || ownerTextWords(text.split('\n').map(l => l.replace(/^\s*(?:>\s?)+/, '')).join('\n'))
+}
+
 export function ownerIntent(text: string): OwnerIntent {
-  const own = ownerTextWords(text.split('\n').filter(l => !/^\s*>/.test(l)).join('\n'))
-  const words = own || ownerTextWords(text)
+  const quoted = hasQuote(text)
+  const words = ownerTextWords(ownLines(text))
+  // Only quoted lines and no own words (a bare forward): nothing was asked, so it is recorded as a `question` (no card, no reminder).
+  if (!words && quoted) return 'question'
   // Only an attachment (png, voice note, link): no words to act on. The leader answers it; it is not a work card.
   if (!words) return text.trim() ? 'complaint' : 'work'
   // "pode ser a C" / "pode ser?" answer or ask about an option; they are not a request.
@@ -104,12 +120,9 @@ export function ownerIntent(text: string): OwnerIntent {
   if (words.split(' ').length <= COMPLAINT_MAX_WORDS && COMPLAINT_RE.test(words)) return 'complaint'
   // Nothing asks for work, and the text opens like a question: it is one, "?" or not (same 15-word cap in the engine).
   if (INTERROGATIVE_OPENING_RE.test(words)) return 'question'
+  // A remark on a quote with no request verb is a reaction to it ("isso vai ser corrigido né?"), not a long report: no card.
+  if (quoted) return 'question'
   return words.split(' ').length <= QUESTION_MAX_WORDS ? 'question' : 'work'
-}
-
-/** Quote prefixes ("> …") belong to what was pasted, not to what the owner is asking. */
-function withoutQuotePrefixes(text: string): string {
-  return text.split('\n').map(l => l.replace(/^\s*(?:>\s?)+/, '')).join('\n')
 }
 
 /**
@@ -118,13 +131,13 @@ function withoutQuotePrefixes(text: string): string {
  * that was only an attachment says so in words.
  */
 export function ownerRequestTitle(text: string, max = 60): string {
-  const words = ownerTextWords(text)
+  const words = titleWords(text)
   if (!words) return text.trim() ? '(anexo, sem texto)' : ''
   return words.length > max ? `${words.slice(0, max - 1).trimEnd()}…` : words
 }
 
 /** The nudge excerpt of an owner message: its words (no attachment paths), first `max` characters. */
 export function nudgeExcerpt(text: string, max = 80): string {
-  const words = ownerTextWords(text) || (text.trim() ? '(anexo, sem texto)' : '')
+  const words = titleWords(text) || (text.trim() ? '(anexo, sem texto)' : '')
   return words.length > max ? `${words.slice(0, max).trimEnd()}…` : words
 }
