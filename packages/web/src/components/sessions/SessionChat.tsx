@@ -60,6 +60,7 @@ import { splitImageAttachments } from '../../lib/attachmentPreview'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { AttachmentLightbox } from './AttachmentLightbox'
 import { scratchKey, sessionScratch } from '../../lib/sessionScratch'
+import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { chatReadAt, firstFrameStale, refreshChat, subscribeChat } from '../../lib/chatFeed'
 import { composerMaxHeight } from '../../lib/composerHeight'
 import { isPickerSelectKey } from '../../lib/pickerKeys'
@@ -85,7 +86,7 @@ import {
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { isNayCwd, modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
-import { personQueuedCount, queuedBubbleActions, sendNowPillOffered, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
+import { personQueuedCount, queuedBubbleActions, sendNowPillOffered, shouldRestoreDraft, strandedCards, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
@@ -175,6 +176,8 @@ interface ChatPayload {
   older?: string
   /** Messages the SERVER is holding for this conversation — see `pending-prompts.ts`. */
   pending?: { text: string; at: number }[]
+  /** MENSAGENS.KILL: handed to a session that is not running and never read — offered back (see `strandedCards`). */
+  stranded?: { text: string; at: number }[]
   /**
    * What agentop typed into this session's pane, and when — so a `[Image #N]` marker the harness
    * substituted for a path can find its file again. Absent when nothing was ever attached here.
@@ -1519,6 +1522,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [echo, payload?.pending, turns, deliveredTick, loadedId, session.id])
 
+  // Not running: the server says so (`live: false`) or the row does — a structured source's payload is always `live`.
+  const sessionEnded = payload?.live === false || !sessionRunning(session)
+  const strandedList = useMemo(
+    () => strandedCards({ ended: sessionEnded, stranded: payload?.stranded, queued, draft }),
+    [sessionEnded, payload?.stranded, queued, draft],
+  )
+
   /** A clock, so an ageing echo ages on screen instead of freezing at its first render. */
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -2705,7 +2715,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               carries the same text — so it is drawn as one: faded, with the wait said in words
               under it. It used to be indistinguishable from a delivered message, and on a session
               mid-turn the wait is minutes. */}
-          {queued.map((q, i) => (
+          {(sessionEnded ? [] : queued).map((q, i) => (
             <ChatBubble
               key={`echo-${i}`}
               turn={{ role: 'user', text: q.text }}
@@ -2718,6 +2728,30 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               awaitingWorking={working}
               awaitingActions={queuedActionsFor(q.text)}
               onQuoteClick={onSentQuote}
+              {...(q.at !== undefined ? { awaitingSinceMs: Math.max(0, now - q.at) } : {})}
+            />
+          ))}
+
+          {/* MENSAGENS.KILL — what this session was handed and never read, offered back to be resent. */}
+          {strandedList.map((q, i) => (
+            <ChatBubble
+              key={`stranded-${i}`}
+              turn={{ role: 'user', text: q.text }}
+              sessionId={session.id}
+              lang={lang}
+              harness={session.harness}
+              anchorId={echoAnchorId(session.id, q.text)}
+              awaiting
+              stranded={{
+                label: pt ? 'Colocar na caixa de mensagem' : 'Put back in the message box',
+                hint: pt
+                  ? 'Devolve o texto à caixa de mensagem para você revisar e enviar de novo. Nada é reenviado sozinho.'
+                  : 'Puts the text back in the message box so you can review it and send it again. Nothing is resent by itself.',
+                run: () => {
+                  editDraft(prev => appendToDraft(prev, q.text))
+                  editEcho(list => list.filter(t => t !== q.text))
+                },
+              }}
               {...(q.at !== undefined ? { awaitingSinceMs: Math.max(0, now - q.at) } : {})}
             />
           ))}
