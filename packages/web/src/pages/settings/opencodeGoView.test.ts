@@ -26,15 +26,15 @@ describe('fmtUsd', () => {
 })
 
 describe('ocUsageView', () => {
-  test('rings read the tightest model per window, in dollars', () => {
+  test('quota is unknown while local costs remain available separately', () => {
     const v = ocUsageView(reply([{ model: 'glm-5.3', costUsd: 1.5, at: NOW - 3_600_000 }]), false)
     expect(v.title).toBe('OpenCode Go')
     expect(v.price).toBe('US$ 10/month')
     expect(v.rings.map(r => r.kind)).toEqual(['5h', 'week', 'month'])
     // glm-5.3 on Go: 15 monthly -> 3 (5 h), 7.5 (week), 15 (month)
-    expect(v.rings[0]).toMatchObject({ pct: 50, detail: 'US$ 1.50 / US$ 3', model: 'glm-5.3' })
-    expect(v.rings[2]).toMatchObject({ pct: 10, detail: 'US$ 1.50 / US$ 15' })
-    expect(v.models[0]).toMatchObject({ model: 'glm-5.3', pct: 50, binding: '5h', trains: false })
+    expect(v.rings[0]).toMatchObject({ pct: null, detail: 'unknown', model: 'glm-5.3' })
+    expect(v.rings[2]).toMatchObject({ pct: null, detail: 'unknown', model: 'glm-5.3' })
+    expect(v.models[0]).toMatchObject({ model: 'glm-5.3', pct: null, amount: 'US$ 1.50', trains: false })
   })
   test('a Muse Spark model is flagged as training on the data', () => {
     const v = ocUsageView(reply([{ model: 'muse-spark-1.3-contributor', costUsd: 1, at: NOW - 1000 }]), true)
@@ -43,7 +43,7 @@ describe('ocUsageView', () => {
   test('no use: no rings, a sentence saying so (never a zero ring)', () => {
     const v = ocUsageView(reply([]), true)
     expect(v.rings).toEqual([])
-    expect(v.notes[0]).toContain('Nenhuma resposta')
+    expect(v.notes.join(' ')).toContain('Nenhuma resposta')
   })
   test('zen / none: no per-window limits and the reason is said', () => {
     const v = ocUsageView({ plan: head('zen'), usage: null, reason: 'no-go-plan', estimated: true, now: NOW }, false)
@@ -53,12 +53,17 @@ describe('ocUsageView', () => {
     expect(v.notes[0]).toContain('OpenCode Zen')
   })
   test('unreadable store and unlisted models are said', () => {
-    expect(ocUsageView({ plan: head('go'), usage: null, reason: 'unreadable', estimated: true, now: NOW }, false).notes[0]).toContain('Could not read')
+    expect(ocUsageView({ plan: head('go'), usage: null, reason: 'unreadable', estimated: true, now: NOW }, false).notes.join(' ')).toContain('Could not read')
     const v = ocUsageView(reply([{ model: 'brand-new', costUsd: 1, at: NOW - 1000 }]), false)
     expect(v.notes.join(' ')).toContain('brand-new')
   })
   test('basis says whether the plan was chosen or inferred', () => {
     expect(ocUsageView(reply([], { plan: head('go', true) }), false).basis).toBe('chosen by you')
     expect(ocUsageView(reply([]), false).basis).toBe('inferred from the key')
+  })
+  test('a provider refusal takes precedence over reassuring local cost estimates', () => {
+    const r = reply([], { blocked: { at: NOW, message: 'Go usage limit exceeded' } })
+    expect(ocUsageView(r, true).notes[0]).toContain('Go bloqueado')
+    expect(ocUsageView(r, false).notes[0]).toContain('Reset unknown')
   })
 })

@@ -65,6 +65,19 @@ async function spawnabilityBudget(now: number) {
   return planLimitsPayload(undefined, now)
 }
 
+test('legacy Go cost estimates expose neither invented quota nor routing capacity', async () => {
+  const now = Date.now()
+  await ingestPlanLimits({ harness: 'opencode', account: 'default', sourcePlan: 'OpenCode Go', source: 'opencode-cost-estimate', updatedAt: now,
+    windows: [{ kind: 'week', usedPct: 49.8, resetsAt: now + 7 * 86_400_000 }] })
+  const body = await planLimitsPayload(undefined, now)
+  expect(body.limits.find(l => l.harness === 'opencode')).toMatchObject({ windows: [], unmeasuredReason: expect.stringContaining('unknown') })
+  expect(body.budgets.some(b => b.harness === 'opencode')).toBe(false)
+  expect(body.unmeasured).toContainEqual({ harness: 'opencode', account: body.limits.find(l => l.harness === 'opencode')!.account, status: 'hold', reason: expect.stringContaining('unknown') })
+  expect(planLimitsTool({ kind: 'qa', authorHarness: 'claude' }, body).unmeasured).toEqual(body.unmeasured ?? [])
+  expect(body.readings.some(b => b.harness === 'opencode')).toBe(false)
+  expect(routeRecommendation(body.budgets, 'qa', 'claude').harness).not.toBe('opencode')
+})
+
 test('missing binary keeps usage but removes slots and routing eligibility', async () => {
   unlinkSync(join(dir, 'codex'))
   const body = await spawnabilityBudget(Date.now())

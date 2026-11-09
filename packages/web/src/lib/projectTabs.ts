@@ -73,8 +73,8 @@ export function kindEmpty(
   const searching = query.trim() !== ''
   if (searching) {
     return pt
-      ? `Nada em "${query.trim()}"${tab === 'all' ? '' : ` em ${kindLabel(tab, pt).toLowerCase()}`}. Tente menos letras, ou outra aba.`
-      : `Nothing matches "${query.trim()}"${tab === 'all' ? '' : ` under ${kindLabel(tab, pt).toLowerCase()}`}. Try fewer letters, or another tab.`
+      ? `Nada em "${query.trim()}"${tab === 'all' ? '' : ` em ${kindLabel(tab, pt).toLowerCase()}`}. Tente menos letras, ou outra aba. Pastas privadas (Mesa, Documentos, Fotos…) só são buscadas quando você as abre.`
+      : `Nothing matches "${query.trim()}"${tab === 'all' ? '' : ` under ${kindLabel(tab, pt).toLowerCase()}`}. Try fewer letters, or another tab. Private folders (Desktop, Documents, Photos…) are searched only when you open them.`
   }
   if (anyProjects && tab !== 'all') {
     return pt

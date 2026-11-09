@@ -1,5 +1,18 @@
 import { describe, expect, test } from 'bun:test'
-import { personQueuedCount, queuedBubbleActions, visibleQueued } from './queuedCards'
+import { personQueuedCount, queuedBubbleActions, sendNowPillOffered, visibleQueued } from './queuedCards'
+
+describe('sendNowPillOffered — one "Send now" per waiting message', () => {
+  test('a single waiting message is served by the button inside it, so the pill stays away', () => {
+    expect(sendNowPillOffered(true, 1)).toBe(false)
+  })
+  test('with two or more waiting messages the pill sends the whole queue', () => {
+    expect(sendNowPillOffered(true, 2)).toBe(true)
+    expect(sendNowPillOffered(true, 5)).toBe(true)
+  })
+  test('never offered where send-now itself is not shown (any harness, any width)', () => {
+    expect(sendNowPillOffered(false, 3)).toBe(false)
+  })
+})
 
 describe('queuedBubbleActions (FLUXO.AVISOS 10)', () => {
   const base = { text: 'corrige a coluna', harness: 'claude', working: true, dialogOpen: false, personQueued: 1, sendNowRunning: false, stopEnabled: true, pt: false }
@@ -10,9 +23,15 @@ describe('queuedBubbleActions (FLUXO.AVISOS 10)', () => {
     expect(queuedBubbleActions({ ...base, pt: true }).sendNow?.label).toBe('Enviar agora')
     expect(queuedBubbleActions({ ...base, pt: true }).interrupt?.label).toBe('Interromper')
   })
-  test('the hint says the whole queue goes when there is more than one message', () => {
-    expect(queuedBubbleActions({ ...base, personQueued: 3 }).sendNow?.hint).toContain('all 3 queued messages')
-    expect(queuedBubbleActions({ ...base, personQueued: 3, pt: true }).sendNow?.hint).toContain('3 mensagens da fila')
+  test('with two or more waiting messages the balloons carry no send-now link: the pill under the conversation is the one control', () => {
+    for (const personQueued of [2, 3, 5]) {
+      expect(queuedBubbleActions({ ...base, personQueued }).sendNow).toBeNull()
+    }
+    expect(queuedBubbleActions({ ...base, personQueued: 3 }).interrupt).not.toBeNull()
+  })
+  test('with exactly one waiting message the link inside the balloon says it sends this message', () => {
+    expect(queuedBubbleActions(base).sendNow?.hint).toContain('this message')
+    expect(queuedBubbleActions({ ...base, pt: true }).sendNow?.hint).toContain('esta mensagem')
   })
   test('a harness with no measured send-now keystroke gets Interrupt only (when its stop verb works), never Send now', () => {
     for (const harness of ['codex', 'gemini', 'copilot', 'kimi', 'antigravity', 'opencode']) {

@@ -9,12 +9,13 @@
  * already been answered. The host classifies the text; the engine decides what to do with the answer
  * (a `question` is recorded already answered: no subtask, no reminder).
  *
- * The rule errs toward `work`: a missed question costs one needless reminder, a missed request costs the
- * owner's work being forgotten.
- *  - a polite request ("can you …/pode …/quero …/precisa …") → `work`, even when the text ends in "?"
+ * FLUXO.CARD-SEM-PEDIDO: the rule errs toward NO card. Only a clear request is `work`; thanks, goodbyes, remarks,
+ * reports and questions about his own English used to become cards (and a nudge each). The message reaches the leader
+ * either way, so nothing is lost by not carding it.
+ *  - a polite request ("can you …/pode …/quero …/precisa …/me dá …") → `work`, even when the text ends in "?"
  *  - a trailing "?" → `question`, unless a verb stands in VERB POSITION ("faz o deploy?")
  *  - otherwise a strong verb anywhere, or a verb in verb position → `work`
- *  - otherwise only a tiny text (≤ 3 words: "opcao C", "status") is a `question`; a longer statement is a report → `work`
+ *  - a complaint about a previous answer → `complaint`; everything else → `question` (no card)
  *  - word boundaries are Unicode-aware: "publicação" does not contain the verb "publica"
  */
 
@@ -47,6 +48,7 @@ const IMPERATIVE = [
   'fix', 'add', 'create', 'implement', 'make', 'change', 'update', 'remove', 'delete', 'send', 'run', 'build', 'write',
   'ship', 'deploy', 'release', 'merge', 'push', 'open', 'close', 'kill', 'start', 'stop', 'move', 'rename', 'replace',
   'continue', 'resume', 'check', 'review', 'investigate', 'test', 'show', 'put', 'set', 'use', 'try', 'redo', 'refactor',
+  'hotfix',
 ]
 const ADDED = [
   'resolve', 'resolva', 'resolver', 'refatora', 'refatore', 'tenta', 'tente', 'limpa', 'limpe', 'reverte', 'reverta', 'desfaz',
@@ -57,28 +59,28 @@ const ADDED = [
   // answering IS the request ("responde as coisas que eu falei"); the past tense "respondeu" is a complaint, not this
   'responde', 'responda', 'responder', 'explica', 'explique', 'esclarece', 'esclareça',
 ]
-const POLITE = /(?<![\p{L}\p{N}])(?:pode(?:ria|m)?(?!\s+ser(?![\p{L}\p{N}]))|consegue|conseguiria|d[áa] pra|dá para|quero|preciso|precisa|precisamos|gostaria|tem que|deve|can you|could you|would you|will you|please|por favor|i need|i want|we need)(?![\p{L}\p{N}])/iu
+// "quero saber / entender / ver se" asks to be TOLD something (no card); "não consegue" is a report; "seria legal" is a clear wish.
+const POLITE = /(?<![\p{L}\p{N}])(?:pode(?:ria|m)?(?!\s+ser(?![\p{L}\p{N}]))|(?<!n[ãa]o\s+)consegue|conseguiria|d[áa] pra|dá para|quero(?!\s+(?:saber|entender|perguntar|ver\s+se|checar\s+se))|queria|preciso|precisa|precisamos|gostaria|(?:vc|voc[êe])\s+tem que|tem que\s+(?:fazer|implementar|corrigir|criar|adicionar|remover|enviar|mudar|trocar|ajustar|atualizar|resolver|responder|alinhar|testar)|deve(?!\s+(?:ser|sair)(?![\p{L}\p{N}]))|me\s+(?:faz|fa[çc]a|mostra|mostre|manda|mande|abre|abra)|seria\s+(?:legal|bom|bacana|melhor|ideal)|me\s+d[aá]|me\s+passa|me\s+diz|me\s+fala|can you|could you|would you|will you|please|por favor|i need|i want|we need)(?![\p{L}\p{N}])/iu
+// An infinitive ("fazer", "resolver") names an action in a sentence about something else; only a polite opener makes it a request.
+const INFINITIVES = new Set(['fazer', 'implementar', 'corrigir', 'criar', 'adicionar', 'remover', 'enviar', 'mudar', 'trocar', 'ajustar',
+  'atualizar', 'resolver', 'responder', 'alinhar', 'testar'])
 
-const AMBIGUOUS = new Set(['teste', 'ajuste', 'troca', 'move', 'deploy', 'release', 'build', 'test', 'check', 'review', 'update',
+const AMBIGUOUS = new Set(['hotfix', 'teste', 'ajuste', 'troca', 'move', 'deploy', 'release', 'build', 'test', 'check', 'review', 'update',
   'change', 'merge', 'push', 'run', 'start', 'stop', 'set', 'put', 'use', 'show', 'open', 'close', 'ship', 'resume', 'continue', 'try', 'make',
   'vai', 'fix', 'faz', 'continua', 'muda', 'mostra', 'sobe', 'publica', 'libera', 'roda', 'fecha', 'cria'])
-const ALL_VERBS = [...IMPERATIVE, ...ADDED]
+const ALL_VERBS = [...IMPERATIVE, ...ADDED].filter(v => !INFINITIVES.has(v) && v !== 'vai' && v !== 'pesquisa')
 const STRONG_VERBS = ALL_VERBS.filter(v => !AMBIGUOUS.has(v))
 const LB = '(?<![\\p{L}\\p{N}])'
 const RB = '(?![\\p{L}\\p{N}])'
-const FILLERS = 'ok|blz|beleza|mano|cara|agora|então|entao|aí|ai'
+const FILLERS = 'ok|blz|beleza|mano|cara|agora|então|entao|aí|ai|e|and|now|valeu|obrigado|thanks'
+/** A verb counts as a request only where a request STARTS: the text, a line or a sentence (after an optional filler). */
 const VERB_POSITION_RE = new RegExp(
-  `(?:^|[.!?;:,\\n]\\s*|${LB}(?:e|and|pra|to|${FILLERS})\\s+)(?:${ALL_VERBS.join('|')})${RB}`, 'iu')
+  `(?:^|[.!?;:,\\n]\\s*)(?:(?:${FILLERS})[,!\\s]+)?(?:${ALL_VERBS.join('|')})${RB}`, 'iu')
 const STRONG_RE = new RegExp(`${LB}(?:${STRONG_VERBS.join('|')})${RB}`, 'iu')
+/** A strong verb buried in a long text is a story, not an order; it only counts in a short message. */
+const STRONG_MAX_WORDS = 15
 
-/** A text this short with no verb and no "?" is a bare answer ("opcao C", "status"); a longer one is a report. */
-export const QUESTION_MAX_WORDS = 3
-
-/**
- * A complaint about a PREVIOUS ANSWER, with no new request in it ("vc n me respondeu", "não era isso que eu pedi").
- * Short on purpose: a long message that contains the phrase also carries content, and content stays `work`.
- */
-const COMPLAINT_MAX_WORDS = 12
+/** A complaint about a PREVIOUS ANSWER, with no new request in it ("vc n me respondeu", "não era isso que eu pedi"). */
 const COMPLAINT_RE = new RegExp(
   `${LB}(?:` +
   // "vc n me respondeu", "você não respondeu", "ninguém me respondeu", "ignorou", "esqueceu de responder"
@@ -89,9 +91,6 @@ const COMPLAINT_RE = new RegExp(
   `isso\\s+n[ãa]o\\s+(?:era|[ée]|foi)\\s+o\\s+que\\s+eu\\s+(?:pedi|falei|disse|quis)|` +
   `n[ãa]o\\s+(?:era|foi)\\s+o\\s+que\\s+eu\\s+(?:pedi|falei|disse|quis)` +
   `)${RB}`, 'iu')
-/** An interrogative OPENING with no "?" typed (dictated messages rarely carry one): "qual a versão atual", "oq é isso". */
-const INTERROGATIVE_OPENING_RE = new RegExp(
-  `^(?:e\\s+)?(?:qual|quais|quando|onde|como|quem|quanto|quantos?|quantas?|por\\s?que|porque|pq|pra\\s+que|o\\s+que|oq|que\\s+horas|será|sera|tem\\s+como)${RB}`, 'iu')
 
 const isQuoted = (l: string): boolean => /^\s*>/.test(l)
 const hasQuote = (text: string): boolean => text.split('\n').some(isQuoted)
@@ -116,13 +115,12 @@ export function ownerIntent(text: string): OwnerIntent {
   if (/^pode ser(?![\p{L}\p{N}])/iu.test(words) && words.split(' ').length <= 6) return 'question'
   if (POLITE.test(words)) return 'work'
   if (/[?？]\s*["')\]]*$/.test(words)) return VERB_POSITION_RE.test(words) ? 'work' : 'question'
-  if (VERB_POSITION_RE.test(words) || STRONG_RE.test(words)) return 'work'
-  if (words.split(' ').length <= COMPLAINT_MAX_WORDS && COMPLAINT_RE.test(words)) return 'complaint'
-  // Nothing asks for work, and the text opens like a question: it is one, "?" or not (same 15-word cap in the engine).
-  if (INTERROGATIVE_OPENING_RE.test(words)) return 'question'
-  // A remark on a quote with no request verb is a reaction to it ("isso vai ser corrigido né?"), not a long report: no card.
-  if (quoted) return 'question'
-  return words.split(' ').length <= QUESTION_MAX_WORDS ? 'question' : 'work'
+  if (VERB_POSITION_RE.test(words) || (STRONG_RE.test(words) && words.split(' ').length <= STRONG_MAX_WORDS)) return 'work'
+  // A complaint is never a card, at any length: nothing here asks for work (the request verbs were tested above).
+  if (COMPLAINT_RE.test(words)) return 'complaint'
+  // FLUXO.CARD-SEM-PEDIDO: nothing above is a clear request, so there is no card. Thanks, goodbyes, remarks, reports and
+  // questions about his own English all land here; the message still reaches the leader, which is all they need.
+  return 'question'
 }
 
 /**

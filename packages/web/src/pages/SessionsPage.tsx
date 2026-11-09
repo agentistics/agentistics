@@ -410,7 +410,8 @@ function mobilePanelTabStyle(on: boolean, hot: boolean): CSSProperties {
 function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: SessionsPageBodyProps) {
   const ctx = useOutletContext<AppContext>()
   const {
-    lang, isCentral, theme, filters, setFilters, activeOnly, setActiveOnly,
+    lang, isCentral, theme,
+    sessionsFilters, sessionsActiveOnly, setSessionsFilters, setSessionsActiveOnly,
     availableProjects, sessionCountByProject, models, availableHarnesses, derived,
     data, currency, brlRate,
   } = ctx
@@ -767,8 +768,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
 
   /** The fleet as the aside is showing it — one narrowing, read by both. */
   const overviewRows = useMemo(
-    () => filterFleet({ rows: fleet.rows, filters, activeOnly }).rows,
-    [fleet.rows, filters, activeOnly],
+    () => filterFleet({ rows: fleet.rows, filters: sessionsFilters, activeOnly: sessionsActiveOnly }).rows,
+    [fleet.rows, sessionsFilters, sessionsActiveOnly],
   )
 
   /**
@@ -2161,12 +2162,12 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * would be trying to explain to themselves.
    */
   const filterCount =
-    (activeOnly ? 1 : 0) +
+    (sessionsActiveOnly ? 1 : 0) +
     [
-      (filters.harnesses?.length ?? 0) > 0,
-      (filters.repos?.length ?? 0) > 0,
-      filters.projects.length > 0,
-      (filters.models?.length ?? 0) > 0,
+      (sessionsFilters.harnesses?.length ?? 0) > 0,
+      (sessionsFilters.repos?.length ?? 0) > 0,
+      sessionsFilters.projects.length > 0,
+      (sessionsFilters.models?.length ?? 0) > 0,
     ].filter(Boolean).length
 
   /** The filter icon both mobile bars carry. Same sheet, same count, same target size. */
@@ -2303,8 +2304,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       {...(filterCount > 0
         ? {
             onClear: () => {
-              setActiveOnly(false)
-              setFilters({ ...filters, harnesses: [], repos: [], projects: [], models: [] })
+              setSessionsActiveOnly(false)
+              setSessionsFilters({ ...sessionsFilters, harnesses: [], repos: [], projects: [], models: [] })
             },
           }
         : {})}
@@ -2314,10 +2315,10 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         compact
         hideClearAll
         only={FLEET_FILTER_DIMS}
-        activeOnly={activeOnly}
-        onActiveOnlyChange={setActiveOnly}
-        filters={filters}
-        onChange={setFilters}
+        activeOnly={sessionsActiveOnly}
+        onActiveOnlyChange={setSessionsActiveOnly}
+        filters={sessionsFilters}
+        onChange={setSessionsFilters}
         projects={availableProjects}
         sessionCountByProject={sessionCountByProject}
         models={models}
@@ -3215,8 +3216,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             historyLoading={fleet.historyLoading}
             closedTotal={fleet.closedTotal ?? 0}
             unsupported={unsupported}
-            filters={filters}
-            activeOnly={activeOnly}
+            filters={sessionsFilters}
+            activeOnly={sessionsActiveOnly}
             {...(fleet.unavailable ? { unavailable: fleet.unavailable } : {})}
             stale={stale}
             rowsById={rowIndex}

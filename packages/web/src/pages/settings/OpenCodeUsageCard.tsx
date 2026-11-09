@@ -59,8 +59,7 @@ export default function OpenCodeUsageCard({ lang, refreshKey }: { lang: 'pt' | '
           {m.model}
           {m.trains && <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--accent-red)' }}>{t.trains}</span>}
         </div>
-        <div style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>{m.pct}% · {t.windowShort(m.binding)}</div>
-        <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--text-secondary)' }}>{m.amount}</div>
+        <div style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>{m.amount}</div>
       </div>)}
     </div>}
 
