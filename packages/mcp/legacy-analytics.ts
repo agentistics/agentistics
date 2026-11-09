@@ -3,7 +3,7 @@
  * tool switch so the projected path (`projected-analytics.ts`) can be checked against exactly what the
  * surface emits (`surface-parity.ts`). Pure: data in, the tool's JSON value out.
  */
-import { canonicalProjectPath } from "@agentistics/core";
+import { calcStreak, canonicalProjectPath } from "@agentistics/core";
 import { filterSessions, sessionHarness, sessionMessages, sessionTokens, statsCacheTotals, type AnySession } from "./session-tokens.js";
 
 export function legacySummary(data: any, harness?: string): unknown {
@@ -21,6 +21,7 @@ export function legacySummary(data: any, harness?: string): unknown {
   const modelTokens: Record<string, number> = {};
   const projectSessions: Record<string, number> = {};
   const activeDates = new Set<string>();
+  const localDates = new Set<string>();
   for (const s of allSessions) {
     const { input, output, cacheRead, cacheWrite, cost, unpriced, tokensUnavailable } = sessionTokens(s);
     totalUnpriced += unpriced;
@@ -33,7 +34,12 @@ export function legacySummary(data: any, harness?: string): unknown {
       const root = canonicalProjectPath(s.project_path);
       projectSessions[root] = (projectSessions[root] ?? 0) + 1;
     }
-    if (s.start_time) activeDates.add(String(s.start_time).slice(0, 10));
+    if (s.start_time) {
+      activeDates.add(String(s.start_time).slice(0, 10));
+      // The streak counts LOCAL days, like the screens' (`localActivityDates`).
+      const d = new Date(s.start_time);
+      if (!Number.isNaN(d.getTime())) localDates.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+    }
   }
   const claudeFallback = unified || harness === "claude";
   const topModel =
@@ -54,8 +60,9 @@ export function legacySummary(data: any, harness?: string): unknown {
     topModel,
     topProject,
     activeDays: activeDates.size || (claudeFallback ? sc.activeDays ?? 0 : 0),
-    // Streak is Claude-only (derived from statsCache); N/A for a single non-claude harness.
-    currentStreak: claudeFallback ? sc.currentStreak ?? 0 : null,
+    // Claude's comes from its statsCache; any other single harness has no cache, so its streak is read
+    // off its own sessions (null only when it has none to read).
+    currentStreak: claudeFallback ? sc.currentStreak ?? 0 : localDates.size > 0 ? calcStreak(localDates) : null,
   };
 }
 

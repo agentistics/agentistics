@@ -64,6 +64,8 @@ if (process.env.PROBE_IDLE_ONLY) process.exit(0)
 const totals = () => {
   const db = new Database(join(root, 'journal.db'), { readonly: true })
   try {
+    // A journal that has never been imported has no events view yet: that is "nothing", not a failure.
+    if (!db.query("SELECT 1 FROM sqlite_master WHERE name = 'events_readable'").get()) return {}
     const rows = db.query<{ source_id: string; type: string; data_shape: string; data_values: string }, []>(`SELECT source_id,type,data_shape,data_values FROM events_readable WHERE source_id IN ('opencode','codex') AND type IN ('session.started','model.completed','tool.requested')`).all()
     const out: Record<string, { sessions: number; input: number; output: number; cache: number; tools: number; declaredCostUSD: number }> = {}
     for (const row of rows) {

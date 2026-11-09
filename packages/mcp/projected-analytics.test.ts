@@ -89,3 +89,19 @@ describe("projected MCP analytics (A4.4)", () => {
     expect(streakOf([], "2026-09-03")).toBe(0);
   });
 });
+
+describe("an unfed journal is not an answer", () => {
+  const empty: MetricsQueryFn = async () => ({
+    ok: true, body: { groups: [], page: { nextCursor: null }, basis: { freshness: { lag: 0, fresh: true, rebuilding: false, journalHead: 0 } } },
+  });
+  test("summary refuses (so the MCP falls back to the sessions it can see) instead of answering zeros", async () => {
+    await expect(projectedSummary(empty)).rejects.toBeInstanceOf(ProjectionUnavailable);
+    await expect(projectedHarnesses(empty)).rejects.toBeInstanceOf(ProjectionUnavailable);
+  });
+  test("a journal with events but no match for the filter still answers (empty is real there)", async () => {
+    const fed: MetricsQueryFn = async () => ({
+      ok: true, body: { groups: [], page: { nextCursor: null }, basis: { freshness: { lag: 0, fresh: true, rebuilding: false, journalHead: 42 } } },
+    });
+    expect(((await projectedSummary(fed)) as any).totalSessions).toBe(0);
+  });
+});

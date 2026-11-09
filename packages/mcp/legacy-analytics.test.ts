@@ -25,3 +25,13 @@ describe("legacy MCP analytics: projects roll up to their root (A4.4 decision 2)
     expect((legacySummary(data) as any).topProject).toBe("/p/app");
   });
 });
+
+describe("legacy MCP summary: a harness with no statsCache still has a streak", () => {
+  test("an OpenCode-only machine with sessions today reads streak 1, not null", () => {
+    const now = new Date().toISOString();
+    const data = { sessions: [{ session_id: "o", harness: "opencode", project_path: "/w", input_tokens: 5, output_tokens: 1, model: "upx/fable-5.1", start_time: now }], statsCache: {} };
+    const s = legacySummary(data, "opencode") as any;
+    expect(s.currentStreak).toBe(1);
+    expect(s.totalSessions).toBe(1);
+  });
+});
