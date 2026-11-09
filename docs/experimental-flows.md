@@ -41,8 +41,10 @@ the worker applies without an engine change. A result count ("12/12 tests") is n
 
 `owner.message` is emitted for the owner's composer message and for a hand-off relay of a message nobody answered. Its payload
 carries two host-decided fields besides the text: `intent` (`question` | `work`, the deterministic rule in
-`flows/owner-intent.ts`: a request verb or a polite request is work even before a "?"; otherwise a trailing "?" or a short
-text with no request verb is a question; when in doubt it is work; quoted or forwarded lines ("> ", "> >") are never the
+`flows/owner-intent.ts`: only a CLEAR request is work (a request verb at the start of a sentence, a short message with a
+strong verb, or a polite request, even before a "?"); thanks, goodbyes, remarks, reports and questions, in Portuguese or
+English, are a question; a complaint about a previous answer is a complaint at any length; when in doubt it is NOT a card,
+because the message reaches the leader either way and a card also fires a nudge; quoted or forwarded lines ("> ", "> >") are never the
 owner's words: a request verb inside a quote counts for nothing, a remark on a quote with no verb is a question, and a message
 that is only a quote is a question too) and `title` (the subtask title: the owner's own words, with attachment paths removed
 and never the quoted text; `text` stays literal). The host never emits for the hand-off request itself

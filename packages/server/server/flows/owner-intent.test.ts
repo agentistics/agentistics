@@ -9,7 +9,7 @@ describe('ownerIntent — a deterministic host rule', () => {
     for (const w of [
       'corrige o login', 'manda o relatório', 'Fix the history column', 'faz o deploy e me avisa',
       'pode corrigir a coluna de histórico?', 'can you ship 2.203.0?', 'por favor revisa o PR', 'quero que a fila mostre a prioridade',
-      'a passagem de liderança deveria ser um item de sistema e não um pedido do dono porque ela confunde a fila inteira',
+      'me da lista e horário de tudo que sai',
     ]) expect(ownerIntent(w)).toBe('work')
   })
   test('an attachment with no words is for the leader to answer, not a work card (live p-4a1a72afdec7)', () => {
@@ -75,8 +75,46 @@ describe('FLUXO.AVISOS r2 — complaints, "?"-less questions, audio attachments 
     expect(ownerIntent(`${p} qual a versão atual`)).toBe('question')
   })
   test('real requests from the board stay work', () => {
-    for (const w of ['me da lista e horário de tudo que sai', 'perdi todas as mensagens que eu tinha enviado nessa merda',
-      'os pesos vc tem que definir, sou ruim com matemática então vc precisa ser assertivo nisso', 'outra coisa q falei foi sobre a quantidade de workers']) expect(ownerIntent(w)).toBe('work')
+    for (const w of ['me da lista e horário de tudo que sai',
+      'os pesos vc tem que definir, sou ruim com matemática então vc precisa ser assertivo nisso']) expect(ownerIntent(w)).toBe('work')
+  })
+})
+
+describe('FLUXO.CARD-SEM-PEDIDO — when unsure, no card (synthetic, same shapes as the real 08/11 messages)', () => {
+  test('thanks, goodbye, a remark and a question about his own English are not cards (pt and en)', () => {
+    for (const t of [
+      'alright, good job my huge friend! thanks for all your work, you are so great!\ntomorrow I come back to see new updates!\nBye Buddy',
+      'oh shit, this information can make confusion for the users (included me)',
+      'my english is good? im a beginner',
+      'ok, isso também deve sair amanhã junto com tudo, valeu',
+      'valeu, obrigado por tudo, até amanhã',
+      'caraio mano que bad news',
+      'good night, I am going to sleep',
+    ]) expect(ownerIntent(t)).toBe('question')
+  })
+  test('a report or opinion with no request verb is not a card, however long', () => {
+    for (const t of [
+      'outra coisa que falei foi sobre a quantidade de workers',
+      'estou meio perdido em relação às entregas e aos estudos que vão garantir qualidade baseada em fatos',
+      'a passagem de liderança deveria ser um item de sistema e não um pedido do dono porque ela confunde a fila inteira',
+      'o upx é porque o uso que recebi foi por um gateway que a empresa fornece, mas deveria funcionar com qualquer um',
+    ]) expect(ownerIntent(t)).toBe('question')
+  })
+  test('"deve" in a remark is not a request; a question with a "?" in the middle stays a question', () => {
+    expect(ownerIntent('deve ser corrigido com certeza rs')).toBe('question')
+    expect(ownerIntent('pesquisa ficou pronta?\ntudo está bem encaminhado para conseguirmos bons resultados e a task do benchmark')).toBe('question')
+  })
+  test('a complaint stays a complaint at any length, and never a card', () => {
+    const long = 'vc n me respondeu e já faz um bom tempo que eu estou esperando uma resposta sobre aquilo que perguntei antes de dormir ontem'
+    expect(ownerIntent(long)).toBe('complaint')
+  })
+  test('a clear request still becomes a card, with an attachment or after thanks', () => {
+    for (const t of [
+      'obrigado! agora corrige a coluna de histórico',
+      'thanks, now please fix the history column',
+      '/home/me/.agentistics/attachments/f04865e5-image.png\n\nquero que a sessão fechada saia da lista',
+      'me manda a lista de tudo que sai hoje',
+    ]) expect(ownerIntent(t)).toBe('work')
   })
 })
 
