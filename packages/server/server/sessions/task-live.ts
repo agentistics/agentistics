@@ -788,6 +788,7 @@ export function buildLive(o: {
     const stepInfo = stage === 'published' || stage === 'completed' || stage === 'queue' || stage === 'blocked' ? null : (() => {
       const reported = stepOf(eventsBySubject.get(subject) ?? [], round.startedAtMs)
       const handback = p.comments.some(c => c.kind === 'handback' && (c.subtaskId ?? null) === (p.sub?.id ?? null) && (round.startedAtMs === null || (ms(c.createdAt) ?? 0) >= round.startedAtMs))
+      const derived = deriveStep({
         stage, sinceMs: round.startedAtMs, handback,
         sessions: (sessionStage ? (currentSession ? [currentSession] : []) : p.sessions).map(s => ({ id: s.id, live: s.live, isQa: !!s.label && QA_NAME.test(s.label), ...(s.activity ? { activity: s.activity } : {}) })),
         ...(rec ? { rec: rec as StepRecord } : {}),
