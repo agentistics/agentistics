@@ -135,14 +135,17 @@ export default function HomePage() {
       // `apportionModelUsage`'s guess only for the days nothing in scope can answer — reported
       // here so that guess never reads as a measurement. Only on the API sub-line: the plan
       // basis's own subtitle already states its coverage in days.
+      // Every token in scope belongs to a route nobody can price: the cost is UNKNOWN, never R$0,00 (same rule
+      // as the Compare page's `allUnpriced`).
+      const allUnpriced = !showPlan && d.unpricedTokens > 0 && d.unpricedTokens >= totalTokens(d.tokenTotals)
       const estimateNote = !showPlan ? costEstimateNote(d.costEstimatedDays, lang === 'pt' ? 'pt' : 'en') : null
       card = (
         <StatCard
           label={showPlan ? (lang === 'pt' ? 'Custo do plano' : 'Plan cost') : (lang === 'pt' ? 'Custo estimado' : 'Est. cost')}
-          value={fmtCost(shownUSD, currency, brlRate)}
+          value={allUnpriced ? (lang === 'pt' ? 'não registrado' : 'not recorded') : fmtCost(shownUSD, currency, brlRate)}
           // Sized by whichever currency renders wider, so flipping USD ⇄ BRL never resizes the
           // headline — BRL is ~5× the amount and can carry an extra digit.
-          sizeBasis={widerValue(fmtCost(shownUSD, 'USD', brlRate), fmtCost(shownUSD, 'BRL', brlRate))}
+          sizeBasis={allUnpriced ? undefined : widerValue(fmtCost(shownUSD, 'USD', brlRate), fmtCost(shownUSD, 'BRL', brlRate))}
           sub={showPlan ? planCostSub(lang) : [costCardSub(lang, filters.harness), estimateNote, d.unpricedTokens > 0 ? UNPRICED_TOTAL_MARKER[lang === 'pt' ? 'pt' : 'en'] : ''].filter(Boolean).join('\n')}
           icon={<TrendingUp size={15} />} accent="var(--anthropic-orange)" info={infoItems[5]} onInfoClick={() => setInfoModalIndex(5)}
           // Only the currency lives here. The API/Plan switch moved to the filter bar, where it
