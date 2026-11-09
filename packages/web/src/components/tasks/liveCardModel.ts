@@ -99,6 +99,7 @@ export interface BarSegment { stage: LiveStage; state: 'done' | 'cur' | 'todo'; 
 
 /** PURE: the 6-segment bar. The active segment wears the COLOUR OF THE COLUMN the card is in; done ones are grey. */
 export function stageBar(stage: LiveStage, origin: LiveStage | null | undefined): BarSegment[] {
+  if (stage === 'completed') return [{ stage, state: 'cur', color: STAGE_LABEL.completed.color }]
   const at = stage === 'adjust' ? 'qa' : stage === 'blocked' ? (origin && origin !== 'blocked' ? (origin === 'adjust' ? 'qa' : origin) : 'queue') : stage
   const i = BAR_STAGES.indexOf(at)
   return BAR_STAGES.map((s, k) => ({
@@ -227,7 +228,7 @@ export function locateWorker(w: { cardKey?: string | null }, shown: readonly Liv
 const stageName = (s: LiveStage, pt: Pt) => STAGE_LABEL[s][pt ? 'pt' : 'en'].toLowerCase()
 
 export interface TimeRow {
-  /** "tempo nessa etapa 52 min" — the same words in EVERY column. */
+  /** Round time beside a percent; otherwise the existing stage/publication clock. */
   inStage: string
   /** "total 52 min" — this card's real work, never the task's age. */
   total: string
@@ -238,8 +239,10 @@ export interface TimeRow {
 
 export function timeRow(c: LiveCard, nowMs: number, pt: Pt): TimeRow {
   const d = c.d
-  const done = d.stage === 'published'
+  const done = d.stage === 'published' || d.stage === 'completed'
   const inStageMs = d.stageSinceMs === null ? null : nowMs - d.stageSinceMs
+  const percent = cardPercent(d, pt) !== null
+  const roundMs = d.round?.startedAtMs == null ? null : Math.max(0, nowMs - d.round.startedAtMs)
   const workMs = d.workMs !== undefined ? d.workMs : (d.startedAtMs === null ? null : nowMs - d.startedAtMs)
   const trail = d.trail ?? []
   const n = trail.length
@@ -249,11 +252,16 @@ export function timeRow(c: LiveCard, nowMs: number, pt: Pt): TimeRow {
     // A published card is not "in a stage" any more: it says when it was published, and what it cost in work.
     inStage: done
       ? `${pt ? 'publicado' : 'published'} ${d.deliveredAtMs ? fmtClock(d.deliveredAtMs) : '—'}`
-      : `${pt ? 'tempo nessa etapa' : 'time in this stage'} ${fmtSpan(inStageMs)}`,
+      : percent
+        ? `${d.round && d.round.number > 1 ? `${pt ? 'rodada' : 'round'} ${d.round.number} · ` : ''}${pt ? 'tempo da rodada' : 'time in this round'} ${fmtSpan(roundMs)}`
+        : `${pt ? 'tempo nessa etapa' : 'time in this stage'} ${fmtSpan(inStageMs)}`,
     total: `total ${fmtSpan(workMs)}`,
     stageNo: n > 0 ? (pt ? `${ord(n)} etapa` : `${ord(n)} stage`) : null,
     title: [
-      pt ? '“Tempo nessa etapa”: há quanto tempo o cartão está nesta coluna.' : '“Time in this stage”: how long the card has been in this column.',
+      percent
+        ? (pt ? '“Tempo da rodada”: desde o início observado da rodada atual, a mesma rodada do percentual.' : '“Time in this round”: since the observed start of the current round, the same round as the percent.')
+        : (pt ? '“Tempo nessa etapa”: tempo desde a última mudança de status registrada; pode abranger outras rodadas.' : '“Time in this stage”: time since the last recorded status change; it may span other rounds.'),
+      ...(percent ? [pt ? `Desde a última mudança de status (pode incluir outras rodadas): ${fmtSpan(inStageMs)}.` : `Since the last status change (may include other rounds): ${fmtSpan(inStageMs)}.`] : []),
       pt ? '“Total”: tempo de trabalho real das sessões deste cartão — não a idade da tarefa.' : '“Total”: the real work time of this card\'s sessions — not the task\'s age.',
       ...(lines.length ? [pt ? `Etapas por onde passou: ${lines.join(' → ')}` : `Stages it went through: ${lines.join(' → ')}`] : []),
     ].join('\n'),
@@ -266,7 +274,7 @@ export interface EtaBox { label: string; value: string; tone: 'ok' | 'none' | 'l
 
 /** PURE: [próxima etapa, publicação]. "sem estimativa" is a legitimate answer; an invented time is not. */
 export function etaBoxes(d: LiveDeliveryRecord, pt: Pt): [EtaBox, EtaBox] | null {
-  if (d.stage === 'published') return null
+  if (d.stage === 'published' || d.stage === 'completed') return null
   const stageEta = d.stageEta, pub = d.publishEta
   const nextWord = (stageEta && stageEta.kind === 'estimate' && stageEta.nextStage) ? ` (${stageName(stageEta.nextStage, pt)})` : ''
   const none = pt ? 'sem estimativa' : 'no estimate'
@@ -560,7 +568,7 @@ const HIDDEN_WORD: Record<HiddenReason, { pt: string; en: string }> = {
   'status-unplaced': { pt: 'status sem etapa reconhecida', en: 'status with no known stage' },
   'published-old': { pt: 'publicado há mais de 24 h', en: 'published over 24 h ago' },
   'queue-idle': { pt: 'saiu da fila (sessão em espera removida)', en: 'left the queue (staged session removed)' },
-  'legacy-review-old': { pt: 'em revisão há mais de 72 h, sem sessão viva e sem commit publicado', en: 'in review for over 72 h, no live session and no published commit' },
+  'legacy-review-old': { pt: 'em revisão há mais de 24 h, sem sessão viva e sem prova de publicação', en: 'in review for over 24 h, no live session and no proof of release' },
 }
 export const hiddenWord = (r: HiddenReason, pt: Pt): string => HIDDEN_WORD[r][pt ? 'pt' : 'en']
 

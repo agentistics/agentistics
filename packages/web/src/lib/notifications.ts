@@ -53,6 +53,11 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão não iniciada', message: 'Não foi possível ler o quadro para arquivar a sessão.' },
     en: { title: 'Session not started', message: 'The board could not be read to file the session.' },
   },
+  // Antigas publish (delivery/service.ts): a piece with no session filed cannot be marked done.
+  'no_session': {
+    pt: { title: 'Peça sem sessão', message: 'Nenhuma sessão está arquivada nesta peça, então o quadro não a marca como concluída. Arquive a peça, ou abra a tarefa e arquive a conversa que a entregou.' },
+    en: { title: 'Piece has no session', message: 'No session is filed on this piece, so the board cannot mark it done. Archive it, or open the task and file the conversation that delivered it.' },
+  },
   'account.auto_switched': {
     pt: { title: 'Conta trocada', message: 'A sessão {session} parou no limite da conta {from} (volta às {until}) e continua na conta {to}, de onde parou.' },
     en: { title: 'Account switched', message: 'Session {session} stopped at the limit of account {from} (back at {until}) and carries on with account {to}, where it left off.' },

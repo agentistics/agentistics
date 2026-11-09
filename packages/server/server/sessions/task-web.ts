@@ -6,6 +6,7 @@
  * delivery cost", and the two would drift.
  */
 
+import { join } from 'node:path'
 import { buildLive, legacyReviewShaPieces } from './task-live'
 import { dirsForShas } from './release-repos'
 import { publishedAmong } from './release-tags'
@@ -89,8 +90,10 @@ async function fileVersion(file: string): Promise<string> {
 /** Both the book and registry feed the live line: sessions can change without a book write. */
 async function liveSourceVersion(): Promise<string> {
   const { defaultDeliveriesPath } = await import('../delivery/store')
-  const [tasks, sessions, deliveries] = await Promise.all([fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE), fileVersion(defaultDeliveriesPath())])
-  return `${tasks}|${sessions}|${deliveries}`
+  // The reconcile's proof cache decides which pieces are old / proven / unchecked, so a run that rewrites it must not be served a stale split.
+  const proofFile = join(process.env.AGENTISTICS_DIR ?? join(process.env.HOME ?? '', '.agentistics'), 'delivery-proof-cache.json')
+  const [tasks, sessions, deliveries, proofs] = await Promise.all([fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE), fileVersion(defaultDeliveriesPath()), fileVersion(proofFile)])
+  return `${tasks}|${sessions}|${deliveries}|${proofs}`
 }
 
 // A write is the fast invalidation path; the stat key also catches writes made by another process.
@@ -108,7 +111,7 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
     const owners = conversationOwners(w.rollupRows)
     // Comments are only the SOURCE of a legacy piece's delivered commit (its handback): the subtask-level ones, grouped once.
     const commentsOfTask = new Map<string, typeof w.book.comments>()
-    for (const c of w.book.comments) if (c.subtaskId) { const l = commentsOfTask.get(c.taskId); if (l) l.push(c); else commentsOfTask.set(c.taskId, [c]) }
+    for (const c of w.book.comments) { const l = commentsOfTask.get(c.taskId); if (l) l.push(c); else commentsOfTask.set(c.taskId, [c]) }
     const details = w.book.tasks.map(task => buildTaskDetail({
       owners,
       task,
@@ -139,7 +142,18 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
       metas: w.metas.values(),
     })
     const publishedShas = publishedAmong([...pieces.keys()], nowMs, undefined, dirsFor)
-    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas })
+    const proof = await (async () => {
+      try {
+        const { outcomes } = await (await import('../delivery/host')).deliveryService().proofOutcomes()
+        return {
+          suggestions: new Map([...outcomes].flatMap(([id, o]) => (o.suggestion ? [[id, o.suggestion] as const] : []))),
+          proven: new Set([...outcomes].flatMap(([id, o]) => (o.proven ? [id] : []))),
+          unchecked: new Set([...outcomes].flatMap(([id, o]) => (o.unchecked ? [id] : []))),
+          uncheckedWhy: new Map([...outcomes].flatMap(([id, o]) => (o.unchecked ? [[id, o.unchecked] as const] : []))),
+        }
+      } catch { return {} }
+    })()
+    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas, ...proof })
     const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result
     return result
@@ -148,6 +162,12 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
   try { return (await promise).reply } finally {
     if (liveBuildInFlight?.promise === promise) liveBuildInFlight = null
   }
+}
+
+/** The pieces the Live lists as "antigas" (same cached build the screen reads): the ONE set every antigas surface acts on. */
+export async function liveAntigaPieces(): Promise<Array<{ id: string; taskId: string }>> {
+  const reply = await liveReplyForBook()
+  return (reply.oldReviews ?? []).map(d => ({ id: d.subtaskId ?? d.taskId, taskId: d.taskId }))
 }
 
 export interface ListTasksOptions {

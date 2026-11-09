@@ -115,14 +115,24 @@ export interface ReconcileEntry {
   tag?: string
   via?: string
   reason?: string
+  /** The repository of the proof PR when it is not the public one (an engine PR). */
+  repo?: string
+  /** The first release run is red (it will not publish), not finished/tagged yet, or could not be READ (unknown: the piece does not move). */
+  releaseGate?: 'red' | 'pending' | 'unknown'
+  /** Weak evidence the person may accept in one click (`Antigas`); it never moved anything. */
+  suggestion?: { repo: string; pr: number; tag?: string; via: string }
+  /** No proof and nothing alive: the piece leaves "Revisão do líder" for the collapsed group "Antigas sem registro". */
+  bucket?: 'antiga'
+  /** The piece was NOT looked up (no repository known / gh unreadable / quota): it is neither proven nor "no proof", and the next run retries it. */
+  unchecked?: 'no-repos' | 'gh' | 'budget'
   /** `apply` only: the write happened (false = refused: `reason`). */
   applied?: boolean
 }
 
 /** PURE. The report's one-line rendering (CLI). */
 export function reconcileLine(e: ReconcileEntry): string {
-  const what = e.to ? `${e.from} → ${e.to}` : `${e.from} (fica)`
-  const facts = [e.pr ? `PR #${e.pr}` : '', e.mergeSha ? e.mergeSha.slice(0, 9) : '', e.tag ?? ''].filter(Boolean).join(' ')
+  const what = e.to ? `${e.from} → ${e.to}${e.releaseGate === 'red' ? ' (release vermelha)' : ''}` : e.bucket === 'antiga' ? `${e.from} → antigas` : e.unchecked ? `${e.from} (não verificada)` : `${e.from} (fica)`
+  const facts = [e.pr ? `PR #${e.pr}` : '', e.mergeSha ? e.mergeSha.slice(0, 9) : '', e.tag ?? '', e.via ?? '', e.suggestion ? `sugestão: PR #${e.suggestion.pr}${e.suggestion.tag ? ` ${e.suggestion.tag}` : ''} (${e.suggestion.via})` : ''].filter(Boolean).join(' ')
   const state = e.applied === undefined ? '' : e.applied ? ' ✔' : ' ✘'
   return `${e.subtaskId}\t${what}${state}${facts ? `\t${facts}` : ''}${e.reason ? `\t${e.reason}` : ''}`
 }

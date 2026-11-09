@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.204.0': {
+    features: [
+      {
+        pt: 'Nova página BETA "Calendário de entregas" (Agentask → Calendário): veja as entregas por Mês, Semana, Dia ou Cronograma e filtre por tarefa, etapa, versão, harness e prioridade. Onde não dá para estimar, o calendário diz "sem estimativa" em vez de inventar um horário. Funciona no celular, como uma agenda por dia, e você pode exportar a visão filtrada em .ics.',
+        en: 'New BETA page "Delivery calendar" (Agentask → Calendar): see deliveries by Month, Week, Day or Schedule and filter by task, stage, version, harness and priority. Where it cannot estimate, the calendar says "no estimate" instead of inventing a time. It works on the phone as an agenda by day, and you can export the filtered view as .ics.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Limpeza da coluna "Revisão do líder": as peças que já têm prova de que saíram em uma versão vão para Publicado sozinhas, e as antigas, sem nenhum registro, saem da coluna com um clique. Nada é apagado.',
+        en: 'Cleanup of the "Leader review" column: pieces with proof they shipped in a release move to Published on their own, and old ones with no record leave the column in one click. Nothing is deleted.',
+      },
+      {
+        pt: 'Nos cartões do Live, o tempo ao lado da porcentagem agora é o da rodada atual.',
+        en: "On Live cards, the time beside the percent is now the current round's.",
+      },
+    ],
+  },
   '2.203.1': {
     features: [],
     fixes: [

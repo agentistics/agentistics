@@ -37,6 +37,7 @@ import {
 import type { LiveSortId } from '@agentistics/core'
 import { LiveCardView } from './LiveCardView'
 import { LiveApprove } from './LiveApprove'
+import { LiveAntigas } from './LiveAntigas'
 import { LiveColumn } from './LiveColumn'
 import { LiveLeaders } from './LiveLeaders'
 import type { LeaderWorker } from './liveDeliveryModel'
@@ -66,6 +67,7 @@ export const copy = (pt: boolean) => pt ? {
   noPublished: 'Nada publicado neste período.',
   capped: (n: number, cap: number) => `Lista cortada em ${cap} por tipo: ${n} ${n === 1 ? 'peça mais antiga ficou' : 'peças mais antigas ficaram'} de fora. Os números acima não são o total.`,
   searchColumn: 'Buscar nesta coluna…', noMatch: 'Nenhum cartão corresponde.', clearSearch: 'Limpar',
+  antigas: (n: number) => `Antigas · ${n}`, antigasTip: 'Peças antigas sem prova de publicação: decida cada uma em um clique.',
   left: 'saiu', recentLeft: (n: number) => `saíram há pouco (${n})`, noneLeft: 'Ninguém saiu do quadro nos últimos minutos.',
 } : {
   title: 'Live Delivery',
@@ -81,6 +83,7 @@ export const copy = (pt: boolean) => pt ? {
   noPublished: 'Nothing published in this period.',
   capped: (n: number, cap: number) => `List cut at ${cap} per kind: ${n} older ${n === 1 ? 'piece is' : 'pieces are'} left out. The numbers above are not the total.`,
   searchColumn: 'Search this column…', noMatch: 'No card matches.', clearSearch: 'Clear',
+  antigas: (n: number) => `Old · ${n}`, antigasTip: 'Old pieces with no proof of release: decide each one in one click.',
   left: 'left', recentLeft: (n: number) => `left recently (${n})`, noneLeft: 'Nothing left the board in the last minutes.',
 }
 
@@ -137,6 +140,7 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet
   const [pipNote, setPipNote] = useState(false)
   const [gone, setGone] = useState<Gone[]>([])
   const [showGone, setShowGone] = useState(false)
+  const [showAntigas, setShowAntigas] = useState(false)
   const [clock, setClock] = useState(() => Date.now())
 
   // ONE set of cards feeds both the tab counts and the columns. The server already answered for the chosen period
@@ -433,6 +437,12 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet
   const answeredPeriod = replyPeriod ?? reply.view?.period
   const periodLoading = Boolean(answeredPeriod) && answeredPeriod !== period
   const showPublished = tab === 'all' || tab === 'published'
+  // "Antigas sem registro": filtros v2 keeps them in "Tudo", at the bottom of "Revisão do líder". That tab's bar opens the group: a button in
+  // that column's header sits off screen at 1280 px, behind the columns to its left.
+  const oldCards = cards.filter(c => c.d.old && (taskIds.length === 0 || taskIds.includes(c.d.taskId)))
+  const antigasTrigger = tab === 'all' && oldCards.length > 0 ? (
+    <button type="button" className="ag-tap" data-live-antigas-open onClick={() => setShowAntigas(true)} title={L.antigasTip} style={{ ...button(isMobile), flexShrink: 0 }}>{L.antigas(oldCards.length)}</button>
+  ) : null
   // The server cuts each kind at its cap (the oldest go): say so, so a count is never read as the total.
   // Under a task or stage filter only the cut pieces that match it count (the server's own rule, `liveCapOmitted`).
   const capFacts = reply.view?.capFacts
@@ -453,6 +463,7 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet
   })
   const actions = (
     <>
+      {antigasTrigger}
       {gone.length > 0 && (
         <button type="button" className="ag-tap" data-live-gone-toggle data-fresh={gone.some(g => clock - g.atMs < GONE_LINGER_MS) ? '1' : '0'} aria-pressed={showGone} onClick={() => setShowGone(v => !v)}
           style={{ ...pillBtn(showGone || gone.some(g => clock - g.atMs < GONE_LINGER_MS)), transition: reducedMotion() ? 'none' : 'background .4s, border-color .4s' }}>{L.recentLeft(gone.length)}</button>
@@ -486,6 +497,11 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet
       {error === 'down' && <span role="alert" data-live-stale-error style={{ fontSize: 12, color: 'var(--accent-red)' }}>{L.down}</span>}
       {periodLoading && !error && <CenteredLoader size={40} label={L.loading} testId="agentask-live-period-loading" />}
       {capNote && <span role="status" data-live-capped style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{capNote}</span>}
+      <LiveAntigas
+        open={showAntigas} pt={pt} mobile={isMobile} onClose={() => setShowAntigas(false)}
+        items={oldCards.map(c => ({ key: c.d.key, taskId: c.d.taskId, subtaskId: c.d.subtaskId, title: c.d.title, ...(c.d.suggestion ? { suggestion: c.d.suggestion } : {}) }))}
+        onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}
+      />
       {showGone && (
         <ul data-live-gone-list style={{ ...surface, listStyle: 'none', margin: 0, padding: '8px 10px', display: 'grid', gap: 3, fontSize: 11.5 }}>
           {gone.length === 0 && <li style={{ color: 'var(--text-tertiary)' }}>{L.noneLeft}</li>}
@@ -500,6 +516,10 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet
   )
 
   if (cards.length === 0 && leaders.length === 0 && gone.length === 0) return <div style={{ display: 'grid', gap: 12 }}>{header}<Note text={L.none} /></div>
+
+  // The group's sheet covers the whole phone, and every piece it decides is a board write that refreshes the Live: redrawing a few
+  // hundred cards nobody can see, once per write, pegged the page until the tab crashed (measured at 390 px, 180 pieces).
+  if (isMobile && showAntigas) return <div style={{ display: 'grid', gap: 10 }}>{header}</div>
 
   if (isMobile) {
     // Stages with cards, in order; Publicado also stays while its tab shows (its period picker lives in its header).

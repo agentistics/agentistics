@@ -13,7 +13,7 @@
 import { PRIORITY_ORDER, DEFAULT_PRIORITY, type TaskPriorityId } from './taskSort'
 
 /** Every column of the line, left to right. */
-export type LiveBoardStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
+export type LiveBoardStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'completed' | 'published'
 
 /**
  * THE TABS (filtros v2, owner 08/11). The main choice of the bar, with a count each:
@@ -56,9 +56,10 @@ export const hasSomeoneOn = (c: LiveTabbable): boolean => c.liveState === 'worki
 
 /** PURE: does a piece belong to the tab (a published one also has to be inside the period)? */
 export function liveTabMatches(tab: LiveTab, c: LiveTabbable, period: LivePeriod, nowMs: number): boolean {
-  if (c.stage === 'published' && !inPublishedPeriod(c.deliveredAtMs, period, nowMs)) return false
+  // Concluído (no release proof) rides the same period as Publicado: 495 of them in "Tudo" made the board render ~2.4 s slower (r9).
+  if ((c.stage === 'published' || c.stage === 'completed') && !inPublishedPeriod(c.deliveredAtMs, period, nowMs)) return false
   switch (tab) {
-    case 'active': return c.stage !== 'queue' && c.stage !== 'published' && !c.old && hasSomeoneOn(c)
+    case 'active': return c.stage !== 'queue' && c.stage !== 'published' && c.stage !== 'completed' && !c.old && hasSomeoneOn(c)
     case 'queue': return c.stage === 'queue'
     case 'published': return c.stage === 'published'
     default: return true

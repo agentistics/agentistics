@@ -160,7 +160,7 @@ const DATE_RANGES: { key: DateRange; labelPt: string; labelEn: string }[] = [
 ]
 
 /**
- * Every control in this bar. `height: 30` is the DESKTOP figure — see `mobileTarget` below for the
+ * Every control in this bar. `height: 32` is the DESKTOP figure — see `mobileTarget` below for the
  * phone's, which is a rule rather than a preference.
  */
 const CTL: React.CSSProperties = {
@@ -173,7 +173,7 @@ const CTL: React.CSSProperties = {
   padding: '5px 10px',
   cursor: 'pointer',
   outline: 'none',
-  height: 30,
+  height: 32,
   display: 'flex',
   alignItems: 'center',
 }
@@ -186,7 +186,7 @@ const CTL: React.CSSProperties = {
  * row of near-misses. `height` is cleared rather than raised because `CTL` sets it — a `minHeight`
  * alone would be beaten by nothing, but leaving both reads as two answers to one question.
  *
- * Desktop keeps 30: applying the mobile number there turns a compact filter row into a row of
+ * Desktop keeps 32: applying the mobile number there turns a compact filter row into a row of
  * buttons, which is the mistake this repository's own mobile rules call out by name.
  */
 // @touch-intentional this object IS the mobile target — consumers spread it only when `isMobile`, so it never reaches a desktop layout.
