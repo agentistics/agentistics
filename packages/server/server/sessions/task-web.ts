@@ -164,6 +164,12 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
   }
 }
 
+/** The pieces the Live lists as "antigas" (same cached build the screen reads): the ONE set every antigas surface acts on. */
+export async function liveAntigaPieces(): Promise<Array<{ id: string; taskId: string }>> {
+  const reply = await liveReplyForBook()
+  return (reply.oldReviews ?? []).map(d => ({ id: d.subtaskId ?? d.taskId, taskId: d.taskId }))
+}
+
 export interface ListTasksOptions {
   /** Step one of the split load: open tasks + anything touched in the last two days. */
   recent?: boolean

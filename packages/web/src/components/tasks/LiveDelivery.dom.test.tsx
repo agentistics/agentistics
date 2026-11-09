@@ -411,6 +411,34 @@ test('run lock + end of run: a 409 antigas_running stops the batch with one sent
   } finally { globalThis.fetch = realFetch; localStorage.clear() }
 })
 
+test('r10: while the preview loads the dialog says it is counting, and the end states what really happened (concluded vs archived)', async () => {
+  localStorage.clear()
+  const old = Array.from({ length: 3 }, (_, i) => ({ ...reply.deliveries[0]!, key: `t/o${i}`, subtaskId: `o${i}`, title: `Old review ${i}`, stage: 'leader', sessionIds: [], old: true }))
+  localStorage.setItem('agentask.live.view', JSON.stringify({ tab: 'all' }))
+  let releasePreview!: () => void
+  const gate = new Promise<void>(r => { releasePreview = r })
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { ids: string[]; preview?: boolean }
+    if (body.preview) { await gate; return new Response(JSON.stringify({ ok: true, done: [], preview: { conclude: 2, archive: 1 } }), { status: 200 }) }
+    return new Response(JSON.stringify({ ok: true, done: body.ids.map((id, i) => ({ subtaskId: id, ok: true, how: i === 0 ? 'archived' : 'concluded' })) }), { status: 200 })
+  }) as typeof fetch
+  try {
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: { ...reply, deliveries: old } as never }))) })
+    await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-open]') as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-all]') as HTMLElement).click())
+    expect(document.body.textContent).toContain('Counting what the action will do')
+    await act(async () => { releasePreview(); await new Promise(r => setTimeout(r, 10)) })
+    expect(document.body.textContent).toContain('2 completed, 1 archived')
+    expect(document.body.textContent).not.toContain('Counting what the action will do')
+    const buttons = Array.from(document.querySelectorAll('button')).filter(b => b.textContent === 'Conclude')
+    await act(async () => { buttons.at(-1)!.click(); await new Promise(r => setTimeout(r, 10)) })
+    expect(document.querySelector('[data-live-antigas-summary]')!.textContent).toBe('Finished: 3 pieces done, 0 left. (2 completed, 1 archived)')
+  } finally { globalThis.fetch = realFetch; localStorage.clear() }
+})
+
 test('LOW 11: on a phone the Líderes pill, its rows and the filter chip\'s remove control are 44 px targets', async () => {
   const { LiveLeaders } = await import('./LiveLeaders')
   const { LiveTaskChips } = await import('./LiveTaskFilter')

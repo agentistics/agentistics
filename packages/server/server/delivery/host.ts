@@ -239,6 +239,22 @@ async function pieceHasSession(id: string): Promise<boolean> {
   return subtaskHasSession({ id: sub.taskId }, id, w.rollupRows)
 }
 
+/** `pieceHasSession` for many ids with ONE world load: the preview asked once per piece and reloaded the board every time (11 s). */
+async function piecesWithSession(ids: readonly string[]): Promise<Set<string>> {
+  const { loadTaskWorld } = await import('../sessions/task-source')
+  const { rowsOfTask, subtaskHasSession } = await import('../sessions/task-report')
+  const w = await loadTaskWorld()
+  const out = new Set<string>()
+  for (const id of ids) {
+    const task = w.book.tasks.find(t => t.id === id)
+    if (task) { if (rowsOfTask(task, w.rollupRows).length > 0) out.add(id); continue }
+    const sub = w.book.subtasks.find(s => s.id === id)
+    if (!sub) continue
+    if (sub.parentGroupId || subtaskHasSession({ id: sub.taskId }, id, w.rollupRows)) out.add(id)
+  }
+  return out
+}
+
 /** `antigas`: closes a record-less old piece — done (completed without release proof) or abandoned (archived). Never deletes. */
 async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Promise<{ ok: true } | { ok: false; message: string }> {
   const m = await import('../sessions/task-web')
@@ -266,7 +282,8 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
   const svc = createDeliveryService({
     store, facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
     autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, accountName: accountNameOf, now: () => Date.now(),
-    reviewPieces: boardReviewPieces, closeLegacy: closeLegacyPiece, hasSession: pieceHasSession,
+    reviewPieces: boardReviewPieces, closeLegacy: closeLegacyPiece, hasSession: pieceHasSession, hasSessions: piecesWithSession,
+    oldPieces: async () => (await import('../sessions/task-web')).liveAntigaPieces(),
     autoReconcile: () => autoReconcileEnabled,
     proofStore: proofCacheFile(),
     log: line => console.log(line),

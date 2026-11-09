@@ -48,6 +48,7 @@ const T = (pt: boolean) => pt ? {
   taskLevel: 'Tarefa sem subtarefas: decida abrindo a tarefa.',
   confirmArchiveTitle: (n: number) => `Arquivar ${n} ${n === 1 ? 'peça' : 'peças'}?`,
   confirmArchive: 'Elas saem da revisão como abandonadas. Nada é apagado, mas para voltar é preciso abrir cada tarefa. Uma peça que ainda espera alguém não é tocada.',
+  counting: 'Contando o que a ação fará…', breakdown: (c: number, a: number) => ` (${c} ${c === 1 ? 'concluída' : 'concluídas'}, ${a} ${a === 1 ? 'arquivada' : 'arquivadas'})`,
   concludeAll: 'Concluir', counts: (c: number, a: number) => `${c} ${c === 1 ? 'concluída' : 'concluídas'}, ${a} ${a === 1 ? 'arquivada' : 'arquivadas'}`,
   confirmConcludeTitle: (n: number) => `Concluir ${n} ${n === 1 ? 'peça' : 'peças'} de uma vez?`,
   confirmConclude: 'Quem tem sessão vai para Concluído, sem prova de release; quem não tem é arquivada. Nada é apagado. Uma peça que ainda espera alguém não é tocada.',
@@ -68,6 +69,7 @@ const T = (pt: boolean) => pt ? {
   taskLevel: 'A task with no subtasks: decide it by opening the task.',
   confirmArchiveTitle: (n: number) => `Archive ${n} ${n === 1 ? 'piece' : 'pieces'}?`,
   confirmArchive: 'They leave review as abandoned. Nothing is deleted, but bringing one back means opening its task. A piece still waiting on somebody is not touched.',
+  counting: 'Counting what the action will do…', breakdown: (c: number, a: number) => ` (${c} completed, ${a} archived)`,
   concludeAll: 'Conclude', counts: (c: number, a: number) => `${c} completed, ${a} archived`,
   confirmConcludeTitle: (n: number) => `Conclude ${n} ${n === 1 ? 'piece' : 'pieces'} in one go?`,
   confirmConclude: 'Pieces with a session go to Completed, no release proof; the rest are archived. Nothing is deleted. A piece still waiting on somebody is not touched.',
@@ -86,7 +88,8 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({})
   const [asking, setAsking] = useState<Action | null>(null)
-  const [summary, setSummary] = useState<{ done: number; left: number; stopped: boolean } | null>(null)
+  const [summary, setSummary] = useState<{ done: number; left: number; stopped: boolean; concluded: number; archived: number } | null>(null)
+  const [counting, setCounting] = useState(false)
   const [preview, setPreview] = useState<{ conclude: number; archive: number } | null>(null)
   const stopper = useRef<AbortController | null>(null)
   const stopRequested = useRef(false)
@@ -97,23 +100,24 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   const actionable = useMemo(() => visible.map(a => a.subtaskId ?? a.taskId), [visible])
 
   /** `done` = the pieces the server reported done in this request (its own numbers); `running` = another run holds the lock. */
-  const send = async (action: Action, ids: readonly string[], chosenVersion: string | undefined, signal?: AbortSignal): Promise<{ done: number; running: boolean }> => {
+  const send = async (action: Action, ids: readonly string[], chosenVersion: string | undefined, signal?: AbortSignal): Promise<{ done: number; running: boolean; concluded: number; archived: number }> => {
     const fail = (why: string) => setOutcomes(o => ({ ...o, ...Object.fromEntries(ids.map(id => [id, { ok: false, reason: why }])) }))
     try {
       const res = await fetch('/api/deliveries/antigas', {
         method: 'POST', headers: { 'content-type': 'application/json' }, ...(signal ? { signal } : {}),
         body: JSON.stringify({ action, ids, expect: ids.length, ...(action === 'publish' && chosenVersion ? { version: chosenVersion } : {}), ...(action === 'archive' && reason.trim() ? { reason: reason.trim() } : {}) }),
       })
-      const body = await res.json().catch(() => ({})) as { done?: Array<{ subtaskId: string; ok: boolean; reason?: string; code?: 'no_session' }>; sentence?: string; error?: string }
+      const body = await res.json().catch(() => ({})) as { done?: Array<{ subtaskId: string; ok: boolean; how?: 'concluded' | 'archived'; reason?: string; code?: 'no_session' }>; sentence?: string; error?: string }
       if (!res.ok) {
-        if (body.error === 'antigas_running') { fail(L.running); return { done: 0, running: true } }
-        fail(body.sentence ?? body.error ?? String(res.status)); return { done: 0, running: false }
+        if (body.error === 'antigas_running') { fail(L.running); return { done: 0, running: true, concluded: 0, archived: 0 } }
+        fail(body.sentence ?? body.error ?? String(res.status)); return { done: 0, running: false, concluded: 0, archived: 0 }
       }
       setOutcomes(o => ({ ...o, ...Object.fromEntries((body.done ?? []).map(x => [x.subtaskId, { ok: x.ok, ...(x.reason ? { reason: x.reason } : {}), ...(x.code ? { code: x.code } : {}) }])) }))
-      return { done: (body.done ?? []).filter(x => x.ok).length, running: false }
+      const okRows = (body.done ?? []).filter(x => x.ok)
+      return { done: okRows.length, running: false, concluded: okRows.filter(x => x.how === 'concluded').length, archived: okRows.filter(x => x.how === 'archived').length }
     } catch (e) {
       if ((e as { name?: string }).name !== 'AbortError') fail(L.unreachable)
-      return { done: 0, running: false }
+      return { done: 0, running: false, concluded: 0, archived: 0 }
     }
   }
   const one = async (action: Action, id: string, chosenVersion?: string) => {
@@ -126,11 +130,13 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   const askConclude = async () => {
     setPreview(null)
     setAsking('conclude')
+    setCounting(true)
     try {
       const res = await fetch('/api/deliveries/antigas', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'conclude', preview: true, ids: actionable, expect: actionable.length }) })
       const body = await res.json().catch(() => ({})) as { preview?: { conclude: number; archive: number } }
       if (res.ok && body.preview) setPreview(body.preview)
     } catch { /* the dialog still opens, without the split */ }
+    setCounting(false)
   }
   const group = async (action: Action) => {
     const ids = [...actionable]
@@ -140,16 +146,20 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
     setProgress({ done: 0, total: ids.length })
     setSummary(null)
     let made = 0
+    let concluded = 0
+    let archived = 0
     let blocked = false
     // "Stop" lets the batch in flight finish, so the list says exactly what happened; leaving the screen aborts it (the server then stops too).
     for (let at = 0; at < ids.length && !stopRequested.current && !ac.signal.aborted; at += ANTIGAS_CHUNK) {
       const r = await send(action, ids.slice(at, at + ANTIGAS_CHUNK), version.trim() || undefined, ac.signal)
       made += r.done
+      concluded += r.concluded
+      archived += r.archived
       if (r.running) { blocked = true; break } // another run holds the lock: every further chunk would be refused the same way
       setProgress({ done: Math.min(ids.length, at + ANTIGAS_CHUNK), total: ids.length })
     }
     // The numbers are the server's own: what it reported done, and what is left of the batch this screen set out to do.
-    if (!ac.signal.aborted) setSummary({ done: made, left: ids.length - made, stopped: stopRequested.current || blocked })
+    if (!ac.signal.aborted) setSummary({ done: made, left: ids.length - made, stopped: stopRequested.current || blocked, concluded, archived })
     stopper.current = null
     setProgress(null)
   }
@@ -179,7 +189,7 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
             <input data-live-antigas-reason value={reason} onChange={e => setReason(e.target.value)} placeholder={L.reason} aria-label={L.reason} style={{ ...field, width: mobile ? '100%' : 160 }} />
             <button type="button" data-live-antigas-all disabled={busy || actionable.length === 0} onClick={() => void askConclude()} style={btn(true)}>{L.concludeAll} · {L.all(actionable.length)}</button>
           </div>
-          {summary && !busy && <p role="status" data-live-antigas-summary style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 12 }}>{L.summary(summary.done, summary.left, summary.stopped)}</p>}
+          {summary && !busy && <p role="status" data-live-antigas-summary style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 12 }}>{L.summary(summary.done, summary.left, summary.stopped)}{summary.concluded + summary.archived > 0 ? L.breakdown(summary.concluded, summary.archived) : ''}</p>}
           {visible.length !== actionable.length && <p data-live-antigas-why style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: 11.5 }}>{L.whyFewer(visible.length, actionable.length)}</p>}
           {/* On a phone the sheet itself is the one scroller, with its footer pinned; a second one inside it fights the thumb. */}
           <ul className="ag-scroll" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8, ...(mobile ? {} : { maxHeight: 'calc(46vh / var(--ui-zoom, 1))', overflowY: 'auto' as const, overscrollBehavior: 'contain' as const }) }}>
@@ -214,7 +224,8 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
       <ConfirmModal
         open={asking !== null} layer={mobile ? 2020 : 320} tone={asking === 'archive' ? 'danger' : 'default'} focusCancel
         title={asking === 'conclude' ? L.confirmConcludeTitle(actionable.length) : asking === 'archive' ? L.confirmArchiveTitle(actionable.length) : L.confirmPublishTitle(actionable.length)}
-        message={asking === 'conclude' ? `${preview ? `${L.counts(preview.conclude, preview.archive)}. ` : ''}${L.confirmConclude}` : asking === 'archive' ? L.confirmArchive : L.confirmPublish}
+        busy={asking === 'conclude' && counting}
+        message={asking === 'conclude' ? `${counting ? `${L.counting} ` : ''}${preview ? `${L.counts(preview.conclude, preview.archive)}. ` : ''}${L.confirmConclude}` : asking === 'archive' ? L.confirmArchive : L.confirmPublish}
         confirmLabel={asking === 'conclude' ? L.concludeAll : asking === 'archive' ? L.archive : L.publish} cancelLabel={L.cancel}
         onCancel={() => setAsking(null)}
         onConfirm={() => { const a = asking; setAsking(null); if (a) void group(a) }}

@@ -79,6 +79,10 @@ export interface DeliveryDeps {
   pieceHints?(subtaskId: string): Promise<{ branches: string[]; shas: string[]; heads?: DeclaredHead[]; prs?: number[]; latest?: string[] }>
   /** Archives / completes a record-less old piece on the board (`antigas`), without implying release proof. Optional. */
   hasSession?(subtaskId: string): Promise<boolean>
+  /** Same question for many pieces with ONE read of the board (the preview asks for hundreds; one world load per id took 11 s). */
+  hasSessions?(ids: readonly string[]): Promise<Set<string>>
+  /** The pieces the Live screen lists as "antigas": THE one predicate (the screen, the dialog, the CLI, the MCP and the action all read it). null = unreadable. */
+  oldPieces?(): Promise<Array<{ id: string; taskId: string }> | null>
   closeLegacy?(subtaskId: string, to: 'done' | 'abandoned'): Promise<{ ok: true } | { ok: false; message: string }>
   /** The automatic reconcile (first tick, then on its cadence) is ON only where the host asks for it; a function is asked on every tick. */
   autoReconcile?: boolean | (() => boolean)
@@ -1659,9 +1663,20 @@ export function createDeliveryService(d: DeliveryDeps) {
     const proofs = await loadProof()
     const facts = (p: ReviewPiece) => ({ hasRecord: false, status: p.status, hasOpenChildren: p.hasOpenChildren, proven: proofs.outcomes.get(p.id)?.proven, live: alive.has(p.id), updatedMs: msOf(p.updatedAt), handbackMs: msOf(p.handbackAt), suggested: !!proofs.outcomes.get(p.id)?.suggestion, unchecked: !!proofs.outcomes.get(p.id)?.unchecked, uncheckedWhy: proofs.outcomes.get(p.id)?.unchecked, nowMs })
     const doc = await d.store.read()
+    // ONE predicate: when the host can say which pieces the Live lists as antigas, that list decides membership everywhere below.
+    // Every chunk of a running batch writes the board (which drops the Live's cache), so a chunk reuses the set read when the batch began
+    // (30 s); a preview or an `all` always reads afresh. The write boundary (`closeLegacy`) still re-checks open children.
+    const fresh = o.all === true || o.all === 'true' || o.preview === true || o.preview === 'true' || !oldCache || d.now() - oldCache.at > 30_000
+    if (fresh) oldCache = { at: d.now(), v: await d.oldPieces?.().catch(() => null) ?? null }
+    const liveOld = oldCache!.v
+    const liveById = liveOld ? new Map(liveOld.map(p => [p.id, p])) : null
+    const isOld = (id: string): boolean => liveById ? liveById.has(id) && !proofs.outcomes.get(id)?.proven : (() => { const p = piecesById.get(id); return !!p && isAntiga(facts(p)) })()
+    const taskOf = (id: string): string | undefined => piecesById.get(id)?.taskId ?? liveById?.get(id)?.taskId
     let ids: string[] = []
     if (o.all === true || o.all === 'true') {
-      ids = pieces.filter(p => !doc.deliveries[p.id] && isAntiga(facts(p)) && !proofs.outcomes.get(p.id)?.proven).map(p => p.id)
+      ids = liveById
+        ? [...liveById.keys()].filter(id => !doc.deliveries[id] && isOld(id))
+        : pieces.filter(p => !doc.deliveries[p.id] && isAntiga(facts(p)) && !proofs.outcomes.get(p.id)?.proven).map(p => p.id)
     } else {
       const raw = Array.isArray(o.ids) ? o.ids : typeof o.ids === 'string' ? o.ids.split(',') : []
       ids = [...new Set(raw.filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean))]
@@ -1673,10 +1688,11 @@ export function createDeliveryService(d: DeliveryDeps) {
     if (action === 'conclude' && (o.preview === true || o.preview === 'true')) {
       let conclude = 0
       let archive = 0
-      for (const id of ids) {
-        const piece = piecesById.get(id)
-        if (!piece || doc.deliveries[id] || !isAntiga(facts(piece))) continue
-        if (!d.hasSession || await d.hasSession(id).catch(() => true)) conclude++
+      const eligible = ids.filter(id => !doc.deliveries[id] && isOld(id))
+      const withSession = d.hasSessions ? await d.hasSessions(eligible).catch(() => null) : null
+      for (const id of eligible) {
+        const has = withSession ? withSession.has(id) : (!d.hasSession || await d.hasSession(id).catch(() => true))
+        if (has) conclude++
         else archive++
       }
       return { ok: true, status: 200, action, preview: { conclude, archive }, done: [] }
@@ -1684,10 +1700,10 @@ export function createDeliveryService(d: DeliveryDeps) {
     const done: Array<{ subtaskId: string; ok: boolean; how?: 'concluded' | 'archived'; reason?: string; code?: 'no_session' }> = []
     for (const id of ids) {
       if (signal?.aborted) return { ok: true, status: 200, action, done, stopped: true }
-      const piece = piecesById.get(id)
+      const taskId = taskOf(id)
       if (doc.deliveries[id]) { done.push({ subtaskId: id, ok: false, reason: 'the piece has a delivery record: it is not "antiga" (use the flow verbs)' }); continue }
-      if (!piece) { done.push({ subtaskId: id, ok: false, reason: 'the piece is not in review on the board' }); continue }
-      if (!isAntiga(facts(piece))) { done.push({ subtaskId: id, ok: false, reason: 'the piece is recent, has a live session or a delivery still waiting: it is still review work' }); continue }
+      if (!taskId) { done.push({ subtaskId: id, ok: false, reason: 'the piece is not in review on the board' }); continue }
+      if (!isOld(id)) { done.push({ subtaskId: id, ok: false, reason: 'the piece is recent, has a live session or a delivery still waiting: it is still review work' }); continue }
       // Proven shipped, waiting for its reconcile to move it: archiving it as abandoned would write down the opposite of what is known.
       if (action === 'archive' && proofs.outcomes.get(id)?.proven) { done.push({ subtaskId: id, ok: false, reason: 'the last reconcile proved this piece shipped: it goes to Published, it is not abandoned' }); continue }
       const close = (to: 'done' | 'abandoned') => d.closeLegacy!(id, to).catch(e => ({ ok: false as const, message: e instanceof Error ? e.message : String(e) }))
@@ -1705,7 +1721,7 @@ export function createDeliveryService(d: DeliveryDeps) {
         continue
       }
       const applied = how === 'archived' ? 'archive' : action === 'conclude' ? 'publish' : action
-      await d.board.comment(piece.taskId, id, antigaComment(applied, { version, reason })).catch(() => undefined)
+      await d.board.comment(taskId, id, antigaComment(applied, { version, reason })).catch(() => undefined)
       await d.emit('entrega.antiga', { subtarefa: id, acao: applied }).catch(() => undefined)
       done.push({ subtaskId: id, ok: true, ...(how ? { how } : {}) })
     }
@@ -1721,6 +1737,7 @@ export function createDeliveryService(d: DeliveryDeps) {
    * instead of starting over.
    */
   let antigasRunning: number | null = null // when the running call took the lock
+  let oldCache: { at: number; v: Array<{ id: string; taskId: string }> | null } | null = null
   const ANTIGAS_LOCK_MS = 10 * 60_000
   let autoRun: Promise<void> | null = null
   const autoReconcile = async (actions: string[]): Promise<void> => {
@@ -1932,6 +1949,13 @@ export function createDeliveryService(d: DeliveryDeps) {
       // ONE run at a time: two writers over the same pieces would count the same piece twice and make the screen's "N of M" a lie.
       // The lock is this closure's own flag, in memory: a restart starts free, and `finally` frees it on finish, abort and throw alike.
       // A call that never returns (a hung board write) would hold it for good, so the hold is a lease: past ANTIGAS_LOCK_MS it is stale.
+      // A PREVIEW only reads: it takes no lock, or a click made while it loads is refused for a run that does not exist.
+      if ((o.preview === true || o.preview === 'true') && o.action === 'conclude') {
+        try { return await antigas(o, actor, signal) } catch (e) {
+          if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
+          throw e
+        }
+      }
       if (antigasRunning !== null && d.now() - antigasRunning < ANTIGAS_LOCK_MS) return fail(409, 'antigas_running', 'another run on the old pieces is already going: wait for it to finish, then look again')
       const mine = d.now()
       antigasRunning = mine

@@ -2400,6 +2400,49 @@ describe('reconcile: batch release PR proof, scope, antigas and the automatic ru
     expect(closed.sort()).toEqual(['s2', 's3'])
     expect(h.calls.comments.filter(c => c.includes('v2.203.0')).length).toBe(2)
   })
+
+  test('r10: a slow PREVIEW takes no lock, so a click made while it loads is not refused for a run that does not exist', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    const closed: string[] = []
+    const h = harness({ status: 'in_review' }, {
+      reviewPieces: async () => pieces,
+      hasSessions: async ids => { await gate; return new Set(ids) },
+      closeLegacy: async id => { closed.push(id); return { ok: true } },
+    })
+    const preview = h.svc.antigas({ action: 'conclude', preview: true, all: true }, 'owner')
+    await new Promise(r => setTimeout(r, 20))
+    const click = await h.svc.antigas({ action: 'conclude', ids: ['s2'] }, 'owner')
+    expect(click.ok).toBe(true)
+    expect(closed).toEqual(['s2'])
+    release()
+    const p = await preview
+    expect(p.ok && p.preview).toEqual({ conclude: 2, archive: 0 })
+  })
+
+  test('r10: ONE predicate — the set the Live lists is the set preview, "all" and the action use, by id', async () => {
+    const closed: string[] = []
+    // s3 is listed by the screen although the service\'s own facts would also call it old; s2 is NOT listed (the Live knows it shipped by sha).
+    const live = [{ id: 's3', taskId: 't1' }, { id: 'task-only', taskId: 'task-only' }]
+    const h = harness({ status: 'in_review' }, { reviewPieces: async () => pieces, oldPieces: async () => live, hasSessions: async ids => new Set(ids), closeLegacy: async id => { closed.push(id); return { ok: true } } })
+    const prev = await h.svc.antigas({ action: 'conclude', preview: true, all: true }, 'owner')
+    expect(prev.ok && prev.preview).toEqual({ conclude: 2, archive: 0 })
+    const out = await h.svc.antigas({ action: 'conclude', all: true, expect: 2 }, 'owner')
+    expect(out.ok && out.done.map(x => x.subtaskId).sort()).toEqual(['s3', 'task-only'])
+    expect(closed.sort()).toEqual(['s3', 'task-only'])
+    const refused = await h.svc.antigas({ action: 'conclude', ids: ['s2'] }, 'owner')
+    expect(refused.ok && refused.done[0]).toMatchObject({ ok: false })
+  })
+
+  test('r10: the preview reads the board ONCE for all pieces, not once per piece', async () => {
+    let single = 0
+    let batch = 0
+    const h = harness({ status: 'in_review' }, { reviewPieces: async () => pieces, hasSession: async () => { single++; return true }, hasSessions: async ids => { batch++; return new Set(ids.slice(0, 1)) }, closeLegacy: async () => ({ ok: true }) })
+    const prev = await h.svc.antigas({ action: 'conclude', preview: true, all: true }, 'owner')
+    expect(single).toBe(0)
+    expect(batch).toBe(1)
+    expect(prev.ok && prev.preview).toEqual({ conclude: 1, archive: 1 })
+  })
 })
 
 // r2 — the rest of the QA's list that the pins below do not state.
