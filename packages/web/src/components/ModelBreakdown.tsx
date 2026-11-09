@@ -318,8 +318,10 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
           ))}
           <div style={{ textAlign: 'right' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--anthropic-orange)' }}>
-              {fmtCost(totalCost, currency, brlRate)}
-              {unpricedTotal > 0 && <span data-unpriced-marker style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', marginLeft: 6 }}>{UNPRICED_TOTAL_MARKER[lang]}</span>}
+              {unpricedTotal > 0 && unpricedTotal >= entries.reduce((n, [, u]) => n + usageTokenTotal(u), 0)
+                ? (pt ? 'não registrado' : 'not recorded')
+                : <>{fmtCost(totalCost, currency, brlRate)}
+              {unpricedTotal > 0 && <span data-unpriced-marker style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', marginLeft: 6 }}>{UNPRICED_TOTAL_MARKER[lang]}</span>}</>}
             </span>
           </div>
         </div>

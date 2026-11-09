@@ -35,3 +35,16 @@ describe("legacy MCP summary: a harness with no statsCache still has a streak", 
     expect(s.totalSessions).toBe(1);
   });
 });
+
+describe("legacy MCP summary: the unified view reads every harness", () => {
+  const now = new Date().toISOString();
+  const data = { sessions: [{ session_id: "o", harness: "opencode", project_path: "/w", input_tokens: 5, output_tokens: 1, model: "upx/fable-5.1", start_time: now }], statsCache: {} };
+  test("an OpenCode-only machine has the same streak unfiltered as filtered", () => {
+    expect((legacySummary(data) as any).currentStreak).toBe(1);
+  });
+  test("all-unpriced usage is a null cost with unpricedTokens, never 0", () => {
+    const s = legacySummary(data) as any;
+    expect(s.estimatedCostUSD).toBeNull();
+    expect(s.unpricedTokens).toBe(6);
+  });
+});

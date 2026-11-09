@@ -41,6 +41,8 @@ export function legacySummary(data: any, harness?: string): unknown {
       if (!Number.isNaN(d.getTime())) localDates.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
     }
   }
+  const grandTokens = totalInput + totalOutput + totalCacheRead + totalCacheWrite;
+  const allUnpriced = totalUnpriced > 0 && totalUnpriced >= grandTokens && totalCostUSD === 0 && !(unified || harness === "claude" ? totals.cost : 0);
   const claudeFallback = unified || harness === "claude";
   const topModel =
     Object.entries(modelTokens).sort(([, a], [, b]) => b - a)[0]?.[0]
@@ -53,7 +55,8 @@ export function legacySummary(data: any, harness?: string): unknown {
     totalOutputTokens:     totalOutput   || (claudeFallback ? totals.output : 0),
     totalCacheReadTokens:  totalCacheRead  || (claudeFallback ? totals.cacheRead : 0),
     totalCacheWriteTokens: totalCacheWrite || (claudeFallback ? totals.cacheWrite : 0),
-    estimatedCostUSD:      Math.round((totalCostUSD || (claudeFallback ? totals.cost : 0)) * 100) / 100,
+    // Every token unpriced (and no Claude cache total to fall back on) is "not recorded", never a 0.
+    estimatedCostUSD:      allUnpriced ? null : Math.round((totalCostUSD || (claudeFallback ? totals.cost : 0)) * 100) / 100,
     // PRICE.UNKNOWN: tokens of models with no price are counted above but not priced; the cost is a floor.
     ...(totalUnpriced > 0 ? { unpricedTokens: totalUnpriced, costNote: "estimatedCostUSD excludes usage of models with no price (+ unpriced usage)" } : {}),
     totalSessions: allSessions.length,
@@ -62,7 +65,10 @@ export function legacySummary(data: any, harness?: string): unknown {
     activeDays: activeDates.size || (claudeFallback ? sc.activeDays ?? 0 : 0),
     // Claude's comes from its statsCache; any other single harness has no cache, so its streak is read
     // off its own sessions (null only when it has none to read).
-    currentStreak: claudeFallback ? sc.currentStreak ?? 0 : localDates.size > 0 ? calcStreak(localDates) : null,
+    // The unified view reads every harness's sessions (local days, like the Home) and merges Claude's cache.
+    currentStreak: unified
+      ? Math.max(localDates.size > 0 ? calcStreak(localDates) : 0, sc.currentStreak ?? 0)
+      : harness === "claude" ? sc.currentStreak ?? 0 : localDates.size > 0 ? calcStreak(localDates) : null,
   };
 }
 
