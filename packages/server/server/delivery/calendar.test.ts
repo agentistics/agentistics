@@ -37,3 +37,20 @@ describe('answerCalendar', () => {
     expect(a.versions[0]).toMatchObject({ version: '2.202.0', basis: 'none', atMs: null })
   })
 })
+
+describe('a leader working alone reaches the Calendar (LIVE.EM-ANDAMENTO-E-LIDER)', () => {
+  test('the leader piece (task-level, running, on the leader session\'s clock) is a piece of the calendar', () => {
+    const NOW = Date.parse('2026-11-09T15:00:00.000Z')
+    const reply = buildCalendar({
+      nowMs: NOW,
+      lives: [{
+        key: 't', taskId: 't', taskTitle: 'Engine', subtaskId: null, title: 'Engine', stage: 'running', startedAtMs: NOW - 600_000, stageSinceMs: NOW - 600_000,
+        harnesses: ['claude'], models: ['opus'], eta: { kind: 'none' }, stageEta: { kind: 'none' }, publishEta: { kind: 'none', reason: 'no-history' }, deliveredAtMs: null,
+      }],
+      records: [], tasks: [{ id: 't', title: 'Engine', status: 'in_progress' }], subtasks: [], resets: [],
+    })
+    const a = answerCalendar(reply, { tasks: 'active' })
+    expect(a.pieces.map(p => p.title)).toEqual(['Engine'])
+    expect(a.pieces[0]!.publishEta.kind).toBe('none')
+  })
+})

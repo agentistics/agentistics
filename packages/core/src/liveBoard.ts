@@ -17,7 +17,8 @@ export type LiveBoardStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' |
 
 /**
  * THE TABS (filtros v2, owner 08/11). The main choice of the bar, with a count each:
- *   - `active`    "Em andamento": only what has somebody working or waiting (a live agent), past the queue.
+ *   - `active`    "Em andamento": every stage except the queue, Publicado and Concluído, and except an "antiga" card
+ *                 (those have their own button). Nobody has to be on it: a Blocked or Adjusting piece is in progress.
  *   - `queue`     "Na fila".
  *   - `published` "Publicado", inside its own `LivePeriod`.
  *   - `all`       "Tudo": every piece in its real column (old ones marked), Publicado inside its period.
@@ -51,7 +52,7 @@ export function inPublishedPeriod(deliveredAtMs: number | null | undefined, peri
   return typeof deliveredAtMs === 'number' && nowMs - deliveredAtMs <= PERIOD_MS[period]
 }
 
-/** PURE: somebody is on it (working, waiting, or asking a person). */
+/** PURE: somebody is on it (working, waiting, or asking a person). Not a tab rule any more: the tabs read the stage. */
 export const hasSomeoneOn = (c: LiveTabbable): boolean => c.liveState === 'working' || c.liveState === 'waiting' || c.liveState === 'needs-you'
 
 /** PURE: does a piece belong to the tab (a published one also has to be inside the period)? */
@@ -59,7 +60,7 @@ export function liveTabMatches(tab: LiveTab, c: LiveTabbable, period: LivePeriod
   // Concluído (no release proof) rides the same period as Publicado: 495 of them in "Tudo" made the board render ~2.4 s slower (r9).
   if ((c.stage === 'published' || c.stage === 'completed') && !inPublishedPeriod(c.deliveredAtMs, period, nowMs)) return false
   switch (tab) {
-    case 'active': return c.stage !== 'queue' && c.stage !== 'published' && c.stage !== 'completed' && !c.old && hasSomeoneOn(c)
+    case 'active': return c.stage !== 'queue' && c.stage !== 'published' && c.stage !== 'completed' && !c.old
     case 'queue': return c.stage === 'queue'
     case 'published': return c.stage === 'published'
     default: return true

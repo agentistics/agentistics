@@ -208,10 +208,14 @@ async function boardReviewPieces(): Promise<import('./service').ReviewPiece[]> {
 }
 
 /** `<dataDir>/delivery-proof-cache.json`: what gh already answered, so a restart resumes the reconcile instead of starting over. A cache: never a source of truth. */
-function proofCacheFile(): { load(): Promise<unknown>; save(doc: unknown): Promise<void> } {
+function proofCacheFile(): { load(): Promise<unknown>; save(doc: unknown): Promise<void>; stamp(): Promise<string | null> } {
   const path = async () => (await import('node:path')).join(process.env.AGENTISTICS_DIR ?? (await import('node:path')).join(process.env.HOME ?? '', '.agentistics'), 'delivery-proof-cache.json')
   return {
     async load() { return JSON.parse(await (await import('node:fs/promises')).readFile(await path(), 'utf8')) },
+    async stamp() {
+      const st = await (await import('node:fs/promises')).stat(await path()).catch(() => null)
+      return st ? `${st.mtimeMs}:${st.size}` : null
+    },
     async save(doc) {
       const fs = await import('node:fs/promises')
       const p = await path()

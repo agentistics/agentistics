@@ -241,7 +241,20 @@ export type AgendaEntry =
   | { kind: 'version'; atMs: number | null; version: CalVersion; state: 'published' | 'expected' }
   | { kind: 'resets'; atMs: number; items: { label: string; atMs: number; window: '5h' | 'week' }[] }
   | { kind: 'due'; atMs: null; mark: Extract<CalMark, { kind: 'task-due' }> }
-  | { kind: 'piece'; atMs: number; piece: CalPiece; state: 'published' | 'expected' }
+  | { kind: 'piece'; atMs: number; piece: CalPiece; state: 'published' | 'expected' | 'started' }
+
+/**
+ * Open pieces that have a version-less place on the calendar by NOTHING but their start: no release version, no
+ * publication, no estimate (a leader working alone is the common case). They are placed on the BRT day the work began,
+ * never on an invented date, so a piece nobody can date ahead is still on the calendar.
+ */
+export function startedPiecesOfDay(day: string, pieces: readonly CalPiece[]): CalPiece[] {
+  return pieces.filter(p => {
+    if (p.version || p.stage === 'published' || p.publishedAtMs !== null || p.publishEta.kind === 'estimate') return false
+    const at = p.startedAtMs ?? p.stageSinceMs
+    return at !== null && brtDay(at) === day
+  })
+}
 
 /** What happens on one BRT day: versions shipping or shipped, pieces without a version, renewals, due days. */
 export function agendaOf(day: string, o: { versions: readonly CalVersion[]; pieces: readonly CalPiece[]; marks: readonly CalMark[] }): AgendaEntry[] {
@@ -252,6 +265,7 @@ export function agendaOf(day: string, o: { versions: readonly CalVersion[]; piec
     const at = p.publishedAtMs ?? (p.publishEta.kind === 'estimate' ? p.publishEta.atMs : null)
     if (at !== null && brtDay(at) === day) out.push({ kind: 'piece', atMs: at, piece: p, state: p.publishedAtMs !== null ? 'published' : 'expected' })
   }
+  for (const p of startedPiecesOfDay(day, o.pieces)) out.push({ kind: 'piece', atMs: (p.startedAtMs ?? p.stageSinceMs)!, piece: p, state: 'started' })
   const resets = o.marks.flatMap(m => (m.kind === 'account-reset' && brtDay(m.atMs) === day ? [{ label: m.label, atMs: m.atMs, window: m.window }] : []))
   if (resets.length) { resets.sort((a, b) => a.atMs - b.atMs); out.push({ kind: 'resets', atMs: resets[0]!.atMs, items: resets }) }
   for (const m of o.marks) if (m.kind === 'task-due' && m.day === day) out.push({ kind: 'due', atMs: null, mark: m })

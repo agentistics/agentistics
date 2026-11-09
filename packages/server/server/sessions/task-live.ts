@@ -223,7 +223,12 @@ const LEADER_NAME = /(^|[^\p{L}])(l[ií]der|leader)([^\p{L}]|$)/iu
 const STALE_HEARTBEAT_MS = 10 * 60_000
 const QA_NAME =/(^|[^a-z])qa([^a-z]|$)|\bquality\b/i
 
-interface PieceSession { id: string; harness: string; model: string | null; effort?: string; label?: string; live: boolean; seenMs?: number; startMs: number | null; activity?: SessionActivity }
+/** The stored session role (`session-roles.ts`); a session that has one is never read as the QA's by its NAME. */
+export type StoredRoleOf = (s: { id: string; conversationId?: string }) => string | undefined
+/** QA by name — only the fallback, and only for a session with no stored leader/worker role. */
+const isQaName = (s: { label?: string; role?: string }): boolean => !!s.label && s.role !== 'leader' && s.role !== 'worker' && QA_NAME.test(s.label)
+
+interface PieceSession { id: string; harness: string; model: string | null; effort?: string; label?: string; role?: string; live: boolean; seenMs?: number; startMs: number | null; activity?: SessionActivity }
 
 // ---------------------------------------------------------------------------------- ETA
 
@@ -469,12 +474,13 @@ const ms = (iso: string | undefined | null): number | null => {
   return Number.isFinite(n) ? n : null
 }
 
-function piecesOf(d: TaskDetail): Piece[] {
+function piecesOf(d: TaskDetail, roleOf?: StoredRoleOf): Piece[] {
   const sessionsOf = (subtaskId: string | null): PieceSession[] =>
     d.sessions
       .filter(s => (s.subtaskId ?? null) === subtaskId && !s.historical)
       .map(s => ({
         id: s.id, harness: s.harness, model: s.model, ...(s.label ? { label: s.label } : {}),
+        ...(roleOf ? (() => { const r = roleOf({ id: s.id, ...(s.conversationId ? { conversationId: s.conversationId } : {}) }); return r ? { role: r } : {} })() : {}),
         ...(s.effort ? { effort: s.effort } : {}),
         live: !s.endedAt, startMs: ms(s.createdAt),
         ...(typeof s.lastSeenMs === 'number' && Number.isFinite(s.lastSeenMs) ? { seenMs: s.lastSeenMs } : {}),
@@ -654,11 +660,13 @@ export function buildLive(o: {
   /** Incomplete lookups; uncheckedWhy distinguishes normal non-repository work from failed reads. */
   unchecked?: ReadonlySet<string>
   uncheckedWhy?: ReadonlyMap<string, 'no-repos' | 'gh' | 'budget'>
+  /** The stored role of a session: a leader or worker is never taken for the QA by its name. */
+  roleOf?: StoredRoleOf
 }): LiveReply {
   const samples: Sample[] = []
   const candidates: Piece[] = []
   for (const d of o.details) {
-    for (const p of piecesOf(d)) {
+    for (const p of piecesOf(d, o.roleOf)) {
       const dur = p.times?.source === 'sessions' ? p.times.durationMs : null
       if (p.status === 'done' && dur && dur > 0 && p.sessions.length > 0) {
         samples.push({
@@ -699,7 +707,7 @@ export function buildLive(o: {
     if (stored?.dequeued && stage === 'queue') { hide(p, stage, 'queue-idle'); continue }
     const liveSessions = p.sessions.filter(s => s.live)
     let isOld = false
-    if (!rec && stage === 'running' && liveSessions.some(s => s.label && QA_NAME.test(s.label))) stage = 'qa'
+    if (!rec && stage === 'running' && liveSessions.some(isQaName)) stage = 'qa'
     // An ABANDONED piece is closed: a session still marked open on it (a native session that never
     // recorded its end) must not put it back on the board as running.
     // The same holds for a custom terminal status the vocabulary cannot map ("cancelado"): the board has no closing
@@ -716,7 +724,7 @@ export function buildLive(o: {
       const round = since === null ? [] : liveSessions.filter(s => s.startMs !== null && s.startMs > since
         // A `lost` row (reboot) has no endedAt but a frozen heartbeat: it is not a round. No stamp = unknown, stays live.
         && (s.seenMs === undefined || o.nowMs - s.seenMs <= STALE_HEARTBEAT_MS) && !(s.label && LEADER_NAME.test(s.label)))
-      if (round.length > 0) stage = round.some(s => s.label && QA_NAME.test(s.label)) ? 'qa' : 'running'
+      if (round.length > 0) stage = round.some(isQaName) ? 'qa' : 'running'
     }
     // LEGACY in-review work (no delivery record): published once a release tag contains the commit it names;
     // with no such commit and nothing alive for 72 h it is not review work any more — it is listed apart, never dropped.
@@ -757,7 +765,7 @@ export function buildLive(o: {
     const sessionStage = stage === 'running' || stage === 'adjust' || stage === 'qa'
     const roundSessions = sessionStage ? p.sessions.filter(s => {
       if (s.label && LEADER_NAME.test(s.label)) return false
-      const qa = (!!s.label && QA_NAME.test(s.label)) || s.id === rec?.qaSessionId
+      const qa = isQaName(s) || s.id === rec?.qaSessionId
       return stage === 'qa' ? qa : !qa
     }) : []
     const fresh = roundSessions.filter(s => s.live && (s.seenMs === undefined || o.nowMs - s.seenMs <= STALE_HEARTBEAT_MS))
@@ -790,7 +798,7 @@ export function buildLive(o: {
       const handback = p.comments.some(c => c.kind === 'handback' && (c.subtaskId ?? null) === (p.sub?.id ?? null) && (round.startedAtMs === null || (ms(c.createdAt) ?? 0) >= round.startedAtMs))
       const derived = deriveStep({
         stage, sinceMs: round.startedAtMs, handback,
-        sessions: (sessionStage ? (currentSession ? [currentSession] : []) : p.sessions).map(s => ({ id: s.id, live: s.live, isQa: !!s.label && QA_NAME.test(s.label), ...(s.activity ? { activity: s.activity } : {}) })),
+        sessions: (sessionStage ? (currentSession ? [currentSession] : []) : p.sessions).map(s => ({ id: s.id, live: s.live, isQa: isQaName(s), ...(s.activity ? { activity: s.activity } : {}) })),
         ...(rec ? { rec: rec as StepRecord } : {}),
       })
       return mergeStep(reported, derived)
