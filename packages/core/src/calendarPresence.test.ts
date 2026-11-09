@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { brtDay, brtDayStartMs, filterCalendar, pieceOnDay, piecePresence, type CalPiece, type CalendarReply } from './deliveryCalendar'
+import { brtDay, brtDayStartMs, filterCalendar, pieceDayPresence, piecePresence, type CalPiece, type CalendarReply } from './deliveryCalendar'
+
+// What the screens ask (`pieceDayPresence`, as MobileDayGrid and the desktop Day do): is the piece drawn on this day?
+const pieceOnDay = (p: CalPiece, day: string, nowMs: number): boolean => pieceDayPresence(p, day, nowMs).length > 0
 
 const NOW = Date.parse('2026-11-09T15:00:00.000Z') // Mon 09, 12:00 BRT
 const H = 3600_000, D = 24 * H

@@ -330,7 +330,6 @@ export function pieceDayPresence(p: CalPiece, day: string, nowMs: number): CalPr
     return to > from ? [{ fromMs: from, toMs: to, expected: b.expected }] : []
   })
 }
-export const pieceOnDay = (p: CalPiece, day: string, nowMs: number): boolean => pieceDayPresence(p, day, nowMs).length > 0
 
 const touches = (p: CalPiece, f: CalFilters, nowMs: number): boolean => {
   if (f.fromMs === undefined && f.toMs === undefined) return true

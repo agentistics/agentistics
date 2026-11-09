@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { brtDay, brtDayStartMs, pieceDayPresence, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
 import { addDays, clock, DAY_MS, packIntervals, placeColumn, swipeDay, weekDays } from '../../lib/calendarModel'
@@ -35,6 +35,23 @@ export function MobileDayGrid(p: MobileGridProps) {
   const [collapsed, setCollapsed] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
   const start = useRef<{ x: number; y: number } | null>(null)
+  // A column narrower than 44px cannot hold a tap target per piece: the whole column opens its Day instead (0 = not measured).
+  const body = useRef<HTMLDivElement>(null)
+  const [colW, setColW] = useState(0)
+  useLayoutEffect(() => {
+    const el = scroller.current // the viewport, not the body: the body grows with the lanes
+    if (!el) return
+    const measure = () => setColW((el.clientWidth - (span === 1 ? 44 : 14)) / span)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [span])
+  const narrow = span > 1 && colW > 0 && colW < 44
+  // Day: lanes thinner than 44px are not targets either, so the column grows to 44px per lane and the grid scrolls sideways.
+  const lanes = span === 1 ? Math.max(1, ...packIntervals(phoneEvents(anchor, p).map(e => ({ ...e, toMs: Math.max(e.toMs, e.fromMs + 44 * 60_000) }))).map(e => e.lanes)) : 1
+  const wideDay = span === 1 && colW > 0 && lanes * 44 > colW
   const untimed = days.flatMap(day => [
     ...p.marks.flatMap(m => m.kind === 'task-due' && m.day === day ? [{ id: `${day}:${m.taskId}`, day, title: `${pick(TEXT.due, pt)} · ${m.label}`, selection: { kind: 'mark', mark: m } as CalSelection }] : []),
     // A version with no date is not happening on any day, today included, so it is never listed here (the API's
@@ -59,12 +76,12 @@ export function MobileDayGrid(p: MobileGridProps) {
         {untimed.length > 3 && <button className="cal-phone-button cal-phone-allday-more" data-cal-allday-more={untimed.length - 3} type="button" onClick={() => setExpanded(!expanded)}>{expanded ? pick(TEXT.collapse, pt) : `+${untimed.length - 3} ${pick(TEXT.more, pt)}`}</button>}
       </div>}
     </div>}
-    <div ref={scroller} data-cal-hour-scroller style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
+    <div ref={scroller} data-cal-hour-scroller style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: wideDay ? 'auto' : 'hidden', overscrollBehavior: 'contain', touchAction: wideDay ? 'pan-x pan-y' : 'pan-y' }}
       onTouchStart={e => { const t = e.touches[0]; if (t) start.current = { x: t.clientX, y: t.clientY } }}
-      onTouchEnd={e => { const t = e.changedTouches[0]; if (t && start.current) p.onDay(swipeDay(anchor, t.clientX - start.current.x, t.clientY - start.current.y, 1)); start.current = null }}>
+      onTouchEnd={e => { const t = e.changedTouches[0]; if (t && start.current && !wideDay) p.onDay(swipeDay(anchor, t.clientX - start.current.x, t.clientY - start.current.y, 1)); start.current = null }}>
       {/* 24h of grid plus room so 23:00 scrolls fully above the bottom navigation and the chat button. */}
       {emptyDay && <div data-cal-empty-day role="status" style={{ position: 'sticky', top: 0, zIndex: 3, height: 0, overflow: 'visible', pointerEvents: 'none' }}><div style={{ margin: '12px auto 0', width: 'fit-content', maxWidth: '85%', padding: '8px 12px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12.5, textAlign: 'center' }}>{pick(TEXT.emptyDay, pt)}</div></div>}
-      <div data-cal-grid-body style={{ height: 'calc(1440px + 148px + env(safe-area-inset-bottom, 0px))', display: 'flex', position: 'relative' }}>
+      <div ref={body} data-cal-grid-body data-cal-narrow={narrow ? '' : undefined} data-cal-lanes={wideDay ? lanes : undefined} style={{ ...(wideDay ? { width: 44 + lanes * 44 } : {}), height: 'calc(1440px + 148px + env(safe-area-inset-bottom, 0px))', display: 'flex', position: 'relative' }}>
         {/* Thin views give the gutter up to the columns (hour number only): at 360px the page content is ~328px wide, and seven columns of 44px leave ~20px. */}
         <div style={{ width: span === 1 ? 44 : 14, flexShrink: 0, position: 'relative' }}>{Array.from({ length: 24 }, (_, h) => <span key={h} style={{ position: 'absolute', top: h * 60, left: 0, fontSize: span === 1 ? 10 : 9, color: 'var(--text-tertiary)' }}>{String(h).padStart(2, '0')}{span === 1 ? ':00' : ''}</span>)}</div>
         {days.map(day => {
@@ -81,6 +98,11 @@ export function MobileDayGrid(p: MobileGridProps) {
             // Thin columns (Week, 3 days): one full-width card per stretch of time, the rest counted in a "+N" chip. Both open the day.
             const byId = new Map(raw.map(e => [e.id, e]))
             cards = placeColumn(raw, d0).map(item => {
+              if (narrow) { // drawn, not tappable: the column button below opens the Day
+                if (item.kind === 'chip') return <div aria-hidden data-cal-phone-more={item.count} data-cal-phone-more-day={day} key={`more:${item.top}`} style={{ position: 'absolute', top: item.top, left: 0, width: '100%', height: item.height, display: 'grid', placeItems: 'center', fontSize: 10, fontWeight: 700, border: '1px solid var(--border)', background: 'var(--bg-elevated)', boxSizing: 'border-box', pointerEvents: 'none' }}>+{item.count}</div>
+                const e = byId.get(item.id)!
+                return <div aria-hidden data-cal-phone-event={e.id} key={e.id} style={{ ...cardStyle(e), top: item.top, left: 0, width: '100%', height: item.height, pointerEvents: 'none' }}>{label(e)}</div>
+              }
               if (item.kind === 'chip') return <button type="button" className="cal-phone-button" data-cal-phone-more={item.count} data-cal-phone-more-day={day} key={`more:${item.top}`} aria-label={`+${item.count} · ${day}`} onClick={openDay} style={{ position: 'absolute', top: item.top, left: 0, width: '100%', height: item.height, minWidth: 0, padding: 0, fontWeight: 700, border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>+{item.count}</button>
               const e = byId.get(item.id)!
               return <button type="button" className="cal-phone-event" data-cal-phone-event={e.id} key={e.id} title={`${e.title} · ${clock(e.fromMs)}`} aria-label={`${e.title} · ${clock(e.fromMs)}`} onClick={ev => (item.hidden > 0 ? openDay() : p.onOpen(e.selection, ev))} style={{ ...cardStyle(e), top: item.top, left: 0, width: '100%', height: item.height }}>{label(e)}</button>
@@ -88,6 +110,7 @@ export function MobileDayGrid(p: MobileGridProps) {
           }
           return <div key={day} data-cal-grid-day={day} style={{ flex: 1, minWidth: 0, height: 1440, position: 'relative', boxShadow: 'inset 1px 0 var(--border)', background: 'repeating-linear-gradient(to bottom, var(--border-subtle) 0 1px, transparent 1px 60px)' }}>
             {cards}
+            {narrow && <button type="button" data-cal-day-target={day} aria-label={`${day} · ${raw.length}`} onClick={openDay} style={{ position: 'absolute', inset: 0, zIndex: 1, padding: 0, border: 0, background: 'transparent', cursor: 'pointer' }} />}
             {day === today && <div data-cal-now style={{ position: 'absolute', top: (nowMs - d0) / 60_000, left: 0, right: 0, borderTop: '2px solid var(--accent-red)', pointerEvents: 'none', zIndex: 2 }} />}
           </div>
         })}
