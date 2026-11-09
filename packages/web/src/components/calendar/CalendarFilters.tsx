@@ -101,7 +101,7 @@ export function CalendarFilters({ value, onChange, pieces, harnessOf, versionLis
       ? { display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 12, paddingTop: 12, minWidth: 0 }
       : { display: 'flex', alignItems: 'center', gap: 8, flexWrap: mobile ? 'nowrap' : 'wrap', overflowX: mobile ? 'auto' : undefined, paddingBottom: 8, minWidth: 0, flexShrink: 0 }}>
       <div data-cal-field style={sheet ? { display: 'flex', alignItems: 'center', gap: 6, width: '100%' } : { minWidth: mobile ? 220 : 200, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Filter size={13} aria-hidden style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
+        {!sheet && <Filter size={13} aria-hidden style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />}
         <div style={{ flex: 1, minWidth: 0 }}>
           <Select control
             value={value.tasks} onChange={v => set({ tasks: v })} searchable searchPlaceholder={pick(TEXT.searchTask, pt)}

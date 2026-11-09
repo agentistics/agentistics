@@ -265,6 +265,9 @@ test('filters sheet: one left-aligned column, every field the same full width, n
   const fields = Array.from(document.querySelectorAll('[data-cal-field]')) as HTMLElement[]
   expect(fields.length).toBe(5)
   for (const f of fields) expect(f.style.width).toBe('100%')
+  // no funnel indenting the first control: the sheet header already carries one
+  expect(root.querySelector('[data-cal-field] > svg')).toBeNull()
+  expect((fields[0] as HTMLElement).firstElementChild?.tagName.toLowerCase()).not.toBe('svg')
 })
 
 test('switch with a tap target shows only the pill: no painted box, and a global min-height cannot grow it', async () => {

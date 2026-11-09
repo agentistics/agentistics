@@ -1,7 +1,7 @@
 import React from 'react'
 import { describe, test, expect } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { RowSwitch, StatusDot, Select, MultiPicker, popoverPosition } from './primitives'
+import { RowSwitch, StatusDot, Select, MultiPicker, popoverPosition, popoverRoom } from './primitives'
 
 describe('RowSwitch', () => {
   test('the row itself is a <button role="switch"> with aria-checked reflecting `on`', () => {
@@ -208,5 +208,29 @@ describe('popoverPosition', () => {
     const nearBottom = popoverPosition(rect(705, 36, 20, 200), 160, 900)
     expect(nearBottom.bottom).toBe(199)
     expect(nearBottom.top).toBeUndefined()
+  })
+})
+
+describe('popoverRoom', () => {
+  const rect = (top: number, height = 44) => ({ top, bottom: top + height, left: 0, width: 300, right: 300, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+  test('a panel that opens up is capped to the room above the trigger, one that opens down to the room below', () => {
+    // 320x568, trigger at 265: it flips up, and 340px does not fit in the 265px above
+    expect(popoverRoom(rect(265), popoverPosition(rect(265), 340, 568), 340, 568)).toBeLessThanOrEqual(265 - 8)
+    expect(popoverRoom(rect(40), popoverPosition(rect(40), 340, 568), 340, 568)).toBe(340)
+    expect(popoverRoom(rect(300), popoverPosition(rect(300), 340, 568), 340, 568)).toBeLessThanOrEqual(300 - 12)
+  })
+  test('never reports less than a usable panel', () => {
+    expect(popoverRoom(rect(5, 44), popoverPosition(rect(5, 44), 340, 120), 340, 120)).toBeGreaterThanOrEqual(160)
+  })
+})
+
+describe('MultiPicker panel scroll containment', () => {
+  test('the open panel keeps wheel/touch scrolling inside itself', () => {
+    const g = globalThis as { window?: unknown }
+    const had = 'window' in g
+    if (!had) g.window = { innerWidth: 320, innerHeight: 568, matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {} }
+    let html = ''
+    try { html = renderToStaticMarkup(<MultiPicker defaultOpenForTest options={[{ value: 'a', label: 'A' }]} onCommit={() => {}} placeholder="p" searchPlaceholder="s" confirmLabel={n => `Add ${n}`} selectAllLabel="all" emptyLabel="none" />) } finally { if (!had) delete g.window }
+    expect(html).toMatch(/role="listbox"[^>]*overscroll-behavior:\s*contain/)
   })
 })
