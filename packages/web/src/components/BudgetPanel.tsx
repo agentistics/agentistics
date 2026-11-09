@@ -88,6 +88,17 @@ export function computeMonthCost(statsCache: StatsCache, monthStart: Date, now: 
   return total
 }
 
+/** True when Claude's stats-cache holds any token for this month. Without it the panel has nothing
+ *  to price (an OpenCode-only machine, a gateway model): it must say "not recorded", never $0.00. */
+export function hasMonthUsage(statsCache: StatsCache, monthStart: Date, now: Date): boolean {
+  for (const day of statsCache.dailyModelTokens ?? []) {
+    const date = parseISO(day.date)
+    if (date < monthStart || date > now) continue
+    if (Object.values(day.tokensByModel).some(t => t > 0)) return true
+  }
+  return false
+}
+
 export function BudgetPanel({ statsCache, budgetUSD, onBudgetChange, currency, brlRate, monthlyCommitmentUSD = null, commitmentPartial = false, lang, harness }: Props) {
   const pt = lang === 'pt'
   const [editing, setEditing] = useState(false)
@@ -96,7 +107,7 @@ export function BudgetPanel({ statsCache, budgetUSD, onBudgetChange, currency, b
     : null
   const [draft, setDraft] = useState(displayBudget !== null ? String(Math.round(displayBudget * 100) / 100) : '')
 
-  const { monthSpend, forecast, daysElapsed, daysInMonth, monthLabel } = useMemo(() => {
+  const { monthSpend, forecast, daysElapsed, daysInMonth, monthLabel, recorded } = useMemo(() => {
     const now = new Date()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
     const dInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
@@ -110,6 +121,7 @@ export function BudgetPanel({ statsCache, budgetUSD, onBudgetChange, currency, b
       daysElapsed: dElapsed,
       daysInMonth: dInMonth,
       monthLabel: formatter.format(now),
+      recorded: hasMonthUsage(statsCache, monthStart, now),
     }
   }, [statsCache, pt])
 
@@ -141,6 +153,7 @@ export function BudgetPanel({ statsCache, budgetUSD, onBudgetChange, currency, b
     setEditing(false)
   }
 
+  const notRecorded = pt ? 'não registrado' : 'not recorded'
   const hasBudget = budgetUSD !== null && budgetUSD > 0
   const spendPct = hasBudget ? Math.min(1, monthSpend / budgetUSD!) : 0
   const forecastPct = hasBudget ? forecast / budgetUSD! : 0
@@ -202,13 +215,13 @@ export function BudgetPanel({ statsCache, budgetUSD, onBudgetChange, currency, b
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
         <Stat
           label={pt ? 'Gasto no mês' : 'Month spend'}
-          value={fmtCost(monthSpend, currency, brlRate)}
+          value={recorded ? fmtCost(monthSpend, currency, brlRate) : notRecorded}
           sub={pt ? `até ${daysElapsed}º dia` : `through day ${daysElapsed}`}
           accent="var(--anthropic-orange)"
         />
         <Stat
           label={pt ? 'Projeção do mês' : 'Month forecast'}
-          value={fmtCost(forecast, currency, brlRate)}
+          value={recorded ? fmtCost(forecast, currency, brlRate) : notRecorded}
           sub={pt ? 'extrapolação linear' : 'linear projection'}
           accent={overForecast ? '#f59e0b' : 'var(--accent-blue, #3b82f6)'}
         />
