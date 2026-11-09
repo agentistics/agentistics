@@ -6,10 +6,10 @@ const NOW = 1_000_000
 const d = (over: Partial<LiveDelivery>): LiveDelivery => ({
   key: 't/a', taskId: 't', taskTitle: 'Task', subtaskId: 'a', title: 'Piece', status: 'in_progress', stage: 'running',
   stageSinceMs: 0, startedAtMs: 0, sessionIds: [], harnesses: [], models: [], eta: { kind: 'none', reason: 'no-history' },
-  lastAction: null, blockedReason: null, deliveredAtMs: null,
+  lastAction: null, blockedReason: null, deliveredAtMs: null, priority: 'low',
   workMs: null, efforts: [], trail: [], stageEta: { kind: 'none', reason: 'no-history' }, publishEta: { kind: 'none', reason: 'no-history' }, block: null, ci: null, step: null, ...over,
 })
-const reply = (ds: LiveDelivery[]): LiveReply => ({ generatedAt: 'x', deliveries: ds, samples: 0, hidden: [], archived: [], archivedTotal: 0, sessionTasks: {} })
+const reply = (ds: LiveDelivery[]): LiveReply => ({ generatedAt: 'x', deliveries: ds, samples: 0, hidden: [], sessionTasks: {} })
 const row = (id: string, state: string, x: Partial<FleetRowLite> = {}): FleetRowLite => ({ id, title: id, harness: 'claude', state, ...x })
 
 describe('describeLive', () => {
@@ -30,6 +30,43 @@ describe('describeLive', () => {
     expect(run({ task: 'alp' })).toEqual(['1'])
     expect(run({ stage: 'qa' })).toEqual(['1'])
     expect(run({ stalledOnly: true })).toEqual(['3'])
+  })
+  test('the screen\'s tabs (same rules as the web): Em andamento = somebody on it, Na fila, Publicado in its period, Tudo', () => {
+    const H = 3600_000, NOWMS = 400 * H
+    const ds = [
+      d({ key: 'q', stage: 'queue' }), d({ key: 'b', stage: 'blocked' }), d({ key: 'r', stage: 'running', sessionIds: ['w'] }),
+      d({ key: 'p', stage: 'published', deliveredAtMs: NOWMS - 2 * H }), d({ key: 'p3', stage: 'published', deliveredAtMs: NOWMS - 72 * H }),
+    ]
+    const hist = [d({ key: 'p40', stage: 'published', deliveredAtMs: NOWMS - 40 * 24 * H })]
+    const old = [d({ key: 'o', stage: 'leader', old: true })]
+    const view = (filters: object) => describeLive({
+      reply: { ...reply(ds), history: hist, oldReviews: old }, rows: [row('w', 'working')], leaderIds: new Set(), nowMs: NOWMS, filters,
+    })
+    const keys = (filters: object) => view(filters).deliveries.map(x => x.key)
+    expect(keys({ tab: 'active' })).toEqual(['r'])
+    expect(keys({ tab: 'queue' })).toEqual(['q'])
+    expect(keys({ tab: 'published' })).toEqual(['p'])
+    expect(keys({ tab: 'published', period: '7d' })).toEqual(['p', 'p3'])
+    expect(keys({ tab: 'published', period: 'all' })).toEqual(['p', 'p3', 'p40'])
+    expect(keys({ tab: 'all', period: '7d' })).toEqual(['q', 'b', 'r', 'o', 'p', 'p3'])
+    expect(keys({})).toEqual(keys({ tab: 'all' }))
+    // The counts are the screen's tab numbers, and each equals the list that tab returns.
+    const v = view({ tab: 'all', period: '7d' }).view
+    expect(v.counts).toEqual({ active: 1, queue: 1, published: 2, all: 6 })
+    for (const tab of ['active', 'queue', 'published', 'all'] as const) expect(view({ tab, period: '7d' }).deliveries).toHaveLength(v.counts[tab])
+    // The old review never counts as active work.
+    expect(view({ tab: 'all' }).summary.deliveries).toBe(3)
+  })
+  test('each stage is listed highest priority first (ties: longest in the stage); `sort` changes it', () => {
+    const ds = [
+      d({ key: 'low', stage: 'running', priority: 'low', stageSinceMs: 10 }), d({ key: 'urg', stage: 'running', priority: 'urgent', stageSinceMs: 900 }),
+      d({ key: 'hi-old', stage: 'running', priority: 'high', stageSinceMs: 5 }), d({ key: 'hi-new', stage: 'running', priority: 'high', stageSinceMs: 50 }),
+      d({ key: 'qa-low', stage: 'qa', priority: 'low' }), d({ key: 'qa-urg', stage: 'qa', priority: 'urgent' }),
+    ]
+    const run = (filters: object) => describeLive({ reply: reply(ds), rows: [], leaderIds: new Set(), nowMs: NOW, filters }).deliveries.map(x => x.key)
+    expect(run({})).toEqual(['urg', 'hi-old', 'hi-new', 'low', 'qa-urg', 'qa-low'])
+    expect(run({ sort: 'recent' })).toEqual(['urg', 'hi-new', 'low', 'hi-old', 'qa-low', 'qa-urg'].map(k => k))
+    expect(run({ sort: 'time-in-stage' })).toEqual(['hi-old', 'low', 'hi-new', 'urg', 'qa-low', 'qa-urg'])
   })
   test('leaders are their own band, never a delivery: current action, workers, awaiting', () => {
     const v = describeLive({
@@ -67,6 +104,36 @@ describe('the leader model is the transcript\'s, not the harness default (MED 9)
     expect(v.leaders[0]!.model).toBe('claude-opus-5-5')
     expect(v.leaders[0]!.workers[0]!.model).toBe('claude-sonnet-5-5')
     expect(v.deliveries[0]!.agents[0]!.model).toBe('claude-sonnet-5-5')
+  })
+  test('LOW-6: when the cap cut older pieces the view says how many, and only where it matters', () => {
+    const H = 3600_000, NOWMS = 400 * H
+    const hist = [d({ key: 'p40', stage: 'published', deliveredAtMs: NOWMS - 40 * 24 * H })]
+    const capped = { ...reply([]), history: hist, historyTotal: 5 }
+    const v = (filters: object) => describeLive({ reply: capped, rows: [], leaderIds: new Set(), nowMs: NOWMS, filters }).view
+    expect(v({ tab: 'published', period: 'all' }).capped).toEqual({ cap: 400, omitted: 4 })
+    expect(v({ tab: 'all', period: 'all' }).capped).toEqual({ cap: 400, omitted: 4 })
+    // 24 h: the oldest kept piece is already outside it, so nothing the cap cut could have been inside.
+    expect(v({ tab: 'published', period: '24h' }).capped).toBeNull()
+    expect(v({ tab: 'queue', period: 'all' }).capped).toBeNull()
+    expect(describeLive({ reply: { ...reply([]), history: hist }, rows: [], leaderIds: new Set(), nowMs: NOWMS, filters: { period: 'all' } }).view.capped).toBeNull()
+  })
+  test('LOW-7: the view states the EFFECTIVE tab and period, and which were defaulted', () => {
+    const run = (filters: object) => describeLive({ reply: reply([]), rows: [], leaderIds: new Set(), nowMs: NOW, filters }).view
+    expect(run({})).toMatchObject({ tab: 'all', period: '24h', defaulted: ['tab', 'period'] })
+    expect(run({ tab: 'queue' })).toMatchObject({ tab: 'queue', period: '24h', defaulted: ['period'] })
+    expect(run({ tab: 'queue', period: '7d' }).defaulted).toEqual([])
+  })
+  test('LOW-8: a live worker on a piece published over 24 h ago is not listed as "published" under its leader', () => {
+    const H = 3600_000, NOWMS = 400 * H
+    const old = d({ key: 'old', stage: 'published', deliveredAtMs: NOWMS - 48 * H, sessionIds: ['w1'] })
+    const fresh = d({ key: 'fresh', stage: 'published', deliveredAtMs: NOWMS - H, sessionIds: ['w2'] })
+    const v = describeLive({
+      reply: { ...reply([fresh]), history: [old] }, leaderIds: new Set(['L']), nowMs: NOWMS,
+      rows: [row('L', 'working'), row('w1', 'working', { parentSessionId: 'L' }), row('w2', 'working', { parentSessionId: 'L' })],
+    })
+    const ws = v.leaders[0]!.workers
+    expect(ws.find(w => w.id === 'w1')).toMatchObject({ stage: null, cardKey: null })
+    expect(ws.find(w => w.id === 'w2')).toMatchObject({ stage: 'published', cardKey: 'fresh' })
   })
   test('with no observation the registry model stays, and none stays null', () => {
     const v = describeLive({ reply: reply([]), rows: [row('L', 'working', { model: 'opus' }), row('M', 'working')], leaderIds: new Set(['L', 'M']), nowMs: NOW })

@@ -17,6 +17,7 @@
  * environment for a caller that builds one explicitly.
  */
 import { readFileSync } from 'node:fs'
+import { promisify } from 'node:util'
 
 /** PURE: `env` without `keys`, `undefined` values dropped (a spawn's env holds strings). */
 export function withoutKeys(env: Record<string, string | undefined>, keys: readonly string[]): Record<string, string> {
@@ -104,7 +105,20 @@ export function installSpawnEnvGuard(keys: readonly string[]): void {
   for (const api of ['spawn', 'spawnSync', 'execFile', 'execFileSync', 'fork', 'exec', 'execSync'] as const) {
     const orig = cp[api]
     if (typeof orig !== 'function') continue
-    cp[api] = function (this: unknown, ...a: unknown[]) { return orig.apply(this, withChildEnv(api, a, decide)) }
+    const wrapped = function (this: unknown, ...a: unknown[]) { return orig.apply(this, withChildEnv(api, a, decide)) }
+    // `exec` and `execFile` carry `util.promisify.custom`, which makes `promisify(execFile)` resolve to `{ stdout, stderr }`.
+    // A plain wrapper drops it and `promisify` falls back to the callback's FIRST value (the stdout string), so every
+    // `.stdout` read after the guard came back undefined. The wrapper gets its own custom, over the same env decision.
+    for (const key of Reflect.ownKeys(orig)) {
+      if (key === promisify.custom || key === 'length' || key === 'name' || key === 'prototype') continue
+      const d = Object.getOwnPropertyDescriptor(orig, key)
+      if (d) Object.defineProperty(wrapped, key, d)
+    }
+    const custom = (orig as unknown as Record<symbol, ((...a: unknown[]) => unknown) | undefined>)[promisify.custom]
+    if (typeof custom === 'function') {
+      Object.defineProperty(wrapped, promisify.custom, { value: function (this: unknown, ...a: unknown[]) { return custom.apply(this, withChildEnv(api, a, decide)) }, enumerable: false, configurable: true, writable: true })
+    }
+    cp[api] = wrapped
   }
   const bun = Bun as unknown as Record<'spawn' | 'spawnSync', (...a: unknown[]) => unknown>
   const spawn = bun.spawn.bind(Bun), spawnSync = bun.spawnSync.bind(Bun)

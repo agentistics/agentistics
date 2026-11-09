@@ -1282,9 +1282,14 @@ export function Select({ value, onChange, options, placeholder, disabled, search
  */
 export function MultiPicker({
   options, onCommit, placeholder, searchPlaceholder, confirmLabel, selectAllLabel, emptyLabel, disabled,
-  defaultOpenForTest,
+  defaultOpenForTest, panelMinWidth, triggerHeight,
 }: {
-  options: { value: string; label: string; disabled?: boolean; hint?: string }[]
+  /** Trigger height in px (default 44, the form number); a toolbar row passes its own control height. */
+  triggerHeight?: number
+  /** `heading` draws a section title instead of a row (no box, never selectable); `hint` is the right-aligned count. */
+  options: { value: string; label: string; disabled?: boolean; hint?: string; heading?: boolean }[]
+  /** The list never opens narrower than this (px, capped to the screen): a trigger can be small, long titles are not. */
+  panelMinWidth?: number
   /** Called with everything ticked when the user confirms. Never called with an empty list. */
   onCommit: (values: string[]) => void
   placeholder: string
@@ -1350,7 +1355,12 @@ export function MultiPicker({
   const openPanel = () => {
     if (disabled) return
     const rect = wrapperRef.current?.getBoundingClientRect()
-    if (rect) setPos(popoverPosition(rect, PANEL_MAX_H, window.innerHeight))
+    if (rect) {
+      const base = popoverPosition(rect, PANEL_MAX_H, window.innerHeight)
+      const width = Math.max(base.width ?? rect.width, Math.min(panelMinWidth ?? 0, window.innerWidth - 16))
+      // Wider than its trigger: keep it on screen (a trigger near the right edge would push it off).
+      setPos({ ...base, width, left: Math.max(8, Math.min(base.left, window.innerWidth - width - 8)) })
+    }
     setOpen(true)
     setTimeout(() => searchRef.current?.focus(), 0)
   }
@@ -1380,7 +1390,8 @@ export function MultiPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         style={{
-          width: '100%', padding: '8px 11px', minHeight: 44, boxSizing: 'border-box',
+          width: '100%', boxSizing: 'border-box',
+          ...(triggerHeight ? { padding: '0 11px', height: triggerHeight } : { padding: '8px 11px', minHeight: 44 }),
           background: 'var(--bg-elevated)',
           border: `1px solid ${open ? 'var(--anthropic-orange)' : 'var(--border)'}`,
           borderRadius: 8, fontSize: 13, color: 'var(--text-tertiary)', fontFamily: 'inherit',
@@ -1427,21 +1438,33 @@ export function MultiPicker({
             {filtered.length === 0 && (
               <span style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '8px 4px' }}>{emptyLabel}</span>
             )}
-            {filtered.map(o => (
-              <div key={o.value}
-                title={o.hint}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6, minHeight: isMobile ? 44 : 32, paddingLeft: 2,
-                  opacity: o.disabled ? 0.45 : 1, pointerEvents: o.disabled ? 'none' : undefined,
-                }}>
-                <Checkbox
-                  checked={!o.disabled && picked.includes(o.value)}
-                  onChange={c => { if (o.disabled) return; lastPickAtRef.current = Date.now(); setPicked(prev => c ? [...prev, o.value] : prev.filter(v => v !== o.value)) }}
-                  label={o.label}
-                />
-                {o.hint && <span style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{o.hint}</span>}
-              </div>
-            ))}
+            {filtered.map(o => {
+              // A section heading ("Recentes", "Todas as tarefas") is a title, not a row: no box to tick, no overlap with the rows it heads.
+              if (o.heading) {
+                return <div key={o.value} data-multipicker-heading style={{ padding: '8px 4px 2px', fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', letterSpacing: '.04em' }}>{o.label}</div>
+              }
+              const toggleRow = (c: boolean) => { if (o.disabled) return; lastPickAtRef.current = Date.now(); setPicked(prev => c ? [...prev, o.value] : prev.filter(v => v !== o.value)) }
+              const on = !o.disabled && picked.includes(o.value)
+              return (
+                <div key={o.value}
+                  title={o.label}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, minHeight: isMobile ? 44 : 32, paddingLeft: 2, paddingRight: 4,
+                    opacity: o.disabled ? 0.45 : 1, pointerEvents: o.disabled ? 'none' : undefined,
+                  }}>
+                  <Checkbox checked={on} onChange={toggleRow} label="" ariaLabel={o.label} />
+                  {/* The label owns the room the count does not: at most two lines, ellipsis after, never over the count. */}
+                  <span
+                    onClick={() => toggleRow(!on)}
+                    style={{
+                      flex: 1, minWidth: 0, fontSize: 12, lineHeight: 1.3, color: 'var(--text-secondary)', cursor: 'pointer',
+                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere',
+                    }}
+                  >{o.label}</span>
+                  {o.hint && <span style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', flexShrink: 0, marginLeft: 'auto' }}>{o.hint}</span>}
+                </div>
+              )
+            })}
           </div>
           <button
             type="button"

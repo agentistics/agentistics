@@ -2,15 +2,13 @@ import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * The `:vault` picker (VAULT.PERSONAL §8.5): choose credentials and/or whole groups to hand to THIS
  * session's agent. Metadata only — no value is ever fetched here. A locked vault runs the unlock first
- * (the gesture in the service, then the code when the policy asks); a list that needs the code asks it.
- * Full screen on a phone. `VaultCodeAsk` is the small code prompt the composer shows when the grant
- * itself asks for the code at send time.
+ * (the vault's own confirmation); a list that needs a proof asks for it (COFRE.DESBLOQUEIO: never a code).
+ * Full screen on a phone.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Folder, KeyRound } from 'lucide-react'
 import { Err, card, input, overlay } from '../MfaSetup'
-import { codeComplete, loadVault, stepUp } from '../../lib/vaultApi'
-import { CodeField } from './VaultUnlock'
+import { loadVault, stepUp } from '../../lib/vaultApi'
 import { VaultStage } from './VaultStage'
 import { Checkbox, DialogActions, dialogButtonStyle } from '../../pages/settings/primitives'
 import { filterPersonal, listPersonal, type PersonalGroup, type PersonalMeta } from '../../lib/vaultPersonal'
@@ -25,8 +23,8 @@ const T = {
     en: 'The agent gets REFERENCES (vault://…) and uses them in commands; it never sees a value, and any value that shows up in an output is replaced. Sending is immediate when the vault is open, unless a credential requires step-up confirmation.',
     pt: 'O agente recebe REFERÊNCIAS (vault://…) e as usa nos comandos; ele nunca vê um valor, e qualquer valor que aparecer numa saída é trocado. Enviar é imediato com o cofre aberto, salvo quando uma credencial exige confirmação adicional.',
   },
-  code: { en: 'Authenticator code', pt: 'Código do autenticador' },
-  confirmCode: { en: 'Confirm', pt: 'Confirmar' },
+  proofAsk: { en: 'The list needs you to confirm it is you.', pt: 'A lista precisa que você confirme que é você.' },
+  confirmCode: { en: 'Confirm it is you', pt: 'Confirmar que sou eu' },
   search: { en: 'Search…', pt: 'Buscar…' },
   groups: { en: 'Groups', pt: 'Grupos' },
   items: { en: 'Credentials', pt: 'Credenciais' },
@@ -55,17 +53,15 @@ function Shell({ isMobile, title, onClose, children }: { isMobile: boolean; titl
   )
 }
 
-function CodeInput({ lang, isMobile, onCode, error, onCancel }: { lang: Lang; isMobile: boolean; onCode: (c: string) => Promise<void>; error?: string | null; onCancel?: () => void }) {
-  const [code, setCode] = useState('')
+/** The list owes a proof: one button — the service raises the gesture, or the vault-password prompt asks. */
+function ProofAsk({ lang, isMobile, onProof, error }: { lang: Lang; isMobile: boolean; onProof: () => Promise<void>; error?: string | null }) {
   const [busy, setBusy] = useState(false)
-  const ok = codeComplete(code) && !busy
   return (
-    <form onSubmit={e => { e.preventDefault(); if (ok) { setBusy(true); void onCode(code).finally(() => { setBusy(false); setCode('') }) } }}>
-      <CodeField value={code} onChange={setCode} label={t('code', lang)} autoFocus />
+    <form onSubmit={e => { e.preventDefault(); if (!busy) { setBusy(true); void onProof().finally(() => setBusy(false)) } }}>
+      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 8 }}>{t('proofAsk', lang)}</div>
       {error && <Err text={error} />}
       <DialogActions>
-        {onCancel && <button type="button" onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel', lang)}</button>}
-        <button type="submit" disabled={!ok} style={dialogButtonStyle('primary', isMobile, !ok)}>{busy && <AgentisticsLoader size={14} />} {t('confirmCode', lang)}</button>
+        <button type="submit" disabled={busy} style={dialogButtonStyle('primary', isMobile, busy)}>{busy && <AgentisticsLoader size={14} />} {t('confirmCode', lang)}</button>
       </DialogActions>
     </form>
   )
@@ -107,9 +103,9 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
       <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>{t('intro', lang)}</div>
       {phase === 'loading' && <AgentisticsLoader size={14} />}
       {phase === 'failed' && <Err text={t('failed', lang)} />}
-      {/* §10: the shared unlock — Hello + code on this computer, the phone's own ways on a phone. */}
+      {/* §10: the shared unlock — this computer's own confirmation here, the phone's biometrics on a phone. */}
       {phase === 'locked' && <VaultStage lang={lang} isMobile={isMobile} compact onOpened={() => { void load() }} />}
-      {phase === 'list-code' && <CodeInput lang={lang} isMobile={isMobile} error={error} onCode={async c => { const r = await stepUp(c); if (!r.ok) { setError(r.sentence); return } setError(null); await load() }} />}
+      {phase === 'list-code' && <ProofAsk lang={lang} isMobile={isMobile} error={error} onProof={async () => { const r = await stepUp(); if (!r.ok) { setError(r.sentence); return } setError(null); await load() }} />}
       {phase === 'ready' && (
         <>
           {items.length === 0 ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('none', lang)}</div> : (
@@ -147,15 +143,6 @@ export function VaultPicker({ lang, isMobile, initial, onConfirm, onClear, onClo
           {phase === 'ready' && <button type="button" onClick={confirm} disabled={pick.size === 0 && pickG.size === 0} style={dialogButtonStyle('primary', isMobile, pick.size === 0 && pickG.size === 0)}>{t('confirm', lang)}</button>}
         </DialogActions>
       </div>
-    </Shell>
-  )
-}
-
-/** The code the grant asks at send time (resolve with the code, or null when cancelled). */
-export function VaultCodeAsk({ lang, isMobile, onDone }: { lang: Lang; isMobile: boolean; onDone: (code: string | null) => void }) {
-  return (
-    <Shell isMobile={isMobile} title={t('code', lang)} onClose={() => onDone(null)}>
-      <CodeInput lang={lang} isMobile={isMobile} onCode={async c => { onDone(c) }} onCancel={() => onDone(null)} />
     </Shell>
   )
 }

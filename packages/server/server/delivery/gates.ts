@@ -19,17 +19,81 @@
  * Darwin-safe: memory is the machine's AVAILABLE memory (`/proc/meminfo` on Linux, `vm_stat` on macOS), git/gh are plain argv.
  */
 import type { DeliveryCi, DeliveryRecord, GateName } from './machine'
+import { reconcileSessions } from '../sessions/session-ref'
+import { hasEffortConcept } from '../sessions/live-runtime'
+import { ISOLATION_ENV } from '../account-isolation'
+import type { BackendSession, ManagedSession } from '../sessions/types'
+
+/** The backend, also used by the fleet, proves liveness; a lost registry row reserves no slot. */
+export function runningSessionIds(registry: ManagedSession[], backend: BackendSession[]): Set<string> {
+  return new Set(reconcileSessions(registry, backend)
+    .filter(s => !s.managed?.endedAt && s.backend?.alive === true)
+    .map(s => s.id))
+}
 
 export interface StagedFact { prompt?: string; harness?: string; model?: string; effort?: string; account?: string; cwd?: string }
-export interface SubtaskFact { id: string; taskId: string; title: string; status: string; groupMember: boolean; staged?: StagedFact; blockedBy: string[] }
+export interface SubtaskFact { id: string; taskId: string; title: string; status: string; groupMember: boolean; parentGroupId?: string; staged?: StagedFact; blockedBy: string[]; /** The TASK's Agentask priority (urgent|high|medium|low) — a subtask has none of its own. */ priority?: string }
+/** What the Fila tab shows beside a queued piece, read from the board in one place (same source as the card). */
+export interface QueueExtras {
+  taskTitle: string
+  members: Array<{ id: string; title: string; status: string }>
+  notes: { total: number; last: Array<{ author: string; at: string; body: string }> }
+}
 export interface SessionFact {
   id: string; harness: string; model?: string; effort?: string; account?: string; taskId?: string; subtaskId?: string
   role?: string; label?: string; alive: boolean; cwd: string; worktree: boolean; rootPath?: string; createdAt?: string
 }
 export interface BudgetFact { harness: string; account: string; fiveHourPct: number; weekPct: number; stale: boolean }
 
+/**
+ * A PIECE the board holds blocked, as the Live shows it — what the vigia needs to adopt one that has no delivery record.
+ * `id` is the subtask id, a GROUP's id (a blocked member counts for its group, never as a delivery of its own), or a TASK id
+ * for a task with no subtasks (the Live's task-level card). `groupMember` is true only if a host leaks a member through:
+ * the vigia refuses to adopt it.
+ */
+export interface BlockedSubtaskFact { id: string; taskId: string; title: string; blockedBy: string[]; groupMember: boolean; since: string; reason?: string }
+
+/** The board slice `blockedPiecesOf` reads (structural, so a test needs no book). */
+export interface BlockedBook {
+  tasks: ReadonlyArray<{ id: string; title: string; status: string; updatedAt: string; blockedReason?: string; blockedBy?: string[] }>
+  subtasks: ReadonlyArray<{ id: string; taskId: string; title: string; status: string; updatedAt: string; isGroup?: boolean; parentGroupId?: string; blockedBy?: string[] }>
+}
+
+const CLOSED = (status: string) => status === 'done' || status === 'abandoned'
+
+/**
+ * PURE. The blocked pieces the Live shows, one per card: a blocked subtask; a GROUP whose own status is blocked or that holds a
+ * blocked member (the member's block counts for the group — a member has no card and no delivery of its own); and a blocked
+ * TASK that has no subtasks (its own card). Closed pieces never appear. Oldest block first.
+ */
+export function blockedPiecesOf(book: BlockedBook): BlockedSubtaskFact[] {
+  const out = new Map<string, BlockedSubtaskFact>()
+  const subtasksOf = (taskId: string) => book.subtasks.filter(s => s.taskId === taskId)
+  for (const s of book.subtasks) {
+    if (s.parentGroupId || s.status !== 'blocked') continue
+    out.set(s.id, { id: s.id, taskId: s.taskId, title: s.title, blockedBy: s.blockedBy ?? [], groupMember: false, since: s.updatedAt })
+  }
+  for (const m of book.subtasks) {
+    if (!m.parentGroupId || m.status !== 'blocked') continue
+    const g = book.subtasks.find(x => x.id === m.parentGroupId)
+    if (!g || CLOSED(g.status)) continue
+    const have = out.get(g.id)
+    if (have) { if (Date.parse(m.updatedAt) < Date.parse(have.since)) have.since = m.updatedAt; continue }
+    out.set(g.id, { id: g.id, taskId: g.taskId, title: g.title, blockedBy: g.blockedBy ?? [], groupMember: false, since: m.updatedAt, reason: `um membro do grupo está bloqueado: ${m.title}` })
+  }
+  for (const t of book.tasks) {
+    if (t.status !== 'blocked' || subtasksOf(t.id).some(s => !s.parentGroupId)) continue
+    out.set(t.id, { id: t.id, taskId: t.id, title: t.title, blockedBy: t.blockedBy ?? [], groupMember: false, since: t.updatedAt, ...(t.blockedReason?.trim() ? { reason: t.blockedReason.trim() } : {}) })
+  }
+  return [...out.values()].sort((a, b) => (Date.parse(a.since) || 0) - (Date.parse(b.since) || 0) || a.id.localeCompare(b.id))
+}
+
 export interface GateFacts {
   subtask(id: string): Promise<SubtaskFact | null>
+  /** Every piece the board holds in `blocked` (see `BlockedSubtaskFact`). Optional: a host that cannot list them simply adopts none. */
+  blockedSubtasks?(): Promise<BlockedSubtaskFact[]>
+  /** The board status of a piece that is a subtask, a group OR a task; null = it no longer exists. Falls back to `subtask(id)`. */
+  pieceStatus?(id: string): Promise<string | null>
   sessions(): Promise<SessionFact[]>
   budgets(): Promise<BudgetFact[]>
   memoryBytes(): Promise<number | null>
@@ -37,6 +101,8 @@ export interface GateFacts {
   topCap(harness: string): Promise<number>
   git(cwd: string, args: string[]): Promise<string>
   gh(cwd: string, args: string[]): Promise<string>
+  /** Board-side extras for the Fila tab (group members, the subtask's notes). Optional: absent = the tab shows none. */
+  queueExtras?(subtaskId: string): Promise<QueueExtras | null>
   /** The repository checkout this process runs in, for a piece with no author session on record (`flow release`). Null = none. */
   repoCwd?(): Promise<string | null>
 }
@@ -66,6 +132,17 @@ export function isTopTier(harness: string, model: string | undefined): boolean {
   if (harness === 'gemini' || harness === 'antigravity') return /\bpro\b|-pro/.test(m)
   if (harness === 'codex' || harness === 'copilot') return /-pro\b|\bpro\b|-max\b/.test(m)
   return /opus|fable|-pro\b/.test(m)
+}
+
+/**
+ * PURE (FLUXO.AVISOS 5): is the owner's TOP-TIER cap of a provider already used up, counting `adding` more workers of that
+ * tier? One rule for the slot gate (`judgeVaga`) and for every `agentop session` door that starts a worker. Leaders and
+ * sessions that are not running reserve nothing. Null = room (or the model is not top tier at all).
+ */
+export function topTierFull(harness: string, model: string | undefined, sessions: readonly SessionFact[], cap: number, adding = 1): { running: number; cap: number } | null {
+  if (!isTopTier(harness, model)) return null
+  const running = sessions.filter(x => x.alive && x.role !== 'leader' && x.harness === harness && isTopTier(x.harness, x.model)).length
+  return running + adding > cap ? { running, cap } : null
 }
 
 /** PURE: the model family, for "never Sonnet over Sonnet". */
@@ -109,19 +186,37 @@ export function judgePredispatch(sub: SubtaskFact | null): GateVerdict {
   if (!sub) return no('the subtask does not exist on the board', ['subtarefa'])
   if (sub.groupMember) return no('a group member never receives a session — stage it on the group', ['subtarefa (não membro de grupo)'])
   const s = sub.staged ?? {}
-  const missing = (['prompt', 'harness', 'model', 'effort', 'account'] as const).filter(k => !s[k]?.trim()).map(k => (k === 'prompt' ? 'brief/prompt' : k))
+  const harness = s.harness?.trim()
+  // FLUXO.AVISOS 4: ask only for what THIS harness uses. An effort the harness has no concept of, or an account on a harness
+  // that cannot keep a second login apart, is not "missing" — the leader was sent in circles for fields that did nothing.
+  // With no harness yet, both stay required (the harness itself is what is missing).
+  const needs = ['prompt', 'harness', 'model', ...(!harness || hasEffortConcept(harness) ? ['effort'] : []), ...(!harness || harnessHasAccounts(harness) ? ['account'] : [])] as const
+  const missing = needs.filter(k => !(s as Record<string, string | undefined>)[k]?.trim()).map(k => (k === 'prompt' ? 'brief/prompt' : k))
   if (missing.length) return no(`pre-dispatch incomplete: ${missing.join(', ')}`, missing)
-  return { ok: true, evidence: { harness: s.harness, model: s.model, effort: s.effort, account: s.account, promptChars: s.prompt!.length, subtaskId: sub.id } }
+  return { ok: true, evidence: { harness: s.harness, model: s.model, effort: s.effort ?? null, account: stagedAccount(s), promptChars: s.prompt!.length, subtaskId: sub.id } }
+}
+
+/** PURE: can this harness keep a second login apart (an isolation variable exists for it)? Otherwise it only has `default`. */
+export function harnessHasAccounts(harness: string): boolean {
+  return !!(ISOLATION_ENV as Record<string, string | null | undefined>)[harness]
+}
+
+/** PURE: the account a staged session runs under — the staged one, else `default` for a harness with no accounts. */
+export function stagedAccount(s: StagedFact): string | undefined {
+  const named = s.account?.trim()
+  if (named) return named
+  return s.harness && !harnessHasAccounts(s.harness.trim()) ? 'default' : undefined
 }
 
 /** PURE. Is there room to start the staged session now? */
 export function judgeVaga(sub: SubtaskFact | null, o: { sessions: readonly SessionFact[]; budgets: readonly BudgetFact[]; memoryBytes: number | null; topCap: number }): GateVerdict {
   const s = sub?.staged
-  if (!s?.harness || !s.account) return no('the vaga gate reads the staged harness and account — run predispatch first', ['pré-dispatch'])
+  const account = s ? stagedAccount(s) : undefined
+  if (!s?.harness || !account) return no('the vaga gate reads the staged harness and account — run predispatch first', ['pré-dispatch'])
   const missing: string[] = []
-  const evidence: Record<string, unknown> = { harness: s.harness, account: s.account, model: s.model }
-  const row = o.budgets.find(b => !b.stale && b.harness === s.harness && b.account === s.account)
-  if (!row) missing.push(`fresh plan_limits reading for ${s.harness}:${s.account}`)
+  const evidence: Record<string, unknown> = { harness: s.harness, account, model: s.model }
+  const row = o.budgets.find(b => !b.stale && b.harness === s.harness && b.account === account)
+  if (!row) missing.push(`fresh plan_limits reading for ${s.harness}:${account}`)
   else {
     evidence.fiveHourPct = row.fiveHourPct; evidence.weekPct = row.weekPct
     if (row.fiveHourPct >= FIVE_HOUR_CEILING) missing.push(`5 h window at ${row.fiveHourPct}% (≥ ${FIVE_HOUR_CEILING}%)`)
@@ -133,7 +228,7 @@ export function judgeVaga(sub: SubtaskFact | null, o: { sessions: readonly Sessi
   if (isTopTier(s.harness, s.model)) {
     const top = workers.filter(x => x.harness === s.harness && isTopTier(x.harness, x.model)).length
     evidence.topTier = { running: top, cap: o.topCap }
-    if (top >= o.topCap) missing.push(`${top} ${s.harness} top-tier workers running (cap ${o.topCap})`)
+    if (topTierFull(s.harness, s.model, o.sessions, o.topCap)) missing.push(`${top} ${s.harness} top-tier workers running (cap ${o.topCap})`)
   }
   evidence.memoryBytes = o.memoryBytes
   if (o.memoryBytes === null) missing.push('free memory unknown')
@@ -244,6 +339,93 @@ export function pickReleaseTag(tags: ReadonlyArray<{ name: string; sha: string }
 
 const json = <T>(s: string, fallback: T): T => { try { return JSON.parse(s) as T } catch { return fallback } }
 
+/** The repository a release belongs to when nothing on the piece names one. */
+export const DEFAULT_RELEASE_REPO = 'agentistics/agentistics'
+
+/** One PR as gh describes it (`pr view|list --json …` or the REST `commits/<sha>/pulls` row, normalised). */
+export interface PrCandidate { number: number; state: string; headRefOid?: string; headRefName?: string; mergeSha?: string; mergedAt?: string }
+
+/**
+ * PURE. FLUXO.CICLO-COMPLETO — which merged PR is THIS piece's. Only MERGED PRs with a merge commit count. When the piece
+ * knows the sha QA approved (or the pushed head), a PR from that head wins; otherwise exactly ONE merged PR must remain —
+ * two different candidates are ambiguous and prove nothing (a wrong PR would publish a piece that never shipped).
+ */
+export function pickMergedPr(cands: readonly PrCandidate[], shas: readonly string[]): { ok: true; pr: PrCandidate } | { ok: false; reason: string } {
+  const merged = [...new Map(cands.filter(c => c.state === 'MERGED' && c.mergeSha).map(c => [c.number, c] as const)).values()]
+  if (merged.length === 0) return { ok: false, reason: cands.length ? `no MERGED PR among ${cands.map(c => `#${c.number} (${c.state})`).join(', ')}` : 'no PR found for this piece' }
+  const wanted = shas.filter(Boolean)
+  const byHead = wanted.length ? merged.filter(c => c.headRefOid && wanted.includes(c.headRefOid)) : []
+  if (byHead.length === 1) return { ok: true, pr: byHead[0]! }
+  if (merged.length === 1) return { ok: true, pr: merged[0]! }
+  return { ok: false, reason: `ambiguous: ${merged.length} merged PRs match (${merged.map(c => `#${c.number}`).join(', ')}) and none is from the approved sha` }
+}
+
+/** Where gh is asked about a piece: the author's checkout, else the repository the piece (or the default) names. */
+async function repoOf(r: DeliveryRecord, f: GateFacts, author: SessionFact | null): Promise<{ cwd: string; slug: string | null } | null> {
+  if (r.releaseRepo) return { cwd: (await f.repoCwd?.().catch(() => null)) ?? author?.rootPath ?? author?.cwd ?? '.', slug: r.releaseRepo }
+  const cwd = author?.rootPath ?? author?.cwd
+  if (cwd) return { cwd, slug: null }
+  const fallback = await f.repoCwd?.().catch(() => null)
+  return fallback ? { cwd: fallback, slug: DEFAULT_RELEASE_REPO } : null
+}
+const repoArgs = (slug: string | null) => (slug ? ['-R', slug] : [])
+const repoPath = (slug: string | null) => slug ?? '{owner}/{repo}'
+const PR_FIELDS = 'number,state,headRefOid,headRefName,mergeCommit,mergedAt'
+type PrJson = { number?: number; state?: string; headRefOid?: string; headRefName?: string; mergeCommit?: { oid?: string } | null; mergedAt?: string }
+const fromPrJson = (p: PrJson): PrCandidate | null => (typeof p.number === 'number' ? { number: p.number, state: p.state ?? '', ...(p.headRefOid ? { headRefOid: p.headRefOid } : {}), ...(p.headRefName ? { headRefName: p.headRefName } : {}), ...(p.mergeCommit?.oid ? { mergeSha: p.mergeCommit.oid } : {}), ...(p.mergedAt ? { mergedAt: p.mergedAt } : {}) } : null)
+
+export type MergedPrFinding = { ok: true; pr: number; mergeSha: string; headSha?: string; branch?: string; via: string } | { ok: false; reason: string }
+
+/**
+ * FLUXO.CICLO-COMPLETO — find the merged PR of a piece, from what the piece itself records: its PR number, its branch, the
+ * PR that contains the sha QA approved (or the pushed head), the branch its author's worktree still sits on, and — only for
+ * the one-shot backfill (`search`) — a merged PR whose title/body names the subtask id. Each route is a FACT gh states; a
+ * piece with none of them is "not provable", said in a sentence, never guessed. Never throws.
+ */
+export async function findMergedPr(r: DeliveryRecord, f: GateFacts, opts: { search?: boolean } = {}): Promise<MergedPrFinding> {
+  try {
+    const sessions = await f.sessions().catch(() => [] as SessionFact[])
+    const author = authorOf(r, sessions)
+    const repo = await repoOf(r, f, author)
+    if (!repo) return { ok: false, reason: 'the repository of the piece is not known (no author checkout, no repository recorded)' }
+    const shas = [r.qaSha, r.headSha].filter((s): s is string => !!s)
+    const tried: string[] = []
+    const settle = (cands: PrCandidate[], via: string): MergedPrFinding | null => {
+      const pick = pickMergedPr(cands, shas)
+      if (!pick.ok) { tried.push(`${via}: ${pick.reason}`); return null }
+      return { ok: true, pr: pick.pr.number, mergeSha: pick.pr.mergeSha!, ...(pick.pr.headRefOid ? { headSha: pick.pr.headRefOid } : {}), ...(pick.pr.headRefName ? { branch: pick.pr.headRefName } : {}), via }
+    }
+    const list = async (args: string[]) => {
+      const raw = json<PrJson[]>(await f.gh(repo.cwd, ['pr', 'list', ...repoArgs(repo.slug), '--state', 'merged', ...args, '--json', PR_FIELDS, '--limit', '10']).catch(() => '[]'), [])
+      return (Array.isArray(raw) ? raw : []).map(fromPrJson).filter((c): c is PrCandidate => !!c)
+    }
+    if (r.pr) {
+      const one = fromPrJson(json<PrJson>(await f.gh(repo.cwd, ['pr', 'view', String(r.pr), ...repoArgs(repo.slug), '--json', PR_FIELDS]).catch(() => '{}'), {}))
+      const got = one ? settle([one], `PR #${r.pr}`) : (tried.push(`PR #${r.pr}: gh did not describe it`), null)
+      if (got) return got
+    }
+    if (r.branch) { const got = settle(await list(['--head', r.branch]), `branch ${r.branch}`); if (got) return got }
+    for (const sha of shas) {
+      const rows = json<Array<{ number?: number; state?: string; merged_at?: string | null; merge_commit_sha?: string | null; head?: { sha?: string; ref?: string } }>>(await f.gh(repo.cwd, ['api', `repos/${repoPath(repo.slug)}/commits/${sha}/pulls`]).catch(() => '[]'), [])
+      const cands = (Array.isArray(rows) ? rows : []).flatMap(p => (typeof p.number === 'number' ? [{ number: p.number, state: p.merged_at ? 'MERGED' : (p.state ?? '').toUpperCase(), ...(p.head?.sha ? { headRefOid: p.head.sha } : {}), ...(p.head?.ref ? { headRefName: p.head.ref } : {}), ...(p.merged_at && p.merge_commit_sha ? { mergeSha: p.merge_commit_sha } : {}), ...(p.merged_at ? { mergedAt: p.merged_at } : {}) }] : []))
+      const got = settle(cands, `sha ${sha.slice(0, 9)}`)
+      if (got) return got
+    }
+    // The branch each author worktree filed on this piece still sits on (a legacy piece never recorded its branch).
+    const branches = new Set<string>()
+    for (const s of sessions) {
+      if (s.subtaskId !== r.subtaskId || s.role === 'leader' || !s.worktree) continue
+      const b = (await f.git(s.cwd, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim()
+      if (b && b !== 'main' && b !== 'dev' && b !== r.branch) branches.add(b)
+    }
+    for (const b of branches) { const got = settle(await list(['--head', b]), `worktree branch ${b}`); if (got) return got }
+    if (opts.search) { const got = settle(await list(['--search', `${r.subtaskId} in:title,body`]), `search ${r.subtaskId}`); if (got) return got }
+    return { ok: false, reason: tried.length ? `no merged PR proven — ${tried.join('; ')}` : 'no merged PR proven: the piece records no PR, branch or sha and no author worktree names one' }
+  } catch (e) {
+    return { ok: false, reason: `the merged PR could not be looked up (${e instanceof Error ? e.message.split('\n')[0] : String(e)})` }
+  }
+}
+
 // Only negative ancestry facts survive polls: commits and a resolved tag SHA are immutable. A new
 // first page restarts pagination (offsets may have shifted). Never cache a run's mutable verdict.
 interface ReleaseSearch { page: number; firstPage: string; checked: Map<string, boolean> }
@@ -292,26 +474,26 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
         return { ok: true, evidence: { branch: r.branch, head: remote, qaSha: r.qaSha } }
       }
       case 'delecoes': {
-        const author = authorOf(r, await f.sessions())
-        const cwd = author?.rootPath ?? author?.cwd
-        if (!cwd) return no('the repository of the delivery is not known', ['repositório'])
+        const repo = await repoOf(r, f, authorOf(r, await f.sessions()))
+        if (!repo) return no('the repository of the delivery is not known', ['repositório'])
+        const cwd = repo.cwd
         let pr = r.pr
-        if (!pr && r.branch) pr = json<{ number?: number }>(await f.gh(cwd, ['pr', 'view', r.branch, '--json', 'number']).catch(() => '{}'), {}).number
+        if (!pr && r.branch) pr = json<{ number?: number }>(await f.gh(cwd, ['pr', 'view', r.branch, ...repoArgs(repo.slug), '--json', 'number']).catch(() => '{}'), {}).number
         if (!pr) return no('no PR is known for this delivery', ['PR aberto'])
-        const files = json<Array<{ filename: string; status: string }>>(await f.gh(cwd, ['api', '--paginate', `repos/{owner}/{repo}/pulls/${pr}/files?per_page=100`]), [])
+        const files = json<Array<{ filename: string; status: string }>>(await f.gh(cwd, ['api', '--paginate', `repos/${repoPath(repo.slug)}/pulls/${pr}/files?per_page=100`]), [])
         return judgeDeletions(Array.isArray(files) ? files : [], r.allowDeletions?.paths ?? [], pr)
       }
       case 'mergeado': {
-        const author = authorOf(r, await f.sessions())
-        const cwd = author?.rootPath ?? author?.cwd
-        if (!cwd) return no('the repository of the delivery is not known', ['repositório'])
+        const repo = await repoOf(r, f, authorOf(r, await f.sessions()))
+        if (!repo) return no('the repository of the delivery is not known', ['repositório'])
+        const cwd = repo.cwd
         const ref = r.pr ? String(r.pr) : r.branch
         if (!ref) return no('no PR or branch recorded', ['PR'])
-        const view = json<{ number?: number; state?: string; headRefOid?: string; mergeCommit?: { oid?: string } | null }>(await f.gh(cwd, ['pr', 'view', ref, '--json', 'number,state,headRefOid,mergeCommit']), {})
+        const view = json<{ number?: number; state?: string; headRefOid?: string; mergeCommit?: { oid?: string } | null }>(await f.gh(cwd, ['pr', 'view', ref, ...repoArgs(repo.slug), '--json', 'number,state,headRefOid,mergeCommit']), {})
         let onMain: boolean | null = null
         const oid = view.mergeCommit?.oid
         if (view.state === 'MERGED' && oid) {
-          const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/{owner}/{repo}/compare/${oid}...main`, '--jq', '{status: .status}']).catch(() => '{}'), {})
+          const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${repoPath(repo.slug)}/compare/${oid}...main`, '--jq', '{status: .status}']).catch(() => '{}'), {})
           onMain = cmp.status === 'ahead' || cmp.status === 'identical' ? true : cmp.status ? false : null
         }
         return judgeMerged({ view, ...(r.qaSha ? { qaSha: r.qaSha } : {}), onMain })
@@ -328,7 +510,9 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
           : author?.rootPath ?? author?.cwd ?? (await f.repoCwd?.().catch(() => null)) ?? undefined
         if (!cwd) return no('the repository of the delivery is not known', ['repositório'])
         const repoPath = slug ?? '{owner}/{repo}'
-        const wanted = r.tag ?? (r.versionTarget && /^\d/.test(r.versionTarget) ? `v${r.versionTarget}` : null)
+        // A DECLARED release names its tag. A piece the flow saw MERGED (no declaration) is published by the first tag that
+        // CONTAINS its merge commit — a planned `versionTarget` is a plan, not proof that the tag carries the merge.
+        const wanted = r.tag ?? (r.versionTarget && /^\d/.test(r.versionTarget) && (r.declaredRelease || !r.mergeSha) ? `v${r.versionTarget}` : null)
         if (!r.mergeSha && !wanted) return no('no merge sha recorded', ['sha do merge'])
         const runList = ['run', 'list', ...(slug ? ['-R', slug] : []), '--workflow', 'release.yml', '--json', 'databaseId,status,conclusion,headSha,updatedAt', '--limit', '50']
         const runsRaw = json<ReleaseRun[]>(await f.gh(cwd, runList), [])
@@ -412,7 +596,7 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
             runs.push(...pageRuns)
           }
         }
-        return judgeRelease({ mergeSha: r.mergeSha, runs, ...(contained ? { contained } : {}), tag, tagSha, wanted, declared: Boolean(r.declaredRelease), pr: r.pr ?? null })
+        return judgeRelease({ mergeSha: r.mergeSha, runs, ...(contained ? { contained } : {}), tag, tagSha, wanted, declared: Boolean(r.declaredRelease || r.mergeDetected), pr: r.pr ?? null })
       }
     }
   } catch (error) {
@@ -429,17 +613,29 @@ export function defaultGateFacts(): GateFacts {
     return (await promisify(execFile)(cmd, cmd === 'git' ? ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, ...args] : args, { cwd, timeout: 20_000, env: gitEnv(), maxBuffer: 8 * 1024 * 1024 })).stdout
   }
   return {
+    blockedSubtasks: async () => {
+      const { loadTaskWorld } = await import('../sessions/task-source')
+      return blockedPiecesOf((await loadTaskWorld()).book)
+    },
+    pieceStatus: async id => {
+      const { loadTaskWorld } = await import('../sessions/task-source')
+      const { book } = await loadTaskWorld()
+      return book.subtasks.find(s => s.id === id)?.status ?? book.tasks.find(t => t.id === id)?.status ?? null
+    },
     subtask: async id => {
       const { loadTaskWorld } = await import('../sessions/task-source')
       const w = await loadTaskWorld()
       const s = w.book.subtasks.find(x => x.id === id)
       if (!s) return null
       const st = s.stagedSession as (StagedFact & { prompt: string }) | undefined
-      return { id: s.id, taskId: s.taskId, title: s.title, status: s.status, groupMember: Boolean(s.parentGroupId), blockedBy: s.blockedBy ?? [], ...(st ? { staged: { prompt: st.prompt, harness: st.harness, model: st.model, effort: st.effort, account: st.account, cwd: st.cwd } } : {}) }
+      const taskRow = w.book.tasks.find(t => t.id === s.taskId)
+      return { id: s.id, taskId: s.taskId, title: s.title, status: s.status, groupMember: Boolean(s.parentGroupId), ...(s.parentGroupId ? { parentGroupId: s.parentGroupId } : {}), blockedBy: s.blockedBy ?? [], priority: (await import('../sessions/task-model')).migratePriority(taskRow?.priority), ...(st ? { staged: { prompt: st.prompt, harness: st.harness, model: st.model, effort: st.effort, account: st.account, cwd: st.cwd } } : {}) }
     },
     sessions: async () => {
       const [{ readRegistry }, { readRolesDoc, roleOfRow }, { AGENTISTICS_DATA_DIR }] = await Promise.all([import('../sessions/registry'), import('../sessions/session-roles'), import('../config')])
-      const [registry, doc] = await Promise.all([readRegistry(), readRolesDoc(AGENTISTICS_DATA_DIR)])
+      const { resolveBackend } = await import('../sessions/index')
+      const [registry, doc, backend] = await Promise.all([readRegistry(), readRolesDoc(AGENTISTICS_DATA_DIR), (await resolveBackend()).list()])
+      const running = runningSessionIds(registry, backend)
       return registry.map(m => ({
         id: m.id, harness: m.harness, cwd: m.cwd, worktree: m.repo?.worktree === true,
         ...(m.repo?.rootPath ? { rootPath: m.repo.rootPath } : {}),
@@ -447,15 +643,25 @@ export function defaultGateFacts(): GateFacts {
         ...(m.taskId ? { taskId: m.taskId } : {}), ...(m.subtaskId ? { subtaskId: m.subtaskId } : {}),
         ...(m.label ? { label: m.label } : {}), ...(m.createdAt ? { createdAt: m.createdAt } : {}),
         role: roleOfRow(doc.roles, { id: m.id, conversationId: m.conversationId }) ?? (m.leader ? 'leader' : 'worker'),
-        // The registry's own end stamp: a session killed or exited is not running (a reboot's `lost` rows keep no stamp
-        // and count as running until reconciled — the conservative direction for a capacity gate).
-        alive: !m.endedAt,
+        alive: running.has(m.id),
       }))
     },
     budgets: async () => {
       const [{ planLimitsPayload }, { readPreferences }] = await Promise.all([import('../plan-limits'), import('../preferences')])
       const rows = (await planLimitsPayload((await readPreferences()).billing, Date.now())).budgets
       return rows.map(b => ({ harness: b.harness, account: (b as { account?: string }).account ?? 'default', fiveHourPct: b.fiveHourPct, weekPct: b.weekPct, stale: b.stale }))
+    },
+    queueExtras: async id => {
+      const { loadTaskWorld } = await import('../sessions/task-source')
+      const { book } = await loadTaskWorld()
+      const s = book.subtasks.find(x => x.id === id)
+      if (!s) return null
+      const notes = book.comments.filter(c => c.subtaskId === id).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      return {
+        taskTitle: book.tasks.find(t => t.id === s.taskId)?.title ?? s.taskId,
+        members: book.subtasks.filter(m => m.parentGroupId === id).map(m => ({ id: m.id, title: m.title, status: m.status })),
+        notes: { total: notes.length, last: notes.slice(-3).reverse().map(c => ({ author: c.author, at: c.createdAt, body: c.body })) },
+      }
     },
     memoryBytes: async () => (await import('../cli-run')).memAvailableAnyBytes(),
     topCap: async harness => {

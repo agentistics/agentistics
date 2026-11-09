@@ -49,11 +49,12 @@ const STATUSES: readonly ApiUsageStatus[] = ['ok', 'no-key', 'no-permission', 'e
 export const API_USAGE_URL = '/api/engine/x/api-usage'
 export const API_USAGE_POLL_MS = 60_000
 
-function timeoutSignal(ms: number): AbortSignal {
-  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms)
+/** A signal that aborts after `ms`; `done()` clears the fallback timer so a finished request leaves none behind. */
+export function timeoutSignal(ms: number): { signal: AbortSignal; done: () => void } {
+  if (typeof AbortSignal.timeout === 'function') return { signal: AbortSignal.timeout(ms), done: () => {} }
   const controller = new AbortController()
-  setTimeout(() => controller.abort(), ms)
-  return controller.signal
+  const timer = setTimeout(() => controller.abort(), ms)
+  return { signal: controller.signal, done: () => clearTimeout(timer) }
 }
 
 /** A tiny fixture shaped like the engine's answer: one item ok, one without permission. */
@@ -164,8 +165,9 @@ let stop: (() => void) | null = null
 const emit = (next: ApiUsageSnapshot) => { snap = next; for (const l of listeners) l() }
 
 async function refresh(): Promise<void> {
+  const timeout = timeoutSignal(8_000)
   try {
-    const r = await fetch(API_USAGE_URL, { cache: 'no-store', signal: timeoutSignal(8_000) })
+    const r = await fetch(API_USAGE_URL, { cache: 'no-store', signal: timeout.signal })
     // 404 = community build. Before the first answer, any refusal gives the initial empty state;
     // after a good answer, transient server failures must not erase what is already on screen.
     if (!r.ok) { if (r.status === 404 || snap.items === null) emit({ items: [] }); return }
@@ -173,7 +175,7 @@ async function refresh(): Promise<void> {
   } catch {
     // A dropped connection keeps what is on screen; before the first answer there is simply nothing.
     if (snap.items === null) emit({ items: [] })
-  }
+  } finally { timeout.done() }
 }
 
 function start(): () => void {

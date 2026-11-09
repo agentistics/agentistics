@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  ARCHIVED_CAP, HIDDEN_CAP, awaitingApprovalOf, blockOf, buildLive, ciSignalOf, estimateEta, legacyReviewShas, shasIn, stageOfStatus, stepOf, estimateStages, nextStageOf, stageTypicals, trailOf, type StageTypical, type StageVisit,
+  HIDDEN_CAP, awaitingApprovalOf, blockOf, buildLive, ciSignalOf, estimateEta, legacyReviewShas, shasIn, stageOfStatus, stepOf, estimateStages, nextStageOf, stageTypicals, trailOf, type StageTypical, type StageVisit,
 } from './task-live'
 import { describeLive, workerWord, type FleetRowLite } from './task-live-view'
 import type { TaskDetail } from './task-report'
@@ -26,6 +26,24 @@ const sess = (id: string, subtaskId: string | null, extra: object = {}) => ({
   tokens: null, costUSD: null, rounds: null, ...extra,
 })
 const ev = (id: string, at: number, extra: Partial<TaskEvent>): TaskEvent => ({ id, taskId: 't1', actor: 'x', kind: 'status', at: iso(at), ...extra })
+
+describe('every delivery carries the Agentask priority (a subtask has none of its own: it inherits its task\'s)', () => {
+  const live = (task: object) => buildLive({
+    nowMs: NOW, events: [],
+    details: [detail({ subtasks: [sub('a', 'in_progress')] as never, sessions: [sess('s1', 'a')] as never }, task)],
+  }).deliveries[0]!
+  test('the task\'s priority reaches its subtask pieces and its own task-level piece', () => {
+    expect(live({ priority: 'urgent' }).priority).toBe('urgent')
+    expect(live({ priority: 'high' }).priority).toBe('high')
+    const taskLevel = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [], sessions: [sess('s1', null)] as never }, { priority: 'medium' })] }).deliveries[0]!
+    expect(taskLevel.priority).toBe('medium')
+  })
+  test('absent, the legacy none and a typo are low — never `none` and never medium', () => {
+    expect(live({}).priority).toBe('low')
+    expect(live({ priority: 'none' }).priority).toBe('low')
+    expect(live({ priority: 'asap' }).priority).toBe('low')
+  })
+})
 
 describe('"total" is the piece\'s real work, never the task\'s age', () => {
   test('a 52-day-old task with a piece started 90 minutes ago reports 90 minutes', () => {
@@ -189,6 +207,14 @@ describe('a card never leaves without a word (item r) — one test per path that
     const h = hiddenOf([sub('a', 'done', { deliveredAt: iso(NOW - 30 * H) }), sub('b', 'done', { deliveredAt: iso(NOW - 400 * 24 * H) })])
     expect(h.map(x => [x.key, x.reason])).toEqual([['t1/a', 'published-old']])
   })
+  test('published more than 24 h ago lands in history (newest first), a year-old one does not', () => {
+    const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [
+      sub('a', 'done', { deliveredAt: iso(NOW - 30 * H) }), sub('b', 'done', { deliveredAt: iso(NOW - 5 * 24 * H) }),
+      sub('c', 'done', { deliveredAt: iso(NOW - 400 * 24 * H) }), sub('d', 'done', { deliveredAt: iso(NOW - 2 * H) }),
+    ] as never, sessions: [] as never })] })
+    expect((r.history ?? []).map(x => x.key)).toEqual(['t1/a', 't1/b'])
+    expect(r.deliveries.map(x => x.key)).toEqual(['t1/d'])
+  })
   test('queue entry that lost its staged session -> queue-idle', () => {
     expect(hiddenOf([sub('a', 'todo', { updatedAt: iso(NOW - H) })])).toEqual([expect.objectContaining({ reason: 'queue-idle', stage: 'queue' })])
     expect(hiddenOf([sub('a', 'todo', { updatedAt: iso(NOW - 30 * H) })])).toEqual([])
@@ -204,7 +230,7 @@ describe('a card never leaves without a word (item r) — one test per path that
 
 describe('the leaders band', () => {
   const row = (id: string, state: string, x: Partial<FleetRowLite> = {}): FleetRowLite => ({ id, title: id, harness: 'claude', state, ...x })
-  const reply = (ds: object[]) => ({ generatedAt: 'x', deliveries: ds as never, samples: 0, hidden: [], archived: [], archivedTotal: 0, sessionTasks: {} })
+  const reply = (ds: object[]) => ({ generatedAt: 'x', deliveries: ds as never, samples: 0, hidden: [], sessionTasks: {} })
   test('the last action is a sentence, never JSON, and the leader carries its effort', () => {
     const v = describeLive({
       reply: reply([]),
@@ -227,7 +253,7 @@ describe('the leaders band', () => {
     expect(workerWord('waiting-approval', 'blocked')).toBe('needs-you')
   })
   test('a leader\'s own filing is not a column card', () => {
-    const d = { key: 't1', taskId: 't1', taskTitle: 'Engine', subtaskId: null, title: 'Engine', status: 'in_progress', stage: 'running', stageSinceMs: 0, startedAtMs: 0, sessionIds: ['L'], harnesses: [], models: [], efforts: [], eta: { kind: 'none', reason: 'no-history' }, workMs: null, trail: [], stageEta: { kind: 'none', reason: 'no-history' }, publishEta: { kind: 'none', reason: 'no-history' }, block: null, lastAction: null, blockedReason: null, deliveredAtMs: null }
+    const d = { key: 't1', taskId: 't1', taskTitle: 'Engine', subtaskId: null, title: 'Engine', status: 'in_progress', stage: 'running', stageSinceMs: 0, startedAtMs: 0, sessionIds: ['L'], harnesses: [], models: [], efforts: [], eta: { kind: 'none', reason: 'no-history' }, workMs: null, trail: [], stageEta: { kind: 'none', reason: 'no-history' }, publishEta: { kind: 'none', reason: 'no-history' }, block: null, lastAction: null, blockedReason: null, priority: 'low', deliveredAtMs: null }
     const v = describeLive({ reply: reply([d]), rows: [row('L', 'working')], leaderIds: new Set(['L']), nowMs: NOW })
     expect(v.deliveries).toEqual([])
     expect(v.leaders[0]!.taskId).toBe('t1')
@@ -267,6 +293,36 @@ describe('FLUXO.ENTREGA-DSL: the Live is a projection of the delivery record', (
     expect(q.stage).toBe('queue')
     expect(q.staged).toEqual({ harness: 'codex', model: 'gpt-5.5', effort: 'high', account: 'acc_2' })
     expect(q.slot).toMatchObject({ ok: false })
+  })
+  test('a dequeued piece is absent from queue even though its draft is kept; review overrides a stale fila record immediately', () => {
+    const draft = { prompt: 'p', harness: 'codex' }
+    const view = (status: string, dequeued?: { reason: string }) => buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [sub('a', status, { stagedSession: draft })] as never, sessions: [] })],
+      deliveries: new Map([['a', { phase: 'fila', ...(dequeued ? { dequeued } : {}) }]]),
+    })
+    expect(view('todo', { reason: 'superseded' }).deliveries).toHaveLength(0)
+    expect(view('in_review').deliveries[0]?.stage).toBe('leader')
+    expect(view('abandoned').deliveries).toHaveLength(0)
+  })
+  test('BLOQUEIO.ORFAO r3 · a TASK-level record (keyed by the task id) decides the stage of a task with no subtasks, as a subtask record does', () => {
+    // The board still reads `blocked` (e.g. the deferral could not write it) but the record says the piece is back in the queue.
+    const q = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [], sessions: [sess('s1', null)] as never }, { status: 'blocked', blockedReason: 'esperando a chave' })],
+      deliveries: new Map([['t1', { phase: 'fila' }]]),
+    }).deliveries.find(d => d.subtaskId === null)!
+    expect(q.stage).toBe('queue')
+    expect(q.phase).toBe('fila')
+    // and the same record in a real block carries its own reason, not the board's
+    const b = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [], sessions: [] }, { status: 'blocked' })],
+      deliveries: new Map([['t1', { phase: 'bloqueado', origin: 'fila', block: { reason: 'externo', text: 'CI fora do ar' } }]]),
+    }).deliveries.find(d => d.subtaskId === null)!
+    expect(b.stage).toBe('blocked')
+    expect(b.block).toMatchObject({ originStage: 'queue' })
+    expect(b.phase).toBe('bloqueado')
   })
 })
 
@@ -329,9 +385,9 @@ describe('Publicado from a release tag, and the legacy review archive (HIGH 3)',
     const subs = Array.from({ length: 80 }, (_, i) => reviewSub(`o${i}`, 100 + i))
     const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: subs as never, sessions: [] })] })
     expect(r.deliveries).toHaveLength(0)
-    expect(r.archivedTotal).toBe(80)
-    expect(r.archived).toHaveLength(ARCHIVED_CAP)
-    expect(r.archived[0]).toMatchObject({ reason: 'legacy-review-old', title: 'Sub o0' })
+    expect(r.oldReviewsTotal).toBe(80)
+    expect(r.oldReviews).toHaveLength(80)
+    expect(r.oldReviews?.[0]).toMatchObject({ old: true, title: 'Sub o0' })
   })
   test('a fresh review card, or one with a live session, stays in Revisão do líder; a delivery record exempts it', () => {
     const details = [detail({
@@ -340,7 +396,7 @@ describe('Publicado from a release tag, and the legacy review archive (HIGH 3)',
     })]
     const r = buildLive({ nowMs: NOW, events: [], details, deliveries: new Map([['flow', { phase: 'revisao_lider' }]]) })
     expect(r.deliveries.map(d => d.subtaskId).sort()).toEqual(['alive', 'flow', 'fresh'])
-    expect(r.archivedTotal).toBe(0)
+    expect(r.oldReviewsTotal).toBe(0)
   })
 })
 
@@ -368,5 +424,29 @@ describe('M5 — a human gate waiting on the owner is projected to the card', ()
     expect(awaitingApprovalOf({ ...base, asked: { pr_merge: 3 } })).toBeNull()
     expect(awaitingApprovalOf({ ...base, asked: { pr_merge: 4 }, approvals: { pr_merge: { revision: 4, decision: 'approve' } } })).toBeNull()
     expect(awaitingApprovalOf(undefined)).toBeNull()
+  })
+})
+
+describe('HOSTILE r3 re-QA (Opus) — BLOQUEIO.ORFAO, the Live side', () => {
+  // LOW-1 (r3 re-QA): leader decision r4 — documented, not fixed in this batch.
+  test.skip('HQ6 · a blocked TASK the Live shows as its own card (subtasks + a live direct session) is a piece the vigia discovers', async () => {
+    const { blockedPiecesOf } = await import('../delivery/gates')
+    const r = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [sub('a', 'todo')] as never, sessions: [sess('d', null)] as never }, { status: 'blocked', blockedReason: 'esperando a chave' })],
+    })
+    const card = r.deliveries.find(d => d.subtaskId === null)
+    expect(card?.stage).toBe('blocked') // the Live shows a Bloqueado card for the task itself
+    const found = blockedPiecesOf({
+      tasks: [{ id: 't1', title: 'Task one', status: 'blocked', updatedAt: iso(NOW - 30 * H), blockedReason: 'esperando a chave' }],
+      subtasks: [{ id: 'a', taskId: 't1', title: 'Sub a', status: 'todo', updatedAt: iso(NOW - 2 * H) }],
+    })
+    expect(found.map(p => p.id)).toContain('t1')
+  })
+
+  test('HQ7 · a pure adoption the board released to In review leaves NO record behind, so the Live shows the board status (a review card)', () => {
+    // r4: reconcileAdopted DELETES the pure adoption on release (service.test.ts covers it); with no record the Live reads the board.
+    const control = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [sub('a', 'in_review')] as never, sessions: [] })] })
+    expect(control.deliveries.find(d => d.subtaskId === 'a')?.stage).toBe('leader')
   })
 })

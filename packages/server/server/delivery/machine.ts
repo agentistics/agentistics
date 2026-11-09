@@ -3,7 +3,7 @@
  *
  *   fila → executando → qa → { aprovado: revisao_lider | reprovado: ajuste }
  *   ajuste → qa                                   (ajuste NEVER goes straight to revisao_lider)
- *   revisao_lider → { ok: pr_merge | pede mudança: ajuste }
+ *   revisao_lider → { ok: pr_merge | pede mudança: ajuste | PR já mergeado (o tick detecta): ci }
  *   pr_merge → { merge ok: ci | falhou: revisao_lider }
  *   ci → { release.yml verde + tag: publicado | falhou: revisao_lider }
  *   bloqueado ← any phase but publicado, and back to the STORED origin phase only.
@@ -73,9 +73,15 @@ export interface DeliveryBlock {
   unlocker: 'self' | 'leader' | 'owner'
   /** Last time the leader (or, autonomous OFF + decisao_do_dono, the owner) was woken for it. */
   lastWakeAt?: string
+  /** The last time a wake was TRIED and did not reach anybody — a failed wake is not retried every minute, it waits its cadence too. */
+  lastWakeAttemptAt?: string
   wakes?: number
   /** Set once the piece was deferred to the next batch (reason 6 under autonomous, or > 2 h). */
   deferredAt?: string
+  /** The deferral could not move the BOARD piece to the queue: the next tick re-applies it (once per tick, silently) until it lands. */
+  boardMovePending?: boolean
+  /** How many ticks already retried that board move; the retry is capped, then dropped with one notice. */
+  boardMoveTries?: number
 }
 
 export interface QaVerdict { verdict: 'APROVADO' | 'REPROVADO'; findings: string; sha: string; qaSessionId?: string; at: string }
@@ -89,10 +95,42 @@ export interface DeliveryCi { mergedMain: boolean; releaseGreen: boolean; tagPub
 export interface DeliveryHistoryEntry { from: Phase; to: Phase; at: string; actor: string; detail: string; revision: number }
 
 /** The delivery record: one per subtask, the single source of truth the Live is a projection of. */
+/** The leader's open question: is this queued piece allowed to start now? */
+export interface QueueAsk {
+  at: string
+  leaderSessionId?: string
+  /** The question reached the leader's composer; false = retried each tick until it does (or the timeout decides). */
+  delivered: boolean
+  /** Last reminder (autonomous OFF only): the flow keeps waiting and reminds every 10 min. */
+  remindedAt?: string
+  /** `sim` given (by the leader, or by the 10 min timeout in autonomous mode): start when the slot gate passes. */
+  approved?: { at: string; actor: string; auto: boolean }
+  /** Claimed under the store lock right before the session is spawned — two ticks never open two sessions. */
+  startingAt?: string
+}
+export interface QueueHold {
+  kind: 'nao' | 'agendar'
+  reason: string
+  at: string
+  actor: string
+  /** `agendar`: ISO instant the piece becomes a candidate again. */
+  until?: string
+}
+
 export interface DeliveryRecord {
   subtaskId: string
   taskId: string
   phase: Phase
+  /** Withdrawn from the queue; history and the draft remain, and only an explicit restage reopens it. */
+  dequeued?: { at: string; actor: string; reason: string; commentedAt?: string }
+  /** FILA.PRIORIDADE — the question put to the leader before this queued piece leaves the queue (see `fila-proximo.ts`). */
+  queueAsk?: QueueAsk
+  /** FILA.PRIORIDADE — the leader's `nao` / `agendar`: the piece stays queued and is not a candidate while this holds. */
+  queueHold?: QueueHold
+  /** FILA.PRIORIDADE — how the piece left the queue (the link to the session it opened), kept so the Fila tab can still point at it. */
+  queueStarted?: { at: string; actor: string; auto: boolean; sessionId: string }
+  /** Explicit link to the canonical engine pedido, retained even when its event bus is temporarily unavailable. */
+  pedidoIds?: string[]
   /** Where a block returns to. Present only while `phase === 'bloqueado'`. */
   origin?: Phase
   block?: DeliveryBlock
@@ -100,6 +138,12 @@ export interface DeliveryRecord {
   /** Release batch this piece ships in (`2.200.8`, …); `next` after a deferral. */
   versionTarget?: string
   leaderSessionId?: string
+  /**
+   * `board` = this record was created by the vigia's ADOPTION of a piece the board already held in `blocked` (BLOQUEIO.ORFAO),
+   * not by a flow transition. Only such a record is reconciled against the board's own status each tick: the board is the
+   * only witness of a block the flow never made.
+   */
+  adopted?: 'board'
   authorSessionId?: string
   authorModel?: string
   qaSessionId?: string
@@ -128,6 +172,12 @@ export interface DeliveryRecord {
   releaseRepo?: string
   /** Present only for a piece the leader DECLARED through `flow release`. The tick never sends such a piece back to the review. */
   declaredRelease?: { version: string; mergeSha: string; repo: string; at: string; by: string }
+  /**
+   * FLUXO.CICLO-COMPLETO — the flow FOUND this piece's PR merged (the leader merged it without moving the piece). Like a declared
+   * release it is published by the first tag that contains the merge and is never bounced back to the review by a red run of
+   * the merge commit (that would loop: the next tick finds the same merged PR).
+   */
+  mergeDetected?: { at: string; pr: number; via: string }
   /** The tag's own release run was red: the leader was told once (ISO + reason); the piece stays in `ci` until it is green. */
   releaseFailNotice?: { at: string; reason: string }
   gates: Partial<Record<GateName, GateResult>>
@@ -141,6 +191,16 @@ export interface DeliveryRecord {
   allowDeletions?: { paths: string[]; reason: string }
   /** The step of the CURRENT phase last reported (Live per-phase %). */
   step?: number
+  /**
+   * FLUXO.CICLO-COMPLETO — what the minute tick last concluded about this piece in its CURRENT phase (merge detection in
+   * revisao_lider/pr_merge, the release gate in ci): the sentence a reader needs to know why it has not moved. Cleared on
+   * every transition; never a decision, only the tick's reason.
+   */
+  tickNote?: { at: string; phase: Phase; revision: number; reason: string; /** A gate REFUSED (as opposed to "not yet"): the piece waits on the leader. */ failed?: boolean }
+  /** The last time the task's LEADER acted on this piece without moving it (a gate, a configure, a step). Restarts the review clock. */
+  leaderTouchedAt?: string
+  /** FLUXO.CICLO-COMPLETO — the timed reminder to the live leader for a piece waiting on them (one per phase/revision, max 3). */
+  reviewNudge?: { phase: Phase; revision: number; sent: number; lastAt?: string; lastAttemptAt?: string }
   history: DeliveryHistoryEntry[]
   createdAt: string
   updatedAt: string
@@ -224,6 +284,12 @@ export const EDGES: Readonly<Record<string, Edge>> = {
     ],
   },
   'revisao_lider>ajuste': { gates: [], needs: [detail('o pedido de mudança do líder (detail)')] },
+  // FLUXO.CICLO-COMPLETO: the leader merged the PR without moving the piece. The merge IS the leader's review; the same two
+  // merge gates the pr_merge edge reads prove it (the PR is MERGED, on main, from the sha QA approved; nothing deleted outright).
+  'revisao_lider>ci': {
+    gates: ['delecoes', 'mergeado'],
+    needs: [(r) => (r.mergeSha ? null : 'o sha do merge no main (lido do PR pelo portão mergeado)'), detail('como o merge foi encontrado (detail)')],
+  },
   'pr_merge>ci': { gates: ['delecoes', 'mergeado'], needs: [(r) => (r.mergeSha ? null : 'o sha do merge no main (lido do PR pelo portão mergeado)')] },
   'pr_merge>revisao_lider': { gates: [], needs: [detail('o motivo da falha do merge (checagem, conflito ou deleção)')] },
   'ci>publicado': { gates: ['release'], needs: [] },
@@ -300,6 +366,12 @@ export function planTransition(r: DeliveryRecord, to: unknown, input: Transition
   next.revision = r.revision + 1
   next.updatedAt = ctx.at
   delete next.step
+  delete next.queueAsk // the queue's question and hold belong to the piece's time in `fila`
+  delete next.queueHold
+  delete next.adopted // a real flow transition: this is a delivery now, never a mere adoption (BLOQUEIO.ORFAO r3)
+  delete next.tickNote // the tick's reason belonged to the phase being left
+  delete next.reviewNudge
+  delete next.leaderTouchedAt
   if (skipped) next.skips = [...next.skips, skipped]
   const d = input.detail?.trim() ?? ''
   if (r.phase === 'qa') {
@@ -307,7 +379,7 @@ export function planTransition(r: DeliveryRecord, to: unknown, input: Transition
     if (to === 'revisao_lider') next.qaSha = r.headSha
     else delete next.qaSha
   }
-  if (r.phase === 'revisao_lider') next.review = { sha: input.reviewedSha ?? '', decision: to === 'pr_merge' ? 'ok' : 'ajustar', detail: d, at: ctx.at, by: ctx.actor }
+  if (r.phase === 'revisao_lider') next.review = { sha: input.reviewedSha ?? (to === 'ci' ? r.qaSha ?? '' : ''), decision: to === 'ajuste' ? 'ajustar' : 'ok', detail: d, at: ctx.at, by: ctx.actor }
   if (to === 'ajuste') { delete next.qaSha; delete next.mergeSha; delete next.ci; delete next.publishedAt }
   if (to === 'ci') {
     next.mergeSha = r.mergeSha
@@ -333,6 +405,7 @@ export function planBlock(r: DeliveryRecord, reason: unknown, text: string, ctx:
   next.revision = r.revision + 1
   next.updatedAt = ctx.at
   delete next.step
+  delete next.adopted // a block the flow itself made is not the board's orphan any more
   next.block = {
     reason: recorded, text: text.trim(), since: ctx.at, unlocker: unlockerOf(recorded), wakes: 0,
     // Reason 6 with the owner away: the leader does NOT perform the action — the safe path is decided now.
@@ -341,6 +414,18 @@ export function planBlock(r: DeliveryRecord, reason: unknown, text: string, ctx:
   if (recorded === 'fora_das_autorizacoes') next.versionTarget = 'next'
   next.history = [...r.history, { from: r.phase, to: 'bloqueado', at: ctx.at, actor: ctx.actor, detail: `${recorded}: ${text.trim()}`, revision: next.revision }]
   return { ok: true, next, skipped: null }
+}
+
+/**
+ * PURE. Is this `adopted: 'board'` record still ONLY an adoption (BLOQUEIO.ORFAO)? It stops being one the moment it has history in a
+ * real phase, evidence (head sha, gates, sessions, PR) or the machine's own marker was cleared: such a record is a delivery, and the
+ * board going done/abandoned/missing must never delete it.
+ */
+export function isPureAdoption(r: DeliveryRecord): boolean {
+  if (r.adopted !== 'board') return false
+  if (r.headSha || r.branch || r.pr || r.mergeSha || r.authorSessionId || r.qaSessionId || r.qa || r.review || Object.keys(r.gates ?? {}).length > 0) return false
+  const bookkeeping = (p: string) => p === 'fila' || p === 'bloqueado'
+  return r.history.every(h => bookkeeping(h.from) && bookkeeping(h.to))
 }
 
 /** PURE. Leave `bloqueado` — ALWAYS to the stored origin, never anywhere else. */
@@ -353,6 +438,7 @@ export function planUnblock(r: DeliveryRecord, ctx: { at: string; actor: string;
   next.updatedAt = ctx.at
   delete next.origin
   delete next.block
+  if (next.phase !== 'fila') delete next.adopted // unblocked into a real phase: no longer a pure adoption
   next.history = [...r.history, { from: 'bloqueado', to: r.origin, at: ctx.at, actor: ctx.actor, detail: ctx.detail?.trim() || 'desbloqueado', revision: next.revision }]
   return { ok: true, next, skipped: null }
 }
@@ -398,8 +484,10 @@ export function planWatch(records: readonly DeliveryRecord[], o: { nowMs: number
     if (b.reason === 'decisao_do_dono' && o.autonomous) { out.push({ kind: 'convert-owner-block', subtaskId: r.subtaskId }); continue }
     if (b.deferredAt) continue
     if (age > BLOCK_DEFER_AFTER_MS && b.reason !== 'decisao_do_dono') { out.push({ kind: 'defer', subtaskId: r.subtaskId, reason: b.reason, ageMs: age }); continue }
-    const last = Date.parse(b.lastWakeAt ?? b.since)
-    if (b.reason !== 'dependencia' && (!b.lastWakeAt || o.nowMs - last >= BLOCK_WAKE_EVERY_MS)) out.push({ kind: 'wake-leader', subtaskId: r.subtaskId, reason: b.reason, ageMs: age, text: b.text })
+    // A wake that was only ATTEMPTED counts for the cadence too: a dead leader is retried every 30 min, not every minute.
+    const stamps = [b.lastWakeAt, b.lastWakeAttemptAt].map(s => Date.parse(s ?? '')).filter(Number.isFinite)
+    const last = stamps.length > 0 ? Math.max(...stamps) : NaN
+    if (b.reason !== 'dependencia' && (stamps.length === 0 || o.nowMs - last >= BLOCK_WAKE_EVERY_MS)) out.push({ kind: 'wake-leader', subtaskId: r.subtaskId, reason: b.reason, ageMs: age, text: b.text })
   }
   return out
 }

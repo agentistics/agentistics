@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises'
 import { PORT, WEB_PORT, TEAM_CENTRAL, TEAM_PASSWORD, TEAM_ORG, INGEST_ONLY } from './config'
 import type { Server, ServerWebSocket } from 'bun'
 import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
-import { featureOn } from '@agentistics/core'
+import { featureOn, LIVE_PERIODS, LIVE_TABS, parseLiveSort, type LivePeriod, type LiveTab } from '@agentistics/core'
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { sendTelemetry } from './telemetry'
@@ -2468,6 +2468,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         ...(url.searchParams.get('task') ? { task: url.searchParams.get('task')! } : {}),
         ...(stage ? { stage } : {}),
         ...(url.searchParams.get('stalled') === '1' ? { stalledOnly: true } : {}),
+        // The screen's tab and Publicado period (the web keeps its choice in the browser; an agent passes it here).
+        // A missing OR invalid tab/period is not passed on: the reply falls back to `tab=all`, `period=24h` and says so in `view.defaulted`.
+        ...(LIVE_TABS.includes(url.searchParams.get('tab') as LiveTab) ? { tab: url.searchParams.get('tab') as LiveTab } : {}),
+        ...(LIVE_PERIODS.includes(url.searchParams.get('period') as LivePeriod) ? { period: url.searchParams.get('period') as LivePeriod } : {}),
+        ...(url.searchParams.has('sort') ? { sort: parseLiveSort(url.searchParams.get('sort')) } : {}),
       }))
     }
     // The two ORCHESTRATION reads, matched before the generic `<ref>` GET below — otherwise
@@ -2587,12 +2592,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(found)
     }
     if (url.pathname === '/api/tasks' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string }
+      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string; priority?: string }
       const { createTask } = await import('./sessions/task-web')
+      // FLUXO.AVISOS 9: an unknown priority word is refused, never silently stored as `low`.
+      if (body.priority !== undefined && !['urgent', 'high', 'medium', 'low'].includes(body.priority)) return json({ error: 'bad_priority', message: 'priority must be urgent | high | medium | low' }, 400)
       const made = await createTask({
         title: body.title ?? '',
         ...(body.detail !== undefined ? { detail: body.detail } : {}),
         ...(typeof body.type === 'string' ? { type: body.type } : {}),
+        ...(body.priority !== undefined ? { priority: body.priority } : {}),
       })
       if (!made) return json({ error: 'title_required' }, 400)
       return json({ task: made })
@@ -3077,10 +3085,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         await markCallerVerified(body.value, verifySessionIdentity)
         const out = await runFleetAction(fleetLang(url.searchParams.get('lang')), body.value)
-        // ORQ.H1: the OWNER's composer message (no verified session caller) → `owner.message` for the flows.
-        if (out.ok && body.value.action === 'prompt') {
-          void import('./flows/owner-message').then(m => m.emitOwnerMessage(body.value, m.defaultOwnerMessageDeps())).catch(() => {})
-        }
         // An account refusal (reopen, group reopen, external continuation) keeps its status.
         const { spawnAccountStatus } = await import('./sessions/spawn-account')
         return new Response(JSON.stringify(out), {

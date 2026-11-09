@@ -46,8 +46,9 @@ function fake(id: ProtectorId): Fake {
 
 export let T = 1_800_000_000_000
 const clock = () => T
-let seed: Uint8Array
-export const codeAt = (o = 0) => hotp(seed, Math.floor(T / 30_000) + o)
+// COFRE.DESBLOQUEIO (2026-11-07): there is no authenticator any more, so no seed. A "code" a test still
+// passes is IGNORED by the gate — kept as a constant so a test can prove exactly that.
+export const codeAt = (_o = 0) => '123456'
 export const next = () => { T += 30_000 }
 export let dir = ''
 export let dpapi = fake('dpapi')
@@ -69,15 +70,12 @@ export async function silentVault(): Promise<void> {
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('MARK'))
 }
 
-/** …plus the authenticator only (the leader's order puts presence BEFORE the recovery key). */
+/**
+ * What used to be "…plus the authenticator". COFRE.DESBLOQUEIO: there is no authenticator step, so this
+ * is the silent vault itself — kept under its old name so the scenarios built on it read unchanged.
+ */
 export async function authVault(): Promise<void> {
   await silentVault()
-  const a = await beginAuthenticator(S, 'box')
-  if (!a.ok) throw new Error(a.sentence)
-  seed = base32Decode(a.secret)
-  const c = await confirmAuthenticator(codeAt(0), S)
-  if (!c.ok) throw new Error(c.sentence)
-  next()
 }
 
 /** Make the recovery key now (socket); returns the words. */
@@ -92,12 +90,6 @@ export async function makeRecovery(): Promise<string[]> {
 /** …plus the authenticator and a recovery key (through the socket session), presence NOT yet enrolled. */
 export async function enrolledVault(): Promise<{ words: string[] }> {
   await silentVault()
-  const a = await beginAuthenticator(S, 'box')
-  if (!a.ok) throw new Error(a.sentence)
-  seed = base32Decode(a.secret)
-  const c = await confirmAuthenticator(codeAt(0), S)
-  if (!c.ok) throw new Error(c.sentence)
-  next()
   const r = await beginRecoveryKey(S)
   if (!r.ok) throw new Error(r.sentence)
   const k = await confirmRecoveryKey(r.positions.map(p => r.words[p - 1]!))
@@ -181,17 +173,17 @@ describe('M1 — CSRF: /api/vault POSTs need a same-origin proof AND a JSON body
     expect((await post('/api/vault/unlock', CROSS, '{}')).json.code).toBe('not-same-origin')
     expect(hello.gestures).toBe(g)
   })
-  test('the dashboard itself (same-origin, JSON) still works — a wrong code is judged', async () => {
+  test('the dashboard itself (same-origin, JSON) still works — and a code is no longer judged at all', async () => {
     await enrolledVault()
     const r = await post('/api/vault/stepup', SAME, CODE)
-    expect(r.json.code).toBe('stepup-wrong')
-    expect((await stepUpState()).failures).toBe(1)
+    expect(r.json.code).not.toBe('not-same-origin')
+    expect(r.json.code).not.toBe('stepup-wrong')
+    expect((await stepUpState()).failures).toBe(0)
   })
   test('an older browser without Sec-Fetch-Site passes on a matching Origin only', async () => {
     await enrolledVault()
-    expect((await post('/api/vault/stepup', { 'content-type': 'application/json', origin: 'http://127.0.0.1:47291' }, CODE)).json.code).toBe('stepup-wrong')
+    expect((await post('/api/vault/stepup', { 'content-type': 'application/json', origin: 'http://127.0.0.1:47291' }, CODE)).json.code).not.toBe('not-same-origin')
     expect((await post('/api/vault/stepup', { 'content-type': 'application/json', origin: 'http://evil.example' }, CODE)).json.code).toBe('not-same-origin')
-    expect((await stepUpState()).failures).toBe(1)
   })
 })
 
@@ -219,10 +211,13 @@ describe('M2 — in recovery mode the re-enrolment steps answer the local socket
     expect(!r.ok && r.code).toBe('recovery-tty-only')
     expect(JSON.stringify(r)).not.toMatch(/"words"/)
   })
-  test('HTTP cannot get a new authenticator seed', async () => {
+  test('no channel can get an authenticator seed any more (COFRE.DESBLOQUEIO) — not HTTP, not the terminal', async () => {
     await inRecovery()
-    const r = await beginAuthenticator(WEB, 'box')
-    expect(!r.ok && r.code).toBe('recovery-tty-only')
+    for (const ctx of [WEB, S]) {
+      const r = await beginAuthenticator(ctx, 'box')
+      expect(!r.ok && r.code).toBe('authenticator-retired')
+      expect(JSON.stringify(r)).not.toContain('otpauth')
+    }
   })
   test('HTTP cannot enrol a presence credential', async () => {
     await inRecovery()
@@ -231,10 +226,9 @@ describe('M2 — in recovery mode the re-enrolment steps answer the local socket
     expect(!r.ok && r.code).toBe('recovery-tty-only')
     expect(hello.gestures).toBe(g)
   })
-  test('the local terminal (vault.sock) still completes all three steps without the lost factors', async () => {
+  test('the local terminal (vault.sock) still completes both steps without the lost factors', async () => {
     await inRecovery()
-    const a = await beginAuthenticator(S, 'box')
-    expect(a.ok).toBe(true)
+    expect((await vaultStatus()).recoveryTodo).not.toContain('authenticator')
     const r = await beginRecoveryKey(S)
     expect(r.ok).toBe(true)
     expect((await enrolPresence('hello', S)).ok).toBe(true)
@@ -294,60 +288,51 @@ import { mintSetupCode, probePresence } from './gate'
 
 describe('S2 — first enrolment from a page needs a proof from this machine', () => {
   const WEB = { session: 'http:local' }
-  test('the first authenticator over HTTP is refused without a setup code (no seed handed out)', async () => {
+  // COFRE.DESBLOQUEIO: the first enrolment is now the WAY OF CONFIRMING (no authenticator before it); the
+  // device check is its first request, and it needs the same proof from this machine.
+  test('the first device check over HTTP is refused without a setup code', async () => {
     await silentVault()
-    const r = await beginAuthenticator(WEB, 'box')
+    const r = await probePresence('hello', WEB)
     expect(!r.ok && r.code).toBe('setup-code-required')
     expect(!r.ok && r.sentence).toContain('agentop vault setup-code')
-    expect(JSON.stringify(r)).not.toContain('otpauth')
   })
   test('with the code the service printed, it proceeds — once', async () => {
     await silentVault()
     const { code } = mintSetupCode()
     expect(code).toMatch(/^\d{8}$/)
-    const r = await beginAuthenticator({ ...WEB, setupCode: code }, 'box')
+    const r = await probePresence('hello', { ...WEB, setupCode: code })
     expect(r.ok).toBe(true)
-    const again = await beginAuthenticator({ ...WEB, setupCode: code }, 'box')
+    const again = await probePresence('hello', { ...WEB, setupCode: code })
     expect(!again.ok && again.code).toBe('setup-code-required')
   })
   test('five wrong setup codes burn it', async () => {
     await silentVault()
     const { code } = mintSetupCode()
-    for (let i = 0; i < 5; i++) expect((await beginAuthenticator({ ...WEB, setupCode: '00000000' }, 'box')).ok).toBe(false)
-    const r = await beginAuthenticator({ ...WEB, setupCode: code }, 'box')
+    for (let i = 0; i < 5; i++) expect((await probePresence('hello', { ...WEB, setupCode: '00000000' })).ok).toBe(false)
+    const r = await probePresence('hello', { ...WEB, setupCode: code })
     expect(!r.ok && r.code).toBe('setup-code-required')
   })
   test('an expired setup code is refused', async () => {
     await silentVault()
     const { code } = mintSetupCode()
     T += 11 * 60_000
-    expect((await beginAuthenticator({ ...WEB, setupCode: code }, 'box')).ok).toBe(false)
+    expect((await probePresence('hello', { ...WEB, setupCode: code })).ok).toBe(false)
   })
   test('the local terminal (socket) needs no setup code', async () => {
     await silentVault()
-    expect((await beginAuthenticator(S, 'box')).ok).toBe(true)
+    expect((await probePresence('hello', S)).ok).toBe(true)
   })
-  test('the first recovery key over HTTP, outside THIS session\'s wizard, needs the authenticator code', async () => {
+  test('the first recovery key over HTTP, outside THIS session\'s wizard, needs the setup code', async () => {
     await silentVault()
-    const a = await beginAuthenticator(S, 'box')
-    if (!a.ok) throw new Error(a.sentence)
-    seed = base32Decode(a.secret)
-    expect((await confirmAuthenticator(codeAt(), S)).ok).toBe(true)
-    next()
-    // The wizard flow belongs to the session that verified the code — a page is not that session.
     const r = await beginRecoveryKey(WEB)
-    expect(!r.ok && r.code).toBe('stepup-required')
-    const ok = await beginRecoveryKey({ ...WEB, code: codeAt() })
-    expect(ok.ok).toBe(true)
+    expect(!r.ok && r.code).toBe('setup-code-required')
+    const { code } = mintSetupCode()
+    expect((await beginRecoveryKey({ ...WEB, setupCode: code })).ok).toBe(true)
   })
-  test('inside the same session\'s wizard the verified code stands for the recovery step', async () => {
+  test('inside the same session\'s wizard the setup code it spent stands for the recovery step', async () => {
     await silentVault()
     const { code } = mintSetupCode()
-    const a = await beginAuthenticator({ ...WEB, setupCode: code }, 'box')
-    if (!a.ok) throw new Error(a.sentence)
-    seed = base32Decode(a.secret)
-    expect((await confirmAuthenticator(codeAt(), WEB)).ok).toBe(true)
-    next()
+    expect((await acceptSetupCode({ ...WEB, setupCode: code })).ok).toBe(true)
     expect((await beginRecoveryKey(WEB)).ok).toBe(true)
   })
   test('a failed device check is said in words, never as a reason code', async () => {
@@ -422,10 +407,11 @@ describe('S5 — onStateChange / lockedBy / autoLockInMs are fed by the vault', 
     expect(await ensureVaultOpen({ create: false, migrate: false })).not.toBeNull()
     expect(again.at(-1)?.state).toBe('open')
   })
-  test('a frozen step-up is heard as stepup-frozen', async () => {
+  test('codes are never judged any more, so twenty wrong ones freeze nothing (COFRE.DESBLOQUEIO)', async () => {
     const seen = await watching()
     for (let i = 0; i < 20; i++) { T += 16 * 60_000; await requireVaultStepUp('set-auto-lock', { session: 'socket', code: '000000' }) }
-    expect(seen.at(-1)).toMatchObject({ state: 'locked', lockedBy: 'stepup-frozen' })
+    expect(seen.some(s => s.lockedBy === 'stepup-frozen')).toBe(false)
+    expect((await stepUpState()).frozen).toBe(false)
   })
 })
 
@@ -489,7 +475,7 @@ describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
   })
 
   for (const point of ['before-commit-mark', 'before-finish']) {
-    test(`a crash after the commit (${point}) is finished on the next unlock — the code still works, nothing is lost`, async () => {
+    test(`a crash after the commit (${point}) is finished on the next unlock — the gesture alone opens it, nothing is lost`, async () => {
       await enrolledVault() // a recovery key exists: the terminal brings the words, so it must follow too
       const old = await silentCopy()
       __rekeyCrashAtForTests(point)
@@ -498,8 +484,9 @@ describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
       restart()
       expect(vaultJson().kid).not.toBe(old.kid)
       const u = await unlockWithGesture()
-      expect(u.ok && u.state).toBe('pending-stepup')
-      expect((await completeUnlock(codeAt())).ok).toBe(true)
+      // COFRE.DESBLOQUEIO: no code is owed after the gesture — the unlock completes at once.
+      expect(u.ok && u.state).toBe('open')
+      expect((await completeUnlock(codeAt())).ok).toBe(false)
       const r = await openFromFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup')
       expect(r.ok && new TextDecoder().decode(r.plaintext)).toBe('MARK')
       expect(leftovers()).toEqual([])
@@ -537,12 +524,12 @@ describe('S7 — presence enrolment rotates the data key, crash-safely', () => {
 describe('decision 3 — the setup code never reaches a log; it is minted on demand for a TTY', () => {
   test('a page asking without a code gets a sentence naming the command — and nothing is minted or logged', async () => {
     await silentVault()
-    const r = await beginAuthenticator({ session: 'http:local' }, 'box')
+    const r = await probePresence('hello', { session: 'http:local' })
     expect(!r.ok && r.code).toBe('setup-code-required')
     expect(!r.ok && r.sentence).toContain('agentop vault setup-code')
     expect(!r.ok && r.sentence).not.toMatch(/\blog\b/)
     // Nothing was minted for the page to guess at: no 8-digit code is live.
-    expect((await beginAuthenticator({ session: 'http:local', setupCode: '00000000' }, 'box')).ok).toBe(false)
+    expect((await probePresence('hello', { session: 'http:local', setupCode: '00000000' })).ok).toBe(false)
   })
   test('the socket op refuses a caller that is not on a terminal', async () => {
     await silentVault()
@@ -559,8 +546,8 @@ describe('decision 3 — the setup code never reaches a log; it is minted on dem
     const a = (await op({ op: 'setup-code', tty: true })).reply as { code: string }
     const b = (await op({ op: 'setup-code', tty: true })).reply as { code: string }
     expect(a.code).not.toBe(b.code) // a fresh code each time (a collision is 1 in 10^8)
-    expect((await beginAuthenticator({ session: 'http:local', setupCode: a.code }, 'box')).ok).toBe(false)
-    expect((await beginAuthenticator({ session: 'http:local', setupCode: b.code }, 'box')).ok).toBe(true)
+    expect((await probePresence('hello', { session: 'http:local', setupCode: a.code })).ok).toBe(false)
+    expect((await probePresence('hello', { session: 'http:local', setupCode: b.code })).ok).toBe(true)
   })
 })
 
@@ -569,7 +556,7 @@ describe('decision 3 — the setup code never reaches a log; it is minted on dem
 import { wizardPlan, missingSteps } from '../../../web/src/lib/vaultApi'
 import { stepsToRun } from './enroll-plan'
 
-describe('decision 2 — authenticator → presence (the key rotates) → recovery LAST; words never linger', () => {
+describe('decision 2 — presence (the key rotates) → recovery LAST; words never linger', () => {
   test('a just-confirmed recovery key is NOT kept: presence right after it still needs the words', async () => {
     await enrolledVault() // recovery confirmed a moment ago, same session
     const r = await enrolPresence('hello', { ...S, code: codeAt() })
@@ -601,21 +588,17 @@ describe('decision 2 — authenticator → presence (the key rotates) → recove
     expect(!r.ok && r.sentence).toContain('agentop vault enroll --presence')
     expect(!r.ok && r.sentence).toMatch(/new recovery words/i)
   })
-  test('the page\'s wizard keeps its flow through presence: the recovery key after it needs no second code', async () => {
+  test('the page\'s wizard keeps its flow through presence: the recovery key after it needs no second proof', async () => {
     await silentVault()
     const W = { session: 'http:local' }
-    const a = await beginAuthenticator({ ...W, setupCode: mintSetupCode().code }, 'box')
-    if (!a.ok) throw new Error(a.sentence)
-    seed = base32Decode(a.secret)
-    expect((await confirmAuthenticator(codeAt(), W)).ok).toBe(true)
-    next()
+    expect((await acceptSetupCode({ ...W, setupCode: mintSetupCode().code })).ok).toBe(true)
     expect((await enrolPresence('hello', W)).ok).toBe(true)
     expect((await beginRecoveryKey(W)).ok).toBe(true)
   })
-  test('the wizard and the terminal both run authenticator → presence → recovery', () => {
-    expect(missingSteps({ authenticator: null, recoveryCreatedAt: null, presence: false, presenceAvailable: ['hello'] })).toEqual(['authenticator', 'presence', 'recovery'])
-    expect(wizardPlan(['authenticator', 'presence', 'recovery'])).toEqual(['probe', 'authenticator', 'presence', 'recovery'])
-    expect(stepsToRun({ only: [], presence: null, requirePresence: false } as never, { authenticator: false, recovery: false, presence: false, available: ['hello'] })).toEqual(['authenticator', 'presence', 'recovery'])
+  test('the wizard and the terminal both run presence → recovery — no authenticator step', () => {
+    expect(missingSteps({ recoveryCreatedAt: null, presence: false, presenceAvailable: ['hello'] })).toEqual(['presence', 'recovery'])
+    expect(wizardPlan(['presence', 'recovery'])).toEqual(['presence', 'recovery'])
+    expect(stepsToRun({ only: [], presence: null, requirePresence: false }, { recovery: false, presence: false, available: [{ id: 'hello', advanced: false }] })).toEqual(['presence', 'recovery'])
   })
 })
 
@@ -639,19 +622,19 @@ describe('the setup code is asked BEFORE any gesture', () => {
     expect(!r.ok && r.code).toBe('setup-code-required')
     expect(hello.gestures).toBe(before)
   })
-  test('accepting the code first carries the whole wizard: probe, authenticator, first words — no second code', async () => {
+  test('accepting the code first carries the whole wizard: probe, first words — no second code', async () => {
     await silentVault()
     expect(setupCodeOwed(false, SWEB)).toBe(true)
     expect((await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })).ok).toBe(true)
     expect(setupCodeOwed(false, SWEB)).toBe(false)
     expect((await probePresence('hello', SWEB)).ok).toBe(true)
-    expect((await beginAuthenticator(SWEB, 'box')).ok).toBe(true)
+    expect((await beginRecoveryKey(SWEB)).ok).toBe(true)
   })
   test('the proof belongs to the session that typed the code', async () => {
     await silentVault()
     expect((await acceptSetupCode({ ...SWEB, setupCode: mintSetupCode().code })).ok).toBe(true)
     expect(setupCodeOwed(false, OTHER)).toBe(true)
-    const r = await beginAuthenticator(OTHER, 'box')
+    const r = await probePresence('hello', OTHER)
     expect(!r.ok && r.code).toBe('setup-code-required')
     expect((await beginRecoveryKey(OTHER)).ok).toBe(false)
   })

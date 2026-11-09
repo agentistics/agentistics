@@ -49,7 +49,8 @@ describe('vault bundle: backup on one machine, restore on a fresh one with the 2
     expect((await recoverWithWords('abandon '.repeat(23) + 'art')).ok).toBe(false)
     const rec = await recoverWithWords(r.words.join(' '))
     expect(rec.ok).toBe(true)
-    expect(rec.ok && rec.todo).toContain('authenticator')
+    expect(rec.ok && rec.todo).toContain('recovery')
+    expect(rec.ok && rec.todo).not.toContain('authenticator') // COFRE.DESBLOQUEIO: no authenticator step
     // everything came back, readable under the same key
     const items = await listItems()
     expect(items.map(i => i.name)).toEqual(['Banco'])

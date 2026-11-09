@@ -54,6 +54,34 @@ export function countGitCommands(cmd: string): { commits: number; pushes: number
 }
 
 /**
+ * What may precede a test runner and still be a way of RUNNING it: environment assignments
+ * (`NODE_OPTIONS=--max-old-space-size=3500 bun test`) and a CLOSED list of wrapper programs — the same rule
+ * `countGitCommands` follows, for the same reason (`echo "bun test"` runs nothing).
+ */
+const TEST_WRAPPER = '(?:(?:[A-Z_][A-Z0-9_]*=\\S*\\s+)*(?:(?:rtk(?:\\s+proxy)?|sudo|time|env|command|nice|flock\\s+\\S+|timeout\\s+\\S+|agentop\\s+run(?:\\s+--?[\\w-]+)*\\s+--)\\s+)*(?:[A-Z_][A-Z0-9_]*=\\S*\\s+)*)'
+/**
+ * A test RUNNER invoked as a command: a package manager's `test` script, or one of the runners themselves.
+ * `(?![\w-])` after the verb, so `bun testify` and `go test-helper` are not it.
+ */
+const TEST_RUNNER = new RegExp(
+  `^${TEST_WRAPPER}(?:`
+  + '(?:bun|npm|pnpm|yarn)\\s+(?:run\\s+)?test(?::[\\w-]+)?'
+  + '|bunx?\\s+(?:--bun\\s+)?(?:vitest|jest|playwright\\s+test)'
+  + '|(?:npx|pnpm\\s+exec|yarn)\\s+(?:vitest|jest|playwright\\s+test)'
+  + '|(?:vitest|jest|pytest|py\\.test|phpunit|rspec|mocha)'
+  + '|python3?\\s+-m\\s+(?:pytest|unittest)'
+  + '|go\\s+test|cargo\\s+(?:nextest\\s+run|test)|dotnet\\s+test|mvn\\s+(?:-\\S+\\s+)*test|gradlew?\\s+test'
+  + ')(?![\\w-])',
+)
+
+/** How many test runs a shell command line performs — one per chained segment whose verb is a test runner. */
+export function countTestCommands(cmd: string): number {
+  let runs = 0
+  for (const seg of cmd.split(/&&|\|\||;|\n/)) if (TEST_RUNNER.test(seg.trim())) runs++
+  return runs
+}
+
+/**
  * Each harness's own tool name → the shared name.
  *
  * The tools breakdown compares harnesses; it cannot do that while one calls it `Bash`, another

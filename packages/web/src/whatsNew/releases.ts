@@ -10,21 +10,183 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.203.0': {
+  '2.204.0': {
     features: [
       {
-        pt: 'Nova página BETA "Calendário de entregas" (Agentask → Calendário): as próximas versões em cartões no topo, e abaixo Mês (versões como fitas), Semana, Dia (por hora, com as renovações das contas) e Cronograma (versões em cima, peças por prioridade embaixo, linha do "agora"). Por padrão mostra só as tarefas em andamento; filtre por tarefa, etapa, versão, harness e prioridade, ou só as confirmadas. Onde a Live não consegue estimar, o calendário diz "sem estimativa" em vez de inventar um horário. No celular vira uma agenda por dia. Dá para exportar a visão filtrada em .ics, e os agentes consultam o mesmo calendário pela ferramenta agentistics_delivery_calendar ou por agentop flow calendario.',
-        en: 'New BETA page "Delivery calendar" (Agentask → Calendar): the next versions as cards on top, and below Month (versions as ribbons), Week, Day (by the hour, with the accounts renewals) and Schedule (versions on top, pieces by priority below, a "now" line). By default it shows only the tasks being worked on; filter by task, stage, version, harness and priority, or only the confirmed ones. Where the Live line cannot estimate, the calendar says "no estimate" instead of inventing a time. On a phone it becomes an agenda by day. You can export the filtered view as .ics, and agents read the same calendar through the agentistics_delivery_calendar tool or agentop flow calendario.',
+        pt: 'Nova página BETA "Calendário de entregas" (Agentask → Calendário): Mês, Semana, Dia e Cronograma, com filtros por tarefa, etapa, versão, harness e prioridade. Onde a Live não consegue estimar, o calendário diz "sem estimativa" em vez de inventar um horário. No celular vira uma agenda por dia. Dá para exportar a visão filtrada em .ics, e os agentes consultam o mesmo calendário pela ferramenta agentistics_delivery_calendar.',
+        en: 'New BETA page "Delivery calendar" (Agentask → Calendar): Month, Week, Day and Schedule, filterable by task, stage, version, harness and priority. Where the Live line cannot estimate, the calendar says "no estimate" instead of inventing a time. On a phone it becomes an agenda by day. You can export the filtered view as .ics, and agents read the same calendar through the agentistics_delivery_calendar tool.',
       },
     ],
     fixes: [],
   },
-  '2.201.2': {
+  '2.203.0': {
+    features: [
+      {
+        pt: 'O ciclo das entregas anda sozinho depois da revisão: quando o PR de uma peça é mergeado ela vai para CI, e vira Publicado quando sai a primeira versão com o merge. As peças que ficavam paradas em "Revisão do líder" deixam de depender de alguém movê-las.',
+        en: 'The delivery cycle moves by itself after the review: once a piece\'s PR is merged it goes to CI, and becomes Published when the first release with that merge is out. Pieces no longer wait in "Leader review" for someone to move them.',
+      },
+      {
+        pt: 'Uma peça esperando o líder gera um lembrete ao líder vivo da tarefa depois de 30 min e de novo a cada 2 h, no máximo 3 vezes. Nunca a você.',
+        en: 'A piece waiting on its leader reminds the task\'s live leader after 30 min, then every 2 h, at most 3 times. Never you.',
+      },
+      {
+        pt: 'O Live ganhou abas com contagem (Em andamento, Na fila, Publicado, Tudo), e Publicado tem o próprio período (24 h, 7 dias, 30 dias, tudo). A coluna Histórico saiu, colunas vazias ficam recolhidas, e a prioridade na fila do Live agora é só para leitura. O filtro de tarefas ficou na altura das abas, e o carregamento da janela destacada aparece centralizado.',
+        en: 'Live now has tabs with counts (In progress, Queued, Published, All), and Published has its own period (24 h, 7 days, 30 days, all). The History column is gone, empty columns stay collapsed, and priority in the Live queue is now read-only. The task filter now matches the height of the tabs, and the pop-out window\'s loader is centred.',
+      },
+      {
+        pt: 'Uma mensagem sua que ainda está na fila da sessão agora tem "Enviar agora" e "Interromper" na própria legenda ("entregue à sessão…"). "Enviar agora" aparece onde dá para enviar de verdade (Claude Code, com a sessão no meio de um turno); "Interromper" em qualquer assistente que aceite parar o turno. Onde não funciona, o botão simplesmente não aparece.',
+        en: 'A message of yours that is still queued in the session now has "Send now" and "Interrupt" on its own caption ("delivered to the session…"). "Send now" shows where it can really work (Claude Code, mid-turn); "Interrupt" on any assistant that accepts stopping the turn. Where neither can work, no button is drawn.',
+      },
+      {
+        pt: 'Criar uma tarefa pelo MCP agora aceita prioridade e tipo, e a lista de status de uma subtarefa não é mais fixa — vale a do seu quadro.',
+        en: 'Creating a task through the MCP now accepts a priority and a type, and a subtask\'s status list is no longer fixed — your board\'s own list applies.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'O pré-dispatch deixou de exigir "esforço" e "conta" de assistentes que não usam esses campos: pede só o que o assistente escolhido realmente usa.',
+        en: 'Pre-dispatch no longer demands "effort" and "account" from assistants that do not use them: it asks only for what the chosen assistant really uses.',
+      },
+      {
+        pt: 'Abrir sessões pela linha de comando (iniciar, lote, reabrir) agora respeita o teto de modelos de topo por provedor, como a fila já respeitava; "--force" passa por cima e avisa que passou.',
+        en: 'Opening sessions from the command line (start, batch, reopen) now respects the per-provider cap on top-tier models, as the queue already did; "--force" overrides it and says so.',
+      },
+      {
+        pt: 'A recomendação de limites de uso não sugere mais uma conta cuja leitura está velha ou ausente, e diz quais assistentes não deu para avaliar.',
+        en: 'The usage-limits recommendation no longer suggests an account whose reading is stale or missing, and says which assistants it could not judge.',
+      },
+      {
+        pt: 'Uma entrega parcial ("parte 2 de 5") não manda mais a subtarefa para revisão nem aparece como entregue no check-in: só a entrega final conta.',
+        en: 'A partial handback ("part 2 of 5") no longer moves the subtask to review or shows up as delivered in the check-in: only the final one counts.',
+      },
+      {
+        pt: 'Sessões encerradas (ou que nunca tiveram código próprio, como as de QA) não recebem mais aviso de "fechar entrega", e uma pasta de trabalho que já sumiu deixa de travar o fechamento.',
+        en: 'Sessions that already ended (or never had code of their own, like QA sessions) no longer get a "close delivery" notice, and a work folder that is already gone no longer blocks the close.',
+      },
+      {
+        pt: 'Reclamação, áudio ou anexo sem texto não viram mais um cartão de trabalho: o líder responde na conversa.',
+        en: 'A complaint, a voice note or an attachment with no text no longer becomes a work card: the leader answers in the conversation.',
+      },
+      {
+        pt: 'O lembrete de pedido confere de novo antes de avisar: uma peça com sessão viva, ou retirada da fila para abrir à mão, não é mais tratada como esquecida.',
+        en: 'The request reminder checks again before warning: a piece with a live session, or taken off the queue to be opened by hand, is no longer treated as forgotten.',
+      },
+      {
+        pt: 'Uma nova rodada numa peça em revisão leva o cartão de volta para QA ou Em desenvolvimento enquanto a sessão roda, e uma sessão perdida num reinício não segura mais o cartão ali.',
+        en: 'A new round on a piece under review moves its card back to QA or In development while the session runs, and a session lost in a reboot no longer holds the card there.',
+      },
+    ],
+  },
+  '2.202.2': {
     features: [],
     fixes: [
       {
-        pt: 'A Live agora mostra em "Publicado" as peças de uma versão que entrou como um único commit grande: o líder declara o conteúdo do release (agentop flow release) e as peças vão a Publicado quando a versão sai verde, em vez de o app adivinhar pelo git. A prova é a própria tag da versão, no repositório do release, mesmo quando o commit do merge teve uma execução vermelha corrigida depois.',
-        en: 'Live now shows in "Published" the pieces of a version that landed as one big commit: the leader declares the release contents (agentop flow release) and the pieces move to Published once the version ships green, instead of the app guessing from git. The proof is the version\'s own tag, in the release\'s repository, even when the merge commit had a red run that a later commit fixed.',
+        pt: 'Uma pergunta curta sua é respondida na conversa, sem virar subtarefa nem gerar lembretes. Se o líder perceber que era trabalho, ainda pode ligá-la a uma subtarefa.',
+        en: 'A short question of yours is answered in the conversation, with no subtask and no reminders. If the leader sees it was real work, they can still link it to a subtask.',
+      },
+      {
+        pt: 'Os avisos ao líder citam só o título do seu pedido, não a mensagem inteira, o que gasta menos tokens.',
+        en: 'Notices to the leader quote only the title of your request, not the whole message, which uses fewer tokens.',
+      },
+    ],
+  },
+  '2.202.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Chega de avisos repetidos: uma mensagem sua que o líder já respondeu não volta mais como um novo "Pedido do dono" quando a liderança é passada, e a mesma mensagem não vira dois pedidos.',
+        en: 'No more repeated notices: a message of yours that the leader already answered no longer comes back as a new "Owner request" when leadership is handed over, and one message no longer becomes two requests.',
+      },
+      {
+        pt: 'O pedido de passagem de liderança e o primeiro texto da sessão sucessora deixam de aparecer como pedidos seus, e perguntas simples ("e o deploy?") são marcadas como pergunta, não como trabalho.',
+        en: 'The hand-off request and the successor session\'s first text no longer show up as requests from you, and simple questions ("what about the deploy?") are marked as questions, not as work.',
+      },
+      {
+        pt: 'O lembrete "pré-dispatch incompleto" confere de novo, na hora de enviar, se ainda faz sentido, não se repete a cada troca de líder e mostra só o número do pedido e o começo do texto, sem colar a mensagem inteira (nem os caminhos dos anexos).',
+        en: 'The "incomplete pre-dispatch" reminder now re-checks right before it is sent that it still applies, no longer repeats on every leader change, and shows only the request number and the start of the text, without pasting the whole message (or attachment paths).',
+      },
+    ],
+  },
+  '2.202.0': {
+    features: [
+      {
+        pt: 'A fila agora sai por prioridade e sozinha: quando uma sessão termina e há vaga, o sistema pega o próximo da fila (maior prioridade primeiro) e pergunta ao líder da tarefa — "sim", "não" com motivo, ou "agendar" para uma hora. O "não" fica no cartão com o motivo e o fluxo passa ao próximo; o agendamento mostra "começa às HH:MM". Sem resposta em 10 minutos, com o modo autônomo ligado a sessão abre sozinha e isso fica registrado; com ele desligado o sistema espera e lembra o líder. Tudo vira comentário na subtarefa e os assistentes enxergam e respondem pelo MCP e pelo terminal (agentop flow fila).',
+        en: 'The queue now leaves by priority and by itself: when a session ends and a slot is free, the system takes the next queued piece (highest priority first) and asks the task\'s leader — "yes", "no" with a reason, or "schedule" for a time. A "no" stays on the card with its reason and the flow moves to the next; a schedule shows "starts at HH:MM". With no answer in 10 minutes, autonomous mode on opens the session by itself and records it; off, the system keeps waiting and reminds the leader. Everything is logged as a comment on the subtask, and assistants read and answer it through MCP and the terminal (agentop flow fila).',
+      },
+      {
+        pt: 'A página da tarefa ganhou a aba "Fila": a fila daquela tarefa na ordem de saída, com a prioridade (editável ali mesmo), o pré-dispatch completo, por que a peça espera (vaga, conta, agendamento), as últimas anotações e as ações iniciar agora, agendar, tirar da fila e editar o pré-dispatch. A prioridade também pode ser mudada direto no cartão "Na fila" da Esteira, e o status das subtarefas aparece em português.',
+        en: 'The task page gets a "Queue" tab: that task\'s queue in leaving order, with the priority (editable right there), the full pre-dispatch, why the piece waits (slot, account, schedule), the latest notes and the actions start now, schedule, take off the queue and edit the pre-dispatch. The priority can also be changed straight on the Live "Queued" card, and subtask statuses read in Portuguese.',
+      },
+      {
+        pt: 'A Esteira de entregas ao vivo ganhou uma barra de filtros clara (filtros de um lado, visão e ações do outro), “Apenas ativas” e “Exibir itens na fila”, e uma ordenação que mostra primeiro o que tem a prioridade mais alta — cada cartão traz a prioridade da tarefa. As colunas empilham os cartões na vertical, rolam sozinhas e ganham uma busca quando passam de três cartões fora da vista; “Executando” virou “Em desenvolvimento” e “Em QA” virou “QA”. O motivo de um cartão esperar vaga agora vem em palavras simples, e o seletor de tarefas ficou mais largo e sem texto por cima de texto. Os assistentes também enxergam a prioridade e os mesmos filtros pelo MCP.',
+        en: 'The Live Delivery line gets a clear filter bar (filters on one side, view and actions on the other), “Only active” and “Show queued items”, and an order that lists the highest priority first — every card shows its task’s priority. Columns stack their cards vertically, scroll on their own and gain a search once more than three cards are out of view; “Running” became “In development” and “In QA” became “QA”. Why a card waits for a slot now reads in plain words, and the task picker is wider with no text on top of text. Assistants see the priority and the same filters through MCP too.',
+      },
+      {
+        pt: 'A Esteira ganhou a coluna Histórico (sempre recolhida, abre num clique) com as publicações de mais de 24 h, e cada cartão tem links para abrir a sessão do autor, do QA e do líder.',
+        en: 'The Live line gets a History column (always collapsed, one click to open) with what was published over 24 h ago, and every card links to the author, QA and leader sessions.',
+      },
+      {
+        pt: 'Hardware, Modo autônomo, Cofre, Esteira de entregas e Ligações agora ficam num botão só no topo; ele fica laranja quando há atividade. A janela “Uso dos planos” saiu: contas e APIs estão na página Uso.',
+        en: 'Hardware, Autonomous mode, Vault, Live Delivery and Calls now sit behind one button in the top bar, which turns orange when something is going on. The “Plan usage” window is gone: accounts and APIs live on the Usage page.',
+      },
+      {
+        pt: 'Cofre sem aplicativo autenticador: nenhum QR nem código de 6 dígitos em lugar nenhum. Você confirma que é você com o que o computador já tem — Touch ID ou a senha do Mac, Windows Hello, a digital do celular — ou com uma senha própria do cofre.',
+        en: 'Vault without an authenticator app: no QR and no 6-digit code anywhere. You confirm it is you with what the computer already has — Touch ID or the Mac password, Windows Hello, your phone\'s fingerprint — or with a vault password of your own.',
+      },
+      {
+        pt: 'No Mac o cofre configura sem instalar nada: o Touch ID (ou a senha do Mac) destrava, sem exigir chave de segurança nem libfido2.',
+        en: 'On a Mac the vault sets up with nothing to install: Touch ID (or the Mac password) unlocks it, with no security key or libfido2 required.',
+      },
+      {
+        pt: 'Senha do cofre: pelo menos 9 caracteres, 1 maiúscula, 2 especiais e 1 número, com cada regra marcada enquanto você digita, um botão "Gerar senha aleatória" (mostrada uma vez, com botão de copiar) e um bloco "Como sua senha fica protegida". O servidor confere as mesmas regras e pausa depois de várias tentativas erradas.',
+        en: 'Vault password: at least 9 characters, 1 uppercase, 2 special characters and 1 number, each rule ticked as you type, a "Generate a random password" button (shown once, with a copy button) and a "How your password is protected" block. The server checks the same rules and pauses after several wrong tries.',
+      },
+      {
+        pt: 'A chave de segurança (FIDO) virou opção avançada e só aparece quando o computador tem o que ela precisa. As 24 palavras de recuperação continuam iguais.',
+        en: 'The security key (FIDO) is now an advanced option, shown only when the computer has what it needs. The 24 recovery words stay the same.',
+      },
+      {
+        pt: 'Novo agentistics_vault_status: uma sessão consegue ler como o cofre está protegido (estado, formas de confirmar em uso e disponíveis, regras da senha) sem nunca ver um segredo.',
+        en: 'New agentistics_vault_status: a session can read how the vault is protected (state, ways to confirm in use and available, password rules) without ever seeing a secret.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Peças na fila não somem mais por causa do filtro de agentes: “ativo” agora quer dizer “está numa coluna do fluxo”, não “tem agente rodando”.',
+        en: 'Queued pieces no longer vanish behind the agents filter: “active” now means “sits in a flow column”, not “has a running agent”.',
+      },
+      {
+        pt: 'Os cartões da Live agora mostram a porcentagem da etapa (“passo 2 de 5: implementando”), lida de fatos reais: sessão aberta, primeira edição, testes rodando, commit no ramo, entrega da sessão e os portões da QA, revisão e merge. Sem sinal, a linha continua escondida — nada é chutado.',
+        en: 'Live cards now show the stage percentage (“step 2 of 5: implementing”), read from real facts: session open, first edit, tests running, a commit on the branch, the session’s handback and the QA, review and merge gates. With no signal the line stays hidden — nothing is guessed.',
+      },
+      {
+        pt: 'Cofres que já usavam o código do autenticador continuam abrindo: o código não é mais pedido, e o registro dele é apagado assim que você escolhe uma nova forma de confirmar.',
+        en: 'Vaults that already used the authenticator code keep opening: the code is no longer asked, and its record is deleted as soon as you choose a new way to confirm.',
+      },
+    ],
+  },
+  '2.201.2': {
+    features: [],
+    fixes: [{
+      pt: 'Sessões perdidas ou encerradas deixam de ocupar vagas para iniciar as peças da fila.',
+      en: 'Lost or ended sessions no longer occupy slots needed to start queued work.',
+    }, {
+      pt: 'Peças em revisão ou concluídas saem da fila automaticamente; o líder também pode retirá-las com um motivo registrado.',
+      en: 'Pieces under review or already finished leave the queue automatically; the leader can also withdraw them with a recorded reason.',
+    }, {
+      pt: 'Pedidos ao líder chegam à fila também pelo terminal e pelas passagens de sessão. Um pedido sem pré-dispatch cobra o líder após 10 minutos; peças na mesma área sugerem encaixe e grupos mantêm um único cartão.',
+      en: 'Requests reach the leader’s queue from the terminal and session handoffs too. A request without pre-dispatch reminds the leader after 10 minutes; work in the same area suggests a fit and groups keep one card.',
+    }, {
+      pt: 'A Live agora mostra em "Publicado" as peças de uma versão que entrou como um único commit grande: o líder declara o conteúdo do release (agentop flow release) e as peças vão a Publicado quando a versão sai verde, em vez de o app adivinhar pelo git. A prova é a própria tag da versão, no repositório do release, mesmo quando o commit do merge teve uma execução vermelha corrigida depois.',
+      en: 'Live now shows in "Published" the pieces of a version that landed as one big commit: the leader declares the release contents (agentop flow release) and the pieces move to Published once the version ships green, instead of the app guessing from git. The proof is the version\'s own tag, in the release\'s repository, even when the merge commit had a red run that a later commit fixed.',
+    }],
+  },
+  '2.201.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Um cartão bloqueado no quadro não fica mais parado sem ninguém cobrar: o fluxo de entrega cobra o líder e adia a peça depois de 2 h, como as outras.',
+        en: 'A card blocked on the board no longer sits there with nobody chasing it: the delivery flow reminds the leader and defers the piece after 2 h, like the others.',
       },
     ],
   },

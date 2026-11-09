@@ -681,7 +681,11 @@ export async function killAndRetireSession(
   const previous = (await registry.read()).find(m => m.id === id)?.endedAt
   await registry.patch(id, { endedAt: previous ?? new Date().toISOString() })
   try {
-    if (await kill()) return true
+    if (await kill()) {
+      // A worker stopped on purpose frees a slot: the delivery queue looks at its next piece now (server process only).
+      void import('./shared-snapshot').then(async s => { if (s.isServerProcess()) (await import('../delivery/queue-kick')).kickQueueNext('sessão encerrada') }).catch(() => undefined)
+      return true
+    }
   } catch (e) {
     await registry.patch(id, { endedAt: previous ?? null })
     throw e

@@ -30,6 +30,38 @@ characters): "I stopped on purpose, waiting for X". The `session.handback` event
 message `text`; the engine records both and `fechar-entregue` refuses to close the worker ("worker awaiting: X")
 while its newest handback has `awaiting`. A later handback without `awaiting` is final again.
 
+**The host also infers an intermediate handback** (FLUXO.AVISOS 8). A handback with `awaiting`, or whose text says it is
+one slice of a longer piece ("parte 2 de 5", "etapa 2/6", "seguindo com…", "moving on to…") and does not also say it is
+final, is recorded and delivered but does NOT move the sender's subtask to `in_review` and is NOT listed as delivered in the
+leader's check-in (`message.intermediate` on the board mirror). The reply to the worker says so in a sentence. When the host
+inferred it, the `session.handback` event carries `awaiting: "progress: <marker>"`, so the engine's existing refusal to close
+the worker applies without an engine change. A result count ("12/12 tests") is not a progress marker.
+
+### Owner messages on the flows bus (FLUXO.AVISOS 1, 2, 11)
+
+`owner.message` is emitted for the owner's composer message and for a hand-off relay of a message nobody answered. Its payload
+carries two host-decided fields besides the text: `intent` (`question` | `work`, the deterministic rule in
+`flows/owner-intent.ts`: a request verb or a polite request is work even before a "?"; otherwise a trailing "?" or a short
+text with no request verb is a question; when in doubt it is work; quoted or forwarded lines ("> ", "> >") are never the
+owner's words: a request verb inside a quote counts for nothing, a remark on a quote with no verb is a question, and a message
+that is only a quote is a question too) and `title` (the subtask title: the owner's own words, with attachment paths removed
+and never the quoted text; `text` stays literal). The host never emits for the hand-off request itself
+(`handoff: true`, the button's fixed sentence), for the successor's own first prompt, or for a relayed turn the predecessor
+already answered. One owner MESSAGE is one event: the host keeps a persistent ledger (`owner-messages.json`, conversation +
+text hash, no per-session key) so the composer's copy and the relay's copy of the same words are the same request, however
+many sessions saw it. The engine half records a `question` already `answered` (no subtask, no reminder) and titles the subtask
+from `payload.title`.
+
+### Nudges
+
+`cutucar-sessao` re-reads the fleet right before typing: a session that already ended is refused (`failure: ended`) and nothing is
+typed (the composer would follow or reopen it). `alvo-trabalho` says `gone` / `notRepo` / `goneWorktree` instead of a plain ok, and
+`sessao-sem-codigo` answers whether a session owns code at all (a QA or probe session, or one whose folder is bare or gone with no
+worktree of its own): the close flow then needs only the final handback plus a stopped session, decided in the host, never by a model.
+`ultima-mensagem-sessao` (`{sessionId}` → `{ok, at, from?, kind?}`) reports the newest message typed INTO a session by
+someone else (a leader's `agentistics_session_message` or the composer), so the close flow can keep a worker open when it
+got new work after its final handback. Held in memory; nothing known is `ok: false`.
+
 A `agentistics_wait` handback condition takes an optional `match` (case-insensitive substring of the handback
 text). Without it the wait fires on any handback from that session, as before.
 

@@ -8,9 +8,25 @@ import { defaultGateFacts } from './gates'
 import { createDeliveryStore } from './store'
 import { PHASE_STATUS, type DeliveryRecord, type Phase } from './machine'
 
+/** Uses the same pedidos view as the leader briefing and the existing MCP flow reader. */
+export async function readOwnerRequests(): Promise<import('./service').OwnerRequestFact[] | null> {
+  const { prepareOwnerRequestFlows } = await import('../flows/owner-message')
+  if (!(await prepareOwnerRequestFlows())) return []
+  const { engine } = await import('../engine/load')
+  const view = await engine()?.flows?.read?.('pedidos', {}) as { pedidos?: import('./service').OwnerRequestFact[] } | null | undefined
+  return Array.isArray(view?.pedidos) ? view.pedidos : null
+}
+
 /** The Live stage each phase must read as, so a created status is found again by the same reading. */
 const LIVE_STAGE: Record<Phase, string> = {
   fila: 'queue', executando: 'running', qa: 'qa', ajuste: 'adjust', revisao_lider: 'leader', pr_merge: 'merge', ci: 'ci', publicado: 'published', bloqueado: 'blocked',
+}
+
+/** True when `id` names a TASK that no subtask shares the id with (the vigia keys a task-level piece by its task id). */
+async function isTaskPiece(id: string): Promise<boolean> {
+  const { loadTaskWorld } = await import('../sessions/task-source')
+  const { book } = await loadTaskWorld()
+  return !book.subtasks.some(s => s.id === id) && book.tasks.some(t => t.id === id)
 }
 
 export function defaultDeliveryBoard(): DeliveryBoard {
@@ -27,15 +43,21 @@ export function defaultDeliveryBoard(): DeliveryBoard {
         if (!made.ok) return { ok: false, message: made.message }
         id = made.status.id
       }
+      // A TASK-level piece (BLOQUEIO.ORFAO: a blocked task with no subtasks) is keyed by the task id and moves the task itself.
+      if (await isTaskPiece(subtaskId)) {
+        const moved = await m.markTask(subtaskId, id as never, 'flow:entrega')
+        return moved.ok ? { ok: true } : { ok: false, message: moved.message }
+      }
       const out = await m.patchSubtask(subtaskId, { status: id as never })
       return out.ok ? { ok: true } : { ok: false, message: out.message }
     },
     async setCi(subtaskId, ci) { await (await web()).setSubtaskCi(subtaskId, ci) },
     async logStep(taskId, subtaskId, step, actor) { await (await web()).logSubtaskStep(taskId, subtaskId, step, actor) },
-    async comment(taskId, subtaskId, body) { await (await web()).addComment(taskId, { author: 'flow:entrega', body, subtaskId }) },
+    async comment(taskId, subtaskId, body) { await (await web()).addComment(taskId, { author: 'flow:entrega', body, ...(subtaskId === taskId ? {} : { subtaskId }) }) },
     async subtaskFinished(subtaskId) {
       const { loadTaskWorld } = await import('../sessions/task-source')
-      return (await loadTaskWorld()).book.subtasks.find(s => s.id === subtaskId)?.status === 'done'
+      const { book } = await loadTaskWorld()
+      return (book.subtasks.find(s => s.id === subtaskId) ?? book.tasks.find(t => t.id === subtaskId))?.status === 'done'
     },
     async stage(subtaskId, draft) {
       const { normalizeStagedSession } = await import('@agentistics/core')
@@ -49,9 +71,11 @@ export function defaultDeliveryBoard(): DeliveryBoard {
 
 export function defaultDeliveryNotify(): DeliveryNotify {
   return {
-    async session(sessionId, text) {
+    async session(sessionId, text, header) {
       const { runFleetAction } = await import('../sessions/fleet-web')
-      const out = await runFleetAction('en', { action: 'prompt', id: sessionId, text: `[from flow entrega · nudge]\n${text}` })
+      // A system QUESTION (`fila · confirmar`) carries its own header line inside `text`; every other nudge wears the standard one.
+      const body = header === undefined ? `[from flow entrega · nudge]\n${text}` : text
+      const out = await runFleetAction('en', { action: 'prompt', id: sessionId, text: body })
       return out.ok
     },
     async owner(text, kind) {
@@ -70,10 +94,12 @@ export async function deliveryAutonomous(leaderSessionId?: string): Promise<bool
   return (row as { away?: boolean } | undefined)?.away === true
 }
 
-async function emitEvent(type: string, payload: Record<string, unknown>) {
+export async function emitEvent(type: string, payload: Record<string, unknown>, bus?: { emit?(event: { type: string; id: string; payload: Record<string, unknown> }): Promise<unknown> }) {
   try {
-    const { engine } = await import('../engine/load')
-    await engine()?.flows?.emit?.({ type, id: `${type}:${String(payload.subtarefa ?? '')}:${Date.now()}`, payload })
+    const flows = bus ?? (await import('../engine/load')).engine()?.flows
+    // The engine's delivery timer already holds its serial bus while calling this service.
+    // Queue courtesy events without waiting on that same bus; the delivery record is durable first.
+    void flows?.emit?.({ type, id: `${type}:${String(payload.subtarefa ?? '')}:${Date.now()}`, payload }).catch(() => {})
   } catch { /* the record is authoritative; the bus is a courtesy */ }
   try { (await import('../sse')).broadcastFlowsChanged() } catch { /* a CLI has no SSE */ }
 }
@@ -113,13 +139,31 @@ async function mergePr(r: DeliveryRecord): Promise<{ ok: true; mergeSha: string;
   }
 }
 
+/** The name a person gave an account (nickname, else the harness's own label); never the raw id. */
+async function accountNameOf(harness: string, account: string): Promise<string | null> {
+  const { readAccounts } = await import('../harness-accounts')
+  const row = (await readAccounts()).accounts.find(a => a.id === account && a.harness === harness)
+  return row ? (row.nickname?.trim() || row.label?.trim() || null) : null
+}
+
+/** Board subtasks shown In review / PR · merge / CI (the backfill adopts the ones with no delivery record). Group members excluded. */
+async function boardReviewPieces(): Promise<Array<{ id: string; taskId: string; title: string; status: string }>> {
+  const { loadTaskWorld } = await import('../sessions/task-source')
+  const { book } = await loadTaskWorld()
+  const wanted = new Set([PHASE_STATUS.revisao_lider.id, PHASE_STATUS.pr_merge.id, PHASE_STATUS.ci.id])
+  return book.subtasks.filter(s => wanted.has(s.status) && !s.parentGroupId).map(s => ({ id: s.id, taskId: s.taskId, title: s.title, status: s.status }))
+}
+
 let cached: DeliveryService | null = null
 /** The process's delivery service (one store path, one set of deps). */
 export function deliveryService(overrides: Partial<DeliveryDeps> = {}): DeliveryService {
   if (cached && Object.keys(overrides).length === 0) return cached
+  const store = overrides.store ?? createDeliveryStore()
   const svc = createDeliveryService({
-    store: createDeliveryStore(), facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
-    autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, now: () => Date.now(), ...overrides,
+    store, facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
+    autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, accountName: accountNameOf, now: () => Date.now(),
+    reviewPieces: boardReviewPieces,
+    ...overrides,
   })
   if (Object.keys(overrides).length === 0) cached = svc
   return svc

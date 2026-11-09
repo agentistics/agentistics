@@ -85,7 +85,7 @@ import {
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { isNayCwd, modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
-import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
+import { personQueuedCount, queuedBubbleActions, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
@@ -132,12 +132,12 @@ import { buildPickRows } from '../../lib/sessionPick'
 import { sessionPath } from '../../lib/sessionRoute'
 import { copyText } from '../../lib/clipboard'
 import { SessionPickModal } from './SessionPickModal'
-import { VaultCodeAsk, VaultPicker } from '../vault/VaultPicker'
+import { VaultPicker } from '../vault/VaultPicker'
 import { loadVault } from '../../lib/vaultApi'
 import { grantStep, UNLOCK_FIRST_LINE } from '../../lib/vaultGrantFlow'
 import { ensureVaultOpen } from '../vault/VaultUnlockHost'
 import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipTokens, vaultGrantMessage, vaultTrigger, type VaultSelection } from '../../lib/vaultChip'
-import { grantSession, listGrantRecords, withStepUp, type GrantRecord } from '../../lib/vaultPersonal'
+import { grantSession, listGrantRecords, type GrantRecord } from '../../lib/vaultPersonal'
 import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture } from '../../lib/passkey'
 
 import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
@@ -807,8 +807,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const [vaultGrantCache, setVaultGrantCache] = useState<null | { key: string; refs: string[]; briefing: string; expiresAt: number }>(null)
   const [vaultPickerOpen, setVaultPickerOpen] = useState(false)
   const [vaultTriggerSeen, setVaultTriggerSeen] = useState<number | null>(null)
-  const [vaultCodeAsk, setVaultCodeAsk] = useState<null | ((c: string | null) => void)>(null)
-  const askVaultCode = useCallback(() => new Promise<string | null>(res => setVaultCodeAsk(() => (c: string | null) => { setVaultCodeAsk(null); res(c) })), [])
   useEffect(() => {
     const at = vaultTrigger(draft.slice(0, caret))
     if (at !== null && at !== vaultTriggerSeen) { setVaultTriggerSeen(at); setVaultPickerOpen(true) }
@@ -827,14 +825,15 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         setNotice(UNLOCK_FIRST_LINE[pt ? 'pt' : 'en'])
         if (!(await ensureVaultOpen(`personal-grant:${session.id}`))) return { ok: false as const, code: 'locked', sentence: pt ? 'O cofre continua trancado; nada foi enviado.' : 'The vault is still locked; nothing was sent.', status: 423 }
       }
-      return withStepUp(c => grantSession(session.id, ids, gids, c), askVaultCode)
+      // COFRE.DESBLOQUEIO: no code is asked; the proof (a gesture, or the vault password through its prompt) is the service's.
+      return grantSession(session.id, ids, gids)
     }
     if (ms.ok && !ms.loopback && passkeySupport(window) === 'ok' && hasPasskeyHere(ms, window.location.hostname)) {
-      const g = await withStepUp(c => phoneGesture('personal-grant', session.id, c), askVaultCode)
+      const g = await phoneGesture('personal-grant', session.id)
       if (!g.ok) return g
-      return withStepUp(c => grantSession(session.id, ids, gids, c, g.gestureToken), askVaultCode)
+      return grantSession(session.id, ids, gids, undefined, g.gestureToken)
     }
-    return withStepUp(c => grantSession(session.id, ids, gids, c), askVaultCode)
+    return grantSession(session.id, ids, gids)
   }
   /** Escape closes the picker while the `@word` it was triggered by is still on screen — see `slashDismissed`. */
   const [atDismissed, setAtDismissed] = useState(false)
@@ -2231,6 +2230,21 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     setStopping(false)
     if (!out.ok) setNotice(out.message)
   }
+  /**
+   * FLUXO.AVISOS 10 — the actions on a QUEUED message's own caption. The same verbs as the pill under the conversation and
+   * the stop button (`sendNow` / `stopNow` above): nothing is performed here, the rule for which to offer is the pure
+   * `queuedBubbleActions`, and an action that cannot work on this harness or right now is simply not drawn.
+   */
+  const queuedActionsFor = (text: string) => {
+    const a = queuedBubbleActions({
+      text, harness: session.harness, working, dialogOpen: blocked, personQueued: queuedPersonCount,
+      sendNowRunning: sendNowRun?.kind === 'running', stopEnabled: stopEnabled && !stopping, pt,
+    })
+    return {
+      ...(a.sendNow ? { sendNow: { ...a.sendNow, run: () => void sendNow() } } : {}),
+      ...(a.interrupt ? { interrupt: { ...a.interrupt, run: () => void stopNow() } } : {}),
+    }
+  }
 
   /** The memory gate refused the last Reopen: "Reabrir mesmo assim" is offered, behind a confirmation. */
   const [reopenForceable, setReopenForceable] = useState(false)
@@ -2702,6 +2716,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               anchorId={echoAnchorId(session.id, q.text)}
               awaiting
               awaitingWorking={working}
+              awaitingActions={queuedActionsFor(q.text)}
               onQuoteClick={onSentQuote}
               {...(q.at !== undefined ? { awaitingSinceMs: Math.max(0, now - q.at) } : {})}
             />
@@ -4300,7 +4315,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           }}
         />
       )}
-      {vaultCodeAsk && <VaultCodeAsk lang={pt ? 'pt' : 'en'} isMobile={isMobile} onDone={vaultCodeAsk} />}
 
       {/* FORWARD — the fleet picker as its third feature: pick one or more sessions, then an
           optional comment and where it lands (the draft by default). See `chatForward.ts`. */}

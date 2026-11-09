@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { base32Decode, hotp, parseVaultJson, presenceSentence, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
+import { parseVaultJson, presenceSentence, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
 import { __resetVaultForTests, __setVaultClockForTests, becomeVaultHolder, lockVault, sealToFile, vaultDir, vaultStatus } from './service'
 import { __resetGateForTests, mintSetupCode } from './gate'
 import { handleVaultHttp, loopbackRequest } from './http'
@@ -38,8 +38,8 @@ function fake(id: ProtectorId, opts: { probeReason?: string } = {}): Fake {
 
 let T = 1_800_000_000_000
 const clock = () => T
-let seed: Uint8Array
-const codeAt = () => hotp(seed, Math.floor(T / 1000 / 30))
+// COFRE.DESBLOQUEIO (2026-11-07): no authenticator. A code still sent is ignored, never a proof.
+const codeAt = () => '123456'
 const next = () => { T += 30_000 }
 
 let dir = ''
@@ -74,12 +74,7 @@ async function fresh(opts: { soon?: ProtectorId[]; lang?: 'en' | 'pt' } = {}): P
 /** The whole wizard from a LOCAL page: gesture → authenticator → presence → recovery. Returns the 24 words. */
 async function enrolLocally(): Promise<string[]> {
   expect((await http('POST', '/api/vault/local-proof')).json).toMatchObject({ ok: true, kind: 'hello' })
-  const a = await http('POST', '/api/vault/authenticator/begin', {})
-  expect(a.status).toBe(200)
-  seed = base32Decode(a.json.secret)
-  expect((await http('POST', '/api/vault/authenticator/confirm', { code: codeAt() })).status).toBe(200)
-  next()
-  expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })).status).toBe(200)
+  expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(200)
   next()
   const r = await http('POST', '/api/vault/recovery/begin', {})
   const typed = (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!)
@@ -113,21 +108,21 @@ describe('S2, v2.98.1: the FIRST enrolment from a loopback page is proven by ONE
   test('without the gesture a loopback page still owes a proof; with it, no setup code is asked', async () => {
     const v = await http('GET', '/api/vault')
     expect(v.json).toMatchObject({ loopback: true, localProofKind: 'hello', setupCode: { owed: true } })
-    expect((await http('POST', '/api/vault/authenticator/begin', {})).json.code).toBe('setup-code-required')
+    expect((await http('POST', '/api/vault/presence/probe', { protector: 'hello' })).json.code).toBe('setup-code-required')
     const p = await http('POST', '/api/vault/local-proof')
     expect(p.json).toMatchObject({ ok: true, kind: 'hello' })
     expect(hello.proofs).toBe(1)
     expect((await http('GET', '/api/vault')).json.setupCode.owed).toBe(false)
-    expect((await http('POST', '/api/vault/authenticator/begin', {})).status).toBe(200)
+    expect((await http('POST', '/api/vault/presence/probe', { protector: 'hello' })).status).toBe(200)
   })
   test('the gesture is refused off loopback, and a loopback proof never stands for a LAN request', async () => {
     expect((await http('POST', '/api/vault/local-proof', {}, LAN)).json.code).toBe('not-loopback')
     expect(hello.proofs).toBe(0)
     expect((await http('GET', '/api/vault', undefined, LAN)).json).toMatchObject({ loopback: false, localProofKind: null })
     await http('POST', '/api/vault/local-proof')
-    expect((await http('POST', '/api/vault/authenticator/begin', {}, LAN)).json.code).toBe('setup-code-required')
+    expect((await http('POST', '/api/vault/presence/probe', { protector: 'hello' }, LAN)).json.code).toBe('setup-code-required')
     // …where the terminal's setup code still works (the fallback).
-    expect((await http('POST', '/api/vault/authenticator/begin', { setupCode: mintSetupCode().code }, LAN)).status).toBe(200)
+    expect((await http('POST', '/api/vault/presence/probe', { protector: 'hello', setupCode: mintSetupCode().code }, LAN)).status).toBe(200)
   })
   test('a machine with no presence device keeps the setup code, said in words', async () => {
     __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en', protectors: [dpapi], autoInit: { candidates: [dpapi] } })
@@ -139,7 +134,7 @@ describe('S2, v2.98.1: the FIRST enrolment from a loopback page is proven by ONE
   test('the proof expires with its 10 minutes', async () => {
     await http('POST', '/api/vault/local-proof')
     T += 11 * 60_000
-    expect((await http('POST', '/api/vault/authenticator/begin', {})).json.code).toBe('setup-code-required')
+    expect((await http('POST', '/api/vault/presence/probe', { protector: 'hello' })).json.code).toBe('setup-code-required')
   })
 })
 
@@ -147,7 +142,7 @@ describe('1(a): a kind this platform has but cannot offer yet is "coming soon", 
   test('fido2 is not offered on Windows/WSL; the view says it is coming soon; asking for it refuses in words', async () => {
     await fresh({ soon: ['fido2'], lang: 'pt' })
     const v = await http('GET', '/api/vault')
-    expect(v.json.presenceAvailable).toEqual(['hello'])
+    expect(v.json.presenceAvailable).toEqual(['hello', 'password'])
     expect(v.json.presenceSoon).toEqual(['fido2'])
     for (const path of ['/api/vault/presence/probe', '/api/vault/presence/enroll']) {
       const r = await http('POST', path, { protector: 'fido2' })
@@ -247,12 +242,13 @@ describe('3(b): recovery with the 24 words from a page ON this computer', () => 
     expect((await http('POST', '/api/vault/recover', { words: 'abandon '.repeat(24).trim() })).json.code).toMatch(/recovery-(words|denied)/)
     const ok = await http('POST', '/api/vault/recover', { words: words.join(' ') })
     expect(ok).toMatchObject({ status: 200, json: { ok: true } })
-    expect(ok.json.todo).toContain('authenticator')
+    expect(ok.json.todo).toContain('presence')
+    expect(ok.json.todo).not.toContain('authenticator') // COFRE.DESBLOQUEIO: no authenticator step any more
     expect((await vaultStatus()).state).toBe('open')
     // From the LAN the same session is refused (review M2: the channel is this computer).
-    expect((await http('POST', '/api/vault/authenticator/begin', {}, LAN)).json.code).toBe('recovery-tty-only')
+    expect((await http('POST', '/api/vault/recovery/begin', {}, LAN)).json.code).toBe('recovery-tty-only')
     // From the loopback page that recovered, the re-enrolment goes ahead.
-    expect((await http('POST', '/api/vault/authenticator/begin', {})).status).toBe(200)
+    expect((await http('POST', '/api/vault/presence/probe', { protector: 'hello' })).status).toBe(200)
     expect(parseVaultJson(readFileSync(join(vaultDir(), 'vault.json')))).not.toBeNull()
   })
   test('five wrong tries pause the page recovery', async () => {

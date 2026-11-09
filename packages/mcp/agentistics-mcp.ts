@@ -28,6 +28,7 @@ import { sessionProof } from "./session-proof.js";
 import { nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
 import { planLimitsTool } from "./plan-limits-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
+import { vaultStatusTool } from "./vault-tool.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
 
@@ -100,16 +101,16 @@ const CATALOG = [
   { id: "sessions.recent",     label: "Recent sessions",  category: "sessions", defaultW: 12, defaultH: 7, minW: 6, minH: 4, description: "List of most recent sessions" },
 ];
 
-async function apiGet(path: string) {
-  const res = await fetch(`${API}${path}`);
-  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}`);
-  return res.json();
-}
-
 async function apiGetText(path: string) {
   const res = await fetch(`${API}${path}`);
   if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}`);
   return res.text();
+}
+
+async function apiGet(path: string) {
+  const res = await fetch(`${API}${path}`);
+  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}`);
+  return res.json();
 }
 
 const LEGACY_TOOLS: Record<ProjectedTool, (data: any, harness?: string) => unknown> = {
@@ -274,10 +275,15 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_create",
     description:
-      "Create a task. A title is required; a description is optional. Creating a title that already exists returns the existing task rather than a duplicate, so this is safe to call before filing work under a name you are not sure exists.",
+      "Create a task. A title is required; a description is optional. Set `priority` (urgent | high | medium | low — default low, and nobody chose a default) and `type` (an id from agentistics_task_types) when you know them: a board of defaults orders nothing. Creating a title that already exists returns the existing task rather than a duplicate (its priority and type are left alone — use agentistics_task_edit), so this is safe to call before filing work under a name you are not sure exists.",
     inputSchema: {
       type: "object",
-      properties: { title: { type: "string" }, detail: { type: "string" } },
+      properties: {
+        title: { type: "string" },
+        detail: { type: "string" },
+        priority: { type: "string", enum: ["urgent", "high", "medium", "low"], description: "Defaults to low. Decides the order of the queue and of the Live delivery line." },
+        type: { type: "string", description: "A type id from agentistics_task_types (an unknown one is dropped)." },
+      },
       required: ["title"],
     },
   },
@@ -393,6 +399,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_subtask",
     description:
+      "Joining a staged subtask to a group folds its queued delivery and brief into the group, keeping one queue card and an audit reason. " +
       "Add a subtask, or change one. Pass `title` to add; pass `id` with `done`, `status`, `dueDate`, `startDate`, `blockedBy` or `parentGroupId` to edit one. `startedAt`/`deliveredAt` are system-stamped facts (when real work began / when this piece reached `done`) and are never set through this tool — they are read back on the subtask record. A subtask carries the same columns its parent does; its own cost, tokens, rounds and harness are rolled up from the sessions filed under it — the PARENT task's rollup is the sum of all its subtasks' sessions. A subtask CAN be blocked by another subtask of the SAME parent (pass `blockedBy` as the full list of sibling subtask ids that must be `done` first; a sibling outside this task, or the subtask itself, is dropped rather than accepted) — this is separate from agentistics_task_blocked_by, which blocks a whole TASK on other tasks. **`done` REQUIRES the subtask to have at least one session filed under it** and is refused (422, `done_needs_session`) without one — EXCEPT for a group MEMBER (`parentGroupId` set), which can never hold a session of its own (see below) and therefore reaches `done` through this same edit with no session required; a GROUP itself (`isGroup: true`) and an ordinary loose subtask both still need one. **The moment every one of a task's top-level subtasks (loose subtasks and groups — a group's own members never count separately) reaches `done`, the parent task auto-delivers too.** To put a session ON a subtask use agentistics_task_session with `subtaskId` — a subtask holds ANY NUMBER of sessions, so the link lives on the session, not in a field here. **SUBTASK GROUPS are a real hierarchy level, not a label**: pass `isGroup: true` with `title` to create a GROUP — a peer row that CAN hold a session, exactly like a loose subtask. Pass `id` (a subtask) with `parentGroupId` (a group's own subtask id, from the SAME parent task) to make it a MEMBER of that group — join with the group's id, leave with `parentGroupId: ''`. A refused reference (the id names no subtask, names one that is not `isGroup: true`, names a different task, or the subtask being patched is itself a group) is refused as `invalid_group` (422). **Joining a group is ALSO refused (422, `subtask_has_sessions`) when the subtask already has a session filed on it** — a member gets no rollup bucket of its own, so that session's cost would silently drop out of every visible breakdown while the task's own total kept counting it; detach the session first. **A MEMBER can never hold a session of its own** — filing on one is refused by agentistics_task_session with `subtask_in_group` (422); only the group itself accounts for a session, and a member's own status/dates/comments still exist and feed the group's progress percentage.",
     inputSchema: {
       type: "object",
@@ -407,7 +414,8 @@ const TOOLS: Tool[] = [
         },
         status: {
           type: "string",
-          enum: ["backlog", "todo", "in_progress", "blocked", "in_review", "done", "abandoned"],
+          description:
+            "A status id this board currently has — call agentistics_task_statuses for the live list (the vocabulary is editable, so it is NOT fixed here). The four every board starts with are todo | in_progress | blocked | done.",
         },
         dueDate: { type: "string" },
         startDate: { type: "string" },
@@ -502,35 +510,16 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_live_delivery",
     description:
-      "What is being DELIVERED right now — the Live Delivery line, the same source as the screen. Use it to answer \"what is running\", \"when does X ship\" and \"is anything stalled\". Returns a `summary` (active deliveries, agents working, stalled, the next delivery with an estimate), the active `deliveries` with their stage (queue, running, qa, adjust, leader, merge, published), the agents on each (harness, model, account, live state), time in the stage and in total, the ETA with its source and confidence (`kind: none` means there is NO estimate — say so, never invent a time), the last action, and the `leaders` band (each leader's current action, its workers and what waits on a decision — leaders are never deliveries). Filters: `task` (id or part of the title), `stage`, `stalledOnly`.",
+      "What is being DELIVERED right now — the Live Delivery line, the same source as the screen. Use it to answer \"what is running\", \"when does X ship\" and \"is anything stalled\". Returns a `summary` (active deliveries, agents working, stalled, the next delivery with an estimate), the active `deliveries` with their stage (queue, running, qa, adjust, leader, merge, published), the agents on each (harness, model, account, live state), time in the stage and in total, the step inside the stage (`step`, with `stepSource` = `reported` or `signals` and `stepSignal` naming the observed fact — null `step` means nothing is observable, say so; the screen then draws no percent), the ETA with its source and confidence (`kind: none` means there is NO estimate — say so, never invent a time), the last action, and the `leaders` band (each leader's current action, its workers and what waits on a decision — leaders are never deliveries). Each delivery carries its Agentask `priority` (urgent | high | medium | low; a subtask inherits its task's). Filters: `task` (id or part of the title), `stage`, `stalledOnly`, and the screen's own tabs — `tab`: `active` (Em andamento: only what has an agent working or waiting), `queue` (Na fila), `published` (Publicado) or `all` (Tudo: every piece in its real column, old legacy reviews marked `old`; the default here, while the screen opens on `active`) — and `period`, the Publicado period: `24h` (default), `7d`, `30d` or `all`. The answer's `view` carries `{tab, period, counts, defaulted, capped}`: `tab`/`period` are the EFFECTIVE values (a missing or invalid one falls back to `all` / `24h`, and `defaulted` names which did), `counts` is the count of EVERY tab under the same `task` filter and period, the very numbers the screen's tabs print, and `capped` (`{cap, omitted}`, else null) says the list was cut at 400 pieces per kind and that many older ones are NOT in the answer — then a count is not the total. Plus `sort` (how each stage lists its cards; default `priority`, highest first, ties by longest in the stage). Stage names on screen: queue = Na fila, running = Em desenvolvimento, qa = QA. There is no Histórico column any more: a piece published earlier is in `deliveries` whenever `period` covers it.",
     inputSchema: {
       type: "object",
       properties: {
         task: { type: "string", description: "A task id or part of its title." },
         stage: { type: "string", enum: ["queue", "running", "qa", "adjust", "leader", "merge", "published"] },
         stalledOnly: { type: "boolean", description: "Only deliveries that need a person, lost an agent or are blocked." },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "agentistics_delivery_calendar",
-    description:
-      "BETA. The DELIVERY CALENDAR — when each piece of work started, when it is expected to ship, which release version it rides and when a version really went out; the same source and rules as the \"Calendário de entregas\" screen (`agentop flow calendario` prints the same). Returns `pieces` (task, subtask, stage, `version`, harness/model, priority, `startedAtMs`, `stageEta` and `publishEta` — `kind: none` means there is NO estimate: say so, never invent a time — `publishedAtMs`, `dueDate`, `confirmed`, `late`), `versions` (each with `state` published|planned, `atMs` = the real publication or the LATEST piece estimate, `basis` published|estimate|partial|none, the pieces and the count per stage) and `marks` (an account's usage window renewing, a task's due day). Times are epoch ms; day arguments are BRT days (America/Sao_Paulo). By default only pieces of tasks being worked on now; pass `all` for the history too. Filters: `task` (id or part of the title), `subtask`, `version` (one or a list), `stage`, `harness`, `priority`, `from`/`to` (yyyy-MM-dd or an ISO instant — keeps what touches the period), `confirmedOnly` (published or a medium/high-confidence estimate). `format: \"ics\"` returns the filtered view as an .ics file instead of JSON.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        task: { type: "string", description: "A task id or part of its title." },
-        subtask: { type: "string", description: "A subtask id." },
-        version: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "A release version (2.202.0) or a list." },
-        stage: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "queue, blocked, running, qa, adjust, leader, merge, ci, published — one or a list." },
-        harness: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
-        priority: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "urgent, high, medium, low." },
-        from: { type: "string", description: "Start of the period: yyyy-MM-dd (BRT) or an ISO instant." },
-        to: { type: "string", description: "End of the period (inclusive)." },
-        all: { type: "boolean", description: "Include pieces of tasks not being worked on now (history)." },
-        confirmedOnly: { type: "boolean", description: "Only published pieces or those with a medium/high-confidence estimate." },
-        format: { type: "string", enum: ["json", "ics"] },
+        tab: { type: "string", enum: ["active", "queue", "published", "all"], description: "The screen's tab: active (Em andamento), queue (Na fila), published (Publicado) or all (Tudo). Default all." },
+        period: { type: "string", enum: ["24h", "7d", "30d", "all"], description: "How far back Publicado reaches. Default 24h." },
+        sort: { type: "string", enum: ["priority", "time-in-stage", "recent"], description: "Order within each stage. Default priority (highest first, ties by longest in the stage)." },
       },
       required: [],
     },
@@ -597,13 +586,39 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: { ref: { type: "string" } }, required: ["ref"] },
   },
   {
-    name: "agentistics_task_phase",
+    name: "agentistics_delivery_calendar",
     description:
-      "FLUXO.ENTREGA-DSL — read or move a DELIVERY (one subtask) through its fixed phases: fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado, plus bloqueado (from any phase, back to the stored origin only). Any transition outside that table is REFUSED (422 `fase_pulada`) with a sentence naming what is missing — executando → revisao_lider, ajuste → revisao_lider and every other skip included. The gates each edge needs are run BY THE SERVER from evidence (predispatch, vaga, salvo = sha on origin per ls-remote, qa-modelo = QA model ≠ author model from the registry and never Sonnet over Sonnet, cabeca = the pushed branch is still at the sha QA tested, delecoes = no file deleted outright by the PR, mergeado = gh says the PR is MERGED, the merge commit is on origin/main and the PR head is the sha QA approved — the merge sha is READ FROM THE PR, never from you, release = the batch's version tag exists AND the release.yml run that produced it is green, read in the repository the release recorded); salvo needs every check run on the pushed head to have concluded green (pending or absent refuse); you never pass proof. `action`: `get` (default; omit `subtaskId` to list every delivery) | `phase` (`to` + what that edge reads: `verdict` APROVADO/REPROVADO + `findings` from qa, `reviewedSha` = the sha QA approved for revisao_lider → pr_merge, `detail` for a request for change or a failure reason) | `gate` (`name`: run ONE gate and record its evidence) | `block` (`reason` one of dependencia, pedido_de_bloqueio, limite, maquina, externo, fora_das_autorizacoes; `text`) | `unblock` (`detail`; the leader of the task or the owner — an owner-decision block only the owner) | `step` (`step` 1..9: the step of the current phase, for the Live %) | `configure` (the LEADER of the task or the owner only; `patch`: versionTarget, humanGates [phases needing the owner's approval — skipped and recorded as 'pulado: modo autônomo' while autonomous mode is on], leaderSessionId, pr, tag, allowDeletions {paths, reason}; the QA and author sessions are never settable — the host records them from the sessions it opened and the registry) | `approve` (`phase`, `decision` approve|reject, `note`: answers a human gate the owner was ASKED about; a session identity is deliberately not sent, the owner answers through this same door as the Live card button and `agentop flow approve`) | `stage-run` (predispatch + vaga gates, then start the staged session and move to executando) | `merge` (delecoes gate, squash-merge the PR, move to ci; a failure goes back to revisao_lider) | `release` (the LEADER of the task or the owner DECLARES what a release contains: `version` x.y.z, `mergeSha` = the commit on main carrying it (information only; 40 characters, or a short sha the server resolves), optional `repo` = owner/name (default agentistics/agentistics), `subtaskIds` = every piece in it; no `subtaskId`. Each piece gets its record (a legacy one is adopted), versionTarget/mergeSha/tag/repo, goes to ci and then to publicado as soon as the tag `v<version>` exists and the release.yml run that produced it is green — read by the server from the TAG, not from the sha — with the release's own publish time; a declared piece is never sent back to revisao_lider by the tick (a red tag run keeps it in ci and wakes the leader once); done/abandoned/blocked/unknown/other-task pieces refuse the whole batch, which is written in ONE store write; a second run changes nothing). In autonomous mode nothing here ever asks or waits for the owner.",
+      "BETA. The DELIVERY CALENDAR — when each piece of work started, when it is expected to ship, which release version it rides and when a version really went out; the same source and rules as the \"Calendário de entregas\" screen (`agentop flow calendario` prints the same). Returns `pieces` (task, subtask, stage, `version`, harness/model, priority, `startedAtMs`, `stageEta` and `publishEta` — `kind: none` means there is NO estimate: say so, never invent a time — `publishedAtMs`, `dueDate`, `confirmed`, `late`), `versions` (each with `state` published|planned, `atMs` = the real publication or the LATEST piece estimate, `basis` published|estimate|partial|none, the pieces and the count per stage) and `marks` (an account's usage window renewing, a task's due day). Times are epoch ms; day arguments are BRT days (America/Sao_Paulo). By default only pieces of tasks being worked on now; pass `all` for the history too. Filters: `task` (id or part of the title), `subtask`, `version` (one or a list), `stage`, `harness`, `priority`, `from`/`to` (yyyy-MM-dd or an ISO instant — keeps what touches the period), `confirmedOnly` (published or a medium/high-confidence estimate). `format: \"ics\"` returns the filtered view as an .ics file instead of JSON.",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "step", "configure", "approve", "stage-run", "merge", "release"] },
+        task: { type: "string", description: "A task id or part of its title." },
+        subtask: { type: "string", description: "A subtask id." },
+        version: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "A release version (2.202.0) or a list." },
+        stage: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "queue, blocked, running, qa, adjust, leader, merge, ci, published — one or a list." },
+        harness: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+        priority: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "urgent, high, medium, low." },
+        from: { type: "string", description: "Start of the period: yyyy-MM-dd (BRT) or an ISO instant." },
+        to: { type: "string", description: "End of the period (inclusive)." },
+        all: { type: "boolean", description: "Include pieces of tasks not being worked on now (history)." },
+        confirmedOnly: { type: "boolean", description: "Only published pieces or those with a medium/high-confidence estimate." },
+        format: { type: "string", enum: ["json", "ics"] },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_task_phase",
+    description:
+      "FLUXO.CICLO-COMPLETO — the minute `tick` also moves a piece in revisao_lider or pr_merge to ci BY ITSELF once its PR is merged (found from the piece's PR number, branch, the PR containing the sha QA approved, or its author worktree's branch; the merge gates `delecoes` + `mergeado` still run, and a refusal leaves the piece where it is with the reason), publishes ci pieces from the FIRST tag that contains the merge, and reminds the LIVE leader of the task (never the owner) of a piece waiting on them for 30 min, then every 2 h, at most 3 times. `get` with a `subtaskId` returns `tickReason`: why the tick has not moved it. `reconcile` (no `subtaskId`; `apply` true to write) is the one-shot BACKFILL: every piece in revisao_lider/pr_merge/ci matched to its merged PR and the first release tag containing it — a report of what moves and what cannot be proven, with the reason. " +
+      "`tick` also enables the mandatory owner-request/placement flows through the official engine switches and reads canonical pedidos; after 10 minutes without complete staging it wakes the current live task leader, including after a handoff or restart, and never asks the owner. " +
+      "Queue actions: `dequeue` withdraws a queued piece with a required free-text `reason` (task leader or owner only), keeps the draft/history, and refuses dispatch until explicitly restaged; `tick` reconciles stale queued pieces against board review/done/abandoned and records a comment. Vacancy counts live backend processes; lost/exited/closed sessions reserve no slots. " +
+      "FLUXO.ENTREGA-DSL — read or move a DELIVERY (one subtask) through its fixed phases: fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado, plus bloqueado (from any phase, back to the stored origin only). Any transition outside that table is REFUSED (422 `fase_pulada`) with a sentence naming what is missing — executando → revisao_lider, ajuste → revisao_lider and every other skip included. The gates each edge needs are run BY THE SERVER from evidence (predispatch, vaga, salvo = sha on origin per ls-remote, qa-modelo = QA model ≠ author model from the registry and never Sonnet over Sonnet, cabeca = the pushed branch is still at the sha QA tested, delecoes = no file deleted outright by the PR, mergeado = gh says the PR is MERGED, the merge commit is on origin/main and the PR head is the sha QA approved — the merge sha is READ FROM THE PR, never from you, release = the batch's version tag exists AND the release.yml run that produced it is green, read in the repository the release recorded); salvo needs every check run on the pushed head to have concluded green (pending or absent refuse); you never pass proof. `action`: `get` (default; omit `subtaskId` to list every delivery) | `phase` (`to` + what that edge reads: `verdict` APROVADO/REPROVADO + `findings` from qa, `reviewedSha` = the sha QA approved for revisao_lider → pr_merge, `detail` for a request for change or a failure reason) | `gate` (`name`: run ONE gate and record its evidence) | `block` (`reason` one of dependencia, pedido_de_bloqueio, limite, maquina, externo, fora_das_autorizacoes; `text`) | `unblock` (`detail`; the leader of the task or the owner — an owner-decision block only the owner) | `step` (`step` 1..9: the step of the current phase, for the Live %. The Live already DERIVES the step from real signals — a session open, a file edit, a test run, a commit, the gates, the PR — so report only when you know better; the card shows the larger of the two and says which it is. Works for a legacy piece with no delivery record too: only the board's `step` event is written, nothing is adopted into the flow) | `configure` (the LEADER of the task or the owner only; `patch`: versionTarget, humanGates [phases needing the owner's approval — skipped and recorded as 'pulado: modo autônomo' while autonomous mode is on], leaderSessionId, pr, tag, allowDeletions {paths, reason}; the QA and author sessions are never settable — the host records them from the sessions it opened and the registry) | `approve` (`phase`, `decision` approve|reject, `note`: answers a human gate the owner was ASKED about; a session identity is deliberately not sent, the owner answers through this same door as the Live card button and `agentop flow approve`) | `stage-run` (predispatch + vaga gates, then start the staged session and move to executando) | `merge` (delecoes gate, squash-merge the PR, move to ci; a failure goes back to revisao_lider) | `release` (the LEADER of the task or the owner DECLARES what a release contains: `version` x.y.z, `mergeSha` = the commit on main carrying it (information only; 40 characters, or a short sha the server resolves), optional `repo` = owner/name (default agentistics/agentistics), `subtaskIds` = every piece in it; no `subtaskId`. Each piece gets its record (a legacy one is adopted), versionTarget/mergeSha/tag/repo, goes to ci and then to publicado as soon as the tag `v<version>` exists and the release.yml run that produced it is green — read by the server from the TAG, not from the sha — with the release's own publish time; a declared piece is never sent back to revisao_lider by the tick (a red tag run keeps it in ci and wakes the leader once); done/abandoned/blocked/unknown/other-task pieces refuse the whole batch, which is written in ONE store write; a second run changes nothing). In autonomous mode nothing here ever asks or waits for the owner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "dequeue", "tick", "step", "configure", "approve", "stage-run", "merge", "release", "reconcile"] },
+        apply: { type: "boolean", description: "reconcile: write the moves (a leader of the task, or the owner). Absent/false = dry run: the report only" },
         subtaskId: { type: "string" },
         version: { type: "string", description: "release: the version the pieces shipped in, x.y.z" },
         mergeSha: { type: "string", description: "release: the commit on main that carries the release (information only: stored on the record; a short sha is resolved to 40 characters or refused). The publication evidence is the version tag's own green release.yml run" },
@@ -618,7 +633,7 @@ const TOOLS: Tool[] = [
         phase: { type: "string", description: "approve: the phase whose human gate is answered" },
         decision: { type: "string", enum: ["approve", "reject"] },
         note: { type: "string" },
-        reason: { type: "string", enum: ["dependencia", "pedido_de_bloqueio", "limite", "maquina", "externo", "fora_das_autorizacoes"] },
+        reason: { type: "string", description: "dequeue: required free-text audit reason (leader only); block: dependencia | pedido_de_bloqueio | limite | maquina | externo | fora_das_autorizacoes" },
         text: { type: "string" },
         step: { type: "number" },
         patch: { type: "object" },
@@ -629,6 +644,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_stage",
     description:
+      "Placement is deterministic: a queued piece of the same task sharing a file, area tag or UI surface is returned as an `encaixe` warning so you can extend that brief or group the pieces. Withdrawn pieces are excluded. " +
       "FLUXO.ENTREGA-DSL pre-dispatch — write the STAGED SESSION on a subtask (prompt/brief, harness, model, effort, account, cwd) and open its delivery in `fila` (\"Na fila\"). A leader receiving a request from the owner stages it in the SAME turn: the demand flow reminds the leader (never the owner) after 10 minutes of an owner request with no staged subtask. The fields merge over what the subtask already holds, and the predispatch gate is checked right away (the reply says what is still missing). Nothing starts here — `agentistics_task_phase action=stage-run` starts it once the vaga gate passes. `pedidoId` links the owner request this answers.",
     inputSchema: {
       type: "object",
@@ -644,6 +660,32 @@ const TOOLS: Tool[] = [
         pedidoId: { type: "string" },
       },
       required: ["subtaskId"],
+    },
+  },
+  {
+    name: "agentistics_task_queue",
+    description:
+      "FILA.PRIORIDADE — read the delivery QUEUE (\"Na fila\") exactly as the task page's Fila tab shows it, from the same source, in the order pieces LEAVE: the task's priority (urgent → low), then arrival. " +
+      "Each item: `position` (in its task) and `globalPosition`, `priority`, the subtask/group (with `group.members`), the full PRE-DISPATCH (`predispatch`: harness, model, effort, account and its name, cwd, prompt), the slot gate's last verdict (`slot`; ok=false carries the raw reason such as `no slot: 4 workers running (machine ceiling 4)`), " +
+      "`hold` (the leader said `nao <motivo>` or `agendar <ISO> <motivo>`: kind, reason, until, who, `active`), `ask` (the system question to the leader: when, delivered, approved, `expiresAt` = 10 min, `onTimeout` = `sim` with autonomous mode on, `esperar` with it off), the leader, and the subtask's notes (`notes.last` the newest 3, `notes.total`). " +
+      "`recent` lists pieces the queue opened in the last 24 h with the session they opened. Pass `taskId` for one task's queue. To change the order, change the TASK's priority with `agentistics_task_edit`; to edit a piece's pre-dispatch use `agentistics_task_stage`; to start now / schedule / answer use `agentistics_task_queue_answer`; to withdraw use `agentistics_task_phase action=dequeue`.",
+    inputSchema: { type: "object", properties: { taskId: { type: "string", description: "Only this task's queued pieces. Omit for every task." } }, required: [] },
+  },
+  {
+    name: "agentistics_task_queue_answer",
+    description:
+      "FILA.PRIORIDADE — answer the queue's SYSTEM QUESTION (the message headed `[from flow fila · confirmar]` that arrives in a leader's composer when a slot opens and its piece is next), or act on a queued piece from the Fila tab. Leader of the task or owner only. " +
+      "`answer` is one of: `sim` (open the session now — if no slot is free right now the approval is kept and the next tick starts it; never opens twice), `nao <motivo>` (the piece stays queued with the reason on its card; the flow moves on to the next one), `agendar <ISO> <motivo>` (stays queued, becomes a candidate again only from that FUTURE instant, shown on the card as `começa às HH:MM`). " +
+      "A `nao` or `agendar` without a reason, and an `agendar` in the past, are refused with a sentence. Every decision is recorded as a comment on the subtask (who, why, when). With no answer in 10 minutes: autonomous mode ON → the flow carries on as `sim` and records it; OFF → it keeps waiting and reminds you. " +
+      "Set `runNow: true` instead of `answer` to run the queue flow once right now (what happens automatically when a worker ends and every minute).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subtaskId: { type: "string" },
+        answer: { type: "string", description: "`sim` | `nao <motivo>` | `agendar <ISO> <motivo>`" },
+        runNow: { type: "boolean", description: "Run the queue flow now instead of answering." },
+      },
+      required: [],
     },
   },
   {
@@ -703,7 +745,7 @@ const TOOLS: Tool[] = [
         to: { type: "string", description: "The target session reference." },
         kind: { type: "string", enum: ["handback", "block", "question"] },
         body: { type: "string", description: "The message." },
-        awaiting: { type: "string", description: "kind=handback only: what you stopped waiting for (marks the handback as intermediate; the worker is not closed). Omit on a final handback." },
+        awaiting: { type: "string", description: "kind=handback only: what you stopped waiting for (marks the handback as intermediate: the worker is not closed, your subtask stays in_progress and the leader's check-in does not list it as delivered). A text that says it is part N of M (\"parte 2 de 5\", \"2/5\", \"seguindo com…\") with no awaiting is read the same way, and the reply tells you so. Omit on the FINAL handback." },
       },
       required: ["to", "kind", "body"],
     },
@@ -1002,6 +1044,12 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "agentistics_vault_status",
+    description:
+      "How this machine's vault is protected — never what it holds. Returns the state (open/locked/uninitialized…), the ways to confirm it is you already in use (touchid = Touch ID or the Mac password, hello = Windows Hello, password = the vault's own password, fido2 = a security key), the ways this machine offers (a security key only when its tools are present, marked advanced), whether an old app-code record is still on disk (it is no longer asked; it is deleted once a way to confirm is chosen), whether the 24-word recovery key exists, the auto-lock minutes, and the vault-password rules (the same table the page and the server enforce). Setting up, unlocking and confirming are the person's: on the /vault page or with `agentop vault` — never pass a vault password or recovery words through a tool.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "agentistics_tag_detail",
     description:
       "Get full detail for one tag by name or id: aggregate totals plus per-source breakdown and distributions (top projects, models, harnesses, repos, members/users), daily activity series, and the active date window. Call agentistics_tags first to find the id/name.",
@@ -1107,7 +1155,12 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       }
       case "agentistics_task_create": {
         const a = args as any;
-        const body = await apiSend("POST", "/api/tasks", { title: a?.title, detail: a?.detail });
+        const body = await apiSend("POST", "/api/tasks", {
+          title: a?.title,
+          detail: a?.detail,
+          ...(typeof a?.priority === "string" ? { priority: a.priority } : {}),
+          ...(typeof a?.type === "string" ? { type: a.type } : {}),
+        });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_status": {
@@ -1248,12 +1301,6 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiGet(`/api/tasks/live${liveDeliveryQuery(args as any)}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
-      case "agentistics_delivery_calendar": {
-        const q = deliveryCalendarQuery(args as any);
-        if ((args as any)?.format === "ics") return { content: [{ type: "text", text: await apiGetText(`/api/deliveries/calendar${q}`) }] };
-        const body = await apiGet(`/api/deliveries/calendar${q}`);
-        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
-      }
       case "agentistics_task_edit": {
         const a = args as any;
         const ref = encodeURIComponent(String(a?.ref ?? ""));
@@ -1297,6 +1344,12 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiSend("DELETE", `/api/tasks/${encodeURIComponent(ref)}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
+      case "agentistics_delivery_calendar": {
+        const q = deliveryCalendarQuery(args as any);
+        if ((args as any)?.format === "ics") return { content: [{ type: "text", text: await apiGetText(`/api/deliveries/calendar${q}`) }] };
+        const body = await apiGet(`/api/deliveries/calendar${q}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
       case "agentistics_task_phase": {
         const a = (args ?? {}) as any;
         const action = typeof a.action === "string" ? a.action : "get";
@@ -1313,8 +1366,14 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           });
           return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
         }
-        if (typeof a.subtaskId !== "string" || !a.subtaskId) throw new Error("subtaskId is required");
-        const { subtaskId, action: _a, ...rest } = a;
+        if (action === "reconcile") {
+          // The backfill: same service as `agentop flow reconcile --release`; dry run unless `apply`.
+          const body = await apiSend("POST", "/api/deliveries/reconcile", { apply: a.apply === true, session: sessionProof(process.env) });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (action !== "tick" && (typeof a.subtaskId !== "string" || !a.subtaskId)) throw new Error("subtaskId is required");
+        const { subtaskId: _s, action: _a, ...rest } = a;
+        const subtaskId = action === "tick" ? "tick" : a.subtaskId;
         // `approve` is the OWNER's answer to a human gate: no session identity travels with it (the server reads "no session proof" as the owner).
         const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(subtaskId)}`, { ...rest, action, ...(action === "approve" ? {} : { session: sessionProof(process.env) }) });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
@@ -1329,6 +1388,23 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           ...(typeof a.versionTarget === "string" ? { versionTarget: a.versionTarget } : {}),
           ...(typeof a.pedidoId === "string" ? { pedidoId: a.pedidoId } : {}),
         });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_queue": {
+        const a = (args ?? {}) as any;
+        // `queue/` with no task = every task's queue (the route reads an empty task as "all").
+        const body = await apiGet(`/api/deliveries/queue/${encodeURIComponent(typeof a.taskId === "string" ? a.taskId : "")}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_queue_answer": {
+        const a = (args ?? {}) as any;
+        if (a.runNow === true) {
+          const body = await apiSend("POST", "/api/deliveries/queue-next", { session: sessionProof(process.env) });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (typeof a.subtaskId !== "string" || !a.subtaskId) throw new Error("subtaskId is required");
+        if (typeof a.answer !== "string" || !a.answer.trim()) throw new Error("answer is required: sim | nao <motivo> | agendar <ISO> <motivo>");
+        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(a.subtaskId)}`, { action: "queue-answer", answer: a.answer, session: sessionProof(process.env) });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_session_groups": {
@@ -1731,6 +1807,15 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           window: t.window ?? null,
         }));
         return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
+      }
+
+      case "agentistics_vault_status": {
+        // Raw fetch, not apiGet: an open vault whose list owes a proof answers 401 WITH its view, and
+        // that view is exactly what this tool reduces. Anything else non-2xx is an error.
+        const res = await fetch(`${API}/api/vault`);
+        const body = await res.json().catch(() => ({})) as any;
+        if (!res.ok && !(body && typeof body === "object" && body.view)) throw new Error(`GET /api/vault → HTTP ${res.status}`);
+        return text(vaultStatusTool(body));
       }
 
       case "agentistics_tag_detail": {

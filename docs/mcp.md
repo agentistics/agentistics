@@ -75,6 +75,7 @@ There are **38 tools** (`packages/mcp/agentistics-mcp.ts`, the `TOOLS` array). B
 | **Custom layouts** — 8 | `agentistics_component_catalog`, `agentistics_get_layouts`, `agentistics_build_layout`, `agentistics_add_component`, `agentistics_remove_component`, `agentistics_create_layout`, `agentistics_set_active_layout`, `agentistics_delete_layout` |
 | **PDF export** — 1 | `agentistics_export_pdf` |
 | **Tags** — 2, read-only | `agentistics_tags`, `agentistics_tag_detail` |
+| **Vault** — 1, read-only | `agentistics_vault_status` — how the vault is protected (state, ways to confirm in use and offered, legacy app-code flag, recovery key present, password rules); never an item or a secret. Setting up, unlocking and the vault password stay with the person (the /vault page or `agentop vault`) |
 | **Team** — 2, read-only | `agentistics_team_status`, `agentistics_team_members` |
 
 Each tool's own `description` (what `tools/list` returns) is the authoritative contract; the

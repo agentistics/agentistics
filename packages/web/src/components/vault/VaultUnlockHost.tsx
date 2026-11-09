@@ -2,7 +2,7 @@
  * The vault unlock, callable from anywhere (VAULT.PERSONAL §10).
  *
  * `ensureVaultOpen()` resolves `true` at once when the vault is open; otherwise it shows ONE modal with
- * the shared `VaultUnlock` (Hello + code here, the phone's own ways on a phone) and resolves `true` once
+ * the shared `VaultUnlock` (this computer's own confirmation here, the phone's biometrics on a phone) and resolves `true` once
  * the vault opened — so the action that needed it carries on by itself — or `false` when the person
  * closes it. A module-level store with one mounted host (the notifications pattern), so a hook or a
  * plain async function can ask too, not only a component inside some provider.
@@ -17,6 +17,7 @@ import { card, overlay } from '../MfaSetup'
 import { loadVault, unlockFor } from '../../lib/vaultApi'
 import { phoneFacts } from '../../lib/phoneVault'
 import { PhoneRequests, VaultUnlock, usePhoneRequests } from './VaultUnlock'
+import { VaultPasswordPrompt } from './VaultPassword'
 import { useEscapeOwner } from '../../lib/overlayStack'
 
 type Ask = { resolve: (ok: boolean) => void }
@@ -74,6 +75,8 @@ export function VaultUnlockHost({ lang, isMobile, enabled }: { lang: 'en' | 'pt'
   const why = lang === 'pt' ? 'Esta ação precisa do cofre aberto. Destranque aqui e ela continua sozinha.' : 'This needs the vault open. Unlock it here and it carries on by itself.'
   return (
     <>
+      {/* COFRE.DESBLOQUEIO: the ONE vault-password prompt, wherever a request needs it. */}
+      <VaultPasswordPrompt lang={lang} enabled={enabled} />
       {ask && (
         <div style={o} role="dialog" aria-modal="true" aria-label={title} onClick={() => answer(false)}>
           <div style={c} onClick={e => e.stopPropagation()}>

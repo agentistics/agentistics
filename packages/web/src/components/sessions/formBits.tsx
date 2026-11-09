@@ -54,7 +54,7 @@ export function Muted({ text }: { text: string }) {
  * enough — this is the same lesson CLAUDE.md already states for the flex/grid item default: it must
  * be overridden at EVERY level of the ancestor chain, not only the deepest one.
  */
-export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, count, tap, flush, ariaLabel, variant = 'segmented' }: {
+export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, count, tap, flush, ariaLabel, variant = 'segmented', natural, gap, height }: {
   tabs: readonly T[]
   /** The selected tab, or null when none is (a surface showing something the tabs do not name). */
   value: T | null
@@ -75,11 +75,17 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, c
    * strip scrolls sideways on a narrow screen rather than squeezing a label to an ellipsis.
    */
   variant?: 'segmented' | 'underline'
+  /** Segmented only: each tab takes the width of its own label instead of an equal share (a strip that must never truncate). */
+  natural?: boolean
+  /** Underline only: the space between tabs (default 22). A strip that must fit a phone narrows it. */
+  gap?: number
+  /** Segmented only: the strip's TOTAL outer height (frame and padding included), for a toolbar that must line up with 32px controls. Absent keeps 30px tabs inside the frame. */
+  height?: number
 }) {
   if (variant === 'underline') {
     return (
       <div role="tablist" aria-label={ariaLabel} style={{
-        display: 'flex', gap: 22, marginBottom: flush ? 0 : 18, minWidth: 0, overflowX: 'auto',
+        display: 'flex', gap: gap ?? 22, marginBottom: flush ? 0 : 18, minWidth: 0, overflowX: 'auto',
         borderBottom: '1px solid var(--border)', scrollbarWidth: 'none',
       }}>
         {tabs.map(id => {
@@ -92,7 +98,8 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, c
               aria-selected={on}
               onClick={() => onPick(id)}
               style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap',
+                // A strip told to pack tight (`gap` under 12) also tightens label↔count, so 3-digit counts fit a 360px phone.
+                display: 'inline-flex', alignItems: 'center', gap: gap !== undefined && gap < 12 ? 4 : 6, flexShrink: 0, whiteSpace: 'nowrap',
                 minHeight: tap ?? undefined, padding: '10px 2px', marginBottom: -1, cursor: 'pointer',
                 border: 'none', borderBottom: `2px solid ${on ? 'var(--anthropic-orange)' : 'transparent'}`,
                 background: 'transparent', fontFamily: 'inherit', fontSize: 12, fontWeight: on ? 650 : 500,
@@ -112,6 +119,7 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, c
     <div role="tablist" aria-label={ariaLabel} style={{
       display: 'flex', gap: 3, marginBottom: flush ? 0 : 8, padding: 3, borderRadius: 9, minWidth: 0,
       background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+      ...(height ? { height, boxSizing: 'border-box' as const } : {}),
     }}>
       {tabs.map(id => {
         const on = value === id
@@ -122,8 +130,8 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, c
             aria-selected={on}
             onClick={() => onPick(id)}
             style={{
-              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              gap: 5, minHeight: tap ?? 30, minWidth: 0, borderRadius: 7, border: 'none', cursor: 'pointer',
+              flex: natural ? '0 0 auto' : 1, padding: natural ? '0 12px' : undefined, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: 5, minHeight: tap ?? (height ? height - 8 : 30), minWidth: 0, borderRadius: 7, border: 'none', cursor: 'pointer',
               background: on ? 'var(--bg-surface)' : 'transparent',
               color: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
               fontFamily: 'inherit', fontSize: 11.5, fontWeight: on ? 650 : 500,

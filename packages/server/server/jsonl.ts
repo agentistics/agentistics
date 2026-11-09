@@ -6,7 +6,7 @@ import type { SessionDayUsage, SessionMeta, TurnEvent } from '@agentistics/core'
 import { sessionDay, activeMinutesOf, charCount, emptyActiveTime, foldActiveTime, finishActiveTime } from '@agentistics/core'
 import type { ActiveTimeState } from '@agentistics/core'
 import { getSessionFileStats } from './git'
-import { countGitCommands } from './harness-activity'
+import { countGitCommands, countTestCommands } from './harness-activity'
 import { resolveUsage, type UsageContribution } from './usage-dedupe'
 import { emptyAgentMetrics, foldAgentEntry, finishAgentMetrics, type AgentMetricsState } from './agent-metrics'
 import { enrichFromSubagentTranscripts } from './subagent-metrics'
@@ -451,6 +451,8 @@ export interface ClaudeParseState {
   countedUsage: Map<string, ClaudeUsageContribution>
   gitCommits: number
   gitPushes: number
+  /** Shell commands whose verb is a test runner — see `countTestCommands`. */
+  testRuns: number
   toolErrors: number
   userInterruptions: number
   hasMcp: boolean
@@ -521,7 +523,7 @@ export function emptyClaudeParse(): ClaudeParseState {
     cacheCreation1hTokens: 0, cacheCreation5mTokens: 0, sawCacheCreationBreakdown: false,
     contextTokens: 0, contextTokensAny: 0,
     countedUsage: new Map(),
-    gitCommits: 0, gitPushes: 0,
+    gitCommits: 0, gitPushes: 0, testRuns: 0,
     toolErrors: 0, userInterruptions: 0,
     hasMcp: false, sawAgentLaunch: false,
     claudeFilesModified: new Set(),
@@ -884,6 +886,7 @@ function* foldClaudeParseSteps(state: ClaudeParseState, lines: Iterable<string>,
               const g = countGitCommands(cmd)
               state.gitCommits += g.commits
               state.gitPushes += g.pushes
+              state.testRuns += countTestCommands(cmd)
             }
 
             // Detect language and agent files from file-based tool calls
@@ -1065,6 +1068,7 @@ export async function finishClaudeSession(
             ? { compact_dropped_tokens: compaction.droppedTokens }
             : {}),
           skill_uses: { ...skillUses },
+          test_runs: state.testRuns,
         }
       : {}),
     tool_output_tokens: { ...state.toolOutputTokens },

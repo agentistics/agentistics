@@ -23,6 +23,8 @@ export interface DeliveryDoc {
   deliveries: Record<string, DeliveryRecord>
   /** Records this build cannot read, kept verbatim and written back. Never handed to a caller. */
   preserved?: Record<string, unknown>
+  /** Cadence only. Requests themselves stay in the engine's canonical pedidos document. */
+  requestReminders?: Record<string, { at?: string; pendingAt?: string; leaderSessionId?: string }>
 }
 
 const SAFE_ID = /^[A-Za-z0-9_.:-]{1,120}$/
@@ -50,6 +52,7 @@ export function parseDeliveryDocStrict(text: string): DeliveryDoc {
   const raw: unknown = JSON.parse(text)
   if (!isRec(raw)) throw new Error('the document is not an object')
   const out: DeliveryDoc = { version: 1, deliveries: {} }
+  if (isRec(raw.requestReminders)) out.requestReminders = raw.requestReminders as NonNullable<DeliveryDoc['requestReminders']>
   const d = isRec(raw.deliveries) ? raw.deliveries : {}
   const kept: Record<string, unknown> = isRec(raw.preserved) ? { ...raw.preserved } : {}
   for (const [id, r] of Object.entries(d)) {
@@ -70,7 +73,7 @@ export function serializeDeliveryDoc(doc: DeliveryDoc): string {
   const deliveries: Record<string, unknown> = { ...doc.deliveries }
   const preserved: Record<string, unknown> = {}
   for (const [id, r] of Object.entries(doc.preserved ?? {})) { if (id in deliveries) preserved[id] = r; else deliveries[id] = r }
-  return JSON.stringify({ version: 1, deliveries, ...(Object.keys(preserved).length ? { preserved } : {}) }, null, 2) + '\n'
+  return JSON.stringify({ version: 1, deliveries, ...(doc.requestReminders ? { requestReminders: doc.requestReminders } : {}), ...(Object.keys(preserved).length ? { preserved } : {}) }, null, 2) + '\n'
 }
 
 export interface DeliveryStore {

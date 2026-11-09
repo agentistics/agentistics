@@ -8,15 +8,16 @@
  * The shape is a closed list of named fields rather than a spread of anything read from disk.
  */
 import { basename } from 'node:path'
-import { isKid, isPresenceId, parseSealed, parseVaultJson, PRESENCE_GESTURES, setupCodeCommand, setupCodeWhere } from '@agentistics/vault'
+import { hasPresence, isKid, isPresenceId, parseSealed, parseVaultJson, PRESENCE_GESTURES, setupCodeCommand, setupCodeWhere } from '@agentistics/vault'
+import { VAULT_PASSWORD_MIN_LENGTH, VAULT_PASSWORD_MIN_SPECIAL, VAULT_PASSWORD_RULES } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { sealedFiles } from './boot'
-import { VAULT_ACTION_ROWS, authPolicyView, policyRow, proofsOf, requireVaultStepUp, rowFor, type VaultAction, setupCodeOwed, localProofKind, stepUpState, unlockPolicyView, type GateContext } from './gate'
+import { VAULT_ACTION_ROWS, asProof, authPolicyView, policyRow, proofsOf, requireVaultStepUp, rowFor, type VaultAction, setupCodeOwed, localProofKind, unlockPolicyView, type GateContext } from './gate'
 import { readAuthPolicy, type AuthPolicyRead } from './auth-policy'
 import { DEFAULT_AUTH_POLICY } from '@agentistics/vault'
 import { hardeningLines } from './hardening'
 import {
-  displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, presenceSoon, restoreWithFor, secretFs, unlockWindowHint, vaultDir, vaultLang, vaultStatus,
+  displayPath, lockVault, pendingPlaintextFiles, presenceCandidates, presenceSoon, unlockMethodOffers, restoreWithFor, secretFs, unlockWindowHint, vaultDir, vaultLang, vaultStatus,
   type LockedBy, type RecoveryStep, type VaultState,
 } from './service'
 
@@ -90,6 +91,24 @@ export interface VaultView {
   unlockPolicy: { mode: 'always' | 'hello-only' | 'daily'; hours: number; chosen: boolean; codeNextUnlock: boolean; windowEndsAt: string | null }
   /** Owner decision 2026-10-06: which proof each kind of action asks — one row per kind (gate.ts `authPolicyView`). */
   authPolicy: Awaited<ReturnType<typeof authPolicyView>>
+  /**
+   * COFRE.DESBLOQUEIO (owner, 2026-11-07): the ways of confirming this machine offers, best first —
+   * `advanced` for a FIDO2 key, which appears ONLY where its tools are present.
+   */
+  unlockMethods: { id: string; advanced: boolean; gestures: { enroll: number; unlock: number } }[]
+  /** The way(s) this vault confirms with today (its presence wrappers), best first; empty = none chosen yet. */
+  methods: string[]
+  /** The vault still RECORDS an app code (authenticator) from before 2026-11-07 (asked by nothing; dropped when a method is set up). */
+  legacyAppCode: boolean
+  /** The vault password's rules (the same ones the server enforces), for a client that cannot import them. */
+  passwordRules: { minLength: number; minSpecial: number; rules: string[] }
+}
+
+/** How many dialogs each method raises to enrol / to unlock (the page states these numbers, never its own). */
+export function methodGestures(id: string): { enroll: number; unlock: number } {
+  if (id === 'password') return { enroll: 0, unlock: 0 }
+  if (id === 'touchid') return { enroll: 1, unlock: 1 }
+  return { enroll: PRESENCE_GESTURES.enroll, unlock: PRESENCE_GESTURES.unlock }
 }
 
 const KIND_OF_PURPOSE: Record<string, VaultItem['kind']> = {
@@ -118,8 +137,6 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
     stored = parseVaultJson(raw ? new TextDecoder().decode(raw) : null)
     if (stored) { createdAt = stored.createdAt; kid = kid ?? stored.kid }
   } catch { /* the view says "unknown" rather than failing */ }
-  const su = await stepUpState()
-  const STEP_MS = 30_000
 
   const items: VaultItem[] = []
   for (const f of files) {
@@ -148,10 +165,13 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
     state: s.state, protector: s.protector, protectorLabel: s.protectorLabel, kid, createdAt,
     sentence: s.sentence, pending: s.pending, canLock: s.state === 'open', items,
     wrappers: s.wrappers, presence: s.wrappers.some(w => isPresenceId(w)), presenceAvailable: presenceCandidates().map(p => p.id),
-    authenticator: stored?.stepup ? {
-      enrolledAt: stored.stepup.enrolledAt, lastUsedAt: su.lastStep !== null ? new Date(su.lastStep * STEP_MS).toISOString() : null,
-      failures: su.failures, pausedUntil: su.pausedUntilMs ? new Date(su.pausedUntilMs).toISOString() : null, frozen: su.frozen,
-    } : null,
+    // COFRE.DESBLOQUEIO: no authenticator is ever reported as enrolled — the code is asked by nothing.
+    // A legacy record is reported as a fact (`legacyAuthenticator`) for the migration note only.
+    authenticator: null,
+    legacyAppCode: Boolean(stored?.stepup),
+    unlockMethods: unlockMethodOffers().map(m => ({ ...m, gestures: methodGestures(m.id) })),
+    methods: s.wrappers.filter(w => isPresenceId(w)),
+    passwordRules: { minLength: VAULT_PASSWORD_MIN_LENGTH, minSpecial: VAULT_PASSWORD_MIN_SPECIAL, rules: [...VAULT_PASSWORD_RULES] },
     recoveryCreatedAt: stored?.wrappers.find(w => w.type === 'recovery')?.createdAt ?? null,
     requirePresence: stored?.requirePresence === true,
     autoLockMinutes: stored?.autoLock?.minutes ?? 30,
@@ -160,12 +180,13 @@ export async function readVaultView(files: string[] = sealedFiles(), pendingFile
     recoveryTodo: s.recoveryTodo ?? null,
     // Owner decision 2026-10-06: the rows the person's per-action policy makes of the table, so the icons
     // the page draws are what the gate will ask.
-    gates: Object.fromEntries((Object.keys(VAULT_ACTION_ROWS) as VaultAction[]).map(k => { const r = stored ? policyRow(k, { session, loopback }, authPolicy.policy, proofsOf(stored)) : rowFor(k, { session, loopback }); return [k, { code: r.code, gesture: r.gesture, grant: r.grant !== null }] })),
+    // COFRE.DESBLOQUEIO: as the person's ONE proof (`asProof`) — no row asks a code any more.
+    gates: Object.fromEntries((Object.keys(VAULT_ACTION_ROWS) as VaultAction[]).map(k => { const r = asProof(stored ? policyRow(k, { session, loopback }, authPolicy.policy, proofsOf(stored)) : rowFor(k, { session, loopback })); return [k, { code: r.code, gesture: r.gesture, grant: r.grant !== null }] })),
     authPolicy: { state: authPolicy.state, rows: authRows.rows },
     gestures: { probe: PRESENCE_GESTURES.probe, enroll: PRESENCE_GESTURES.enroll },
     unlockPolicy: unlockPolicyView(stored, await unlockWindowHint(typeof kid === 'string' ? kid : null)),
     setupCode: {
-      owed: setupCodeOwed(Boolean(stored?.stepup), { session, loopback }),
+      owed: setupCodeOwed(stored ? hasPresence(stored) : false, { session, loopback }),
       command: setupCodeCommand(AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR),
       where: setupCodeWhere(vaultLang()),
     },

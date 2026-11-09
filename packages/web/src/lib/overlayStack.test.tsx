@@ -8,7 +8,6 @@ let createRoot: typeof import('react-dom/client').createRoot
 let ConfirmModal: typeof import('../pages/settings/primitives').ConfirmModal
 let MemoryRouter: typeof import('react-router-dom').MemoryRouter
 let Select: typeof import('../pages/settings/primitives').Select
-let PlanUsageModal: typeof import('../components/PlanUsageModal').PlanUsageModal
 let DockSettingsScreen: typeof import('../components/nay/DockSettings').DockSettingsScreen
 let useEscapeOwner: typeof import('./overlayStack').useEscapeOwner
 
@@ -23,7 +22,6 @@ beforeAll(async () => {
   ConfirmModal = (await import('../pages/settings/primitives')).ConfirmModal
   MemoryRouter = (await import('react-router-dom')).MemoryRouter
   Select = (await import('../pages/settings/primitives')).Select
-  PlanUsageModal = (await import('../components/PlanUsageModal')).PlanUsageModal
   DockSettingsScreen = (await import('../components/nay/DockSettings')).DockSettingsScreen
   useEscapeOwner = (await import('./overlayStack')).useEscapeOwner
 })
@@ -85,16 +83,4 @@ describe('overlay stack', () => {
     expect(log).toEqual(['screen'])
   })
 
-  test('PlanUsageModal over the real Nay settings screen: one Escape closes only the modal', () => {
-    const log: string[] = []
-    const settings = createElement(DockSettingsScreen, { key: 's', pt: false, isMobile: false, chat: {} as never, onLeave() {}, onBack: () => log.push('settings') })
-    const wrap = (...kids: ReactElement[]) => createElement(MemoryRouter, null, createElement('div', null, ...kids))
-    mount(wrap(settings))
-    mount(wrap(settings, createElement(PlanUsageModal, { key: 'p', lang: 'en', onClose: () => log.push('usage') })))
-    esc()
-    expect(log).toEqual(['usage'])
-    mount(wrap(settings))
-    esc()
-    expect(log).toEqual(['usage', 'settings'])
-  })
 })

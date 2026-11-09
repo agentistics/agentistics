@@ -36,12 +36,15 @@ import {
   type HeldPresence, type Protector, type ProtectorId, type StepUpState, type VaultJson, type WrapperRecord,
   ACTION_KINDS, ACTION_KINDS_ORDER, choiceFor, choicesFor, parseAuthPolicy, proofsFor, type ActionKind, type AuthPolicy, type ProofChoice, type VaultProofs,
 } from '@agentistics/vault'
+import { passwordFailure, withoutAuthenticator } from '@agentistics/vault'
+import { checkVaultPassword, vaultPasswordWeakSentence } from '@agentistics/core'
 import { readAuthPolicy, writeAuthPolicy, type AuthPolicyRead } from './auth-policy'
+import { currentVaultPassword } from './password-context'
 import {
   abandonPending, adoptPending, ensureVaultOpen, lockVault, noteVaultActivity, openWithRecovery, pendingUnlock, protectorById,
   recoveryStepDone, recoveryTodo, refused, sealToFile, secretFs, sentence, setAutoLockPeriod, vaultAudit, vaultDir, vaultLang,
   presenceWord, presenceCandidates, presenceSoon, chooseAutoProtector, vaultStatus, noteCodeUnlock, dropUnlockWindow, unlockWindowAnchor, onVaultLock,
-  consumeFreshPresence, mintFresh,
+  consumeFreshPresence, mintFresh, notePasswordResult, passwordPaused, passwordRefusal,
 } from './service'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { realProtectorIo } from './io'
@@ -129,7 +132,10 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   'personal-grant': { code: false, gesture: true, grant: null },
   'personal-grant-open': { code: false, gesture: false, grant: null },
   'personal-backup-wipe': { code: true, gesture: true, grant: null },
-  'phone-enrol-request': { code: true, gesture: false, grant: null },
+  // COFRE.DESBLOQUEIO: the phone's REQUEST asked the code; with the code gone it asks nothing — a phone
+  // has no proof of its own yet (it is enrolling one). The request only QUEUES: nothing is registered
+  // until the computer approves it with its own proof, fresh, on loopback (`phone-enrol-approve`).
+  'phone-enrol-request': { code: false, gesture: false, grant: null },
   'phone-enrol-approve': { code: false, gesture: true, grant: null },
   // Changing what the vault asks is itself a security setting: by default code AND gesture, fresh — and,
   // once chosen, whatever the 'settings' kind says (never nothing: it is critical).
@@ -310,7 +316,22 @@ async function checkCodeWith(dek: Uint8Array, kid: string, code: string): Promis
   return stepupRefusal(v)
 }
 
-function enrolled(v: VaultJson): boolean { return Boolean(v.stepup) }
+/**
+ * COFRE.DESBLOQUEIO (owner, 2026-11-07): the authenticator code is gone from every flow. A vault that
+ * still RECORDS one (`v.stepup`) is treated as having none — its code is never asked — and the record
+ * is dropped the moment a new way of confirming is set up (`retireAuthenticator`). Every row that used
+ * to ask the code now asks the person's own proof instead (`asProof`).
+ */
+function enrolled(_v: VaultJson): boolean { return false }
+
+/**
+ * PURE. The row as the person's ONE proof: wherever the table asked the code, it now asks the method
+ * this vault confirms with (Touch ID, Windows Hello, a key, the vault password). The 'read' grant still
+ * rides where the row had one, so a setting changed twice in five minutes is confirmed once.
+ */
+export function asProof(row: ActionRow): ActionRow {
+  return row.code ? { code: false, gesture: true, grant: row.grant } : row
+}
 /** The proofs this vault can ask at all — what `proofsFor` decides against. */
 export function proofsOf(v: VaultJson): VaultProofs { return { hasAuthenticator: enrolled(v), hasPresence: hasPresence(v) } }
 
@@ -324,7 +345,14 @@ function presenceSoonRefusal(id: ProtectorId): Refusal | null {
 
 /** §2.4: prove a human gesture NOW, against the open key (a presence unwrap must give the same DEK). */
 async function proveGesture(open: { dek: Uint8Array; kid: string; vault: VaultJson }): Promise<{ ok: true } | Refusal> {
-  for (const w of open.vault.wrappers.filter(x => isPresenceId(x.type))) {
+  const presence = open.vault.wrappers.filter(x => isPresenceId(x.type))
+  // COFRE.DESBLOQUEIO: the vault password is a proof too. When this request carries one, it is tried
+  // FIRST (nobody should get a Touch ID dialog after typing the password); without one, a gesture method
+  // is tried first and the password is asked for only when it is the vault's only way.
+  const typed = currentVaultPassword() !== undefined
+  const ordered = [...presence].sort((a, b) => ((a.type === 'password') === typed ? -1 : 0) - ((b.type === 'password') === typed ? -1 : 0))
+  for (const w of ordered) {
+    if (w.type === 'password') return provePassword(open, w)
     const p = protectorById(w.type)
     if (!p) continue
     const u = await p.unwrap(w, open.kid)
@@ -337,6 +365,34 @@ async function proveGesture(open: { dek: Uint8Array; kid: string; vault: VaultJs
     if (u.kind === 'denied') return refused('presence-cancelled', sentence('presence-required', { presence: presenceWord(w.type) }))
   }
   return refused('presence-required', sentence('presence-required', { presence: presenceWord(open.vault.wrappers.find(x => isPresenceId(x.type))?.type) }))
+}
+
+// ── the vault password as a proof (COFRE.DESBLOQUEIO, 2026-11-07) ─────────────────────────────
+
+export function passwordRequired(): Refusal { return passwordRefusal('password-required') }
+
+/**
+ * Check the password the request carried against the vault's own wrapper (the same DEK must come out).
+ * Wrong tries share the unlock's pause (service.ts `notePasswordResult`): five free, then a minute,
+ * doubling, capped at an hour — never a lockout, the 24 words always open the vault.
+ */
+async function provePassword(open: { dek: Uint8Array; kid: string }, w: WrapperRecord): Promise<{ ok: true } | Refusal> {
+  if (currentVaultPassword() === undefined) return passwordRequired()
+  const paused = passwordPaused()
+  if (paused) return paused
+  const p = protectorById('password')
+  if (!p) return passwordRequired()
+  const u = await p.unwrap(w, open.kid)
+  if (u.ok) {
+    const same = u.dek.length === open.dek.length && timingSafeEqual(Buffer.from(u.dek), Buffer.from(open.dek))
+    u.dek.fill(0)
+    if (same) { notePasswordResult(true); return { ok: true } }
+    return refused('presence-lost', sentence('presence-required', { presence: presenceWord('password') }))
+  }
+  if (u.kind === 'missing') return refused('presence-lost', sentence('presence-required', { presence: presenceWord('password') }))
+  if (passwordFailure(u.reason) === 'password-required') return passwordRequired()
+  notePasswordResult(false)
+  return passwordPaused() ?? passwordRefusal('password-wrong')
 }
 
 export interface GateContext {
@@ -416,17 +472,15 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
   }
   // Owner decision 2026-10-06: the person's choice for this kind of action, against what the vault can ask.
   if (ACTION_KIND_OF[action]) row = policyRow(action, ctx, (await readAuthPolicy()).policy, proofsOf(o.vault))
-  if (row.code && enrolled(o.vault)) {
-    if (row.grant && grantValid(ctx.grant, ctx.session, row.grant)) { /* reused */ }
-    else {
-      if (!ctx.code) return refused('stepup-required', sentence('stepup-required'))
-      const c = await checkCodeWith(o.dek, o.kid, ctx.code)
-      if (!c.ok) return c
-      if (row.grant) {
-        if (row.gesture && hasPresence(o.vault)) { const g = await gestureFor(action, ctx, o); if (!g.ok) return g }
-        noteVaultActivity()
-        return { ok: true, grant: mintGrant(ctx.session, row.grant) }
-      }
+  // COFRE.DESBLOQUEIO: a row that asked ONLY the code now asks the person's proof — and keeps its grant,
+  // so a 'read' grant still stands for it within five minutes. A row that asked the gesture keeps asking
+  // it FRESH (a grant never stood for a gesture, and still does not).
+  if (row.code && !row.gesture && hasPresence(o.vault)) {
+    if (!(row.grant && grantValid(ctx.grant, ctx.session, row.grant))) {
+      const g = await gestureFor(action, ctx, o)
+      if (!g.ok) return g
+      noteVaultActivity()
+      return row.grant ? { ok: true, grant: mintGrant(ctx.session, row.grant) } : { ok: true }
     }
   }
   if (row.gesture && hasPresence(o.vault)) {
@@ -508,8 +562,8 @@ export async function requirePersonalReveal(ctx: GateContext, opts: { confirm?: 
 
 function revealNeedsSetup(): Refusal {
   return refused('reveal-needs-setup', vaultLang() === 'pt'
-    ? 'Para ver um segredo, o cofre precisa pedir uma confirmação sua. Configure o autenticador (e, se puder, a confirmação pessoal) primeiro.'
-    : 'To see a secret, the vault must ask you to confirm. Set up the authenticator (and, where you can, personal confirmation) first.')
+    ? 'Para ver um segredo, o cofre precisa pedir uma confirmação sua. Escolha primeiro como ele confirma que é você (Touch ID ou senha do Mac, Windows Hello, ou uma senha do cofre).'
+    : 'To see a secret, the vault must ask you to confirm. First choose how it confirms it is you (Touch ID or the Mac password, Windows Hello, or a vault password).')
 }
 
 function phoneGestureRefusal(): Refusal {
@@ -570,12 +624,18 @@ async function gestureFor(action: VaultAction, ctx: GateContext, o: { dek: Uint8
     if (consumeGestureToken(ctx.session, ctx.gestureToken, `${action}:${ctx.binding ?? ''}`)) return { ok: true }
     return phoneGestureRefusal()
   }
+  // COFRE.DESBLOQUEIO: what used to be the CODE is now this proof, and a code could be typed anywhere —
+  // a Touch ID / Hello dialog cannot. Off this computer, a non-personal action never raises a dialog on
+  // an empty desk: it is done at the computer (or rides the 'read' grant a phone's unlock already holds).
+  if (!ctx.loopback && !fromSocket(ctx) && !(currentVaultPassword() !== undefined && o.vault.wrappers.some(w => w.type === 'password'))) return phoneGestureRefusal()
   return proveGesture(o)
 }
 
 /** HTTP `POST /api/vault/stepup`: a code in, a 'read' grant out (5 min, this session only). */
-export async function stepUpForRead(code: string, session: string): Promise<GateResult> {
-  return requireVaultStepUp('set-auto-lock', { code, session })
+export async function stepUpForRead(ctx: { session: string; loopback?: boolean; gestureToken?: string }): Promise<GateResult> {
+  // COFRE.DESBLOQUEIO: the 'read' grant is earned by the person's proof (the gesture here, the vault
+  // password in its header), never a code. The page asks it once and rides the grant for 5 minutes.
+  return requireVaultStepUp('set-auto-lock', ctx)
 }
 
 /** VAULT.PERSONAL §10: what refuses a phone unlock before anything is unwrapped (recovery mode, frozen). */
@@ -628,23 +688,15 @@ function dropEnrolSeed(): void { _enrolSeed?.seed.fill(0); _enrolSeed = null }
  * caller (route / socket op) sends it with `Cache-Control: no-store` and never logs it.
  */
 export async function beginAuthenticator(ctx: GateContext, machineLabel: string): Promise<{ ok: true; uri: string; secret: string } | Refusal> {
-  const o = await ensureVaultOpen({ create: false, migrate: false })
-  if (!o) return refused('locked', sentence('locked'))
-  if (enrolled(o.vault)) {
-    const g = await requireVaultStepUp('enroll-authenticator', ctx)
-    if (!g.ok) return g
-  } else if (!recoveryTodo()) {
-    const p = firstEnrolProof(ctx)
-    if (!p.ok) return p
-  }
-  if (_enrolSeed && _enrolSeed.served && _now() < _enrolSeed.expiresMs) {
-    return refused('already-served', vaultLang() === 'pt' ? 'O código QR desta configuração já foi mostrado uma vez. Comece de novo.' : 'This setup\'s QR code was already shown once. Start over.')
-  }
-  dropEnrolSeed()
-  const seed = new Uint8Array(randomBytes(20))
-  _enrolSeed = { seed, served: true, expiresMs: _now() + ENROL_TTL_MS }
-  const secret = base32Encode(seed).replace(/=+$/, '')
-  return { ok: true, uri: otpauthUri(secret, machineLabel, 'Agentistics'), secret }
+  // COFRE.DESBLOQUEIO (owner, 2026-11-07): no authenticator is ever set up again.
+  void ctx; void machineLabel
+  return authenticatorRetired()
+}
+
+export function authenticatorRetired(): Refusal {
+  return refused('authenticator-retired', vaultLang() === 'pt'
+    ? 'O cofre não usa mais código de aplicativo. Ele confirma com o que o computador já tem (Touch ID ou senha do Mac, Windows Hello) ou com uma senha do cofre.'
+    : 'The vault no longer uses an app code. It confirms with what the computer already has (Touch ID or the Mac password, Windows Hello) or with a vault password.')
 }
 
 /**
@@ -709,8 +761,8 @@ function firstEnrolProof(ctx: GateContext): { ok: true } | Refusal {
 }
 
 /** Over the vault file + this session: does a page starting the setup still owe the setup code? */
-export function setupCodeOwed(stepupEnrolled: boolean, ctx: { session: string; loopback?: boolean }): boolean {
-  return !stepupEnrolled && !recoveryTodo() && !fromSocket(ctx) && !setupProofHeld(ctx) && !localProofHeld(ctx)
+export function setupCodeOwed(alreadyProtected: boolean, ctx: { session: string; loopback?: boolean }): boolean {
+  return !alreadyProtected && !recoveryTodo() && !fromSocket(ctx) && !setupProofHeld(ctx) && !localProofHeld(ctx)
 }
 
 // ── v2.98.1: the FIRST enrolment from a page ON this computer — a gesture instead of the setup code ──
@@ -746,7 +798,7 @@ export async function proveLocalHuman(ctx: GateContext): Promise<{ ok: true; kin
   if (!ctx.loopback || fromSocket(ctx)) return notLoopback()
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
-  if (!setupCodeOwed(enrolled(o.vault), ctx)) return { ok: true, kind: null }
+  if (!setupCodeOwed(hasPresence(o.vault), ctx)) return { ok: true, kind: null }
   const p = presenceCandidates().find(x => typeof x.proveHuman === 'function')
   if (!p) {
     return refused('no-local-proof', vaultLang() === 'pt'
@@ -804,7 +856,7 @@ export async function recoverFromPage(words: string, ctx: GateContext): Promise<
 export async function acceptSetupCode(ctx: GateContext): Promise<{ ok: true } | Refusal> {
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
-  if (!setupCodeOwed(enrolled(o.vault), ctx)) return { ok: true }
+  if (!setupCodeOwed(hasPresence(o.vault), ctx)) return { ok: true }
   if (!spendSetupCode(ctx.setupCode)) return setupRequired()
   _setupProof = { until: _now() + SETUP_TTL_MS, session: ctx.session }
   return { ok: true }
@@ -819,32 +871,27 @@ const ENROL_MAX_WRONG = 5
  * what the caller turns into the 5-minute 'read' grant, so the screen needs no second code after.
  */
 export async function confirmAuthenticator(code: string, ctx: { session: string } = { session: SOCKET_SESSION }): Promise<{ ok: true; step: number } | Refusal> {
-  const e = _enrolSeed
-  if (!e || _now() > e.expiresMs) { dropEnrolSeed(); return refused('no-enrolment', vaultLang() === 'pt' ? 'Nenhuma configuração do autenticador em andamento.' : 'No authenticator setup is in progress.') }
-  const nowSec = Math.floor(_now() / 1000)
-  const s = matchTotp(e.seed, code, nowSec, 1)
-  if (s === null) {
-    if (++_enrolWrong >= ENROL_MAX_WRONG) {
-      dropEnrolSeed(); _enrolWrong = 0
-      return refused('stepup-wrong', vaultLang() === 'pt' ? 'Muitos códigos errados. Comece de novo e escaneie o QR code outra vez.' : 'Too many wrong codes. Start over and scan the QR code again.')
-    }
-    return refused('stepup-wrong', vaultLang() === 'pt' ? 'Esse código não é deste autenticador (ou o relógio do celular está diferente). Tente o código atual.' : 'That code is not from this authenticator (or the phone clock differs). Try the current code.')
+  void code; void ctx
+  return authenticatorRetired()
+}
+
+/**
+ * COFRE.DESBLOQUEIO migration: a new way of confirming was just set up, so the authenticator this vault
+ * may still RECORD is dropped — `stepup` (and its unlock policy) leave vault.json, the sealed seed and the
+ * failure counter are deleted. Before this the vault kept opening with the old record present; the code
+ * was simply never asked. Best effort on the files: a seed left behind is sealed and asked by nothing.
+ */
+async function retireAuthenticator(o: { vault: VaultJson }): Promise<void> {
+  const had = Boolean(o.vault.stepup)
+  if (had || o.vault.unlockPolicy) {
+    const v = withoutAuthenticator(o.vault)
+    await writeVaultJson(v)
+    o.vault = v
   }
-  const o = await ensureVaultOpen({ create: false, migrate: false })
-  if (!o) return refused('locked', sentence('locked'))
-  try {
-    await sealToFile(seedFile(), SEED_PURPOSE, SEED_NAME, e.seed)
-  } finally { dropEnrolSeed() }
-  _enrolWrong = 0
-  const vault: VaultJson = { ...o.vault, v: 2, stepup: { enrolledAt: new Date(_now()).toISOString(), digits: 6, period: 30 } }
-  await writeVaultJson(vault)
-  o.vault = vault
-  // A fresh authenticator starts a fresh counter; the replay floor is the step just used.
-  await saveState({ v: 1, failures: 0, lastStep: s, pausedUntilMs: null, frozen: false })
-  _flow = { until: _now() + ENROL_TTL_MS, session: ctx.session }
-  recoveryStepDone('authenticator')
-  vaultAudit({ type: 'vault.enroll-authenticator' })
-  return { ok: true, step: s }
+  await secretFs().unlink(seedFile()).catch(() => {})
+  await secretFs().unlink(stateFile()).catch(() => {})
+  _mem = { ...FRESH_STEPUP }
+  if (had) vaultAudit({ type: 'vault.authenticator-retired' })
 }
 
 /**
@@ -860,13 +907,10 @@ export async function probePresence(id: ProtectorId, ctx: GateContext): Promise<
   if (soon) return soon
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
-  if (o.vault.stepup && !flowActive(ctx) && !recoveryTodo()) {
-    // Inside the wizard the verified enrolment code already stands for it (owner decision 2026-10-02).
-    if (!flowActive(ctx)) {
-      const g = await requireVaultStepUp('enroll-presence', ctx)
-      if (!g.ok) return g
-    }
-  } else if (!o.vault.stepup && !recoveryTodo()) {
+  if (hasPresence(o.vault) && !flowActive(ctx) && !recoveryTodo()) {
+    const g = await requireVaultStepUp('enroll-presence', ctx)
+    if (!g.ok) return g
+  } else if (!hasPresence(o.vault) && !recoveryTodo()) {
     // A first enrolment from a page: the setup code comes BEFORE any gesture, never after them.
     const p = firstEnrolProof(ctx)
     if (!p.ok) return p
@@ -922,9 +966,9 @@ export async function beginRecoveryKey(ctx: GateContext): Promise<{ ok: true; wo
     const g = await requireVaultStepUp('rotate-recovery', ctx)
     if (!g.ok) return g
   } else if (!recoveryTodo() && !fromSocket(ctx) && !flowActive(ctx) && !presenceHeldFor(ctx)) {
-    // Review S2: the FIRST 24 words, to a page outside its own wizard — the code if one exists, else
-    // the setup code (nothing else on this machine can be asked yet).
-    if (enrolled(o.vault)) {
+    // Review S2: the FIRST 24 words, to a page outside its own wizard — the vault's own proof if it has
+    // one, else the first-enrolment proof (nothing else on this machine can be asked yet).
+    if (hasPresence(o.vault)) {
       const g = await requireVaultStepUp('create-recovery', ctx)
       if (!g.ok) return g
     } else {
@@ -955,6 +999,7 @@ export async function confirmRecoveryKey(typed: readonly string[], ctx: { sessio
       if (h.oldKid !== o.kid) return refused('presence-held-stale', vaultLang() === 'pt' ? 'A chave do cofre mudou desde a etapa da confirmação pessoal. Nada foi alterado; ligue a confirmação pessoal de novo.' : 'The vault key changed since the presence step. Nothing was changed; turn presence on again.')
       const c = await commitHeldPresence(h, r.entropy, o)
       if (!c.ok) return c
+      await retireAuthenticator(o)
     } finally { dropRecovery() }
     recoveryStepDone('presence'); recoveryStepDone('recovery')
     dropUnlockWindow() // a protector change
@@ -1026,15 +1071,26 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   if (!o) return refused('locked', sentence('locked'))
   if (recoveryTodo() && !fromSocket(ctx) && !recoverPageHeld(ctx)) return recoveryTtyOnly()
   if (!recoveryTodo()) {
-    if (!o.vault.stepup) return refused('needs-authenticator', lang === 'pt' ? 'Configure o autenticador antes da confirmação pessoal (`agentop vault enroll --authenticator`).' : 'Set up the authenticator before presence (`agentop vault enroll --authenticator`).')
-    // Review S7: known BEFORE the code is spent — otherwise the terminal would ask for a code, learn the
-    // words are needed, and ask again for a code the replay floor has just burned.
+    // Review S7: known BEFORE any proof is spent — otherwise the terminal would ask for a proof, learn
+    // the words are needed, and ask again.
     if (o.vault.wrappers.some(w => isSilentId(w.type)) && o.vault.wrappers.some(w => w.type === 'recovery')
       && !(ctx.words && fromSocket(ctx)) && ctx.replaceRecovery !== true) return needsRecoveryWords()
-    // Inside the wizard the verified enrolment code already stands for it (owner decision 2026-10-02).
-    if (!flowActive(ctx)) {
+    // COFRE.DESBLOQUEIO (2026-11-07): the FIRST way of confirming needs no authenticator before it —
+    // it needs the first-enrolment proof (this computer's terminal, its setup code, or one gesture on a
+    // page opened here). Adding a SECOND way costs the first one's proof.
+    if (!hasPresence(o.vault)) {
+      const p = firstEnrolProof(ctx)
+      if (!p.ok) return p
+    } else if (!flowActive(ctx)) {
       const g = await requireVaultStepUp('enroll-presence', ctx)
       if (!g.ok) return g
+    }
+    // The vault password must meet the rules HERE, on the server — a page that skipped its own check is refused.
+    if (id === 'password') {
+      const pw = currentVaultPassword()
+      if (pw === undefined) return passwordRequired()
+      const c = checkVaultPassword(pw)
+      if (!c.ok) return refused('password-weak', vaultPasswordWeakSentence(c, lang))
     }
   }
   // v2.98.1 (the owner's machine): this kind ALREADY protects the vault and nothing silent is left to
@@ -1058,6 +1114,7 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
     if (deferred) return deferred
     const k = await countGestures(ctx, id, PRESENCE_GESTURES.enroll, () => enrolWithNewKey(id, presence, all, o, ctx))
     if (!k.ok) return k
+    await retireAuthenticator(o)
     recoveryStepDone('presence')
     vaultAudit({ type: 'vault.enroll-presence', protector: id })
     dropUnlockWindow() // a protector change
@@ -1068,6 +1125,7 @@ export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<
   const r = await countGestures(ctx, id, PRESENCE_GESTURES.enroll, () => enrollPresence(realProtectorIo(), vaultDir(), { state: 'open', kid: o.kid, dek: o.dek, vault: o.vault, via: 'memory' }, presence, all))
   if (!r.ok) return enrolFailure(id, r.reason)
   o.vault = r.vault
+  await retireAuthenticator(o)
   recoveryStepDone('presence')
   vaultAudit({ type: 'vault.enroll-presence', protector: id })
   return { ok: true, removed: r.removed, recoveryOwed: afterPresence(o.vault) }
@@ -1297,6 +1355,9 @@ async function enrolWithNewKey(
 function enrolFailure(id: ProtectorId, reason: string): Refusal {
   const lang = vaultLang()
   const word = presenceWord(id)
+  const pw = passwordFailure(reason)
+  if (pw === 'password-required') return passwordRequired()
+  if (pw === 'password-weak') return refused('password-weak', vaultPasswordWeakSentence(checkVaultPassword(currentVaultPassword() ?? ''), lang))
   const code = presenceCode(reason)
   if (code) return refused(code, presenceSentence(code, lang, word, reason))
   if (reason.startsWith('no-hmac-secret')) {
@@ -1466,8 +1527,8 @@ export async function setAuthPolicy(policy: unknown, ctx: GateContext): Promise<
   const p = parseAuthPolicy(policy)
   if (p === null) {
     return refused('bad-request', vaultLang() === 'pt'
-      ? 'Escolha uma confirmação válida para cada ação. Excluir, apagar, os ajustes de segurança e a recuperação pedem pelo menos uma prova (código ou Hello).'
-      : 'Pick a valid proof for each action. Deleting, wiping, the security settings and recovery always ask at least one proof (the code or Hello).')
+      ? 'Escolha uma confirmação válida para cada ação. Excluir, apagar, os ajustes de segurança e a recuperação sempre pedem a sua confirmação.'
+      : 'Pick a valid choice for each action. Deleting, wiping, the security settings and recovery always ask you to confirm.')
   }
   const g = await requireVaultStepUp('set-auth-policy', ctx)
   if (!g.ok) return g
@@ -1480,9 +1541,16 @@ export async function setAuthPolicy(policy: unknown, ctx: GateContext): Promise<
 /** What the screen draws for the policy: one row per kind, its choice, the choices it may take, the default. */
 export async function authPolicyView(read?: AuthPolicyRead): Promise<{ state: 'default' | 'stored' | 'unreadable' | 'locked'; rows: { kind: ActionKind; choice: ProofChoice; choices: readonly ProofChoice[]; critical: boolean; read: boolean; default: ProofChoice }[] }> {
   const r = read ?? await readAuthPolicy()
+  // COFRE.DESBLOQUEIO: with the code gone there is ONE proof — the way this vault confirms it is you —
+  // so a kind either asks it ("gesture") or, for a read at this computer, asks nothing ("none"). A stored
+  // "code" or "both" from before reads as that one proof (the gate already asks it: `proofsFor`).
+  const one = (c: ProofChoice): ProofChoice => (c === 'none' ? 'none' : 'gesture')
   return {
     state: r.state,
-    rows: ACTION_KINDS_ORDER.map(kind => ({ kind, choice: choiceFor(r.policy, kind), choices: choicesFor(kind), critical: ACTION_KINDS[kind].critical, read: ACTION_KINDS[kind].read, default: ACTION_KINDS[kind].default })),
+    rows: ACTION_KINDS_ORDER.map(kind => ({
+      kind, choice: one(choiceFor(r.policy, kind)), choices: choicesFor(kind).filter(c => c === 'gesture' || c === 'none'),
+      critical: ACTION_KINDS[kind].critical, read: ACTION_KINDS[kind].read, default: one(ACTION_KINDS[kind].default),
+    })),
   }
 }
 
