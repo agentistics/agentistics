@@ -1282,10 +1282,13 @@ export function Select({ value, onChange, options, placeholder, disabled, search
  */
 export function MultiPicker({
   options, onCommit, placeholder, searchPlaceholder, confirmLabel, selectAllLabel, emptyLabel, disabled,
-  defaultOpenForTest, panelMinWidth, triggerHeight,
+  defaultOpenForTest, panelMinWidth, tall,
 }: {
-  /** Trigger height in px (default 44, the form number); a toolbar row passes its own control height. */
-  triggerHeight?: number
+  /**
+   * Default trigger = the app's control height (32px desktop, 44px phone), like every toolbar button and tab.
+   * `tall` is the explicit opt-in for a roomy FORM field (44px on desktop too, like the form `Select`).
+   */
+  tall?: boolean
   /** `heading` draws a section title instead of a row (no box, never selectable); `hint` is the right-aligned count. */
   options: { value: string; label: string; disabled?: boolean; hint?: string; heading?: boolean }[]
   /** The list never opens narrower than this (px, capped to the screen): a trigger can be small, long titles are not. */
@@ -1391,7 +1394,7 @@ export function MultiPicker({
         aria-expanded={open}
         style={{
           width: '100%', boxSizing: 'border-box',
-          ...(triggerHeight ? { padding: '0 11px', height: triggerHeight } : { padding: '8px 11px', minHeight: 44 }),
+          ...(tall ? { padding: '8px 11px', minHeight: 44 } : { padding: '0 11px', height: isMobile ? 44 : 32 }),
           background: 'var(--bg-elevated)',
           border: `1px solid ${open ? 'var(--anthropic-orange)' : 'var(--border)'}`,
           borderRadius: 8, fontSize: 13, color: 'var(--text-tertiary)', fontFamily: 'inherit',

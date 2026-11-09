@@ -26,6 +26,7 @@ import { ScheduleView } from './ScheduleView'
 import { useDeliveryCalendar } from './useDeliveryCalendar'
 import { useFitHeight } from './useFitHeight'
 import { VersionCards } from './VersionCards'
+import { hasRealVersions } from '../../lib/versionVisibility'
 import { MobileCalendar, type PhoneView } from './MobileCalendar'
 
 const DESKTOP_VIEWS: CalView[] = ['month', 'week', 'day', 'schedule']
@@ -69,6 +70,8 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
   const go = (v: CalView) => { setView(v); setSel(null) }
   const step = (dir: -1 | 1) => { setAnchor(a => stepAnchor(activeView === 'agenda' ? 'day' : activeView, a, dir)); setSel(null) }
   const harnessOf = (id: string) => (HARNESS_LABELS as Record<string, string>)[id] ?? id
+  // ONE rule (lib/versionVisibility): no real release version for this person = no version filter, count or strip.
+  const realVersions = hasRealVersions(reply?.versions)
   const versionList = useMemo(() => (reply ? reply.versions.map(v => v.version) : []), [reply])
 
   const exportIcs = () => {
@@ -87,7 +90,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
   }
   const selectedId = sel?.kind === 'piece' ? sel.key : sel?.kind === 'version' ? sel.version : null
 
-  const caption = shown ? `${pick(TEXT.pieces(shown.pieces.length), pt)} · ${pick(TEXT.versions(shown.versions.length), pt)} · BRT` : ''
+  const caption = shown ? `${pick(TEXT.pieces(shown.pieces.length), pt)} ${realVersions ? ` · ${pick(TEXT.versions(shown.versions.length), pt)}` : ''} · BRT` : ''
   const empty = shown !== null && shown.pieces.length === 0 && shown.versions.length === 0 && shown.marks.length === 0
 
   const tabs = (isMobile ? MOBILE_VIEWS : DESKTOP_VIEWS).map(id => ({ id, label: pick(VIEW_LABEL[id], pt) }))
@@ -125,7 +128,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
       onOpenDay={d => { setQuery(q => { q.set('calDay', d); q.set('calView', 'day'); return q }); setSel(null) }}
       nowMs={nowMs} pt={pt} versions={shown?.versions ?? []} pieces={shown?.pieces ?? []} marks={shown?.marks ?? []} onOpen={open} ready={!!shown}
       filterCount={Number(filters.tasks !== 'active') + filters.versions.length + filters.stages.length + filters.harnesses.length + filters.priorities.length + Number(filters.confirmedOnly)}
-      exportIcs={exportIcs} filters={reply && <CalendarFilters value={filters} onChange={setFilters} pieces={reply.pieces} harnessOf={harnessOf} versionList={versionList} pt={pt} mobile={false} shown={caption} />}
+      exportIcs={exportIcs} filters={reply && <CalendarFilters value={filters} onChange={setFilters} pieces={reply.pieces} harnessOf={harnessOf} versionList={versionList} showVersions={realVersions} pt={pt} mobile={false} shown={caption} />}
       body={shown ? body : error ? <div role="alert" style={{ padding: 20 }}><p>{pick(TEXT.loadError, pt)}</p><button className="cal-phone-button" type="button" onClick={() => void reload()}>{pick(TEXT.retry, pt)}</button></div> : <CenteredLoader placement="area" />} />
     {sel && reply && shown && <CalendarDetail selection={sel} anchor={point} pieces={reply.pieces} versions={reply.versions} marks={reply.marks} nowMs={nowMs} pt={pt} isMobile onClose={close} onSelect={setSel} />}
   </div>
@@ -162,8 +165,8 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
 
       {reply && shown ? (
         <>
-          <CalendarFilters value={filters} onChange={f => { setFilters(f); setSel(null) }} pieces={reply.pieces} harnessOf={harnessOf} versionList={versionList} pt={pt} mobile={isMobile} shown={caption} />
-          {!isMobile && (activeView === 'month' || activeView === 'week') && <VersionCards versions={shown.versions} nowMs={nowMs} pt={pt} selected={sel?.kind === 'version' ? sel.version : null} onOpen={(v, e) => open({ kind: 'version', version: v.version }, e)} />}
+          <CalendarFilters value={filters} onChange={f => { setFilters(f); setSel(null) }} pieces={reply.pieces} harnessOf={harnessOf} versionList={versionList} showVersions={realVersions} pt={pt} mobile={isMobile} shown={caption} />
+          {realVersions && !isMobile && (activeView === 'month' || activeView === 'week') && <VersionCards versions={shown.versions} nowMs={nowMs} pt={pt} selected={sel?.kind === 'version' ? sel.version : null} onOpen={(v, e) => open({ kind: 'version', version: v.version }, e)} />}
           {body}
           {!isMobile && (
             <div data-cal-legend style={{ display: 'flex', flexWrap: 'wrap', columnGap: 14, rowGap: 2, alignItems: 'center', minHeight: 30, padding: '4px 0', flexShrink: 0, color: 'var(--text-secondary)', fontSize: 11 }}>

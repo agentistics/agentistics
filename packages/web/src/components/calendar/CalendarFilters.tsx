@@ -62,7 +62,7 @@ function Multi({ label, options, chosen, labelOf, onChange, pt, mobile }: {
       <div style={{ width: mobile ? 130 : 116, flexShrink: 0 }}>
         <MultiPicker
           options={left} onCommit={v => onChange([...chosen, ...v.filter(x => !chosen.includes(x))])}
-          placeholder={label} searchPlaceholder={pick(TEXT.searchTask, pt)} confirmLabel={n => pick(TEXT.confirmAdd(n), pt)}
+          placeholder={label} searchPlaceholder={`${label}…`} confirmLabel={n => pick(TEXT.confirmAdd(n), pt)}
           selectAllLabel={pick(TEXT.selectAll, pt)} emptyLabel={pick(TEXT.noTasks, pt)} disabled={left.length === 0 && chosen.length === 0}
         />
       </div>
@@ -77,11 +77,11 @@ function Multi({ label, options, chosen, labelOf, onChange, pt, mobile }: {
   )
 }
 
-export function CalendarFilters({ value, onChange, pieces, harnessOf, versionList, pt, mobile, shown }: {
+export function CalendarFilters({ value, onChange, pieces, harnessOf, versionList, showVersions = true, pt, mobile, shown }: {
   value: UiFilters; onChange: (f: UiFilters) => void; pieces: readonly CalPiece[]
   /** Display name of a harness id (`HARNESS_LABELS`). */
   harnessOf: (id: string) => string
-  versionList: readonly string[]; pt: boolean; mobile: boolean
+  versionList: readonly string[]; showVersions?: boolean; pt: boolean; mobile: boolean
   /** The count caption on the right: `9 pieces · 4 versions · BRT`. */
   shown: string
 }) {
@@ -107,8 +107,8 @@ export function CalendarFilters({ value, onChange, pieces, harnessOf, versionLis
       </div>
       <Multi label={pick(TEXT.stage, pt)} pt={pt} mobile={mobile} chosen={value.stages} labelOf={v => stageName(v as CalStage, pt)}
         options={CAL_STAGES.map(s => ({ value: s, label: stageName(s, pt) }))} onChange={v => set({ stages: v as CalStage[] })} />
-      <Multi label={pick(TEXT.version, pt)} pt={pt} mobile={mobile} chosen={value.versions} labelOf={v => v}
-        options={versionList.map(v => ({ value: v, label: v }))} onChange={v => set({ versions: v })} />
+      {showVersions && <Multi label={pick(TEXT.version, pt)} pt={pt} mobile={mobile} chosen={value.versions} labelOf={v => v}
+        options={versionList.map(v => ({ value: v, label: v }))} onChange={v => set({ versions: v })} />}
       <Multi label={pick(TEXT.harness, pt)} pt={pt} mobile={mobile} chosen={value.harnesses} labelOf={harnessOf}
         options={harnesses.map(h => ({ value: h, label: harnessOf(h) }))} onChange={v => set({ harnesses: v })} />
       <Multi label={pick(TEXT.priority, pt)} pt={pt} mobile={mobile} chosen={value.priorities} labelOf={v => pick(PRIORITY_LABEL[v as CalPriority], pt)}
