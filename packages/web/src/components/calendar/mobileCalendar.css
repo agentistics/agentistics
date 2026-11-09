@@ -14,8 +14,6 @@
 .cal-phone-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: 24px repeat(6, minmax(44px, 1fr)); flex: 1; min-height: 0; overflow-y: auto; text-align: center; }
 .cal-phone-month .cal-phone-button { flex-direction: column; gap: 4px; padding: 2px; min-width: 0; }
 .cal-phone-sheet { color: var(--text-primary); }
-.cal-phone-sheet [data-cal-filters] { flex-direction: column; align-items: stretch; gap: 12px; padding-top: 12px; }
-.cal-phone-sheet [data-cal-filters] > div { flex-wrap: wrap !important; }
-.cal-phone-sheet [data-cal-filters] button { min-height: 44px; }
+.cal-phone-sheet [data-cal-field] button { min-height: 44px; }
 /* The bottom navigation keeps chat reachable; its duplicate floating button obscures the grid. */
 body:has([data-cal-phone]) [style*="position: fixed"]:has([data-nay-fab]) { visibility: hidden; pointer-events: none; }

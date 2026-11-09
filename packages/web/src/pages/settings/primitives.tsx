@@ -944,6 +944,16 @@ export function popoverPosition(rect: DOMRect, maxHeight: number, viewportHeight
     : { left: rect.left, top: rect.bottom + 4, width: rect.width }
 }
 
+/**
+ * PURE. The tallest a panel may be on the side `popoverPosition` chose: the room between the trigger and the screen
+ * edge (8px margin), never above `maxHeight` and never below a usable 160px. Without it a 340px panel that flips up
+ * on a 568px phone started above the screen and one that stays down ended below it, with its confirm button.
+ */
+export function popoverRoom(rect: DOMRect, pos: PopoverRect, maxHeight: number, viewportHeight: number): number {
+  const room = pos.bottom !== undefined ? rect.top - 4 - 8 : viewportHeight - (rect.bottom + 4) - 8
+  return Math.max(160, Math.min(maxHeight, room))
+}
+
 /** The style a popover panel gets. `position: fixed` is the load-bearing part — see popoverPosition. */
 /**
  * Where a Select's open list is drawn: `document.body`, and above every modal. Portalled, because a
@@ -1312,6 +1322,7 @@ export function MultiPicker({
   const [query, setQuery] = React.useState('')
   // See popoverPosition: fixed, so the Drawer's scrolling body cannot clip it.
   const [pos, setPos] = React.useState<PopoverRect | null>(null)
+  const [panelMaxH, setPanelMaxH] = React.useState(340)
   const wrapperRef = React.useRef<HTMLDivElement>(null)
   const searchRef = React.useRef<HTMLInputElement>(null)
   const PANEL_MAX_H = 340
@@ -1364,6 +1375,7 @@ export function MultiPicker({
       const width = Math.max(base.width ?? rect.width, Math.min(panelMinWidth ?? 0, window.innerWidth - 16))
       // Wider than its trigger: keep it on screen (a trigger near the right edge would push it off).
       setPos({ ...base, width, left: Math.max(8, Math.min(base.left, window.innerWidth - width - 8)) })
+      setPanelMaxH(popoverRoom(rect, base, PANEL_MAX_H, window.innerHeight))
     }
     setOpen(true)
     setTimeout(() => searchRef.current?.focus(), 0)
@@ -1415,7 +1427,10 @@ export function MultiPicker({
             ...popoverStyle(pos),
             background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8,
             boxShadow: '0 8px 28px rgba(0,0,0,0.35)', padding: 6,
-            display: 'flex', flexDirection: 'column', gap: 6, maxHeight: PANEL_MAX_H,
+            display: 'flex', flexDirection: 'column', gap: 6, maxHeight: panelMaxH,
+            // A wheel or a swipe on the panel stays on the panel: it must not chain to the sheet/page behind it, which
+            // the outside-scroll rule above reads as "the page scrolled" and closes the picker (confirm unreachable).
+            overscrollBehavior: 'contain', overflow: 'hidden', touchAction: 'pan-y',
           }}
         >
           <input
@@ -1438,7 +1453,7 @@ export function MultiPicker({
               />
             </div>
           )}
-          <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             {filtered.length === 0 && (
               <span style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '8px 4px' }}>{emptyLabel}</span>
             )}

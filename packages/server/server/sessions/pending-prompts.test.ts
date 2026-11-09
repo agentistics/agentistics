@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, reloadPrompts, resetPrompts, usePromptStoreForTests } from './pending-prompts'
+import { PENDING_TTL_MS, clearPrompts, migratePrompts, pendingFor, recordPrompt, reloadPrompts, resetPrompts, strandedFor, STRANDED_KEEP_MS, MAX_STORED_PROMPTS, usePromptStoreForTests } from './pending-prompts'
 import { parseAntigravityChat } from './antigravity-chat'
 import { parseCodexChat } from './codex-chat'
 import { parseCopilotChat } from './copilot-chat'
@@ -10,6 +10,7 @@ import { parseGeminiChatTurns } from './gemini-chat'
 import { parseKimiChat } from './kimi-chat'
 
 const CONV = 'conv-1'
+const DAY = 24 * 60 * 60 * 1000
 
 beforeEach(() => {
   usePromptStoreForTests(join(mkdtempSync(join(tmpdir(), 'pending-prompts-')), 'pending-prompts.json'))
@@ -150,5 +151,56 @@ describe('local command acknowledgements', () => {
     reloadPrompts()
     expect(pendingFor(CONV, [command]).map(p => p.text)).toEqual([prompt])
     expect(pendingFor(CONV, [command, prompt])).toEqual([])
+  })
+})
+
+describe('MENSAGENS.KILL — what was typed into a session that died is not lost', () => {
+  const HOUR = 60 * 60 * 1000
+  it('a message queued behind a hung session is STRANDED after a kill, long past the live TTL', () => {
+    recordPrompt(CONV, 'please run the migration', 0)
+    // the session hung; the live view gave up on it after the ceiling...
+    expect(pendingFor(CONV, [], PENDING_TTL_MS + 1)).toEqual([])
+    // ...and it was killed hours later: the message is still there to be resent.
+    expect(strandedFor(CONV, [], 3 * HOUR).map(p => p.text)).toEqual(['please run the migration'])
+  })
+  it('survives a server restart', () => {
+    recordPrompt(CONV, 'one', 0)
+    pendingFor(CONV, [], PENDING_TTL_MS + 1)
+    reloadPrompts()
+    expect(strandedFor(CONV, [], HOUR).map(p => p.text)).toEqual(['one'])
+  })
+  it('a reopened conversation that already carries the text does not offer it again', () => {
+    recordPrompt(CONV, 'hello there', 0)
+    expect(strandedFor(CONV, ['hello there'], HOUR)).toEqual([])
+    expect(strandedFor(CONV, [], HOUR)).toEqual([])
+  })
+  it('a resend replaces the stranded copy instead of duplicating it', () => {
+    recordPrompt(CONV, 'again', 0)
+    recordPrompt(CONV, 'again', 2 * HOUR)
+    expect(strandedFor(CONV, [], 3 * HOUR)).toEqual([{ text: 'again', at: 2 * HOUR }])
+  })
+  it('is bounded: a message nobody resent for weeks stops being offered', () => {
+    recordPrompt(CONV, 'old', 0)
+    expect(strandedFor(CONV, [], STRANDED_KEEP_MS + 1)).toEqual([])
+  })
+  it('is held under the row id for a session that never linked a conversation', () => {
+    recordPrompt('row-x', 'first', 0)
+    expect(strandedFor('row-x', [], HOUR).map(p => p.text)).toEqual(['first'])
+  })
+  it('RETENTION: a 13-day-old stranded message survives a burst of recent ones (cap is not hit by normal load)', () => {
+    recordPrompt('old-conv', 'promised for 14 days', 0)
+    for (let i = 0; i < 900; i++) recordPrompt(`c${i}`, `m${i}`, 13 * DAY + i)
+    expect(strandedFor('old-conv', [], 13 * DAY + 1000).map(p => p.text)).toEqual(['promised for 14 days'])
+  })
+  it('RETENTION: expired entries are dropped before any live one when the cap is reached', () => {
+    for (let i = 0; i < 400; i++) recordPrompt(`dead${i}`, `old${i}`, i)
+    for (let i = 0; i < MAX_STORED_PROMPTS; i++) recordPrompt(`live${i}`, `new${i}`, 20 * DAY + i)
+    expect(strandedFor('dead0', [], 20 * DAY + MAX_STORED_PROMPTS).length).toBe(0)
+    expect(strandedFor('live0', [], 20 * DAY + MAX_STORED_PROMPTS).map(p => p.text)).toEqual(['new0'])
+  })
+  it('RETENTION: past the cap the OLDEST goes first, never the newest', () => {
+    for (let i = 0; i < MAX_STORED_PROMPTS + 5; i++) recordPrompt(`c${i}`, `m${i}`, DAY + i)
+    expect(strandedFor('c0', [], DAY + 10_000)).toEqual([])
+    expect(strandedFor(`c${MAX_STORED_PROMPTS + 4}`, [], DAY + 10_000).length).toBe(1)
   })
 })

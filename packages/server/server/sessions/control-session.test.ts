@@ -303,3 +303,16 @@ describe('an EXTERNAL row in waiting is not actionable', () => {
     expect(c.stateLabel).toBe(S.sessState.waiting)
   })
 })
+
+describe('context gauge without a window', () => {
+  it('keeps the tokens used and says nothing about a percentage', () => {
+    const c = toControlSession(view({ contextTokens: 12_000 }), S, LIVE)
+    expect(c.context).toBeUndefined()
+    expect(c.contextUsed).toBe('12.0K')
+  })
+  it('does not set contextUsed when a window gives a real gauge', () => {
+    const c = toControlSession(view({ contextTokens: 12_000, contextWindow: 120_000 }), S, LIVE)
+    expect(c.context?.label).toBe('10%')
+    expect(c.contextUsed).toBeUndefined()
+  })
+})

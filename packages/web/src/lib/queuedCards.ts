@@ -99,3 +99,30 @@ export function visibleQueued(
 export function shouldRestoreDraft(pending: { text: string }[] | undefined, sent: string): boolean {
   return !(pending ?? []).some(p => p.text === sent)
 }
+
+/**
+ * MENSAGENS.KILL — the messages a session that is no longer running will never read, to be OFFERED back.
+ *
+ * A running session's waiting messages are `queued` ("delivered — not read yet"). Once the session is
+ * killed, crashed or finished that sentence is false: nothing will read them. They are listed here instead
+ * — the server's held copy plus this tab's own echoes, deduplicated by text and in the order they were
+ * sent — each with one action that puts the words back in the composer. Never resent by itself: the session
+ * may have been killed because of them. A text already in the composer is not offered again.
+ */
+export function strandedCards(i: {
+  ended: boolean
+  stranded: readonly { text: string; at?: number }[] | undefined
+  queued: readonly QueuedCard[]
+  draft: string
+}): QueuedCard[] {
+  if (!i.ended) return []
+  const seen = new Set<string>()
+  const out: QueuedCard[] = []
+  for (const c of [...(i.stranded ?? []), ...i.queued]) {
+    if (seen.has(c.text) || c.text.trim() === '') continue
+    seen.add(c.text)
+    if (i.draft.includes(c.text.trim())) continue
+    out.push(c.at === undefined ? { text: c.text } : { text: c.text, at: c.at })
+  }
+  return out.sort((a, b) => (a.at ?? Number.MAX_SAFE_INTEGER) - (b.at ?? Number.MAX_SAFE_INTEGER))
+}

@@ -314,6 +314,12 @@ export function toControlSession(
           },
         }
       : {}),
+    // A measured level whose window nobody states (a gateway or local route): the tokens are still a
+    // fact worth showing, so the row says them and the screen says the limit is not reported. Never
+    // a percentage, never an invented limit.
+    ...(fraction === null && v.contextTokens !== undefined && v.contextTokens > 0
+      ? { contextUsed: fmt(v.contextTokens) }
+      : {}),
     searchFields: v.searchFields,
     attached: v.attached,
     ...(v.pid !== undefined ? { pid: v.pid } : {}),

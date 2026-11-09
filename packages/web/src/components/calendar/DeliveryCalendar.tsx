@@ -128,7 +128,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
       onOpenDay={d => { setQuery(q => { q.set('calDay', d); q.set('calView', 'day'); return q }); setSel(null) }}
       nowMs={nowMs} pt={pt} versions={shown?.versions ?? []} pieces={shown?.pieces ?? []} marks={shown?.marks ?? []} onOpen={open} ready={!!shown}
       filterCount={Number(filters.tasks !== 'active') + filters.versions.length + filters.stages.length + filters.harnesses.length + filters.priorities.length + Number(filters.confirmedOnly)}
-      exportIcs={exportIcs} filters={reply && <CalendarFilters value={filters} onChange={setFilters} pieces={reply.pieces} harnessOf={harnessOf} versionList={versionList} showVersions={realVersions} pt={pt} mobile={false} shown={caption} />}
+      exportIcs={exportIcs} filters={reply && <CalendarFilters value={filters} onChange={setFilters} pieces={reply.pieces} harnessOf={harnessOf} versionList={versionList} showVersions={realVersions} pt={pt} mobile sheet shown={caption} />}
       body={shown ? body : error ? <div role="alert" style={{ padding: 20 }}><p>{pick(TEXT.loadError, pt)}</p><button className="cal-phone-button" type="button" onClick={() => void reload()}>{pick(TEXT.retry, pt)}</button></div> : <CenteredLoader placement="area" />} />
     {sel && reply && shown && <CalendarDetail selection={sel} anchor={point} pieces={reply.pieces} versions={reply.versions} marks={reply.marks} nowMs={nowMs} pt={pt} isMobile onClose={close} onSelect={setSel} />}
   </div>
