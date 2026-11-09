@@ -7,6 +7,7 @@ import { createDeliveryService, type DeliveryBoard, type DeliveryDeps, type Deli
 import { defaultGateFacts } from './gates'
 import { createDeliveryStore } from './store'
 import { PHASE_STATUS, type DeliveryRecord, type Phase } from './machine'
+import { boardReviewTargets } from './review-board'
 
 /** Uses the same pedidos view as the leader briefing and the existing MCP flow reader. */
 export async function readOwnerRequests(): Promise<import('./service').OwnerRequestFact[] | null> {
@@ -146,12 +147,131 @@ async function accountNameOf(harness: string, account: string): Promise<string |
   return row ? (row.nickname?.trim() || row.label?.trim() || null) : null
 }
 
-/** Board subtasks shown In review / PR · merge / CI (the backfill adopts the ones with no delivery record). Group members excluded. */
-async function boardReviewPieces(): Promise<Array<{ id: string; taskId: string; title: string; status: string }>> {
-  const { loadTaskWorld } = await import('../sessions/task-source')
+/** PURE. A git remote as the `owner/name` gh takes; null when it is not one (a local path, another forge's odd form). */
+export function repoSlug(remoteKey: string | null | undefined): string | null {
+  const m = /^github\.com\/([^/]+\/[^/]+)$/.exec(remoteKey ?? '')
+  return m ? m[1]! : null
+}
+
+/** The repository each directory belongs to, once per process: a card's sessions name a handful of worktrees. */
+const repoOfCwd = new Map<string, string | null>()
+async function slugOfCwd(cwd: string): Promise<string | null> {
+  const known = repoOfCwd.get(cwd)
+  if (known !== undefined) return known
+  const [{ existsSync }, { dirname }, { normalizeGitRemote }, { getGitRemote }] = await Promise.all([import('node:fs'), import('node:path'), import('@agentistics/core'), import('../git')])
+  // A removed worktree still names its repository through the folder that held it (`<repo>/.worktrees/<name>`); a path that no longer leads anywhere says nothing.
+  let dir = cwd
+  for (let up = 0; up < 6 && dir !== dirname(dir) && !existsSync(dir); up++) dir = dirname(dir)
+  const slug = existsSync(dir) ? repoSlug(normalizeGitRemote((await getGitRemote(dir).catch(() => '')) ?? '')) : null
+  repoOfCwd.set(cwd, slug)
+  return slug
+}
+
+/**
+ * Board subtasks shown In review / PR · merge / CI (the backfill adopts the ones with no delivery record). Group members excluded.
+ * Each carries the facts of ITS OWN work: when it last handed back and which repositories its worker sessions ran in (H4: a card is
+ * never compared with somebody else's PRs). A card with no such session has `repos: []`: nothing can be proven for it.
+ */
+async function boardReviewPieces(): Promise<import('./service').ReviewPiece[]> {
+  const [{ loadTaskWorld }, { readRegistry }] = await Promise.all([import('../sessions/task-source'), import('../sessions/registry')])
   const { book } = await loadTaskWorld()
-  const wanted = new Set([PHASE_STATUS.revisao_lider.id, PHASE_STATUS.pr_merge.id, PHASE_STATUS.ci.id])
-  return book.subtasks.filter(s => wanted.has(s.status) && !s.parentGroupId).map(s => ({ id: s.id, taskId: s.taskId, title: s.title, status: s.status }))
+  const subs = boardReviewTargets(book)
+  const ids = new Set(subs.map(s => s.id))
+  const { hintsFromHandbacks } = await import('./batch-proof')
+  const lastHandback = new Map<string, string>()
+  const handbacks = new Map<string, Array<{ body: string; createdAt: string }>>()
+  for (const c of book.comments) {
+    const id = c.subtaskId ?? c.taskId
+    if (!ids.has(id) || c.kind !== 'handback') continue
+    if (c.createdAt > (lastHandback.get(id) ?? '')) lastHandback.set(id, c.createdAt)
+    ;(handbacks.get(id) ?? handbacks.set(id, []).get(id)!).push(c)
+  }
+  const cwds = new Map<string, Set<string>>()
+  const recorded = new Map<string, Set<string>>()
+  for (const r of await readRegistry().catch(() => [])) {
+    const sub = (r as { subtaskId?: string; taskId?: string }).subtaskId ?? (r as { taskId?: string }).taskId
+    if (!sub || !ids.has(sub) || (r as { role?: string }).role === 'leader') continue
+    // The repository recorded at spawn (the one moment the directory is provably there) outranks asking git now.
+    if (r.repo?.repo?.includes('/')) (recorded.get(sub) ?? recorded.set(sub, new Set()).get(sub)!).add(r.repo.repo)
+    else if (r.cwd) (cwds.get(sub) ?? cwds.set(sub, new Set()).get(sub)!).add(r.cwd)
+  }
+  const out: import('./service').ReviewPiece[] = []
+  for (const s of subs) {
+    const repos = new Set<string>(recorded.get(s.id) ?? [])
+    for (const cwd of cwds.get(s.id) ?? []) { const slug = await slugOfCwd(cwd); if (slug) repos.add(slug) }
+    const handbackAt = lastHandback.get(s.id)
+    // What its delivery declared: its HANDBACKS only. Notes and every other comment are talk about the work, never a statement of what shipped (H1).
+    const hints = hintsFromHandbacks((handbacks.get(s.id) ?? []).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(c => ({ body: c.body, ...(Date.parse(c.createdAt) ? { atMs: Date.parse(c.createdAt) } : {}) })))
+    out.push({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, hasOpenChildren: s.hasOpenChildren, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}), ...(s.createdAt ? { createdAt: s.createdAt } : {}), ...(handbackAt ? { handbackAt } : {}), repos: [...repos], hints })
+  }
+  return out
+}
+
+/** `<dataDir>/delivery-proof-cache.json`: what gh already answered, so a restart resumes the reconcile instead of starting over. A cache: never a source of truth. */
+function proofCacheFile(): { load(): Promise<unknown>; save(doc: unknown): Promise<void> } {
+  const path = async () => (await import('node:path')).join(process.env.AGENTISTICS_DIR ?? (await import('node:path')).join(process.env.HOME ?? '', '.agentistics'), 'delivery-proof-cache.json')
+  return {
+    async load() { return JSON.parse(await (await import('node:fs/promises')).readFile(await path(), 'utf8')) },
+    async save(doc) {
+      const fs = await import('node:fs/promises')
+      const p = await path()
+      const tmp = `${p}.${process.pid}.tmp`
+      await fs.writeFile(tmp, JSON.stringify(doc), { mode: 0o600 })
+      await fs.rename(tmp, p)
+    },
+  }
+}
+
+/** Only the running server reconciles by itself: it asks for it at boot, so `agentop flow tick` (a CLI one-shot) never does (L3). */
+let autoReconcileEnabled = false
+export function enableAutoReconcile(): void { autoReconcileEnabled = process.env.AGENTISTICS_AUTO_RECONCILE !== '0' }
+
+/** Whether the board would let this piece be marked done (a session is filed under it): the same rule `markTask`/`patchSubtask` apply. */
+async function pieceHasSession(id: string): Promise<boolean> {
+  const { loadTaskWorld } = await import('../sessions/task-source')
+  const { rowsOfTask, subtaskHasSession } = await import('../sessions/task-report')
+  const w = await loadTaskWorld()
+  const task = w.book.tasks.find(t => t.id === id)
+  if (task) return rowsOfTask(task, w.rollupRows).length > 0
+  const sub = w.book.subtasks.find(s => s.id === id)
+  if (!sub) return false
+  if (sub.parentGroupId) return true // a group member is exempt from the gate
+  return subtaskHasSession({ id: sub.taskId }, id, w.rollupRows)
+}
+
+/** `pieceHasSession` for many ids with ONE world load: the preview asked once per piece and reloaded the board every time (11 s). */
+async function piecesWithSession(ids: readonly string[]): Promise<Set<string>> {
+  const { loadTaskWorld } = await import('../sessions/task-source')
+  const { rowsOfTask, subtaskHasSession } = await import('../sessions/task-report')
+  const w = await loadTaskWorld()
+  const out = new Set<string>()
+  for (const id of ids) {
+    const task = w.book.tasks.find(t => t.id === id)
+    if (task) { if (rowsOfTask(task, w.rollupRows).length > 0) out.add(id); continue }
+    const sub = w.book.subtasks.find(s => s.id === id)
+    if (!sub) continue
+    if (sub.parentGroupId || subtaskHasSession({ id: sub.taskId }, id, w.rollupRows)) out.add(id)
+  }
+  return out
+}
+
+/** `antigas`: closes a record-less old piece — done (completed without release proof) or abandoned (archived). Never deletes. */
+async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Promise<{ ok: true } | { ok: false; message: string }> {
+  const m = await import('../sessions/task-web')
+  if (to === 'abandoned' && !(await m.listStatuses()).some(s => s.id === 'abandoned')) {
+    const made = await m.createStatus({ label: 'Abandoned', color: '#6b7280' })
+    if (!made.ok) return { ok: false, message: made.message }
+    if (made.status.id !== 'abandoned') return { ok: false, message: `the board has no "abandoned" status and the one just created is ${made.status.id}` }
+  }
+  // Re-read at the write boundary: children may have opened after the dialog was built.
+  const { book } = await (await import('../sessions/task-source')).loadTaskWorld()
+  const { subtaskDone } = await import('../sessions/task-model')
+  const task = book.tasks.find(t => t.id === subtaskId)
+  if (book.subtasks.some(s => (task ? s.taskId === task.id : s.parentGroupId === subtaskId) && !subtaskDone(s.status))) return { ok: false, message: 'this piece has open subtasks; decide them first' }
+  const out = task
+    ? await m.markTask(subtaskId, to, 'flow:antigas')
+    : await m.patchSubtask(subtaskId, { status: to as never })
+  return out.ok ? { ok: true } : { ok: false, message: out.message ?? 'board refused the change' }
 }
 
 let cached: DeliveryService | null = null
@@ -162,7 +282,11 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
   const svc = createDeliveryService({
     store, facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
     autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, accountName: accountNameOf, now: () => Date.now(),
-    reviewPieces: boardReviewPieces,
+    reviewPieces: boardReviewPieces, closeLegacy: closeLegacyPiece, hasSession: pieceHasSession, hasSessions: piecesWithSession,
+    oldPieces: async () => (await import('../sessions/task-web')).liveAntigaPieces(),
+    autoReconcile: () => autoReconcileEnabled,
+    proofStore: proofCacheFile(),
+    log: line => console.log(line),
     ...overrides,
   })
   if (Object.keys(overrides).length === 0) cached = svc

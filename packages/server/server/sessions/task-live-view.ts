@@ -184,7 +184,7 @@ export function describeLive(o: {
   const needle = f.task?.trim().toLowerCase()
   // A piece whose only sessions are LEADERS is the leader's own filing, not delivery work: the leader
   // has its card in the band, and a column card would show the task's age as "total".
-  const leaderOnly = (d: LiveDeliveryView) => d.sessionIds.length > 0 && d.sessionIds.every(id => o.leaderIds.has(id))
+  const leaderOnly = (d: LiveDeliveryView) => d.subtaskId === null && d.stage === 'running' && d.sessionIds.length > 0 && d.sessionIds.every(id => o.leaderIds.has(id))
   // EFFECTIVE values: a caller that names no (or an invalid) tab gets `all`, no period gets `24h`; `view.defaulted` says so.
   const tab: LiveTab = f.tab ?? 'all'
   const period: LivePeriod = f.period ?? LIVE_PERIOD_DEFAULT
@@ -199,7 +199,7 @@ export function describeLive(o: {
     // Stage by stage, as the screen's columns are; within a stage the chosen order.
     .sort((a, b) => LIVE_STAGES.indexOf(a.stage) - LIVE_STAGES.indexOf(b.stage) || cmp(a, b))
 
-  const active = deliveries.filter(d => d.stage !== 'published' && !d.old)
+  const active = deliveries.filter(d => d.stage !== 'published' && d.stage !== 'completed' && !d.old)
   const etas = active.flatMap(d => d.eta.kind === 'estimate' && d.eta.atMs >= o.nowMs
     ? [{ atMs: d.eta.atMs, title: d.title, confidence: d.eta.confidence }] : [])
   etas.sort((a, b) => a.atMs - b.atMs)

@@ -14,8 +14,8 @@ import {
 import type { FleetRow } from '../../lib/fleet'
 import { modelDisplay } from '../../lib/modelDisplay'
 
-export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
-export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published']
+export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'completed' | 'published'
+export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'completed', 'published']
 
 export type LiveEta =
   | {
@@ -36,7 +36,7 @@ export interface LiveBlock { reason: BlockReason; text: string | null; unlocker:
 export interface LiveCiSignal { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null }
 export interface StageVisit { stage: LiveStage; enteredMs: number; ms: number }
 export type HiddenReason = 'no-live-session' | 'status-unplaced' | 'published-old' | 'queue-idle' | 'legacy-review-old'
-export interface LiveHidden { key: string; taskId: string; title: string; stage: LiveStage | null; reason: HiddenReason; atMs?: number | null }
+export interface LiveHidden { key: string; taskId: string; subtaskId?: string; title: string; stage: LiveStage | null; reason: HiddenReason; atMs?: number | null }
 export interface RuntimeFacts { model?: string; effort?: string; effortConcept: boolean }
 
 /** Mirror of the server's `LiveDelivery` (`task-live.ts`). The newer fields are optional: an older server omits them. */
@@ -48,8 +48,10 @@ export interface LiveDeliveryRecord {
   stageEta?: LiveStageEta; publishEta?: LivePublishEta; block?: LiveBlock | null
   /** The Agentask priority (urgent | high | medium | low); a subtask inherits its task's. Absent from an older server = low. */
   priority?: string
-  /** A legacy review with nobody on it for over 72 h: drawn with an "antiga" tag, in "Tudo" only. */
+  /** "Antiga sem registro": drawn with an "antiga" tag, in "Tudo" only, and decided in one click in its group. */
   old?: boolean
+  /** An old card only: what the last reconcile suspects shipped it (weak evidence: it moved nothing). */
+  suggestion?: { repo: string; pr: number; tag?: string; via: string }
   ci?: LiveCiSignal | null; step?: number | null
   /** Where `step` came from: stated by the worker/flow (`reported`) or read off observed facts (`signals`, named by `stepSignal`). */
   stepSource?: 'reported' | 'signals' | null; stepSignal?: string | null
@@ -223,7 +225,7 @@ export function orderColumns(cols: Record<LiveStage, LiveCard[]>, sort: LiveSort
 export interface LiveSummary { deliveries: number; agentsWorking: number; nextEtaMs: number | null }
 
 export function summarize(cards: readonly LiveCard[], nowMs: number): LiveSummary {
-  const active = cards.filter(c => c.d.stage !== 'published' && !c.d.old)
+  const active = cards.filter(c => c.d.stage !== 'published' && c.d.stage !== 'completed' && !c.d.old)
   const etas = active.flatMap(c => c.d.eta.kind === 'estimate' && c.d.eta.atMs >= nowMs ? [c.d.eta.atMs] : [])
   return {
     deliveries: active.length,
@@ -283,6 +285,7 @@ export const STAGE_LABEL: Record<LiveStage, { pt: string; en: string; color: str
   leader: { pt: 'Revisão do líder', en: 'Leader review', color: '#b78bff' },
   merge: { pt: 'PR / merge', en: 'PR / merge', color: '#3ecf8e' },
   ci: { pt: 'CI · publicando', en: 'CI · publishing', color: 'rgb(45,180,200)' },
+  completed: { pt: 'Concluído · sem prova de release', en: 'Completed · no release proof', color: '#8b8b95' },
   published: { pt: 'Publicado', en: 'Published', color: '#26b573' },
 }
 

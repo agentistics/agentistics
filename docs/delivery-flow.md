@@ -67,7 +67,73 @@ first release tag that contains the merge. Dry run by default: a report of what 
 or `→ publicado`) and what could not be proven, with the reason. `--apply` (a leader of the task or
 the owner) writes it through the ordinary transitions, whose gates run; the writes are attributed
 to `flow:reconcile`, which wakes nobody and rings no bell per piece. Running it again changes
-nothing. `server/delivery/machine.ts` is the table (pure); `gates.ts` checks evidence;
+nothing.
+
+**CICLO.RECONCILE-2 — what counts as proof, and who runs it.**
+
+- *Who may be moved.* A piece with a **live session** is never moved, whatever a PR says, and a piece
+  with a **record** in `revisao_lider` / `pr_merge` is proven only by its own PR (`findMergedPr`,
+  which checks the sha QA approved): a batch PR must never go over a real review.
+- *Strong evidence moves a piece; free text never does.* Legacy pieces shipped inside a batch release
+  PR and carry no pr/branch/sha of their own. `batch-proof.ts` reads what the piece's **own handbacks
+  declared** (a branch WITH its commit, a full sha, a PR number; `hintsFromText`) and `matchBatchPr`
+  (pure) checks it against gh's facts of a PR that merged into a default branch (**a PR into `dev`
+  proves nothing**) of the **card's own repository**, after the card existed: (1) a declared commit
+  that is one of the PR's real commits, read from gh (`loadPrCommits`; a short sha resolves to a full
+  one, so a squash does not hide it); (2) the PR whose head is the declared branch, merged after that
+  declaration; (3) a PR number the handback states, unambiguous across the card's repositories. Task ids, session ids, flow keys, a
+  sha the card was compared with or based on, and a file path are never read as anything. Several
+  PRs at one tier are **ambiguous = not proven**, unless all of them shipped in one release.
+- *Weak evidence is a suggestion.* The piece's id or the card's whole `CODE.NAME` in a PR's text, or a
+  declared branch named there, moves nothing: it is shown beside the card in "Antigas", with a one-click "Publicar na vX".
+  A later round of a card (`MOBILE.BARRA r3`) is not the round the PR shipped.
+- *The release.* The merge commit is the PR's own. A public PR needs the first green release tag
+  containing it; an **engine** PR the first public tag whose `engine.pin` contains it
+  (`findEnginePinTag`); any other repository is read in that repository, and with no release to read
+  a merged PR stays a suggestion: **a user's repository gets correct proof or none, never ours**. A
+  green tag declares the piece exactly as `flow release` does (one atomic write, attributed to
+  `flow:reconcile`, with a comment "publicado na vX.Y.Z — prova: PR #N, <which commit>"). A red run is
+  `→ ci (release vermelha)`; a run that could not be READ is `unknown` and the piece does not move.
+- *Cost.* What gh answered is kept in `<dataDir>/delivery-proof-cache.json` and survives a restart:
+  commits, ancestry and a green tag never change; PR and tag lists are read again after an hour. A
+  second run asks almost nothing (measured on a real board of 262 pieces: 360 calls cold against the
+  2.771 of the first version, 5 warm). Each run has a budget (`AUTO_RUN_GH_BUDGET`, 250 calls, about
+  10 % of the hourly quota); on the budget or a rate limit it stops at once, judges nothing it did not
+  read, and the next run continues.
+- *Scope.* The backfill looks up only pieces with a delivery record, touched on the board within 30
+  days, or proven by a release PR (`antigas.ts` `inReconcileScope`); older ones spend no gh call.
+- *It runs by itself.* The running server's tick starts a reconcile (apply, proven pieces only) after
+  it boots, single-flight, in the background, at most every 30 min and at least 3x what the last run
+  took; a rate limit, or a quota below a third, doubles the wait up to 6 h. The server's log carries
+  one `auto-reconcile …` line per run. With no gh token nothing is proven and nothing breaks. Never in
+  a CLI one-shot (`agentop flow tick`), off with `AGENTISTICS_AUTO_RECONCILE=0`.
+- *Antigas sem registro.* A record-less piece in review, untouched for over 24 h, with no live session
+  and no proof is a decision to make. **Age alone does not put real work there**: a piece whose
+  delivery handed back in the last 7 days stays in review unless the reconcile suspects it shipped
+  (`isAntiga`, the one rule the Live and the reconcile share). They stay in the "Tudo" tab, marked, at
+  the bottom of "Revisão do líder", and the "Antigas" button in that tab's bar opens the group: one click per card and
+  for the group, **Marcar concluído** (optional version in the comment) and **Arquivar** (abandoned, reason in the
+  comment). Never deletes. The group asks first; the number it shows is the list of ids it sends, 5 at
+  a time, so it shows progress and can be stopped between two batches. HTTP `POST /api/deliveries/antigas`
+  `{action: publish|archive, ids | all, expect?, version?, reason?}`, MCP `agentistics_task_phase
+  action=antigas antigasAction=… subtaskIds|all expect?`, CLI `agentop flow antigas publish|archive
+  (--subtask S[,S…] | --all [--expect N])`. `all` answers from the board, no reconcile inside the
+  call, and leaves out what the last run proved; `expect` refuses (409 `count_changed`) when the group
+  is not the size the person saw; a client that gave up stops the work. A piece with a delivery record
+  is refused (it is not "antiga"). "Mark published" on a piece with no session is refused by the board's
+  own rule, in a sentence with its way out (archive, or open the task and file the conversation).
+  A missing repository is normal for non-code work: it prevents automatic release proof, but does
+  not prevent the age rule or either manual action. GitHub failures and exhausted budgets remain
+  unchecked until a later lookup. `isAntiga` checks the same status, children, handback, liveness,
+  record and proof facts for the screen, reconcile and click; the old-review list is not capped.
+  Tasks without subtasks use their task id through the same actions. A task with open subtasks is
+  a container, not another card in Leader review, and the write refuses to close open children.
+  Group candidates use the same member-derived status as the Live; an empty group keeps its own
+  stored status. A manually completed piece has stage `completed` ("Concluído · sem prova de release")
+  in Tudo, with no publication window and no queue membership. Only a release proof projects it to
+  Publicado. An old `deliveredAt` is never rewritten to make it look newly published.
+
+`server/delivery/machine.ts` is the table (pure); `gates.ts` checks evidence;
 `service.ts` is the one door every surface uses; `store.ts` keeps one record per subtask in
 `<dataDir>/deliveries.json` under the cross-process file lock.
 

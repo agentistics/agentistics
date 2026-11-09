@@ -35,11 +35,11 @@ beforeEach(() => { localStorage.clear(); localStorage.setItem('agentistics.live.
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = '' })
 afterAll(async () => GlobalRegistrator.unregister())
 
-test('draws the nine stages, the cards in them, the summary and an honest "no estimate"', async () => {
+test('draws the ten stages, the cards in them, the summary and an honest "no estimate"', async () => {
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, props('en')))) })
   await act(async () => { await new Promise(r => setTimeout(r, 20)) })
-  expect(document.querySelectorAll('[data-live-column]').length).toBe(9)
+  expect(document.querySelectorAll('[data-live-column]').length).toBe(10)
   expect(document.querySelector('[data-live-column="running"] [data-live-card="t/a"]')).not.toBeNull()
   expect(document.querySelector('[data-live-column="qa"] [data-live-card="t/b"]')).not.toBeNull()
   expect(document.querySelector('[data-live-summary]')!.textContent).toContain('2 active deliveries')
@@ -262,7 +262,7 @@ test('CI · publicando: its own column, a signal checklist, a percent line; Publ
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: { ...reply, deliveries: [ciCard] } as never }))) })
   const cols = Array.from(document.querySelectorAll('[data-live-column]')).map(c => c.getAttribute('data-live-column'))
-  expect(cols.slice(-3)).toEqual(['merge', 'ci', 'published'])
+  expect(cols.slice(-4)).toEqual(['merge', 'ci', 'completed', 'published'])
   const card = document.querySelector('[data-live-column="ci"] [data-live-card="t/ci"]')!
   const lines = Array.from(card.querySelectorAll('[data-ci-line]')).map(l => [l.getAttribute('data-ci-line'), l.getAttribute('data-done')])
   expect(lines).toEqual([['merge', '1'], ['release', '0'], ['tag', '0']])
@@ -340,7 +340,103 @@ test('old legacy reviews are no separate button: they sit in "Tudo" (counted), m
   expect(tabs).toEqual(['In progress0', 'Queued0', 'Published0', 'All3'])
   await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
   expect(document.querySelectorAll('[data-live-column="leader"] [data-live-old]').length).toBe(3)
+  // Their home: the column's header opens the group, and every number on the screen is the number of pieces it lists.
+  const open = document.querySelector('[data-live-antigas-open]') as HTMLElement
+  expect(open.textContent).toBe('Old · 3')
+  expect(document.querySelector('[data-live-antigas]')).toBeNull()
+  await act(async () => open.click())
+  const group = document.querySelector('[data-live-antigas]')!
+  expect(group.querySelectorAll('[data-live-archived]').length).toBe(3)
+  expect(group.querySelector('[data-live-antigas-all]')!.textContent).toBe('Conclude · All (3)')
   localStorage.clear()
+})
+
+test('H6: "All" asks first, sends exactly the ids it counted, answers in batches; M2: a board refusal is a sentence with a way out', async () => {
+  localStorage.clear()
+  const old = Array.from({ length: 25 }, (_, i) => ({ ...reply.deliveries[0]!, key: `t/o${i}`, subtaskId: `o${i}`, title: `Old review ${i}`, stage: 'leader', sessionIds: [], old: true }))
+  localStorage.setItem('agentask.live.view', JSON.stringify({ tab: 'all' }))
+  const sent: Array<{ ids: string[]; expect: number; action: string }> = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { ids: string[]; expect: number; action: string }
+    if (!(body as { preview?: boolean }).preview) sent.push(body)
+    return new Response(JSON.stringify({ ok: true, done: body.ids.map((id, i) => (i === 0 && id === 'o0' ? { subtaskId: id, ok: false, code: 'no_session', reason: 'x' } : { subtaskId: id, ok: true })) }), { status: 200 })
+  }) as typeof fetch
+  try {
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: { ...reply, deliveries: old } as never }))) })
+    await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-open]') as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-all]') as HTMLElement).click())
+    expect(sent.filter(s => !(s as { preview?: boolean }).preview)).toEqual([]) // nothing happens before the answer
+    expect(document.body.textContent).toContain('Conclude 25 pieces in one go?')
+    const buttons = Array.from(document.querySelectorAll('button')).filter(b => b.textContent === 'Conclude')
+    await act(async () => { buttons.at(-1)!.click(); await new Promise(r => setTimeout(r, 10)) })
+    expect(sent.map(s => s.ids.length)).toEqual([5, 5, 5, 5, 5])
+    expect(sent.every(s => s.action === 'conclude' && s.expect === s.ids.length)).toBe(true)
+    // What the board refused stays, in words, with a way out; what it took left the list.
+    const list = document.querySelector('[data-live-antigas]')!
+    expect(list.querySelectorAll('[data-live-archived]').length).toBe(1)
+    expect(list.querySelector('[data-live-antiga-error]')!.textContent).toContain('No session was filed')
+    expect(list.querySelector('[data-live-antiga-error]')!.textContent).not.toContain('done_needs_session')
+    expect(list.querySelector('[data-live-antiga-open]')).not.toBeNull()
+  } finally { globalThis.fetch = realFetch; localStorage.clear() }
+})
+
+test('run lock + end of run: a 409 antigas_running stops the batch with one sentence, and the end says how many were done and how many are left', async () => {
+  localStorage.clear()
+  const old = Array.from({ length: 25 }, (_, i) => ({ ...reply.deliveries[0]!, key: `t/o${i}`, subtaskId: `o${i}`, title: `Old review ${i}`, stage: 'leader', sessionIds: [], old: true }))
+  localStorage.setItem('agentask.live.view', JSON.stringify({ tab: 'all' }))
+  let calls = 0
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    if ((JSON.parse(String(init.body)) as { preview?: boolean }).preview) return new Response(JSON.stringify({ ok: true, done: [], preview: { conclude: 0, archive: 25 } }), { status: 200 })
+    calls++
+    const body = JSON.parse(String(init.body)) as { ids: string[] }
+    if (calls === 1) return new Response(JSON.stringify({ ok: true, done: body.ids.map(id => ({ subtaskId: id, ok: true })) }), { status: 200 })
+    return new Response(JSON.stringify({ ok: false, error: 'antigas_running', sentence: 'x' }), { status: 409 })
+  }) as typeof fetch
+  try {
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: { ...reply, deliveries: old } as never }))) })
+    await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-open]') as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-all]') as HTMLElement).click())
+    const buttons = Array.from(document.querySelectorAll('button')).filter(b => b.textContent === 'Conclude')
+    await act(async () => { buttons.at(-1)!.click(); await new Promise(r => setTimeout(r, 10)) })
+    expect(calls).toBe(2) // the refused chunk ends the batch: no further request is made
+    const list = document.querySelector('[data-live-antigas]')!
+    expect(list.textContent).toContain('A run on the old pieces is already going')
+    expect(list.querySelector('[data-live-antigas-summary]')!.textContent).toBe('Stopped: 5 pieces done, 20 left.')
+  } finally { globalThis.fetch = realFetch; localStorage.clear() }
+})
+
+test('r10: while the preview loads the dialog says it is counting, and the end states what really happened (concluded vs archived)', async () => {
+  localStorage.clear()
+  const old = Array.from({ length: 3 }, (_, i) => ({ ...reply.deliveries[0]!, key: `t/o${i}`, subtaskId: `o${i}`, title: `Old review ${i}`, stage: 'leader', sessionIds: [], old: true }))
+  localStorage.setItem('agentask.live.view', JSON.stringify({ tab: 'all' }))
+  let releasePreview!: () => void
+  const gate = new Promise<void>(r => { releasePreview = r })
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body)) as { ids: string[]; preview?: boolean }
+    if (body.preview) { await gate; return new Response(JSON.stringify({ ok: true, done: [], preview: { conclude: 2, archive: 1 } }), { status: 200 }) }
+    return new Response(JSON.stringify({ ok: true, done: body.ids.map((id, i) => ({ subtaskId: id, ok: true, how: i === 0 ? 'archived' : 'concluded' })) }), { status: 200 })
+  }) as typeof fetch
+  try {
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: { ...reply, deliveries: old } as never }))) })
+    await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-open]') as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-all]') as HTMLElement).click())
+    expect(document.body.textContent).toContain('Counting what the action will do')
+    await act(async () => { releasePreview(); await new Promise(r => setTimeout(r, 10)) })
+    expect(document.body.textContent).toContain('2 completed, 1 archived')
+    expect(document.body.textContent).not.toContain('Counting what the action will do')
+    const buttons = Array.from(document.querySelectorAll('button')).filter(b => b.textContent === 'Conclude')
+    await act(async () => { buttons.at(-1)!.click(); await new Promise(r => setTimeout(r, 10)) })
+    expect(document.querySelector('[data-live-antigas-summary]')!.textContent).toBe('Finished: 3 pieces done, 0 left. (2 completed, 1 archived)')
+  } finally { globalThis.fetch = realFetch; localStorage.clear() }
 })
 
 test('LOW 11: on a phone the Líderes pill, its rows and the filter chip\'s remove control are 44 px targets', async () => {

@@ -204,11 +204,11 @@ describe('a card never leaves without a word (item r) — one test per path that
     expect(hiddenOf([sub('a', 'abandoned', { updatedAt: iso(NOW - H) }), sub('b', 'backlog', { updatedAt: iso(NOW - H) })])).toEqual([])
   })
   test('published more than 24 h ago -> published-old (and a year-old one is not worth a line)', () => {
-    const h = hiddenOf([sub('a', 'done', { deliveredAt: iso(NOW - 30 * H) }), sub('b', 'done', { deliveredAt: iso(NOW - 400 * 24 * H) })])
+    const h = buildLive({ nowMs: NOW, events: [], deliveries: new Map([['a', { phase: 'publicado' }], ['b', { phase: 'publicado' }]]), details: [detail({ subtasks: [sub('a', 'done', { deliveredAt: iso(NOW - 30 * H) }), sub('b', 'done', { deliveredAt: iso(NOW - 400 * 24 * H) })] as never, sessions: [] })] }).hidden
     expect(h.map(x => [x.key, x.reason])).toEqual([['t1/a', 'published-old']])
   })
   test('published more than 24 h ago lands in history (newest first), a year-old one does not', () => {
-    const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [
+    const r = buildLive({ nowMs: NOW, events: [], deliveries: new Map(['a', 'b', 'c', 'd'].map(id => [id, { phase: 'publicado' }])), details: [detail({ subtasks: [
       sub('a', 'done', { deliveredAt: iso(NOW - 30 * H) }), sub('b', 'done', { deliveredAt: iso(NOW - 5 * 24 * H) }),
       sub('c', 'done', { deliveredAt: iso(NOW - 400 * 24 * H) }), sub('d', 'done', { deliveredAt: iso(NOW - 2 * H) }),
     ] as never, sessions: [] as never })] })
@@ -388,6 +388,13 @@ describe('Publicado from a release tag, and the legacy review archive (HIGH 3)',
     expect(r.oldReviewsTotal).toBe(80)
     expect(r.oldReviews).toHaveLength(80)
     expect(r.oldReviews?.[0]).toMatchObject({ old: true, title: 'Sub o0' })
+  })
+  test('a task-level piece with no children follows the same antiga rule', () => {
+    const details = [detail({ subtasks: [], sessions: [] }, { status: 'in_review', updatedAt: iso(NOW - 300 * H) })]
+    const r = buildLive({ nowMs: NOW, events: [], details })
+    expect(r.oldReviewsTotal).toBe(1)
+    expect(r.deliveries).toHaveLength(0)
+    expect(r.oldReviews?.[0]).toMatchObject({ stage: 'leader', old: true })
   })
   test('a fresh review card, or one with a live session, stays in Revisão do líder; a delivery record exempts it', () => {
     const details = [detail({

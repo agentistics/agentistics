@@ -1429,7 +1429,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         import('./delivery/web'), import('./delivery/host'), import('./sessions/session-identity'),
       ])
       const body = req.method === 'POST' ? await req.json().catch(() => ({})) as Record<string, unknown> : {}
-      const out = await deliveryRequest(req.method, url.pathname, body, { service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token) })
+      const out = await deliveryRequest(req.method, url.pathname, body, { service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token) }, req.signal)
       return json(out.body, out.status)
     }
 
@@ -5508,7 +5508,7 @@ if (!TEAM_CENTRAL && CAPS.localShell) {
   // `entrega-vigiar` timer calls the SAME `tick`, which is serialised in this process, so two ticks never double a wake.
   // One small file read per minute when nothing is in CI or blocked.
   setInterval(() => {
-    void import('./delivery/host').then(m => m.deliveryService().tick())
+    void import('./delivery/host').then(m => { m.enableAutoReconcile(); return m.deliveryService().tick() })
       .then(r => { if (r.actions.length) console.log(`[entrega] ${r.actions.join(', ')}`) })
       .catch(err => console.error('[entrega] tick:', err instanceof Error ? err.message : String(err)))
   }, 60_000).unref()

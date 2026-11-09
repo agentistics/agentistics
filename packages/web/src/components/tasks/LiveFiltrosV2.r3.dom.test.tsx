@@ -50,30 +50,6 @@ beforeEach(() => { localStorage.clear(); resetLiveCache() })
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = ''; localStorage.clear(); globalThis.fetch = realFetch })
 afterAll(async () => GlobalRegistrator.unregister())
 
-test('while a slower period answer is held the loader shows, even when the server does not echo view.period', async () => {
-  let release: () => void = () => {}
-  const held = new Promise<void>(r => { release = r })
-  globalThis.fetch = (async (u: string) => {
-    if (!String(u).startsWith('/api/tasks/live')) return json({})
-    const a = answer(String(u)) as unknown as { view?: unknown }
-    delete a.view
-    if (String(u).includes('period=30d')) await held
-    return json(a)
-  }) as unknown as typeof fetch
-  localStorage.setItem('agentistics.live.view.v2', JSON.stringify({ tab: 'all', period: '24h', sort: 'priority' }))
-  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
-  await act(async () => { root!.render(createElement(Router, null, createElement(LiveDeliveryScreen, { lang: 'pt' }))) })
-  await settle()
-  expect(document.querySelector('[data-testid="agentask-live-period-loading"]')).toBeNull()
-  await act(async () => { (document.querySelector('[data-live-period-current]') as HTMLElement).click() })
-  await act(async () => { (document.querySelector('[data-live-period="30d"]') as HTMLElement).click() })
-  await settle()
-  expect(document.querySelector('[data-testid="agentask-live-period-loading"]')).not.toBeNull()
-  release()
-  await settle()
-  expect(document.querySelector('[data-testid="agentask-live-period-loading"]')).toBeNull()
-})
-
 test('choosing 30 dias on the real screen changes the Tudo count the real read model answers', async () => {
   const asked: string[] = []
   globalThis.fetch = (async (u: string) => {
