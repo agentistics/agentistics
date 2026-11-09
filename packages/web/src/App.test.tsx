@@ -76,3 +76,22 @@ test('Settings keeps the statistics pull-tab out of its card area', async () => 
   const src = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
   expect(src).toContain("{!location.pathname.startsWith('/settings') && (() => {")
 })
+
+test('Sessions receives its own scope instead of the metric header filters', async () => {
+  const { readFileSync } = await import('node:fs')
+  const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+  const page = readFileSync(new URL('./pages/SessionsPage.tsx', import.meta.url), 'utf8')
+  expect(app).toContain('sessionsFilters={sessionsFilters}')
+  expect(app).toContain('sessionsActiveOnly={sessionsActiveOnly}')
+  expect(page).toContain('filters: sessionsFilters, activeOnly: sessionsActiveOnly')
+  expect(page).toContain('filters={sessionsFilters}')
+  expect(page).toContain('activeOnly={sessionsActiveOnly}')
+})
+
+test('floating chat receives session scope independently of metric header filters', async () => {
+  const { readFileSync } = await import('node:fs')
+  const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+  const dock = app.slice(app.indexOf('<NayDock'), app.indexOf('/>', app.indexOf('<NayDock')))
+  expect(dock).toContain('filters={sessionsFilters}')
+  expect(dock).toContain('dockActiveOnly(inSessionsWorkspace, sessionsActiveOnly)')
+})

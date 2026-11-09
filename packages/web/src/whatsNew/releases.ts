@@ -10,6 +10,31 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.203.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'OpenCode Go: o limite que o provedor não informa aparece como "sem medição" em vez de uma estimativa local disfarçada, e o plano fica em espera quando o provedor recusa por limite.',
+        en: 'OpenCode Go: a limit the provider does not publish shows as "unknown" instead of a local estimate posing as quota, and the plan is put on hold when the provider refuses for usage limit.',
+      },
+      {
+        pt: 'Os filtros do topo não mexem mais na lista de Sessões nem no chat flutuante. A lista tem o seu próprio menu Filtros, que muda só ela. O calendário da visão geral ainda acompanha o topo.',
+        en: 'The top filters no longer change the Sessions list or the floating chat. The list has its own Filters menu, which changes only the list. The overview calendar still follows the top bar.',
+      },
+      {
+        pt: 'Com uma mensagem na fila, o "Enviar agora" fica no próprio balão; com duas ou mais, só a pílula "Enviar agora" sob a conversa, que envia a fila inteira. Vale para sessões do Claude.',
+        en: 'With one queued message, "Send now" sits in the bubble itself; with two or more, only the "Send now" pill under the conversation, which sends the whole queue. This applies to Claude sessions.',
+      },
+      {
+        pt: 'Agradecimentos, despedidas e comentários soltos não viram mais cartão para você; só um pedido claro vira cartão, e a mensagem continua chegando ao líder.',
+        en: 'Thanks, goodbyes and passing remarks no longer become a card for you; only a clear request does, and the message still reaches the leader.',
+      },
+      {
+        pt: 'No Mac, o agentistics não varre mais pastas privadas (Mesa, Documentos, Fotos…) em segundo plano atrás de projetos; elas só são lidas quando você mesmo as abre.',
+        en: 'On Mac, agentistics no longer scans private folders (Desktop, Documents, Photos…) in the background looking for projects; they are read only when you open them yourself.',
+      },
+    ],
+  },
   '2.203.0': {
     features: [
       {

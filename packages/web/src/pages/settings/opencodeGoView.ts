@@ -3,13 +3,14 @@
  * It turns the `/api/opencode/usage` answer into words and rows; it holds no rule about the plan itself
  * (`@agentistics/core` `opencodeGo.ts` does) and draws nothing.
  */
-import type { GoUsage, GoWindowKind, GoWindowUse, OpencodePlanId } from '@agentistics/core'
+import type { GoUsage, GoWindowKind, OpencodePlanId } from '@agentistics/core'
 
 export interface OcUsageReply {
   plan: { id: OpencodePlanId; label: string; priceUsd: number | null; perMember: boolean; chosen: boolean }
   usage: GoUsage | null
   reason?: 'no-go-plan' | 'unreadable'
   estimated: true
+  blocked?: { at: number; message: string }
   now: number
 }
 
@@ -44,9 +45,9 @@ export const OC_USAGE_COPY = (pt: boolean) => ({
   window: (k: GoWindowKind) => (k === '5h' ? (pt ? '5 horas' : '5 hours') : k === 'week' ? (pt ? 'Semana' : 'Week') : (pt ? 'Mês' : 'Month')),
   windowShort: (k: GoWindowKind) => (k === '5h' ? '5 h' : k === 'week' ? (pt ? 'sem' : 'wk') : (pt ? 'mês' : 'mo')),
   of: (used: string, limit: string) => `${used} / ${limit}`,
-  modelsTitle: pt ? 'Por modelo (dólares)' : 'Per model (dollars)',
+  modelsTitle: pt ? 'Custo local por modelo (últimos 30 dias)' : 'Local cost per model (last 30 days)',
   trains: pt ? 'treina com seus dados' : 'trains on your data',
-  noUse: pt ? 'Nenhuma resposta do Go nesta máquina no último mês. Os anéis aparecem depois do primeiro uso.' : 'No Go response on this machine in the last month. The rings appear after the first use.',
+  noUse: pt ? 'Nenhuma resposta do Go nesta máquina no último mês.' : 'No Go response on this machine in the last month.',
   noGoPlan: (plan: string) => pt ? `${plan} não tem limite por janela para mostrar aqui.` : `${plan} has no per-window limit to show here.`,
   unreadable: pt ? 'Não foi possível ler o histórico do OpenCode.' : 'Could not read the OpenCode history.',
   unlisted: (ids: string[]) => pt ? `Sem limite listado (grátis ou novo demais): ${ids.join(', ')}.` : `No listed limit (free, or too new): ${ids.join(', ')}.`,
@@ -54,7 +55,7 @@ export const OC_USAGE_COPY = (pt: boolean) => ({
 })
 
 export interface OcRing { kind: GoWindowKind; label: string; pct: number | null; detail: string; model: string | null }
-export interface OcModelRow { model: string; pct: number; binding: GoWindowKind; amount: string; trains: boolean }
+export interface OcModelRow { model: string; pct: number | null; binding: GoWindowKind; amount: string; trains: boolean }
 export interface OcUsageView {
   title: string
   price: string
@@ -71,18 +72,20 @@ export const pctOf = (f: number): number => Math.max(0, Math.round(f * 100))
 export function ocUsageView(r: OcUsageReply, pt: boolean): OcUsageView {
   const t = OC_USAGE_COPY(pt)
   const notes: string[] = []
+  if (r.plan.id.startsWith('go')) notes.push(r.blocked
+    ? (pt ? 'Go bloqueado pelo limite do provedor. Renovação desconhecida; aguardando recuperação confirmada.' : 'Go is blocked by the provider limit. Reset unknown; awaiting confirmed recovery.')
+    : (pt ? 'Quota e renovação do provedor: sem medição. Os custos locais abaixo não determinam disponibilidade.' : 'Provider quota and reset: unknown. Local costs below do not determine availability.'))
   const rings: OcRing[] = (['5h', 'week', 'month'] as const).map((kind): OcRing => {
     const m = r.usage?.tightest[kind] ?? null
-    const w: GoWindowUse | undefined = m?.windows.find(x => x.kind === kind)
     return {
       kind, label: t.window(kind), model: m?.model ?? null,
-      pct: w ? pctOf(w.fraction) : null,
-      detail: w ? t.of(fmtUsd(w.usedUsd), fmtUsd(w.limitUsd)) : '',
+      pct: null,
+      detail: pt ? 'sem medição' : 'unknown',
     }
   })
   const models: OcModelRow[] = (r.usage?.models ?? []).map(m => ({
-    model: m.model, pct: pctOf(m.binding.fraction), binding: m.binding.kind,
-    amount: t.of(fmtUsd(m.binding.usedUsd), fmtUsd(m.binding.limitUsd)), trains: m.trainsOnData,
+    model: m.model, pct: null, binding: 'month',
+    amount: fmtUsd(m.windows.find(w => w.kind === 'month')!.usedUsd), trains: m.trainsOnData,
   }))
   if (r.reason === 'no-go-plan') notes.push(t.noGoPlan(t.planName(r.plan.id)))
   else if (r.reason === 'unreadable') notes.push(t.unreadable)

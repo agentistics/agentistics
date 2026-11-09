@@ -156,8 +156,8 @@ export function FleetOverview({
       </p>
 
       <SectionNote text={pt
-        ? 'A frota agora — as mesmas sessões listadas ao lado. Segue os filtros do topo, menos o período: uma sessão viva está acontecendo agora.'
-        : 'The fleet now — the same sessions listed beside it. Follows the filters above, except the date range: a live session is happening now.'} />
+        ? 'A frota agora — as mesmas sessões listadas ao lado. Segue o menu Filtros da lista; os filtros do topo não mudam isto.'
+        : 'The fleet now — the same sessions listed beside it. Follows the list\'s own Filters menu; the top filters do not change this.'} />
 
       {/* TWO UP ON A PHONE. `minmax(150px, …)` needs 312px for a second column and the pane has
           ~300 — so four cards stacked into four full-width rows, and the section below them fell
@@ -318,8 +318,8 @@ export function FleetOverview({
           {/* Said HERE and not only in the heading above, because the two regions are read
               separately: somebody comparing the cards with this grid is looking at this half. */}
           <SectionNote text={pt
-            ? 'Histórico gravado — este calendário segue os filtros do topo, como as barras acima.'
-            : 'Recorded history — this calendar follows the filters above, as the bars do.'} />
+            ? 'Histórico gravado — só este calendário segue os filtros de métricas do topo (período, projetos, modelos).'
+            : 'Recorded history — only this calendar follows the top metric filters (period, projects, models).'} />
           {/* CAPPED. The heatmap fills its container and keeps its own aspect ratio, so on this
               full-width page it grew to roughly 500px tall — reported as "ta gigante". It is a
               glance, not a chart you read a value off: the cells only need to be big enough to
