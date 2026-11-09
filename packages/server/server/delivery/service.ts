@@ -1950,7 +1950,13 @@ export function createDeliveryService(d: DeliveryDeps) {
       // The lock is this closure's own flag, in memory: a restart starts free, and `finally` frees it on finish, abort and throw alike.
       // A call that never returns (a hung board write) would hold it for good, so the hold is a lease: past ANTIGAS_LOCK_MS it is stale.
       // A PREVIEW only reads: it takes no lock, or a click made while it loads is refused for a run that does not exist.
-      if ((o.preview === true || o.preview === 'true') && o.action === 'conclude') {
+      // A simulation request must never write: only `conclude` can be simulated, so any other action asked with a preview (or a
+      // preview value that is not a clear yes/no) is refused before the lock and before anything is read.
+      const wantsPreview = o.preview === true || o.preview === 'true'
+      const noPreview = o.preview === undefined || o.preview === null || o.preview === false || o.preview === 'false'
+      if (!wantsPreview && !noPreview) return fail(400, 'bad_preview', 'preview must be true or false')
+      if (wantsPreview && o.action !== 'conclude') return fail(400, 'preview_only_conclude', 'preview only simulates "conclude"; publish and archive cannot be simulated, so nothing was changed: ask without preview to act, or preview "conclude"')
+      if (wantsPreview) {
         try { return await antigas(o, actor, signal) } catch (e) {
           if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
           throw e

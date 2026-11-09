@@ -2401,6 +2401,30 @@ describe('reconcile: batch release PR proof, scope, antigas and the automatic ru
     expect(h.calls.comments.filter(c => c.includes('v2.203.0')).length).toBe(2)
   })
 
+  test('r11: a simulation request NEVER writes: preview on publish/archive (or a junk value) is refused, nothing closes', async () => {
+    const closed: string[] = []
+    const h = harness({ status: 'in_review' }, { reviewPieces: async () => pieces, closeLegacy: async id => { closed.push(id); return { ok: true } } })
+    for (const action of ['publish', 'archive']) {
+      for (const preview of [true, 'true']) {
+        const out = await h.svc.antigas({ action, preview, all: true }, 'owner')
+        expect(out.ok).toBe(false)
+        expect(!out.ok && out.status).toBe(400)
+        expect(!out.ok && out.code).toBe('preview_only_conclude')
+        expect(!out.ok && out.sentence).toMatch(/preview/)
+      }
+    }
+    const junk = await h.svc.antigas({ action: 'conclude', preview: 1, all: true }, 'owner')
+    expect(!junk.ok && junk.status).toBe(400)
+    expect(closed).toEqual([])
+    expect(h.calls.comments).toEqual([])
+    // the honest forms still work
+    const ok = await h.svc.antigas({ action: 'conclude', preview: true, all: true }, 'owner')
+    expect(ok.ok && ok.preview).toBeDefined()
+    const no = await h.svc.antigas({ action: 'archive', preview: false, ids: ['s2'] }, 'owner')
+    expect(no.ok).toBe(true)
+    expect(closed).toEqual(['s2'])
+  })
+
   test('r10: a slow PREVIEW takes no lock, so a click made while it loads is not refused for a run that does not exist', async () => {
     let release!: () => void
     const gate = new Promise<void>(r => { release = r })
