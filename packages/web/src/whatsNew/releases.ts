@@ -27,6 +27,14 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Cost: when no token has a known price (for example, a gateway model), the card shows "not recorded" instead of $0.00.',
       },
       {
+        pt: 'Custo: a mesma regra vale nas listas de sessões, nos rankings, na comparação, nos repositórios, no PDF e nas respostas do MCP.',
+        en: 'Cost: the same rule applies to session lists, top boards, compare, repositories, the PDF and MCP answers.',
+      },
+      {
+        pt: 'Calendário: uma versão que já tem release aparece como publicada, com a data real, mesmo que alguma peça dela não esteja marcada; versões antigas sem release deixam de aparecer como pendentes.',
+        en: 'Calendar: a version that has a release shows as published with its real date, even if one of its pieces is not marked; older versions with no release no longer show as pending.',
+      },
+      {
         pt: 'Codex: os tokens de uma sessão retomada são somados por inteiro, sem perder a parte de antes da retomada.',
         en: 'Codex: the tokens of a resumed session are counted in full, without losing the part before the resume.',
       },
