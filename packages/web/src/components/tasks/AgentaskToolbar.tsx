@@ -279,7 +279,7 @@ export function AgentaskToolbar({ lang, q, onQ, state, actions, statuses, onView
   const mobile = useIsMobile()
   const chips = activeChips(state, lang)
   const seg = (active: boolean): CSSProperties => ({
-    ...button(mobile), height: mobile ? 44 : 30, border: 'none',
+    ...button(mobile), height: mobile ? 44 : 24, border: 'none',
     background: active ? 'var(--bg-elevated)' : 'transparent',
     color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
   })

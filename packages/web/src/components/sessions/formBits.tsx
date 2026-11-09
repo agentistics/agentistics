@@ -64,7 +64,7 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, c
   icon?: (t: T) => React.ReactNode
   /** A count beside each label. Absent = the tabs carry no count, and no `0` is drawn in its place. */
   count?: (t: T) => number
-  /** Minimum tab height on touch — 44 on mobile; absent keeps the desktop 30px. */
+  /** Minimum tab height on touch — 44 on mobile; absent keeps the desktop 24px tabs in a 32px strip. */
   tap?: number
   /** Drop the strip's own bottom margin, for a strip that sits inside a header row. */
   flush?: boolean
@@ -79,7 +79,7 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, c
   natural?: boolean
   /** Underline only: the space between tabs (default 22). A strip that must fit a phone narrows it. */
   gap?: number
-  /** Segmented only: the strip's TOTAL outer height (frame and padding included), for a toolbar that must line up with 32px controls. Absent keeps 30px tabs inside the frame. */
+  /** Segmented only: the strip's TOTAL outer height (frame and padding included), for a toolbar that must line up with 32px controls. Absent keeps the 32px standard (24px tabs inside the frame). */
   height?: number
 }) {
   if (variant === 'underline') {
@@ -119,7 +119,7 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, c
     <div role="tablist" aria-label={ariaLabel} style={{
       display: 'flex', gap: 3, marginBottom: flush ? 0 : 8, padding: 3, borderRadius: 9, minWidth: 0,
       background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-      ...(height ? { height, boxSizing: 'border-box' as const } : {}),
+      ...((height ?? (tap ? undefined : 32)) ? { height: height ?? 32, boxSizing: 'border-box' as const } : {}),
     }}>
       {tabs.map(id => {
         const on = value === id
@@ -131,7 +131,7 @@ export function TabStrip<T extends string>({ tabs, value, onPick, label, icon, c
             onClick={() => onPick(id)}
             style={{
               flex: natural ? '0 0 auto' : 1, padding: natural ? '0 12px' : undefined, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              gap: 5, minHeight: tap ?? (height ? height - 8 : 30), minWidth: 0, borderRadius: 7, border: 'none', cursor: 'pointer',
+              gap: 5, minHeight: tap ?? ((height ?? 32) - 8), minWidth: 0, borderRadius: 7, border: 'none', cursor: 'pointer',
               background: on ? 'var(--bg-surface)' : 'transparent',
               color: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
               fontFamily: 'inherit', fontSize: 11.5, fontWeight: on ? 650 : 500,
