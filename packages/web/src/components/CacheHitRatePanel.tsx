@@ -1,6 +1,6 @@
 import React from 'react'
 import { Zap, Lightbulb, TrendingDown, TrendingUp, Info } from 'lucide-react'
-import { fmt, formatModel, getModelColor, fmtCost } from '@agentistics/core'
+import { fmt, formatModel, getModelColor, fmtCost, isUnpricedModel } from '@agentistics/core'
 import type { Lang, SurfaceHarnessId } from '@agentistics/core'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { NAtag } from './NAtag'
@@ -93,6 +93,13 @@ const TIPS = {
   },
 } as const
 
+/** False only when some model used the cache and every such model has no known price. */
+export function cacheSavingsRecorded(perModel: Record<string, { cacheReadTokens: number; inputTokens: number }>): boolean {
+  const ids = Object.keys(perModel)
+  if (ids.length === 0) return true
+  return ids.some(id => !isUnpricedModel(id))
+}
+
 export function CacheHitRatePanel({
   hitRate,
   cacheTotals,
@@ -108,6 +115,11 @@ export function CacheHitRatePanel({
 }: Props) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
+  // The savings are priced with a blended rate; a model with no known price (a gateway route) has
+  // nothing to price, so when every model that touched the cache is unpriced the three money
+  // figures read "not recorded" — never a confident $0.00 or a made-up saving.
+  const savingsRecorded = cacheSavingsRecorded(perModel)
+  const money = (usd: number) => savingsRecorded ? fmtCost(usd, currency, brlRate) : (pt ? 'não registrado' : 'not recorded')
 
   // Only show N/A when the active harness explicitly lacks token capability.
   // A 0% cache hit for a token-capable harness (e.g. codex, gemini) is a real 0 — fine.
@@ -215,21 +227,21 @@ export function CacheHitRatePanel({
         <div className="ag-grid cols-3" style={{ gap: 8 }}>
           <Stat
             label={pt ? 'Economia bruta' : 'Gross savings'}
-            value={fmtCost(grossSavedUSD, currency, brlRate)}
+            value={money(grossSavedUSD)}
             sub={pt ? 'vs. input normal' : 'vs. regular input'}
             accent="var(--accent-green, #22c55e)"
             icon={<TrendingDown size={11} />}
           />
           <Stat
             label={pt ? 'Custo write' : 'Write overhead'}
-            value={fmtCost(writeOverheadUSD, currency, brlRate)}
+            value={money(writeOverheadUSD)}
             sub={pt ? 'prêmio para criar cache' : 'premium to create cache'}
             accent="#f59e0b"
             icon={<TrendingUp size={11} />}
           />
           <Stat
             label={pt ? 'Economia líquida' : 'Net savings'}
-            value={fmtCost(netSavedUSD, currency, brlRate)}
+            value={money(netSavedUSD)}
             sub={pt ? 'no período' : 'in period'}
             accent={netSavedUSD >= 0 ? 'var(--anthropic-orange)' : '#ef4444'}
             icon={<Zap size={11} />}
