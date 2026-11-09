@@ -132,6 +132,15 @@ export function snoozeError(reason: 'empty' | 'format' | 'range', lang: 'pt' | '
   return pt ? 'Entre 1 minuto e 24 horas.' : 'Between 1 minute and 24 hours.'
 }
 
+/**
+ * The actions on a session's card that ask the person for an ANSWER (type a reply, pick an approval option).
+ * While autonomous mode is on the owner is not asked anything — the card stays informational (go to the
+ * session, mute, snooze, dismiss), and the leader decides.
+ */
+export function cardAnswerActions(autonomousOn: boolean): { reply: boolean; approve: boolean } {
+  return { reply: !autonomousOn, approve: !autonomousOn }
+}
+
 /** "15 min", "1 h", "1 h 30 min" — how a snooze is said back to the person who set it. */
 export function formatSpan(ms: number): string {
   const total = Math.max(0, Math.round(ms / 60_000))

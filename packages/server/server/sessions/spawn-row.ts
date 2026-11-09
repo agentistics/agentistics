@@ -90,6 +90,7 @@ export function refusalText(r: Extract<FilingPlan, { ok: false }>): string {
 export const WARNING_TEXT: Record<OkPlan['warnings'][number], string> = {
   no_folder: 'No sidebar folder was found for this session — pass --folder to file it.',
   subtask_member_filed_on_group: 'The subtask is a member of a group; the session is filed on the group.',
+  inherited_task_needs_subtask: "The parent's task was not filed: only leaders are filed on the task itself, so this worker starts unfiled; file it on a subtask.",
   shared_checkout_override: 'Sharing a main checkout another live session works in (--shared-cwd).',
   inherited_task_repo_mismatch: 'The working directory is outside the inherited task repository; the session is still filed on that task. Pass --task explicitly to require a matching repository.',
 }

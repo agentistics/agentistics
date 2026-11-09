@@ -68,7 +68,9 @@ export interface Conversation {
    * `contextWindow` is resolved HERE rather than on the row, because it is the one place that holds
    * both the harness's own answer (codex writes `model_context_window` per session) and the model
    * id a table lookup needs. A row further downstream has neither. Both absent together: a
-   * measurement with no window cannot be drawn, and a window with no measurement is not a reading.
+   * measurement with no window cannot be DRAWN as a gauge (so `contextWindow` is absent whenever it
+   * is unknown), but the level itself is still a reading and is kept; a window with no measurement
+   * is not a reading.
    */
   contextTokens?: number
   contextWindow?: number
@@ -94,7 +96,31 @@ export function findConversation<C extends Pick<Conversation, 'sessionId' | 'nat
   pool: readonly C[],
   id: string,
 ): C | undefined {
-  return pool.find(c => c.sessionId === id) ?? pool.find(c => c.nativeId === id)
+  const index = indexOf(pool)
+  return (index.bySession.get(id) ?? index.byNative.get(id)) as C | undefined
+}
+
+/**
+ * APP.LENTO: `findConversation` was two linear scans, and the fleet poll calls it three times per
+ * managed row (`claimResume`, `reopenTargetFor`, `metricsOf`) — on a real machine 3.000 rows × 3.600
+ * conversations every five seconds, ~20 % of the server's CPU in the profile. The pool is now indexed
+ * ONCE per array (both ids, FIRST occurrence wins, exactly as `Array.find` did) and the index is
+ * rebuilt whenever the array's length changes, so a caller that appends to its pool is never
+ * answered from a stale index.
+ */
+type ConversationIndex = { length: number; bySession: Map<string, unknown>; byNative: Map<string, unknown> }
+const INDEXES = new WeakMap<readonly unknown[], ConversationIndex>()
+function indexOf(pool: readonly Pick<Conversation, 'sessionId' | 'nativeId'>[]): ConversationIndex {
+  const known = INDEXES.get(pool)
+  if (known && known.length === pool.length) return known
+  const bySession = new Map<string, unknown>(), byNative = new Map<string, unknown>()
+  for (const c of pool) {
+    if (!bySession.has(c.sessionId)) bySession.set(c.sessionId, c)
+    if (c.nativeId !== undefined && !byNative.has(c.nativeId)) byNative.set(c.nativeId, c)
+  }
+  const index = { length: pool.length, bySession, byNative }
+  INDEXES.set(pool, index)
+  return index
 }
 
 const CACHE_TTL_MS = 30_000
@@ -147,11 +173,13 @@ export function toConversation(s: SessionMeta): Conversation {
     } } : {}),
     ...(s.user_message_count ? { turns: s.user_message_count } : {}),
     ...(s.assistant_message_count ? { calls: s.assistant_message_count } : {}),
-    // BOTH or NEITHER. Half a gauge is not a weaker gauge, it is an unreadable one: a measurement
-    // with no window has no percentage, and a window with no measurement has no level.
-    ...(s.context_tokens && window
-      ? { contextTokens: s.context_tokens, contextWindow: window }
-      : {}),
+    // The GAUGE (the row's ring) needs BOTH halves — a measurement with no window has no percentage
+    // — and `session-view.ts` still requires both before it draws one. The MEASUREMENT alone is
+    // kept, though: the leader's hand-off counter ("112 mil") needs a level and no window, and
+    // dropping the level whenever a route's window is unknown (a local OpenCode model, a model the
+    // table has never verified) silenced a counter that had every number it needs.
+    ...(s.context_tokens ? { contextTokens: s.context_tokens } : {}),
+    ...(s.context_tokens && window ? { contextWindow: window } : {}),
     // Through `sessionCostUSD`/`calcCost`, never an inline rate: CLAUDE.md makes that the single
     // source of truth, and a second arithmetic here would disagree with the dashboard the first
     // time a price changed.

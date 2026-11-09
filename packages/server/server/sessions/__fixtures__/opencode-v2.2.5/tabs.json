@@ -1,0 +1,39 @@
+{
+  "global": {
+    "tabs": [],
+    "unread": {}
+  },
+  "cwd": {
+    "/work/ws": {
+      "tabs": [
+        {
+          "sessionID": "ses_e518c628affezx8DVpFfW7DYbK",
+          "title": "OK"
+        },
+        {
+          "sessionID": "ses_e518c336fffef88wYtVixaUt8C",
+          "title": "OK"
+        }
+      ],
+      "unread": {}
+    },
+    "/work/ws2": {
+      "tabs": [
+        {
+          "sessionID": "ses_e5189f9d0ffebyLrwS5rCUdmAW",
+          "title": "OK"
+        }
+      ],
+      "unread": {}
+    },
+    "/home/user": {
+      "tabs": [
+        {
+          "sessionID": "ses_e5189f9c7ffe1SllXfZEzj1wyH",
+          "title": "Home tab"
+        }
+      ],
+      "unread": {}
+    }
+  }
+}

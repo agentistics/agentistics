@@ -47,6 +47,7 @@ export interface EngineChatTurn {
     writes?: string[]
     opaqueWrite?: boolean
     ref?: string
+    output?: string
   }>
   thinking?: string
   pending?: boolean
@@ -96,6 +97,10 @@ export interface ChatAttention {
  *
  * - `window` — replace everything; `older` says the source has turns above the window.
  * - `grow`   — the LAST turn it holds changed in place (a tool call got its text, a task ended).
+ *   With `back` (1.24, additive) it is the turn `back` places BEFORE the last instead: a source that
+ *   appended a turn after one still in flight (a note landing while a tool runs) grows the in-flight
+ *   one where it is, never the note that happens to be last. A `back` that reaches above what the
+ *   receiver holds (dropped from the front) changes nothing. Absent / 0 = the last, as before.
  * - `append` — these turns follow; then drop from the FRONT down to `max` (and `older` becomes true).
  *   A `grow` and an `append` emitted together apply in that order.
  * - `live`   — in-flight text of the turn being written, replaced (not appended) by each `live`; ended
@@ -109,7 +114,7 @@ export interface ChatAttention {
 export type HarnessChatDelta =
   | { kind: 'window'; turns: EngineChatTurn[]; older: boolean }
   | { kind: 'append'; turns: EngineChatTurn[] }
-  | { kind: 'grow'; turn: EngineChatTurn }
+  | { kind: 'grow'; turn: EngineChatTurn; back?: number }
   | { kind: 'live'; text: string; reasoning?: string }
   | { kind: 'state'; working: boolean; attention?: ChatAttention }
   | { kind: 'fork'; to: ChatSourceRef }
@@ -177,7 +182,12 @@ export function applyHarnessChatDeltas(
   let older = prev.older
   for (const d of deltas) {
     if (d.kind === 'window') { turns = [...d.turns]; older = d.older; continue }
-    if (d.kind === 'grow') { if (turns.length > 0) turns[turns.length - 1] = d.turn; else turns.push(d.turn); continue }
+    if (d.kind === 'grow') {
+      const back = typeof d.back === 'number' && Number.isInteger(d.back) && d.back > 0 ? d.back : 0
+      if (back > 0) { const i = turns.length - 1 - back; if (i >= 0) turns[i] = d.turn; continue }
+      if (turns.length > 0) turns[turns.length - 1] = d.turn; else turns.push(d.turn)
+      continue
+    }
     if (d.kind === 'append') {
       turns.push(...d.turns)
       if (turns.length > max) { turns = turns.slice(turns.length - max); older = true }

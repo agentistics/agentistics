@@ -116,6 +116,26 @@ describe('buildSessionViews', () => {
     expect(other!.activity).toBeUndefined()
   })
 
+  it('OPENCODE.ATIVAS-TUI: each tab of one opencode TUI is its own row, named by its own session', () => {
+    const conv = (sessionId: string, title: string) => ({
+      sessionId, title, lastActivityMs: 1, startedMs: 0, harness: 'opencode' as const, cwd: '/repo/ws', resumable: true, firstPrompt: '',
+    })
+    const views = buildSessionViews({
+      reconciled: [], activity: new Map(),
+      processes: [
+        proc({ harness: 'opencode', cwd: '/repo/ws', sessionId: 'ses_a', pid: 7 }),
+        proc({ harness: 'opencode', cwd: '/repo/ws', sessionId: 'ses_b', pid: 7 }),
+        proc({ harness: 'opencode', cwd: '/repo/ws', pid: 8 }), // an anonymous TUI: never borrows a title
+      ],
+      conversations: [conv('ses_a', 'Segurança e privacidade do repo'), conv('ses_b', 'Claude Code com gateway upx')],
+    })
+    const byConv = new Map(views.map(v => [v.conversationId ?? `pid:${v.pid}`, v]))
+    expect(byConv.get('ses_a')!.harnessName).toBe('Segurança e privacidade do repo')
+    expect(byConv.get('ses_b')!.harnessName).toBe('Claude Code com gateway upx')
+    expect(byConv.get('pid:8')!.harnessName).toBeUndefined()
+    expect(views.filter(v => v.status === 'external')).toHaveLength(3)
+  })
+
   it('EXT.OPEN: an external process known only by its directory gets NO conversation link — the guess is never exact', () => {
     const [v] = buildSessionViews({ reconciled: [], activity: new Map(), processes: [proc()] })
     expect(v!.conversationId).toBeUndefined()
@@ -179,6 +199,18 @@ describe('buildSessionViews', () => {
       processes: [proc({ cwd: '/repo/a', harness: 'opencode', sessionId: 'ses_aaa', pid: 9 })],
     })
     expect(views).toHaveLength(1)
+  })
+
+  it('MAC.OPENCODE r2: a DEAD managed row never hides the live TUI driving its conversation', () => {
+    for (const status of ['exited', 'lost'] as const) {
+      const dead = row('o', { status, managed: managed('o', { harness: 'opencode', conversationId: 'ses_aaa' }) })
+      const views = buildSessionViews({
+        reconciled: [dead],
+        activity: new Map([['o', 'exited']]),
+        processes: [proc({ cwd: '/repo/a', harness: 'opencode', sessionId: 'ses_aaa', pid: 9 })],
+      })
+      expect(views.some(v => v.status === 'external')).toBe(true)
+    }
   })
 
   it('sorts what needs answering to the top', () => {

@@ -63,6 +63,10 @@ export interface AsideGroupPrefs {
   foldedGroupsSection: boolean
   /** Folders whose "Ended (N)" block is EXPANDED — absent means collapsed (the default). */
   expandedEndedGroups: string[]
+  /** Which sections of the Encerradas tab are FOLDED (`sleeping` | `today` | `older`). Absent reads as
+   *  the default — only `older` ("Antes de hoje") starts folded, since it is the long tail; an explicit
+   *  `[]` means the person opened everything and stays that way. */
+  foldedEndedSections: string[]
   /** Has the person ever picked a sort? Until then folders keep their drag order. */
   sortExplicit: boolean
   /** Show only the sessions whose role is "leader" (`leadersFilter.ts`). A FILTER, persisted like the
@@ -77,7 +81,7 @@ export interface AsideGroupPrefs {
 export const DEFAULT_ASIDE_GROUP_PREFS: AsideGroupPrefs = {
   groupBy: 'project', order: {}, collapsed: [], cardColor: 'wash', collapsedUserGroups: [],
   sort: DEFAULT_ORDER, hiddenUserGroups: [], foldedPinned: false, foldedGroupsSection: false,
-  expandedEndedGroups: [], sortExplicit: false, leadersOnly: false, tab: 'active', foldedTeams: [],
+  expandedEndedGroups: [], foldedEndedSections: ['older'], sortExplicit: false, leadersOnly: false, tab: 'active', foldedTeams: [],
 }
 
 /** Total: anything that is not a known key and direction reads as the default. */
@@ -155,6 +159,9 @@ export function parseAsideGroupPrefs(stored: unknown): AsideGroupPrefs {
       foldedTeams: Array.isArray(p.foldedTeams)
         ? p.foldedTeams.filter((x): x is string => typeof x === 'string')
         : [],
+      foldedEndedSections: Array.isArray(p.foldedEndedSections)
+        ? p.foldedEndedSections.filter((x): x is string => typeof x === 'string')
+        : DEFAULT_ASIDE_GROUP_PREFS.foldedEndedSections,
       expandedEndedGroups: Array.isArray(p.expandedEndedGroups)
         ? p.expandedEndedGroups.filter((x): x is string => typeof x === 'string')
         : [],

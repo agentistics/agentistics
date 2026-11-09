@@ -14,14 +14,14 @@
  * shows both and no total, and an open task shows no duration — "still running" is not "took N h".
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, BarChart3, ClipboardList, ExternalLink, FileText, Link2,
   Filter, LayoutGrid, MessageSquare, Pencil, Plus, Rows3, Search, Settings2, Trash2, X, XCircle,
 } from 'lucide-react'
-import { PRIORITY_ORDER, type SortSpec, type TaskPriorityId } from '@agentistics/core'
+import { PRIORITY_ORDER, sortTaskTypes, type SortSpec, type TaskPriorityId } from '@agentistics/core'
 import { ChevronDown } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { CenteredLoader } from '../components/CenteredLoader'
@@ -33,14 +33,18 @@ import {
   type CommentAttachment, type CommentPart,
 } from '../lib/commentBody'
 import { BoardView, MobileLane } from '../components/tasks/TaskBoard'
+import { LiveDelivery } from '../components/tasks/LiveDelivery'
 import { effectiveView, hasStoredView, resolveLane } from '../components/tasks/mobileLanes'
+import { planPartial, rowsForPlan } from '../components/tasks/partialPlan'
 import { mobileBoardCopy } from '../components/tasks/boardCopyThreads'
 import { TaskTable } from '../components/tasks/TaskTable'
 import { SubtaskTable } from '../components/tasks/SubtaskTable'
 import {
-  useBoardPref,
+  DEFAULT_PREFS, useBoardPref, type BoardView as BoardViewId,
 } from '../components/tasks/boardPrefs'
-import { BoardArrange } from '../components/tasks/BoardArrange'
+import { pathOfView, viewOfPath } from '../lib/tasksViewRoute'
+import { AgentaskToolbar, ViewPanel, type ViewActions, type ViewState } from '../components/tasks/AgentaskToolbar'
+import { isDefaultVisible, visibleStatuses, uniqueStatusLabels } from '../components/tasks/statusDefaults'
 import { DELIVERY_TABS, DeliveryDetail, type DeliveryTab } from '../components/tasks/DeliveryDetail'
 import { TaskHero } from '../components/tasks/TaskHero'
 import { liveSessionsOf } from '../components/tasks/threadView'
@@ -50,7 +54,6 @@ import { ConfirmModal, Select } from './settings/primitives'
 import { DatePicker } from '../components/DatePicker'
 import { BlockedDialog } from '../components/tasks/BlockedDialog'
 import { TaskProgressBar } from '../components/tasks/TaskProgressBar'
-import { BetaTag } from '../components/BetaTag'
 import { StatusChip } from '../components/tasks/StatusChip'
 import { boardCopy, statusLabel, type Lang } from '../components/tasks/copy'
 import { TaskFiles } from '../components/tasks/TaskFiles'
@@ -62,14 +65,14 @@ import { NewSessionModal } from '../components/sessions/NewSessionModal'
 import { markSessionPending } from '../lib/pendingSessionStore'
 import {
   NA, PRIORITY, SESSION_STATE, button, claimLeft, field, fmtInt, fmtTokens, harnessColor,
-  liveStatusOrder, microLabel, numeric, pill, statusStyle, surface, type BoardStatus,
+  liveStatusMap, liveStatusOrder, microLabel, NO_TYPE_KEY, numeric, pill, statusStyle, surface, type BoardStatus,
 } from '../components/tasks/board'
 import {
   addComment, addLink, addSubtask, createTask, deleteFile, deleteTask, editComment, fileUrl,
   attachSession, detachSession, fmtDuration, markTask, patchSubtask, removeComment, removeLink,
   removeSubtask,
   editTask, moveTask, setBlockedBy, uploadFile,
-  useTaskDetail, useTaskList, useTaskStatuses, useTaskTypes,
+  useTaskDetail, useTaskFullText, useTaskList, useTaskStatuses, useTaskTypes,
   type AttemptRollup, type AttemptView, type TaskDetail, type TaskFieldPatch, type TaskFile,
   type TaskListRow, type TaskRecord, type TasksError, type TaskStatus,
 } from '../lib/tasks'
@@ -95,7 +98,7 @@ function TaskList() {
   // range and the harness / project / repo chips scope which SESSIONS count toward each task, which
   // is what makes "what did this cost me last week" answerable.
   const { filters, lang } = useOutletContext<AppContext>()
-  const { rows, overview, excluded, error, reload } = useTaskList(filters)
+  const { rows: listRows, overview, excluded, error, partial, reload } = useTaskList(filters)
   const { statuses, reload: reloadStatuses } = useTaskStatuses()
   const { types, reload: reloadTypes } = useTaskTypes()
   const navigate = useNavigate()
@@ -106,11 +109,24 @@ function TaskList() {
   // resets itself on every back-press is a view nobody can stay in.
   // Read LIVE from the per-person store (`boardPrefs.ts`), not seeded once: on a device that opens
   // the board before the server answers, the arrangement lands as soon as it does.
-  const [storedView, setView] = useBoardPref('view')
+  const [storedView, setStoredView] = useBoardPref('view')
+  // Each view is its own route (`/tasks/live`, …) so the sidebar can link to it and light it up; plain
+  // `/tasks` keeps the stored choice. Picking a view inside the page navigates to its route.
+  const routedView = viewOfPath(useLocation().pathname)
+  const setView = (v: BoardViewId) => { setStoredView(v); navigate(pathOfView(v)) }
   // A phone with no stored choice opens on the kanban, not on the metrics.
-  const view = effectiveView(storedView, isMobile, hasStoredView())
+  const view = routedView ?? effectiveView(storedView, isMobile, hasStoredView())
+  // Bare `/tasks` is the entry: it lands on the view the person last used, so the sidebar lights it.
+  const bare = useLocation().pathname.replace(/\/+$/, '') === '/tasks'
+  useEffect(() => { if (bare) navigate(pathOfView(view), { replace: true }) }, [bare, view, navigate])
   const [lane, setLane] = useState<string | null>(null)
   const [sheet, setSheet] = useState(false)
+  useEffect(() => {
+    if (!sheet) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSheet(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sheet])
   const MB = mobileBoardCopy(lang)
   // The kanban's arrangement, persisted with everything else the board remembers. The SORT is
   // shared with the table on purpose: a board that ranks its cards one way in the grid and another
@@ -129,7 +145,15 @@ function TaskList() {
   const [storedGroups, setBoardColumns] = useBoardPref('groups')
   const [hideEmpty, setHideEmpty] = useBoardPref('hideEmpty')
   const [composeSubtaskProgress, setComposeSubtaskProgress] = useBoardPref('composeSubtaskProgress')
-  const boardColumns = useMemo(() => storedGroups ?? liveStatusOrder(statuses), [storedGroups, statuses])
+  const boardColumns = useMemo(() => visibleStatuses(storedGroups, statuses), [storedGroups, statuses])
+  const [groupBy, setGroupBy] = useBoardPref('groupBy')
+  // While only step one of the split load is here, a view draws only what step two cannot move
+  // (`partialPlan.ts`): the closed history is never drawn half-way, and a view it would reshuffle
+  // waits for the whole list. The row-reading code below only ever sees the result.
+  const plan = planPartial({
+    partial, view, groupBy, lanes: isMobile ? 'none' : lanes, statusOrder: liveStatusOrder(statuses),
+  })
+  const rows = useMemo(() => rowsForPlan(listRows, plan), [listRows, plan])
   /**
    * The tasks on their way to `blocked`, waiting on the dialog's answer.
    *
@@ -170,13 +194,21 @@ function TaskList() {
     await reload()
   }
 
+  // A description is clipped in the list (`detailClipped`); searching reads the whole text, fetched
+  // once and silently the first time somebody types.
+  const needle = q.trim().toLowerCase()
+  const fullText = useTaskFullText(needle !== '' && Boolean(rows?.some(r => r.detailClipped)), filters)
+  /** Step two (the closed history) or the full descriptions are still on their way: an empty
+   *  search result is not yet an answer. */
+  const searchPending = needle !== '' && (partial || Boolean(rows?.some(r => r.detailClipped)) && fullText === null)
+  /** The board's true per-status sizes while only step one has arrived — counts right from the first paint. */
+  const statusTotals = partial ? overview?.statusCounts : undefined
   const shown = useMemo(() => {
-    const needle = q.trim().toLowerCase()
     if (!needle || !rows) return rows ?? []
     return rows.filter(r =>
       r.task.title.toLowerCase().includes(needle)
-      || (r.task.detail ?? '').toLowerCase().includes(needle))
-  }, [rows, q])
+      || (fullText?.get(r.task.id) ?? r.task.detail ?? '').toLowerCase().includes(needle))
+  }, [rows, needle, fullText])
 
 
   const seg = (active: boolean): React.CSSProperties => ({
@@ -187,42 +219,57 @@ function TaskList() {
     color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
   })
 
-  const laneChips = liveStatusOrder(statuses)
-    .filter(st => boardColumns.includes(st))
-    .map(st => ({ status: st, count: shown.filter(r => r.task.status === st).length }))
+  const laneChips = boardColumns
+    .map(st => ({ status: st, count: (!needle ? statusTotals?.[st] : undefined) ?? shown.filter(r => r.task.status === st).length }))
   const activeLane = resolveLane(lane, laneChips)
-  const arrange = (
-<BoardArrange
-            lang={lang}
-            sort={sort} onSort={setSort}
-            columnSorts={columnSort} onColumnSorts={setColumnSort}
-            lanes={lanes} onLanes={setLanes}
-            wip={wip} onWip={setWip}
-            // The board and the table share ONE set of visible columns: they are the LIVE statuses,
-            // and letting each remember its own would mean hiding a status twice.
-            columns={boardColumns}
-            onColumns={setBoardColumns}
-            hideEmpty={hideEmpty}
-            onHideEmpty={setHideEmpty}
-            composeSubtaskProgress={composeSubtaskProgress}
-            onComposeSubtaskProgress={setComposeSubtaskProgress}
-            statuses={statuses}
-            counts={Object.fromEntries(liveStatusOrder(statuses).map(st => [
-              st, shown.filter(r => r.task.status === st).length,
-            ]))}
-          />
-  )
-
-  // The table draws this INSIDE its own toolbar row (`toolbarStart`); the board keeps it above.
-  const searchBox = (
-    <div style={{ position: 'relative', maxWidth: 380 }}>
-      <Search size={14} style={{ position: 'absolute', left: 11, top: isMobile ? 15 : 8, color: 'var(--text-tertiary)' }} />
-      <input
-        style={{ ...field(isMobile), paddingLeft: 32, ...(isMobile ? {} : { height: 28 }) }}
-        value={q} placeholder={lang === 'pt' ? 'Buscar' : 'Search'}
-        onChange={e => setQ(e.target.value)}
-      />
-    </div>
+  const [storedTypeGroups, setTypeGroups] = useBoardPref('typeGroups')
+  const onTypes = view === 'table' && groupBy === 'type'
+  const typeItems = useMemo(() => [
+    ...sortTaskTypes(types ?? []).map(t => ({ id: t.id, label: t.label, color: t.color, count: shown.filter(r => r.task.type === t.id).length })),
+    { id: NO_TYPE_KEY, label: lang === 'pt' ? 'Sem tipo' : 'No type', color: 'var(--text-tertiary)', count: shown.filter(r => !r.task.type).length },
+  ], [types, shown, lang])
+  const statusItems = useMemo(() => {
+    const m = liveStatusMap(statuses)
+    const names = uniqueStatusLabels(statuses)
+    return liveStatusOrder(statuses).map(id => ({
+      id, label: names[id] ?? m[id]?.label ?? id, color: m[id]?.color ?? 'var(--text-tertiary)',
+      count: (!needle ? statusTotals?.[id] : undefined) ?? shown.filter(r => r.task.status === id).length,
+    }))
+  }, [statuses, shown, needle, statusTotals])
+  const viewState: ViewState = {
+    view, items: onTypes ? typeItems : statusItems,
+    shown: onTypes ? (storedTypeGroups ?? typeItems.map(i => i.id)) : boardColumns,
+    shownIsDefault: onTypes ? storedTypeGroups === null : isDefaultVisible(storedGroups, statuses),
+    groupBy, lanes, sort, wip, hideEmpty, compose: composeSubtaskProgress,
+  }
+  // `null` is "never chosen" — the default applies again (see `statusDefaults.ts`).
+  const forgetGroups = () => setBoardColumns(null)
+  const forgetTypeGroups = () => setTypeGroups(null)
+  const restoreView = () => {
+    forgetGroups(); forgetTypeGroups()
+    setGroupBy('status'); setLanes('none'); setSort(DEFAULT_PREFS.sort)
+    setColumnSort({}); setWip({}); setHideEmpty(false); setComposeSubtaskProgress(true)
+  }
+  const viewActions: ViewActions = {
+    onShown: next => (onTypes ? setTypeGroups(next) : setBoardColumns(next as BoardStatus[])),
+    onGroupBy: setGroupBy, onLanes: setLanes, onSort: setSort, onWip: setWip,
+    onHideEmpty: setHideEmpty, onCompose: setComposeSubtaskProgress,
+    onManage: () => { setSheet(false); setManagingStatuses('status') },
+    onRestore: restoreView,
+  }
+  const clearChip = (id: string) => {
+    if (id === 'visible') { if (onTypes) forgetTypeGroups(); else forgetGroups() }
+    else if (id === 'lanes') setLanes('none')
+    else if (id === 'groupBy') setGroupBy('status')
+    else if (id === 'sort') setSort(DEFAULT_PREFS.sort)
+    else if (id === 'wip') setWip({})
+    else if (id === 'hideEmpty') setHideEmpty(false)
+  }
+  const toolbar = (
+    <AgentaskToolbar
+      lang={lang} q={q} onQ={setQ} state={viewState} actions={viewActions} statuses={statuses}
+      onView={setView} onNew={() => setOpen(v => !v)} onOpenSheet={() => setSheet(true)} onClearChip={clearChip}
+    />
   )
 
   // First data not here yet: the shared screen loader and NOTHING else — no toolbar, no empty or
@@ -239,23 +286,10 @@ function TaskList() {
     }}>
       {isMobile && (
         <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <h1 style={{ fontSize: 20, margin: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-              Agentask
-              <BetaTag what="Agentask" />
-            </h1>
-            <button style={button(true, 'primary')} onClick={() => setOpen(v => !v)}>
-              <Plus size={15} /> New task
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>{searchBox}</div>
-            <button
-              style={{ ...button(true), flexShrink: 0, gap: 6 }}
-              onClick={() => setSheet(true)}
-              aria-label={MB.adjust}
-            ><Settings2 size={15} /> {MB.adjust}</button>
-          </div>
+          <h1 style={{ fontSize: 20, margin: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+            Agentask
+          </h1>
+          {toolbar}
           {rows !== null && view === 'board' && shown.length > 0 && (
             <div
               className="ag-noscroll" role="tablist" aria-label={MB.chips}
@@ -305,52 +339,27 @@ function TaskList() {
                 <button style={{ ...seg(view === 'overview'), flex: 1 }} onClick={() => setView('overview')}><BarChart3 size={14} /> Metrics</button>
                 <button style={{ ...seg(view === 'board'), flex: 1 }} onClick={() => setView('board')}><LayoutGrid size={14} /> Board</button>
                 <button style={{ ...seg(view === 'table'), flex: 1 }} onClick={() => setView('table')}><Rows3 size={14} /> Table</button>
+                <button style={{ ...seg(view === 'live'), flex: 1 }} onClick={() => { setView('live'); setSheet(false) }}><LiveDot /> Live</button>
               </div>
             </div>
-            <div style={{ display: 'grid', gap: 6 }}>
-              <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{MB.manage}</span>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button style={{ ...button(true), gap: 6 }} onClick={() => { setSheet(false); setManagingStatuses('status') }}><Settings2 size={14} /> {lang === 'pt' ? 'Status e tipos' : 'Statuses & types'}</button>
-              </div>
-            </div>
-            {view === 'board' && shown.length > 0 && arrange}
+            <ViewPanel lang={lang} state={viewState} actions={viewActions} statuses={statuses} />
           </div>
         </>,
         document.body,
       )}
-      {!isMobile && <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <h1 style={{ fontSize: 19, margin: 0, fontWeight: 650, display: 'flex', alignItems: 'center', gap: 8 }}>
-            Agentask
-            <BetaTag what="Agentask" />
-          </h1>
-          <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--text-tertiary)' }}>
-            What each piece of work cost, in how many rounds and across how many sessions.
-          </p>
-        </div>
-        <div style={{ ...surface, display: 'flex', padding: 3, gap: 2 }}>
-          <button style={seg(view === 'overview')} onClick={() => setView('overview')}>
-            <BarChart3 size={14} /> Metrics
-          </button>
-          <button style={seg(view === 'board')} onClick={() => setView('board')}>
-            <LayoutGrid size={14} /> Board
-          </button>
-          <button style={seg(view === 'table')} onClick={() => setView('table')}>
-            <Rows3 size={14} /> Table
-          </button>
-        </div>
-        <button
-          style={{ ...button(isMobile), padding: '0 9px', gap: 6 }}
-          onClick={() => setManagingStatuses('status')}
-          title={lang === 'pt' ? 'Gerenciar status e tipos' : 'Manage statuses and types'}
-          aria-label={lang === 'pt' ? 'Gerenciar status e tipos' : 'Manage statuses and types'}
-        >
-          <Settings2 size={14} />{!isMobile && <span style={{ fontSize: 12 }}>{lang === 'pt' ? 'Status e tipos' : 'Statuses & types'}</span>}
-        </button>
-        <button style={button(isMobile, 'primary')} onClick={() => setOpen(v => !v)}>
-          <Plus size={15} /> New task
-        </button>
-      </div>}
+      {!isMobile && (
+        <>
+          <div>
+            <h1 style={{ fontSize: 19, margin: 0, fontWeight: 650, display: 'flex', alignItems: 'center', gap: 8 }}>
+              Agentask
+              </h1>
+            <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--text-tertiary)' }}>
+              What each piece of work cost, in how many rounds and across how many sessions.
+            </p>
+          </div>
+          {toolbar}
+        </>
+      )}
 
       {managingStatuses && (
         <ManageStatusesModal
@@ -416,8 +425,6 @@ function TaskList() {
         />
       )}
 
-      {view === 'board' && !isMobile && searchBox}
-
 
       {excluded > 0 && (
         // Said, never swallowed: a rollup that silently shrank is the same defect as a confident
@@ -434,12 +441,13 @@ function TaskList() {
 
       {view === 'overview' && overview && <BoardOverviewView o={overview} statuses={statuses} />}
 
-      {view !== 'overview' && rows !== null && shown.length === 0 && (
+      {view === 'live' && <LiveDelivery lang={lang} />}
+
+      {view !== 'overview' && view !== 'live' && rows !== null && shown.length === 0 && !searchPending && (
         <EmptyNotice error={rows.length > 0 ? null : error} />
       )}
       {rows !== null && view === 'board' && shown.length > 0 && (
         <>
-          {!isMobile && arrange}
           {isMobile ? (
             <MobileLane
               rows={shown} status={activeLane} lang={lang} sort={sort} columnSort={columnSort}
@@ -456,6 +464,7 @@ function TaskList() {
             wip={wip}
             columns={boardColumns}
             hideEmpty={hideEmpty}
+            statusTotals={needle ? undefined : statusTotals}
             statuses={statuses}
             sessions={fleet.sessions}
             onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}
@@ -467,6 +476,7 @@ function TaskList() {
       {view === 'table' && (
         <TaskTable
           rows={shown}
+          statusTotals={needle ? undefined : statusTotals}
           lang={lang}
           statuses={statuses}
           types={types}
@@ -493,7 +503,6 @@ function TaskList() {
           }}
           onRefreshDetail={refreshDetail}
           onCommentsChanged={async ref => { await reload(); await refreshDetail(ref) }}
-          toolbarStart={isMobile ? undefined : searchBox}
           onAddSubtask={async (ref, title) => { await addSubtask(ref, title); await refreshDetail(ref) }}
           onPatchSubtask={async (ref, sid, patch) => {
             // The RESULT reaches the caller — the group-forming gestures (§F.1) need it to show
@@ -553,6 +562,10 @@ function TaskList() {
 
 // ----------------------------------------------------------------------------- detail
 
+
+function LiveDot() {
+  return <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent-red, #ff5f5f)', display: 'inline-block' }} />
+}
 
 function TaskDetailView({ id }: { id: string }) {
   const { filters, lang } = useOutletContext<AppContext>()

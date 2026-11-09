@@ -1,12 +1,19 @@
 /**
- * AWAY MODE — the browser's one copy of `GET /api/away` (server/away.ts), shared by the settings
+ * AUTONOMOUS MODE — the browser's one copy of `GET /api/away` (server/away.ts), shared by the settings
  * switch, the activation dialog and the header pill. It follows the shared SSE stream
  * (`event: away`) and re-renders once at `until`, since expiry is lazy (nothing is pushed then).
  * The rules and words sessions are told live in core's `awayMode.ts`.
  */
 import { useSyncExternalStore } from 'react'
-import { AWAY_OFF, AWAY_TOP_MODEL, awayActive, parseAwayState, type AwayAuthId, type AwayState, type AwayTopCaps, type HarnessId } from '@agentistics/core'
+import { AWAY_OFF, AWAY_TOP_MODEL, awayActive, awayScheduled, parseAwayState, scheduleSummaryText, type AgentSchedule, type AwayAuthId, type AwayState, type AwayTopCaps, type HarnessId } from '@agentistics/core'
 import { subscribeEvent } from './eventStream'
+import { Infinity as InfinityIcon, type LucideIcon } from 'lucide-react'
+
+/**
+ * The ONE icon of autonomous mode, drawn by every surface (pill, chip, dialog, settings, session panel).
+ * Candidates the owner may pick instead: Workflow, Bot, Rocket, Zap, Orbit, Repeat, BrainCircuit.
+ */
+export const AUTONOMOUS_ICON: LucideIcon = InfinityIcon
 
 export interface AwaySnapshot {
   /** `null` until the first answer, or when this server has no away route (older build / central). */
@@ -65,6 +72,8 @@ export function useAway(): AwaySnapshot {
 export interface AwayRequest {
   on: boolean
   until?: string | null
+  /** Scheduled instead of open-ended: on only inside these windows (same shape as an account's agent-use agenda). */
+  schedule?: AgentSchedule
   authorised?: AwayAuthId[]
   note?: string
   maxWorkers?: number
@@ -86,7 +95,7 @@ export async function setAway(req: AwayRequest): Promise<{ ok: true } | { ok: fa
 }
 
 /**
- * Switch ONE session's own away mode (`PUT /api/away/session`). The server records it and, when
+ * Switch ONE session's own autonomous mode (`PUT /api/away/session`). The server records it and, when
  * the session is running and its effective state changed, tells it. Resolves to the server's
  * error code on refusal; the fleet row follows on the next fleet push.
  */
@@ -133,7 +142,8 @@ export function untilChoiceLabel(c: UntilChoice, lang: 'pt' | 'en'): string {
 /** "until 09:00" / "until Mon 09:00" / "until I'm back" — local clock, short. */
 export function awayUntilLabel(s: AwayState | null, lang: 'pt' | 'en', now: number): string {
   const pt = lang === 'pt'
-  if (!s || s.until === null) return pt ? 'até você voltar' : "until you're back"
+  if (s && awayScheduled(s)) return `${pt ? 'agendado' : 'scheduled'}: ${scheduleSummaryText(s.schedule, lang)}`
+  if (!s || s.until === null) return pt ? 'até você desligar' : "until you turn it off"
   const d = new Date(s.until)
   const time = d.toLocaleTimeString(pt ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' })
   const sameDay = new Date(now).toDateString() === d.toDateString()

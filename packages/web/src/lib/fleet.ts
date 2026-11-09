@@ -12,9 +12,10 @@
  * What this module owns is the transport, the poll, and the mapping from a stored `SessionMeta` row
  * to the live fleet row that is driving it.
  */
+import { hasPendingFleetHistory, INITIAL_FLEET_SESSION_LIMIT, readFleetInPhases } from './fleetInitial'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { followFleet, readCompactFleetResponse, type Baseline, type FleetWire, type SessionMode } from '@agentistics/core'
+import { followFleet, type Baseline, type FleetWire, type SessionMode } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { fleetSeedNotice, fleetStaleNotice, stillLoadingAfterPoll } from './fleetStale'
 import { cacheIsUsable, stripVolatile } from './fleetCache'
@@ -129,6 +130,7 @@ export interface FleetRow {
 }
 
 export interface FleetPayload {
+  historyLoading?: boolean
   sessions: FleetRow[]
   /** This machine's 30-day behaviour baseline — see `session-profile.ts`. */
   baseline?: Baseline
@@ -300,12 +302,40 @@ function readFleetCache(): FleetPayload | null {
   }
 }
 
-function writeFleetCache(payload: FleetPayload): void {
+function storeFleetCache(payload: FleetPayload): void {
   try {
     // The SCREEN is stripped before it is written, never after it is read — a payload that was
     // never stored cannot leak from a store somebody inspects.
     localStorage.setItem(FLEET_CACHE_KEY, JSON.stringify({ at: Date.now(), payload: stripVolatile(payload) }))
   } catch { /* quota or disabled — the cache is an optimisation, never a requirement */ }
+}
+
+/**
+ * The cache is a FIRST FRAME for the next visit, so it needs to be minutes old at worst — not
+ * rewritten on every frame. The stream delivers a frame whenever any row changes and each write
+ * serialised the whole fleet (thousands of rows) synchronously on the main thread: ~60 ms per frame
+ * on the machine this was measured on, landing under whoever was typing. The latest payload is kept
+ * and written at most every `CACHE_WRITE_GAP_MS`, and when the page is hidden or closed, so the next
+ * visit still finds the last thing this one saw.
+ */
+const CACHE_WRITE_GAP_MS = 20_000
+let cachePending: FleetPayload | null = null
+let cacheTimer: ReturnType<typeof setTimeout> | null = null
+let cacheFlushHooked = false
+function flushFleetCache(): void {
+  if (cacheTimer !== null) { clearTimeout(cacheTimer); cacheTimer = null }
+  const p = cachePending
+  cachePending = null
+  if (p) storeFleetCache(p)
+}
+function writeFleetCache(payload: FleetPayload): void {
+  cachePending = payload
+  if (typeof document !== 'undefined' && !cacheFlushHooked) {
+    cacheFlushHooked = true
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushFleetCache() })
+    addEventListener('pagehide', flushFleetCache)
+  }
+  if (cacheTimer === null) cacheTimer = setTimeout(flushFleetCache, CACHE_WRITE_GAP_MS)
 }
 
 /**
@@ -477,7 +507,7 @@ async function pollOnce(): Promise<void> {
     // header's counter, search — lists them as ordinary rows. Never rejects: a failed native read is
     // an empty native half, never a failed fleet poll.
     const nativeP = readNativeFleet(pollLang)
-    const res = await fetch(`/api/fleet?lang=${pollLang}&format=compact-v1`)
+    const res = await fetch(`/api/fleet?lang=${pollLang}&format=compact-v1&closed=${INITIAL_FLEET_SESSION_LIMIT}`)
     if (res.status === 403 || res.status === 404) {
       // Not an empty fleet: this machine may not be asked. The two must stay distinguishable, and
       // a refusal is a complete ANSWER — it clears the failure count rather than reading as
@@ -489,7 +519,22 @@ async function pollOnce(): Promise<void> {
     // poll left a minutes-old list on screen looking live — a stale list is worse than an empty
     // one, because an empty one is obviously wrong.
     if (!res.ok) { snapFailures++; return }
-    const json = withNativeSessions(normalizeFleetPayload(await readCompactFleetResponse(await res.json(), offset => `/api/fleet/closed?lang=${pollLang}&offset=${offset}&limit=100`, true, `/api/fleet?lang=${pollLang}&format=compact-v1`, snapshot.rows as never) as unknown as FleetPayload), await nativeP)
+    const raw = await res.json()
+    const native = await nativeP
+    if (epoch !== fleetEpoch) return
+    const json = withNativeSessions(normalizeFleetPayload(await readFleetInPhases(
+      raw,
+      offset => `/api/fleet/closed?lang=${pollLang}&offset=${offset}&limit=100`,
+      `/api/fleet?lang=${pollLang}&format=compact-v1&closed=${INITIAL_FLEET_SESSION_LIMIT}`,
+      snapshot.rows as never,
+      snapLoading || snapshot.rows.length === 0 ? wire => {
+        if (epoch !== fleetEpoch) return
+        snapshot = { ...withNativeSessions(normalizeFleetPayload(wire as unknown as FleetPayload), native), historyLoading: true }
+        snapLoading = false; snapUnsupported = false; snapFailures = 0
+        snapLastOkMs = Date.now(); cachedAt = 0
+        emit()
+      } : undefined,
+    ) as unknown as FleetPayload), native)
     if (epoch !== fleetEpoch) return
     snapUnsupported = false
     snapshot = json
@@ -520,9 +565,10 @@ let fleetStream: ReturnType<typeof followFleet> | null = null
 let fleetStreamUrl = ''
 let nextStreamTry = 0
 let streamedFleet: FleetPayload | null = null
+let historyRequested = false
 
 function openFleetStream(): void {
-  const url = `/api/fleet/events?lang=${pollLang}&closed=0`
+  const url = `/api/fleet/events?lang=${pollLang}&closed=${INITIAL_FLEET_SESSION_LIMIT}`
   if (fleetStream && fleetStreamUrl === url) return
   fleetStream?.close()
   fleetStreamUrl = url
@@ -546,7 +592,7 @@ export function needsClosedFleet(activeOnly: boolean, pinnedCount: number): bool
 }
 
 /** History is loaded in pages when an existing list asks to draw inactive sessions. */
-export function loadClosedFleet(): void { void fleetStream?.loadClosed() }
+export function loadClosedFleet(): void { historyRequested = true; void fleetStream?.loadClosed(); emit() }
 
 function fleetTick(): void {
   if (fleetStream?.healthy()) return
@@ -603,6 +649,19 @@ function stopPolling(): void {
     document.removeEventListener('visibilitychange', onVisible)
     onVisible = null
   }
+}
+
+/**
+ * `hasPendingFleetHistory` walks every row (a string test per row, thousands of rows) and every
+ * mounted consumer asked it on every render — so one fleet frame cost it N times over, and the
+ * answer only changes when the snapshot does. Remembered by snapshot identity.
+ */
+let pendingMemo: { snap: FleetPayload; requested: boolean; value: boolean } | null = null
+function historyPendingOf(snap: FleetPayload, requested: boolean): boolean {
+  if (pendingMemo && pendingMemo.snap === snap && pendingMemo.requested === requested) return pendingMemo.value
+  const value = hasPendingFleetHistory(snap, requested)
+  pendingMemo = { snap, requested, value }
+  return value
 }
 
 export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
@@ -756,7 +815,7 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
   }, [actRaw, lang])
 
   return {
-    fleet: enabled ? snapshot : EMPTY,
+    fleet: enabled ? { ...snapshot, historyLoading: historyPendingOf(snapshot, historyRequested) } : EMPTY,
     loading: enabled ? snapLoading : false,
     unsupported: enabled ? snapUnsupported : false,
     // Resolved on every render rather than stored: the sentence carries how long it has been, and

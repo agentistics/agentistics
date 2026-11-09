@@ -23,7 +23,6 @@ import { ScopedSessions } from '../components/ScopedSessions'
 import { sessionCost } from '../components/ScopedSessions'
 import { StatTile, STAT_TILE_GRID } from '../components/StatTile'
 import { MetricNote } from '../components/MetricNote'
-import { BetaTag } from '../components/BetaTag'
 import { RepoTasksTab } from '../components/tasks/RepoTasksTab'
 import { repoTaskTotals, tasksOfRepo } from '../lib/repoTasks'
 import { useTaskList } from '../lib/tasks'
@@ -84,10 +83,10 @@ export default function RepoDetailPage() {
 
   const title = linked ? repoShortName(remote) : (folderPath.split('/').filter(Boolean).pop() || (pt ? 'Sem repositório' : 'No repository'))
   const host = linked ? remote.split('/')[0]! : ''
-  const tabs: { id: Tab; label: string; icon: React.ReactNode; show: boolean; badge?: number; beta?: boolean }[] = [
+  const tabs: { id: Tab; label: string; icon: React.ReactNode; show: boolean; badge?: number }[] = [
     { id: 'overview', label: pt ? 'Visão geral' : 'Overview', icon: <GitBranch size={13} />, show: true },
     { id: 'sessions', label: pt ? 'Sessões' : 'Sessions', icon: <Clock size={13} />, show: true },
-    { id: 'tasks', label: pt ? 'Tarefas' : 'Tasks', icon: <ClipboardList size={13} />, show: repoTasks.length > 0, badge: repoTasks.length || undefined, beta: true },
+    { id: 'tasks', label: pt ? 'Tarefas' : 'Tasks', icon: <ClipboardList size={13} />, show: repoTasks.length > 0, badge: repoTasks.length || undefined },
     { id: 'workflows', label: 'Dynamic Workflows', icon: <WorkflowIcon size={13} />, show: workflows.length > 0 && workflows.some(w => capable(harnessOf(w), 'dynamicWorkflows')), badge: workflows.length },
   ]
 
@@ -178,7 +177,6 @@ export default function RepoDetailPage() {
               )}
               {/* Every ALM surface carries the mark — one that appears on five of six reads as the
                   unmarked one being the finished part. */}
-              {t.beta && <BetaTag what={t.label} compact />}
             </button>
           )
         })}
@@ -216,7 +214,7 @@ export default function RepoDetailPage() {
       )}
 
       {tab === 'tasks' && (
-        <Section title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><ClipboardList size={14} /> {pt ? 'Tarefas neste repositório' : 'Tasks in this repository'} <BetaTag what={pt ? 'O board de tarefas' : 'The task board'} /></span>}>
+        <Section title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><ClipboardList size={14} /> {pt ? 'Tarefas neste repositório' : 'Tasks in this repository'}</span>}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, marginBottom: 14 }}>
             <StatTile label={pt ? 'Tarefas' : 'Tasks'} value={String(taskTotals.tasks)} />
             <StatTile label={pt ? 'Em andamento' : 'In flight'} value={String(taskTotals.inFlight)} />

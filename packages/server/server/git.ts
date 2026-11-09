@@ -265,6 +265,19 @@ export function isAuthoritativeNoRemote(err: unknown): boolean {
 }
 
 const remoteMemo = createFingerprintMemo<string | undefined>()
+/**
+ * APP.LENTO: a READ that failed is still not an answer (see `isAuthoritativeNoRemote`), but asking
+ * again on EVERY build is not either: a worktree whose `.git` points at a gitdir that was removed
+ * answers exit 128 forever, and it was one `git` process per such directory per `/api/data` build —
+ * measured on a real store, 3 of 1.426 directories, every few seconds while sessions wrote. The
+ * failure is now held for `REMOTE_FAILURE_MS` per (repository, config fingerprint): the caller gets
+ * the same `undefined` it got before, nothing is remembered as "no remote", and a config change or
+ * the window ending asks git again. The same window holds an answer whose config CANNOT be
+ * fingerprinted (`configFingerprint` is null for a config with an `[include]`, or none to read): it
+ * used to bypass the memo entirely and spawn git on every build.
+ */
+export const REMOTE_FAILURE_MS = 5 * 60_000
+const remoteFailures = new Map<string, { fp: string | null; until: number; value?: string }>()
 const headMemo = createFingerprintMemo<string | undefined>()
 
 /** `origin`'s remote, normalized. Spawns git only when the repository's config changed since the
@@ -277,6 +290,8 @@ export async function getGitRemote(projectPath: string): Promise<string | undefi
   const key = dirs ? dirs.commonDir + '\0' + dirs.gitDir : projectPath
   const cached = remoteMemo.get(key, fp)
   if (cached.hit) return cached.value
+  const held = remoteFailures.get(key)
+  if (held && held.fp === fp && Date.now() < held.until) return held.value
   let value: string | undefined
   try {
     fingerprintedSpawns++
@@ -287,10 +302,17 @@ export async function getGitRemote(projectPath: string): Promise<string | undefi
     )
     value = normalizeGitRemote(stdout.trim()) || undefined
   } catch (err) {
-    // A failed read is returned UNCACHED (see `isAuthoritativeNoRemote`): the next build asks again.
-    if (!isAuthoritativeNoRemote(err)) return undefined
+    // A failed read is returned UNCACHED as an answer (see `isAuthoritativeNoRemote`); it is only held
+    // back from being retried for a few minutes.
+    if (!isAuthoritativeNoRemote(err)) {
+      if (remoteFailures.size >= 4096) remoteFailures.delete(remoteFailures.keys().next().value as string)
+      remoteFailures.set(key, { fp, until: Date.now() + REMOTE_FAILURE_MS })
+      return undefined
+    }
     value = undefined
   }
+  if (fp === null) remoteFailures.set(key, { fp, until: Date.now() + REMOTE_FAILURE_MS, value })
+  else remoteFailures.delete(key)
   remoteMemo.set(key, fp, value)
   return value
 }
@@ -391,6 +413,7 @@ export function clearGitStatsCache(): void {
   statsMemo.clear()
   headMemo.clear()
   remoteMemo.clear()
+  remoteFailures.clear()
   gitDirsMemo.clear()
   walkCount = 0
   // Also drop the open handle, so a caller that has just repointed the store gets the new one.

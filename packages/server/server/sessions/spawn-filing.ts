@@ -102,20 +102,22 @@ export type FolderSource = 'explicit' | 'predecessor' | 'task' | 'parent' | 'non
 export type CwdSource = 'explicit' | 'caller' | 'predecessor'
 
 /** Codes, not sentences: the surfaces (CLI, route) render them in the reader's language. */
-export type FilingWarning = 'no_folder' | 'subtask_member_filed_on_group' | 'shared_checkout_override' | 'inherited_task_repo_mismatch'
+export type FilingWarning = 'no_folder' | 'inherited_task_needs_subtask' | 'subtask_member_filed_on_group' | 'shared_checkout_override' | 'inherited_task_repo_mismatch'
 
 export type FilingRefusal =
   | 'no_such_task' | 'ambiguous_task'
   | 'no_such_subtask' | 'ambiguous_subtask' | 'subtask_needs_task'
   | 'no_such_folder' | 'ambiguous_folder'
   | 'cwd_missing' | 'cwd_wrong_repo' | 'cwd_needed' | 'cwd_shared_checkout'
-  | 'subtask_refused' | 'board_unreadable' | 'handoff_required'
+  | 'subtask_refused' | 'worker_needs_subtask' | 'board_unreadable' | 'handoff_required'
 
 export type FilingPlan = {
   ok: true
   taskId?: string
   /** The task's real title — what the row's `task` field carries. */
   taskTitle?: string
+  /** The task came from the parent/predecessor, not from the caller's own words. */
+  taskInherited?: true
   /** Already redirected from a group member to its group. */
   subtaskId?: string
   /** Set when `subtaskRef` named a group member and the session is filed on its group. */
@@ -413,6 +415,7 @@ export function planFiling(input: FilingInput): FilingPlan {
   return {
     ok: true,
     ...(filing.task ? { taskId: filing.task.id, taskTitle: filing.task.title } : {}),
+    ...(filing.task && !explicitTask ? { taskInherited: true } : {}),
     ...(filing.subtask ? { subtaskId: filing.subtask.id } : {}),
     ...(filing.memberOf ? { memberOf: filing.memberOf } : {}),
     ...(folder.group ? { folderId: folder.group.id, folderPath: folder.path ?? pathOf(input.groups, folder.group) } : {}),

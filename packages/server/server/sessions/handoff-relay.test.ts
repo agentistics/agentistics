@@ -128,15 +128,48 @@ describe('HANDOFF.RELAY — IO with injected reader', () => {
     expect(failed).toMatchObject({ ok: false, delivered: false, reason: 'send-failed' })
     expect(patches).toHaveLength(0)
     const sentTo: string[] = []
-    const ok = await flushHandoffRelay(registry[0]!, registry, async to => { sentTo.push(to); return true }, io)
+    const registered: unknown[] = []
+    const ok = await flushHandoffRelay(registry[0]!, registry, async to => { sentTo.push(to); return true }, { ...io, ownerMessages: async (target, source, messages) => { registered.push({ target, source: source.id, messages }) } })
     expect(ok.delivered).toBe(true)
     expect(sentTo).toEqual(['next'])
+    expect(registered).toEqual([{ target: 'next', source: registry[0]!.id, messages: [{ at: later[7]!.at, text: 'e o motor?' }] }])
     expect(patches[0]).toMatchObject({ handoffRelayedAt: later[7]!.at, handoffRelayAwaiting: true })
   })
 
   it('follows a reopened successor to its live row', () => {
     const reg = [row({ id: 'next', conversationId: 'c2', endedAt: 'x' }), row({ id: 'next2', conversationId: 'c2' })]
     expect(successorRow(reg, 'next')?.id).toBe('next2')
+  })
+  it('FLUXO.AVISOS: an owner turn the predecessor already answered is flagged, so it is not replayed as a new request', async () => {
+    const got = await captureHandoffRelay(row({}), async () => ({ turns: [...CASE, t('user', 'e o motor?', 58)] }))
+    expect(got.owner?.map(o => [o.text, o.answered === true])).toEqual([['o release saiu? qual versão?', true], ['e o motor?', false]])
+    // a tool-only assistant turn is work under way, not an answer
+    const working = await captureHandoffRelay(row({}), async () => ({ turns: [t('user', 'corrige a fila', 58), t('assistant', '', 59, { tools: [{ name: 'Bash' }] })] }))
+    expect(working.owner?.[0]?.answered).toBeUndefined()
+  })
+  it('FLUXO.AVISOS: the hand-off button\'s sentence and the successor\'s own first prompt are never the owner\'s words', async () => {
+    expect(isOwnerTurn({ role: 'user', text: 'Quero passar a liderança agora. Prepare o arquivo durável de passagem' })).toBe(false)
+    expect(isOwnerTurn({ role: 'user', text: 'Hand off leadership now. Prepare the durable handoff file' })).toBe(false)
+    const turns = [
+      t('user', 'Você é o sucessor. Continue a fila F2 e responda ao dono.', 1), // the predecessor's briefing (--handoff -p)
+      t('assistant', 'Entendido.', 2),
+      t('user', 'corrige a coluna de histórico', 30),
+    ]
+    const born = row({ handoffFrom: 'old', createdAt: new Date(Date.UTC(2026, 9, 16, 14, 0)).toISOString() })
+    const got = await captureHandoffRelay(born, async () => ({ turns }))
+    expect(got.owner?.map(o => o.text)).toEqual(['corrige a coluna de histórico'])
+    // a leader that was NOT born from a hand-off keeps its first message
+    const plain = await captureHandoffRelay(row({}), async () => ({ turns }))
+    expect(plain.owner).toHaveLength(2)
+    // a first turn far from the spawn (the read window moved) is an owner message, not the briefing
+    const late = row({ handoffFrom: 'old', createdAt: new Date(Date.UTC(2026, 9, 16, 12, 0)).toISOString() })
+    expect((await captureHandoffRelay(late, async () => ({ turns }))).owner).toHaveLength(2)
+  })
+  it('the request bus retains the whole original owner turn when the briefing quote is truncated', async () => {
+    const text = 'Fix the queue. '.repeat(300)
+    const got = await captureHandoffRelay(row({}), async () => ({ turns: [t('user', text, 58)] }))
+    expect(got.owner?.[0]?.text).toBe(text.trim())
+    expect(got.section.length).toBeLessThan(text.length)
   })
 })
 
@@ -212,7 +245,7 @@ describe('HANDOFF.RELAY — kill is best-effort (fix1 H1/M5)', () => {
     expect(comments).toHaveLength(1)
   })
 
-  it('fix2 M-B: with no task the owed text goes to the notice inbox, with or without away mode', async () => {
+  it('fix2 M-B: with no task the owed text goes to the notice inbox, with or without autonomous mode', async () => {
     const reg = [row({ handoffTo: 'next', handoffRelayedAt: cursor }), row({ id: 'next', conversationId: 'c2', endedAt: '2026-10-16T15:00:00.000Z' })]
     const notices: Array<[string, string]> = []
     const r = await flushBeforeKill('lead-1', async () => true, 'pt', { registry: reg, ...io(), comment, notify: (t, m) => { notices.push([t, m]); return true }, now: NOW })

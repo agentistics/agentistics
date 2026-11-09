@@ -8,7 +8,7 @@ import { readdirSync, readFileSync, renameSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { base32Decode, hotp, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
+import { type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
 import { __resetVaultForTests, __setVaultClockForTests, sealToFile, vaultDir } from './service'
 import { __resetGateForTests } from './gate'
 import { __resetPersonalForTests, personalRoot } from './personal'
@@ -36,8 +36,8 @@ function fake(id: ProtectorId): Fake {
 
 let T = 1_800_000_000_000
 const clock = () => T
-let seed: Uint8Array
-const codeAt = () => hotp(seed, Math.floor(T / 1000 / 30))
+// COFRE.DESBLOQUEIO (2026-11-07): no authenticator. A code still sent is ignored, never a proof.
+const codeAt = () => '123456'
 const next = () => { T += 30_000 }
 let dir = ''
 let dpapi = fake('dpapi'), hello = fake('hello')
@@ -71,13 +71,11 @@ async function fresh(withPresence = true): Promise<void> {
   __setVaultClockForTests(clock); __resetGateForTests(clock); __resetPersonalForTests(clock)
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('TEST-NOT-A-SECRET'))
   if (withPresence) expect((await http('POST', '/api/vault/local-proof')).status).toBe(200)
-  const a = await http('POST', '/api/vault/authenticator/begin', withPresence ? {} : { setupCode: (await import('./gate')).mintSetupCode().code })
-  seed = base32Decode(a.json.secret)
-  expect((await http('POST', '/api/vault/authenticator/confirm', { code: codeAt() })).status).toBe(200)
+  else expect((await http('POST', '/api/vault/setup-code', { setupCode: (await import('./gate')).mintSetupCode().code })).status).toBe(200)
   next()
 }
 async function presenceOn(): Promise<void> {
-  expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() })).status).toBe(200)
+  expect((await http('POST', '/api/vault/presence/enroll', { protector: 'hello' })).status).toBe(200)
   next()
   const r = await http('POST', '/api/vault/recovery/begin', {})
   const typed = (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!)
@@ -103,12 +101,15 @@ async function ask(): Promise<{ waiting: ReturnType<typeof authorizeUse>; id: st
 }
 
 describe('the confirmEachUse setter (VAULT.V4 §3.1)', () => {
-  test('it is gated by the code, persisted in the view, audited, and reversible', async () => {
-    grant = undefined // no live 5-minute read grant: the code is owed
+  test('it is gated by the person\'s proof (never a code), persisted in the view, audited, and reversible', async () => {
+    await presenceOn()
+    grant = undefined // no live 5-minute read grant: the proof is owed
     const view0 = (await http('GET', '/api/vault')).json
     expect(view0.confirmEachUse ?? false).toBe(false)
+    hello.deny = true
     const refused = await http('POST', '/api/vault/confirm-each-use', { enabled: true, code: '000000' })
     expect(refused.json.ok).toBe(false)
+    hello.deny = false
     expect((await http('POST', '/api/vault/confirm-each-use', { enabled: 'yes', code: codeAt() })).json.ok).toBe(false)
     const on = await http('POST', '/api/vault/confirm-each-use', { enabled: true, code: codeAt() })
     expect(on.json.ok).toBe(true)
@@ -195,6 +196,8 @@ describe('use requests over HTTP (VAULT.V4 §3.4–3.5)', () => {
   test('from a phone: the list needs a session, approve needs a phone gesture token, deny needs neither the token nor Hello', async () => {
     await presenceOn()
     const { waiting, id } = await ask()
+    // The session's 'read' grant (what a phone holds after opening the vault): earned once by the proof.
+    expect((await http('POST', '/api/vault/stepup', {})).json.ok).toBe(true)
     // a phone with NO vault grant (no session proof) is refused the list and the deny
     const noList = await http('GET', '/api/vault/personal/use-requests', undefined, PHONE, false)
     expect(noList.json.ok).not.toBe(true)

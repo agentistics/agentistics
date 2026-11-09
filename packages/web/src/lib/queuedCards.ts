@@ -1,5 +1,51 @@
 import { pendingEchoes } from '@agentistics/core'
 import { parseSystemEvent } from './systemEvent'
+import { sendNowShown } from './promptHistory'
+
+/**
+ * FLUXO.AVISOS 10 — the actions a QUEUED message's own caption offers ("entregue à sessão — ela lê ao terminar o turno").
+ * A queued message used to say it was waiting and give no way to stop waiting from where the person was looking; the only
+ * "send now" lived in a pill under the whole conversation, claude-only. Each action is offered only where it can work:
+ *  - `sendNow`: the existing sendNow verb — claude, mid-turn, no dialog open, and this card is the PERSON's own message
+ *    (the harness submits its whole queue; the hint says so). No other harness has a measured keystroke, so none shows it.
+ *  - `interrupt`: the existing stop verb — any harness whose row offers it enabled, mid-turn, no dialog open: the turn
+ *    ends and the session reads what was waiting.
+ * Hidden — never disabled-and-explained — otherwise: a control that cannot work is a control that teaches the wrong thing.
+ */
+export interface QueuedBubbleActions {
+  sendNow: { label: string; hint: string } | null
+  interrupt: { label: string; hint: string } | null
+}
+
+export function queuedBubbleActions(i: {
+  text: string
+  harness: string
+  working: boolean
+  dialogOpen: boolean
+  /** The person's messages in the queue (system notices excluded) — the count the whole-queue hint speaks of. */
+  personQueued: number
+  sendNowRunning: boolean
+  stopEnabled: boolean
+  pt: boolean
+}): QueuedBubbleActions {
+  const person = parseSystemEvent(i.text) === null
+  const pt = i.pt
+  const sendNow = person && !i.sendNowRunning
+    && sendNowShown({ harness: i.harness, working: i.working, queuedCount: i.personQueued, dialogOpen: i.dialogOpen })
+  const interrupt = person && i.working && i.stopEnabled && !i.dialogOpen
+  return {
+    sendNow: sendNow ? {
+      label: pt ? 'Enviar agora' : 'Send now',
+      hint: i.personQueued > 1
+        ? (pt ? `Envia agora as ${i.personQueued} mensagens da fila, em ordem — não só esta.` : `Sends all ${i.personQueued} queued messages now, in order — not only this one.`)
+        : (pt ? 'Envia agora esta mensagem, sem esperar o fim do turno.' : 'Sends this message now, without waiting for the turn to end.'),
+    } : null,
+    interrupt: interrupt ? {
+      label: pt ? 'Interromper' : 'Interrupt',
+      hint: pt ? 'Para o turno atual; a sessão lê esta mensagem em seguida.' : 'Stops the current turn; the session reads this message next.',
+    } : null,
+  }
+}
 
 export interface QueuedCard { text: string; at?: number }
 

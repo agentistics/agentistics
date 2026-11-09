@@ -1,5 +1,6 @@
 import { sessionDay } from '@agentistics/core'
 import { addDays, format, startOfDay } from 'date-fns'
+import { localDayCache } from './tzSignature'
 
 /**
  * sessionDaySlice.ts — PURE: what a session did INSIDE a date range.
@@ -63,8 +64,16 @@ export const EMPTY_DAY: DayUsage = {
 
 /** The ISO day an instant belongs to, or `''`. The one place this rule is written for the web. */
 export function dayKey(iso: string | undefined): string {
-  return sessionDay(iso)
+  if (iso === undefined) return sessionDay(iso)
+  // APP.LENTO: asked of every session on every derivation (the server pushes a data patch after each
+  // rebuild); an instant's local day does not change, so it is parsed and formatted once.
+  const known = DAY_OF_ISO.get(iso)
+  if (known !== undefined) return known
+  const day = sessionDay(iso)
+  DAY_OF_ISO.set(iso, day)
+  return day
 }
+const DAY_OF_ISO = localDayCache<string, string>(200_000)
 
 /**
  * The most days a range is ever enumerated into.
@@ -138,9 +147,16 @@ export function expandHours(hours: Record<string, number> | undefined): number[]
 
 /** The local activity day of an instant. `''` when it is not a real instant. */
 export function dayKeyOfMs(ms: number): string {
+  // APP.LENTO: `activeInWindow` asks this for the SAME two range bounds once per session — two
+  // date-fns formats × every session × every derivation. The last few answers are kept.
+  const known = DAY_OF_MS.get(ms)
+  if (known !== undefined) return known
   const date = new Date(ms)
-  return Number.isFinite(ms) && !Number.isNaN(date.getTime()) ? format(date, 'yyyy-MM-dd') : ''
+  const day = Number.isFinite(ms) && !Number.isNaN(date.getTime()) ? format(date, 'yyyy-MM-dd') : ''
+  DAY_OF_MS.set(ms, day)
+  return day
 }
+const DAY_OF_MS = localDayCache<number, string>(64)
 
 /** A day entry that records real work. The parser only writes one for a turn; an older writer
  *  could leave a hollow one, and counting it would put a session in a day it sat out. */

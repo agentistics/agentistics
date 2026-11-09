@@ -84,6 +84,9 @@ const PROCESS_HARNESS: Record<string, HarnessId> = {
   // opencode 1.19.5 (measured 2026-10-31, `readlink -f $(command -v opencode)`): ONE native binary at
   // `~/.opencode/bin/opencode`, comm `opencode`, the TUI and its worker threads in that one process.
   opencode: 'opencode',
+  // opencode 2.x (npm `@opencode/cli`): the native binary is `bin/opencode.exe` on every platform. Run through the
+  // npm symlink its comm is `opencode`; run by its real path (or read back as one, as macOS `ps` may) it is this.
+  'opencode.exe': 'opencode',
 }
 
 /** `comm` is not always the tool's name: `gh copilot` runs its binary with the thread name
@@ -159,8 +162,15 @@ export function installedHarnessAt(exePath: string, harness?: HarnessId): Harnes
     // the npm package `opencode-ai` ships the same binary under `node_modules/opencode-ai/…/bin/opencode`.
     [/\/\.opencode\/bin\/opencode$/, 'opencode'],
     [/\/node_modules\/opencode-[^/]+\/(?:.*\/)?bin\/opencode$/, 'opencode'],
+    // opencode 2.x (npm `@opencode/cli`, measured 2.2.5): `node_modules/@opencode/cli/bin/opencode.exe` (a native ELF;
+    // other platforms ship `@opencode/cli-<platform>/bin/opencode`).
+    [/\/node_modules\/@opencode\/cli(?:-[^/]+)?\/(?:.*\/)?bin\/opencode(?:\.exe)?$/, 'opencode'],
     [/\/\.local\/share\/gh\/copilot\/copilot$/, 'copilot'],
-    [/^(?:\/usr\/local|\/opt\/homebrew|\/home\/[^/]+\/\.local)\/bin\/(claude|codex|gemini|copilot|agy|antigravity|kimi|opencode)$/, 'path-bin'],
+    [/^(?:\/usr\/local|\/opt\/homebrew|\/(?:home|Users)\/[^/]+\/\.local)\/bin\/(claude|codex|gemini|copilot|agy|antigravity|kimi|opencode)$/, 'path-bin'],
+    // MAC.OPENCODE r2: Homebrew installs the native binary in its CELLAR (`/opt/homebrew/Cellar/opencode/2.2.5/bin/opencode`,
+    // read from homebrew-core's `opencode.rb` 2.2.5: `bin.install …/bin/opencode`) and links `/opt/homebrew/bin/opencode` to it,
+    // so the executable a Mac reports (lsof's `txt`, `realpath`) is the Cellar path. Intel Macs use `/usr/local`, Linuxbrew its own prefix.
+    [/^(?:\/opt\/homebrew|\/usr\/local|\/home\/linuxbrew\/\.linuxbrew)\/Cellar\/[^/]+\/[^/]+\/bin\/(claude|codex|gemini|copilot|agy|antigravity|kimi|opencode)$/, 'path-bin'],
   ]
   for (const [pattern, id] of known) {
     if (!pattern.test(normal)) continue
@@ -252,6 +262,8 @@ const MANAGEMENT: Record<'claude' | 'codex' | 'copilot' | 'kimi' | 'opencode', r
   opencode: [
     'completion', 'acp', 'mcp', 'run', 'debug', 'providers', 'auth', 'agent', 'upgrade', 'uninstall',
     'serve', 'web', 'models', 'stats', 'export', 'import', 'github', 'session', 'plugin', 'plug', 'db',
+    // 2.x (`opencode --help`, 2.2.5). `serve --service` is the background service the TUI spawns as its child.
+    'update', 'api', 'service', 'reload', 'pair',
   ],
 }
 
@@ -515,6 +527,13 @@ export interface HarnessProcess {
   pid?: number
   /** Whether stdin is a terminal; false is conclusive evidence of a one-shot invocation. */
   stdinIsTty?: boolean
+  /**
+   * MAC.OPENCODE-MUDO — `'tabs'` when `sessionId` came from opencode 2.x's `tui/tabs.json`. That record is keyed by
+   * DIRECTORY, not by process: every TUI in one cwd shows (and is credited with) every tab of that cwd, and a TUI that
+   * died keeps its tabs there. It is good enough to NAME an external row, never to MOVE a managed row off the
+   * conversation it was linked to (see `sessions-host.ts`).
+   */
+  sessionFrom?: 'tabs'
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -578,7 +597,12 @@ async function scanMacProcessesWithHarnessIndex(): Promise<{
   unavailable: LiveUnavailableReason | null
 }> {
   const { scanMacProcesses } = await import('./macos-processes-io')
-  const result = scanMacProcesses()
+  const t0 = performance.now()
+  const result = await scanMacProcesses()
+  // MAC.OPENCODE-MUDO: the one line the owner can send from a Mac when the fleet is slow — how long the sweep took
+  // and how much it found. Logged only when it is slow enough to matter.
+  const ms = Math.round(performance.now() - t0)
+  if (ms >= 2_000) console.warn(`[live-sessions] macOS process sweep took ${ms} ms (${result.procs.length} harness processes, ${result.foreignPids} total; psFailed=${result.psFailed}, cwdDenied=${result.cwdDenied})`)
   if (result.psFailed) return { procs: [], unavailable: 'no-ps' }
 
   try {
@@ -590,6 +614,8 @@ async function scanMacProcessesWithHarnessIndex(): Promise<{
       if (rec?.sessionId) p.sessionId = rec.sessionId
     }
   } catch { /* best-effort, same as the Linux path */ }
+  // The opencode link was Linux-only: a TUI on a Mac never named a session, so its tabs never became rows.
+  await linkOpencodeTuis(result.procs)
 
   const unavailable = result.procs.length > 0
     ? null
@@ -599,6 +625,63 @@ async function scanMacProcessesWithHarnessIndex(): Promise<{
   return { procs: result.procs, unavailable }
 }
 
+/**
+ * OPENCODE.ATIVAS-TUI — PURE. One opencode 2.x TUI process holds SEVERAL sessions (its tabs); each open tab becomes
+ * its own process record (same pid, cwd and start, its own `sessionId`), so every downstream rule that keys a row
+ * by its session (`externalId`, `dedupeExternalProcesses`, the activity read) draws one row per tab. A process with
+ * no tabs record is returned untouched.
+ */
+export function expandOpencodeTabs(procs: readonly HarnessProcess[], tabs: ReadonlyMap<number, readonly string[]>): HarnessProcess[] {
+  const out: HarnessProcess[] = []
+  for (const p of procs) {
+    const ids = p.harness === 'opencode' && p.pid !== undefined ? tabs.get(p.pid) : undefined
+    if (!ids || ids.length === 0) { out.push(p); continue }
+    for (const id of ids) out.push({ ...p, sessionId: id, sessionFrom: 'tabs' })
+  }
+  return out
+}
+
+/**
+ * Link opencode processes to their sessions, IN PLACE (Linux and macOS alike). opencode holds one shared store and
+ * names no session in argv unless `-s` was given. 1.x: its own log (`opencode-run-link.ts`, which refuses every
+ * ambiguity). 2.x: the TUI's own tabs record (`readOpencodeTabs`) — every open tab of the process's cwd is a session
+ * of that process — and, for a process with no tabs record, the service's session list (one-to-one, refusing
+ * ambiguity). Best-effort: anything unread leaves an unlinked row, as before.
+ */
+async function linkOpencodeTuis(procs: HarnessProcess[]): Promise<void> {
+  const all = procs.filter(p => p.harness === 'opencode' && p.pid !== undefined)
+  if (all.length === 0) return
+  try {
+    // Sessions a managed row already drives are not candidates for a TUI beside it (see `opencode-run-link.ts` `linkOpencodeProcesses`).
+    const taken = new Set<string>()
+    try {
+      const { readRegistry } = await import('./sessions/registry')
+      // An ENDED row drives nothing: excluding its conversation hid the tab of a TUI the owner opened on it by hand
+      // (MAC.OPENCODE r2) — every conversation once reopened through agentop stayed "taken" forever.
+      for (const m of await readRegistry()) if (m.harness === 'opencode' && m.conversationId && !m.endedAt) taken.add(m.conversationId)
+    } catch { /* no registry: nothing is excluded, as before */ }
+    const refs = all.map(p => ({ pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs, ...(p.stdinIsTty !== undefined ? { tty: p.stdinIsTty } : {}) }))
+    const { opencodeV2Io, isOpencodeV2Now } = await import('./sessions/opencode-v2-io')
+    if (isOpencodeV2Now()) {
+      const api = await import('./sessions/opencode-v2-api')
+      const io = opencodeV2Io()
+      const tabs = api.opencodeTabSessions(refs, api.readOpencodeTabs(io.stateDir), taken)
+      const expanded = expandOpencodeTabs(procs, tabs)
+      procs.splice(0, procs.length, ...expanded)
+      const rest = refs.filter(r => !tabs.has(r.pid))
+      const unlinked = procs.filter(p => p.harness === 'opencode' && !p.sessionId && p.pid !== undefined && !tabs.has(p.pid))
+      if (unlinked.length === 0) return
+      const linked = await api.readOpencodeV2ProcessSessions(rest, io, taken)
+      for (const p of unlinked) { const id = linked.get(p.pid!); if (id) p.sessionId = id }
+      return
+    }
+    const unlinked = all.filter(p => !p.sessionId)
+    if (unlinked.length === 0) return
+    const linked = await (await import('./sessions/opencode-run-log')).readOpencodeProcessSessions(refs, undefined, taken)
+    for (const p of unlinked) { const id = linked.get(p.pid!); if (id) p.sessionId = id }
+  } catch { /* best-effort: an unread log is an unlinked row, as before */ }
+}
+
 /** Read every running harness process (Linux /proc, macOS `ps`+`lsof`): which harness it is, its
  *  cwd, the session it resumed when argv says so, and when it started. [] on any other platform,
  *  or when this platform's own process source could not be read. */
@@ -606,7 +689,7 @@ export async function scanProcesses(): Promise<{
   procs: HarnessProcess[]
   unavailable: LiveUnavailableReason | null
 }> {
-  if (process.platform === 'darwin') return scanMacProcessesWithHarnessIndex()
+  if (process.platform === 'darwin') return sharedScanOf(scanMacProcessesWithHarnessIndex)
   if (process.platform !== 'linux') {
     return { procs: [], unavailable: detectionUnavailable({ platform: process.platform, procReadable: false, foreignPids: 0, cwdDenied: false }) }
   }
@@ -620,14 +703,27 @@ export async function scanProcesses(): Promise<{
  * in flight), which keeps the answer as live as a person can tell.
  */
 const SCAN_SHARE_MS = 1_000
-let sharedScan: { atMs: number; p: ReturnType<typeof scanLinuxProcesses> } | null = null
-function sharedLinuxScan(): ReturnType<typeof scanLinuxProcesses> {
-  const nowMs = Date.now()
-  if (sharedScan && nowMs - sharedScan.atMs < SCAN_SHARE_MS && nowMs >= sharedScan.atMs) return sharedScan.p
-  const p = scanLinuxProcesses()
+type ScanResult = { procs: HarnessProcess[]; unavailable: LiveUnavailableReason | null }
+let sharedScan: { atMs: number; p: Promise<ScanResult> } | null = null
+/**
+ * One sweep shared by every caller inside `SCAN_SHARE_MS` and by every caller while it is in flight — on BOTH
+ * platforms. MAC.OPENCODE-MUDO: the macOS sweep (`ps` + several `lsof`) was run once per caller, unshared, by the
+ * fleet poll, `/api/data`, the memory probe and the live claims alike; on a Mac each one costs seconds, so a poll
+ * that started a new sweep before the last one ended never caught up and the fleet stopped answering.
+ */
+export function sharedScanOf(scan: () => Promise<ScanResult>, nowMs: number = Date.now()): Promise<ScanResult> {
+  if (sharedScan && (nowMs - sharedScan.atMs < SCAN_SHARE_MS && nowMs >= sharedScan.atMs || inFlight.has(sharedScan.p))) return sharedScan.p
+  const p = scan()
   sharedScan = { atMs: nowMs, p }
-  void p.catch(() => { if (sharedScan?.p === p) sharedScan = null })
+  inFlight.add(p)
+  void p.then(() => { inFlight.delete(p) }, () => { inFlight.delete(p); if (sharedScan?.p === p) sharedScan = null })
   return p
+}
+const inFlight = new Set<Promise<ScanResult>>()
+/** Test seam: forget the shared sweep. */
+export function resetSharedScan(): void { sharedScan = null; inFlight.clear() }
+function sharedLinuxScan(): Promise<ScanResult> {
+  return sharedScanOf(() => scanLinuxProcesses())
 }
 
 /** Linux reader with an injectable procfs root so every process rule can be tested with fixtures. */
@@ -718,24 +814,33 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
   }))
   // Forget what is gone, so the memo is as large as the process table and no larger.
   for (const k of notHarness) if (!seen.has(k)) notHarness.delete(k)
-  // opencode holds one shared `opencode.db` and names no session in argv unless `-s` was given, so its
-  // link comes from its own log: the run that started in this cwd at this process's start time
-  // (`opencode-run-link.ts`, which refuses every ambiguity). Only on the real /proc — a fixture root has no
-  // matching log — and only when there is an opencode process to link.
-  const unlinked = procs.filter(p => p.harness === 'opencode' && !p.sessionId && p.pid !== undefined)
-  if (procRoot === '/proc' && unlinked.length > 0) {
+  // opencode: the shared link (1.x log, 2.x tabs record + service) — only on the real /proc, a fixture root has
+  // no matching log or service.
+  if (procRoot === '/proc') await linkOpencodeTuis(procs)
+  // codex 0.161 holds `state_5.sqlite`, not the rollout, so an external TUI usually names no conversation by
+  // fd. Its own `threads` table does (`codex-thread-link.ts`): the thread created in this cwd at this
+  // process's start time. Same guard as opencode: only the real /proc, only unlinked processes.
+  if (procRoot === '/proc' && procs.some(p => p.harness === 'codex')) {
     try {
-      const { readOpencodeProcessSessions } = await import('./sessions/opencode-run-log')
-      const all = procs.filter(p => p.harness === 'opencode' && p.pid !== undefined)
-      // Sessions a managed row already drives are not candidates for a TUI beside it (see `linkOpencodeProcesses`).
+      const { dropWrapperParents } = await import('./sessions/codex-thread-link')
+      const { readCodexProcessSessions, codexStatePathOfPid } = await import('./sessions/codex-thread-log')
+      // The npm/bun wrapper (`codex.js`) outlives the native binary it spawned: one terminal, two "codex"
+      // processes. Keep the child — the row list and the link both want one.
+      const ppidOf = new Map<number, number>((table ?? []).map(r => [r.pid, r.ppid]))
+      const codex = procs.filter(p => p.harness === 'codex' && p.pid !== undefined)
+      const keep = new Set(dropWrapperParents(codex.map(p => ({ pid: p.pid!, ppid: ppidOf.get(p.pid!) }))).map(p => p.pid))
+      for (let i = procs.length - 1; i >= 0; i--) { const p = procs[i]!; if (p.harness === 'codex' && p.pid !== undefined && !keep.has(p.pid)) procs.splice(i, 1) }
       const taken = new Set<string>()
       try {
         const { readRegistry } = await import('./sessions/registry')
-        for (const m of await readRegistry()) if (m.harness === 'opencode' && m.conversationId) taken.add(m.conversationId)
-      } catch { /* no registry: nothing is excluded, as before */ }
-      const linked = await readOpencodeProcessSessions(all.map(p => ({ pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs, ...(p.stdinIsTty !== undefined ? { tty: p.stdinIsTty } : {}) })), undefined, taken)
-      for (const p of unlinked) { const id = linked.get(p.pid!); if (id) p.sessionId = id }
-    } catch { /* best-effort: an unread log is an unlinked row, as before */ }
+        for (const m of await readRegistry()) if (m.harness === 'codex' && m.conversationId) taken.add(m.conversationId)
+      } catch { /* no registry: nothing is excluded */ }
+      const all = procs.filter(p => p.harness === 'codex' && p.pid !== undefined)
+      const linked = await readCodexProcessSessions(all.map(p => ({
+        pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs, knownId: p.sessionId, statePath: codexStatePathOfPid(p.pid!),
+      })), undefined, taken)
+      for (const p of all) { if (p.sessionId) continue; const id = linked.get(p.pid!); if (id) p.sessionId = id }
+    } catch { /* best-effort: an unread state is an unlinked row, as before */ }
   }
   const unavailable = procs.length > 0
     ? null
@@ -951,23 +1056,24 @@ export function resolveLiveSnapshot(
 }
 
 type ExternalRowState = { row: UnmatchedProcess; lastSeenMs: number; visible: boolean }
-const externalRows = new Map<number, ExternalRowState>()
+const externalRows = new Map<string, ExternalRowState>()
 
-/** Apply the five-second disappearance debounce to unmatched process rows. */
-function debounceExternalRows(rows: UnmatchedProcess[], nowMs: number): UnmatchedProcess[] {
-  const current = new Map<number, UnmatchedProcess>()
-  for (const row of rows) if (row.pid !== undefined) current.set(row.pid, row)
+/** Apply the five-second disappearance debounce to unmatched process rows. Keyed by pid AND session: one opencode
+ *  TUI process holds several sessions (its tabs), and a pid-only key kept just the last of them. */
+export function debounceExternalRows(rows: UnmatchedProcess[], nowMs: number): UnmatchedProcess[] {
+  const current = new Map<string, UnmatchedProcess>()
+  for (const row of rows) if (row.pid !== undefined) current.set(`${row.pid}\u0000${row.sessionId ?? ''}`, row)
   const out: UnmatchedProcess[] = []
-  for (const [pid, row] of current) {
-    const previous = externalRows.get(pid)
+  for (const [key, row] of current) {
+    const previous = externalRows.get(key)
     const visible = previous?.visible || row.startedMs !== undefined && nowMs - row.startedMs >= EXTERNAL_MIN_LIFETIME_MS
-    externalRows.set(pid, { row, lastSeenMs: nowMs, visible })
+    externalRows.set(key, { row, lastSeenMs: nowMs, visible })
     if (visible) out.push(row)
   }
-  for (const [pid, state] of externalRows) {
-    if (current.has(pid)) continue
+  for (const [key, state] of externalRows) {
+    if (current.has(key)) continue
     if (state.visible && nowMs - state.lastSeenMs < EXTERNAL_GONE_GRACE_MS) out.push(state.row)
-    else externalRows.delete(pid)
+    else externalRows.delete(key)
   }
   return out
 }

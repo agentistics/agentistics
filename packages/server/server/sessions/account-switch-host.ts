@@ -75,7 +75,12 @@ const REAL_IO: SwitchIo = {
   turns: async m => (await import('./handoff-relay-io')).readSessionTurns(m),
   role: async keys => (await import('./session-roles')).storedRoleFor(keys) as Promise<'leader' | 'worker' | undefined>,
   label: accountLabel,
-  link: async (oldId, newId) => (await import('./handoff-relay-io')).recordHandoffLink(oldId, newId, undefined),
+  link: async (oldId, newId) => {
+    await (await import('./handoff-relay-io')).recordHandoffLink(oldId, newId, undefined)
+    // A harness switch replaces the row just like a reopen: move the whole team, including
+    // ended children, while preserving a worker successor's own parent and role.
+    await (await import('./team-links-io')).completeReopenReparent(oldId, newId)
+  },
 }
 
 /** MEM.GUARD: a forced start below the hard memory floor says so in the sentence the switch returns. */

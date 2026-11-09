@@ -5,7 +5,8 @@ import type { Root } from 'react-dom/client'
 import type { PlanLimits } from '@agentistics/core'
 
 let createRoot: typeof import('react-dom/client').createRoot
-let Modal: typeof import('./PlanUsageModal').PlanUsageModal
+// The body the removed modal wrapped; the accounts now live on the Uso page, the same component.
+let Modal: typeof import('./nay/NayLimitsTab').NayLimitsTab
 let Router: typeof import('react-router-dom').MemoryRouter
 let setLimits: typeof import('../lib/planLimits').__setPlanLimitsForTest
 let useNotifications: typeof import('../lib/notifications').useNotifications
@@ -43,7 +44,7 @@ beforeAll(async () => {
     return Response.json({})
   }) as typeof fetch
   createRoot = (await import('react-dom/client')).createRoot
-  Modal = (await import('./PlanUsageModal')).PlanUsageModal
+  Modal = (await import('./nay/NayLimitsTab')).NayLimitsTab
   Router = (await import('react-router-dom')).MemoryRouter
   useNotifications = (await import('../lib/notifications')).useNotifications
   setLimits = (await import('../lib/planLimits')).__setPlanLimitsForTest
@@ -65,7 +66,7 @@ async function mount(lang: 'pt' | 'en' = 'en') {
   const host = document.createElement('div'); document.body.append(host)
   root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null,
-    createElement(Modal, { lang, onClose() {} }), createElement(Notices))) })
+    createElement(Modal, { manageAgentUse: true, lang, isMobile: window.innerWidth < 768 }), createElement(Notices))) })
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 }
 const switches = () => Array.from(document.querySelectorAll<HTMLButtonElement>('button[role="switch"]'))

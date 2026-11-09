@@ -129,6 +129,18 @@ jobs:
       - name: Perf budgets
         run: bun scripts/perf/budget.ts "$RUNNER_TEMP/perf-home"
 
+      # APP.LENTO: the browser half — a key event in a live composer while sessions write (the data
+      # patches land under the keystrokes), and a route change. Needs the web bundle embedded and
+      # headless Chromium.
+      - name: Web bundle for the UI budgets
+        run: bun run build && bun run packages/server/scripts/embed-dist.ts
+
+      - name: Headless Chromium
+        run: bunx playwright install --with-deps chromium-headless-shell
+
+      - name: UI budgets
+        run: bun scripts/perf/ui-budget.ts "$RUNNER_TEMP/perf-home"
+
       # The rebuild storm: ten sessions writing every 500 ms must not keep /api/data rebuilding
       # back to back (build duration, rebuild duty cycle, /api/fleet, /api/data, the chat echo).
       - name: Synthetic home with git repositories

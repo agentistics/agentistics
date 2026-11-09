@@ -10,7 +10,7 @@ describe('areaOfPath', () => {
       expect(areaOfPath(path)?.area.id).toBe('sessions')
       expect(areaOfPath(path)?.page?.id).toBe(page)
       expect(isSessionsWorkspace(path)).toBe(false)
-      expect(searchAreas(page === 'leaders' ? 'Líderes' : page === 'handoffs' ? 'Passagens' : page === 'away' ? 'Away' : 'Check-ins', 'en').some(r => r.area.id === 'sessions' && r.page.path === path)).toBe(true)
+      expect(searchAreas(page === 'leaders' ? 'Líderes' : page === 'handoffs' ? 'Passagens' : page === 'away' ? 'Autonomous' : 'Check-ins', 'en').some(r => r.area.id === 'sessions' && r.page.path === path)).toBe(true)
     })
   }
   test('sessions and everything under it', () => {
@@ -80,7 +80,7 @@ describe('searchAreas', () => {
   test('accent-insensitive, both languages', () => {
     expect(searchAreas('historico', 'pt')).toEqual([])
     expect(APP_AREAS.find(a => a.id === 'usage')!.pages.map(p => p.id)).toEqual(['now'])
-    expect(searchAreas('away', 'pt').map(r => r.page.id)).toContain('away')
+    expect(searchAreas('autônomo', 'pt').map(r => r.page.id)).toContain('away')
   })
   test('empty query finds nothing', () => {
     expect(searchAreas('  ', 'pt')).toEqual([])
@@ -116,5 +116,16 @@ describe('area header landing', () => {
   test('other areas keep resuming the last page visited', () => {
     expect(areaHeaderPath(area('metrics'), '/costs')).toBe('/costs')
     expect(areaHeaderPath(area('metrics'))).toBe('/')
+  })
+})
+
+describe('Agentask menu lands on its own view (F1)', () => {
+  test('Board links to /tasks/board, never the redirecting /tasks', () => {
+    const tasks = APP_AREAS.find(a => a.id === 'tasks')!
+    const paths = tasks.pages.map(p => p.path)
+    expect(paths).toContain('/tasks/board')
+    expect(paths).not.toContain('/tasks')
+    expect(tasks.pages[0]!.also).toContain('/tasks')
+    expect(new Set(paths).size).toBe(paths.length)
   })
 })

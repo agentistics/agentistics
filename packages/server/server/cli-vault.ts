@@ -24,8 +24,9 @@ import {
 } from './vault/service'
 import { askVault, askVaultSocket, type SocketReply } from './vault/socket'
 import { loadVaultConsumers, pendingSecretValues, sealedFiles } from './vault/boot'
-import { clearScreen, confirm, maskedInput, pause } from './cli-ui'
-import { parseEnrolArgs, pickPresence, qrHalfBlocks, stepsToRun, wordGrid } from './vault/enroll-plan'
+import { clearScreen, confirm, maskedInput, pause, select } from './cli-ui'
+import { parseEnrolArgs, pickPresence, stepsToRun, wordGrid, type PresenceKind } from './vault/enroll-plan'
+import { VAULT_PASSWORD_RULES, VAULT_PASSWORD_RULE_TEXT, checkVaultPassword, generateVaultPassword, vaultPasswordWeakSentence } from '@agentistics/core'
 
 const HELP = `Usage: agentop vault <command>
 
@@ -36,11 +37,15 @@ const HELP = `Usage: agentop vault <command>
   rekey --protector <id>   move the vault to another protector (keychain|dpapi|libsecret|systemd-creds|passphrase)
   add-passphrase           add a passphrase wrapper beside the system one (how a Docker machine opens it)
   reset [--yes]            delete the vault and every sealed file — the secrets are then re-entered
-  enroll                   protect the vault: authenticator, recovery key, presence (what is still missing)
-        [--authenticator] [--recovery] [--presence hello|fido2] [--require-presence]
+  enroll                   protect the vault: how it confirms it is you, then the recovery key (what is still missing)
+        [--recovery] [--presence touchid|hello|password|fido2] [--require-presence]
+                           touchid  = Touch ID or the Mac password (macOS)
+                           hello    = Windows Hello (Windows / WSL)
+                           password = a vault password of your own (any system)
+                           fido2    = a security key (advanced; only where libfido2 / webauthn is present)
   recover                  open the vault with your 24-word recovery key (terminal only)
   setup-code               print the one-time code the dashboard asks for its FIRST vault setup
-  disable-presence         turn presence off (code + gesture; the main machine also needs the 24 words)
+  disable-presence         turn the confirmation off (it asks for it; the main machine also needs the 24 words)
 
 There is no command that decrypts secrets back to plain text.`
 
@@ -51,10 +56,22 @@ function t(en: string, pt: string): string {
 /** The slice of `GET /api/vault` the §7.2 status adds (`view` op): never a secret, never a value. */
 interface View {
   presence?: boolean; presenceAvailable?: string[]; requirePresence?: boolean; recoveryCreatedAt?: string | null
-  authenticator?: { enrolledAt: string; lastUsedAt: string | null; failures: number; pausedUntil: string | null; frozen: boolean } | null
+  /** COFRE.DESBLOQUEIO: the ways this machine offers, and the one(s) the vault confirms with. */
+  unlockMethods?: { id: string; advanced: boolean }[]; methods?: string[]; legacyAppCode?: boolean
   autoLockMinutes?: number; autoLockInMs?: number | null; pendingStepup?: boolean
   recoveryTodo?: string[] | null
   hardening?: { state: string; private: boolean | null; coreDumps: string | null; yama: string | null; lines: string[] } | null
+}
+
+/** A way of confirming, in the user's words. */
+function methodName(id: string): string {
+  switch (id) {
+    case 'touchid': return t('Touch ID or the Mac password', 'Touch ID ou senha do Mac')
+    case 'hello': return 'Windows Hello'
+    case 'password': return t('vault password', 'senha do cofre')
+    case 'fido2': return t('security key', 'chave de segurança')
+    default: return id
+  }
 }
 
 function minutesWords(ms: number): string {
@@ -65,19 +82,13 @@ function minutesWords(ms: number): string {
 function printSecurity(v: View, wrappers: string[]): void {
   const out = (k: string, val: string) => process.stdout.write(`${k}: ${val}\n`)
   out(t('scope', 'escopo'), t('human', 'humano'))
-  const pres = wrappers.filter(w => w === 'hello' || w === 'fido2')
-  out(t('presence', 'presença'), pres.length
-    ? `${pres.join(', ')}${v.requirePresence ? t(' (main machine: required)', ' (máquina principal: obrigatória)') : ''}`
-    : (v.presenceAvailable?.length ? t('off (can be enrolled: ', 'desligada (pode ser configurada: ') + v.presenceAvailable.join(', ') + ')' : t('not available on this machine', 'indisponível nesta máquina')))
-  const a = v.authenticator
-  if (!a) out(t('authenticator', 'autenticador'), t('not set up', 'não configurado'))
-  else {
-    const state = a.frozen ? t('FROZEN — re-enrol with the recovery key', 'CONGELADO — configure de novo com a chave de recuperação')
-      : a.pausedUntil ? t(`paused until ${a.pausedUntil}`, `pausado até ${a.pausedUntil}`) : t('ready', 'pronto')
-    out(t('authenticator', 'autenticador'), `${state}; ${t('failed attempts', 'tentativas erradas')}: ${a.failures}${a.lastUsedAt ? `; ${t('last used', 'último uso')} ${a.lastUsedAt}` : ''}`)
-  }
+  const pres = v.methods ?? wrappers.filter(w => ['touchid', 'hello', 'password', 'fido2'].includes(w))
+  const offers = (v.unlockMethods ?? []).map(m => m.advanced ? `${methodName(m.id)} (${t('advanced', 'avançado')})` : methodName(m.id))
+  out(t('confirms with', 'confirma com'), pres.length
+    ? `${pres.map(methodName).join(', ')}${v.requirePresence ? t(' (main machine: required)', ' (máquina principal: obrigatória)') : ''}`
+    : t('nothing chosen yet — run `agentop vault enroll`', 'nada escolhido ainda — rode `agentop vault enroll`'))
+  if (offers.length) out(t('this machine offers', 'esta máquina oferece'), offers.join(', '))
   out(t('recovery key', 'chave de recuperação'), v.recoveryCreatedAt ? `${t('created', 'criada em')} ${v.recoveryCreatedAt}` : t('not created', 'não criada'))
-  if (v.pendingStepup) out(t('unlock', 'desbloqueio'), t('waiting for your authenticator code', 'esperando o código do autenticador'))
   out(t('auto-lock', 'bloqueio automático'), `${v.autoLockMinutes ?? 30} min${typeof v.autoLockInMs === 'number' ? t(` — locks in ${minutesWords(v.autoLockInMs)}`, ` — trava em ${minutesWords(v.autoLockInMs)}`) : ''}`)
   if (v.recoveryTodo?.length) out(t('recovery mode', 'modo de recuperação'), t(`still owed: ${v.recoveryTodo.join(', ')} — run \`agentop vault enroll\``, `falta: ${v.recoveryTodo.join(', ')} — rode \`agentop vault enroll\``))
   const h = v.hardening
@@ -139,21 +150,25 @@ function down(): number {
   return 1
 }
 
-/** A 6-digit authenticator code, typed on the TTY (never echoed, never on argv). */
-async function askCode(): Promise<string | null> {
-  if (!process.stdin.isTTY) { process.stderr.write(refusalSentence('stepup-required', vaultLang()) + t(' (a terminal is needed to type it)\n', ' (é preciso um terminal para digitá-lo)\n')); return null }
-  const c = (await maskedInput(t('Authenticator code', 'Código do autenticador'))).replace(/\s/g, '')
-  return c || null
+/** The vault password, typed on the TTY (never echoed, never on argv). */
+async function askVaultPassword(): Promise<string | null> {
+  if (!process.stdin.isTTY) { process.stderr.write(t('The vault password can only be typed on a terminal.\n', 'A senha do cofre só pode ser digitada em um terminal.\n')); return null }
+  const p = await maskedInput(t('Vault password', 'Senha do cofre'))
+  return p || null
 }
 
-/** Ask a gated op; when the service says a code is needed, ask for it on the TTY and ask again. */
+/**
+ * Ask a gated op; when the service says the vault PASSWORD is needed (COFRE.DESBLOQUEIO — a vault that
+ * confirms with its own password), ask for it on the TTY and ask again. A gesture (Touch ID, Windows
+ * Hello, a key) is raised by the service itself and needs nothing here.
+ */
 async function askGated(req: Record<string, unknown> & { op: string }): Promise<SocketReply | null> {
   let r = await ask(req)
-  for (let i = 0; r && !r.ok && (r.code === 'stepup-required' || r.code === 'stepup-wrong' || r.code === 'stepup-replayed') && i < 3; i++) {
-    if (r.code !== 'stepup-required') process.stderr.write(String(r.sentence) + '\n')
-    const code = await askCode()
-    if (!code) return r
-    r = await ask({ ...req, code })
+  for (let i = 0; r && !r.ok && (r.code === 'password-required' || r.code === 'password-wrong') && i < 3; i++) {
+    if (r.code !== 'password-required') process.stderr.write(String(r.sentence) + '\n')
+    const password = await askVaultPassword()
+    if (!password) return r
+    r = await ask({ ...req, password })
   }
   return r
 }
@@ -230,21 +245,17 @@ async function cmdUnlock(): Promise<number> {
   const needsPass = st.ok && (st.status?.wrappers ?? []).includes('passphrase') && st.status?.state === 'locked'
   const pass = needsPass ? await askPassphrase(false) : undefined
   if (needsPass && !pass) return 1
-  // §2.2: the SERVICE raises the gesture (Windows Hello, the security key); the code follows here.
-  if (st.ok && (st.status?.wrappers ?? []).some(w => w === 'hello' || w === 'fido2')) {
-    process.stdout.write(t('Confirm on the presence prompt the service is raising…\n', 'Confirme no pedido de presença que o serviço está abrindo…\n'))
+  const wrappers = st.ok ? (st.status?.wrappers ?? []) : []
+  // COFRE.DESBLOQUEIO: a vault that confirms with its own password asks for it HERE; the SERVICE raises
+  // a gesture (Touch ID / the Mac password, Windows Hello, a key) itself.
+  const password = wrappers.includes('password') && !wrappers.some(w => w === 'touchid' || w === 'hello' || w === 'fido2') ? await askVaultPassword() : null
+  if (wrappers.includes('password') && !wrappers.some(w => w === 'touchid' || w === 'hello' || w === 'fido2') && !password) return 1
+  if (wrappers.some(w => w === 'touchid' || w === 'hello' || w === 'fido2')) {
+    process.stdout.write(t('Confirm on the prompt the service is raising (Touch ID / the Mac password, Windows Hello or your key)…\n', 'Confirme no pedido que o serviço está abrindo (Touch ID / senha do Mac, Windows Hello ou a sua chave)…\n'))
   }
-  const svc = await ask({ op: 'unlock', ...(pass ? { passphrase: pass } : {}) }, { timeoutMs: 180_000 })
+  const svc = await askGated({ op: 'unlock', ...(pass ? { passphrase: pass } : {}), ...(password ? { password } : {}) })
   if (!svc) return down()
   if (!svc.ok) return said(svc)
-  if (svc.unlock === 'pending-stepup') {
-    // ONE attempt per gesture: a wrong code zeroes the key in the service (§2.2).
-    const code = await askCode()
-    if (!code) return 1
-    const r = await ask({ op: 'unlock-code', code })
-    if (!r) return down()
-    if (!r.ok) return said(r)
-  }
   process.stdout.write(t('The agentop service unlocked its vault.\n', 'O serviço do agentop destrancou o cofre.\n'))
   return 0
 }
@@ -320,7 +331,7 @@ async function cmdReset(args: string[]): Promise<number> {
 /**
  * §4.3 `agentop vault recover` — TTY ONLY: the 24 words are typed here (never echoed, never on argv,
  * never in a web form) and handed to the service, which opens the vault in RECOVERY mode. Then the
- * three steps are owed: presence, the authenticator, a NEW recovery key (the old words were just typed).
+ * two steps are owed: presence, then a NEW recovery key (the old words were just typed).
  */
 /** Review S2: the one-time code a page needs to start the FIRST enrolment — shown here, on this machine. */
 async function cmdSetupCode(): Promise<number> {
@@ -358,8 +369,8 @@ async function cmdRecover(): Promise<number> {
 }
 
 /**
- * §7.3 `agentop vault enroll` — TTY ONLY (a QR and 24 words are for a person looking at a screen).
- * Runs what is still missing, in the one safe order: authenticator (QR + two codes), the recovery key
+ * §7.3 `agentop vault enroll` — TTY ONLY (24 words are for a person looking at a screen).
+ * Runs what is still missing, in the one safe order: the recovery key
  * (shown once, three words typed back), then presence, which is the step that retires the silent OS
  * wrapper — written and read back before the old one goes, so a crash anywhere leaves the vault
  * openable. Every step is a request to the SERVICE; this process never holds a key or a seed.
@@ -367,15 +378,15 @@ async function cmdRecover(): Promise<number> {
 async function cmdEnroll(args: string[]): Promise<number> {
   const parsed = parseEnrolArgs(args)
   if (!parsed.ok) {
-    process.stderr.write((parsed.deferred === 'se'
-      ? t('Touch ID / Secure Enclave is not available yet (it waits on a signed helper). Use --presence fido2 with a security key.\n',
-        'Touch ID / Secure Enclave ainda não está disponível (depende de um helper assinado). Use --presence fido2 com uma chave de segurança.\n')
-      : parsed.usage + '\n'))
+    process.stderr.write((parsed.retired === 'authenticator'
+      ? t('The vault no longer uses an app code. Choose how it confirms it is you: --presence touchid|hello|password|fido2.\n',
+        'O cofre não usa mais código de aplicativo. Escolha como ele confirma que é você: --presence touchid|hello|password|fido2.\n')
+      : '') + parsed.usage + '\n')
     return 2
   }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    process.stderr.write(t('Enrolment needs a terminal: it shows a QR code and 24 words that are never written anywhere else.\n',
-      'A configuração precisa de um terminal: ela mostra um QR e 24 palavras que não são gravadas em nenhum outro lugar.\n'))
+    process.stderr.write(t('Enrolment needs a terminal: it shows 24 words that are never written anywhere else.\n',
+      'A configuração precisa de um terminal: ela mostra 24 palavras que não são gravadas em nenhum outro lugar.\n'))
     return 1
   }
   if (!(await askVaultSocket({ op: 'status' }))) return down()
@@ -387,50 +398,68 @@ async function cmdEnroll(args: string[]): Promise<number> {
   }
   let view = await readView()
   if (!view) return down()
-  const state = () => ({ authenticator: Boolean(view?.authenticator), recovery: Boolean(view?.recoveryCreatedAt), presence: Boolean(view?.presence), available: view?.presenceAvailable ?? [] })
+  const state = () => ({ recovery: Boolean(view?.recoveryCreatedAt), presence: Boolean(view?.presence), available: view?.unlockMethods ?? [] })
   const steps = stepsToRun(parsed.value, state())
   if (steps.length === 0) {
-    process.stdout.write(t('Nothing left to set up: the authenticator, the recovery key and presence are all in place.\n', 'Nada a configurar: autenticador, chave de recuperação e presença já estão ativos.\n'))
+    process.stdout.write(t('Nothing left to set up: the vault confirms it is you and has its recovery key.\n', 'Nada a configurar: o cofre já confirma que é você e tem a chave de recuperação.\n'))
     return cmdStatus(false)
   }
-  const presence = pickPresence(parsed.value.presence, state().available)
-  if (steps.includes('presence') && !presence) {
-    process.stderr.write(t('Presence is not available here (no Windows Hello and no security-key support on this machine).\n', 'A presença não está disponível aqui (sem Windows Hello e sem suporte a chave de segurança nesta máquina).\n'))
+  let presence = pickPresence(parsed.value.presence, state().available)
+  if (steps.includes('presence') && parsed.value.presence && !presence) {
+    process.stderr.write(t(`${methodName(parsed.value.presence)} is not offered on this machine. It offers: ${state().available.map(m => methodName(m.id)).join(', ')}.\n`,
+      `${methodName(parsed.value.presence)} não é oferecido nesta máquina. Ela oferece: ${state().available.map(m => methodName(m.id)).join(', ')}.\n`))
     return 1
   }
+  if (steps.includes('presence') && !parsed.value.presence) {
+    // No flag: ASK which way, from what this machine offers (the vault password is always one of them).
+    const offers = state().available
+    const chosen = await select<string>({
+      message: t('How should the vault confirm it is you?', 'Como o cofre deve confirmar que é você?'),
+      choices: offers.map(m => ({ name: methodName(m.id), value: m.id, ...(m.advanced ? { hint: t('advanced', 'avançado') } : {}) })),
+    })
+    presence = chosen as typeof presence
+  }
   for (const step of steps) {
-    const rc = step === 'authenticator' ? await enrolAuthenticator() : step === 'recovery' ? await enrolRecovery() : await enrolPresence(presence!, steps.includes('recovery'))
+    const rc = step === 'recovery' ? await enrolRecovery() : await enrolPresence(presence!, steps.includes('recovery'))
     if (rc !== 0) return rc
   }
   view = await readView()
-  const pres = view?.presence ? t('Windows Hello or your security key', 'o Windows Hello ou a sua chave de segurança') : null
-  if (steps.includes('presence') && pres) {
+  if (steps.includes('presence') && view?.presence) {
+    const pres = (view.methods ?? []).map(methodName).join(t(' or ', ' ou ')) || methodName(presence ?? '')
     process.stdout.write('\n' + t(
-      `Done. From now on the vault opens only with ${pres} and your code. It locks itself after ${view?.autoLockMinutes ?? 30} minutes without use. Keep your 24 words offline.\n`,
-      `Pronto. A partir de agora o cofre só abre com ${pres} e o seu código. Ele trava sozinho depois de ${view?.autoLockMinutes ?? 30} minutos sem uso. Guarde as suas 24 palavras offline.\n`))
+      `Done. From now on the vault opens only with ${pres}. It locks itself after ${view?.autoLockMinutes ?? 30} minutes without use. Keep your 24 words offline.\n`,
+      `Pronto. A partir de agora o cofre só abre com ${pres}. Ele trava sozinho depois de ${view?.autoLockMinutes ?? 30} minutos sem uso. Guarde as suas 24 palavras offline.\n`))
   }
   return 0
 }
 
-async function enrolAuthenticator(): Promise<number> {
-  const a = await askGated({ op: 'authenticator-begin' })
-  if (!a) return down()
-  if (!a.ok) return said(a)
-  process.stdout.write('\n' + t('Scan this with your authenticator app (Google Authenticator, Authy, 1Password…):\n\n', 'Escaneie com o seu app autenticador (Google Authenticator, Authy, 1Password…):\n\n'))
-  for (const l of qrHalfBlocks(String(a.uri))) process.stdout.write('  ' + l + '\n')
-  process.stdout.write('\n' + t('Cannot scan it? Type this key into the app:\n', 'Não consegue escanear? Digite esta chave no app:\n'))
-  process.stdout.write('  ' + String(a.secret).match(/.{1,4}/g)?.join(' ') + '\n\n')
-  process.stdout.write(t('Then type the 6-digit code the app shows now:\n', 'Depois digite o código de 6 dígitos que o app mostra agora:\n'))
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const c = (await maskedInput(t('Authenticator code', 'Código do autenticador'))).replace(/\s/g, '')
-    const r = await ask({ op: 'authenticator-confirm', code: c })
-    if (!r) return down()
-    if (r.ok) { process.stdout.write(t('Authenticator set up.\n', 'Autenticador configurado.\n')); return 0 }
-    process.stderr.write(String(r.sentence) + '\n')
-    if (r.code === 'no-enrolment') return 1
+/**
+ * The vault password, chosen on the terminal: the rules are checked HERE as it is typed (the same
+ * `checkVaultPassword` the page and the service use), or a random one is generated and shown ONCE.
+ * The service checks the rules again; nothing here is the last word.
+ */
+async function chooseVaultPassword(): Promise<string | null> {
+  const lang = vaultLang()
+  process.stdout.write(t('The vault password needs:\n', 'A senha do cofre precisa de:\n'))
+  for (const r of VAULT_PASSWORD_RULES) process.stdout.write(`  · ${VAULT_PASSWORD_RULE_TEXT[r][lang]}\n`)
+  process.stdout.write(t('It is never stored or sent anywhere: it only derives (scrypt, with a random salt) the key that opens the vault. Forgot it? The 24 words open the vault.\n',
+    'Ela nunca é guardada nem enviada para lugar nenhum: só deriva (scrypt, com um sal aleatório) a chave que abre o cofre. Esqueceu? As 24 palavras abrem o cofre.\n'))
+  if (await confirm(t('Generate a random one for you (shown once)?', 'Gerar uma aleatória para você (mostrada uma vez)?'), false)) {
+    const g = generateVaultPassword()
+    process.stdout.write('\n  ' + g + '\n\n' + t('Store it in your password manager now — it is not shown again.\n', 'Guarde no seu gerenciador de senhas agora — ela não aparece de novo.\n'))
+    await pause(t('Press Enter when you have stored it', 'Aperte Enter quando tiver guardado'))
+    clearScreen()
+    return g
   }
-  process.stderr.write(t('Start again with `agentop vault enroll --authenticator`.\n', 'Recomece com `agentop vault enroll --authenticator`.\n'))
-  return 1
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const p = await maskedInput(t('New vault password', 'Nova senha do cofre'))
+    const c = checkVaultPassword(p)
+    if (!c.ok) { process.stderr.write(vaultPasswordWeakSentence(c, lang) + '\n'); continue }
+    const again = await maskedInput(t('Type it again', 'Digite de novo'))
+    if (again !== p) { process.stderr.write(t('The two did not match.\n', 'As duas não conferem.\n')); continue }
+    return p
+  }
+  return null
 }
 
 async function enrolRecovery(): Promise<number> {
@@ -460,22 +489,30 @@ async function enrolRecovery(): Promise<number> {
   return 1
 }
 
-async function enrolPresence(kind: 'hello' | 'fido2', recoveryPlanned = false): Promise<number> {
+async function enrolPresence(kind: PresenceKind, recoveryPlanned = false): Promise<number> {
+  // The vault password is chosen HERE and travels with the enrolment op only; a gesture is raised by the service.
+  const chosen = kind === 'password' ? await chooseVaultPassword() : null
+  if (kind === 'password' && !chosen) { process.stderr.write(t('No password was set; nothing was changed.\n', 'Nenhuma senha foi definida; nada foi alterado.\n')); return 1 }
+  const pw = chosen ? { password: chosen } : {}
   process.stdout.write('\n' + (kind === 'hello'
     ? t('Windows Hello will ask you twice: once to create the vault\'s key, once to use it.\n', 'O Windows Hello vai pedir duas vezes: uma para criar a chave do cofre e uma para usá-la.\n')
-    : t('Agentistics is checking that your security key can protect your vault — touch it when it blinks (twice).\n', 'O Agentistics está verificando se a sua chave de segurança pode proteger o seu cofre — toque nela quando piscar (duas vezes).\n')))
-  let r = await askGated({ op: 'presence-enroll', protector: kind })
+    : kind === 'touchid'
+      ? t('macOS will ask for Touch ID or your Mac password once.\n', 'O macOS vai pedir o Touch ID ou a senha do Mac uma vez.\n')
+      : kind === 'password' ? ''
+        : t('Agentistics is checking that your security key can protect your vault — touch it when it blinks (twice).\n', 'O Agentistics está verificando se a sua chave de segurança pode proteger o seu cofre — toque nela quando piscar (duas vezes).\n')))
+  // Adding a SECOND way asks the first one (the service raises a gesture, or `askGated` asks for the old password).
+  let r = await askGated({ op: 'presence-enroll', protector: kind, ...pw })
   if (r && !r.ok && r.code === 'presence-needs-recovery-words' && process.stdin.isTTY && process.stdout.isTTY) {
     // Review S7: presence makes a NEW vault key, and the recovery key must follow it — typed here, on the TTY.
     // Leader decision 2: the words are typed for THIS call only (never kept); without them, NEW words.
     process.stdout.write(t('Turning presence on replaces the vault key; your recovery key must follow it.\n', 'Ligar a presença troca a chave do cofre; a sua chave de recuperação precisa acompanhar.\n'))
     const words = (await maskedInput(t('Your 24 words (or press Enter with nothing to make NEW words instead)', 'Suas 24 palavras (ou Enter vazio para criar palavras NOVAS)'))).trim()
     if (words) {
-      r = await askGated({ op: 'presence-enroll', protector: kind, words })
+      r = await askGated({ op: 'presence-enroll', protector: kind, words, ...pw })
     } else {
       const yes = await confirm(t('Make new recovery words after presence? Your OLD words will stop working.', 'Criar palavras de recuperação novas depois da presença? As palavras ANTIGAS deixam de funcionar.'), false)
       if (!yes) return 1
-      r = await askGated({ op: 'presence-enroll', protector: kind, replaceRecovery: true })
+      r = await askGated({ op: 'presence-enroll', protector: kind, replaceRecovery: true, ...pw })
     }
   }
   if (!r) return down()

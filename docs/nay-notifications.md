@@ -151,7 +151,7 @@ eligible updates within two seconds collapse into one “+N more — open the be
 retain an individual card within that same limit; additional errors remain in the summary and bell.
 Slower arrivals that would overflow the overlay also share one summary.
 
-While the tab is hidden or global away mode is active, notifications accumulate in one “N updates
+While the tab is hidden or global autonomous mode is active, notifications accumulate in one “N updates
 while you were away” summary. It appears on return and gets its full reading time then. Summaries
 open the existing bell panel by click, Enter or Space, including routes without a header bell. Grouping and dismissing toasts leave history and
 unread counts untouched; opening the bell marks entries read as usual. Existing category, Nay card,

@@ -17,9 +17,16 @@
 /** Characters as the caret moves over them. `0` for anything that is not a string. */
 export function promptCharCount(text: string): number {
   if (typeof text !== 'string' || text === '') return 0
-  let n = 0
-  // `for…of` walks code points, so a surrogate pair counts once.
-  for (const _ of text) n++
+  // The same count `for (const _ of text) n++` gives — a surrogate PAIR counts once, a lone surrogate
+  // counts once — without building an iterator over the whole draft on every keystroke.
+  let n = text.length
+  for (let i = 0; i < text.length - 1; i++) {
+    const hi = text.charCodeAt(i)
+    if (hi >= 0xd800 && hi <= 0xdbff) {
+      const lo = text.charCodeAt(i + 1)
+      if (lo >= 0xdc00 && lo <= 0xdfff) { n--; i++ }
+    }
+  }
   return n
 }
 

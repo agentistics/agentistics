@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  cwdFromLsof, etimeToMs, parseLsofFields, parsePsList, processStartFromEtime, splitPsCommand,
+  cwdFromLsof, etimeToMs, macExecutable, parseLsofFields, parsePsList, processStartFromEtime, splitPsCommand,
 } from './macos-processes'
+import { harnessOfProcess } from './live-sessions'
 
 describe('parsePsList', () => {
   test('parses pid, etime, comm from ps -axwwo pid=,etime=,comm=', () => {
@@ -124,5 +125,30 @@ describe('cwdFromLsof', () => {
     const byPid = new Map([[1234, [] as string[]]])
     expect(cwdFromLsof(byPid, 1234)).toBeUndefined()
     expect(cwdFromLsof(byPid, 9999)).toBeUndefined()
+  })
+})
+
+// OPENCODE.ATIVAS-TUI — `ps -o comm=` names the path the process was EXECUTED by, which for an npm/nvm/volta install
+// is a symlink; Linux reads `/proc/<pid>/exe`, already resolved. Without resolving it, a 2.x TUI installed with
+// `npm i -g @opencode/cli` under nvm matched no install layout and was never seen at all.
+describe('macExecutable — the ps path resolved like /proc/<pid>/exe', () => {
+  const NVM_BIN = '/Users/u/.nvm/versions/node/v22.11.0/bin/opencode'
+  const REAL = '/Users/u/.nvm/versions/node/v22.11.0/lib/node_modules/@opencode/cli/bin/opencode.exe'
+  const resolve = (p: string) => (p === NVM_BIN ? REAL : undefined)
+
+  test('a symlinked opencode 2.x is resolved and recognised', () => {
+    expect(harnessOfProcess('opencode', NVM_BIN, [NVM_BIN])).toBeUndefined() // the bug: the link itself is no layout
+    expect(macExecutable(NVM_BIN, resolve)).toBe(REAL)
+    expect(harnessOfProcess('opencode', macExecutable(NVM_BIN, resolve), [NVM_BIN])).toBe('opencode')
+  })
+
+  test('the real path read back by ps (opencode.exe) is recognised too', () => {
+    expect(harnessOfProcess('opencode.exe', REAL, [REAL])).toBe('opencode')
+    expect(harnessOfProcess('opencode.exe', REAL, [REAL, 'serve', '--service'])).toBeUndefined()
+  })
+
+  test('a relative or unresolvable path is kept as it is', () => {
+    expect(macExecutable('opencode', resolve)).toBe('opencode')
+    expect(macExecutable('/usr/local/bin/claude', resolve)).toBe('/usr/local/bin/claude')
   })
 })

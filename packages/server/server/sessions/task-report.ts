@@ -19,6 +19,7 @@ import { isHistoricalRow } from './task-historical'
 import { isNativeRow, nativeRollupSession } from './task-native'
 import { rollupAttempt, type AttemptRollup, type RollupSession } from './task-rollup'
 import { scopedTaskStats, taskStats, type TaskStats } from './task-stats'
+import { sessionActivityOf, type SessionActivity } from './task-live-steps'
 import type { BoardRow } from './types'
 
 /** A rollup row: an attempt, or the sessions of a task that name no attempt. */
@@ -49,7 +50,11 @@ export interface TaskSessionRow {
   subtaskId: string | null
   createdAt: string
   endedAt?: string
+  /** The registry's last heartbeat (epoch ms). Frozen on a row the machine lost; absent when never stamped. */
+  lastSeenMs?: number
   label?: string
+  /** The reasoning effort the session was started with (registry), when one was asked for. */
+  effort?: string
   conversationId?: string
   /**
    * True for a conversation filed on the board with NO session behind it (`HistoricalSession`): its
@@ -67,6 +72,11 @@ export interface TaskSessionRow {
    *  `RollupSession.meta`. Read straight off `SessionMeta.model` (`data.ts` resolves it from the
    *  JSONL when not already in session-meta); never a second guess at what the session ran. */
   model: string | null
+  /**
+   * What the conversation DID (file edits, test runs, commits, a browser pass) — the facts the Live's per-stage step reads
+   * (`task-live-steps.ts`). Absent when the conversation is not in the store: nothing was read, so no signal.
+   */
+  activity?: SessionActivity
   /** Null when the conversation is not in the store — see `RollupSession.meta`. */
   tokens: number | null
   costUSD: number | null
@@ -75,6 +85,8 @@ export interface TaskSessionRow {
 
 export interface TaskListRow {
   task: Task
+  /** Set by the HTTP list when `task.detail` was cut to a card's worth (`task-list-window.ts`). */
+  detailClipped?: boolean
   attempts: number
   rollup: AttemptRollup
   /**
@@ -159,10 +171,32 @@ export function rowsOfTask<R extends BoardRow>(
   rows: readonly R[],
   owners: ReadonlyMap<string, string> = conversationOwners(rows),
 ): R[] {
-  return rows.filter(r =>
-    (r.taskId === task.id
-      || (r.task !== undefined && legacyTaskId(r.task) === task.id))
-    && (!r.conversationId || owners.get(r.conversationId) === task.id))
+  return (rowsByTask(rows).get(task.id) ?? []).filter(r => !r.conversationId || owners.get(r.conversationId) === task.id)
+}
+
+/**
+ * The registry bucketed by the task each row NAMES (its `taskId`, or the id derived from its legacy
+ * `task` name), in registry order. `rowsOfTask` used to scan every row for every task — 136 tasks x
+ * 3000 rows — which was ~100 ms of a 230 ms live-line build on the real book. A row naming two
+ * different tasks (an id AND a legacy name that derive differently) sits in both buckets, exactly as
+ * the scan matched it for both. Memoized on the array: one board read hands the same rows to every
+ * task, and the length guard rebuilds for a caller that grew its own array.
+ */
+const bucketMemo = new WeakMap<readonly unknown[], { length: number; byTask: Map<string, unknown[]> }>()
+function rowsByTask<R extends BoardRow>(rows: readonly R[]): Map<string, R[]> {
+  const hit = bucketMemo.get(rows)
+  if (hit && hit.length === rows.length) return hit.byTask as Map<string, R[]>
+  const byTask = new Map<string, R[]>()
+  const put = (id: string, r: R) => { const l = byTask.get(id); if (l) l.push(r); else byTask.set(id, [r]) }
+  for (const r of rows) {
+    if (r.taskId !== undefined) put(r.taskId, r)
+    if (r.task !== undefined) {
+      const legacy = legacyTaskId(r.task)
+      if (legacy !== r.taskId) put(legacy, r)
+    }
+  }
+  bucketMemo.set(rows, { length: rows.length, byTask })
+  return byTask
 }
 
 // The rule lives in `task-conversations.ts` (see there); re-exported so this module stays the one
@@ -562,12 +596,15 @@ export function buildTaskDetail(o: {
   threads?: readonly TaskThread[]
   subtasks?: readonly Subtask[]
   files?: readonly TaskFile[]
+  /** `conversationOwners(rows)`, when the caller builds many details over the same rows (the live line
+   *  builds one per task: recomputing it for each was ~230 ms of a 136-task read). */
+  owners?: ReadonlyMap<string, string>
 }): TaskDetail {
   // ONE ROW PER CONVERSATION, decided ONCE and handed to everything below — the newest row of each
   // conversation, because it carries the current filing and the current liveness. Every figure and
   // every list on this detail reads the same set, so a conversation cannot be in the list and
   // missing from a bucket, or counted twice in the evidence block, or filed in two places.
-  const mine = distinctConversations(rowsOfTask(o.task, o.rows))
+  const mine = distinctConversations(rowsOfTask(o.task, o.rows, o.owners))
   const metas = mine
     .map(r => (r.conversationId ? o.metas.get(r.conversationId) : undefined))
     .filter((m): m is SessionMeta => m !== undefined)
@@ -611,8 +648,11 @@ export function buildTaskDetail(o: {
         subtaskId: r.subtaskId ?? null,
         createdAt: r.createdAt,
         ...(r.endedAt ? { endedAt: r.endedAt } : {}),
+        ...(typeof r.lastSeenMs === 'number' && Number.isFinite(r.lastSeenMs) ? { lastSeenMs: r.lastSeenMs } : {}),
         ...(r.label ? { label: r.label } : {}),
+        ...(typeof (r as { effort?: unknown }).effort === 'string' ? { effort: (r as { effort: string }).effort } : {}),
         ...(r.conversationId ? { conversationId: r.conversationId } : {}),
+        ...(sessionActivityOf(meta) ? { activity: sessionActivityOf(meta)! } : {}),
         ...(isHistoricalRow(r) ? { historical: true } : {}),
         ...(isNativeRow(r) ? { native: true } : {}),
         ...(isNativeRow(r)

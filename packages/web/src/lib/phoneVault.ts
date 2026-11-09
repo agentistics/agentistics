@@ -1,11 +1,9 @@
 /**
  * VAULT.PERSONAL §10 — opening the vault from a phone, browser side. The service decides everything
- * (vault/phone.ts); this module drives `navigator.credentials` (a passkey WITH the PRF extension), keeps
- * the device key a "code alone" phone was handed, and encodes bytes.
- *
- * The device key lives in this browser's storage on the PHONE and nowhere on the computer — that is
- * the point of it (the computer alone cannot open the vault). Every storage access is guarded: a
- * private window makes the accessor itself throw.
+ * (vault/phone.ts); this module drives `navigator.credentials` (a passkey WITH the PRF extension) and
+ * encodes bytes. COFRE.DESBLOQUEIO (2026-11-07): the "code alone" device key is retired — a stored one
+ * is only READ to be forgotten. Every storage access is guarded: a private window makes the accessor
+ * itself throw.
  */
 import { unlockOffers, type UnlockOffer } from '@agentistics/core'
 import { b64urlBytes, b64urlEncode } from './passkey'
@@ -47,7 +45,7 @@ export function offersHere(f: Pick<PhoneFacts, 'loopback' | 'secure' | 'passkeys
   return unlockOffers({ loopback: f.loopback, secure: f.secure, passkeys: f.passkeys, codeOnly: f.codeOnly, deviceKey: Boolean(device && f.devices.includes(device.deviceId)) })
 }
 
-/** PURE. The PRF output a browser returned, as base64url — or null when the authenticator gave none. */
+/** PURE. The PRF output a browser returned, as base64url — or null when the passkey gave none. */
 export function prfFirst(ext: unknown): string | null {
   const first = (ext as { prf?: { results?: { first?: unknown } } } | null)?.prf?.results?.first
   if (first instanceof ArrayBuffer) return first.byteLength === 32 ? b64urlEncode(first) : null
@@ -88,29 +86,25 @@ async function assertWithPrf(challenge: string, rpId: string, allow: { id: strin
 
 // ── opening ───────────────────────────────────────────────────────────────────────────────────
 
-/** Biometrics on this phone (a passkey + PRF) and the code, in ONE request. */
-export async function unlockWithPasskey(code: string): Promise<Reply<{ state: string }>> {
+/**
+ * Biometrics on this phone (a passkey + PRF) — the whole unlock, in ONE request. COFRE.DESBLOQUEIO
+ * (owner, 2026-11-07): no code any more; the phone's biometric IS the proof.
+ */
+export async function unlockWithPasskey(): Promise<Reply<{ state: string }>> {
   const b = await vaultPost<{ challengeId: string; challenge: string; rpId: string; allow: { id: string; salt: string }[] }>('/api/vault/phone/unlock/begin', {})
   if (!b.ok) return b
   const a = await assertWithPrf(b.challenge, b.rpId, b.allow)
   if (!a) return cancelled()
-  return vaultPost<{ state: string }>('/api/vault/phone/unlock', { kind: 'passkey', challengeId: b.challengeId, ...a, prf: a.prf ?? '', code })
-}
-
-/** The code alone, on a phone the computer approved (the device key rides along). */
-export async function unlockWithDevice(code: string): Promise<Reply<{ state: string }>> {
-  const k = readDeviceKey()
-  if (!k) return { ok: false, code: 'phone-unknown', sentence: '', status: 0 }
-  const r = await vaultPost<{ state: string }>('/api/vault/phone/unlock', { kind: 'device', ...k, code })
-  // A key the service no longer knows (switch turned off, phone removed) is dead weight: forget it.
-  if (!r.ok && r.code === 'phone-unknown') writeDeviceKey(null)
-  return r
+  // A device key left by an older version opens nothing any more: forget it.
+  if (readDeviceKey()) writeDeviceKey(null)
+  return vaultPost<{ state: string }>('/api/vault/phone/unlock', { kind: 'passkey', challengeId: b.challengeId, ...a, prf: a.prf ?? '' })
 }
 
 // ── registering this phone: ask here, approve on the computer ─────────────────────────────────
 
-export const requestEnrol = (kind: 'passkey' | 'device', label: string, code: string) =>
-  vaultPost<{ id: string; match: string; expiresInMs: number }>('/api/vault/phone/enrol/request', { kind, label, code })
+/** The phone asks; nothing is registered until the computer approves with its own proof. */
+export const requestEnrol = (kind: 'passkey', label: string) =>
+  vaultPost<{ id: string; match: string; expiresInMs: number }>('/api/vault/phone/enrol/request', { kind, label })
 export const enrolStatus = (id: string) =>
   vaultGet<{ status: 'pending' | 'approved' | 'denied' | 'expired' }>(`/api/vault/phone/enrol/status?id=${encodeURIComponent(id)}`)
 
@@ -144,17 +138,10 @@ export async function enrolPasskey(requestId: string): Promise<Reply<{ unlockabl
   return vaultPost<{ unlockable: boolean; sentence?: string }>('/api/vault/phone/enrol/passkey-key', { challengeId: f.prf.challengeId, ...a, ...(a.prf ? { prf: a.prf } : {}) })
 }
 
-/** After the computer approved: take the device key and keep it in this browser. */
-export async function enrolDevice(requestId: string): Promise<Reply<{ stored: boolean }>> {
-  const r = await vaultPost<DeviceKey>('/api/vault/phone/enrol/device', { requestId })
-  if (!r.ok) return r
-  return { ok: true, stored: writeDeviceKey({ deviceId: r.deviceId, deviceSecret: r.deviceSecret }) }
-}
-
 // ── the computer's side ───────────────────────────────────────────────────────────────────────
 
 export interface PhoneRequest { id: string; label: string; kind: 'passkey' | 'device'; match: string; createdAt: string; expiresInMs: number }
 export const phoneRequests = () => vaultGet<{ requests: PhoneRequest[] }>('/api/vault/phone/requests')
 export const decidePhoneRequest = (id: string, approve: boolean) => vaultPost('/api/vault/phone/requests/decide', { id, approve })
-export const removeDevice = (id: string, code?: string) => vaultPost('/api/vault/phone/devices/remove', { id, ...(code ? { code } : {}) })
-export const clearStalePhones = (code?: string) => vaultPost<{ removed: number }>('/api/vault/phone/stale/clear', code ? { code } : {})
+export const removeDevice = (id: string) => vaultPost('/api/vault/phone/devices/remove', { id })
+export const clearStalePhones = () => vaultPost<{ removed: number }>('/api/vault/phone/stale/clear', {})

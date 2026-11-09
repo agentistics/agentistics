@@ -15,7 +15,7 @@ describe('parseSystemEvent', () => {
     expect(parseSystemEvent('<pasted_content id="a">\n[from session abc · handback]\nx\n</pasted_content id="b">')).toBeNull()
   })
   test('marked check-in keeps the checklist and away instructions as the body', () => {
-    const body = 'Faça o check-in da liderança agora.\n- Review sessions\nAWAY MODE — decide within the authorisations.'
+    const body = 'Faça o check-in da liderança agora.\n- Review sessions\nAUTONOMOUS MODE — decide within the authorisations.'
     expect(parseSystemEvent(`[from agentistics · check-in]\n${body}`)).toEqual({ kind: 'checkin', body })
   })
   test('legacy Portuguese and English check-in prompts keep their full text', () => {
@@ -44,10 +44,10 @@ describe('parseSystemEvent', () => {
     expect(parseSystemEvent('[from agentistics · question]\nhand off?')?.kind).toBe('question')
   })
   test('away OFF is told apart from ON/updated', () => {
-    const off = parseSystemEvent('[from agentistics · away]\n[agentistics · away mode is now OFF for this session] back')!
+    const off = parseSystemEvent('[from agentistics · away]\n[agentistics · autonomous mode is now OFF for this session] back')!
     expect(off.kind).toBe('away-off')
-    expect(systemEventLine(off, true)).toBe('Modo ausente desligado nesta sessão')
-    expect(systemEventLine(parseSystemEvent('[from agentistics · away]\nAway on')!, true)).toBe('Modo ausente atualizado')
+    expect(systemEventLine(off, true)).toBe('Modo autônomo desligado nesta sessão')
+    expect(systemEventLine(parseSystemEvent('[from agentistics · away]\nAway on')!, true)).toBe('Modo autônomo atualizado')
     expect(systemEventLine(parseSystemEvent('[from agentistics · question]\nx')!, true)).toBe('Dica de passagem de contexto')
   })
   test('session headers carry the sender', () => {
@@ -69,7 +69,7 @@ describe('parseSystemEvent', () => {
 
 test('r2: multi-line body and CRLF headers parse', () => {
   expect(parseSystemEvent('[from session ab1 · block]\nl1\nl2\n')).toEqual({ kind: 'block', sender: 'ab1', body: 'l1\nl2' })
-  expect(parseSystemEvent('[from agentistics · away]\r\nAway mode is now OFF')?.kind).toBe('away-off')
+  expect(parseSystemEvent('[from agentistics · away]\r\nAutonomous mode is now OFF')?.kind).toBe('away-off')
 })
 test('r2: header-like prose does not match', () => {
   expect(parseSystemEvent('please see [from session x · handback] text')).toBeNull()

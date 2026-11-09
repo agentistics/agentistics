@@ -1,0 +1,162 @@
+{
+ "data": [
+  {
+   "id": "ses_e53f2d1d1ffeeKVXnpk7eHuJJb",
+   "fork": {
+    "sessionID": "ses_e53f48c24ffeMy9oUiacfDl4ld",
+    "boundary": {
+     "type": "through",
+     "messageID": "msg_1ac0d10f2001FWZVLdzDgsE6wd"
+    }
+   },
+   "projectID": "8125906d12fd1e1ce56970bf60fc12a8686a6790",
+   "model": {
+    "id": "m1",
+    "providerID": "stub",
+    "variant": "default"
+   },
+   "cost": 0,
+   "tokens": {
+    "input": 0,
+    "output": 0,
+    "reasoning": 0,
+    "cache": {
+     "read": 0,
+     "write": 0
+    }
+   },
+   "time": {
+    "created": 1793887907375,
+    "updated": 1793887907375
+   },
+   "title": "OK (fork #1)",
+   "location": {
+    "directory": "/dev/shm/oc2/api/wsB"
+   }
+  },
+  {
+   "id": "ses_e53f48c24ffeMy9oUiacfDl4ld",
+   "projectID": "8125906d12fd1e1ce56970bf60fc12a8686a6790",
+   "model": {
+    "id": "m1",
+    "providerID": "stub",
+    "variant": "default"
+   },
+   "cost": 0,
+   "tokens": {
+    "input": 4936,
+    "output": 28,
+    "reasoning": 0,
+    "cache": {
+     "read": 0,
+     "write": 0
+    }
+   },
+   "outcome": "succeeded",
+   "time": {
+    "created": 1793887794670,
+    "updated": 1793887905905,
+    "busy": 1793887899877,
+    "idle": 1793887899803
+   },
+   "title": "OK",
+   "location": {
+    "directory": "/dev/shm/oc2/api/wsB"
+   }
+  },
+  {
+   "id": "ses_e53f54feaffeuKh2zkN0ErsPCo",
+   "projectID": "8125906d12fd1e1ce56970bf60fc12a8686a6790",
+   "model": {
+    "id": "m1",
+    "providerID": "stub",
+    "variant": "default"
+   },
+   "cost": 0,
+   "tokens": {
+    "input": 3702,
+    "output": 21,
+    "reasoning": 0,
+    "cache": {
+     "read": 0,
+     "write": 0
+    }
+   },
+   "outcome": "succeeded",
+   "time": {
+    "created": 1793887744025,
+    "updated": 1793887744128,
+    "busy": 1793887744042,
+    "idle": 1793887744130
+   },
+   "title": "OK",
+   "location": {
+    "directory": "/dev/shm/oc2/api/wsB"
+   }
+  },
+  {
+   "id": "ses_e53f551d7ffe4BngZyKVE1rc2r",
+   "projectID": "8125906d12fd1e1ce56970bf60fc12a8686a6790",
+   "model": {
+    "id": "m1",
+    "providerID": "stub",
+    "variant": "default"
+   },
+   "cost": 0,
+   "tokens": {
+    "input": 2468,
+    "output": 14,
+    "reasoning": 0,
+    "cache": {
+     "read": 0,
+     "write": 0
+    }
+   },
+   "outcome": "succeeded",
+   "time": {
+    "created": 1793887743736,
+    "updated": 1793887743900,
+    "busy": 1793887743833,
+    "idle": 1793887743893
+   },
+   "title": "OK",
+   "location": {
+    "directory": "/dev/shm/oc2/api/wsB"
+   }
+  },
+  {
+   "id": "ses_e53f5546fffed0rljfb5dmhJxm",
+   "projectID": "79febbf052a6cf6e0358cf2ba6aaafe16d6205a3",
+   "model": {
+    "id": "m1",
+    "providerID": "stub",
+    "variant": "default"
+   },
+   "cost": 0,
+   "tokens": {
+    "input": 2468,
+    "output": 14,
+    "reasoning": 0,
+    "cache": {
+     "read": 0,
+     "write": 0
+    }
+   },
+   "outcome": "succeeded",
+   "time": {
+    "created": 1793887743086,
+    "updated": 1793887743344,
+    "busy": 1793887743222,
+    "idle": 1793887743331
+   },
+   "title": "OK",
+   "location": {
+    "directory": "/dev/shm/oc2/api/wsA"
+   }
+  }
+ ],
+ "cursor": {
+  "previous": "eyJwYXJlbnRJRCI6Im51bGwiLCJhbmNob3IiOnsiaWQiOiJzZXNfZTUzZjJkMWQxZmZlZUtWWG5wazdlSHVKSmIiLCJ0aW1lIjoxNzkzODg3OTA3Mzc1LCJkaXJlY3Rpb24iOiJwcmV2aW91cyJ9fQ",
+  "next": "eyJwYXJlbnRJRCI6Im51bGwiLCJhbmNob3IiOnsiaWQiOiJzZXNfZTUzZjU1NDZmZmZlZDBybGpmYjVkbWhKeG0iLCJ0aW1lIjoxNzkzODg3NzQzMzQ0LCJkaXJlY3Rpb24iOiJuZXh0In19"
+ }
+}

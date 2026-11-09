@@ -341,6 +341,10 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     try { const c = (JSON.parse(raw) as { child?: unknown }).child; return typeof c === 'number' && c > 1 ? c : null } catch { return null }
   }
   const isAlive = (id: string): boolean => {
+    // APP.LENTO: the fleet poll asks this of EVERY row (3.000 on a real machine, every 5 s), and almost
+    // none has a record — each then paid ~5 synchronous reads that failed with a thrown error. With no
+    // directory every branch below answers false, so one `existsSync` gives the same answer.
+    if (!existsSync(dirOf(id))) return false
     if (foreign(id)) return false
     const k = lastGen(id)
     if (relayLive(id, k)) return true
@@ -370,11 +374,26 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     }
   }
 
+  /**
+   * Relays THIS process spawned that have not yet published `relay.pid`, by generation directory. A
+   * relay publishes that file only once its signal handlers exist (structured-relay.ts), so until then
+   * `terminate` could neither find it (it returned true and the relay booted on, starting its child —
+   * the AGY.MULTICHILD 9 CI leak) nor safely TERM it (a TERM before the handler kills the relay and
+   * orphans a child it may already have spawned). `terminate` waits for these instead.
+   */
+  const booting = new Map<string, { pid: number; exited: Promise<void> }>()
+  /** Ids `terminate` was asked to end: a generation still waiting on its predecessor never starts after it. */
+  const terminated = new Set<string>()
   function startRelay(dir: string, spec: RelayLaunchSpec): void {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     writeFileSync(path.join(dir, FILES.launch), JSON.stringify(spec), { mode: 0o600 })
     const child = spawnChild(relay.command, [...relay.args, dir], { detached: true, stdio: 'ignore', cwd: dir, env: relayEnv(process.env, spec) })
     child.on('error', () => {})
+    if (child.pid !== undefined) {
+      const exited = new Promise<void>(r => { child.once('exit', () => r()); child.once('error', () => r()) })
+      booting.set(dir, { pid: child.pid, exited })
+      void exited.then(() => { if (booting.get(dir)?.pid === child.pid) booting.delete(dir) })
+    }
     child.unref()
   }
 
@@ -411,6 +430,8 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     const start = () => {
       // The server went away before it started: nothing was launched, nothing is on disk for it.
       if (detached) return
+      // Terminated while it waited for the previous child: starting now would outlive the terminate.
+      if (terminated.has(id)) { end(null); return }
       try { startRelay(dir, spec) } catch { end(null); return }
       if (gen.killed) markKilled(dir)
       conn = relayConnection(path.join(dir, FILES.sock), 0, {
@@ -458,6 +479,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
       } catch { return null }
     },
     create(id, saved) {
+      terminated.delete(id)
       const dir = dirOf(id)
       rmSync(dir, { recursive: true, force: true })
       mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -498,6 +520,19 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     markEnding(id, why) { try { writeFileSync(path.join(dirOf(id), FILES.ending), why, { mode: 0o600 }) } catch { /* no directory: nothing to end */ } },
     ending: id => read(id, FILES.ending),
     async terminate(id, timeoutMs = 6000) {
+      terminated.add(id)
+      const until = Date.now() + timeoutMs
+      // A relay this process started that has not published its pid yet: wait for it to publish (or to
+      // die) — never TERM it before its handlers exist, never report "nothing left" while it boots.
+      for (let k = 0, n = generations(id); k < n; k++) {
+        const b = booting.get(genDir(id, k))
+        if (!b) continue
+        while (Date.now() < until && readGen(id, k, FILES.pid) === null && pidAlive(b.pid)) {
+          await Promise.race([b.exited, sleep(25)])
+        }
+        // Still unpublished at the deadline (a relay stuck in its boot): end it rather than leave it running.
+        if (readGen(id, k, FILES.pid) === null && pidAlive(b.pid)) { try { process.kill(b.pid, 'SIGKILL') } catch { /* gone */ } }
+      }
       // Every generation's relay, though only the last can still be running: nothing is left behind.
       const pids: number[] = []
       for (let k = 0, n = generations(id); k < n; k++) { const p = relayPid(id, k); if (p !== null && pidAlive(p)) pids.push(p) }
@@ -516,7 +551,6 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
       }
       for (const g of orphans) { try { process.kill(-g, 'SIGTERM') } catch { /* gone */ } }
       const done = () => pids.every(p => !pidAlive(p)) && orphans.every(g => !groupAlive(g))
-      const until = Date.now() + timeoutMs
       while (Date.now() < until) { if (done()) return true; await sleep(50) }
       for (const g of orphans) { try { process.kill(-g, 'SIGKILL') } catch { /* gone */ } }
       await sleep(100)

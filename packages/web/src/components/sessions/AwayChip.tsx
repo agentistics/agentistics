@@ -1,8 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { Moon } from 'lucide-react'
 import { SESSION_CHIP_STYLE } from './RoleChip'
 import { ConfirmModal, Select } from '../../pages/settings/primitives'
-import { setSessionAway, useAway } from '../../lib/awayMode'
+import { AUTONOMOUS_ICON, setSessionAway, useAway } from '../../lib/awayMode'
 import { AwayImpact } from '../AwayImpact'
 import { useIsMobile } from '../../hooks/useIsMobile'
 
@@ -34,8 +33,8 @@ export function __resetAwayDialogForTest() { store.req = null; store.pending = {
 export function awayMenuItems(session: { id: string; actionable?: boolean; away?: boolean } | undefined, pt: boolean, globalActive: boolean) {
   if (!session?.actionable) return []
   return [{
-    id: 'away', icon: <Moon size={14} aria-hidden />, on: session.away === true || globalActive,
-    label: pt ? 'Modo ausente nesta sessão…' : 'Away mode on this session…',
+    id: 'away', icon: <AUTONOMOUS_ICON size={14} aria-hidden />, on: session.away === true || globalActive,
+    label: pt ? 'Modo autônomo nesta sessão…' : 'Autonomous mode on this session…',
     onSelect: (trigger?: HTMLElement | null) => openSessionAwayDialog(session.id, { away: session.away === true, pt, trigger }),
   }]
 }
@@ -52,14 +51,14 @@ export function AwayChip({ pt, id, away = false }: { pt: boolean; compact?: bool
   useEffect(() => { if (id && store.pending[id] !== undefined) { store.pending[id] = undefined; bump() } }, [id, away])
   const on = (id ? store.pending[id] : undefined) ?? away // the session's OWN flag: what the dialog toggles
   const override = on && !global.active
-  const label = pt ? 'Modo ausente só nesta sessão' : 'Away mode on this session only'
+  const label = pt ? 'Modo autônomo só nesta sessão' : 'Autonomous mode on this session only'
   const hit = mobile ? { minWidth: 44, minHeight: 44, justifyContent: 'center' } as const : {}
   if (!override || !id) return null
   return (
     <button type="button" data-testid="session-away-chip" role="switch" aria-checked title={label} aria-label={label}
       onClick={e => openSessionAwayDialog(id, { away: on, pt, trigger: e.currentTarget })}
       style={{ ...SESSION_CHIP_STYLE, border: 'none', padding: 3, alignSelf: 'center', background: 'transparent', cursor: 'pointer', color: 'var(--anthropic-orange)', ...hit }}>
-      <Moon size={13} aria-hidden />
+      <AUTONOMOUS_ICON size={13} aria-hidden />
     </button>
   )
 }
@@ -94,8 +93,8 @@ export function AwayScopeDialog({ pt, open, on, scope, setScope, busy, error, gl
   busy: boolean; error: string | null; globalActive: boolean; onConfirm: () => void; onCancel: () => void
 }) {
   return (
-    <ConfirmModal open={open} tone="default" icon={<Moon size={17} />}
-      title={on ? (pt ? 'Desligar modo ausente' : 'Turn away mode off') : (pt ? 'Ligar modo ausente' : 'Turn away mode on')}
+    <ConfirmModal open={open} tone="default" icon={<AUTONOMOUS_ICON size={17} />}
+      title={on ? (pt ? 'Desligar modo autônomo' : 'Turn autonomous mode off') : (pt ? 'Ligar modo autônomo' : 'Turn autonomous mode on')}
       message={pt ? 'Onde aplicar esta mudança?' : 'Where should this change apply?'}
       confirmLabel={busy ? (pt ? 'Salvando…' : 'Saving…') : (pt ? 'Aplicar' : 'Apply')}
       cancelLabel={pt ? 'Cancelar' : 'Cancel'} onConfirm={onConfirm} onCancel={onCancel}>
@@ -106,7 +105,7 @@ export function AwayScopeDialog({ pt, open, on, scope, setScope, busy, error, gl
       {scope === 'active' && <AwayImpact pt={pt} open={open} />}
       {globalActive && <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{pt
         ? 'O modo global também está ligado e continua valendo. Use o controle global para avisar que voltou para todas as sessões.'
-        : 'Global away mode is also on and still applies. Use the global control to return for every session.'}</p>}
+        : 'Global autonomous mode is also on and still applies. Use the global control to return for every session.'}</p>}
       {error && <p role="alert">{error}</p>}
     </ConfirmModal>
   )

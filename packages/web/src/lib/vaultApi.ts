@@ -31,7 +31,15 @@ export interface VaultView {
   wrappers: string[]
   presence: boolean
   presenceAvailable: string[]
-  authenticator: { enrolledAt: string; lastUsedAt: string | null; failures: number; pausedUntil: string | null; frozen: boolean } | null
+  /**
+   * COFRE.DESBLOQUEIO (owner, 2026-11-07): the ways this machine offers to confirm "it is you", best
+   * first — `advanced` for a security key (offered only where its tools exist). Absent on an older server.
+   */
+  unlockMethods?: { id: UnlockMethodId; advanced: boolean; gestures: { enroll: number; unlock: number } }[]
+  /** The way(s) this vault confirms with today; empty = none chosen yet. Absent on an older server. */
+  methods?: string[]
+  /** The vault still records an app code from before 2026-11-07 (asked by nothing; dropped when a way is set up). */
+  legacyAppCode?: boolean
   recoveryCreatedAt: string | null
   requirePresence: boolean
   autoLockMinutes: number
@@ -59,6 +67,12 @@ export interface VaultView {
   authPolicy?: AuthPolicyView
 }
 export type UnlockMode = 'always' | 'hello-only' | 'daily'
+/** The ways to confirm "it is you" (the server's `unlockMethodsFor`). */
+export type UnlockMethodId = 'touchid' | 'hello' | 'password' | 'fido2'
+/** PURE. Does this vault confirm with its own password only (no gesture to raise)? Then the page asks for it inline. */
+export function confirmsWithPasswordOnly(v: Pick<VaultView, 'wrappers'>): boolean {
+  return v.wrappers.includes('password') && !v.wrappers.some(w => w === 'hello' || w === 'touchid' || w === 'fido2')
+}
 /** Owner decision 2026-10-06 — the per-action policy. The SERVER decides (and refuses "none" on a critical kind); this only draws it. */
 export type ProofChoice = 'code' | 'gesture' | 'both' | 'none'
 export type ActionKind = 'reveal' | 'use' | 'edit' | 'delete-secret' | 'delete-device' | 'wipe' | 'settings' | 'recovery'
@@ -112,15 +126,33 @@ let _unlockFor: string | null = null
 export function unlockFor(binding: string | null): void { _unlockFor = binding }
 function freshAlive(now = Date.now()): boolean { return _fresh !== null && now < _fresh.until }
 
-async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> } | null> {
+// ── COFRE.DESBLOQUEIO: the vault password, asked where a gesture would be raised ───────────────
+//
+// A vault that confirms with its OWN password asks for it at the unlock and at every confirmed action.
+// Rather than every dialog growing a field, the server answers `password-required` (or `password-wrong`)
+// and the ONE prompt the app mounts (VaultPasswordPrompt) asks the person; the request is then sent again
+// with the password in its own header. The password lives in that request only: never stored, never
+// logged, never in a URL — and dropped right after.
+
+/** What the prompt is asked: is this a retry after a wrong password, and the server's sentence. */
+export interface PasswordAsk { retry: boolean; sentence: string }
+type PasswordPrompt = (ask: PasswordAsk) => Promise<string | null>
+let _askPassword: PasswordPrompt | null = null
+/** The app's one prompt registers here (null to detach). */
+export function setVaultPasswordPrompt(fn: PasswordPrompt | null): void { _askPassword = fn }
+const PASSWORD_CODES = new Set(['password-required', 'password-wrong'])
+/** PURE. Should this reply be answered by asking the person for the vault password? */
+export function wantsVaultPassword(r: { json: Record<string, unknown> } | null): boolean {
+  return r !== null && r.json.ok !== true && PASSWORD_CODES.has(String(r.json.code ?? ''))
+}
+
+async function send(method: 'GET' | 'POST', path: string, sent: unknown, password?: string): Promise<{ status: number; json: Record<string, unknown> } | null> {
   try {
     const headers: Record<string, string> = {}
-    // Every POST is JSON, even an empty one: the server refuses a vault POST of any other type (a
-    // cross-site page could send text/plain without a preflight — review M1).
-    const sent = method === 'POST' ? (body ?? {}) : body
     if (sent !== undefined) headers['Content-Type'] = 'application/json'
     if (grantAlive()) headers['x-vault-grant'] = _grant!.token
     if (freshAlive()) headers['x-vault-fresh'] = _fresh!.token
+    if (password !== undefined) headers['x-vault-password'] = password
     const r = await fetch(path, { method, headers, ...(sent !== undefined ? { body: JSON.stringify(sent) } : {}) })
     const json = await r.json().catch(() => ({})) as Record<string, unknown>
     if (typeof json.grant === 'string') rememberGrant(json.grant)
@@ -128,6 +160,20 @@ async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promi
     if (r.status === 401 && json.code === 'stepup-required') forgetGrant()
     return { status: r.status, json }
   } catch { return null }
+}
+
+async function call(method: 'GET' | 'POST', path: string, body?: unknown, opts: { password?: string } = {}): Promise<{ status: number; json: Record<string, unknown> } | null> {
+  // Every POST is JSON, even an empty one: the server refuses a vault POST of any other type (a
+  // cross-site page could send text/plain without a preflight — review M1).
+  const sent = method === 'POST' ? (body ?? {}) : body
+  let r = await send(method, path, sent, opts.password)
+  // The server wants the vault password: ask the person (at most three times) and send it again.
+  for (let i = 0; i < 3 && method === 'POST' && _askPassword && wantsVaultPassword(r); i++) {
+    const pw = await _askPassword({ retry: r!.json.code === 'password-wrong', sentence: String(r!.json.sentence ?? '') })
+    if (pw === null) break
+    r = await send(method, path, sent, pw)
+  }
+  return r
 }
 
 const reply = <T,>(r: { status: number; json: Record<string, unknown> } | null): Reply<T> => {
@@ -154,10 +200,15 @@ export async function loadVault(): Promise<LoadResult> {
   return r.status === 200 && typeof r.json.state === 'string' ? { kind: 'view', view: r.json as unknown as VaultView } : { kind: 'failed' }
 }
 
-export const stepUp = (code: string) => call('POST', '/api/vault/stepup', { code }).then(r => reply<{ grant: string }>(r))
-export const lockNow = (code?: string) => call('POST', '/api/vault/lock', code ? { code } : {}).then(r => reply(r))
-/** Phase 1: raises the gesture IN THE SERVICE. `pending-stepup` = a code is owed (§2.2). */
-export const unlockGesture = () => call('POST', '/api/vault/unlock', _unlockFor ? { for: _unlockFor } : {}).then(r => reply<{ state: string }>(r))
+/** The 5-minute 'read' grant, earned by the person's proof (a gesture, or the vault password via the prompt). */
+export const stepUp = () => call('POST', '/api/vault/stepup', {}).then(r => reply<{ grant: string }>(r))
+export const lockNow = () => call('POST', '/api/vault/lock', {}).then(r => reply(r))
+/**
+ * The unlock: the SERVICE raises the gesture (Touch ID / the Mac password, Windows Hello, a key). A vault
+ * that confirms with its own password is opened with `password` (typed inline on the unlock), or asks
+ * for it through the prompt. There is no second step: no code is owed after it (COFRE.DESBLOQUEIO).
+ */
+export const unlockGesture = (password?: string) => call('POST', '/api/vault/unlock', _unlockFor ? { for: _unlockFor } : {}, password !== undefined ? { password } : {}).then(r => reply<{ state: string }>(r))
 export interface VaultUseRequest { id: string; sessionTitle: string; harness: string; name: string; field: string; command: string | null; flags: string[]; count: number; expiresAt: number }
 export const pendingVaultUseRequests = () => vaultGet<{ requests: VaultUseRequest[] }>('/api/vault/personal/use-requests')
 const onThisComputer = (): boolean => { try { return ['localhost', '127.0.0.1', '[::1]', '::1'].includes(window.location.hostname) } catch { return true } }
@@ -180,40 +231,22 @@ export async function decideVaultUse(id: string, approve: boolean, phone: (actio
 }
 /** Create the vault from the page (the same code path as `agentop vault init`). `passphrase` only when no keychain answered. */
 export const createVault = (passphrase?: string) => call('POST', '/api/vault/init', passphrase ? { passphrase } : {}).then(r => reply<{ existed?: boolean; said?: string }>(r))
-export const unlockCode = (code: string) => call('POST', '/api/vault/unlock/code', { code }).then(r => reply(r))
 /** Which proof each kind of action asks: gated by the CURRENT 'settings' choice (the server's `set-auth-policy` row). */
-export const setAuthPolicy = (policy: Partial<Record<ActionKind, ProofChoice>>, code?: string) => call('POST', '/api/vault/auth-policy', { policy, ...(code ? { code } : {}) }).then(r => reply(r))
-/** Changing what an unlock asks: the code AND the gesture, fresh (the server's `set-unlock-policy` row). */
-export const setUnlockPolicy = (mode: UnlockMode, hours: number, code?: string) => call('POST', '/api/vault/unlock-policy', { mode, hours, ...(code ? { code } : {}) }).then(r => reply(r))
-/** PURE. The hours as typed: whole, 1–24, else null. */
-export function parseUnlockHours(s: string): number | null {
-  const t = s.trim()
-  if (!/^\d{1,2}$/.test(t)) return null
-  const n = Number(t)
-  return n >= UNLOCK_HOURS_MIN && n <= UNLOCK_HOURS_MAX ? n : null
-}
+export const setAuthPolicy = (policy: Partial<Record<ActionKind, ProofChoice>>) => call('POST', '/api/vault/auth-policy', { policy }).then(r => reply(r))
 /**
- * PURE. The words for step 2 of "how your vault works" — the CURRENT unlock mode, when presence and
- * the authenticator are both on (otherwise the old three answers stand).
+ * PURE. The words for step 2 of "how your vault works": the vault's own proof once one is chosen
+ * (Touch ID / the Mac password, Windows Hello, a key, the vault password), else "nothing yet".
  */
-export function howStep2(v: Pick<VaultView, 'authenticator' | 'presence' | 'unlockPolicy'>): { key: 'how2_both' | 'how2_code' | 'how2_nothing' | 'how2_always' | 'how2_helloOnly' | 'how2_daily'; hours?: number } {
-  const how = howConfirms(v)
-  if (how !== 'both' || !v.authenticator || !v.presence) return { key: how === 'both' ? 'how2_both' : how === 'code' ? 'how2_code' : 'how2_nothing' }
-  const p = v.unlockPolicy ?? { mode: 'daily' as const, hours: 12 }
-  if (p.mode === 'always') return { key: 'how2_always' }
-  if (p.mode === 'hello-only') return { key: 'how2_helloOnly' }
-  return { key: 'how2_daily', hours: p.hours }
+export function howStep2(v: Pick<VaultView, 'presence'>): { key: 'how2_proof' | 'how2_nothing'; hours?: number } {
+  return { key: v.presence ? 'how2_proof' : 'how2_nothing' }
 }
-export const setAutoLock = (minutes: number, code?: string) => call('POST', '/api/vault/auto-lock', { minutes, ...(code ? { code } : {}) }).then(r => reply(r))
+export const setAutoLock = (minutes: number) => call('POST', '/api/vault/auto-lock', { minutes }).then(r => reply(r))
 export const armHeartbeat = () => call('POST', '/api/vault/activity/arm', { gesture: true })
-export const setConfirmEachUse = (enabled: boolean, code?: string) => call('POST', '/api/vault/confirm-each-use', { enabled, ...(code ? { code } : {}) }).then(r => reply(r))
+export const setConfirmEachUse = (enabled: boolean) => call('POST', '/api/vault/confirm-each-use', { enabled }).then(r => reply(r))
 export const heartbeat = () => call('POST', '/api/vault/activity', {})
 
 /** The wizard's first step: spend the setup code BEFORE any gesture; the proof stands for the rest of this wizard. */
 export const setupCodeAccept = (setupCode: string) => call('POST', '/api/vault/setup-code', { setupCode }).then(r => reply(r))
-/** `setupCode`: the one-time code `agentop vault setup-code` prints — a page's FIRST enrolment needs it (review S2). */
-export const authenticatorBegin = (code?: string, setupCode?: string) => call('POST', '/api/vault/authenticator/begin', { ...(code ? { code } : {}), ...(setupCode ? { setupCode } : {}) }).then(r => reply<{ uri: string; secret: string }>(r))
-export const authenticatorConfirm = (code: string) => call('POST', '/api/vault/authenticator/confirm', { code }).then(r => reply<{ grant: string }>(r))
 export interface GestureProgress { kind: string; done: number; total: number }
 /** Polled while a probe / enrolment request is in flight. `null` = nothing in flight for this session. */
 export const presenceProgress = () => call('GET', '/api/vault/presence/progress').then(r => reply<{ progress: GestureProgress | null }>(r))
@@ -222,12 +255,17 @@ export function gestureStep(p: GestureProgress | null): { i: number; n: number }
   if (!p || p.total <= 0) return null
   return { i: Math.min(p.total, p.done + 1), n: p.total }
 }
-export const presenceProbe = (protector: 'hello' | 'fido2', code?: string) => call('POST', '/api/vault/presence/probe', { protector, ...(code ? { code } : {}) }).then(r => reply(r))
-export const recoveryBegin = (code?: string, setupCode?: string) => call('POST', '/api/vault/recovery/begin', { ...(code ? { code } : {}), ...(setupCode ? { setupCode } : {}) }).then(r => reply<{ words: string[]; positions: number[] }>(r))
+export const presenceProbe = (protector: UnlockMethodId, setupCode?: string) => call('POST', '/api/vault/presence/probe', { protector, ...(setupCode ? { setupCode } : {}) }).then(r => reply(r))
+export const recoveryBegin = (setupCode?: string) => call('POST', '/api/vault/recovery/begin', { ...(setupCode ? { setupCode } : {}) }).then(r => reply<{ words: string[]; positions: number[] }>(r))
 export const recoveryConfirm = (typed: string[]) => call('POST', '/api/vault/recovery/confirm', { typed }).then(r => reply(r))
-/** `replaceRecovery`: no words at hand — make NEW words after presence (the old ones stop working). */
-export const presenceEnrol = (protector: 'hello' | 'fido2', code?: string, replaceRecovery?: boolean) => call('POST', '/api/vault/presence/enroll', { protector, ...(code ? { code } : {}), ...(replaceRecovery ? { replaceRecovery: true } : {}) }).then(r => reply<{ removed: string[]; recoveryOwed: boolean }>(r))
-export const presenceDisable = (code?: string, words?: string) => call('POST', '/api/vault/presence/disable', { ...(code ? { code } : {}), ...(words ? { words } : {}) }).then(r => reply(r))
+/**
+ * Set up a way to confirm. `password`: the NEW vault password (the server checks the same rules), sent
+ * in its own header for this one request. `replaceRecovery`: no words at hand — make NEW words after it.
+ */
+export const presenceEnrol = (protector: UnlockMethodId, opts: { password?: string; replaceRecovery?: boolean; setupCode?: string } = {}) =>
+  call('POST', '/api/vault/presence/enroll', { protector, ...(opts.replaceRecovery ? { replaceRecovery: true } : {}), ...(opts.setupCode ? { setupCode: opts.setupCode } : {}) }, opts.password !== undefined ? { password: opts.password } : {})
+    .then(r => reply<{ removed: string[]; recoveryOwed: boolean }>(r))
+export const presenceDisable = (words?: string) => call('POST', '/api/vault/presence/disable', { ...(words ? { words } : {}) }).then(r => reply(r))
 /** v2.98.1: ONE presence gesture on a loopback page stands for the setup code of a FIRST enrolment. */
 export const localProof = () => call('POST', '/api/vault/local-proof').then(r => reply<{ kind: string | null }>(r))
 /** v2.98.1: recovery with the 24 words, from a loopback page only. The caller drops the words right after. */
@@ -237,9 +275,9 @@ export const recoverWithWords = (words: string) => call('POST', '/api/vault/reco
 export function splitWords(s: string): string[] {
   return s.toLowerCase().replace(/\d+[.)]/g, ' ').split(/[\s,;]+/).filter(Boolean).slice(0, 24)
 }
-/** PURE. The kinds a vault with presence ON may still ADD: offered here, and not already enrolled. */
-export function addableKinds(v: Pick<VaultView, 'presenceAvailable' | 'wrappers'>): ('hello' | 'fido2')[] {
-  return (['hello', 'fido2'] as const).filter(k => v.presenceAvailable.includes(k) && !v.wrappers.includes(k))
+/** PURE. The ways a vault that already confirms may still ADD: offered here, and not already set up. */
+export function addableKinds(v: Pick<VaultView, 'presenceAvailable' | 'wrappers'>): UnlockMethodId[] {
+  return (['touchid', 'hello', 'password', 'fido2'] as const).filter(k => v.presenceAvailable.includes(k) && !v.wrappers.includes(k))
 }
 export interface Credential { type: string; label: string; createdAt: string }
 export const credentials = () => call('GET', '/api/vault/credentials').then(r => reply<{ credentials: Credential[]; recoveryCreatedAt: string | null; requirePresence: boolean }>(r))
@@ -267,42 +305,39 @@ export function remainingMs(reportedInMs: number | null, reportedAt: number, now
 export function minutesLeft(ms: number): number { return Math.max(0, Math.ceil(ms / 60_000)) }
 
 /**
- * PURE. Which of the two proofs an action asks of THIS vault right now: the code only once an
- * authenticator is enrolled, the gesture only once a presence wrapper exists (the server's own rule —
- * `requireVaultStepUp`). Used to draw the icons and to decide whether to ask for a code up front.
+ * PURE. Whether an action asks the person's proof on THIS vault right now: only once a way to confirm
+ * exists (the server's own rule — `requireVaultStepUp`). COFRE.DESBLOQUEIO: `code` is always false — no
+ * row asks a code any more; the field is kept so an older server's table still reads.
  */
-export function gateFor(view: Pick<VaultView, 'gates' | 'authenticator' | 'presence'>, action: string): { code: boolean; gesture: boolean; grant: boolean } {
+export function gateFor(view: Pick<VaultView, 'gates' | 'presence'>, action: string): { code: boolean; gesture: boolean; grant: boolean } {
   const row = view.gates[action]
   if (!row) return { code: false, gesture: false, grant: false }
-  return { code: row.code && view.authenticator !== null, gesture: row.gesture && view.presence, grant: row.grant }
-}
-/** PURE. Does the request need a typed code, or can a live grant stand in for it? */
-export function needsTypedCode(g: { code: boolean; grant: boolean }, grantIsAlive: boolean): boolean {
-  return g.code && !(g.grant && grantIsAlive)
+  return { code: false, gesture: (row.gesture || row.code) && view.presence, grant: row.grant }
 }
 
-export type WizardStep = 'authenticator' | 'recovery' | 'presence'
 /**
- * What the wizard runs: the setup code leads whenever the server says a page's first enrolment owes
- * it, then the device check whenever a fresh enrolment will end in presence.
+ * COFRE.DESBLOQUEIO (owner, 2026-11-07): two steps protect the vault — HOW it confirms it is you
+ * (`presence`: Touch ID / the Mac password, Windows Hello, a vault password, or a security key), then the
+ * 24 words. There is no app-code step any more.
  */
-export type WizardPhaseStep = 'setup' | 'local' | 'probe' | WizardStep
+export type WizardStep = 'recovery' | 'presence'
+/** What the wizard runs: the first-enrolment proof leads whenever the server says a page owes it. */
+export type WizardPhaseStep = 'setup' | 'local' | WizardStep
 
 /**
- * PURE. The whole §7.3 flow for what is missing: setup code → probe → authenticator → presence →
- * recovery. The setup code is FIRST, before any gesture (owner, 2026-10-02: it used to surface only
- * after the Hello dialogs, as a red failure on the authenticator step).
+ * PURE. The whole flow for what is missing: [proof] → presence → recovery. The proof is FIRST, before
+ * any gesture (owner, 2026-10-02: it used to surface only after the dialogs, as a red failure).
  */
 export function wizardPlan(missing: readonly WizardStep[], setupOwed = false, localProof = false): WizardPhaseStep[] {
-  const steps: WizardPhaseStep[] = missing.includes('presence') && missing.includes('authenticator') ? ['probe', ...missing] : [...missing]
-  // v2.98.1: on a page ON this computer with a presence device, ONE gesture replaces the setup code.
+  const steps: WizardPhaseStep[] = [...missing]
+  // v2.98.1: on a page ON this computer with a gesture method (Touch ID, Hello), ONE gesture replaces the setup code.
   return setupOwed && steps.length > 0 ? [localProof ? 'local' : 'setup', ...steps] : steps
 }
 
 /** PURE. After a page recovery: the re-enrolment the server still owes, in the wizard's safe order. */
 export function recoverySteps(todo: readonly string[] | null | undefined): WizardStep[] {
   if (!todo) return []
-  return (['authenticator', 'presence', 'recovery'] as const).filter(s => todo.includes(s))
+  return (['presence', 'recovery'] as const).filter(s => todo.includes(s))
 }
 
 /** PURE. What an action will ask, as words for a tooltip — from the gate row, narrowed by this vault. */
@@ -311,12 +346,12 @@ export function askWords(g: { code: boolean; gesture: boolean }, words: { code: 
   const parts = [g.code ? words.code : null, g.gesture ? words.presence : null].filter(Boolean).join(words.and)
   return words.asks.replace('{what}', parts)
 }
-/** PURE. What an "ultra secure" setup still lacks, in the one safe order (presence last — it retires the silent wrapper). */
-export function missingSteps(v: Pick<VaultView, 'authenticator' | 'recoveryCreatedAt' | 'presence' | 'presenceAvailable'>): WizardStep[] {
+/** PURE. What the protected setup still lacks, in the one safe order (presence first — it retires the silent wrapper). */
+export function missingSteps(v: Pick<VaultView, 'recoveryCreatedAt' | 'presence' | 'presenceAvailable'>): WizardStep[] {
   const out: WizardStep[] = []
   // Leader decision 2: presence BEFORE the recovery key (presence replaces the data key; the words made
-  // last wrap the final one and are never kept in memory across steps).
-  if (!v.authenticator) out.push('authenticator')
+  // last wrap the final one and are never kept in memory across steps). The vault password is offered
+  // on every machine, so presence is always available.
   if (!v.presence && v.presenceAvailable.length > 0) out.push('presence')
   if (!v.recoveryCreatedAt) out.push('recovery')
   return out
@@ -329,12 +364,9 @@ export function wordRows(words: readonly string[], perRow = 4): { n: number; wor
   return rows
 }
 
-/** PURE. Digits only, at most 6 — what a code field holds. */
-export function cleanCode(s: string): string { return s.replace(/\D/g, '').slice(0, 6) }
 /** The 8-digit setup code (`agentop vault setup-code`), spaces and dashes ignored. */
 export function cleanSetupCode(s: string): string { return s.replace(/\D/g, '').slice(0, 8) }
 export const setupCodeComplete = (s: string): boolean => /^\d{8}$/.test(s)
-export const codeComplete = (s: string): boolean => /^\d{6}$/.test(s)
 
 // ── what a glance should say (VAULT.UX2) ─────────────────────────────────────────────────────
 
@@ -342,7 +374,7 @@ export type Tone = 'ok' | 'warn' | 'rec' | 'off'
 export type BadgeKey =
   | 'badge_configured' | 'badge_missing' | 'badge_recommended' | 'badge_on' | 'badge_na' | 'badge_attention'
   | 'badge_active' | 'badge_limited' | 'badge_minutes' | 'badge_sealed' | 'badge_pending'
-export type SectionId = 'authenticator' | 'presence' | 'recovery' | 'autolock' | 'memory' | 'secrets'
+export type SectionId = 'presence' | 'recovery' | 'autolock' | 'memory' | 'secrets'
 
 /**
  * PURE. The badge each section wears: a tone (colour AND a glyph in the words, never colour alone) and
@@ -350,16 +382,14 @@ export type SectionId = 'authenticator' | 'presence' | 'recovery' | 'autolock' |
  * have is "not available here", which is a fact and not a to-do.
  */
 export function sectionBadge(
-  v: Pick<VaultView, 'authenticator' | 'presence' | 'presenceAvailable' | 'recoveryCreatedAt' | 'hardening'>,
+  v: Pick<VaultView, 'presence' | 'presenceAvailable' | 'recoveryCreatedAt' | 'hardening'>,
   id: SectionId, counts: { sealed: number; pending: number } = { sealed: 0, pending: 0 },
 ): { tone: Tone; key: BadgeKey } {
   switch (id) {
-    case 'authenticator':
-      if (!v.authenticator) return { tone: 'warn', key: 'badge_missing' }
-      return v.authenticator.frozen || v.authenticator.pausedUntil ? { tone: 'warn', key: 'badge_attention' } : { tone: 'ok', key: 'badge_configured' }
     case 'presence':
+      // COFRE.DESBLOQUEIO: the way to confirm is not optional any more — it is what protects the vault.
       if (v.presence) return { tone: 'ok', key: 'badge_on' }
-      return v.presenceAvailable.length === 0 ? { tone: 'off', key: 'badge_na' } : { tone: 'rec', key: 'badge_recommended' }
+      return v.presenceAvailable.length === 0 ? { tone: 'off', key: 'badge_na' } : { tone: 'warn', key: 'badge_missing' }
     case 'recovery': return v.recoveryCreatedAt ? { tone: 'ok', key: 'badge_configured' } : { tone: 'warn', key: 'badge_missing' }
     case 'autolock': return { tone: 'ok', key: 'badge_minutes' }
     case 'memory': {
@@ -377,9 +407,9 @@ export function howNow(v: Pick<VaultView, 'state' | 'pendingStepup'>): 0 | 1 | 2
   return v.state === 'open' ? 2 : v.pendingStepup ? 1 : 0
 }
 
-/** PURE. What step 2 asks of THIS vault: nothing yet, the code alone, or the gesture and the code. */
-export function howConfirms(v: Pick<VaultView, 'authenticator' | 'presence'>): 'nothing' | 'code' | 'both' {
-  return v.presence && v.authenticator ? 'both' : v.authenticator ? 'code' : v.presence ? 'both' : 'nothing'
+/** PURE. What step 2 asks of THIS vault: nothing yet, or the person's proof (one gesture or the vault password). */
+export function howConfirms(v: Pick<VaultView, 'presence'>): 'nothing' | 'proof' {
+  return v.presence ? 'proof' : 'nothing'
 }
 
 /**
@@ -391,6 +421,6 @@ export function primarySection(missing: readonly WizardStep[], bannerShowing: bo
   return bannerShowing ? null : (missing[0] ?? null)
 }
 
-/** One idle window after a fresh Hello / phone passkey, never an authenticator code. */
+/** One idle window after a fresh confirmation here / the phone's passkey there — never a code. */
 export const extendVaultOpen = (gestureToken?: string) => vaultPost<{ autoLockInMs: number }>('/api/vault/extend', gestureToken ? { gestureToken } : {})
-export const lockVaultFromCard = (code?: string) => lockNow(code)
+export const lockVaultFromCard = () => lockNow()

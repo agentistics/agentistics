@@ -30,7 +30,7 @@ import type { ColumnSorts } from './columnSort'
  * A column of cards is read top to bottom; a key nobody can see on the card (attempts, comments)
  * would order it by something invisible, and the reader would conclude the board was shuffled.
  */
-const BOARD_SORTS: Array<{ key: SortKey; label: string }> = [
+export const BOARD_SORTS: Array<{ key: SortKey; label: string }> = [
   { key: 'manual', label: 'Hand order' },
   { key: 'priority', label: 'Priority' },
   { key: 'due', label: 'Due date' },

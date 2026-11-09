@@ -10,6 +10,7 @@
  * would report each as an `unregistered` fleet row. See `tmux-cli.ts`'s note on `SHELL_SOCKET`.
  */
 
+import { shellTmux as tmux } from './shell-tmux'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import {
@@ -18,21 +19,6 @@ import {
 } from './tmux-cli'
 import { planShellOpen, type ShellRefusal } from './shell-spec'
 import { readShells, writeShells, type ShellRecord } from './shell-store'
-
-async function tmux(args: string[]): Promise<{ code: number; out: string; err: string }> {
-  try {
-    const p = Bun.spawn(['tmux', ...args], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' })
-    const [out, err] = await Promise.all([
-      new Response(p.stdout).text(),
-      new Response(p.stderr).text(),
-    ])
-    return { code: await p.exited, out, err }
-  } catch {
-    // tmux is not on PATH. 127 is what a shell reports for that, and callers consult
-    // `tmuxAvailable` — no throw, so a missing tmux never crashes one.
-    return { code: 127, out: '', err: '' }
-  }
-}
 
 async function tmuxAvailable(): Promise<boolean> {
   return (await tmux(['-V'])).code === 0
@@ -83,20 +69,30 @@ export async function openShell(o: {
   sessionId: string
   cwd: string | undefined
   now?: number
+  timing?: (stage: string, ms: number) => void
 }): Promise<{ ok: true; shell: ShellRecord } | { ok: false; reason: ShellRefusal }> {
   const now = o.now ?? Date.now()
-  const open = await listShells()
+  const timed = async <T>(stage: string, work: () => Promise<T>): Promise<T> => {
+    const started = performance.now()
+    try { return await work() } finally { o.timing?.(stage, performance.now() - started) }
+  }
+  const [open, cwdExists, available] = await Promise.all([
+    timed('list', listShells),
+    timed('cwd', async () => o.cwd ? dirExists(o.cwd) : false),
+    timed('tmux', tmuxAvailable),
+  ])
   const plan = planShellOpen({
     cwd: o.cwd,
-    cwdExists: o.cwd ? await dirExists(o.cwd) : false,
-    tmuxAvailable: await tmuxAvailable(),
+    cwdExists,
+    tmuxAvailable: available,
     openCount: open.length,
     shell: process.env.SHELL,
+    platform: process.platform,
   })
   if (!plan.ok) return plan
 
   const id = randomUUID()
-  const r = await tmux(newSessionArgs({ id, cwd: plan.cwd, argv: plan.argv, socket: SHELL_SOCKET, path: process.env.PATH }))
+  const r = await timed('spawn', () => tmux(newSessionArgs({ id, cwd: plan.cwd, argv: plan.argv, socket: SHELL_SOCKET, path: process.env.PATH })))
   // tmux would not start it. `no-tmux` is the honest code: nothing the caller named went wrong with
   // the request, and the alternative is inventing a reason for a failure we cannot attribute.
   if (r.code !== 0) {
@@ -107,7 +103,7 @@ export async function openShell(o: {
   const shell: ShellRecord = {
     id, sessionId: o.sessionId, cwd: plan.cwd, createdMs: now, lastViewedMs: now,
   }
-  await writeShells([...open, shell])
+  await timed('persist', () => writeShells([...open, shell]))
   return { ok: true, shell }
 }
 

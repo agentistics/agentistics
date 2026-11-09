@@ -742,10 +742,22 @@ textarea,
 
 /* The live marker's dot. It reports something happening NOW, and a static dot beside a static
    line is a label. Opacity only — a scaling dot moves the text beside it. */
+/* The bar along the foot of a transient notice (`ActionNotice`): full width, empty at the end of its 2 s. */
+/* A transient notice sits on the BOTTOM edge of the screen, above the phone's floating nav pill. */
+.ag-action-toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 1300; overflow: hidden;
+  width: min(420px, calc(100vw / var(--ui-zoom, 1) - 24px)); box-sizing: border-box;
+  border: 1px solid var(--border); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+@media (max-width: 767px) { .ag-action-toast { bottom: calc(var(--mobile-nav-h) + 12px); } }
+@keyframes ag-notice-shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @keyframes ag-hint-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 .ag-hint-pulse { animation: ag-hint-pulse 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .ag-hint-pulse { animation: none; } }
 @media (prefers-reduced-motion: reduce) { .ag-working-spin { animation: none; } }
+/* The reasoning line's brain, while the model is still reasoning (the seconds beside it keep ticking under reduced motion). */
+.ag-reasoning-pulse { animation: ag-hint-pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .ag-reasoning-pulse { animation: none; } }
 
 /* The phone's session panel (`Drawer side="left"`) holds cards built for a 344px popover. Inside
    one of its sections they take the section's width instead — an inline width only an !important
@@ -1501,3 +1513,19 @@ tr:focus-within .ag-row-actions,
     content: ''; position: fixed; inset: 0; z-index: -1; background: var(--ag-scrim); pointer-events: none;
   }
 }
+
+/* Shared pretty scrollbar (popup of plan usage; the Live board's horizontal scroll reuses it). */
+/* Standard properties only where ::-webkit-scrollbar is unsupported (Firefox): Chromium >=121 and WebKit ignore the pseudo-elements once they are set. */
+@supports not selector(::-webkit-scrollbar) {
+  .ag-scroll { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--anthropic-orange) 60%, transparent) color-mix(in srgb, var(--text-primary) 6%, transparent); }
+}
+.ag-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.ag-scroll::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.ag-scroll::-webkit-scrollbar-track { background: color-mix(in srgb, var(--text-primary) 6%, transparent); border-radius: 999px; }
+.ag-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--anthropic-orange) 60%, transparent); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+.ag-scroll::-webkit-scrollbar-thumb:hover { background: var(--anthropic-orange); background-clip: padding-box; border: 2px solid transparent; }
+
+/* Live shortcut: a green dot that breathes while an agent works. Reduced motion renders it still (no class). */
+@keyframes ag-live-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(62,207,142,.55); } 50% { box-shadow: 0 0 0 5px rgba(62,207,142,0); } }
+.ag-live-pulse { animation: ag-live-pulse 1.8s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) { .ag-live-pulse { animation: none; } }

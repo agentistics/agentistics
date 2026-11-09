@@ -5,13 +5,13 @@
  * policy on its own; this table only draws `view.authPolicy` and sends the draft through the gate
  * dialog (`GateDialog` kind 'auth-policy'), whose proof is the CURRENT 'settings' row.
  *
- * "Open the vault" leads the table but is not a choice of its own: the unlock policy already has the
- * three honest modes for an unlock, so its row states the mode and opens that editor.
+ * "Open the vault" leads the table but is not a choice: an unlock always asks the vault's own proof.
+ * COFRE.DESBLOQUEIO (2026-11-07): the choices are that proof or — for a read — nothing; no code.
  */
 import { useEffect, useMemo, useState } from 'react'
 import type React from 'react'
 import { Select } from '../../pages/settings/primitives'
-import { Gate, presWordOf, unlockModeKey } from './VaultFlows'
+import { Gate, presWordOf } from './VaultFlows'
 import { vt, vtf, type VaultKey } from '../../lib/vaultText'
 import { authPolicyDraft, authPolicyDiff, type ActionKind, type AuthPolicyRow, type ProofChoice, type VaultView } from '../../lib/vaultApi'
 
@@ -19,11 +19,9 @@ type Lang = 'en' | 'pt'
 const kindKey = (k: ActionKind) => `ap_k_${k.replace(/-/g, '_')}` as VaultKey
 const choiceKey = (c: ProofChoice) => `ap_c_${c}` as VaultKey
 
-export function AuthPolicyTable({ view, lang, isMobile, gate, btn, onSave, onOpenUnlock }: {
+export function AuthPolicyTable({ view, lang, isMobile, gate, btn, onSave }: {
   view: VaultView; lang: Lang; isMobile: boolean; gate: { code: boolean; gesture: boolean }; btn: React.CSSProperties
   onSave: (draft: Partial<Record<ActionKind, ProofChoice>>) => void
-  /** Opens the unlock policy's own editor (the "Open the vault" row). */
-  onOpenUnlock?: () => void
 }) {
   const rows: AuthPolicyRow[] = view.authPolicy?.rows ?? []
   const pres = presWordOf(view, lang)
@@ -33,8 +31,7 @@ export function AuthPolicyTable({ view, lang, isMobile, gate, btn, onSave, onOpe
   const changed = authPolicyDiff(rows, draft) > 0
   const presCap = pres.charAt(0).toUpperCase() + pres.slice(1)
   const label = (c: ProofChoice) => vt(choiceKey(c), lang).replace(/\{presence\}/g, c === 'gesture' ? presCap : pres)
-  const unlock = view.unlockPolicy
-  const missing = view.authenticator === null || !view.presence
+  const missing = !view.presence
 
   const cell: React.CSSProperties = { padding: isMobile ? '12px 0' : '10px 12px', borderTop: '1px solid var(--border)', minWidth: 0, display: 'flex', alignItems: 'center' }
   const name = (title: string, desc: string, tag?: React.ReactNode) => (
@@ -64,12 +61,11 @@ export function AuthPolicyTable({ view, lang, isMobile, gate, btn, onSave, onOpe
             <div role="columnheader" style={{ ...cell, borderTop: 'none', fontSize: 11.5, color: 'var(--text-tertiary)', paddingTop: 0 }}>{vt('ap_col_proof', lang)}</div>
           </div>
         )}
-        {unlock && view.presence && (
+        {view.presence && (
           <div role="row" style={{ display: 'contents' }} data-kind="open">
             <div role="cell" style={{ ...cell, ...(isMobile ? { paddingBottom: 6 } : null) }}>{name(vt('ap_k_open', lang), vtf('ap_k_open_d', lang, { presence: pres }), criticalTag)}</div>
-            <div role="cell" style={{ ...cell, ...(isMobile ? { borderTop: 'none', paddingTop: 0 } : null), display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{vt(unlockModeKey(unlock.mode), lang).replace('{presence}', pres)}</span>
-              {onOpenUnlock && <button type="button" style={{ ...btn, minHeight: isMobile ? 44 : undefined }} onClick={onOpenUnlock}>{vt('ap_k_open_btn', lang)}</button>}
+            <div role="cell" style={{ ...cell, ...(isMobile ? { borderTop: 'none', paddingTop: 0 } : null) }}>
+              <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{presCap}</span>
             </div>
           </div>
         )}
@@ -88,7 +84,7 @@ export function AuthPolicyTable({ view, lang, isMobile, gate, btn, onSave, onOpe
       </div>
       {missing && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5, marginTop: 10 }}>{vt('ap_missing', lang)}</div>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
-        <button type="submit" style={btn} disabled={!changed}>{vt('ap_save', lang)} <Gate code={gate.code} gesture={gate.gesture} lang={lang} /></button>
+        <button type="submit" style={btn} disabled={!changed}>{vt('ap_save', lang)} <Gate gesture={gate.gesture} lang={lang} /></button>
         {authPolicyDiff(rows.map(r => ({ ...r, choice: r.default })), draft) > 0 && (
           <button type="button" style={{ ...btn, ...linkBtn }} onClick={() => setDraft(Object.fromEntries(rows.map(r => [r.kind, r.default])) as Partial<Record<ActionKind, ProofChoice>>)}>
             {vt('ap_reset', lang)}

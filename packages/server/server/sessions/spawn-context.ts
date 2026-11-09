@@ -216,7 +216,7 @@ export async function writeContextFile(plan: SpawnPlan): Promise<boolean> {
 }
 
 /**
- * AWAY MODE for the briefing of one session: the global state while it is active, else the
+ * AUTONOMOUS MODE for the briefing of one session: the global state while it is active, else the
  * session's own flag (`sessionAwayState`). Best effort: an unreadable preferences file costs the
  * global half, never the spawn — a session-only away still briefs.
  */
@@ -229,6 +229,24 @@ export async function resolveContextAway(sessionAway?: boolean): Promise<Pick<Co
   } catch { /* the session flag alone */ }
   const away = sessionAwayState(global, sessionAway, Date.now())
   return away ? { away } : {}
+}
+
+/**
+ * AUTONOMOUS MODE at spawn: the approval mode a new session starts in. `away` is the session's own
+ * resolved flag; the global switch is read here. Explicit `mode` wins; a harness whose TUI has no
+ * no-questions flag stays on its default (`tuiStartModes`).
+ */
+export async function resolveAutonomousMode<M extends string>(
+  harness: import('@agentistics/core').HarnessId,
+  explicit: M | undefined,
+  away: boolean,
+  inherited?: M,
+): Promise<{ mode: M | 'no-questions' | undefined; fromAutonomous: boolean }> {
+  const { autonomousSpawnMode } = await import('@agentistics/core')
+  if (explicit) return autonomousSpawnMode(explicit, false, false, inherited)
+  const { tuiStartModes } = await import('./spawn-spec')
+  const on = !!(await resolveContextAway(away)).away
+  return autonomousSpawnMode<M>(explicit, on, tuiStartModes(harness).includes('no-questions'), inherited)
 }
 
 /**

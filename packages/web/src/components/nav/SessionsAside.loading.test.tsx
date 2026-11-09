@@ -71,15 +71,15 @@ afterAll(async () => {
 
 
 
-async function paint(props: { loading: boolean; closedTotal?: number }) {
+async function paint(props: { loading: boolean; closedTotal?: number; historyLoading?: boolean; tab?: 'active' | 'ended' }) {
   await loadSharedPrefs()
-  act(() => writePrefs({ leadersOnly: false, tab: 'active', foldedTeams: [] }))
+  act(() => writePrefs({ leadersOnly: false, tab: props.tab ?? 'active', foldedTeams: [] }))
   const host = document.createElement('div')
   document.body.appendChild(host)
   const root: Root = createRoot(host)
   act(() => root.render(
     <MemoryRouter><SessionsAside lang="pt" rows={[]} filters={filters} activeOnly={false}
-      loading={props.loading} {...(props.closedTotal ? { closedTotal: props.closedTotal } : {})}
+      loading={props.loading} historyLoading={props.historyLoading} {...(props.closedTotal ? { closedTotal: props.closedTotal } : {})}
       unsupported={false} finishedTasks={[]} hideNew rowsById={new Map()} act={async () => ({ ok: true, message: '' })} />
     </MemoryRouter>,
   ))
@@ -101,4 +101,31 @@ test('live view empty but the machine holds ended conversations: never "no sessi
     expect(m.host.textContent).toContain('85 conversas estão em Encerradas')
     expect(m.host.textContent).not.toContain('Nenhuma sessão nesta máquina ainda')
   } finally { await m.done() }
+})
+
+
+// G (owner, 2026-11-06): the "rest of the history is still loading" caveat is NOT on the Sessions
+// list. It is a quick notice raised once when Encerradas is entered, and only if still loading.
+const loadingNotice = () => Array.from(document.body.querySelectorAll('[data-action-notice]')).find(el => el.textContent?.includes('Carregando o resto das sessões'))
+
+test('partial history says nothing on the active tab, and never claims that search found nothing', async () => {
+  const m = await paint({ loading: false, historyLoading: true })
+  try {
+    expect(m.host.textContent).not.toContain('Carregando o resto das sessões')
+    expect(loadingNotice()).toBeUndefined()
+    expect(m.host.textContent).not.toContain('Nenhuma sessão nesta máquina ainda')
+  } finally { await m.done() }
+})
+
+test('entering Encerradas while the history still loads raises ONE quick notice; loaded, nothing', async () => {
+  const m = await paint({ loading: false, historyLoading: true, tab: 'ended' })
+  try {
+    const notice = loadingNotice()
+    expect(notice).toBeDefined()
+    expect(notice!.hasAttribute('data-transient')).toBe(true) // the 2 s bottom toast, not a standing banner
+    expect(notice!.textContent).toContain('parciais')
+    expect(m.host.textContent).not.toContain('Carregando o resto das sessões')
+  } finally { await m.done() }
+  const loaded = await paint({ loading: false, historyLoading: false, tab: 'ended' })
+  try { expect(loadingNotice()).toBeUndefined() } finally { await loaded.done() }
 })

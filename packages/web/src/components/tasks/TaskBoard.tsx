@@ -15,7 +15,9 @@ import {
   PRIORITY, cardStyle, claimLeft, fmtInt, fmtTokens, liveStatusOrder, microLabel,
   numeric, pill, statusStyle, surface, type BoardStatus,
 } from './board'
-import type { LaneKey } from './boardPrefs'
+import { useBoardPref, type LaneKey } from './boardPrefs'
+import { resolveBoardPage } from './boardPaging'
+import { BoardPager } from './BoardPager'
 import { TaskProgressBar } from './TaskProgressBar'
 import { HarnessBadges } from './HarnessBadges'
 import { boardCopy, statusLabel } from './copy'
@@ -241,6 +243,8 @@ export interface BoardViewProps {
   columns?: readonly BoardStatus[]
   /** Hide columns with no card in any lane (a view choice; the picked columns are untouched). */
   hideEmpty?: boolean
+  /** Per-status totals while `rows` is only step one of the split load (see `TaskTableProps`). */
+  statusTotals?: Record<string, number>
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
   statuses: readonly TaskStatusDef[] | null
 }
@@ -272,6 +276,9 @@ export function BoardView(p: BoardViewProps) {
     return () => clearTimeout(t)
   }, [refused])
   const [over, setOver] = useState<{ lane: string; status: BoardStatus; index: number } | null>(null)
+  // Cards per page is ONE per-person choice; the page INDEX is per column (clamped when read).
+  const [pageSize, setPageSize] = useBoardPref('pageSize')
+  const [pages, setPages] = useState<Record<string, number>>({})
   const [nowMs, setNowMs] = useState(() => Date.now())
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 60_000)
@@ -312,8 +319,13 @@ export function BoardView(p: BoardViewProps) {
     }))
   }, [rows, p.lanes, p.sort, p.columnSort, p.columns, p.statuses])
   const hiddenCols = useMemo(
-    () => (p.hideEmpty ? emptyColumns(lanes, lanes.flatMap(l => l.columns.map(c => c.status))) : new Set<string>()),
-    [p.hideEmpty, lanes],
+    () => {
+      if (!p.hideEmpty) return new Set<string>()
+      const empty = emptyColumns(lanes, lanes.flatMap(l => l.columns.map(c => c.status)))
+      for (const st of [...empty]) if ((p.statusTotals?.[st] ?? 0) > 0) empty.delete(st)
+      return empty
+    },
+    [p.hideEmpty, lanes, p.statusTotals],
   )
 
   /** May a card be moved to a new POSITION in this column? Only under hand order — see `canReorderBy`. */
@@ -377,6 +389,8 @@ export function BoardView(p: BoardViewProps) {
               const over_ = limit !== undefined && col.rows.length > limit
               const isOverCol = over?.lane === lane.name && over.status === col.status
               const colSort = effectiveSort(p.sort, p.columnSort, col.status)
+              const pageKey = `${lane.name}\u0000${col.status}`
+              const pg = resolveBoardPage(col.rows.length, pageSize, pages[pageKey] ?? 0)
               const canMove = reorderable(col.status)
               const dragged = drag ? rows.find(r => r.task.id === drag) : undefined
               // The note is for a card that WOULD reorder here: one coming from another column is a
@@ -426,7 +440,7 @@ export function BoardView(p: BoardViewProps) {
                       isMobile={isMobile}
                     />
                     <span style={{ ...microLabel, fontSize: 11 }}>
-                      {col.rows.length}{limit !== undefined ? ` / ${limit}` : ''}
+                      {p.statusTotals?.[col.status] ?? col.rows.length}{limit !== undefined ? ` / ${limit}` : ''}
                     </span>
                     {over_ && (
                       // A WIP limit WARNS and never blocks: the limit is an agreement a team makes
@@ -478,7 +492,10 @@ export function BoardView(p: BoardViewProps) {
                         —
                       </div>
                     )
-                    : col.rows.map((r, i) => (
+                    : col.rows.slice(pg.start, pg.end).map((r, k) => {
+                      // `i` is the position in the WHOLE column: a drop index is never page-relative.
+                      const i = pg.start + k
+                      return (
                       <div
                         key={r.task.id}
                         data-task-card
@@ -516,7 +533,13 @@ export function BoardView(p: BoardViewProps) {
                           lang={p.lang}
                         />
                       </div>
-                    ))}
+                      )
+                    })}
+                  <BoardPager
+                    info={pg} pageSize={pageSize} lang={p.lang} compact
+                    onPage={n => setPages(cur => ({ ...cur, [pageKey]: n }))}
+                    onPageSize={n => { setPageSize(n); setPages({}) }}
+                  />
                 </section>
               )
             })}
@@ -548,6 +571,9 @@ export function MobileLane(p: {
     const t = setInterval(() => setNowMs(Date.now()), 60_000)
     return () => clearInterval(t)
   }, [])
+  const [pageSize, setPageSize] = useBoardPref('pageSize')
+  const [page, setPage] = useState(0)
+  useEffect(() => { setPage(0) }, [p.status])
   const list = useMemo(() => {
     if (p.status === null) return []
     return sortRows(
@@ -556,6 +582,7 @@ export function MobileLane(p: {
       { statusOrder: liveStatusOrder(p.statuses) },
     )
   }, [p.rows, p.status, p.sort, p.columnSort, p.statuses])
+  const pg = resolveBoardPage(list.length, pageSize, page)
   if (list.length === 0) {
     return (
       <div style={{
@@ -566,7 +593,7 @@ export function MobileLane(p: {
   }
   return (
     <div style={{ display: 'grid', gap: 10 }}>
-      {list.map(r => (
+      {list.slice(pg.start, pg.end).map(r => (
         <Card
           key={r.task.id}
           row={r}
@@ -577,6 +604,7 @@ export function MobileLane(p: {
           statuses={p.statuses}
         />
       ))}
+      <BoardPager info={pg} pageSize={pageSize} lang={lang} onPage={setPage} onPageSize={n => { setPageSize(n); setPage(0) }} />
     </div>
   )
 }

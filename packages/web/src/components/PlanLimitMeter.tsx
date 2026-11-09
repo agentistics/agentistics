@@ -8,16 +8,21 @@
  * A harness with no record draws NOTHING (the callers simply have no `PlanLimits` for it) — never a
  * zero bar: nothing observed is not nothing used.
  */
-import { effectiveWindow, windowKey, windowRenewed, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
+import { effectiveWindow, windowKey, windowRenewed, type AgentSchedule, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
 import { createPortal } from 'react-dom'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { CalendarClock, KeyRound } from 'lucide-react'
+import { AgentScheduleEditor, AgentUseBadge } from './AgentScheduleEditor'
+import { scheduleSummaryText, type AgentUseView } from '../lib/agentScheduleView'
 import { HARNESS_LABELS } from '../lib/harness'
 import { HarnessMark } from './sessions/HarnessMark'
 import {
-  currentUsedPct, forecastPhrase, LIMIT_WARN, limitTone, resetPhrase, shortWhen, SOURCE_LABEL, stalePhrase,
+  currentUsedPct, forecastPhrase, LIMIT_WARN, limitTone, resetPhrase, ringResetPhrase, shortWhen, SOURCE_LABEL, stalePhrase,
   updatedPhrase, warnForecast, windowLabel, windowShort, fmtWhen, limitLevel, limitLevelWord, subscriptionName, subscriptionRows, type RegisteredPlan,
 } from '../lib/planLimits'
 import { ToggleSwitch } from './ToggleSwitch'
+import { useApiUsage } from '../lib/apiUsage'
+import { accountsSectionTitle, ApiUsageRows, SectionTitle, apiSectionTitle } from './ApiUsageSection'
 
 type Lang = 'pt' | 'en'
 
@@ -58,8 +63,10 @@ export const PLAN_ROW_GRID = { display: 'grid', gridTemplateColumns: 'auto 1fr a
  * (CONTA.LIMITES), so an account reads the same in both. `note` replaces the plan line (a reason the
  * row cannot be picked); `tag` leads the plan line ("Current"), so it never cuts the name.
  */
-export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note, tag, wrap = false }: {
+export function PlanUsageRowCells({ harness, name, plan, limits: reading, now, lang, note, tag, wrap = false, loginBroken = false }: {
   harness: PlanLimits['harness']; name: string; plan: string | undefined; limits: PlanLimits | null; now: number; lang: Lang
+  /** The account's login is expired or signed out: whatever reading it has is stale, so no rings (0/0 would read as "unused"). */
+  loginBroken?: boolean
   note?: ReactNode; tag?: ReactNode
   /** The picker: name and plan WRAP (never an ellipsis on the one fact that tells rows apart), the tag on its own line. */
   wrap?: boolean
@@ -67,7 +74,9 @@ export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note
   const text = wrap
     ? { display: 'block', overflowWrap: 'anywhere' } as const
     : { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as const
-  const waiting = lang === 'pt' ? 'aguardando leitura' : 'waiting for the first reading'
+  // A reading of an account that cannot sign in is the last thing it said, not what it uses now.
+  const limits = loginBroken ? null : reading
+  const waiting = loginBroken ? (lang === 'pt' ? 'sem login' : 'signed out') : (lang === 'pt' ? 'sem leitura do plano' : 'no plan reading')
   return <>
     <HarnessMark harness={harness} size={20} />
     <div style={{ minWidth: 0 }}>
@@ -81,18 +90,46 @@ export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note
         : <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>{tag}<span style={{ ...text, minWidth: 0, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span></span>}
       {note && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{note}</span>}
     </div>
-    {limits ? limits.windows.map(w => <div key={windowKey(w)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang, w.scope)}</span></div>) : wrap ? null : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{waiting}</span>}
+    {limits ? limits.windows.map(w => <div key={windowKey(w)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang, w.scope)}</span>{(() => { const reset = ringResetPhrase(w, now, lang); return reset ? <span data-plan-ring-reset style={{ fontSize: 9.5, lineHeight: 1.2, whiteSpace: 'nowrap', color: 'var(--text-tertiary)' }}>{reset}</span> : null })()}</div>) : wrap ? null : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{waiting}</span>}
   </>
 }
 
-export function PlanUsageSummary({ limits, registered = [], accountLabels, now, lang, onOpen, embedded = false }: { onOpen?: () => void; limits: PlanLimits[] | null; registered?: RegisteredPlan[]; accountLabels?: Record<string, string>; now: number; lang: Lang; /** Inside a card that already carries the title: fill its width, no own title or inset. */ embedded?: boolean }) {
-  const rows = subscriptionRows(limits, registered, accountLabels)
-  return <div data-plan-usage-summary style={{ width: '100%', maxWidth: embedded ? undefined : 344, boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+export function PlanUsageSummary({ limits, registered = [], accountLabels, now, lang, onOpen, embedded = false, agentUse, onRelogin }: {
+  /** The popup's per-account controls: ONLY the agent-use switch and "Sign in again" (never the schedule). */
+  agentUse?: ((harness: PlanLimits['harness'], account?: string) => { on: boolean; pending: boolean; onToggle: () => void; accountId: string; view?: AgentUseView; reloginable: boolean; loginBroken?: boolean } | undefined) & { loaded?: boolean; accounts?: readonly { harness: PlanLimits['harness']; id: string; label?: string }[] }
+  onRelogin?: (r: { accountId: string; harness: PlanLimits['harness']; who: string }) => void
+  onOpen?: () => void; limits: PlanLimits[] | null; registered?: RegisteredPlan[]; accountLabels?: Record<string, string>; now: number; lang: Lang; /** Inside a card that already carries the title: fill its width, no own title or inset. */ embedded?: boolean }) {
+  const rows = subscriptionRows(limits, registered, accountLabels, agentUse?.accounts)
+  const apis = useApiUsage().items ?? []
+  const sectioned = apis.length > 0
+  return <div data-plan-usage-summary style={{ width: '100%', maxWidth: embedded ? undefined : 344, boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4, ...(embedded ? {} : { minHeight: 0, flex: '1 1 auto' }) }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>{!embedded && <>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span></>}<span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
-    {rows.map((row, i) => <div key={`${row.harness}:${i}`} data-plan-row={row.harness} style={{ ...PLAN_ROW_GRID, padding: '8px 4px', borderTop: '1px solid var(--border)' }}>
-      <PlanUsageRowCells harness={row.harness} name={subscriptionName(row.harness, row.accountLabel)} plan={row.plan} limits={row.limits} now={now} lang={lang} />
-    </div>)}
+    <div data-plan-usage-scroll className="ag-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 4, ...(embedded ? {} : { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }) }}>
+    {sectioned && <SectionTitle>{accountsSectionTitle(lang)}</SectionTitle>}
+    {rows.map((row, i) => {
+      const control = agentUse?.(row.harness, row.account)
+      const who = subscriptionName(row.harness, row.accountLabel)
+      return <div key={`${row.harness}:${i}`} style={{ borderTop: '1px solid var(--border)', padding: '8px 4px' }}>
+        <div data-plan-row={row.harness} style={PLAN_ROW_GRID}>
+          <PlanUsageRowCells harness={row.harness} name={who} plan={row.plan} limits={row.limits} now={now} lang={lang} loginBroken={control?.loginBroken === true} />
+        </div>
+        {!control && agentUse && agentUse.loaded === false && row.account && <div data-plan-row-controls-loading style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-tertiary)' }}>…</div>}
+        {control && <div data-plan-row-controls={control.accountId} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, fontSize: 11.5, color: 'var(--text-secondary)' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <ToggleSwitch on={control.on} disabled={control.pending} onToggle={control.onToggle} label={`${lang === 'pt' ? 'Uso por agentes' : 'Agent use'} · ${who}`} />
+            {lang === 'pt' ? 'Uso por agentes' : 'Agent use'}
+          </span>
+          {control.view && <AgentUseBadge view={control.view} lang={lang} />}
+          {control.loginBroken && onRelogin && <button type="button" data-plan-row-relogin={control.accountId} onClick={() => onRelogin({ accountId: control.accountId, harness: row.harness, who })}
+            style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 8, padding: '3px 9px', fontSize: 11.5, cursor: 'pointer' }}>
+            <KeyRound size={12} aria-hidden />{lang === 'pt' ? 'Refazer login' : 'Sign in again'}
+          </button>}
+        </div>}
+      </div>
+    })}
+    {sectioned && <><SectionTitle>{apiSectionTitle(lang)}</SectionTitle><ApiUsageRows items={apis} now={now} lang={lang} /></>}
     {rows.some(r => r.limits?.windows.some(w => currentUsedPct(w, now) >= 75)) && <div style={{ padding: '7px 4px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{rows.flatMap(r => (r.limits?.windows ?? []).filter(w => currentUsedPct(w, now) >= 75).slice(0, 1).map(w => <span key={`${r.harness}:${windowKey(w)}`} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><LimitLevelIcon pct={currentUsedPct(w, now)} lang={lang} />{HARNESS_LABELS[r.harness]}: {windowLabel(w.kind, lang, w.scope)} {lang === 'pt' ? 'em' : 'at'} {Math.round(currentUsedPct(w, now))}% · {lang === 'pt' ? 'renova' : 'resets'} {fmtWhen(w.resetsAt, now, lang)}</span>))}</div>}
+    </div>
     <div style={{ borderTop: '1px solid var(--border)', padding: '8px 4px 4px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>{lang === 'pt' ? 'Clique para ver tudo' : 'Click to see everything'} <button type="button" data-plan-usage-open onClick={onOpen} style={{ float: 'right', border: 0, background: 'transparent', padding: 0, font: 'inherit', fontWeight: 700, color: 'var(--anthropic-orange)', cursor: 'pointer' }}>{lang === 'pt' ? 'Abrir ›' : 'Open ›'}</button></div>
   </div>
 }
@@ -128,16 +165,16 @@ export function PlanSessionBlock({ limits, now, lang }: { limits: PlanLimits; no
 
 /**
  * The DETAILED card (Nay's Limits tab, mobile panel). `limits: null` is a registered plan that has
- * reported nothing yet: named, state "waiting for the first reading", NO ring and no zero.
+ * reported nothing yet: named, state "no plan reading", NO ring and no zero.
  */
-export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedded = false, showPlan = true, agentUse, isMobile = false }: { isMobile?: boolean; agentUse?: { on: boolean; pending: boolean; onToggle: () => void }; showPlan?: boolean; embedded?: boolean; accountLabel?: string; limits: PlanLimits | null; pending?: { harness: PlanLimits['harness']; plan: string }; now: number; lang: Lang }) {
+export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedded = false, showPlan = true, agentUse, isMobile = false }: { isMobile?: boolean; agentUse?: { on: boolean; pending: boolean; onToggle: () => void; accountId?: string; schedule?: AgentSchedule; view?: AgentUseView; applyAccount?: (account: unknown) => void }; showPlan?: boolean; embedded?: boolean; accountLabel?: string; limits: PlanLimits | null; pending?: { harness: PlanLimits['harness']; plan: string }; now: number; lang: Lang }) {
   const pt = lang === 'pt'
   const harness = limits?.harness ?? pending!.harness
   const plan = limits ? (limits.plan ?? limits.sourcePlan) : pending?.plan
   const worst = limits ? Math.max(...limits.windows.map(w => currentUsedPct(w, now)), 0) : null
   const early = limits?.windows.some(w => warnForecast(w, now, limits.updatedAt) !== null) ?? false
   const level = early && limitLevel(worst) === 'ok' ? 'attention' : limitLevel(worst)
-  const state = limits ? limitLevelWord(level, lang, worst) : (pt ? 'aguardando leitura' : 'waiting for the first reading')
+  const state = limits ? limitLevelWord(level, lang, worst) : (pt ? 'sem leitura do plano' : 'no plan reading')
   const stale = limits ? stalePhrase(limits, now, lang) : null
   return <div data-plan-usage-card={harness} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, padding: embedded ? 0 : 12, borderRadius: 12, background: 'var(--bg-card)', border: embedded ? undefined : '1px solid var(--border)' }}>
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
@@ -152,9 +189,29 @@ export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedd
         </span>}
       </div>
     </div>
-    {agentUse && !agentUse.on && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{pt ? 'Agentes não usam esta conta' : "Agents won't use this account"}</span>}
+    {agentUse?.view
+      ? <AgentUseBadge view={agentUse.view} lang={lang} />
+      : agentUse && !agentUse.on && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{pt ? 'Agentes não usam esta conta' : "Agents won't use this account"}</span>}
+    {agentUse?.accountId && <AgentScheduleSection control={{ ...agentUse, accountId: agentUse.accountId }} who={subscriptionName(harness, accountLabel)} lang={lang} isMobile={isMobile} />}
     {limits && <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{limits.windows.map(w => <div key={windowKey(w)} style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><WindowRow w={w} now={now} observedAt={limits.updatedAt} lang={lang} ring={48} /></div>)}</div>}
     <span style={{ minHeight: 14, fontSize: 11, color: stale ? LIMIT_WARN : 'var(--text-tertiary)' }}>{limits ? updatedPhrase(limits, now, lang) : null}</span>
+  </div>
+}
+
+/** The card's "Agenda" disclosure: closed by default, the editor inside. */
+function AgentScheduleSection({ control, who, lang, isMobile }: { control: { accountId: string; schedule?: AgentSchedule; view?: AgentUseView; applyAccount?: (account: unknown) => void }; who: string; lang: Lang; isMobile: boolean }) {
+  const pt = lang === 'pt'
+  const [open, setOpen] = useState(false)
+  const active = !!control.schedule?.enabled
+  const summary = scheduleSummaryText(control.schedule, lang)
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+    <button type="button" aria-expanded={open} data-agent-schedule-toggle onClick={() => setOpen(o => !o)}
+      style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer', minHeight: isMobile ? 44 : undefined }}>
+      <CalendarClock size={13} aria-hidden />{pt ? 'Agenda' : 'Schedule'}{active ? (pt ? ' · ligada' : ' · on') : ''}{active && !open && summary ? <span data-agent-schedule-summary style={{ fontWeight: 400, color: 'var(--text-tertiary)' }}> · {summary}</span> : null}{open ? ' ▴' : ' ▾'}
+    </button>
+    {open && <div style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)', minWidth: 0 }}>
+      <AgentScheduleEditor accountId={control.accountId} who={who} schedule={control.schedule} view={control.view} lang={lang} isMobile={isMobile} onSaved={control.applyAccount} showBadge={false} />
+    </div>}
   </div>
 }
 

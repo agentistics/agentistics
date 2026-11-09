@@ -3,6 +3,7 @@ import {
   resolveOpenSessionIds, resolveLiveSnapshot, sessionIdFromArgv, harnessOf, sessionIdFromFdPaths,
   LIVE_ACTIVITY_WINDOW_MIN, LIVE_STARTUP_GRACE_MIN, harnessOfProcess, detectionUnavailable, isHarnessInfrastructure,
   belongsToServerEnvironment, installedHarnessAt, isNonInteractiveInvocation, EXTERNAL_MIN_LIFETIME_MS,
+  expandOpencodeTabs, debounceExternalRows,
 } from './live-sessions'
 import type { HarnessId, SessionMeta } from '@agentistics/core'
 
@@ -539,11 +540,51 @@ describe('opencode (1.19.5, measured 2026-10-31 under tmux)', () => {
     expect(harnessOfProcess('opencode', EXE, ['opencode', 'attach', 'http://127.0.0.1:4096'])).toBe('opencode')
     expect(harnessOfProcess('opencode', EXE, ['opencode', '/home/u/proj'])).toBe('opencode')
   })
+  test('2.x (@opencode/cli 2.2.5): the npm native binary is identified, the service child and its verbs are infrastructure, `mini` is a conversation', () => {
+    const X = '/home/u/proj/node_modules/@opencode/cli/bin/opencode.exe'
+    expect(installedHarnessAt(X)).toBe('opencode')
+    expect(installedHarnessAt('/home/u/.nvm/lib/node_modules/@opencode/cli-darwin-arm64/bin/opencode')).toBe('opencode')
+    expect(harnessOfProcess('opencode', X, ['/home/u/proj/node_modules/.bin/opencode'])).toBe('opencode')
+    expect(harnessOfProcess('opencode', X, ['opencode', '/home/u/proj'])).toBe('opencode')
+    expect(harnessOfProcess('opencode', X, ['opencode', 'mini'])).toBe('opencode')
+    expect(harnessOfProcess('opencode', X, [X, 'serve', '--service'])).toBeUndefined()
+    for (const verb of ['service', 'api', 'pair', 'reload', 'serve', 'update', 'upgrade', 'uninstall', 'acp', 'debug', 'auth', 'mcp', 'plugin', 'models', 'stats', 'run', 'session']) {
+      expect(harnessOfProcess('opencode', X, ['opencode', verb])).toBeUndefined()
+    }
+  })
   test('`-s` / `--session` name a `ses_…` session; `-s` with any other value names nothing', () => {
     const SES = 'ses_e70797397ffeSYPpraVLuN7l9J'
     expect(sessionIdFromArgv(['opencode', '-s', SES])).toBe(SES)
     expect(sessionIdFromArgv(['opencode', `--session=${SES}`])).toBe(SES)
     expect(sessionIdFromArgv(['codex', '-s', 'workspace-write'])).toBeUndefined()
     expect(sessionIdFromArgv(['opencode', '-s', 'ses_short'])).toBeUndefined()
+  })
+})
+
+// OPENCODE.ATIVAS-TUI — one 2.x TUI process holds several sessions (its tabs); each becomes its own process record.
+describe('expandOpencodeTabs — one TUI, one record per open tab', () => {
+  const tui = { harness: 'opencode' as HarnessId, cwd: '/w', pid: 10, startedMs: 1, stdinIsTty: true }
+  const other = { harness: 'claude' as HarnessId, cwd: '/w', pid: 20, startedMs: 1 }
+
+  test('a TUI with three tabs becomes three records with the same pid and their own session', () => {
+    const out = expandOpencodeTabs([tui, other], new Map([[10, ['ses_a', 'ses_b', 'ses_c']]]))
+    expect(out.filter(p => p.pid === 10).map(p => p.sessionId)).toEqual(['ses_a', 'ses_b', 'ses_c'])
+    expect(out.filter(p => p.pid === 10).every(p => p.cwd === '/w' && p.startedMs === 1)).toBe(true)
+    expect(out).toContainEqual(other)
+  })
+
+  test('a process with no tabs record is left exactly as it was', () => {
+    expect(expandOpencodeTabs([tui, other], new Map())).toEqual([tui, other])
+  })
+})
+
+describe('debounceExternalRows — keyed by the session, not only the pid', () => {
+  test('two tabs of one TUI (same pid) both survive', () => {
+    const now = 1_000_000
+    const rows = [
+      { harness: 'opencode' as HarnessId, cwd: '/w', pid: 4242, startedMs: now - 60_000, sessionId: 'ses_a' },
+      { harness: 'opencode' as HarnessId, cwd: '/w', pid: 4242, startedMs: now - 60_000, sessionId: 'ses_b' },
+    ]
+    expect(debounceExternalRows(rows, now).map(r => r.sessionId).sort()).toEqual(['ses_a', 'ses_b'])
   })
 })

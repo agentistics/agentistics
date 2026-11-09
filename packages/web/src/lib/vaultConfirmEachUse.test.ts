@@ -11,10 +11,10 @@ function mockFetch(): void {
 }
 
 describe('confirm each use — web', () => {
-  test('the setting posts to its own route with the code, and names its gate action', async () => {
+  test('the setting posts to its own route with no code, and names its gate action', async () => {
     mockFetch()
-    expect((await setConfirmEachUse(true, '123456')).ok).toBe(true)
-    expect(calls[0]).toEqual({ url: '/api/vault/confirm-each-use', body: { enabled: true, code: '123456' } })
+    expect((await setConfirmEachUse(true)).ok).toBe(true)
+    expect(calls[0]).toEqual({ url: '/api/vault/confirm-each-use', body: { enabled: true } })
     expect(gateActionOf('confirm-each-use')).toBe('set-confirm-each-use')
   })
   test('texts exist in both languages', () => {

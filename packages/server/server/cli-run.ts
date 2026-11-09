@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { freemem, homedir, tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
@@ -47,8 +47,12 @@ export const SOCKET_PATH_MAX = 107
  */
 export const RUN_TMP_PREFIX = '/tmp/agr-'
 
-export function createRunTmp(): string {
-  return mkdtempSync(RUN_TMP_PREFIX)
+export function createRunTmp(env: Record<string, string | undefined> = process.env): string {
+  // Test seam: `AGENTISTICS_RUN_TMP_TAG=<alnum>` makes the dir `/tmp/agr-<tag>-XXXXXX`, so a test can tell ITS run's
+  // dir from every other run's on a shared /tmp. The result still starts with RUN_TMP_PREFIX and sits directly under
+  // /tmp, so `removeRunTmp`'s guard is untouched; anything that is not 1-12 alphanumerics is ignored.
+  const tag = env.AGENTISTICS_RUN_TMP_TAG
+  return mkdtempSync(tag && /^[A-Za-z0-9]{1,12}$/.test(tag) ? `${RUN_TMP_PREFIX}${tag}-` : RUN_TMP_PREFIX)
 }
 
 /** Placeholder for the pure env builder when the caller has no created dir; never created. */
@@ -78,7 +82,7 @@ export const THROWAWAY_ENV_DROP: readonly string[] = [
   'CLAUDE_CREDENTIALS_FILE', 'CLAUDE_JSON_FILE', 'CLAUDE_SETTINGS_FILE', 'CLAUDE_SETTINGS_LOCAL_FILE', 'CODEX_AUTH_FILE',
   // Per-file / per-directory relocations of the store's own state (events, tasks, team sync, parse cache).
   'AGENTISTICS_EVENTS_FILE', 'AGENTISTICS_EVENT_PRODUCER_FILE', 'AGENTISTICS_EVENT_SUBSCRIPTIONS_FILE', 'AGENTISTICS_MOBILE_SUBSCRIPTIONS_FILE',
-  'AGENTISTICS_PARSE_CACHE_FILE', 'AGENTISTICS_TASKS_FILE', 'AGENTISTICS_TEAM_CONN_DIR', 'AGENTISTICS_TEAM_DIR', 'AGENTISTICS_TEAM_SENT_FILE',
+  'AGENTISTICS_PARSE_CACHE_FILE', 'AGENTISTICS_DELIVERIES_FILE', 'AGENTISTICS_TASKS_FILE', 'AGENTISTICS_TEAM_CONN_DIR', 'AGENTISTICS_TEAM_DIR', 'AGENTISTICS_TEAM_SENT_FILE',
   'AGENTISTICS_TEAM_SYNC_FILE',
   // R1: read through an injected `env` object (opencode-paths.ts, account-login.ts), invisible to a `process.env.X` grep.
   'OPENCODE_DB', 'OPENCODE_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
@@ -395,6 +399,36 @@ export function memAvailableBytes(): number | null {
     const m = /^MemAvailable:\s+(\d+) kB/m.exec(readFileSync('/proc/meminfo', 'utf8'))
     return m ? Number(m[1]) * 1024 : null
   } catch { return null }
+}
+
+/**
+ * PURE. Available memory from macOS `vm_stat` output: free + inactive + speculative + purgeable pages, times the page size
+ * the header states. `os.freemem()` on macOS counts only the FREE pages, so a healthy Mac routinely reports under 3 GB —
+ * the inactive/cached pages are reclaimable and are what "available" means on Linux's `MemAvailable`.
+ */
+export function parseVmStat(text: string): number | null {
+  const size = /page size of (\d+) bytes/.exec(text)
+  if (!size) return null
+  const pages = (label: string) => { const m = new RegExp(`^${label}:\\s+(\\d+)\\.?`, 'm').exec(text); return m ? Number(m[1]) : 0 }
+  const free = pages('Pages free'), inactive = pages('Pages inactive'), speculative = pages('Pages speculative'), purgeable = pages('Pages purgeable')
+  if (!free && !inactive) return null
+  return (free + inactive + speculative + purgeable) * Number(size[1])
+}
+
+/**
+ * The machine's AVAILABLE memory on any platform: `MemAvailable` on Linux, `vm_stat` on macOS (see `parseVmStat`),
+ * `os.freemem()` elsewhere. null = unmeasured.
+ */
+export function memAvailableAnyBytes(): number | null {
+  if (process.platform === 'linux') return memAvailableBytes()
+  if (process.platform === 'darwin') {
+    try {
+      const out = execFileSync('vm_stat', [], { encoding: 'utf8', timeout: 3000 })
+      const n = parseVmStat(out)
+      if (n !== null) return n
+    } catch { /* fall through to freemem */ }
+  }
+  try { return freemem() } catch { return null }
 }
 
 /**

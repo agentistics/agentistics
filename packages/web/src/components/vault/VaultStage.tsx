@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AgentisticsLoader } from '../AgentisticsLoader'
-import { VaultUnlock, CodeField } from './VaultUnlock'
+import { VaultUnlock } from './VaultUnlock'
 import { VaultSafe, SAFE_OPEN_MS, SAFE_WIDTH_DESKTOP, SAFE_WIDTH_MOBILE, type SafePhase } from './VaultSafe'
-import { VaultCodeClock } from './VaultCodeClock'
 import { refreshVaultWatch } from '../../lib/vaultWatch'
-import { codeComplete, type UiAction } from '../../lib/vaultApi'
+import { type UiAction } from '../../lib/vaultApi'
+import { lockedSubKey, vt } from '../../lib/vaultText'
 import { Err } from '../MfaSetup'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
 
@@ -12,9 +12,8 @@ type Lang = 'pt' | 'en'
 
 const WORDS = {
   lockedTitle: { en: 'Vault locked', pt: 'Cofre trancado' },
-  lockedSub: { en: 'Your secrets are protected. Unlock with Windows Hello or your code.', pt: 'Seus segredos estão protegidos. Destrave com Windows Hello ou o código.' },
   unlockingTitle: { en: 'Unlocking…', pt: 'Destravando…' },
-  unlockingSub: { en: 'Confirm on this computer, or enter the code.', pt: 'Confirme neste computador ou digite o código.' },
+  unlockingSub: { en: 'Confirm it is you.', pt: 'Confirme que é você.' },
   openTitle: { en: 'Vault open', pt: 'Cofre aberto' },
   openSub: { en: 'Done. It locks by itself after a while without use.', pt: 'Pronto. Ele tranca sozinho depois de um tempo sem uso.' },
 } as const
@@ -45,6 +44,8 @@ export function VaultStage({ lang, isMobile, fromOpen, onOpened, compact, onActi
 }) {
   const [busy, setBusy] = useState(false)
   const [opening, setOpening] = useState(false)
+  // Until the service has said which presence check this machine has, the sentence names none.
+  const [wrappers, setWrappers] = useState<string[] | null>(null)
   const done = useRef(onOpened)
   done.current = onOpened
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -58,39 +59,36 @@ export function VaultStage({ lang, isMobile, fromOpen, onOpened, compact, onActi
   const phase: SafePhase = opening ? 'opening' : busy ? 'unlocking' : 'locked'
   const w = (k: keyof typeof WORDS) => WORDS[k][lang]
   const title = opening ? w('openTitle') : busy ? w('unlockingTitle') : w('lockedTitle')
-  const sub = opening ? w('openSub') : busy ? w('unlockingSub') : w('lockedSub')
+  const sub = opening ? w('openSub') : busy ? w('unlockingSub') : vt(lockedSubKey(wrappers), lang)
   return (
     <StageFrame isMobile={isMobile} compact={compact} phase={phase} fromOpen={fromOpen} label={w('lockedTitle')} title={title} sub={sub}>
-      {!opening && <VaultUnlock lang={lang} isMobile={isMobile} center onOpened={opened} onBusy={setBusy} {...(onAction ? { onAction } : {})} />}
-      {!opening && !busy && <VaultCodeClock lang={lang} center style={{ marginTop: 12 }} />}
+      {!opening && <VaultUnlock lang={lang} isMobile={isMobile} center onOpened={opened} onBusy={setBusy} onWrappers={setWrappers} {...(onAction ? { onAction } : {})} />}
       {!opening && !busy && extra}
     </StageFrame>
   )
 }
 
 /**
- * The same centred safe when the vault is OPEN but the list still owes the authenticator code: the code
- * field lives inside the composition, styled like every other code field (`CodeField`), never as a bare
- * form. While the code is checked the dial turns; the door does not move — nothing is unlocked here.
+ * The same centred safe when the vault is OPEN but the list still owes a proof (a page from another
+ * device with no grant yet). COFRE.DESBLOQUEIO: one button — the vault's own confirmation (the service
+ * raises the gesture, or the vault-password prompt asks). The door does not move: nothing is unlocked.
  */
-export function VaultCodeStage({ lang, isMobile, compact, title, sub, error, onSubmit }: {
+export function VaultProofStage({ lang, isMobile, compact, title, sub, error, onSubmit }: {
   lang: Lang; isMobile: boolean; compact?: boolean; title: string; sub: string; error: string | null
-  onSubmit: (code: string) => Promise<void>
+  onSubmit: () => Promise<void>
 }) {
-  const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const submit = () => {
-    if (!codeComplete(code) || busy) return
+    if (busy) return
     setBusy(true)
-    void onSubmit(code).finally(() => { setBusy(false); setCode('') })
+    void onSubmit().finally(() => setBusy(false))
   }
   return (
     <StageFrame isMobile={isMobile} compact={compact} phase={busy ? 'unlocking' : 'locked'} label={title} title={title} sub={sub}>
       <form onSubmit={e => { e.preventDefault(); submit() }} style={{ width: isMobile ? '100%' : 260, textAlign: 'left' }}>
-        <CodeField value={code} onChange={setCode} label={lang === 'pt' ? 'Código do autenticador' : 'Authenticator code'} autoFocus={!isMobile} error={!!error} errorKey={error} />
         {error && <Err text={error} />}
-        <button type="submit" disabled={busy || !codeComplete(code)} style={{ ...dialogButtonStyle('primary', isMobile, busy || !codeComplete(code)), width: '100%' }}>
-          {busy && <AgentisticsLoader size={14} />} {lang === 'pt' ? 'Confirmar' : 'Confirm'}
+        <button type="submit" disabled={busy} style={{ ...dialogButtonStyle('primary', isMobile, busy), width: '100%' }}>
+          {busy && <AgentisticsLoader size={14} />} {lang === 'pt' ? 'Confirmar que sou eu' : 'Confirm it is me'}
         </button>
       </form>
     </StageFrame>

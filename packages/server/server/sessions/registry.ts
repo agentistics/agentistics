@@ -31,6 +31,7 @@ import type { ManagedSession, RetireRequest } from './types'
 import { withFileLock } from './file-lock'
 import { RefusalLog } from './refusal-log'
 import { withIdentityPreferences } from './session-identity-prefs'
+import { isServerProcess } from './shared-snapshot'
 
 /** Distinguishes two writes from the SAME process; the pid distinguishes the processes. */
 let writeSeq = 0
@@ -271,7 +272,7 @@ function sanitize(raw: unknown): ManagedSession | null {
       ? { harnessNameSince: s.harnessNameSince }
       : {}),
     ...(typeof s.structuredDriver === 'string' && s.structuredDriver ? { structuredDriver: s.structuredDriver } : {}),
-    // Per-session away mode. Missing here, a flag set at spawn or by the switch was wiped by the
+    // Per-session autonomous mode. Missing here, a flag set at spawn or by the switch was wiped by the
     // first heartbeat rewrite — the session went on being told the owner was out, and the row said not.
     ...(s.away === true ? { away: true } : {}),
     // PLAN.ACCOUNTS D3: the account this session runs on. Missing here, it was written at spawn and
@@ -354,7 +355,19 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
   // change it cannot see is an in-place rewrite of the same size within one kernel tick). `sanitize`
   // still runs on every read and builds fresh objects, so a caller that edits what it was given (the
   // poller does) can never reach the kept copy.
-  let parsedMemo: { key: string; parsed: unknown[] } | null = null
+  let parsedMemo: { key: string; parsed: unknown[]; sanitized?: ManagedSession[] } | null = null
+  // APP.LENTO: `sanitize` builds each entry out of ~40 conditional spreads, and the fleet poll alone
+  // reads the registry several times every five seconds — 3.000 rows on a real machine, ~5 % of the
+  // server's CPU in the profile. The SANITIZED list is now kept with the parse, and every read gets
+  // fresh objects copied from it (the entry and its two nested records; `spawnConfiguration` was
+  // already passed through by reference), so a caller that edits what it was given still cannot reach
+  // the kept copy.
+  const fresh = (list: readonly ManagedSession[]): ManagedSession[] => list.map(e => {
+    const c = { ...e }
+    if (e.repo) c.repo = { ...e.repo }
+    if (e.retire) c.retire = { ...e.retire }
+    return c
+  })
 
   async function read(): Promise<ManagedSession[]> {
     let key: string | null = null
@@ -364,7 +377,8 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
     } catch { /* absent, or unreadable: the read below says which */ }
     if (key !== null && parsedMemo?.key === key) {
       corrupt = false
-      return parsedMemo.parsed.map(sanitize).filter((s): s is ManagedSession => s !== null)
+      parsedMemo.sanitized ??= parsedMemo.parsed.map(sanitize).filter((s): s is ManagedSession => s !== null)
+      return fresh(parsedMemo.sanitized)
     }
     parsedMemo = null
     let text: string
@@ -575,7 +589,16 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
 }
 
 /** The registry this machine actually uses. */
-const defaultRegistry = withIdentityPreferences(createSessionRegistry(MANAGED_SESSIONS_FILE))
+const defaultRegistry = withIdentityPreferences(createSessionRegistry(MANAGED_SESSIONS_FILE), undefined, {
+  readRepair: isServerProcess,
+  backgroundReadRepair: true,
+  onReadRepair: async () => {
+    const { broadcastSessionGroupsChanged } = await import('../sse')
+    broadcastSessionGroupsChanged()
+    const { processSessionHub } = await import('./session-hub')
+    void processSessionHub()?.refresh().catch(() => {})
+  },
+})
 
 export const readRegistry = (): Promise<ManagedSession[]> => defaultRegistry.read()
 export const adoptSessionRecords = (rs: readonly ManagedSession[]): Promise<void> => defaultRegistry.adopt(rs)
@@ -658,7 +681,11 @@ export async function killAndRetireSession(
   const previous = (await registry.read()).find(m => m.id === id)?.endedAt
   await registry.patch(id, { endedAt: previous ?? new Date().toISOString() })
   try {
-    if (await kill()) return true
+    if (await kill()) {
+      // A worker stopped on purpose frees a slot: the delivery queue looks at its next piece now (server process only).
+      void import('./shared-snapshot').then(async s => { if (s.isServerProcess()) (await import('../delivery/queue-kick')).kickQueueNext('sessão encerrada') }).catch(() => undefined)
+      return true
+    }
   } catch (e) {
     await registry.patch(id, { endedAt: previous ?? null })
     throw e

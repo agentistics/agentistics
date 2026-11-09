@@ -359,7 +359,7 @@ export interface ManagedSession {
   /** Explicit leader role, used by the context handoff hint. */
   leader?: boolean
   /**
-   * PER-SESSION AWAY MODE (`awayMode.ts`, `sessionAwayState`): this session is told the owner is
+   * PER-SESSION AUTONOMOUS MODE (`awayMode.ts`, `sessionAwayState`): this session is told the owner is
    * away even while the global switch is off. Set at spawn (`away`, or inherited from a verified away
    * parent) or toggled at runtime (`/api/away/session`); carried across a reopen by `inheritedIdentity`.
    * Absent = not away on its own.

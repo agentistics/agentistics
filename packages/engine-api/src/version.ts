@@ -206,7 +206,17 @@
  * built against 1.22 loads on a 1.23 host and never sees it; one built against 1.23 is refused by an older
  * host like every minor bump, or negotiates down and keeps its keys where they were.
  */
-export const ENGINE_API_VERSION = '1.23.0'
+/**
+ * 1.24.0 — SURFACE.BETA: `EngineSurface.beta` (optional boolean). The host draws its own beta tag beside the
+ * surface's entry; a non-boolean is refused (`bad-beta`). Same minor: `SurfaceMountContext.lang` is live and the optional
+ * `onLangChange(fn)` tells a mounted surface the app's language changed (a keep-alive page redraws, never remounts). Additive only: a host that predates it ignores the
+ * field, so an engine built against 1.24 still works there (the entry just carries no tag).
+ * Same minor (OPENCODE.TRAVA-FORM, 2.200.8): the `grow` chat delta's optional `back` (grow the turn that many places before
+ * the last, so a note appended while a tool runs is never overwritten) and `EngineChatTurn.tools[].output` (what the call
+ * printed, trimmed by the source). Both additive: an older host ignores them — it keeps growing the last turn, which is the
+ * pre-fix behaviour, and shows no output — so they ride 1.24 rather than refusing a mixed fleet.
+ */
+export const ENGINE_API_VERSION = '1.24.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

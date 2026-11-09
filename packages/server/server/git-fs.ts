@@ -72,12 +72,33 @@ export async function headFingerprint(d: GitDirs): Promise<string | null> {
 }
 
 /** What `config --get remote.origin.url` depends on: the repo's config (and a worktree's own). */
-export async function configFingerprint(d: GitDirs): Promise<string | null> {
-  const cfg = await readFile(join(d.commonDir, 'config'), 'utf8').catch(() => null)
-  if (cfg === null) return null
+/**
+ * APP.LENTO: the CONTENT half of the fingerprint, kept per config file while its (mtime, size, inode)
+ * stay the same. Every data build fingerprinted every project's config — 1.426 paths on a real store —
+ * by reading, regex-testing and hashing the whole file each time (~5 % of the server's CPU). A `stat`
+ * says whether the file is the one already read; anything that rewrites it moves the mtime or the size.
+ */
+const configContent = new Map<string, { st: string; part: string | null }>()
+async function configPart(file: string): Promise<string | null> {
+  const st = await stat(file).catch(() => null)
+  if (!st) { configContent.delete(file); return null }
+  const key = `${st.ino}:${st.mtimeMs}:${st.size}`
+  const known = configContent.get(file)
+  if (known && known.st === key) return known.part
+  const cfg = await readFile(file, 'utf8').catch(() => null)
   // An include can pull the remote from anywhere; a fingerprint of this file would not see it change.
-  if (/^\s*\[include/im.test(cfg)) return null
-  return `${cfg.length}:${hash(cfg)} ${await stamp(join(d.gitDir, 'config.worktree'))}`
+  const part = cfg === null || /^\s*\[include/im.test(cfg) ? null : `${cfg.length}:${hash(cfg)}`
+  if (cfg !== null) {
+    if (configContent.size >= 8192) configContent.delete(configContent.keys().next().value as string)
+    configContent.set(file, { st: key, part })
+  }
+  return part
+}
+
+export async function configFingerprint(d: GitDirs): Promise<string | null> {
+  const part = await configPart(join(d.commonDir, 'config'))
+  if (part === null) return null
+  return `${part} ${await stamp(join(d.gitDir, 'config.worktree'))}`
 }
 
 function hash(s: string): number {

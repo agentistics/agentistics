@@ -68,6 +68,9 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // Registration writes device credentials and reads the sealed VAPID key, so every mobile-push
   // route is host-local power and must be refused when this machine's local capability is off.
   ['/api/mobile-push', 'localShell'],
+  // OpenCode provider connections WRITE a credential file (`auth.json`) on this host. Same gate as the
+  // account roots: it must be unreachable on an exposed instance whoever is signed in.
+  ['/api/opencode', 'localShell'],
   ['/api/harnesses', 'localChat'],
   // RES.1 — the process governor: reads every agentop process on the host, kills on request, and
   // registers helper processes. Host power, so the strictest capability.
@@ -100,6 +103,9 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // the fleet — and a prefix for the same reason: the next task route must be guarded by having
   // been added at all, never by having remembered a second table.
   ['/api/tasks', 'localShell'],
+  // FLUXO.ENTREGA-DSL: the delivery records move board statuses, run git/gh in the delivery's worktree and can
+  // start the staged session — host power, the same capability as the task board, and a prefix for the same reason.
+  ['/api/deliveries', 'localShell'],
   // User session groups: the routes behind the MCP tools that file a session under a group. They
   // resolve a session reference against THIS machine's fleet, so they read host state the same way
   // `/api/fleet` does, and they are refused on a central for the same reason.

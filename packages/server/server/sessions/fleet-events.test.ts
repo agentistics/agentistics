@@ -357,3 +357,19 @@ test('compact GET with a view carries every row the view names, so the sidebar e
   const bare = await readCompactFleetResponse(JSON.parse(JSON.stringify(snapshotBody(1, frame))), () => '', false)
   expect((bare.view as { groups: Array<{ rows: unknown[] }> }).groups[0]!.rows.length).toBe(1)
 })
+
+
+test('the history phase retains recent row ids and order and clears the partial marker', () => {
+  const recent = [row('live'), ...Array.from({ length: 15 }, (_, i) => row(`closed:${i}`, { endedAt: 1000 - i }))]
+  const early = buildFleetFrame(payload(recent, { historyLoading: true }), 15)
+  const sent = planFleetDelta(EMPTY_SENT, early).next
+  const older = Array.from({ length: 50 }, (_, i) => row(`closed:older-${i}`, { endedAt: 500 - i }))
+  const full = buildFleetFrame(payload([...recent, ...older], { historyLoading: false }), 15)
+  const delta = planFleetDelta(sent, full)
+  expect(delta.delta.remove).toEqual([])
+  expect(delta.delta.order).toBeUndefined()
+  expect(delta.delta.meta.historyLoading).toBe(false)
+  const first = applyFleetWire(null, 'snapshot', snapshotBody(1, early))
+  const next = applyFleetWire(first, 'delta', deltaBody(2, full, delta.delta))
+  expect(next.sessions.map(r => r.id)).toEqual(first.sessions.map(r => r.id))
+})

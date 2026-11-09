@@ -251,8 +251,9 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          carrying no activity — nothing about them is capturable), and
   │                          `sessions-host.ts` is the 5s poller, whose failed poll keeps the
   │                          previous list plus a reason rather than reporting an empty one.
-  │                          `project-search.ts` / `project-source.ts` feed the wizard's search
+                          `project-search.ts` / `project-source.ts` feed the wizard's search
   │                          field from the LOCAL store, so it works with the server stopped.
+  │                          `project-source.ts` also (a) re-reads the scan roots SHALLOWLY (depth 2, 300 ms, never a disk root) on EVERY non-empty query (at most every 1.5 s; a re-read already running is waited for, up to 300 ms), folding what is new into the index and keeping it across disk-index ticks (a deeper folder, depth 3+, is only found by the 60 s full scan or a typed path); the disk-index tick no longer renews the full-scan clock, so the 60 s revalidation really runs; and (b) proposes the New-project parent from REPOSITORY checkouts only (`isHabitCandidate`) — never from history cwds, where a harness's dated scratch folder (Codex `.../Codex/2026-10-29`) used to win the count; no repos → `<home>/projetos` (pt) or `<home>/projects` (en).
   │                          **A reboot takes tmux and leaves the registry**, so every managed
   │                          session reconciles to `lost` while keeping its name, note and task —
   │                          `session-view.ts` therefore offers REOPEN for any managed row that is

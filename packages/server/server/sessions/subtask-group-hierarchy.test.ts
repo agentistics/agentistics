@@ -101,6 +101,26 @@ test('patchSubtask joins a subtask to an existing group of the SAME task', async
   expect(out).toEqual({ result: { ok: true }, parentGroupId: 'g1' })
 })
 
+test('joining a staged member folds its delivery and prompt into the group through the board write path', async () => {
+  const out = await run(`
+    ${task('t1')}
+    ${subtask('g1', 't1', 'isGroup: true,')}
+    ${subtask('m1', 't1', "stagedSession: { prompt: 'Fix the queue', harness: 'codex', model: 'gpt-6.1-sol', effort: 'high', account: 'default' },")}
+    const { createDeliveryStore } = await import(${JSON.stringify(join(SESSIONS_DIR, '../delivery/store.ts'))})
+    const { newDelivery } = await import(${JSON.stringify(join(SESSIONS_DIR, '../delivery/machine.ts'))})
+    const deliveries = createDeliveryStore()
+    await deliveries.update(d => { d.deliveries.m1 = newDelivery({ subtaskId: 'm1', taskId: 't1', at: new Date().toISOString() }) })
+    const result = await web.patchSubtask('m1', { parentGroupId: 'g1' })
+    const after = await store.read()
+    const records = await deliveries.read()
+    console.log(JSON.stringify({ result, reason: records.deliveries.m1.dequeued?.reason, groupPhase: records.deliveries.g1?.phase, prompt: after.subtasks.find(s => s.id === 'g1').stagedSession?.prompt }))
+  `) as { result: unknown; reason: string; groupPhase: string; prompt: string }
+  expect(out.result).toEqual({ ok: true })
+  expect(out.reason).toContain('group g1')
+  expect(out.groupPhase).toBe('fila')
+  expect(out.prompt).toContain('[group member m1]\nFix the queue')
+})
+
 test('patchSubtask refuses `invalid_group` when the id names no subtask', async () => {
   const out = await run(`
     ${task('t1')}

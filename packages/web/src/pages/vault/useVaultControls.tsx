@@ -6,8 +6,8 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
-  armHeartbeat, askWords, credentials, gateFor, grantAlive, heartbeat, loadVault, lockNow, missingSteps, needsTypedCode, presenceDisable, primarySection,
-  recoverySteps, setAutoLock, setConfirmEachUse, type Credential, type LoadResult, type UiAction, type UnlockMode, type VaultView, type WizardStep, type ActionKind, type ProofChoice,
+  armHeartbeat, askWords, credentials, gateFor, grantAlive, heartbeat, loadVault, lockNow, missingSteps, presenceDisable, primarySection,
+  recoverySteps, setAutoLock, setConfirmEachUse, type Credential, type LoadResult, type UiAction, type UnlockMethodId, type VaultView, type WizardStep, type ActionKind, type ProofChoice,
 } from '../../lib/vaultApi'
 import { pageBeat } from '../../lib/vaultBeat'
 import { presenceKey, vt, vtf } from '../../lib/vaultText'
@@ -27,9 +27,9 @@ export function useVaultControls(lang: Lang) {
   const [creds, setCreds] = useState<{ credentials: Credential[]; recoveryCreatedAt: string | null } | null>(null)
   const [wizard, setWizard] = useState<WizardStep[] | null>(null)
   // v2.98.1: "add another way" opens the wizard on ONE kind (never re-running one already enrolled).
-  const [wizardKind, setWizardKind] = useState<'hello' | 'fido2' | null>(null)
+  const [wizardKind, setWizardKind] = useState<UnlockMethodId | null>(null)
   const [recoverOpen, setRecoverOpen] = useState(false)
-  const [dialog, setDialog] = useState<null | { kind: GateKind; minutes?: number; policy?: { mode: UnlockMode; hours: number }; authPolicy?: Partial<Record<ActionKind, ProofChoice>>; enabled?: boolean }>(null)
+  const [dialog, setDialog] = useState<null | { kind: GateKind; minutes?: number; authPolicy?: Partial<Record<ActionKind, ProofChoice>>; enabled?: boolean }>(null)
   const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem(UPGRADE_DISMISS_KEY) === '1' } catch { return false } })
   const busyUi = wizard !== null || dialog !== null || recoverOpen
 
@@ -89,17 +89,16 @@ export function useVaultControls(lang: Lang) {
     code: vt('tip_code', lang), presence: vtf('tip_presence', lang, { presence: presWord }), and: vt('tip_and', lang), asks: vt('tip_asks', lang), nothing: vt('tip_nothing', lang),
   }) : '')
 
-  // An action's proofs: the icons say what it asks; a dialog collects the code (and warns about the gesture).
-  const ask = (kind: GateKind, minutes?: number, policy?: { mode: UnlockMode; hours: number }, authPolicy?: Partial<Record<ActionKind, ProofChoice>>, enabled?: boolean) => {
+  // An action's proof: the icon says what it asks; a dialog warns before the confirmation is raised.
+  const ask = (kind: GateKind, minutes?: number, authPolicy?: Partial<Record<ActionKind, ProofChoice>>, enabled?: boolean) => {
     if (!view) return
     const action = gateActionOf(kind)
-    if (kind === 'unlock-policy') { setDialog({ kind, policy }); return } // always the code AND the gesture
     // The policy table: always the dialog — it states what the CURRENT settings row asks, and the change is a decision.
     if (kind === 'auth-policy') { setDialog({ kind, authPolicy }); return }
     const gate = gateFor(view, action)
-    if (!needsTypedCode(gate, grantAlive()) && !gate.gesture) {
-      // A live grant covers the code and there is no gesture to raise: just do it; if the server
-      // still wants something, the dialog opens and asks.
+    if (!gate.gesture || (gate.grant && grantAlive())) {
+      // Nothing to confirm (or a live grant stands for it): just do it; if the server still wants
+      // something, the dialog opens and says so.
       void (async () => {
         const r = kind === 'lock' ? await lockNow() : kind === 'autolock' ? await setAutoLock(minutes ?? 30) : kind === 'confirm-each-use' ? await setConfirmEachUse(enabled === true) : await presenceDisable()
         if (r.ok) await load(); else setDialog({ kind, minutes, enabled })
@@ -136,7 +135,7 @@ export function VaultFlowHost({ c, lang, isMobile, onChanged }: { c: VaultContro
     <>
       {c.dialog && (
         <GateDialog
-          lang={lang} view={view} isMobile={isMobile} kind={c.dialog.kind} minutes={c.dialog.minutes} policy={c.dialog.policy} authPolicy={c.dialog.authPolicy} enabled={c.dialog.enabled}
+          lang={lang} view={view} isMobile={isMobile} kind={c.dialog.kind} minutes={c.dialog.minutes} authPolicy={c.dialog.authPolicy} enabled={c.dialog.enabled}
           onCancel={() => c.setDialog(null)} onDone={() => { c.setDialog(null); done() }} onAction={c.onAction}
         />
       )}

@@ -4,8 +4,9 @@ import { createHash, randomBytes } from 'node:crypto'
 import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
+import { HARNESS_ORDER, type AgentDayBaseline, type AgentManual, type AgentSchedule, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
+import { defaultClaudeConfigDir } from './default-claude-root'
 import { withFileLock } from './sessions/file-lock'
 import { ISOLATION_ENV } from './account-isolation'
 import { runClaudeInLoginContext } from './account-login'
@@ -37,7 +38,18 @@ export interface HarnessAccount {
    * newer than this is the old token's last word, not a new expiry: it neither marks nor raises a bar.
    */
   loginRenewedAt?: number
+  /**
+   * The ONE flag every router/spawn/plan-limits reader honours. With an active `agentSchedule` it is
+   * WRITTEN by the schedule evaluator (`agent-schedule-host.ts`) — the effective state — never a
+   * second flag beside it.
+   */
   available: boolean
+  /** Stored. When agents may use the account (`@agentistics/core` agentSchedule.ts). */
+  agentSchedule?: AgentSchedule
+  /** Stored. A person flipped the switch against the schedule; cleared when the schedule agrees. */
+  agentManual?: AgentManual
+  /** Stored. The weekly reading today's spend is measured from (local day). */
+  agentDayBaseline?: AgentDayBaseline
   firstSeen: number
   lastSeen: number
 }
@@ -52,6 +64,15 @@ export interface AccountsFile {
    * managed sessions, billing) resolve through it, so nothing recorded under the old id is orphaned.
    */
   aliases?: Record<string, string>
+}
+export interface AccountPatch {
+  available?: boolean
+  nickname?: string
+  /** `null` removes the schedule. */
+  agentSchedule?: AgentSchedule | null
+  /** `null` clears the manual override. */
+  agentManual?: AgentManual | null
+  agentDayBaseline?: AgentDayBaseline
 }
 export type AccountIdentity = Pick<HarnessAccount, 'key' | 'label' | 'plan'>
 const fallback = (): AccountIdentity => ({ key: 'default', label: 'Conta padrão' })
@@ -115,7 +136,7 @@ async function readCopilotIdentity(file: string): Promise<AccountIdentity> {
 
 export { ISOLATION_ENV }
 const DEFAULT_ROOTS: Record<HarnessId, () => string> = {
-  claude: () => process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'),
+  claude: () => defaultClaudeConfigDir(process.env, AGENTISTICS_DATA_DIR) ?? join(homedir(), '.claude'),
   codex: () => process.env.CODEX_HOME ?? join(homedir(), '.codex'),
   copilot: () => process.env.COPILOT_HOME ?? join(homedir(), '.copilot'),
   gemini: () => process.env.GEMINI_CLI_HOME ?? join(homedir(), '.gemini'),
@@ -518,6 +539,7 @@ export function createHarnessAccounts(options: {
       throw error
     }
   }
+  const LAST_SEEN_STEP_MS = 60_000
   function adopt(data: AccountsFile, harness: HarnessId, root: string | null, detected: AccountIdentity, fresh = false) {
     const key = bindingKey(harness, root)
     const previous = data.accounts.find(a => a.id === data.bindings[key])
@@ -533,7 +555,8 @@ export function createHarnessAccounts(options: {
     // An e-mail label is the evidence `sameLogin` needs later; a probe that named only the org keeps it.
     if (!(harness === 'claude' && account.label.includes('@') && !detected.label.includes('@'))) account.label = detected.label
     if (detected.plan) account.plan = detected.plan
-    account.lastSeen = now()
+    // Refreshing every probe rewrote accounts.json on every usage tick; a minute of slack is plenty for "last seen".
+    if (now() - account.lastSeen >= LAST_SEEN_STEP_MS) account.lastSeen = now()
     account.retired = undefined
     // A sign-in that just FINISHED (`bind`) replaced whatever expired. A routine re-probe (`current`)
     // proves nothing: an expired token still names its owner, so the mark survives it.
@@ -554,7 +577,6 @@ export function createHarnessAccounts(options: {
       return { harness, ...await source, source }
     }))
     const resolveAll = (data: AccountsFile, mutate: boolean) => {
-      let changed = false
       const accounts = detected.map(({ harness, identity: found, confirmed, signedOut }) => {
         const bound = data.accounts.find(a => a.id === data.bindings[bindingKey(harness, root)])
         const out = signedOut ? { signedOut } : {}
@@ -565,10 +587,13 @@ export function createHarnessAccounts(options: {
         }
         if (!mutate) return matchIdentity(data, harness, root, found) ?? bound
           ?? { ...fallback(), id: '', harness, root, available: true, firstSeen: now(), lastSeen: now() }
-        changed = true
-        return adopt(data, harness, root, found).account
+        const adopted = adopt(data, harness, root, found).account
+        // The default Claude login answered `loggedIn` right now: a mark left by an earlier refusal
+        // (or by a leaked account root) must not outlive that proof, or the owner re-logs in only to drop it.
+        if (harness === 'claude' && root === null) delete adopted.loginExpiredAt
+        return adopted
       })
-      return { accounts, changed }
+      return { accounts }
     }
     const done = (accounts: HarnessAccount[]) => legacy ? accounts : accounts[0]!
     const seen = await snapshot()
@@ -583,8 +608,10 @@ export function createHarnessAccounts(options: {
           const latest = cache.get(bindingKey(d.harness, root))
           if (latest?.settled && latest.identity !== d.source) { Object.assign(d, latest.settled, { source: latest.identity }); d.signedOut = latest.settled.signedOut }
         }
-        const { accounts, changed } = resolveAll(data, true)
-        if (changed) await write(data)
+        const before = JSON.stringify(data)
+        const { accounts } = resolveAll(data, true)
+        // Only a real difference is written: a confirmed probe that changed nothing must not touch the file.
+        if (JSON.stringify(data) !== before) await write(data)
         return accounts
       }))
     } catch (error) {
@@ -593,13 +620,22 @@ export function createHarnessAccounts(options: {
       throw error
     }
   }
-  async function update(id: string, patch: { available?: boolean; nickname?: string }): Promise<HarnessAccount | null> {
+  async function update(id: string, patch: AccountPatch): Promise<HarnessAccount | null> {
     return serial(async () => {
       const data = await read()
       const at = canonicalAccountId(data, id)
       const account = data.accounts.find(a => a.id === at)
       if (!account) return null
       if (patch.available !== undefined) account.available = patch.available
+      if (patch.agentSchedule !== undefined) {
+        if (patch.agentSchedule === null) delete account.agentSchedule
+        else account.agentSchedule = patch.agentSchedule
+      }
+      if (patch.agentManual !== undefined) {
+        if (patch.agentManual === null) delete account.agentManual
+        else account.agentManual = patch.agentManual
+      }
+      if (patch.agentDayBaseline !== undefined) account.agentDayBaseline = patch.agentDayBaseline
       if (patch.nickname !== undefined) {
         const nickname = sanitizeNickname(patch.nickname)
         if (nickname) account.nickname = nickname
@@ -710,7 +746,7 @@ export const currentHarnessAccounts = (harnesses: readonly HarnessId[]) => store
 export const listHarnessAccounts = (harnesses?: readonly HarnessId[]) => store.list(harnesses)
 export const setAccountAvailable = (harness: HarnessId, key: string, available: boolean) => store.setAvailable(harness, key, available)
 export const retireAccount = (id: string) => store.retire(id)
-export const updateAccount = (id: string, patch: { available?: boolean; nickname?: string }) => store.update(id, patch)
+export const updateAccount = (id: string, patch: AccountPatch) => store.update(id, patch)
 export const markLoginExpired = (id: string, at: number) => store.markLoginExpired(id, at)
 export const clearLoginExpired = (id: string) => store.clearLoginExpired(id)
 
@@ -723,10 +759,12 @@ export const clearLoginExpired = (id: string) => store.clearLoginExpired(id)
 export type AccountLoginState = 'ok' | 'expired' | 'signed_out'
 export function accountLoginState(
   a: Pick<HarnessAccount, 'retired' | 'loginExpiredAt' | 'signedOut'>, bound: boolean,
+  /** The root's credential file is missing / empty / invalid (`account-credentials.ts`): the login is gone even though no probe said so. */
+  credentialBroken = false,
 ): AccountLoginState | undefined {
   if (a.retired) return undefined
   if (a.loginExpiredAt !== undefined) return 'expired'
-  if (!bound || a.signedOut) return 'signed_out'
+  if (!bound || a.signedOut || credentialBroken) return 'signed_out'
   return 'ok'
 }
 

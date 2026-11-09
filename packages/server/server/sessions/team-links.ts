@@ -88,6 +88,44 @@ export function currentLeaderId(rows: readonly TeamRow[], id: string): string {
   return cur
 }
 
+/**
+ * The session a MESSAGE to `reference` should reach. `reference` matches a row by managed id or
+ * conversation id ONLY (never title/label). The message is redirected to the successor only when the
+ * original row is really retired (ended) and the successor is alive; a live original keeps its mail.
+ * An unmatched reference is returned as is.
+ */
+export function liveLeaderId(rows: readonly TeamRow[], id: string): string {
+  // Walk the WHOLE chain (A -> B(retired) -> C): the answer is the last LIVE node, else the original.
+  const seen = new Set<string>([id])
+  let cur = id
+  let live: string | undefined
+  for (let i = 0; i < 16; i++) {
+    const reopened = rows.filter(r => r.supersedes === cur && !seen.has(r.id)).sort((a, b) => (b.endedAt ? 0 : 1) - (a.endedAt ? 0 : 1))[0]
+    let nextId: string | undefined
+    if (reopened) nextId = reopened.id
+    else {
+      const next = rows.find(r => r.id === cur)?.handoffTo
+      if (!next || seen.has(next)) break
+      const succ = rows.find(r => r.id === next)
+      nextId = succ?.endedAt && succ.conversationId
+        ? rows.find(r => r.id !== succ.id && !r.endedAt && r.conversationId === succ.conversationId)?.id ?? succ.id
+        : succ?.id
+    }
+    if (!nextId) break
+    seen.add(nextId)
+    cur = nextId
+    const row = rows.find(r => r.id === cur)
+    if (row && !row.endedAt) live = cur
+  }
+  return live ?? id
+}
+
+export function messageTargetFor(rows: readonly TeamRow[], reference: string): string {
+  const hit = rows.find(r => r.id === reference) ?? rows.find(r => !!r.conversationId && r.conversationId === reference)
+  if (!hit || !hit.endedAt) return reference
+  return liveLeaderId(rows, hit.id)
+}
+
 export interface HandoffReparent {
   /** Rows to file under the successor (the predecessor's whole team, ended rows included so a reopen follows). */
   children: string[]

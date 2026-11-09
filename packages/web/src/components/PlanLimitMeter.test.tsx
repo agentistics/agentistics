@@ -60,3 +60,39 @@ test('a long window title wraps inside its card instead of overflowing', () => {
   expect(b).not.toContain('white-space:nowrap')
   expect(h).not.toMatch(/Semana · [^<]*% usado/)
 })
+
+import { ringResetPhrase } from '../lib/planLimits'
+import { PlanUsageSummary } from './PlanLimitMeter'
+import { fmtWhen } from '../lib/planLimits'
+
+// POPUP.USO-RESET — a tiny "zera <local time>" under each ring, nothing when the reset is unknown.
+const day = 24 * H
+const live: PlanLimits = {
+  harness: 'claude', source: 'claude-usage-api', updatedAt: now - 60_000, plan: 'Claude Max 5x',
+  windows: [
+    { kind: '5h', usedPct: 40, resetsAt: now + 2 * H },
+    { kind: 'week', usedPct: 20, resetsAt: now + 3 * day },
+  ],
+} as unknown as PlanLimits
+
+test('ring reset: today reads "zera HH:MM", a later day names the weekday, in both languages', () => {
+  const five = live.windows[0]!, week = live.windows[1]!
+  expect(ringResetPhrase(five, now, 'pt')).toBe(`zera ${fmtWhen(five.resetsAt, now, 'pt')}`)
+  expect(ringResetPhrase(five, now, 'pt')).toMatch(/^zera \d{2}:\d{2}$/)
+  expect(ringResetPhrase(week, now, 'pt')).toMatch(/^zera [^\d\s]+ \d{2}:\d{2}$/)
+  expect(ringResetPhrase(five, now, 'en')).toMatch(/^resets /)
+})
+
+test('ring reset: nothing when unknown — a renewed window, a past or missing time', () => {
+  expect(ringResetPhrase({ kind: '5h', usedPct: 80, resetsAt: now - H } as never, now, 'pt')).toBeNull()
+  expect(ringResetPhrase({ kind: '5h', usedPct: 10, resetsAt: Number.NaN } as never, now, 'pt')).toBeNull()
+  expect(ringResetPhrase({ kind: '5h', usedPct: 10 } as never, now, 'pt')).toBeNull()
+})
+
+test('the usage popup draws the line under each ring, and only where a reset is known', () => {
+  const html = renderToStaticMarkup(<PlanUsageSummary limits={[live]} now={now} lang="pt" />)
+  expect(html.match(/data-plan-ring-reset/g)?.length).toBe(2)
+  expect(html).toMatch(/zera \d{2}:\d{2}/)
+  const none = renderToStaticMarkup(<PlanUsageSummary limits={[{ ...live, windows: [{ kind: '5h', usedPct: 80, resetsAt: now - H }] } as unknown as PlanLimits]} now={now} lang="pt" />)
+  expect(none).not.toContain('data-plan-ring-reset')
+})

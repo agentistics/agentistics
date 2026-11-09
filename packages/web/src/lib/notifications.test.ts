@@ -44,6 +44,19 @@ afterAll(() => { globalThis.fetch = realFetch })
 beforeEach(() => { stubFetch(); respond = () => [] })
 
 describe('loading from the server', () => {
+  test('APP.LENTO: an identical answer keeps the list identity (no re-render for nothing); a change does not', async () => {
+    respond = () => [note('a'), note('b')]
+    const s = await freshStore()
+    await s.refreshNotifications()
+    const first = s.readNotifications()
+    await s.refreshNotifications()
+    expect(s.readNotifications()).toBe(first)
+    respond = () => [note('a', { read: true }), note('b')]
+    await s.refreshNotifications()
+    expect(s.readNotifications()).not.toBe(first)
+    expect(s.readNotifications()[0]!.read).toBe(true)
+  })
+
   test('refresh pulls the history and fills the cache', async () => {
     respond = () => [note('a'), note('b')]
     const s = await freshStore()
@@ -401,18 +414,6 @@ describe('every {placeholder} is interpolated, not only the hand-listed ones', (
   })
 })
 
-
-test('local digest failure reaches the toast store with localized copy without fetching', async () => {
-  const s = await freshStore()
-  s.pushLocalNotification({ type: 'error', code: 'away.digest_failed' })
-  const failure = s.readNotifications()[0]!
-  expect(failure.type).toBe('error')
-  expect(s.resolveNotification(failure, 'pt').title).toBe('Não foi possível abrir o resumo')
-  expect(s.resolveNotification(failure, 'en').title).toBe('Could not open the summary')
-  expect(calls).toHaveLength(0)
-  s.pushLocalNotification({ type: 'error', code: 'away.digest_stale' })
-  expect(s.resolveNotification(s.readNotifications()[0]!, 'en').message).toBe('This offer is no longer available.')
-})
 
 describe('retirement notification localization', () => {
   test('all retire codes resolve in both languages with metadata', async () => {

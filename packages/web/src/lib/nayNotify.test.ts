@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  alertStillTrue, cardPlacement, cardWidth, formatSpan, formatWaiting, NAY_ANIMATIONS, parseNayAnimation, parseSnooze,
+  alertStillTrue, cardAnswerActions, cardPlacement, cardWidth, formatSpan, formatWaiting, NAY_ANIMATIONS, parseNayAnimation, parseSnooze,
   snoozeError, SNOOZE_PRESETS, staleDue, STALE_OPTIONS_MIN,
 } from './nayNotify'
 
@@ -132,5 +132,12 @@ describe('where the card opens', () => {
   it('fills the phone width minus its gutters', () => {
     expect(cardWidth(390, true)).toBe(366)
     expect(cardWidth(1440, false)).toBe(360)
+  })
+})
+
+describe('the card never asks the owner for an answer while autonomous mode is on', () => {
+  it('hides reply and approve while on, keeps them when off', () => {
+    expect(cardAnswerActions(true)).toEqual({ reply: false, approve: false })
+    expect(cardAnswerActions(false)).toEqual({ reply: true, approve: true })
   })
 })

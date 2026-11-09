@@ -48,6 +48,8 @@ import { TypedModel } from './ModelSelect'
 import { approvalIdentity } from '../../lib/approvalQuestion'
 import { dialogAnswersToRetire } from '../../lib/dialogAnswerEcho'
 import { ChatBubble, type ChatTurn } from './ChatBubble'
+import { ReasoningRow, useReasoningClock } from './ReasoningRow'
+import { enterSends } from '../../lib/composerEnter'
 import { WorkingNote } from './WorkingNote'
 import { ToolActivity } from './ToolActivity'
 import { chatActivityStore } from '../../lib/appFlags'
@@ -83,7 +85,7 @@ import {
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { isNayCwd, modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
-import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
+import { personQueuedCount, queuedBubbleActions, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
@@ -130,12 +132,12 @@ import { buildPickRows } from '../../lib/sessionPick'
 import { sessionPath } from '../../lib/sessionRoute'
 import { copyText } from '../../lib/clipboard'
 import { SessionPickModal } from './SessionPickModal'
-import { VaultCodeAsk, VaultPicker } from '../vault/VaultPicker'
+import { VaultPicker } from '../vault/VaultPicker'
 import { loadVault } from '../../lib/vaultApi'
 import { grantStep, UNLOCK_FIRST_LINE } from '../../lib/vaultGrantFlow'
 import { ensureVaultOpen } from '../vault/VaultUnlockHost'
 import { applyVaultChip, expandVaultChip, hasVaultChip, removeVaultChip, vaultChipTokens, vaultGrantMessage, vaultTrigger, type VaultSelection } from '../../lib/vaultChip'
-import { grantSession, listGrantRecords, withStepUp, type GrantRecord } from '../../lib/vaultPersonal'
+import { grantSession, listGrantRecords, type GrantRecord } from '../../lib/vaultPersonal'
 import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture } from '../../lib/passkey'
 
 import type { AttachmentMessage, AttachmentSend, CostBasis, HarnessId, SessionMeta } from '@agentistics/core'
@@ -805,8 +807,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const [vaultGrantCache, setVaultGrantCache] = useState<null | { key: string; refs: string[]; briefing: string; expiresAt: number }>(null)
   const [vaultPickerOpen, setVaultPickerOpen] = useState(false)
   const [vaultTriggerSeen, setVaultTriggerSeen] = useState<number | null>(null)
-  const [vaultCodeAsk, setVaultCodeAsk] = useState<null | ((c: string | null) => void)>(null)
-  const askVaultCode = useCallback(() => new Promise<string | null>(res => setVaultCodeAsk(() => (c: string | null) => { setVaultCodeAsk(null); res(c) })), [])
   useEffect(() => {
     const at = vaultTrigger(draft.slice(0, caret))
     if (at !== null && at !== vaultTriggerSeen) { setVaultTriggerSeen(at); setVaultPickerOpen(true) }
@@ -825,14 +825,15 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         setNotice(UNLOCK_FIRST_LINE[pt ? 'pt' : 'en'])
         if (!(await ensureVaultOpen(`personal-grant:${session.id}`))) return { ok: false as const, code: 'locked', sentence: pt ? 'O cofre continua trancado; nada foi enviado.' : 'The vault is still locked; nothing was sent.', status: 423 }
       }
-      return withStepUp(c => grantSession(session.id, ids, gids, c), askVaultCode)
+      // COFRE.DESBLOQUEIO: no code is asked; the proof (a gesture, or the vault password through its prompt) is the service's.
+      return grantSession(session.id, ids, gids)
     }
     if (ms.ok && !ms.loopback && passkeySupport(window) === 'ok' && hasPasskeyHere(ms, window.location.hostname)) {
-      const g = await withStepUp(c => phoneGesture('personal-grant', session.id, c), askVaultCode)
+      const g = await phoneGesture('personal-grant', session.id)
       if (!g.ok) return g
-      return withStepUp(c => grantSession(session.id, ids, gids, c, g.gestureToken), askVaultCode)
+      return grantSession(session.id, ids, gids, undefined, g.gestureToken)
     }
-    return withStepUp(c => grantSession(session.id, ids, gids, c), askVaultCode)
+    return grantSession(session.id, ids, gids)
   }
   /** Escape closes the picker while the `@word` it was triggered by is still on screen — see `slashDismissed`. */
   const [atDismissed, setAtDismissed] = useState(false)
@@ -1290,9 +1291,27 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * `'auto'` before reading `scrollHeight` is required: skip it and a field that GREW once can only
    * ever read its own (already tall) scrollHeight back, so deleting text never shrinks it again.
    */
+  const lastFit = useRef({ len: 0, newlines: 0, maxH: 0 })
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
+    /*
+     * ONE character typed onto a draft with the same line breaks can only GROW the field, so the
+     * reset-to-`auto` below (two style writes around a forced layout — per keystroke, of the whole
+     * page) is skipped for it: if the content still fits the box, nothing is written at all; if a line
+     * just wrapped, the box is set to the new height without the reset. Everything else — a deletion, a
+     * paste, a line break, the ceiling moving, the first fit — takes the full path, which is the only
+     * one that can SHRINK the field. Measured on a 880-key typing run: this effect was the largest
+     * single function of the typing path (~0.6 ms per key, more in WebKit).
+     */
+    const nl = (draft.match(/\n/g) ?? []).length
+    const prev = lastFit.current
+    lastFit.current = { len: draft.length, newlines: nl, maxH: maxComposerH }
+    if (prev.len > 0 && draft.length === prev.len + 1 && nl === prev.newlines && maxComposerH === prev.maxH && el.style.height !== '') {
+      if (el.scrollHeight > el.clientHeight) el.style.height = `${Math.min(el.scrollHeight, maxComposerH)}px`
+      setComposerOverflows(el.scrollHeight > maxComposerH + 1)
+      return
+    }
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, maxComposerH)}px`
     // The scrollbar only once the draft is past the ceiling. Under the text-size zoom the measured
@@ -1385,6 +1404,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const structuredText = source?.liveText ?? (adapter ? payload.liveText : undefined)
   const structuredReasoning = source?.liveReasoning ?? (adapter ? payload.liveReasoning : undefined)
  const composing = adapter ? payload.composing ?? null : null
+  // The live reasoning is a LINE, animated while the model is still reasoning (it stops being the newest thing once the answer starts).
+  const reasoningClock = useReasoningClock(Boolean(structuredReasoning), Boolean(structuredText), working)
+  const reasoningRunning = Boolean(structuredReasoning) && working && !structuredText
 
   // A turn just ENDED. The live bubble is gone the moment `working` drops, and the real one is up
   // to `CHAT_POLL_MS` away — a gap where neither source is showing the answer that just finished.
@@ -2208,6 +2230,21 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     setStopping(false)
     if (!out.ok) setNotice(out.message)
   }
+  /**
+   * FLUXO.AVISOS 10 — the actions on a QUEUED message's own caption. The same verbs as the pill under the conversation and
+   * the stop button (`sendNow` / `stopNow` above): nothing is performed here, the rule for which to offer is the pure
+   * `queuedBubbleActions`, and an action that cannot work on this harness or right now is simply not drawn.
+   */
+  const queuedActionsFor = (text: string) => {
+    const a = queuedBubbleActions({
+      text, harness: session.harness, working, dialogOpen: blocked, personQueued: queuedPersonCount,
+      sendNowRunning: sendNowRun?.kind === 'running', stopEnabled: stopEnabled && !stopping, pt,
+    })
+    return {
+      ...(a.sendNow ? { sendNow: { ...a.sendNow, run: () => void sendNow() } } : {}),
+      ...(a.interrupt ? { interrupt: { ...a.interrupt, run: () => void stopNow() } } : {}),
+    }
+  }
 
   /** The memory gate refused the last Reopen: "Reabrir mesmo assim" is offered, behind a confirmation. */
   const [reopenForceable, setReopenForceable] = useState(false)
@@ -2388,7 +2425,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // `canPrompt` is checked HERE now rather than only on the field's `disabled`, which no longer
     // follows it — see the note on the textarea. This is where it belonged anyway: the rule is
     // about what may be DELIVERED, not about what may be typed.
-    if ((ownWords === '' && attached.length === 0) || sending) return
+    if (ownWords === '' && attached.length === 0) return
+    // The previous message is still on its way: SAY so and keep the draft — returning in silence is a key that looks broken.
+    if (sending) { setNotice(pt ? 'A mensagem anterior ainda está sendo enviada — a sua continua aqui; envie de novo em instantes.' : 'The previous message is still being sent — yours is kept here; send again in a moment.'); return }
     /**
      * A REFUSAL IS SAID, NEVER RETURNED IN SILENCE.
      *
@@ -2677,6 +2716,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               anchorId={echoAnchorId(session.id, q.text)}
               awaiting
               awaitingWorking={working}
+              awaitingActions={queuedActionsFor(q.text)}
               onQuoteClick={onSentQuote}
               {...(q.at !== undefined ? { awaitingSinceMs: Math.max(0, now - q.at) } : {})}
             />
@@ -2712,8 +2752,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               those as chat entries buried the sentences actually addressed to the user. */}
           {/* A SOURCE's live text is the model's own stream — exact, unlike a screen read — so it
               is drawn as the bubble it will become (`chatSource.ts`). */}
-          {(structuredText || structuredReasoning) && (
-            <ChatBubble turn={{ role: 'assistant', text: structuredText ?? '', ...(structuredReasoning ? { reasoning: structuredReasoning } : {}) }} lang={lang} harness={session.harness} sessionId={session.id} />
+          {structuredReasoning && (
+            <ReasoningRow text={structuredReasoning} running={reasoningRunning} clock={reasoningClock} lang={lang} />
+          )}
+          {structuredText && (
+            <ChatBubble turn={{ role: 'assistant', text: structuredText }} lang={lang} harness={session.harness} sessionId={session.id} />
           )}
 
           {showWorking && !liveActivity && (
@@ -3369,7 +3412,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                                   return
                                 }
                                 // Same rule as the main field: a phone's return breaks the line.
-                                if (e.key === 'Enter' && !e.shiftKey && !isMobile) { e.preventDefault(); void send(); return }
+                                if (enterSends({ key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, isComposing: e.nativeEvent.isComposing, keyCode: e.keyCode, isMobile })) { e.preventDefault(); void send(); return }
                                 if (e.key === 'Escape' && stopEnabled) { e.preventDefault(); void stopNow() }
                               }}
                             />
@@ -3561,7 +3604,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     // is a 44px target sitting right beside the field. On a hardware keyboard the
                     // rule is the opposite one and unchanged — enter sends, shift+enter breaks —
                     // and the picker above follows the same split for the same reason.
-                    if (e.key === 'Enter' && !e.shiftKey && !isMobile) { e.preventDefault(); void send() }
+                    if (enterSends({ key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, isComposing: e.nativeEvent.isComposing, keyCode: e.keyCode, isMobile })) { e.preventDefault(); void send() }
                     // The composer's own "esc": stops the CURRENT turn without touching the draft
                     // or the field's own ability to keep taking text — see `stopNow`.
                     if (e.key === 'Escape' && stopEnabled) { e.preventDefault(); void stopNow() }
@@ -4272,7 +4315,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           }}
         />
       )}
-      {vaultCodeAsk && <VaultCodeAsk lang={pt ? 'pt' : 'en'} isMobile={isMobile} onDone={vaultCodeAsk} />}
 
       {/* FORWARD — the fleet picker as its third feature: pick one or more sessions, then an
           optional comment and where it lands (the draft by default). See `chatForward.ts`. */}

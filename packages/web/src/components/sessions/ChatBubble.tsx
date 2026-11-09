@@ -1,4 +1,6 @@
 import { SurfaceTurnBadge } from '../SurfaceTurnBadge'
+import { ReasoningRow } from './ReasoningRow'
+import { EMPTY_REASONING_CLOCK } from '../../lib/reasoningRow'
 /**
  * ChatBubble — one turn of a session's conversation.
  *
@@ -161,6 +163,11 @@ export interface ChatBubbleProps {
   /** Whether the session is mid-turn — the reason an unread message is normal rather than stuck. */
   awaitingWorking?: boolean
   /**
+   * FLUXO.AVISOS 10: what the caption may DO about the wait — the existing send-now / interrupt verbs, offered only where
+   * they can work (`queuedBubbleActions` decides; an absent entry is a button that is not drawn).
+   */
+  awaitingActions?: { sendNow?: AwaitingAction; interrupt?: AwaitingAction }
+  /**
    * Quote THIS turn in the composer. Absent where the session cannot be written to — a reply
    * control on a row that will refuse the message is a control that teaches the wrong thing.
    *
@@ -271,35 +278,12 @@ function PastedBlock({ text, pt }: { text: string; pt: boolean }) {
   )
 }
 
-/** The model's reasoning, folded above its answer — `PastedBlock`'s shape, closed until asked. */
+/**
+ * The model's reasoning above its answer: the activity-line shape (`ReasoningRow`), closed until asked. A turn that is already
+ * over has no measured span here — the live turn's seconds belong to the line drawn while it streamed.
+ */
 export function ReasoningBlock({ text, pt }: { text: string; pt: boolean }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div data-testid="reasoning-block" style={{
-      margin: '2px 0 6px', border: '1px solid var(--border-subtle)', borderRadius: 8,
-      background: 'var(--bg-elevated)', overflow: 'hidden', minWidth: 0,
-    }}>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        aria-expanded={open}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6, width: '100%', minHeight: 32,
-          padding: '4px 10px', background: 'transparent', border: 'none', cursor: 'pointer',
-          color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 11.5, textAlign: 'left',
-        }}
-      >
-        <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'none' : 'rotate(-90deg)' }} />
-        <span style={{ fontWeight: 600 }}>{pt ? 'Raciocínio' : 'Reasoning'}</span>
-      </button>
-      {open && (
-        <div style={{
-          padding: '0 10px 8px', fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-secondary)',
-          whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 360, overflowY: 'auto',
-        }}>{text}</div>
-      )}
-    </div>
-  )
+  return <ReasoningRow text={text} running={false} clock={EMPTY_REASONING_CLOCK} lang={pt ? 'pt' : 'en'} />
 }
 
 /** Quiet text-only controls of a system line: no capsule, no fill, the muted text token. */
@@ -395,7 +379,10 @@ function SystemNote({ note, noteRef, pt, sessionId }: { note: string; noteRef?: 
   )
 }
 
-const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant, surfaceSubmitted }: ChatBubbleProps & { surfaceSubmitted?: boolean }) {
+/** One action on a queued message's caption: its words and what it runs. */
+export interface AwaitingAction { label: string; hint: string; run: () => void }
+
+const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, awaitingActions, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant, surfaceSubmitted }: ChatBubbleProps & { surfaceSubmitted?: boolean }) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
@@ -608,6 +595,10 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
     return <SystemNote note={turn.system} noteRef={turn.systemRef} pt={pt} {...(sessionId ? { sessionId } : {})} />
   }
 
+  // The reasoning a bubble shows: the native runtime's own channel, or — for OpenCode, whose ACP stream states its thinking turn by
+  // turn — the turn's `thinking`, so the line that said "Raciocinando…" does not vanish when the answer lands. Every other CLI's
+  // `thinking` stays undrawn (the decision in this file's header).
+  const reasoningShown = (turn.reasoning?.trim() || (harness === 'opencode' ? turn.thinking?.trim() : '') || '')
   const color = (HARNESS_COLORS as Record<string, string>)[harness] ?? 'var(--text-secondary)'
   const name = (HARNESS_LABELS as Record<string, string>)[harness] ?? harness
 
@@ -979,8 +970,8 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
           </div>
         )}
 
-        {turn.role === 'assistant' && turn.reasoning && turn.reasoning.trim() !== '' && (
-          <ReasoningBlock text={turn.reasoning.trim()} pt={pt} />
+        {turn.role === 'assistant' && reasoningShown !== '' && (
+          <ReasoningBlock text={reasoningShown} pt={pt} />
         )}
 
         {text.trim() !== '' && (
@@ -1090,7 +1081,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
           const st = echoStatus(awaitingSinceMs ?? null, awaitingWorking === true, pt ? 'pt' : 'en')
           return (
             <div role="status" style={{
-              display: 'flex', alignItems: 'center', gap: 5,
+              display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap',
               fontSize: 10,
               // A wait long enough to be worth a second look is the ONLY one that changes colour.
               // Colouring every unread message would make the ordinary case look like a fault,
@@ -1098,8 +1089,28 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
               color: st.notable ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
               alignSelf: mine ? 'flex-end' : 'flex-start',
             }}>
-              <Clock size={10} style={{ flexShrink: 0 }} />
-              <span>{st.text}</span>
+              {/* The clock stays with its sentence: only the actions wrap onto their own line on a narrow screen. */}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                <Clock size={10} style={{ flexShrink: 0 }} />
+                <span>{st.text}</span>
+              </span>
+              {([awaitingActions?.sendNow, awaitingActions?.interrupt] as const).map((a, k) => a && (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={a.run}
+                  // A text action keeps its natural size; `.ag-tap` projects the 44px touch target on a phone (index.css).
+                  className="ag-tap"
+                  title={a.hint}
+                  aria-label={`${a.label}. ${a.hint}`}
+                  data-testid={k === 0 ? 'queued-send-now' : 'queued-interrupt'}
+                  style={{
+                    border: 'none', background: 'transparent', padding: '0 2px', cursor: 'pointer',
+                    fontFamily: 'inherit', fontSize: 10, fontWeight: 600, textDecoration: 'underline',
+                    color: 'var(--anthropic-orange)',
+                  }}
+                >{a.label}</button>
+              ))}
             </div>
           )
         })()}
@@ -1322,7 +1333,7 @@ export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
   const event = parsed?.kind === 'rename' && (props.awaiting || props.turn.pending) ? null : parsed
   if (event) return event.sender
     ? <FleetSystemEventRow event={event} lang={props.lang} at={props.turn.at} />
-    : <SystemEventRow event={event} pt={props.lang === 'pt'} sessionId={props.sessionId} defaultOpen={event.kind === 'flow'} />
+    : <SystemEventRow event={event} pt={props.lang === 'pt'} sessionId={props.sessionId} />
   const surfaceText = props.turn.role === 'user' ? surfaceTurnText(props.turn.text) : null
   if (surfaceText !== null) return <ChatBubbleInner {...props} surfaceSubmitted turn={{ ...props.turn, text: surfaceText }} />
   return <ChatBubbleInner {...props} />

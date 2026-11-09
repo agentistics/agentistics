@@ -1,56 +1,42 @@
 import { describe, expect, test } from 'bun:test'
-import { parseEnrolArgs, pickPresence, qrHalfBlocks, stepsToRun, wordGrid } from './enroll-plan'
-import { qrMatrix } from '../../../web/src/lib/qr'
+import { parseEnrolArgs, pickPresence, stepsToRun, wordGrid } from './enroll-plan'
 
 describe('parseEnrolArgs', () => {
   test('no flags = everything that is missing; flags pick single steps; presence takes its kind', () => {
     expect(parseEnrolArgs([])).toEqual({ ok: true, value: { only: [], presence: null, requirePresence: false } })
-    expect(parseEnrolArgs(['--authenticator', '--recovery'])).toMatchObject({ ok: true, value: { only: ['authenticator', 'recovery'] } })
+    expect(parseEnrolArgs(['--recovery'])).toMatchObject({ ok: true, value: { only: ['recovery'] } })
     expect(parseEnrolArgs(['--presence', 'fido2', '--require-presence'])).toEqual({ ok: true, value: { only: ['presence'], presence: 'fido2', requirePresence: true } })
+    for (const k of ['touchid', 'hello', 'password', 'fido2'] as const) {
+      expect(parseEnrolArgs(['--presence', k])).toEqual({ ok: true, value: { only: ['presence'], presence: k, requirePresence: false } })
+    }
   })
-  test('Secure Enclave is DEFERRED (Q1) and says so; anything unknown is a usage error', () => {
-    expect(parseEnrolArgs(['--presence', 'se'])).toMatchObject({ ok: false, deferred: 'se' })
+  test('the authenticator is RETIRED (owner, 2026-11-07) and says so; anything unknown is a usage error', () => {
+    expect(parseEnrolArgs(['--authenticator'])).toMatchObject({ ok: false, retired: 'authenticator' })
     expect(parseEnrolArgs(['--presence'])).toMatchObject({ ok: false })
+    expect(parseEnrolArgs(['--presence', 'se'])).toMatchObject({ ok: false })
     expect(parseEnrolArgs(['--presence', 'pin'])).toMatchObject({ ok: false })
     expect(parseEnrolArgs(['--wat'])).toMatchObject({ ok: false })
   })
 })
 
-describe('stepsToRun — the §7.3 order, and only what is missing', () => {
-  const none = { authenticator: false, recovery: false, presence: false, available: ['hello'] }
-  test('a fresh machine runs all three: authenticator, presence, then the recovery key LAST (leader decision 2)', () => {
-    expect(stepsToRun({ only: [], presence: null, requirePresence: false }, none)).toEqual(['authenticator', 'presence', 'recovery'])
+describe('stepsToRun — presence, then the recovery key LAST, and only what is missing', () => {
+  const mac = [{ id: 'touchid', advanced: false }, { id: 'password', advanced: false }]
+  const none = { recovery: false, presence: false, available: mac }
+  test('a fresh machine runs both: presence, then the recovery key LAST (leader decision 2) — no authenticator step', () => {
+    expect(stepsToRun({ only: [], presence: null, requirePresence: false }, none)).toEqual(['presence', 'recovery'])
   })
-  test('a machine with no presence device skips presence (never offered and failing)', () => {
-    expect(stepsToRun({ only: [], presence: null, requirePresence: false }, { ...none, available: [] })).toEqual(['authenticator', 'recovery'])
-  })
-  test('an already-enrolled machine has nothing left; a flag forces its step in the safe order', () => {
-    const done = { authenticator: true, recovery: true, presence: true, available: ['hello'] }
+  test('an already-protected machine has nothing left; a flag forces its step in the safe order', () => {
+    const done = { recovery: true, presence: true, available: mac }
     expect(stepsToRun({ only: [], presence: null, requirePresence: false }, done)).toEqual([])
-    expect(stepsToRun({ only: ['recovery', 'authenticator'], presence: null, requirePresence: false }, done)).toEqual(['authenticator', 'recovery'])
+    expect(stepsToRun({ only: ['recovery', 'presence'], presence: null, requirePresence: false }, done)).toEqual(['presence', 'recovery'])
   })
-  test('pickPresence honours a request only when this machine offers it', () => {
-    expect(pickPresence(null, ['hello', 'fido2'])).toBe('hello')
-    expect(pickPresence('fido2', ['hello'])).toBeNull()
+  test('pickPresence honours a request only when this machine offers it, and never picks an ADVANCED one by itself', () => {
+    expect(pickPresence(null, mac)).toBe('touchid')
+    expect(pickPresence('password', mac)).toBe('password')
+    expect(pickPresence('fido2', mac)).toBeNull()
+    expect(pickPresence(null, [{ id: 'fido2', advanced: true }, { id: 'password', advanced: false }])).toBe('password')
+    expect(pickPresence('fido2', [{ id: 'fido2', advanced: true }])).toBe('fido2')
     expect(pickPresence(null, [])).toBeNull()
-  })
-})
-
-describe('qrHalfBlocks', () => {
-  const uri = 'otpauth://totp/Agentistics:box?secret=ABCDEFGHIJKLMNOP&issuer=Agentistics&digits=6&period=30'
-  const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
-  test('draws every module: rows = ceil((n+2q)/2), each line as wide as the matrix plus the quiet zone', () => {
-    const n = qrMatrix(uri).length
-    const lines = qrHalfBlocks(uri)
-    expect(lines).toHaveLength(Math.ceil((n + 4) / 2))
-    for (const l of lines) expect([...strip(l)]).toHaveLength(n + 4)
-  })
-  test('sets its own colours (black on white) and resets them, so the theme cannot invert it', () => {
-    for (const l of qrHalfBlocks(uri)) { expect(l.startsWith('\x1b[30;47m')).toBe(true); expect(l.endsWith('\x1b[0m')).toBe(true) }
-  })
-  test('the top-left finder pattern is dark (the corner after the quiet zone)', () => {
-    const lines = qrHalfBlocks(uri).map(strip)
-    expect(lines[1]![2]).toBe('█') // rows 2-3, column 2: inside the finder's first two rows
   })
 })
 

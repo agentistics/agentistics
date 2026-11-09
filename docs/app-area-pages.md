@@ -25,7 +25,7 @@ identity. Loading, unavailable and stale fleet states never claim an empty fleet
 
 These URLs remain unchanged for bookmarks and deep links. The desktop tree, rail, search and
 mobile sheet resolve them to Sessions; there is no separate top-level Leadership entry. Sessions
-lists the session workspace, followed by Leaders, Check-ins, Hand-offs and Away mode. Clicking
+lists the session workspace, followed by Leaders, Check-ins, Hand-offs and Autonomous mode. Clicking
 the Sessions area header opens the session workspace (`/sessions`), like its List subpage. On desktop, the
 expanded area bar covers the full width and height of the sessions list, including its controls,
 even after resizing the list. Its
@@ -40,10 +40,10 @@ the existing global defaults editor follows the reports. Individual agenda contr
 remain in each session's check-in panel.
 
 Hand-offs reserves its page for HANDOFF.CONFIG (`t-49f70edb75`) with a plain explanatory
-sentence and no configuration controls. Away mode composes the existing settings
+sentence and no configuration controls. Autonomous mode composes the existing settings
 switch, activation dialog, return confirmation and fleet impact. The top-bar away pill
-links to this page. Existing settings URLs remain usable; digest offers and their
-answers remain in the notification bell, using the existing away digest flow.
+links to this page. Existing settings URLs remain usable. (The "summary of the autonomous
+mode" notification offer was removed on 2026-11-06 at the owner's request.)
 
 ## Usage and activity presentation
 

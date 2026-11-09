@@ -139,3 +139,35 @@ test('two conversations with one title stay two rows even when one is synthetic'
   ]
   expect(dedupeEnded(rows).map(x => x.id)).toEqual(['m1', 'closed:c2'])
 })
+
+// The indexed `dedupeEnded` must keep exactly the rows the original quadratic rule kept. The reference
+// below IS that rule, verbatim, so a future "simplification" of the index cannot drift from it.
+test('dedupeEnded keeps exactly what the original find-based rule kept (randomised)', () => {
+  const reference = (rows: readonly TeamRow[]): TeamRow[] => {
+    const live = (s: TeamRow['state']) => s === 'working' || s === 'waiting' || s === 'waiting-approval'
+    const cidOf = (x: TeamRow) => x.conversationId || (x.id.startsWith('closed:') ? x.id.slice('closed:'.length) : undefined)
+    const end = (x: TeamRow) => x.endedAt ?? x.startedAt ?? -Infinity
+    const ended = rows.filter(x => !live(x.state)).sort((a, b) => end(b) - end(a))
+    const drop = new Set<TeamRow>(); const kept: TeamRow[] = []
+    for (const x of ended) {
+      const twin = kept.find(k => (cidOf(x) && cidOf(k) ? cidOf(x) === cidOf(k) : k.title === x.title && Math.abs(end(k) - end(x)) <= 5 * 60_000))
+      if (twin) drop.add(x); else kept.push(x)
+    }
+    return rows.filter(x => !drop.has(x))
+  }
+  let seed = 7
+  const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n }
+  for (let round = 0; round < 200; round++) {
+    const rows: TeamRow[] = Array.from({ length: 40 }, (_, i) => {
+      const kind = rnd(4)
+      const t = 10_000_000 + rnd(12) * 100_000
+      return r(kind === 0 ? `closed:c${rnd(8)}-${i}` : `s${i}`, rnd(5) === 0 ? 'working' : 'exited', {
+        title: `T${rnd(4)}`,
+        ...(kind === 1 || kind === 2 ? { conversationId: `c${rnd(8)}` } : {}),
+        ...(rnd(6) === 0 ? {} : { endedAt: t }),
+        ...(rnd(3) === 0 ? { startedAt: t - 50_000 } : {}),
+      })
+    })
+    expect(dedupeEnded(rows).map(x => x.id)).toEqual(reference(rows).map(x => x.id))
+  }
+})

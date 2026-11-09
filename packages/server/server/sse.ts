@@ -12,10 +12,12 @@ import { centralManifest, centralHtml } from './central-branding'
 import { invalidateCache, rebuildNow, useWatcherDrivenRefresh } from './data'
 import { createRebuildScheduler } from './rebuild-scheduler'
 import { mirrorFile } from './archive'
+import { onBookWrite } from './sessions/task-store'
 import { harnessEnabled } from './adapters/types'
 import { LATE_WATCH_INTERVAL_MS, planLateWatches, type WatchWant } from './watch-plan'
 import { addStoredNotification } from './notifications-store'
 import type { NotificationSubject } from './notifications-authority'
+import { debounceWithMaxWait } from './debounce-maxwait'
 
 export type SseController = ReadableStreamDefaultController<Uint8Array>
 
@@ -103,6 +105,21 @@ let sseDebounce: ReturnType<typeof setTimeout> | null = null
  * mark the cache stale, nudge listeners — rather than starting a full build in the background.
  */
 export function enableRebuildOnChange(): void { rebuildOnChange = true; useWatcherDrivenRefresh() }
+
+/** A task-book write: tell every client with a dedicated `book` event — NOT `change`, which makes
+ *  `useData` refetch the whole of `/api/data` (megabytes) for a write the book alone explains.
+ *  Only the board and Live views listen to `book`. Debounced with a ceiling so a burst is one push
+ *  and a steady stream still gets through. */
+const BOOK_MAX_WAIT_MS = 2000
+const pushBook = debounceWithMaxWait(() => {
+  const payload = sseEncoder.encode('event: book\ndata: {}\n\n')
+  for (const ctrl of [...sseClients]) {
+    try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
+  }
+}, 150, BOOK_MAX_WAIT_MS)
+export function notifyBookChange(): void { pushBook() }
+
+onBookWrite(() => notifyBookChange())
 
 export function triggerSseNotification() {
   if (rebuildOnChange) rebuilds.changed()
@@ -379,10 +396,19 @@ export function broadcastSessionGroupsChanged(): void {
   }
 }
 
-/** Away mode changed (`server/away.ts`): an EMPTY signal — the browser re-reads `GET /api/away`. */
+/** Autonomous mode changed (`server/away.ts`): an EMPTY signal — the browser re-reads `GET /api/away`. */
 export function broadcastAwayChanged(): void {
   if (sseClients.size === 0) return
   const payload = sseEncoder.encode('event: away\ndata: {}\n\n')
+  for (const ctrl of [...sseClients]) {
+    try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
+  }
+}
+
+/** Flow journals changed: an empty refresh signal, with no session/task text on the shared stream. */
+export function broadcastFlowsChanged(): void {
+  if (sseClients.size === 0) return
+  const payload = sseEncoder.encode('event: flows\ndata: {}\n\n')
   for (const ctrl of [...sseClients]) {
     try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
   }

@@ -115,16 +115,16 @@ for (const width of [1440, 390]) describe(`Leadership at ${width}px`, () => {
     try {
       __setAwayForTest(null)
       const render = () => atWidth(width, () => renderToStaticMarkup(<AwayContent lang="pt" capable />))
-      expect(render()).toContain('Carregando modo ausente…')
+      expect(render()).toContain('Carregando modo autônomo…')
       expect(render()).not.toContain('Você está presente.')
       __setAwayForTest(AWAY_OFF)
       expect(render()).toContain('Você está presente.')
-      expect(render()).toContain('Estou fora (dormindo, viajando)')
+      expect(render()).toContain('Sessões trabalham sem pedir permissão')
       const switchRow = render().split('role="switch"')[1]!.split('</button>')[0]!
       expect(switchRow).toContain('white-space:normal')
       expect(switchRow).not.toContain('text-overflow:ellipsis')
       __setAwayForTest({ ...AWAY_OFF, on: true })
-      expect(render().match(/até você voltar/g)).toHaveLength(1)
+      expect(render().match(/até você desligar/g)).toHaveLength(1)
       expect(render()).not.toContain('>Disponibilidade<')
       expect(render()).not.toContain('text-transform:uppercase')
       expect(render()).toContain('font-size:13px;color:var(--text-secondary)')
@@ -150,12 +150,13 @@ for (const lang of ['pt', 'en'] as const) test(`embedded check-in defaults have 
   expect(html).not.toContain(lang === 'pt' ? 'Check-in dos líderes' : 'Leader check-ins')
 })
 
-test('away authorization reads as a sentence in both languages', () => {
+test('autonomous mode is one switch: no authorisation list, ceilings or until picker on the page', () => {
   try {
     __setAwayForTest({ ...AWAY_OFF, on: true, authorised: ['releases', 'workers', 'merges'] })
     for (const lang of ['pt', 'en'] as const) {
       const html = atWidth(390, () => renderToStaticMarkup(<AwayContent lang={lang} capable />))
-      expect(html).toContain(lang === 'pt' ? 'releases que o líder aprovar, abrir sessões de workers, merge de PRs' : 'releases the leader approves, open worker sessions, merge PRs')
+      expect(html).toContain(lang === 'pt' ? 'Líderes decidem e registram; workers reportam ao líder.' : 'Leaders decide and record; workers report to their leader.')
+      expect(html).not.toContain(lang === 'pt' ? 'releases que o líder aprovar' : 'releases the leader approves')
     }
   } finally { __setAwayForTest(null) }
 })

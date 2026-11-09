@@ -58,7 +58,7 @@ export function Revealable({ shown, onToggle, lang, disabled, children }: {
   shown: boolean
   onToggle: () => void
   lang?: Lang
-  /** The field is not secret right now (the step-up prompt in authenticator-code mode). The
+  /** The field is not secret right now (the account step-up prompt in one-time-code mode). The
    *  button is then ABSENT, not present and inert — an eye that does nothing is a bug report. */
   disabled?: boolean
   children: React.ReactNode

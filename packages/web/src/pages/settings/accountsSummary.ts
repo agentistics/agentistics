@@ -7,7 +7,8 @@
  * can never disagree with what opens under it.
  */
 import { currentUsedPct, windowKey } from '@agentistics/core'
-import type { HarnessId, PlanLimits, PlanLimitWindow } from '@agentistics/core'
+import type { AgentSchedule, HarnessId, PlanLimits, PlanLimitWindow } from '@agentistics/core'
+import type { AgentUseView } from '../../lib/agentScheduleView'
 
 export interface AccountRowData {
   id: string
@@ -29,6 +30,9 @@ export interface AccountRowData {
   login?: 'ok' | 'expired' | 'signed_out'
   /** "Sign in again" can run from the app for this account, re-binding the same id. */
   relogin?: boolean
+  /** CONTAS.AGENDA-AGENTICA: when agents may use the account, and (schedule active) why it is on/off now. */
+  agentSchedule?: AgentSchedule
+  agentUse?: AgentUseView
 }
 
 /** The literal the server stores when a harness cannot say whose account a folder holds. */

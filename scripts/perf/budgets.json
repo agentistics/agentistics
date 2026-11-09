@@ -19,6 +19,12 @@
   "_comment_startup": "Fast startup (startup.ts): ms from /api/health answering to the first /api/data?partial=1 + /api/team/session — what the web app waits on before it paints — on a fresh install (cold) AND a restart (warm), over an EMPTY home and over a git home whose every `git log --numstat` takes 20 s. Before: cold first screen 2.3 s on a small synthetic home and NEVER (connection dropped at 120 s, 180 s, 240 s) with slow git; after: 0.4-0.9 s and full data in ~6 s.",
   "startupFirstScreenMs": 2000,
   "startupFullDataMs": 60000,
+  "_comment_appLento": "APP.LENTO (06/11): the owner's server held ~98 % of a core with nothing to do and every request waited behind it. Measured on a throwaway over the real store (3.044 managed rows, 327 MB journal) before -> after: idle 27 % -> 9.6 %, /api/fleet p95 3.7 s -> 1.0 s, /api/tasks p95 1.3 s -> 0.5 s, a keystroke's event p95 >300 ms -> 24 ms, a route change paints in <=118 ms. budget.ts checks the server half over the synthetic home; ui-budget.ts the browser half.",
+  "idleCpuPct": 10,
+  "fleetPollP95Ms": 500,
+  "tasksListP95Ms": 500,
+  "keystrokeEventP95Ms": 50,
+  "routePaintMaxMs": 500,
   "_comment_engineMap": "F0.4: the ENGINE.MAP bench (scripts/perf/engine-map/) — 09 §8 of the engine-map design, a mixed fleet of fake claude/codex/gemini/copilot/kimi/agy sessions on a throwaway server. Checked by engine-map/check.ts, NOT by budget.ts (which skips this object). level 'warn' reports an exceeded budget and keeps the job green; Phase 4 (F4) flips each to 'fail'. The figures are the ADAPTER-path targets of 09 §8, so a runner that is slower than the reference machine will warn — that is what a warning is for.",
   "engineMap": {
     "switchFirstP95Ms": {

@@ -1,0 +1,132 @@
+import { afterEach, describe, expect, test } from 'bun:test'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { userSearchPath } from './sessions/user-path'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { catalogCliPath, modelCatalog, peekModelCatalog, resetModelCatalogForTests, setCliResolverForTests, setModelReaderForTests } from './model-catalog'
+
+afterEach(() => resetModelCatalogForTests())
+
+const opt = (id: string) => ({ id, label: id, verifiedAt: '2026-11-06', source: 't' })
+
+describe('catalogCliPath', () => {
+  test('a LaunchAgent PATH still reaches Homebrew and /usr/local — where opencode lives on a Mac', () => {
+    const path = catalogCliPath('/usr/bin:/bin:/usr/sbin:/sbin', '/Users/dono').split(':')
+    expect(path).toContain('/opt/homebrew/bin')
+    expect(path).toContain('/usr/local/bin')
+    // the process's own PATH still decides which binary wins
+    expect(path.indexOf('/usr/bin')).toBeLessThan(path.indexOf('/opt/homebrew/bin'))
+  })
+
+  test('two installations: the SAME binary availability and spawn resolve wins (~/.local/bin first)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'catpath-'))
+    try {
+      for (const dir of ['system-bin', '.local/bin']) {
+        mkdirSync(join(home, dir), { recursive: true })
+        const f = join(home, dir, 'opencode')
+        writeFileSync(f, '#!/bin/sh\necho x\n')
+        chmodSync(f, 0o755)
+      }
+      const processPath = `${join(home, 'system-bin')}:/usr/bin:/bin`
+      const viaCatalog = Bun.which('opencode', { PATH: catalogCliPath(processPath, home) })
+      const viaSpawn = Bun.which('opencode', { PATH: userSearchPath(processPath, home) })
+      expect(viaCatalog).toBe(join(home, '.local/bin/opencode'))
+      expect(viaCatalog).toBe(viaSpawn)
+      // Homebrew/usr-local are only APPENDED
+      const parts = catalogCliPath(processPath, home).split(':')
+      expect(parts[0]).toBe(join(home, '.local/bin'))
+      expect(parts.indexOf('/opt/homebrew/bin')).toBeGreaterThan(parts.indexOf('/bin'))
+    } finally { rmSync(home, { recursive: true, force: true }) }
+  })
+})
+
+describe('a failed command read is not remembered as "no models"', () => {
+  test('first read fails → table answer; a later read succeeds → the CLI list (after the backoff)', async () => {
+    let t = 1_000_000
+    let calls = 0
+    setModelReaderForTests('opencode', async () => (++calls === 1 ? null : [opt('upx/fable-5.1'), opt('opencode/big-pickle')]), () => t)
+    peekModelCatalog('opencode')
+    await Bun.sleep(5)
+    expect(calls).toBe(1)
+    expect(peekModelCatalog('opencode').source).toBe('table')
+    expect(calls).toBe(1) // not retried inside the backoff
+    t += 31_000
+    peekModelCatalog('opencode') // due again → refresh in the background
+    await Bun.sleep(5)
+    const got = await modelCatalog('opencode')
+    expect(calls).toBe(2)
+    expect(got.source).toBe('cli')
+    expect(got.models.map(m => m.id)).toEqual(['upx/fable-5.1', 'opencode/big-pickle'])
+    expect(got.freeText).toBe(false)
+  })
+
+  test('when the CLI never answers, the models the config declares are offered (and a typed id stays accepted)', async () => {
+    setModelReaderForTests('opencode', async () => null, () => 1, async () => [opt('upx/fable-5.1'), opt('upx/opus-5')])
+    peekModelCatalog('opencode')
+    await Bun.sleep(5)
+    const got = peekModelCatalog('opencode')
+    expect(got.models.map(m => m.id)).toEqual(['upx/fable-5.1', 'upx/opus-5'])
+    expect(got.source).toBe('table')
+    expect(got.freeText).toBe(true)
+  })
+
+  test('a later failure keeps the last good CLI list', async () => {
+    let t = 1
+    let ok = true
+    setModelReaderForTests('opencode', async () => (ok ? [opt('a/b')] : null), () => t)
+    await modelCatalog('opencode'); await Bun.sleep(5)
+    expect(peekModelCatalog('opencode').models.map(m => m.id)).toEqual(['a/b'])
+    ok = false; t += 7 * 60 * 60_000
+    peekModelCatalog('opencode'); await Bun.sleep(5)
+    expect(peekModelCatalog('opencode').models.map(m => m.id)).toEqual(['a/b'])
+  })
+})
+
+describe('the cached list belongs to ONE binary', () => {
+  test('when the resolved opencode changes, the old list is void and the new binary is asked', async () => {
+    let bin = '/system/opencode'
+    setCliResolverForTests(() => bin)
+    let calls = 0
+    setModelReaderForTests('opencode', async () => (++calls === 1 ? [opt('system/model')] : [opt('user/model')]), () => 1)
+    await modelCatalog('opencode'); await Bun.sleep(5)
+    expect(peekModelCatalog('opencode').models.map(m => m.id)).toEqual(['system/model'])
+    expect(calls).toBe(1)
+    bin = '/home/u/.local/bin/opencode' // e.g. adoptUserBinOnPath / a new install
+    expect(peekModelCatalog('opencode').source).toBe('table') // the old binary's list is not served
+    await Bun.sleep(5)
+    expect(peekModelCatalog('opencode').models.map(m => m.id)).toEqual(['user/model'])
+    expect(calls).toBe(2)
+  })
+
+  test('an unchanged binary keeps its list (no refresh inside the TTL)', async () => {
+    setCliResolverForTests(() => '/same/opencode')
+    let calls = 0
+    setModelReaderForTests('opencode', async () => { calls++; return [opt('a/b')] }, () => 1)
+    await modelCatalog('opencode'); await Bun.sleep(5)
+    peekModelCatalog('opencode'); peekModelCatalog('opencode'); await Bun.sleep(5)
+    expect(calls).toBe(1)
+  })
+})
+
+describe('the cached opencode list belongs to ONE set of connected providers', () => {
+  test('connecting a subscription (auth.json changes) voids the free-only list at once', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-auth-'))
+    const prev = process.env.OPENCODE_DIR
+    process.env.OPENCODE_DIR = dir
+    try {
+      let calls = 0
+      setModelReaderForTests('opencode', async () => (++calls === 1 ? [opt('opencode/big-pickle')] : [opt('opencode/big-pickle'), opt('opencode-go/glm-5.3-flash')]), () => 1)
+      await modelCatalog('opencode'); await Bun.sleep(5)
+      expect(peekModelCatalog('opencode').models.map(m => m.id)).toEqual(['opencode/big-pickle'])
+      expect(calls).toBe(1)
+      writeFileSync(join(dir, 'auth.json'), '{}') // a key was pasted
+      peekModelCatalog('opencode') // sees the new stamp and refreshes in the background
+      await Bun.sleep(10)
+      expect(calls).toBe(2)
+      expect(peekModelCatalog('opencode').models.map(m => m.id)).toEqual(['opencode/big-pickle', 'opencode-go/glm-5.3-flash'])
+    } finally {
+      if (prev === undefined) delete process.env.OPENCODE_DIR; else process.env.OPENCODE_DIR = prev
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

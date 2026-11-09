@@ -12,7 +12,7 @@ import { mkdir } from 'node:fs/promises'
 import { structuredIntentOf } from './structured-route'
 import { agentisticsMcpLaunch } from '../mcp-launch'
 import { managedProcessLogPath } from './process-conversation'
-import { HARNESS_ORDER, hasRolePrefix, type HarnessId } from '@agentistics/core'
+import { HARNESS_ORDER, hasRolePrefix, type CanonicalMode, type HarnessId } from '@agentistics/core'
 // `GROUPINGS` and never a list typed into the usage text: the help is the only place a person can
 // read what `--group` accepts, and a second copy of that list drifts silently — the CLI would go on
 // accepting an arrangement its own help says nothing about. Same rule `cli-parse.ts` already applies
@@ -21,6 +21,8 @@ import { GROUPINGS, sessionRunning } from '@agentistics/tui/control/sessions'
 import { controlStrings, sessionWordBook } from '@agentistics/tui/control/i18n'
 import { wrapText } from '@agentistics/tui/control/surface'
 import { parseSessionArgs, LS_DEFAULT, type BatchSpec, type SessionCommand } from './cli-parse'
+import { checkTopTier } from './top-tier-gate'
+import { readHarnessDefaults } from './harness-defaults'
 import { cliStrings } from '../cli-i18n'
 import { resolveLang, type CliLang } from '../cli-lang'
 import { readPreferences } from '../preferences'
@@ -36,7 +38,7 @@ import { SPAWN_SPECS, planSpawn } from './spawn-spec'
 import { spawnCapabilities } from './codex-capabilities'
 import { readHarnessVersion } from './harness-version'
 import { spawnGate, UNPROVEN_SESSION, verifyBornRole } from './spawn-gate'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
@@ -134,9 +136,9 @@ const USAGE = `Usage:
   toast for it, while it still shows as waiting and its events are still recorded. Absent = on. On
   \`batch\` it is a default for the \`--session\`s that follow it, like \`--model\`.
 
-  \`--away\` starts the session in AWAY MODE on its own (it is told the owner is out and asks them
-  nothing, even while the global switch is off); \`--no-away\` refuses to inherit it. Absent: a
-  session started from inside a session that is itself in away mode inherits it. On \`batch\` it
+  \`--away\` starts the session in AUTONOMOUS MODE on its own (it is told to decide without asking permission and is born in no-questions mode
+  unless --mode is given, even while the global switch is off); \`--no-away\` refuses to inherit it. Absent: a
+  session started from inside a session that is itself in autonomous mode inherits it. On \`batch\` it
   applies to every session.
 
   \`--account <acc_…>\` (experimental \`multi-account\`) runs the session on that harness account, in
@@ -152,7 +154,7 @@ const USAGE = `Usage:
   session and moves it (e.g. to "…/Finalizadas") in one step. \`folders\` prints the tree to pick from.
 
   \`--handoff\` (from inside a leader) starts that leader's SUCCESSOR: the same folder, pin position, title,
-  check-in agenda, leader role, away mode and last-answer relay the web hand-off gives. Refused without a
+  check-in agenda, leader role, autonomous mode and last-answer relay the web hand-off gives. Refused without a
   verified calling session. \`kill\` of the predecessor then leaves the successor pinned.
 
   \`--task <id|title>\` / \`--subtask <id|title>\` file the session on the BOARD at spawn, with the task's real
@@ -521,7 +523,7 @@ export async function start(
   const offeredConversationId = randomUUID()
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
   // A hand-off already PROVED its caller by the pane above (stronger than the token check), so the
-  // predecessor's away mode and role origin are inherited on that proof.
+  // predecessor's autonomous mode and role origin are inherited on that proof.
   const parentVerified = (cmd.handoff && !!parentSessionIdForPlan)
     || await callerHoldsIdentity(callerSessionId())
   // A hand-off names its predecessor exactly; any other spawn by a predecessor that has already
@@ -565,7 +567,9 @@ export async function start(
   // HANDOFF: the successor keeps the predecessor's title and is briefed with the owner's last words to it.
   const label = cmd.handoff ? handoffTitle(handoffParentRow?.label, cmd.label) : cmd.label
   // …and its launch flags when this hand-off did not name them (same harness only).
-  const launch = handoffSpawnDefaults(handoffParentRow, cmd.harness, { ...cmd, mode: cmd.mode ?? registry0.find(r => r.id === verifiedCaller)?.mode })
+  const launch0 = handoffSpawnDefaults(handoffParentRow, cmd.harness, { ...cmd, mode: cmd.mode ?? registry0.find(r => r.id === verifiedCaller)?.mode })
+  // AUTONOMOUS MODE: born in no-questions unless --mode was explicit.
+  const launch = { ...launch0, mode: (await resolveAutonomousMode(cmd.harness, cmd.mode, away, launch0.mode)).mode }
   const relay = handoffParentRow
     ? await import('./handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
@@ -604,6 +608,11 @@ export async function start(
   // process. A refusal here means nothing below this point runs: no id is minted, no row is
   // written, nothing is spawned. `--force` still goes through this check, so the override note
   // is printed from the SAME place a plain refusal would have been.
+  // FLUXO.AVISOS 5: the owner's top-tier cap binds this door exactly as it binds the delivery flow's slot gate.
+  if (await checkTopTier(
+    [{ harness: cmd.harness, model: launch.model ?? (await readHarnessDefaults(cmd.harness).catch(() => undefined))?.model, role: wantedRole }],
+    cmd.force ?? false, lang, cmd.json ?? false,
+  )) return 1
   if (reportAdmission(
     await admitOrWait(1, cmd.force ?? false, lang, cmd.json ?? false), lang, cmd.json ?? false,
   )) return 1
@@ -870,7 +879,7 @@ export async function batch(
   const gateCaller = callerId ? ((batchDeps.provesCaller ? await batchDeps.provesCaller(callerId) : (await callerProof(callerId, async () => (backend as { listPanePids?: () => Promise<Map<string, number>> }).listPanePids?.())) === 'proven') ? callerId : null) : undefined
   if (gateCaller === null) { console.error(UNPROVEN_SESSION); return 1 }
   const gateParent = gateCaller ? (await parentLinkOf(gateCaller, { followHandoff: true })).parentSessionId : undefined
-  const gates = []
+  const gates: Awaited<ReturnType<typeof spawnGate>>[] = []
   for (const [index, spec] of cmd.specs.entries()) {
     const filing = plans[index]!
     gates.push(await (batchDeps.spawnGate ?? spawnGate)({
@@ -896,6 +905,15 @@ export async function batch(
   // is admitted or refused as a UNIT (see `spawn-admission.ts`'s docstring on `fits`: half a batch
   // is a plan nobody approved). Refused BEFORE the task book is even touched, so a refused batch
   // creates no task, no attempt, and spawns nothing.
+  // FLUXO.AVISOS 5: the whole batch counts together against the top-tier cap, refused as a unit like the memory gate.
+  if (await checkTopTier(
+    await Promise.all(cmd.specs.map(async (spec, i) => ({
+      harness: spec.harness,
+      model: spec.model ?? (await readHarnessDefaults(spec.harness).catch(() => undefined))?.model,
+      role: (gates[i] as { role?: string } | undefined)?.role ?? spec.role,
+    }))),
+    cmd.force ?? false, lang, cmd.json ?? false,
+  )) return 1
   if (reportAdmission(
     await admitOrWait(cmd.specs.length, cmd.force ?? false, lang, cmd.json ?? false),
     lang, cmd.json ?? false,
@@ -929,6 +947,7 @@ export async function batch(
     const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
     const g = gates[index]!
+    const specMode = (await resolveAutonomousMode(spec.harness, spec.mode, away, parentRow?.mode)).mode
     const batchRole = g.ok ? g.role : undefined
     const role = batchRole ? await ensureSpawnRole([offeredConversationId, id], batchRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
     const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: spec.harness, lang, ...(await folderCtxFor(filing.folderId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(filing.taskId, filing.subtaskId, cmd.task)) })
@@ -941,7 +960,7 @@ export async function batch(
       cwd,
       ...(logFile ? { logFile } : {}),
       context: ctx,
-      ...((spec.mode ?? parentRow?.mode) ? { mode: spec.mode ?? parentRow?.mode } : {}),
+      ...(specMode ? { mode: specMode } : {}),
       ...(spec.prompt ? { prompt: spec.prompt } : {}),
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
@@ -978,7 +997,7 @@ export async function batch(
       ...(spec.attempt && resolved?.attempts.get(spec.attempt)
         ? { attemptId: resolved.attempts.get(spec.attempt)! }
         : {}),
-      ...((spec.mode ?? parentRow?.mode) ? { mode: spec.mode ?? parentRow?.mode } : {}),
+      ...(specMode ? { mode: specMode } : {}),
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
       ...(spec.name ? { label: spec.name } : {}),
@@ -1102,6 +1121,11 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
   // fully running has no business being refused for memory it does not need.
   if (plan.reopen.length > 0) {
     const lang = await resolveLang()
+    // FLUXO.AVISOS 5: a reopen starts assistants too — the top-tier cap counts them.
+    if (await checkTopTier(
+      plan.reopen.map(r => ({ harness: r.entry.harness, model: r.entry.model, role: r.entry.leader ? 'leader' : undefined })),
+      force, lang, json,
+    )) return 1
     if (reportAdmission(
       await admitOrWait(plan.reopen.length, force, lang, json), lang, json,
     )) return 1
@@ -1125,7 +1149,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
       const account = await recordedSpawnAccount(m.accountId, { agentCaller, harness: m.harness })
       if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); return }
-      const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
+      const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...(await autonomousLaunch(m.harness, inheritedLaunch(m, m.harness), m.away === true)), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
       if (!planned.ok) { skipped.push(m.id); return }
       // DSL.TIPO-SESSAO — the reopen door passes the spawn gate too (journaled; it keeps the role the row had).
       const claimed = callerSessionId()
@@ -1483,6 +1507,12 @@ async function attach(ref: string, backend: SessionBackend): Promise<number> {
  * both at once and the memory cost is zero, not +1. Gating it would refuse a swap that frees the
  * exact memory it would need.
  */
+/** AUTONOMOUS MODE for a reopen/relaunch: the inherited launch flags, with the mode born as no-questions while it is on. */
+async function autonomousLaunch<L extends { mode?: CanonicalMode | undefined }>(harness: HarnessId, launch: L, away: boolean): Promise<L> {
+  const mode = (await resolveAutonomousMode(harness, undefined, away, launch.mode)).mode as CanonicalMode | undefined
+  return mode ? { ...launch, mode } : launch
+}
+
 async function takeOver(ref: string, backend: SessionBackend): Promise<number | null> {
   const live = await liveAgentFor(ref)
   if (!live) return null
@@ -1498,7 +1528,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
     const previous = newestRowOfConversation(await readRegistry(), live.sessionId)
     const account = await recordedSpawnAccount(previous?.accountId, { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
     if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
-    const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...inheritedLaunch(previous, live.harness), ...(logFile ? { logFile } : {}), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
+    const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...(await autonomousLaunch(live.harness, inheritedLaunch(previous, live.harness), previous?.away === true)), ...(logFile ? { logFile } : {}), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
     if (planned.ok && planned.plan.modeNeedsProtocol) { console.error(`Cannot reopen ${live.sessionId}: terminal cannot apply ${planned.plan.modeNeedsProtocol} approval mode`); return 1 }
     const plan = planTakeover({
       conversationId: live.sessionId,

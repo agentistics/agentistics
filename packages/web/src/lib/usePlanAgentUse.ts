@@ -1,14 +1,46 @@
 import { useEffect, useRef, useState } from 'react'
-import type { HarnessId } from '@agentistics/core'
+import type { AgentSchedule, HarnessId } from '@agentistics/core'
+import type { AgentUseView } from './agentScheduleView'
 import { subscribeEvent } from './eventStream'
 import { pushLocalNotification } from './notifications'
 import { createAccountMutator } from '../pages/settings/accountMutations'
 
-type PlanAccount = { id: string; harness: HarnessId; available: boolean; retired?: boolean }
+type PlanAccount = {
+  id: string; harness: HarnessId; available: boolean; retired?: boolean
+  label?: string; nickname?: string
+  /** The schedule (CONTAS.AGENDA-AGENTICA) and, while it is active, the effective state and why. */
+  agentSchedule?: AgentSchedule; agentUse?: AgentUseView
+  /** "Sign in again" can run for this account (any login state). */
+  reloginable?: boolean
+  /** Server's login state and whether "Sign in again" fixes a BROKEN one (expired / signed out). */
+  login?: 'ok' | 'expired' | 'signed_out'; relogin?: boolean
+}
+
+/** PURE. Only an expired / signed-out login that Sign in again can fix; a working account never shows the button. */
+export function loginNeedsRelogin(a: { login?: string; relogin?: boolean }): boolean {
+  return (a.login === 'expired' || a.login === 'signed_out') && a.relogin === true
+}
+
+/** What a surface needs to draw one account's agent-use controls. */
+export interface AgentUseControl {
+  on: boolean
+  pending: boolean
+  onToggle: () => void
+  accountId: string
+  schedule?: AgentSchedule
+  view?: AgentUseView
+  reloginable: boolean
+  /** The login is expired / signed out AND a re-login can fix it: the only case the popup offers it. */
+  loginBroken: boolean
+  /** Take the server's answer after a schedule save or a re-login. */
+  applyAccount: (account: unknown) => void
+}
 
 /** Availability comes from the registry, including accounts with no meter or hidden budgets. */
 export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
   const [accounts, setAccounts] = useState<PlanAccount[]>([])
+  // False until the registry answered once (or failed): rows must not render controls-less in between.
+  const [loaded, setLoaded] = useState(false)
   const [optimistic, setOptimistic] = useState<Record<string, boolean>>({})
   const mutator = useRef(createAccountMutator<PlanAccount>((id, body) => fetch(`/api/accounts/${encodeURIComponent(id)}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -22,11 +54,12 @@ export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
       const version = revision.current
       try {
         const r = await fetch('/api/accounts', { cache: 'no-store' })
-        if (!r.ok) return
+        if (!r.ok) { if (active) setLoaded(true); return }
         const body = await r.json() as { accounts?: PlanAccount[] }
         if (active && version === revision.current) setAccounts(prev => (body.accounts ?? []).map(a =>
           mutator.has(a.id) ? prev.find(p => p.id === a.id) ?? a : a))
-      } catch { /* Without the registry, meters remain visible but cannot be switched. */ }
+        if (active) setLoaded(true)
+      } catch { if (active) setLoaded(true) /* Without the registry, meters remain visible but cannot be switched. */ }
     }
     void reload()
     const off = subscribeEvent('plan-limits', () => { void reload() })
@@ -34,12 +67,21 @@ export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
     return () => { active = false; off(); connected() }
   }, [enabled, mutator])
 
-  return (harness: HarnessId, id?: string) => {
+  const lookup = (harness: HarnessId, id?: string): AgentUseControl | undefined => {
     const account = accounts.find(a => a.id && a.id === id && a.harness === harness && !a.retired)
     if (!enabled || !account) return undefined
     return {
       on: optimistic[account.id] ?? account.available,
       pending: Object.hasOwn(optimistic, account.id),
+      accountId: account.id,
+      ...(account.agentSchedule ? { schedule: account.agentSchedule } : {}),
+      ...(account.agentUse ? { view: account.agentUse } : {}),
+      reloginable: account.reloginable === true,
+      loginBroken: loginNeedsRelogin(account),
+      applyAccount: (next: unknown) => {
+        const a = next as PlanAccount | null
+        if (a && a.id === account.id) { revision.current++; setAccounts(prev => prev.map(x => x.id === a.id ? a : x)) }
+      },
       onToggle: async () => {
         if (mutator.has(account.id)) return
         revision.current++
@@ -58,4 +100,10 @@ export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
       },
     }
   }
+  // `loaded` lets a row show a placeholder instead of a controls-less first frame; `accounts` lets the
+  // list add the accounts that have no plan reading (they would otherwise be invisible here).
+  return Object.assign(lookup, {
+    loaded,
+    accounts: accounts.filter(a => !a.retired).map(a => ({ harness: a.harness, id: a.id, label: a.nickname ?? a.label })),
+  })
 }

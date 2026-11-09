@@ -40,7 +40,7 @@ describe('AreaTree', () => {
     const html = render({ at: '/usage' })
     expect(html).not.toContain('Histórico')
     expect(html).toMatch(/aria-current="page"[^>]*>Agora/)
-    expect(html).not.toContain('Modo ausente')
+    expect(html).not.toContain('Modo autônomo')
     expect(html).not.toContain('Check-ins')
   })
   it('renders the badge next to Sessões', () => {

@@ -5,6 +5,7 @@ import {
   parseCodexModelsCache,
   parseKimiModelAliases,
   parseOpencodeModels,
+  parseOpencodeConfigModels,
   isSafeModelId,
   resolveChatModel,
 } from './model-catalog-parse'
@@ -94,8 +95,15 @@ describe('parseOpencodeModels', () => {
     ])
   })
 
-  test('a line that is not an id (an error sentence) makes it no answer', () => {
+  test('an error sentence alone is no answer', () => {
     expect(parseOpencodeModels('Error: something went wrong\n', SRC)).toBeNull()
+  })
+
+  test('a notice beside the list does not void it (the free-only picker bug)', () => {
+    const out = 'Update available: 1.20.0\nopencode/big-pickle\nopencode-go/glm-5.3-flash\nopencode-go/muse-spark-1.2-contributor\n'
+    expect(parseOpencodeModels(out, SRC)?.map(m => m.id)).toEqual([
+      'opencode/big-pickle', 'opencode-go/glm-5.3-flash', 'opencode-go/muse-spark-1.2-contributor',
+    ])
   })
 })
 
@@ -166,5 +174,52 @@ describe('catalogFields', () => {
 
   test('no catalog at all is the table with nothing named', () => {
     expect(catalogFields([], undefined)).toEqual({ modelSuggestions: [], models: [], modelsSource: 'table', modelFreeText: true })
+  })
+})
+
+describe('parseOpencodeConfigModels', () => {
+  const cfg = JSON.stringify({
+    model: 'upx/fable-5.1',
+    provider: {
+      upx: { models: { 'fable-5.1': { name: 'Fable' }, 'opus-5': {} } },
+      ollama: { models: { 'qwen3:4b': {} } },
+      empty: {},
+    },
+  })
+
+  test('lists every provider/model the config declares, default first', () => {
+    expect(parseOpencodeConfigModels(cfg, SRC)?.map(m => m.id)).toEqual([
+      'upx/fable-5.1', 'upx/opus-5', 'ollama/qwen3:4b',
+    ])
+  })
+
+  test('the plural `providers` key is read as well as the legacy `provider`', () => {
+    const doc = JSON.stringify({ providers: { upx: { models: { 'opus-5': {} } } }, provider: { ollama: { models: { 'qwen3:4b': {} } } } })
+    expect(parseOpencodeConfigModels(doc, SRC)?.map(m => m.id)).toEqual(['ollama/qwen3:4b', 'upx/opus-5'])
+  })
+
+  test('the default alone is a list (a provider declared elsewhere)', () => {
+    expect(parseOpencodeConfigModels('{"model":"upx/fable-5.1"}', SRC)?.map(m => m.id)).toEqual(['upx/fable-5.1'])
+  })
+
+  test('opencode.jsonc: // and /* */ comments and trailing commas are read; strings keep their //', () => {
+    const jsonc = `{
+      // the default
+      "model": "upx/fable-5.1", /* inline */
+      "provider": {
+        "upx": {
+          "options": { "baseURL": "https://api.example.com/v1" },
+          "models": { "fable-5.1": {}, "opus-5": {}, },
+        },
+      },
+    }`
+    expect(parseOpencodeConfigModels(jsonc, SRC)?.map(m => m.id)).toEqual(['upx/fable-5.1', 'upx/opus-5'])
+  })
+
+  test('junk, comments and an unexpected shape say nothing', () => {
+    expect(parseOpencodeConfigModels('{ "model": "a/b" ', SRC)).toBeNull()
+    expect(parseOpencodeConfigModels('[]', SRC)).toBeNull()
+    expect(parseOpencodeConfigModels('{"provider":{"x":{"models":[1]}}}', SRC)).toBeNull()
+    expect(parseOpencodeConfigModels('{"model":"not an id"}', SRC)).toBeNull()
   })
 })

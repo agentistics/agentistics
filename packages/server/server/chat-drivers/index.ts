@@ -1,4 +1,4 @@
-import type { HarnessId } from '@agentistics/core'
+import { HARNESS_LABELS, HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import type { ChatDriver, HarnessChatStatus } from './types'
 import { claudeDriver } from './claude'
 import { codexDriver } from './codex'
@@ -7,10 +7,10 @@ import { copilotDriver } from './copilot'
 import { modelCatalog } from '../model-catalog'
 import { readHarnessDefaults } from '../sessions/harness-defaults'
 import { readHarnessVersion } from '../sessions/harness-version'
+import { availableHarnesses } from '../sessions/harness-available'
+import { HARNESS_INSTALLERS } from '../sessions/harness-install-plan'
 
-/**
- * Registry of all chat drivers in display order: claude, codex, gemini, copilot.
- */
+/** Backends that can actually serve Nay chat. */
 export const ALL_DRIVERS: ChatDriver[] = [claudeDriver, codexDriver, geminiDriver, copilotDriver]
 
 export function getChatDriver(harness: HarnessId): ChatDriver | undefined {
@@ -31,16 +31,38 @@ export async function chatDefaultModel(harness: HarnessId): Promise<string> {
  * install/auth/ready flags and setup guidance. Used by GET /api/chat-harnesses.
  * The models come from the ONE catalog every model picker reads (`model-catalog.ts`).
  */
-export async function chatHarnessStatus(): Promise<HarnessChatStatus[]> {
-  return Promise.all(ALL_DRIVERS.map(async d => {
-    const installed = d.isAvailable()
-    const authReady = d.authReady()
-    const version = installed ? await readHarnessVersion(d.id) : undefined
-    const catalog = await modelCatalog(d.id)
+export async function chatHarnessStatus(all = false): Promise<HarnessChatStatus[]> {
+  const byId = new Map(ALL_DRIVERS.map(d => [d.id, d]))
+  const detected = all ? availableHarnesses() : null
+  const installedIds = new Set(detected && !detected.blind ? detected.ids : [])
+  const ids = all ? HARNESS_ORDER : ALL_DRIVERS.map(d => d.id)
+  return Promise.all(ids.map(async id => {
+    const driver = byId.get(id)
+    const catalog = await modelCatalog(id)
+    if (!driver) {
+      return {
+        id,
+        label: HARNESS_LABELS[id],
+        installed: installedIds.has(id),
+        canInstall: Object.hasOwn(HARNESS_INSTALLERS, id),
+        authReady: false,
+        ready: false,
+        updateAvailable: false,
+        models: catalog.models.map(m => ({ id: m.id, label: m.label })),
+        modelsSource: catalog.source,
+        modelFreeText: catalog.freeText,
+        defaultModel: '',
+        setup: { docUrl: CATALOG_DOCS[id], note: 'This harness has no Nay chat driver.' },
+      }
+    }
+    const installed = all ? installedIds.has(id) : driver.isAvailable()
+    const authReady = driver.authReady()
+    const version = installed ? await readHarnessVersion(driver.id) : undefined
     return {
-      id: d.id,
-      label: d.label,
+      id,
+      label: driver.label,
       installed,
+      canInstall: Object.hasOwn(HARNESS_INSTALLERS, id),
       authReady,
       ready: installed && authReady,
       ...(version ? { version } : {}),
@@ -48,8 +70,16 @@ export async function chatHarnessStatus(): Promise<HarnessChatStatus[]> {
       models: catalog.models.map(m => ({ id: m.id, label: m.label })),
       modelsSource: catalog.source,
       modelFreeText: catalog.freeText,
-      defaultModel: await chatDefaultModel(d.id),
-      setup: d.setup,
+      defaultModel: await chatDefaultModel(driver.id),
+      setup: driver.setup,
     }
   }))
+}
+
+/** Official guidance for catalog entries without an integrated chat setup. */
+const CATALOG_DOCS: Partial<Record<HarnessId, string>> = {
+  antigravity: 'https://antigravity.google/download',
+  kimi: 'https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html',
+  opencode: 'https://opencode.ai/docs/',
+  hermes: 'https://hermes-agent.nousresearch.com/docs/',
 }

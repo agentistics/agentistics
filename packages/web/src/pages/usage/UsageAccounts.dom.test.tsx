@@ -256,3 +256,36 @@ describe('removing a plan in the edge cases (CONTAS.MAC.NOVO)', () => {
     expect((saves[0] as (b: unknown) => unknown)(billing)).toEqual({ profiles: {} })
   })
 })
+
+describe('the agent schedule in the account editor (CONTAS.AGENDA-AGENTICA)', () => {
+  test('turning the schedule on, adding Saturday and saving PATCHes the whole schedule', async () => {
+    const el = mount('/usage')
+    await flush()
+    act(() => (el.querySelector('button[aria-label="Set plan · me@example.test"]') as HTMLButtonElement).click())
+    await flush()
+    const box = document.querySelector('[data-account-schedule]') as HTMLElement
+    expect(box).not.toBeNull()
+    expect(box.querySelectorAll('[data-agent-day]').length).toBe(7)
+    act(() => (box.querySelector('[role=switch][aria-label^="Agent-use schedule"]') as HTMLButtonElement).click())
+    act(() => (box.querySelector('[data-agent-day="sat"]') as HTMLButtonElement).click())
+    await flush()
+    expect(box.querySelector('[data-agent-day-editor="sat"]')).not.toBeNull()
+    act(() => (box.querySelector('[data-agent-schedule-save]') as HTMLButtonElement).click())
+    await flush()
+    const last = patches.at(-1)!
+    expect(last.url).toBe('/api/accounts/c1')
+    const sched = last.body.agentSchedule as { enabled: boolean; days: Record<string, { windows: unknown[] }> }
+    expect(sched.enabled).toBe(true)
+    expect(Object.keys(sched.days).sort()).toEqual(['fri', 'mon', 'sat', 'thu', 'tue', 'wed'])
+    expect(sched.days.sat!.windows).toEqual([{ from: '09:00', to: '18:00' }])
+  })
+
+  test('the reason badge is drawn from the server state', async () => {
+    account = { ...account, available: false, agentSchedule: { enabled: true, days: {} }, agentUse: { reason: 'day-off', on: false, dayUsedPct: null } }
+    const el = mount('/usage')
+    await flush()
+    act(() => (el.querySelector('button[aria-label="Set plan · me@example.test"]') as HTMLButtonElement).click())
+    await flush()
+    expect(document.querySelector('[data-agent-use-badge="day-off"]')?.textContent).toContain('Day not scheduled')
+  })
+})

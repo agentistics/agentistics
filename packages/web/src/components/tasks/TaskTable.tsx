@@ -22,6 +22,7 @@
  * It computes NOTHING. Every figure arrives already decided from `/api/tasks`.
  */
 
+import { visibleStatuses } from './statusDefaults'
 import { useEscapeOwner } from '../../lib/overlayStack'
 import React, { useEffect, useMemo, useState } from 'react'
 import {
@@ -40,6 +41,8 @@ import {
   type TaskStatusDef, type TaskTypeDef, sortTaskTypes,
 } from '@agentistics/core'
 import { DEFAULT_PREFS, useBoardPref } from './boardPrefs'
+import { resolveBoardPage } from './boardPaging'
+import { BoardPager } from './BoardPager'
 import { ColResizeHandle } from './ColResizeHandle'
 import { contentWidthOf, fitContentWidth, hasCustomWidths, resolveWidths, tableMinWidth } from './columnWidths'
 import { SortTh } from './SortHeader'
@@ -652,6 +655,9 @@ export interface TaskTableProps {
   lang?: 'pt' | 'en'
   /** Details already fetched for expanded rows — subtasks come from here. */
   details: Map<string, TaskDetail>
+  /** The board's per-status totals while `rows` is only step one of the split load: a status group
+   *  shows its TRUE size from the first paint, and is not dropped as empty before its rows arrive. */
+  statusTotals?: Record<string, number>
   onOpen: (id: string) => void
   onStatus: (ref: string, status: TaskStatus) => void
   onPriority?: (ref: string, priority: TaskPriorityId) => void
@@ -696,7 +702,6 @@ export interface TaskTableProps {
   onCommentsChanged?: (ref: string) => Promise<unknown> | void
   /** Drawn at the START of the toolbar row — the page's search box, so the table has ONE row of
    *  controls instead of a search row above a controls row. */
-  toolbarStart?: React.ReactNode
 }
 
 type TableStagedTarget = StagedTarget & { taskId: string }
@@ -733,6 +738,8 @@ export function TaskTable(p: TaskTableProps) {
   const [storedGroups, setGroups] = useBoardPref('groups')
   const [groupBy, setGroupBy] = useBoardPref('groupBy')
   const [hideEmpty, setHideEmpty] = useBoardPref('hideEmpty')
+  const [pageSize, setPageSize] = useBoardPref('pageSize')
+  const [pages, setPages] = useState<Record<string, number>>({})
   const [storedTypeGroups, setTypeGroups] = useBoardPref('typeGroups')
   const [storedCollapsed, setStoredCollapsed] = useBoardPref('collapsed')
   const collapsed = useMemo(() => new Set<string>(storedCollapsed), [storedCollapsed])
@@ -913,7 +920,7 @@ export function TaskTable(p: TaskTableProps) {
   const groupsShown = useMemo(
     () => (groupBy === 'type'
       ? storedTypeGroups?.map(k => `type:${k}`) ?? groups.map(g => g.key)
-      : storedGroups ?? liveStatusOrder(p.statuses)),
+      : visibleStatuses(storedGroups, p.statuses)),
     [groupBy, storedTypeGroups, storedGroups, p.statuses, groups],
   )
 
@@ -966,7 +973,7 @@ export function TaskTable(p: TaskTableProps) {
     groupsShown
       .map(st => groups.find(g => g.key === st))
       .filter((g): g is typeof groups[number] => g !== undefined),
-    g => g.rows.length, hideEmpty,
+    g => (groupBy !== 'type' ? p.statusTotals?.[g.key] : undefined) ?? g.rows.length, hideEmpty,
   )
 
   // The selection that ACTS is the one on screen: a row in a hidden or folded group, filtered out by
@@ -998,9 +1005,6 @@ export function TaskTable(p: TaskTableProps) {
           a Subtasks tab), rather than on a second row of bare, unlabeled selects. Every menu is the
           app's portal popover — a menu opened inside a scrolling table is clipped by it. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        {p.toolbarStart && (
-          <div style={{ flex: isMobile ? '1 1 100%' : '0 1 340px', minWidth: 0 }}>{p.toolbarStart}</div>
-        )}
         {!isMobile && <span style={{ flex: 1 }} />}
         {/* ONE bar — Filter · Group · Columns · Sort — whose segments open the existing menus in the
             same portal panel (`ViewBar.tsx`), the same bar the subtask grid and the kanban draw.
@@ -1015,50 +1019,6 @@ export function TaskTable(p: TaskTableProps) {
             triggerStyle={viewSegment(isMobile)}
             activeTriggerStyle={viewSegment(isMobile, true)}
           />
-          {/* Two lists behind one segment: HOW the table is grouped (one or the other, per person: a
-              single-choice list over the same PickerMenu — picking the row that is not current moves
-              the choice to it) and WHICH groups are on screen. */}
-          <PickerMenu
-            title={copy.viewBar.group}
-            lang={p.lang ?? 'en'}
-            width={250}
-            triggerStyle={viewSegment(isMobile, groupBy !== 'status' || visible.length !== groups.length)}
-            tabs={[
-              {
-                id: 'groupBy', label: copy.types.groupBy,
-                items: [
-                  { value: 'status', label: copy.types.groupByStatus },
-                  { value: 'type', label: copy.types.groupByType },
-                ],
-                value: [groupBy],
-                onChange: next => {
-                  const picked = next.find(v => v !== groupBy)
-                  if (picked === 'status' || picked === 'type') setGroupBy(picked)
-                },
-              },
-              {
-                id: 'groups', label: copy.pickers.groupsTitle, orderable: true,
-                items: groups.map(g => ({
-                  value: g.key,
-                  // The SAME word the chip in every row of this group prints — one vocabulary, one language.
-                  label: g.label,
-                  color: g.color,
-                  // The count of a HIDDEN group too — "hidden" must not read as "empty".
-                  hint: String(g.rows.length),
-                })),
-                value: groupsShown,
-                // The picked ORDER is kept, not re-canonicalised: the board and the table share this field.
-                onChange: next => (groupBy === 'type'
-                  ? setTypeGroups(next.map(k => k.replace(/^type:/, '')))
-                  : setGroups(next as BoardStatus[])),
-                note: groupBy === 'type' ? copy.types.groupsNote : copy.pickers.groupsNote,
-              },
-            ]}
-          >
-            {copy.viewBar.group}: {groupBy === 'type' ? copy.types.groupByType : copy.types.groupByStatus}
-            <span style={{ ...microLabel, fontSize: 10.5 }}>{visible.length}/{groups.length}</span>
-          </PickerMenu>
-          <EmptyGroupsMenu hide={hideEmpty} onChange={setHideEmpty} lang={p.lang ?? 'en'} />
           <PickerMenu
             title={copy.pickers.columnsTitle}
             lang={p.lang ?? 'en'}
@@ -1139,6 +1099,7 @@ export function TaskTable(p: TaskTableProps) {
       {visible.map(g => {
         const s = { color: g.color }
         const isFolded = collapsed.has(g.key)
+        const pg = resolveBoardPage(g.rows.length, pageSize, pages[g.key] ?? 0)
         return (
           <div key={g.key} style={{ ...surface, overflow: 'hidden', borderLeft: `3px solid ${s.color}` }}>
             <div
@@ -1155,7 +1116,7 @@ export function TaskTable(p: TaskTableProps) {
               <span style={{ fontSize: 12.5, fontWeight: 700, color: s.color }}>
                 {g.label}
               </span>
-              <span style={{ ...microLabel, fontSize: 11 }}>{g.rows.length}</span>
+              <span style={{ ...microLabel, fontSize: 11 }}>{(groupBy !== 'type' ? p.statusTotals?.[g.key] : undefined) ?? g.rows.length}</span>
             </div>
 
             {!isFolded && (
@@ -1211,7 +1172,7 @@ export function TaskTable(p: TaskTableProps) {
                     </thead>
                   )}
                   <tbody>
-                    {g.rows.map(row => {
+                    {g.rows.slice(pg.start, pg.end).map(row => {
                       const open = expanded.has(row.task.id)
                       const detail = p.details.get(row.task.id)
                       // The column FILTER (t-63b7d3b2b0 #2) narrows what is drawn, never `p.subtasks`
@@ -1539,6 +1500,15 @@ export function TaskTable(p: TaskTableProps) {
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            )}
+            {!isFolded && (
+              <div style={{ padding: '0 10px' }}>
+                <BoardPager
+                  info={pg} pageSize={pageSize} lang={p.lang}
+                  onPage={n => setPages(cur => ({ ...cur, [g.key]: n }))}
+                  onPageSize={n => { setPageSize(n); setPages({}) }}
+                />
               </div>
             )}
           </div>
