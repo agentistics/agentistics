@@ -2624,7 +2624,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         {payload.recorded && <RecordedBlock recorded={payload.recorded} pt={pt} />}
         {(payload.attention ?? []).map((m, i) => <AttentionMarkLine key={`am-${i}`} mark={m} pt={pt} />)}
         <div style={{ margin: '12px 0 0', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'stretch', width: '100%' }}>
-          <StrandedList cards={strandedList} sessionId={session.id} harness={session.harness} lang={lang} now={now} onPutBack={putBackStranded} />
+          <StrandedList cards={strandedList} sessionId={session.id} harness={session.harness} lang={lang} now={now} onPutBack={putBackStranded} composer={false} />
         </div>
         <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--text-tertiary)', opacity: 0.8 }}>
           {pt
@@ -2742,7 +2742,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           ))}
 
           {/* MENSAGENS.KILL — what this session was handed and never read, offered back to be resent. */}
-          <StrandedList cards={strandedList} sessionId={session.id} harness={session.harness} lang={lang} now={now} onPutBack={putBackStranded} />
+          <StrandedList cards={strandedList} sessionId={session.id} harness={session.harness} lang={lang} now={now} onPutBack={putBackStranded} composer />
 
           {/* Only the person's queued messages offer send-now and contribute to its count.
               The action still submits the harness's whole queue, including any system notices. */}

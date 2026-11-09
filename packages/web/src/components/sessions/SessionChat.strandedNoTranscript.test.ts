@@ -18,3 +18,10 @@ test('the no-transcript notice draws the stranded cards', () => {
 test('the stranded list does not wait for a transcript in the ordinary branch either', () => {
   expect(src.match(/<StrandedList/g)?.length).toBe(2)
 })
+
+test('the no-transcript notice has no composer, so its cards offer Copy; the chat keeps put-back', () => {
+  const start = src.indexOf('if (payload?.unavailable) {')
+  const branch = src.slice(start, src.indexOf('\n  return (', start))
+  expect(branch).toContain('composer={false}')
+  expect(src.match(/composer \/>/g)?.length).toBe(1)
+})
