@@ -50,6 +50,8 @@ export interface LiveDeliveryView extends LiveDelivery {
   liveState: LiveState
   /** Needs a person, an agent is lost, a stated block, or filed sessions the fleet shows nowhere. */
   stalled: boolean
+  /** The leader's own filing on a task with no open piece: the leader is doing the work itself (the card wears the Leader badge). */
+  leaderPiece?: boolean
 }
 
 /** How a worker reads: its own words, from its state AND where its piece sits. */
@@ -182,9 +184,19 @@ export function describeLive(o: {
     return { ...d, workMs, agents, liveState, stalled }
   })
   const needle = f.task?.trim().toLowerCase()
-  // A piece whose only sessions are LEADERS is the leader's own filing, not delivery work: the leader
-  // has its card in the band, and a column card would show the task's age as "total".
-  const leaderOnly = (d: LiveDeliveryView) => d.subtaskId === null && d.stage === 'running' && d.sessionIds.length > 0 && d.sessionIds.every(id => o.leaderIds.has(id))
+  // A piece whose only sessions are LEADERS is the leader's own filing. While the task has an OPEN piece of its own
+  // (a subtask / group card that is not published, completed or abandoned) the leader is a coordinator: it stays in
+  // the band and adds no duplicate card. With none, the leader IS doing the work, and the filing is ONE card, marked
+  // `leaderPiece`, whose clock is the leader session's own start — never the task's age.
+  const openTasks = new Set(all.filter(d => d.subtaskId !== null && !d.old && d.stage !== 'published' && d.stage !== 'completed').map(d => d.taskId))
+  const isLeaderFiling = (d: LiveDeliveryView) => d.subtaskId === null && d.stage === 'running' && d.sessionIds.length > 0 && d.sessionIds.every(id => o.leaderIds.has(id))
+  const leaderOnly = (d: LiveDeliveryView) => isLeaderFiling(d) && openTasks.has(d.taskId)
+  const asLeaderPiece = (d: LiveDeliveryView): LiveDeliveryView => {
+    if (!isLeaderFiling(d)) return d
+    const since = Math.min(...d.sessionIds.map(id => byId.get(id)?.createdMs ?? Infinity))
+    const at = Number.isFinite(since) ? since : null
+    return { ...d, leaderPiece: true, startedAtMs: at, stageSinceMs: at, workMs: null, eta: { kind: 'none', reason: 'not-started' }, ...(d.round ? { round: { ...d.round, startedAtMs: at } } : {}) }
+  }
   // EFFECTIVE values: a caller that names no (or an invalid) tab gets `all`, no period gets `24h`; `view.defaulted` says so.
   const tab: LiveTab = f.tab ?? 'all'
   const period: LivePeriod = f.period ?? LIVE_PERIOD_DEFAULT
@@ -192,7 +204,7 @@ export function describeLive(o: {
   const cmp = liveComparator(f.sort ?? LIVE_SORT_DEFAULT)
   // The tab counts are asked of the task-filtered set only (as the screen's are): a stage / stalled filter narrows the
   // list, not the tabs.
-  const ofTask = all.filter(d => !leaderOnly(d)).filter(d => !needle || d.taskId === f.task || d.taskTitle.toLowerCase().includes(needle))
+  const ofTask = all.filter(d => !leaderOnly(d)).map(asLeaderPiece).filter(d => !needle || d.taskId === f.task || d.taskTitle.toLowerCase().includes(needle))
   const counts = liveTabCounts(ofTask, period, o.nowMs)
   const deliveries = ofTask
     .filter(d => liveTabMatches(tab, d, period, o.nowMs) && (!f.stage || d.stage === f.stage) && (!f.stalledOnly || d.stalled))

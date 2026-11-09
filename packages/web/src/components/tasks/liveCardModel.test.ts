@@ -164,13 +164,13 @@ describe('Publicado is not emptied by the task filter', () => {
     ], [])
     expect(filterCards(cards, f({ taskIds: ['T1'] })).map(c => c.d.key)).toEqual(['p', 'r'])
     expect(filterCards(cards, f({ taskIds: ['T1', 'T2'], tab: 'published' })).map(c => c.d.key)).toEqual(['p', 'q'])
-    // "Em andamento" is about somebody on it: the running piece here has no agent, so nothing is in progress.
-    expect(filterCards(cards, f({ tab: 'active' })).length).toBe(0)
+    // "Em andamento" is every open stage, agent or not: the running piece is in progress, the published ones are not.
+    expect(filterCards(cards, f({ tab: 'active' })).length).toBe(1)
   })
-  test('a blocked card is in "Tudo" (it has its real column) but not "Em andamento" while nobody is on it', () => {
+  test('a blocked card is in "Tudo" and in "Em andamento" even with nobody on it', () => {
     const cards = joinLive([rec({ key: 'b', stage: 'blocked' })], [])
     expect(filterCards(cards, f({}))).toHaveLength(1)
-    expect(filterCards(cards, f({ tab: 'active' }))).toHaveLength(0)
+    expect(filterCards(cards, f({ tab: 'active' }))).toHaveLength(1)
   })
 })
 

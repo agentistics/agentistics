@@ -20,13 +20,16 @@ describe('the tabs and the Publicado period (filtros v2)', () => {
     expect(liveTabMatches('all', c('completed'), '24h', NOW)).toBe(false)
     expect(liveTabMatches('all', c('completed'), 'all', NOW)).toBe(true)
   })
-  test('Em andamento = somebody working or waiting, past the queue and not old; a published piece is never in progress', () => {
+  test('Em andamento = every stage except queue, published, completed and old; nobody has to be on it', () => {
     const t = (x: LiveTabbable) => liveTabMatches('active', x, '24h', NOW)
     expect(t(c('running', { liveState: 'working' }))).toBe(true)
     expect(t(c('qa', { liveState: 'waiting' }))).toBe(true)
     expect(t(c('leader', { liveState: 'needs-you' }))).toBe(true)
-    expect(t(c('running', { liveState: 'down' }))).toBe(false)
-    expect(t(c('blocked'))).toBe(false)
+    expect(t(c('running', { liveState: 'down' }))).toBe(true)
+    expect(t(c('blocked'))).toBe(true)
+    expect(t(c('adjust'))).toBe(true)
+    expect(t(c('leader'))).toBe(true)
+    expect(t(c('completed', { deliveredAtMs: NOW }))).toBe(false)
     expect(t(c('queue', { liveState: 'working' }))).toBe(false)
     expect(t(c('leader', { liveState: 'working', old: true }))).toBe(false)
     expect(t(c('published', { liveState: 'working', deliveredAtMs: NOW }))).toBe(false)
@@ -45,8 +48,8 @@ describe('the tabs and the Publicado period (filtros v2)', () => {
       c('queue'), c('running', { liveState: 'working' }), c('leader', { old: true }), c('blocked'),
       c('published', { deliveredAtMs: NOW - H }), c('published', { deliveredAtMs: NOW - 50 * H }),
     ]
-    expect(liveTabCounts(list, '24h', NOW)).toEqual({ active: 1, queue: 1, published: 1, all: 5 })
-    expect(liveTabCounts(list, '7d', NOW)).toEqual({ active: 1, queue: 1, published: 2, all: 6 })
+    expect(liveTabCounts(list, '24h', NOW)).toEqual({ active: 2, queue: 1, published: 1, all: 5 })
+    expect(liveTabCounts(list, '7d', NOW)).toEqual({ active: 2, queue: 1, published: 2, all: 6 })
   })
 })
 

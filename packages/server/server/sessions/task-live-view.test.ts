@@ -31,7 +31,7 @@ describe('describeLive', () => {
     expect(run({ stage: 'qa' })).toEqual(['1'])
     expect(run({ stalledOnly: true })).toEqual(['3'])
   })
-  test('the screen\'s tabs (same rules as the web): Em andamento = somebody on it, Na fila, Publicado in its period, Tudo', () => {
+  test('the screen\'s tabs (same rules as the web): Em andamento = every open stage, Na fila, Publicado in its period, Tudo', () => {
     const H = 3600_000, NOWMS = 400 * H
     const ds = [
       d({ key: 'q', stage: 'queue' }), d({ key: 'b', stage: 'blocked' }), d({ key: 'r', stage: 'running', sessionIds: ['w'] }),
@@ -43,7 +43,7 @@ describe('describeLive', () => {
       reply: { ...reply(ds), history: hist, oldReviews: old }, rows: [row('w', 'working')], leaderIds: new Set(), nowMs: NOWMS, filters,
     })
     const keys = (filters: object) => view(filters).deliveries.map(x => x.key)
-    expect(keys({ tab: 'active' })).toEqual(['r'])
+    expect(keys({ tab: 'active' })).toEqual(['b', 'r'])
     expect(keys({ tab: 'queue' })).toEqual(['q'])
     expect(keys({ tab: 'published' })).toEqual(['p'])
     expect(keys({ tab: 'published', period: '7d' })).toEqual(['p', 'p3'])
@@ -52,7 +52,7 @@ describe('describeLive', () => {
     expect(keys({})).toEqual(keys({ tab: 'all' }))
     // The counts are the screen's tab numbers, and each equals the list that tab returns.
     const v = view({ tab: 'all', period: '7d' }).view
-    expect(v.counts).toEqual({ active: 1, queue: 1, published: 2, all: 6 })
+    expect(v.counts).toEqual({ active: 2, queue: 1, published: 2, all: 6 })
     for (const tab of ['active', 'queue', 'published', 'all'] as const) expect(view({ tab, period: '7d' }).deliveries).toHaveLength(v.counts[tab])
     // The old review never counts as active work.
     expect(view({ tab: 'all' }).summary.deliveries).toBe(3)
@@ -138,5 +138,52 @@ describe('the leader model is the transcript\'s, not the harness default (MED 9)
   test('with no observation the registry model stays, and none stays null', () => {
     const v = describeLive({ reply: reply([]), rows: [row('L', 'working', { model: 'opus' }), row('M', 'working')], leaderIds: new Set(['L', 'M']), nowMs: NOW })
     expect(v.leaders.map(l => l.model)).toEqual(['opus', null])
+  })
+})
+
+describe('a leader working alone gets a card (LIVE.EM-ANDAMENTO-E-LIDER)', () => {
+  const leaderPiece = d({ key: 't', subtaskId: null, title: 'Task', sessionIds: ['L'], startedAtMs: 1, stageSinceMs: 1, workMs: 99 })
+  const run = (ds: LiveDelivery[], tab: 'all' | 'active' = 'active') => describeLive({
+    reply: reply(ds), rows: [row('L', 'working', { createdMs: 777 })], leaderIds: new Set(['L']), nowMs: NOW, filters: { tab },
+  })
+  test('no open subtask piece: ONE card, marked, on the leader session\'s own clock, no invented estimate', () => {
+    const v = run([leaderPiece])
+    expect(v.deliveries).toHaveLength(1)
+    expect(v.deliveries[0]).toMatchObject({ key: 't', leaderPiece: true, liveState: 'working', startedAtMs: 777, stageSinceMs: 777, workMs: null, eta: { kind: 'none' } })
+    expect(v.view.counts.active).toBe(1)
+  })
+  test('an open subtask piece: the leader stays in the band, no duplicate card', () => {
+    const v = run([leaderPiece, d({ key: 't/a', subtaskId: 'a', stage: 'queue' })], 'all')
+    expect(v.deliveries.map(x => x.key)).toEqual(['t/a'])
+  })
+  test('only finished subtasks: the leader is doing the work, so it gets the card', () => {
+    const v = run([leaderPiece, d({ key: 't/a', subtaskId: 'a', stage: 'published', deliveredAtMs: NOW }), d({ key: 't/b', subtaskId: 'b', stage: 'completed', deliveredAtMs: NOW })], 'all')
+    expect(v.deliveries.map(x => x.key).sort()).toEqual(['t', 't/a', 't/b'])
+    expect(v.deliveries.find(x => x.key === 't')!.leaderPiece).toBe(true)
+  })
+  test('a worker piece is never marked as a leader piece', () => {
+    const v = describeLive({ reply: reply([d({ key: 'w', subtaskId: null, sessionIds: ['W'] })]), rows: [row('W', 'working')], leaderIds: new Set(), nowMs: NOW })
+    expect(v.deliveries[0]!.leaderPiece).toBeUndefined()
+  })
+})
+
+describe('Em andamento no longer needs an agent on the piece', () => {
+  const run = (ds: LiveDelivery[]) => describeLive({ reply: reply(ds), rows: [], leaderIds: new Set(), nowMs: NOW, filters: { tab: 'active' } }).deliveries.map(x => x.key)
+  test('blocked and adjusting with no agent are in; queue, published, completed and old stay out', () => {
+    expect(run([
+      d({ key: 'b', stage: 'blocked' }), d({ key: 'j', stage: 'adjust' }), d({ key: 'q', stage: 'queue' }),
+      d({ key: 'p', stage: 'published', deliveredAtMs: NOW }), d({ key: 'c', stage: 'completed', deliveredAtMs: NOW }), d({ key: 'o', stage: 'leader', old: true }),
+    ])).toEqual(['b', 'j'])
+  })
+})
+
+describe('a leader filed directly on a subtask (owner scope addition)', () => {
+  test('the subtask piece keeps its card (only task-level filings are dropped), its agent is the leader, and the task gets no extra card', () => {
+    const sub = d({ key: 't/a', subtaskId: 'a', sessionIds: ['L'], startedAtMs: 5 })
+    const v = describeLive({ reply: reply([sub, d({ key: 't', subtaskId: null, sessionIds: ['L'] })]), rows: [row('L', 'working', { createdMs: 9 })], leaderIds: new Set(['L']), nowMs: NOW, filters: { tab: 'active' } })
+    expect(v.deliveries.map(x => x.key)).toEqual(['t/a'])
+    // The web draws the Leader badge from "an agent of this card is a leader" (LiveDelivery roleOf).
+    expect(v.deliveries[0]!.agents.map(a => a.id)).toEqual(['L'])
+    expect(v.leaders.map(l => l.id)).toEqual(['L'])
   })
 })

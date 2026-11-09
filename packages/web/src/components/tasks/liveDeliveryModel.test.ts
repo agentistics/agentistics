@@ -55,14 +55,14 @@ describe('filters, grouping, summary', () => {
   ], [row('a', 'working'), row('c', 'exited')])
   const NOWMS = 1_000 * 3600_000
   const f = (over: Partial<Parameters<typeof filterCards>[1]> = {}) => ({ taskIds: [], tab: 'all' as const, period: '24h' as const, nowMs: NOWMS, ...over })
-  test('"Em andamento" is somebody working or waiting, past the queue — a card with nobody on it is not in progress', () => {
-    // Piece '1' has a working agent; '2' (leader review, no agent) is waiting on a person's review, not in progress.
-    expect(filterCards(cards, f({ tab: 'active' })).map(c => c.d.key)).toEqual(['1'])
+  test('"Em andamento" is every open stage — a card with nobody on it is still in progress', () => {
+    // Piece '1' has a working agent; '2' (leader review, no agent) is open work too.
+    expect(filterCards(cards, f({ tab: 'active' })).map(c => c.d.key)).toEqual(['1', '2'])
     // "Tudo" keeps every piece in its real column; Publicado is inside its period ('3' was published at t=1 ms: long ago).
     expect(filterCards(cards, f({ tab: 'all' })).map(c => c.d.key)).toEqual(['1', '2'])
     expect(filterCards(cards, f({ tab: 'all', period: 'all' })).map(c => c.d.key)).toEqual(['1', '2', '3'])
     expect(filterCards(cards, f({ tab: 'all', taskIds: ['B'] })).map(c => c.d.key)).toEqual(['2'])
-    expect(filterCards(cards, f({ tab: 'active', taskIds: ['B'] }))).toEqual([])
+    expect(filterCards(cards, f({ tab: 'active', taskIds: ['B'] })).map(c => c.d.key)).toEqual(['2'])
   })
   test('the tabs: Na fila is the queue, Publicado is its own period (24 h, 7 d, 30 d, all), an old review shows only in Tudo', () => {
     const H = 3600_000
@@ -73,7 +73,7 @@ describe('filters, grouping, summary', () => {
       mk('p1', 'published', { deliveredAtMs: NOWMS - 2 * H }), mk('p3', 'published', { deliveredAtMs: NOWMS - 3 * 24 * H }), mk('p40', 'published', { deliveredAtMs: NOWMS - 40 * 24 * H }),
     ], [row('w', 'working')])
     const keys = (tab: 'active' | 'queue' | 'published' | 'all', period: '24h' | '7d' | '30d' | 'all') => filterCards(all, f({ tab, period })).map(c => c.d.key)
-    expect(keys('active', '24h')).toEqual(['r'])                    // not the queue, not published, not the old review
+    expect(keys('active', '24h')).toEqual(['r', 'l'])                    // not the queue, not published, not the old review
     expect(keys('queue', '24h')).toEqual(['q'])
     expect(keys('published', '24h')).toEqual(['p1'])
     expect(keys('published', '7d')).toEqual(['p1', 'p3'])
@@ -99,7 +99,7 @@ describe('filters, grouping, summary', () => {
         }
       }
     }
-    expect(tabCounts(all, { taskIds: [], period: '24h', nowMs: NOWMS })).toEqual({ active: 2, queue: 2, published: 1, all: 8 })
+    expect(tabCounts(all, { taskIds: [], period: '24h', nowMs: NOWMS })).toEqual({ active: 4, queue: 2, published: 1, all: 8 })
   })
   test('a queued piece NEVER has an agent and still belongs to "Na fila" and "Tudo"', () => {
     const q = joinLive([rec({ key: 'q', stage: 'queue', sessionIds: [] })], [])

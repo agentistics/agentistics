@@ -68,7 +68,7 @@ test('ONE bar, two groups: filters (task picker + the four tabs with counts) and
   const filters = bar.querySelector('[data-live-filters]')!, actions = bar.querySelector('[data-live-actions]')!
   expect(filters.querySelector('[data-live-taskfilter]')).not.toBeNull()
   const tabs = Array.from(filters.querySelectorAll('[role="tab"]')).map(t => t.textContent)
-  expect(tabs).toEqual(['Em andamento0', 'Na fila0', 'Publicado0', 'Tudo1'])
+  expect(tabs).toEqual(['Em andamento1', 'Na fila0', 'Publicado0', 'Tudo1'])
   // the old pills are gone, and the sort + the window moved to the right-hand group
   for (const gone of ['[data-live-allsteps]', '[data-live-only-active]', '[data-live-show-queue]', '[data-live-archived-toggle]']) expect(bar.querySelector(gone)).toBeNull()
   expect(actions.querySelector('[aria-label^="Ordenar"]')).not.toBeNull()
@@ -90,12 +90,12 @@ test('the tabs choose what is drawn, their counts equal what the columns then ho
   ])
   await mount(props('pt', all))
   const counts = () => Array.from(document.querySelectorAll('[data-live-tabs] [role="tab"]')).map(t => t.textContent)
-  expect(counts()).toEqual(['Em andamento1', 'Na fila1', 'Publicado1', 'Tudo4'])
+  expect(counts()).toEqual(['Em andamento2', 'Na fila1', 'Publicado1', 'Tudo4'])
   // "Tudo": every piece in its column, Publicado inside its 24 h period
   expect(shownKeys()).toEqual(['b', 'p', 'q', 'r'])
   expect(shownKeys().length).toBe(Number(tabBtn('Tudo').textContent!.replace(/\D/g, '')))
   await act(async () => tabBtn('Em andamento').click())
-  expect(shownKeys()).toEqual(['r'])
+  expect(shownKeys()).toEqual(['b', 'r'])
   expect(JSON.parse(localStorage.getItem(VIEW_KEY)!)).toMatchObject({ tab: 'active' })
   await act(async () => tabBtn('Na fila').click())
   expect(shownKeys()).toEqual(['q'])
