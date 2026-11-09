@@ -228,7 +228,7 @@ export function locateWorker(w: { cardKey?: string | null }, shown: readonly Liv
 const stageName = (s: LiveStage, pt: Pt) => STAGE_LABEL[s][pt ? 'pt' : 'en'].toLowerCase()
 
 export interface TimeRow {
-  /** "tempo nessa etapa 52 min" — the same words in EVERY column. */
+  /** Round time beside a percent; otherwise the existing stage/publication clock. */
   inStage: string
   /** "total 52 min" — this card's real work, never the task's age. */
   total: string
@@ -241,6 +241,8 @@ export function timeRow(c: LiveCard, nowMs: number, pt: Pt): TimeRow {
   const d = c.d
   const done = d.stage === 'published' || d.stage === 'completed'
   const inStageMs = d.stageSinceMs === null ? null : nowMs - d.stageSinceMs
+  const percent = cardPercent(d, pt) !== null
+  const roundMs = d.round?.startedAtMs == null ? null : Math.max(0, nowMs - d.round.startedAtMs)
   const workMs = d.workMs !== undefined ? d.workMs : (d.startedAtMs === null ? null : nowMs - d.startedAtMs)
   const trail = d.trail ?? []
   const n = trail.length
@@ -250,11 +252,16 @@ export function timeRow(c: LiveCard, nowMs: number, pt: Pt): TimeRow {
     // A published card is not "in a stage" any more: it says when it was published, and what it cost in work.
     inStage: done
       ? `${pt ? 'publicado' : 'published'} ${d.deliveredAtMs ? fmtClock(d.deliveredAtMs) : '—'}`
-      : `${pt ? 'tempo nessa etapa' : 'time in this stage'} ${fmtSpan(inStageMs)}`,
+      : percent
+        ? `${d.round && d.round.number > 1 ? `${pt ? 'rodada' : 'round'} ${d.round.number} · ` : ''}${pt ? 'tempo da rodada' : 'time in this round'} ${fmtSpan(roundMs)}`
+        : `${pt ? 'tempo nessa etapa' : 'time in this stage'} ${fmtSpan(inStageMs)}`,
     total: `total ${fmtSpan(workMs)}`,
     stageNo: n > 0 ? (pt ? `${ord(n)} etapa` : `${ord(n)} stage`) : null,
     title: [
-      pt ? '“Tempo nessa etapa”: há quanto tempo o cartão está nesta coluna.' : '“Time in this stage”: how long the card has been in this column.',
+      percent
+        ? (pt ? '“Tempo da rodada”: desde o início observado da rodada atual, a mesma rodada do percentual.' : '“Time in this round”: since the observed start of the current round, the same round as the percent.')
+        : (pt ? '“Tempo nessa etapa”: tempo desde a última mudança de status registrada; pode abranger outras rodadas.' : '“Time in this stage”: time since the last recorded status change; it may span other rounds.'),
+      ...(percent ? [pt ? `Desde a última mudança de status (pode incluir outras rodadas): ${fmtSpan(inStageMs)}.` : `Since the last status change (may include other rounds): ${fmtSpan(inStageMs)}.`] : []),
       pt ? '“Total”: tempo de trabalho real das sessões deste cartão — não a idade da tarefa.' : '“Total”: the real work time of this card\'s sessions — not the task\'s age.',
       ...(lines.length ? [pt ? `Etapas por onde passou: ${lines.join(' → ')}` : `Stages it went through: ${lines.join(' → ')}`] : []),
     ].join('\n'),

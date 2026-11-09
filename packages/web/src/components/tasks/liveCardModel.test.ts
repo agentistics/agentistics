@@ -75,6 +75,18 @@ describe('stage bar — active segment wears its column colour', () => {
 })
 
 describe('time row — "total" is the card\'s work, never the task\'s age (item a, f)', () => {
+  test('cards without a percent keep stage wording in every unpublished column', () => {
+    for (const stage of LIVE_STAGES.filter(s => s !== 'published')) {
+      const c = card({ stage, round: { number: 2, startedAtMs: NOW - 3 * MIN } })
+      expect(timeRow(c, NOW, true).inStage).toBe('tempo nessa etapa 52 min')
+      expect(timeRow(c, NOW, false).inStage).toBe('time in this stage 52 min')
+    }
+  })
+  test('a percent with missing round data never borrows the stage clock', () => {
+    const c = card({ step: 1 })
+    expect(timeRow(c, NOW, true).inStage).toBe('tempo da rodada —')
+    expect(timeRow(c, NOW, false).inStage).toBe('time in this round —')
+  })
   test('the same words in every column; a 52-day-old task shows the card\'s 52 minutes', () => {
     for (const stage of ['running', 'qa', 'leader'] as const) {
       const t = timeRow(card({ stage, workMs: 52 * MIN, trail: [{ stage: 'queue', enteredMs: 0, ms: 1 }, { stage, enteredMs: 1, ms: 2 }] }), NOW, true)

@@ -89,6 +89,8 @@ export interface LiveDelivery {
   stage: LiveStage
   /** When the piece last changed status (the book's own stamp) — "time in this stage". */
   stageSinceMs: number | null
+  /** Current stage round, from the session start or stage entry; shared by Web and MCP. */
+  round?: { number: number; startedAtMs: number | null }
   /** Earliest session start; null when nothing is filed. */
   startedAtMs: number | null
   /** Registry ids of the sessions that have not ended — what the browser joins to the fleet. */
@@ -750,6 +752,22 @@ export function buildLive(o: {
     // The newest visit is the stage the book says now; when the log is empty or stale for it, the
     // status stamp is the only witness and the trail is left to say what it knows.
     const stageSinceMs = ms(p.updatedAt)
+    // A new session is a new round, even when the board status never changed. Keep the
+    // status clock for cards without a percent; scope the percent's facts to this round.
+    const sessionStage = stage === 'running' || stage === 'adjust' || stage === 'qa'
+    const roundSessions = sessionStage ? p.sessions.filter(s => {
+      if (s.label && LEADER_NAME.test(s.label)) return false
+      const qa = (!!s.label && QA_NAME.test(s.label)) || s.id === rec?.qaSessionId
+      return stage === 'qa' ? qa : !qa
+    }) : []
+    const fresh = roundSessions.filter(s => s.live && (s.seenMs === undefined || o.nowMs - s.seenMs <= STALE_HEARTBEAT_MS))
+    const currentSession = [...(fresh.length ? fresh : roundSessions)].sort((a, b) => (b.startMs ?? -Infinity) - (a.startMs ?? -Infinity))[0]
+    const visits = trail.filter(v => v.stage === stage)
+    const roundStart = currentSession ? currentSession.startMs : (stageSinceMs ?? visits.at(-1)?.enteredMs ?? null)
+    const round = {
+      number: currentSession ? roundSessions.filter(s => s.id === currentSession.id || (s.startMs !== null && currentSession.startMs !== null && s.startMs < currentSession.startMs)).length : Math.max(1, visits.length),
+      startedAtMs: roundStart,
+    }
     const originStage = stage === 'blocked'
       ? (rec?.origin ? PHASE_STAGE[rec.origin] ?? null : ([...trail].reverse().find(v => v.stage !== 'blocked')?.stage ?? null))
       : null
@@ -768,11 +786,10 @@ export function buildLive(o: {
     // THE STEP inside the stage: what a worker/the flow REPORTED (`step` events), or what the facts show (an edit, a test
     // run, a commit, the record's gates) — the larger of the two. Nothing observable and nothing reported = null: no line.
     const stepInfo = stage === 'published' || stage === 'completed' || stage === 'queue' || stage === 'blocked' ? null : (() => {
-      const reported = stepOf(eventsBySubject.get(subject) ?? [], stageSinceMs)
-      const handback = p.comments.some(c => c.kind === 'handback' && (c.subtaskId ?? null) === (p.sub?.id ?? null) && (stageSinceMs === null || (ms(c.createdAt) ?? 0) >= stageSinceMs))
-      const derived = deriveStep({
-        stage, sinceMs: stageSinceMs, handback,
-        sessions: p.sessions.map(s => ({ id: s.id, live: s.live, isQa: !!s.label && QA_NAME.test(s.label), ...(s.activity ? { activity: s.activity } : {}) })),
+      const reported = stepOf(eventsBySubject.get(subject) ?? [], round.startedAtMs)
+      const handback = p.comments.some(c => c.kind === 'handback' && (c.subtaskId ?? null) === (p.sub?.id ?? null) && (round.startedAtMs === null || (ms(c.createdAt) ?? 0) >= round.startedAtMs))
+        stage, sinceMs: round.startedAtMs, handback,
+        sessions: (sessionStage ? (currentSession ? [currentSession] : []) : p.sessions).map(s => ({ id: s.id, live: s.live, isQa: !!s.label && QA_NAME.test(s.label), ...(s.activity ? { activity: s.activity } : {}) })),
         ...(rec ? { rec: rec as StepRecord } : {}),
       })
       return mergeStep(reported, derived)
@@ -785,6 +802,7 @@ export function buildLive(o: {
       title: p.sub?.title ?? p.task.title,
       status: p.status, stage,
       stageSinceMs,
+      round,
       startedAtMs,
       sessionIds: liveSessions.map(s => s.id),
       harnesses: [...new Set(liveSessions.concat(p.sessions).map(s => s.harness))],

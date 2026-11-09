@@ -43,6 +43,8 @@ export interface RuntimeFacts { model?: string; effort?: string; effortConcept: 
 export interface LiveDeliveryRecord {
   key: string; taskId: string; taskTitle: string; subtaskId: string | null; title: string
   status: string; stage: LiveStage; stageSinceMs: number | null; startedAtMs: number | null
+  /** Same current-round start and ordinal as the server/MCP projection. */
+  round?: { number: number; startedAtMs: number | null }
   sessionIds: string[]; harnesses: string[]; models: string[]; eta: LiveEta
   efforts?: string[]; workMs?: number | null; trail?: StageVisit[]
   stageEta?: LiveStageEta; publishEta?: LivePublishEta; block?: LiveBlock | null
