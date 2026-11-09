@@ -1,5 +1,18 @@
 import { describe, expect, test } from 'bun:test'
-import { personQueuedCount, queuedBubbleActions, visibleQueued } from './queuedCards'
+import { personQueuedCount, queuedBubbleActions, sendNowPillOffered, visibleQueued } from './queuedCards'
+
+describe('sendNowPillOffered — one "Send now" per waiting message', () => {
+  test('a single waiting message is served by the button inside it, so the pill stays away', () => {
+    expect(sendNowPillOffered(true, 1)).toBe(false)
+  })
+  test('with two or more waiting messages the pill sends the whole queue', () => {
+    expect(sendNowPillOffered(true, 2)).toBe(true)
+    expect(sendNowPillOffered(true, 5)).toBe(true)
+  })
+  test('never offered where send-now itself is not shown (any harness, any width)', () => {
+    expect(sendNowPillOffered(false, 3)).toBe(false)
+  })
+})
 
 describe('queuedBubbleActions (FLUXO.AVISOS 10)', () => {
   const base = { text: 'corrige a coluna', harness: 'claude', working: true, dialogOpen: false, personQueued: 1, sendNowRunning: false, stopEnabled: true, pt: false }
