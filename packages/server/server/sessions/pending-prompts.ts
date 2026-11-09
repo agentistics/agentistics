@@ -60,7 +60,13 @@ export const STRANDED_KEEP_MS = 14 * 24 * 60 * 60 * 1000
 
 /** The most entries kept per conversation — a runaway sender cannot grow this without bound. */
 const MAX_PER_SESSION = 50
-const MAX_TOTAL = 500
+/**
+ * The most entries kept in all. Expired ones (older than `STRANDED_KEEP_MS`, never offered again) are dropped
+ * FIRST; only if the store is still over this does the OLDEST unexpired entry go. So a stranded message can be
+ * evicted early only when more than this many unread messages are held at once (about 240 KB on disk).
+ * At 500 a 13-day entry was lost under load, before the promised 14 days.
+ */
+export const MAX_STORED_PROMPTS = 1000
 // Under `bun test` (NODE_ENV=test) the default store is a per-process temp file, so no suite that
 // records or resets prompts can ever touch the user's real queue.
 let storeFile = process.env.NODE_ENV === 'test'
@@ -70,10 +76,11 @@ let storeFile = process.env.NODE_ENV === 'test'
 const byConversation = new Map<string, PendingPrompt[]>()
 let loaded = false
 
-function trimTotal(): void {
+function trimTotal(now = Date.now()): void {
   const all = [...byConversation.entries()].flatMap(([conversationId, prompts]) => prompts.map(prompt => ({ conversationId, prompt })))
-  if (all.length <= MAX_TOTAL) return
-  const keep = new Set(all.sort((a, b) => a.prompt.at - b.prompt.at).slice(-MAX_TOTAL).map(x => x.prompt))
+  if (all.length <= MAX_STORED_PROMPTS) return
+  const live = all.filter(x => now - x.prompt.at < STRANDED_KEEP_MS)
+  const keep = new Set(live.sort((a, b) => a.prompt.at - b.prompt.at).slice(-MAX_STORED_PROMPTS).map(x => x.prompt))
   for (const [id, prompts] of byConversation) {
     const left = prompts.filter(prompt => keep.has(prompt))
     if (left.length) byConversation.set(id, left)
@@ -116,7 +123,7 @@ export function recordPrompt(conversationId: string, text: string, now = Date.no
   const rest = list.filter(p => p.text !== text)
   rest.push({ text, at: now })
   byConversation.set(conversationId, rest.slice(-MAX_PER_SESSION))
-  trimTotal()
+  trimTotal(now)
   persist()
 }
 

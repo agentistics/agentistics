@@ -87,6 +87,7 @@ import {
 import { ROW_FLASH } from '../../lib/noteFocus'
 import { isNayCwd, modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
 import { personQueuedCount, queuedBubbleActions, sendNowPillOffered, shouldRestoreDraft, strandedCards, visibleQueued } from '../../lib/queuedCards'
+import { StrandedList } from './StrandedList'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
@@ -1529,6 +1530,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     [sessionEnded, payload?.stranded, queued, draft],
   )
 
+  const putBackStranded = (text: string) => {
+    editDraft(prev => appendToDraft(prev, text))
+    editEcho(list => list.filter(t => t !== text))
+  }
+
   /** A clock, so an ageing echo ages on screen instead of freezing at its first render. */
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -2617,6 +2623,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         </p>
         {payload.recorded && <RecordedBlock recorded={payload.recorded} pt={pt} />}
         {(payload.attention ?? []).map((m, i) => <AttentionMarkLine key={`am-${i}`} mark={m} pt={pt} />)}
+        <div style={{ margin: '12px 0 0', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'stretch', width: '100%' }}>
+          <StrandedList cards={strandedList} sessionId={session.id} harness={session.harness} lang={lang} now={now} onPutBack={putBackStranded} />
+        </div>
         <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--text-tertiary)', opacity: 0.8 }}>
           {pt
             ? 'A visão de terminal continua disponível para esta sessão.'
@@ -2733,28 +2742,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           ))}
 
           {/* MENSAGENS.KILL — what this session was handed and never read, offered back to be resent. */}
-          {strandedList.map((q, i) => (
-            <ChatBubble
-              key={`stranded-${i}`}
-              turn={{ role: 'user', text: q.text }}
-              sessionId={session.id}
-              lang={lang}
-              harness={session.harness}
-              anchorId={echoAnchorId(session.id, q.text)}
-              awaiting
-              stranded={{
-                label: pt ? 'Colocar na caixa de mensagem' : 'Put back in the message box',
-                hint: pt
-                  ? 'Devolve o texto à caixa de mensagem para você revisar e enviar de novo. Nada é reenviado sozinho.'
-                  : 'Puts the text back in the message box so you can review it and send it again. Nothing is resent by itself.',
-                run: () => {
-                  editDraft(prev => appendToDraft(prev, q.text))
-                  editEcho(list => list.filter(t => t !== q.text))
-                },
-              }}
-              {...(q.at !== undefined ? { awaitingSinceMs: Math.max(0, now - q.at) } : {})}
-            />
-          ))}
+          <StrandedList cards={strandedList} sessionId={session.id} harness={session.harness} lang={lang} now={now} onPutBack={putBackStranded} />
 
           {/* Only the person's queued messages offer send-now and contribute to its count.
               The action still submits the harness's whole queue, including any system notices. */}

@@ -1092,12 +1092,12 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
             <button
               type="button"
               onClick={stranded.run}
-              className="ag-tap"
               title={stranded.hint}
               aria-label={`${stranded.label}. ${stranded.hint}`}
               data-testid="stranded-resend"
               style={{
                 border: 'none', background: 'transparent', padding: '0 2px', cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', minHeight: isMobile ? 44 : 32,
                 fontFamily: 'inherit', fontSize: 10, fontWeight: 600, textDecoration: 'underline',
                 color: 'var(--anthropic-orange)',
               }}
