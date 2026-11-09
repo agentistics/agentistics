@@ -91,7 +91,7 @@ export interface DeliveryDeps {
   /** The automatic reconcile's shortest cadence (default 30 min; it also waits 3x what the last run took). */
   autoReconcileEveryMs?: number
   /** Where what gh answered survives a restart (absent: this process only). A cache: a failed read or write costs one run, never a wrong answer. */
-  proofStore?: { load(): Promise<unknown>; save(doc: unknown): Promise<void> }
+  proofStore?: { load(): Promise<unknown>; save(doc: unknown): Promise<void>; /** A cheap fingerprint of the stored document (mtime+size): another process wrote it when it changed. */ stamp?(): Promise<string | null> }
   /** One line per automatic run (L2: its result used to be invisible). */
   log?(line: string): void
 }
@@ -199,12 +199,40 @@ const msOf = (iso: string | undefined): number | null => (iso ? Date.parse(iso) 
 
 export function createDeliveryService(d: DeliveryDeps) {
   let proofCache: ProofCache | null = null
+  /** The store's fingerprint when this process last read or wrote it: a different one means ANOTHER process (the CLI's reconcile) wrote it. */
+  let proofStamp: string | null = null
+  /** Reconcile runs in progress in THIS process: while one holds the cache, nothing swaps it from underneath. */
+  let proofRuns = 0
+  let proofReloadWarned = false
   const loadProof = async (): Promise<ProofCache> => {
-    if (!proofCache) proofCache = hydrateProofCache(await d.proofStore?.load().catch(() => null) ?? null, d.now())
+    const stamp = await d.proofStore?.stamp?.().catch(() => null) ?? null
+    if (!proofCache) {
+      proofCache = hydrateProofCache(await d.proofStore?.load().catch(() => null) ?? null, d.now())
+      proofStamp = stamp
+    } else if (proofRuns === 0 && stamp !== null && stamp !== proofStamp) {
+      // The Live (this process) answers from these outcomes, and `agentop flow reconcile` runs in another process and saves
+      // its own: a copy loaded once keeps judging the pieces by a run nobody remembers (LIMPEZA.ANTIGAS-FALTANTES). Same object, new content.
+      // A file that cannot be read or parsed (a half-written one, the other process mid-write) is NOT an empty cache: keep what is in memory
+      // and leave the stamp alone, so the next good file is still picked up and the next save does not write an empty cache over every outcome.
+      const raw = await d.proofStore?.load().catch(() => undefined)
+      if (raw === undefined || raw === null || typeof raw !== 'object') {
+        if (!proofReloadWarned) { proofReloadWarned = true; d.log?.('[delivery] proof cache: the stored file could not be read; keeping the outcomes in memory') }
+      } else {
+        proofReloadWarned = false
+        const disk = hydrateProofCache(raw, d.now())
+        const keepAuto = proofCache.auto
+        Object.assign(proofCache, disk, { unreadable: proofCache.unreadable, unreadableWhy: proofCache.unreadableWhy, auto: keepAuto.nextAt >= disk.auto.nextAt ? keepAuto : disk.auto })
+        proofStamp = stamp
+      }
+    }
     proofCache.nowMs = d.now()
     return proofCache
   }
-  const saveProof = async (): Promise<void> => { if (proofCache) await d.proofStore?.save(serializeProofCache(proofCache)).catch(() => undefined) }
+  const saveProof = async (): Promise<void> => {
+    if (!proofCache) return
+    await d.proofStore?.save(serializeProofCache(proofCache)).catch(() => undefined)
+    proofStamp = await d.proofStore?.stamp?.().catch(() => null) ?? null
+  }
   /** The record, created at `fila` on first use (a subtask that exists on the board). */
   const ensure = async (subtaskId: string, o: { versionTarget?: string; humanGates?: Phase[]; leaderSessionId?: string } = {}): Promise<DeliveryRecord | DeliveryReply> => {
     if (!SUB_ID.test(subtaskId)) return fail(400, 'bad_subtask', 'invalid subtask id')
@@ -1445,6 +1473,10 @@ export function createDeliveryService(d: DeliveryDeps) {
    * the reason. `apply` writes through the ordinary transitions (their gates run; `flow:reconcile` announces nothing per piece).
    */
   const reconcile = async (o: { apply?: unknown }, actor: string, opts: { budget?: number } = {}): Promise<ReconcileReply> => {
+    proofRuns++
+    try { return await reconcileRun(o, actor, opts) } finally { proofRuns-- }
+  }
+  const reconcileRun = async (o: { apply?: unknown }, actor: string, opts: { budget?: number } = {}): Promise<ReconcileReply> => {
     const apply = o.apply === true || o.apply === 'true'
     const sessions = await d.facts.sessions().catch(() => [] as SessionFact[])
     const isLeader = sessions.some(s => s.id === actor && s.role === 'leader')
