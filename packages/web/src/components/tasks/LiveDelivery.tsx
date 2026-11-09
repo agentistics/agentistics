@@ -40,7 +40,7 @@ import { LiveApprove } from './LiveApprove'
 import { LiveColumn } from './LiveColumn'
 import { LiveLeaders } from './LiveLeaders'
 import type { LeaderWorker } from './liveDeliveryModel'
-import { LiveTaskFilter } from './LiveTaskFilter'
+import { LiveTaskChips, LiveTaskFilter } from './LiveTaskFilter'
 import { sessionLinks } from './liveSessionLinks'
 import { LiveToolbar } from './LiveToolbar'
 import { menuRowStyle, PanelMenu } from './PickerMenu'
@@ -477,6 +477,7 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet
       <LiveToolbar
         pt={pt} mobile={isMobile} title={L.title} summary={summaryLine} summaryTitle={summaryTitle}
         taskFilter={<LiveTaskFilter options={options} chosen={taskIds} onChange={setTaskIds} pt={pt} mobile={isMobile} />}
+        taskChips={<LiveTaskChips options={options} chosen={taskIds} onChange={setTaskIds} pt={pt} mobile={isMobile} />}
         tab={tab} counts={counts} onTab={(t: LiveTab) => { setViewPref({ tab: t }); setStageFilter('all') }}
         sort={sort} onSort={(s: LiveSortId) => setViewPref({ sort: s })}
         actions={actions}

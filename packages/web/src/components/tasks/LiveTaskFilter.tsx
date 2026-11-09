@@ -37,7 +37,6 @@ export function LiveTaskFilter({ options, chosen, onChange, pt, mobile }: {
   mobile?: boolean
 }) {
   const opts = useMemo(() => pickerOptions(options, chosen, pt), [options, chosen, pt])
-  const labelOf = (id: string) => options.find(o => o.value === id)?.label ?? id
   return (
     // `display: contents`: the picker is a flex item of the toolbar's filter row (same line as the tabs), and
     // the chips sit on a line of their own below it, so selecting tasks never moves or grows the first row.
@@ -55,7 +54,22 @@ export function LiveTaskFilter({ options, chosen, onChange, pt, mobile }: {
           triggerHeight={mobile ? 44 : 32}
         />
       </div>
-      {chosen.length > 0 && <div data-live-chips style={{ order: 2, flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
+    </div>
+  )
+}
+
+/** The chosen tasks as removable chips — their own row BELOW the controls, never inside the row they would push. */
+export function LiveTaskChips({ options, chosen, onChange, pt, mobile }: {
+  options: readonly TaskOption[]
+  chosen: readonly string[]
+  onChange: (ids: string[]) => void
+  pt: boolean
+  mobile?: boolean
+}) {
+  const labelOf = (id: string) => options.find(o => o.value === id)?.label ?? id
+  if (chosen.length === 0) return null
+  return (
+    <div data-live-chips style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
       {chosen.map(id => (
         <span key={id} data-live-chip={id} title={labelOf(id)} style={{ ...pill('var(--anthropic-orange)'), gap: 6, maxWidth: 260, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange-light)' }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortTitle(labelOf(id), 34)}</span>
@@ -70,7 +84,6 @@ export function LiveTaskFilter({ options, chosen, onChange, pt, mobile }: {
           </button>
         </span>
       ))}
-      </div>}
     </div>
   )
 }

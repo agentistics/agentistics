@@ -156,6 +156,19 @@ test('"only with active agents" does not empty Publicado, with or without a task
   localStorage.clear()
 })
 
+test('toolbar: chips live on their own row under the controls, never inside the row they would push; tabs are 32px', async () => {
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: reply as never, initialTaskIds: ['t'] }))) })
+  const controls = document.querySelector('[data-live-controls]') as HTMLElement
+  const chips = document.querySelector('[data-live-chips]') as HTMLElement
+  expect(controls).not.toBeNull()
+  expect(chips).not.toBeNull()
+  expect(controls.contains(chips)).toBe(false)
+  expect(controls.nextElementSibling).toBe(chips)
+  expect(controls.querySelector('[data-live-actions]')).not.toBeNull()
+  expect((document.querySelector('[data-live-tabs] [role="tablist"]') as HTMLElement).style.height).toBe('32px')
+})
+
 test('opened from a session: filtered by its task as a removable chip; other tasks stay reachable', async () => {
   const two = { ...reply, sessionTasks: { s1: 't' }, deliveries: [...reply.deliveries, { ...reply.deliveries[0]!, key: 'u/a', taskId: 'u', taskTitle: 'Other task', sessionIds: [] }] }
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
@@ -332,12 +345,12 @@ test('old legacy reviews are no separate button: they sit in "Tudo" (counted), m
 
 test('LOW 11: on a phone the Líderes pill, its rows and the filter chip\'s remove control are 44 px targets', async () => {
   const { LiveLeaders } = await import('./LiveLeaders')
-  const { LiveTaskFilter } = await import('./LiveTaskFilter')
+  const { LiveTaskChips } = await import('./LiveTaskFilter')
   const leader = { id: 'L', title: 'Motor', harness: 'claude', model: null, state: 'working', currentAction: null, workers: [{ id: 'w', title: 'w', state: 'working', stage: 'running', word: 'working', cardKey: 't/a' }], awaiting: [] }
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   const mk = (mobile: boolean) => createElement(Router, null,
     createElement(LiveLeaders, { leaders: [leader] as never, nowMs: Date.now(), lang: 'pt', locate: () => ({ kind: 'none' as const }), onLocate: () => {}, onOpen: () => {}, mobile }),
-    createElement(LiveTaskFilter, { options: [{ value: 't', label: 'Task', recent: true, live: 1 }], chosen: ['t'], onChange: () => {}, pt: true, mobile }))
+    createElement(LiveTaskChips, { options: [{ value: 't', label: 'Task', recent: true, live: 1 }], chosen: ['t'], onChange: () => {}, pt: true, mobile }))
   await act(async () => { root!.render(mk(true)) })
   expect((document.querySelector('#live-leaders-head') as HTMLElement).style.minHeight).toBe('44px')
   await act(async () => (document.querySelector('#live-leaders-head') as HTMLElement).click())

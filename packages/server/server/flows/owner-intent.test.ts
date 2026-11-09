@@ -29,6 +29,31 @@ describe('ownerIntent — a deterministic host rule', () => {
   })
 })
 
+describe('FLUXO.CITACAO — a quoted or forwarded text is not the owner\'s words (real 08/11 cases)', () => {
+  const case1 = '> Sua mensagem virou card de trabalho por engano, mais uma vez. Encerrei o card e anotei o caso e vou corrigir isso agora.\n\nmano perdi a conta de quantas vezes eu vi vc me falando isso e de quantos tokens já gastou com isso...'
+  const case2 = '> Você tem razão, e eu vinha piorando isso. **Hoje foram...**\n> ...\n\nisso vai ser corrigido né mano? pelo amor de God'
+  const case3 = 'Isso aqui vai ser corrigido ne?\n\n> encaminhado de «[ LÍDER ] - Motor» (Claude Code):\n> Você tem razão, vou corrigir e publicar.\n> >\n> **Quantos tokens:** 12 mil'
+  test('a long quoted answer plus a short remark is not work', () => {
+    expect(ownerIntent(case1)).not.toBe('work')
+    expect(ownerIntent(case2)).toBe('question')
+    expect(ownerIntent(case3)).toBe('question')
+  })
+  test('the title is the owner\'s own words, never the quoted text', () => {
+    expect(ownerRequestTitle(case2)).toBe('isso vai ser corrigido né mano? pelo amor de God')
+    expect(ownerRequestTitle(case3)).toBe('Isso aqui vai ser corrigido ne?')
+    expect(ownerRequestTitle('corrige isso\n\n> texto citado')).toBe('corrige isso')
+    expect(nudgeExcerpt(case2)).toBe('isso vai ser corrigido né mano? pelo amor de God')
+  })
+  test('own request stays work; a verb inside the quote never makes it work; any quote depth', () => {
+    expect(ownerIntent('corrige isso\n\n> texto citado')).toBe('work')
+    expect(ownerIntent('> corrige o login e faz o deploy\n> > publica agora\n>mande tudo\nsó isso aqui por enquanto')).toBe('question')
+  })
+  test('only quoted lines and no own words is not a request', () => {
+    expect(ownerIntent('> corrige o login\n> > faz o deploy')).toBe('question')
+    expect(ownerRequestTitle('> corrige o login\n> faz o deploy')).toBe('corrige o login faz o deploy')
+  })
+})
+
 describe('FLUXO.AVISOS r2 — complaints, "?"-less questions, audio attachments (real owner phrases)', () => {
   test('a complaint about a previous answer is neither work nor a closable question', () => {
     for (const c of ['vc n me respondeu', 'você não me respondeu', 'não era isso que eu pedi', 'isso não era o que eu falei', 'vc ignorou minha pergunta']) expect(ownerIntent(c)).toBe('complaint')

@@ -35,7 +35,7 @@ const WORDS = (pt: boolean) => pt ? {
 }
 
 export function LiveToolbar({
-  pt, mobile, title, summary, summaryTitle, taskFilter, tab, counts, onTab, sort, onSort, actions,
+  pt, mobile, title, summary, summaryTitle, taskFilter, taskChips, tab, counts, onTab, sort, onSort, actions,
 }: {
   pt: boolean
   mobile: boolean
@@ -45,6 +45,8 @@ export function LiveToolbar({
   summaryTitle: string
   /** The task multi-select, already built (it owns its chips). */
   taskFilter: ReactNode
+  /** The chosen-task chips: drawn on a row of their own under the controls. */
+  taskChips?: ReactNode
   tab: LiveTab
   /** What each tab prints — counted from the very cards the columns draw. */
   counts: Record<LiveTab, number>
@@ -67,13 +69,13 @@ export function LiveToolbar({
           ...(mobile ? { flexBasis: '100%', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' } : {}),
         }}>{summary}</span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }} data-live-controls>
         <div role="group" aria-label={w.filters} data-live-filters style={{ ...group, flex: mobile ? '1 1 100%' : '1 1 auto' }}>
           {taskFilter}
           <div data-live-tabs style={mobile ? { minWidth: 0, flex: '1 1 100%' } : { flex: '0 0 auto', width: 'max-content', minWidth: 'max-content' }}>
             <TabStrip<LiveTab>
               tabs={LIVE_TABS} value={tab} onPick={onTab} label={t => (mobile ? w.tabShort : w.tab)[t]} count={t => counts[t]}
-              ariaLabel={w.tabs} flush {...(mobile ? { tap: 44, variant: 'underline' as const, gap: 6 } : { natural: true })}
+              ariaLabel={w.tabs} flush {...(mobile ? { tap: 44, variant: 'underline' as const, gap: 6 } : { natural: true, height: 32 })}
             />
           </div>
         </div>
@@ -97,6 +99,7 @@ export function LiveToolbar({
           {actions}
         </div>
       </div>
+      {taskChips}
     </div>
   )
 }
