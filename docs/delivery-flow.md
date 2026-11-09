@@ -93,6 +93,18 @@ moved (QA, Ajuste, PR · merge and CI · publicando statuses are created when mi
 (`{mergedMain, releaseGreen, tagPublished, tag, pr}`) is written onto the subtask, and `step` events
 feed the per-phase percentage. Every change emits `entrega.etapa` on the engine bus.
 
+Cards with a percentage show the current round's elapsed time beside it, with the round number
+when there has been more than one. `round.startedAtMs` and `round.number` are projected once by
+`buildLive` and carried unchanged by the Web API and `agentistics_live_delivery`. For running,
+adjustment and QA, a round is the latest live session of that role (or the latest filed session
+when none is live); author and QA sessions have separate round counts. Its session creation time
+starts the clock and bounds reported steps, handbacks and gates; only that session's activity
+advances the observed percentage. Other stages retain the recorded status stamp, falling back to
+the latest logged stage entry when it is missing. An unknown start displays `—`, never a borrowed historical time.
+Cards without a percentage keep their stage-time wording. The tooltip explains that this stage
+clock measures time since the last status change and can span earlier rounds; the card's total
+continues to mean measured work time.
+
 ## The release says what it published — `agentop flow release`
 
 A release assembled from many merged branches, with conflict fixes, squashed into one commit, cannot be matched
