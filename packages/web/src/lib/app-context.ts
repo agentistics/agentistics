@@ -58,6 +58,9 @@ export interface AppContext {
   /** Session lists ignore metric controls; their own search and quick filters still apply. */
   sessionsFilters: Filters
   sessionsActiveOnly: boolean
+  /** The list's own setters: the Sessions Filtros menu (desktop strip and phone sheet) writes these, never the metric ones. */
+  setSessionsFilters: React.Dispatch<React.SetStateAction<Filters>>
+  setSessionsActiveOnly: (v: boolean) => void
   /** The SAME memoized values the desktop header's `FiltersBar` already gets — computed once in
    *  App.tsx from `data`/`filters`, so the mobile Sessions workspace's own `FiltersBar` can reuse
    *  them verbatim instead of re-deriving (and risking disagreeing with) the same filter options.

@@ -14,8 +14,9 @@ const rows = [
 
 test('session scope is independent of the metric header state in App', () => {
   const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
-  expect(app.includes('const sessionsFilters = SESSION_LIST_FILTERS')).toBe(true)
-  expect(app.includes('const sessionsActiveOnly = inSessionsWorkspace')).toBe(true)
+  expect(app.includes('useState<Filters>(SESSION_LIST_FILTERS)')).toBe(true)
+  expect(app.includes('const sessionsFilters = listFilters')).toBe(true)
+  expect(app.includes('useState(inSessionsWorkspace)')).toBe(true)
 })
 
 for (const surface of ['Sessions', 'floating chat'] as const) {

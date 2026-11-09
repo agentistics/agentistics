@@ -1239,8 +1239,13 @@ export default function AppLayout() {
   // Only the sessions workspace offers the handle, but whatever it is dragged to applies to both.
   const liveAsideWidth = asideWidth
   const inSessionsWorkspace = isSessionsWorkspace(location.pathname)
-  const sessionsFilters = SESSION_LIST_FILTERS
-  const sessionsActiveOnly = inSessionsWorkspace
+  // The session list has its OWN filters: the Filtros menu on Sessions edits these and nothing
+  // else, and the top bar's metric filters never reach the list or the floating chat.
+  const [listFilters, setListFilters] = useState<Filters>(SESSION_LIST_FILTERS)
+  const [listActiveOnly, setListActiveOnly] = useState(inSessionsWorkspace)
+  useEffect(() => { setListActiveOnly(inSessionsWorkspace) }, [inSessionsWorkspace])
+  const sessionsFilters = listFilters
+  const sessionsActiveOnly = listActiveOnly
   // The fixed aside's real width: the list (or the collapsed rail), plus the Sessões area's own
   // area rail and its gap. Every inset that clears the aside reads this one figure.
   const leftAsideW = (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth) + (inSessionsWorkspace ? AREA_RAIL_W + PANEL_GAP : 0)
@@ -1677,7 +1682,7 @@ export default function AppLayout() {
   // the panel is open. See `activeFilterCount.ts` for why this cannot simply be read off the
   // component instead.
   const leadersOnly = useLeadersOnly()
-  const sessionsActiveFilterCount = countActiveFilters(filters, activeOnly, leadersOnly)
+  const sessionsActiveFilterCount = countActiveFilters(sessionsFilters, sessionsActiveOnly, leadersOnly)
 
   /**
    * WHERE THE FILTROS PANEL MAY SIT (design item 4, owner 2026-09-27: "Filtros na linha de botões
@@ -1766,7 +1771,7 @@ export default function AppLayout() {
    * "nothing" is indistinguishable from one that is failing, and it was reported as exactly that.
    * An option is a promise that something might be behind it.
    */
-  const fleetOptions = useMemo(() => fleetFilterOptions(headerFleet.rows, activeOnly), [headerFleet.rows, activeOnly])
+  const fleetOptions = useMemo(() => fleetFilterOptions(headerFleet.rows, sessionsActiveOnly), [headerFleet.rows, sessionsActiveOnly])
   const headerFleetIndex = useFleetIndex(headerFleet.sessions)
   const selectedFleetSession = inSessionsWorkspace && selectedSessionId !== undefined
     ? headerFleet.rows.find(r => r.id === selectedSessionId || r.conversationId === selectedSessionId)
@@ -3158,6 +3163,7 @@ export default function AppLayout() {
     statsCache,
     filters, setFilters, activeOnly, setActiveOnly,
     sessionsFilters, sessionsActiveOnly,
+    setSessionsFilters: setListFilters, setSessionsActiveOnly: setListActiveOnly,
     availableProjects, availableHarnesses,
     lang, theme, currency, setCurrency, textScale, setTextScale, brlRate,
     billing, saveBilling, costBasis, setCostBasis, planBasis, billingReady, openBillingSetup,
@@ -3464,10 +3470,10 @@ export default function AppLayout() {
                 }}>
                   <FiltersBar
                     only={SESSIONS_FILTER_DIMS}
-                    activeOnly={activeOnly}
-                    onActiveOnlyChange={setActiveOnly}
-                    filters={filters}
-                    onChange={setFilters}
+                    activeOnly={sessionsActiveOnly}
+                    onActiveOnlyChange={setListActiveOnly}
+                    filters={sessionsFilters}
+                    onChange={setListFilters}
                     projects={availableProjects}
                     sessionCountByProject={sessionCountByProject}
                     models={models}
