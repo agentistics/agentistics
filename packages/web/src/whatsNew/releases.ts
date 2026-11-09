@@ -14,6 +14,22 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     features: [],
     fixes: [
       {
+        pt: 'OpenCode Go: o limite que o provedor não informa aparece como "desconhecido" em vez de uma estimativa local disfarçada, e o plano fica em espera quando o provedor recusa por limite.',
+        en: 'OpenCode Go: a limit the provider does not publish shows as "unknown" instead of a local estimate posing as quota, and the plan is put on hold when the provider refuses for usage limit.',
+      },
+      {
+        pt: 'Os filtros de métricas do topo não mexem mais nas telas de sessões: a lista e a conversa continuam completas.',
+        en: 'The metric filters at the top no longer affect the sessions screens: the list and the conversation stay complete.',
+      },
+      {
+        pt: 'Mensagens na fila mostram um só botão "enviar agora"; o atalho sob a conversa só aparece com duas ou mais mensagens esperando.',
+        en: 'Queued messages show a single "send now" button; the shortcut under the conversation only appears with two or more waiting messages.',
+      },
+      {
+        pt: 'Agradecimentos, despedidas e comentários soltos não viram mais cartão para você; só um pedido claro vira cartão, e a mensagem continua chegando ao líder.',
+        en: 'Thanks, goodbyes and passing remarks no longer become a card for you; only a clear request does, and the message still reaches the leader.',
+      },
+      {
         pt: 'No Mac, o agentistics não pede mais acesso à Mesa, Documentos, Fotos e outras pastas privadas só por procurar projetos. Elas só são lidas quando você mesmo as abre.',
         en: 'On Mac, agentistics no longer asks for access to Desktop, Documents, Photos and other private folders just by looking for projects. They are read only when you open them yourself.',
       },
