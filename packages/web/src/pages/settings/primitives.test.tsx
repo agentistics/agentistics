@@ -111,6 +111,11 @@ describe('popovers are not clipped by a scrolling ancestor', () => {
     expect(triggerStyle(390)).toMatch(/(^|;)height:44px/)
   })
 
+  test('Select `control` is the toolbar height: 32px desktop', () => {
+    const html = withWindow(() => renderToStaticMarkup(<Select control value="a" onChange={() => {}} options={[{ value: 'a', label: 'A' }]} />))
+    expect(/aria-haspopup="listbox"[^>]*style="([^"]*)"/.exec(html)?.[1]).toMatch(/(^|;)height:32px/)
+  })
+
   test('MultiPicker `tall` is the explicit form opt-in (44px on desktop too)', () => {
     expect(triggerStyle(1440, { tall: true })).toContain('min-height:44px')
   })

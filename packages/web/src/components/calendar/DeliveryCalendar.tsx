@@ -97,7 +97,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
   const tapIcon = isMobile ? 'ag-tap-icon' : undefined
   const navBtn: React.CSSProperties = {
     // A phone's 44px target is PROJECTED by `.ag-tap-icon` (an invisible box), never painted.
-    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 28, height: 28, padding: '0 6px', position: 'relative',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 32, height: 32, padding: '0 6px', position: 'relative',
     background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', cursor: 'pointer', font: 'inherit', fontSize: 12,
   }
 
@@ -140,7 +140,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
           <CalendarDays size={17} aria-hidden style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
           <span>{pick(TEXT.title, pt)}</span><BetaTag what={pick(TEXT.beta, pt)} lang={lang} />
         </h1>
-        {!isMobile && <div style={{ flexShrink: 0, width: 350 }}><SegmentedTabs tabs={tabs} value={activeView} onChange={go} ariaLabel={pick(TEXT.title, pt)} containerName="cal-views" /></div>}
+        {!isMobile && <div style={{ flexShrink: 0, width: 350, ['--mode-min-height' as string]: '24px' }}><SegmentedTabs tabs={tabs} value={activeView} onChange={go} ariaLabel={pick(TEXT.title, pt)} containerName="cal-views" /></div>}
         <button type="button" data-cal-today onClick={() => { setAnchor(brtDay(Date.now())); setSel(null) }} className={isMobile ? 'ag-tap' : undefined} style={navBtn}>{pick(TEXT.today, pt)}</button>
         {!isMobile && <>
           <button type="button" aria-label={pick(TEXT.prev, pt)} onClick={() => step(-1)} className={tapIcon} style={navBtn}><ChevronLeft size={15} /></button>

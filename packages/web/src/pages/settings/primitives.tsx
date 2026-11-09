@@ -978,7 +978,9 @@ export function creatableName(typed: string, options: readonly { label: string }
   return options.some(o => o.label.trim().toLowerCase() === n.toLowerCase()) ? null : n
 }
 
-export function Select({ value, onChange, options, placeholder, disabled, searchable, searchPlaceholder, defaultOpenForTest, creatable }: {
+export function Select({ value, onChange, options, placeholder, disabled, searchable, searchPlaceholder, defaultOpenForTest, creatable, control }: {
+  /** Toolbar control: the app control height (32px desktop, 44px phone) instead of the roomy form field. */
+  control?: boolean
   value: string
   onChange: (v: string) => void
   /** `disabled` greys an option out and blocks selection; `hint` says why, inline. */
@@ -1127,8 +1129,7 @@ export function Select({ value, onChange, options, placeholder, disabled, search
         aria-expanded={open}
         style={{
           width: '100%',
-          minHeight: isMobile ? 44 : undefined,
-          padding: '8px 11px',
+          ...(control ? { height: isMobile ? 44 : 32, padding: '0 11px', boxSizing: 'border-box' as const } : { minHeight: isMobile ? 44 : undefined, padding: '8px 11px' }),
           background: 'var(--bg-elevated)',
           border: `1px solid ${open ? 'var(--anthropic-orange)' : 'var(--border)'}`,
           borderRadius: 8,

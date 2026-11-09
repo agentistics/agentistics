@@ -99,7 +99,7 @@ export function CalendarFilters({ value, onChange, pieces, harnessOf, versionLis
       <div style={{ minWidth: mobile ? 220 : 200, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
         <Filter size={13} aria-hidden style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <Select
+          <Select control
             value={value.tasks} onChange={v => set({ tasks: v })} searchable searchPlaceholder={pick(TEXT.searchTask, pt)}
             options={[{ value: 'active', label: `${pick(TEXT.tasks, pt)}: ${pick(TEXT.active, pt).toLowerCase()}` }, { value: 'all', label: pick(TEXT.allTasks, pt) }, ...tasks]}
           />
