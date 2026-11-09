@@ -75,17 +75,15 @@ describe('goUsage', () => {
 })
 
 describe('goPlanLimits', () => {
-  test('one 5 h and one week window from the tightest model, with the rolling reset', () => {
+  test('local costs cannot supply provider quota or renewal to routing', () => {
     const at = NOW - 2 * H
     const l = goPlanLimits(goUsage([{ model: 'glm-5.3', costUsd: 1.5, at }, { model: 'glm-5.3-flash', costUsd: 1, at }], 'go', NOW), NOW)!
     expect(l).toMatchObject({ harness: 'opencode', source: 'opencode-cost-estimate', sourcePlan: 'OpenCode Go', updatedAt: NOW })
-    expect(l.windows).toEqual([
-      { kind: '5h', usedPct: 50, resetsAt: at + 5 * H },
-      { kind: 'week', usedPct: 20, resetsAt: at + 7 * 24 * H },
-    ])
+    expect(l.windows).toEqual([])
+    expect(l.unmeasuredReason).toContain('unknown')
   })
   test('nothing used on a listed model is no reading', () => {
-    expect(goPlanLimits(goUsage([], 'go', NOW), NOW)).toBeNull()
-    expect(goPlanLimits(goUsage([{ model: 'big-pickle', costUsd: 1, at: NOW - H }], 'go', NOW), NOW)).toBeNull()
+    expect(goPlanLimits(goUsage([], 'go', NOW), NOW)?.windows).toEqual([])
+    expect(goPlanLimits(goUsage([], 'zen', NOW), NOW)).toBeNull()
   })
 })

@@ -30,7 +30,10 @@ export function queuedBubbleActions(i: {
 }): QueuedBubbleActions {
   const person = parseSystemEvent(i.text) === null
   const pt = i.pt
-  const sendNow = person && !i.sendNowRunning
+  // ONE control per action: a single waiting message is served by this link, two or more by the pill
+  // under the conversation (`sendNowPillOffered`) — every send-now sends the whole queue, so a link on
+  // each balloon beside the pill is three buttons for one act.
+  const sendNow = person && !i.sendNowRunning && i.personQueued <= 1
     && sendNowShown({ harness: i.harness, working: i.working, queuedCount: i.personQueued, dialogOpen: i.dialogOpen })
   const interrupt = person && i.working && i.stopEnabled && !i.dialogOpen
   return {
@@ -45,6 +48,16 @@ export function queuedBubbleActions(i: {
       hint: pt ? 'Para o turno atual; a sessão lê esta mensagem em seguida.' : 'Stops the current turn; the session reads this message next.',
     } : null,
   }
+}
+
+/**
+ * The pill under the conversation. A single waiting message already carries its own "Send now"
+ * (`queuedBubbleActions`), so drawing the pill too showed two buttons for one message. The pill is
+ * for two or more, where it is the one control that says it sends the whole queue. `shown` is the
+ * same per-harness rule (`sendNowShown`) both buttons obey, so no harness loses the action.
+ */
+export function sendNowPillOffered(shown: boolean, personQueued: number): boolean {
+  return shown && personQueued >= 2
 }
 
 export interface QueuedCard { text: string; at?: number }

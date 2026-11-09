@@ -18,7 +18,7 @@ import { lstat, mkdir, readdir, realpath, rmdir } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { checkProjectName, type CreateFolderRefusal } from '@agentistics/core'
-import { shouldPruneDirectory } from './sessions/dir-scan'
+import { isPrivateMacPath, shouldPruneDirectory } from './sessions/dir-scan'
 import { isExcludedProjectPath } from './sessions/project-source'
 
 export interface FolderEntry { name: string; path: string; hasChildren: boolean }
@@ -71,6 +71,7 @@ interface Deps {
   home?: string
   temporary?: string
   budgetMs?: number
+  platform?: NodeJS.Platform
   /** Test seam: the directory read. */
   list?: (dir: string) => Promise<{ name: string; dir: boolean }[]>
 }
@@ -118,7 +119,11 @@ export async function listFolders(rawPath: string, deps: Deps): Promise<FolderLi
   for (const e of dirs) {
     if (Date.now() > deadline) { partial = true; break }
     const path = join(requested, e.name)
-    folders.push({ name: e.name, path, hasChildren: await hasSubfolders(join(real, e.name), list, temporary) })
+    const child = join(real, e.name)
+    // A private folder shown from OUTSIDE it is listed without being read (reading raises the macOS
+    // prompt); its expander is assumed. Opening it is the user's own act and lists it normally.
+    const unopened = isPrivateMacPath(child, home, deps.platform) && !isPrivateMacPath(real, home, deps.platform)
+    folders.push({ name: e.name, path, hasChildren: unopened ? true : await hasSubfolders(child, list, temporary) })
   }
   return { ok: true, path: requested, parent: parentOf(requested, roots), folders, partial }
 }

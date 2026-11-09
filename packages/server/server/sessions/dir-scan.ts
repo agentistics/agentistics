@@ -43,10 +43,37 @@ export function isWholeDiskRoot(root: string): boolean {
   return normalized === '' || normalized === '/' || /^\/mnt\/[a-z]$/i.test(normalized) || /^[a-z]:$/i.test(normalized)
 }
 
+/**
+ * Folders macOS guards behind a consent prompt ("agentop wants access to files in your Desktop
+ * folder"). Merely `stat`ing or listing one fires it, so a BACKGROUND walk must never touch them.
+ */
+const MAC_PRIVATE = new Set(['desktop', 'documents', 'downloads', 'pictures', 'movies', 'music', 'public', 'library'])
+
+/**
+ * Is `path` somewhere a background walk must not enter? PURE (no fs access): on macOS the private
+ * folders directly under a home (`/Users/<name>/Desktop`, …, `Library` — which holds iCloud Drive
+ * at `Library/Mobile Documents`) and anything below them; on EVERY platform any `.photoslibrary`
+ * bundle. Only the user's own click (picker) or typed path may open such a folder.
+ */
+export function isPrivateMacPath(path: string, home: string = homedir(), platform: NodeJS.Platform = process.platform): boolean {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
+  if (parts.some(p => p.toLowerCase().endsWith('.photoslibrary'))) return true
+  if (platform !== 'darwin') return false
+  const h = home.replace(/\\/g, '/').split('/').filter(Boolean)
+  const underHome = h.length > 0 && h.every((seg, i) => parts[i]?.toLowerCase() === seg.toLowerCase())
+  let rest: string[] | null = underHome ? parts.slice(h.length) : null
+  if (!rest && parts[0]?.toLowerCase() === 'users' && parts.length >= 3) rest = parts.slice(2)
+  return !!rest && rest.length > 0 && MAC_PRIVATE.has(rest[0]!.toLowerCase())
+}
+
 export interface ScanOptions {
   depth?: number
   timeBudgetMs?: number
   now?: () => number
+  /** Test seams. */
+  home?: string
+  platform?: NodeJS.Platform
+  readDir?: (dir: string) => Promise<import('node:fs').Dirent<string>[]>
 }
 
 export const DISK_SCAN_DEPTH = 4
@@ -141,6 +168,8 @@ export async function scanDirectories(
   const depth = options.depth ?? (isWholeDiskRoot(root) ? DISK_SCAN_DEPTH : SCAN_DEPTH)
   const timeBudgetMs = options.timeBudgetMs ?? (isWholeDiskRoot(root) ? DISK_SCAN_BUDGET_MS : 1_000)
   const now = options.now ?? Date.now
+  const home = options.home ?? homedir()
+  const platform = options.platform ?? process.platform
   const deadline = now() + timeBudgetMs
   const out: ScannedDir[] = []
   let frontier: string[] = [root]
@@ -156,7 +185,7 @@ export async function scanDirectories(
       const batch = frontier.slice(i, i + 64)
       const batchRead = Promise.all(batch.map(async dir => {
         try {
-          return { dir, entries: await readdir(dir, { withFileTypes: true }) }
+          return { dir, entries: await (options.readDir ?? ((d: string) => readdir(d, { withFileTypes: true })))(dir) }
         } catch {
           // Unreadable (permissions, a broken mount, a race with a delete). Not an error worth
           // reporting: it is one directory the user cannot start a session in either.
@@ -194,7 +223,10 @@ export async function scanDirectories(
         // place to start — so a `.git` does not stop the descent. Only the prune list does.
         for (const e of entries) {
           if (!e.isDirectory() || shouldPruneDirectory(e.name)) continue
-          next.push(join(dir, e.name))
+          const child = join(dir, e.name)
+          // Never enter (not even stat) a private folder: on macOS that alone raises the prompt.
+          if (isPrivateMacPath(child, home, platform)) continue
+          next.push(child)
         }
       }
     }
@@ -225,6 +257,8 @@ export async function isDirectory(path: string): Promise<boolean> {
  */
 export async function isWorktreeDir(path: string): Promise<boolean> {
   const gitPath = join(path, '.git')
+  // A history folder stays listed, but probing its `.git` is a read inside a private folder.
+  if (isPrivateMacPath(path)) return false
   try {
     if (!(await stat(gitPath)).isFile()) return false
   } catch {

@@ -9,6 +9,13 @@ The names of the four surfaces are in [docs/surfaces.md](surfaces.md); what a se
 started and what its states mean is [docs/session-manager.md](session-manager.md). This page is
 about the web one specifically.
 
+The top bar on metric pages scopes metrics only. Its period, harness, project, model and billing
+choices do not narrow the Sessions list, collapsed session rail or floating chat session picker.
+The desktop filter panel and mobile filter sheet continue to edit metric scope, including the
+overview's heatmap; they do not filter the session list. Session lists retain their own search,
+quick filters and arrangement controls. Their default active-session scope is independent of the
+metric header's Active only switch. Changing metric filters preserves the current session selection.
+
 - Components: `packages/web/src/pages/SessionsPage.tsx`, `packages/web/src/components/sessions/`
 - Terminal side: [terminal-channel.md](terminal-channel.md),
   [terminal-interactive.md](terminal-interactive.md),

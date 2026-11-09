@@ -66,6 +66,27 @@ function readLogTail(logDir: string): string {
   } catch { return '' }
 }
 
+/** Account-wide Go refusal. A successful Go response after it is the only local recovery proof. */
+export function readGoLimit(dbPath: string = OPENCODE_DB_PATH): OpencodeLimit | null {
+  const text = readLogTail(join(dirname(dbPath), 'log'))
+  let latest: OpencodeLimit | null = null
+  for (const line of text.split('\n')) {
+    if (!/providerID=opencode(?:-go)? /.test(line) || !/Go usage limit (?:exceeded|reached)/i.test(line)) continue
+    const sid = /session\.id=(\S+)/.exec(line)?.[1]
+    const hit = sid ? opencodeLimitFromLog(line, sid) : null
+    if (hit && (!latest || hit.at > latest.at)) latest = hit
+  }
+  if (!latest) return null
+  let db: Database | undefined
+  try {
+    db = new Database(dbPath, { readonly: true })
+    const recovered = db.query<{ n: number }, [number]>(
+      "SELECT count(*) AS n FROM message WHERE time_created > ? AND json_valid(data) AND json_extract(data, '$.role') = 'assistant' AND json_extract(data, '$.providerID') = 'opencode-go' AND json_extract(data, '$.tokens.output') > 0",
+    ).get(latest.at)
+    return recovered && recovered.n > 0 ? null : latest
+  } catch { return latest } finally { db?.close() }
+}
+
 /** IO. Did the session produce output after `at`? (An assistant message created later with output tokens.) */
 function workedAfter(dbPath: string, sessionId: string, at: number): boolean {
   if (!existsSync(dbPath)) return false
