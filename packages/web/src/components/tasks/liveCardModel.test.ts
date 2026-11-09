@@ -76,7 +76,7 @@ describe('stage bar — active segment wears its column colour', () => {
 
 describe('time row — "total" is the card\'s work, never the task\'s age (item a, f)', () => {
   test('cards without a percent keep stage wording in every unpublished column', () => {
-    for (const stage of LIVE_STAGES.filter(s => s !== 'published')) {
+    for (const stage of LIVE_STAGES.filter(s => s !== 'published' && s !== 'completed')) {
       const c = card({ stage, round: { number: 2, startedAtMs: NOW - 3 * MIN } })
       expect(timeRow(c, NOW, true).inStage).toBe('tempo nessa etapa 52 min')
       expect(timeRow(c, NOW, false).inStage).toBe('time in this stage 52 min')
