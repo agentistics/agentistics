@@ -25,7 +25,7 @@
 
 import { format, parseISO } from 'date-fns'
 import type { SurfaceHarnessId, SessionMeta } from '@agentistics/core'
-import { canonicalProjectPath, sessionCostUSD, sessionModelUsage, calcCost, unpricedTokens, sessionTokenTotal, totalTokens, usageTokens } from '@agentistics/core'
+import { costState as coreCostState, type CostState, canonicalProjectPath, sessionCostUSD, sessionModelUsage, calcCost, unpricedTokens, sessionTokenTotal, totalTokens, usageTokens } from '@agentistics/core'
 
 /** What a board is ranked by. The same three `topUsage.ts` offers, and for the same reason. */
 export type TopMetric = 'cost' | 'tokens' | 'sessions'
@@ -48,9 +48,8 @@ export interface Leader {
  * How a cost cell reads: `unknown` when every token of the row is unpriced (print "not recorded", never a
  * 0), `partial` when some are (print the priced figure plus the "+ unpriced usage" marker), else `priced`.
  */
-export function costState(e: Pick<Leader, 'tokens' | 'unpriced'>): 'priced' | 'partial' | 'unknown' {
-  if (e.unpriced <= 0) return 'priced'
-  return e.unpriced >= e.tokens ? 'unknown' : 'partial'
+export function costState(e: Pick<Leader, 'tokens' | 'unpriced'>): CostState {
+  return coreCostState(e.unpriced, e.tokens)
 }
 
 export interface Board {

@@ -1,7 +1,7 @@
 import { useEscapeOwner } from '../lib/overlayStack'
 import React, { useState, useMemo, useEffect, useRef, useReducer, lazy, Suspense, useSyncExternalStore } from 'react'
 import type { SessionMeta } from '@agentistics/core'
-import { HARNESS_COST_LABEL, USAGE_NOT_REPORTED, sessionCostUSD, fmtCost } from '@agentistics/core'
+import { sessionCostCell, HARNESS_COST_LABEL, USAGE_NOT_REPORTED, sessionCostUSD, fmtCost } from '@agentistics/core'
 import { sessionTime } from '../lib/sessionTime'
 import { reopeningLabel } from '../lib/reopeningStore'
 import { formatProjectName, repoShortName, sessionLabel, sessionTokenTotal } from '@agentistics/core'
@@ -1515,7 +1515,7 @@ function CardChips({ s, lang }: { s: SessionMeta; lang: 'pt' | 'en' }) {
         : tokens > 0 && <Chip icon={null} label={`${fmt(tokens)} tkn`} color="var(--anthropic-orange, #e8690b)" />}
       {tools > 0 && <Chip icon={<Wrench size={11} />} label={`${tools} tools`} color="var(--accent-green, #22c55e)" />}
       {Object.values(s.model_usage ?? {}).some(u => u.costSource === 'harness') && sessionCostUSD(s) !== null && (
-        <Chip icon={null} label={`${fmtCost(sessionCostUSD(s)!)} · ${HARNESS_COST_LABEL[lang]}`} />
+        <Chip icon={null} label={`${sessionCostCell(s, lang, usd => fmtCost(usd))} · ${HARNESS_COST_LABEL[lang]}`} />
       )}
       {s.git_commits > 0 && <Chip icon={<GitCommit size={11} />} label={`${s.git_commits} commits`} color="var(--accent-purple, #a855f7)" />}
       {s.files_modified > 0 && <Chip icon={<FileCode size={11} />} label={`${s.files_modified} files`} />}
