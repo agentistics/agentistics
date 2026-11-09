@@ -74,6 +74,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { railTooltipShown } from '../../lib/railTooltip'
+import { TaskNavigationLinks } from './TaskNavigationLinks'
 import { createPortal } from 'react-dom'
 import { ArrowDown, Eye, EyeOff, MoreHorizontal } from 'lucide-react'
 import { PanelContextMenu, PanelTileDropdown, type PanelContextMenuEntry, type PanelTile } from './bandControls'
@@ -94,6 +95,8 @@ export { RAIL_WIDTH_PX }
 const CONFIG_AREA_H = 41
 
 export interface PanelRailProps {
+  pathname?: string
+  onNavigate?: (to: string) => void
   /** Already filtered (gates subtracted) and ordered — see this module's own header. */
   panels: readonly PanelId[]
   /** Hidden panels this session can still reach (gates subtracted the same way) — the eye's own
@@ -235,7 +238,7 @@ function RailResizeHandle({ width, onResize, lang }: {
 
 export function PanelRail({
   panels, hidden, active, rightOpen, activity, hardwareCritical, railWidth, onResizeWidth, lang,
-  harness, onOpen, onMinimize, onMove, onHide, onReveal, onDrop,
+  harness, onOpen, onMinimize, onMove, onHide, onReveal, onDrop, pathname, onNavigate,
 }: PanelRailProps) {
   const pt = lang === 'pt'
   const iconPx = railIconSize(railWidth)
@@ -327,6 +330,7 @@ export function PanelRail({
       }}
     >
       <RailResizeHandle width={railWidth} onResize={onResizeWidth} lang={lang} />
+      <TaskNavigationLinks lang={lang} pathname={pathname} onNavigate={onNavigate} size={iconPx} />
       <div
         ref={colRef}
         role="tablist"

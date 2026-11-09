@@ -39,7 +39,7 @@ export const PANEL_META: Record<PanelId, PanelMetaEntry> = {
     },
   },
   live: {
-    title: { en: 'Live', pt: 'Live' },
+    title: { en: 'Files', pt: 'Arquivos' },
     description: {
       en: 'What this session is doing right now, as it happens.',
       pt: 'O que esta sessão está fazendo agora, em tempo real.',

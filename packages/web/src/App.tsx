@@ -105,6 +105,8 @@ import { visibleSettingsSections } from './lib/settingsSections'
 import { AreaTree } from './components/nav/AreaTree'
 import { isSessionsWorkspace } from './lib/appAreas'
 import { AREA_RAIL_W, AreaRail } from './components/nav/AreaRail'
+import { headerLeftMenus } from './lib/leftMenus'
+import { StatusWriteFeedback } from './components/tasks/StatusWriteFeedback'
 import { areaBadges } from './lib/areaBadges'
 import { MobileAreaBar } from './components/nav/MobileAreaBar'
 import { setAreaSheetOpen, useAreaSheetOpen } from './lib/areaSheetStore'
@@ -573,6 +575,13 @@ function SideNav({
   // Which session is open, for the collapsed rail's selected highlight.
   const { sessionId } = useParams()
   const pt = lang === 'pt'
+  const [areaRailOpen, setAreaRailOpen] = useState(() => {
+    try { return localStorage.getItem('agentistics-area-rail-open') === '1' } catch { return false }
+  })
+  const changeAreaRail = (open: boolean) => {
+    setAreaRailOpen(open)
+    try { localStorage.setItem('agentistics-area-rail-open', open ? '1' : '0') } catch { /* private window */ }
+  }
   // History, for the icon row. This ships as an installed PWA, where there is no browser chrome to
   // fall back on — in a plain tab they duplicate the browser's own, which is a cost worth paying
   // for the standalone case.
@@ -788,7 +797,11 @@ function SideNav({
     }}>
       {/* The aside is the full height of the window, so it carries its own mark and fold control —
           this row is FRAME chrome (the mockup's own titlebar), never inside the panel below it. */}
-      <AsideHeader lang={lang === 'pt' ? 'pt' : 'en'} height={TOPBAR_H} collapsed={collapsed} onToggle={onToggle} />
+      <AsideHeader lang={lang === 'pt' ? 'pt' : 'en'} height={TOPBAR_H} collapsed={collapsed} onToggle={() => {
+        const next = headerLeftMenus(areaRailOpen, collapsed)
+        if (next.areasOpen !== areaRailOpen) changeAreaRail(next.areasOpen)
+        onToggle()
+      }} />
 
       {/* ONE aside, two bodies — never two asides. The shell above is shared; only what sits below
           it changes. Collapsed, the sessions workspace draws the RAIL — sessions, not the
@@ -816,7 +829,8 @@ function SideNav({
          */
         <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', gap: PANEL_GAP }}>
         {/* APP.AREAS Task 4: the areas as a rail of icons beside the list, which is unchanged. */}
-        <AreaRail lang={pt ? 'pt' : 'en'} pathname={location.pathname} badges={areaBadgeCounts} visibleSettings={visibleSettings} />
+        <AreaRail lang={pt ? 'pt' : 'en'} pathname={location.pathname} badges={areaBadgeCounts} visibleSettings={visibleSettings}
+          open={areaRailOpen} onOpenChange={changeAreaRail} />
         <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{
             flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
@@ -4601,6 +4615,7 @@ export default function AppLayout() {
       {retryImportModal}
       {/* Global notification toasts (auto-dismiss with an exit animation; history in the bell) */}
       <NotificationToasts lang={lang} />
+      <StatusWriteFeedback lang={lang} />
       {/* The Live's external window belongs to the app, not to the popover that opened it. */}
       <LivePipHost lang={lang === 'pt' ? 'pt' : 'en'} />
       <CheckinModalHost lang={lang === 'pt' ? 'pt' : 'en'} />

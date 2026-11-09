@@ -50,7 +50,7 @@ describe('AreaRail', () => {
       expect(open).toContain('Agentask')
       // Each area appears once (no icon column duplicating the tree rows).
       const first = pageLabel(APP_AREAS[0]!, lang)
-      expect(open.split(`>${first}</a>`).length - 1).toBe(1)
+      expect(open.split(`>${first}</button>`).length - 1).toBe(1)
     })
     test(`Métricas leads and Sessões follows (${lang})`, () => {
       const html = render(lang)
