@@ -156,18 +156,11 @@ export function goUsage(rows: readonly GoCostRow[], plan: OpencodePlanId, now: n
 }
 
 /**
- * The meter `agentistics_plan_limits` routes on: one UNSCOPED 5 h and one week window, each from the model
- * nearest its limit (the conservative reading — a session may use any model). The month window has no
- * place in a plan-limits record (its kinds are 5 h and week), so the OpenCode card draws it from `GoUsage`.
- * `null` when no listed model has been used: no reading is not a reading of zero.
+ * Local priced responses do not reveal the provider's quota or window anchor. Keep the plan visible,
+ * with no measured windows and no routing capacity. Dollar estimates remain in the usage endpoint.
  */
 export function goPlanLimits(u: GoUsage, now: number, account = 'default'): PlanLimits | null {
-  const windows: PlanLimits['windows'] = []
-  for (const kind of ['5h', 'week'] as const) {
-    const m = u.tightest[kind]
-    const w = m?.windows.find(x => x.kind === kind)
-    if (w) windows.push({ kind, usedPct: Math.round(w.fraction * 1000) / 10, resetsAt: w.resetsAt })
-  }
-  if (!windows.length) return null
-  return { harness: 'opencode', account, sourcePlan: opencodePlan(u.plan).label, windows, updatedAt: now, source: 'opencode-cost-estimate' }
+  if (!['go', 'go-plus', 'go-teams'].includes(u.plan)) return null
+  return { harness: 'opencode', account, sourcePlan: opencodePlan(u.plan).label, windows: [], updatedAt: now, source: 'opencode-cost-estimate',
+    unmeasuredReason: 'Go quota and reset unknown: local response costs do not measure provider availability.' }
 }

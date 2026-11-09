@@ -74,6 +74,8 @@ export interface PlanLimits {
   /** Owner-only: the login label the registry holds for the account. Never forwarded to agents. */
   label?: string
   windows: PlanLimitWindow[]
+  /** No provider measurement; never route from local cost estimates. Also carries an observed refusal. */
+  unmeasuredReason?: string
   /** Epoch ms of the record the windows were read from. */
   updatedAt: number
   source: PlanLimitSource

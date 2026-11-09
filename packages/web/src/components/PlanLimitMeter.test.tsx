@@ -10,6 +10,21 @@ const limits: PlanLimits = {
   windows: [{ kind: '5h', usedPct: 80, resetsAt: now - H }],
 } as unknown as PlanLimits
 
+test('Go provider refusal shows the block with no invented percentage or reset', () => {
+  const go: PlanLimits = { harness: 'opencode', account: 'default', source: 'opencode-cost-estimate', updatedAt: now,
+    sourcePlan: 'OpenCode Go', windows: [], unmeasuredReason: 'Go usage limit exceeded. On hold; reset unknown.' }
+  for (const html of [
+    renderToStaticMarkup(<PlanSessionBlock limits={go} now={now} lang="pt" />),
+    renderToStaticMarkup(<PlanUsageCard limits={go} now={now} lang="pt" />),
+  ]) {
+    expect(html).toContain('Go bloqueado pelo limite do provedor')
+    expect(html).toContain('Renovação desconhecida')
+    expect(html).not.toContain('49.8')
+    expect(html).not.toContain('zera ')
+    expect(html).not.toContain('com folga')
+  }
+})
+
 test('a renewed window keeps the "no reading since" wording and adds the estimated reset (EN)', () => {
   const html = renderToStaticMarkup(<PlanSessionBlock limits={limits} now={now} lang="en" />)
   expect(html).toContain('renewed — no reading since')

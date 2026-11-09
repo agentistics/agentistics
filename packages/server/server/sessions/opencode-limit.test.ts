@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { opencodeLimitFromLog, readOpencodeLimit } from './opencode-limit'
+import { opencodeLimitFromLog, readOpencodeLimit, readGoLimit } from './opencode-limit'
 
 const S = 'ses_e6f24c17fffe3bzg3zp4CucgJQ'
 // Real lines from opencode 1.19.5's log (throwaway HOME, free model, 2026-10-31).
@@ -13,6 +13,10 @@ const other = main.replace(S, 'ses_other')
 const connect = `timestamp=2026-10-31T07:30:00.000Z level=ERROR run=x message="stream error" providerID=ollama modelID=q session.id=${S} small=false agent=build mode=primary error.error="AI_APICallError: Cannot connect to API"`
 
 describe('opencodeLimitFromLog', () => {
+  it('recognizes the Go refusal that otherwise leaves ACP waiting with no output', () => {
+    const go = main.replace('providerID=opencode ', 'providerID=opencode-go ').replace(/Free usage limit reached\.[^"\n]+/, 'Go usage limit exceeded')
+    expect(opencodeLimitFromLog(go, S)?.message).toBe('Go usage limit exceeded')
+  })
   it('reads the main-agent free-limit refusal for this session, cleaned of the SDK prefix', () => {
     expect(opencodeLimitFromLog([main, title].join('\n'), S)).toEqual({
       at: Date.parse('2026-10-31T07:27:32.371Z'),
@@ -52,5 +56,19 @@ describe('readOpencodeLimit', () => {
   })
   it('answers null for a missing store', () => {
     expect(readOpencodeLimit(S, '/nonexistent/opencode.db')).toBeNull()
+  })
+  it('holds the whole Go plan until a successful Go response, regardless of session', () => {
+    const { dir, dbPath } = setup({ output: 12 })
+    try {
+      const go = main.replace(/Free usage limit reached\.[^"\n]+/, 'Go usage limit exceeded')
+      writeFileSync(join(dir, 'log', 'opencode.log'), go)
+      // The successful response in setup has no Go provider: it cannot clear this plan.
+      expect(readGoLimit(dbPath)?.message).toBe('Go usage limit exceeded')
+      const db = new Database(dbPath)
+      const at = Date.parse('2026-10-31T09:00:00Z')
+      db.run('INSERT INTO message VALUES (?,?,?,?,?)', ['m3', 'another-session', at, at, JSON.stringify({ role: 'assistant', providerID: 'opencode-go', tokens: { output: 2 } })])
+      db.close()
+      expect(readGoLimit(dbPath)).toBeNull()
+    } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 })

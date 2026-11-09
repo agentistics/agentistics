@@ -239,6 +239,14 @@ The FILES KPI in `useData.ts` always prefers session-level `files_modified` (whi
 
 ## OpenCode
 
+Go response costs are local spending estimates, not a measurement of the provider's remaining
+quota. The former weekly meter divided local seven-day costs by half the per-model monthly table;
+its rolling renewal was also an estimate. Neither value establishes availability. Limits and MCP
+therefore show no measured Go windows, and exclude these estimates from routing budgets and history.
+An observed main-agent `Go usage limit exceeded` refusal is shown as a provider block. The log does
+not supply its reset time: it stays unknown until a later successful Go response proves recovery.
+The runtime's live ACP error delivery and leader notification belong to the engine repository.
+
 OpenCode metrics are read from its SQLite `session`, `message`, and text `part` rows. The reader
 uses `OPENCODE_DB` when set, otherwise `$XDG_DATA_HOME/opencode/opencode.db` (default
 `~/.local/share/opencode/opencode.db`); `OPENCODE_DIR` is Agentistics's directory override.
