@@ -14,8 +14,8 @@ import {
 import type { FleetRow } from '../../lib/fleet'
 import { modelDisplay } from '../../lib/modelDisplay'
 
-export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
-export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published']
+export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'completed' | 'published'
+export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'completed', 'published']
 
 export type LiveEta =
   | {
@@ -225,7 +225,7 @@ export function orderColumns(cols: Record<LiveStage, LiveCard[]>, sort: LiveSort
 export interface LiveSummary { deliveries: number; agentsWorking: number; nextEtaMs: number | null }
 
 export function summarize(cards: readonly LiveCard[], nowMs: number): LiveSummary {
-  const active = cards.filter(c => c.d.stage !== 'published' && !c.d.old)
+  const active = cards.filter(c => c.d.stage !== 'published' && c.d.stage !== 'completed' && !c.d.old)
   const etas = active.flatMap(c => c.d.eta.kind === 'estimate' && c.d.eta.atMs >= nowMs ? [c.d.eta.atMs] : [])
   return {
     deliveries: active.length,
@@ -285,6 +285,7 @@ export const STAGE_LABEL: Record<LiveStage, { pt: string; en: string; color: str
   leader: { pt: 'Revisão do líder', en: 'Leader review', color: '#b78bff' },
   merge: { pt: 'PR / merge', en: 'PR / merge', color: '#3ecf8e' },
   ci: { pt: 'CI · publicando', en: 'CI · publishing', color: 'rgb(45,180,200)' },
+  completed: { pt: 'Concluído · sem prova de release', en: 'Completed · no release proof', color: '#8b8b95' },
   published: { pt: 'Publicado', en: 'Published', color: '#26b573' },
 }
 

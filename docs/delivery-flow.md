@@ -112,7 +112,7 @@ nothing.
   delivery handed back in the last 7 days stays in review unless the reconcile suspects it shipped
   (`isAntiga`, the one rule the Live and the reconcile share). They stay in the "Tudo" tab, marked, at
   the bottom of "Revisão do líder", and the "Antigas" button in that tab's bar opens the group: one click per card and
-  for the group, **Marcar publicado** (optional version) and **Arquivar** (abandoned, reason in the
+  for the group, **Marcar concluído** (optional version in the comment) and **Arquivar** (abandoned, reason in the
   comment). Never deletes. The group asks first; the number it shows is the list of ids it sends, 5 at
   a time, so it shows progress and can be stopped between two batches. HTTP `POST /api/deliveries/antigas`
   `{action: publish|archive, ids | all, expect?, version?, reason?}`, MCP `agentistics_task_phase
@@ -122,6 +122,16 @@ nothing.
   is not the size the person saw; a client that gave up stops the work. A piece with a delivery record
   is refused (it is not "antiga"). "Mark published" on a piece with no session is refused by the board's
   own rule, in a sentence with its way out (archive, or open the task and file the conversation).
+  A missing repository is normal for non-code work: it prevents automatic release proof, but does
+  not prevent the age rule or either manual action. GitHub failures and exhausted budgets remain
+  unchecked until a later lookup. `isAntiga` checks the same status, children, handback, liveness,
+  record and proof facts for the screen, reconcile and click; the old-review list is not capped.
+  Tasks without subtasks use their task id through the same actions. A task with open subtasks is
+  a container, not another card in Leader review, and the write refuses to close open children.
+  Group candidates use the same member-derived status as the Live; an empty group keeps its own
+  stored status. A manually completed piece has stage `completed` ("Concluído · sem prova de release")
+  in Tudo, with no publication window and no queue membership. Only a release proof projects it to
+  Publicado. An old `deliveredAt` is never rewritten to make it look newly published.
 
 `server/delivery/machine.ts` is the table (pure); `gates.ts` checks evidence;
 `service.ts` is the one door every surface uses; `store.ts` keeps one record per subtask in

@@ -502,7 +502,7 @@ const TOOLS: Tool[] = [
       type: "object",
       properties: {
         task: { type: "string", description: "A task id or part of its title." },
-        stage: { type: "string", enum: ["queue", "running", "qa", "adjust", "leader", "merge", "published"] },
+        stage: { type: "string", enum: ["queue", "blocked", "running", "qa", "adjust", "leader", "merge", "ci", "completed", "published"] },
         stalledOnly: { type: "boolean", description: "Only deliveries that need a person, lost an agent or are blocked." },
         tab: { type: "string", enum: ["active", "queue", "published", "all"], description: "The screen's tab: active (Em andamento), queue (Na fila), published (Publicado) or all (Tudo). Default all." },
         period: { type: "string", enum: ["24h", "7d", "30d", "all"], description: "How far back Publicado reaches. Default 24h." },

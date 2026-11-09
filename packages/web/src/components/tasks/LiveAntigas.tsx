@@ -16,7 +16,7 @@ import { button } from './board'
 export interface LiveAntigaItem {
   key: string
   taskId: string
-  /** Absent for a task-level piece: it can only be opened. */
+  /** Absent for a task-level piece: actions use its taskId. */
   subtaskId: string | null
   title: string
   suggestion?: { repo: string; pr: number; tag?: string; via: string }
@@ -40,7 +40,7 @@ export const ANTIGAS_CHUNK = 5
 const T = (pt: boolean) => pt ? {
   title: (n: number) => `Antigas sem registro · ${n}`,
   note: 'Sem prova de publicação, sem sessão viva e paradas há mais de 24 h. Decida cada uma: nada é apagado e nada sai daqui sozinho.',
-  publish: 'Marcar publicado', archive: 'Arquivar', all: (n: number) => `Todas (${n})`, version: 'versão (opcional)', reason: 'motivo (opcional)',
+  publish: 'Marcar concluído', archive: 'Arquivar', all: (n: number) => `Todas (${n})`, version: 'versão (opcional)', reason: 'motivo (opcional)',
   failed: (s: string) => `Recusada: ${s}`, busy: (a: number, b: number) => `Enviando ${a} de ${b}…`, stop: 'Parar', close: 'Fechar', cancel: 'Cancelar', openTask: 'Abrir a tarefa',
   noSession: 'Nenhuma sessão ficou registrada nesta peça, e o quadro só marca como publicada o que tem sessão. Arquive, ou abra a tarefa e registre a conversa que a entregou.',
   suggest: (tag: string | undefined, pr: number) => `Pode ter saído${tag ? ` na ${tag}` : ''}, PR #${pr}. A prova é fraca, então nada mudou sozinho.`,
@@ -48,8 +48,8 @@ const T = (pt: boolean) => pt ? {
   taskLevel: 'Tarefa sem subtarefas: decida abrindo a tarefa.',
   confirmArchiveTitle: (n: number) => `Arquivar ${n} ${n === 1 ? 'peça' : 'peças'}?`,
   confirmArchive: 'Elas saem da revisão como abandonadas. Nada é apagado, mas para voltar é preciso abrir cada tarefa. Uma peça que ainda espera alguém não é tocada.',
-  confirmPublishTitle: (n: number) => `Marcar ${n} ${n === 1 ? 'peça' : 'peças'} como publicadas?`,
-  confirmPublish: 'Elas vão para concluídas sem prova, porque você está dizendo que saíram. Uma peça que ainda espera alguém não é tocada.',
+  confirmPublishTitle: (n: number) => `Marcar ${n} ${n === 1 ? 'peça' : 'peças'} como concluídas?`,
+  confirmPublish: 'Elas vão para Concluído · sem prova de release, visíveis em Tudo. Publicado exige prova de release. Uma peça que ainda espera alguém não é tocada.',
   unreachable: 'Não consegui falar com o servidor. Nada mudou nesta peça.',
   running: 'Já há uma execução em andamento nas peças antigas. Espere ela terminar e confira a lista de novo.',
   summary: (done: number, left: number, stopped: boolean) => `${stopped ? 'Parado' : 'Terminou'}: ${done} ${done === 1 ? 'peça feita' : 'peças feitas'}, ${left} ${left === 1 ? 'restante' : 'restantes'}.`,
@@ -57,7 +57,7 @@ const T = (pt: boolean) => pt ? {
 } : {
   title: (n: number) => `Old, no record · ${n}`,
   note: 'No proof of release, no live session and untouched for over 24 h. Decide each one: nothing is deleted and nothing leaves here by itself.',
-  publish: 'Mark published', archive: 'Archive', all: (n: number) => `All (${n})`, version: 'version (optional)', reason: 'reason (optional)',
+  publish: 'Mark completed', archive: 'Archive', all: (n: number) => `All (${n})`, version: 'version (optional)', reason: 'reason (optional)',
   failed: (s: string) => `Refused: ${s}`, busy: (a: number, b: number) => `Sending ${a} of ${b}…`, stop: 'Stop', close: 'Close', cancel: 'Cancel', openTask: 'Open the task',
   noSession: 'No session was filed on this piece, and the board only marks done what has one. Archive it, or open the task and file the conversation that delivered it.',
   suggest: (tag: string | undefined, pr: number) => `May have shipped${tag ? ` in ${tag}` : ''}, PR #${pr}. The proof is weak, so nothing changed by itself.`,
@@ -65,8 +65,8 @@ const T = (pt: boolean) => pt ? {
   taskLevel: 'A task with no subtasks: decide it by opening the task.',
   confirmArchiveTitle: (n: number) => `Archive ${n} ${n === 1 ? 'piece' : 'pieces'}?`,
   confirmArchive: 'They leave review as abandoned. Nothing is deleted, but bringing one back means opening its task. A piece still waiting on somebody is not touched.',
-  confirmPublishTitle: (n: number) => `Mark ${n} ${n === 1 ? 'piece' : 'pieces'} as published?`,
-  confirmPublish: 'They go to done with no proof, because you are saying they shipped. A piece still waiting on somebody is not touched.',
+  confirmPublishTitle: (n: number) => `Mark ${n} ${n === 1 ? 'piece' : 'pieces'} as completed?`,
+  confirmPublish: 'They go to Completed · no release proof, visible in All. Published requires release proof. A piece still waiting on somebody is not touched.',
   unreachable: 'Could not reach the server. Nothing changed on this piece.',
   running: 'A run on the old pieces is already going. Wait for it to finish, then look at the list again.',
   summary: (done: number, left: number, stopped: boolean) => `${stopped ? 'Stopped' : 'Finished'}: ${done} ${done === 1 ? 'piece' : 'pieces'} done, ${left} left.`,
@@ -86,8 +86,8 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   useEffect(() => () => stopper.current?.abort(), [])
   const busy = progress !== null
   // What the screen lists is what the group button acts on: a piece already decided here leaves both at once.
-  const visible = useMemo(() => items.filter(a => !a.subtaskId || outcomes[a.subtaskId]?.ok !== true), [items, outcomes])
-  const actionable = useMemo(() => visible.flatMap(a => (a.subtaskId ? [a.subtaskId] : [])), [visible])
+  const visible = useMemo(() => items.filter(a => outcomes[a.subtaskId ?? a.taskId]?.ok !== true), [items, outcomes])
+  const actionable = useMemo(() => visible.map(a => a.subtaskId ?? a.taskId), [visible])
 
   /** `done` = the pieces the server reported done in this request (its own numbers); `running` = another run holds the lock. */
   const send = async (action: Action, ids: readonly string[], chosenVersion: string | undefined, signal?: AbortSignal): Promise<{ done: number; running: boolean }> => {
@@ -168,20 +168,19 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
           {/* On a phone the sheet itself is the one scroller, with its footer pinned; a second one inside it fights the thumb. */}
           <ul className="ag-scroll" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8, ...(mobile ? {} : { maxHeight: 'calc(46vh / var(--ui-zoom, 1))', overflowY: 'auto' as const, overscrollBehavior: 'contain' as const }) }}>
             {visible.map(a => {
-              const out = a.subtaskId ? outcomes[a.subtaskId] : undefined
+              const id = a.subtaskId ?? a.taskId
+              const out = outcomes[id]
               return (
                 <li key={a.key} data-live-archived={a.key} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', minWidth: 0, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
                   <button type="button" onClick={() => onOpen(a.taskId)} title={a.title} style={{ background: 'none', border: 0, padding: 0, minHeight: mobile ? 44 : undefined, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, color: 'var(--text-secondary)', textAlign: 'left', flex: '1 1 200px', minWidth: 0, overflowWrap: 'anywhere' }}>{shortTitle(a.title, 72)}</button>
-                  {a.subtaskId
-                    ? <span style={{ display: 'flex', gap: 6, flexShrink: 0, ...(mobile ? { flexBasis: '100%' } : {}) }}>
-                        <button type="button" data-live-antiga-publish={a.subtaskId} disabled={busy} onClick={() => void one('publish', a.subtaskId!)} style={{ ...btn(), ...(mobile ? { flex: 1 } : {}) }}>{L.publish}</button>
-                        <button type="button" data-live-antiga-archive={a.subtaskId} disabled={busy} onClick={() => void one('archive', a.subtaskId!)} style={{ ...btn(), ...(mobile ? { flex: 1 } : {}) }}>{L.archive}</button>
-                      </span>
-                    : <span style={{ color: 'var(--text-tertiary)', fontSize: 11.5 }}>{L.taskLevel}</span>}
+                  <span style={{ display: 'flex', gap: 6, flexShrink: 0, ...(mobile ? { flexBasis: '100%' } : {}) }}>
+                    <button type="button" data-live-antiga-publish={id} disabled={busy} onClick={() => void one('publish', id)} style={{ ...btn(), ...(mobile ? { flex: 1 } : {}) }}>{L.publish}</button>
+                    <button type="button" data-live-antiga-archive={id} disabled={busy} onClick={() => void one('archive', id)} style={{ ...btn(), ...(mobile ? { flex: 1 } : {}) }}>{L.archive}</button>
+                  </span>
                   {a.suggestion && (
                     <span data-live-antiga-suggestion style={{ flexBasis: '100%', display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', color: 'var(--text-tertiary)', fontSize: 11.5 }} title={a.suggestion.via}>
                       <span style={{ minWidth: 0, flex: '1 1 200px' }}>{L.suggest(a.suggestion.tag, a.suggestion.pr)}</span>
-                      {a.subtaskId && a.suggestion.tag && <button type="button" data-live-antiga-accept={a.subtaskId} disabled={busy} onClick={() => void one('publish', a.subtaskId!, a.suggestion!.tag!.replace(/^v/, ''))} style={btn(true)}>{L.accept(a.suggestion.tag)}</button>}
+                      {a.suggestion.tag && <button type="button" data-live-antiga-accept={id} disabled={busy} onClick={() => void one('publish', id, a.suggestion!.tag!.replace(/^v/, ''))} style={btn(true)}>{L.accept(a.suggestion.tag)}</button>}
                     </span>
                   )}
                   {out && !out.ok && (

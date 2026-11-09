@@ -26,8 +26,8 @@ import type { TaskDetail } from './task-report'
 import { ANTIGA_AFTER_MS, isAntiga } from '../delivery/antigas'
 import { deriveStep, mergeStep, type SessionActivity, type StepRecord } from './task-live-steps'
 
-export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
-export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published']
+export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'completed' | 'published'
+export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'completed', 'published']
 
 /** The happy path a piece follows once it runs; `adjust` and `blocked` are detours that return to it. */
 export const HAPPY_PATH: readonly LiveStage[] = ['running', 'qa', 'leader', 'merge', 'ci', 'published']
@@ -37,7 +37,7 @@ export const MIN_SAMPLES = 3
 export const PUBLISHED_WINDOW_MS = 24 * 3600_000
 /** Published pieces older than 24 h stay readable (Publicado's longer periods), up to this many days back… */
 export const HISTORY_DAYS = 365
-/** …and at most this many pieces of each kind (the newest). The reply states how many the cap left out. */
+/** …and at most this many published history pieces (the newest). Actionable old reviews are not capped. */
 export const HISTORY_CAP = 400
 
 export type LiveEta =
@@ -367,7 +367,7 @@ export function stageTypicals(trails: readonly (readonly StageVisit[])[]): Parti
 
 /** The stage a piece goes to next on the happy path; a detour returns to where it came from. */
 export function nextStageOf(stage: LiveStage, origin: LiveStage | null = null): LiveStage | null {
-  if (stage === 'published') return null
+  if (stage === 'published' || stage === 'completed') return null
   if (stage === 'queue') return 'running'
   if (stage === 'blocked') return origin ?? 'running'
   if (stage === 'adjust') return 'leader'
@@ -381,7 +381,7 @@ export function estimateStages(o: {
   typicals: Partial<Record<LiveStage, StageTypical>>; totalEta: LiveEta
 }): { stageEta: LiveStageEta; publishEta: LivePublishEta } {
   const { stage, nowMs } = o
-  if (stage === 'published') return { stageEta: { kind: 'none', reason: 'final' }, publishEta: { kind: 'none', reason: 'final' } }
+  if (stage === 'published' || stage === 'completed') return { stageEta: { kind: 'none', reason: 'final' }, publishEta: { kind: 'none', reason: 'final' } }
   const next = nextStageOf(stage, o.origin)
   if (o.sinceMs === null) return { stageEta: { kind: 'none', reason: 'not-started' }, publishEta: totalOnly(o.totalEta) }
   const here = o.typicals[stage]
@@ -441,6 +441,7 @@ interface Piece {
   dependsOn: number
   /** The task's comments (each with its own `subtaskId`) — the real data keeps a legacy piece's delivered commit in its handback comment. */
   comments: readonly { subtaskId?: string; body: string; createdAt: string; kind?: string }[]
+  hasOpenChildren?: boolean
 }
 
 /** Resolve the target carried by newer activity records and by the older human-readable detail. */
@@ -481,19 +482,22 @@ function piecesOf(d: TaskDetail): Piece[] {
     blockedReason: null,
     dependsOn: (s.blockedBy ?? []).filter(id => d.subtasks.some(x => x.id === id && !subtaskDone(x.status))).length,
     comments: d.comments,
+    hasOpenChildren: d.subtasks.some(child => child.parentGroupId === s.id && !subtaskDone(child.status)),
   }))
   // Sessions filed on the task itself stand for a piece of their own; a task with NO subtasks is
   // that piece. A task that has subtasks and also direct sessions gets the extra piece only while
   // one of those sessions is alive (an ended direct session is history, not a delivery).
   const direct = sessionsOf(null)
+  const openChildren = d.subtasks.some(s => !subtaskDone(s.status))
   if (subs.length === 0 || direct.some(s => s.live)) {
     out.push({
-      task: d.task, sub: null, status: d.task.status, updatedAt: d.task.updatedAt,
+      task: d.task, sub: null, status: d.task.status === 'in_review' && openChildren ? 'in_progress' : d.task.status, updatedAt: d.task.updatedAt,
       ...(d.task.deliveredAt ? { deliveredAt: d.task.deliveredAt } : {}),
       times: timesOf(null) ?? d.times, sessions: direct,
       blockedReason: d.task.blockedReason ?? null,
       dependsOn: (d.task.blockedBy ?? []).length,
       comments: d.comments,
+      hasOpenChildren: openChildren,
     })
   }
   return out
@@ -615,7 +619,7 @@ export function legacyReviewShaPieces(details: readonly TaskDetail[], events: re
   const { eventsBySubject } = indexEvents(details, events)
   const out = new Map<string, ShaPiece[]>()
   for (const d of details) for (const p of piecesOf(d)) {
-    if (p.status !== 'in_review' || deliveries?.has(p.sub ? p.sub.id : p.task.id)) continue
+    if (!['in_review', 'done'].includes(p.status) || deliveries?.has(p.sub ? p.sub.id : p.task.id)) continue
     const piece: ShaPiece = { taskId: p.task.id, subtaskId: p.sub?.id ?? null, ...(p.task.repo ? { repo: p.task.repo } : {}) }
     for (const g of legacyShaGroups(p, eventsBySubject.get(p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id))) for (const sha of g) {
       const l = out.get(sha)
@@ -640,8 +644,9 @@ export function buildLive(o: {
   suggestions?: ReadonlyMap<string, { repo: string; pr: number; tag?: string; via: string }>
   /** Subtasks the last reconcile proved shipped (not yet moved, e.g. the automatic run is off). */
   proven?: ReadonlySet<string>
-  /** Subtasks the last reconcile could NOT look up: not "no proof", so never drawn as old. */
+  /** Incomplete lookups; uncheckedWhy distinguishes normal non-repository work from failed reads. */
   unchecked?: ReadonlySet<string>
+  uncheckedWhy?: ReadonlyMap<string, 'no-repos' | 'gh' | 'budget'>
 }): LiveReply {
   const samples: Sample[] = []
   const candidates: Piece[] = []
@@ -677,6 +682,13 @@ export function buildLive(o: {
     // A stale queue record must never override work the board already sent for review or closed.
     const rec = stored?.dequeued || (stored?.phase === 'fila' && ['in_review', 'done', 'abandoned'].includes(p.status)) ? undefined : stored
     let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfStatus(p.status, o.statusLabel?.(p.status))
+    const id = p.sub?.id ?? p.task.id
+    // Board completion is not evidence of a public release. Preserve the card in Tudo, outside the queue.
+    if (p.status === 'done' && rec?.phase !== 'publicado') {
+      const subject = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
+      const released = o.uncheckedWhy?.get(id) !== 'no-repos' && legacyShaGroups(p, eventsBySubject.get(subject)).some(g => g.every(sha => o.publishedShas?.has(sha)))
+      stage = released ? 'published' : 'completed'
+    }
     if (stored?.dequeued && stage === 'queue') { hide(p, stage, 'queue-idle'); continue }
     const liveSessions = p.sessions.filter(s => s.live)
     let isOld = false
@@ -686,15 +698,12 @@ export function buildLive(o: {
     // with no such commit and nothing alive for 72 h it is not review work any more — it is listed apart, never dropped.
     if (!rec && stage === 'leader' && p.status === 'in_review') {
       const subj = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
-      if (legacyShaGroups(p, eventsBySubject.get(subj)).some(g => g.every(sha => o.publishedShas?.has(sha)))) stage = 'published'
+      if (o.uncheckedWhy?.get(id) !== 'no-repos' && legacyShaGroups(p, eventsBySubject.get(subj)).some(g => g.every(sha => o.publishedShas?.has(sha)))) stage = 'published'
       else {
         // ONE rule with the reconcile (`delivery/antigas.ts`): age alone does not take a delivery still waiting on its leader out of the column.
         let handbackMs: number | null = null
         for (const c of p.comments) if (c.kind === 'handback' && (c.subtaskId ?? null) === (p.sub?.id ?? null)) handbackMs = Math.max(handbackMs ?? 0, ms(c.createdAt) ?? 0)
-        // A task-level piece (no subtask) is never looked up by the reconcile nor decidable by the "old" actions, which are per subtask:
-        // "no proof" was never established for it, so it is `unchecked` (stays in review) rather than old by age alone.
-        // A piece the last reconcile proved shipped is on its way to Publicado, not a decision to make.
-        isOld = !(p.sub && o.proven?.has(p.sub.id)) && isAntiga({ hasRecord: false, live: liveSessions.length > 0, updatedMs: ms(p.updatedAt), nowMs: o.nowMs, handbackMs, suggested: !!(p.sub && o.suggestions?.has(p.sub.id)), unchecked: !p.sub || !!o.unchecked?.has(p.sub.id) })
+        isOld = isAntiga({ hasRecord: !!stored, status: p.status, hasOpenChildren: p.hasOpenChildren, proven: o.proven?.has(id), live: liveSessions.length > 0, updatedMs: ms(p.updatedAt), nowMs: o.nowMs, handbackMs, suggested: o.suggestions?.has(id), unchecked: o.unchecked?.has(id), uncheckedWhy: o.uncheckedWhy?.get(id) })
       }
     }
     // Only what could have been a card a moment ago is worth a departure line: an abandoned/backlog piece,
@@ -732,11 +741,11 @@ export function buildLive(o: {
     const harness = dominant(liveSessions.concat(p.sessions).map(s => s.harness))
     const model = dominant(liveSessions.concat(p.sessions).map(s => s.model).filter((m): m is string => !!m))
     const ev = lastBySubject.get(subject)
-    const eta = stage === 'published' ? { kind: 'none', reason: 'not-started' } as const
+    const eta = stage === 'published' || stage === 'completed' ? { kind: 'none', reason: 'not-started' } as const
       : estimateEta({ nowMs: o.nowMs, startedAtMs, harness, model, samples })
     // THE STEP inside the stage: what a worker/the flow REPORTED (`step` events), or what the facts show (an edit, a test
     // run, a commit, the record's gates) — the larger of the two. Nothing observable and nothing reported = null: no line.
-    const stepInfo = stage === 'published' || stage === 'queue' || stage === 'blocked' ? null : (() => {
+    const stepInfo = stage === 'published' || stage === 'completed' || stage === 'queue' || stage === 'blocked' ? null : (() => {
       const reported = stepOf(eventsBySubject.get(subject) ?? [], stageSinceMs)
       const handback = p.comments.some(c => c.kind === 'handback' && (c.subtaskId ?? null) === (p.sub?.id ?? null) && (stageSinceMs === null || (ms(c.createdAt) ?? 0) >= stageSinceMs))
       const derived = deriveStep({
@@ -771,7 +780,7 @@ export function buildLive(o: {
       } : null,
       blockedReason: p.blockedReason,
       priority: migratePriority(p.task.priority) as LiveDelivery['priority'],
-      ...(isOld ? { old: true, ...(p.sub && o.suggestions?.get(p.sub.id) ? { suggestion: o.suggestions.get(p.sub.id)! } : {}) } : {}),
+      ...(isOld ? { old: true, ...(o.suggestions?.get(id) ? { suggestion: o.suggestions.get(id)! } : {}) } : {}),
       deliveredAtMs: stage === 'published' ? deliveredAtMs : null,
       staged: p.sub?.stagedSession ? {
         harness: p.sub.stagedSession.harness ?? null, model: p.sub.stagedSession.model ?? null,
@@ -794,11 +803,10 @@ export function buildLive(o: {
     for (const d of cut) (cutByTask[d.taskId] ??= { title: d.taskTitle, history: 0, oldReviews: 0 })[kind]++
   }
   countCut(history.slice(HISTORY_CAP), 'history')
-  countCut(oldReviews.slice(HISTORY_CAP), 'oldReviews')
   return {
     generatedAt: new Date(o.nowMs).toISOString(), deliveries,
     history: history.slice(0, HISTORY_CAP),
-    oldReviews: oldReviews.slice(0, HISTORY_CAP),
+    oldReviews,
     cutByTask,
     historyTotal: history.length, oldReviewsTotal: oldReviews.length,
     samples: samples.length, sessionTasks,

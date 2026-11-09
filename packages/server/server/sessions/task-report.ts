@@ -539,10 +539,13 @@ function threadCounts(taskId: string, threads: readonly TaskThread[]): { threads
 }
 
 /** Read-time canonicalization keeps stale stored group statuses from leaking into any surface. */
-function effectiveSubtasks(subtasks: readonly Subtask[]): Subtask[] {
+export function effectiveSubtasks(subtasks: readonly Subtask[]): Subtask[] {
   return subtasks.map(subtask => {
     if (!isGroupSubtask(subtask)) return subtask
-    const status = groupStatus(groupMembers(subtask.id, subtasks).map(member => member.status))
+    const members = groupMembers(subtask.id, subtasks)
+    // An empty group has no members that can override its own board status.
+    if (members.length === 0) return subtask
+    const status = groupStatus(members.map(member => member.status))
     return { ...subtask, status, done: status === 'done' }
   })
 }

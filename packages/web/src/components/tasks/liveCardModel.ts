@@ -99,6 +99,7 @@ export interface BarSegment { stage: LiveStage; state: 'done' | 'cur' | 'todo'; 
 
 /** PURE: the 6-segment bar. The active segment wears the COLOUR OF THE COLUMN the card is in; done ones are grey. */
 export function stageBar(stage: LiveStage, origin: LiveStage | null | undefined): BarSegment[] {
+  if (stage === 'completed') return [{ stage, state: 'cur', color: STAGE_LABEL.completed.color }]
   const at = stage === 'adjust' ? 'qa' : stage === 'blocked' ? (origin && origin !== 'blocked' ? (origin === 'adjust' ? 'qa' : origin) : 'queue') : stage
   const i = BAR_STAGES.indexOf(at)
   return BAR_STAGES.map((s, k) => ({
@@ -238,7 +239,7 @@ export interface TimeRow {
 
 export function timeRow(c: LiveCard, nowMs: number, pt: Pt): TimeRow {
   const d = c.d
-  const done = d.stage === 'published'
+  const done = d.stage === 'published' || d.stage === 'completed'
   const inStageMs = d.stageSinceMs === null ? null : nowMs - d.stageSinceMs
   const workMs = d.workMs !== undefined ? d.workMs : (d.startedAtMs === null ? null : nowMs - d.startedAtMs)
   const trail = d.trail ?? []
@@ -266,7 +267,7 @@ export interface EtaBox { label: string; value: string; tone: 'ok' | 'none' | 'l
 
 /** PURE: [próxima etapa, publicação]. "sem estimativa" is a legitimate answer; an invented time is not. */
 export function etaBoxes(d: LiveDeliveryRecord, pt: Pt): [EtaBox, EtaBox] | null {
-  if (d.stage === 'published') return null
+  if (d.stage === 'published' || d.stage === 'completed') return null
   const stageEta = d.stageEta, pub = d.publishEta
   const nextWord = (stageEta && stageEta.kind === 'estimate' && stageEta.nextStage) ? ` (${stageName(stageEta.nextStage, pt)})` : ''
   const none = pt ? 'sem estimativa' : 'no estimate'

@@ -111,7 +111,7 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
     const owners = conversationOwners(w.rollupRows)
     // Comments are only the SOURCE of a legacy piece's delivered commit (its handback): the subtask-level ones, grouped once.
     const commentsOfTask = new Map<string, typeof w.book.comments>()
-    for (const c of w.book.comments) if (c.subtaskId) { const l = commentsOfTask.get(c.taskId); if (l) l.push(c); else commentsOfTask.set(c.taskId, [c]) }
+    for (const c of w.book.comments) { const l = commentsOfTask.get(c.taskId); if (l) l.push(c); else commentsOfTask.set(c.taskId, [c]) }
     const details = w.book.tasks.map(task => buildTaskDetail({
       owners,
       task,
@@ -149,6 +149,7 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
           suggestions: new Map([...outcomes].flatMap(([id, o]) => (o.suggestion ? [[id, o.suggestion] as const] : []))),
           proven: new Set([...outcomes].flatMap(([id, o]) => (o.proven ? [id] : []))),
           unchecked: new Set([...outcomes].flatMap(([id, o]) => (o.unchecked ? [id] : []))),
+          uncheckedWhy: new Map([...outcomes].flatMap(([id, o]) => (o.unchecked ? [[id, o.unchecked] as const] : []))),
         }
       } catch { return {} }
     })()

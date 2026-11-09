@@ -75,7 +75,7 @@ export interface DeliveryDeps {
   reviewPieces?(): Promise<ReviewPiece[]>
   /** What the piece's OWN delivery declared in its handbacks: branch @ commit, full commits, PR numbers (read-only; matched against gh's facts). */
   pieceHints?(subtaskId: string): Promise<{ branches: string[]; shas: string[]; heads?: DeclaredHead[]; prs?: number[]; latest?: string[] }>
-  /** Archives / marks published a record-less old piece on the board (`antigas`). Optional (no board = refused). */
+  /** Archives / completes a record-less old piece on the board (`antigas`), without implying release proof. Optional. */
   closeLegacy?(subtaskId: string, to: 'done' | 'abandoned'): Promise<{ ok: true } | { ok: false; message: string }>
   /** The automatic reconcile (first tick, then on its cadence) is ON only where the host asks for it; a function is asked on every tick. */
   autoReconcile?: boolean | (() => boolean)
@@ -90,6 +90,7 @@ export interface DeliveryDeps {
 }
 
 export interface ReviewPiece {
+  hasOpenChildren?: boolean
   id: string; taskId: string; title: string; status: string
   /** When the board last touched it (ISO). */
   updatedAt?: string
@@ -1402,12 +1403,12 @@ export function createDeliveryService(d: DeliveryDeps) {
     const nowMs = d.now()
     // A piece is "alive" when a session of it runs now (a task-level piece is keyed by its task id).
     const alive = new Set(sessions.filter(s => s.alive).map(s => s.subtaskId ?? s.taskId).filter((x): x is string => !!x))
-    interface Piece { r: DeliveryRecord; hasRecord: boolean; updatedMs: number | null; title?: string; createdMs: number | null; handbackMs: number | null; repos?: string[]; hints?: ReviewPiece['hints'] }
+    interface Piece { r: DeliveryRecord; hasRecord: boolean; updatedMs: number | null; title?: string; createdMs: number | null; handbackMs: number | null; repos?: string[]; hints?: ReviewPiece['hints']; status?: string; hasOpenChildren?: boolean }
     const pieces: Piece[] = Object.values(doc.deliveries).filter(r => !r.dequeued && (MERGE_PHASES.includes(r.phase) || r.phase === 'ci'))
       .map(r => ({ r, hasRecord: true, updatedMs: Date.parse(r.updatedAt) || null, createdMs: null, handbackMs: null }))
     for (const p of (await d.reviewPieces?.().catch(() => []) ?? [])) {
       if (doc.deliveries[p.id] || !SUB_ID.test(p.id)) continue
-      pieces.push({ r: newDelivery({ subtaskId: p.id, taskId: p.taskId, at, phase: adoptPhase(p.status) }), hasRecord: false, updatedMs: msOf(p.updatedAt), title: p.title, createdMs: msOf(p.createdAt), handbackMs: msOf(p.handbackAt), ...(p.repos ? { repos: p.repos } : {}), ...(p.hints ? { hints: p.hints } : {}) })
+      pieces.push({ r: newDelivery({ subtaskId: p.id, taskId: p.taskId, at, phase: adoptPhase(p.status) }), hasRecord: false, updatedMs: msOf(p.updatedAt), title: p.title, createdMs: msOf(p.createdAt), handbackMs: msOf(p.handbackAt), status: p.status, hasOpenChildren: p.hasOpenChildren, ...(p.repos ? { repos: p.repos } : {}), ...(p.hints ? { hints: p.hints } : {}) })
     }
     // What gh already answered survives the run and a restart, so a run only asks for what is new. The meter is what keeps one
     // run inside its share of the quota: past it (or on "rate limit") every further read fails at once and the rest waits.
@@ -1434,7 +1435,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     }
     const entries: ReconcileEntry[] = []
     let savedAtCalls = 0
-    for (const { r, hasRecord, updatedMs, title: boardTitle, createdMs, handbackMs, repos, hints } of pieces.sort((a, b) => a.r.subtaskId.localeCompare(b.r.subtaskId))) {
+    for (const { r, hasRecord, updatedMs, title: boardTitle, createdMs, handbackMs, repos, hints, status, hasOpenChildren } of pieces.sort((a, b) => a.r.subtaskId.localeCompare(b.r.subtaskId))) {
       const title = boardTitle ?? (await d.facts.subtask(r.subtaskId).catch(() => null))?.title
       const e: ReconcileEntry = { subtaskId: r.subtaskId, taskId: r.taskId, ...(title ? { title } : {}), from: r.phase }
       entries.push(e)
@@ -1444,17 +1445,17 @@ export function createDeliveryService(d: DeliveryDeps) {
       // H3: somebody is on it. A PR, however well it names the piece, says nothing about what that session is doing now.
       if (live && r.phase !== 'ci') { e.reason = 'sessão viva: fica'; continue }
       // A piece this run PROVED shipped is on its way to Published, never "old": the screen and "All" already leave it out, so the count must too.
-      const antiga = () => { if (hasRecord || proofs.outcomes.get(r.subtaskId)?.proven || !isAntiga({ hasRecord, live, updatedMs, nowMs, handbackMs, suggested: !!e.suggestion })) return false; e.bucket = 'antiga'; return true }
+      const antiga = () => { const outcome = proofs.outcomes.get(r.subtaskId); if (!isAntiga({ hasRecord, status, hasOpenChildren, proven: outcome?.proven, live, updatedMs, nowMs, handbackMs, suggested: !!e.suggestion, unchecked: !!e.unchecked, uncheckedWhy: e.unchecked })) return false; e.bucket = 'antiga'; return true }
       // The quota ran out: what was not reached is not judged. It stays exactly where it is and the next run continues from here.
       // "No proof" is said only of a piece that was LOOKED UP. One that could not be (nothing known about where it worked, gh unreadable, the quota
       // spent) is "could not check": it is not offered as antiga as if it had been, and the next run tries it again.
       const unchecked = (why: 'no-repos' | 'gh' | 'budget', reason: string) => {
         e.unchecked = why
         e.reason = `could not be checked: ${reason}. Not a lack of proof — it will be tried again on a later run`
-        if (why !== 'budget') proofs.outcomes.set(r.subtaskId, { unchecked: why })
+        proofs.outcomes.set(r.subtaskId, { unchecked: why })
       }
+      if (!hasRecord && repos && repos.length === 0) { unchecked('no-repos', 'no repository is known for this piece (no session of it recorded where it worked)'); antiga(); continue }
       if (meter.stopped()) { if (hasRecord) e.reason = `não verificada nesta rodada (${meter.stopped()})`; else unchecked('budget', `this run reached its ${meter.stopped() === 'rate-limit' ? 'GitHub rate limit' : 'GitHub call budget'} before this piece`); continue }
-      if (!hasRecord && repos && repos.length === 0) { unchecked('no-repos', 'no repository is known for this piece (no session of it recorded where it worked)'); continue }
       // A RECORDED piece has its own evidence (qaSha, its PR): `findMergedPr` checks the sha QA approved. A batch PR must never go
       // over that check (H3: an older PR of the same branch published work whose real review was still open).
       const extra = hasRecord ? null : hints ?? await d.pieceHints?.(r.subtaskId).catch(() => null) ?? { branches: [], shas: [] }
@@ -1609,7 +1610,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     const pieces = await d.reviewPieces?.().catch(() => []) ?? []
     const piecesById = new Map(pieces.map(p => [p.id, p]))
     const proofs = await loadProof()
-    const facts = (p: ReviewPiece) => ({ hasRecord: false, live: alive.has(p.id), updatedMs: msOf(p.updatedAt), handbackMs: msOf(p.handbackAt), suggested: !!proofs.outcomes.get(p.id)?.suggestion, unchecked: !!proofs.outcomes.get(p.id)?.unchecked, nowMs })
+    const facts = (p: ReviewPiece) => ({ hasRecord: false, status: p.status, hasOpenChildren: p.hasOpenChildren, proven: proofs.outcomes.get(p.id)?.proven, live: alive.has(p.id), updatedMs: msOf(p.updatedAt), handbackMs: msOf(p.handbackAt), suggested: !!proofs.outcomes.get(p.id)?.suggestion, unchecked: !!proofs.outcomes.get(p.id)?.unchecked, uncheckedWhy: proofs.outcomes.get(p.id)?.unchecked, nowMs })
     const doc = await d.store.read()
     let ids: string[] = []
     if (o.all === true || o.all === 'true') {

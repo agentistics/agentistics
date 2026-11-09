@@ -2465,18 +2465,18 @@ describe('QA pins: reconcile never moves real work, and does not spend the quota
     expect(h.calls.gh.length).toBe(first)
   })
 
-  test('QA r2 M-2: a piece whose repository is unknown was NOT checked: it says so, is not offered as antiga, and is retried next run', async () => {
+  test('r8: no repository is a normal antiga case, without implying release proof', async () => {
     const old = { ...piece, updatedAt: '2026-11-01T00:00:00Z', repos: [] as string[] }
     const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [old], pieceHints: async () => ({ branches: [], shas: [] }), closeLegacy: async () => ({ ok: true }) })
     const out = await h.svc.reconcile({}, 'owner')
     expect(out.ok).toBe(true)
     if (!out.ok) return
     expect(out.entries[0]).toMatchObject({ unchecked: 'no-repos' })
-    expect(out.entries[0]!.bucket).toBeUndefined()
+    expect(out.entries[0]!.bucket).toBe('antiga')
     expect(out.entries[0]!.reason).toMatch(/could not be checked/i)
-    expect(out.summary).toMatchObject({ antigas: 0, unchecked: 1 })
+    expect(out.summary).toMatchObject({ antigas: 1, unchecked: 1 })
     const all = await h.svc.antigas({ action: 'archive', all: true }, 'owner')
-    expect(all.ok && all.done).toEqual([])
+    expect(all.ok && all.done).toEqual([{ subtaskId: old.id, ok: true }])
     const again = await h.svc.reconcile({}, 'owner')
     expect(again.ok && again.entries[0]).toMatchObject({ unchecked: 'no-repos' })
   })
@@ -2500,5 +2500,21 @@ describe('QA pins: reconcile never moves real work, and does not spend the quota
     const out = await h.svc.antigas({ action: 'archive', all: true }, 'owner')
     expect(out.ok && out.done.length).toBe(1)
     expect(h.calls.gh).toEqual([])
+  })
+
+  test('r8 task-level cards follow the same predicate and open children prevent every old-card action', async () => {
+    const closed: string[] = []
+    const pieces = [
+      { id: 't-d9e9fff3f6', taskId: 't-d9e9fff3f6', title: 'Cold start', status: 'in_review', updatedAt: '2026-11-01T00:00:00Z', repos: [] as string[] },
+      { id: 't-e1dea7cd6f', taskId: 't-e1dea7cd6f', title: 'Engine', status: 'in_review', updatedAt: '2026-11-01T00:00:00Z', repos: [] as string[], hasOpenChildren: true },
+    ]
+    const h = harness({ sessions: [] }, { reviewPieces: async () => pieces, closeLegacy: async id => { closed.push(id); return { ok: true } } })
+    const dry = await h.svc.reconcile({}, 'owner')
+    expect(dry.ok && dry.entries.filter(e => e.bucket === 'antiga').map(e => e.subtaskId)).toEqual(['t-d9e9fff3f6'])
+    const out = await h.svc.antigas({ action: 'archive', all: true, expect: 1 }, 'owner')
+    expect(out.ok && out.done).toEqual([{ subtaskId: 't-d9e9fff3f6', ok: true }])
+    const refused = await h.svc.antigas({ action: 'publish', ids: ['t-e1dea7cd6f'] }, 'owner')
+    expect(refused.ok && refused.done[0]?.ok).toBe(false)
+    expect(closed).toEqual(['t-d9e9fff3f6'])
   })
 })

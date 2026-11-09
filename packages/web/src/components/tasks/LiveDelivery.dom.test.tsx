@@ -35,11 +35,11 @@ beforeEach(() => { localStorage.clear(); localStorage.setItem('agentistics.live.
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = '' })
 afterAll(async () => GlobalRegistrator.unregister())
 
-test('draws the nine stages, the cards in them, the summary and an honest "no estimate"', async () => {
+test('draws the ten stages, the cards in them, the summary and an honest "no estimate"', async () => {
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, props('en')))) })
   await act(async () => { await new Promise(r => setTimeout(r, 20)) })
-  expect(document.querySelectorAll('[data-live-column]').length).toBe(9)
+  expect(document.querySelectorAll('[data-live-column]').length).toBe(10)
   expect(document.querySelector('[data-live-column="running"] [data-live-card="t/a"]')).not.toBeNull()
   expect(document.querySelector('[data-live-column="qa"] [data-live-card="t/b"]')).not.toBeNull()
   expect(document.querySelector('[data-live-summary]')!.textContent).toContain('2 active deliveries')
@@ -249,7 +249,7 @@ test('CI · publicando: its own column, a signal checklist, a percent line; Publ
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: { ...reply, deliveries: [ciCard] } as never }))) })
   const cols = Array.from(document.querySelectorAll('[data-live-column]')).map(c => c.getAttribute('data-live-column'))
-  expect(cols.slice(-3)).toEqual(['merge', 'ci', 'published'])
+  expect(cols.slice(-4)).toEqual(['merge', 'ci', 'completed', 'published'])
   const card = document.querySelector('[data-live-column="ci"] [data-live-card="t/ci"]')!
   const lines = Array.from(card.querySelectorAll('[data-ci-line]')).map(l => [l.getAttribute('data-ci-line'), l.getAttribute('data-done')])
   expect(lines).toEqual([['merge', '1'], ['release', '0'], ['tag', '0']])

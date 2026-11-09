@@ -84,6 +84,7 @@ describe('buildLive', () => {
   test('in-progress with nothing alive is not on the line; a published piece leaves after 24 h', () => {
     const r = buildLive({
       nowMs: NOW, events: [],
+      deliveries: new Map([['fresh', { phase: 'publicado' }], ['old', { phase: 'publicado' }]]),
       details: [detail({
         subtasks: [
           sub('idle', 'in_progress'),

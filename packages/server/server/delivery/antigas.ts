@@ -26,8 +26,12 @@ export interface ReviewPieceFacts {
   handbackMs?: number | null
   /** The last reconcile suspects it shipped (weak evidence): then it is a decision to make, not work still waiting. */
   suggested?: boolean
-  /** The last reconcile could not look the piece up (no repository known, gh unreadable, quota): "no proof" has not been established. */
+  /** The last lookup was incomplete; no-repos is normal and remains eligible for a manual decision. */
   unchecked?: boolean
+  uncheckedWhy?: 'no-repos' | 'gh' | 'budget'
+  proven?: boolean
+  status?: string
+  hasOpenChildren?: boolean
 }
 
 /**
@@ -36,7 +40,9 @@ export interface ReviewPieceFacts {
  * than `DELIVERY_WAITS_MS` went unanswered and joins the group, where it is a 1-click decision, never a silent one.
  */
 export function isAntiga(f: ReviewPieceFacts): boolean {
-  if (f.hasRecord || f.live || f.unchecked) return false
+  if (f.hasRecord || f.live || f.proven || f.hasOpenChildren || (f.status !== undefined && f.status !== 'in_review')) return false
+  // No repository is normal for non-code work. It prevents publication proof, not a manual decision.
+  if (f.unchecked && f.uncheckedWhy !== 'no-repos') return false
   // An unknown age is NOT old: a piece whose date cannot be read stays where it is (never moved on a guess).
   if (f.updatedMs === null) return false
   if (!f.suggested && f.handbackMs != null && f.nowMs - f.handbackMs <= DELIVERY_WAITS_MS) return false
@@ -58,6 +64,6 @@ export type AntigaAction = 'publish' | 'archive'
 /** PURE. The comment a one-click action leaves on the piece (the reason is the owner's/leader's, never invented). */
 export function antigaComment(action: AntigaAction, o: { version?: string; reason?: string }): string {
   return action === 'publish'
-    ? `[fluxo entrega] marcada como publicada${o.version ? ` na v${o.version}` : ''} (antiga sem registro, ação manual).`
+    ? `[fluxo entrega] marcada como concluída sem prova de release${o.version ? ` (versão informada: v${o.version})` : ''} (antiga sem registro, ação manual).`
     : `[fluxo entrega] arquivada (abandonada): antiga sem registro${o.reason ? ` — ${o.reason}` : ''}.`
 }

@@ -7,6 +7,7 @@ import { createDeliveryService, type DeliveryBoard, type DeliveryDeps, type Deli
 import { defaultGateFacts } from './gates'
 import { createDeliveryStore } from './store'
 import { PHASE_STATUS, type DeliveryRecord, type Phase } from './machine'
+import { boardReviewTargets } from './review-board'
 
 /** Uses the same pedidos view as the leader briefing and the existing MCP flow reader. */
 export async function readOwnerRequests(): Promise<import('./service').OwnerRequestFact[] | null> {
@@ -174,21 +175,21 @@ async function slugOfCwd(cwd: string): Promise<string | null> {
 async function boardReviewPieces(): Promise<import('./service').ReviewPiece[]> {
   const [{ loadTaskWorld }, { readRegistry }] = await Promise.all([import('../sessions/task-source'), import('../sessions/registry')])
   const { book } = await loadTaskWorld()
-  const wanted = new Set([PHASE_STATUS.revisao_lider.id, PHASE_STATUS.pr_merge.id, PHASE_STATUS.ci.id])
-  const subs = book.subtasks.filter(s => wanted.has(s.status) && !s.parentGroupId)
+  const subs = boardReviewTargets(book)
   const ids = new Set(subs.map(s => s.id))
   const { hintsFromHandbacks } = await import('./batch-proof')
   const lastHandback = new Map<string, string>()
   const handbacks = new Map<string, Array<{ body: string; createdAt: string }>>()
   for (const c of book.comments) {
-    if (!c.subtaskId || !ids.has(c.subtaskId) || c.kind !== 'handback') continue
-    if (c.createdAt > (lastHandback.get(c.subtaskId) ?? '')) lastHandback.set(c.subtaskId, c.createdAt)
-    ;(handbacks.get(c.subtaskId) ?? handbacks.set(c.subtaskId, []).get(c.subtaskId)!).push(c)
+    const id = c.subtaskId ?? c.taskId
+    if (!ids.has(id) || c.kind !== 'handback') continue
+    if (c.createdAt > (lastHandback.get(id) ?? '')) lastHandback.set(id, c.createdAt)
+    ;(handbacks.get(id) ?? handbacks.set(id, []).get(id)!).push(c)
   }
   const cwds = new Map<string, Set<string>>()
   const recorded = new Map<string, Set<string>>()
   for (const r of await readRegistry().catch(() => [])) {
-    const sub = (r as { subtaskId?: string }).subtaskId
+    const sub = (r as { subtaskId?: string; taskId?: string }).subtaskId ?? (r as { taskId?: string }).taskId
     if (!sub || !ids.has(sub) || (r as { role?: string }).role === 'leader') continue
     // The repository recorded at spawn (the one moment the directory is provably there) outranks asking git now.
     if (r.repo?.repo?.includes('/')) (recorded.get(sub) ?? recorded.set(sub, new Set()).get(sub)!).add(r.repo.repo)
@@ -201,7 +202,7 @@ async function boardReviewPieces(): Promise<import('./service').ReviewPiece[]> {
     const handbackAt = lastHandback.get(s.id)
     // What its delivery declared: its HANDBACKS only. Notes and every other comment are talk about the work, never a statement of what shipped (H1).
     const hints = hintsFromHandbacks((handbacks.get(s.id) ?? []).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(c => ({ body: c.body, ...(Date.parse(c.createdAt) ? { atMs: Date.parse(c.createdAt) } : {}) })))
-    out.push({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}), ...(s.createdAt ? { createdAt: s.createdAt } : {}), ...(handbackAt ? { handbackAt } : {}), repos: [...repos], hints })
+    out.push({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, hasOpenChildren: s.hasOpenChildren, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}), ...(s.createdAt ? { createdAt: s.createdAt } : {}), ...(handbackAt ? { handbackAt } : {}), repos: [...repos], hints })
   }
   return out
 }
@@ -225,7 +226,7 @@ function proofCacheFile(): { load(): Promise<unknown>; save(doc: unknown): Promi
 let autoReconcileEnabled = false
 export function enableAutoReconcile(): void { autoReconcileEnabled = process.env.AGENTISTICS_AUTO_RECONCILE !== '0' }
 
-/** `antigas`: closes a record-less old piece on the board — done (marked published) or abandoned (archived). Never deletes. */
+/** `antigas`: closes a record-less old piece — done (completed without release proof) or abandoned (archived). Never deletes. */
 async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Promise<{ ok: true } | { ok: false; message: string }> {
   const m = await import('../sessions/task-web')
   if (to === 'abandoned' && !(await m.listStatuses()).some(s => s.id === 'abandoned')) {
@@ -233,8 +234,15 @@ async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Pr
     if (!made.ok) return { ok: false, message: made.message }
     if (made.status.id !== 'abandoned') return { ok: false, message: `the board has no "abandoned" status and the one just created is ${made.status.id}` }
   }
-  const out = await m.patchSubtask(subtaskId, { status: to as never })
-  return out.ok ? { ok: true } : { ok: false, message: out.message }
+  // Re-read at the write boundary: children may have opened after the dialog was built.
+  const { book } = await (await import('../sessions/task-source')).loadTaskWorld()
+  const { subtaskDone } = await import('../sessions/task-model')
+  const task = book.tasks.find(t => t.id === subtaskId)
+  if (book.subtasks.some(s => (task ? s.taskId === task.id : s.parentGroupId === subtaskId) && !subtaskDone(s.status))) return { ok: false, message: 'this piece has open subtasks; decide them first' }
+  const out = task
+    ? await m.markTask(subtaskId, to, 'flow:antigas')
+    : await m.patchSubtask(subtaskId, { status: to as never })
+  return out.ok ? { ok: true } : { ok: false, message: out.message ?? 'board refused the change' }
 }
 
 let cached: DeliveryService | null = null
