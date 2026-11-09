@@ -268,6 +268,8 @@ export const button = (mobile: boolean, kind: 'ghost' | 'primary' = 'ghost'): CS
   padding: '0 13px',
   // 44px is the MOBILE number. Applying it on desktop turns a control row into a toolbar.
   height: mobile ? 44 : 32,
+  // …and 44px wide at least: an icon-only button with the 13px padding is 36-42px, a target a thumb misses.
+  minWidth: mobile ? 44 : undefined,
   borderRadius: 'var(--radius-sm)',
   border: `1px solid ${kind === 'primary' ? 'transparent' : 'var(--border)'}`,
   background: kind === 'primary' ? 'var(--anthropic-orange)' : 'transparent',

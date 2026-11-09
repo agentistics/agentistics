@@ -250,7 +250,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
                         background: active ? 'var(--anthropic-orange-dim)' : 'transparent',
                         borderRadius: '0 8px 8px 0',
                       }}
-                    >{pageLabel(page, lang)}</NavLink>
+                    >{pageLabel(page, lang)}{page.beta && <BetaTag what={pageLabel(page, lang)} lang={lang} />}</NavLink>
                   </div>
                 )
               })}

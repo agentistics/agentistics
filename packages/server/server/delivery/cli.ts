@@ -51,7 +51,7 @@ Exit codes: 0 passed/moved, 1 refused (the sentence says what is missing), 2 usa
 Every gate reads the machine (git, gh, the session registry); nothing here accepts a sha, a session id or a "green" from the caller.
 `
 
-export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'reconcile', 'antigas', 'tick'] as const
+export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'reconcile', 'antigas', 'tick', 'calendario'] as const
 
 /** PURE: is `agentop flow <args>` one of the delivery verbs (handled here, not by the engine)? */
 export function isDeliveryFlowVerb(args: readonly string[]): boolean {
@@ -193,6 +193,15 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
       if (r.preview) io.out(`${r.preview.conclude} concluídas, ${r.preview.archive} arquivadas`)
       for (const x of r.done) io.out(`${x.subtaskId}\t${x.ok ? `ok${x.how ? ` (${x.how})` : ''}` : `recusada: ${x.reason ?? '?'}`}`)
       return 0
+    }
+    case 'calendario': {
+      // The Delivery calendar, filtered — the same read the screen and `agentistics_delivery_calendar` use. Read-only.
+      const { deliveryCalendar, answerCalendar, calendarFiltersOf } = await import('./calendar')
+      const q = new URLSearchParams()
+      for (const [flag, param] of [['task', 'task'], ['subtask', 'subtask'], ['version', 'version'], ['stage', 'stage'], ['harness', 'harness'], ['priority', 'priority'], ['from', 'from'], ['to', 'to']] as const) if (flags[flag]) q.set(param, flags[flag]!)
+      if (flags.all === 'true') q.set('all', '1')
+      if (flags.confirmed === 'true') q.set('confirmed', '1')
+      io.out(JSON.stringify(answerCalendar(await deliveryCalendar(), calendarFiltersOf(q)), null, 2)); return 0
     }
     case 'tick': io.out(JSON.stringify(await svc.tick(), null, 2)); return 0
     default: io.err('unknown delivery verb'); return 2

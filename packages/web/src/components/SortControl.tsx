@@ -32,7 +32,7 @@ export function SortControl<K extends string>({ options, sortKey, dir, onKey, on
         <button
           onClick={() => setOpen(o => !o)}
           style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6, height: 30, padding: '0 9px',
+            display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 9px',
             borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-elevated)',
             color: 'var(--text-secondary)', fontSize: 11.5, fontFamily: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap',
           }}
@@ -75,7 +75,7 @@ export function SortControl<K extends string>({ options, sortKey, dir, onKey, on
         onClick={onDir}
         title={dir === 'desc' ? (pt ? 'Decrescente (maior → menor)' : 'Descending') : (pt ? 'Crescente (menor → maior)' : 'Ascending')}
         style={{
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32,
           borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-elevated)',
           color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
         }}

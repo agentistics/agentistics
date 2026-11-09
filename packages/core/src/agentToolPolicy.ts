@@ -67,6 +67,7 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_task_claim',
   'agentistics_task_activity',
   'agentistics_live_delivery',
+  'agentistics_delivery_calendar',
   'agentistics_task_edit',
   'agentistics_task_session',
   'agentistics_task_delete',
@@ -150,6 +151,7 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_task_claim: { ...TASKS, risk: 'W', routes: ['POST /api/tasks/:ref/claim'], reason: 'a lease that expires on its own and can be released' },
   agentistics_task_activity: { ...TASKS, risk: 'R', routes: ['GET /api/tasks/activity'], reason: 'reads the board activity log' },
   agentistics_live_delivery: { ...TASKS, risk: 'R', routes: ['GET /api/tasks/live'], reason: 'reads the live delivery line and the leaders band; changes nothing' },
+  agentistics_delivery_calendar: { ...TASKS, risk: 'R', routes: ['GET /api/deliveries/calendar'], reason: 'reads the delivery calendar (dates, versions, ETAs); changes nothing' },
   agentistics_task_edit: { ...TASKS, risk: 'W', routes: ['POST /api/tasks/:ref'], reason: 'edits task fields; reversible by another edit' },
   agentistics_task_session: {
     ...TASKS, risk: 'W', routes: ['POST /api/tasks/x/sessions', 'POST /api/tasks/:ref/sessions'],

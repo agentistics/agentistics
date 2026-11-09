@@ -42,7 +42,7 @@ export function ViewBar({ children, label }: { children: ReactNode; label?: stri
 export const viewSegment = (mobile: boolean, active = false): CSSProperties => ({
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
   // 44px is the MOBILE number; the desktop bar stays a bar, not a row of buttons.
-  minHeight: mobile ? 44 : 28, padding: '0 11px', borderRadius: 8, border: 'none',
+  minHeight: mobile ? 44 : 24, padding: '0 11px', borderRadius: 8, border: 'none',
   cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, whiteSpace: 'nowrap',
   fontWeight: active ? 700 : 500,
   background: active ? 'var(--bg-surface)' : 'transparent',

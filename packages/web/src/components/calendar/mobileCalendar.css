@@ -1,0 +1,21 @@
+.cal-phone-button { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 44px; min-height: 44px; padding: 4px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
+.cal-phone-button:focus-visible { outline: 2px solid var(--anthropic-orange); outline-offset: -2px; }
+/* Thin week columns keep their geometry; the touch surface projects a 44px target. */
+.cal-phone-event::after { content: ''; position: absolute; top: 0; left: 50%; width: max(100%, 44px); height: 100%; transform: translateX(-50%); }
+.cal-phone-event:focus-visible { outline: 2px solid var(--anthropic-orange); z-index: 4; }
+.cal-phone-weekday { flex-direction: column; gap: 0; padding: 4px 0; }
+.cal-phone-weekday small { color: var(--text-tertiary); font-size: 10px; }
+.cal-phone-weekday span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; }
+.cal-phone-weekday[aria-current=date] span, .cal-phone-month [aria-current=date] { background: var(--anthropic-orange); color: var(--bg-primary); }
+.cal-phone-weekday[aria-pressed=true] span { outline: 1px solid var(--anthropic-orange); outline-offset: 2px; }
+/* All-day rows (2 + "+N more") are touch targets: 44px like every phone control; the band scrolls past 35% of the screen. */
+.cal-phone-allday, .cal-phone-allday-more { display: flex; width: 100%; min-height: 44px; height: 44px; padding: 0 8px; text-align: left; justify-content: flex-start; background: var(--anthropic-orange-dim); margin-bottom: 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cal-phone-allday-more { background: transparent; color: var(--text-secondary); }
+.cal-phone-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: 24px repeat(6, minmax(44px, 1fr)); flex: 1; min-height: 0; overflow-y: auto; text-align: center; }
+.cal-phone-month .cal-phone-button { flex-direction: column; gap: 4px; padding: 2px; min-width: 0; }
+.cal-phone-sheet { color: var(--text-primary); }
+.cal-phone-sheet [data-cal-filters] { flex-direction: column; align-items: stretch; gap: 12px; padding-top: 12px; }
+.cal-phone-sheet [data-cal-filters] > div { flex-wrap: wrap !important; }
+.cal-phone-sheet [data-cal-filters] button { min-height: 44px; }
+/* The bottom navigation keeps chat reachable; its duplicate floating button obscures the grid. */
+body:has([data-cal-phone]) [style*="position: fixed"]:has([data-nay-fab]) { visibility: hidden; pointer-events: none; }
