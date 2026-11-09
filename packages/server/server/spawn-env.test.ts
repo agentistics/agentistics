@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseEnviron, withBunEnv, withChildEnv, withoutKeys } from './spawn-env'
 
@@ -50,5 +52,36 @@ describe('installSpawnEnvGuard — a child does NOT inherit the dropped keys (QA
     for (const k of ['bunSync', 'bunAsync', 'execSync', 'spawnSync', 'execFileSync', 'spawn']) expect(out[k]).toBe('XKEEP=kept')
     // An explicit env is the caller's, minus the dropped keys — process.env's later edits included.
     expect(out.bunExplicit).toBe('XKEEP=k,XLATER=set-after-start')
+  })
+
+  it('promisify(execFile) / promisify(exec) still resolve to { stdout, stderr }, and the child still loses the dropped key', () => {
+    const script = `
+      const { installSpawnEnvGuard } = await import(${JSON.stringify(join(import.meta.dir, 'spawn-env.ts'))})
+      installSpawnEnvGuard(['XDROP_A'])
+      const { execFile, exec } = await import('node:child_process')
+      const { promisify } = await import('node:util')
+      const pick = s => s.split('\\n').filter(l => l.startsWith('XDROP') || l.startsWith('XKEEP')).sort().join(',')
+      const a = await promisify(execFile)('env', [], {})
+      const b = await promisify(exec)('env')
+      const c = await promisify(execFile)('env', [], { env: { ...process.env, XDROP_A: 'x' } })
+      console.log(JSON.stringify({ aType: typeof a, a: pick(a.stdout), b: pick(b.stdout), c: pick(c.stdout) }))`
+    const r = Bun.spawnSync([process.execPath, '-e', script], { env: { ...process.env, XDROP_A: '2', XKEEP: 'kept' } })
+    const out = JSON.parse(r.stdout.toString().trim().split('\n').pop()!)
+    expect(out).toEqual({ aType: 'object', a: 'XKEEP=kept', b: 'XKEEP=kept', c: 'XKEEP=kept' })
+  })
+
+  it('the delivery gates read gh through the guarded execFile (QA c4: findMergedPr saw "gh did not describe it")', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ghfake-'))
+    writeFileSync(join(dir, 'gh'), '#!/bin/sh\necho "FAKE_GH:${XDROP_A:-dropped}"\n', { mode: 0o755 })
+    const script = `
+      const { installSpawnEnvGuard } = await import(${JSON.stringify(join(import.meta.dir, 'spawn-env.ts'))})
+      const { defaultGateFacts } = await import(${JSON.stringify(join(import.meta.dir, 'delivery', 'gates.ts'))})
+      installSpawnEnvGuard(['XDROP_A'])
+      console.log(JSON.stringify({ out: await defaultGateFacts().gh(${JSON.stringify(dir)}, ['pr', 'view']) }))`
+    const r = Bun.spawnSync([process.execPath, '-e', script], { env: { ...process.env, XDROP_A: '1', PATH: `${dir}:${process.env.PATH}` } })
+    const out = JSON.parse(r.stdout.toString().trim().split('\n').pop()!)
+    expect(typeof out.out).toBe('string')
+    expect(out.out.trim()).toBe('FAKE_GH:dropped')
+    rmSync(dir, { recursive: true, force: true })
   })
 })
