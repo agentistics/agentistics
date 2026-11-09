@@ -10,6 +10,31 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.204.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Live: "Em andamento" passa a mostrar tudo o que não está na fila, publicado, concluído ou antigo, inclusive peças bloqueadas ou em ajuste sem ninguém nelas.',
+        en: 'Live: "In progress" now shows everything that is not queued, published, completed or old, including blocked or adjusting pieces nobody is on.',
+      },
+      {
+        pt: 'Um líder que toca uma tarefa sozinho ganha um card no Live com o selo de Líder, e ele aparece no Calendário pelo dia de início.',
+        en: 'A leader working a task alone gets a Live card with the Leader badge, and it shows on the Calendar on its start day.',
+      },
+      {
+        pt: 'Calendário: trabalho sem versão e sem previsão aparece no dia em que começou, na visão de mês e de semana.',
+        en: 'Calendar: work with no version and no estimate shows on the day it started, in the month and week views.',
+      },
+      {
+        pt: 'Uma sessão com papel salvo de líder ou worker não é mais mostrada como QA só porque o nome ou a pasta contém "qa".',
+        en: 'A session with a stored leader or worker role is no longer shown as QA just because its name or folder contains "qa".',
+      },
+      {
+        pt: 'Revisão do líder: depois de uma limpeza feita pela linha de comando, o Live marca as peças antigas na hora, sem precisar reiniciar o app.',
+        en: 'Leader review: after a cleanup run from the command line, the Live marks old pieces at once, without restarting the app.',
+      },
+    ],
+  },
   '2.204.1': {
     features: [],
     fixes: [
