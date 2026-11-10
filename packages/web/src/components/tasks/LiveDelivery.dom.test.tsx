@@ -50,6 +50,16 @@ test('draws the ten stages, the cards in them, the summary and an honest "no est
   expect(document.querySelector('[data-live-card="t/a"]')!.getAttribute('data-alert')).toBeNull()
 })
 
+test('projects an absent leader into a visible No leader column with a one-line reason', async () => {
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  const review = { ...reply, deliveries: [{ ...reply.deliveries[0]!, stage: 'leader', leaderAvailability: 'absent', leaderAvailabilityReason: 'no live leader is filed on this task', sessionIds: [] }] }
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: review as never }))) })
+  await act(async () => { await new Promise(r => setTimeout(r, 20)) })
+  expect(document.querySelector('[data-live-column="no-leader"]')).not.toBeNull()
+  expect(document.querySelector('[data-live-no-leader]')!.textContent).toContain('No leader')
+  expect(document.querySelector('[data-live-no-leader]')!.textContent).toContain('no live leader')
+})
+
 test('opens on "Em andamento" (agents working or waiting, 2 here); "Na fila" is empty and the choice is remembered', async () => {
   localStorage.clear()
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)

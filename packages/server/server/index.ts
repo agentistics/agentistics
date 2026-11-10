@@ -2463,7 +2463,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/tasks/live' && req.method === 'GET') {
       const { liveDeliveries } = await import('./sessions/task-web')
       const { LIVE_STAGES } = await import('./sessions/task-live')
-      const stage = LIVE_STAGES.find(x => x === url.searchParams.get('stage'))
+      const requestedStage = url.searchParams.get('stage')
+      const stage = requestedStage === 'no-leader' ? requestedStage : LIVE_STAGES.find(x => x === requestedStage)
       return json(await liveDeliveries({
         ...(url.searchParams.get('task') ? { task: url.searchParams.get('task')! } : {}),
         ...(stage ? { stage } : {}),

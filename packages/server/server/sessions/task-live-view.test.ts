@@ -24,6 +24,20 @@ describe('describeLive', () => {
     expect(v.deliveries[1]).toMatchObject({ liveState: 'needs-you', stalled: true })
     expect(v.summary).toMatchObject({ deliveries: 2, agentsWorking: 1, stalled: 1 })
   })
+  test('review exposes only a same-task live leader, and failed fleet reads stay unknown', () => {
+    const review = d({ key: 't/a', taskId: 't', taskTitle: 'Task', stage: 'leader' })
+    const available = describeLive({ reply: reply([review]), rows: [row('lead', 'working', { task: 't' })], leaderIds: new Set(['lead']), nowMs: NOW })
+    expect(available.deliveries[0]).toMatchObject({ leaderAvailability: 'available' })
+
+    const otherTask = describeLive({ reply: reply([review]), rows: [row('other', 'working', { task: 'other-task' })], leaderIds: new Set(['other']), nowMs: NOW })
+    expect(otherTask.deliveries[0]).toMatchObject({ leaderAvailability: 'absent', leaderAvailabilityReason: 'no live leader is filed on this task' })
+
+    const dead = describeLive({ reply: reply([review]), rows: [row('lead', 'lost', { task: 't' })], leaderIds: new Set(['lead']), nowMs: NOW })
+    expect(dead.deliveries[0]!.leaderAvailability).toBe('absent')
+
+    const unknown = describeLive({ reply: reply([review]), rows: [], leaderIds: new Set(), fleetRead: 'unknown', nowMs: NOW })
+    expect(unknown.deliveries[0]).toMatchObject({ leaderAvailability: 'unknown', leaderAvailabilityReason: 'leader availability could not be read from the fleet' })
+  })
   test('filters: by task name, stage and stalled-only', () => {
     const ds = [d({ key: '1', taskTitle: 'Alpha', stage: 'qa' }), d({ key: '2', taskId: 'u', taskTitle: 'Beta', stage: 'running', blockedReason: 'x' }), d({ key: '3', stage: 'adjust', blockedReason: 'waits' })]
     const run = (filters: object) => describeLive({ reply: reply(ds), rows: [], leaderIds: new Set(), nowMs: NOW, filters }).deliveries.map(x => x.key)
