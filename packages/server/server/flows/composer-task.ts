@@ -2,14 +2,16 @@ import { createHash } from 'node:crypto'
 import { validComposerTask } from '@agentistics/core'
 import type { Subtask } from '../sessions/task-model'
 import type { TaskStore } from '../sessions/task-store'
-import { isOwnerComposerRequest, ownerMessageTarget } from './owner-message'
+import { isOwnerComposerRequest, ownerMessageTarget, prepareOwnerRequestFlows } from './owner-message'
 
 export interface ComposerTaskDeps {
   ready?(): Promise<boolean>
   target(id: string): Promise<{ taskId?: string; conversationId?: string } | undefined>
   store(): Promise<TaskStore>
-  /** Direct runs deliberately bypass owner.message's automatic placement trigger. */
+  /** Only explicit single-operation commands are allowed here; event-triggered flows use emit. */
   run(name: string, inputs: Record<string, unknown>): Promise<unknown>
+  emit?(event: { type: string; id: string; payload: Record<string, unknown> }): Promise<unknown>
+  sleep?(ms: number): Promise<void>
   now(): number
 }
 type Request = { id: string; text?: string; messageId?: string; asTask?: unknown; action?: unknown; session?: unknown; callerVerified?: unknown }
@@ -39,28 +41,65 @@ async function registerOnce(req: Request, lang: 'pt' | 'en', d: ComposerTaskDeps
   const at = new Date(d.now()).toISOString()
   const conversationId = target.conversationId ?? req.id
   const hash = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 16)
+  const request = {
+    messageId: req.messageId, sessionId: req.id, conversationId, at, text,
+    pedidoId: `p-${createHash('sha256').update(`${conversationId}\0${at}\0${text}`).digest('hex').slice(0, 12)}`,
+  }
+  const existing = (await store.read()).subtasks.find(s => s.ownerRequest?.messageId === request.messageId)
+  if (existing) {
+    if (existing.ownerRequest?.text !== text) return { ok: false, message: pt ? 'Esta identificação de mensagem já foi usada com outro texto.' : 'This message id was already used with different text.' }
+    return { ok: true, subtask: existing, note: pt ? `Registrado como tarefa: ${existing.title}` : `Registered as task: ${existing.title}` }
+  }
+  // H1 is event-only. In particular, never call pedido-do-dono through flows.run: the engine
+  // deliberately rejects that operation because it is triggered exclusively by owner.message.
+  const emit = d.emit ?? (async event => {
+    const { engine } = await import('../engine/load')
+    await prepareOwnerRequestFlows()
+    const flows = engine()?.flows
+    if (!flows?.emit) throw new Error('Task registration flows are unavailable')
+    return flows.emit(event)
+  })
+  const beforeEvent = new Set((await store.read()).subtasks.map(s => s.id))
+  const rollbackEventCards = async () => {
+    const after = await store.read()
+    // Never use the snapshot as ownership. Another request may have been recorded while the
+    // event was in flight. Only a card carrying this request's durable identity is ours.
+    await Promise.all(after.subtasks.filter(s => !beforeEvent.has(s.id) && s.taskId === target.taskId &&
+      (s.ownerRequest?.pedidoId === request.pedidoId || s.ownerRequest?.messageId === request.messageId)).map(s => store.removeSubtask(s.id)))
+  }
+  const eventId = `owner.message:${conversationId}:${at}:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`
+  let emitted: unknown
+  try {
+    emitted = await emit({ type: 'owner.message', id: eventId, payload: {
+      sessionId: req.id, conversationId, taskId: target.taskId, text, at,
+      attachments: [], role: 'leader', channel: 'composer-task',
+    } })
+  } catch { await rollbackEventCards(); return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' } }
+  if (emitted === false) { await rollbackEventCards(); return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' } }
+  await rollbackEventCards()
   const subtask = await store.registerComposerSubtask({
     id: `s-${hash(req.messageId)}`, taskId: target.taskId, title,
     status: 'todo', done: false, createdAt: at, updatedAt: at,
     // This request has not been dispatched yet: startedAt is stamped by ordinary filing.
     priority: req.asTask.priority, assignee: 'leader', notes: text,
     ...(req.asTask.dueDate ? { dueDate: req.asTask.dueDate } : {}),
-    ownerRequest: { messageId: req.messageId, sessionId: req.id, conversationId, at, text,
-      pedidoId: `p-${createHash('sha256').update(`${conversationId}\0${at}\0${text}`).digest('hex').slice(0, 12)}` },
+    ownerRequest: request,
   })
   if (!subtask?.ownerRequest) return { ok: false, message: pt ? 'A tarefa de destino não existe mais.' : 'The destination task no longer exists.' }
   if (subtask.ownerRequest.text !== text) return { ok: false, message: pt ? 'Esta identificação de mensagem já foi usada com outro texto.' : 'This message id was already used with different text.' }
   const r = subtask.ownerRequest
   // Retries use the ORIGINAL timestamp and text, including after a crash between these two runs.
-  const registered = await d.run('pedido-do-dono', { sessionId: r.sessionId, conversationId: r.conversationId, taskId: subtask.taskId, text: r.text, at: r.at, role: 'leader', channel: 'composer-task' }) as { status?: string; output?: { pedido?: { state?: string; linkedSubtaskIds?: string[] } } }
-  if (registered?.status !== 'success' || !registered.output?.pedido?.state) return { ok: false, message: pt ? 'A subtarefa foi salva, mas o pedido não foi registrado. Tente enviar novamente.' : 'The subtask was saved, but request registration failed. Retry sending.' }
-  if (registered.output.pedido.state === 'linked' && !registered.output.pedido.linkedSubtaskIds?.includes(subtask.id)) return { ok: false, message: pt ? 'O pedido já está vinculado a outra subtarefa.' : 'The request is already linked to another subtask.' }
-  if (registered.output?.pedido?.state === 'open') {
-    const linked = await d.run('pedido-link', { id: r.pedidoId, subtaskIds: [subtask.id], by: 'owner:composer' }) as { status?: string }
-    if (linked?.status !== 'success') {
-      const checked = await d.run('pedido-do-dono', { sessionId: r.sessionId, conversationId: r.conversationId, taskId: subtask.taskId, text: r.text, at: r.at, role: 'leader', channel: 'composer-task' }) as { output?: { pedido?: { state?: string; linkedSubtaskIds?: string[] } } }
-      if (checked.output?.pedido?.state !== 'linked' || !checked.output.pedido.linkedSubtaskIds?.includes(subtask.id)) return { ok: false, message: pt ? 'O pedido foi salvo, mas não vinculado. Tente enviar novamente.' : 'The request was saved, but not linked. Retry sending.' }
-    }
+  let linked: { status?: string } = {}
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      linked = await d.run('pedido-link', { id: r.pedidoId, subtaskIds: [subtask.id], by: 'owner:composer' }) as { status?: string }
+    } catch { linked = {} }
+    if (linked.status === 'success') break
+    if (attempt < 2) await (d.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms))))(200)
+  }
+  if (linked?.status !== 'success') {
+    await store.removeSubtask(subtask.id)
+    return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' }
   }
   return { ok: true, subtask, note: pt ? `Registrado como tarefa: ${subtask.title}` : `Registered as task: ${subtask.title}` }
 }
