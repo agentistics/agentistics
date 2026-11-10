@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -16,19 +17,21 @@ async function world() {
   const task = { id: 't1', title: 'Delivery', status: 'in_progress', createdAt: '2026-11-09T10:00:00Z', updatedAt: '2026-11-09T10:00:00Z' }
   await store.upsertTask(task)
   const pedidos = new Map<string, { state: string; linkedSubtaskIds: string[] }>()
+  const emitted: string[] = []
   const d: ComposerTaskDeps = {
     now: () => Date.parse('2026-11-09T12:00:00Z'), target: async () => ({ taskId: task.id, conversationId: 'conv' }), store: async () => store,
-    run: async (name, input) => {
-      if (name === 'pedido-do-dono') {
-        const key = String(input.at)
-        if (!pedidos.has(key)) pedidos.set(key, { state: 'open', linkedSubtaskIds: [] })
-        return { status: 'success', output: { pedido: pedidos.get(key) } }
-      }
+    emit: async event => {
+      emitted.push(event.type)
+      const key = String(event.payload.at)
+      if (!pedidos.has(key)) pedidos.set(key, { state: 'open', linkedSubtaskIds: [] })
+      return { status: 'success', output: { pedido: pedidos.get(key) } }
+    },
+    run: async (_name, input) => {
       for (const p of pedidos.values()) { p.state = 'linked'; p.linkedSubtaskIds = input.subtaskIds as string[] }
       return { status: 'success' }
     },
   }
-  return { d, store, pedidos, task, file }
+  return { d, store, pedidos, emitted, task, file }
 }
 const request = { id: 'lead', action: 'prompt', text: '  Fix the calendar\nFull details for the task.', messageId: 'msg-1', asTask: { priority: 'high' as const, dueDate: '2026-11-12' } }
 
@@ -42,6 +45,8 @@ test('flagged send creates one complete subtask and linked pedido, even after re
   expect(book.events.filter(e => e.actor === 'owner:composer')).toHaveLength(1)
   expect(book.subtasks[0]).toMatchObject({ taskId: 't1', title: 'Fix the calendar', notes: request.text.trim(), priority: 'high', dueDate: '2026-11-12', assignee: 'leader', status: 'todo', ownerRequest: { messageId: 'msg-1', at: '2026-11-09T12:00:00.000Z' } })
   expect(book.subtasks[0]!.startedAt).toBeUndefined() // Filing, rather than request creation, starts work.
+  expect(x.emitted).toEqual(['owner.message'])
+  expect(book.subtasks[0]!.ownerRequest?.pedidoId).toBe(`p-${createHash('sha256').update(`conv\0${book.subtasks[0]!.ownerRequest!.at}\0${request.text.trim()}`).digest('hex').slice(0, 12)}`)
   expect([...x.pedidos.values()][0]).toMatchObject({ state: 'linked', linkedSubtaskIds: [book.subtasks[0]!.id] })
   const detail = buildTaskDetail({ task: x.task, attempts: [], rows: [], metas: new Map(), costOf: () => 0, subtasks: book.subtasks })
   expect(detail.subtasks[0]).toEqual(book.subtasks[0]!) // Same detail returned by agentistics_task.
@@ -55,11 +60,42 @@ test('concurrent registrations are insert-if-absent under the real board lock', 
   expect((await x.store.read()).subtasks).toHaveLength(1)
 })
 
-test('a crash after the board write retries the original timestamp without a second card', async () => {
+test('a registration failure leaves no orphan card and retry creates one', async () => {
   const x = await world()
-  expect((await registerComposerTask(request, 'en', { ...x.d, run: async () => { throw new Error('interrupted') } })).ok).toBe(false)
+  expect((await registerComposerTask(request, 'en', { ...x.d, emit: async () => { throw new Error('interrupted') } })).ok).toBe(false)
   expect((await registerComposerTask(request, 'en', x.d)).ok).toBe(true)
   expect((await x.store.read()).subtasks).toHaveLength(1)
+})
+
+test('link failure rolls back the subtask', async () => {
+  const x = await world()
+  const failed = { ...x.d, run: async () => { throw new Error('link unavailable') } }
+  expect((await registerComposerTask(request, 'en', failed)).ok).toBe(false)
+  expect((await x.store.read()).subtasks).toHaveLength(0)
+})
+
+test('event rollback never removes an unrelated concurrent subtask', async () => {
+  const x = await world()
+  const alien = { id: 's-alien', taskId: 't1', title: 'Parallel work', status: 'todo' as const, done: false,
+    createdAt: '2026-11-09T12:00:00.000Z', updatedAt: '2026-11-09T12:00:00.000Z' }
+  const d = { ...x.d, emit: async () => {
+    await x.store.upsertSubtask(alien)
+    throw new Error('event failed')
+  } }
+  expect((await registerComposerTask(request, 'en', d)).ok).toBe(false)
+  expect((await x.store.read()).subtasks.map(s => s.id)).toEqual(['s-alien'])
+})
+
+test('link retries while the event delivery is still being persisted', async () => {
+  const x = await world(); let attempts = 0
+  const d = { ...x.d, sleep: async () => {}, run: async (_name: string, input: Record<string, unknown>) => {
+    attempts++
+    if (attempts < 3) return { status: 'pending' }
+    for (const p of x.pedidos.values()) { p.state = 'linked'; p.linkedSubtaskIds = input.subtaskIds as string[] }
+    return { status: 'success' }
+  } }
+  expect((await registerComposerTask(request, 'en', d)).ok).toBe(true)
+  expect(attempts).toBe(3)
 })
 
 test('no task, invalid date/priority, missing gesture/id and agent messages refuse without writes', async () => {
