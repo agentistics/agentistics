@@ -29,3 +29,20 @@ describe('gateway model ids are priced at the public API rate', () => {
     expect(isUnpricedModel('upx/some-internal-model')).toBe(true)
   })
 })
+
+describe('gateway routes never price an unrelated or unknown model (QA adversarial ids)', () => {
+  test('a version that only shares a prefix stays unpriced', () => {
+    expect(hasModelPrice('upx/fable-5.10')).toBe(false)
+    expect(hasModelPrice('claude-fable-5-10')).toBe(false)
+  })
+  test('claude- glued to another word is a different model', () => {
+    expect(hasModelPrice('evil/evilclaude-opus-4.8')).toBe(false)
+    expect(hasModelPrice('evil/notclaude-opus-4.8')).toBe(false)
+  })
+  test('the real gateway spellings still price', () => {
+    expect(hasModelPrice('upx/fable-5.1')).toBe(true)
+    expect(hasModelPrice('acme-gw/upx/fable-5.1')).toBe(true)
+    expect(hasModelPrice('us.anthropic.claude-sonnet-5:0')).toBe(true)
+    expect(hasModelPrice('openrouter/anthropic/claude-opus-4.8')).toBe(true)
+  })
+})

@@ -1199,8 +1199,10 @@ export function pricingKey(modelId: string): string | null {
   let forwardKey = ''
   let reverseKey = ''
   for (const key of Object.keys(MODEL_PRICING)) {
-    if (id.startsWith(key)) {
-      // Most specific (longest) prefix wins.
+    if (id.startsWith(key) && !/^(?:\d|-\d{1,2}(?!\d))/.test(id.slice(key.length))) {
+      // Most specific (longest) prefix wins. The prefix must end on a version boundary: `…-5-1` never
+      // prices `…-5-10`, and `…-5` never prices `…-5-10` (another, unknown version); a date suffix
+      // (`-20250929`) or a variant (`[1m]`, `-thinking`) still matches.
       if (key.length > forwardKey.length) forwardKey = key
     } else if (id && key.startsWith(id) && key[id.length] === '-') {
       // Truncated id: least specific (shortest) candidate wins — never a `-lite`/variant price.
@@ -1248,8 +1250,11 @@ export function canonicalModelId(modelId: string): string | null {
   let id = String(modelId ?? '').trim().toLowerCase()
   if (!id) return null
   id = id.slice(id.lastIndexOf('/') + 1)
-  const claudeAt = id.indexOf('claude-')
-  if (claudeAt > 0) id = id.slice(claudeAt)
+  // Bedrock-style `us.anthropic.claude-…`: the family starts right after a `.` segment separator. A
+  // `claude-` glued to another word (`evilclaude-…`, `notclaude-…`) is a different model, never priced.
+  const bedrock = /(?:^|\.)(claude-.*)$/.exec(id)
+  if (bedrock) id = bedrock[1]!
+  else if (id.includes('claude-')) return null
   id = id.replace(/[:@].*$/, '')
   id = id.replace(/(\d)\.(?=\d)/g, '$1-')
   if (/^(fable|opus|sonnet|haiku|mythos)-/.test(id)) id = `claude-${id}`
