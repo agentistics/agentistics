@@ -3,7 +3,7 @@ import { useOutletContext, useSearchParams } from 'react-router-dom'
 import { GitCompare } from 'lucide-react'
 import type { AppContext } from '../lib/app-context'
 import type { SurfaceHarnessId, Lang, TokenBreakdown } from '@agentistics/core'
-import { EMPTY_TOKENS, TOKEN_PARTS, UNPRICED_MODEL_LABEL, UNPRICED_TOTAL_MARKER, fmt, fmtCost, formatModel, isUnpricedModel, t, tokenLabel, tokenSharePct, totalTokens } from '@agentistics/core'
+import { COST_NOT_RECORDED, EMPTY_TOKENS, TOKEN_PARTS, UNPRICED_MODEL_LABEL, UNPRICED_TOTAL_MARKER, fmt, fmtCost, formatModel, isUnpricedModel, t, tokenLabel, tokenSharePct, totalTokens } from '@agentistics/core'
 import { HARNESS_LABELS, HARNESS_COLORS, capable } from '../lib/harness'
 import { computeFilteredHarnessSummaries } from '../hooks/useData'
 import { fmtDateLocalized } from '../lib/dateFormat'
@@ -935,7 +935,7 @@ function CompareByHarness() {
                       <NACell lang={lang} />
                     ) : psc !== null && psc !== undefined ? (
                       <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtCost(psc, currency, brlRate)}
+                        {s && s.unpricedTokens >= totalTokens(s.tokens) && s.unpricedTokens > 0 ? COST_NOT_RECORDED[lang === 'pt' ? 'pt' : 'en'] : fmtCost(psc, currency, brlRate)}
                       </div>
                     ) : (
                       <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>—</span>

@@ -23,15 +23,16 @@ describe('stageOfStatus', () => {
 })
 
 describe('estimateEta', () => {
-  const sample = (d: number, model = 'opus', harness = 'claude'): Sample => ({ harness, model, durationMs: d * H })
+  const sample = (d: number, model = 'opus', harness = 'claude'): Sample => ({ harness, model, durationMs: d * H,
+    endpoint: 'publication', startedAtMs: NOW - (24 + d) * H, completedAtMs: NOW - 24 * H })
   const five = [1, 2, 3, 4, 5].map(d => sample(d))
-  test('no history under three similar samples', () => {
+  test('under three samples uses the declared bootstrap', () => {
     expect(estimateEta({ nowMs: NOW, startedAtMs: NOW - H, harness: 'claude', model: 'opus', samples: [sample(1), sample(2)] }))
-      .toEqual({ kind: 'none', reason: 'no-history' })
+      .toMatchObject({ kind: 'estimate', basis: { scope: 'bootstrap', n: 0 } })
   })
-  test('not started: no ETA', () => {
+  test('not started: an if-started-now approximation', () => {
     expect(estimateEta({ nowMs: NOW, startedAtMs: null, harness: 'claude', model: 'opus', samples: five }))
-      .toEqual({ kind: 'none', reason: 'not-started' })
+      .toMatchObject({ kind: 'estimate', assumption: 'if-started-now', atMs: NOW + 3 * H })
   })
   test('median, ± half the IQR, and the basis travels with it', () => {
     const e = estimateEta({ nowMs: NOW, startedAtMs: NOW - H, harness: 'claude', model: 'opus', samples: five })
@@ -39,16 +40,16 @@ describe('estimateEta', () => {
     if (e.kind !== 'estimate') return
     expect(e.atMs).toBe(NOW - H + 3 * H)
     expect(e.plusMinusMs).toBe(1 * H)
-    expect(e.basis).toMatchObject({ n: 5, scope: 'harness-model', medianMs: 3 * H })
+    expect(e.basis).toMatchObject({ n: 5, scope: 'harness', medianMs: 3 * H })
     expect(e.confidence).toBe('medium')
   })
   test('falls back to harness-only when the model has too few samples', () => {
     const e = estimateEta({ nowMs: NOW, startedAtMs: NOW - H, harness: 'claude', model: 'sonnet', samples: five })
     expect(e.kind === 'estimate' && e.basis.scope).toBe('harness')
   })
-  test('past the typical range there is no number, not a stale one', () => {
+  test('past the typical range there is a revised approximation', () => {
     expect(estimateEta({ nowMs: NOW, startedAtMs: NOW - 9 * H, harness: 'claude', model: 'opus', samples: five }))
-      .toEqual({ kind: 'none', reason: 'beyond-range' })
+      .toMatchObject({ kind: 'estimate', overrun: true, confidence: 'low', basis: { scope: 'general' } })
   })
 })
 

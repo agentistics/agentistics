@@ -337,7 +337,7 @@ export async function journalBackfillSummary(): Promise<{
     const p = readBackfillProgress(JOURNAL_BACKFILL_PATH)
     if (backfillComplete(p, fileIdentity(JOURNAL_PATH))) return null
     if (!p) return { state: 'pending', written: 0, harness: null, done: null, total: null }
-    return { state: p.state, written: p.written, harness: p.harness ?? null, done: p.done ?? null, total: p.total ?? null }
+    return { state: p.state === 'done' ? 'pending' : p.state, written: p.written, harness: p.harness ?? null, done: p.done ?? null, total: p.total ?? null }
   } catch {
     return null
   }

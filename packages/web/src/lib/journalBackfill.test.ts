@@ -12,8 +12,8 @@ describe('the journal first-import line', () => {
   })
   test('running says where it is and that the figures come from the previous path', () => {
     const t = journalBackfillText({ state: 'running', written: 1234, harness: 'codex', done: 3, total: 19 }, 'en')!
-    expect(t).toBe("Importing this machine's history into the journal · codex 3/19 · 1,234 events — until it completes, the figures come from the previous path.")
-    expect(journalBackfillText({ state: 'running', written: 1234, harness: 'codex', done: 3, total: 19 }, 'pt')).toContain('1.234 eventos')
+    expect(t).toBe("Updating this machine's history · codex 3/19 · 1,234 records — some history may still be missing.")
+    expect(journalBackfillText({ state: 'running', written: 1234, harness: 'codex', done: 3, total: 19 }, 'pt')).toContain('1.234 registros')
   })
   test('paused names the reason a person can act on', () => {
     expect(journalBackfillText({ state: 'paused', written: 0, harness: null, done: null, total: null }, 'pt')).toContain('pausada')

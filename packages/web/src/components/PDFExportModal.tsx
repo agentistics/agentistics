@@ -5,7 +5,7 @@ import {
 import { format, parseISO, subDays } from 'date-fns'
 import type { AppData, Filters, Lang, ModelUsage, SessionMeta, SurfaceHarnessId } from '@agentistics/core'
 import { sessionTime } from '../lib/sessionTime'
-import { formatModel, formatProjectName, repoShortName, calcCost, sessionCostUSD, sessionLabel, fmt, fmtCost, fmtFull, EMPTY_TOKENS, totalTokens } from '@agentistics/core'
+import { costCellText, sessionCostCell, unpricedTokens, formatModel, formatProjectName, repoShortName, calcCost, sessionCostUSD, sessionLabel, fmt, fmtCost, fmtFull, EMPTY_TOKENS, totalTokens } from '@agentistics/core'
 import { useDerivedStats, blendedCostPerToken, blendedSessionCost, type BlendedRates, type HarnessSummary } from '../hooks/useData'
 import { HARNESS_LABELS, HARNESS_COLORS, capable } from '../lib/harness'
 import { brandAsset } from '../lib/brand'
@@ -392,7 +392,7 @@ function MiniModelBars({ modelUsage, c, currency, brlRate }: {
         <div key={id}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: c.text }}>{formatModel(id)}</span>
-            <span style={{ fontSize: 10, color: c.textSec }}>{fmtCost(cost, currency, brlRate)} · {fmt(tokens)} tokens</span>
+            <span style={{ fontSize: 10, color: c.textSec }}>{costCellText(cost, unpricedTokens([[id, modelUsage[id]!]]), tokens, 'en', usd => fmtCost(usd, currency, brlRate))} · {fmt(tokens)} tokens</span>
           </div>
           <div style={{ height: 7, background: c.bgElevated, borderRadius: 4, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${(cost / maxCost) * 100}%`, background: c.orange, borderRadius: 4 }} />
@@ -491,7 +491,7 @@ function MiniSessionsTable({ sessions, c, lang, currency, brlRate, blendedRates 
             <div style={{ color: c.textSec }}>{sessionTime(s, lang).combined}</div>
             <div style={{ color: c.orange, fontWeight: 600 }}>{msgs}</div>
             <div style={{ color: c.textSec }}>{tools}</div>
-            <div style={{ color: c.textSec }}>{costUSD === null ? '—' : fmtCost(costUSD, currency, brlRate)}</div>
+            <div style={{ color: c.textSec }}>{costUSD === null ? '—' : sessionCostCell(s, lang === 'pt' ? 'pt' : 'en', usd => fmtCost(usd, currency, brlRate), costUSD)}</div>
           </div>
         )
       })}
@@ -1252,7 +1252,7 @@ export function PDFContent({ pdfTheme, sectionOrder, derived, pdfFilters, lang, 
                 <KPICard label={pt ? 'Mensagens' : 'Messages'} value={fmt(derived.totalMessages)} sub={pt ? 'no período' : 'in period'} accent={c.orange} c={c} />
                 <KPICard label={pt ? 'Sessões' : 'Sessions'} value={fmt(derived.totalSessions)} sub={`avg ${derived.totalSessions > 0 ? Math.round(derived.totalMessages / derived.totalSessions) : 0} msgs`} accent={c.blue} c={c} />
                 <KPICard label="Tool calls" value={fmt(derived.totalToolCalls)} sub={pt ? 'execuções' : 'executions'} accent={c.green} c={c} />
-                <KPICard label={pt ? 'Custo est.' : 'Est. cost'} value={fmtCost(derived.totalCostUSD, currency, brlRate)} sub="Anthropic pricing" accent={c.orange} c={c} />
+                <KPICard label={pt ? 'Custo est.' : 'Est. cost'} value={costCellText(derived.totalCostUSD, derived.unpricedTokens, totalTokens(derived.tokenTotals), pt ? 'pt' : 'en', usd => fmtCost(usd, currency, brlRate))} sub="Anthropic pricing" accent={c.orange} c={c} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
                 <KPICard label={pt ? 'Sequência' : 'Streak'} value={`${derived.streak}d`} sub={pt ? 'dias consec.' : 'consecutive'} accent={c.red} c={c} />

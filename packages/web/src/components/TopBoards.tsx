@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import type { HarnessId, Lang, SessionMeta } from '@agentistics/core'
-import { fmt, fmtCost, formatModel, formatProjectName, sessionLabel } from '@agentistics/core'
+import { costCellText, fmt, fmtCost, formatModel, formatProjectName, sessionLabel } from '@agentistics/core'
 import {
   hourProfile, lastActiveDay, rankHarnesses, rankModels, rankProjects, rankSessions, rankTools,
   sessionsOnDay, shareOf,
@@ -290,8 +290,10 @@ export function TopBoards({ sessions, lang, currency, brlRate, onSelectSession }
     tools: rankTools(daySessions, 1),
   }), [daySessions, metric])
 
+  // An unpriced row prints "not recorded", never a 0; a partly priced one keeps its priced figure + the marker.
+  const costCell = (e: Leader): string => costCellText(e.cost, e.unpriced, e.tokens, l, usd => fmtCost(usd, currency, brlRate))
   const value = (e: Leader): string =>
-    metric === 'cost' ? fmtCost(e.cost, currency, brlRate)
+    metric === 'cost' ? costCell(e)
     : metric === 'tokens' ? fmt(e.tokens)
     : String(e.sessions)
   const calls = (e: Leader) => `${fmt(e.calls)}×`

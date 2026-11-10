@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, startTransition } from 'react'
+import { accumulateUsageCost } from '@agentistics/core'
 import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, SurfaceHarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
 import { applyDataPatch, type DataPatch, calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, withoutHiddenNative, surfaceHarnesses, NATIVE_HARNESS_ID, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
@@ -963,6 +964,7 @@ export function summarizeSessions(list: SessionMeta[], hasCost: boolean, hasToke
           cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
           webSearchRequests: 0, costUSD: 0,
         })
+        accumulateUsageCost(entry, u, key)
         entry.inputTokens += u.inputTokens
         entry.outputTokens += u.outputTokens
         entry.cacheReadInputTokens += u.cacheReadInputTokens
@@ -2007,6 +2009,7 @@ export function computeDerivedStats(
             }
           }
           const entry = filteredModelUsage[m]!
+          accumulateUsageCost(entry, u, m)
           entry.inputTokens              += u.inputTokens
           entry.outputTokens             += u.outputTokens
           entry.cacheReadInputTokens     += u.cacheReadInputTokens
@@ -2057,6 +2060,7 @@ export function computeDerivedStats(
             }
           }
           const entry = filteredModelUsage[model]
+          accumulateUsageCost(entry, u, model)
           entry.inputTokens              += u.inputTokens
           entry.outputTokens             += u.outputTokens
           entry.cacheReadInputTokens     += u.cacheReadInputTokens
@@ -2078,6 +2082,7 @@ export function computeDerivedStats(
             }
           }
           const entry = filteredModelUsage[m]!
+          accumulateUsageCost(entry, u, m)
           entry.inputTokens              += u.inputTokens
           entry.outputTokens             += u.outputTokens
           entry.cacheReadInputTokens     += u.cacheReadInputTokens
@@ -2109,6 +2114,7 @@ export function computeDerivedStats(
             }
           }
           const entry = filteredModelUsage[m]!
+          accumulateUsageCost(entry, u, m)
           entry.inputTokens              += u.inputTokens
           entry.outputTokens             += u.outputTokens
           entry.cacheReadInputTokens     += u.cacheReadInputTokens

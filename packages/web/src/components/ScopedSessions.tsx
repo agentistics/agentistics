@@ -24,7 +24,7 @@ import { Link } from 'react-router-dom'
 import { ChevronRight, Clock } from 'lucide-react'
 import {
   calcCost, fmt, fmtCost, formatModel, sessionCostUSD, sessionLabel, sessionTokens,
-  sessionTokenTotal, totalTokensExplained, type HarnessId, type SessionMeta,
+  sessionTokenTotal, totalTokensExplained, type HarnessId, type SessionMeta, sessionCostCell,
 } from '@agentistics/core'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../lib/harness'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -165,7 +165,7 @@ export function ScopedSessions({ sessions, lang, currency, brlRate }: Props) {
               display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
               gap: isMobile ? 14 : 18, flexWrap: 'wrap', flexShrink: 0,
             }}>
-              <Metric label={pt ? 'Custo' : 'Cost'} value={sessionCost(s) === undefined ? '—' : fmtCost(sessionCost(s)!, currency, brlRate)} accent />
+              <Metric label={pt ? 'Custo' : 'Cost'} value={sessionCost(s) === undefined ? '—' : sessionCostCell(s, pt ? 'pt' : 'en', usd => fmtCost(usd, currency, brlRate), sessionCost(s)!)} accent />
               <Metric
                 label="Tokens"
                 value={tokens === undefined ? '—' : fmt(tokens)}

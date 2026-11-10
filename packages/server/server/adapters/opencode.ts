@@ -30,7 +30,13 @@ export function readOpencodeDb(path: string, models: OpencodeModels = {}): { ses
     const rows = db.transaction(() => ({
       sessions: db!.query<OpencodeSessionRow, []>('SELECT id, directory, title, time_created, time_updated FROM session').all(),
       messages: db!.query<OpencodeMessageRow, []>('SELECT id, session_id, time_created, time_updated, data FROM message ORDER BY time_created, id').all(),
-      parts: db!.query<OpencodePartRow, []>("SELECT id, message_id, session_id, time_created, data FROM part WHERE json_valid(data) AND json_extract(data, '$.type') = 'text' ORDER BY time_created, id").all(),
+      // Text parts as stored; a tool part is cut down to its name and status (its input/output can be megabytes
+      // and the parser only counts the request and whether it failed).
+      parts: db!.query<OpencodePartRow, []>(
+        "SELECT id, message_id, session_id, time_created, CASE WHEN json_extract(data, '$.type') = 'tool' " +
+        "THEN json_object('type', 'tool', 'tool', json_extract(data, '$.tool'), 'state', json_object('status', json_extract(data, '$.state.status'))) " +
+        "ELSE data END AS data FROM part WHERE json_valid(data) AND json_extract(data, '$.type') IN ('text', 'tool') ORDER BY time_created, id",
+      ).all(),
     }))()
     const messages = new Map<string, OpencodeMessageRow[]>(), parts = new Map<string, OpencodePartRow[]>()
     for (const m of rows.messages) { const list = messages.get(m.session_id) ?? []; list.push(m); messages.set(m.session_id, list) }

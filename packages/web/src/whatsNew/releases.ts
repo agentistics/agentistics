@@ -10,6 +10,44 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.204.3': {
+    features: [
+      {
+        pt: 'Live: toda peça em andamento passa a ter uma previsão aproximada de publicação, calculada pelo histórico de peças parecidas, ou por uma faixa larga quando ainda há pouco histórico.',
+        en: 'Live: every piece in progress now has an approximate publication forecast, computed from similar past pieces, or a wide range while there is little history.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'OpenCode: as chamadas de ferramenta passam a ser contadas nas métricas, e a última sessão e a ofensiva acompanham o uso real.',
+        en: 'OpenCode: tool calls are now counted in the metrics, and the last session and the streak follow real use.',
+      },
+      {
+        pt: 'Custo: quando nenhum token tem preço conhecido (por exemplo, um modelo de gateway), o cartão mostra "não registrado" em vez de R$ 0,00.',
+        en: 'Cost: when no token has a known price (for example, a gateway model), the card shows "not recorded" instead of $0.00.',
+      },
+      {
+        pt: 'Custo: a mesma regra vale nas listas de sessões, nos rankings, na comparação, nos repositórios, no PDF e nas respostas do MCP.',
+        en: 'Cost: the same rule applies to session lists, top boards, compare, repositories, the PDF and MCP answers.',
+      },
+      {
+        pt: 'Calendário: uma versão que já tem release aparece como publicada, com a data real, mesmo que alguma peça dela não esteja marcada; versões antigas sem release deixam de aparecer como pendentes.',
+        en: 'Calendar: a version that has a release shows as published with its real date, even if one of its pieces is not marked; older versions with no release no longer show as pending.',
+      },
+      {
+        pt: 'Codex: os tokens de uma sessão retomada são somados por inteiro, sem perder a parte de antes da retomada.',
+        en: 'Codex: the tokens of a resumed session are counted in full, without losing the part before the resume.',
+      },
+      {
+        pt: 'MCP: o resumo de métricas não responde mais tudo zerado antes de o histórico ser carregado.',
+        en: 'MCP: the metrics summary no longer answers all zeros before the history is loaded.',
+      },
+      {
+        pt: 'Quadro: um líder que fecha uma subtarefa junto com outra alteração agora fecha de verdade, ou recebe um erro claro; antes o fechamento era descartado e a resposta dizia que deu certo.',
+        en: 'Board: a leader closing a subtask together with another change now really closes it, or gets a clear error; before, the close was dropped and the answer said it worked.',
+      },
+    ],
+  },
   '2.204.2': {
     features: [],
     fixes: [

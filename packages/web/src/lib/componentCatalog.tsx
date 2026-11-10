@@ -8,7 +8,7 @@ import {
 import type { AppContext } from './app-context'
 import { sessionTime } from './sessionTime'
 import { widerValue } from './statCardSize'
-import { projectFolder, fmt, fmtDuration, fmtCost, fmtFull, UNPRICED_TOTAL_MARKER } from '@agentistics/core'
+import { costCellText, totalTokens, projectFolder, fmt, fmtDuration, fmtCost, fmtFull, UNPRICED_TOTAL_MARKER } from '@agentistics/core'
 import { StatCard } from '../components/StatCard'
 import { StreakBreakdownButton } from '../components/StreakBreakdownButton'
 import { HighlightsBoard } from '../components/HighlightsBoard'
@@ -136,7 +136,7 @@ export const CATALOG: CatalogItem[] = [
     render: ({ derived, lang, currency, brlRate }) => (
       <StatCard
         label={lang === 'pt' ? 'Custo estimado' : 'Est. cost'}
-        value={fmtCost(derived.totalCostUSD, currency, brlRate)}
+        value={costCellText(derived.totalCostUSD, derived.unpricedTokens, totalTokens(derived.tokenTotals), lang === 'pt' ? 'pt' : 'en', usd => fmtCost(usd, currency, brlRate))}
         // Same rule as the HomePage cost card: size by the wider currency so switching
         // USD ⇄ BRL leaves the headline alone.
         sizeBasis={widerValue(fmtCost(derived.totalCostUSD, 'USD', brlRate), fmtCost(derived.totalCostUSD, 'BRL', brlRate))}

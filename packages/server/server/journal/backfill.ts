@@ -32,6 +32,8 @@ import { RESERVED_BYTES, SWAP_ALARM_FRACTION, type MemorySample } from '../sessi
 
 export interface BackfillProgress {
   v: 1
+  /** Full history reconciled after live feeding became default-on. Old imports left a gap. */
+  historyVersion?: number
   /** The journal file this progress describes (`fileIdentity`). Another file inherits nothing. */
   identity: string | null
   state: 'running' | 'paused' | 'done' | 'interrupted' | 'failed'
@@ -64,8 +66,10 @@ export async function writeBackfillProgress(path: string, p: BackfillProgress): 
 }
 
 /** Complete for THIS journal: a progress record that completed, written about the same file. */
+export const HISTORY_VERSION = 1
+
 export function backfillComplete(progress: BackfillProgress | null, journalIdentity: string | null): boolean {
-  return progress !== null && progress.completedAt !== undefined && journalIdentity !== null && progress.identity === journalIdentity
+  return progress !== null && progress.completedAt !== undefined && progress.historyVersion === HISTORY_VERSION && journalIdentity !== null && progress.identity === journalIdentity
 }
 
 /** Whether the projection route must wait: the journal is on and its first import has not completed. */
@@ -105,11 +109,13 @@ export function planAutoBackfill(o: {
   staleMs: number
   /** The running integrations' adapter versions by harness id; absent = unknown (no upgrade check). */
   adapterVersions?: Record<string, string>
+  /** A server restart must also reconcile sessions written while the service was stopped. */
+  catchUp?: boolean
 }): BackfillDecision {
   if (!o.journalEnabled) return { start: false, reason: 'journal-off' }
   if (o.central) return { start: false, reason: 'central' }
   if (o.optedOut) return { start: false, reason: 'opted-out' }
-  if (backfillComplete(o.progress, o.journalIdentity) && !adapterUpgradePending(o.progress, o.adapterVersions)) return { start: false, reason: 'complete' }
+  if (!o.catchUp && backfillComplete(o.progress, o.journalIdentity) && !adapterUpgradePending(o.progress, o.adapterVersions)) return { start: false, reason: 'complete' }
   const p = o.progress
   if (p && (p.state === 'running' || p.state === 'paused') && o.nowMs - Date.parse(p.updatedAt) < o.staleMs) {
     return { start: false, reason: 'running-elsewhere' }
@@ -187,6 +193,7 @@ export function backgroundImportArgv(cli: readonly string[], o: { nice: string |
 }
 
 export interface AutoBackfillDeps {
+  catchUp?: boolean
   journalEnabled: boolean
   central: boolean
   journalPath: string
@@ -213,6 +220,7 @@ export function maybeStartAutoBackfill(d: AutoBackfillDeps): BackfillDecision {
     journalIdentity: fileIdentity(d.journalPath),
     nowMs: (d.now ?? Date.now)(),
     staleMs: 10 * 60_000,
+    catchUp: d.catchUp,
     ...(d.adapterVersions ? { adapterVersions: d.adapterVersions } : {}),
   })
   if (!decision.start) return decision

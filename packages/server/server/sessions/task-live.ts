@@ -14,10 +14,9 @@
  *    the vocabulary lets people invent is matched on its id/label words; one nobody can place is
  *    not guessed into a column — a piece with a live session falls back to "running", one without
  *    is left off the line.
- *  - The ETA is NEVER a number without a source. It is the median of how long SIMILAR delivered
- *    pieces took (same harness + model, else same harness), with the inter-quartile half-range as
- *    the ± and a confidence read off the sample size and spread. Fewer than `MIN_SAMPLES`
- *    similar pieces, or a piece already past the typical range, answers `none` with the reason.
+ *  - The ETA always names its evidence: comparable publication median, general average,
+ *    low-confidence session work span, or a versioned initial planning range. Open pieces
+ *    retain an interval even with no history or after overrunning their original range.
  */
 
 import { migratePriority, subtaskDone, type Subtask, type Task, type TaskEvent } from './task-model'
@@ -33,6 +32,25 @@ export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running',
 export const HAPPY_PATH: readonly LiveStage[] = ['running', 'qa', 'leader', 'merge', 'ci', 'published']
 
 export const MIN_SAMPLES = 3
+export const FORECAST_METHOD_VERSION = 'registration-forecast-v1'
+export const FORECAST_SAMPLE_CAP = 500
+export const FORECAST_WINDOW_MS = 90 * 24 * 3600_000
+export const FORECAST_MIN_REMAINING_MS = 15 * 60_000
+export const FORECAST_BUCKET_MS = 3600_000
+export const FORECAST_BOOTSTRAP = { centerMs: 4 * 3600_000, lowerMs: 3600_000, upperMs: 12 * 3600_000 } as const
+export type ForecastScope = 'type-harness-model' | 'type-harness' | 'harness-model' | 'harness' | 'general' | 'bootstrap' | 'stages'
+export interface ForecastBasis {
+  n: number; scope: ForecastScope; harness: string; model: string | null; medianMs: number
+  endpoint?: 'publication' | 'work-span' | 'stage'; statistic?: 'median' | 'mean' | 'bootstrap' | 'sum'
+  exclusions?: Readonly<Record<string, number>>
+}
+export interface ForecastMetadata {
+  earliestAtMs: number; latestAtMs: number; computedAtMs: number; methodVersion: string
+  confidence: 'low' | 'medium' | 'high'; basis: ForecastBasis
+  overrun: boolean; conditional: 'blocked' | null
+  assumption: 'started' | 'if-started-now' | 'scheduled-start' | 'after-resumption'
+  queueTimeUnknown: boolean; blockReason: string | null; overrunAnchorAtMs?: number
+}
 /** A published piece stays on the line this long. */
 export const PUBLISHED_WINDOW_MS = 24 * 3600_000
 /** Published pieces older than 24 h stay readable (Publicado's longer periods), up to this many days back… */
@@ -41,13 +59,13 @@ export const HISTORY_DAYS = 365
 export const HISTORY_CAP = 400
 
 export type LiveEta =
-  | {
+  | ({
       kind: 'estimate'
       atMs: number
       plusMinusMs: number
       confidence: 'low' | 'medium' | 'high'
-      basis: { n: number; scope: 'harness-model' | 'harness'; harness: string; model: string | null; medianMs: number }
-    }
+      basis: ForecastBasis
+    } & Partial<ForecastMetadata>)
   | { kind: 'none'; reason: 'no-history' | 'not-started' | 'beyond-range' }
 
 /** Why a piece is blocked (fluxo-entrega-dsl §Bloqueio) and who can lift it. */
@@ -65,10 +83,10 @@ export interface LiveBlock {
 export interface StageVisit { stage: LiveStage; enteredMs: number; ms: number }
 
 export type LiveStageEta =
-  | { kind: 'estimate'; atMs: number; medianMs: number; n: number; nextStage: LiveStage | null }
+  | ({ kind: 'estimate'; atMs: number; medianMs: number; n: number; nextStage: LiveStage | null } & Partial<ForecastMetadata>)
   | { kind: 'none'; reason: 'no-history' | 'beyond-range' | 'not-started' | 'final'; typicalMs?: number; n?: number }
 export type LivePublishEta =
-  | { kind: 'estimate'; atMs: number; source: 'stages' | 'total'; n: number; parts: { stage: LiveStage; medianMs: number }[] }
+  | ({ kind: 'estimate'; atMs: number; source: 'stages' | 'total' | 'general' | 'bootstrap' | 'revised-overrun'; n: number; parts: { stage: LiveStage; medianMs: number }[] } & Partial<ForecastMetadata>)
   | { kind: 'none'; reason: 'no-history' | 'beyond-range' | 'not-started' | 'final' }
 
 /**
@@ -239,38 +257,157 @@ function quantile(sorted: readonly number[], q: number): number {
   return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (pos - lo)
 }
 
-export interface Sample { harness: string; model: string | null; durationMs: number }
+export interface Sample {
+  harness: string; model: string | null; durationMs: number; taskType?: string | null
+  key?: string; endpoint?: 'publication' | 'work-span'; startedAtMs?: number; completedAtMs?: number
+  abandoned?: boolean; recovered?: boolean; rollup?: boolean
+  /** Blocked waits are included in durationMs, retained for diagnostics. */
+  blockReasons?: readonly string[]
+}
+interface Distribution { center: number; lower: number; upper: number; confidence: ForecastMetadata['confidence']; basis: ForecastBasis }
+export interface ForecastCohorts {
+  sampleCount: number
+  samples: readonly Sample[]
+  exclusions: Readonly<Record<string, number>>
+  distributions: ReadonlyMap<string, Distribution>
+}
+const cohortKey = (endpoint: string, scope: ForecastScope, type: string | null, harness: string | null, model: string | null) =>
+  JSON.stringify([endpoint, scope, type, harness, model])
 
-/** PURE: the ETA of a piece that started at `startedAtMs`, read from `samples`. */
-export function estimateEta(o: {
+function distribution(xs: readonly number[], basis: ForecastBasis): Distribution {
+  const sorted = [...xs].sort((a, b) => a - b)
+  const median = quantile(sorted, 0.5), p25 = quantile(sorted, 0.25), p75 = quantile(sorted, 0.75)
+  const general = basis.scope === 'general'
+  const center = general ? sorted.reduce((a, b) => a + b, 0) / sorted.length : median
+  let lower = general ? Math.min(p25, center / 2) : Math.min(p25, center - Math.max(center / 4, FORECAST_MIN_REMAINING_MS))
+  let upper = general ? Math.max(p75, center * 2) : Math.max(p75, center + Math.max(center / 4, FORECAST_MIN_REMAINING_MS))
+  if (general && (xs.length < 8 || basis.endpoint === 'work-span')) {
+    lower = Math.min(lower, center / 4); upper = Math.max(upper, center * 3)
+  }
+  const spread = (p75 - p25) / median
+  const confidence = general ? 'low' : xs.length >= 8 && spread < 0.6 ? 'high' : xs.length >= 4 && spread < 1.2 ? 'medium' : 'low'
+  return { center, lower: Math.max(0, lower), upper, confidence,
+    basis: { ...basis, medianMs: median, statistic: general ? 'mean' : 'median' } }
+}
+
+/** PURE: validate/dedupe/bound once, then sort distributions once per source revision. */
+export function buildForecastCohorts(samples: Iterable<Sample>, nowMs: number): ForecastCohorts {
+  const exclusions = { invalid: 0, outsideWindow: 0, abandoned: 0, recovered: 0, rollup: 0, duplicate: 0, capped: 0 }
+  const bounded: Sample[] = []
+  for (const s of samples) {
+    if (s.abandoned) { exclusions.abandoned++; continue }
+    if (s.recovered) { exclusions.recovered++; continue }
+    if (s.rollup) { exclusions.rollup++; continue }
+    if (!Number.isFinite(s.durationMs) || s.durationMs <= 0 ||
+      s.startedAtMs === undefined || s.completedAtMs === undefined ||
+      (s.completedAtMs !== undefined && (!Number.isFinite(s.completedAtMs) || s.completedAtMs <= 0 || s.completedAtMs > nowMs)) ||
+      (s.startedAtMs !== undefined && (!Number.isFinite(s.startedAtMs) || s.startedAtMs <= 0 || s.completedAtMs === undefined || s.startedAtMs >= s.completedAtMs ||
+        Math.abs(s.completedAtMs - s.startedAtMs - s.durationMs) > 1))) {
+      exclusions.invalid++; continue
+    }
+    if (s.completedAtMs !== undefined && s.completedAtMs < nowMs - FORECAST_WINDOW_MS) { exclusions.outsideWindow++; continue }
+    const duplicate = s.key ? bounded.findIndex(x => x.key === s.key) : -1
+    if (duplicate >= 0) {
+      exclusions.duplicate++
+      if ((bounded[duplicate]!.completedAtMs ?? 0) >= (s.completedAtMs ?? 0)) continue
+      bounded.splice(duplicate, 1)
+    }
+    // Keep only the newest 500 while scanning. No lifetime-sized history sort or allocation.
+    let lo = 0, hi = bounded.length
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      if ((bounded[mid]!.completedAtMs ?? 0) >= (s.completedAtMs ?? 0)) lo = mid + 1
+      else hi = mid
+    }
+    bounded.splice(lo, 0, s)
+    if (bounded.length > FORECAST_SAMPLE_CAP) { bounded.pop(); exclusions.capped++ }
+  }
+  const pools = new Map<string, { xs: number[]; basis: ForecastBasis }>()
+  for (const s of bounded) {
+    const endpoint = s.endpoint ?? 'work-span'
+    const add = (scope: ForecastScope, type: string | null, harness: string | null, model: string | null) => {
+      const key = cohortKey(endpoint, scope, type, harness, model)
+      let pool = pools.get(key)
+      if (!pool) { pool = { xs: [], basis: { n: 0, scope, harness: harness ?? '', model, medianMs: 0, endpoint, exclusions } }; pools.set(key, pool) }
+      pool.xs.push(s.durationMs); pool.basis.n++
+    }
+    add('general', null, null, null)
+    if (endpoint === 'work-span') continue
+    if (s.taskType && s.model) add('type-harness-model', s.taskType, s.harness, s.model)
+    if (s.taskType) add('type-harness', s.taskType, s.harness, null)
+    add('harness', null, s.harness, null)
+  }
+  return { sampleCount: bounded.length, samples: bounded, exclusions,
+    distributions: new Map([...pools].filter(([, p]) => p.xs.length >= MIN_SAMPLES).map(([k, p]) => [k, distribution(p.xs, p.basis)])) }
+}
+
+export interface EstimateOptions {
   nowMs: number
   startedAtMs: number | null
   harness: string | null
   model: string | null
-  samples: readonly Sample[]
-}): LiveEta {
-  if (o.startedAtMs === null) return { kind: 'none', reason: 'not-started' }
-  if (!o.harness) return { kind: 'none', reason: 'no-history' }
-  const same = (s: Sample) => s.harness === o.harness
-  let scope: 'harness-model' | 'harness' = 'harness-model'
-  let pool = o.model ? o.samples.filter(s => same(s) && s.model === o.model) : []
-  if (pool.length < MIN_SAMPLES) { scope = 'harness'; pool = o.samples.filter(same) }
-  if (pool.length < MIN_SAMPLES) return { kind: 'none', reason: 'no-history' }
-  const sorted = pool.map(s => s.durationMs).sort((a, b) => a - b)
-  const median = quantile(sorted, 0.5)
-  const p25 = quantile(sorted, 0.25), p75 = quantile(sorted, 0.75)
-  const elapsed = o.nowMs - o.startedAtMs
-  // Past the median there is no honest "when": `start + max(median, elapsed)` would be NOW, drawn as "~agora".
-  if (elapsed >= median || elapsed > p75) return { kind: 'none', reason: 'beyond-range' }
-  const spread = median > 0 ? (p75 - p25) / median : 1
-  const confidence = pool.length >= 8 && spread < 0.6 ? 'high' : pool.length >= 4 && spread < 1.2 ? 'medium' : 'low'
-  return {
-    kind: 'estimate',
-    atMs: o.startedAtMs + median,
-    plusMinusMs: Math.round((p75 - p25) / 2),
-    confidence,
-    basis: { n: pool.length, scope, harness: o.harness, model: scope === 'harness-model' ? o.model : null, medianMs: Math.round(median) },
+  taskType?: string | null; samples?: readonly Sample[]; cohorts?: ForecastCohorts
+  scheduledAtMs?: number | null; blocked?: boolean; blockReason?: string | null
+  /** Persisted cache input. It is an hourly anchor, never a mutable prediction. */
+  overrunAnchorAtMs?: number
+}
+function generalDistribution(c: ForecastCohorts): Distribution {
+  return c.distributions.get(cohortKey('publication', 'general', null, null, null)) ??
+    c.distributions.get(cohortKey('work-span', 'general', null, null, null)) ?? {
+      center: FORECAST_BOOTSTRAP.centerMs, lower: FORECAST_BOOTSTRAP.lowerMs, upper: FORECAST_BOOTSTRAP.upperMs,
+      confidence: 'low', basis: { n: 0, scope: 'bootstrap', endpoint: 'publication', harness: '', model: null, medianMs: FORECAST_BOOTSTRAP.centerMs,
+        statistic: 'bootstrap', exclusions: c.exclusions },
+    }
+}
+function selectDistribution(c: ForecastCohorts, o: EstimateOptions): Distribution {
+  if (o.harness) {
+    const keys = [
+      ...(o.taskType && o.model ? [cohortKey('publication', 'type-harness-model', o.taskType, o.harness, o.model)] : []),
+      ...(o.taskType ? [cohortKey('publication', 'type-harness', o.taskType, o.harness, null)] : []),
+      cohortKey('publication', 'harness', null, o.harness, null),
+    ]
+    for (const key of keys) { const d = c.distributions.get(key); if (d) return d }
   }
+  return generalDistribution(c)
+}
+type ForecastEstimate = Extract<LiveEta, { kind: 'estimate' }> & ForecastMetadata
+function projectDistribution(d: Distribution, o: EstimateOptions, general: Distribution): ForecastEstimate {
+  const unstarted = o.startedAtMs === null || o.blocked
+  const scheduled = Number.isFinite(o.scheduledAtMs) ? Math.max(o.nowMs, o.scheduledAtMs!) : o.nowMs
+  let anchor = unstarted ? (o.blocked ? o.nowMs : scheduled) : o.nowMs
+  const elapsed = unstarted ? 0 : Math.max(0, o.nowMs - o.startedAtMs!)
+  let lower = Math.max(FORECAST_MIN_REMAINING_MS, d.lower - elapsed)
+  let upper = Math.max(lower + FORECAST_MIN_REMAINING_MS, d.upper - elapsed)
+  let center = d.center - elapsed
+  let basis = d.basis, confidence = d.confidence
+  let overrunAnchorAtMs: number | undefined
+  if (!unstarted && elapsed >= d.upper) {
+    // A persisted boundary keeps its hourly phase across restarts/source refreshes. Without
+    // one, derive a reproducible boundary from the original upper-bound crossing.
+    const crossing = o.startedAtMs! + d.upper
+    const boundary = crossing + Math.floor((o.nowMs - crossing) / FORECAST_BUCKET_MS) * FORECAST_BUCKET_MS
+    const saved = o.overrunAnchorAtMs
+    overrunAnchorAtMs = saved !== undefined && Number.isFinite(saved) && saved >= o.startedAtMs! && saved <= o.nowMs
+      ? saved + Math.floor((o.nowMs - saved) / FORECAST_BUCKET_MS) * FORECAST_BUCKET_MS : boundary
+    anchor = overrunAnchorAtMs
+    lower = Math.max(FORECAST_MIN_REMAINING_MS, general.lower)
+    upper = Math.max(lower + FORECAST_MIN_REMAINING_MS, general.upper * Math.min(4, 1 + (anchor - o.startedAtMs!) / d.upper))
+    center = general.center; basis = general.basis; confidence = 'low'
+  }
+  center = Math.min(upper, Math.max(lower, center))
+  return { kind: 'estimate', atMs: anchor + center, plusMinusMs: (upper - lower) / 2,
+    earliestAtMs: anchor + lower, latestAtMs: anchor + upper, basis, confidence,
+    computedAtMs: o.nowMs, methodVersion: FORECAST_METHOD_VERSION, overrun: !unstarted && elapsed >= d.center,
+    conditional: o.blocked ? 'blocked' : null, blockReason: o.blockReason ?? null,
+    assumption: o.blocked ? 'after-resumption' : unstarted ? (Number.isFinite(o.scheduledAtMs) ? 'scheduled-start' : 'if-started-now') : 'started',
+    queueTimeUnknown: !!unstarted && !o.blocked && !Number.isFinite(o.scheduledAtMs),
+    ...(overrunAnchorAtMs !== undefined ? { overrunAnchorAtMs } : {}) }
+}
+
+/** PURE: an approximation always exists, including cold starts and overruns. */
+export function estimateEta(o: EstimateOptions): ForecastEstimate {
+  const c = o.cohorts ?? buildForecastCohorts(o.samples ?? [], o.nowMs)
+  return projectDistribution(selectDistribution(c, o), o, generalDistribution(c))
 }
 
 
@@ -356,7 +493,7 @@ export function trailOf(
   return visits
 }
 
-export interface StageTypical { medianMs: number; p75Ms: number; n: number }
+export interface StageTypical { medianMs: number; p25Ms?: number; p75Ms: number; n: number }
 
 /** PURE: how long pieces typically sit in each stage, from the CLOSED visits of every piece. */
 export function stageTypicals(trails: readonly (readonly StageVisit[])[]): Partial<Record<LiveStage, StageTypical>> {
@@ -364,14 +501,17 @@ export function stageTypicals(trails: readonly (readonly StageVisit[])[]): Parti
   for (const t of trails) {
     for (let i = 0; i < t.length - 1; i++) {
       const v = t[i]!
-      if (v.ms > 0) by.set(v.stage, [...(by.get(v.stage) ?? []), v.ms])
+      if (Number.isFinite(v.ms) && v.ms > 0) {
+        const xs = by.get(v.stage) ?? []
+        xs.push(v.ms); by.set(v.stage, xs)
+      }
     }
   }
   const out: Partial<Record<LiveStage, StageTypical>> = {}
   for (const [stage, xs] of by) {
     if (xs.length < MIN_SAMPLES) continue
     const sorted = [...xs].sort((a, b) => a - b)
-    out[stage] = { medianMs: Math.round(quantile(sorted, 0.5)), p75Ms: Math.round(quantile(sorted, 0.75)), n: sorted.length }
+    out[stage] = { medianMs: Math.round(quantile(sorted, 0.5)), p25Ms: Math.round(quantile(sorted, 0.25)), p75Ms: Math.round(quantile(sorted, 0.75)), n: sorted.length }
   }
   return out
 }
@@ -399,19 +539,32 @@ export function estimateStages(o: {
   const elapsed = nowMs - o.sinceMs
   let stageEta: LiveStageEta
   if (!here) stageEta = { kind: 'none', reason: 'no-history' }
-  else if (elapsed >= here.medianMs || elapsed > here.p75Ms) stageEta = { kind: 'none', reason: 'beyond-range', typicalMs: here.medianMs, n: here.n }
-  else stageEta = { kind: 'estimate', atMs: o.sinceMs + here.medianMs, medianMs: here.medianMs, n: here.n, nextStage: next }
+  else if (here.n < MIN_SAMPLES || elapsed >= stageDistribution(here).upper) stageEta = { kind: 'none', reason: 'beyond-range', typicalMs: here.medianMs, n: here.n }
+  else {
+    const estimate = projectDistribution(stageDistribution(here), {
+      nowMs, startedAtMs: o.sinceMs, harness: null, model: null,
+    }, stageDistribution(here))
+    stageEta = { ...estimate, medianMs: here.medianMs, n: here.n, nextStage: next }
+  }
 
   // Publication: the rest of the current stage plus every stage still ahead; any stage with no
   // history makes the sum unknowable, so the whole-piece estimate answers instead (and says so).
   const ahead: LiveStage[] = []
   for (let s: LiveStage | null = next; s && s !== 'published'; s = nextStageOf(s, null)) ahead.push(s)
   const parts = ahead.map(s => ({ stage: s, medianMs: o.typicals[s]?.medianMs ?? NaN }))
-  if (stageEta.kind === 'estimate' && parts.every(p => Number.isFinite(p.medianMs))) {
+  if (stageEta.kind === 'estimate' && parts.every(p => Number.isFinite(p.medianMs) && o.typicals[p.stage]!.n >= MIN_SAMPLES)) {
     const n = Math.min(here!.n, ...ahead.map(s => o.typicals[s]!.n))
+    const components = [stageDistribution(here!), ...ahead.map(s => stageDistribution(o.typicals[s]!))]
+    const confidence = components.some(c => c.confidence === 'low') ? 'low' : components.some(c => c.confidence === 'medium') ? 'medium' : 'high'
+    const atMs = stageEta.atMs + parts.reduce((a, p) => a + p.medianMs, 0)
     return {
       stageEta,
-      publishEta: { kind: 'estimate', atMs: stageEta.atMs + parts.reduce((a, p) => a + p.medianMs, 0), source: 'stages', n, parts },
+      publishEta: { ...stageEta, kind: 'estimate', atMs, source: 'stages', n, parts,
+        earliestAtMs: stageEta.earliestAtMs! + components.slice(1).reduce((a, c) => a + c.lower, 0),
+        latestAtMs: stageEta.latestAtMs! + components.slice(1).reduce((a, c) => a + c.upper, 0), confidence,
+        basis: { n, scope: 'stages', endpoint: 'stage', statistic: 'sum', harness: '', model: null,
+          exclusions: o.totalEta.kind === 'estimate' ? o.totalEta.basis.exclusions ?? {} : {},
+          medianMs: components.reduce((a, c) => a + c.center, 0) } },
     }
   }
   return { stageEta, publishEta: totalOnly(o.totalEta, stageEta) }
@@ -419,16 +572,52 @@ export function estimateStages(o: {
 
 /**
  * The whole-piece estimate as a publication time. It can never come BEFORE the next stage's own estimate
- * (publication is the end of the line, the next stage a step on it), and a piece already past the typical
- * range of its stage is "slower than usual" for publication too — never a time that is already behind us.
+ * (publication is the end of the line, the next stage a step on it). A missing/overrun stage
+ * estimate never suppresses the whole-piece fallback.
  */
 function totalOnly(eta: LiveEta, stageEta?: LiveStageEta): LivePublishEta {
-  if (stageEta?.kind === 'none' && stageEta.reason === 'beyond-range') return { kind: 'none', reason: 'beyond-range' }
   if (eta.kind === 'estimate') {
     const floor = stageEta?.kind === 'estimate' ? stageEta.atMs : 0
-    return { kind: 'estimate', atMs: Math.max(eta.atMs, floor), source: 'total', n: eta.basis.n, parts: [] }
+    const atMs = Math.max(eta.atMs, floor)
+    return { ...eta, kind: 'estimate', atMs,
+      ...(eta.latestAtMs === undefined ? {} : { latestAtMs: Math.max(eta.latestAtMs, atMs) }),
+      source: eta.overrunAnchorAtMs !== undefined ? 'revised-overrun' : eta.basis.scope === 'bootstrap' ? 'bootstrap' : eta.basis.scope === 'general' ? 'general' : 'total',
+      n: eta.basis.n, parts: [] }
   }
   return { kind: 'none', reason: eta.reason }
+}
+
+function stageDistribution(t: StageTypical): Distribution {
+  const half = Math.max(t.medianMs / 4, FORECAST_MIN_REMAINING_MS)
+  const p25 = t.p25Ms ?? t.medianMs
+  const ratio = (t.p75Ms - p25) / t.medianMs
+  return { center: t.medianMs, lower: Math.max(0, Math.min(p25, t.medianMs - half)),
+    upper: Math.max(t.p75Ms, t.medianMs + half),
+    confidence: t.n >= 8 && ratio < 0.6 ? 'high' : t.n >= 4 && ratio < 1.2 ? 'medium' : 'low',
+    basis: { n: t.n, scope: 'stages', endpoint: 'stage', statistic: 'median', harness: '', model: null, medianMs: t.medianMs, exclusions: {} } }
+}
+
+/** One publication projection, reusable by Live, Calendar and dispatch snapshot callers. */
+export function resolvePieceForecast(o: EstimateOptions & {
+  stage: LiveStage; origin: LiveStage | null; sinceMs: number | null
+  typicals: Partial<Record<LiveStage, StageTypical>>
+}): { eta: LiveEta; stageEta: LiveStageEta; publishEta: LivePublishEta } {
+  if (o.stage === 'published' || o.stage === 'completed') {
+    return { eta: { kind: 'none', reason: 'not-started' }, stageEta: { kind: 'none', reason: 'final' }, publishEta: { kind: 'none', reason: 'final' } }
+  }
+  const total = estimateEta({ ...o, startedAtMs: o.stage === 'queue' ? null : o.startedAtMs, blocked: o.stage === 'blocked' })
+  if (o.stage === 'queue' || o.startedAtMs === null) {
+    return { eta: total, stageEta: { kind: 'none', reason: 'not-started' }, publishEta: totalOnly(total) }
+  }
+  const result = estimateStages({ ...o, totalEta: total })
+  const p = result.publishEta
+  // Blocking has no known resumption date. Do not subtract the blocked wait or compose a
+  // running stage across it; keep the conditional whole-piece interval instead.
+  if (o.stage === 'blocked') return { eta: total, stageEta: result.stageEta, publishEta: totalOnly(total) }
+  if (p.kind === 'estimate' && p.source === 'stages') {
+    return { ...result, eta: { ...total, ...p, plusMinusMs: (p.latestAtMs! - p.earliestAtMs!) / 2 } }
+  }
+  return { ...result, eta: p.kind === 'estimate' ? { ...total, ...p } : total }
 }
 
 const dominant = (xs: readonly string[]): string | null => {
@@ -474,7 +663,7 @@ const ms = (iso: string | undefined | null): number | null => {
   return Number.isFinite(n) ? n : null
 }
 
-function piecesOf(d: TaskDetail, roleOf?: StoredRoleOf): Piece[] {
+function piecesOf(d: TaskDetail, roleOf?: StoredRoleOf, includeMembers = false): Piece[] {
   const sessionsOf = (subtaskId: string | null): PieceSession[] =>
     d.sessions
       .filter(s => (s.subtaskId ?? null) === subtaskId && !s.historical)
@@ -487,7 +676,7 @@ function piecesOf(d: TaskDetail, roleOf?: StoredRoleOf): Piece[] {
         ...(s.activity ? { activity: s.activity } : {}),
       }))
   const timesOf = (id: string | null) => d.subtaskRollups.find(r => r.id === id)?.times
-  const subs = d.subtasks.filter(s => !s.parentGroupId)
+  const subs = includeMembers ? d.subtasks : d.subtasks.filter(s => !s.parentGroupId)
   const out: Piece[] = subs.map(s => ({
     task: d.task, sub: s, status: s.status, updatedAt: s.updatedAt,
     ...(s.deliveredAt ? { deliveredAt: s.deliveredAt } : {}),
@@ -541,6 +730,8 @@ export interface LiveDeliveryFacts {
   ci?: unknown
   /** When the release that shipped it was published (ISO) — the Publicado window starts here when the record says so. */
   publishedAt?: string
+  queueStarted?: { at: string }
+  history?: readonly { to: string; at: string }[]
   step?: number
   /** FILA.PRIORIDADE — the leader's `nao`/`agendar` and the open question (see `delivery/fila-proximo.ts`). */
   queueHold?: { kind: 'nao' | 'agendar'; reason: string; at: string; actor: string; until?: string }
@@ -642,6 +833,51 @@ export function legacyReviewShaPieces(details: readonly TaskDetail[], events: re
   return out
 }
 
+export interface ForecastHistory { cohorts: ForecastCohorts; typicals: Partial<Record<LiveStage, StageTypical>> }
+
+/** PURE: publication endpoints outrank session work spans. Never turn a handback into publication. */
+export function prepareForecastHistory(o: {
+  details: readonly TaskDetail[]; events: readonly TaskEvent[]; nowMs: number
+  deliveries?: ReadonlyMap<string, LiveDeliveryFacts>; statusLabel?: (id: string) => string | undefined
+}): ForecastHistory {
+  function* samples(): Generator<Sample> {
+    for (const d of o.details) for (const p of piecesOf(d, undefined, true)) {
+      const id = p.sub?.id ?? p.task.id
+      const rec = o.deliveries?.get(id)
+      if (p.status !== 'done' && rec?.phase !== 'publicado' && p.status !== 'abandoned') continue
+      const hasTerminalChild = (s: Subtask) => {
+        const child = o.deliveries?.get(s.id)
+        const times = d.subtaskRollups.find(r => r.id === s.id)?.times
+        return (s.status === 'done' || child?.phase === 'publicado') &&
+          ((times?.source === 'sessions' && ms(times.startedAt) !== null && ms(times.completedAt) !== null) ||
+            (child?.phase === 'publicado' && ms(child.publishedAt) !== null &&
+              (child.history?.some(h => h.to === 'executando') || child.queueStarted)))
+      }
+      const rollup = p.sub ? d.subtasks.some(s => s.parentGroupId === p.sub!.id && hasTerminalChild(s))
+        : d.subtasks.some(hasTerminalChild)
+      const sessionStart = p.times?.source === 'sessions' ? ms(p.times.startedAt) : null
+      const firstRun = rec?.history?.find(h => h.to === 'executando')
+      const published = rec?.phase === 'publicado' ? ms(rec.publishedAt) : null
+      const start = published !== null ? ms(firstRun?.at) ?? ms(rec?.queueStarted?.at) ?? sessionStart : sessionStart
+      const end = published ?? (p.times?.source === 'sessions' ? ms(p.times.completedAt) : null)
+      const duration = start !== null && end !== null ? end - start : NaN
+      yield { key: p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id,
+        harness: dominant(p.sessions.map(s => s.harness)) ?? '',
+        model: dominant(p.sessions.map(s => s.model).filter((m): m is string => !!m)),
+        taskType: p.task.type ?? null, endpoint: published !== null ? 'publication' : 'work-span',
+        durationMs: duration, startedAtMs: start ?? NaN, completedAtMs: end ?? NaN,
+        abandoned: p.status === 'abandoned', rollup,
+        recovered: p.times?.source !== 'sessions' && !firstRun && !rec?.queueStarted,
+        blockReasons: rec?.block ? [rec.block.reason] : [],
+      }
+    }
+  }
+  const cohorts = buildForecastCohorts(samples(), o.nowMs)
+  const { eventsBySubject } = indexEvents(o.details, o.events)
+  const typicals = stageTypicals(cohorts.samples.map(s => trailOf(eventsBySubject.get(s.key!) ?? [], o.nowMs, o.statusLabel)))
+  return { cohorts, typicals }
+}
+
 /** PURE: details of the tasks → what the line shows now, plus the history the ETA rests on. */
 export function buildLive(o: {
   details: readonly TaskDetail[]
@@ -662,19 +898,14 @@ export function buildLive(o: {
   uncheckedWhy?: ReadonlyMap<string, 'no-repos' | 'gh' | 'budget'>
   /** The stored role of a session: a leader or worker is never taken for the QA by its name. */
   roleOf?: StoredRoleOf
+  /** Cached by liveReplyForBook's source revision. */
+  forecastHistory?: ForecastHistory
+  /** Persisted cache anchors loaded by the host/background owner. */
+  overrunAnchors?: ReadonlyMap<string, number>
 }): LiveReply {
-  const samples: Sample[] = []
   const candidates: Piece[] = []
   for (const d of o.details) {
     for (const p of piecesOf(d, o.roleOf)) {
-      const dur = p.times?.source === 'sessions' ? p.times.durationMs : null
-      if (p.status === 'done' && dur && dur > 0 && p.sessions.length > 0) {
-        samples.push({
-          harness: dominant(p.sessions.map(s => s.harness)) ?? p.sessions[0]!.harness,
-          model: dominant(p.sessions.map(s => s.model).filter((m): m is string => !!m)),
-          durationMs: dur,
-        })
-      }
       candidates.push(p)
     }
   }
@@ -682,7 +913,7 @@ export function buildLive(o: {
   const { lastBySubject, eventsBySubject } = indexEvents(o.details, o.events)
   const trails = new Map<string, StageVisit[]>()
   for (const [subject, list] of eventsBySubject) trails.set(subject, trailOf(list, o.nowMs, o.statusLabel))
-  const typicals = stageTypicals([...trails.values()])
+  const { cohorts, typicals } = o.forecastHistory ?? prepareForecastHistory(o)
 
   const deliveries: LiveDelivery[] = []
   const history: LiveDelivery[] = []
@@ -789,8 +1020,6 @@ export function buildLive(o: {
     const harness = dominant(liveSessions.concat(p.sessions).map(s => s.harness))
     const model = dominant(liveSessions.concat(p.sessions).map(s => s.model).filter((m): m is string => !!m))
     const ev = lastBySubject.get(subject)
-    const eta = stage === 'published' || stage === 'completed' ? { kind: 'none', reason: 'not-started' } as const
-      : estimateEta({ nowMs: o.nowMs, startedAtMs, harness, model, samples })
     // THE STEP inside the stage: what a worker/the flow REPORTED (`step` events), or what the facts show (an edit, a test
     // run, a commit, the record's gates) — the larger of the two. Nothing observable and nothing reported = null: no line.
     const stepInfo = stage === 'published' || stage === 'completed' || stage === 'queue' || stage === 'blocked' ? null : (() => {
@@ -803,7 +1032,13 @@ export function buildLive(o: {
       })
       return mergeStep(reported, derived)
     })()
-    const { stageEta, publishEta } = estimateStages({ stage, origin: originStage, sinceMs: stageSinceMs, nowMs: o.nowMs, typicals, totalEta: eta })
+    const { eta, stageEta, publishEta } = resolvePieceForecast({
+      stage, origin: originStage, sinceMs: stageSinceMs, nowMs: o.nowMs, typicals,
+      startedAtMs: stage === 'queue' ? null : startedAtMs, harness, model, taskType: p.task.type ?? null, cohorts,
+      scheduledAtMs: rec?.queueHold?.kind === 'agendar' ? ms(rec.queueHold.until) : null,
+      blockReason: rec?.block?.text || rec?.block?.reason || p.blockedReason || (p.dependsOn > 0 ? 'dependencia' : null),
+      overrunAnchorAtMs: o.overrunAnchors?.get(subject),
+    })
     ;(isOld ? oldReviews : oldPublished ? history : deliveries).push({
       key: subject,
       taskId: p.task.id, taskTitle: p.task.title,
@@ -858,7 +1093,7 @@ export function buildLive(o: {
     oldReviews,
     cutByTask,
     historyTotal: history.length, oldReviewsTotal: oldReviews.length,
-    samples: samples.length, sessionTasks,
+    samples: cohorts.sampleCount, sessionTasks,
     hidden: hidden.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, HIDDEN_CAP),
   }
 }

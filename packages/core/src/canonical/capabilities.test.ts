@@ -368,7 +368,7 @@ describe('LEGACY_FALSE_NOTES — the classification of every legacy false', () =
     // Activity that it does not parse remains a legacy false, classified below.
     'opencode.agents': 'not_supported', 'opencode.gitLines': 'not_supported',
     'opencode.dynamicWorkflows': 'not_supported', 'opencode.mcpServers': 'not_supported',
-    'opencode.tools': 'unknown', 'opencode.compaction': 'unknown',
+    'opencode.compaction': 'unknown',
     'opencode.skills': 'unknown',
   }
 
@@ -400,7 +400,6 @@ describe('CAPABILITY_REFINEMENTS — what P2 may change, and nothing else', () =
   // TargetContent payloads (A3.5 fixture); the replay emits request-time edit deltas, as P2 §3 says.
   const UPGRADED_FALSES = [
     'antigravity.agents', 'antigravity.gitLines', 'kimi.agents',
-    'opencode.tools',
   ]
 
   test('every cell not refined is exactly the boolean migration', () => {
