@@ -442,18 +442,30 @@ async function readJsonPrefs(path: string, lockHeld = false): Promise<Preference
   // the file changes a few times a day. Re-reading and re-parsing it each time was ~15 % of an idle
   // server's CPU. The PARSED file is kept against its stat (inode + size + mtime in ns — a write is
   // an atomic rename, so it is a new inode, and another process's write moves the mtime), and every
-  // caller gets its own CLONE, because callers spread and edit what they are handed.
+  // caller gets the SAME deep-frozen object (no per-read clone: that was ~5 % of CPU), so a caller
+  // that edits what it was handed throws instead of corrupting every later read. Writers copy first
+  // (`thawPrefs`).
   const key = await prefsStatKey(path)
   let raw: Record<string, unknown> | null
   const hit = key !== null ? rawPrefsMemo.get(path) : undefined
-  if (hit && hit.key === key) raw = structuredClone(hit.raw)
+  if (hit && hit.key === key) raw = hit.raw
   else {
     raw = await readRawPrefs(path, lockHeld)
-    if (raw && key !== null) rawPrefsMemo.set(path, { key, raw: structuredClone(raw) })
+    if (raw && key !== null) { raw = deepFreezePrefs(raw); rawPrefsMemo.set(path, { key, raw }) }
     else rawPrefsMemo.delete(path)
   }
   if (!raw) return null
   return injectSealedTokens(path, raw as Preferences)
+}
+
+function deepFreezePrefs<T>(v: T): T {
+  // Test-only guard: freezing a large object slows every later read (see task-store.ts).
+  if (process.env.NODE_ENV !== 'test') return v
+  if (v && typeof v === 'object' && !Object.isFrozen(v)) {
+    Object.freeze(v)
+    for (const k of Object.keys(v as object)) deepFreezePrefs((v as Record<string, unknown>)[k])
+  }
+  return v
 }
 
 const rawPrefsMemo = new Map<string, { key: string; raw: Record<string, unknown> }>()

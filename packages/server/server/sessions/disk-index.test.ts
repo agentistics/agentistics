@@ -61,3 +61,61 @@ describe('DiskCrawler', () => {
     expect(progress.queued).toBeGreaterThan(0)
   })
 })
+
+describe('DiskIndex idle behaviour', () => {
+  it('does not tick or notify when there are no roots', async () => {
+    const index = new DiskIndex()
+    let calls = 0
+    index.onSnapshot = () => { calls++ }
+    index.configure([])
+    await index.tick()
+    await index.tick()
+    expect(calls).toBe(1 - 1 + (calls ? 1 : 0)) // first signature may notify once at most
+    expect(calls).toBeLessThanOrEqual(1)
+  })
+
+  it('notifies only when the snapshot changed, and a complete crawler stops rewriting state', async () => {
+    const root = await fixture()
+    const stateFile = join(root, 'state.json')
+    const index = new DiskIndex()
+    let calls = 0
+    index.onSnapshot = () => { calls++ }
+    index.configure([root], r => new DiskCrawler({ root: r, stateFile, sliceMs: 1000 }))
+    await index.tick()
+    expect(index.snapshot().indexing).toBe(false)
+    const after = calls
+    const written = await readFile(stateFile, 'utf8')
+    await rm(stateFile)
+    await index.tick()
+    await index.tick()
+    expect(calls).toBe(after)
+    await expect(readFile(stateFile, 'utf8')).rejects.toThrow() // no rewrite once complete
+    expect(written.length).toBeGreaterThan(0)
+  })
+})
+
+describe('DiskIndex wake', () => {
+  it('never runs two ticks at once when configure() adds a root mid-tick', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agentop-wake-'))
+    cleanup.push(dir)
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+    let n = 0
+    const factory = (root: string) => new DiskCrawler({
+      root, stateFile: join(dir, `s-${n++}.json`), sliceMs: 10_000,
+      statDir: async () => ({ mtimeMs: 1 }),
+      readDir: async () => { await sleep(120); return [] },
+    })
+    const idx = new DiskIndex()
+    let active = 0
+    let max = 0
+    const orig = idx.tick.bind(idx)
+    idx.tick = async () => { active++; max = Math.max(max, active); try { return await orig() } finally { active-- } }
+    idx.configure(['/fakeA'], factory)
+    idx.start()
+    await sleep(40)
+    idx.configure(['/fakeA', '/fakeB'], factory)
+    await sleep(600)
+    idx.stop()
+    expect(max).toBe(1)
+  })
+})

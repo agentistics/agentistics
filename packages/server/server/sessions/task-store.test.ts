@@ -610,3 +610,33 @@ describe('setRanks and the activity log', () => {
     })
   })
 })
+
+describe('createTaskStore read memo', () => {
+  it('serves the same frozen book until the file changes, then re-reads', async () => {
+    const { file, s } = await store()
+    await s.upsertTask(task('a'))
+    const first = await s.read()
+    expect(await s.read()).toBe(first)
+    expect(() => { (first.tasks as Task[]).push(task('x')) }).toThrow()
+    await s.upsertTask(task('b'))
+    const second = await s.read()
+    expect(second).not.toBe(first)
+    expect(second.tasks.map(t => t.id).sort()).toEqual(['a', 'b'])
+    // A write from ANOTHER process (same path, new bytes) is seen through the stamp.
+    const other = createTaskStore(file)
+    await other.upsertTask(task('c'))
+    expect((await s.read()).tasks.map(t => t.id).sort()).toEqual(['a', 'b', 'c'])
+  })
+
+  it('shares one parse between instances of the same file, and any write invalidates it', async () => {
+    const { file, s } = await store()
+    await s.upsertTask(task('a'))
+    const other = createTaskStore(file)
+    const first = await s.read()
+    expect(await other.read()).toBe(first)
+    await other.upsertTask(task('b'))
+    const after = await s.read()
+    expect(after).not.toBe(first)
+    expect(after.tasks.map(t => t.id).sort()).toEqual(['a', 'b'])
+  })
+})
