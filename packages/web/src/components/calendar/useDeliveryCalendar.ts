@@ -38,8 +38,7 @@ export function useDeliveryCalendar(): { reply: CalendarReply | null; error: Rou
     } catch (reason) {
       if (!alive.current || mine !== generation.current || controller.signal.aborted) return
       const routeError = reason as RouteError
-      if (routeError.kind === 'timeout') setSlow(true)
-      else setError(routeError)
+      setError(routeError)
       attempt.current++
     }
   }, [])

@@ -27,14 +27,13 @@ test('a fill loader never fixes itself to the viewport', () => {
   expect(html).not.toContain('position:fixed')
 })
 
-test('route panels provide a positioned flex fill for both sidebar widths', async () => {
+test('route wrappers do not intercept the full-panel loader containing block', async () => {
   for (const file of ['pages/TasksPage.tsx', 'pages/DeliveryCalendarPage.tsx']) {
     const source = await Bun.file(new URL(`../${file}`, import.meta.url)).text()
-    expect(source).toContain('position: \'relative\'')
-    expect(source).toContain('flex: 1')
-    expect(source).toContain('minHeight: 0')
+    const wrapper = source.match(/data-route-panel="(?:live|calendar)" style=\{\{([^}]+)\}\}/)?.[1]
+    expect(wrapper).toBeDefined()
+    expect(wrapper).not.toContain('position:')
   }
-  expect(248).toBeGreaterThan(64)
 })
 
 test('fixed loading surfaces all use the shared centering container', async () => {

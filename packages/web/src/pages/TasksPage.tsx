@@ -275,7 +275,7 @@ function TaskList() {
   // First data not here yet: the shared screen loader and NOTHING else — no toolbar, no empty or
   // "every group is hidden" state, which would claim something about data that has not arrived.
   if (rows === null) {
-    return <CenteredLoader size={40} label={lang === 'pt' ? 'Carregando' : 'Loading'} testId="agentask-loading" />
+    return <CenteredLoader size={40} label={lang === 'pt' ? 'Carregando' : 'Loading'} testId="agentask-loading" placement="fill" />
   }
 
   return (
@@ -441,7 +441,7 @@ function TaskList() {
 
       {view === 'overview' && overview && <BoardOverviewView o={overview} statuses={statuses} />}
 
-      {view === 'live' && <div data-route-panel="live" style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><LiveDelivery lang={lang} /></div>}
+      {view === 'live' && <div data-route-panel="live" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><LiveDelivery lang={lang} /></div>}
 
       {view !== 'overview' && view !== 'live' && rows !== null && shown.length === 0 && !searchPending && (
         <EmptyNotice error={rows.length > 0 ? null : error} />
