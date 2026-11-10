@@ -8,6 +8,7 @@ import { loadOpencodeAny } from './opencode'
 import { getOpencodeReadIssue, setOpencodeReadIssue } from './opencode-status'
 import { createOpencodeV2Client, generationOfTables, loadOpencodeV2, opencodeStateDirFor, parseServiceRecord, rowsOfV2Messages, type Fetch } from './opencode-v2'
 import { clearAdapterMemos } from './file-memo'
+import { parseOpencodeSession } from './opencode-parse'
 import type { HealthIssue } from '@agentistics/core'
 import { analyzeOpencodeStatus } from '../health'
 
@@ -15,6 +16,14 @@ const FX = join(import.meta.dir, 'fixtures', 'opencode-v2.2.5')
 const read = (f: string) => JSON.parse(readFileSync(join(FX, f), 'utf8'))
 const sessionsBody = read('sessions.json'), messagesBody = read('messages-ses_e53f48c24ffeMy9oUiacfDl4ld.json')
 const service = { url: 'http://127.0.0.1:1', password: 'pw' }
+
+test('2.x keeps declared message cost through normalization to the shared parser', () => {
+  const at = Date.parse('2026-11-01T00:00:00Z')
+  const { messages, parts } = rowsOfV2Messages('s', [{ id: 'm', type: 'assistant', time: { created: at, completed: at + 1000 }, model: { id: 'glm-5.3', providerID: 'opencode-go' }, tokens: { input: 10, output: 2 }, cost: 0.25 }])
+  const s = parseOpencodeSession({ id: 's', directory: '/work', title: 'Cost', time_created: at, time_updated: at + 1000 }, messages, parts)!
+  expect(sessionCostUSD(s)).toBe(0.25)
+  expect(unpricedTokens(s)).toBe(0)
+})
 
 const dirs: string[] = []
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); clearAdapterMemos(); setOpencodeReadIssue(null) })

@@ -22,6 +22,20 @@ const sessions: SessionMeta[] = [
 const data: AppData = { statsCache: emptyStatsCache(), sessions, allSessions: [], projects: [], harnesses: ['claude', 'codex', 'opencode'] }
 const run = (h: SurfaceHarnessId[]) => computeDerivedStats(data, { ...base, harnesses: h })!
 
+test('declared OpenCode cost is preserved in totals and per-model figures', () => {
+  const model = 'opencode-go/glm-5.3'
+  const declared = { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 1.25, costSource: 'harness' as const }
+  const rows = [s('go-1', 'opencode', '2026-11-02', 1, 1, { model, model_usage: { [model]: declared } }), s('go-2', 'opencode', '2026-11-03', 1, 1, { model, model_usage: { [model]: declared } })]
+  const d = computeDerivedStats({ ...data, sessions: rows }, { ...base, harnesses: ['opencode'] })!
+  expect(d.totalCostUSD).toBe(2.5)
+  expect(d.modelUsage[model]!.costUSD).toBe(2.5)
+  expect(d.unpricedTokens).toBe(0)
+  const unknown = { ...declared, costUSD: 0, costSource: undefined }
+  const partial = computeDerivedStats({ ...data, sessions: [...rows, s('go-unknown', 'opencode', '2026-11-04', 1, 1, { model, model_usage: { [model]: unknown } })] }, { ...base, harnesses: ['opencode'] })!
+  expect(partial.totalCostUSD).toBe(2.5)
+  expect(partial.unpricedTokens).toBe(15)
+})
+
 describe('harness filter: additive figures (union = sum of parts)', () => {
   test('messages, sessions, tool calls and tokens add up across harness filters', () => {
     const codex = run(['codex']), open = run(['opencode']), both = run(['codex', 'opencode'])

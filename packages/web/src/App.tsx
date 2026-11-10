@@ -45,7 +45,7 @@ import type { TagDef } from './lib/tagMatch'
 import { canCreateTagFromFilters, filtersToTagDraft } from './lib/filtersToTag'
 import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison, TeamConfig } from '@agentistics/core'
 import type { Lang, Theme } from '@agentistics/core'
-import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, fmt, totalTokens, totalTokensExplained, isNayCwd } from '@agentistics/core'
+import { costCellText, totalTokens as sumAllTokens, isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, fmt, totalTokens, totalTokensExplained, isNayCwd } from '@agentistics/core'
 import { StatCard } from './components/StatCard'
 import { StreakBreakdownButton } from './components/StreakBreakdownButton'
 import { ActivityHeatmap } from './components/ActivityHeatmap'
@@ -2583,6 +2583,9 @@ export default function AppLayout() {
   const presenceScopeNote = derived?.presenceScope.isPolicyDefault
     ? (lang === 'pt' ? 'somente membros online (política do central)' : 'online members only (central policy)')
     : null
+  const headerCostText = headerPlanBasis || !derived
+    ? fmtCost(headerCostUSD, currency, brlRate)
+    : costCellText(headerCostUSD, derived.unpricedTokens, sumAllTokens(derived.tokenTotals), lang === 'pt' ? 'pt' : 'en', usd => fmtCost(usd, currency, brlRate))
   const headerCostTitle = [
     headerPlanBasis
       ? [
@@ -3562,7 +3565,7 @@ export default function AppLayout() {
         </span>
         <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{derived.totalSessions.toLocaleString()}</strong> {lang === 'pt' ? (derived.totalSessions === 1 ? 'sessão' : 'sessões') : (derived.totalSessions === 1 ? 'session' : 'sessions')}</span>
         <span style={{ opacity: 0.35 }}>·</span>
-        <span style={{ color: 'var(--anthropic-orange)', fontWeight: 600 }} title={headerCostTitle}>{fmtCost(headerCostUSD, currency, brlRate)}</span>
+        <span style={{ color: 'var(--anthropic-orange)', fontWeight: 600 }} title={headerCostTitle}>{headerCostText}</span>
         <span style={{ opacity: 0.35 }}>·</span>
         <span title={headerTokensTitle}><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{fmt(headerTokens)}</strong> tok</span>
       </span>
@@ -4286,7 +4289,7 @@ export default function AppLayout() {
               >
                 <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{derived.totalSessions.toLocaleString()}</strong> {lang === 'pt' ? 'sessões' : 'sessions'}</span>
                 <span style={{ opacity: 0.35 }}>·</span>
-                <span style={{ color: 'var(--anthropic-orange)', fontWeight: 600 }} title={headerCostTitle}>{fmtCost(headerCostUSD, currency, brlRate)}</span>
+                <span style={{ color: 'var(--anthropic-orange)', fontWeight: 600 }} title={headerCostTitle}>{headerCostText}</span>
                 <span style={{ opacity: 0.35 }}>·</span>
                 <span title={headerTokensTitle}><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{fmt(headerTokens)}</strong> tok</span>
                 <ChevronDown size={16} style={{ marginLeft: 'auto', opacity: 0.6, transform: fleetOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
@@ -4312,7 +4315,7 @@ export default function AppLayout() {
                       </span>
                       <span style={val}>{derived.totalSessions.toLocaleString()}</span>
                       <span style={{ opacity: 0.35 }}>·</span>
-                      <span style={{ color: 'var(--anthropic-orange)', fontWeight: 600 }}>{fmtCost(headerCostUSD, currency, brlRate)}</span>
+                      <span style={{ color: 'var(--anthropic-orange)', fontWeight: 600 }}>{headerCostText}</span>
                       <span style={{ opacity: 0.35 }}>·</span>
                       <span style={val}>{fmt(headerTokens)}</span> tok
                     </span>

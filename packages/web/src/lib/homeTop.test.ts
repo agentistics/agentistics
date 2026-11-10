@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { SessionMeta } from '@agentistics/core'
 import {
-  hourProfile, lastActiveDay, rankHarnesses, rankModels, rankProjects, rankSessions, rankTools,
+  costState, hourProfile, lastActiveDay, rankHarnesses, rankModels, rankProjects, rankSessions, rankTools,
   sessionDayLocal, sessionsOnDay, shareOf,
 } from './homeTop'
 
@@ -131,6 +131,24 @@ describe('shares', () => {
   it('are zero rather than NaN when the board is empty', () => {
     const board = rankTools([])
     expect(board.total).toBe(0)
-    expect(shareOf({ key: 'x', label: 'x', cost: 0, tokens: 0, sessions: 0, calls: 0 }, board, 'calls')).toBe(0)
+    expect(shareOf({ key: 'x', label: 'x', cost: 0, tokens: 0, sessions: 0, calls: 0, unpriced: 0 }, board, 'calls')).toBe(0)
+  })
+})
+
+describe('cost cells of an unpriced row', () => {
+  const ghost = s({ session_id: 'g', model: 'some-unknown-router/model-x' })
+  it('a row whose usage is entirely unpriced is unknown, never a 0', () => {
+    for (const board of [rankSessions([ghost], 'cost', label), rankModels([ghost], 'cost'), rankHarnesses([ghost], 'cost')]) {
+      expect(costState(board.entries[0]!)).toBe('unknown')
+    }
+  })
+  it('a partly priced row keeps its priced figure and is flagged partial', () => {
+    const priced = s({ session_id: 'p' })
+    const e = rankHarnesses([ghost, priced], 'cost').entries[0]!
+    expect(costState(e)).toBe('partial')
+    expect(e.cost).toBeGreaterThan(0)
+  })
+  it('a fully priced row is priced', () => {
+    expect(costState(rankSessions([s()], 'cost', label).entries[0]!)).toBe('priced')
   })
 })

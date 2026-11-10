@@ -19,6 +19,40 @@ const response = (id = 'msg_a', extra: object = {}, offset = 1000) => message(id
   tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 200, write: 30 } }, ...extra,
 }, offset)
 
+test('declared OpenCode cost survives all live consumers, without table pricing or double counting', () => {
+  const go = response('go', { providerID: 'opencode-go', modelID: 'glm-5.3', cost: 1.25 })
+  const s = parseOpencodeSession(session, [user, go, go])!
+  expect(sessionCostUSD(s)).toBe(1.25)
+  expect(unpricedTokens(s)).toBe(0)
+  expect(s.model_usage!['opencode-go/glm-5.3']!.costSource).toBe('harness')
+  expect(toConversation(s).costUSD).toBe(1.25)
+})
+
+test('tool parts are counted once per request, errors included, text/step parts ignored', () => {
+  const part = (id: string, data: object) => ({ id, message_id: 'msg_a', session_id: session.id, time_created: at + 1500, data: JSON.stringify(data) })
+  const s = parseOpencodeSession(session, [user, response()], [
+    part('p1', { type: 'tool', tool: 'bash', state: { status: 'completed' } }),
+    part('p2', { type: 'tool', tool: 'bash', state: { status: 'error' } }),
+    part('p3', { type: 'tool', tool: 'read', state: { status: 'running' } }),
+    part('p4', { type: 'text', text: 'hi' }),
+    part('p5', { type: 'step-finish' }),
+  ])!
+  expect(Object.values(s.tool_counts).reduce((a, b) => a + b, 0)).toBe(3)
+  expect(s.tool_errors).toBe(1)
+  expect(HARNESS_CAPABILITIES.opencode.tools).toBe(true)
+})
+
+test('placeholder zero usage is unavailable even when the completed message has a model', () => {
+  const s = parseOpencodeSession(session, [user, response('zero', {
+    finish: undefined, time: { completed: at + 2000 }, providerID: 'opencode-go', modelID: 'glm-5.3',
+    cost: 0, tokens: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+  })])!
+  expect(s.tokens_unavailable).toBe(true)
+  expect(s.model).toBe('opencode-go/glm-5.3')
+  expect(sessionCostUSD(s)).toBeNull()
+  expect(toConversation(s).costUSD).toBeUndefined()
+})
+
 /** Minimal real columns from the read-only OpenCode 1.17.9 schema dump. */
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'opencode-metrics-')); dirs.push(dir)
@@ -140,5 +174,17 @@ test('a route with no stated window keeps its context level but draws no gauge',
     const local = toConversation({ ...s, model: 'ollama/qwen-coder', context_window: undefined })
     expect(local.contextTokens).toBe(330); expect(local.contextWindow).toBeUndefined()
     expect(c.contextTokens).toBe(330)
+  } finally { db.close() }
+})
+
+test('tool parts in the SQLite store reach the session (the loader used to select text parts only)', () => {
+  const { path, db } = fixture()
+  try {
+    const tool = (id: string, status: string) => db.query('INSERT INTO part VALUES (?,?,?,?,?,?)')
+      .run(id, 'msg_a', session.id, at + 1500, at + 1500, JSON.stringify({ type: 'tool', tool: 'bash', state: { status, output: 'x'.repeat(1000) } }))
+    tool('prt_t1', 'completed'); tool('prt_t2', 'error')
+    const [s] = loadOpencodeDb(path, {})
+    expect(Object.values(s!.tool_counts).reduce((a, b) => a + b, 0)).toBe(2)
+    expect(s!.tool_errors).toBe(1)
   } finally { db.close() }
 })

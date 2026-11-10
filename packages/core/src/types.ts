@@ -31,6 +31,10 @@ export interface ModelUsage {
   cacheCreation5mInputTokens?: number
   webSearchRequests: number
   costUSD: number
+  /** A declared cost, or an aggregate containing declared and table-priced costs. */
+  costSource?: 'harness' | 'mixed'
+  /** Unpriced part of an aggregate containing declared costs for this model. */
+  unpricedTokens?: number
 }
 
 export interface LongestSession {
@@ -173,7 +177,7 @@ export const HARNESS_CAPABILITIES: Record<SurfaceHarnessId, HarnessCapabilities>
   kimi: { tokens: true, cost: true, model: true, tools: true, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true, contextWindow: true, compaction: false, skills: false, mcpServers: true },
   // OpenCode message usage feeds the SQLite adapter. Prices use the shared model table;
   // unknown routes stay unpriced. The last response's input side supplies the context gauge.
-  opencode: { tokens: true, cost: true, model: true, tools: false, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true, contextWindow: true, compaction: false, skills: false, mcpServers: false },
+  opencode: { tokens: true, cost: true, model: true, tools: true, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true, contextWindow: true, compaction: false, skills: false, mcpServers: false },
   // Hermes (Nous Research): DECLARED only. No adapter reads its store yet and no live probe has run, so
   // nothing is claimed — every metric is false until a recorded run proves otherwise.
   hermes: { tokens: false, cost: false, model: false, tools: false, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: false, contextWindow: false, compaction: false, skills: false, mcpServers: false },
@@ -1302,13 +1306,27 @@ export function sessionCostUSD(
   // Only models the table knows are priced. A session whose every model is unknown has NO cost (null) —
   // not a guess and not a confident zero; a mixed one is the sum of what could be priced (the caller
   // reports `unpricedTokens` so the total can say it is a floor).
-  const priced = entries.filter(([model]) => !isUnpricedModel(model))
+  const priced = entries.filter(([model, u]) => u.costSource !== undefined || !isUnpricedModel(model))
   if (priced.length === 0) return null
-  return priced.reduce((sum, [model, u]) => sum + calcCost(u, model), 0)
+  return priced.reduce((sum, [model, u]) => sum + (modelCostUSD(u, model) ?? 0), 0)
 }
 
 const usageTokens = (u: ModelUsage): number =>
   u.inputTokens + u.outputTokens + u.cacheReadInputTokens + u.cacheCreationInputTokens
+
+/** Preserve declared spend before a caller adds a source's token counters to an accumulator. */
+export function accumulateUsageCost(target: ModelUsage, source: ModelUsage, model: string): void {
+  if (target.costSource === undefined && source.costSource === undefined) return
+  const empty = usageTokens(target) === 0 && target.costUSD === 0
+  const same = empty || target.costSource === source.costSource
+  const missing = (u: ModelUsage) => u.costSource !== undefined ? u.unpricedTokens ?? 0 : isUnpricedModel(model) ? usageTokens(u) : 0
+  target.unpricedTokens = missing(target) + missing(source)
+  target.costUSD = calcCost(target, model) + calcCost(source, model)
+  target.costSource = same ? source.costSource : 'mixed'
+}
+
+export const HARNESS_COST_LABEL = { en: 'declared by the harness', pt: 'declarado pelo harness' } as const
+export const USAGE_NOT_REPORTED = { en: 'usage not reported', pt: 'uso não informado' } as const
 
 /**
  * Tokens that belong to models with no price — what a total must admit it did not price. Takes a session
@@ -1319,7 +1337,7 @@ export function unpricedTokens(
   fallbackModel?: string,
 ): number {
   if (Array.isArray(from)) {
-    return (from as ReadonlyArray<readonly [string, ModelUsage]>).reduce((sum, [model, u]) => sum + (isUnpricedModel(model) ? usageTokens(u) : 0), 0)
+    return (from as ReadonlyArray<readonly [string, ModelUsage]>).reduce((sum, [model, u]) => sum + (u.costSource !== undefined ? u.unpricedTokens ?? 0 : isUnpricedModel(model) ? usageTokens(u) : 0), 0)
   }
   const sess = from as Parameters<typeof sessionModelUsage>[0]
   const entries = sessionModelUsage(sess, fallbackModel)
@@ -1327,7 +1345,7 @@ export function unpricedTokens(
   if (entries.length === 0) {
     return (sess.input_tokens ?? 0) + (sess.output_tokens ?? 0) + (sess.cache_read_input_tokens ?? 0) + (sess.cache_creation_input_tokens ?? 0)
   }
-  return entries.reduce((sum, [model, u]) => sum + (isUnpricedModel(model) ? usageTokens(u) : 0), 0)
+  return entries.reduce((sum, [model, u]) => sum + (u.costSource !== undefined ? u.unpricedTokens ?? 0 : isUnpricedModel(model) ? usageTokens(u) : 0), 0)
 }
 
 /**
@@ -1345,12 +1363,14 @@ export function unpricedTokens(
  * per-model figure is DISPLAYED or a null must survive (rollups); {@link calcCost} is for sums.
  */
 export function modelCostUSD(usage: ModelUsage, modelId: string): number | null {
+  if (usage.costSource !== undefined) return usage.costUSD
   if (isUnpricedModel(modelId)) return null
   return calcCost(usage, modelId)
 }
 
 /** Sum-friendly: an UNPRICED model contributes 0 (tokens are reported separately — see {@link unpricedTokens}). */
 export function calcCost(usage: ModelUsage, modelId: string): number {
+  if (usage.costSource !== undefined) return usage.costUSD
   const price = getModelPrice(modelId)
   const hasTtlBreakdown = usage.cacheCreation1hInputTokens !== undefined
     && usage.cacheCreation5mInputTokens !== undefined

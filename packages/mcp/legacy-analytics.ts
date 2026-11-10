@@ -3,7 +3,7 @@
  * tool switch so the projected path (`projected-analytics.ts`) can be checked against exactly what the
  * surface emits (`surface-parity.ts`). Pure: data in, the tool's JSON value out.
  */
-import { canonicalProjectPath } from "@agentistics/core";
+import { calcStreak, canonicalProjectPath, costState } from "@agentistics/core";
 import { filterSessions, sessionHarness, sessionMessages, sessionTokens, statsCacheTotals, type AnySession } from "./session-tokens.js";
 
 export function legacySummary(data: any, harness?: string): unknown {
@@ -21,6 +21,7 @@ export function legacySummary(data: any, harness?: string): unknown {
   const modelTokens: Record<string, number> = {};
   const projectSessions: Record<string, number> = {};
   const activeDates = new Set<string>();
+  const localDates = new Set<string>();
   for (const s of allSessions) {
     const { input, output, cacheRead, cacheWrite, cost, unpriced, tokensUnavailable } = sessionTokens(s);
     totalUnpriced += unpriced;
@@ -33,8 +34,15 @@ export function legacySummary(data: any, harness?: string): unknown {
       const root = canonicalProjectPath(s.project_path);
       projectSessions[root] = (projectSessions[root] ?? 0) + 1;
     }
-    if (s.start_time) activeDates.add(String(s.start_time).slice(0, 10));
+    if (s.start_time) {
+      activeDates.add(String(s.start_time).slice(0, 10));
+      // The streak counts LOCAL days, like the screens' (`localActivityDates`).
+      const d = new Date(s.start_time);
+      if (!Number.isNaN(d.getTime())) localDates.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+    }
   }
+  const grandTokens = totalInput + totalOutput + totalCacheRead + totalCacheWrite;
+  const allUnpriced = totalUnpriced > 0 && totalUnpriced >= grandTokens && totalCostUSD === 0 && !(unified || harness === "claude" ? totals.cost : 0);
   const claudeFallback = unified || harness === "claude";
   const topModel =
     Object.entries(modelTokens).sort(([, a], [, b]) => b - a)[0]?.[0]
@@ -47,15 +55,20 @@ export function legacySummary(data: any, harness?: string): unknown {
     totalOutputTokens:     totalOutput   || (claudeFallback ? totals.output : 0),
     totalCacheReadTokens:  totalCacheRead  || (claudeFallback ? totals.cacheRead : 0),
     totalCacheWriteTokens: totalCacheWrite || (claudeFallback ? totals.cacheWrite : 0),
-    estimatedCostUSD:      Math.round((totalCostUSD || (claudeFallback ? totals.cost : 0)) * 100) / 100,
+    // Every token unpriced (and no Claude cache total to fall back on) is "not recorded", never a 0.
+    estimatedCostUSD:      allUnpriced ? null : Math.round((totalCostUSD || (claudeFallback ? totals.cost : 0)) * 100) / 100,
     // PRICE.UNKNOWN: tokens of models with no price are counted above but not priced; the cost is a floor.
     ...(totalUnpriced > 0 ? { unpricedTokens: totalUnpriced, costNote: "estimatedCostUSD excludes usage of models with no price (+ unpriced usage)" } : {}),
     totalSessions: allSessions.length,
     topModel,
     topProject,
     activeDays: activeDates.size || (claudeFallback ? sc.activeDays ?? 0 : 0),
-    // Streak is Claude-only (derived from statsCache); N/A for a single non-claude harness.
-    currentStreak: claudeFallback ? sc.currentStreak ?? 0 : null,
+    // Claude's comes from its statsCache; any other single harness has no cache, so its streak is read
+    // off its own sessions (null only when it has none to read).
+    // The unified view reads every harness's sessions (local days, like the Home) and merges Claude's cache.
+    currentStreak: unified
+      ? Math.max(localDates.size > 0 ? calcStreak(localDates) : 0, sc.currentStreak ?? 0)
+      : harness === "claude" ? sc.currentStreak ?? 0 : localDates.size > 0 ? calcStreak(localDates) : null,
   };
 }
 
@@ -64,9 +77,10 @@ export function legacyHarnesses(data: any): unknown {
   const sessions = (data.sessions ?? []) as AnySession[];
   const rows = present.map((h) => {
     const hs = sessions.filter((s) => sessionHarness(s) === h);
-    let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0, messages = 0, lastActive = "";
+    let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0, unpricedSum = 0, messages = 0, lastActive = "";
     for (const s of hs) {
       const t = sessionTokens(s);
+      unpricedSum += t.unpriced;
       if (!t.tokensUnavailable) {
         input += t.input; output += t.output; cacheRead += t.cacheRead; cacheWrite += t.cacheWrite; cost += t.cost;
       }
@@ -82,7 +96,8 @@ export function legacyHarnesses(data: any): unknown {
       cacheReadTokens: cacheRead,
       cacheWriteTokens: cacheWrite,
       totalTokens: input + output + cacheRead + cacheWrite,
-      estimatedCostUSD: Math.round(cost * 100) / 100,
+      estimatedCostUSD: costState(unpricedSum, input + output + cacheRead + cacheWrite) === "unknown" ? null : Math.round(cost * 100) / 100,
+      ...(unpricedSum > 0 ? { unpricedTokens: unpricedSum } : {}),
       lastActive: lastActive || null,
     };
   }).sort((a, b) => b.totalTokens - a.totalTokens);
@@ -92,15 +107,16 @@ export function legacyHarnesses(data: any): unknown {
 export function legacyProjects(data: any, harness?: string): unknown {
   // projects[] only has {name, path, sessions:[{sessionId}]} — aggregate tokens/cost from sessions
   const allSessions = filterSessions((data.sessions ?? []) as AnySession[], harness);
-  const byPath: Record<string, { sessions: number; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; costUSD: number; messages: number; lastActive: string; languages: string[] }> = {};
+  const byPath: Record<string, { sessions: number; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; costUSD: number; unpriced: number; messages: number; lastActive: string; languages: string[] }> = {};
   for (const s of allSessions) {
     // The project ROOT: a worktree's sessions roll up to its repository (A4.4 decision 2).
     const key = canonicalProjectPath(s.project_path as string);
     if (!key) continue;
-    if (!byPath[key]) byPath[key] = { sessions: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, costUSD: 0, messages: 0, lastActive: "", languages: [] };
+    if (!byPath[key]) byPath[key] = { sessions: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, costUSD: 0, unpriced: 0, messages: 0, lastActive: "", languages: [] };
     const agg = byPath[key]!;
-    const { input, output, cacheRead, cacheWrite, cost, tokensUnavailable } = sessionTokens(s);
+    const { input, output, cacheRead, cacheWrite, cost, unpriced, tokensUnavailable } = sessionTokens(s);
     agg.sessions     += 1;
+    agg.unpriced     += unpriced;
     if (!tokensUnavailable) {
       agg.inputTokens  += input;
       agg.outputTokens += output;
@@ -128,7 +144,7 @@ export function legacyProjects(data: any, harness?: string): unknown {
     // When scoped to a harness, drop projects with no sessions in that harness.
     .filter((p: any) => !harness || harness === "all" || byPath[p.path])
     .map((p: any) => {
-      const agg = byPath[p.path] ?? { sessions: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, costUSD: 0, messages: 0, lastActive: "", languages: [] };
+      const agg = byPath[p.path] ?? { sessions: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, costUSD: 0, unpriced: 0, messages: 0, lastActive: "", languages: [] };
       return {
         name: p.name,
         path: p.path,
@@ -137,7 +153,8 @@ export function legacyProjects(data: any, harness?: string): unknown {
         inputTokens: agg.inputTokens,
         outputTokens: agg.outputTokens,
         totalTokens: agg.inputTokens + agg.outputTokens,
-        estimatedCostUSD: Math.round(agg.costUSD * 10000) / 10000,
+        estimatedCostUSD: costState(agg.unpriced, agg.inputTokens + agg.outputTokens + agg.cacheRead + agg.cacheWrite) === "unknown" ? null : Math.round(agg.costUSD * 10000) / 10000,
+        ...(agg.unpriced > 0 ? { unpricedTokens: agg.unpriced } : {}),
         lastActive: agg.lastActive || null,
         languages: agg.languages,
       };
@@ -192,13 +209,14 @@ export function legacyCosts(data: any, harness?: string): unknown {
 
 export function legacyRepos(data: any, harness?: string): unknown {
   const allSessions = filterSessions((data.sessions ?? []) as AnySession[], harness);
-  const byRemote: Record<string, { sessions: number; messages: number; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; costUSD: number; lastActive: string }> = {};
+  const byRemote: Record<string, { sessions: number; messages: number; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; costUSD: number; unpriced: number; lastActive: string }> = {};
   for (const s of allSessions) {
     const key = (s.git_remote as string) || "";
-    if (!byRemote[key]) byRemote[key] = { sessions: 0, messages: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, costUSD: 0, lastActive: "" };
+    if (!byRemote[key]) byRemote[key] = { sessions: 0, messages: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, costUSD: 0, unpriced: 0, lastActive: "" };
     const agg = byRemote[key]!;
-    const { input, output, cacheRead, cacheWrite, cost, tokensUnavailable } = sessionTokens(s);
+    const { input, output, cacheRead, cacheWrite, cost, unpriced, tokensUnavailable } = sessionTokens(s);
     agg.sessions += 1;
+    agg.unpriced += unpriced;
     agg.messages += sessionMessages(s);
     if (!tokensUnavailable) {
       agg.inputTokens += input; agg.outputTokens += output; agg.cacheRead += cacheRead; agg.cacheWrite += cacheWrite;
@@ -215,7 +233,8 @@ export function legacyRepos(data: any, harness?: string): unknown {
       inputTokens: agg.inputTokens,
       outputTokens: agg.outputTokens,
       totalTokens: agg.inputTokens + agg.outputTokens + agg.cacheRead + agg.cacheWrite,
-      estimatedCostUSD: Math.round(agg.costUSD * 10000) / 10000,
+      estimatedCostUSD: costState(agg.unpriced, agg.inputTokens + agg.outputTokens + agg.cacheRead + agg.cacheWrite) === "unknown" ? null : Math.round(agg.costUSD * 10000) / 10000,
+      ...(agg.unpriced > 0 ? { unpricedTokens: agg.unpriced } : {}),
       lastActive: agg.lastActive || null,
     }))
     .sort((a, b) => b.totalTokens - a.totalTokens);

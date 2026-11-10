@@ -35,20 +35,20 @@ export function journalLoadingNotification(b: JournalBackfillSummary | null | un
   const pt = lang === 'pt'
   const n = b.written.toLocaleString(pt ? 'pt-BR' : 'en-US')
   const where = b.harness ? ` · ${b.harness}${b.done !== null && b.total !== null ? ` ${b.done}/${b.total}` : ''}` : ''
-  const tail = pt ? ' — até terminar, os números vêm do caminho anterior.' : ' — until it completes, the figures come from the previous path.'
+  const tail = pt ? ' — parte do histórico ainda pode estar faltando.' : ' — some history may still be missing.'
   const message = pt
-    ? b.state === 'pending' ? `O histórico desta máquina ainda vai ser importado para o journal, em segundo plano${tail}`
+    ? b.state === 'pending' ? `O histórico desta máquina será atualizado em segundo plano${tail}`
       : b.state === 'paused' ? `Importação do histórico pausada: a máquina está sem memória folgada${where} · ${n} eventos${tail}`
         : b.state === 'interrupted' ? `Importação do histórico interrompida${where} · ${n} eventos; ela continua no próximo início do servidor${tail}`
           : b.state === 'failed' ? `A importação do histórico falhou.`
             : b.state === 'done' ? 'A importação do histórico foi concluída.'
-              : `Importando o histórico desta máquina para o journal${where} · ${n} eventos${tail}`
-    : b.state === 'pending' ? `This machine's history is still to be imported into the journal, in the background${tail}`
+              : `Atualizando o histórico desta máquina${where} · ${n} registros${tail}`
+    : b.state === 'pending' ? `This machine's history will be updated in the background${tail}`
       : b.state === 'paused' ? `History import paused: the machine is short on memory${where} · ${n} events${tail}`
         : b.state === 'interrupted' ? `History import interrupted${where} · ${n} events; it resumes on the next server start${tail}`
           : b.state === 'failed' ? 'The history import failed.'
             : b.state === 'done' ? 'The history import is complete.'
-              : `Importing this machine's history into the journal${where} · ${n} events${tail}`
+              : `Updating this machine's history${where} · ${n} records${tail}`
   return {
     type: b.state === 'failed' ? 'warning' : b.state === 'done' ? 'success' : 'info',
     title: pt ? 'Importação do histórico' : 'History import',

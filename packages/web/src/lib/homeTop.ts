@@ -25,7 +25,7 @@
 
 import { format, parseISO } from 'date-fns'
 import type { SurfaceHarnessId, SessionMeta } from '@agentistics/core'
-import { canonicalProjectPath, sessionCostUSD, sessionModelUsage, calcCost, sessionTokenTotal, totalTokens, usageTokens } from '@agentistics/core'
+import { costState as coreCostState, type CostState, canonicalProjectPath, sessionCostUSD, sessionModelUsage, calcCost, unpricedTokens, sessionTokenTotal, totalTokens, usageTokens } from '@agentistics/core'
 
 /** What a board is ranked by. The same three `topUsage.ts` offers, and for the same reason. */
 export type TopMetric = 'cost' | 'tokens' | 'sessions'
@@ -40,6 +40,16 @@ export interface Leader {
   sessions: number
   /** Tool CALLS. Zero on boards where the notion does not apply. */
   calls: number
+  /** Tokens counted in `tokens` that no price covers; `cost` excludes them (PRICE.UNKNOWN). */
+  unpriced: number
+}
+
+/**
+ * How a cost cell reads: `unknown` when every token of the row is unpriced (print "not recorded", never a
+ * 0), `partial` when some are (print the priced figure plus the "+ unpriced usage" marker), else `priced`.
+ */
+export function costState(e: Pick<Leader, 'tokens' | 'unpriced'>): CostState {
+  return coreCostState(e.unpriced, e.tokens)
 }
 
 export interface Board {
@@ -100,7 +110,7 @@ function finish(acc: Map<string, Leader>, metric: TopMetric, limit: number): Boa
 }
 
 const blank = (key: string, label = key): Leader =>
-  ({ key, label, cost: 0, tokens: 0, sessions: 0, calls: 0 })
+  ({ key, label, cost: 0, tokens: 0, sessions: 0, calls: 0, unpriced: 0 })
 
 /**
  * Rank whole SESSIONS.
@@ -122,6 +132,7 @@ export function rankSessions(
     const e = acc.get(s.session_id) ?? blank(s.session_id, labelOf(s))
     e.cost += sessionCostUSD(s) ?? 0
     e.tokens += sessionTokenTotal(s) ?? 0
+    e.unpriced += unpricedTokens(s)
     e.sessions = 1
     e.calls += Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
     acc.set(s.session_id, e)
@@ -145,6 +156,7 @@ export function rankModels(sessions: readonly SessionMeta[], metric: TopMetric, 
       const e = acc.get(model) ?? blank(model)
       e.cost += calcCost(usage, model)
       e.tokens += totalTokens(usageTokens(usage))
+      e.unpriced += unpricedTokens([[model, usage]])
       // A session that used both models really did touch both, so it counts once for each.
       e.sessions += 1
       acc.set(model, e)
@@ -160,7 +172,8 @@ export function rankHarnesses(sessions: readonly SessionMeta[], metric: TopMetri
     const key: SurfaceHarnessId = s.harness ?? 'claude'
     const e = acc.get(key) ?? blank(key)
     e.cost += sessionCostUSD(s) ?? 0
-      e.tokens += sessionTokenTotal(s) ?? 0
+    e.tokens += sessionTokenTotal(s) ?? 0
+    e.unpriced += unpricedTokens(s)
     e.sessions += 1
     acc.set(key, e)
   }
@@ -176,6 +189,7 @@ export function rankProjects(sessions: readonly SessionMeta[], metric: TopMetric
     const e = acc.get(key) ?? blank(key)
     e.cost += sessionCostUSD(s) ?? 0
     e.tokens += sessionTokenTotal(s) ?? 0
+    e.unpriced += unpricedTokens(s)
     e.sessions += 1
     acc.set(key, e)
   }

@@ -103,3 +103,22 @@ test('task_started followed by user_message does not change active time', () => 
   expect(s.active_minutes).toBe(2)
   expect(s.user_message_count).toBe(1)
 })
+
+// Rollout shape measured on 01a10e0c-…: the cumulative `total_token_usage` restarts mid-file (a resume),
+// so "last snapshot wins" kept only the final series and dropped what the earlier ones had spent. The
+// journal's replay already counts every series; the screens must read the same figures.
+test('a cumulative counter that restarts counts every series, not only the last', () => {
+  const tc = (input: number, cached: number, output: number) => JSON.stringify({
+    timestamp: '2026-10-05T18:00:00.000Z', type: 'event_msg',
+    payload: { type: 'token_count', info: { total_token_usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output } } },
+  })
+  const content = [
+    JSON.stringify({ timestamp: '2026-10-05T18:00:00.000Z', type: 'session_meta', payload: { id: 'r', cwd: '/p' } }),
+    tc(100, 40, 10), tc(300, 100, 30),   // series 1 ends at 300 / 100 / 30
+    tc(50, 0, 5), tc(80, 20, 9),         // restart: series 2 ends at 80 / 20 / 9
+  ].join('\n')
+  const s = parseCodexRollout(content, 'f')!
+  expect(s.input_tokens).toBe((300 - 100) + (80 - 20))
+  expect(s.cache_read_input_tokens).toBe(100 + 20)
+  expect(s.output_tokens).toBe(30 + 9)
+})

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { computeMonthCost } from './BudgetPanel'
+import { computeMonthCost, hasMonthUsage } from './BudgetPanel'
 import type { StatsCache, ModelUsage } from '@agentistics/core'
 
 /**
@@ -109,5 +109,17 @@ describe('computeMonthCost — cache-write TTL rate', () => {
     }
     // (1_000_000*0.7/1e6)*3 + (1_000_000*0.3/1e6)*15 = 2.1 + 4.5
     expect(computeMonthCost(sc, MONTH_START, NOW)).toBeCloseTo(6.6)
+  })
+})
+
+describe('hasMonthUsage', () => {
+  const monthStart = new Date(2026, 10, 1)
+  const now = new Date(2026, 10, 9, 12)
+  test('no Claude tokens this month (OpenCode-only machine): not recorded, never $0.00', () => {
+    expect(hasMonthUsage({ dailyModelTokens: [] } as unknown as StatsCache, monthStart, now)).toBe(false)
+    expect(hasMonthUsage({ dailyModelTokens: [{ date: '2026-10-20', tokensByModel: { m: 500 } }] } as unknown as StatsCache, monthStart, now)).toBe(false)
+  })
+  test('any token this month: recorded', () => {
+    expect(hasMonthUsage({ dailyModelTokens: [{ date: '2026-11-03', tokensByModel: { m: 1 } }] } as unknown as StatsCache, monthStart, now)).toBe(true)
   })
 })

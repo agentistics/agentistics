@@ -21,7 +21,7 @@ export interface MetricsGroupLike {
 export interface MetricsPageLike {
   groups: MetricsGroupLike[]
   page: { nextCursor: string | null }
-  basis?: { freshness?: { lag: number; fresh: boolean; rebuilding: boolean }; costBasis?: unknown }
+  basis?: { freshness?: { lag: number; fresh: boolean; rebuilding: boolean; journalHead?: number }; costBasis?: unknown }
 }
 export type MetricsAnswer =
   | { ok: true; body: MetricsPageLike }
@@ -62,7 +62,13 @@ export async function allMetricGroups(q: MetricsQueryFn, params: MetricsParams):
     groups.push(...a.body.groups)
     basis = a.body.basis
     cursor = a.body.page.nextCursor
-    if (!cursor) return { groups, basis }
+    if (!cursor) {
+      // A journal nothing was ever written to (`journalHead` 0) answers an empty page that is fresh and
+      // complete — and reads as "you used nothing". It is not an answer about this machine's usage: the
+      // surface falls back to the session data it can already see.
+      if (groups.length === 0 && basis?.freshness?.journalHead === 0) throw new ProjectionUnavailable(200, 'journal_empty')
+      return { groups, basis }
+    }
   }
   throw new Error(`metrics query did not finish in ${MAX_PAGES} pages`)
 }

@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import type { AppContext, } from '../lib/app-context'
 import type { SessionMeta, MemberPresence, SurfaceHarnessId, WorkflowRun, WorkflowAgent } from '@agentistics/core'
-import { repoShortName, fmt, fmtCost, fmtDuration, formatProjectName, formatModel, sessionLabel, workflowTokens, NO_REPO_KEY, sessionTokenTotal, totalTokens, totalTokensExplained } from '@agentistics/core'
+import { costCellText, unpricedTokens, repoShortName, fmt, fmtCost, fmtDuration, formatProjectName, formatModel, sessionLabel, workflowTokens, NO_REPO_KEY, sessionTokenTotal, totalTokens, totalTokensExplained } from '@agentistics/core'
 import { TokenBreakdownLine } from '../components/TokenBreakdownLine'
 import { capable, HARNESS_LABELS, HARNESS_COLORS, DYNAMIC_WORKFLOWS_DOC } from '../lib/harness'
 import { DocLink } from '../components/DocLink'
@@ -132,7 +132,7 @@ export default function RepoDetailPage() {
       {/* KPI row */}
       <div style={{ display: 'grid', gridTemplateColumns: STAT_TILE_GRID, gap: 10 }}>
         <StatTile label={pt ? 'Sessões' : 'Sessions'} value={String(scoped.totalSessions)} />
-        <StatTile label={pt ? 'Custo' : 'Cost'} value={fmtCost(scoped.totalCostUSD, currency, brlRate)} accent />
+        <StatTile label={pt ? 'Custo' : 'Cost'} value={costCellText(scoped.totalCostUSD, scoped.unpricedTokens, totalTokens(scoped.tokenTotals), pt ? 'pt' : 'en', usd => fmtCost(usd, currency, brlRate))} accent />
         {/* ONE tokens tile — the total of all four billed counters, where this used to be input
             and output as two tiles (the pair that comes to 0,34 % of the volume). The four
             counters themselves are the line UNDER this strip, not tiles in it: the grid is
@@ -303,7 +303,7 @@ function MemberComparePanel({ sessions, lang, currency, brlRate }: {
     { label: pt ? 'Sessões' : 'Sessions', val: m => m.summary.sessions, display: m => String(m.summary.sessions) },
     { label: pt ? 'Mensagens' : 'Messages', val: m => m.summary.messages, display: m => fmt(m.summary.messages) },
     { label: 'Tokens', val: m => tok(m), display: m => fmt(tok(m)) },
-    { label: pt ? 'Custo' : 'Cost', val: m => m.summary.costUSD, display: m => fmtCost(m.summary.costUSD, currency, brlRate) },
+    { label: pt ? 'Custo' : 'Cost', val: m => m.summary.costUSD, display: m => costCellText(m.summary.costUSD, m.summary.unpricedTokens, totalTokens(m.summary.tokens), pt ? 'pt' : 'en', usd => fmtCost(usd, currency, brlRate)) },
     { label: pt ? 'Custo/M tok' : 'Cost/M tok', val: m => m.summary.costPerMTokens ?? 0, display: m => m.summary.costPerMTokens != null ? fmtCost(m.summary.costPerMTokens, currency, brlRate) : '—' },
   ]
 
@@ -371,7 +371,7 @@ function MemberComparePanel({ sessions, lang, currency, brlRate }: {
 interface MemberAgg {
   user: string
   sessions: number; messages: number; toolCalls: number
-  cost: number; inTok: number; outTok: number; cacheRead: number; cacheWrite: number
+  cost: number; unpriced: number; inTok: number; outTok: number; cacheRead: number; cacheWrite: number
   commits: number; linesAdded: number; linesRemoved: number; files: number
   agents: number; durationMin: number; durationUnmeasured: number
   interruptions: number; errors: number
@@ -398,7 +398,7 @@ function MembersTable({ sessions, presence, lang, currency, brlRate }: {
       if (!m) {
         m = byUser[u] = {
           user: u, sessions: 0, messages: 0, toolCalls: 0, cost: 0, inTok: 0, outTok: 0,
-          cacheRead: 0, cacheWrite: 0, commits: 0, linesAdded: 0, linesRemoved: 0, files: 0,
+          cacheRead: 0, cacheWrite: 0, unpriced: 0, commits: 0, linesAdded: 0, linesRemoved: 0, files: 0,
           agents: 0, durationMin: 0, durationUnmeasured: 0, interruptions: 0, errors: 0,
           models: new Set(), harnesses: new Set(), firstActive: '', lastActive: '', byDay: {}, byHour: {},
         }
@@ -409,6 +409,7 @@ function MembersTable({ sessions, presence, lang, currency, brlRate }: {
       m.toolCalls += Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
       if (!s.tokens_unavailable) {
         m.cost += sessCost(s) ?? 0
+        m.unpriced += unpricedTokens(s)
         m.inTok += s.input_tokens ?? 0
         m.outTok += s.output_tokens ?? 0
         m.cacheRead += s.cache_read_input_tokens ?? 0
@@ -443,6 +444,8 @@ function MembersTable({ sessions, presence, lang, currency, brlRate }: {
   const totalCost = rows.reduce((a, r) => a + r.cost, 0)
   const maxCost = Math.max(...rows.map(r => r.cost), 1e-9)
   const fc = (usd: number) => fmtCost(usd, currency, brlRate)
+  const fcm = (m: { cost: number; unpriced: number; inTok: number; outTok: number; cacheRead: number; cacheWrite: number }) =>
+    costCellText(m.cost, m.unpriced, m.inTok + m.outTok + m.cacheRead + m.cacheWrite, pt ? 'pt' : 'en', fc) // @tokens-intentional: the four billed counters
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -487,7 +490,7 @@ function MembersTable({ sessions, presence, lang, currency, brlRate }: {
               <div style={{ display: 'flex', gap: isMobile ? 10 : 16, alignItems: 'center', flexShrink: 0 }}>
                 {!isMobile && <Head label={pt ? 'sessões' : 'sessions'} value={String(m.sessions)} />}
                 {!isMobile && <Head label="tokens" value={fmt(m.inTok + m.outTok)} />}
-                <Head label={pt ? 'custo' : 'cost'} value={fc(m.cost)} accent />
+                <Head label={pt ? 'custo' : 'cost'} value={fcm(m)} accent />
                 <ChevronDown size={16} color="var(--text-tertiary)" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }} />
               </div>
             </div>
@@ -497,7 +500,7 @@ function MembersTable({ sessions, presence, lang, currency, brlRate }: {
               <div style={{ overflow: 'hidden', minHeight: 0 }}>
                 <div style={{ padding: '4px 13px 14px', borderTop: '1px solid var(--border-subtle)' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginTop: 12 }}>
-                    <MetricCard icon={<DollarSign size={12} />} label={pt ? 'Custo estimado' : 'Estimated cost'} value={fc(m.cost)} hint={pt ? 'Gasto do membro neste repo (preço por modelo).' : "Member's spend in this repo (per-model pricing)."} accent />
+                    <MetricCard icon={<DollarSign size={12} />} label={pt ? 'Custo estimado' : 'Estimated cost'} value={fcm(m)} hint={pt ? 'Gasto do membro neste repo (preço por modelo).' : "Member's spend in this repo (per-model pricing)."} accent />
                     <MetricCard icon={<Cpu size={12} />} label={pt ? 'Tokens (in / out)' : 'Tokens (in / out)'} value={`${fmt(m.inTok)} / ${fmt(m.outTok)}`} hint={pt ? 'Enviados ao modelo / gerados pelo modelo.' : 'Sent to / generated by the model.'} />
                     <MetricCard icon={<Database size={12} />} label={pt ? 'Cache lido' : 'Cache read'} value={fmt(m.cacheRead)} hint={pt ? 'Tokens servidos do cache — mais barato que input.' : 'Tokens served from cache — cheaper than input.'} />
                     <MetricCard icon={<Clock size={12} />} label={pt ? 'Sessões' : 'Sessions'} value={String(m.sessions)} hint={(() => {

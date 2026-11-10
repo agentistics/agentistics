@@ -20,22 +20,22 @@ export function journalBackfillText(b: JournalBackfillSummary | null | undefined
   const n = b.written.toLocaleString(lang === 'pt' ? 'pt-BR' : 'en-US')
   const where = b.harness ? ` · ${b.harness}${b.done !== null && b.total !== null ? ` ${b.done}/${b.total}` : ''}` : ''
   const tail = lang === 'pt'
-    ? ' — até terminar, os números vêm do caminho anterior.'
-    : ' — until it completes, the figures come from the previous path.'
+    ? ' — parte do histórico ainda pode estar faltando.'
+    : ' — some history may still be missing.'
   if (lang === 'pt') {
     switch (b.state) {
-      case 'pending': return `O histórico desta máquina ainda vai ser importado para o journal, em segundo plano${tail}`
+      case 'pending': return `O histórico desta máquina será atualizado em segundo plano${tail}`
       case 'paused': return `Importação do histórico pausada: a máquina está sem memória folgada${where} · ${n} eventos${tail}`
       case 'interrupted': return `Importação do histórico interrompida${where} · ${n} eventos; ela continua no próximo início do servidor${tail}`
       case 'failed': return `A importação do histórico falhou; tente de novo pelo botão ao lado${tail}`
-      default: return `Importando o histórico desta máquina para o journal${where} · ${n} eventos${tail}`
+      default: return `Atualizando o histórico desta máquina${where} · ${n} registros${tail}`
     }
   }
   switch (b.state) {
-    case 'pending': return `This machine's history is still to be imported into the journal, in the background${tail}`
+    case 'pending': return `This machine's history will be updated in the background${tail}`
     case 'paused': return `History import paused: the machine is short on memory${where} · ${n} events${tail}`
     case 'interrupted': return `History import interrupted${where} · ${n} events; it resumes on the next server start${tail}`
     case 'failed': return `The history import failed; retry with the button beside it${tail}`
-    default: return `Importing this machine's history into the journal${where} · ${n} events${tail}`
+    default: return `Updating this machine's history${where} · ${n} records${tail}`
   }
 }
