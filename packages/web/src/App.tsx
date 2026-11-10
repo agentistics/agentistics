@@ -267,7 +267,10 @@ function useBootWatchdog(): BootVerdict {
     const probe = () => {
       fetchWithTimeout('/api/health', 4000, { cache: 'no-store' })
         .then(r => { health = r.ok ? 'ok' : 'down' })
-        .catch(() => { health = 'down' })
+        // A probe deadline means the server is busy, not that it is unreachable: a delayed 200
+        // from a live server must not turn the global banner into "inacessível". Connection
+        // failures and explicit 5xx responses remain real down signals.
+        .catch(error => { health = (error as { name?: string } | null)?.name === 'AbortError' ? 'unknown' : 'down' })
         .finally(tick)
     }
     const ticker = setInterval(tick, 1000)
