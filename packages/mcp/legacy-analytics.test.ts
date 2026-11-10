@@ -29,7 +29,7 @@ describe("legacy MCP analytics: projects roll up to their root (A4.4 decision 2)
 describe("legacy MCP summary: a harness with no statsCache still has a streak", () => {
   test("an OpenCode-only machine with sessions today reads streak 1, not null", () => {
     const now = new Date().toISOString();
-    const data = { sessions: [{ session_id: "o", harness: "opencode", project_path: "/w", input_tokens: 5, output_tokens: 1, model: "upx/fable-5.1", start_time: now }], statsCache: {} };
+    const data = { sessions: [{ session_id: "o", harness: "opencode", project_path: "/w", input_tokens: 5, output_tokens: 1, model: "upx/modelo-interno", start_time: now }], statsCache: {} };
     const s = legacySummary(data, "opencode") as any;
     expect(s.currentStreak).toBe(1);
     expect(s.totalSessions).toBe(1);
@@ -38,7 +38,7 @@ describe("legacy MCP summary: a harness with no statsCache still has a streak", 
 
 describe("legacy MCP summary: the unified view reads every harness", () => {
   const now = new Date().toISOString();
-  const data = { sessions: [{ session_id: "o", harness: "opencode", project_path: "/w", input_tokens: 5, output_tokens: 1, model: "upx/fable-5.1", start_time: now }], statsCache: {} };
+  const data = { sessions: [{ session_id: "o", harness: "opencode", project_path: "/w", input_tokens: 5, output_tokens: 1, model: "upx/modelo-interno", start_time: now }], statsCache: {} };
   test("an OpenCode-only machine has the same streak unfiltered as filtered", () => {
     expect((legacySummary(data) as any).currentStreak).toBe(1);
   });
@@ -52,7 +52,7 @@ describe("legacy MCP summary: the unified view reads every harness", () => {
 describe("legacy MCP harnesses/projects: unpriced usage is a null cost", () => {
   const data = {
     harnesses: ["opencode"],
-    sessions: [{ session_id: "o", harness: "opencode", project_path: "/w", input_tokens: 5, output_tokens: 1, model: "upx/fable-5.1", start_time: new Date().toISOString() }],
+    sessions: [{ session_id: "o", harness: "opencode", project_path: "/w", input_tokens: 5, output_tokens: 1, model: "upx/modelo-interno", start_time: new Date().toISOString() }],
     projects: [{ name: "w", path: "/w", sessions: [{ sessionId: "o" }] }],
     statsCache: {},
   };

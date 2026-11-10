@@ -1199,8 +1199,10 @@ export function pricingKey(modelId: string): string | null {
   let forwardKey = ''
   let reverseKey = ''
   for (const key of Object.keys(MODEL_PRICING)) {
-    if (id.startsWith(key)) {
-      // Most specific (longest) prefix wins.
+    if (id.startsWith(key) && !/^(?:\d|-\d{1,2}(?!\d))/.test(id.slice(key.length))) {
+      // Most specific (longest) prefix wins. The prefix must end on a version boundary: `…-5-1` never
+      // prices `…-5-10`, and `…-5` never prices `…-5-10` (another, unknown version); a date suffix
+      // (`-20250929`) or a variant (`[1m]`, `-thinking`) still matches.
       if (key.length > forwardKey.length) forwardKey = key
     } else if (id && key.startsWith(id) && key[id.length] === '-') {
       // Truncated id: least specific (shortest) candidate wins — never a `-lite`/variant price.
@@ -1226,7 +1228,37 @@ export function getModelPrice(modelId: string): ModelPrice {
   // the table so no partial-prefix match can price it. See local-models.ts.
   if (isLocalModelId(modelId)) return LOCAL_MODEL_PRICE
   const hit = pricingKey(modelId)
-  return hit ? MODEL_PRICING[hit]! : UNPRICED_PRICE
+  if (hit) return MODEL_PRICING[hit]!
+  // A gateway/router route (company gateway, OpenRouter, LiteLLM, Bedrock…) names a model the table
+  // knows under another spelling: `upx/fable-5.1`, `openrouter/anthropic/claude-opus-4.8`,
+  // `us.anthropic.claude-sonnet-5:0`. Price it at the provider's public API rate for that model.
+  const canonical = canonicalModelId(modelId)
+  if (canonical && canonical !== modelId) {
+    const viaGateway = MODEL_PRICING[canonical] ? canonical : pricingKey(canonical)
+    if (viaGateway) return MODEL_PRICING[viaGateway]!
+  }
+  return UNPRICED_PRICE
+}
+
+/**
+ * The table spelling of a model id seen through a gateway: drop the route prefix (everything up to
+ * the last `/`, or a Bedrock-style `region.vendor.` prefix), drop `:variant`/`@date` suffixes,
+ * lower-case, write version dots as dashes (`5.1` → `5-1`) and add `claude-` to a bare Claude
+ * family name. Returns null when nothing is left.
+ */
+export function canonicalModelId(modelId: string): string | null {
+  let id = String(modelId ?? '').trim().toLowerCase()
+  if (!id) return null
+  id = id.slice(id.lastIndexOf('/') + 1)
+  // Bedrock-style `us.anthropic.claude-…`: the family starts right after a `.` segment separator. A
+  // `claude-` glued to another word (`evilclaude-…`, `notclaude-…`) is a different model, never priced.
+  const bedrock = /(?:^|\.)(claude-.*)$/.exec(id)
+  if (bedrock) id = bedrock[1]!
+  else if (id.includes('claude-')) return null
+  id = id.replace(/[:@].*$/, '')
+  id = id.replace(/(\d)\.(?=\d)/g, '$1-')
+  if (/^(fable|opus|sonnet|haiku|mythos)-/.test(id)) id = `claude-${id}`
+  return id || null
 }
 
 /**
