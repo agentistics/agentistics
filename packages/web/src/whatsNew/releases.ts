@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.205.0': {
+    features: [
+      {
+        pt: 'Registrar tarefa pelo chat: ligue o botão de prancheta no campo de mensagem, escolha a prioridade e, se quiser, o prazo; ao enviar, a mensagem vira uma subtarefa com esses campos, ligada ao seu pedido, e o botão desliga sozinho.',
+        en: 'Register a task from the chat: turn on the clipboard button in the message box, pick the priority and, optionally, a due date; on send the message becomes a subtask with those fields, linked to your request, and the button turns itself off.',
+      },
+      {
+        pt: 'Calendário e Live ganharam atalhos na barra de ícones do painel lateral.',
+        en: 'Calendar and Live now have shortcuts in the side panel icon bar.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Menu lateral: clicar no título de um grupo não navega mais; o controle de expandir/recolher fica no topo e o botão do cabeçalho recolhe os dois menus.',
+        en: 'Side menu: clicking a group title no longer navigates; the expand/collapse control sits at the top and the header button collapses both menus.',
+      },
+      {
+        pt: 'Agentask: ao mudar o status de uma tarefa ou subtarefa, um indicador de carregamento aparece até o servidor confirmar; mover uma tarefa para Em revisão com subtarefas abertas pede confirmação e as subtarefas continuam visíveis.',
+        en: 'Agentask: changing a task or subtask status shows a loading indicator until the server confirms; moving a task to In review with open subtasks asks for confirmation and the subtasks stay visible.',
+      },
+      {
+        pt: 'Registrar tarefa com vários envios ao mesmo tempo não deixa mais cartões de pedido soltos nem falha à toa.',
+        en: 'Registering tasks from several sends at once no longer leaves stray request cards behind or fails for no reason.',
+      },
+    ],
+  },
   '2.204.9': {
     features: [],
     fixes: [
