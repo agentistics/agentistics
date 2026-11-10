@@ -8,6 +8,7 @@
  * the rest.
  */
 
+import { hostWhich } from '../host-which'
 import { knownManagers, planDependency, type DependencyFacts, type DependencyId, type DependencyPlan } from './dependency-plan'
 
 /** The binary each dependency is found under. Only tmux today — see `DependencyId`. */
@@ -16,8 +17,8 @@ const BINARY: Record<DependencyId, string> = { tmux: 'tmux' }
 async function facts(id: DependencyId): Promise<DependencyFacts> {
   const managers = knownManagers()
   const [present, foundManagers] = await Promise.all([
-    Promise.resolve(Bun.which(BINARY[id]) !== null),
-    Promise.all(managers.map(async m => (Bun.which(m) !== null ? m : null))),
+    Promise.resolve(hostWhich(BINARY[id]) !== null),
+    Promise.all(managers.map(async m => (hostWhich(m) !== null ? m : null))),
   ])
   return {
     platform: process.platform,

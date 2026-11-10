@@ -39,6 +39,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _lockHooks: 'callbacks run on lock (they DROP key material, they hold none)',
     _pw: 'COFRE.DESBLOQUEIO: a COUNT of consecutive wrong vault passwords and the instant the pause ends — never a password, a hash of one or key material',
     _fresh: 'the SHA-256 of the single-use fresh-unlock proof + the session and action it is bound to + a timestamp (review H2); the token itself goes only to the page that unlocked; no key material',
+    fido2Memo: 'a boolean + timestamp: whether the libfido2 tools exist (PERF.WHICH); no key material',
     _unlockWindowAnchorMs: 'a timestamp (ms) of the last gesture+code unlock — the per-day window; no key material',
     _windowIo: 'a promise chain serialising writes/deletes of the window file (a timestamp + a MAC); no key material',
     _vaultDir: 'a path', _role: 'holder|client', _lang: 'a language reader', _io: 'the IO adapter', _fs: 'the fs adapter',

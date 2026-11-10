@@ -3,6 +3,7 @@
  * (PERF.1 step 5). Every removal goes through git (`git worktree remove`, which itself refuses a
  * dirty tree) or deletes exactly `<worktree>/node_modules`; nothing else is ever deleted.
  */
+import { hostWhich } from '../host-which'
 import { existsSync, readdirSync, readlinkSync, rmSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
@@ -37,7 +38,7 @@ export const WORKTREE_POOL_SIZE = 4
 let prio: string[] | null = null
 function priority(): string[] {
   if (prio) return prio
-  const nice = Bun.which('nice'), ionice = Bun.which('ionice')
+  const nice = hostWhich('nice'), ionice = hostWhich('ionice')
   prio = [...(nice ? [nice, '-n', '19'] : []), ...(ionice ? [ionice, '-c', '3'] : [])]
   return prio
 }
@@ -158,7 +159,7 @@ export function liveCwds(): CwdReading {
     }
     return { cwds, known: true }
   }
-  const lsof = Bun.which('lsof')
+  const lsof = hostWhich('lsof')
   if (!lsof) return { cwds: [], known: false }
   try {
     const r = Bun.spawnSync([lsof, '-a', '-d', 'cwd', '-Fn'])

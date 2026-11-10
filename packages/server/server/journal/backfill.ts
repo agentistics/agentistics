@@ -23,6 +23,7 @@
  * Until the progress file says COMPLETE for THIS journal file, the projection route answers
  * `projections_backfilling` and every surface falls back, item by item, to `/api/data`.
  */
+import { hostWhich } from '../host-which'
 import { readFileSync } from 'node:fs'
 import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -226,7 +227,7 @@ export function maybeStartAutoBackfill(d: AutoBackfillDeps): BackfillDecision {
   if (!decision.start) return decision
   const argv = backgroundImportArgv(
     cliArgv(process.execPath, process.argv[1], import.meta.dir),
-    { nice: Bun.which('nice'), ionice: Bun.which('ionice') },
+    { nice: hostWhich('nice'), ionice: hostWhich('ionice') },
   )
   try {
     if (d.spawn) d.spawn(argv)

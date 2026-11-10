@@ -14,6 +14,7 @@
  * they have spent a week trusting them.
  */
 
+import { hostWhich } from '../host-which'
 import { existsSync, readFileSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -83,7 +84,7 @@ const WSL_POWERSHELL_PATHS = [
 ]
 
 export function findPowershell(): string | undefined {
-  const onPath = Bun.which('powershell.exe')
+  const onPath = hostWhich('powershell.exe')
   if (onPath) return onPath
   if (!isWsl()) return undefined
   return WSL_POWERSHELL_PATHS.find(p => existsSync(p))
@@ -95,9 +96,9 @@ export async function probeDesktop(failed: readonly DesktopChannel[] = []): Prom
   const powershell = findPowershell()
   return {
     ...(ccnScript !== undefined ? { ccnScript } : {}),
-    hasJq: !!Bun.which('jq'),
+    hasJq: !!hostWhich('jq'),
     hasPowershell: powershell !== undefined,
-    hasNotifySend: !!Bun.which('notify-send'),
+    hasNotifySend: !!hostWhich('notify-send'),
     hasTty: process.stdout.isTTY === true,
     // Absent reads as ENABLED here — unlike `chatAllowed`, because this switch turns off a
     // notification rather than opening a door. Only an explicit `0` disables it.

@@ -343,6 +343,7 @@ async function makeLoginEnvironment(root: string, extra: Record<string, string> 
   // `security` is macOS's keychain tool: claude stores its login there, and without it on PATH the
   // CLI cannot save the credential it just exchanged (absent on Linux, so nothing is linked there).
   for (const name of ['node', 'bun', 'python3', 'python', 'sh', 'bash', 'env', 'cat', 'dirname', 'readlink', 'security']) {
+    if (name === 'security' && process.platform !== 'darwin') continue // macOS keychain tool: a PATH walk for nothing elsewhere
     const path = findHarnessBinary(name)
     if (path) await symlink(path, join(bin, name))
   }

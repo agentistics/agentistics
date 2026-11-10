@@ -1,3 +1,4 @@
+import { hostWhich } from '../host-which'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { installSearchPath, withUserBin } from './harness-install-plan'
@@ -61,5 +62,5 @@ export function harnessSearchPath(
 
 /** Absolute path of an assistant's CLI on `harnessSearchPath()`, looked up fresh (never cached). */
 export function findHarnessBinary(name: string, path: string = harnessSearchPath()): string | undefined {
-  return Bun.which(name, { PATH: path }) ?? undefined
+  return hostWhich(name, { PATH: path }) ?? undefined
 }

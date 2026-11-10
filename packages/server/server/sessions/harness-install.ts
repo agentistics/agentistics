@@ -1,3 +1,4 @@
+import { hostWhich } from '../host-which'
 import { appendFile, access, constants } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -38,7 +39,7 @@ let busy = false
 /** The user-writable npm prefix test: `npm i -g` into a root-owned prefix would need sudo. */
 async function npmPrefixWritable(env: Record<string, string | undefined>): Promise<boolean> {
   try {
-    if (!Bun.which('npm', { PATH: env.PATH ?? '' })) return false
+    if (!hostWhich('npm', { PATH: env.PATH ?? '' })) return false
     const proc = Bun.spawn(['npm', 'prefix', '-g'], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', env })
     const prefix = (await new Response(proc.stdout).text()).trim()
     await proc.exited
@@ -59,7 +60,7 @@ async function realFacts(): Promise<HarnessInstallFacts> {
     platform: process.platform,
     arch: process.arch,
     home: homedir(),
-    nodePresent: Bun.which('node', { PATH: path }) !== null && Bun.which('npm', { PATH: path }) !== null,
+    nodePresent: hostWhich('node', { PATH: path }) !== null && hostWhich('npm', { PATH: path }) !== null,
     npmGlobalWritable: await npmPrefixWritable(env),
     npmPrefix: join(homedir(), '.local'),
   }

@@ -1,3 +1,4 @@
+import { hostWhich } from './host-which'
 import { INITIAL_SESSION_LIMIT, isInitialSnapshot } from './sessions/boot-fleet'
 import { sessionNotify, type ControlSession } from '@agentistics/tui/control/session-fleet'
 /**
@@ -2310,7 +2311,7 @@ export async function spawnManaged(req: {
   // tmux prints nothing. Refused here, before any row exists, with the PATH named.
   adoptUserBinOnPath()
   const bin = planned.plan.argv[0]
-  if (bin && !Bun.which(bin, { PATH: process.env.PATH ?? '' })) {
+  if (bin && !hostWhich(bin, { PATH: process.env.PATH ?? '', negativeTtlMs: 30_000 })) {
     return { ok: false, message: s.sessNotOnPath(bin, process.env.PATH ?? '') }
   }
 
@@ -2804,7 +2805,7 @@ export function dropProcessCaches(): void {
  */
 export async function restartArgv(): Promise<string[] | null> {
   const cmdline = await readFileText('/proc/self/cmdline', 'utf8').catch(() => '')
-  return planRestartArgv(cmdline, cmd => Bun.which(cmd), existsSync)
+  return planRestartArgv(cmdline, cmd => hostWhich(cmd), existsSync)
 }
 
 export function createControlHost(initialLang: CliLang, altScreen: Suspendable): StartHost {
