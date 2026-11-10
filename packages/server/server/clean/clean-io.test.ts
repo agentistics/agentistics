@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, ut
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
-import { applyClean, cwdInside, parseDu, repoOf, worktreeFacts, WORKTREE_POOL_SIZE } from './clean-io'
+import { applyClean, cwdInside, openSessionCwds, parseDu, repoOf, worktreeFacts, WORKTREE_POOL_SIZE } from './clean-io'
 import { planClean } from './clean-plan'
 
 const dirs: string[] = []
@@ -77,6 +77,16 @@ describe('clean io (real git)', () => {
     expect(kinds).toMatchObject({ squash: 'remove', pushed: 'remove', local: 'keep' })
     expect(cwdInside(join(root, 'x'), [join(root, 'x', 'sub')])).toBe(true)
     expect(cwdInside(join(root, 'x'), [join(root, 'xy')])).toBe(false)
+  })
+
+  test('a stopped but not-ended managed session keeps its worktree in use', async () => {
+    const { root, r } = repo()
+    expect(openSessionCwds([{ cwd: '/a' }, { cwd: '/b', endedAt: '2026-01-01T00:00:00Z' }, { cwd: '' }])).toEqual(['/a'])
+    const facts = await worktreeFacts(r, { env, managedCwds: openSessionCwds([{ cwd: join(root, 'merged') }, { cwd: join(root, 'dirty'), endedAt: 'x' }]) })
+    const by = (p: string) => facts.find(f => f.path === join(root, p))!
+    expect(by('merged').inUse).toBe(true)
+    expect(by('dirty').inUse).toBe(false)
+    expect(planClean(facts, Date.now()).find(i => i.facts.path === join(root, 'merged'))!.action).toEqual({ kind: 'keep', reason: 'active' })
   })
 
   test('a child that leaves stdout open cannot strand clean after the timeout', async () => {

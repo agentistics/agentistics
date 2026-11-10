@@ -6,6 +6,7 @@
 import { existsSync, readdirSync, readlinkSync, rmSync, statSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import type { CleanItem, WorktreeFacts } from './clean-plan'
+import { readRegistry } from '../sessions/registry'
 
 export interface CleanIoOpts {
   signal?: AbortSignal
@@ -17,6 +18,8 @@ export interface CleanIoOpts {
   lowPriority?: boolean
   /** Override the per-process ceiling in tests; production keeps the 60-second default. */
   timeoutMs?: number
+  /** Test seam: cwds of not-ended managed sessions; production reads the session registry. */
+  managedCwds?: readonly string[]
 }
 
 /** Ceiling for one git/du call. */
@@ -136,6 +139,11 @@ export function liveCwds(): string[] {
   return out
 }
 
+/** cwds of managed sessions that were never ended (stopped but resumable still count). Pure; exported for tests. */
+export function openSessionCwds(rows: ReadonlyArray<{ cwd: string; endedAt?: string }>): string[] {
+  return rows.filter(r => !r.endedAt && r.cwd).map(r => resolve(r.cwd))
+}
+
 /** A live process has its cwd at or below `path`. Pure; exported for tests. */
 export function cwdInside(path: string, cwds: readonly string[]): boolean {
   const p = resolve(path)
@@ -150,7 +158,9 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
   const blocks = list.out.split('\n\n').filter(Boolean)
   const allPaths = blocks.map(b => b.split('\n').find(l => l.startsWith('worktree '))?.slice(9)).filter((p): p is string => !!p).map(p => resolve(p))
   o.onDiscover?.(blocks.length)
-  const cwds = liveCwds()
+  let managed = o.managedCwds
+  if (!managed) { try { managed = openSessionCwds(await readRegistry()) } catch { managed = [] } }
+  const cwds = [...liveCwds(), ...managed]
   const out: Array<WorktreeFacts | undefined> = []
   let next = 0
   const inspect = async (block: string, index: number) => {
