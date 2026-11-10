@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.204.9': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Métricas: ao filtrar por OpenCode (ou outro harness que informa o próprio custo), o custo estimado deixa de aparecer zerado; vale o custo que o próprio harness registrou, inclusive com modelos atrás de gateway.',
+        en: 'Metrics: filtering by OpenCode (or another harness that reports its own cost) no longer shows a zero estimated cost; the cost the harness itself recorded is used, gateway models included.',
+      },
+      {
+        pt: 'Métricas: o card Arquivos mostra "N/A" quando nenhum harness filtrado informa arquivos editados, em vez de um 0 enganoso.',
+        en: 'Metrics: the Files card shows "N/A" when no filtered harness reports edited files, instead of a misleading 0.',
+      },
+    ],
+  },
   '2.204.8': {
     features: [],
     fixes: [
