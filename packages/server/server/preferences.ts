@@ -137,6 +137,8 @@ export interface Preferences {
    *  start. Absent reads as OFF. An explicit `AGENTISTICS_*` variable still wins either way. Read
    *  by `experimental-boot.ts` BEFORE config.ts loads, so it must stay a plain boolean key. */
   experimental?: boolean
+  /** Optional composer hint only. Never authorizes automatic request/card creation. */
+  taskMessageSuggestions?: boolean
   /** Opt-in for the repository explorer's read+write routes (`/api/fleet/tree*`). Absent reads as
    *  OFF, and it can only ever narrow `CAPS.localShell` — the same capability the utility shell
    *  rides; see `sessions/editor-gate.ts`. Separate from `shellEnabled`: wanting a shell is not

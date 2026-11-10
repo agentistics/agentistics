@@ -1,7 +1,7 @@
 /**
  * AreaRail — the app's areas as a 60px column of icons, drawn beside the sessions list in the
  * Sessões area (APP.AREAS Task 4, prototype `ASessoesColuna`). It replaces the Painel/Sessões
- * switch: every area is one click away without leaving the list. The button at its foot WIDENS this
+ * switch: each group opens its pages without navigating. The button at its top WIDENS this
  * same bar (icons gain their labels and sections, drawn by `AreaTree`) — one bar, never a second
  * column beside it; closing folds it back to icons.
  *
@@ -15,9 +15,7 @@ import { APP_AREAS, areaOfPath, pageLabel, type AreaId } from '../../lib/appArea
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { SOLID_COUNT } from './countBadge'
 import { AREA_ICON, AreaTree, Tip, areaEntryPath, rememberAreaPath } from './AreaTree'
-import { useEngineSurfaces } from '../../hooks/useEngineSurfaces'
-import { surfacePagePath } from '../../lib/engineSurfaces'
-import { surfaceGlyph } from '../EngineSurfaceButtons'
+import { areaOpenStore, openedArea } from '../../lib/areaOpen'
 
 export const AREA_RAIL_W = 60
 /** The width the same bar takes when opened: icons plus their labels and sections. */
@@ -32,41 +30,36 @@ export interface AreaRailProps {
   visibleSettings?: ReadonlySet<string>
   /** Opens the tree panel on the first render (tests). */
   initialTreeOpen?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
-export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSettings, initialTreeOpen = false }: AreaRailProps) {
+export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSettings, initialTreeOpen = false, open, onOpenChange }: AreaRailProps) {
   const navigate = useNavigate()
   const pt = lang === 'pt'
-  const [treeOpen, setTreeOpen] = useState(initialTreeOpen)
-  const hover = useRef(false)
-  const focused = useRef(false)
+  const [localOpen, setLocalOpen] = useState(initialTreeOpen)
   const navRef = useRef<HTMLElement>(null)
-  const focusHref = useRef<string | null>(null)
-  // Opening replaces the icon links with the tree. Carry keyboard focus to the same destination.
+  const toggleRef = useRef<HTMLButtonElement>(null)
+  const focusArea = useRef<string | null>(null)
+  const treeOpen = open ?? localOpen
+  const setTreeOpen = (next: boolean) => { setLocalOpen(next); onOpenChange?.(next) }
   useLayoutEffect(() => {
-    const nav = navRef.current
-    if (treeOpen && focused.current && nav && !nav.contains(document.activeElement)) {
-      const links = Array.from(nav.querySelectorAll<HTMLAnchorElement>('a[href]'))
-      ;(links.find(a => a.getAttribute('href') === focusHref.current) ?? links[0])?.focus()
+    if (treeOpen && focusArea.current) {
+      navRef.current?.querySelector<HTMLButtonElement>(`[data-area-heading="${focusArea.current}"]`)?.focus()
+      focusArea.current = null
     }
   }, [treeOpen])
-  const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const cancelClose = () => clearTimeout(leaveTimer.current)
-  const closeSoon = () => {
-    cancelClose()
-    leaveTimer.current = setTimeout(() => { if (!hover.current && !focused.current) setTreeOpen(false) }, 150)
-  }
-  useEffect(() => () => cancelClose(), [])
   const current = areaOfPath(pathname)?.area.id
   // Navigating anywhere closes the tree panel: it answered "where to", and the answer was given.
-  useEffect(() => { setTreeOpen(false) }, [pathname])
-  useEscapeOwner(treeOpen, () => setTreeOpen(false))
+  const previousPath = useRef(pathname)
+  useEffect(() => { if (previousPath.current !== pathname) { previousPath.current = pathname; setTreeOpen(false) } }, [pathname])
+  useEscapeOwner(treeOpen, () => { setTreeOpen(false); toggleRef.current?.focus() })
   const go = (to: string) => { rememberAreaPath(to); (onNavigate ?? navigate)(to) }
-  const treeLabel = pt ? 'Mostrar a árvore de áreas' : 'Show the area tree'
-  const closeLabel = pt ? 'Recolher a barra de áreas' : 'Collapse the area bar'
+  const treeLabel = pt ? 'Expandir' : 'Expand'
+  const closeLabel = pt ? 'Recolher' : 'Collapse'
 
   const icon: React.CSSProperties = {
-    position: 'relative', width: 40, height: 40, borderRadius: 9, border: 'none', flexShrink: 0,
+    position: 'relative', width: 32, height: 32, borderRadius: 9, border: 'none', flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontFamily: 'inherit',
     textDecoration: 'none',
   }
@@ -81,10 +74,6 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
     <div style={{ display: 'flex', flexShrink: 0, minHeight: 0, width: AREA_RAIL_W }}>
       <nav ref={navRef}
         aria-label={pt ? 'Áreas do app' : 'App areas'}
-        onPointerEnter={event => { if (event.pointerType !== 'touch') { hover.current = true; cancelClose(); setTreeOpen(true) } }}
-        onPointerLeave={event => { if (event.pointerType !== 'touch') { hover.current = false; closeSoon() } }}
-        onFocusCapture={event => { focusHref.current = (event.target as HTMLElement).closest('a')?.getAttribute('href') ?? null; focused.current = true; cancelClose(); setTreeOpen(true) }}
-        onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { focused.current = false; closeSoon() } }}
         data-area-rail
         data-open={treeOpen ? 'true' : 'false'}
         style={{
@@ -96,6 +85,15 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
           boxShadow: treeOpen ? '0 12px 32px rgba(0,0,0,0.35)' : 'none',
         }}
       >
+        <div style={{ display: 'flex', justifyContent: treeOpen ? 'flex-start' : 'center', padding: treeOpen ? '0 13px' : 0, flexShrink: 0 }}>
+          <button ref={toggleRef} type="button" aria-label={treeOpen ? closeLabel : treeLabel} aria-expanded={treeOpen}
+            aria-controls="ag-area-rail-tree" title={treeOpen ? closeLabel : treeLabel}
+            onClick={() => setTreeOpen(!treeOpen)}
+            style={{ ...icon, width: treeOpen ? '100%' : 32, justifyContent: treeOpen ? 'flex-start' : 'center', gap: 10,
+              color: 'var(--text-secondary)', background: 'transparent' }}>
+            <ListTree size={18} />{treeOpen && closeLabel}
+          </button>
+        </div>
         {treeOpen ? (
           <div id="ag-area-rail-tree" className="ag-noscroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 8px' }}>
             <AreaTree lang={lang} pathname={pathname} badges={badges} visibleSettings={visibleSettings}
@@ -115,11 +113,14 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
               const name = n ? `${label}, ${n} ${what}` : label
               return (
                 <Tip key={area.id} label={<>{label}{area.beta && <> <BetaTag what={label} lang={lang} /></>}</>} show>
-                  <a
-                    href={to}
+                  <button
+                    type="button"
                     aria-label={name}
                     aria-current={active ? 'page' : undefined}
-                    onClick={e => { e.preventDefault(); go(to) }}
+                    onClick={() => {
+                      if (area.pages.length > 0) { focusArea.current = area.id; areaOpenStore.set(openedArea(areaOpenStore.get(), area.id)); setTreeOpen(true) }
+                      else go(to)
+                    }}
                     style={{
                       ...icon,
                       color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
@@ -134,30 +135,13 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       }}>{n}</span>
                     ) : null}
-                  </a>
+                  </button>
                 </Tip>
               )
             })}
             <span style={{ flex: 1 }} />
           </>
         )}
-        <div style={{ display: 'flex', justifyContent: treeOpen ? 'flex-start' : 'center', padding: treeOpen ? '0 10px' : 0, flexShrink: 0 }}>
-            <button
-              type="button"
-              aria-label={treeOpen ? closeLabel : treeLabel}
-              aria-expanded={treeOpen}
-              aria-controls="ag-area-rail-tree"
-              title={treeOpen ? closeLabel : treeLabel}
-              onClick={() => setTreeOpen(o => !o)}
-              style={{
-                ...icon,
-                color: treeOpen ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
-                background: treeOpen ? 'var(--anthropic-orange-dim)' : 'transparent',
-              }}
-            >
-              <ListTree size={18} />
-            </button>
-        </div>
       </nav>
     </div>
   )

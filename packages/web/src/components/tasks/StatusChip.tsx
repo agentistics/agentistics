@@ -18,11 +18,14 @@
  */
 
 import type { TaskStatusDef } from '@agentistics/core'
+import { useStatusPending } from '../../lib/statusWrites'
 import { liveStatusMap, liveStatusOrder, type BoardStatus } from './board'
 import { ChipSelect } from './ChipSelect'
 import { statusLabel, type Lang } from './copy'
 
 export interface StatusChipProps {
+  taskId?: string
+  subtaskId?: string
   value: string
   /** `blocked` reaches the caller like any other status — the reason dialog is the caller's. */
   onPick: (status: BoardStatus) => void
@@ -37,7 +40,8 @@ export interface StatusChipProps {
   disabled?: boolean
 }
 
-export function StatusChip({ value, onPick, lang, statuses, compact, block = true, disabled }: StatusChipProps) {
+export function StatusChip({ value, onPick, lang, statuses, compact, block = true, disabled, taskId, subtaskId }: StatusChipProps) {
+  const pending = useStatusPending(taskId ? `/api/tasks/${encodeURIComponent(taskId)}${subtaskId ? `/subtasks#${subtaskId}` : ''}` : undefined)
   // Built here rather than passed in, so no caller can offer a different set of statuses — the
   // point of the component is that the menu is the same everywhere. Every entry's label/colour is
   // the LIVE one (a person's rename or custom status wins over any fixed word).
@@ -53,6 +57,8 @@ export function StatusChip({ value, onPick, lang, statuses, compact, block = tru
   return (
     <ChipSelect
       value={value}
+      pending={pending}
+      pendingLabel={lang === 'pt' ? 'Salvando' : 'Saving'}
       options={options}
       onPick={v => onPick(v as BoardStatus)}
       title={statusLabel(value, lang, statuses ?? undefined)}

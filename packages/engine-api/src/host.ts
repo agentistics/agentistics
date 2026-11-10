@@ -267,7 +267,7 @@ export interface EngineBoard {
   /** Add (`title`, `isGroup`) or edit (`id` + columns) a subtask — the `/subtasks` route's body. */
   subtask(ref: string, payload: Record<string, unknown>, by: { actor: string; sessionId: string }): Promise<EngineBoardAnswer>
   comment(ref: string, c: { body: string; author: string; sessionId: string; subtaskId?: string }): Promise<EngineBoardAnswer>
-  status(ref: string, s: { status: string; actor: string; sessionId: string; reason?: string; blockedBy?: string[] }): Promise<EngineBoardAnswer>
+  status(ref: string, s: { status: string; actor: string; sessionId: string; reason?: string; blockedBy?: string[]; allowOpenSubtasks?: boolean }): Promise<EngineBoardAnswer>
   claim(ref: string, c: { by: string; sessionId: string; leaseMs?: number; note?: string; takeover?: boolean; release?: boolean }): Promise<EngineBoardAnswer>
   /**
    * Files the session produced (verification screenshots, EVID.1), stored in the host's attachment

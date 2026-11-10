@@ -130,7 +130,7 @@ export function contextText(i: ContextInput): string {
     METRICS_DASHBOARDS_LINE,
     briefingText(i.lang ?? 'en', { planLimitsAvailable: planLimits && !worker, away }),
     roleLine(i.role),
-    ...awayBriefingLines(i.away, i.role, now, { planLimitsInBriefing: planLimits, ruleInBriefing: true }),
+    ...awayBriefingLines(i.away, i.role, now, { planLimitsInBriefing: planLimits, ruleInBriefing: true, lang: i.lang }),
     ...flowLines(i.lang ?? 'en', i.role, !!i.taskId),
   ]
   if (i.role !== 'worker') {

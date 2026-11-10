@@ -22,6 +22,7 @@ import { TaskProgressBar } from './TaskProgressBar'
 import { HarnessBadges } from './HarnessBadges'
 import { boardCopy, statusLabel } from './copy'
 import { BOARD_SORT_KEYS } from './BoardArrange'
+import { useStatusPending } from '../../lib/statusWrites'
 import { emptyColumns } from './emptyGroups'
 import { ColumnSortMenu } from './ColumnSortMenu'
 import {
@@ -40,6 +41,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
   nowMs: number
   statuses: readonly TaskStatusDef[] | null
 }) {
+  const pending = useStatusPending(`/api/tasks/${encodeURIComponent(row.task.id)}`)
   const s = statusStyle(statuses, row.task.status)
   const counts = row.counts
   const priority = row.task.priority && row.task.priority !== 'none'
@@ -56,6 +58,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
   return (
     <button
       onClick={onOpen}
+      aria-busy={pending || undefined}
       style={{ ...cardStyle, position: 'relative', overflow: 'hidden' }}
       onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-card-hover)' }}
       onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-card)' }}
@@ -86,6 +89,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
           </div>
         )}
         <div style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.35 }}>{row.task.title}</div>
+        {pending && <span role="status" style={{ fontSize: 12 }}>{lang === 'pt' ? 'Salvando status…' : 'Saving status…'}</span>}
         {row.task.detail && (
           <div style={{
             fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.45,
@@ -260,6 +264,7 @@ function laneOf(row: TaskListRow, key: LaneKey): string {
 }
 
 export function BoardView(p: BoardViewProps) {
+  const statusPending = useStatusPending()
   const { rows, onOpen } = p
   const isMobile = useIsMobile()
   const L = boardCopy(p.lang ?? 'en').list
@@ -499,7 +504,8 @@ export function BoardView(p: BoardViewProps) {
                       <div
                         key={r.task.id}
                         data-task-card
-                        draggable
+                        draggable={!statusPending}
+                        aria-busy={statusPending || undefined}
                         onDragStart={() => { setDrag(r.task.id); setRefused(null) }}
                         onDragEnd={() => { setDrag(null); setOver(null) }}
                         onDragOver={e => {

@@ -48,7 +48,7 @@ describe('awayBriefingLines', () => {
   })
   it('leader lines: scope, pacing, quality, communication', () => {
     const lines = awayBriefingLines(on({ note: 'focus on QUAL', maxWorkers: 4, topCaps: { claude: 1, codex: 3 } }), 'leader', NOW)
-    expect(lines).toHaveLength(4)
+    expect(lines).toHaveLength(5)
     expect(lines[0]).toBe(`AUTONOMOUS MODE (until they say they are back). ${AUTONOMOUS_ON_RULE.en} Pre-authorised: publish releases the leader has approved (QA green); open worker sessions within the plan limits; owner's note: focus on QUAL. Act directly within those authorisations; anything outside them is DEFERRED safely in the hand-off file for the owner's return.`)
     expect(lines[1]).toContain('Never run more than 4 workers at once; at most this many of them on a provider\'s top model tier at once: claude (Opus / Fable) ≤ 1, codex (top GPT tier) ≤ 3, any other provider ≤ 1')
     expect(lines[1]).toContain('free RAM drops under 2 GB')

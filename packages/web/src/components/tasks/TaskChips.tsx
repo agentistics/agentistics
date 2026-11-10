@@ -236,6 +236,7 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
     <>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         <StatusChip
+          taskId={id}
           value={task.status} lang={lang} statuses={statuses} compact block={false}
           {...(busy ? { disabled: true } : {})}
           onPick={st => void onStatus(st as TaskStatus)}

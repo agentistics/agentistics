@@ -609,6 +609,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                     {id === 'status'
                       ? (
                         <StatusChip
+                          taskId={t.taskId} subtaskId={t.id}
                           value={t.status} lang={p.lang} statuses={p.statuses} compact block={false}
                           onPick={st => void pickStatus(t, st)}
                         />

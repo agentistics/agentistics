@@ -85,6 +85,8 @@ export default function SessionsSettings() {
   // CONTA.AUTO — move a session that stopped at its account's limit to another account by itself. Absent reads as ON.
   const [autoSwitch, setAutoSwitch] = useState<boolean | null>(null)
   const [autoSwitchSaving, setAutoSwitchSaving] = useState(false)
+  const [taskSuggestions, setTaskSuggestions] = useState(false)
+  const [taskSuggestionsSaving, setTaskSuggestionsSaving] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
   // A CENTRAL CAN NEVER RUN THE STUDIO, and this screen is the one place a user turns it on — so it
   // is the one place a false sentence about it is expensive. `CAPS.localShell` carries no central
@@ -139,6 +141,7 @@ export default function SessionsSettings() {
       .then((p: {
         archiveMode?: ArchiveMode; archiveSessions?: boolean
         shellEnabled?: boolean; editorEnabled?: boolean; editorAutosave?: boolean; autoSwitchAccounts?: boolean
+        taskMessageSuggestions?: boolean
       } | null) => {
         const m: ArchiveMode =
           p?.archiveMode ?? (p?.archiveSessions === true ? 'full' : p?.archiveSessions === false ? 'off' : 'off')
@@ -150,6 +153,7 @@ export default function SessionsSettings() {
         // Same reading for the Studio's switch, same reason.
         setEditorEnabled(p?.editorEnabled !== false)
         setAutoSwitch(p?.autoSwitchAccounts !== false)
+        setTaskSuggestions(p?.taskMessageSuggestions === true)
         // Autosave is UNTOUCHED by the reversal above — it stays absent = OFF, since widening a
         // save race is a materially different risk than opening a panel that is already gated by
         // `capable` on the two switches above.
@@ -285,6 +289,15 @@ export default function SessionsSettings() {
       <Divider />
 
       <AwaySection lang={pt ? 'pt' : 'en'} capable={shellCapable && !ctx.isCentral} />
+
+      <PrefRow label={pt ? 'Sugerir criar tarefa ao escrever um pedido (nunca cria automaticamente)' : 'Suggest creating a task when writing a request (never creates automatically)'}>
+        <Toggle on={taskSuggestions} disabled={taskSuggestionsSaving} onToggle={() => {
+          const next = !taskSuggestions
+          setTaskSuggestionsSaving(true)
+          void fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskMessageSuggestions: next }) })
+            .then(r => { if (r.ok) setTaskSuggestions(next) }).catch(() => {}).finally(() => setTaskSuggestionsSaving(false))
+        }} />
+      </PrefRow>
 
       <Divider />
 

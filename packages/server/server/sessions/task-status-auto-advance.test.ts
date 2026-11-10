@@ -25,6 +25,49 @@ import { join } from 'node:path'
 
 const SESSIONS_DIR = import.meta.dir
 
+test('review refuses open top-level subtasks; explicit override preserves all 740 children', async () => {
+  const out = await run(`
+    ${task('t-review', "status: 'in_progress',")}
+    const children = Array.from({ length: 740 }, (_, i) => ({ id: 's-' + i, taskId: 't-review', title: 'Child ' + i,
+      status: ['todo', 'in_progress', 'in_review', 'blocked'][i % 4], done: false,
+      createdAt: '2026-11-09T10:00:00Z', updatedAt: '2026-11-09T10:00:00Z' }))
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(cfg.TASKS_FILE, JSON.stringify({ ...await store.read(), subtasks: children }))
+    const refused = await web.markTask('t-review', 'in_review', 'test')
+    const before = (await web.showTask('t-review')).task
+    const allowed = await web.markTask('t-review', 'in_review', 'test', { allowOpenSubtasks: true })
+    const after = (await web.showTask('t-review')).task
+    console.log(JSON.stringify({ refused: refused.message, open: refused.openSubtaskIds.length, before: before.task.status,
+      allowed: allowed.ok, after: after.task.status, children: after.subtasks.length,
+      identical: before.subtasks.map(s => s.id).join() === after.subtasks.map(s => s.id).join() }))
+  `)
+  expect(out).toEqual({ refused: 'open_subtasks', open: 740, before: 'in_progress', allowed: true, after: 'in_review', children: 740, identical: true })
+}, 20_000)
+
+test('open group members alone do not prevent parent review', async () => {
+  const out = await run(`
+    ${task('t-review', "status: 'in_progress',")}
+    ${subtask('member', 't-review', "parentGroupId: 'group',")}
+    console.log(JSON.stringify(await web.markTask('t-review', 'in_review', 'test')))
+  `)
+  expect(out).toMatchObject({ ok: true })
+})
+
+test('filing a worker on an explicit composer task stamps the start and assignee once', async () => {
+  const out = await run(`
+    ${task('t1', "repo: 'github.com/test/repo',")}
+    ${subtask('s1', 't1', "priority: 'high', assignee: 'leader', ownerRequest: { messageId: 'm', sessionId: 'lead', conversationId: 'conv', at: '2026-11-09T10:00:00Z', text: 'Fix', pedidoId: 'p-1' },")}
+    ${session('worker', "parentSessionId: 'leader',")}
+    const first = await web.attachSession('t1', 'worker', { subtaskId: 's1' })
+    const before = (await store.read()).subtasks[0]
+    await web.attachSession('t1', 'worker', { subtaskId: 's1' })
+    const after = (await store.read()).subtasks[0]
+    console.log(JSON.stringify({ ok: first.ok, status: after.status, assignee: after.assignee,
+      started: !!after.startedAt, planMatchesStart: after.startDate === after.startedAt, sameStart: before.startedAt === after.startedAt }))
+  `)
+  expect(out).toEqual({ ok: true, status: 'in_progress', assignee: 'worker', started: true, planMatchesStart: true, sameStart: true })
+})
+
 async function run(body: string): Promise<unknown> {
   const dir = await mkdtemp(join(tmpdir(), 'agentop-subtask-auto-advance-'))
   const script = `

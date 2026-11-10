@@ -2,8 +2,8 @@
  * AreaTree — the app's navigation tree, rendered from the area registry.
  *
  * Desktop aside (`variant="aside"`) and the mobile sheet (`variant="sheet"`, larger targets) are the
- * same tree. The sheet starts folded; the aside expands the area holding the current URL. Clicking an area goes to the page
- * last visited inside it (remembered per area in sessionStorage), else its first page.
+ * same tree. The sheet starts folded; the aside expands the area holding the current URL. Group
+ * headings only expand/collapse; their child pages navigate. A single-page area navigates directly.
  */
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { LucideIcon } from 'lucide-react'
@@ -154,13 +154,21 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
     return (
       <Tip key={area.id} label={<>{label}{area.beta && <> <BetaTag what={label} lang={lang} /></>}</>} show={collapsed}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-        <a
-          href={to}
+        <button
+          type="button"
+          data-area-heading={area.id}
           aria-label={collapsed ? label : undefined}
           aria-current={active && !area.pages.length ? 'page' : undefined}
-          onClick={e => { e.preventDefault(); if (hasPages && !sheet) areaOpenStore.set(openedArea(openMap, area.id)); go(to) }}
+          aria-expanded={hasPages ? expanded : undefined}
+          onClick={() => {
+            if (hasPages) {
+              if (sheet) setSheetArea(expanded ? null : area.id)
+              else areaOpenStore.set(toggledAreaOpen(openMap, area.id, active, current?.area.id))
+            } else go(to)
+          }}
           style={{
             ...areaRowStyle(sheet),
+            border: 'none', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
             padding: collapsed ? '0' : '0 12px',
             justifyContent: collapsed ? 'center' : 'flex-start', textDecoration: 'none',
             fontWeight: active ? 700 : 500,
@@ -175,7 +183,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
           {!collapsed && label}
           {!collapsed && area.beta && <BetaTag what={label} lang={lang} style={{ marginLeft: 4 }} />}
           {!collapsed && n ? <Badge n={n} /> : null}
-        </a>
+        </button>
         {!collapsed && hasPages && (
           <button
             type="button" aria-expanded={expanded}

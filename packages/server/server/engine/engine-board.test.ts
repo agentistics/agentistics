@@ -30,6 +30,12 @@ function deps(over: Partial<BoardDeps> = {}): BoardDeps & { calls: Array<[string
 const by = { actor: 'native:s', sessionId: 's' }
 
 describe('createEngineBoard', () => {
+  test('review refusal is 422 and an explicit override is forwarded to the shared mutation', async () => {
+    const d = deps({ markTask: async (_ref, _to, _actor, o) => ({ ok: o.allowOpenSubtasks === true, message: 'open_subtasks' }) })
+    const board = createEngineBoard(d)
+    expect(await board.status('t', { status: 'in_review', ...by })).toMatchObject({ ok: false, status: 422, reason: 'open_subtasks' })
+    expect(await board.status('t', { status: 'in_review', ...by, allowOpenSubtasks: true })).toMatchObject({ ok: true })
+  })
   test('every operation reaches its route\'s function with the route\'s arguments', async () => {
     const d = deps()
     const b = createEngineBoard(d)

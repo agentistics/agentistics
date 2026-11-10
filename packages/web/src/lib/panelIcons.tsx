@@ -12,7 +12,7 @@
  */
 
 import {
-  Activity, Bot, BarChart3, ClipboardList, Cpu, FolderTree, GitBranch, GitPullRequest, Image, Plug,
+  FileDiff, Bot, BarChart3, ClipboardList, Cpu, FolderTree, GitBranch, GitPullRequest, Image, Plug,
   Search, Sparkles, TerminalSquare, Workflow, type LucideIcon,
 } from 'lucide-react'
 import { HarnessMark } from '../components/sessions/HarnessMark'
@@ -20,7 +20,7 @@ import type { PanelId } from './panelSlots'
 
 const ICON: Record<Exclude<PanelId, 'cli' | 'shell'>, LucideIcon> = {
   search: Search,
-  live: Activity,
+  live: FileDiff,
   gallery: Image,
   skills: Sparkles,
   agents: Bot,

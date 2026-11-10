@@ -14,7 +14,7 @@
  * shows both and no total, and an open task shows no duration — "still running" is not "took N h".
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import {
@@ -178,19 +178,40 @@ function TaskList() {
   const [starting, setStarting] = useState<{ taskId: string; title: string } | null>(null)
   /** Details fetched for the rows the table has expanded — subtasks live there. */
   const [details, setDetails] = useState<Map<string, TaskDetail>>(new Map())
+  const [loadingDetails, setLoadingDetails] = useState<Set<string>>(new Set())
+  const [detailErrors, setDetailErrors] = useState<Set<string>>(new Set())
+  const detailLoads = useRef(new Set<string>())
+  const loadExpandedDetail = async (id: string) => {
+    if (detailLoads.current.has(id)) return
+    detailLoads.current.add(id)
+    setLoadingDetails(prev => new Set(prev).add(id))
+    setDetailErrors(prev => { const next = new Set(prev); next.delete(id); return next })
+    try {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`)
+      if (!res.ok) throw new Error('detail unavailable')
+      const body = await res.json() as { task: TaskDetail }
+      if (!Array.isArray(body.task?.subtasks)) throw new Error('incomplete detail')
+      setDetails(prev => new Map(prev).set(id, body.task))
+    } catch {
+      setDetailErrors(prev => new Set(prev).add(id))
+    } finally {
+      detailLoads.current.delete(id)
+      setLoadingDetails(prev => { const next = new Set(prev); next.delete(id); return next })
+    }
+  }
 
   /** The ONE way a status is set from this page. `blocked` asks its question first. */
   const toStatus = async (ids: string[], status: TaskStatus) => {
     if (status === 'blocked') { setBlocking(ids); return }
-    for (const id of ids) await markTask(id, status)
+    for (const id of ids) {
+      const out = await markTask(id, status)
+      if (out.ok && details.has(id)) await refreshDetail(id)
+    }
     await reload()
   }
 
   const refreshDetail = async (id: string) => {
-    const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`)
-    if (!res.ok) return
-    const body = await res.json() as { task: TaskDetail }
-    setDetails(m => new Map(m).set(id, body.task))
+    await loadExpandedDetail(id)
     await reload()
   }
 
@@ -481,6 +502,8 @@ function TaskList() {
           statuses={statuses}
           types={types}
           details={details}
+          loadingDetails={loadingDetails}
+          detailErrors={detailErrors}
           onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}
           onStatus={(ref, status) => void toStatus([ref], status)}
           onPriority={async (ref, priority) => { await editTask(ref, { priority }); await reload() }}
@@ -494,13 +517,8 @@ function TaskList() {
             if (made && status !== 'todo') await markTask(made.id, status)
             await reload()
           }}
-          onExpand={async id => {
-            if (details.has(id)) return
-            const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`)
-            if (!res.ok) return
-            const body = await res.json() as { task: TaskDetail }
-            setDetails(m => new Map(m).set(id, body.task))
-          }}
+          // Expansion always refreshes all children, irrespective of the parent's status.
+          onExpand={id => { void loadExpandedDetail(id) }}
           onRefreshDetail={refreshDetail}
           onCommentsChanged={async ref => { await reload(); await refreshDetail(ref) }}
           onAddSubtask={async (ref, title) => { await addSubtask(ref, title); await refreshDetail(ref) }}

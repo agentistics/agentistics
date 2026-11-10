@@ -151,6 +151,8 @@ export type FleetActionId =
   | 'archive' | 'delete'
 
 export interface FleetActionRequest {
+  messageId?: string
+  asTask?: import('@agentistics/core').ComposerTaskOptions
   id: string
   action: FleetActionId
   /** The text for `prompt`/`rename`/`note`/`task`. */

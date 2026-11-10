@@ -246,6 +246,8 @@ export interface FleetState {
   refresh: () => void
   act: (req: {
     id: string
+    messageId?: string
+    asTask?: import('@agentistics/core').ComposerTaskOptions
     action: FleetActionId
     text?: string
     choice?: number
