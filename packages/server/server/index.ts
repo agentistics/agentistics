@@ -2584,6 +2584,20 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // `in_use` is 422 like the status routes; `no_such_type` stays 404.
       return json(out, out.ok ? 200 : (out.message === 'no_such_type' ? 404 : 422))
     }
+    if (url.pathname === '/api/tasks/message-suggestion' && req.method === 'POST') {
+      const { readPreferences } = await import('./preferences')
+      if ((await readPreferences()).taskMessageSuggestions !== true) return json({ suggest: false })
+      const body = await req.json().catch(() => ({}))
+      const { ownerTaskSuggestion } = await import('./flows/owner-intent')
+      return json({ suggest: typeof body.text === 'string' && ownerTaskSuggestion(body.text, true) })
+    }
+    if (url.pathname === '/api/tasks/from-message' && req.method === 'POST') {
+      const body = await req.json().catch(() => null)
+      if (!body || typeof body.id !== 'string') return json({ ok: false, message: 'message required' }, 400)
+      const { registerComposerTask } = await import('./flows/composer-task')
+      const out = await registerComposerTask({ ...body, action: 'prompt' }, url.searchParams.get('lang') === 'pt' ? 'pt' : 'en')
+      return json(out, out.ok ? 200 : 422)
+    }
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'GET') {
       const ref = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
       const { showTask } = await import('./sessions/task-web')
@@ -2957,6 +2971,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         ref, to,
         typeof body.actor === 'string' ? body.actor : undefined,
         {
+          ...(body.allowOpenSubtasks === true ? { allowOpenSubtasks: true } : {}),
           ...(typeof body.reason === 'string' ? { reason: body.reason } : {}),
           ...(Array.isArray(body.blockedBy)
             ? { blockedBy: body.blockedBy.filter((v): v is string => typeof v === 'string') }
@@ -2971,7 +2986,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // caller can act on, with a code that says so.
       return json(out, out.ok ? 200
         : out.message === 'unknown_status' ? 400
-        : (out.message === 'blocked_needs_reason' || out.message === 'done_needs_session') ? 422 : 404)
+        : (out.message === 'blocked_needs_reason' || out.message === 'done_needs_session' || out.message === 'open_subtasks') ? 422 : 404)
     }
 
     /**

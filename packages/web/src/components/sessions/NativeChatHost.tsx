@@ -53,9 +53,18 @@ export function NativeChatHost(props: Omit<SessionChatProps, 'source'>) {
             : `The native runtime takes images and PDFs — it does not attach ${parts.refused.join(', ')}.`,
         }
       }
+      let taskNote = ''
+      if (req.asTask !== undefined) {
+        try {
+          const res = await fetch(`/api/tasks/from-message?lang=${lang}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req) })
+          const registered = await res.json()
+          if (!res.ok || !registered.ok) return { ok: false, message: registered.message || (pt ? 'Não foi possível registrar a tarefa.' : 'Could not register the task.') }
+          taskNote = registered.note
+        } catch { return { ok: false, message: pt ? 'Não foi possível registrar a tarefa.' : 'Could not register the task.' } }
+      }
       // A refused send puts its sentence on the state (`send-failed`), which the source's `notice` says.
-      const ok = await send(parts.text, parts.uploads)
-      return { ok, message: '' }
+      const ok = await send(taskNote ? `${parts.text}\n\n[agentistics · ${taskNote}]` : parts.text, parts.uploads)
+      return { ok, message: taskNote }
     }
     if (req.action === 'interrupt') { await stop(); return { ok: true, message: '' } }
     // The row verbs (rename, stop the session, reopen) — the same engine routes the menu reaches.

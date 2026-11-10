@@ -2,15 +2,17 @@
  * owner-message.ts — ORQ.H1's emitter: the OWNER's composer message to a managed session, as the
  * `owner.message` event of the engine's flows bus.
  *
- * Every confirmed owner composer send reaches here (HTTP, TUI and late confirmations), carrying NO session proof.
+ * Legacy confirmed sends/relays still reach here, but unflagged messages never emit or create cards.
+ * The composer task gesture uses composer-task.ts and direct register/link runs instead of this bus.
+ * Explicit compatibility callers must carry valid task options and NO session proof.
  * The text goes through the hand-off relay's classifier: an ordinary relay (`[from session …]`,
  * `[from flow …]`, `<agent-message>`), a context block, a task notification or any other system
- * entry is NOT an owner message and emits nothing. Leaders' messages become pedidos; a worker's
- * becomes a comment on its subtask (the engine decides — the role travels in the payload).
+ * entry is NOT an owner message and emits nothing. The classifier remains available for optional hints.
  * Trusted handoff readers emit original owner turns separately, retaining their conversation and timestamp.
  * A failure here never changes a confirmed send's outcome.
  */
 import { createHash } from 'node:crypto'
+import { validComposerTask } from '@agentistics/core'
 import { isOwnerTurn } from '../sessions/handoff-relay'
 import { ownerIntent, ownerRequestTitle } from './owner-intent'
 import { convScope, DUPLICATE_WINDOW_MS, taskScope } from './owner-ledger'
@@ -82,7 +84,7 @@ export interface OwnerMessageDeps {
   now(): number
 }
 
-export type OwnerMessageOutcome = 'emitted' | 'flows-off' | 'no-engine' | 'not-composer' | 'not-owner' | 'no-session' | 'no-role' | 'handoff' | 'duplicate'
+export type OwnerMessageOutcome = 'emitted' | 'not-task' | 'flows-off' | 'no-engine' | 'not-composer' | 'not-owner' | 'no-session' | 'no-role' | 'handoff' | 'duplicate'
 
 /**
  * PURE. A composer prompt from the web/TUI as the owner sends it: `action: prompt` and NO session proof at
@@ -94,7 +96,10 @@ export function isOwnerComposerRequest(body: { action?: unknown; session?: unkno
   return body.action === 'prompt' && body.session === undefined && body.callerVerified !== true
 }
 
-export async function emitOwnerMessage(req: { id: string; text?: string; channel?: string; action?: unknown; session?: unknown; callerVerified?: unknown; handoff?: unknown }, deps: OwnerMessageDeps, source: { at?: string; conversationId?: string } = {}): Promise<OwnerMessageOutcome> {
+export async function emitOwnerMessage(req: { id: string; text?: string; channel?: string; action?: unknown; session?: unknown; callerVerified?: unknown; handoff?: unknown; asTask?: unknown }, deps: OwnerMessageDeps, source: { at?: string; conversationId?: string } = {}): Promise<OwnerMessageOutcome> {
+  // Legacy emitters and transcript relays have no explicit gesture. Classification is a hint only.
+  // Flagged composer sends register through composer-task.ts, without the automatic placement bus.
+  if (!validComposerTask(req.asTask)) return 'not-task'
   if (!deps.flowsOn()) return 'flows-off'
   if (!isOwnerComposerRequest(req)) return 'not-composer'
   // FLUXO.AVISOS: the hand-off request is the SYSTEM asking the leader to hand over — never the owner asking for work.

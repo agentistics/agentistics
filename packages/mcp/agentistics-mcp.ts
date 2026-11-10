@@ -314,6 +314,7 @@ const TOOLS: Tool[] = [
             "A status id this board currently has — call agentistics_task_statuses to see the live list. The four every board starts with are todo | in_progress | blocked | done.",
         },
         actor: { type: "string" },
+        allowOpenSubtasks: { type: "boolean", description: "Explicitly move a parent to in_review despite open top-level subtasks, after inspecting the open_subtasks refusal. Default false." },
         reason: {
           type: "string",
           description: "Why it is blocked, in your own words. Required by `blocked` unless you pass `blockedBy`.",
@@ -1184,6 +1185,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const a = args as any;
         const body = await apiSend("POST", `/api/tasks/${encodeURIComponent(String(a?.ref))}`, {
           status: a?.status,
+          ...(a?.allowOpenSubtasks === true ? { allowOpenSubtasks: true } : {}),
           ...(typeof a?.actor === "string" ? { actor: a.actor } : {}),
           ...(typeof a?.reason === "string" ? { reason: a.reason } : {}),
           ...(Array.isArray(a?.blockedBy) ? { blockedBy: a.blockedBy } : {}),

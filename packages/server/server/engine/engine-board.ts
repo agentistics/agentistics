@@ -31,7 +31,7 @@ export interface BoardDeps {
   patchSubtask(id: string, patch: Record<string, unknown>): R<{ ok: boolean; message?: string }>
   setSubtaskDone(id: string, done: boolean): R<{ ok: boolean; message?: string }>
   addComment(ref: string, o: { author: string; body: string; subtaskId?: string; attachments?: unknown }): R<{ ok: true; id: string } | { ok: false; reason: string; message: string }>
-  markTask(ref: string, to: string, actor: string | undefined, o: { reason?: string; blockedBy?: readonly string[] }): R<{ ok: boolean; message?: string }>
+  markTask(ref: string, to: string, actor: string | undefined, o: { reason?: string; blockedBy?: readonly string[]; allowOpenSubtasks?: boolean }): R<{ ok: boolean; message?: string }>
   claimTask(o: { ref: string; by: string; leaseMs?: number; sessionId?: string; note?: string; takeover?: boolean }): R<{ ok: boolean; reason?: string; heldBy?: string }>
   releaseTask(o: { ref: string; by: string }): R<{ ok: boolean; reason?: string; heldBy?: string }>
   storeAttachment(file: { name: string; bytes: Uint8Array }, sessionId: string): R<{ ok: boolean; path?: string; name?: string; message?: string }>
@@ -77,10 +77,10 @@ export function createEngineBoard(d: BoardDeps): EngineBoard {
     }),
     status: (ref, s) => guarded(async () => {
       if (!s.status.trim()) return no(400, 'bad_status')
-      const r = await d.markTask(ref, s.status, s.actor, { ...(s.reason ? { reason: s.reason } : {}), ...(s.blockedBy ? { blockedBy: s.blockedBy } : {}) })
+      const r = await d.markTask(ref, s.status, s.actor, { ...(s.reason ? { reason: s.reason } : {}), ...(s.blockedBy ? { blockedBy: s.blockedBy } : {}), ...(s.allowOpenSubtasks === true ? { allowOpenSubtasks: true } : {}) })
       if (r.ok) return ok(r)
       const m = r.message ?? 'refused'
-      return no(m === 'unknown_status' ? 400 : m === 'blocked_needs_reason' || m === 'done_needs_session' ? 422 : 404, m, r)
+      return no(m === 'unknown_status' ? 400 : m === 'blocked_needs_reason' || m === 'done_needs_session' || m === 'open_subtasks' ? 422 : 404, m, r)
     }),
     claim: (ref, c) => guarded(async () => {
       const r = c.release

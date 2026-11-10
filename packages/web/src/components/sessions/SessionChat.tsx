@@ -1,4 +1,5 @@
 import { HandoffBand } from './HandoffWarning'
+import { ComposerTaskButton, ComposerTaskFields, useComposerTask } from '../chat/ComposerTask'
 import { AccountLimitBand, AccountLoginBand } from './AccountSwitch'
 /**
  * SessionChat — one live session, read as a conversation.
@@ -394,6 +395,20 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    */
   const [loaded] = useState(() => loadComposer(scratchId))
   const [draft, setDraft] = useState(loaded.draft)
+  const composerTask = useComposerTask()
+  const [taskSuggestion, setTaskSuggestion] = useState(false)
+  useEffect(() => {
+    setTaskSuggestion(false)
+    if (!draft.trim() || composerTask.options) return
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      void fetch('/api/tasks/message-suggestion', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: draft }), signal: controller.signal })
+        .then(r => r.ok ? r.json() : null).then(r => { if (!controller.signal.aborted) setTaskSuggestion(r?.suggest === true) }).catch(() => {})
+    }, 600)
+    return () => { clearTimeout(timer); controller.abort() }
+  }, [draft, composerTask.options])
+  useEffect(() => { composerTask.setOptions(null); composerTask.complete() }, [session.id])
 
   /**
    * Every change to the draft, PERSISTED against the session it belongs to.
@@ -2520,6 +2535,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
      * cannot undo itself is how that happens.
      */
     const restore = { draft, attached, replyTo }
+    const taskRequest: ReturnType<typeof composerTask.take> = answeringNow ? {} : composerTask.take(full)
     setSending(true)
     setDeliveryFailure(null)
     // A SOURCE draws its own optimistic turn (the native runtime's `sent`); an echo would be a second copy.
@@ -2552,9 +2568,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     const answeringShape = answeringNow && answering ? answering.shape : null
     const out = answeringNow && answering
       ? await act(composerAnswerRequest(session.id, answering, full))
-      : await act({ id: session.id, action: 'prompt', text: full })
+      : await act({ id: session.id, action: 'prompt', text: full, ...taskRequest })
     setSending(false)
     if (out.ok) {
+      composerTask.complete()
+      if (taskRequest.asTask) setNotice(out.message)
       if (out.id && out.id !== session.id) onReopened?.(out.id)
       setVaultGrantCache(null)
       // Ask for the transcript at once. The harness writes the user turn as soon as it takes the
@@ -2577,6 +2595,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // next time they press send, so the echo stays (the transcript retires it when the message
     // lands), the field stays empty, and the server's sentence says to look before resending.
     if (out.failure === 'unconfirmed') {
+      composerTask.complete()
       setNotice(out.message)
       return
     }
@@ -2591,6 +2610,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // sends exactly them (`continueHere`).
     if (out.confirm) setContinueAsk({ message: out.message, text: full })
     setDraft(restore.draft)
+    if (taskRequest.asTask) composerTask.setOptions(taskRequest.asTask)
     sessionScratch.writeDraft(scratchId, restore.draft)
     setAttached(restore.attached)
     sessionScratch.writeAttachments(scratchId, restore.attached)
@@ -3703,7 +3723,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     The gap is 6 rather than 4, and the two halves are separated by the whole
                     remaining width: asked for a row where the controls "nao fiquem entulhados". A
                     row of touching 34px squares reads as one object with lines in it. */}
+                {!answeringNow && <ComposerTaskFields options={composerTask.options} onChange={composerTask.setOptions} pt={pt} />}
+                {!answeringNow && taskSuggestion && <button type="button" className="ag-composer-task-control"
+                  onClick={() => composerTask.setOptions({ priority: 'medium' })}>
+                  {pt ? 'Parece um pedido — criar tarefa?' : 'Looks like a request — create a task?'}
+                </button>}
                 <ComposerToolbar>
+                {!answeringNow && <ComposerTaskButton options={composerTask.options} onChange={composerTask.setOptions} disabled={!canPrompt || sending} pt={pt} />}
                 {/* ANSWERING A QUESTION IS NOT WRITING A PROMPT, so the row is not the same row.
                     An answer travels a different route — `answerSession` presses the option's
                     digit, waits for the field to open, then types ONE line and returns — and an
@@ -4405,4 +4431,3 @@ function excerptRange(root: HTMLElement, excerpt: string): Range | null {
   r.setEnd(b[0], b[1])
   return r
 }
-

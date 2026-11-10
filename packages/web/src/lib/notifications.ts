@@ -102,6 +102,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Tópico resolvido', message: 'O tópico foi movido para Resolvidos.' },
     en: { title: 'Topic resolved', message: 'The topic was moved to Resolved.' },
   },
+  'tasks.status_failed': {
+    pt: { title: 'Não foi possível mudar o status', message: 'A alteração não foi salva. Confira a conexão e os requisitos do status e tente novamente.' },
+    en: { title: 'Could not change status', message: 'The change was not saved. Check the connection and status requirements, then try again.' },
+  },
   // PLAN.LIMITS — the generic copy; `resolveNotification` composes the real sentence from `meta`
   // (harness, window, percentage, renewal) through `limitNoticeText`.
   'limits.threshold': {

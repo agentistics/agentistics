@@ -127,7 +127,7 @@ const PHASE_STAGE: Record<string, CalStage> = {
   fila: 'queue', executando: 'running', qa: 'qa', ajuste: 'adjust', revisao_lider: 'leader', pr_merge: 'merge', ci: 'ci', publicado: 'published', bloqueado: 'blocked',
 }
 export interface CalTaskInput { id: string; title: string; status: string; priority?: string; dueDate?: string }
-export interface CalSubtaskInput { id: string; taskId: string; title: string }
+export interface CalSubtaskInput { id: string; taskId: string; title: string; priority?: string; dueDate?: string }
 export interface CalResetInput { harness: string; account: string; label: string; window: '5h' | 'week'; resetsAt: number }
 
 const toPriority = (p: string | undefined): CalPriority | null => (p === 'urgent' || p === 'high' || p === 'medium' || p === 'low' ? p : null)
@@ -169,13 +169,14 @@ export function buildCalendar(o: {
     const publishedAtMs = parseMs(rec?.publishedAt) ?? (l.stage === 'published' ? l.deliveredAtMs : null)
     const confidence = l.eta.kind === 'estimate' ? l.eta.confidence : null
     const publishEta = l.stage === 'published' ? ({ kind: 'none', reason: 'final' } as CalEta) : eta(l.publishEta, confidence)
-    const dueDate = task?.dueDate ?? null
+    const sub = l.subtaskId ? subById.get(l.subtaskId) : undefined
+    const dueDate = sub?.dueDate ?? task?.dueDate ?? null
     const published = l.stage === 'published'
     pieces.push({
       key: l.key, taskId: l.taskId, taskTitle: l.taskTitle, subtaskId: l.subtaskId, title: l.title, stage: l.stage,
       version: pickVersion(rec?.versionTarget),
       harness: l.harnesses[0] ?? null, model: l.models[0] ?? null,
-      priority: toPriority(task?.priority),
+      priority: toPriority(sub?.priority ?? task?.priority),
       active: !published,
       startedAtMs: l.startedAtMs, stageSinceMs: l.stageSinceMs, trail: l.trail ? l.trail.map(v => ({ ...v })) : [],
       stageEta: published ? { kind: 'none', reason: 'final' } : eta(l.stageEta, confidence),
@@ -192,6 +193,8 @@ export function buildCalendar(o: {
     if (seen.has(key)) continue
     const publishedAtMs = parseMs(r.publishedAt)
     const task = taskById.get(r.taskId)
+    const sub = subById.get(r.subtaskId)
+    const dueDate = sub?.dueDate ?? task?.dueDate ?? null
     const stage = PHASE_STAGE[r.phase]
     if (stage && stage !== 'published') {
       // A piece the delivery flow tracks (it has a phase, maybe a version) that the Live line does not draw — planned
@@ -200,11 +203,11 @@ export function buildCalendar(o: {
       pieces.push({
         key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,
         title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage, version: pickVersion(r.versionTarget),
-        harness: null, model: null, priority: toPriority(task?.priority), active: task?.status === 'in_progress',
+        harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: task?.status === 'in_progress',
         startedAtMs: parseMs(r.firstAt), stageSinceMs: parseMs(r.lastAt), trail: [],
         stageEta: { kind: 'none', reason: 'not-started' }, publishEta: { kind: 'none', reason: 'not-started' },
-        publishedAtMs: null, dueDate: task?.dueDate ?? null, confirmed: false,
-        late: task?.dueDate !== undefined && task.dueDate < today,
+        publishedAtMs: null, dueDate, confirmed: false,
+        late: dueDate !== null && dueDate < today,
       })
       continue
     }
@@ -212,10 +215,10 @@ export function buildCalendar(o: {
     pieces.push({
       key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,
       title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage: 'published', version: pickVersion(r.versionTarget),
-      harness: null, model: null, priority: toPriority(task?.priority), active: false,
+      harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: false,
       startedAtMs: null, stageSinceMs: null, trail: [],
       stageEta: { kind: 'none', reason: 'final' }, publishEta: { kind: 'none', reason: 'final' },
-      publishedAtMs, dueDate: task?.dueDate ?? null, confirmed: true, late: false,
+      publishedAtMs, dueDate, confirmed: true, late: false,
     })
   }
 

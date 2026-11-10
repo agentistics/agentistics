@@ -144,8 +144,8 @@ export interface LiveDelivery {
   lastAction: { text: string; atMs: number; kind?: string; from?: string; to?: string } | null
   blockedReason: string | null
   /**
-   * The Agentask priority of the piece (urgent | high | medium | low) — the TASK's; a subtask carries none of its own, so
-   * it inherits the task's. Never `none`: an unset priority reads as `low` everywhere (`migratePriority`).
+   * The piece's stated priority (urgent | high | medium | low), inherited from the task when absent.
+   * Never `none`: an unset priority reads as `low` everywhere (`migratePriority`).
    */
   priority: 'urgent' | 'high' | 'medium' | 'low'
   /** Set once a published piece leaves the line. */
@@ -984,7 +984,7 @@ export function buildLive(o: {
     }
     const gate = stage === 'qa' || stage === 'adjust' || stage === 'leader' || stage === 'merge' || stage === 'ci' || stage === 'blocked'
     const staged = p.sub?.stagedSession !== undefined
-    if (stage === 'queue' && !staged && liveSessions.length === 0) { if (recent && p.status !== 'backlog') hide(p, stage, 'queue-idle'); continue }
+    if (stage === 'queue' && !staged && !p.sub?.ownerRequest && liveSessions.length === 0) { if (recent && p.status !== 'backlog') hide(p, stage, 'queue-idle'); continue }
     if (stage === 'running' && liveSessions.length === 0 && !gate) { if (recent) hide(p, stage, 'no-live-session'); continue }
     const subject = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
     const trail = trails.get(subject) ?? []
@@ -1063,7 +1063,7 @@ export function buildLive(o: {
         ...(ev.from ? { from: ev.from } : {}), ...(ev.to ? { to: ev.to } : {}),
       } : null,
       blockedReason: p.blockedReason,
-      priority: migratePriority(p.task.priority) as LiveDelivery['priority'],
+      priority: migratePriority(p.sub?.priority ?? p.task.priority) as LiveDelivery['priority'],
       ...(isOld ? { old: true, ...(o.suggestions?.get(id) ? { suggestion: o.suggestions.get(id)! } : {}) } : {}),
       deliveredAtMs: stage === 'published' ? deliveredAtMs : null,
       staged: p.sub?.stagedSession ? {
