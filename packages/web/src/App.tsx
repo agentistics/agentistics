@@ -4106,7 +4106,7 @@ export default function AppLayout() {
               // nav leave and SCROLLS INSIDE ITSELF, like an editor pane — all four corners stay
               // on screen, which is the point of the design. The page's own max-width box lives
               // one level down (`pageScrollRef`'s child), so the panel itself runs edge to edge.
-              flex: 1, minWidth: 0, minHeight: 0,
+              position: 'relative', flex: 1, minWidth: 0, minHeight: 0,
               margin: OUTER_GAP,
               border: PANEL_BORDER, borderRadius: PANEL_RADIUS,
               background: 'var(--bg-surface)',
@@ -4116,6 +4116,7 @@ export default function AppLayout() {
           : {
               // Table pages grow with the screen; the rest keep 1400 — see `pageWidth.ts`.
               maxWidth: pageMaxWidth(location.pathname),
+              position: 'relative',
               margin: '0 auto',
               width: '100%',
               boxSizing: 'border-box',

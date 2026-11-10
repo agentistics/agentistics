@@ -20,6 +20,7 @@ import { useNavigate } from 'react-router-dom'
 import { Check, ChevronDown, ExternalLink } from 'lucide-react'
 import { LIVE_PERIODS, liveCapOmitted, plainLeaderName, type LivePeriod, type LiveTab } from '@agentistics/core'
 import { CenteredLoader } from '../CenteredLoader'
+import { Button } from '../../pages/settings/primitives'
 import { useFleet, type FleetRow } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { usePlanLimits } from '../../lib/planLimits'
@@ -368,11 +369,12 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, slow, onRetr
   if (reply === null && error !== 'down') {
     // The pop-out (popover, sheet, PiP window) is not the viewport: a `screen` loader centred on the page and
     // drew beside the popup's middle. Inside it the loader fills the popup's own box instead.
-    const retry = slow && <button type="button" className="ag-tap" onClick={onRetry} style={{ ...button(isMobile), position: 'absolute', left: '50%', bottom: 16, transform: 'translateX(-50%)', minHeight: isMobile ? 44 : 32 }}>{L.retry}</button>
+    const retry = slow && <Button onClick={onRetry} style={{ position: 'absolute', left: '50%', bottom: 16, transform: 'translateX(-50%)', width: 'auto', pointerEvents: 'auto' }}>{L.retry}</Button>
     if (compact) return <div data-live-loading-box style={{ position: 'relative', flex: 1, minHeight: 240 }}><CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" placement="fill" />{retry}</div>
-    return <div data-live-route style={{ position: 'relative', flex: 1, minHeight: 0 }}><CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" placement="fill" />{retry}</div>
+    // The visible main panel is the containing block, not the content-sized route below its toolbar.
+    return <div data-live-route style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}><CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" placement="fill" />{retry}</div>
   }
-  if (reply === null) return <Note text={L.down} />
+  if (reply === null) return <div role="alert" style={{ ...surface, padding: 16, textAlign: 'center' }}><p>{L.down}</p><Button onClick={onRetry}>{L.retry}</Button></div>
 
   const open = (c: LiveCard) => {
     const id = c.agents[0]?.id ?? c.d.sessionIds[0]

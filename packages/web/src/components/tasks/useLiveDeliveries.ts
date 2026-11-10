@@ -86,7 +86,6 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
     } catch (reason) {
       if (controller.signal.aborted || mine !== generation.current) return
       const route = reason as RouteError
-      if (route.kind === 'timeout') { setSlow(true); setRouteError(route); return }
       setRouteError(route)
       setError(route.kind === 'refused' ? 'refused' : 'down')
       attempt.current++
