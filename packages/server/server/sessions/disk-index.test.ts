@@ -93,3 +93,29 @@ describe('DiskIndex idle behaviour', () => {
     expect(written.length).toBeGreaterThan(0)
   })
 })
+
+describe('DiskIndex wake', () => {
+  it('never runs two ticks at once when configure() adds a root mid-tick', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agentop-wake-'))
+    cleanup.push(dir)
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+    let n = 0
+    const factory = (root: string) => new DiskCrawler({
+      root, stateFile: join(dir, `s-${n++}.json`), sliceMs: 10_000,
+      statDir: async () => ({ mtimeMs: 1 }),
+      readDir: async () => { await sleep(120); return [] },
+    })
+    const idx = new DiskIndex()
+    let active = 0
+    let max = 0
+    const orig = idx.tick.bind(idx)
+    idx.tick = async () => { active++; max = Math.max(max, active); try { return await orig() } finally { active-- } }
+    idx.configure(['/fakeA'], factory)
+    idx.start()
+    await sleep(40)
+    idx.configure(['/fakeA', '/fakeB'], factory)
+    await sleep(600)
+    idx.stop()
+    expect(max).toBe(1)
+  })
+})

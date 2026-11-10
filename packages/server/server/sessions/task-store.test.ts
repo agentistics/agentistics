@@ -627,4 +627,16 @@ describe('createTaskStore read memo', () => {
     await other.upsertTask(task('c'))
     expect((await s.read()).tasks.map(t => t.id).sort()).toEqual(['a', 'b', 'c'])
   })
+
+  it('shares one parse between instances of the same file, and any write invalidates it', async () => {
+    const { file, s } = await store()
+    await s.upsertTask(task('a'))
+    const other = createTaskStore(file)
+    const first = await s.read()
+    expect(await other.read()).toBe(first)
+    await other.upsertTask(task('b'))
+    const after = await s.read()
+    expect(after).not.toBe(first)
+    expect(after.tasks.map(t => t.id).sort()).toEqual(['a', 'b'])
+  })
 })

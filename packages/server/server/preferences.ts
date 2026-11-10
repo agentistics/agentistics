@@ -459,6 +459,8 @@ async function readJsonPrefs(path: string, lockHeld = false): Promise<Preference
 }
 
 function deepFreezePrefs<T>(v: T): T {
+  // Test-only guard: freezing a large object slows every later read (see task-store.ts).
+  if (process.env.NODE_ENV !== 'test') return v
   if (v && typeof v === 'object' && !Object.isFrozen(v)) {
     Object.freeze(v)
     for (const k of Object.keys(v as object)) deepFreezePrefs((v as Record<string, unknown>)[k])
