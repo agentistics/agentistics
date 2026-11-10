@@ -14,7 +14,12 @@ Live and Calendar use the shared loader while their first read is pending. Its f
 is anchored to the positioned `main`, so content-sized route wrappers and toolbars cannot shift its
 centre. Compact Live pop-outs retain their own containing box. A slow request offers retry after
 five seconds; the hard timeout at 60 seconds becomes a local error with the standard styled retry
-button. Retrying reads the route again without changing the API or MCP read model.
+button. Background heartbeats and push events leave a pending read's deadline intact; an explicit
+retry (or a different Live period) can replace it. The local error remains visible during background
+retries until a reply arrives. Isolated health deadlines are inconclusive under browser connection
+contention; three consecutive deadlines raise the global offline banner for a hung server. Any health
+answer resets that streak. Connection failures and error responses still raise the banner immediately.
+Retrying reads the route again without changing the API or MCP read model.
 
 ## Validation
 

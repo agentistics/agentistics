@@ -13,6 +13,7 @@ import { eventStream } from '../lib/eventStream'
 let root: Root | undefined
 const realFetch = globalThis.fetch
 const realTimeout = globalThis.setTimeout
+const realInterval = globalThis.setInterval
 let subscription: ReturnType<typeof spyOn>
 
 function Live() {
@@ -31,6 +32,7 @@ afterEach(async () => {
   root = undefined
   globalThis.fetch = realFetch
   globalThis.setTimeout = realTimeout
+  globalThis.setInterval = realInterval
   resetLiveCache()
   document.body.innerHTML = ''
 })
@@ -54,6 +56,45 @@ async function mount(route: 'live' | 'calendar', width: number) {
 }
 
 for (const route of ['live', 'calendar'] as const) {
+  test(`L4 ${route}: heartbeat cannot cancel the deadline; the alert survives background retries until a reply arrives`, async () => {
+    let heartbeat: (() => void) | undefined
+    let deadline: (() => void) | undefined
+    let calls = 0
+    let finish: ((response: Response) => void) | undefined
+    globalThis.setInterval = ((callback: () => void, ms?: number) => {
+      if (ms === 60_000) heartbeat = callback
+      return realInterval(callback, ms)
+    }) as typeof setInterval
+    globalThis.setTimeout = ((callback: () => void, ms?: number) => {
+      if (ms === ROUTE_HARD_TIMEOUT_MS) deadline = callback
+      return realTimeout(callback, ms)
+    }) as typeof setTimeout
+    globalThis.fetch = ((_url: unknown, init?: RequestInit) => {
+      calls++
+      return new Promise<Response>((resolve, reject) => {
+        finish = resolve
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+      })
+    }) as typeof fetch
+    await mount(route, 390)
+    // A fleet/book refresh can shift the request's start past the heartbeat's start. The
+    // heartbeat then runs BEFORE the pending request's 60 s deadline, as in the browser QA.
+    await act(async () => heartbeat!())
+    expect(calls).toBe(1)
+    await act(async () => deadline!())
+    expect(document.querySelector('[role="alert"]')).not.toBeNull()
+    expect(document.querySelector('[data-placement="fill"]')).toBeNull()
+    await act(async () => heartbeat!())
+    expect(calls).toBe(2)
+    const alert = document.querySelector('[role="alert"]')!
+    expect(alert).not.toBeNull()
+    expect(alert.querySelector('button')!.style.border).not.toBe('')
+    await act(async () => finish!(Response.json(route === 'live'
+      ? { generatedAt: 'x', deliveries: [], samples: 0 }
+      : { pieces: [], versions: [], marks: [] })))
+    expect(document.querySelector('[role="alert"]')).toBeNull()
+  })
+
   test(`L1 ${route}: pending route fills the panel, including the toolbar, even with a zero-height route wrapper`, async () => {
     globalThis.fetch = ((_url: unknown, init?: RequestInit) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })

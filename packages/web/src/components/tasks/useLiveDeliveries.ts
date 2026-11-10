@@ -69,7 +69,10 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
   const abort = useRef<AbortController | null>(null)
   const attempt = useRef(0)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (replace = false) => {
+    // Background signals must not keep restarting a slow read before its hard deadline.
+    // Only an explicit retry or a different period supersedes the in-flight request.
+    if (abort.current && !replace) return
     const mine = ++generation.current
     abort.current?.abort()
     const controller = new AbortController()
@@ -89,6 +92,8 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
       setRouteError(route)
       setError(route.kind === 'refused' ? 'refused' : 'down')
       attempt.current++
+    } finally {
+      if (mine === generation.current) abort.current = null
     }
   }, [])
 
@@ -109,6 +114,8 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
     const beat = setInterval(() => { if (document.visibilityState === 'visible') void load() }, LIVE_HEARTBEAT_MS)
     return () => {
       off(); clearInterval(tick); clearInterval(beat); abort.current?.abort()
+      abort.current = null
+      generation.current++
       document.removeEventListener('visibilitychange', onVisible)
       later.cancel()
     }
@@ -123,7 +130,7 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
   const firstPeriod = useRef(true)
   useEffect(() => {
     if (firstPeriod.current) { firstPeriod.current = false; return }
-    void load()
+    void load(true)
   }, [period, load])
   const first = useRef(true)
   useEffect(() => {
@@ -132,5 +139,5 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
     return () => clearTimeout(t)
   }, [signature, load])
 
-  return { reply, replyPeriod, error, routeError, slow, nowMs, reload: async () => { await new Promise(resolve => setTimeout(resolve, retryBackoffMs(attempt.current))); return load() } }
+  return { reply, replyPeriod, error, routeError, slow, nowMs, reload: async () => { await new Promise(resolve => setTimeout(resolve, retryBackoffMs(attempt.current))); return load(true) } }
 }
