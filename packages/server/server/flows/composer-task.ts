@@ -27,6 +27,22 @@ export async function registerComposerTask(req: Request, lang: 'pt' | 'en', d = 
   }
 }
 
+/**
+ * One registration at a time per task. The engine creates its "Owner's request" card asynchronously from the
+ * event, and that card carries no ownerRequest (the engine is not ours to change), so the only way to know which
+ * new cards belong to THIS request is for no other registration on the task to be in flight. Concurrent sends
+ * used to share one engine queue: link retries (3 x 200ms) expired for the later ones, the subtask was rolled
+ * back, and the flow's card then landed AFTER the rollback sweep, orphaned.
+ */
+const tails = new Map<string, Promise<unknown>>()
+async function serialised<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = tails.get(key) ?? Promise.resolve()
+  const run = prev.then(fn, fn)
+  const tail = run.catch(() => undefined)
+  tails.set(key, tail)
+  try { return await run } finally { if (tails.get(key) === tail) tails.delete(key) }
+}
+
 async function registerOnce(req: Request, lang: 'pt' | 'en', d: ComposerTaskDeps): Promise<ComposerTaskResult> {
   const pt = lang === 'pt'
   if (!isOwnerComposerRequest(req) || !validComposerTask(req.asTask) || typeof req.messageId !== 'string' || !/^[\w-]{1,120}$/.test(req.messageId) || !req.text?.trim()) {
@@ -34,6 +50,12 @@ async function registerOnce(req: Request, lang: 'pt' | 'en', d: ComposerTaskDeps
   }
   const target = await d.target(req.id)
   if (!target?.taskId) return { ok: false, message: pt ? 'Vincule esta sessão ou seu líder a uma tarefa antes de criar uma subtarefa.' : 'File this session or its leader on a task before creating a subtask.' }
+  return serialised(target.taskId, () => registerLocked(req, lang, d, target as { taskId: string; conversationId?: string }))
+}
+
+async function registerLocked(req: Request & { text?: string; messageId?: string; asTask?: unknown }, lang: 'pt' | 'en', d: ComposerTaskDeps, target: { taskId: string; conversationId?: string }): Promise<ComposerTaskResult> {
+  const pt = lang === 'pt'
+  if (!validComposerTask(req.asTask) || typeof req.messageId !== 'string' || !req.text?.trim()) throw new Error('unreachable')
   if (d.ready && !await d.ready()) return { ok: false, message: pt ? 'O fluxo de registro de tarefas não está disponível nesta instância.' : 'The task registration flow is unavailable on this instance.' }
   const store = await d.store()
   const text = req.text.trim()
@@ -60,13 +82,15 @@ async function registerOnce(req: Request, lang: 'pt' | 'en', d: ComposerTaskDeps
     return flows.emit(event)
   })
   const beforeEvent = new Set((await store.read()).subtasks.map(s => s.id))
-  const rollbackEventCards = async () => {
+  const sleep = d.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)))
+  /** Own cards only: new since the emit AND carrying this request's identity (ownerRequest, or the pedido id the flow writes in its title). */
+  const rollbackEventCards = async (keepId?: string) => {
     const after = await store.read()
-    // Never use the snapshot as ownership. Another request may have been recorded while the
-    // event was in flight. Only a card carrying this request's durable identity is ours.
-    await Promise.all(after.subtasks.filter(s => !beforeEvent.has(s.id) && s.taskId === target.taskId &&
-      (s.ownerRequest?.pedidoId === request.pedidoId || s.ownerRequest?.messageId === request.messageId)).map(s => store.removeSubtask(s.id)))
+    await Promise.all(after.subtasks.filter(s => s.id !== keepId && !beforeEvent.has(s.id) && s.taskId === target.taskId &&
+      (s.ownerRequest?.pedidoId === request.pedidoId || s.ownerRequest?.messageId === request.messageId || (!s.ownerRequest && s.title.includes(request.pedidoId)))).map(s => store.removeSubtask(s.id)))
   }
+  /** The flow's card can land after the first sweep; a failed registration sweeps again once it settles. */
+  const failAndSweep = async () => { await rollbackEventCards(); await sleep(200); await rollbackEventCards() }
   const eventId = `owner.message:${conversationId}:${at}:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`
   let emitted: unknown
   try {
@@ -74,8 +98,8 @@ async function registerOnce(req: Request, lang: 'pt' | 'en', d: ComposerTaskDeps
       sessionId: req.id, conversationId, taskId: target.taskId, text, at,
       attachments: [], role: 'leader', channel: 'composer-task',
     } })
-  } catch { await rollbackEventCards(); return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' } }
-  if (emitted === false) { await rollbackEventCards(); return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' } }
+  } catch { await failAndSweep(); return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' } }
+  if (emitted === false) { await failAndSweep(); return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' } }
   await rollbackEventCards()
   const subtask = await store.registerComposerSubtask({
     id: `s-${hash(req.messageId)}`, taskId: target.taskId, title,
@@ -95,12 +119,14 @@ async function registerOnce(req: Request, lang: 'pt' | 'en', d: ComposerTaskDeps
       linked = await d.run('pedido-link', { id: r.pedidoId, subtaskIds: [subtask.id], by: 'owner:composer' }) as { status?: string }
     } catch { linked = {} }
     if (linked.status === 'success') break
-    if (attempt < 2) await (d.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms))))(200)
+    if (attempt < 2) await sleep(200)
   }
   if (linked?.status !== 'success') {
     await store.removeSubtask(subtask.id)
+    await failAndSweep()
     return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' }
   }
+  await rollbackEventCards(subtask.id)
   return { ok: true, subtask, note: pt ? `Registrado como tarefa: ${subtask.title}` : `Registered as task: ${subtask.title}` }
 }
 

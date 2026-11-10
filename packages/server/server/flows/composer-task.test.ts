@@ -132,3 +132,58 @@ test('actual shared send registers once and still delivers the message plus syst
     expect(sent[0]).toContain('[agentistics · Registered as task: Fix the calendar]')
   } finally { hook.mockRestore(); fleet.__setFleetHostForTest('en', null) }
 })
+
+/** An engine like the real one: emit returns at once, one serial queue builds the pedido card (no ownerRequest) later. */
+async function asyncEngineWorld(stepMs: number, linkWorks = true) {
+  const x = await world()
+  let chain: Promise<unknown> = Promise.resolve()
+  const done = new Set<string>()
+  const pedidoOf = (p: Record<string, unknown>) => `p-${createHash('sha256').update(`${p.conversationId}\0${p.at}\0${p.text}`).digest('hex').slice(0, 12)}`
+  const d: ComposerTaskDeps = {
+    ...x.d,
+    sleep: () => new Promise(r => setTimeout(r, 25)),
+    emit: async event => {
+      const id = pedidoOf(event.payload)
+      chain = chain.then(async () => {
+        await new Promise(r => setTimeout(r, stepMs))
+        await x.store.upsertSubtask({ id: `s-flow-${id}`, taskId: 't1', title: `Owner's request: ${String(event.payload.text)} [high priority] · ${id}`,
+          status: 'todo', done: false, createdAt: '2026-11-09T12:00:00.000Z', updatedAt: '2026-11-09T12:00:00.000Z' })
+        done.add(id)
+      })
+      return { status: 'success' }
+    },
+    run: async (_n, input) => {
+      const book = await x.store.read()
+      const sub = book.subtasks.find(s => s.id === (input.subtaskIds as string[])[0])
+      return linkWorks && sub?.ownerRequest && done.has(sub.ownerRequest.pedidoId) ? { status: 'success' } : { status: 'pending' }
+    },
+  }
+  return { ...x, d, drain: () => chain }
+}
+const mk = (n: number, text = `Task number ${n}`) => ({ ...request, messageId: `msg-c${n}`, text })
+
+test('concurrent sends (3 at once, then the same text twice) each register exactly one linked subtask and leave no orphan card', async () => {
+  const x = await asyncEngineWorld(30)
+  const alien = { id: 's-alien', taskId: 't1', title: 'Parallel work', status: 'todo' as const, done: false, createdAt: '2026-11-09T12:00:00.000Z', updatedAt: '2026-11-09T12:00:00.000Z' }
+  await x.store.upsertSubtask(alien)
+  const results = await Promise.all([1, 2, 3].map(n => registerComposerTask(mk(n), 'en', x.d)))
+  expect(results.map(r => r.ok)).toEqual([true, true, true])
+  await x.drain()
+  const twice = await Promise.all([registerComposerTask(mk(4, 'Same words'), 'en', x.d), registerComposerTask(mk(4, 'Same words'), 'en', x.d)])
+  expect(twice.map(r => r.ok)).toEqual([true, true])
+  await x.drain()
+  const subs = (await x.store.read()).subtasks
+  expect(subs.filter(s => s.ownerRequest)).toHaveLength(4)
+  expect(subs.find(s => s.id === 's-alien')).toBeTruthy()
+  expect(subs.filter(s => s.id.startsWith('s-flow-'))).toHaveLength(0) // flow cards are swept, none orphaned
+  expect(subs).toHaveLength(5)
+})
+
+test('a failed registration whose flow card lands late leaves zero cards of its own and never touches a foreign one', async () => {
+  const x = await asyncEngineWorld(60, false)
+  const alien = { id: 's-alien', taskId: 't1', title: 'Parallel work', status: 'todo' as const, done: false, createdAt: '2026-11-09T12:00:00.000Z', updatedAt: '2026-11-09T12:00:00.000Z' }
+  await x.store.upsertSubtask(alien)
+  expect((await registerComposerTask(mk(1), 'en', x.d)).ok).toBe(false)
+  await x.drain()
+  expect((await x.store.read()).subtasks.map(s => s.id)).toEqual(['s-alien'])
+})
