@@ -193,6 +193,9 @@ export class DiskIndex {
   private cursor = 0
   private running = false
   private timer: ReturnType<typeof setTimeout> | undefined
+  /** A tick is awaiting: a wake() then only flags it, so two chains of timers can never exist. */
+  private ticking = false
+  private wakeRequested = false
   private lastSignature = ''
   onSnapshot?: (snapshot: DiskIndexSnapshot) => void
 
@@ -233,15 +236,20 @@ export class DiskIndex {
   }
 
   private async loop(): Promise<void> {
-    if (!this.running) return
+    if (!this.running || this.ticking) return
+    this.wakeRequested = false
     // Never touch the crawlers (or the listener) while there is nothing to do.
     if (this.idle()) { this.schedule(DISK_INDEX_IDLE_MS); return }
-    await this.tick().catch(() => {})
-    this.schedule(DISK_INDEX_TICK_MS)
+    this.ticking = true
+    try { await this.tick().catch(() => {}) } finally { this.ticking = false }
+    this.schedule(this.wakeRequested ? 0 : DISK_INDEX_TICK_MS)
   }
 
   private wake(): void {
     if (this.timer) clearTimeout(this.timer)
+    this.timer = undefined
+    // The loop in flight reschedules itself immediately once its tick ends; never start a second one.
+    if (this.ticking) { this.wakeRequested = true; return }
     this.schedule(0)
   }
 

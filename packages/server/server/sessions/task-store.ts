@@ -558,7 +558,16 @@ export function onBookWrite(fn: () => void): () => void {
   return () => { bookWriteListeners.delete(fn) }
 }
 
+// Freezing a 15 MB book makes every later property access ~10x slower (measured), so it is a test-only
+// guard: production callers are known not to mutate a read book.
+const FREEZE_BOOKS = process.env.NODE_ENV === 'test'
+
+// One parse per FILE, shared by every store instance of that path (loadTaskWorld builds a new store per
+// request); any instance's write drops the entry.
+const bookMemo = new Map<string, { stamp: string; book: TaskBook }>()
+
 function deepFreeze<T>(v: T): T {
+  if (!FREEZE_BOOKS) return v
   if (v && typeof v === 'object' && !Object.isFrozen(v)) {
     Object.freeze(v)
     for (const k of Object.keys(v as object)) deepFreeze((v as Record<string, unknown>)[k])
@@ -575,21 +584,21 @@ export function createTaskStore(file: string): TaskStore {
   // become permanent data loss.
   let corrupt = false
 
-  // The last parsed book, valid while the file's (ino, size, mtime) stamp is unchanged. Frozen deep
-  // so a caller that mutates what it was handed fails loudly instead of corrupting every later read.
-  let memo: { stamp: string; book: TaskBook } | null = null
+  // The last parsed book lives in the module-level `bookMemo`, valid while the file's (ino, size, mtime)
+  // stamp is unchanged. Frozen deep under NODE_ENV=test so a mutating caller fails loudly.
 
   async function read(): Promise<TaskBook> {
     let stamp = ''
     try {
       const st = await stat(file)
       stamp = `${st.ino}:${st.size}:${st.mtimeMs}`
+      const memo = bookMemo.get(file)
       if (memo && memo.stamp === stamp) return memo.book
     } catch { /* unreadable below */ }
     const book = await readUncached()
     // Only a successful parse is memoised (a corrupt file must keep re-quarantining on the next write).
-    if (stamp && !corrupt) memo = { stamp, book: deepFreeze(book) }
-    else memo = null
+    if (stamp && !corrupt) bookMemo.set(file, { stamp, book: deepFreeze(book) })
+    else bookMemo.delete(file)
     return book
   }
 
@@ -651,7 +660,7 @@ export function createTaskStore(file: string): TaskStore {
   }
 
   async function write(book: TaskBook): Promise<void> {
-    memo = null
+    bookMemo.delete(file)
     await mkdir(dirname(file), { recursive: true })
     if (corrupt) {
       await rename(file, `${file}.corrupt-${Date.now()}`).catch(() => {})
