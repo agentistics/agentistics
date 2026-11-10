@@ -1,3 +1,4 @@
+import { hostWhich } from '../host-which'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { SPAWN_SPECS } from './spawn-spec'
 import type { SpawnOutcome } from './spawn-outcome'
@@ -21,7 +22,7 @@ export function noteFreshSpawn(harness: HarnessId, outcome: SpawnOutcome | undef
 export function harnessSpawnability(
   harness: HarnessId,
   now = Date.now(),
-  which: (bin: string) => string | null = bin => Bun.which(bin, { PATH: userSearchPath() }),
+  which: (bin: string) => string | null = bin => hostWhich(bin, { PATH: userSearchPath(), negativeTtlMs: 30_000 }),
 ): HarnessSpawnability {
   const spec = SPAWN_SPECS[harness]
   if (!spec) return { spawnable: false, unavailableReason: `${harness} has no session launcher` }

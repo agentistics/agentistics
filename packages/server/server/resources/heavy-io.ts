@@ -12,6 +12,7 @@
  * next slot is tried. Slot 0 is `/tmp/agentistics-heavy.lock`, the lock sessions already take by hand.
  */
 
+import { hostWhich } from '../host-which'
 import { mkdir, readdir, readFile, readlink, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
@@ -171,7 +172,7 @@ const GB = 1024 * 1024 * 1024
 export async function runHeavy(argv: string[], say: (line: string) => void, dir = HEAVY_DIR): Promise<number> {
   const cmd = argv[0] === '--' ? argv.slice(1) : argv
   if (cmd.length === 0) { say('usage: agentop heavy -- <command> [args…]'); return 2 }
-  const flock = Bun.which('flock')
+  const flock = hostWhich('flock')
   const command = cmd.join(' ').slice(0, 200)
   if (!flock || process.platform !== 'linux') {
     say('agentop heavy: no flock here — running without the slot.')

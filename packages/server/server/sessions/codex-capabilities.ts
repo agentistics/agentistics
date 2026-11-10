@@ -1,3 +1,4 @@
+import { hostWhich } from '../host-which'
 import { execFile } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
@@ -44,7 +45,7 @@ export function createCodexCapabilityProbe(deps: CodexProbeDeps): () => Promise<
 const supportsNoDaemon = createCodexCapabilityProbe({
   binary: () => {
     adoptUserBinOnPath()
-    return Bun.which('codex', { PATH: userSearchPath() })
+    return hostWhich('codex', { PATH: userSearchPath() })
   },
   mtime: async path => (await stat(path)).mtimeMs,
   help: async path => {

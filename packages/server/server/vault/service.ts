@@ -37,6 +37,7 @@ import {
 import { checkVaultPassword } from '@agentistics/core'
 import { currentVaultPassword } from './password-context'
 import { AGENTISTICS_DATA_DIR } from '../config'
+import { hostWhich } from '../host-which'
 import { underTest } from '../data-dir'
 import { realProtectorIo, realSecretFs } from './io'
 import { applyHardening, loadLibc, readYamaFile, type HardeningPlatform, type HardeningReport } from './hardening'
@@ -208,6 +209,20 @@ export function protectorById(id: ProtectorId, passphrase?: string, dir: string 
   }
 }
 
+const FIDO2_TTL_MS = 10 * 60_000
+let fido2Memo: { at: number; value: boolean } | null = null
+/**
+ * Are all three libfido2 tools present? Computed ONCE per TTL, never per request: `GET /api/vault` asks
+ * on every poll and a miss on a WSL PATH (25 `/mnt/c` dirs) costs ~6 s of synchronous walking each.
+ */
+export function fido2ToolsPresent(now: number = Date.now()): boolean {
+  if (fido2Memo && now >= fido2Memo.at && now - fido2Memo.at < FIDO2_TTL_MS) return fido2Memo.value
+  const value = ['fido2-token', 'fido2-cred', 'fido2-assert'].every(t => FIDO2_TOOL_PATHS(t).some(p => existsSync(p)) || hostWhich(t) !== null)
+  fido2Memo = { at: now, value }
+  return value
+}
+export function resetFido2ToolsMemo(): void { fido2Memo = null }
+
 /**
  * COFRE.DESBLOQUEIO (owner, 2026-11-07): the ways of confirming "it is you" this machine offers, best
  * first — `unlockMethodsFor` (pure) decides. Touch ID / the Mac password on macOS, Windows Hello on
@@ -222,8 +237,7 @@ export function unlockMethodOffers(): UnlockMethodOffer[] {
     if (!ids.includes('password')) ids.push('password')
     return ids.map(id => ({ id: id as UnlockMethodOffer['id'], advanced: id === 'fido2' }))
   }
-  const fido2Tools = (platform() === 'darwin' || platform() === 'linux')
-    && ['fido2-token', 'fido2-cred', 'fido2-assert'].every(t => FIDO2_TOOL_PATHS(t).some(p => existsSync(p)) || Bun.which(t) !== null)
+  const fido2Tools = (platform() === 'darwin' || platform() === 'linux') && fido2ToolsPresent()
   return unlockMethodsFor({ platform: platform(), wsl: isWsl(), fido2Tools, webauthnVerified: WEBAUTHN_BRIDGE_VERIFIED })
 }
 

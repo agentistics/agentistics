@@ -1,3 +1,4 @@
+import { hostWhich } from '../host-which'
 /** All utility shell channels must resolve the SAME executable, including under launchd's PATH. */
 export function resolveShellTmux(
   platform: string,
@@ -15,7 +16,7 @@ export function resolveShellTmux(
 }
 
 export async function shellTmux(args: string[]): Promise<{ code: number; out: string; err: string }> {
-  const executable = resolveShellTmux(process.platform, name => Bun.which(name))
+  const executable = resolveShellTmux(process.platform, name => hostWhich(name, { negativeTtlMs: 30_000 }))
   if (!executable) return { code: 127, out: '', err: 'tmux executable not found' }
   try {
     const p = Bun.spawn([executable, ...args], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' })

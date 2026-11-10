@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.204.7': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Desempenho: no Windows com WSL, o servidor deixa de travar por vários segundos (até 20 s) procurando programas pelas pastas do Windows a cada atualização da tela; a busca agora é lembrada e conferida.',
+        en: 'Performance: on Windows with WSL the server no longer freezes for several seconds (up to 20 s) searching the Windows folders for programs on every screen refresh; the search is now remembered and re-checked.',
+      },
+      {
+        pt: 'Desempenho: um programa instalado com o servidor ligado continua sendo encontrado, em até 30 segundos onde isso importa (abrir sessões, instalar harness) e em até 10 minutos no resto.',
+        en: 'Performance: a program installed while the server runs is still found, within 30 seconds where it matters (opening sessions, installing a harness) and within 10 minutes elsewhere.',
+      },
+    ],
+  },
   '2.204.6': {
     features: [],
     fixes: [
