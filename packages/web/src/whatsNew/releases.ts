@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.204.8': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Desempenho: o servidor gasta cerca de um quarto menos de processador parado, e a lista de tarefas abre mais rápido com um quadro grande, porque o arquivo de tarefas só é lido de novo quando muda.',
+        en: 'Performance: the idle server uses about a quarter less CPU, and the task list opens faster on a large board, because the task file is only read again when it changes.',
+      },
+      {
+        pt: 'Desempenho: a varredura de pastas do disco fica parada quando não há nada para varrer, em vez de acordar a cada 2 segundos.',
+        en: 'Performance: the disk folder scan stays idle when there is nothing to scan, instead of waking every 2 seconds.',
+      },
+    ],
+  },
   '2.204.7': {
     features: [],
     fixes: [
