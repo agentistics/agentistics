@@ -37,7 +37,7 @@ export function cleanKind(kind: string, pt: boolean): string {
 }
 export function cleanReason(reason: string, pt: boolean): string {
   const words: Record<string, [string, string]> = {
-    main: ['pasta principal', 'main checkout'], locked: ['travado', 'locked'], dirty: ['mudanças não commitadas', 'uncommitted changes'], active: ['em uso', 'in use'], unmerged: ['não mergeado', 'not merged'],
+    main: ['pasta principal', 'main checkout'], locked: ['travado', 'locked'], dirty: ['mudanças não commitadas', 'uncommitted changes'], active: ['em uso', 'in use'], 'unknown-use': ['não dá para saber se está em uso', 'cannot tell whether it is in use'], ignored: ['arquivos ignorados não regeneráveis', 'ignored files that cannot be regenerated'], unmerged: ['não mergeado', 'not merged'],
     'merged and clean': ['mergeado e limpo', 'merged and clean'], 'directory is gone': ['a pasta não existe mais', 'directory is gone'],
     'no commit in 30+ days': ['sem commit há 30+ dias', 'no commit in 30+ days'], 'changed since the plan': ['mudou desde a varredura', 'changed since the scan'],
     'the server working directory': ['pasta do servidor', 'server working directory'], 'an active session': ['sessão ativa', 'active session'],

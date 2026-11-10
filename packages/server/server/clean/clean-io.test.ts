@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, ut
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
-import { applyClean, cwdInside, openSessionCwds, parseDu, repoOf, worktreeFacts, WORKTREE_POOL_SIZE } from './clean-io'
+import { applyClean, cwdInside, isRegenerable, openSessionCwds, parseDu, repoOf, worktreeFacts, WORKTREE_POOL_SIZE } from './clean-io'
 import { planClean } from './clean-plan'
 
 const dirs: string[] = []
@@ -87,6 +87,88 @@ describe('clean io (real git)', () => {
     expect(by('merged').inUse).toBe(true)
     expect(by('dirty').inUse).toBe(false)
     expect(planClean(facts, Date.now()).find(i => i.facts.path === join(root, 'merged'))!.action).toEqual({ kind: 'keep', reason: 'active' })
+  })
+
+  const seamEnv = { env, managedCwds: [] as string[], processCwds: () => ({ cwds: [] as string[], known: true }) }
+  const pushedWorktree = () => {
+    const { root, r } = repo()
+    const bare = join(root, 'bare.git'); g(root, 'init', '-q', '--bare', bare); g(r, 'remote', 'add', 'origin', bare)
+    g(r, 'worktree', 'add', '-q', join(root, 'pw'), '-b', 'pw')
+    const wt = join(root, 'pw'); writeFileSync(join(wt, 'c'), 'c'); g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'c'); g(wt, 'push', '-q', 'origin', 'pw')
+    return { root, r, wt }
+  }
+
+  test('an ignored file that cannot be regenerated keeps a pushed worktree, in the plan and in the apply', async () => {
+    const { r, wt } = pushedWorktree()
+    writeFileSync(join(wt, '.gitignore'), '.env.local\n*.secret\ndist\n'); g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'ign'); g(wt, 'push', '-q', 'origin', 'pw')
+    mkdirSync(join(wt, 'dist')); writeFileSync(join(wt, 'dist', 'x'), 'x')
+    // only regenerable ignored output: removable
+    let facts = await worktreeFacts(r, seamEnv)
+    expect(facts.find(f => f.path === wt)).toMatchObject({ pushed: true, dirty: false })
+    expect(facts.find(f => f.path === wt)!.keepsIgnored).toBeUndefined()
+    expect(planClean(facts, Date.now()).find(i => i.facts.path === wt)!.action.kind).toBe('remove')
+    const staleRemovable = planClean(facts, Date.now())
+    // a secret appears AFTER the plan: the apply must notice and refuse
+    writeFileSync(join(wt, 'creds.secret'), 's')
+    const problems = await applyClean(staleRemovable, seamEnv)
+    expect(problems.join('\n')).toContain('ignored files that cannot be regenerated')
+    expect(existsSync(join(wt, 'creds.secret'))).toBe(true)
+    // and a fresh plan keeps it with the stated reason
+    facts = await worktreeFacts(r, seamEnv)
+    expect(planClean(facts, Date.now()).find(i => i.facts.path === wt)!.action).toEqual({ kind: 'keep', reason: 'ignored' })
+    writeFileSync(join(wt, '.env.local'), 'k')
+    expect(existsSync(join(wt, '.env.local'))).toBe(true)
+  })
+
+  test('isRegenerable only forgives the known rebuildable outputs', () => {
+    for (const p of ['node_modules/', 'dist/', 'packages/a/build/', '.turbo/', '.next/', 'coverage/', '.cache/', 'tsconfig.tsbuildinfo', 'out/']) expect(isRegenerable(p)).toBe(true)
+    for (const p of ['.env.local', 'creds.secret', 'secrets/', '"odd name"']) expect(isRegenerable(p)).toBe(false)
+  })
+
+  test('an unreadable or corrupt session registry is UNKNOWN: nothing is removed and a warning is raised', async () => {
+    const { root, r, wt } = pushedWorktree()
+    const reg = join(root, 'managed-sessions.json')
+    const run = async (text: string | null) => {
+      if (text !== null) writeFileSync(reg, text)
+      const warnings: string[] = []
+      const facts = await worktreeFacts(r, { env, registryFile: reg, processCwds: () => ({ cwds: [], known: true }), onWarning: m => warnings.push(m) })
+      return { f: facts.find(x => x.path === wt)!, warnings, plan: planClean(facts, Date.now()).find(i => i.facts.path === wt)!.action }
+    }
+    const corrupt = await run('{not json')
+    expect(corrupt.f.useUnknown).toBe(true)
+    expect(corrupt.plan).toEqual({ kind: 'keep', reason: 'unknown-use' })
+    expect(corrupt.warnings.length).toBe(1)
+    expect((await run('{"a":1}')).plan).toEqual({ kind: 'keep', reason: 'unknown-use' })
+    // an absent registry file is a real empty one; a well-formed one naming the cwd protects it
+    rmSync(reg)
+    expect((await run(null)).plan.kind).toBe('remove')
+    expect((await run(JSON.stringify([{ cwd: wt }]))).plan).toEqual({ kind: 'keep', reason: 'active' })
+    expect((await run(JSON.stringify([{ cwd: wt, endedAt: 'x' }]))).plan.kind).toBe('remove')
+  })
+
+  test('a process reader that cannot answer is unknown, not "not in use"', async () => {
+    const { r, wt } = pushedWorktree()
+    const facts = await worktreeFacts(r, { env, managedCwds: [], processCwds: () => ({ cwds: [], known: false }) })
+    expect(planClean(facts, Date.now()).find(i => i.facts.path === wt)!.action).toEqual({ kind: 'keep', reason: 'unknown-use' })
+  })
+
+  test('the apply re-checks use and dirtiness right before each removal', async () => {
+    const { r, wt } = pushedWorktree()
+    const plan = planClean(await worktreeFacts(r, seamEnv), Date.now()).filter(i => i.facts.path === wt)
+    expect(plan[0]!.action.kind).toBe('remove')
+    // a process moves in after the plan
+    let problems = await applyClean(plan, { ...seamEnv, processCwds: () => ({ cwds: [join(wt, 'sub')], known: true }) })
+    expect(problems.join('\n')).toContain('in use now'); expect(existsSync(wt)).toBe(true)
+    // the registry becomes unreadable after the plan
+    problems = await applyClean(plan, { env, registryFile: join(wt, 'c', 'x'), processCwds: () => ({ cwds: [], known: true }) })
+    expect(problems.join('\n')).toContain('unknown whether it is in use'); expect(existsSync(wt)).toBe(true)
+    // uncommitted work appears after the plan
+    writeFileSync(join(wt, 'late'), 'x')
+    problems = await applyClean(plan, seamEnv)
+    expect(problems.join('\n')).toContain('uncommitted changes now'); expect(existsSync(join(wt, 'late'))).toBe(true)
+    // nothing changed: it goes
+    rmSync(join(wt, 'late'))
+    expect(await applyClean(plan, seamEnv)).toEqual([]); expect(existsSync(wt)).toBe(false)
   })
 
   test('a child that leaves stdout open cannot strand clean after the timeout', async () => {

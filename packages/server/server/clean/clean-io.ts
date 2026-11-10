@@ -4,9 +4,10 @@
  * dirty tree) or deletes exactly `<worktree>/node_modules`; nothing else is ever deleted.
  */
 import { existsSync, readdirSync, readlinkSync, rmSync, statSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import type { CleanItem, WorktreeFacts } from './clean-plan'
-import { readRegistry } from '../sessions/registry'
+import { MANAGED_SESSIONS_FILE } from '../config'
 
 export interface CleanIoOpts {
   signal?: AbortSignal
@@ -20,6 +21,12 @@ export interface CleanIoOpts {
   timeoutMs?: number
   /** Test seam: cwds of not-ended managed sessions; production reads the session registry. */
   managedCwds?: readonly string[]
+  /** Test seam: the registry file to read; production reads the managed-sessions file. */
+  registryFile?: string
+  /** Test seam: the process cwd reader. */
+  processCwds?: () => CwdReading
+  /** A sentence the caller should show: a source of "in use" could not be read. */
+  onWarning?: (message: string) => void
 }
 
 /** Ceiling for one git/du call. */
@@ -129,14 +136,84 @@ async function defaultRef(repo: string, o: CleanIoOpts): Promise<string | null> 
   return null
 }
 
-/** Directories the live processes of this machine are sitting in (Linux /proc; empty elsewhere, i.e. "unknown"). */
-export function liveCwds(): string[] {
-  if (process.platform !== 'linux') return []
-  const out: string[] = []
-  let pids: string[] = []
-  try { pids = readdirSync('/proc').filter(n => /^\d+$/.test(n) && Number(n) !== process.pid) } catch { return [] }
-  for (const pid of pids) { try { out.push(readlinkSync(`/proc/${pid}/cwd`)) } catch { /* gone or not ours */ } }
-  return out
+/** What a reader could say about "who is sitting where": `known: false` means it could not tell at all. */
+export interface CwdReading { cwds: string[]; known: boolean }
+
+/**
+ * Directories the live processes of this machine are sitting in. Linux reads /proc; elsewhere `lsof`
+ * (the same reader the web apply uses). A platform or machine with no working reader is UNKNOWN,
+ * never "nobody is there".
+ */
+export function liveCwds(): CwdReading {
+  if (process.platform === 'linux') {
+    let pids: string[]
+    try { pids = readdirSync('/proc').filter(n => /^\d+$/.test(n) && Number(n) !== process.pid) } catch { return { cwds: [], known: false } }
+    const cwds: string[] = []
+    for (const pid of pids) {
+      try { cwds.push(readlinkSync(`/proc/${pid}/cwd`)) } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code
+        // Gone (ENOENT) or not ours (EACCES) is ordinary; anything else means the read itself is unreliable.
+        if (code !== 'ENOENT' && code !== 'EACCES' && code !== 'ESRCH') return { cwds, known: false }
+      }
+    }
+    return { cwds, known: cwds.length > 0 }
+  }
+  const lsof = Bun.which('lsof')
+  if (!lsof) return { cwds: [], known: false }
+  try {
+    const r = Bun.spawnSync([lsof, '-a', '-d', 'cwd', '-Fn'])
+    if (r.exitCode !== 0 && r.stdout.length === 0) return { cwds: [], known: false }
+    const cwds = r.stdout.toString().split('\n').filter(l => l.startsWith('n')).map(l => l.slice(1))
+    return { cwds, known: cwds.length > 0 }
+  } catch { return { cwds: [], known: false } }
+}
+
+/**
+ * cwds of managed sessions never ended, read from the registry FILE. A missing file is a real empty
+ * registry; an unreadable, empty-by-corruption or non-array one is UNKNOWN — `readRegistry` would
+ * report `[]` for it, which is exactly how an open session became removable.
+ */
+export async function managedReading(o: CleanIoOpts): Promise<CwdReading> {
+  if (o.managedCwds) return { cwds: [...o.managedCwds], known: true }
+  const file = o.registryFile ?? MANAGED_SESSIONS_FILE
+  let text: string
+  try { text = await readFile(file, 'utf-8') } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'ENOENT' ? { cwds: [], known: true } : { cwds: [], known: false }
+  }
+  if (!text.trim()) return { cwds: [], known: true }
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (!Array.isArray(parsed)) return { cwds: [], known: false }
+    const rows = parsed.filter((r): r is { cwd: string; endedAt?: string } => !!r && typeof r === 'object' && typeof (r as { cwd?: unknown }).cwd === 'string')
+    return { cwds: openSessionCwds(rows), known: true }
+  } catch { return { cwds: [], known: false } }
+}
+
+/** Process + registry together: the cwds to protect and whether either source was unreadable. */
+export async function useReading(o: CleanIoOpts): Promise<CwdReading> {
+  const live = (o.processCwds ?? liveCwds)()
+  const managed = await managedReading(o)
+  return { cwds: [...live.cwds, ...managed.cwds], known: live.known && managed.known }
+}
+
+/** Ignored paths an install or build brings back; anything else ignored (`.env.local`, `*.secret`) is the user's. */
+const REGENERABLE = new Set(['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage', '.cache', 'out'])
+export function isRegenerable(entry: string): boolean {
+  const clean = entry.replace(/\/+$/, '')
+  if (clean.startsWith('"')) return false // git quoted an unusual name: do not guess
+  return clean.endsWith('.tsbuildinfo') || clean.split('/').some(seg => REGENERABLE.has(seg))
+}
+
+/** dirty = tracked/untracked change; keepsIgnored = an ignored entry outside the regenerable list (or git could not say). */
+export async function treeState(path: string, o: CleanIoOpts): Promise<{ dirty: boolean; keepsIgnored: boolean }> {
+  const st = await git(['-C', path, 'status', '--porcelain', '--ignored'], o)
+  if (st.code !== 0) return { dirty: true, keepsIgnored: true }
+  let dirty = false, keepsIgnored = false
+  for (const line of st.out.split('\n')) {
+    if (!line.trim()) continue
+    if (line.startsWith('!! ')) { if (!isRegenerable(line.slice(3))) keepsIgnored = true } else dirty = true
+  }
+  return { dirty, keepsIgnored }
 }
 
 /** cwds of managed sessions that were never ended (stopped but resumable still count). Pure; exported for tests. */
@@ -158,9 +235,9 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
   const blocks = list.out.split('\n\n').filter(Boolean)
   const allPaths = blocks.map(b => b.split('\n').find(l => l.startsWith('worktree '))?.slice(9)).filter((p): p is string => !!p).map(p => resolve(p))
   o.onDiscover?.(blocks.length)
-  let managed = o.managedCwds
-  if (!managed) { try { managed = openSessionCwds(await readRegistry()) } catch { managed = [] } }
-  const cwds = [...liveCwds(), ...managed]
+  const use = await useReading(o)
+  if (!use.known) o.onWarning?.('Could not read the process list or the session registry: worktrees are kept because it is unknown whether they are in use.')
+  const cwds = use.cwds
   const out: Array<WorktreeFacts | undefined> = []
   let next = 0
   const inspect = async (block: string, index: number) => {
@@ -174,7 +251,7 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
     const isMain = resolve(path) === resolve(repo)
     const missing = lines.some(l => l.startsWith('prunable')) || !existsSync(path)
     const locked = lines.some(l => l.startsWith('locked'))
-    let merged = false, pushed = false, squashed = false, dirty = false, lastCommitMs: number | null = null, sizeBytes = 0, nodeModulesBytes = 0, lastActivityMs: number | null = null, sizeUnknown = false
+    let merged = false, pushed = false, squashed = false, dirty = false, lastCommitMs: number | null = null, sizeBytes = 0, nodeModulesBytes = 0, lastActivityMs: number | null = null, sizeUnknown = false, keepsIgnored = false
     if (!missing) {
       if (base && headSha) merged = (await git(['-C', repo, 'merge-base', '--is-ancestor', headSha, base], o)).code === 0
       if (!merged && headSha) {
@@ -186,16 +263,16 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
           squashed = c.code === 0 && marks.length > 0 && marks.every(l => l.startsWith('-'))
         }
       }
-      const st = await git(['-C', path, 'status', '--porcelain'], o)
-      dirty = st.code !== 0 || st.out.trim() !== ''
+      const tree = await treeState(path, o)
+      dirty = tree.dirty; keepsIgnored = tree.keepsIgnored
       const lc = await git(['-C', path, 'log', '-1', '--format=%ct'], o)
       lastCommitMs = lc.code === 0 && lc.out.trim() ? Number(lc.out.trim()) * 1000 : null
       const own = resolve(path)
-      const tree = await diskFacts(path, allPaths.filter(p => p !== own && p.startsWith(own + sep)), o)
-      sizeBytes = tree.bytes; nodeModulesBytes = tree.nodeModulesBytes; sizeUnknown = tree.unknown
-      lastActivityMs = Math.max(tree.mtimeMs ?? 0, lastCommitMs ?? 0) || null
+      const disk = await diskFacts(path, allPaths.filter(p => p !== own && p.startsWith(own + sep)), o)
+      sizeBytes = disk.bytes; nodeModulesBytes = disk.nodeModulesBytes; sizeUnknown = disk.unknown
+      lastActivityMs = Math.max(disk.mtimeMs ?? 0, lastCommitMs ?? 0) || null
     }
-    out[index] = { repo, path, branch, isMain, missing, locked, merged, pushed, squashed, inUse: cwdInside(path, cwds), dirty, lastCommitMs, lastActivityMs, sizeBytes, nodeModulesBytes, ...(sizeUnknown ? { sizeUnknown } : {}) }
+    out[index] = { repo, path, branch, isMain, missing, locked, merged, pushed, squashed, inUse: cwdInside(path, cwds), ...(use.known ? {} : { useUnknown: true }), ...(keepsIgnored ? { keepsIgnored } : {}), dirty, lastCommitMs, lastActivityMs, sizeBytes, nodeModulesBytes, ...(sizeUnknown ? { sizeUnknown } : {}) }
     o.onItem?.(out[index]!)
   }
   await Promise.all(Array.from({ length: Math.min(WORKTREE_POOL_SIZE, blocks.length) }, async () => {
@@ -208,11 +285,28 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
   return out.filter((f): f is WorktreeFacts => f !== undefined)
 }
 
+/** Why a worktree must not be touched NOW (in use, unknown, dirty, non-regenerable ignored files), or null. */
+async function changedSince(path: string, o: CleanIoOpts, removing: boolean): Promise<string | null> {
+  const use = await useReading(o)
+  if (cwdInside(path, use.cwds)) return 'it is in use now'
+  if (!use.known) return 'it is unknown whether it is in use (process list or session registry unreadable)'
+  if (!removing) return null // node_modules only: uncommitted work elsewhere in the tree is untouched
+  const tree = await treeState(path, o)
+  if (tree.dirty) return 'it has uncommitted changes now'
+  if (tree.keepsIgnored) return 'it holds ignored files that cannot be regenerated'
+  return null
+}
+
 /** Apply the plan's non-keep items; returns one sentence per item that could not be done. */
 export async function applyClean(items: readonly CleanItem[], o: CleanIoOpts = {}): Promise<string[]> {
   const problems: string[] = []
   const pruned = new Set<string>()
   for (const { facts: f, action: a } of items) {
+    if (a.kind === 'remove' || a.kind === 'node-modules') {
+      // The plan may be minutes old: look again at THIS worktree right before touching it.
+      const why = await changedSince(f.path, o, a.kind === 'remove')
+      if (why) { problems.push(`${f.path}: skipped, ${why}`); continue }
+    }
     if (a.kind === 'remove') {
       // No --force: git refuses a tree that changed since it was listed.
       const r = await git(['-C', f.repo, 'worktree', 'remove', f.path], o)
