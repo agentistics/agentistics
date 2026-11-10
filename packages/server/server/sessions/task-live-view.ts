@@ -157,11 +157,11 @@ export interface LiveFilters { task?: string; stage?: LiveStage | 'no-leader'; s
  * satisfies this check. `unknown` is deliberately distinct from `absent`: a failed fleet read
  * must not make a review look abandoned.
  */
-function leaderForTask(o: { taskId: string; taskTitle: string; rows: readonly FleetRowLite[]; leaderIds: ReadonlySet<string>; fleetRead: 'ok' | 'unknown' }): { availability: LeaderAvailability; reason?: string } {
-  if (o.fleetRead === 'unknown') return { availability: 'unknown', reason: 'leader availability could not be read from the fleet' }
+function leaderForTask(o: { taskId: string; taskTitle: string; rows: readonly FleetRowLite[]; leaderIds: ReadonlySet<string>; fleetRead: 'ok' | 'unknown' }): { availability: LeaderAvailability; reason?: string; reasonCode?: 'fleet-unreadable' | 'no-live-leader' } {
+  if (o.fleetRead === 'unknown') return { availability: 'unknown', reason: 'leader availability could not be read from the fleet', reasonCode: 'fleet-unreadable' }
   const sameTask = (r: FleetRowLite) => r.task === o.taskId || r.task === o.taskTitle
   const leader = o.rows.some(r => o.leaderIds.has(r.id) && sameTask(r) && ALIVE.has(r.state))
-  return leader ? { availability: 'available' } : { availability: 'absent', reason: 'no live leader is filed on this task' }
+  return leader ? { availability: 'available' } : { availability: 'absent', reason: 'no live leader is filed on this task', reasonCode: 'no-live-leader' }
 }
 
 export function describeLive(o: {
@@ -202,7 +202,7 @@ export function describeLive(o: {
       : null
     return { ...d, workMs, agents, liveState, stalled,
       ...(leader?.availability === 'absent' ? { displayStage: 'no-leader' as const } : {}),
-      ...(leader ? { leaderAvailability: leader.availability, ...(leader.reason ? { leaderAvailabilityReason: leader.reason } : {}) } : {}) }
+      ...(leader ? { leaderAvailability: leader.availability, ...(leader.reason ? { leaderAvailabilityReason: leader.reason } : {}), ...(leader.reasonCode ? { leaderAvailabilityReasonCode: leader.reasonCode } : {}) } : {}) }
   })
   const needle = f.task?.trim().toLowerCase()
   // A piece whose only sessions are LEADERS is the leader's own filing. While the task has an OPEN piece of its own
