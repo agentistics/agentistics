@@ -73,6 +73,26 @@ describe('what the fleet says', () => {
   })
 })
 
+describe('the test seam', () => {
+  it('forgets the "opened" stamp even when localStorage is a stub without removeItem', () => {
+    const g = globalThis as { localStorage?: unknown }
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+    const mem = new Map<string, string>()
+    g.localStorage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => { mem.set(k, v) } }
+    try {
+      setOpenSession('a')
+      setOpenSession(null)
+      resetNayNotifyStore()
+      const min = 60_000
+      observeFleet([{ id: 'a', state: 'waiting' }], 1, 10)
+      expect(observeFleet([{ id: 'a', state: 'waiting' }], 1, 10 + min).map(c => c.id)).toEqual(['a'])
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'localStorage', original)
+      else delete g.localStorage
+    }
+  })
+})
+
 describe('the settings demo', () => {
   it('is not dropped by a fleet that has never heard of it', () => {
     pushAlert({ ...alert('demo'), demo: true })

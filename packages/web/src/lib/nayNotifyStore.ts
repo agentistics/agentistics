@@ -310,10 +310,15 @@ export function readNayAlerts(): NayAlert[] { return state.queue }
 /**
  * Test seam: every memory back to a fresh page — including the per-browser opened/snooze stamps. When
  * another test file installed a DOM, `localStorage` is real and shared: an "opened a just now" left by
- * one test made the next one's waiting session look already seen.
+ * one test made the next one's waiting session look already seen. A partial stub (no `removeItem`)
+ * must not keep the stamps either, so each key falls back to an empty value of its own shape.
  */
 export function resetNayNotifyStore(): void {
-  try { localStorage.removeItem(OPENED_KEY); localStorage.removeItem(SNOOZE_KEY) } catch { /* no DOM: nothing persisted */ }
+  for (const [key, empty] of [[OPENED_KEY, '{}'], [SNOOZE_KEY, '[]']] as const) {
+    try { localStorage.removeItem(key) } catch {
+      try { localStorage.setItem(key, empty) } catch { /* no DOM: nothing persisted */ }
+    }
+  }
   state = { queue: [], shock: 0 }
   since.clear(); latest.clear(); staleRaised.clear()
   snoozes = []
