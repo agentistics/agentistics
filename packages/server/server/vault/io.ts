@@ -6,6 +6,7 @@
  * Nothing here logs, and nothing here puts a payload in an argv: `run` takes the secret as `stdin`
  * and writes it to the child's pipe.
  */
+import { hostWhich } from '../host-which'
 import { open, mkdir, rename, chmod, readFile, unlink, lstat, readdir, link } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { existsSync } from 'node:fs'
@@ -114,6 +115,6 @@ export function realProtectorIo(): ProtectorIo {
       }
     },
     async firstExisting(candidates) { return candidates.find(c => existsSync(c)) ?? null },
-    async which(cmd) { return Bun.which(cmd) },
+    async which(cmd) { return hostWhich(cmd) },
   }
 }

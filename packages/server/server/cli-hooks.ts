@@ -20,6 +20,7 @@
  *     directory the user did not ask for and will not know to delete.
  */
 
+import { hostWhich } from './host-which'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -92,12 +93,12 @@ const tilde = (p: string): string => (HOME_DIR && p.startsWith(HOME_DIR) ? `~${p
 
 /** Is there a Claude Code here at all? Either its home directory or its CLI is enough. */
 function claudeCodePresent(): boolean {
-  return existsSync(claudeHome()) || !!Bun.which('claude')
+  return existsSync(claudeHome()) || !!hostWhich('claude')
 }
 
 /** How the installed hook should invoke this agentop. See `hookInvocation` for the ordering. */
 function invocation(): string {
-  const onPath = !!Bun.which('agentop')
+  const onPath = !!hostWhich('agentop')
   return hookInvocation({ onPath, execPath: process.execPath, script: process.argv[1] })
 }
 

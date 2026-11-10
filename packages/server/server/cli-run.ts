@@ -1,3 +1,4 @@
+import { hostWhich } from './host-which'
 import { execFileSync, spawn } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { freemem, homedir, tmpdir } from 'node:os'
@@ -547,7 +548,7 @@ async function startRun(options: RunOptions): Promise<number> {
   const script = process.argv[1]
   const inside = insideHeavyLock(process.env, ancestorCmdlines())
   const heavyPrefix = options.serve ? [] : shouldWrapHeavy({
-    hasCommand: options.command.length > 0, linux: process.platform === 'linux', hasFlock: !!Bun.which('flock'),
+    hasCommand: options.command.length > 0, linux: process.platform === 'linux', hasFlock: !!hostWhich('flock'),
     inside,
   }) ? (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'heavy', '--'] : [process.execPath, 'heavy', '--']) : []
   const argv = options.command.length ? [...heavyPrefix, ...options.command] : (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'server'] : [process.execPath, 'server'])

@@ -13,6 +13,7 @@
  * flight is shared. `modelCatalog` is the awaiting form, for a caller that can afford to wait.
  */
 
+import { hostWhich } from './host-which'
 import { readdir, readFile } from 'node:fs/promises'
 import { statSync } from 'node:fs'
 import { join, delimiter } from 'node:path'
@@ -74,7 +75,7 @@ export function catalogCliPath(path: string | undefined = process.env.PATH, home
 }
 
 /** Resolves a CLI name to the absolute binary the catalog would run (null: not installed). */
-let resolveCli: (name: string) => string | null = name => Bun.which(name, { PATH: catalogCliPath() })
+let resolveCli: (name: string) => string | null = name => hostWhich(name, { PATH: catalogCliPath() })
 
 /** Run a CLI with the user's usual bin dirs on PATH (a sidecar's PATH is often stripped). */
 async function runCli(argv: string[]): Promise<string | null> {
@@ -288,7 +289,7 @@ export function resetModelCatalogForTests(): void {
   cache.clear()
   inflight.clear()
   clock = Date.now
-  resolveCli = name => Bun.which(name, { PATH: catalogCliPath() })
+  resolveCli = name => hostWhich(name, { PATH: catalogCliPath() })
   for (const [h, src] of Object.entries(ORIGINAL_READERS) as [HarnessId, Source][]) READERS[h] = src
 }
 

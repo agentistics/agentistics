@@ -7,6 +7,7 @@
  * run's own HOME (`runOwnedPids`). All IO is injected (`AmbienteDeps`) so the invariants are tested against fakes and against
  * `origin --bare` repositories in a tmpdir, never the real store, the real ports or the real configs.
  */
+import { hostWhich } from '../host-which'
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
@@ -73,7 +74,7 @@ export function defaultAmbienteDeps(): AmbienteDeps {
     home,
     env: process.env,
     platform: process.platform,
-    hasSystemdRun: () => !!Bun.which('systemd-run'),
+    hasSystemdRun: () => !!hostWhich('systemd-run'),
     git: async (cwd, args, timeoutMs = 60_000) => (await exec('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, ...args], { timeout: timeoutMs, env: gitEnv() })).stdout,
     registry: async () => (await import('../sessions/registry')).readRegistry(),
     accountRoots: async () => {

@@ -1,3 +1,4 @@
+import { hostWhich } from '../host-which'
 import { readdirSync, readlinkSync, statfsSync } from 'node:fs'
 import { basename, join, resolve, sep } from 'node:path'
 import { platform } from 'node:os'
@@ -139,7 +140,7 @@ export async function processIn(path: string): Promise<boolean> {
     }
     return inspected === 0
   }
-  const lsof = Bun.which('lsof')
+  const lsof = hostWhich('lsof')
   if (!lsof) return true
   try {
     const out = Bun.spawnSync([lsof, '-a', '-d', 'cwd', '-Fn']).stdout.toString()

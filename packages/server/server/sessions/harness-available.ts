@@ -22,6 +22,7 @@
  * broken wizard; a full list whose every entry fails is.
  */
 
+import { hostWhich } from '../host-which'
 import { adoptUserBinOnPath, userSearchPath } from './user-path'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { SPAWN_SPECS } from './spawn-spec'
@@ -55,7 +56,7 @@ export function availableHarnesses(now: number = Date.now()): { ids: HarnessId[]
     cachedAt = now
     adoptUserBinOnPath()
     const startable = startableHarnessIds()
-    const installed = startable.filter(h => !!Bun.which(SPAWN_SPECS[h]!.bin, { PATH: userSearchPath() }))
+    const installed = startable.filter(h => !!hostWhich(SPAWN_SPECS[h]!.bin, { PATH: userSearchPath(), negativeTtlMs: AVAILABILITY_TTL_MS }, now))
     cached = installed.length > 0 ? installed : startable
     blind = installed.length === 0
   }

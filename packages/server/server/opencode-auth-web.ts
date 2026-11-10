@@ -10,6 +10,7 @@
  * The pasted key is read, written and forgotten: it is in no log line, no audit field and no reply.
  */
 
+import { hostWhich } from './host-which'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { HOME_DIR } from './config'
@@ -44,7 +45,7 @@ export async function handleOpencodeAuthRequest(req: Request, headers: Record<st
       const extra: OpencodeProvider[] = catalogProviders(await catalogText())
       const labels = new Map(extra.map(p => [p.id, p.label]))
       return json({
-        installed: Bun.which('opencode', { PATH: catalogCliPath() }) !== null,
+        installed: hostWhich('opencode', { PATH: catalogCliPath() }) !== null,
         connected: listConnected(doc, labels),
         providers: [...OPENCODE_PROVIDERS, ...extra],
       })
