@@ -24,7 +24,9 @@ export function useDeliveryCalendar(): { reply: CalendarReply | null; error: Rou
   const abort = useRef<AbortController | null>(null)
   const attempt = useRef(0)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (replace = false) => {
+    // Heartbeats and push events share the pending read instead of resetting its deadline.
+    if (abort.current && !replace) return
     const mine = ++generation.current
     abort.current?.abort()
     const controller = new AbortController()
@@ -40,6 +42,8 @@ export function useDeliveryCalendar(): { reply: CalendarReply | null; error: Rou
       const routeError = reason as RouteError
       setError(routeError)
       attempt.current++
+    } finally {
+      if (mine === generation.current) abort.current = null
     }
   }, [])
 
@@ -57,11 +61,13 @@ export function useDeliveryCalendar(): { reply: CalendarReply | null; error: Rou
     return () => {
       alive.current = false
       abort.current?.abort()
+      abort.current = null
+      generation.current++
       offChange(); offBook(); clearInterval(tick); clearInterval(beat)
       document.removeEventListener('visibilitychange', onVisible)
       later.cancel()
     }
   }, [load, later])
 
-  return { reply, error, slow, nowMs, reload: async () => { await new Promise(resolve => setTimeout(resolve, retryBackoffMs(attempt.current))); return load() } }
+  return { reply, error, slow, nowMs, reload: async () => { await new Promise(resolve => setTimeout(resolve, retryBackoffMs(attempt.current))); return load(true) } }
 }
