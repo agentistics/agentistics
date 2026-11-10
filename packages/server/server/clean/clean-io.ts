@@ -3,7 +3,7 @@
  * (PERF.1 step 5). Every removal goes through git (`git worktree remove`, which itself refuses a
  * dirty tree) or deletes exactly `<worktree>/node_modules`; nothing else is ever deleted.
  */
-import { existsSync, rmSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readlinkSync, rmSync, statSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import type { CleanItem, WorktreeFacts } from './clean-plan'
 
@@ -126,6 +126,22 @@ async function defaultRef(repo: string, o: CleanIoOpts): Promise<string | null> 
   return null
 }
 
+/** Directories the live processes of this machine are sitting in (Linux /proc; empty elsewhere, i.e. "unknown"). */
+export function liveCwds(): string[] {
+  if (process.platform !== 'linux') return []
+  const out: string[] = []
+  let pids: string[] = []
+  try { pids = readdirSync('/proc').filter(n => /^\d+$/.test(n) && Number(n) !== process.pid) } catch { return [] }
+  for (const pid of pids) { try { out.push(readlinkSync(`/proc/${pid}/cwd`)) } catch { /* gone or not ours */ } }
+  return out
+}
+
+/** A live process has its cwd at or below `path`. Pure; exported for tests. */
+export function cwdInside(path: string, cwds: readonly string[]): boolean {
+  const p = resolve(path)
+  return cwds.some(c => c === p || c.startsWith(p + sep))
+}
+
 /** Every worktree of one repository, with the facts the plan needs. */
 export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<WorktreeFacts[]> {
   const list = await git(['-C', repo, 'worktree', 'list', '--porcelain'], o)
@@ -134,6 +150,7 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
   const blocks = list.out.split('\n\n').filter(Boolean)
   const allPaths = blocks.map(b => b.split('\n').find(l => l.startsWith('worktree '))?.slice(9)).filter((p): p is string => !!p).map(p => resolve(p))
   o.onDiscover?.(blocks.length)
+  const cwds = liveCwds()
   const out: Array<WorktreeFacts | undefined> = []
   let next = 0
   const inspect = async (block: string, index: number) => {
@@ -147,9 +164,18 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
     const isMain = resolve(path) === resolve(repo)
     const missing = lines.some(l => l.startsWith('prunable')) || !existsSync(path)
     const locked = lines.some(l => l.startsWith('locked'))
-    let merged = false, dirty = false, lastCommitMs: number | null = null, sizeBytes = 0, nodeModulesBytes = 0, lastActivityMs: number | null = null, sizeUnknown = false
+    let merged = false, pushed = false, squashed = false, dirty = false, lastCommitMs: number | null = null, sizeBytes = 0, nodeModulesBytes = 0, lastActivityMs: number | null = null, sizeUnknown = false
     if (!missing) {
       if (base && headSha) merged = (await git(['-C', repo, 'merge-base', '--is-ancestor', headSha, base], o)).code === 0
+      if (!merged && headSha) {
+        // A squash/rebase merge leaves no ancestry: ask whether the commits survive elsewhere instead.
+        if (branch) pushed = (await git(['-C', repo, 'merge-base', '--is-ancestor', headSha, `refs/remotes/origin/${branch}`], o)).code === 0
+        if (!pushed && base) {
+          const c = await git(['-C', repo, 'cherry', base, headSha], o)
+          const marks = c.out.split('\n').filter(Boolean)
+          squashed = c.code === 0 && marks.length > 0 && marks.every(l => l.startsWith('-'))
+        }
+      }
       const st = await git(['-C', path, 'status', '--porcelain'], o)
       dirty = st.code !== 0 || st.out.trim() !== ''
       const lc = await git(['-C', path, 'log', '-1', '--format=%ct'], o)
@@ -159,7 +185,7 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
       sizeBytes = tree.bytes; nodeModulesBytes = tree.nodeModulesBytes; sizeUnknown = tree.unknown
       lastActivityMs = Math.max(tree.mtimeMs ?? 0, lastCommitMs ?? 0) || null
     }
-    out[index] = { repo, path, branch, isMain, missing, locked, merged, dirty, lastCommitMs, lastActivityMs, sizeBytes, nodeModulesBytes, ...(sizeUnknown ? { sizeUnknown } : {}) }
+    out[index] = { repo, path, branch, isMain, missing, locked, merged, pushed, squashed, inUse: cwdInside(path, cwds), dirty, lastCommitMs, lastActivityMs, sizeBytes, nodeModulesBytes, ...(sizeUnknown ? { sizeUnknown } : {}) }
     o.onItem?.(out[index]!)
   }
   await Promise.all(Array.from({ length: Math.min(WORKTREE_POOL_SIZE, blocks.length) }, async () => {

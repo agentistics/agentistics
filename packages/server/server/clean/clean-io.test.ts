@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, ut
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
-import { applyClean, parseDu, repoOf, worktreeFacts, WORKTREE_POOL_SIZE } from './clean-io'
+import { applyClean, cwdInside, parseDu, repoOf, worktreeFacts, WORKTREE_POOL_SIZE } from './clean-io'
 import { planClean } from './clean-plan'
 
 const dirs: string[] = []
@@ -53,6 +53,30 @@ describe('clean io (real git)', () => {
     expect(existsSync(join(root, 'wip', 'b'))).toBe(true)
     expect(existsSync(join(root, 'wip', 'node_modules'))).toBe(false)
     expect(g(r, 'branch', '--list', 'done').trim()).toContain('done')
+  })
+
+  test('squash-merged and pushed branches are removable; a local-only commit is not; a live cwd protects', async () => {
+    const { root, r } = repo()
+    const commit = (wt: string, file: string) => { writeFileSync(join(wt, file), file); g(wt, 'add', '.'); g(wt, 'commit', '-qm', file) }
+    // squash: same patch lands on main under another sha
+    g(r, 'worktree', 'add', '-q', join(root, 'squash'), '-b', 'squash'); commit(join(root, 'squash'), 's')
+    writeFileSync(join(r, 'm'), 'm'); g(r, 'add', '.'); g(r, 'commit', '-qm', 'diverge')
+    g(r, 'cherry-pick', g(join(root, 'squash'), 'rev-parse', 'HEAD').trim())
+    // pushed: a bare remote holds the branch at the same commit
+    const bare = join(root, 'bare.git'); g(root, 'init', '-q', '--bare', bare); g(r, 'remote', 'add', 'origin', bare)
+    g(r, 'worktree', 'add', '-q', join(root, 'pushed'), '-b', 'pushed'); commit(join(root, 'pushed'), 'p')
+    g(join(root, 'pushed'), 'push', '-q', 'origin', 'pushed')
+    // local only
+    g(r, 'worktree', 'add', '-q', join(root, 'local'), '-b', 'local'); commit(join(root, 'local'), 'l')
+    const facts = await worktreeFacts(r, { env })
+    const by = (p: string) => facts.find(f => f.path === join(root, p))!
+    expect(by('squash')).toMatchObject({ merged: false, squashed: true })
+    expect(by('pushed')).toMatchObject({ merged: false, pushed: true })
+    expect(by('local')).toMatchObject({ pushed: false, squashed: false })
+    const kinds = Object.fromEntries(planClean(facts, Date.now()).map(i => [i.facts.path.split('/').pop(), i.action.kind]))
+    expect(kinds).toMatchObject({ squash: 'remove', pushed: 'remove', local: 'keep' })
+    expect(cwdInside(join(root, 'x'), [join(root, 'x', 'sub')])).toBe(true)
+    expect(cwdInside(join(root, 'x'), [join(root, 'xy')])).toBe(false)
   })
 
   test('a child that leaves stdout open cannot strand clean after the timeout', async () => {

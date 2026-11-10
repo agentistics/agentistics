@@ -19,9 +19,19 @@ describe('planClean', () => {
     expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['main', 'remove', 'dirty', 'locked'])
   })
 
-  test('an unmerged worktree untouched for 30 days loses only its node_modules; a recent one is kept', () => {
+  test('an unmerged worktree untouched for 30 days loses only its node_modules; a recent one is kept as unmerged, never "in use"', () => {
     const p = planClean([wt({ lastCommitMs: NOW - 31 * DAY }), wt({ lastCommitMs: NOW - 31 * DAY, dirty: true }), wt({}), wt({ lastCommitMs: NOW - 31 * DAY, nodeModulesBytes: 0 })], NOW)
-    expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['node-modules', 'node-modules', 'active', 'unmerged'])
+    expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['node-modules', 'node-modules', 'unmerged', 'unmerged'])
+  })
+
+  test('clean + pushed equal, or squash-merged (all patches on the base), is removed; local-only commits never are', () => {
+    const p = planClean([wt({ pushed: true }), wt({ squashed: true }), wt({ pushed: true, dirty: true }), wt({ pushed: false, squashed: false })], NOW)
+    expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['remove', 'remove', 'dirty', 'unmerged'])
+  })
+
+  test('"in use" means a live process inside it, and it protects even a merged worktree', () => {
+    const p = planClean([wt({ merged: true, inUse: true }), wt({ lastCommitMs: NOW - 40 * DAY, inUse: true }), wt({ merged: true, inUse: false })], NOW)
+    expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['active', 'active', 'remove'])
   })
 
   test('a worktree whose directory is gone is pruned; the total counts what is freed', () => {
