@@ -36,11 +36,16 @@ tick enable them through the existing official `flow enable` command. The autono
 rule is preserved, including an explicit `AGENTISTICS_FLOWS=0` opt-out. No engine source is copied
 or changed, and the engine's `pedidos` remains the single request registry.
 
-The delivery tick reads those canonical requests. Ten minutes after the request, an open request
-or a linked piece without complete staging wakes the current live task leader, even during its
-turn. Failed wakes retry; successful wakes repeat after 30 minutes. A changed leader is notified
-immediately once due. Only reminder cadence is kept in the delivery store, so restarting does not
-reset it. This path never notifies or waits for the owner, in either mode.
+The delivery tick reads those canonical requests. Ten minutes after the request, an open or linked request
+without any attended link wakes the current live task leader, even during its turn. Any linked
+subtask with complete staging, a current successful predispatch gate, a delivery beyond `fila`,
+an active queue hold, an explicit dequeue, a live worker, or a closed board status counts as
+attended. Group members use their group's facts too. Original automatic links to unstaged cards
+cannot veto a later valid delivery link in `pedidoIds`; links must belong to the same task.
+Each pedido receives at most one successful reminder. The delivery store retains that delivered
+mark across restarts, leader handoffs and temporary omissions from the canonical request read.
+Failed sends retry after 30 minutes; abandoned reservations expire after one minute. This path
+never notifies or waits for the owner, in either mode.
 
 Staging reports an `encaixe` warning for another queued piece of the same task sharing an exact
 file, an explicit `area:`/`surface:` tag, or the same named UI surface. The leader can extend that
@@ -54,8 +59,8 @@ comment; the minute tick retries a missed fold. Group members never produce thei
   `docs/experimental-flows.md`) is never reminded and creates no subtask; the leader answers it in its reply.
 - **The reminder is re-judged at send time.** The tick reserves a reminder, then re-reads the request, the subtask facts and the
   leader right before typing; a request that was staged in between, closed, or whose leader died is dropped and the reservation
-  released (`request-wake-skipped` in the tick actions). The cadence is ONE per pedido (30 min), not one per leader: a newer leader
-  hears the reminder at once only when the one that already got it is gone. The engine's `demanda` flow must not send its own
+  released (`request-wake-skipped` in the tick actions). There is at most ONE successful reminder per pedido, including across
+  leader changes; only failed sends retry, with a 30-minute backoff. The engine's `demanda` flow must not send its own
   second reminder; the host's is the only sender.
 - **The reminder is short:** the pedido id and its first ~80 characters (no attachment paths); the full text is in the leader's
   PEDIDOS ABERTOS DO DONO section.
