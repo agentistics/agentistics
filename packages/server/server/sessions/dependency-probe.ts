@@ -17,8 +17,8 @@ const BINARY: Record<DependencyId, string> = { tmux: 'tmux' }
 async function facts(id: DependencyId): Promise<DependencyFacts> {
   const managers = knownManagers()
   const [present, foundManagers] = await Promise.all([
-    Promise.resolve(hostWhich(BINARY[id]) !== null),
-    Promise.all(managers.map(async m => (hostWhich(m) !== null ? m : null))),
+    Promise.resolve(hostWhich(BINARY[id], { negativeTtlMs: 30_000 }) !== null),
+    Promise.all(managers.map(async m => (hostWhich(m, { negativeTtlMs: 30_000 }) !== null ? m : null))),
   ])
   return {
     platform: process.platform,
