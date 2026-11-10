@@ -39,6 +39,7 @@ test('MCP task_phase and task_stage use the shared gate, authenticated dequeue, 
     budgets: async () => [{ harness: 'codex', account: 'default', fiveHourPct: 10, weekPct: 10, stale: false }],
     memoryBytes: async () => 8 * 1024 ** 3, topCap: async () => 1, git: async () => '', gh: async () => '',
   }
+  let now = Date.now()
   const service = createDeliveryService({
     store: createDeliveryStore(join(dir, 'deliveries.json')), facts,
     board: {
@@ -46,7 +47,7 @@ test('MCP task_phase and task_stage use the shared gate, authenticated dequeue, 
       setPhaseStatus: async () => ({ ok: true }), setCi: async () => {}, logStep: async (_t, s, n) => { steps.push(`${s}:${n}`) },
       comment: async (_t, _s, body) => { comments.push(body) }, subtaskFinished: async () => false,
     },
-    autonomous: async () => true, emit: async () => {}, now: Date.now,
+    autonomous: async () => true, emit: async () => {}, now: () => now,
     requests: async () => { await enableOwnerRequestFlows([flowCommand]); return requests },
     notify: { session: async (id, text) => { wakes.push(`${id}:${text}`); return true }, owner: async () => { throw new Error('must never ask owner') } },
   })
@@ -95,6 +96,9 @@ test('MCP task_phase and task_stage use the shared gate, authenticated dequeue, 
     requests = [{ id: 'p-1', taskId: 't1', sessionId: 'retired', text: 'Move history', at: new Date(Date.now() - 11 * 60_000).toISOString(), state: 'open', linkedSubtaskIds: [] }]
     expect((await call('agentistics_task_phase', { action: 'tick' })).body.actions).toContain('request-wake leader:p-1')
     expect(wakes[0]).toContain('p-1')
+    now += 8 * 60 * 60_000
+    expect((await call('agentistics_task_phase', { action: 'tick' })).body.actions.filter((a: string) => a.startsWith('request-wake'))).toEqual([])
+    expect(wakes).toHaveLength(1)
     status = 'todo'
     await call('agentistics_task_stage', stage)
     const group = await call('agentistics_task_stage', { ...stage, subtaskId: 'g1', prompt: 'surface: Live' })
