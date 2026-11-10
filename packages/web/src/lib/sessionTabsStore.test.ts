@@ -1,13 +1,21 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { getOpenTabs, resetOpenTabsCache, setOpenTabs, SESSION_TABS_KEY, subscribeOpenTabs, updateOpenTabs } from './sessionTabsStore'
 
 const mem = new Map<string, string>()
 let broken = false
+// Other suites in the same process share `localStorage`: put the original back, or this partial
+// stub (no removeItem) leaks into them — it kept the Nay's "opened just now" stamp alive (2026-11-10).
+const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+afterAll(() => {
+  if (original) Object.defineProperty(globalThis, 'localStorage', original)
+  else delete (globalThis as { localStorage?: unknown }).localStorage
+})
 beforeEach(() => {
   mem.clear(); broken = false; resetOpenTabsCache()
   ;(globalThis as { localStorage?: unknown }).localStorage = {
     getItem: (k: string) => { if (broken) throw new Error('blocked'); return mem.get(k) ?? null },
     setItem: (k: string, v: string) => { if (broken) throw new Error('blocked'); mem.set(k, v) },
+    removeItem: (k: string) => { if (broken) throw new Error('blocked'); mem.delete(k) },
   }
 })
 
