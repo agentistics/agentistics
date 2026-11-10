@@ -60,7 +60,7 @@ export const copy = (pt: boolean) => pt ? {
   next: (t: string) => `próxima entrega prevista ${t}`, noNext: 'sem entrega com estimativa',
   live: 'atualizado ao vivo', empty: 'Nada nesta etapa',
   down: 'Não consegui ler as entregas agora.', refused: 'O quadro não está disponível neste perfil.',
-  loading: 'Carregando entregas…', none: 'Nenhuma entrega ativa agora.',
+  loading: 'Carregando entregas…', none: 'Nenhuma entrega ativa agora.', retry: 'Tentar de novo',
   delivered: 'publicado', allSteps: 'Todas as etapas', external: 'Janela externa', externalTip: 'Abrir a esteira numa janela externa', externalBlocked: 'O navegador bloqueou a janela externa.',
   collapse: 'Recolher coluna', expand: 'Abrir coluna',
   period: 'Período do Publicado', periods: { '24h': 'últimas 24 h', '7d': '7 dias', '30d': '30 dias', all: 'tudo' } as Record<LivePeriod, string>,
@@ -76,7 +76,7 @@ export const copy = (pt: boolean) => pt ? {
   next: (t: string) => `next delivery expected ${t}`, noNext: 'no delivery has an estimate',
   live: 'updated live', empty: 'Nothing in this stage',
   down: 'Could not read the deliveries right now.', refused: 'The board is not available on this profile.',
-  loading: 'Loading deliveries…', none: 'No active delivery right now.',
+  loading: 'Loading deliveries…', none: 'No active delivery right now.', retry: 'Try again',
   delivered: 'published', allSteps: 'All steps', external: 'External window', externalTip: 'Open the line in an external window', externalBlocked: 'The browser blocked the external window.',
   collapse: 'Collapse column', expand: 'Open column',
   period: 'Published period', periods: { '24h': 'last 24 h', '7d': '7 days', '30d': '30 days', all: 'all' } as Record<LivePeriod, string>,
@@ -93,8 +93,8 @@ export function LiveDelivery({ lang, compact, focusSessionId, inPip, initialTask
   const plan = usePlanLimits()
   // The Publicado period is asked of the server (it decides what is sent), so it lives here, beside the fetch.
   const [period, setPeriod] = useState<LivePeriod>(() => readViewPrefs().period)
-  const { reply, replyPeriod, error, nowMs } = useLiveDeliveries(fleet.sessions, period)
-  return <LiveDeliveryView lang={lang} reply={reply} replyPeriod={replyPeriod} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} onPeriod={setPeriod} compact={compact} focusSessionId={focusSessionId} inPip={inPip} initialTaskIds={initialTaskIds} />
+  const { reply, replyPeriod, error, slow, nowMs, reload } = useLiveDeliveries(fleet.sessions, period)
+  return <LiveDeliveryView lang={lang} reply={reply} replyPeriod={replyPeriod} error={error} slow={slow} onRetry={() => void reload()} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} onPeriod={setPeriod} compact={compact} focusSessionId={focusSessionId} inPip={inPip} initialTaskIds={initialTaskIds} />
 }
 
 export interface LiveDeliveryViewProps {
@@ -105,6 +105,8 @@ export interface LiveDeliveryViewProps {
   /** The period the reply was asked for (the hook knows it); falls back to what the server echoed in `view.period`. */
   replyPeriod?: LivePeriod
   error: 'down' | 'refused' | null
+  slow?: boolean
+  onRetry?: () => void
   nowMs: number
   fleet: readonly FleetRow[]
   accountLabels: Record<string, string>
@@ -119,7 +121,7 @@ export interface LiveDeliveryViewProps {
 }
 
 /** PURE of data sources: everything it draws comes in as props, so it is tested without mocking a store. */
-export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet, accountLabels, compact, focusSessionId, initialTaskIds, inPip, onPeriod }: LiveDeliveryViewProps) {
+export function LiveDeliveryView({ lang, reply, replyPeriod, error, slow, onRetry, nowMs, fleet, accountLabels, compact, focusSessionId, initialTaskIds, inPip, onPeriod }: LiveDeliveryViewProps) {
   const pt = lang === 'pt'
   const L = copy(pt)
   const isMobile = useIsMobile()
@@ -366,8 +368,9 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet
   if (reply === null && error !== 'down') {
     // The pop-out (popover, sheet, PiP window) is not the viewport: a `screen` loader centred on the page and
     // drew beside the popup's middle. Inside it the loader fills the popup's own box instead.
-    if (compact) return <div data-live-loading-box style={{ position: 'relative', height: '100%', minHeight: 240 }}><CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" placement="fill" /></div>
-    return <CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" />
+    const retry = slow && <button type="button" className="ag-tap" onClick={onRetry} style={{ ...button(isMobile), position: 'absolute', left: '50%', bottom: 16, transform: 'translateX(-50%)', minHeight: isMobile ? 44 : 32 }}>{L.retry}</button>
+    if (compact) return <div data-live-loading-box style={{ position: 'relative', flex: 1, minHeight: 240 }}><CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" placement="fill" />{retry}</div>
+    return <div data-live-route style={{ position: 'relative', flex: 1, minHeight: 0 }}><CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" placement="fill" />{retry}</div>
   }
   if (reply === null) return <Note text={L.down} />
 

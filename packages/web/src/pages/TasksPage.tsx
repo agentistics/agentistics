@@ -462,7 +462,7 @@ function TaskList() {
 
       {view === 'overview' && overview && <BoardOverviewView o={overview} statuses={statuses} />}
 
-      {view === 'live' && <LiveDelivery lang={lang} />}
+      {view === 'live' && <div data-route-panel="live" style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><LiveDelivery lang={lang} /></div>}
 
       {view !== 'overview' && view !== 'live' && rows !== null && shown.length === 0 && !searchPending && (
         <EmptyNotice error={rows.length > 0 ? null : error} />

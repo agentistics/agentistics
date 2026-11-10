@@ -5,6 +5,7 @@ import type { FleetRow } from '../../lib/fleet'
 import type { LivePeriod } from '@agentistics/core'
 import type { LiveReply } from './liveDeliveryModel'
 import { readViewPrefs } from './liveCardModel'
+import { fetchRouteJson, type RouteError, retryBackoffMs } from '../../lib/routeTransport'
 
 /**
  * The Live Delivery read model, kept fresh by the app's own push channels — never a poll of its own:
@@ -61,21 +62,34 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
   const periodRef = useRef(period)
   periodRef.current = period
   const [error, setError] = useState<'down' | 'refused' | null>(null)
+  const [routeError, setRouteError] = useState<RouteError | null>(null)
+  const [slow, setSlow] = useState(false)
   const [nowMs, setNowMs] = useState(() => Date.now())
+  const generation = useRef(0)
+  const abort = useRef<AbortController | null>(null)
+  const attempt = useRef(0)
 
   const load = useCallback(async () => {
+    const mine = ++generation.current
+    abort.current?.abort()
+    const controller = new AbortController()
+    abort.current = controller
+    setSlow(false)
     try {
       const asked = periodRef.current
-      const res = await fetch(liveUrl(asked))
-      if (res.status === 403 || res.status === 404) { setError('refused'); return }
-      if (!res.ok) { setError('down'); return }
-      const fresh = await res.json() as LiveReply
+      const fresh = await fetchRouteJson<LiveReply>(liveUrl(asked), { signal: controller.signal, onSlow: () => { if (mine === generation.current) setSlow(true) } })
+      if (mine !== generation.current) return
       lastReply = { reply: fresh, atMs: Date.now(), period: asked }
       // A slow answer for a period the person already left must not overwrite the one they chose.
       if (asked === periodRef.current) { setReply(fresh); setReplyPeriod(asked) }
-      setError(null)
-    } catch {
-      setError('down')
+      setError(null); setRouteError(null); setSlow(false); attempt.current = 0
+    } catch (reason) {
+      if (controller.signal.aborted || mine !== generation.current) return
+      const route = reason as RouteError
+      if (route.kind === 'timeout') { setSlow(true); setRouteError(route); return }
+      setRouteError(route)
+      setError(route.kind === 'refused' ? 'refused' : 'down')
+      attempt.current++
     }
   }, [])
 
@@ -95,7 +109,7 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
     document.addEventListener('visibilitychange', onVisible)
     const beat = setInterval(() => { if (document.visibilityState === 'visible') void load() }, LIVE_HEARTBEAT_MS)
     return () => {
-      off(); clearInterval(tick); clearInterval(beat)
+      off(); clearInterval(tick); clearInterval(beat); abort.current?.abort()
       document.removeEventListener('visibilitychange', onVisible)
       later.cancel()
     }
@@ -119,5 +133,5 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
     return () => clearTimeout(t)
   }, [signature, load])
 
-  return { reply, replyPeriod, error, nowMs, reload: load }
+  return { reply, replyPeriod, error, routeError, slow, nowMs, reload: async () => { await new Promise(resolve => setTimeout(resolve, retryBackoffMs(attempt.current))); return load() } }
 }
