@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.204.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Custo: um modelo usado por trás de um gateway (por exemplo upx/fable-5.1, OpenRouter ou LiteLLM) passa a ser cobrado pelo preço público da API do próprio modelo, em vez de aparecer como "não registrado".',
+        en: 'Cost: a model used behind a gateway (for example upx/fable-5.1, OpenRouter or LiteLLM) is now priced at the model\'s own public API rate, instead of showing as "not recorded".',
+      },
+      {
+        pt: 'Custo: um nome de modelo desconhecido ou com versão inventada continua "não registrado", nunca recebe o preço de outro modelo parecido.',
+        en: 'Cost: an unknown model name, or one with a made-up version, stays "not recorded" and never gets the price of a similar-looking model.',
+      },
+    ],
+  },
   '2.204.3': {
     features: [
       {
