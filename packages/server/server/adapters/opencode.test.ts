@@ -96,10 +96,11 @@ test('mixed models keep their own price; OpenCode free and local models cost zer
   const s = parseOpencodeSession(session, [user, free])!
   expect(sessionCostUSD(s)).toBe(0)
   expect(sessionCostUSD(parseOpencodeSession(session, [user, response('pickle', { providerID: 'opencode', modelID: 'big-pickle' })])!)).toBe(0)
-  expect(sessionCostUSD(parseOpencodeSession(session, [user, response('missing-provider', { providerID: undefined })])!)).toBeNull()
+  expect(sessionCostUSD(parseOpencodeSession(session, [user, response('missing-provider', { providerID: undefined, modelID: 'modelo-interno' })])!)).toBeNull()
   expect(toConversation(s).costUSD).toBe(0)
-  const unknown = parseOpencodeSession(session, [user, response('msg_x', { providerID: 'custom-vendor' })])!
+  const unknown = parseOpencodeSession(session, [user, response('msg_x', { providerID: 'custom-vendor', modelID: 'modelo-interno' })])!
   expect(sessionCostUSD(unknown)).toBeNull(); expect(unpricedTokens(unknown)).toBe(345)
+  expect(sessionCostUSD(parseOpencodeSession(session, [user, response('gw', { providerID: 'custom-vendor', modelID: 'claude-sonnet-4-6' })])!)).toBeGreaterThan(0)
   expect(toConversation(unknown).costUSD).toBeUndefined()
   const local = parseOpencodeSession(session, [user, response('msg_l', { providerID: 'ollama' })])!
   expect(sessionCostUSD(local)).toBe(0)
@@ -139,7 +140,7 @@ test('live OpenCode refresh uses the exact SQLite session ID and bypasses the tr
   expect(refreshed[0]!.tokens).toBe(345)
   expect(refreshed[0]!.contextTokens).toBe(330)
   expect(refreshed[0]!.costUSD).toBeGreaterThan(0)
-  const unknownWindow = parseOpencodeSession(session, [user, response('msg_unknown', { providerID: 'custom' })])!
+  const unknownWindow = parseOpencodeSession(session, [user, response('msg_unknown', { providerID: 'custom', modelID: 'modelo-interno' })])!
   const next = await refreshConversationContexts(refreshed, rows, () => null, async () => [unknownWindow])
   expect(next[0]!.contextWindow).toBeUndefined()
   expect(next[0]!.costUSD).toBeUndefined()

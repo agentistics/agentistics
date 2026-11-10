@@ -1226,7 +1226,34 @@ export function getModelPrice(modelId: string): ModelPrice {
   // the table so no partial-prefix match can price it. See local-models.ts.
   if (isLocalModelId(modelId)) return LOCAL_MODEL_PRICE
   const hit = pricingKey(modelId)
-  return hit ? MODEL_PRICING[hit]! : UNPRICED_PRICE
+  if (hit) return MODEL_PRICING[hit]!
+  // A gateway/router route (company gateway, OpenRouter, LiteLLM, Bedrock…) names a model the table
+  // knows under another spelling: `upx/fable-5.1`, `openrouter/anthropic/claude-opus-4.8`,
+  // `us.anthropic.claude-sonnet-5:0`. Price it at the provider's public API rate for that model.
+  const canonical = canonicalModelId(modelId)
+  if (canonical && canonical !== modelId) {
+    const viaGateway = MODEL_PRICING[canonical] ? canonical : pricingKey(canonical)
+    if (viaGateway) return MODEL_PRICING[viaGateway]!
+  }
+  return UNPRICED_PRICE
+}
+
+/**
+ * The table spelling of a model id seen through a gateway: drop the route prefix (everything up to
+ * the last `/`, or a Bedrock-style `region.vendor.` prefix), drop `:variant`/`@date` suffixes,
+ * lower-case, write version dots as dashes (`5.1` → `5-1`) and add `claude-` to a bare Claude
+ * family name. Returns null when nothing is left.
+ */
+export function canonicalModelId(modelId: string): string | null {
+  let id = String(modelId ?? '').trim().toLowerCase()
+  if (!id) return null
+  id = id.slice(id.lastIndexOf('/') + 1)
+  const claudeAt = id.indexOf('claude-')
+  if (claudeAt > 0) id = id.slice(claudeAt)
+  id = id.replace(/[:@].*$/, '')
+  id = id.replace(/(\d)\.(?=\d)/g, '$1-')
+  if (/^(fable|opus|sonnet|haiku|mythos)-/.test(id)) id = `claude-${id}`
+  return id || null
 }
 
 /**
