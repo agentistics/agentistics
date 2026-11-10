@@ -326,6 +326,7 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
   // answer from one source. A fleet that cannot be read costs the agent state, never the line.
   let rows: FleetRowLite[] = []
   let leaderIds = new Set<string>()
+  let fleetRead: 'ok' | 'unknown' = 'ok'
   try {
     const { readLiveFleet } = await import('./fleet-web')
     const { listRoles, defaultRoleDeps, roleOfRow } = await import('./session-roles')
@@ -343,11 +344,11 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
     }))
     const roles = await listRoles(await defaultRoleDeps())
     leaderIds = new Set(fleet.filter(r => roleOfRow(roles, r) === 'leader').map(r => r.id))
-  } catch { /* no fleet: deliveries without live state */ }
+  } catch { fleetRead = 'unknown' /* no fleet: preserve uncertainty; never claim a leader is absent */ }
   const reply = await replyPromise
   const { liveRuntimeFacts } = await import('./live-runtime')
   const runtime = await liveRuntimeFacts(nowMs).catch(() => ({}))
-  return describeLive({ reply, rows, leaderIds, nowMs, filters, runtime })
+  return describeLive({ reply, rows, leaderIds, nowMs, filters, runtime, fleetRead })
 }
 
 /** Create a task. Title is required; a description is not — a task nobody described is a task. */

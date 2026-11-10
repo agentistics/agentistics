@@ -35,6 +35,8 @@ export interface FleetRowLite {
   createdMs?: number
 }
 
+export type LeaderAvailability = 'available' | 'absent' | 'unknown'
+
 /** What a harness will use with nothing passed, and whether it has an effort concept at all. */
 export interface RuntimeFacts { model?: string; effort?: string; effortConcept: boolean }
 
@@ -148,7 +150,19 @@ export function workerWord(state: string, stage: LiveStage | null): WorkerWord {
  * (active | queue | published | all — an API caller that names none gets `all`, the screen opens on `active`),
  * the Publicado `period` (24h default) and `sort` (default: highest priority first).
  */
-export interface LiveFilters { task?: string; stage?: LiveStage; stalledOnly?: boolean; tab?: LiveTab; period?: LivePeriod; sort?: LiveSortId }
+export interface LiveFilters { task?: string; stage?: LiveStage | 'no-leader'; stalledOnly?: boolean; tab?: LiveTab; period?: LivePeriod; sort?: LiveSortId }
+
+/**
+ * Join a review piece with the fleet's real leader heartbeat. A leader from another task never
+ * satisfies this check. `unknown` is deliberately distinct from `absent`: a failed fleet read
+ * must not make a review look abandoned.
+ */
+function leaderForTask(o: { taskId: string; taskTitle: string; rows: readonly FleetRowLite[]; leaderIds: ReadonlySet<string>; fleetRead: 'ok' | 'unknown' }): { availability: LeaderAvailability; reason?: string } {
+  if (o.fleetRead === 'unknown') return { availability: 'unknown', reason: 'leader availability could not be read from the fleet' }
+  const sameTask = (r: FleetRowLite) => r.task === o.taskId || r.task === o.taskTitle
+  const leader = o.rows.some(r => o.leaderIds.has(r.id) && sameTask(r) && ALIVE.has(r.state))
+  return leader ? { availability: 'available' } : { availability: 'absent', reason: 'no live leader is filed on this task' }
+}
 
 export function describeLive(o: {
   reply: LiveReply
@@ -159,6 +173,8 @@ export function describeLive(o: {
   filters?: LiveFilters
   lang?: LiveLang
   runtime?: Record<string, RuntimeFacts>
+  /** Whether the fleet read succeeded. Omit for pure callers that already provide an authoritative empty fleet. */
+  fleetRead?: 'ok' | 'unknown'
 }): LiveView {
   const lang = o.lang ?? 'pt'
   const byId = new Map(o.rows.map(r => [r.id, r]))
@@ -181,7 +197,12 @@ export function describeLive(o: {
     // FLEET shows alive right now. A session the book thinks open while no agent runs counts nothing.
     const alive = agents.some(a => ALIVE.has(a.state))
     const workMs = d.workMs ?? (alive && d.startedAtMs !== null ? Math.max(0, o.nowMs - d.startedAtMs) : null)
-    return { ...d, workMs, agents, liveState, stalled }
+    const leader = d.stage === 'leader'
+      ? leaderForTask({ taskId: d.taskId, taskTitle: d.taskTitle, rows: o.rows, leaderIds: o.leaderIds, fleetRead: o.fleetRead ?? 'ok' })
+      : null
+    return { ...d, workMs, agents, liveState, stalled,
+      ...(leader?.availability === 'absent' ? { displayStage: 'no-leader' as const } : {}),
+      ...(leader ? { leaderAvailability: leader.availability, ...(leader.reason ? { leaderAvailabilityReason: leader.reason } : {}) } : {}) }
   })
   const needle = f.task?.trim().toLowerCase()
   // A piece whose only sessions are LEADERS is the leader's own filing. While the task has an OPEN piece of its own
@@ -211,7 +232,7 @@ export function describeLive(o: {
   const ofTask = all.filter(d => !leaderOnly(d)).map(asLeaderPiece).filter(d => !needle || d.taskId === f.task || d.taskTitle.toLowerCase().includes(needle))
   const counts = liveTabCounts(ofTask, period, o.nowMs)
   const deliveries = ofTask
-    .filter(d => liveTabMatches(tab, d, period, o.nowMs) && (!f.stage || d.stage === f.stage) && (!f.stalledOnly || d.stalled))
+    .filter(d => liveTabMatches(tab, d, period, o.nowMs) && (!f.stage || (f.stage === 'no-leader' ? d.displayStage === 'no-leader' : d.stage === f.stage)) && (!f.stalledOnly || d.stalled))
     // Stage by stage, as the screen's columns are; within a stage the chosen order.
     .sort((a, b) => LIVE_STAGES.indexOf(a.stage) - LIVE_STAGES.indexOf(b.stage) || cmp(a, b))
 

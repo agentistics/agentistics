@@ -100,7 +100,7 @@ export interface BarSegment { stage: LiveStage; state: 'done' | 'cur' | 'todo'; 
 /** PURE: the 6-segment bar. The active segment wears the COLOUR OF THE COLUMN the card is in; done ones are grey. */
 export function stageBar(stage: LiveStage, origin: LiveStage | null | undefined): BarSegment[] {
   if (stage === 'completed') return [{ stage, state: 'cur', color: STAGE_LABEL.completed.color }]
-  const at = stage === 'adjust' ? 'qa' : stage === 'blocked' ? (origin && origin !== 'blocked' ? (origin === 'adjust' ? 'qa' : origin) : 'queue') : stage
+  const at = stage === 'adjust' ? 'qa' : stage === 'no-leader' ? 'leader' : stage === 'blocked' ? (origin && origin !== 'blocked' ? (origin === 'adjust' ? 'qa' : origin) : 'queue') : stage
   const i = BAR_STAGES.indexOf(at)
   return BAR_STAGES.map((s, k) => ({
     stage: s,

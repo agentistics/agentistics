@@ -14,8 +14,8 @@ import {
 import type { FleetRow } from '../../lib/fleet'
 import { modelDisplay } from '../../lib/modelDisplay'
 
-export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'completed' | 'published'
-export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'completed', 'published']
+export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'no-leader' | 'merge' | 'ci' | 'completed' | 'published'
+export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'no-leader', 'merge', 'ci', 'completed', 'published']
 
 export type LiveEta =
   | {
@@ -43,6 +43,9 @@ export interface RuntimeFacts { model?: string; effort?: string; effortConcept: 
 export interface LiveDeliveryRecord {
   key: string; taskId: string; taskTitle: string; subtaskId: string | null; title: string
   status: string; stage: LiveStage; stageSinceMs: number | null; startedAtMs: number | null
+  displayStage?: LiveStage | 'no-leader'
+  leaderAvailability?: 'available' | 'absent' | 'unknown'
+  leaderAvailabilityReason?: string
   /** Same current-round start and ordinal as the server/MCP projection. */
   round?: { number: number; startedAtMs: number | null }
   sessionIds: string[]; harnesses: string[]; models: string[]; eta: LiveEta
@@ -98,6 +101,8 @@ export type LiveState = 'working' | 'waiting' | 'needs-you' | 'down' | 'none'
 
 export interface LiveCard {
   d: LiveDeliveryRecord
+  /** Presentation-only column. The persisted/delivery stage remains `leader`. */
+  displayStage?: LiveStage
   agents: LiveAgent[]
   liveState: LiveState
   /** Red border: somebody is blocked on a person, an agent is lost, or the piece is stuck in Adjust. */
@@ -131,7 +136,8 @@ export function joinLive(
       || (d.stage === 'adjust' && d.blockedReason !== null)
       // Sessions are filed and live in the book, yet the fleet shows none of them running.
       || (d.sessionIds.length > 0 && agents.length === 0 && (d.stage === 'running' || d.stage === 'qa'))
-    return { d, agents, liveState, alert }
+    const displayStage = d.displayStage ?? (d.stage === 'leader' && d.leaderAvailability === 'absent' ? 'no-leader' : d.stage)
+    return { d, displayStage, agents, liveState, alert }
   })
 }
 
@@ -154,7 +160,7 @@ export const LIVE_DEFAULTS: { taskIds: readonly string[]; tab: LiveTab; period: 
   { taskIds: [], tab: LIVE_TAB_DEFAULT, period: LIVE_PERIOD_DEFAULT, stage: 'all', sort: LIVE_SORT_DEFAULT }
 
 /** The card as the tab rules read it. */
-const tabbable = (c: LiveCard): LiveTabbable => ({ stage: c.d.stage, deliveredAtMs: c.d.deliveredAtMs, old: c.d.old === true, liveState: c.liveState })
+const tabbable = (c: LiveCard): LiveTabbable => ({ stage: c.d.stage === 'no-leader' ? 'leader' : c.d.stage, deliveredAtMs: c.d.deliveredAtMs, old: c.d.old === true, liveState: c.liveState })
 
 /** PURE: the cards of one task filter (empty = every task) — what the tab counts are counted over. */
 export const ofTasks = (cards: readonly LiveCard[], taskIds: readonly string[]): LiveCard[] =>
@@ -212,7 +218,7 @@ export function filterCards(cards: readonly LiveCard[], f: LiveFilters): LiveCar
 
 export function byStage(cards: readonly LiveCard[]): Record<LiveStage, LiveCard[]> {
   const out = Object.fromEntries(LIVE_STAGES.map(s => [s, [] as LiveCard[]])) as Record<LiveStage, LiveCard[]>
-  for (const c of cards) out[c.d.stage].push(c)
+  for (const c of cards) out[c.displayStage ?? c.d.stage].push(c)
   return out
 }
 
@@ -285,6 +291,7 @@ export const STAGE_LABEL: Record<LiveStage, { pt: string; en: string; color: str
   qa: { pt: 'QA', en: 'QA', color: '#4c9aff' },
   adjust: { pt: 'Ajuste', en: 'Adjusting', color: '#ff5f5f' },
   leader: { pt: 'Revisão do líder', en: 'Leader review', color: '#b78bff' },
+  'no-leader': { pt: 'Sem líder', en: 'No leader', color: '#d97706' },
   merge: { pt: 'PR / merge', en: 'PR / merge', color: '#3ecf8e' },
   ci: { pt: 'CI · publicando', en: 'CI · publishing', color: 'rgb(45,180,200)' },
   completed: { pt: 'Concluído · sem prova de release', en: 'Completed · no release proof', color: '#8b8b95' },

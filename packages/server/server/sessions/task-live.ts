@@ -105,6 +105,12 @@ export interface LiveDelivery {
   title: string
   status: string
   stage: LiveStage
+  /** Presentation-only stage; the persisted/delivery stage remains `leader`. */
+  displayStage?: LiveStage | 'no-leader'
+  /** Availability of a leader for a review piece, from the live fleet read. Other stages omit it. */
+  leaderAvailability?: 'available' | 'absent' | 'unknown'
+  /** A short, user-facing explanation when leaderAvailability is not available. */
+  leaderAvailabilityReason?: string
   /** When the piece last changed status (the book's own stamp) — "time in this stage". */
   stageSinceMs: number | null
   /** Current stage round, from the session start or stage entry; shared by Web and MCP. */
