@@ -329,7 +329,8 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
   let fleetRead: 'ok' | 'unknown' = 'ok'
   try {
     const { readLiveFleet } = await import('./fleet-web')
-    const { listRoles, defaultRoleDeps, roleOfRow } = await import('./session-roles')
+    const { listRoles, defaultRoleDeps, roleOfRow, rolesDocUnreadable } = await import('./session-roles')
+    const { registryUnreadable } = await import('./registry')
     const fleet = await readLiveFleet('en')
     rows = fleet.map(r => ({
       id: r.id, title: r.title, harness: r.harness, state: r.state,
@@ -344,6 +345,7 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
     }))
     const roles = await listRoles(await defaultRoleDeps())
     leaderIds = new Set(fleet.filter(r => roleOfRow(roles, r) === 'leader').map(r => r.id))
+    if (await rolesDocUnreadable((await import('../config')).AGENTISTICS_DATA_DIR) || await registryUnreadable()) fleetRead = 'unknown'
   } catch { fleetRead = 'unknown' /* no fleet: preserve uncertainty; never claim a leader is absent */ }
   const reply = await replyPromise
   const { liveRuntimeFacts } = await import('./live-runtime')

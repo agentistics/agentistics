@@ -43,6 +43,8 @@ export interface CalPiece {
   taskTitle: string
   subtaskId: string | null
   title: string
+  kind?: 'owner-request'
+  leaderAvailabilityReasonCode?: 'fleet-unreadable' | 'no-live-leader'
   stage: CalStage
   /** The release version it rides (`2.202.0`); null when none is declared (or the piece was deferred to `next`). */
   version: string | null
@@ -105,6 +107,8 @@ export interface CalLiveInput {
   taskTitle: string
   subtaskId: string | null
   title: string
+  kind?: 'owner-request'
+  leaderAvailabilityReasonCode?: 'fleet-unreadable' | 'no-live-leader'
   stage: CalStage
   startedAtMs: number | null
   stageSinceMs: number | null
@@ -173,7 +177,7 @@ export function buildCalendar(o: {
     const dueDate = sub?.dueDate ?? task?.dueDate ?? null
     const published = l.stage === 'published'
     pieces.push({
-      key: l.key, taskId: l.taskId, taskTitle: l.taskTitle, subtaskId: l.subtaskId, title: l.title, stage: l.stage,
+      key: l.key, taskId: l.taskId, taskTitle: l.taskTitle, subtaskId: l.subtaskId, title: l.title, ...(l.kind ? { kind: l.kind } : {}), ...(l.leaderAvailabilityReasonCode ? { leaderAvailabilityReasonCode: l.leaderAvailabilityReasonCode } : {}), stage: l.stage,
       version: pickVersion(rec?.versionTarget),
       harness: l.harnesses[0] ?? null, model: l.models[0] ?? null,
       priority: toPriority(sub?.priority ?? task?.priority),
