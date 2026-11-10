@@ -16,6 +16,22 @@ export interface WorktreeFacts {
   missing: boolean
   locked: boolean
   merged: boolean
+  /**
+   * HEAD is contained in `refs/remotes/origin/<branch>` — that exact name only. The branch's configured
+   * upstream (another remote, another name) is NOT consulted, so a branch pushed elsewhere reads unpushed.
+   */
+  pushed?: boolean
+  /**
+   * Every commit of the branch has a patch-id twin on the default branch (`git cherry`, commit by commit:
+   * a rebase merge or a cherry-pick). A squash of SEVERAL commits into one is NOT detected; it reads unmerged.
+   */
+  squashed?: boolean
+  /** A live process, or a not-ended managed session, has its cwd inside this worktree. */
+  inUse?: boolean
+  /** Whether it is in use could not be established (process list or session registry unreadable). Never removed. */
+  useUnknown?: boolean
+  /** Ignored files that an install/build does not regenerate (`.env.local`, secrets…) live in the tree. */
+  keepsIgnored?: boolean
   dirty: boolean
   /** Epoch ms of the last commit, null when unknown. */
   lastCommitMs: number | null
@@ -31,7 +47,7 @@ export type CleanAction =
   | { kind: 'remove'; frees: number }
   | { kind: 'prune'; frees: 0 }
   | { kind: 'node-modules'; frees: number }
-  | { kind: 'keep'; reason: 'main' | 'locked' | 'dirty' | 'active' | 'unmerged' }
+  | { kind: 'keep'; reason: 'main' | 'locked' | 'dirty' | 'active' | 'unknown-use' | 'ignored' | 'unmerged' }
 
 export interface CleanItem { facts: WorktreeFacts; action: CleanAction }
 
@@ -46,11 +62,18 @@ function decide(f: WorktreeFacts, now: number, staleDays: number): CleanAction {
   if (f.isMain) return { kind: 'keep', reason: 'main' }
   if (f.missing) return { kind: 'prune', frees: 0 }
   if (f.locked) return { kind: 'keep', reason: 'locked' }
-  if (f.merged && !f.dirty) return { kind: 'remove', frees: f.sizeBytes }
+  // "In use" is a fact (a live process inside), never a guess from how recent the last commit is.
+  if (f.inUse) return { kind: 'keep', reason: 'active' }
+  // Fail closed: when "in use" could not be established nothing that depends on it is decided.
+  if (f.useUnknown) return { kind: 'keep', reason: 'unknown-use' }
+  // Ignored files are invisible to `git worktree remove`; unlike node_modules they cannot be regenerated.
+  if (f.keepsIgnored && (f.merged || f.pushed || f.squashed) && !f.dirty) return { kind: 'keep', reason: 'ignored' }
+  // Safe to drop when no commit exists only here: merged, squash-merged, or pushed with the remote equal.
+  if ((f.merged || f.pushed || f.squashed) && !f.dirty) return { kind: 'remove', frees: f.sizeBytes }
   const stale = f.lastCommitMs !== null && now - f.lastCommitMs >= staleDays * DAY
   if (stale && f.nodeModulesBytes > 0) return { kind: 'node-modules', frees: f.nodeModulesBytes }
   if (f.dirty) return { kind: 'keep', reason: 'dirty' }
-  return { kind: 'keep', reason: stale ? 'unmerged' : 'active' }
+  return { kind: 'keep', reason: 'unmerged' }
 }
 
 export function reclaimable(items: readonly CleanItem[]): { bytes: number; count: number } {
@@ -67,14 +90,14 @@ export function fmtBytes(n: number): string {
 
 const WORDS = {
   en: {
-    remove: 'remove (merged, clean)', prune: 'prune (directory is gone)', 'node-modules': 'remove node_modules only (no commit in 30+ days, not merged)',
-    main: 'keep: main checkout', locked: 'keep: locked', dirty: 'keep: uncommitted changes', active: 'keep: in use', unmerged: 'keep: not merged',
+    remove: 'remove (merged or pushed, clean)', prune: 'prune (directory is gone)', 'node-modules': 'remove node_modules only (no commit in 30+ days, not merged)',
+    main: 'keep: main checkout', locked: 'keep: locked', dirty: 'keep: uncommitted changes', active: 'keep: live process inside', 'unknown-use': 'keep: cannot tell whether it is in use (process list or session registry unreadable)', ignored: 'keep: ignored files that cannot be regenerated', unmerged: 'keep: not merged or pushed',
     total: (b: string, n: number) => `${n} item${n === 1 ? '' : 's'} would free ${b}.`,
     nothing: 'Nothing to clean: every worktree is in use or holds unmerged or uncommitted work.',
   },
   pt: {
-    remove: 'remover (merged, limpo)', prune: 'podar (a pasta não existe mais)', 'node-modules': 'remover só node_modules (sem commit há 30+ dias, não merged)',
-    main: 'manter: checkout principal', locked: 'manter: travado', dirty: 'manter: mudanças não commitadas', active: 'manter: em uso', unmerged: 'manter: não merged',
+    remove: 'remover (merged ou empurrado, limpo)', prune: 'podar (a pasta não existe mais)', 'node-modules': 'remover só node_modules (sem commit há 30+ dias, não merged)',
+    main: 'manter: checkout principal', locked: 'manter: travado', dirty: 'manter: mudanças não commitadas', active: 'manter: processo vivo dentro', 'unknown-use': 'manter: não dá para saber se está em uso (lista de processos ou registro de sessões ilegível)', ignored: 'manter: arquivos ignorados não regeneráveis', unmerged: 'manter: não merged nem empurrado',
     total: (b: string, n: number) => `${n} ${n === 1 ? 'item liberaria' : 'itens liberariam'} ${b}.`,
     nothing: 'Nada a limpar: todo worktree está em uso ou guarda trabalho não merged ou não commitado.',
   },
