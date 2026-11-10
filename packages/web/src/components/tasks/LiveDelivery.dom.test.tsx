@@ -60,6 +60,17 @@ test('projects an absent leader into a visible No leader column with a one-line 
   expect(document.querySelector('[data-live-no-leader]')!.textContent).toContain('no live leader')
 })
 
+test('localizes the leader reason in the Live card', async () => {
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  const review = { ...reply, deliveries: [{ ...reply.deliveries[0]!, stage: 'leader', leaderAvailability: 'absent', leaderAvailabilityReasonCode: 'no-live-leader', sessionIds: [] }] }
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: review as never }))) })
+  await act(async () => { await new Promise(r => setTimeout(r, 20)) })
+  expect(document.querySelector('[data-live-no-leader]')!.textContent).toContain('nenhum líder vivo')
+  await act(async () => { root!.unmount(); root = undefined; document.body.innerHTML = ''; const h = document.createElement('div'); document.body.append(h); root = createRoot(h); root.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: review as never }))) })
+  await act(async () => { await new Promise(r => setTimeout(r, 20)) })
+  expect(document.querySelector('[data-live-no-leader]')!.textContent).toContain('no live leader is filed')
+})
+
 test('opens on "Em andamento" (agents working or waiting, 2 here); "Na fila" is empty and the choice is remembered', async () => {
   localStorage.clear()
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)

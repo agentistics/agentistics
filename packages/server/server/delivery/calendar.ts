@@ -30,7 +30,7 @@ export async function readCalendarSources(): Promise<CalendarSources> {
   ])
   const [view, records, world] = await Promise.all([liveDeliveries(), deliveryService().list(), loadTaskWorld()])
   const lives: CalLiveInput[] = view.deliveries.map(d => ({
-    key: d.key, taskId: d.taskId, taskTitle: d.taskTitle, subtaskId: d.subtaskId, title: d.title,
+    key: d.key, taskId: d.taskId, taskTitle: d.taskTitle, subtaskId: d.subtaskId, title: d.title, ...(d.kind ? { kind: d.kind } : {}), ...(d.leaderAvailabilityReasonCode ? { leaderAvailabilityReasonCode: d.leaderAvailabilityReasonCode } : {}),
     stage: d.stage as CalStage, startedAtMs: d.startedAtMs, stageSinceMs: d.stageSinceMs,
     harnesses: d.harnesses, models: d.models,
     trail: d.trail.map(v => ({ stage: v.stage as CalStage, enteredMs: v.enteredMs, ms: v.ms })),
