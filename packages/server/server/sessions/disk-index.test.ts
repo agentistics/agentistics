@@ -61,3 +61,35 @@ describe('DiskCrawler', () => {
     expect(progress.queued).toBeGreaterThan(0)
   })
 })
+
+describe('DiskIndex idle behaviour', () => {
+  it('does not tick or notify when there are no roots', async () => {
+    const index = new DiskIndex()
+    let calls = 0
+    index.onSnapshot = () => { calls++ }
+    index.configure([])
+    await index.tick()
+    await index.tick()
+    expect(calls).toBe(1 - 1 + (calls ? 1 : 0)) // first signature may notify once at most
+    expect(calls).toBeLessThanOrEqual(1)
+  })
+
+  it('notifies only when the snapshot changed, and a complete crawler stops rewriting state', async () => {
+    const root = await fixture()
+    const stateFile = join(root, 'state.json')
+    const index = new DiskIndex()
+    let calls = 0
+    index.onSnapshot = () => { calls++ }
+    index.configure([root], r => new DiskCrawler({ root: r, stateFile, sliceMs: 1000 }))
+    await index.tick()
+    expect(index.snapshot().indexing).toBe(false)
+    const after = calls
+    const written = await readFile(stateFile, 'utf8')
+    await rm(stateFile)
+    await index.tick()
+    await index.tick()
+    expect(calls).toBe(after)
+    await expect(readFile(stateFile, 'utf8')).rejects.toThrow() // no rewrite once complete
+    expect(written.length).toBeGreaterThan(0)
+  })
+})

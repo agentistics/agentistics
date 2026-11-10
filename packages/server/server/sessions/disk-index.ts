@@ -9,6 +9,8 @@ import { classifyGitFile, isPrivateMacPath, shouldPruneDirectory, type ScannedDi
 export const DISK_INDEX_SLICE_MS = 100
 export const DISK_INDEX_TICK_MS = 2_000
 export const DISK_INDEX_RECRAWL_MS = 30 * 60_000
+/** Poll interval while there is nothing to crawl (no roots, or every root complete). */
+export const DISK_INDEX_IDLE_MS = 60_000
 
 const MARKERS = new Set(['package.json', 'pyproject.toml', 'go.mod', 'cargo.toml', 'pom.xml'])
 const MAX_ENTRIES = 40_000
@@ -102,6 +104,8 @@ export class DiskCrawler {
   private readonly now: () => number
   private readonly sliceMs: number
   private readonly file: string
+  /** Bumped whenever the candidate list may have changed, so a caller can tell "same" from "new". */
+  private rev = 0
 
   constructor(private readonly options: DiskCrawlerOptions) {
     this.state = emptyState(options.root)
@@ -122,6 +126,8 @@ export class DiskCrawler {
       this.state.queue = [{ path: this.state.root, depth: 0 }]
       this.state.completedAt = 0
     }
+    // A complete index with no recrawl due has nothing to do: no rewrite of the state file either.
+    if (this.state.queue.length === 0 && this.state.completedAt > 0) return this.progress()
     const deadline = now + this.sliceMs
     while (this.state.queue.length && this.now() < deadline) {
       const task = this.state.queue.shift()!
@@ -136,6 +142,7 @@ export class DiskCrawler {
         await Promise.resolve()
         continue
       }
+      this.rev++
       this.state.candidates = this.state.candidates.filter(c => c.path !== task.path && !c.path.startsWith(`${task.path}/`))
       let entries: Dirent<string>[] = []
       try { entries = await (this.options.readDir ?? ((p: string) => readdir(p, { withFileTypes: true, encoding: 'utf8' })))(task.path) } catch { this.state.dirs[task.path] = { mtimeMs, children: [] }; continue }
@@ -159,6 +166,17 @@ export class DiskCrawler {
     return { root: this.state.root, visited: Object.keys(this.state.visited).length, queued: this.state.queue.length, candidates: this.state.candidates.length, complete: this.state.queue.length === 0 && this.state.completedAt > 0 }
   }
 
+  /** Changes whenever progress or the candidate list may have changed. */
+  signature(): string {
+    const p = this.progress()
+    return `${this.rev}:${p.visited}:${p.queued}:${p.candidates}:${p.complete ? 1 : 0}`
+  }
+
+  /** True when a tick would do real work (queue non-empty or a recrawl is due). */
+  idle(): boolean {
+    return this.state.queue.length === 0 && this.state.completedAt > 0 && this.now() - this.state.completedAt < DISK_INDEX_RECRAWL_MS
+  }
+
   candidates(): ScannedDir[] { return this.state.candidates.filter(c => !this.isPrivate(c.path)) }
 
   private isPrivate(path: string): boolean {
@@ -175,12 +193,16 @@ export class DiskIndex {
   private cursor = 0
   private running = false
   private timer: ReturnType<typeof setTimeout> | undefined
+  private lastSignature = ''
   onSnapshot?: (snapshot: DiskIndexSnapshot) => void
 
   configure(roots: string[], factory: (root: string) => DiskCrawler = root => new DiskCrawler({ root })): void {
+    const before = this.roots.join('\0')
     this.roots = [...new Set(roots)]
     for (const root of this.roots) if (!this.crawlers.has(root)) this.crawlers.set(root, factory(root))
     for (const root of this.crawlers.keys()) if (!this.roots.includes(root)) this.crawlers.delete(root)
+    // A running loop may be parked on the long idle wait: new roots must not wait it out.
+    if (this.running && before !== this.roots.join('\0')) this.wake()
   }
 
   async tick(): Promise<DiskIndexSnapshot> {
@@ -189,15 +211,44 @@ export class DiskIndex {
       await this.crawlers.get(root)!.tick()
     }
     const snapshot = this.snapshot()
-    this.onSnapshot?.(snapshot)
+    // Tell the listener only when something it could show has changed.
+    const sig = this.signature()
+    if (sig !== this.lastSignature) { this.lastSignature = sig; this.onSnapshot?.(snapshot) }
     return snapshot
+  }
+
+  private signature(): string {
+    return this.roots.map(r => `${r}=${this.crawlers.get(r)!.signature()}`).join('|')
+  }
+
+  /** Nothing to crawl: no roots, or every root complete with no recrawl due. */
+  private idle(): boolean {
+    return this.roots.every(r => this.crawlers.get(r)!.idle())
+  }
+
+  private schedule(ms: number): void {
+    if (!this.running) return
+    this.timer = setTimeout(() => { void this.loop() }, ms)
+    this.timer.unref?.()
+  }
+
+  private async loop(): Promise<void> {
+    if (!this.running) return
+    // Never touch the crawlers (or the listener) while there is nothing to do.
+    if (this.idle()) { this.schedule(DISK_INDEX_IDLE_MS); return }
+    await this.tick().catch(() => {})
+    this.schedule(DISK_INDEX_TICK_MS)
+  }
+
+  private wake(): void {
+    if (this.timer) clearTimeout(this.timer)
+    this.schedule(0)
   }
 
   start(): void {
     if (this.running) return
     this.running = true
-    const loop = async () => { if (!this.running) return; await this.tick().catch(() => {}); this.timer = setTimeout(loop, DISK_INDEX_TICK_MS); this.timer.unref?.() }
-    void loop()
+    void this.loop()
   }
 
   stop(): void { this.running = false; if (this.timer) clearTimeout(this.timer) }

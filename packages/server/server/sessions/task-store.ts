@@ -18,7 +18,7 @@
  * merges with whatever the other process wrote in between.
  */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import { withFileLock } from './file-lock'
@@ -558,6 +558,14 @@ export function onBookWrite(fn: () => void): () => void {
   return () => { bookWriteListeners.delete(fn) }
 }
 
+function deepFreeze<T>(v: T): T {
+  if (v && typeof v === 'object' && !Object.isFrozen(v)) {
+    Object.freeze(v)
+    for (const k of Object.keys(v as object)) deepFreeze((v as Record<string, unknown>)[k])
+  }
+  return v
+}
+
 export function createTaskStore(file: string): TaskStore {
   // One in-process writer. Each mutation appends to this chain, so read-modify-write sequences run
   // strictly one after another even when several land at once.
@@ -567,7 +575,25 @@ export function createTaskStore(file: string): TaskStore {
   // become permanent data loss.
   let corrupt = false
 
+  // The last parsed book, valid while the file's (ino, size, mtime) stamp is unchanged. Frozen deep
+  // so a caller that mutates what it was handed fails loudly instead of corrupting every later read.
+  let memo: { stamp: string; book: TaskBook } | null = null
+
   async function read(): Promise<TaskBook> {
+    let stamp = ''
+    try {
+      const st = await stat(file)
+      stamp = `${st.ino}:${st.size}:${st.mtimeMs}`
+      if (memo && memo.stamp === stamp) return memo.book
+    } catch { /* unreadable below */ }
+    const book = await readUncached()
+    // Only a successful parse is memoised (a corrupt file must keep re-quarantining on the next write).
+    if (stamp && !corrupt) memo = { stamp, book: deepFreeze(book) }
+    else memo = null
+    return book
+  }
+
+  async function readUncached(): Promise<TaskBook> {
     let text: string
     try {
       text = await readFile(file, 'utf8')
@@ -625,6 +651,7 @@ export function createTaskStore(file: string): TaskStore {
   }
 
   async function write(book: TaskBook): Promise<void> {
+    memo = null
     await mkdir(dirname(file), { recursive: true })
     if (corrupt) {
       await rename(file, `${file}.corrupt-${Date.now()}`).catch(() => {})
