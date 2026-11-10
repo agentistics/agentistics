@@ -122,7 +122,25 @@ describe('clean io (real git)', () => {
 
   test('isRegenerable only forgives the known rebuildable outputs', () => {
     for (const p of ['node_modules/', 'dist/', 'packages/a/build/', '.turbo/', '.next/', 'coverage/', '.cache/', 'tsconfig.tsbuildinfo', 'out/']) expect(isRegenerable(p)).toBe(true)
-    for (const p of ['.env.local', 'creds.secret', 'secrets/', '"odd name"']) expect(isRegenerable(p)).toBe(false)
+    for (const p of ['.env.local', 'creds.secret', 'secrets/', '"odd name"', 'src/dist/keys.secret', 'app/out/creds.secret', 'dist/keys.secret', 'node_modules/x/y.secret']) expect(isRegenerable(p)).toBe(false)
+  })
+
+  test('a loose ignored file inside dist/ or out/ is kept, never removed with the worktree', async () => {
+    const { root, r } = repo()
+    const wt = join(root, 'secrets-wt')
+    g(r, 'worktree', 'add', '-q', wt, '-b', 'secrets')
+    mkdirSync(join(wt, 'src', 'dist'), { recursive: true }); mkdirSync(join(wt, 'app', 'out'), { recursive: true })
+    writeFileSync(join(wt, '.gitignore'), '*.secret\n')
+    writeFileSync(join(wt, 'src', 'dist', 'index.js'), '1')
+    g(wt, 'add', '-f', '.gitignore', 'src/dist/index.js'); g(wt, 'commit', '-qm', 'tracked dist')
+    writeFileSync(join(wt, 'src', 'dist', 'keys.secret'), 's'); writeFileSync(join(wt, 'app', 'out', 'creds.secret'), 's')
+    const facts = await worktreeFacts(r, { env, processCwds: () => ({ cwds: [], known: true }), managedCwds: [] })
+    const f = facts.find(x => x.path === wt)!
+    expect(f.keepsIgnored).toBe(true)
+    const problems = await applyClean([{ facts: f, action: { kind: 'remove' } } as never], { env, processCwds: () => ({ cwds: [], known: true }), managedCwds: [] })
+    expect(problems.join('\n')).toContain('cannot be regenerated')
+    expect(existsSync(join(wt, 'src', 'dist', 'keys.secret'))).toBe(true)
+    expect(existsSync(join(wt, 'app', 'out', 'creds.secret'))).toBe(true)
   })
 
   test('an unreadable or corrupt session registry is UNKNOWN: nothing is removed and a warning is raised', async () => {

@@ -156,15 +156,16 @@ export function liveCwds(): CwdReading {
         if (code !== 'ENOENT' && code !== 'EACCES' && code !== 'ESRCH') return { cwds, known: false }
       }
     }
-    return { cwds, known: cwds.length > 0 }
+    return { cwds, known: true }
   }
   const lsof = Bun.which('lsof')
   if (!lsof) return { cwds: [], known: false }
   try {
     const r = Bun.spawnSync([lsof, '-a', '-d', 'cwd', '-Fn'])
-    if (r.exitCode !== 0 && r.stdout.length === 0) return { cwds: [], known: false }
+    // Exit 0 with nothing printed is "ran and found nothing"; a failure, even with partial output, is unknown.
+    if (r.exitCode !== 0) return { cwds: [], known: false }
     const cwds = r.stdout.toString().split('\n').filter(l => l.startsWith('n')).map(l => l.slice(1))
-    return { cwds, known: cwds.length > 0 }
+    return { cwds, known: true }
   } catch { return { cwds: [], known: false } }
 }
 
@@ -199,9 +200,11 @@ export async function useReading(o: CleanIoOpts): Promise<CwdReading> {
 /** Ignored paths an install or build brings back; anything else ignored (`.env.local`, `*.secret`) is the user's. */
 const REGENERABLE = new Set(['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage', '.cache', 'out'])
 export function isRegenerable(entry: string): boolean {
-  const clean = entry.replace(/\/+$/, '')
-  if (clean.startsWith('"')) return false // git quoted an unusual name: do not guess
-  return clean.endsWith('.tsbuildinfo') || clean.split('/').some(seg => REGENERABLE.has(seg))
+  if (entry.startsWith('"')) return false // git quoted an unusual name: do not guess
+  // Only a directory git collapsed whole (trailing `/`) is a build output; a loose file inside
+  // `dist/` (`src/dist/keys.secret`) is listed by its own path and belongs to the user.
+  if (entry.endsWith('/')) return REGENERABLE.has(entry.replace(/\/+$/, '').split('/').pop() ?? '')
+  return entry.endsWith('.tsbuildinfo')
 }
 
 /** dirty = tracked/untracked change; keepsIgnored = an ignored entry outside the regenerable list (or git could not say). */
