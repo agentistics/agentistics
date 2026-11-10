@@ -33,6 +33,9 @@ async function knownProjectPaths(): Promise<string[]> {
 export async function collectCleanFacts(repos: readonly string[], o: CleanIoOpts & { onProgress?: (done: number, total: number) => void } = {}): Promise<WorktreeFacts[]> {
   const all: WorktreeFacts[] = []
   const pool = 2
+  const warned = new Set<string>()
+  const onWarning = (m: string) => { if (!warned.has(m)) { warned.add(m); process.stderr.write(`\nwarning: ${m}\n`) } }
+  o = { onWarning, ...o }
   let next = 0
   let done = 0
   const worker = async () => {
