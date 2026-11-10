@@ -31,7 +31,8 @@ import { TagCloud } from '../components/TagCloud'
 import { ToolMetricsPanel } from '../components/ToolMetricsPanel'
 import { AgentMetricsPanel } from '../components/AgentMetricsPanel'
 import { TopBoards } from '../components/TopBoards'
-import { capable, HARNESS_LABELS, HARNESS_PROVIDERS } from '../lib/harness'
+import { HARNESS_LABELS, HARNESS_PROVIDERS } from '../lib/harness'
+import { gitLinesReported } from '../lib/gitLinesReported'
 import { StreakBreakdownButton } from '../components/StreakBreakdownButton'
 import { PlanValuePanel } from '../components/PlanValuePanel'
 import { HomeComparisons } from '../components/HomeComparisons'
@@ -204,13 +205,13 @@ export default function HomePage() {
       ].filter(Boolean).join('\n')
       card = <StatCard label="Commits" value={d.gitCommits} sub={commitsSub} icon={<GitCommit size={15} />} accent="var(--accent-cyan)" info={infoItems[6]} onInfoClick={() => setInfoModalIndex(6)} />
     } else if (id === 'files') {
-      const canGitLines = !filters.harness || capable(filters.harness, 'gitLines')
+      const canGitLines = gitLinesReported(filters)
       const filesSub = canGitLines && d.linesAdded + d.linesRemoved > 0
         ? `+${fmt(d.linesAdded)} / -${fmt(d.linesRemoved)} ${lang === 'pt' ? 'linhas' : 'lines'}`
         : canGitLines
           ? (lang === 'pt' ? 'por assistentes' : 'by assistants')
           : (lang === 'pt' ? 'linhas adicionadas/removidas não disponíveis' : 'lines added/removed not available')
-      card = <StatCard label={lang === 'pt' ? 'Arquivos' : 'Files'} value={d.filesModified} sub={filesSub} icon={<FileCode size={15} />} accent="var(--accent-green)" info={infoItems[7]} onInfoClick={() => setInfoModalIndex(7)} />
+      card = <StatCard label={lang === 'pt' ? 'Arquivos' : 'Files'} value={canGitLines ? d.filesModified : 'N/A'} sub={filesSub} icon={<FileCode size={15} />} accent="var(--accent-green)" info={infoItems[7]} onInfoClick={() => setInfoModalIndex(7)} />
     }
 
     return (

@@ -51,6 +51,9 @@ export interface ProjectedDerived {
   projectStats: Record<string, { sessions: number; messages: number; tools: number }>
   /** Harnesses the projection holds at least one session for, in this scope. Absent in hand-built overlays. */
   coveredHarnesses?: string[]
+  /** USD the projection priced per harness. A covered harness at 0 here has NO projected price (the replay carried no
+   *  declared cost and the table cannot price its models), which is "not priced", never "free". */
+  costByHarness?: Record<string, number>
   /** Marks the overlay, so a page can say where its numbers came from. */
   figuresSource: 'projections'
 }
@@ -101,7 +104,7 @@ export async function projectedDerived(
     allMetricGroups(q, { ...scope, subagent: 'false', metrics: 'tools' }),
     allMetricGroups(q, { ...scope, groupBy: 'project', metrics: 'sessions,messages' }),
     allMetricGroups(q, { ...scope, groupBy: 'project', subagent: 'false', metrics: 'tools' }),
-    allMetricGroups(q, { ...scope, groupBy: 'harness', metrics: 'sessions' }),
+    allMetricGroups(q, { ...scope, groupBy: 'harness', metrics: 'sessions,cost' }),
   ])
   const modelUsage: Record<string, ModelUsage> = {}
   let totalCostUSD = 0
@@ -136,6 +139,7 @@ export async function projectedDerived(
     totalToolCalls: toolsOf(mainTools.groups[0])?.calls ?? 0,
     projectStats,
     coveredHarnesses: byHarness.groups.filter(g => (g.metrics.sessions?.count ?? 0) > 0).map(g => String(g.key.harness)),
+    costByHarness: Object.fromEntries(byHarness.groups.map(g => [String(g.key.harness), g.metrics.cost?.usd ?? 0])),
     figuresSource: 'projections',
   }
 }
@@ -175,7 +179,7 @@ const addRecord = (a: Record<string, number>, b: Record<string, number>): Record
  * never shows "259 messages, 0 sessions". Without coverage information (`coverage` absent or a
  * hand-built overlay) an empty projection never overrides a non-empty legacy figure.
  */
-export function overlayProjected<D extends LegacyFigures>(legacy: D | null, overlay: ProjectedDerived | null, coverage?: OverlayCoverage<D>): D | null {
+function overlayProjectedFigures<D extends LegacyFigures>(legacy: D | null, overlay: ProjectedDerived | null, coverage?: OverlayCoverage<D>): D | null {
   if (!legacy || !overlay) return legacy
   const covered = overlay.coveredHarnesses
   if (!coverage || !covered) {
@@ -216,4 +220,30 @@ export function overlayProjected<D extends LegacyFigures>(legacy: D | null, over
     totalToolCalls: overlay.totalToolCalls + parts.reduce((a, d) => a + d.totalToolCalls, 0),
     projectStats,
   }
+}
+
+/**
+ * `overlayProjected`, plus one correction: a harness the projection COVERS but did not PRICE keeps its legacy cost.
+ *
+ * The projection reports `cost.usd = 0` for a harness whose replay carries no declared cost and whose models the
+ * price table cannot name (OpenCode's gateway models: `opencode-go/glm-5.3`). Laying that 0 over the legacy answer
+ * turned the Est. cost card into R$0,00 while the per-session read (cost declared by the harness, `costSource:
+ * 'harness'`) held US$23,57. A covered harness at exactly 0 whose adapter sessions DO carry a cost contributes
+ * that cost back, into the total and into the matching per-model rows.
+ */
+export function overlayProjected<D extends LegacyFigures>(legacy: D | null, overlay: ProjectedDerived | null, coverage?: OverlayCoverage<D>): D | null {
+  const out = overlayProjectedFigures(legacy, overlay, coverage)
+  if (!out || !overlay || !coverage || out === legacy || !overlay.costByHarness || !overlay.coveredHarnesses) return out
+  const missing = coverage.candidates
+    .filter(h => overlay.coveredHarnesses!.includes(h) && (overlay.costByHarness![h] ?? 0) === 0)
+    .map(h => coverage.legacyFor(h)).filter((d): d is D => d !== null && d.totalCostUSD > 0)
+  if (missing.length === 0) return out
+  const modelUsage: Record<string, ModelUsage> = { ...out.modelUsage }
+  for (const d of missing) {
+    for (const [m, u] of Object.entries(d.modelUsage)) {
+      const cur = modelUsage[m]
+      if (cur) modelUsage[m] = { ...cur, costUSD: cur.costUSD + u.costUSD }
+    }
+  }
+  return { ...out, modelUsage, totalCostUSD: out.totalCostUSD + missing.reduce((a, d) => a + d.totalCostUSD, 0) }
 }
