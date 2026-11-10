@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.204.6': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Limpeza do hardware: agora remove de fato as cópias de trabalho (worktrees) já salvas — mescladas, empurradas ou incorporadas por squash — em vez de não limpar nada por causa de commits recentes.',
+        en: 'Hardware cleanup: it now actually removes worktrees whose work is already saved — merged, pushed or squash-merged — instead of cleaning nothing because of recent commits.',
+      },
+      {
+        pt: 'Limpeza do hardware: "em uso" passa a ser um fato (um processo vivo ou uma sessão aberta dentro da pasta); quando não dá para saber, a pasta é mantida, e tudo é conferido de novo logo antes de remover.',
+        en: 'Hardware cleanup: "in use" is now a fact (a live process or an open session inside the folder); when that cannot be told the folder is kept, and everything is checked again right before removing.',
+      },
+      {
+        pt: 'Limpeza do hardware: arquivos ignorados que não se regeneram (como .env.local) mantêm a pasta; só pastas de build e node_modules contam como recriáveis.',
+        en: 'Hardware cleanup: ignored files that cannot be regenerated (such as .env.local) keep the folder; only build folders and node_modules count as recreatable.',
+      },
+    ],
+  },
   '2.204.5': {
     features: [],
     fixes: [
