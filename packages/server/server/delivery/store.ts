@@ -23,8 +23,8 @@ export interface DeliveryDoc {
   deliveries: Record<string, DeliveryRecord>
   /** Records this build cannot read, kept verbatim and written back. Never handed to a caller. */
   preserved?: Record<string, unknown>
-  /** Cadence only. Requests themselves stay in the engine's canonical pedidos document. */
-  requestReminders?: Record<string, { at?: string; pendingAt?: string; leaderSessionId?: string }>
+  /** Delivered tombstones and retry clocks only. Requests stay in the engine's canonical pedidos document. */
+  requestReminders?: Record<string, { at?: string; attemptedAt?: string; pendingAt?: string; leaderSessionId?: string }>
 }
 
 const SAFE_ID = /^[A-Za-z0-9_.:-]{1,120}$/

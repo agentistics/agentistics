@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.204.5': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Pedidos: o aviso "pedido sem pré-dispatch" deixa de se repetir quando o pedido já está sendo atendido por outra peça da mesma tarefa, mesmo que um cartão automático antigo continue ligado a ele.',
+        en: 'Requests: the "request without pre-dispatch" alert no longer repeats when the request is already being handled by another piece of the same task, even if an old automatic card is still linked to it.',
+      },
+      {
+        pt: 'Pedidos: cada pedido é avisado no máximo uma vez, inclusive depois de reiniciar ou trocar de líder; se o envio do aviso falhar, ele tenta de novo depois de 30 minutos.',
+        en: 'Requests: each request is alerted at most once, even after a restart or a leader hand-off; if sending the alert fails, it retries after 30 minutes.',
+      },
+    ],
+  },
   '2.204.4': {
     features: [],
     fixes: [

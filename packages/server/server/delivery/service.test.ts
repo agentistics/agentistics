@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { createDeliveryService, type DeliveryDeps } from './service'
 import { createDeliveryStore } from './store'
 import { blockedPiecesOf, type BlockedSubtaskFact, type GateFacts, type SessionFact } from './gates'
-import { PHASE_STATUS, type DeliveryCi, type Phase } from './machine'
+import { PHASE_STATUS, type DeliveryCi, type DeliveryRecord, type Phase } from './machine'
 import { deliveryHostOps } from './host-ops'
 import { emitEvent } from './host'
 
@@ -177,7 +177,7 @@ describe('delivery service', () => {
     expect((await h.svc.get('s1'))?.pedidoIds).toEqual(['p-1', 'p-2'])
     expect((await h.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
   })
-  test('an unstaged request wakes a busy leader at 10 minutes, follows its replacement and retains cadence across restart', async () => {
+  test('an unstaged request wakes a busy leader once at 10 minutes and retains that mark across restart', async () => {
     const request = { id: 'p-1', taskId: 't1', sessionId: 'retired', text: 'Fix the history column', at: '2026-11-07T02:00:00.000Z', state: 'open', linkedSubtaskIds: [] as string[] }
     const requests = async () => [request]
     const h = harness({}, { requests })
@@ -189,10 +189,10 @@ describe('delivery service', () => {
     expect(h.calls.owner).toEqual([])
     h.w.sessions = [{ ...h.w.sessions[0]!, id: 'replacement' }]
     h.advance(1)
-    // One cadence per PEDIDO: the replacement is not nudged again right after its predecessor was.
+    // One successful nudge per PEDIDO, including after handoff.
     expect((await h.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
     h.advance(30 * 60_000)
-    expect((await h.svc.tick()).actions).toContain('request-wake replacement:p-1')
+    expect((await h.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
     const restarted = harness({ sessions: h.w.sessions }, { requests })
     restarted.advance(10 * 60_000 + 1)
     expect((await restarted.svc.tick()).actions).toEqual([])
@@ -208,6 +208,8 @@ describe('delivery service', () => {
     h.facts.subtask = async id => { const s = await base(id); return s ? { ...s, staged: undefined } : null }
     expect((await h.svc.tick()).actions).toContain('request-wake-failed leader:p-1')
     h.w.wakeOk = true
+    expect((await h.svc.tick()).actions).toEqual([])
+    h.advance(30 * 60_000)
     expect((await h.svc.tick()).actions).toContain('request-wake leader:p-1')
     const original = (await base('s1'))!
     h.facts.subtask = async id => id === 's1' ? { ...original, groupMember: true, parentGroupId: 'g1' } : id === 'g1' ? { ...original, id } : null
@@ -232,6 +234,83 @@ describe('delivery service', () => {
     const unstaged = (h: ReturnType<typeof harness>) => { const base = h.facts.subtask; h.facts.subtask = async id => { const s = await base(id); return s ? { ...s, staged: undefined } : null } }
     const wakes = (a: string[]) => a.filter(x => x.startsWith('request-wake'))
 
+    test('rows 72–77: four real pedidos with obsolete automatic links stay attended for eight hours', async () => {
+      const requests = [
+        ['p-ad54ee703440', 's-c1325fea44'],
+        ['p-1e0a73ba9818', 's-770666ca93'],
+        ['p-b34a7954f0e6', 's-0ec27638a9'],
+        ['p-b007d17fbe7d', 's-a6e0f2c051'],
+      ].map(([id, old]) => ({ ...req(), id: id!, state: 'linked', linkedSubtaskIds: [old!] }))
+      const h = harness({ sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1' }] }, { requests: async () => requests })
+      const links: Array<[string, Phase, string[]]> = [
+        ['s-48d59499b6', 'executando', ['p-ad54ee703440', 'p-b34a7954f0e6', 'p-b007d17fbe7d']],
+        ['s-1aecba58b9', 'executando', ['p-b007d17fbe7d']],
+        ['s-7600e82a42', 'executando', ['p-b34a7954f0e6']],
+        ['s-5a54b9e5dc', 'fila', ['p-1e0a73ba9818']],
+      ]
+      const base = (await h.facts.subtask('s1'))!
+      h.facts.subtask = async id => ({ ...base, id, staged: links.some(([sub]) => sub === id) ? { ...base.staged!, harness: 'codex', model: 'gpt-6.1-sol' } : undefined })
+      const store = createDeliveryStore(join(dir, 'deliveries.json'))
+      await store.update(doc => {
+        for (const [subtaskId, phase, pedidoIds] of links) doc.deliveries[subtaskId] = {
+          subtaskId, taskId: 't1', phase, pedidoIds, revision: 2,
+          gates: { predispatch: { ok: true, at: '2026-11-07T01:00:00Z', revision: 2 } },
+          humanGates: [], approvals: {}, skips: [], history: [], createdAt: '2026-11-07T01:00:00Z', updatedAt: '2026-11-07T01:00:00Z',
+          ...(phase === 'fila' ? { queueHold: { kind: 'nao', reason: 'opened by hand; do not duplicate', at: '2026-11-07T01:00:00Z', actor: 'leader' } } : {}),
+        }
+      })
+      for (let tick = 0; tick <= 48; tick++) {
+        expect(wakes((await h.svc.tick()).actions)).toEqual([])
+        h.advance(10 * 60_000)
+      }
+      expect(h.calls.session.filter(c => c.text.includes('[entrega pedidos]'))).toEqual([])
+    })
+
+    test.each(['gate', 'executando', 'held', 'closed', 'dequeued'] as const)('an attended %s delivery needs no surviving staged draft or worker', async shape => {
+      const h = harness({ sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1' }] }, { requests: async () => [linked()] })
+      unstaged(h)
+      const at = '2026-11-07T01:00:00Z'
+      const record: DeliveryRecord = {
+        subtaskId: 's1', taskId: 't1', phase: shape === 'executando' ? 'executando' : shape === 'closed' ? 'publicado' : 'fila', revision: 1,
+        gates: shape === 'gate' ? { predispatch: { ok: true, at, revision: 1 } } : {},
+        humanGates: [], approvals: {}, skips: [], history: [], createdAt: at, updatedAt: at,
+        ...(shape === 'held' ? { queueHold: { kind: 'nao', reason: 'deliberate hold', at, actor: 'leader' } } : {}),
+        ...(shape === 'dequeued' ? { dequeued: { at, reason: 'opened by hand', actor: 'leader' } } : {}),
+      }
+      await createDeliveryStore(join(dir, 'deliveries.json')).update(doc => { doc.deliveries.s1 = record })
+      expect(wakes((await h.svc.tick()).actions)).toEqual([])
+    })
+
+    test('one successful nudge per pedido survives eight hours, restart, leader switch and temporary read omission', async () => {
+      let requests = [req()]
+      const h = harness({}, { requests: async () => requests })
+      expect(wakes((await h.svc.tick()).actions)).toEqual(['request-wake leader:p-1'])
+      requests = []
+      await h.svc.tick()
+      requests = [req()]
+      const restarted = harness({ sessions: [{ ...h.w.sessions[0]!, id: 'successor' }] }, { requests: async () => requests })
+      for (let tick = 0; tick <= 48; tick++) {
+        restarted.advance(10 * 60_000)
+        expect(wakes((await restarted.svc.tick()).actions)).toEqual([])
+      }
+      expect(restarted.calls.session).toEqual([])
+    })
+
+    test.each(['wrong task', 'stale gate', 'expired schedule'] as const)('%s does not suppress a truly unattended request', async shape => {
+      const h = harness({ sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1' }] }, { requests: async () => [linked()] })
+      unstaged(h)
+      const at = '2026-11-07T01:00:00Z'
+      await createDeliveryStore(join(dir, 'deliveries.json')).update(doc => {
+        doc.deliveries.s1 = {
+          subtaskId: 's1', taskId: shape === 'wrong task' ? 't2' : 't1', phase: 'fila', revision: 2,
+          gates: { predispatch: { ok: shape !== 'expired schedule', at, revision: shape === 'stale gate' ? 1 : 2 } },
+          humanGates: [], approvals: {}, skips: [], history: [], createdAt: at, updatedAt: at,
+          ...(shape === 'expired schedule' ? { queueHold: { kind: 'agendar', until: at, reason: 'expired', at, actor: 'leader' } } : {}),
+        }
+      })
+      expect(wakes((await h.svc.tick()).actions)).toEqual(['request-wake leader:p-1'])
+    })
+
     test('a dequeued piece with a LIVE session is not "unstaged": no reminder (rows 23, 41)', async () => {
       const h = harness({}, { requests: async () => [linked()] })
       await h.svc.stage('s1', {}, 'leader', { pedidoId: 'p-1' })
@@ -254,7 +333,7 @@ describe('delivery service', () => {
       expect(wakes((await h.svc.tick()).actions)).toContain('request-wake leader:p-1')
     })
 
-    test('a dequeued piece with no session and no draft warns ONCE, after 10 minutes', async () => {
+    test('a deliberately dequeued piece remains attended after its worker and draft are gone', async () => {
       const h = harness({ sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1' }] }, { requests: async () => [linked()] })
       await h.svc.stage('s1', {}, 'leader', { pedidoId: 'p-1' })
       expect((await h.svc.dequeue('s1', 'opened by hand', 'leader')).ok).toBe(true)
@@ -262,10 +341,10 @@ describe('delivery service', () => {
       h.advance(5 * 60_000)
       expect(wakes((await h.svc.tick()).actions)).toEqual([])
       h.advance(6 * 60_000)
-      expect(wakes((await h.svc.tick()).actions)).toContain('request-wake leader:p-1')
+      expect(wakes((await h.svc.tick()).actions)).toEqual([])
       h.advance(2 * 60 * 60_000)
       expect(wakes((await h.svc.tick()).actions)).toEqual([])
-      expect(h.calls.session).toHaveLength(1)
+      expect(h.calls.session).toHaveLength(0)
     })
 
     test('a live session that appears between the loop and the send cancels the reminder', async () => {
@@ -305,7 +384,7 @@ describe('delivery service', () => {
       expect(out.actions.some(a => a.startsWith('request-wake-skipped'))).toBe(true)
     })
 
-    test('ONE cadence per pedido: a newer leader does not re-send while the previous one is alive; it does once the previous one is gone', async () => {
+    test('one successful nudge per pedido: a newer leader never receives the same alarm again', async () => {
       const h = harness({}, { requests: async () => [req()] })
       expect((await h.svc.tick()).actions).toContain('request-wake leader:p-1')
       h.w.sessions = [...h.w.sessions, { id: 'leader-b', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1', createdAt: '2026-11-07T03:00:00Z' }]
@@ -315,8 +394,8 @@ describe('delivery service', () => {
       h.advance(60_000)
       expect((await h.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
       h.advance(30 * 60_000)
-      expect((await h.svc.tick()).actions).toContain('request-wake leader-b:p-1')
-      expect(h.calls.session.map(c => c.id)).toEqual(['leader', 'leader-b'])
+      expect((await h.svc.tick()).actions).toEqual([])
+      expect(h.calls.session.map(c => c.id)).toEqual(['leader'])
     })
 
     test('the reminder quotes the id and the first ~80 characters, never the whole owner message (item 11)', async () => {
@@ -344,16 +423,22 @@ describe('delivery service', () => {
       expect((await h.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
     })
 
-    // QA r2 — the author rewrote two assertions from "predecessor gone → the new leader hears now" to "waits out the window".
-    // These pin that the rewrite hides no loss: only a nudge that was actually DELIVERED holds the window.
+    // Failed/aborted sends never consume the one successful reminder. Actual failures back off; aborted sends release immediately.
     const successor = { id: 'leader-b', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1', createdAt: '2026-11-07T03:00:00Z' } as const
 
-    test('QA r2: a send that FAILED records nothing, so the successor hears it on the very next tick', async () => {
+    test('a failed send backs off across handoff and restart, then retries once successfully', async () => {
       const h = harness({ wakeOk: false }, { requests: async () => [req()] })
       expect((await h.svc.tick()).actions).toContain('request-wake-failed leader:p-1')
       h.w.wakeOk = true
       h.w.sessions = [...h.w.sessions.map(s => (s.id === 'leader' ? { ...s, alive: false } : s)), successor]
-      expect((await h.svc.tick()).actions).toContain('request-wake leader-b:p-1')
+      expect((await h.svc.tick()).actions).toEqual([])
+      const restarted = harness({ sessions: h.w.sessions }, { requests: async () => [req()] })
+      restarted.advance(30 * 60_000 - 1)
+      expect((await restarted.svc.tick()).actions).toEqual([])
+      restarted.advance(1)
+      expect((await restarted.svc.tick()).actions).toContain('request-wake leader-b:p-1')
+      restarted.advance(8 * 60 * 60_000)
+      expect((await restarted.svc.tick()).actions).toEqual([])
     })
 
     test('QA r2: a leader that died BEFORE the send records nothing, so the successor hears it on the next tick', async () => {
@@ -375,7 +460,7 @@ describe('delivery service', () => {
       expect((await h.svc.tick()).actions).toContain('request-wake leader-b:p-1')
     })
 
-    test('QA r2: the delivered record survives a RESTART with a real elapsed clock, and the window does end', async () => {
+    test('the delivered record survives a RESTART and does not expire after 30 minutes', async () => {
       const requests = async () => [req()]
       const h = harness({}, { requests })
       expect((await h.svc.tick()).actions).toContain('request-wake leader:p-1')
@@ -383,7 +468,7 @@ describe('delivery service', () => {
       restarted.advance(5 * 60_000)
       expect((await restarted.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
       restarted.advance(25 * 60_000)
-      expect((await restarted.svc.tick()).actions).toContain('request-wake leader-b:p-1')
+      expect((await restarted.svc.tick()).actions).toEqual([])
     })
   })
 
