@@ -725,7 +725,9 @@ export async function start(
     if (cmd.json) console.log(JSON.stringify({ id, harness: cmd.harness, label: label ?? null, ...filingJson(filing), configuration }, null, 2))
     else {
       if (configuration.ready) console.log(`Started ${cmd.harness} session ${id}${label ? ` (${label})` : ''} in ${cwd}`)
-      console.log(`Attach with: agentop session attach ${id}`)
+      // Hermes is structured-only: attach would only print the refusal, so point at the web instead.
+      if (cmd.harness === 'hermes') console.log('Open it from the Sessions page of the web app.')
+      else console.log(`Attach with: agentop session attach ${id}`)
     }
     return configuration.ready ? 0 : 1
   }
