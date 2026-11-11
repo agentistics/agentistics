@@ -142,6 +142,8 @@ import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, createFolderStatus, createProjectFolder, listFolders, rootListing } from './fs-folders'
 import { forgetProjects } from './sessions/project-source'
+import { bookActorFromRequest } from './book-actor'
+import { handleBookRoutes } from './book-routes'
 
 // ---------------------------------------------------------------------------
 // Reads the first `cwd` field found in a JSONL session file.
@@ -490,6 +492,19 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         status,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
+
+    const bookContext = async (bodyOverride?: { session?: unknown } | null) => {
+      const { verifySessionIdentity } = await import('./sessions/session-identity')
+      const actor = await bookActorFromRequest(req, {
+        verify: verifySessionIdentity,
+        roleOf: async id => {
+          const { readRolesDoc, roleOfRow } = await import('./sessions/session-roles')
+          const roles = (await readRolesDoc(AGENTISTICS_DATA_DIR)).roles
+          return roleOfRow(roles, { id })
+        },
+      }, bodyOverride)
+      return { actor }
+    }
 
     if (req.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS })
@@ -1900,6 +1915,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // tenant: a PUT there carries a key, so the engine renders its own failures non-verbose. With no
     // engine (a community build, or one switched off or refused at load) a reserved prefix answers
     // 404 `engine-absent` rather than falling through to the SPA's index.html.
+    if (url.pathname === '/api/flow/op' || url.pathname.startsWith('/api/flow/op/') || url.pathname === '/api/book' || url.pathname.startsWith('/api/book/')) {
+      await loadEngine()
+      const handled = await handleBookRoutes(req, url, { book: engine()?.book, context: bookContext, env: process.env, json })
+      if (handled) return handled
+    }
     {
       const reserved = RESERVED_PREFIXES.find(p => url.pathname === p || url.pathname.startsWith(p + '/'))
       if (reserved) {

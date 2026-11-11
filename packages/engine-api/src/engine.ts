@@ -91,8 +91,37 @@ export interface CommandIO {
   err(line: string): void
 }
 
+export interface EngineBookActor {
+  id: string
+  verified: boolean
+  role?: 'leader' | 'owner' | 'worker' | 'user'
+}
+
+/**
+ * What the host resolved about the caller. The actor comes ONLY from a verified session proof
+ * (`session-identity.ts`); with none it is `{id:'localShell', verified:false, role:'user'}`, never the owner.
+ */
+export interface EngineBookContext {
+  actor: EngineBookActor
+}
+
+/** The hand-off book seam. The host owns authentication and never forwards a request actor. */
+export interface EngineBook {
+  handleHttp(req: Request, context: EngineBookContext): Promise<Response>
+  executeCli(args: string[], context: EngineBookContext): Promise<{
+    stdout: string
+    stderr: string
+    exitCode: number
+  }>
+  invokeFlowOpTransport(name: string, input: {
+    stdin?: string
+    env?: Record<string, string | undefined>
+    context?: EngineBookContext
+  }): Promise<{ stdout: string; exitCode: number }>
+}
+
 export interface EngineCommand {
-  verb: 'code' | 'provider' | 'ingest' | 'flow'
+  verb: 'code' | 'provider' | 'ingest' | 'flow' | 'book'
   /** Help text in both languages; the host prints it in `agentop --help`. */
   summary: Record<'en' | 'pt', string>
   /** Exit code. */
@@ -154,6 +183,8 @@ export interface Engine<E extends EngineEvent = EngineEvent> {
   acp?: EngineAcp
   /** 1.10 — STRUCTURED sessions: one backend, a driver per protocol (`structured.ts`). Absent: `acp` / tmux. */
   structured?: EngineStructured
+  /** 1.25 — the local hand-off book and its flow-op transport. */
+  book?: EngineBook
   /** 1.16 — built-in deterministic flow definitions and durable run status. */
   flows?: {
     list(): readonly string[]
