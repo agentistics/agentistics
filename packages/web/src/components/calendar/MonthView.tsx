@@ -9,7 +9,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { RefreshCw, Flag } from 'lucide-react'
 import { brtDay, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
-import { dowShort, fitWeek, marksOfDay, monthCells, piecesOnDay, startedPiecesOfDay, weekRibbons, type Ribbon } from '../../lib/calendarModel'
+import { dowShort, expectedPiecesOfDay, fitWeek, marksOfDay, monthCells, overduePiecesOfDay, piecesOnDay, startedPiecesOfDay, weekRibbons, type Ribbon } from '../../lib/calendarModel'
 import { TEXT, pick } from './calendarText'
 import { EXPECTED_COLOR, PUBLISHED_COLOR, VersionGlyph, stageColor } from './calendarUi'
 
@@ -71,12 +71,21 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
   const dueMarks = week.map(c => marksOfDay(c.day, marks).filter((m): m is Extract<CalMark, { kind: 'task-due' }> => m.kind === 'task-due'))
   // Pieces with no version and no estimate (a leader working alone) sit on the day their work began, after the due chips.
   const started = week.map(c => startedPiecesOfDay(c.day, pieces))
+  const expected = week.map(c => expectedPiecesOfDay(c.day, pieces))
+  const overdue = week.map(c => overduePiecesOfDay(c.day, pieces, nowMs))
   // The work in progress outranks release context: one row is reserved for these chips before ribbons and due chips share the rest.
-  const reserve = Number.isFinite(cap) ? Math.min(Math.max(0, ...started.map(s => s.length)), cap) : Number.POSITIVE_INFINITY
-  const baseFit = fitWeek({ ribbons: allRibbons, dues: dueMarks.map(d => d.length), cap: Number.isFinite(reserve) ? cap - reserve : cap })
+  // The overdue chip of today has a guaranteed row, taken BEFORE ribbons, dues and started chips compete for the rest;
+  // when it is drawn, its pieces are said by the chip itself and never counted in the day's "+N".
+  const overdueRow = cap >= 1 && overdue.some(s => s.length > 0) ? 1 : 0
+  const capRest = Number.isFinite(cap) ? cap - overdueRow : cap
+  const reserve = Number.isFinite(capRest) ? Math.min(Math.max(0, ...started.map(s => s.length)), capRest) : Number.POSITIVE_INFINITY
+  const baseFit = fitWeek({ ribbons: allRibbons, dues: dueMarks.map(d => d.length), cap: Number.isFinite(reserve) ? capRest - reserve : capRest })
   const shownStarted = started.map(s => s.slice(0, Number.isFinite(reserve) ? reserve : s.length))
-  const fit = { ...baseFit, more: baseFit.more.map((n, i) => n + started[i]!.length - shownStarted[i]!.length) }
-  const chipBase = 2 + Math.min(lanes, Number.isFinite(reserve) ? cap - reserve : lanes) + Math.max(0, ...fit.dues)
+  const expectedRoom = Number.isFinite(capRest) ? Math.max(0, capRest - (Number.isFinite(reserve) ? reserve : 0) - lanes - Math.max(0, ...baseFit.dues)) : Number.POSITIVE_INFINITY
+  const shownExpected = expected.map(s => s.slice(0, expectedRoom))
+  const shownOverdue = overdue.map(s => (s.length > 0 && (cap >= 1) ? s : []))
+  const fit = { ...baseFit, more: baseFit.more.map((n, i) => n + started[i]!.length - shownStarted[i]!.length + expected[i]!.length - shownExpected[i]!.length + (overdue[i]!.length - shownOverdue[i]!.length)) }
+  const chipBase = 2 + Math.min(lanes, Number.isFinite(reserve) ? capRest - reserve : lanes) + Math.max(0, ...fit.dues)
   return (
     <div ref={rowRef} data-cal-week style={{ position: 'relative', minHeight: 0, overflow: 'hidden', borderBottom: !last ? '1px solid var(--border)' : 0 }}>
       <div aria-hidden style={{ position: 'absolute', inset: 0, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
@@ -132,6 +141,19 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</span>
           </button>
         )))}
+        {week.map((c, i) => shownExpected[i]!.map((p, k) => (
+          <button key={`${c.day}-expected-${p.key}`} type="button" data-cal-expected-piece={p.key} onClick={e => onOpenPiece?.(p.key, e)} title={`${p.title} · ${pick(TEXT.expected, pt)}`}
+            style={{ gridColumn: i + 1, gridRow: chipBase + shownStarted[i]!.length + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0, border: `1px dashed ${stageColor(p.stage)}`, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', color: 'var(--text-primary)', background: 'transparent' }}>
+            <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, flexShrink: 0, background: stageColor(p.stage) }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</span>
+          </button>
+        )))}
+        {week.map((c, i) => shownOverdue[i]!.length > 0 && (
+          <button key={`${c.day}-overdue`} type="button" data-cal-overdue={c.day} onClick={() => onPickDay(c.day)} title={pick(TEXT.overdue, pt)}
+            style={{ gridColumn: i + 1, gridRow: chipBase + shownStarted[i]!.length + shownExpected[i]!.length, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', padding: '0 5px', minWidth: 0, border: 0, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
+            {overdue[i]!.length} {pick(TEXT.overdue, pt)}
+          </button>
+        ))}
         {week.map((c, i) => fit.more[i]! > 0 && (
           <button key={`more-${c.day}`} type="button" data-cal-more={c.day} onClick={() => onPickDay(c.day)}
             // "+N" counts ONLY the month cell's own rows that had no room (version ribbons and due dates); the day's pieces are not drawn here.

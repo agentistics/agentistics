@@ -256,6 +256,16 @@ export function startedPiecesOfDay(day: string, pieces: readonly CalPiece[]): Ca
   })
 }
 
+/** Open pieces are also discoverable on their expected publication day in the month grid. */
+export function expectedPiecesOfDay(day: string, pieces: readonly CalPiece[]): CalPiece[] {
+  return pieces.filter(p => p.stage !== 'published' && p.publishEta.kind === 'estimate' && brtDay(p.publishEta.atMs) === day).sort(byPriority)
+}
+
+/** Overdue pieces are grouped on today; their original ETA is no longer a future promise. */
+export function overduePiecesOfDay(day: string, pieces: readonly CalPiece[], nowMs: number): CalPiece[] {
+  return pieces.filter(p => p.stage !== 'published' && p.overdueSinceMs != null && brtDay(nowMs) === day).sort(byPriority)
+}
+
 /** What happens on one BRT day: versions shipping or shipped, pieces without a version, renewals, due days. */
 export function agendaOf(day: string, o: { versions: readonly CalVersion[]; pieces: readonly CalPiece[]; marks: readonly CalMark[] }): AgendaEntry[] {
   const out: AgendaEntry[] = []

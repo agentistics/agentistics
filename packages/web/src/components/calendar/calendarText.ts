@@ -55,6 +55,8 @@ export const TEXT = {
   versionWord: t('Versão', 'Version'),
   dueWord: t('Prazo da tarefa', 'Task due'),
   late: t('atrasada', 'late'),
+  overdue: t('atrasadas', 'overdue'),
+  overdueSince: t('atrasada desde', 'overdue since'),
   legendPublished: t('publicada', 'published'),
   legendExpected: t('tracejado = previsto', 'dashed = expected'),
   close: t('Fechar', 'Close'),
