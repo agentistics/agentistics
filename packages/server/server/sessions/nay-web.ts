@@ -19,6 +19,7 @@ import { readPreferences, updatePreferences } from '../preferences'
 import { runFleetSpawn, type FleetSpawnResponse } from './fleet-web'
 import { readRegistry } from './registry'
 import { planNayLaunch, type NayLaunch, type NayLaunchRequest, type NayLaunchResult } from './nay-launch'
+import { resolveNayPersona, type NayPersona } from './nay-persona'
 
 const LAUNCH_REFUSAL: Record<string, { pt: string; en: string }> = {
   unknown_harness: { pt: 'Este assistente não pode ser iniciado nesta máquina.', en: 'That assistant cannot be started on this machine.' },
@@ -38,6 +39,7 @@ export interface NaySpawnDeps {
   keyOf: (id: string) => Promise<string>
   file: (key: string) => Promise<void>
   now: () => Date
+  persona?: () => Promise<NayPersona>
 }
 
 const label = (now: Date, lang: CliLang): string => nayTitle(now, lang === 'pt' ? 'pt' : 'en')
@@ -49,12 +51,13 @@ export async function startNaySession(
   /** PLAN.ACCOUNTS D3: the server's verdict on the request's session proof (`markCallerVerified`). */
   caller: { callerVerified?: boolean } = {},
 ): Promise<FleetSpawnResponse & { launch?: NayLaunch }> {
-  await deps.ensureDir()
+  const persona = deps.persona ? await deps.persona() : { responder: 'analytics' as const, cwd: NAY_CHAT_DIR, label: 'Nay', mcpEnabled: true }
+  if (persona.responder === 'analytics') await deps.ensureDir()
   const plan = await deps.launch(req)
   if (!plan.ok) return { ok: false, message: LAUNCH_REFUSAL[plan.reason]![lang === 'pt' ? 'pt' : 'en'] }
   const { ok: _ok, ...launch } = plan
   const out = await deps.spawn(lang, {
-    cwd: NAY_CHAT_DIR, label: label(deps.now(), lang), ...launch,
+    cwd: persona.cwd, label: persona.responder === 'analytics' ? label(deps.now(), lang) : persona.label, ...launch,
     ...(caller.callerVerified === true ? { callerVerified: true } : {}),
   })
   if (!out.ok || !out.id) return out
@@ -84,6 +87,7 @@ export function defaultNayDeps(port: number): NaySpawnDeps {
         id: h.id, supportsModel: h.supportsModel, efforts: h.efforts, models: h.models, modelFreeText: h.modelFreeText === true,
       })))
     },
+    persona: async () => resolveNayPersona(await readPreferences(), NAY_CHAT_DIR),
     keyOf: async id => (await readRegistry()).find(r => r.id === id)?.conversationId ?? id,
     file: async key => {
       await updatePreferences(cur => {

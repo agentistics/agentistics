@@ -41,6 +41,15 @@ describe('startNaySession', () => {
     expect(out).toMatchObject({ launch: { harness: 'claude', model: 'claude-opus-5-5', effort: 'high' } })
   })
 
+  test('own-agent uses its folder and skips analytics initialization', async () => {
+    const { d, calls } = deps({
+      ensureDir: async () => { throw new Error('analytics files must not be initialized') },
+      persona: async () => ({ responder: 'own-agent', cwd: '/tmp/project', label: 'Project agent', mcpEnabled: false }),
+    })
+    await startNaySession('en', d)
+    expect(calls.spawned).toMatchObject({ cwd: '/tmp/project', label: 'Project agent' })
+  })
+
   test('a refused launch plan starts nothing and says why', async () => {
     const { d, calls } = deps({ launch: async () => ({ ok: false, reason: 'unknown_effort', value: 'turbo' }) })
     const out = await startNaySession('en', d)

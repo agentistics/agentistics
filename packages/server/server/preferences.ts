@@ -121,6 +121,14 @@ export interface Preferences {
   chatSoundEnabled?: boolean
   /** Which synthesized sound the chat plays (`web/src/lib/chatSounds.ts`). */
   chatSoundId?: string
+  /** Whether the Nay panel is answered by the analytics persona or the selected harness itself. */
+  chatResponder?: 'analytics' | 'own-agent'
+  /** Existing absolute folder used as cwd by an own-agent Nay session. */
+  chatWorkingDir?: string
+  /** Label shown for an own-agent Nay session. */
+  chatLabel?: string
+  /** Opt in to attaching the agentistics MCP to an own-agent session. */
+  chatMcpEnabled?: boolean
   /** Whether this machine serves the chat at all. ABSENT READS AS ON (owner decision, 2026-09-29);
    *  an explicit false turns it off. It can only ever narrow `CAPS.localChat`; see chat-gate.ts. */
   chatEnabled?: boolean
@@ -983,6 +991,13 @@ export function guardTeamConnectionsWipe(
 /** Merge `prefs` over the current preferences and persist to `primary`. Exported for tests. */
 export async function writePreferencesTo(primary: string, legacy: string | null, prefs: Preferences): Promise<void> {
   return enqueueWrite(async () => {
+    if (prefs.chatResponder !== undefined && prefs.chatResponder !== 'analytics' && prefs.chatResponder !== 'own-agent') {
+      throw new Error('invalid chatResponder')
+    }
+    if (prefs.chatResponder === 'own-agent') {
+      const { validateNayWorkingDir } = await import('./sessions/nay-persona')
+      if (!(await validateNayWorkingDir(prefs.chatWorkingDir))) throw new Error('chatWorkingDir must be an existing absolute directory')
+    }
     if (prefs.checkinDefaults !== undefined) {
       // Load only at the write boundary: checkin itself imports the preferences store.
       const { validateCheckinDefaults } = await import('./checkin')
