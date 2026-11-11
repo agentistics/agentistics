@@ -96,8 +96,10 @@ export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = t
     setPersonaError('')
     void fetch('/api/user-prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatResponder: next.responder, chatWorkingDir: next.workingDir, chatLabel: next.label, chatMcpEnabled: next.mcpEnabled }) }).then(async res => {
       if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as { error?: string }
-        setPersonaError(body.error ?? (pt ? 'Não foi possível salvar esta preferência.' : 'Could not save this preference.'))
+        const body = await res.json().catch(() => ({})) as { error?: string; message?: string }
+        const raw = body.error ?? body.message
+        const human = raw?.replace(/chatWorkingDir/g, pt ? 'Pasta de trabalho' : 'Working folder')
+        setPersonaError(human ?? (pt ? 'Não foi possível salvar esta preferência.' : 'Could not save this preference.'))
         return
       }
       setPersonaError('')
@@ -280,6 +282,7 @@ export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = t
               pt ? 'Caminho absoluto de uma pasta existente; nada é escrito nela pelo agentistics.' : 'Absolute path to an existing folder; agentistics writes nothing there.',
               <FieldInput label={pt ? 'Pasta de trabalho' : 'Working folder'} hideLabel value={persona.workingDir} onChange={v => setPersona(current => ({ ...current, workingDir: v }))} onBlur={() => commitPersona({ workingDir: persona.workingDir })} invalid={!!personaError} placeholder="/home/you/project" />,
             )}
+            {personaError && <div role="alert" style={{ color: 'var(--danger, #dc2626)', fontSize: 12, marginTop: -4 }}>{personaError}</div>}
             {choice(
               pt ? 'Nome no painel' : 'Panel label',
               pt ? 'O nome mostrado para a conversa.' : 'The name shown for the conversation.',
@@ -304,7 +307,6 @@ export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = t
               }} />,
             false,
           )}
-          {personaError && <div role="alert" style={{ color: 'var(--danger, #dc2626)', fontSize: 12, marginTop: 4 }}>{personaError}</div>}
           {chat.chatSoundEnabled && choice(
             pt ? 'Qual som' : 'Which sound',
             pt ? 'Toque ▶ para ouvir antes de escolher.' : 'Press ▶ to hear it before choosing.',

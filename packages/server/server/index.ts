@@ -950,17 +950,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        if (err instanceof Error && err.message.startsWith('chatWorkingDir must be')) {
-          const lang = new URL(req.url).searchParams.get('lang') === 'pt'
-          const folder = (await readPreferences()).chatWorkingDir
-          const message = lang
-            ? `a pasta do agente ${String(folder ?? '')} não existe mais — escolha outra em Configurações → Chat`
-            : `the agent folder ${String(folder ?? '')} no longer exists — pick another in Settings → Chat`
-          return new Response(JSON.stringify({ ok: false, message }), {
-            status: 409,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          })
-        }
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
@@ -3276,6 +3265,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
+        if (err instanceof Error && err.message.startsWith('chatWorkingDir must be')) {
+          const { nayWorkingDirConflict } = await import('./sessions/nay-route-errors')
+          return nayWorkingDirConflict(req, (await readPreferences()).chatWorkingDir, CORS_HEADERS)
+        }
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify({ ok: false, ...safe.body }), {

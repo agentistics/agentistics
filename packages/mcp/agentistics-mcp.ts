@@ -191,7 +191,10 @@ async function putPrefs(patch: Record<string, unknown>) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new Error(`PUT /api/preferences → HTTP ${res.status}`);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`PUT /api/preferences → HTTP ${res.status}${detail ? ` ${detail.slice(0, 400)}` : ''}`)
+  }
   return res.json();
 }
 
