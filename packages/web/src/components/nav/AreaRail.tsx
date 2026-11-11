@@ -15,7 +15,7 @@ import { APP_AREAS, areaOfPath, pageLabel, type AreaId } from '../../lib/appArea
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { SOLID_COUNT } from './countBadge'
 import { AREA_ICON, AreaTree, Tip, areaEntryPath, rememberAreaPath } from './AreaTree'
-import { areaOpenStore, openedArea } from '../../lib/areaOpen'
+import { areaOpenStore } from '../../lib/areaOpen'
 
 export const AREA_RAIL_W = 60
 /** The width the same bar takes when opened: icons plus their labels and sections. */
@@ -45,7 +45,9 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
   const setTreeOpen = (next: boolean) => { setLocalOpen(next); onOpenChange?.(next) }
   useLayoutEffect(() => {
     if (treeOpen && focusArea.current) {
-      navRef.current?.querySelector<HTMLButtonElement>(`[data-area-heading="${focusArea.current}"]`)?.focus()
+      const heading = navRef.current?.querySelector<HTMLButtonElement>(`[data-area-heading="${focusArea.current}"]`)
+      heading?.focus({ preventScroll: true })
+      heading?.scrollIntoView?.({ block: 'nearest' })
       focusArea.current = null
     }
   }, [treeOpen])
@@ -96,7 +98,7 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
         </div>
         {treeOpen ? (
           <div id="ag-area-rail-tree" className="ag-noscroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 8px' }}>
-            <AreaTree lang={lang} pathname={pathname} badges={badges} visibleSettings={visibleSettings}
+            <AreaTree lang={lang} pathname={pathname} badges={badges} visibleSettings={visibleSettings} preserveOpenOnMount={focusArea.current !== null}
               onNavigate={to => { setTreeOpen(false); (onNavigate ?? navigate)(to) }} />
           </div>
         ) : (
@@ -117,8 +119,9 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
                     type="button"
                     aria-label={name}
                     aria-current={active ? 'page' : undefined}
+                    aria-expanded={area.pages.length > 0 ? false : undefined}
                     onClick={() => {
-                      if (area.pages.length > 0) { focusArea.current = area.id; areaOpenStore.set(openedArea(areaOpenStore.get(), area.id)); setTreeOpen(true) }
+                      if (area.pages.length > 0) { focusArea.current = area.id; areaOpenStore.set({ ...areaOpenStore.get(), [area.id]: true }); setTreeOpen(true) }
                       else go(to)
                     }}
                     style={{

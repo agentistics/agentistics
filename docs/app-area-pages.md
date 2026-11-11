@@ -26,7 +26,10 @@ identity. Loading, unavailable and stale fleet states never claim an empty fleet
 These URLs remain unchanged for bookmarks and deep links. The desktop tree, rail, search and
 mobile sheet resolve them to Sessions; there is no separate top-level Leadership entry. Sessions
 lists the session workspace, followed by Leaders, Check-ins, Hand-offs and Autonomous mode. Clicking
-the Sessions area header opens the session workspace (`/sessions`), like its List subpage. On desktop, the
+the Sessions area header expands or collapses its list; the List subpage opens `/sessions`. On desktop,
+clicking a group icon in the collapsed menu expands the menu and opens that group's list without
+navigating or changing other groups' open state. Enter and Space do the same; focus and scrolling
+follow the selected group. Single destinations such as Vault still navigate directly. The
 expanded area bar covers the full width and height of the sessions list, including its controls,
 even after resizing the list. Its
 area badge sums session attention and overdue check-in warnings. Navigation ownership is distinct
