@@ -5,7 +5,7 @@
  */
 import { RefreshCw, Flag } from 'lucide-react'
 import { brtDay, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
-import { addDays, agendaOf, clock, dowShort, monthName, relativeDay, weekdayMon0, weekDays, type AgendaEntry } from '../../lib/calendarModel'
+import { addDays, agendaOf, clock, dowShort, monthName, overduePiecesOfDay, relativeDay, weekdayMon0, weekDays, type AgendaEntry } from '../../lib/calendarModel'
 import { TEXT, pick } from './calendarText'
 import { Confidence, EXPECTED_COLOR, PUBLISHED_COLOR, PriorityFlag, StageChip, VersionGlyph } from './calendarUi'
 
@@ -78,6 +78,12 @@ export function AgendaView({ mode, anchor, nowMs, versions, pieces, marks, pt, s
                 {dowShort(i, pt)} <span style={{ fontSize: 13, color: d === today ? 'var(--anthropic-orange-light)' : 'var(--text-primary)' }}>{Number(d.slice(8))}</span>
               </div>
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {overduePiecesOfDay(d, pieces, nowMs).length > 0 && (
+                  <div data-cal-overdue={d} title={pick(TEXT.overdue, pt)}
+                    style={{ flexShrink: 0, height: 22, display: 'flex', alignItems: 'center', padding: '0 7px', borderRadius: 4, fontSize: 11, fontWeight: 600, color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
+                    {overduePiecesOfDay(d, pieces, nowMs).length} {pick(TEXT.overdue, pt)}
+                  </div>
+                )}
                 {list.map((e, k) => (
                   <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {e.atMs !== null && <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums' }}>{timeOf(e, pt)}</span>}

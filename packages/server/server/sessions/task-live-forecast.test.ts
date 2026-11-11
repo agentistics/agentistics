@@ -16,6 +16,27 @@ const forecast = (extra: Partial<Parameters<typeof resolvePieceForecast>[0]> = {
 })
 
 describe('Rule 5 publication forecast', () => {
+  test('a leader with no stage history is anchored to its stage ceiling, not now', () => {
+    const since = NOW - H
+    const input = { stage: 'leader' as const, startedAtMs: since, sinceMs: since, typicals: {} }
+    const first = forecast(input).publishEta
+    expect(first).toMatchObject({ kind: 'estimate', source: 'stages', confidence: 'low', atMs: since + 6 * 24 * H })
+    expect(forecast({ ...input, nowMs: NOW + H }).publishEta).toMatchObject({ kind: 'estimate', atMs: since + 6 * 24 * H, source: 'stages' })
+    expect(forecast({ ...input, nowMs: since + 3 * 24 * H }).publishEta).toMatchObject({ kind: 'none', reason: 'beyond-range' })
+  })
+
+  test('a queue piece stuck past its ceiling never gets a publish time in the past', () => {
+    const stuck = forecast({ stage: 'queue', sinceMs: NOW - 30 * 24 * H, typicals: {} })
+    expect(stuck.publishEta.kind).toBe('none')
+    expect(stuck.stageEta.kind).toBe('none')
+    const since = NOW - H
+    const fresh = forecast({ stage: 'queue', sinceMs: since, typicals: {} })
+    expect(fresh.publishEta.kind).toBe('estimate')
+    if (fresh.publishEta.kind === 'estimate') expect(fresh.publishEta.atMs).toBeGreaterThan(NOW)
+    const later = forecast({ stage: 'queue', sinceMs: since, typicals: {}, nowMs: NOW + H })
+    expect(later.publishEta).toMatchObject({ kind: 'estimate', atMs: fresh.publishEta.kind === 'estimate' ? fresh.publishEta.atMs : -1 })
+  })
+
   test('worked example: four similar published pieces give 12:00–14:00, center 13:00', () => {
     const f = forecast({ stage: 'running', startedAtMs: NOW - H, samples: samples([3, 4, 4, 5]) })
     expect(f.publishEta).toMatchObject({ kind: 'estimate', atMs: NOW + 3 * H,

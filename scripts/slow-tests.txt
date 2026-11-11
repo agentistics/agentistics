@@ -3,3 +3,4 @@
 packages/server/server/claude-chat-removed.test.ts   # ~28s, spawns a server
 packages/server/server/runtime-metrics-perf.test.ts  # ~23s, perf benchmark
 packages/server/server/rebuild-incremental.test.ts  # ~8s, builds a synthetic home + two child builds
+packages/server/server/book-wiring.test.ts  # spawns a server and the bin
