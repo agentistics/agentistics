@@ -773,8 +773,37 @@ describe('tokens_unavailable is absent, not a measured zero (METRICS.FIX)', () =
     expect(sessionModelUsage({ ...base, tokens_unavailable: true })).toEqual([])
     expect(sessionCostUSD({ ...base, tokens_unavailable: true })).toBeNull()
   })
-  test('the same zeros WITHOUT the flag stay a measurement', () => {
+  test('the same zeros WITHOUT the flag remain unbilled', () => {
     expect(sessionModelUsage(base)).toHaveLength(1)
-    expect(sessionCostUSD(base)).toBe(0)
+    expect(sessionCostUSD(base)).toBeNull()
+  })
+})
+
+describe('PRICE.UNKNOWN — named models need billed usage before table pricing', () => {
+  test('a named-but-never-billed model is not measured', () => {
+    expect(sessionCostUSD({
+      model: 'claude-sonnet-4-6', input_tokens: 0, output_tokens: 0,
+      cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+    })).toBeNull()
+  })
+
+  test('a gateway model with real tokens still uses the public API price', () => {
+    expect(sessionCostUSD({
+      model: 'upx/fable-5.1', input_tokens: 1_000_000, output_tokens: 0,
+      cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+    })).toBeGreaterThan(0)
+  })
+
+  test('a declared harness cost of zero remains a measured zero', () => {
+    expect(sessionCostUSD({
+      model: 'claude-sonnet-4-6', model_usage: {
+        'claude-sonnet-4-6': {
+          inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0,
+          costSource: 'harness',
+        },
+      },
+      input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+    })).toBe(0)
   })
 })

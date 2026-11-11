@@ -14,7 +14,10 @@ import { answerFits, structuredRegistry, stubDriver } from '@agentistics/engine-
 import { acpAsStructured, recordingSession, structuredSpawnOf, withStructured, type StructuredProvider } from './structured-backend'
 import { SessionNotice, sessionActionError } from './action-error'
 import { isReplayCall } from './structured-replay'
-import { STRUCTURED_ROUTE_OFF, answerStructured, reopenOrigin, routableDriver, routeSpawn, spawnOriginOf, structuredIntentOf } from './structured-route'
+import {
+  HERMES_STRUCTURED_ONLY_NOTICE, STRUCTURED_ROUTE_OFF, answerStructured, reopenOrigin, routableDriver,
+  routeSpawn, spawnOriginOf, structuredIntentOf,
+} from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
 
 function fakeBase(): SessionBackend & { calls: Array<[string, unknown?]> } {
@@ -126,6 +129,13 @@ describe('routeSpawn (pure)', () => {
     expect(routeSpawn({ ...base, flagOn: true, origin: 'web', driver: null })).toBe('tmux')
     expect(routeSpawn({ ...base, harness: null, flagOn: true, origin: 'web' })).toBe('tmux')
   })
+  test('Hermes web and background origins remain structured routes', () => {
+    const base = {
+      harness: 'hermes' as HarnessId, driver: 'acp' as const, flagOn: true, acpDriven: false, acpOptIn: [] as string[],
+    }
+    expect(routeSpawn({ ...base, origin: 'web' })).toBe('structured')
+    expect(routeSpawn({ ...base, origin: 'background' })).toBe('structured')
+  })
   test('a spawn nobody attaches to is background; an attached one stays a TUI (owner 2026-10-23)', () => {
     // `agentop session --bg`, a leader's worker, a hand-off: no terminal anybody sits in.
     expect(spawnOriginOf(undefined, false)).toBe('background')
@@ -192,6 +202,55 @@ describe('structuredRegistry / stubDriver / answerFits (engine-api, pure)', () =
 })
 
 describe('withStructured — routing', () => {
+  test('attached Hermes spawn refuses with the ACP-only sentence and never builds a tmux plan', async () => {
+    const base = fakeBase()
+    const b = withStructured(base, provider(fakeEngine({ harnesses: ['hermes'] }).reg))
+    const req: BackendSpawn = {
+      id: 'hermes-attached', cwd: '/w', argv: ['hermes', 'acp'],
+      structured: structuredIntentOf({ harness: 'hermes', prompt: 'hi' }, {}),
+    }
+    const err = await b.spawn(req).then(() => null, e => e as Error)
+    expect(err?.message).toBe(HERMES_STRUCTURED_ONLY_NOTICE)
+    expect(base.calls).toEqual([])
+    expect(req.argv).toEqual(['hermes', 'acp'])
+  })
+
+  test('AGENTISTICS_ADAPTER_CHAT=0 refuses Hermes but leaves Claude on its tmux plan', async () => {
+    const env = { AGENTISTICS_ADAPTER_CHAT: '0' }
+    const hermesBase = fakeBase()
+    const hermes = withStructured(hermesBase, provider(fakeEngine({ harnesses: ['hermes'] }).reg, {
+      flagOn: () => featureOn('adapter-chat', env),
+    }))
+    const hermesReq: BackendSpawn = {
+      id: 'hermes-off', cwd: '/w', argv: ['hermes', 'acp'],
+      structured: structuredIntentOf({ harness: 'hermes', prompt: 'hi' }, {}),
+    }
+    await expect(hermes.spawn(hermesReq)).rejects.toThrow(HERMES_STRUCTURED_ONLY_NOTICE)
+    expect(hermesBase.calls).toEqual([])
+    const claudeBase = fakeBase()
+    const claude = withStructured(claudeBase, provider(fakeEngine({ harnesses: ['claude'] }).reg, {
+      flagOn: () => featureOn('adapter-chat', env),
+    }))
+    const claudeReq: BackendSpawn = {
+      id: 'claude-off', cwd: '/w', argv: ['claude'],
+      structured: structuredIntentOf({ harness: 'claude', prompt: 'hi' }, {}),
+    }
+    await claude.spawn(claudeReq)
+    expect(claudeBase.calls).toEqual([['spawn', claudeReq]])
+  })
+
+  test('structured Hermes driver refusal propagates and never falls back to tmux', async () => {
+    const base = fakeBase()
+    const b = withStructured(base, provider(fakeEngine({ harnesses: ['hermes'], refuse: 'driver refused' }).reg))
+    const req: BackendSpawn = {
+      id: 'hermes-refused', cwd: '/w', argv: ['hermes', 'acp'],
+      structured: structuredIntentOf({ harness: 'hermes', origin: 'web', prompt: 'hi' }, {}),
+    }
+    const err = await b.spawn(req).then(() => null, e => e as Error)
+    expect(err?.message).toBe(HERMES_STRUCTURED_ONLY_NOTICE)
+    expect(base.calls).toEqual([])
+  })
+
   for (const origin of ['background', 'web'] as const) for (const raw of ['0', undefined]) {
     test(`${origin}: AGENTISTICS_ADAPTER_CHAT=${raw ?? 'unset'} uses the shared feature decision`, async () => {
       const base = fakeBase()

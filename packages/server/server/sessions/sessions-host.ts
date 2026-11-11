@@ -1193,6 +1193,14 @@ export function createSessionsPoller(o: {
       // F2.0b — which of them run over their harness's protocol right now (cheap, in-memory).
       const structured = new Set<string>()
       if (o.backend.isStructured) for (const r of reconciled) if (o.backend.isStructured(r.id)) structured.add(r.id)
+      const structuredUsage = new Map<string, { contextTokens?: number; contextWindow?: number }>()
+      const structuredTitles = new Map<string, string>()
+      for (const r of reconciled) {
+        const usage = o.backend.usageOf?.(r.id)
+        if (usage && (usage.contextTokens !== undefined || usage.contextWindow !== undefined)) structuredUsage.set(r.id, usage)
+        const title = o.backend.titleOf?.(r.id)
+        if (title) structuredTitles.set(r.id, title)
+      }
 
       // OPENCODE.RESTO — an EXTERNAL opencode (a TUI opened by hand) states its activity from opencode.db: exact, so
       // its row reads working / waiting before anyone takes it over. Harnesses with no such store reading stay unknown.
@@ -1227,6 +1235,8 @@ export function createSessionsPoller(o: {
         conversations,
         harnessSessions,
         sessionHardware,
+        ...(structuredUsage.size > 0 ? { structuredUsage } : {}),
+        ...(structuredTitles.size > 0 ? { structuredTitles } : {}),
         ...(fell ? { fell: new Set(fell.entries.map(e => e.id)) } : {}),
         ...(accountRegistry ? { accounts: accountRegistry } : {}),
       })

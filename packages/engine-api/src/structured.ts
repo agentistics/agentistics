@@ -119,6 +119,10 @@ export interface StructuredUsage {
   turns: number
   input: number
   output: number
+  /** Context size at the latest protocol usage report, when stated. */
+  contextTokens?: number
+  /** Context window at the latest protocol usage report, when stated. */
+  contextWindow?: number
   /** Per model, when the protocol names it. */
   byModel?: Record<string, { input: number; output: number }>
 }
@@ -403,6 +407,8 @@ export interface StructuredSession {
   lastActivityMs(): number
   /** The usage the protocol has stated so far, or null (F2.1, optional: absent = this driver states none). */
   usage?(): StructuredUsage | null
+  /** The title the protocol assigned, when stated. */
+  title?(): string | null
   /** F4.D — the modes this session can be set to, in the protocol's order (absent = none stated). */
   modes?(): readonly StructuredMode[]
   /** F4.D — the mode the PROTOCOL last stated (or the one just set and acknowledged), or null. */
