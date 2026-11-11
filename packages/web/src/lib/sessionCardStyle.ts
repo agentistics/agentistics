@@ -24,6 +24,7 @@ import type { AsideCardColor } from './sessionsAsidePrefs'
 export const STATE_COLOR: Record<SessionState, string> = {
   working: '#22c55e',
   waiting: 'var(--anthropic-orange)',
+  idle: '#22c55e',
   'waiting-approval': 'var(--anthropic-orange)',
   exited: 'var(--text-tertiary)',
   lost: 'var(--accent-red)',
@@ -35,7 +36,7 @@ export const STATE_COLOR: Record<SessionState, string> = {
  *  that already had a wash keep their exact figures; the four newly-covered ones take the same
  *  figure `working` always used. */
 const WASH_PCT: Record<SessionState, number> = {
-  working: 10, waiting: 12, 'waiting-approval': 12,
+  working: 10, idle: 10, waiting: 12, 'waiting-approval': 12,
   exited: 10, lost: 10, closed: 10, unknown: 10,
 }
 

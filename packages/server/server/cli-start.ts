@@ -5297,7 +5297,7 @@ export async function runStart(codeStart?: CodeStart): Promise<StartResult> {
             id: r.id, title: f?.title ?? r.label ?? r.id, harness: r.harness, state,
             stateLabel: f?.stateLabel ?? (pt ? 'encerrada' : 'ended'),
             ...(money(r.costUSD) ? { cost: money(r.costUSD)! } : {}),
-            live: state === 'working' || state === 'waiting' || state === 'waiting-approval',
+            live: state === 'working' || state === 'waiting' || state === 'waiting-approval' || state === 'idle',
           }
         }),
         activity: events.map(e => `${e.at.slice(0, 16).replace('T', ' ')}  ${e.kind}${e.detail ? ` · ${e.detail}` : e.to ? ` · ${e.to}` : ''}  ${e.actor}`),

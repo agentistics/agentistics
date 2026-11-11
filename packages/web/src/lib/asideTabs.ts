@@ -37,7 +37,7 @@ export interface TeamRow {
   lastUserMessageAt?: number
 }
 
-const LIVE: ReadonlySet<SessionState> = new Set<SessionState>(['working', 'waiting', 'waiting-approval', 'unknown'])
+const LIVE: ReadonlySet<SessionState> = new Set<SessionState>(['working', 'waiting', 'waiting-approval', 'idle', 'unknown'])
 
 export function isLive(state: SessionState): boolean { return LIVE.has(state) }
 export function isWaitingState(state: SessionState): boolean { return state === 'waiting' || state === 'waiting-approval' }

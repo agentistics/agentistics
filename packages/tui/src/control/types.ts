@@ -590,6 +590,12 @@ export type SessionState =
   | 'working'
   | 'waiting-approval'
   | 'waiting'
+  /**
+   * Alive, and its last turn ended, but nothing is asked of a person: a STRUCTURED row of a harness
+   * that declares no permission and no question capability (Hermes). It is a running session (it
+   * can be prompted, it counts as active) and NO consumer counts it as needing attention.
+   */
+  | 'idle'
   | 'exited'
   | 'lost'
   /** Running, but agentop did not start it — nothing about it is capturable. */
@@ -704,7 +710,7 @@ export interface ControlSession {
   /** WHERE the link came from (LIVE.1); `null` = not linked yet. Computed from legacy facts. */
   link?: SessionConversationLink | null
   /** The exact registry reason, when one was recorded, before the canonical link is derived. */
-  conversationLinkVia?: SessionConversationLink['reason']
+  conversationLinkVia?: SessionConversationLink['reason'] | null
   /**
    * Already-localized: this harness can never report which conversation a session it started is
    * writing, so no link can be recorded for this row and anything offered to reopen is inferred.

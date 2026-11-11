@@ -214,7 +214,7 @@ export function restoreVerdict(input: {
       en: 'The session has not read this message yet — there is no point in the conversation to go back to.',
     } }
   }
-  const running = input.state === 'working' || input.state === 'waiting' || input.state === 'waiting-approval'
+  const running = input.state === 'working' || input.state === 'waiting' || input.state === 'waiting-approval' || input.state === 'idle'
   if (!running) return { state: 'off', reason: {
     pt: 'A sessão não está em execução. Reabra-a para restaurar a conversa.',
     en: 'The session is not running. Reopen it to restore the conversation.',

@@ -46,7 +46,7 @@ export async function resolveSessionTranscript(
         : 'This conversation’s transcript is no longer on disk.',
     }
   }
-  const live = row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval'
+  const live = row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval' || row.state === 'idle'
   return { row, transcript, live }
 }
 

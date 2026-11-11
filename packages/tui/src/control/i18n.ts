@@ -446,7 +446,7 @@ export interface ControlStrings {
   asideStates: string
   sessionsSorts: Record<'state' | 'name' | 'started' | 'recent' | 'usage' | 'project', string>
   sessionsStates: Record<
-    'working' | 'waiting' | 'waiting-approval' | 'exited' | 'lost' | 'closed' | 'unknown', string
+    'working' | 'waiting' | 'idle' | 'waiting-approval' | 'exited' | 'lost' | 'closed' | 'unknown', string
   >
   /** States the active search on the summary row, and how to drop it. */
   sessionsSearching: (query: string) => string
@@ -1221,6 +1221,7 @@ const EN: ControlStrings = {
     // `working` differ by two letters in the middle of a narrow column, and the one that needs a
     // person was the one being read as the one that does not.
     waiting: 'needs you',
+    idle: 'idle',
     working: 'working',
     // ONE word for every way a session is not running — see `cli-i18n.ts`'s `sessState`, which this
     // table has to agree with or a row reads `off` under a band called `closed`.
@@ -1842,6 +1843,7 @@ const PT: ControlStrings = {
     // band heading and the filter row from here. They have to say the same thing or the row reads
     // `aguardando resposta` under a band called `aguardando`.
     waiting: 'precisa de você',
+    idle: 'ociosa',
     working: 'trabalhando',
     exited: 'encerrada',
     lost: 'encerrada',
