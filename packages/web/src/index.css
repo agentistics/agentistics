@@ -1515,6 +1515,11 @@ tr:focus-within .ag-row-actions,
 }
 
 /* Shared pretty scrollbar (popup of plan usage; the Live board's horizontal scroll reuses it). */
+/* Let this popup's 8px WebKit scrollbar win over the global standard/mobile scrollbar rules. */
+@supports selector(::-webkit-scrollbar) {
+  [data-plan-usage-scroll].ag-scroll { scrollbar-width: auto; scrollbar-color: auto; }
+  [data-plan-usage-scroll].ag-scroll::-webkit-scrollbar { display: block; }
+}
 /* Standard properties only where ::-webkit-scrollbar is unsupported (Firefox): Chromium >=121 and WebKit ignore the pseudo-elements once they are set. */
 @supports not selector(::-webkit-scrollbar) {
   .ag-scroll { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--anthropic-orange) 60%, transparent) color-mix(in srgb, var(--text-primary) 6%, transparent); }

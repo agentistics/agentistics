@@ -79,6 +79,24 @@ test('a long window title wraps inside its card instead of overflowing', () => {
 import { ringResetPhrase } from '../lib/planLimits'
 import { PlanUsageSummary } from './PlanLimitMeter'
 import { fmtWhen } from '../lib/planLimits'
+import { PlanUsageIndicator } from './PlanLimitMeter'
+
+test('compact indicator maps 5h to the upper arc and week to the lower arc independently', () => {
+  const html = renderToStaticMarkup(<PlanUsageIndicator limits={{ ...live, windows: [{ kind: 'week', usedPct: 95, resetsAt: now + 3 * day }, { kind: '5h', usedPct: 1, resetsAt: now + H }] }} now={now} lang="pt" />)
+  expect(html).toMatch(/data-plan-indicator-arc="5h" data-position="top"[\s\S]*?stroke-dasharray="1 100"/)
+  expect(html).toMatch(/data-plan-indicator-arc="week" data-position="bottom"[\s\S]*?stroke-dasharray="95 100"/)
+  expect(html).toContain('tabindex="0"')
+  expect(html).toContain('Semana 95%')
+  expect(html).toContain('5 h 1%')
+})
+
+test('compact indicator preserves scoped readings and unknown windows', () => {
+  const html = renderToStaticMarkup(<PlanUsageIndicator limits={{ ...live, windows: [{ kind: 'week', usedPct: 80, resetsAt: now + day, scope: { id: 'a', label: 'Group A', models: [], providers: [] } }, { kind: 'week', usedPct: 20, resetsAt: now + day, scope: { id: 'b', label: 'Group B', models: [], providers: [] } }] }} now={now} lang="en" />)
+  expect(html).toContain('Group A')
+  expect(html).toContain('Group B')
+  expect(html).toContain('stroke-dasharray="80 100"')
+  expect(html).not.toContain('5 h 0%')
+})
 
 // POPUP.USO-RESET — a tiny "zera <local time>" under each ring, nothing when the reset is unknown.
 const day = 24 * H

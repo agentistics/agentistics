@@ -10,8 +10,9 @@
  */
 import { effectiveWindow, windowKey, windowRenewed, type AgentSchedule, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
 import { createPortal } from 'react-dom'
-import { useState, type ReactNode } from 'react'
-import { CalendarClock, KeyRound } from 'lucide-react'
+import { useId, useState, type ReactNode } from 'react'
+import { CalendarClock, Gauge, KeyRound } from 'lucide-react'
+import { PlanUsageScroll } from './PlanUsageScroll'
 import { AgentScheduleEditor, AgentUseBadge } from './AgentScheduleEditor'
 import { scheduleSummaryText, type AgentUseView } from '../lib/agentScheduleView'
 import { HARNESS_LABELS } from '../lib/harness'
@@ -66,15 +67,46 @@ export function LimitLevelIcon({ pct, size = 16, lang = 'pt', level = limitLevel
 /** The grid one "Plan usage" row is laid out on: mark, name + plan, one ring per window. */
 export const PLAN_ROW_GRID = { display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 8 } as const
 
+/** One circle: the upper arc is 5 h, the lower arc is the week. Scoped readings remain named. */
+export function PlanUsageIndicator({ limits, now, lang }: { limits: PlanLimits; now: number; lang: Lang }) {
+  const tooltipId = useId()
+  const [tooltip, setTooltip] = useState<{ x: number; y: number } | null>(null)
+  const showTooltip = (el: HTMLElement) => { const rect = el.getBoundingClientRect(); setTooltip({ x: Math.max(8, Math.min(rect.left, window.innerWidth - 256)), y: rect.top - 6 }) }
+  const details = limits.windows.map(w => `${windowLabel(w.kind, lang, w.scope)}: ${windowRenewed(w, now) ? '–' : `${Math.round(currentUsedPct(w, now))}%`}${ringResetPhrase(w, now, lang) ? ` · ${ringResetPhrase(w, now, lang)}` : ''}`).join('\n')
+  const arc = (kind: '5h' | 'week') => {
+    const windows = limits.windows.filter(w => w.kind === kind)
+    const pct = windows.length ? Math.max(...windows.map(w => currentUsedPct(w, now))) : null
+    const d = kind === '5h' ? 'M 4.17 14 A 12 12 0 0 1 27.83 14' : 'M 27.83 18 A 12 12 0 0 1 4.17 18'
+    return <g data-plan-indicator-arc={kind} data-position={kind === '5h' ? 'top' : 'bottom'}>
+      <path d={d} fill="none" stroke="var(--ag-tint-4)" strokeWidth={2.5} strokeDasharray={pct === null ? '2 3' : undefined} />
+      {pct !== null && <path data-plan-indicator-fill d={d} pathLength={100} fill="none" stroke={limitTone(pct)} strokeWidth={2.5} strokeDasharray={`${Math.min(100, Math.max(0, pct))} 100`} strokeLinecap={pct > 0 ? 'round' : 'butt'} />}
+    </g>
+  }
+  return <div data-plan-usage-indicator role="img" tabIndex={0} aria-label={details} aria-describedby={tooltip ? tooltipId : undefined}
+    onMouseEnter={e => showTooltip(e.currentTarget)} onMouseLeave={() => setTooltip(null)} onFocus={e => showTooltip(e.currentTarget)} onBlur={() => setTooltip(null)}
+    style={{ gridColumn: '3 / -1', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: 190 }}>
+    <span style={{ position: 'relative', display: 'flex', width: 32, height: 32, flexShrink: 0 }}>
+      <svg aria-hidden width={32} height={32} viewBox="0 0 32 32">{arc('5h')}{arc('week')}</svg>
+      <Gauge size={12} aria-hidden style={{ position: 'absolute', top: 10, left: 10, color: 'var(--text-secondary)' }} />
+    </span>
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, overflowWrap: 'anywhere', fontSize: 10.5, fontVariantNumeric: 'tabular-nums' }}>
+      <span>{limits.windows.map((w, i) => <span key={windowKey(w)}>{i > 0 ? ' · ' : ''}{w.kind === '5h' && !w.scope ? '5 h' : windowLabel(w.kind, lang, w.scope)} {windowRenewed(w, now) ? '–' : `${Math.round(currentUsedPct(w, now))}%`}</span>)}</span>
+      {limits.windows.map(w => { const reset = ringResetPhrase(w, now, lang); return reset ? <span key={windowKey(w)} data-plan-ring-reset style={{ fontSize: 9.5, color: 'var(--text-tertiary)' }}>{w.kind === '5h' && !w.scope ? '5 h' : windowLabel(w.kind, lang, w.scope)} · {reset}</span> : null })}
+    </span>
+    {tooltip && createPortal(<span id={tooltipId} role="tooltip" style={{ position: 'fixed', left: tooltip.x, top: tooltip.y, transform: 'translateY(-100%)', maxWidth: 240, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: 11, whiteSpace: 'pre-line', pointerEvents: 'none', zIndex: 4000 }}>{details}</span>, document.body)}
+  </div>
+}
+
 /**
  * The CELLS of one "Plan usage" row — shared by the summary list and the account-switch picker
  * (CONTA.LIMITES), so an account reads the same in both. `note` replaces the plan line (a reason the
  * row cannot be picked); `tag` leads the plan line ("Current"), so it never cuts the name.
  */
-export function PlanUsageRowCells({ harness, name, plan, limits: reading, now, lang, note, tag, wrap = false, loginBroken = false }: {
+export function PlanUsageRowCells({ harness, name, plan, limits: reading, now, lang, note, tag, wrap = false, loginBroken = false, compact = false }: {
   harness: PlanLimits['harness']; name: string; plan: string | undefined; limits: PlanLimits | null; now: number; lang: Lang
   /** The account's login is expired or signed out: whatever reading it has is stale, so no rings (0/0 would read as "unused"). */
   loginBroken?: boolean
+  compact?: boolean
   note?: ReactNode; tag?: ReactNode
   /** The picker: name and plan WRAP (never an ellipsis on the one fact that tells rows apart), the tag on its own line. */
   wrap?: boolean
@@ -99,7 +131,7 @@ export function PlanUsageRowCells({ harness, name, plan, limits: reading, now, l
       {note && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{note}</span>}
       {limits && <Unmeasured limits={limits} lang={lang} />}
     </div>
-    {limits ? limits.windows.map(w => <div key={windowKey(w)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang, w.scope)}</span>{(() => { const reset = ringResetPhrase(w, now, lang); return reset ? <span data-plan-ring-reset style={{ fontSize: 9.5, lineHeight: 1.2, whiteSpace: 'nowrap', color: 'var(--text-tertiary)' }}>{reset}</span> : null })()}</div>) : wrap ? null : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{waiting}</span>}
+    {limits && compact ? <PlanUsageIndicator limits={limits} now={now} lang={lang} /> : limits ? limits.windows.map(w => <div key={windowKey(w)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang, w.scope)}</span>{(() => { const reset = ringResetPhrase(w, now, lang); return reset ? <span data-plan-ring-reset style={{ fontSize: 9.5, lineHeight: 1.2, whiteSpace: 'nowrap', color: 'var(--text-tertiary)' }}>{reset}</span> : null })()}</div>) : wrap ? null : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{waiting}</span>}
   </>
 }
 
@@ -111,16 +143,16 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
   const rows = subscriptionRows(limits, registered, accountLabels, agentUse?.accounts)
   const apis = useApiUsage().items ?? []
   const sectioned = apis.length > 0
-  return <div data-plan-usage-summary style={{ width: '100%', maxWidth: embedded ? undefined : 344, boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4, ...(embedded ? {} : { minHeight: 0, flex: '1 1 auto' }) }}>
+  return <div data-plan-usage-summary style={{ width: '100%', boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4, ...(embedded ? {} : { minHeight: 0, flex: '1 1 auto' }) }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>{!embedded && <>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span></>}<span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
-    <div data-plan-usage-scroll className="ag-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 4, ...(embedded ? {} : { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }) }}>
+    <PlanUsageScroll lang={lang} embedded={embedded}>
     {sectioned && <SectionTitle>{accountsSectionTitle(lang)}</SectionTitle>}
     {rows.map((row, i) => {
       const control = agentUse?.(row.harness, row.account)
       const who = subscriptionName(row.harness, row.accountLabel)
-      return <div key={`${row.harness}:${i}`} style={{ borderTop: '1px solid var(--border)', padding: '8px 4px' }}>
+      return <div key={`${row.harness}:${i}`} data-plan-scroll-item style={{ borderTop: '1px solid var(--border)', padding: '8px 4px' }}>
         <div data-plan-row={row.harness} style={PLAN_ROW_GRID}>
-          <PlanUsageRowCells harness={row.harness} name={who} plan={row.plan} limits={row.limits} now={now} lang={lang} loginBroken={control?.loginBroken === true} />
+          <PlanUsageRowCells compact harness={row.harness} name={who} plan={row.plan} limits={row.limits} now={now} lang={lang} loginBroken={control?.loginBroken === true} />
         </div>
         {!control && agentUse && agentUse.loaded === false && row.account && <div data-plan-row-controls-loading style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-tertiary)' }}>…</div>}
         {control && <div data-plan-row-controls={control.accountId} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, fontSize: 11.5, color: 'var(--text-secondary)' }}>
@@ -138,7 +170,7 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
     })}
     {sectioned && <><SectionTitle>{apiSectionTitle(lang)}</SectionTitle><ApiUsageRows items={apis} now={now} lang={lang} /></>}
     {rows.some(r => r.limits?.windows.some(w => currentUsedPct(w, now) >= 75)) && <div style={{ padding: '7px 4px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{rows.flatMap(r => (r.limits?.windows ?? []).filter(w => currentUsedPct(w, now) >= 75).slice(0, 1).map(w => <span key={`${r.harness}:${windowKey(w)}`} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><LimitLevelIcon pct={currentUsedPct(w, now)} lang={lang} />{HARNESS_LABELS[r.harness]}: {windowLabel(w.kind, lang, w.scope)} {lang === 'pt' ? 'em' : 'at'} {Math.round(currentUsedPct(w, now))}% · {lang === 'pt' ? 'renova' : 'resets'} {fmtWhen(w.resetsAt, now, lang)}</span>))}</div>}
-    </div>
+    </PlanUsageScroll>
     <div style={{ borderTop: '1px solid var(--border)', padding: '8px 4px 4px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>{lang === 'pt' ? 'Clique para ver tudo' : 'Click to see everything'} <button type="button" data-plan-usage-open onClick={onOpen} style={{ float: 'right', border: 0, background: 'transparent', padding: 0, font: 'inherit', fontWeight: 700, color: 'var(--anthropic-orange)', cursor: 'pointer' }}>{lang === 'pt' ? 'Abrir ›' : 'Open ›'}</button></div>
   </div>
 }
