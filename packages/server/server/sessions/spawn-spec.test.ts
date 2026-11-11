@@ -18,6 +18,17 @@ describe('SPAWN_SPECS', () => {
     }
   })
 
+  it('launches Hermes through its ACP subcommand and leaves model choice to the protocol', () => {
+    expect(planSpawn({ harness: 'hermes', cwd: '/tmp', prompt: 'hello' })).toEqual({
+      ok: true,
+      plan: { argv: ['hermes', 'acp'], initialPrompt: { mode: 'type', text: 'hello' } },
+    })
+    expect(planSpawn({ harness: 'hermes', cwd: '/tmp', resumeId: 'hermes-session' })).toEqual({
+      ok: true,
+      plan: { argv: ['hermes', 'acp'], conversationId: 'hermes-session' },
+    })
+  })
+
   it('only ever suggests a model name the harness itself printed', () => {
     // Not a taste rule: a suggestion is offered as a thing that WILL work, and the picker is a
     // closed dropdown, so an id the CLI refuses fails at spawn with nothing on screen to explain
@@ -591,6 +602,31 @@ const MAIN_PLANS: Partial<Record<HarnessId, { fresh: unknown; resume: unknown }>
           "agy",
           "--conversation",
           "11111111-2222-3333-4444-555555555555"
+        ],
+        "conversationId": "11111111-2222-3333-4444-555555555555"
+      }
+    }
+  },
+  "hermes": {
+    "fresh": {
+      "ok": true,
+      "plan": {
+        "argv": [
+          "hermes",
+          "acp"
+        ],
+        "initialPrompt": {
+          "mode": "type",
+          "text": "hi"
+        }
+      }
+    },
+    "resume": {
+      "ok": true,
+      "plan": {
+        "argv": [
+          "hermes",
+          "acp"
         ],
         "conversationId": "11111111-2222-3333-4444-555555555555"
       }

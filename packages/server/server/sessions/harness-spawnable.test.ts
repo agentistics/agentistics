@@ -66,3 +66,10 @@ test('opencode has a session launcher (V-OPENCODE.2): spawnable when its binary 
   expect(missing.unavailableReason).toBe('opencode is not on PATH: install opencode')
   expect(JSON.stringify(missing)).not.toContain('no session launcher')
 })
+
+test('hermes has an ACP session launcher: spawnable when its binary is on PATH, not installed when absent', () => {
+  expect(harnessSpawnability('hermes', 0, bin => (bin === 'hermes' ? '/test/bin/hermes' : null))).toEqual({ spawnable: true })
+  const missing = harnessSpawnability('hermes', 0, () => null)
+  expect(missing).toEqual({ spawnable: false, unavailableReason: 'hermes is not on PATH: install hermes' })
+  expect(JSON.stringify(missing)).not.toContain('no session launcher')
+})
