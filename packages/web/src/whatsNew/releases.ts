@@ -25,6 +25,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Preferências: idioma, tema e as outras preferências voltam a ser salvas mesmo quando a pasta escolhida para o agente do painel foi apagada.',
         en: 'Preferences: language, theme and the other preferences save again even when the folder chosen for the panel agent was deleted.',
       },
+      {
+        pt: 'Uso dos planos: os dois anéis (5 h em cima, semana embaixo) agora começam do mesmo lado e crescem no mesmo sentido.',
+        en: 'Plan usage: both arcs (5 h on top, week below) now start on the same side and grow the same way.',
+      },
     ],
   },
   '2.207.0': {
