@@ -33,7 +33,10 @@ import { ensureClaudeProjectTrusted } from './claude-trust'
 import { forkUnavailableNotice, harnessBlockedNotice } from './harness-notice'
 import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
 import { pidAlive } from './structured-durable'
-import { modeNeedsProtocolSentence, routableDriver, routeSpawn, structuredOrigin, type SpawnRoute } from './structured-route'
+import {
+  HERMES_STRUCTURED_ONLY_NOTICE, modeNeedsProtocolSentence, routableDriver, routeSpawn, structuredOrigin,
+  type SpawnRoute,
+} from './structured-route'
 import type { BackendSession, BackendSpawn, SessionActivity, SessionBackend, TerminalCapture } from './types'
 
 /** Which harness an argv starts — by its binary's base name against the spawn specs. */
@@ -593,8 +596,10 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       }
       if (route !== 'tmux' && harness) {
         if (await startVia(req, route, harness, reg ?? acpAsStructured(acp!), acp)) return {}
+        if (harness === 'hermes') throw new Error(HERMES_STRUCTURED_ONLY_NOTICE)
         // A refused structured start: the same request, the usual way.
       }
+      if (harness === 'hermes') throw new Error(HERMES_STRUCTURED_ONLY_NOTICE)
       // MODE.EVERYWHERE — the TUI argv cannot carry this mode (its CLI has no flag for it): refused in a
       // sentence, never started in another mode than the one asked for.
       if (req.modeNeedsProtocol) throw new Error(modeNeedsProtocolSentence(harness, req.modeNeedsProtocol))

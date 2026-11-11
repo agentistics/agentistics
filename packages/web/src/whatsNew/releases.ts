@@ -13,8 +13,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.206.0': {
     features: [
       {
-        pt: 'Hermes: abra uma conversa com o agente Hermes pelo agentistics (página de sessões, painel ou CLI); o medidor de contexto e o título da conversa aparecem no painel.',
-        en: 'Hermes: open a conversation with the Hermes agent from agentistics (sessions page, panel or CLI); the context gauge and the conversation title show in the panel.',
+        pt: 'Hermes: abra uma conversa com o agente Hermes pelo agentistics (página de sessões, painel ou '
+          + '`agentop session hermes --bg`); o medidor de contexto e o título da conversa aparecem no painel.',
+        en: 'Hermes: open a conversation with the Hermes agent from agentistics (sessions page, panel or '
+          + '`agentop session hermes --bg`); the context gauge and the conversation title show in the panel.',
       },
     ],
     fixes: [
