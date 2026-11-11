@@ -343,9 +343,12 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
       ...(r.task ? { task: r.task } : {}),
       ...(typeof r.startedAt === 'number' ? { createdMs: r.startedAt } : {}),
     }))
+    // Checked BEFORE listRoles: loading a corrupt document rewrites it as an empty one, after which
+    // the check would see a healthy file and a lost leader would read as "no leader".
+    const rolesUnreadable = await rolesDocUnreadable((await import('../config')).AGENTISTICS_DATA_DIR)
     const roles = await listRoles(await defaultRoleDeps())
     leaderIds = new Set(fleet.filter(r => roleOfRow(roles, r) === 'leader').map(r => r.id))
-    if (await rolesDocUnreadable((await import('../config')).AGENTISTICS_DATA_DIR) || await registryUnreadable()) fleetRead = 'unknown'
+    if (rolesUnreadable || await registryUnreadable()) fleetRead = 'unknown'
   } catch { fleetRead = 'unknown' /* no fleet: preserve uncertainty; never claim a leader is absent */ }
   const reply = await replyPromise
   const { liveRuntimeFacts } = await import('./live-runtime')
