@@ -38,4 +38,11 @@ describe('Nay persona settings', () => {
     await expect(validateNayPreferencePatch({}, { chatResponder: 'bogus' })).rejects.toThrow('analytics or own-agent')
     await expect(validateNayPreferencePatch({}, { chatResponder: 'own-agent', chatWorkingDir: '' })).rejects.toThrow('existing absolute directory')
   })
+
+  test('does not validate a stale own-agent directory for unrelated patches', async () => {
+    await expect(validateNayPreferencePatch(
+      { chatResponder: 'own-agent', chatWorkingDir: '/tmp/nay-directory-that-was-deleted' },
+      { lang: 'pt' },
+    )).resolves.toEqual({ lang: 'pt' })
+  })
 })
