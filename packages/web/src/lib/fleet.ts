@@ -86,7 +86,7 @@ export interface FleetRow {
   harness: string
   cwd: string
   project: string
-  state: 'working' | 'waiting' | 'waiting-approval' | 'exited' | 'lost' | 'unknown' | 'closed'
+  state: 'working' | 'waiting' | 'waiting-approval' | 'idle' | 'exited' | 'lost' | 'unknown' | 'closed'
   stateLabel: string
   actionable: boolean
   /** This row is one of the sessions the machine TOOK — see the server's `FleetRow.fell`. */
@@ -359,7 +359,7 @@ function emit(): void {
 
 function isRowActive(id: string): boolean {
   const row = snapshot.sessions.find(row => row.id === id || row.conversationId === id)
-  return !!row && ['working', 'waiting', 'waiting-approval'].includes(row.state)
+  return !!row && ['working', 'waiting', 'waiting-approval', 'idle'].includes(row.state)
 }
 
 /** Use the shared fleet feed: an acknowledged kill can still have a live row for another poll. */

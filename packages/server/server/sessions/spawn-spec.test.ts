@@ -94,6 +94,16 @@ describe('SPAWN_SPECS', () => {
 })
 
 describe('planSpawn', () => {
+  test('planSpawn for hermes returns a plan', () => {
+    // The structured doors plan before the structured backend takes over; the refusal for a terminal
+    // launch lives in `withStructured.spawn`, not here.
+    const r = planSpawn({ harness: 'hermes', cwd: '/tmp' })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.plan.argv[0]).toBe('hermes')
+    const resumed = planSpawn({ harness: 'hermes', cwd: '/tmp', resumeId: 'conv-1' })
+    expect(resumed.ok).toBe(true)
+  })
+
   it('puts a claude prompt in the positional slot, after the flags, and marks it for submit', () => {
     // Positional, so the text is in argv — but the backend must still SUBMIT it (an Enter) on a
     // version that pre-fills without auto-submitting, without double-submitting one that does.
@@ -656,6 +666,7 @@ describe('planSpawn — the account root (PLAN.ACCOUNTS D3)', () => {
     claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', copilot: 'COPILOT_HOME', gemini: 'GEMINI_CLI_HOME', kimi: 'KIMI_CODE_HOME',
   }
   for (const h of HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)) {
+    if (h === 'hermes') continue // Hermes is structured-only; it has no terminal plan to pin.
     const fresh = { harness: h, cwd: '/w', prompt: 'hi', conversationId: '11111111-2222-3333-4444-555555555555' }
     test(`${h}: the default root is byte-identical to origin/main before D3 (pinned argv/env)`, () => {
       const pinned = MAIN_PLANS[h]

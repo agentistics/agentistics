@@ -86,6 +86,7 @@ const CONTEXT_ANSI: Record<ContextLevel, string> = { ok: DIM, warn: YELLOW, full
 const STATE_ANSI: Record<SessionState, string> = {
   'waiting-approval': `${ESC}[1;31m`,
   waiting: `${ESC}[33m`,
+  idle: `${ESC}[32m`,
   working: `${ESC}[32m`,
   exited: DIM,
   lost: DIM,

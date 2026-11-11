@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test'
 import type { ControlSession } from '@agentistics/tui/control'
 import { controlStrings } from '@agentistics/tui/control/i18n'
+import { emptySearchFields } from '@agentistics/tui/control/search-scope'
+import { cliStrings } from '../cli-i18n'
+import { toControlSession } from './control-session'
 import { fleetRow, sessionHandleOf, verbReason } from './fleet-row'
+import type { SessionView } from './session-view'
 
 const S = controlStrings('en')
 
@@ -141,19 +145,40 @@ describe('fleetRow — an EXTERNAL session takes a write when it can be continue
 })
 
 describe('fleetRow — conversationLinkVia is a flat field, not only link.reason', () => {
-  const link = (reason: 'assigned-id' | 'process-log' | 'first-sighting' | 'no-id-route') =>
-    ({ provenance: reason === 'no-id-route' ? 'unrecoverable' : 'spawn', reason, exact: reason !== 'no-id-route' }) as const
-
-  it('fills it from link.reason whenever the row has a conversation, whatever the harness', () => {
-    for (const harness of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi'] as const) {
-      const r = fleetRow(row({ harness, conversationId: 'conv-1', link: link('process-log') }), S)
-      expect(r.conversationLinkVia).toBe('process-log')
-    }
+  const view = (over: Partial<SessionView> = {}): SessionView => ({
+    id: 'agentop-link-via',
+    harness: 'claude',
+    cwd: '/home/u/proj',
+    status: 'lost',
+    attached: false,
+    approvalDetection: true,
+    searchFields: emptySearchFields(),
+    ...over,
   })
 
-  it('says nothing while there is no id: no-id-route explains an absence, not a way of linking', () => {
-    expect(fleetRow(row({ link: link('no-id-route') }), S).conversationLinkVia).toBeUndefined()
-    expect(fleetRow(row({ conversationId: 'conv-1' }), S).conversationLinkVia).toBeUndefined()
+  const build = (over: Partial<SessionView> = {}) => fleetRow(toControlSession(view(over), cliStrings('en')), S)
+
+  it('fleet row exposes the registry conversationLinkVia at top level', () => {
+    expect(build({ conversationId: 'conv-1', conversationLinkVia: 'resumed-id' }).conversationLinkVia).toBe('resumed-id')
+  })
+
+  it('legacy fleet row without via derives it from the canonical link reader', () => {
+    const r = build({ conversationId: 'conv-1', conversationLink: 'observed' })
+    expect(r.conversationLinkVia).toBe('first-sighting')
+    expect(r.conversationLinkVia).toBe(r.link?.reason ?? null)
+  })
+
+  it('fleet row without a conversation keeps conversationLinkVia null', () => {
+    expect(build().conversationLinkVia).toBeNull()
+  })
+
+  it('conversationLinkVia and link.reason never disagree', () => {
+    const reasons = ['assigned-id', 'resumed-id', 'harness-session-file', 'process-log', 'first-sighting', 'protocol-stated'] as const
+    for (const reason of reasons) {
+      const r = build({ conversationId: `conv-${reason}`, conversationLinkVia: reason })
+      expect(r.conversationLinkVia).toBe(reason)
+      expect(r.conversationLinkVia).toBe(r.link?.reason ?? null)
+    }
   })
 })
 
@@ -173,6 +198,12 @@ describe('fleetRow — fork (V-OPENCODE.2)', () => {
 })
 
 describe('fleetRow — "open in terminal" (F2.0b)', () => {
+  it('structured Hermes has no terminal verb or tmux attach command', () => {
+    const r = fleetRow(row({ harness: 'hermes', structured: true, state: 'waiting' }), S)
+    expect(r.verbs.some(v => (v.action as string) === 'terminal')).toBe(false)
+    expect(r.attachCommand).toBe('')
+  })
+
   it('is offered on a row running over its protocol, in the row\'s language, and enabled', () => {
     const r = fleetRow(row({ structured: true, state: 'waiting' }), S)
     expect(verb(r, 'terminal')).toEqual({ action: 'terminal' as never, label: 'Open in terminal', enabled: true })

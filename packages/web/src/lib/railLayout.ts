@@ -20,6 +20,7 @@
  */
 
 import type { SessionUserGroup } from './sessionUserGroups'
+import { isLiveState } from '@agentistics/core'
 
 export interface RailRowLike {
   id: string
@@ -55,13 +56,12 @@ export type RailItem<T> =
   }
 
 const WAITING = new Set(['waiting', 'waiting-approval'])
-const RUNNING = new Set(['working', 'waiting', 'waiting-approval', 'unknown'])
 
 export function railFolderCounts(rows: readonly RailRowLike[], nestedFolders: number): RailFolderCounts {
   let waiting = 0, active = 0, ended = 0
   for (const r of rows) {
     if (WAITING.has(r.state)) waiting++
-    else if (RUNNING.has(r.state)) active++
+    else if (isLiveState(r.state) || r.state === 'unknown') active++
     else ended++
   }
   return { folders: nestedFolders, waiting, active, ended }

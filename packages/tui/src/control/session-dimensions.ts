@@ -62,7 +62,7 @@ import type { ControlSession, SessionState, SessionViewPrefs } from './types'
  * time while `tsc` stayed clean.
  */
 const ACTIVE_STATES_RAW: readonly SessionState[] =
-  ['working', 'waiting', 'waiting-approval', 'unknown'] as const
+  ['working', 'waiting', 'waiting-approval', 'idle', 'unknown'] as const
 const OFF_STATE_RAW: SessionState = 'closed'
 
 /**
@@ -73,7 +73,7 @@ const OFF_STATE_RAW: SessionState = 'closed'
  * wearing it.
  */
 export const SESSION_STATES: readonly SessionState[] =
-  ['waiting-approval', 'waiting', 'working', 'exited', 'lost', 'closed', 'unknown'] as const
+  ['waiting-approval', 'waiting', 'idle', 'working', 'exited', 'lost', 'closed', 'unknown'] as const
 
 /**
  * The states as the MENU offers them — one row per CHOICE, not one per internal state.

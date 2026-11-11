@@ -160,7 +160,7 @@ export function composerReducer(state: ComposerState, action: ComposerAction): C
 
 /** The fleet-row states the interactive terminal understands (mirrors `FleetRow['state']`). */
 export type FleetRowState =
-  | 'working' | 'waiting' | 'waiting-approval' | 'exited' | 'lost' | 'unknown' | 'closed'
+  | 'working' | 'waiting' | 'waiting-approval' | 'idle' | 'exited' | 'lost' | 'unknown' | 'closed'
 
 /**
  * Why a row cannot be typed into right now, or `null` when it can.

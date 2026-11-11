@@ -9,6 +9,7 @@
  */
 
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
+import { isLiveState } from '@agentistics/core'
 
 export interface HarnessSlice {
   harness: string
@@ -49,7 +50,6 @@ export interface FleetSummary {
   projectRepos: number
 }
 
-const RUNNING = new Set(['working', 'waiting', 'waiting-approval'])
 const WAITING = new Set(['waiting', 'waiting-approval'])
 
 export function summarizeFleet(rows: readonly ControlSession[], now: number): FleetSummary {
@@ -64,7 +64,7 @@ export function summarizeFleet(rows: readonly ControlSession[], now: number): Fl
   let activeUnknown = 0
 
   for (const s of rows) {
-    const isRunning = RUNNING.has(s.state)
+    const isRunning = isLiveState(s.state)
     if (isRunning) running++
     if (WAITING.has(s.state)) waiting++
     if (s.project) {

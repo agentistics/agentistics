@@ -7,7 +7,7 @@
  * Nothing here reads the clock or a store: `nowMs` and the fleet come in, so each rule has a test.
  */
 
-import { parseLivePeriod, parseLiveSort, parseLiveTab, type LivePeriod, type LiveSortId, type LiveTab } from '@agentistics/core'
+import { isLiveState, parseLivePeriod, parseLiveSort, parseLiveTab, type LivePeriod, type LiveSortId, type LiveTab } from '@agentistics/core'
 import { startsLine } from './queueTime'
 import type { FleetRow } from '../../lib/fleet'
 import {
@@ -428,7 +428,7 @@ export function taskOptions(cards: readonly LiveCard[], nowMs: number, extra: Re
   for (const c of cards) {
     add(c.d.taskId, c.d.taskTitle)
     const o = m.get(c.d.taskId)!
-    const live = c.agents.filter(a => a.state === 'working' || a.state === 'waiting' || a.state === 'waiting-approval').length
+    const live = c.agents.filter(a => isLiveState(a.state)).length
     o.live += live
     if (live > 0 || (c.d.stageSinceMs !== null && nowMs - c.d.stageSinceMs < 24 * 3600_000 && c.d.stage !== 'published')) o.recent = true
   }

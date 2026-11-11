@@ -49,4 +49,7 @@ describe('railFolderCounts', () => {
     expect(railFolderCounts([row('1', 'waiting-approval'), row('2', 'working'), row('3', 'unknown'), row('4', 'lost')], 2))
       .toEqual({ folders: 2, waiting: 1, active: 2, ended: 1 })
   })
+  test('idle is active, not ended', () => {
+    expect(railFolderCounts([row('idle', 'idle')], 0)).toEqual({ folders: 0, waiting: 0, active: 1, ended: 0 })
+  })
 })

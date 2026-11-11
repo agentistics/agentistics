@@ -22,7 +22,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
-  isSessionRole, isSessionRoleRequest, parseRoleOrigin, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, stripRolePrefix, titleForRole,
+  isLiveState, isSessionRole, isSessionRoleRequest, parseRoleOrigin, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, stripRolePrefix, titleForRole,
   type HarnessId, type RoleLang, type RoleOrigin, type SessionRole,
 } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
@@ -321,7 +321,7 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     if (next === 'leader' && deps.taskOf) {
       const taskId = await deps.taskOf(resolved.id)
       if (taskId) {
-        const other = (await Promise.all(rows.filter(r => r.id !== resolved.id && r.id !== retiredId && ['working', 'waiting', 'waiting-approval'].includes(r.state ?? '') && roleOfRow(state.roles, r) === 'leader').map(async r =>
+        const other = (await Promise.all(rows.filter(r => r.id !== resolved.id && r.id !== retiredId && isLiveState(r.state) && roleOfRow(state.roles, r) === 'leader').map(async r =>
           await deps.taskOf!(r.id) === taskId ? r : undefined))).find(Boolean)
         if (other) warning = `Another live leader on task ${taskId}: ${other.title} (${other.id}).`
       }
@@ -363,7 +363,7 @@ async function planPredecessorRetire(
   if (!r.ok) return { ok: false, code: 'no_such_session' }
   const pred = r.session
   if (pred.id === c.resolved.id) return { ok: false, code: 'self' }
-  if (!['working', 'waiting', 'waiting-approval'].includes(pred.state ?? '')) return { ok: false, code: 'not_live' }
+  if (!isLiveState(pred.state)) return { ok: false, code: 'not_live' }
   if (roleOfRow(c.roles, pred) !== 'leader') return { ok: false, code: 'not_leader_target' }
   const mine = await c.deps.taskOf?.(c.resolved.id).catch(() => undefined)
   if (!mine) return { ok: false, code: 'no_task' }

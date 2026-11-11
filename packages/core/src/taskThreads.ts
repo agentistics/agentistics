@@ -32,6 +32,8 @@
  * on reopen" find the continuation rather than the retired row.
  */
 
+import { isLiveState } from './liveState'
+
 export type ThreadKind = 'topic' | 'handback' | 'block'
 
 /** The kinds a SESSION may open a thread with. A person may open any. */
@@ -117,11 +119,9 @@ export interface FleetRowLike {
   actionable: boolean
 }
 
-const LIVE = new Set(['working', 'waiting', 'waiting-approval'])
-
 /** Is the row a session that is running right now? */
 export function rowRunning(row: Pick<FleetRowLike, 'state'>): boolean {
-  return LIVE.has(row.state)
+  return isLiveState(row.state)
 }
 
 /**

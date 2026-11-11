@@ -65,6 +65,33 @@ describe('buildSessionViews', () => {
     expect(c!.structured).toBeUndefined() // a finished row has nothing to switch
   })
 
+  it('a finished structured Hermes turn is idle, not needs-you, when permissions and questions are declared absent', () => {
+    const reconciled = [row('hermes', { managed: managed('hermes', { harness: 'hermes' }) })]
+    const [v] = buildSessionViews({ reconciled, activity: new Map([['hermes', 'waiting']]), processes: [], structured: new Set(['hermes']) })
+    expect(v!.approvalDetection).toBe(true)
+    expect(attentionCount([v!])).toBe(0)
+  })
+
+  it('a Claude turn with a real approval marker still needs-you', () => {
+    const reconciled = [
+      row('claude-terminal', { managed: managed('claude-terminal', { harness: 'claude' }) }),
+      row('claude-structured', { managed: managed('claude-structured', { harness: 'claude' }) }),
+      row('hermes', { managed: managed('hermes', { harness: 'hermes' }) }),
+    ]
+    const views = buildSessionViews({
+      reconciled,
+      activity: new Map([
+        ['claude-terminal', 'waiting-approval'],
+        ['claude-structured', 'waiting-approval'],
+        ['hermes', 'waiting'],
+      ]),
+      processes: [],
+      structured: new Set(['claude-structured', 'hermes']),
+    })
+    expect(attentionCount(views)).toBe(2)
+    expect(bellTransitions(new Map(), views)).toEqual(['claude-terminal', 'claude-structured'])
+  })
+
   it('reports approval detection exactly where rules exist, for every harness', () => {
     // Written as an INVARIANT rather than against one harness that happens to be unprobed today:
     // this test used to name gemini, and it broke the day gemini was probed — asserting a fact
