@@ -92,7 +92,7 @@ const TOOL_GROUPS = {
   Metrics: ['agentistics_live_delivery', 'agentistics_delivery_calendar','agentistics_summary', 'agentistics_costs', 'agentistics_projects', 'agentistics_repos', 'agentistics_harnesses', 'agentistics_plan_limits', 'agentistics_tags', 'agentistics_tag_detail', 'agentistics_flow_run', 'agentistics_flow_status', 'agentistics_wait'],
   // COFRE.DESBLOQUEIO: how the vault is protected (never what it holds) — read-only, not listed in the briefing.
   Vault: ['agentistics_vault_status'],
-  Dashboards: ['agentistics_component_catalog', 'agentistics_get_layouts', 'agentistics_create_layout', 'agentistics_add_component', 'agentistics_remove_component', 'agentistics_set_active_layout', 'agentistics_delete_layout', 'agentistics_export_pdf', 'agentistics_build_layout'],
+  Dashboards: ['agentistics_component_catalog', 'agentistics_get_layouts', 'agentistics_get_preferences', 'agentistics_set_preferences', 'agentistics_create_layout', 'agentistics_add_component', 'agentistics_remove_component', 'agentistics_set_active_layout', 'agentistics_delete_layout', 'agentistics_export_pdf', 'agentistics_build_layout'],
 } as const
 
 /** Metrics and dashboards are NOT listed tool by tool (token economy): one line, the tools stay discoverable via the MCP. */

@@ -84,6 +84,7 @@ export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = t
   const defaults = useNayDefaults()
   const [notify, setNotify] = useState<NotificationSettings>(getNotificationSettings)
   const [persona, setPersona] = useState({ responder: 'analytics' as 'analytics' | 'own-agent', workingDir: '', label: 'Nay', mcpEnabled: false })
+  const [personaError, setPersonaError] = useState('')
   useEffect(() => {
     void fetch('/api/user-prefs').then(r => r.ok ? r.json() : {}).then((p: { chatResponder?: string; chatWorkingDir?: string; chatLabel?: string; chatMcpEnabled?: boolean }) => {
       setPersona({ responder: p.chatResponder === 'own-agent' ? 'own-agent' : 'analytics', workingDir: p.chatWorkingDir ?? '', label: p.chatLabel ?? 'Nay', mcpEnabled: p.chatMcpEnabled === true })
@@ -92,8 +93,17 @@ export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = t
   const savePersona = (patch: Partial<typeof persona>) => {
     const next = { ...persona, ...patch }
     setPersona(next)
-    void fetch('/api/user-prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatResponder: next.responder, chatWorkingDir: next.workingDir, chatLabel: next.label, chatMcpEnabled: next.mcpEnabled }) }).catch(() => {})
+    setPersonaError('')
+    void fetch('/api/user-prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatResponder: next.responder, chatWorkingDir: next.workingDir, chatLabel: next.label, chatMcpEnabled: next.mcpEnabled }) }).then(async res => {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string }
+        setPersonaError(body.error ?? (pt ? 'Não foi possível salvar esta preferência.' : 'Could not save this preference.'))
+        return
+      }
+      setPersonaError('')
+    })
   }
+  const commitPersona = (patch: Partial<typeof persona>) => savePersona(patch)
   useEffect(() => subscribeNotificationSettings(() => setNotify(getNotificationSettings())), [])
   const saveNotify = (patch: Partial<NotificationSettings>) => {
     const next = { ...getNotificationSettings(), ...patch }
@@ -268,12 +278,12 @@ export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = t
             {choice(
               pt ? 'Pasta de trabalho' : 'Working folder',
               pt ? 'Caminho absoluto de uma pasta existente; nada é escrito nela pelo agentistics.' : 'Absolute path to an existing folder; agentistics writes nothing there.',
-              <FieldInput label={pt ? 'Pasta de trabalho' : 'Working folder'} hideLabel value={persona.workingDir} onChange={v => savePersona({ workingDir: v })} placeholder="/home/you/project" />,
+              <FieldInput label={pt ? 'Pasta de trabalho' : 'Working folder'} hideLabel value={persona.workingDir} onChange={v => setPersona(current => ({ ...current, workingDir: v }))} onBlur={() => commitPersona({ workingDir: persona.workingDir })} invalid={!!personaError} placeholder="/home/you/project" />,
             )}
             {choice(
               pt ? 'Nome no painel' : 'Panel label',
               pt ? 'O nome mostrado para a conversa.' : 'The name shown for the conversation.',
-              <FieldInput label={pt ? 'Nome no painel' : 'Panel label'} hideLabel value={persona.label} onChange={v => savePersona({ label: v })} placeholder="Nay" />,
+              <FieldInput label={pt ? 'Nome no painel' : 'Panel label'} hideLabel value={persona.label} onChange={v => setPersona(current => ({ ...current, label: v }))} onBlur={() => commitPersona({ label: persona.label })} invalid={!!personaError} placeholder="Nay" />,
             )}
             {choice(
               'MCP agentistics',
@@ -294,6 +304,7 @@ export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = t
               }} />,
             false,
           )}
+          {personaError && <div role="alert" style={{ color: 'var(--danger, #dc2626)', fontSize: 12, marginTop: 4 }}>{personaError}</div>}
           {chat.chatSoundEnabled && choice(
             pt ? 'Qual som' : 'Which sound',
             pt ? 'Toque ▶ para ouvir antes de escolher.' : 'Press ▶ to hear it before choosing.',

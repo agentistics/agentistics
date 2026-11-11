@@ -15,6 +15,7 @@ import { resolveA11yStore } from './a11y-prefs'
 import { machineUiPatch, parseUserUiPut, readMachineUiPrefs, readUserUiPrefs } from './user-ui-prefs'
 import { readJsonLimited } from './limits'
 import { safeError } from './errors'
+import { validateNayPreferencePatch } from './sessions/nay-persona'
 
 /** The whole body; each key also has its own cap (`USER_UI_PREF_REGISTRY`). */
 const MAX_BODY_BYTES = 512 * 1024
@@ -80,13 +81,24 @@ export async function handleUserUiPrefs(
       if (!read.ok) return json({ error: read.error }, read.error === 'too_large' ? 413 : 400)
       const put = parseUserUiPut(read.value)
       if (!put.ok) return json({ error: put.error, key: put.key }, 400)
+      let validatedPatch = put.patch
+      if (Object.keys(put.patch).some(key => key === 'chatResponder' || key === 'chatWorkingDir')) {
+        const current = store.kind === 'machine'
+          ? await deps.readMachine()
+          : readUserUiPrefs(await deps.readAccount(store.accountId)) as Record<string, unknown>
+        try {
+          validatedPatch = await validateNayPreferencePatch(current, put.patch)
+        } catch (err) {
+          return json({ error: err instanceof Error ? err.message : String(err) }, 400)
+        }
+      }
       if (store.kind === 'machine') {
         // Each key goes to its own machine home — a legacy `top` key stays the field the rest of
         // the server reads; a new key goes under `ui` (see `USER_UI_PREF_REGISTRY`).
-        const next = await deps.updateMachine(current => machineUiPatch(current, put.patch))
+        const next = await deps.updateMachine(current => machineUiPatch(current, validatedPatch))
         return json(readMachineUiPrefs(next))
       }
-      await deps.writeAccount(store.accountId, put.patch)
+      await deps.writeAccount(store.accountId, validatedPatch)
       return json(readUserUiPrefs(await deps.readAccount(store.accountId)))
     }
 

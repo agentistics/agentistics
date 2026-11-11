@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp } from 'node:fs/promises'
 import { handleUserUiPrefs, type UserUiPrefsDeps } from './user-ui-prefs-routes'
 import { AUTH_PUBLIC, ADMIN_PATHS } from './index-routes'
 import { routeCapability } from './capability-guard'
@@ -63,6 +64,17 @@ describe('/api/user-prefs on a CENTRAL — per account, never the shared machine
 })
 
 describe('/api/user-prefs on a MACHINE — each key at its own home', () => {
+  test('Nay persona writes use the shared server validator', async () => {
+    const w = world(false)
+    const bad = await w.call('PUT', null, { chatResponder: 'own-agent', chatWorkingDir: 'relative' })
+    expect(bad.status).toBe(400)
+    expect(String(bad.body.error)).toContain('existing absolute directory')
+    const root = await mkdtemp('/tmp/nay-user-prefs-')
+    const good = await w.call('PUT', null, { chatResponder: 'own-agent', chatWorkingDir: `${root}/.` })
+    expect(good.status).toBe(200)
+    expect(good.body.chatWorkingDir).toBe(root)
+  })
+
   test('a legacy key stays top-level and a new key goes under ui', async () => {
     const w = world(false)
     await w.call('PUT', null, { theme: 'light', sessionsAside: { groupBy: 'status' } })

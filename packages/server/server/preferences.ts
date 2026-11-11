@@ -991,13 +991,6 @@ export function guardTeamConnectionsWipe(
 /** Merge `prefs` over the current preferences and persist to `primary`. Exported for tests. */
 export async function writePreferencesTo(primary: string, legacy: string | null, prefs: Preferences): Promise<void> {
   return enqueueWrite(async () => {
-    if (prefs.chatResponder !== undefined && prefs.chatResponder !== 'analytics' && prefs.chatResponder !== 'own-agent') {
-      throw new Error('invalid chatResponder')
-    }
-    if (prefs.chatResponder === 'own-agent') {
-      const { validateNayWorkingDir } = await import('./sessions/nay-persona')
-      if (!(await validateNayWorkingDir(prefs.chatWorkingDir))) throw new Error('chatWorkingDir must be an existing absolute directory')
-    }
     if (prefs.checkinDefaults !== undefined) {
       // Load only at the write boundary: checkin itself imports the preferences store.
       const { validateCheckinDefaults } = await import('./checkin')
@@ -1006,7 +999,9 @@ export async function writePreferencesTo(primary: string, legacy: string | null,
     const release = await acquireFileLock(primary)
     try {
       const { prefs: current } = await readEffective(primary, legacy, true)
-      const merged = { ...current, ...prefs }
+      const { validateNayPreferencePatch } = await import('./sessions/nay-persona')
+      const nayPatch = await validateNayPreferencePatch(current as Record<string, unknown>, prefs as Record<string, unknown>)
+      const merged = { ...current, ...nayPatch } as Preferences
       if (prefs.team) merged.team = mergeTeamPayload(current.team, prefs.team)
       await writePrefsFile(primary, merged)
     } finally {
@@ -1082,7 +1077,9 @@ export async function updatePreferencesAt(primary: string, legacy: string | null
       const { prefs: current } = await readEffective(primary, legacy, true)
       const patch = mutate(current)
       if (patch === undefined) return current
-      const merged = { ...current, ...patch }
+      const { validateNayPreferencePatch } = await import('./sessions/nay-persona')
+      const normalized = await validateNayPreferencePatch(current as Record<string, unknown>, patch as Record<string, unknown>)
+      const merged = { ...current, ...normalized }
       await writePrefsFile(primary, merged)
       return merged
     } finally {
