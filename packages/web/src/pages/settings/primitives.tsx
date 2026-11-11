@@ -633,7 +633,7 @@ export function StatusDot({ state, size = 8 }: {
  * included — adding an inline 16px here would be dead code that reads like a live requirement.
  */
 export function FieldInput({
-  label, sub, value, onChange, min, step, invalid, describedBy, unit, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false, minHeight, hideReveal, masked,
+  label, sub, value, onChange, onBlur, min, step, invalid, describedBy, unit, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false, minHeight, hideReveal, masked,
 }: {
   label: string
   minHeight?: number
@@ -641,6 +641,7 @@ export function FieldInput({
   sub?: string
   value: string
   onChange: (v: string) => void
+  onBlur?: () => void
   min?: number
   step?: number | 'any'
   invalid?: boolean
@@ -708,7 +709,7 @@ export function FieldInput({
           ...(disabled ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
         }}
         onFocus={e => { if (!disabled) e.currentTarget.style.borderColor = 'var(--anthropic-orange)' }}
-        onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
+        onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; onBlur?.() }}
       />
       {unit && <span aria-hidden="true" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', fontSize: 13, pointerEvents: 'none' }}>{unit}</span>}
       {(type === 'password' || masked) && !hideReveal && <RevealButton shown={shown} onToggle={() => setShown(v => !v)} />}

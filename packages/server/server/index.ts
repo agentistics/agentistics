@@ -3265,6 +3265,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
+        if (err instanceof Error && err.message.startsWith('chatWorkingDir must be')) {
+          const { nayWorkingDirConflict } = await import('./sessions/nay-route-errors')
+          return nayWorkingDirConflict(req, (await readPreferences()).chatWorkingDir, CORS_HEADERS)
+        }
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify({ ok: false, ...safe.body }), {
