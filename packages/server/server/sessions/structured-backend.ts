@@ -97,7 +97,7 @@ export interface StructuredProvider {
 /** F2.0b — what `toTerminal` did. */
 export type ToTerminalOutcome =
   | { ok: true }
-  | { ok: false; why: 'not-structured' | 'no-conversation' | 'no-resume' | 'still-running' | 'spawn-failed' }
+  | { ok: false; why: 'not-structured' | 'no-conversation' | 'no-resume' | 'still-running' | 'spawn-failed' | 'hermes-structured-only' }
 
 /**
  * F2.0b — the session as the host drives it, with every call RECORDED (`calls.jsonl`) so a re-attach
@@ -546,6 +546,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       const req: BackendSpawn | null = l ? l.req
         : saved ? { id, cwd: saved.backend.cwd, argv: [], ...(saved.backend.env ? { env: saved.backend.env } : {}), ...(saved.backend.unsetEnv ? { unsetEnv: saved.backend.unsetEnv } : {}), ...(saved.backend.structured ? { structured: saved.backend.structured as BackendSpawn['structured'] } : {}) } : null
       if (!req) return { ok: false, why: 'not-structured' }
+      if (req.structured?.harness === 'hermes') return { ok: false, why: 'hermes-structured-only' }
       const conv = l?.s.conversationId() ?? (await provider.conversationOf?.(id).catch(() => null)) ?? req.structured?.resumeId ?? null
       if (!conv) return { ok: false, why: 'no-conversation' }
       // MODE.EVERYWHERE — the mode it is in NOW (the chip may have changed it since the start).
@@ -666,8 +667,13 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     },
     attachCommand(id) {
       const l = live.get(id)
-      if (!l && durable?.isAlive(id)) return ['sh', '-c', `echo "${STRUCTURED_ATTACH}"`]
+      if (!l && durable?.isAlive(id)) {
+        const saved = durable.saved(id)
+        if (saved?.harness === 'hermes') return ['sh', '-c', `echo "${HERMES_STRUCTURED_ONLY_NOTICE}"`]
+        return ['sh', '-c', `echo "${STRUCTURED_ATTACH}"`]
+      }
       if (!l) return base.attachCommand(id)
+      if (l.req.structured?.harness === 'hermes') return ['sh', '-c', `echo "${HERMES_STRUCTURED_ONLY_NOTICE}"`]
       return ['sh', '-c', `echo "${l.route === 'acp-legacy' ? LEGACY_ATTACH : STRUCTURED_ATTACH}"`]
     },
     activityOf(id) { const s = of(id); return s ? toActivity(s.activity()) : base.activityOf?.(id) },

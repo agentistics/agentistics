@@ -173,6 +173,12 @@ describe('fleetRow — fork (V-OPENCODE.2)', () => {
 })
 
 describe('fleetRow — "open in terminal" (F2.0b)', () => {
+  it('structured Hermes has no terminal verb or tmux attach command', () => {
+    const r = fleetRow(row({ harness: 'hermes', structured: true, state: 'waiting' }), S)
+    expect(r.verbs.some(v => (v.action as string) === 'terminal')).toBe(false)
+    expect(r.attachCommand).toBe('')
+  })
+
   it('is offered on a row running over its protocol, in the row\'s language, and enabled', () => {
     const r = fleetRow(row({ structured: true, state: 'waiting' }), S)
     expect(verb(r, 'terminal')).toEqual({ action: 'terminal' as never, label: 'Open in terminal', enabled: true })
