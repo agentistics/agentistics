@@ -4,8 +4,8 @@ import { handleUserUiPrefs, type UserUiPrefsDeps } from './user-ui-prefs-routes'
 import { routeCapability } from './capability-guard'
 
 /** The machine's preferences file, in memory — the shape the real IO has. */
-function world() {
-  let machine: Record<string, unknown> = { chatEnabled: true, theme: 'dark', ui: { taskBoard: { view: 'board' } } }
+function world(initialMachine: Record<string, unknown> = {}) {
+  let machine: Record<string, unknown> = { chatEnabled: true, theme: 'dark', ui: { taskBoard: { view: 'board' } }, ...initialMachine }
   const deps: UserUiPrefsDeps = {
     readMachine: async () => machine,
     updateMachine: async mutate => { machine = { ...machine, ...mutate(machine) }; return machine },
@@ -20,6 +20,14 @@ function world() {
 }
 
 describe('/api/user-prefs — each key at its own home', () => {
+  test('unrelated writes survive a deleted own-agent directory', async () => {
+    const w = world({ chatResponder: 'own-agent', chatWorkingDir: '/tmp/nay-directory-that-was-deleted' })
+    expect((await w.call('PUT', { lang: 'pt' })).status).toBe(200)
+    expect((await w.call('PUT', { theme: 'light' })).status).toBe(200)
+    expect(w.machine().lang).toBe('pt')
+    expect(w.machine().theme).toBe('light')
+  })
+
   test('Nay persona writes use the shared server validator', async () => {
     const w = world()
     const bad = await w.call('PUT', { chatResponder: 'own-agent', chatWorkingDir: 'relative' })
