@@ -58,6 +58,7 @@ export async function startNaySession(
   const { ok: _ok, ...launch } = plan
   const out = await deps.spawn(lang, {
     cwd: persona.cwd, label: persona.responder === 'analytics' ? label(deps.now(), lang) : persona.label, ...launch,
+    ...(persona.responder === 'own-agent' ? { mcp: persona.mcpEnabled } : {}),
     ...(caller.callerVerified === true ? { callerVerified: true } : {}),
   })
   if (!out.ok || !out.id) return out

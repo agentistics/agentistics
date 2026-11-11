@@ -2003,6 +2003,8 @@ export interface SpawnSessionRequest {
   prompt?: string
   model?: string
   effort?: string
+  /** Whether the structured session receives the agentistics MCP; absent preserves the legacy default. */
+  mcp?: boolean
   /** MODE.EVERYWHERE — the permission mode to start in (absent = the harness's own configuration). */
   mode?: CanonicalMode
   label?: string
