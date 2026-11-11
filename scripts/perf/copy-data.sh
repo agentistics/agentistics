@@ -5,9 +5,9 @@
 #
 # The copy is a fake $HOME: the harness dirs (~/.claude, ~/.codex, ~/.gemini, ~/.copilot, opencode)
 # and ~/.agentistics WITHOUT what must never leave its place: the vault, provider keys, sealed
-# backups, team connections and central data, and the backups/archive (size, not data the server
-# reads at boot). preferences.json is copied with its `team` block removed, so the copy can never
-# push to a central. The running server and its data are only READ, never written.
+# backups, team connections, and the backups/archive (size, not data the server reads at boot).
+# preferences.json is copied with its `team` block removed, so the copy is isolated. The running
+# server and its data are only READ, never written.
 set -euo pipefail
 DEST="${1:-/tmp/agentistics-perf/home}"
 case "$DEST" in "$HOME"|"$HOME/"|/) echo "refusing to copy onto $DEST" >&2; exit 2;; esac
@@ -20,7 +20,7 @@ copy .copilot
 copy .local/share/opencode --exclude 'auth.json'
 copy .agentistics \
   --exclude 'vault' --exclude 'provider-keys' --exclude '*.sealed' --exclude 'backups' --exclude 'backups.jsonl' \
-  --exclude 'archive' --exclude 'central' --exclude 'connections' --exclude 'team*' --exclude '*.corrupt-*' \
+  --exclude 'archive' --exclude 'connections' --exclude 'team*' --exclude '*.corrupt-*' \
   --exclude '*.pre-*' --exclude 'run' --exclude 'structured' --exclude 'flows/bundles' --exclude 'heavy' --exclude '*.sock' --exclude 'instance.lock' --exclude 'server.lock' --exclude 'preferences.json' --exclude 'agentop-server.log'
 if [ -f "$HOME/.agentistics/preferences.json" ]; then
   bun -e "const p=JSON.parse(await Bun.file(process.argv[1]).text()); delete p.team; await Bun.write(process.argv[2], JSON.stringify(p,null,2))" \

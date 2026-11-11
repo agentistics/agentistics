@@ -6,8 +6,8 @@ Please report privately, not as a public issue: open a
 [GitHub security advisory](https://github.com/agentistics/agentistics/security/advisories/new)
 on this repository. That channel is private until a fix ships.
 
-Useful in a report: the version or commit, the deployment shape (solo machine / LAN central /
-public central behind a tunnel), and the smallest reproduction you have. A proof of concept is
+Useful in a report: the version or commit, the deployment shape (local / LAN / public), and the
+smallest reproduction you have. A proof of concept is
 welcome but not required — a clear description of the flaw is enough.
 
 There is no bounty. Expect an acknowledgement within a few days.
@@ -33,9 +33,9 @@ Security here rests on **secrets and configuration, never on the code being unre
   (`packages/server/server/authz-gate.test.ts`) precisely so it can be reviewed in the open.
 
 What a public repository *does* change is that the defaults matter more, because an attacker
-reads them too. That is why the defaults are the conservative ones: the central binds
-`127.0.0.1`, an unrecognised exposure value fails closed to the most restrictive profile, and
-there is no configuration flag that re-enables shell access on an instance marked `public`.
+reads them too. That is why the defaults are conservative: local exposure stays on loopback, an
+unrecognised exposure value fails closed to the most restrictive profile, and there is no
+configuration flag that re-enables shell access on an instance marked `public`.
 
 The reverse — a private repository — would not have prevented any of the issues this project has
 fixed. It would only have delayed someone else noticing them.
@@ -54,12 +54,7 @@ coding assistants whose data this project reads.
 
 ## Deployment guidance
 
-If you run a central reachable by anyone other than yourself, read
-[docs/exposure.md](docs/exposure.md) and run:
-
-```bash
-./central.sh doctor --exposed        # or: agentop central doctor --exposed
-```
-
-It exits non-zero until every control is configured. A check it could not verify is reported as
-a failure, never as a pass.
+If the app is reachable by anyone other than yourself, read [docs/exposure.md](docs/exposure.md).
+Use `local` for loopback-only access, `lan` when access is intentionally limited to a trusted
+network, and `public` only when the app is behind a reverse proxy that provides identity and
+access control. A public deployment must not expose the app directly to the internet.

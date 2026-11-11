@@ -329,7 +329,7 @@ cannot be taken back, and a real project name or repository in one is a leak.
 ```bash
 # 1. a pseudonymized fleet, derived from this machine's computed metrics
 #    (never from transcripts, so chat cannot reach it by construction)
-bun run packages/server/scripts/seed-demo.ts --split 3 --force
+bun run packages/server/scripts/seed-demo.ts --force
 
 # 2. run them
 HOME=~/.agentistics-demo-home-1 PORT=47391 ./release/agentop server &

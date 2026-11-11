@@ -308,7 +308,7 @@ export function verbReason(
   return undefined
 }
 
-/** One control-center row, shaped for the browser — verbs, wording and refusals included. */
+/** One session row, shaped for the browser — verbs, wording and refusals included. */
 const FORGETTABLE_STATES: ReadonlySet<string> = new Set(['exited', 'closed', 'lost'])
 
 export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {

@@ -28,7 +28,6 @@ functionality. In plain terms:
 | Use it yourself, at home or at work | Yes |
 | Install it inside your company for your employees, on any number of machines | Yes, free, with no licence key and no registration |
 | Modify it for your own or your company's internal use | Yes |
-| Self-host the team central for your own organisation | Yes |
 | Write your own adapter, integration, plugin or extension | Yes |
 | Fork it to experiment, study or contribute back | Yes |
 | As a consultancy, install, configure and support it **on your client's own infrastructure**, and charge for that work | Yes (the licence names professional services explicitly) |

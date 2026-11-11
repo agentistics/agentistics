@@ -1,9 +1,8 @@
 # Run THIS machine (solo or member) in Docker.
 #
-# Reuses the same image as the central (see Dockerfile), but without Mongo and without central
-# mode: it reads the host's harness dirs read-only and serves the dashboard. Configure the machine
-# on the HOST first (`agentop member connect …` writes ~/.agentistics), then bring the container up —
-# it mounts that same ~/.agentistics, so it inherits the endpoint/token.
+# Reuses the application image and reads the host's harness dirs read-only while serving the
+# dashboard. Configure the machine on the HOST first, then bring the container up — it mounts that
+# same ~/.agentistics and inherits the local preferences.
 #
 #   agentop start           # pick "docker" in the launcher, or:
 #   docker compose -f docker/machine.yml up -d --build
@@ -32,8 +31,6 @@ services:
       COPILOT_DIR: /host-copilot
       # Antigravity (agy) lives inside the Gemini home, so /host-gemini already covers it;
       # ANTIGRAVITY_DIR defaults to <GEMINI_DIR>/antigravity-cli. Override only to relocate it.
-      # This is a machine, not a central — override the image's central-mode default.
-      AGENTISTICS_TEAM_CENTRAL: ""
       # PORT (api + mcp) 47291; the server also binds 47292 for the web dashboard.
       PORT: "47291"
       SERVE_STATIC: "1"
@@ -53,8 +50,7 @@ services:
       # the host user, so leave the mount read-write AND uncomment the `user:` line below if you
       # want the container to persist anything back (it is the same line the /proc note asks for).
       - ${HOME}/.agentistics:/data/.agentistics
-    # Host networking so the member reaches the central (localhost or a tailnet address) and opens
-    # the reverse-channel WebSocket, and so the web (47292) + api (47291) land directly on the host.
+    # Host networking lets the web (47292) and API (47291) land directly on the host.
     network_mode: host
     # Live sessions are detected by reading /proc. A container has its OWN pid namespace, so
     # without this it sees only itself and "Open now" is structurally empty — an assistant running

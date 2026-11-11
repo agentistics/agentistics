@@ -9,12 +9,11 @@
 # THE IMAGE RUNS THE COMPILED BINARY, NOT THE SOURCE. It used to copy `packages/` whole and run
 # `bun run packages/server/server/index.ts`; the official image now carries the private engine
 # (docs/official-build.md), and an image that ships source would ship the engine's source with it.
-# So the runtime stage receives `release/agentop` — `--minify`, no source map — and no source (the one
-# `.ts` left in it is a three-line forwarder, below).
+# So the runtime stage receives `release/agentop` — `--minify`, no source map — and no source.
 # ---------------------------------------------------------------------------
 
 # ---- Stage 0: the engine slot ----------------------------------------------
-# A COMMUNITY build (a clone, `docker/central.yml`, `docker/machine.yml`, a fork) leaves this stage
+# A COMMUNITY build (a clone, `docker/machine.yml`, a fork) leaves this stage
 # empty and gets the engine slot `engine-slot.ts` chooses on its own. The OFFICIAL image
 # (release.yml's publish-image job) replaces it with the engine checked out at `engine.pin`:
 #
@@ -109,8 +108,7 @@ RUN groupadd --system --gid 10001 agentistics \
 
 # The TLS trust store, installed EXPLICITLY rather than inherited from the base image.
 #
-# A central talks to Mongo over TLS (Atlas is `mongodb+srv://…`, certificate-verified). The base
-# image happened to ship a usable trust store, so this worked — until a rebuild pulled a newer
+# The base image happened to ship a usable trust store, so this worked — until a rebuild pulled a newer
 # `oven/bun:1-slim` whose store differed, and every Mongo connection began failing with
 # "Cert does not contain a DNS name". Same code, same Dockerfile, same commit: only the
 # unpinned base had moved. The app served its static assets fine and 500'd on every route that
@@ -128,17 +126,6 @@ RUN apt-get update \
 # Root-owned on purpose, like /app always was: the app reads its own code and writes only /data.
 COPY --from=builder /app/release/agentop /usr/local/bin/agentop
 
-# The ONE path older clients still exec. Every `agentop central` released before this image ran
-# `docker compose exec app bun run packages/server/bin/cli.ts setup-token` (and `reset-password`,
-# `doctor`), as central.sh still does — a path that named the source this image no longer carries.
-# It is now a forwarder to the binary, so those commands keep working against a new image.
-RUN mkdir -p /app/packages/server/bin \
- && printf '%s\n' \
-    '// Forwarder: this image runs the compiled binary. Kept so `bun run packages/server/bin/cli.ts <cmd>` still works.' \
-    "const r = Bun.spawnSync(['/usr/local/bin/agentop', ...process.argv.slice(2)], { stdio: ['inherit', 'inherit', 'inherit'] })" \
-    'process.exit(r.exitCode ?? 1)' \
-    > /app/packages/server/bin/cli.ts
-
 # agentistics runs on port 47291; expose it
 EXPOSE 47291
 
@@ -148,16 +135,13 @@ EXPOSE 47291
 USER agentistics
 
 # SERVE_STATIC=1: server.ts will serve the embedded frontend on the same port.
-# AGENTISTICS_TEAM_CENTRAL=1: activate central aggregator mode.
 # AGENTISTICS_CONTAINER=1: no event producer, no scheduled backup, no self-upgrade (daemon-plan.ts,
 # upgrade-gate.ts) — an image is replaced, not upgraded in place.
 ENV SERVE_STATIC=1 \
     AGENTISTICS_CONTAINER=1 \
-    AGENTISTICS_TEAM_CENTRAL=1 \
     PORT=47291 \
     HOME=/data
 
-# `agentop server` — the server, plus only the parts of the daemon a central or a container should run
-# (packages/server/server/daemon-plan.ts: a central starts none of it). `bun` stays in the image only for the
-# healthchecks in docker/*.yml (`bun -e "fetch(...)"`) and the forwarder above.
+# `agentop server` — the server and the container-specific daemon plan. `bun` stays in the image for
+# the healthchecks in docker/*.yml (`bun -e "fetch(...)"`).
 CMD ["agentop", "server"]
