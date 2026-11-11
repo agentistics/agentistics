@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { EngineBook, EngineBookContext } from '@agentistics/engine-api'
 import { bookActorFromRequest } from './book-actor'
-import { BOOK_TAKEOVER_UNAVAILABLE, flowOpStatus, handleBookRoutes } from './book-routes'
+import { flowOpStatus, handleBookRoutes } from './book-routes'
 
 interface Seen {
   http: Array<{ url: string; context: EngineBookContext }>
@@ -100,11 +100,18 @@ describe('handleBookRoutes', () => {
     expect(seen.flow[0]!.input.context?.actor).toEqual({ id: 'localShell', verified: false, role: 'user' })
   })
 
-  test('flow op refuses a non-POST (405) and the unimplemented successor spawn (501) without calling the engine', async () => {
+  test('flow op refuses a non-POST (405) without calling the engine', async () => {
     const { book, seen } = fakeBook()
     expect((await run(new Request('http://localhost/api/flow/op/x'), book))?.status).toBe(405)
-    expect((await run(post('/api/flow/op/abrir-sucessor', {}), book))?.status).toBe(501)
     expect(seen.flow).toHaveLength(0)
+  })
+
+  test('slice 2: abrir-sucessor reaches the engine with the proof actor (the spawn is the engine\'s, through the host)', async () => {
+    const { book, seen } = fakeBook()
+    const res = await run(post('/api/flow/op/abrir-sucessor', { stdin: '{}', session: { id: 'managed-1', token: 'valid' } }), book)
+    expect(res?.status).toBe(200)
+    expect(seen.flow.map(f => f.name)).toEqual(['abrir-sucessor'])
+    expect(seen.flow[0]!.input.context?.actor).toEqual({ id: 'managed-1', verified: true, role: 'leader' })
   })
 
   test('R4 the transport exit code maps to HTTP: 0→200, 2→400, 1→500, 3→503', async () => {
@@ -125,15 +132,24 @@ describe('handleBookRoutes', () => {
     expect(seen.flow).toHaveLength(0)
   })
 
-  test('B3 /api/book/takeover answers 501 "book takeover is not available yet" on both builds, never 405', async () => {
+  test('slice 2: /api/book/takeover and /api/book/passagem reach the engine with the proof actor, and the body stays readable', async () => {
     const { book, seen } = fakeBook()
-    for (const b of [book, undefined]) {
-      const res = await run(post('/api/book/takeover', { taskId: 't', sessionId: 's', hmac: 'h' }), b)
-      expect(res?.status).toBe(501)
-      expect(await res?.json()).toEqual({ ok: false, error: 'not-implemented', sentence: BOOK_TAKEOVER_UNAVAILABLE })
+    const bodies: string[] = []
+    const reading: EngineBook = { ...book, handleHttp: async (req, context) => { bodies.push(await req.text()); return book.handleHttp(req, context) } }
+    for (const path of ['/api/book/takeover', '/api/book/passagem']) {
+      const res = await run(post(path, { taskId: 't', bookmarkHash: 'b', session: { id: 'managed-1', token: 'valid' } }), reading)
+      expect(res?.status).toBe(200)
     }
-    expect(BOOK_TAKEOVER_UNAVAILABLE).toBe('book takeover is not available yet')
-    expect(seen.http).toHaveLength(0)
+    expect(seen.http.map(h => new URL(h.url).pathname)).toEqual(['/api/book/takeover', '/api/book/passagem'])
+    for (const h of seen.http) expect(h.context.actor).toEqual({ id: 'managed-1', verified: true, role: 'leader' })
+    // The engine re-checks the very proof, so the request it receives still carries its body.
+    for (const b of bodies) expect(JSON.parse(b)).toMatchObject({ taskId: 't', session: { id: 'managed-1', token: 'valid' } })
+  })
+
+  test('without the book capability /api/book/takeover answers the build\'s 501, never 405', async () => {
+    const res = await run(post('/api/book/takeover', { taskId: 't' }), undefined)
+    expect(res?.status).toBe(501)
+    expect(await res?.json()).toEqual({ error: 'book not available in this build', sentence: 'book not available in this build' })
   })
 
   test('without the book capability both routes answer 501 "book not available in this build"', async () => {

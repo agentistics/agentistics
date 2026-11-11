@@ -2,11 +2,6 @@ import type { EngineBook, EngineBookContext } from '@agentistics/engine-api'
 import { buildFlowOpEnv } from './book-flow-env'
 
 export const BOOK_ABSENT_MESSAGE = 'book not available in this build'
-/**
- * The takeover handshake needs the successor spawn (`abrir-sucessor`, fatia 2) and the session-identity HMAC
- * on the engine side; until both land the route answers this, on every build, rather than a 405.
- */
-export const BOOK_TAKEOVER_UNAVAILABLE = 'book takeover is not available yet'
 
 export interface BookRouteDeps {
   /** The engine's `book` capability, when this build has one. */
@@ -43,7 +38,8 @@ export async function handleBookRoutes(req: Request, url: URL, deps: BookRouteDe
     const name = decodeURIComponent(url.pathname.slice('/api/flow/op/'.length))
     if (url.pathname === '/api/flow/op' || !name) return json({ ok: false, error: 'op-name-required' }, 400)
     const body = await req.json().catch(() => ({})) as { stdin?: unknown; env?: unknown; session?: unknown }
-    if (name === 'abrir-sucessor') return json({ ok: false, error: 'book successor spawn is not available yet' }, 501)
+    // `abrir-sucessor` included (slice 2): the engine spawns through the host's `EngineBookHost`, and only for a
+    // write the runtime admits (an active reservation's runId and a verified leader of it).
     const context = await deps.context(body)
     const result = await book.invokeFlowOpTransport(name, {
       stdin: typeof body.stdin === 'string' ? body.stdin : undefined,
@@ -53,9 +49,9 @@ export async function handleBookRoutes(req: Request, url: URL, deps: BookRouteDe
     return new Response(result.stdout, { status: flowOpStatus(result.exitCode), headers: { 'Content-Type': 'application/json' } })
   }
   if (url.pathname === '/api/book' || url.pathname.startsWith('/api/book/')) {
-    if (url.pathname === '/api/book/takeover') {
-      return json({ ok: false, error: 'not-implemented', sentence: BOOK_TAKEOVER_UNAVAILABLE }, 501)
-    }
+    // `/api/book/takeover` and `/api/book/passagem` included: the engine answers them (501 itself on a host
+    // without `EngineBookHost`). The actor is read from a clone, so the engine still receives the body and
+    // re-checks the takeover proof with the host's verifier.
     if (!book) return json({ error: BOOK_ABSENT_MESSAGE, sentence: BOOK_ABSENT_MESSAGE }, 501)
     return book.handleHttp(req, await deps.context())
   }
