@@ -38,9 +38,9 @@ function resolvePaging(input: { mode: 'maximized'; total: number; page: number; 
 }
 import {
   KIND_FIELDS, PERSONAL_KINDS, REVEAL_HIDE_MS, copyWithAutoClear, createGroup, createPersonal, defaultImportChoices, deleteGroup, editPersonal,
-  filterPersonal, importCommit, importPreview, importReady, listPersonal, listVersions, movePersonal, parseTags, purgePersonal, renameGroup,
+  filterPersonal, importCommit, importPreview, importReady, listPersonal, listVersions, moveBatch, parseTags, purgePersonal, renameGroup,
   USE_ONLY_DEFAULT, isUseOnly, allKind, setAllKind, batchBinding, newGroupName, trashBatch, restorePersonal, restoreVersion, revealPersonal, trashPersonal, withStepUp,
-  type ImportChoice, type ImportKey, type PersonalFilter, type PersonalGroup, type PersonalKind, type PersonalMeta,
+  type BatchResult, type ImportChoice, type ImportKey, type PersonalFilter, type PersonalGroup, type PersonalKind, type PersonalMeta,
 } from '../lib/vaultPersonal'
 import { pt_, type PKey } from '../lib/personalText'
 import { NEW_TYPE, choiceValue, kindChoices, kindName, resolveChoice, useVaultTypes } from '../lib/vaultKinds'
@@ -227,7 +227,7 @@ export default function VaultPage() {
 // ── Segredos ─────────────────────────────────────────────────────────────────────────────────
 
 /** ONE list: the person's secrets (paged, filtered) and, under them, the ones Agentistics keeps for itself. */
-function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
+export function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
   lang: Lang; isMobile: boolean; personal: ReturnType<typeof usePersonalVault>; pending: number; onFlash: (s: string) => void
 }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
@@ -238,7 +238,8 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
   const [size, setSize] = useState(25)
   const [dialog, setDialog] = useState<{ item: PersonalMeta | null; replace?: boolean; tab?: 'create' | 'import' } | null>(null)
   const [versionsOf, setVersionsOf] = useState<PersonalMeta | null>(null)
-  const [moving, setMoving] = useState<PersonalMeta | null>(null)
+  const [moving, setMoving] = useState<PersonalMeta[] | null>(null)
+  const [moveResult, setMoveResult] = useState<string | null>(null)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [learn, setLearn] = useState(false)
   const [sysDetails, setSysDetails] = useState<VaultItem | null>(null)
@@ -346,6 +347,8 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
           <Checkbox checked={allTicked} onChange={v => setSel(cur => setRows(cur, selectable.map(m => m.id), v))} label={t('selectAll', { n: selectable.length })} />
           <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8, flexWrap: 'wrap', flex: isMobile ? '1 1 100%' : undefined }}>
             <button type="button" style={{ ...pageBtn(isMobile), flex: isMobile ? 1 : undefined }} onClick={() => setSel(leaveMode())}>{t('doneSelecting')}</button>
+            <button type="button" disabled={selected.length === 0 || batchBusy} data-vault-batch-move onClick={() => setMoving(selectedItems)}
+              style={{ ...pageBtn(isMobile), flex: isMobile ? '1 1 100%' : undefined }}><FolderInput size={14} /> {t('moveTo')} · {selected.length}</button>
             <button type="button" disabled={selected.length === 0 || batchBusy} data-vault-batch-delete onClick={() => setConfirmBatch(true)}
               style={{ ...dialogButtonStyle('primary', isMobile, selected.length === 0 || batchBusy), width: undefined, flex: isMobile ? 1 : undefined, ...(selected.length === 0 ? null : { background: 'var(--accent-red, #ef4444)', borderColor: 'var(--accent-red, #ef4444)', color: '#fff' }) }}>
               {batchBusy ? <AgentisticsLoader size={14} /> : <Trash2 size={14} />} {t('deleteN', { n: selected.length })}
@@ -354,6 +357,7 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
         </div>
       )}
 
+      {moveResult && <div role="status" data-vault-move-result style={{ fontSize: 13, marginBottom: 12, overflowWrap: 'anywhere' }}>{moveResult}</div>}
       {rows.length === 0 && sysShown.length === 0
         ? <div style={{ fontSize: 13, color: 'var(--text-tertiary)', padding: '18px 0' }}>{items.length === 0 && systemItems.length === 0 ? t('empty') : t('noMatch')}</div>
         : (
@@ -362,7 +366,7 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
               <SecretRow key={m.id} m={m} lang={lang} isMobile={isMobile} group={groupName(m.groupId)} groups={groups}
                 gated={gated} onChanged={upsert} onRemoved={id => setItems(cur => cur.filter(x => x.id !== id))} onFlash={onFlash}
                 selecting={sel.on && !m.deletedAt} checked={sel.ids.has(m.id)} onTick={() => setSel(cur => toggleRow(cur, m.id))}
-                onEdit={replace => setDialog({ item: m, replace })} onVersions={() => setVersionsOf(m)} onMove={() => setMoving(m)} />
+                onEdit={replace => setDialog({ item: m, replace })} onVersions={() => setVersionsOf(m)} onMove={() => setMoving([m])} />
             ))}
             {paging.end >= shown.length && sysShown.map((i, n) => <SystemSecretRow key={`${i.file}-${n}`} item={i} lang={lang} isMobile={isMobile} onDetails={() => setSysDetails(i)} />)}
           </Rows>
@@ -404,7 +408,17 @@ function SecretsArea({ lang, isMobile, personal, pending, onFlash }: {
         confirmLabel={t('deleteN', { n: selected.length })} cancelLabel={t('cancel')}
         onCancel={() => setConfirmBatch(false)} onConfirm={() => { setConfirmBatch(false); void deleteBatch() }} />
       {versionsOf && <VersionsDialog lang={lang} isMobile={isMobile} item={versionsOf} gated={gated} onClose={() => setVersionsOf(null)} onRestored={m => { upsert(m); setVersionsOf(null) }} />}
-      {moving && <MoveDialog lang={lang} isMobile={isMobile} item={moving} groups={groups} gated={gated} onClose={() => setMoving(null)} onMoved={m => { upsert(m); setMoving(null) }} />}
+      {moving && <MoveDialog lang={lang} isMobile={isMobile} items={moving} groups={groups} gated={gated}
+        onGroupCreated={g => setGroups(cur => [...cur.filter(x => x.id !== g.id), g])}
+        onClose={() => setMoving(null)} onMoved={results => {
+          const done = results.filter(r => r.ok && r.meta)
+          const failed = results.filter(r => !r.ok)
+          setItems(cur => cur.map(m => done.find(r => r.id === m.id)?.meta ?? m))
+          setMoveResult(failed.length ? t('movePartial', { ok: done.length, bad: failed.length,
+            names: failed.map(r => `${moving.find(m => m.id === r.id)?.name ?? r.id} (${r.sentence || (r.code === 'network' ? t('network') : r.code) || '?'})`).join('; ') }) : t('moveDone', { n: done.length }))
+          setSel(failed.length ? { on: true, ids: new Set(failed.map(r => r.id)) } : leaveMode())
+          setMoving(null)
+        }} />}
       {groupsOpen && <GroupsDialog lang={lang} isMobile={isMobile} groups={groups} items={items} gated={gated} onClose={() => setGroupsOpen(false)} onChanged={() => { void load() }} />}
       {learn && (
         <Sheet closeLabel={t('close')} isMobile={isMobile} title={t('tab_secrets')} onClose={() => setLearn(false)}
@@ -972,31 +986,42 @@ function VersionsDialog({ lang, isMobile, item, gated, onClose, onRestored }: { 
 }
 
 /** "Mover para grupo": the one choice, then the move (no gesture — the server's gate says so). */
-function MoveDialog({ lang, isMobile, item, groups, gated, onClose, onMoved }: { lang: Lang; isMobile: boolean; item: PersonalMeta; groups: PersonalGroup[]; gated: Gated; onClose: () => void; onMoved: (m: PersonalMeta) => void }) {
+function MoveDialog({ lang, isMobile, items, groups, gated, onClose, onMoved, onGroupCreated }: { lang: Lang; isMobile: boolean; items: PersonalMeta[]; groups: PersonalGroup[]; gated: Gated; onClose: () => void; onMoved: (r: BatchResult[]) => void; onGroupCreated: (g: PersonalGroup) => void }) {
   const t = (k: PKey, v?: Record<string, string | number>) => pt_(k, lang, v)
-  const [groupId, setGroupId] = useState(item.groupId ?? '')
+  const [groupId, setGroupId] = useState(items[0]?.groupId ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const move = async () => {
+    if (busy) return
     setBusy(true); setError(null)
-    const r = await gated(c => movePersonal(item.id, item.version, groupId || null, c), false)
+    const results = await moveBatch(items, groupId || null, call => gated(call, false))
     setBusy(false)
-    if (!r.ok) { setError(r.sentence || t('network')); return }
-    onMoved(r.meta)
+    onMoved(results)
   }
-  const same = (item.groupId ?? '') === groupId
+  const same = items.every(item => (item.groupId ?? '') === groupId)
   return (
-    <Sheet closeLabel={t('close')} isMobile={isMobile} title={`${t('moveTo')} · ${item.name}`} onClose={onClose}
+    <Sheet closeLabel={t('close')} isMobile={isMobile} title={`${t('moveTo')} · ${items.length === 1 ? items[0]!.name : items.length}`} onClose={() => { if (!busy) onClose() }}
       footer={(
         <>
           {error && <Err text={error} />}
           <DialogActions>
-            <button type="button" onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel')}</button>
-            <button type="button" disabled={busy || same} onClick={() => { void move() }} style={dialogButtonStyle('primary', isMobile, busy || same)}>{busy ? t('working') : t('save')}</button>
+            <button type="button" disabled={busy} onClick={onClose} style={dialogButtonStyle('secondary', isMobile)}>{t('cancel')}</button>
+            <button type="button" disabled={busy || same} onClick={() => { void move() }} style={dialogButtonStyle('primary', isMobile, busy || same)}>{busy ? t('working') : t('moveN', { n: items.length })}</button>
           </DialogActions>
         </>
       )}>
-      <Select value={groupId} onChange={setGroupId} placeholder={t('noGroup')} options={[{ value: '', label: t('noGroup') }, ...groups.map(g => ({ value: g.id, label: g.name }))]} />
+      <div>
+        <Select disabled={busy} value={groupId} onChange={setGroupId} placeholder={t('noGroup')} options={[{ value: '', label: t('noGroup') }, ...groups.map(g => ({ value: g.id, label: g.name }))]}
+          creatable={{ label: text => t('createGroupRow', { text }), onCreate: text => {
+            const name = newGroupName(text, groups)
+            if (!name || busy) return
+            setBusy(true); setError(null)
+            void gated(c => createGroup(name, c), false).then(r => {
+              if (r.ok) { onGroupCreated(r.group); setGroupId(r.group.id) }
+              else setError(r.sentence || t('network'))
+            }).catch(() => setError(t('network'))).finally(() => setBusy(false))
+          } }} />
+      </div>
     </Sheet>
   )
 }
