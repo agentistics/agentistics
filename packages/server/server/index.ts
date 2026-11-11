@@ -142,7 +142,7 @@ import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, createFolderStatus, createProjectFolder, listFolders, rootListing } from './fs-folders'
 import { forgetProjects } from './sessions/project-source'
-import { bookActorFromRequest } from './book-actor'
+import { bookActorFromRequest, bookRoleOf } from './book-actor'
 import { handleBookRoutes } from './book-routes'
 
 // ---------------------------------------------------------------------------
@@ -497,10 +497,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { verifySessionIdentity } = await import('./sessions/session-identity')
       const actor = await bookActorFromRequest(req, {
         verify: verifySessionIdentity,
+        // The roles key is the conversation id once the session has one: read the registry row (bookRoleOf).
         roleOf: async id => {
           const { readRolesDoc, roleOfRow } = await import('./sessions/session-roles')
-          const roles = (await readRolesDoc(AGENTISTICS_DATA_DIR)).roles
-          return roleOfRow(roles, { id })
+          const { readRegistry } = await import('./sessions/registry')
+          return bookRoleOf(id, {
+            roles: async () => (await readRolesDoc(AGENTISTICS_DATA_DIR)).roles,
+            row: async rowId => (await readRegistry()).find(r => r.id === rowId),
+            roleOfRow,
+          })
         },
       }, bodyOverride)
       return { actor }

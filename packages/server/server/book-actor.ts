@@ -9,6 +9,26 @@ export interface BookActorBody {
   session?: unknown
 }
 
+export interface BookRoleDeps {
+  /** The stored roles document's `roles` map. */
+  roles: () => Promise<Record<string, string>>
+  /** The registry row of a managed id (its conversation id is the roles key once it has one). */
+  row: (id: string) => Promise<{ id: string; conversationId?: string | undefined } | undefined>
+  roleOfRow: (roles: Record<string, never>, row: { id: string; conversationId?: string | undefined }) => string | undefined
+}
+
+/**
+ * The stored role of a VERIFIED managed id. Roles are keyed by the session's conversation id once it has one
+ * (`sessionIdentityKey`), so the registry row is read first; the managed id alone would read a real leader as a
+ * plain user. Only `leader` / `worker` count.
+ */
+export async function bookRoleOf(id: string, deps: BookRoleDeps): Promise<'leader' | 'worker' | undefined> {
+  const roles = await deps.roles()
+  const row = (await deps.row(id).catch(() => undefined)) ?? { id }
+  const role = deps.roleOfRow(roles as Record<string, never>, row)
+  return role === 'leader' || role === 'worker' ? role : undefined
+}
+
 export interface BookActorDeps {
   verify: (id: unknown, token: unknown) => Promise<string | null>
   roleOf?: (id: string) => Promise<'leader' | 'worker' | undefined>
