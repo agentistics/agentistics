@@ -33,6 +33,8 @@ describe('buildLive derives overdueSinceMs from the stage ceiling when there is 
     const p = pieceOf(detail(3))
     expect(p).toBeDefined()
     expect(p!.overdueSinceMs).toBeUndefined()
-    if (p!.publishEta.kind === 'estimate') expect(p!.publishEta.atMs).toBeGreaterThan(NOW)
+    const eta = p!.publishEta
+    expect(eta.kind).toBe('estimate')
+    expect((eta as { atMs: number }).atMs).toBeGreaterThan(NOW)
   })
 })
