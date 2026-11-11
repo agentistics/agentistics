@@ -703,6 +703,8 @@ export interface ControlSession {
   handoffTo?: string
   /** WHERE the link came from (LIVE.1); `null` = not linked yet. Computed from legacy facts. */
   link?: SessionConversationLink | null
+  /** The exact registry reason, when one was recorded, before the canonical link is derived. */
+  conversationLinkVia?: SessionConversationLink['reason']
   /**
    * Already-localized: this harness can never report which conversation a session it started is
    * writing, so no link can be recorded for this row and anything offered to reopen is inferred.

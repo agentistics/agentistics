@@ -225,6 +225,7 @@ export function toControlSession(
     // answer to "where does it continue from". Never filled from the harness+directory guess.
     ...(v.conversationId ? { conversationId: v.conversationId } : {}),
     ...(link !== undefined ? { link } : {}),
+    ...(v.conversationLinkVia ? { conversationLinkVia: v.conversationLinkVia } : {}),
     // …and where no answer can ever exist, that is stated instead. Only on a row we HOST and only
     // while it has no id: an `external` or `closed` row was never ours to record, and a claude row
     // that has not been polled yet is about to have one. Same shape as `approvalBlind`.
