@@ -183,7 +183,7 @@ describe('popoverPosition', () => {
     const style = popoverStyle({ left: 8, top: 40, width: 116 })
     expect(style.width).toBe('max-content')
     expect(style.minWidth).toBe(116)
-    expect(style.maxWidth).toBe('calc(100vw - 16px)')
+    expect(style.maxWidth).toBe('calc(100vw / var(--ui-zoom, 1) - 16px)')
     expect(style.boxSizing).toBe('border-box')
   })
   const rect = (top: number, height = 40, left = 100, width = 240) =>

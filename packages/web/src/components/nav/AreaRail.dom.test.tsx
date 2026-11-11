@@ -15,6 +15,7 @@ let host: HTMLDivElement
 let oldAct: unknown
 let originalFetch: typeof fetch
 let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView
+let hadOwnScrollIntoView = false
 let scrolled: Element[] = []
 beforeAll(async () => {
   originalFetch = globalThis.fetch
@@ -25,13 +26,16 @@ beforeAll(async () => {
   createRoot = (await import('react-dom/client')).createRoot
   MemoryRouter = (await import('react-router-dom')).MemoryRouter
   useLocation = (await import('react-router-dom')).useLocation
+  // Own or inherited: restoring an inherited method as an OWN property would shadow later
+  // patches of Element.prototype.scrollIntoView in other files of the same run.
+  hadOwnScrollIntoView = Object.prototype.hasOwnProperty.call(HTMLElement.prototype, 'scrollIntoView')
   originalScrollIntoView = HTMLElement.prototype.scrollIntoView
   HTMLElement.prototype.scrollIntoView = function () { scrolled.push(this) }
   AreaRail = (await import('./AreaRail')).AreaRail
   AreaTree = (await import('./AreaTree')).AreaTree
 })
 afterEach(async () => { await act(async () => { root?.unmount() }); root = undefined; host?.remove(); scrolled = []; areaOpenStore.set({}) })
-afterAll(async () => { globalThis.fetch = originalFetch; HTMLElement.prototype.scrollIntoView = originalScrollIntoView; (globalThis as any).IS_REACT_ACT_ENVIRONMENT = oldAct; await GlobalRegistrator.unregister() })
+afterAll(async () => { globalThis.fetch = originalFetch; if (hadOwnScrollIntoView) HTMLElement.prototype.scrollIntoView = originalScrollIntoView; else delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView; (globalThis as any).IS_REACT_ACT_ENVIRONMENT = oldAct; await GlobalRegistrator.unregister() })
 
 for (const lang of ['pt', 'en'] as const) test(`rail opens only by click, top toggle is first, headings never navigate (${lang})`, async () => {
   const visits: string[] = []
