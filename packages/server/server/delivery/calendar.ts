@@ -18,6 +18,7 @@ export interface CalendarSources {
   nowMs: number
   lives: CalLiveInput[]
   records: CalRecordInput[]
+  releases?: { version: string; publishedAt: string }[]
   tasks: CalTaskInput[]
   subtasks: CalSubtaskInput[]
   resets: CalResetInput[]
@@ -25,10 +26,10 @@ export interface CalendarSources {
 
 export async function readCalendarSources(): Promise<CalendarSources> {
   const nowMs = Date.now()
-  const [{ liveDeliveries }, { deliveryService }, { loadTaskWorld }] = await Promise.all([
-    import('../sessions/task-web'), import('./host'), import('../sessions/task-source'),
+  const [{ liveDeliveries }, { deliveryService }, { loadTaskWorld }, { getVersionInfo }] = await Promise.all([
+    import('../sessions/task-web'), import('./host'), import('../sessions/task-source'), import('../version'),
   ])
-  const [view, records, world] = await Promise.all([liveDeliveries(), deliveryService().list(), loadTaskWorld()])
+  const [view, records, world, versionInfo] = await Promise.all([liveDeliveries(), deliveryService().list(), loadTaskWorld(), getVersionInfo()])
   const lives: CalLiveInput[] = view.deliveries.map(d => ({
     key: d.key, taskId: d.taskId, taskTitle: d.taskTitle, subtaskId: d.subtaskId, title: d.title, ...(d.kind ? { kind: d.kind } : {}), ...(d.leaderAvailabilityReasonCode ? { leaderAvailabilityReasonCode: d.leaderAvailabilityReasonCode } : {}),
     stage: d.stage as CalStage, startedAtMs: d.startedAtMs, stageSinceMs: d.stageSinceMs,
@@ -37,6 +38,7 @@ export async function readCalendarSources(): Promise<CalendarSources> {
     eta: d.eta.kind === 'estimate' ? { kind: 'estimate', confidence: d.eta.confidence } : { kind: 'none', reason: d.eta.reason },
     stageEta: d.stageEta.kind === 'estimate' ? { kind: 'estimate', atMs: d.stageEta.atMs } : { kind: 'none', reason: d.stageEta.reason },
     publishEta: d.publishEta.kind === 'estimate' ? { kind: 'estimate', atMs: d.publishEta.atMs } : { kind: 'none', reason: d.publishEta.reason },
+    ...(d.overdueSinceMs != null ? { overdueSinceMs: d.overdueSinceMs } : {}),
     deliveredAtMs: d.deliveredAtMs,
   }))
   return {
@@ -49,6 +51,10 @@ export async function readCalendarSources(): Promise<CalendarSources> {
       ...(r.history[0] ? { firstAt: r.history[0].at } : {}),
       ...(r.history.length ? { lastAt: r.history[r.history.length - 1]!.at } : {}),
     })),
+    releases: (versionInfo.releases ?? []).flatMap(r => {
+      const m = /^v?(\d+\.\d+\.\d+)$/.exec(r.tag)
+      return m ? [{ version: m[1]!, publishedAt: r.published_at }] : []
+    }),
     tasks: world.book.tasks.map(t => ({
       id: t.id, title: t.title, status: t.status,
       ...(t.priority ? { priority: t.priority } : {}),

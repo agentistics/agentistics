@@ -61,6 +61,8 @@ export interface CalPiece {
   stageEta: CalEta
   /** Expected time of reaching Publicado. */
   publishEta: CalEta
+  /** The original stage estimate that has elapsed without the piece leaving the stage. */
+  overdueSinceMs?: number | null
   /** The real publication instant (the release's own) — null until it shipped. */
   publishedAtMs: number | null
   /** `yyyy-MM-dd` — the task's due day. */
@@ -118,6 +120,7 @@ export interface CalLiveInput {
   eta: { kind: 'estimate'; confidence: CalConfidence } | { kind: 'none'; reason?: string }
   stageEta: { kind: 'estimate'; atMs: number } | { kind: 'none'; reason?: string }
   publishEta: { kind: 'estimate'; atMs: number } | { kind: 'none'; reason?: string }
+  overdueSinceMs?: number | null
   deliveredAtMs: number | null
 }
 export interface CalRecordInput {
@@ -125,6 +128,8 @@ export interface CalRecordInput {
   /** ISO of the record's first and latest phase moves (its history) — when the piece began and entered this phase. */
   firstAt?: string; lastAt?: string
 }
+/** A real semver release observed from the repository's release source. */
+export interface CalReleaseInput { version: string; publishedAt: string }
 
 /** The Live stage each delivery phase reads as (`delivery/host.ts` LIVE_STAGE) — a record with no Live card still has one. */
 const PHASE_STAGE: Record<string, CalStage> = {
@@ -159,6 +164,7 @@ export function buildCalendar(o: {
   nowMs: number
   lives: readonly CalLiveInput[]
   records: readonly CalRecordInput[]
+  releases?: readonly CalReleaseInput[]
   tasks: readonly CalTaskInput[]
   subtasks: readonly CalSubtaskInput[]
   resets: readonly CalResetInput[]
@@ -175,7 +181,8 @@ export function buildCalendar(o: {
     const task = taskById.get(l.taskId)
     const publishedAtMs = parseMs(rec?.publishedAt) ?? (l.stage === 'published' ? l.deliveredAtMs : null)
     const confidence = l.eta.kind === 'estimate' ? l.eta.confidence : null
-    const publishEta = l.stage === 'published' ? ({ kind: 'none', reason: 'final' } as CalEta) : eta(l.publishEta, confidence)
+    const overdueSinceMs = l.overdueSinceMs ?? null
+    const publishEta = l.stage === 'published' ? ({ kind: 'none', reason: 'final' } as CalEta) : overdueSinceMs !== null ? ({ kind: 'none', reason: 'overdue' } as CalEta) : eta(l.publishEta, confidence)
     const sub = l.subtaskId ? subById.get(l.subtaskId) : undefined
     const dueDate = sub?.dueDate ?? task?.dueDate ?? null
     const published = l.stage === 'published'
@@ -187,9 +194,9 @@ export function buildCalendar(o: {
       active: !published,
       startedAtMs: l.startedAtMs, stageSinceMs: l.stageSinceMs, trail: l.trail ? l.trail.map(v => ({ ...v })) : [],
       stageEta: published ? { kind: 'none', reason: 'final' } : eta(l.stageEta, confidence),
-      publishEta, publishedAtMs, dueDate,
+      publishEta, overdueSinceMs, publishedAtMs, dueDate,
       confirmed: published || (publishEta.kind === 'estimate' && publishEta.confidence !== null && RANK[publishEta.confidence] >= RANK.medium),
-      late: !published && (deadlinePassed(dueDate, o.nowMs, today) || (publishEta.kind === 'estimate' && publishEta.atMs < o.nowMs)),
+      late: !published && (overdueSinceMs !== null || deadlinePassed(dueDate, o.nowMs, today) || (publishEta.kind === 'estimate' && publishEta.atMs < o.nowMs)),
     })
     seen.add(l.key)
   }
@@ -213,7 +220,7 @@ export function buildCalendar(o: {
         harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: task?.status === 'in_progress',
         startedAtMs: parseMs(r.firstAt), stageSinceMs: parseMs(r.lastAt), trail: [],
         stageEta: { kind: 'none', reason: 'not-started' }, publishEta: { kind: 'none', reason: 'not-started' },
-        publishedAtMs: null, dueDate, confirmed: false,
+        publishedAtMs: null, dueDate, confirmed: false, overdueSinceMs: null,
         late: deadlinePassed(dueDate, o.nowMs, today),
       })
       continue
@@ -225,7 +232,7 @@ export function buildCalendar(o: {
       harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: false,
       startedAtMs: null, stageSinceMs: null, trail: [],
       stageEta: { kind: 'none', reason: 'final' }, publishEta: { kind: 'none', reason: 'final' },
-      publishedAtMs, dueDate, confirmed: true, late: false,
+      publishedAtMs, dueDate, confirmed: true, late: false, overdueSinceMs: null,
     })
   }
 
@@ -237,6 +244,13 @@ export function buildCalendar(o: {
   // Keep this separate from piece publication so a partial record cannot turn a real
   // release into a planned version with "no estimate".
   const releasePublishedAt = new Map<string, number>()
+  for (const r of o.releases ?? []) {
+    const version = pickVersion(r.version)
+    const publishedAt = parseMs(r.publishedAt)
+    if (!version || publishedAt === null) continue
+    const previous = releasePublishedAt.get(version)
+    if (previous === undefined || publishedAt > previous) releasePublishedAt.set(version, publishedAt)
+  }
   for (const r of o.records) {
     const version = pickVersion(r.versionTarget)
     const publishedAt = parseMs(r.publishedAt)
@@ -269,6 +283,10 @@ export function buildCalendar(o: {
       basis: known.length === 0 ? 'none' : known.length === open.length ? 'estimate' : 'partial',
       confidence: lowest, pieceKeys: ps.map(p => p.key), stageCounts,
     })
+  }
+  for (const [version, publishedAt] of releasePublishedAt) {
+    if (byVersion.has(version)) continue
+    versions.push({ version, state: 'published', atMs: publishedAt, basis: 'published', taggedRelease: true, confidence: null, pieceKeys: [], stageCounts: {} })
   }
   versions.sort((a, b) => compareVersions(a.version, b.version))
 

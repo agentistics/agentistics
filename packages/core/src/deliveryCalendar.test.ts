@@ -17,6 +17,17 @@ test('composer subtask priority and due date take precedence over its parent on 
   expect(reply.pieces.find(p => p.subtaskId === 's1')).toMatchObject({ priority: 'urgent', dueDate: '2026-11-12' })
   expect(reply.pieces.find(p => p.subtaskId === 's2')).toMatchObject({ priority: 'high', dueDate: '2026-11-13' })
 })
+
+test('repository releases remain published after delivery records stop at an older version', () => {
+  const reply = buildCalendar({ nowMs: NOW, lives: [], records: [], releases: [
+    { version: '2.204.3', publishedAt: '2026-11-01T12:00:00.000Z' },
+    { version: '2.205.1', publishedAt: '2026-11-03T12:00:00.000Z' },
+    { version: '2.207.0', publishedAt: '2026-11-07T12:00:00.000Z' },
+  ], tasks: [], subtasks: [], resets: [] })
+  expect(reply.versions.map(v => v.version)).toEqual(['2.204.3', '2.205.1', '2.207.0'])
+  expect(reply.versions.every(v => v.state === 'published' && v.basis === 'published' && v.taggedRelease)).toBe(true)
+  expect(reply.versions.find(v => v.version === '2.207.0')!.atMs).toBe(Date.parse('2026-11-07T12:00:00.000Z'))
+})
 const H = 3600_000
 
 test('a local composer deadline keeps its time and becomes late at that time, while day marks stay calendar days', () => {
@@ -138,6 +149,12 @@ describe('buildCalendar', () => {
   test('a piece past its publish ETA is late', () => {
     const r = buildCalendar({ nowMs: NOW, lives: [live({ key: 'z/q', taskId: 'z', stage: 'qa', publishEta: { kind: 'estimate', atMs: NOW - H } })], records: [], tasks: [], subtasks: [], resets: [] })
     expect(r.pieces[0]!.late).toBe(true)
+  })
+  test('an overdue stage has no rolling publish time and preserves when it became overdue', () => {
+    const since = NOW - 3 * 24 * H
+    const r = buildCalendar({ nowMs: NOW, lives: [live({ key: 'z/late', taskId: 'z', stage: 'leader', stageSinceMs: since, overdueSinceMs: since + H, publishEta: { kind: 'estimate', atMs: NOW + H } })], records: [], tasks: [], subtasks: [], resets: [] })
+    expect(r.pieces[0]!.publishEta).toEqual({ kind: 'none', reason: 'overdue' })
+    expect(r.pieces[0]!).toMatchObject({ overdueSinceMs: since + H, late: true })
   })
 })
 

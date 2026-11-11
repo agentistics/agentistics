@@ -68,6 +68,7 @@ export function CalendarDetail({ selection, anchor, pieces, versions, marks, now
         </div>
         <Kv rows={[
           [pick(TEXT.eta, pt), etaRows(p, pt)],
+          ...(p.overdueSinceMs != null ? [[pick(TEXT.overdueSince, pt), stamp(p.overdueSinceMs, pt)] as [string, React.ReactNode]] : []),
           [pick(TEXT.started, pt), p.startedAtMs !== null ? stamp(p.startedAtMs, pt) : '—'],
           [pick(TEXT.versionWord, pt), p.version ?? '—'],
           [pick(TEXT.model, pt), p.harness ? <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><HarnessBadges harnesses={[p.harness]} max={1} />{p.model}</span> : '—'],

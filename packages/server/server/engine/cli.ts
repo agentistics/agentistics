@@ -16,6 +16,7 @@ export const FLOW_VERBS: readonly EngineVerb[] = ['flow']
 
 /** Exit code of a verb this build cannot run. Not 1 (a failure of the verb) — it never ran. */
 export const ENGINE_ABSENT_EXIT = 2
+export const BOOK_ABSENT_SENTENCE = 'book not available in this build'
 
 export function isEngineVerb(command: string | undefined): command is EngineVerb {
   return (ENGINE_VERBS as readonly (string | undefined)[]).includes(command)
@@ -32,6 +33,7 @@ export function resolveEngineVerb(
   flowsOn = true,
 ): { run: EngineCommand } | { refuse: string } {
   const s = cliStrings(lang)
+  if (verb === 'book' && (!status.present || !commands.some(c => c.verb === 'book'))) return { refuse: BOOK_ABSENT_SENTENCE }
   if (!status.present && FLOW_VERBS.includes(verb) && status.reason === 'community-build') {
     return { refuse: lang === 'pt' ? 'fluxos exigem o build oficial' : 'flows require the official build' }
   }

@@ -70,6 +70,66 @@ test('month: a published version and a planned one are ribbons; the version with
   expect(document.querySelector('[data-cal-due="t"]')).not.toBeNull()
 })
 
+test('month: an open piece is present on its expected publication day', async () => {
+  await mount(createElement(Month, { ...common, anchor: '2026-11-07', onPickDay: noop, onOpenVersion: noop, onOpenMark: noop, onOpenPiece: noop }))
+  expect(document.querySelector('[data-cal-expected-piece="t/a"]')).not.toBeNull()
+})
+
+test('month: expected pieces are capped and overflow is counted in the day chip', async () => {
+  const original = HTMLElement.prototype.getBoundingClientRect
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
+  try {
+    const many = Array.from({ length: 30 }, (_, i) => ({ ...view.pieces[0]!, key: `many/${i}`, version: null, publishEta: { kind: 'estimate' as const, atMs: NOW + H, confidence: 'low' as const } }))
+    await mount(createElement(Month, { ...common, pieces: many, anchor: '2026-11-07', onPickDay: noop, onOpenVersion: noop, onOpenMark: noop, onOpenPiece: noop }))
+    expect(document.querySelectorAll('[data-cal-expected-piece]').length).toBeLessThanOrEqual(3)
+    expect(document.querySelector('[data-cal-more="2026-11-07"]')).not.toBeNull()
+  } finally {
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: original })
+  }
+})
+
+test('month: overdue pieces are one grouped chip on today', async () => {
+  const overduePieces = Array.from({ length: 3 }, (_, i) => ({ ...view.pieces[1]!, key: `late/${i}`, version: null, publishEta: { kind: 'none' as const, reason: 'overdue' }, overdueSinceMs: NOW - (i + 1) * 24 * H, late: true }))
+  await mount(createElement(Month, { ...common, pieces: overduePieces, anchor: '2026-11-07', onPickDay: noop, onOpenVersion: noop, onOpenMark: noop, onOpenPiece: noop }))
+  expect(document.querySelectorAll('[data-cal-overdue="2026-11-07"]').length).toBe(1)
+  expect(document.querySelector('[data-cal-overdue="2026-11-11"]')).toBeNull()
+})
+
+test('month: with a day holding >= cap "started" pieces, today still gets exactly one overdue chip and "+N" excludes the overdue pieces', async () => {
+  const original = HTMLElement.prototype.getBoundingClientRect
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
+  try {
+    const base = { ...view.pieces[1]!, version: null, publishedAtMs: null, publishEta: { kind: 'none' as const, reason: 'no-history' } }
+    const started = Array.from({ length: 4 }, (_, i) => ({ ...base, key: `st/${i}`, stage: 'running' as const, startedAtMs: NOW - H, stageSinceMs: NOW - H }))
+    const late = Array.from({ length: 5 }, (_, i) => ({ ...base, key: `od/${i}`, startedAtMs: NOW - 40 * 24 * H, stageSinceMs: NOW - 40 * 24 * H, overdueSinceMs: NOW - (i + 1) * 24 * H, late: true, publishEta: { kind: 'none' as const, reason: 'overdue' } }))
+    await mount(createElement(Month, { ...common, versions: [], marks: [], pieces: [...started, ...late], anchor: '2026-11-07', onPickDay: noop, onOpenVersion: noop, onOpenMark: noop, onOpenPiece: noop }))
+    const chips = document.querySelectorAll('[data-cal-overdue="2026-11-07"]')
+    expect(chips.length).toBe(1)
+    expect(chips[0]!.textContent).toContain('5')
+    // The 5 overdue pieces are said by the chip; "+N" (if any) counts only started pieces that had no row (4 - shown).
+    const shownStarted = document.querySelectorAll('[data-cal-started]').length
+    const more = document.querySelector('[data-cal-more="2026-11-07"]')
+    expect(Number(more?.textContent?.replace('+', '') ?? 0)).toBe(4 - shownStarted)
+  } finally {
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: original })
+  }
+})
+
+test('week: today column shows the overdue chip with the count', async () => {
+  const od = Array.from({ length: 2 }, (_, i) => ({ ...view.pieces[1]!, key: `wk/${i}`, version: null, publishEta: { kind: 'none' as const, reason: 'overdue' }, overdueSinceMs: NOW - H, late: true }))
+  await mount(createElement(Agenda, { ...common, pieces: od, mode: 'week', anchor: '2026-11-07', onOpenPiece: noop, onOpenVersion: noop, onOpenMark: noop }))
+  const chip = document.querySelector('[data-cal-overdue="2026-11-07"]')
+  expect(chip).not.toBeNull()
+  expect(chip!.textContent).toContain('2')
+  expect(document.querySelectorAll('[data-cal-overdue]').length).toBe(1)
+})
+
+test('calendar detail states when an overdue piece became late', async () => {
+  const overdue = { ...view.pieces[1]!, overdueSinceMs: NOW - 2 * H, late: true, publishEta: { kind: 'none' as const, reason: 'overdue' } }
+  await mount(createElement(MemoryRouter, null, createElement(CalendarDetail, { selection: { kind: 'piece', key: overdue.key }, anchor: null, pieces: [overdue], versions: [], marks: [], nowMs: NOW, pt: true, isMobile: false, onClose: noop, onSelect: noop })))
+  expect(document.querySelector('[data-cal-detail]')!.textContent).toContain('atrasada desde')
+})
+
 test('calendar detail localizes the leader reason', async () => {
   const piece = { ...view.pieces[0]!, leaderAvailabilityReasonCode: 'no-live-leader' as const }
   await mount(createElement(MemoryRouter, null, createElement(CalendarDetail, { selection: { kind: 'piece', key: piece.key }, anchor: null, pieces: [piece], versions: [], marks: [], nowMs: NOW, pt: true, isMobile: false, onClose: noop, onSelect: noop })))
