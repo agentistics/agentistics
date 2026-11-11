@@ -200,6 +200,7 @@ import { conversationHeldBy, staleSelfHolder } from './sessions/conversation-cla
 import { withConversationResumeLock as withResumeLock } from './sessions/conversation-resume-lock'
 import { liveConversationHolders } from './sessions/live-claims'
 import type { ManagedSession, SessionBackend, SpawnPlanError } from './sessions/types'
+import { structuredOnlyNotice } from './sessions/spawn-error'
 import {
   addSession, adoptSessionRecords, newSessionId, linkConversationVerified, patchSession, patchSessions, readRegistry, removeSession, retireFallenSessions, killAndRetireSession, touchSessions,
 } from './sessions/registry'
@@ -1727,7 +1728,7 @@ function cachedDetachHint(): Promise<string> {
  * hint and this one goes into a status line — the same facts, addressed to someone looking at a
  * screen rather than at a shell.
  */
-function explainSpawnError(e: SpawnPlanError, s: CliStrings): string {
+export function explainSpawnError(e: SpawnPlanError, s: CliStrings): string {
   switch (e.code) {
     case 'unsupported-harness': return s.sessSpawnUnsupported(e.harness)
     case 'resume-unsupported': return s.sessSpawnNoResume(e.harness)
@@ -1737,6 +1738,7 @@ function explainSpawnError(e: SpawnPlanError, s: CliStrings): string {
     case 'unknown-effort': return s.sessSpawnBadEffort(e.harness, e.value, e.accepted)
     case 'unknown-mode': return s.sessSpawnBadMode(e.harness, e.value)
     case 'account-unsupported': return s.sessSpawnNoAccount(e.harness)
+    case 'structured-only': return structuredOnlyNotice(e)
   }
 }
 

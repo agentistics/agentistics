@@ -251,6 +251,16 @@ describe('withStructured — routing', () => {
     expect(base.calls).toEqual([])
   })
 
+  test('attaching a live structured Hermes session refuses with the ACP-only sentence and does not resume in tmux', async () => {
+    const base = fakeBase()
+    const b = withStructured(base, provider(fakeEngine({ harnesses: ['hermes'] }).reg))
+    const req = web('hermes')
+    await b.spawn(req)
+    await expect(b.toTerminal!('m-1')).resolves.toEqual({ ok: false, why: 'hermes-structured-only' })
+    expect(base.calls.filter(([name]) => name === 'spawn')).toEqual([])
+    expect(b.attachCommand('m-1').join(' ')).toContain(HERMES_STRUCTURED_ONLY_NOTICE)
+  })
+
   for (const origin of ['background', 'web'] as const) for (const raw of ['0', undefined]) {
     test(`${origin}: AGENTISTICS_ADAPTER_CHAT=${raw ?? 'unset'} uses the shared feature decision`, async () => {
       const base = fakeBase()

@@ -5,6 +5,8 @@ import {
   type ContextInput,
 } from './agentistics-context'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
+import { structuredSpawnOf } from './structured-backend'
+import { structuredIntentOf } from './structured-route'
 import { pendingContextFor } from './spawn-context'
 import { CONTEXT_TOOL_NAMES, METRICS_DASHBOARDS_LINE, flowLines } from './agentistics-context'
 import { briefingSkills } from '../briefing'
@@ -204,6 +206,8 @@ describe('delivery per harness', () => {
   test('a resume carries no context at all', () => {
     for (const h of HARNESS_ORDER) {
       if (!SPAWN_SPECS[h]?.resume) continue
+      // Hermes is structured-only: resume context travels in the ACP intent, not a TUI plan.
+      if (h === 'hermes') continue
       const r = plan(h, { resumeId: h === 'opencode' ? 'ses_04d97770e53f4b7d' : '04d97770-e53f-4b7d-86d2-63bd12ec32eb', prompt: undefined }); if (!r.ok) throw new Error(h)
       expect(r.plan.contextVia).toBeUndefined(); expect(r.plan.env).toBeUndefined()
     }
@@ -211,6 +215,8 @@ describe('delivery per harness', () => {
   test('no context requested = argv identical to before', () => {
     for (const h of HARNESS_ORDER) {
       if (!SPAWN_SPECS[h]) continue
+      // Hermes has no terminal argv: its structured ACP request is tested below.
+      if (h === 'hermes') continue
       const a = planSpawn({ harness: h, cwd: '/w', prompt: 'oi' }); if (!a.ok) throw new Error(h)
       expect(a.plan.contextVia).toBeUndefined(); expect(a.plan.env).toBeUndefined()
     }
@@ -218,6 +224,8 @@ describe('delivery per harness', () => {
   test('every spawnable harness has a stated channel or the fallback', () => {
     for (const h of HARNESS_ORDER) {
       if (!SPAWN_SPECS[h]) continue
+      // Hermes is structured-only and therefore has no stated TUI context channel.
+      if (h === 'hermes') continue
       const r = plan(h); if (!r.ok) throw new Error(h)
       expect(['args', 'env-dir', 'files', 'first-message']).toContain(r.plan.contextVia!)
     }
@@ -342,6 +350,15 @@ describe('start flow (any project, any harness)', () => {
   for (const harness of spawnable) {
     test(`${harness}: spawn is ok and the full numbered flow reaches the instruction channel`, () => {
       const c = contextText(other)
+      if (harness === 'hermes') {
+        const intent = structuredIntentOf({ harness, origin: 'web', prompt: 'oi' }, { ctx: { text: c, block: contextBlock(other) } })
+        const structured = structuredSpawnOf({ id: 'hermes-context', cwd: other.cwd, argv: ['hermes', 'acp'], structured: intent }, harness)
+        // Hermes receives the opening context over ACP instructions, not through terminal argv/env.
+        expect(structured.instructions).toEqual({ text: c, block: contextBlock(other) })
+        expect(structured.initialPrompt).toBe('oi')
+        for (const line of flowLines('en')) expect(c.includes(line)).toBe(true)
+        return
+      }
       const r = planSpawn({ harness, cwd: other.cwd, prompt: 'oi', context: { text: c, block: contextBlock(other), dir: '/d' } })
       expect(r.ok).toBe(true)
       if (!r.ok) return

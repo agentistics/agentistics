@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.207.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Hermes: a conversa estruturada não oferece mais abrir no terminal nem aparece como precisando de você depois de concluir um turno.',
+        en: 'Hermes: structured conversations no longer offer opening in a terminal or appear to need you after finishing a turn.',
+      },
+    ],
+  },
   '2.207.0': {
     features: [],
     fixes: [

@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { mkdir } from 'node:fs/promises'
-import { structuredIntentOf } from './structured-route'
+import { HERMES_STRUCTURED_ONLY_NOTICE, structuredIntentOf } from './structured-route'
 import { agentisticsMcpLaunch } from '../mcp-launch'
 import { managedProcessLogPath } from './process-conversation'
 import { HARNESS_ORDER, hasRolePrefix, type CanonicalMode, type HarnessId } from '@agentistics/core'
@@ -80,6 +80,7 @@ import { planTakeover, type TakeoverRefusal } from './takeover'
 import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor, storedRoleFor } from './session-roles'
 import { ensureClaudeProjectTrusted } from './claude-trust'
 import type { BackendInitialPrompt, BackendSpawn, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
+import { structuredOnlyNotice } from './spawn-error'
 
 /**
  * The initial-prompt argument for `backend.spawn`, with the harness's screen RULES attached so the
@@ -198,7 +199,7 @@ that cannot be measured (no /proc) is never refused.`
  */
 const toRefCandidate = (r: ReconciledSession): RefCandidate => ({ id: r.id, label: r.managed?.label })
 
-function explainPlanError(e: SpawnPlanError): string {
+export function explainPlanError(e: SpawnPlanError): string {
   switch (e.code) {
     case 'unsupported-harness':
       return `${e.harness} cannot be started by agentop yet. Supported: ${STARTABLE.join(', ')}.`
@@ -216,6 +217,8 @@ function explainPlanError(e: SpawnPlanError): string {
       return `"${e.value}" is not a mode ${e.harness} can start in. Modes: default, accept-edits, plan, no-questions.`
     case 'account-unsupported':
       return `${e.harness} keeps a single login per computer, so it cannot start in another account's folder.`
+    case 'structured-only':
+      return structuredOnlyNotice(e)
   }
 }
 
@@ -741,6 +744,10 @@ async function execAttach(
   // F2.0b — a live STRUCTURED session has no pane: attaching to it is "open in terminal" — its child
   // ends and the same conversation resumes as a TUI under this id, then the attach enters that.
   const switched = backend.toTerminal ? await backend.toTerminal(id).catch(() => null) : null
+  if (switched && !switched.ok && switched.why === 'hermes-structured-only') {
+    console.error(HERMES_STRUCTURED_ONLY_NOTICE)
+    return 1
+  }
   if (switched?.ok) console.log(`Session ${id} was running over its harness's protocol; it now runs in a terminal (the same conversation, resumed).`)
   const hint = await backend.detachHint()
   console.log(`Attaching to ${id}. To leave the session running and come back here, press ${hint}.`)

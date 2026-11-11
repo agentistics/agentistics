@@ -348,7 +348,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
   // Appended rather than folded into `sessionActions`: the cockpit answers "stop" with the Escape
   // key inside an attached pane, so it never needed a listed verb. The browser has no pane.
   verbs.push(interruptVerb(row, s))
-  if (row.structured && row.actionable) verbs.push(terminalVerb(s))
+  if (row.structured && row.actionable && row.harness !== 'hermes') verbs.push(terminalVerb(s))
   if (row.structured && row.actionable && row.conversationId && FORK_ACTION_HARNESSES.has(row.harness)) {
     verbs.push({ action: 'fork' as SessionAction, label: s.sessionsFork, enabled: true })
   }
@@ -384,7 +384,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.dialogBlind ? { dialogBlind: row.dialogBlind } : {}),
     ...(row.conversationBlind ? { conversationBlind: row.conversationBlind } : {}),
     // A native session has no terminal to attach to — its chat is the way in.
-    attachCommand: isNativeRow(row) ? '' : `agentop session attach ${sessionHandleOf(row.id)}`,
+    attachCommand: isNativeRow(row) || (row.structured && row.harness === 'hermes') ? '' : `agentop session attach ${sessionHandleOf(row.id)}`,
     verbs,
   }
 }

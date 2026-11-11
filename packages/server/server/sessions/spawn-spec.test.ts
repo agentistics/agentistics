@@ -94,6 +94,13 @@ describe('SPAWN_SPECS', () => {
 })
 
 describe('planSpawn', () => {
+  test('planSpawn refuses Hermes as a terminal launcher with the structured-only notice', () => {
+    const r = planSpawn({ harness: 'hermes', cwd: '/tmp' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatchObject({ code: 'structured-only', harness: 'hermes' })
+    if (!r.ok) expect('notice' in r.error ? r.error.notice : '').toContain('Hermes runs only as a structured chat (ACP)')
+  })
+
   it('puts a claude prompt in the positional slot, after the flags, and marks it for submit', () => {
     // Positional, so the text is in argv — but the backend must still SUBMIT it (an Enter) on a
     // version that pre-fills without auto-submitting, without double-submitting one that does.
@@ -422,6 +429,7 @@ describe('MODE.EVERYWHERE — the TUI starts in the asked mode, by its own flag'
   test('"default" and no mode pass nothing — the harness\'s own configuration decides', () => {
     for (const h of HARNESS_ORDER) {
       if (!SPAWN_SPECS[h]) continue
+      if (h === 'hermes') continue // Hermes is structured-only; it has no TUI mode.
       expect(argvOf(h, 'default').argv).toEqual(argvOf(h).argv)
       expect(argvOf(h).modeNeedsProtocol).toBeUndefined()
     }
@@ -656,6 +664,7 @@ describe('planSpawn — the account root (PLAN.ACCOUNTS D3)', () => {
     claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', copilot: 'COPILOT_HOME', gemini: 'GEMINI_CLI_HOME', kimi: 'KIMI_CODE_HOME',
   }
   for (const h of HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)) {
+    if (h === 'hermes') continue // Hermes is structured-only; it has no terminal plan to pin.
     const fresh = { harness: h, cwd: '/w', prompt: 'hi', conversationId: '11111111-2222-3333-4444-555555555555' }
     test(`${h}: the default root is byte-identical to origin/main before D3 (pinned argv/env)`, () => {
       const pinned = MAIN_PLANS[h]
