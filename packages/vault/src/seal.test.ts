@@ -107,7 +107,7 @@ describe('HKDF', () => {
   it('subkeys differ per purpose and per kid', () => {
     const { dek, kid } = newDataKey()
     const a = Buffer.from(subkey(dek, kid, 'github-backup')).toString('hex')
-    const b = Buffer.from(subkey(dek, kid, 'central-token')).toString('hex')
+    const b = Buffer.from(subkey(dek, kid, 'engine-token')).toString('hex')
     const c = Buffer.from(subkey(dek, 'ffffffffffffffff', 'github-backup')).toString('hex')
     expect(new Set([a, b, c]).size).toBe(3)
   })
@@ -120,7 +120,7 @@ describe('purposes', () => {
     expect(isPurpose('provider-key')).toBe(false)
     expect(isEnginePurpose('engine/')).toBe(false)
     expect(isEnginePurpose('engine/../x')).toBe(false)
-    expect(isEnginePurpose('central-token')).toBe(false)
+    expect(isEnginePurpose('engine-token')).toBe(false)
   })
 })
 

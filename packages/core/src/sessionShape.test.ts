@@ -5,7 +5,7 @@ describe('coerceLanguages', () => {
   test('keeps a list of strings', () => expect(coerceLanguages(['ts', 'go'])).toEqual(['ts', 'go']))
   test('drops non-strings from a list', () => expect(coerceLanguages(['ts', 3, null])).toEqual(['ts']))
   test("reads Claude's map shape as its keys", () => expect(coerceLanguages({ TypeScript: 3, Go: 1 })).toEqual(['TypeScript', 'Go']))
-  // The record that took a central down: an empty object.
+  // The record that took a server down: an empty object.
   test('an empty object is an empty list', () => expect(coerceLanguages({})).toEqual([]))
   test('absent or scalar is an empty list', () => {
     expect(coerceLanguages(undefined)).toEqual([])

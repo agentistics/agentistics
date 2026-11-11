@@ -212,8 +212,7 @@ test('BACKUP_LAYERS is the whole set and metrics leads it', () => {
 // `packages/tui` may not import from `packages/server` (server -> tui is the only allowed
 // direction), so `BackupLayer` is redeclared there. This is what stops the two drifting: a layer
 // added here and not there would compile fine and simply never be offered by the cockpit's
-// harness list or config pane — the same guard `central-runtime.test.ts` runs for
-// `CentralRuntimeId`.
+// harness list or config pane — a layer added here and not there never reaches it.
 test('the control center\'s BackupLayer union matches BACKUP_LAYERS, member for member', () => {
   const source = readFileSync(join(import.meta.dir, '..', '..', '..', 'tui', 'src', 'control', 'types.ts'), 'utf8')
   const decl = source.match(/export type BackupLayer = ([^\n]+)/)?.[1]

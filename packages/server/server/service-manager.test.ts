@@ -39,9 +39,9 @@ const FOREGROUND: ServiceSpec = {
 }
 
 const RETURNS: ServiceSpec = {
-  name: 'agentop-central',
-  description: 'agentop central (agentistics autostart)',
-  command: 'docker compose -f /home/u/agentistics/docker/central.yml up -d',
+  name: 'agentop-machine',
+  description: 'agentop machine (agentistics autostart)',
+  command: 'docker compose -f /home/u/agentistics/docker/machine.yml up -d',
   keepsRunning: false,
 }
 
@@ -112,12 +112,12 @@ test('launchctl print pid parsing is conservative', () => {
 })
 
 test('a launchd agent is labelled and named consistently', () => {
-  expect(launchdLabel(RETURNS)).toBe('com.agentistics.agentop-central')
-  expect(launchdPlistName(RETURNS)).toBe('com.agentistics.agentop-central.plist')
+  expect(launchdLabel(RETURNS)).toBe('com.agentistics.agentop-machine')
+  expect(launchdPlistName(RETURNS)).toBe('com.agentistics.agentop-machine.plist')
 })
 
 test('pm2 delete is the exact inverse of pm2 start', () => {
-  expect(pm2DeleteArgs(RETURNS)).toEqual(['pm2', 'delete', 'agentop-central'])
+  expect(pm2DeleteArgs(RETURNS)).toEqual(['pm2', 'delete', 'agentop-machine'])
   expect(pm2StartArgs(RETURNS).slice(0, 2)).toEqual(['pm2', 'start'])
   expect(pm2StartArgs(RETURNS)).toContain(RETURNS.name)
 })

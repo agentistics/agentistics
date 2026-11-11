@@ -63,8 +63,8 @@ describe('adding', () => {
   test('only code+meta are stored — never rendered text, so the language stays switchable', async () => {
     await addNotificationTo(file, { type: 'info', code: 'member.reconnected' })
     const raw = await Bun.file(file).text()
-    expect(raw).not.toContain('Conectado à central')
-    expect(raw).not.toContain('Connected to the central')
+    expect(raw).not.toContain('Conectado')
+    expect(raw).not.toContain('Connected')
     expect(raw).toContain('member.reconnected')
   })
 

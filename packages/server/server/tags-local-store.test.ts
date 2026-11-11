@@ -4,8 +4,7 @@ import { tmpdir } from 'os'
 import { mkdir, writeFile, readFile, readdir, stat } from 'node:fs/promises'
 import { createLocalTagStore } from './tags-local-store'
 
-// Tags used to be central-only because their only store was Mongo. A solo machine now persists them
-// to ~/.agentistics/tags.json, so the file IS the behaviour under test — it runs against a real
+// A machine persists tags to ~/.agentistics/tags.json, so the file IS the behaviour under test — it runs against a real
 // temp dir, never a mocked filesystem.
 
 function tmpFile(): string {

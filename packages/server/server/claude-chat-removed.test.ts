@@ -42,7 +42,6 @@ beforeAll(async () => {
       PATH: `${bin}:${process.env.PATH ?? ''}`,
       PORT: String(port),
       AGENTISTICS_EXPOSURE: 'local',
-      AGENTISTICS_TEAM_CENTRAL: '',
       SERVE_STATIC: '',
     },
     stdout: 'ignore',

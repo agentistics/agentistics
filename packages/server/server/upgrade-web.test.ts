@@ -66,7 +66,7 @@ describe('what /api/version says about pressing install here', () => {
   test('no update is up-to-date, whatever the machine', async () => {
     const { upgradableHint } = await import('./upgrade-web')
     const r = upgradableHint({ hasUpdate: false, latest: '99.0.0' })
-    expect(['up-to-date', 'no-capability', 'central', 'container']).toContain(r!)
+    expect(['up-to-date', 'no-capability', 'container']).toContain(r!)
   })
 })
 

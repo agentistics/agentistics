@@ -46,7 +46,7 @@ rec() {
 SETTLE_MS=3500 rec control-center 120 34 "agentop start" -- \
   Down 1100 Tab 1000 Down 900 Down 900 Tab 1100 Right 1400 Right 1400 Right 1300 Left 1300 Left 1300 Left 1300 q 500
 
-# Setup tab — the solo / central / member wizard, shown but never submitted.
+# Setup tab — the setup wizard, shown but never submitted.
 SETTLE_MS=3500 rec control-center-setup 120 34 "agentop start" -- \
   Right 1600 Down 1000 Down 1000 Up 1000 q 500
 

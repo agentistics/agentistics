@@ -91,7 +91,7 @@ describe('parseUserUiPut', () => {
   })
 
   test('an unknown key is REFUSED, never silently dropped', () => {
-    expect(parseUserUiPut({ taskBoard: {}, team: { mode: 'central' } }))
+    expect(parseUserUiPut({ taskBoard: {}, team: { mode: 'solo' } }))
       .toEqual({ ok: false, error: 'unknown_key', key: 'team' })
   })
 

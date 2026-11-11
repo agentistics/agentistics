@@ -68,10 +68,9 @@ packages/web/public/*.mov
 packages/web/public/*.webm
 .scion/agents/
 
-# deploy env files (central.env etc.) — never commit secrets
+# deploy env files — never commit secrets
 *.env
 *.env.bak
-central.env.*
 
 # git worktrees created by the harness
 .claude/worktrees/
