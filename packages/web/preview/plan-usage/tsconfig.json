@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": [
+    "../../src/components/PlanUsageFootButton.tsx",
+    "../../src/components/PlanLimitMeter.tsx",
+    "../../src/components/PlanLimitMeter.test.tsx",
+    "../../src/components/PlanUsageScroll.tsx",
+    "../../src/components/PlanUsageScroll.dom.test.tsx",
+    "./main.tsx",
+    "./qa.ts"
+  ]
+}
