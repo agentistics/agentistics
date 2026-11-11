@@ -130,6 +130,41 @@ export type EngineDelegateSpawnResult =
   | { ok: true; managedId: string }
   | { ok: false; code: EngineDelegateRefusal; sentence: string }
 
+/** 1.26 — a leader's successor the book asks the host to start (`EngineBookHost.spawnSuccessor`). */
+export interface EngineBookSuccessorSpawn {
+  /** The verified leader being replaced (a managed id). The successor inherits its folder and filing. */
+  predecessorId: string
+  taskId: string
+  /** The successor's whole opening brief: the book's summary, bookmark and how to take over. */
+  prompt: string
+  /** Absent: the predecessor's own harness / the host's choice of model and account. */
+  harness?: string
+  model?: string
+  account?: string
+}
+
+export type EngineBookSuccessorResult =
+  | { ok: true; sessionId: string }
+  | { ok: false; sentence: string }
+
+/**
+ * 1.26 — the host's side of a book takeover. The HOST spawns, stops and retires sessions; the engine only orders it
+ * from the takeover run. A refusal is a value, never a throw the engine has to guess at.
+ */
+export interface EngineBookHost {
+  /** Starts the successor through the host's own hand-off spawn path (`agentop session --handoff` semantics). */
+  spawnSuccessor(req: EngineBookSuccessorSpawn): Promise<EngineBookSuccessorResult>
+  /** Stops a session outright (an unconfirmed or partial successor). */
+  stop(sessionId: string): Promise<{ closed: boolean }>
+  /** Retires the predecessor the way `retirePredecessor` does: it is closed once it goes quiet. */
+  retire(predecessorId: string, successorId: string): Promise<{ retired: boolean }>
+  isAlive(sessionId: string): Promise<boolean>
+  /** The board task a managed session is filed on, if any. */
+  taskOf(sessionId: string): Promise<string | undefined>
+  /** Does `token` prove `id` under the host's session-identity key? Checks only; the host never mints one here. */
+  verifySession(id: string, token: string): Promise<boolean>
+}
+
 /** The host's fleet, as an engine may follow it (1.4) — and, from 1.7, delegate to (B6.2). */
 export interface EngineFleet {
   /** Confirmed transitions only. Returns unsubscribe. A callback that throws is logged, never fatal. */
@@ -630,6 +665,11 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   apiVersion?: string
   /** The fleet's confirmed transitions (1.4). Absent = the host offers none (an engine copes). */
   fleet?: EngineFleet
+  /**
+   * 1.26 (optional) — what the hand-off book needs of the host for a leader takeover (`EngineBookHost`). Absent on
+   * an older host: the engine starts no successor and answers a takeover with 501.
+   */
+  book?: EngineBookHost
   /**
    * 1.7 — the port this host's own API server listens on (`PORT`), so an engine can WRITE it into a
    * harness's exporter configuration (`agentop ingest install claude --channel otlp`). Never for the

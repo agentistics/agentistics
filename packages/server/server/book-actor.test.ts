@@ -1,5 +1,25 @@
 import { describe, expect, test } from 'bun:test'
-import { bookActorFromRequest } from './book-actor'
+import { bookActorFromRequest, bookRoleOf } from './book-actor'
+import { roleOfRow } from './sessions/session-roles'
+
+describe('bookRoleOf (slice 2)', () => {
+  // Roles are stored under the CONVERSATION id once a session has one (`sessionIdentityKey`); looking up the
+  // managed id alone read a real leader as a plain user (found by the official-binary probe).
+  test('a leader whose role is keyed by its conversation id is a leader', async () => {
+    const role = await bookRoleOf('m-1', {
+      roles: async () => ({ ses_abc: 'leader' }),
+      row: async id => (id === 'm-1' ? { id: 'm-1', conversationId: 'ses_abc' } : undefined),
+      roleOfRow,
+    })
+    expect(role).toBe('leader')
+  })
+
+  test('a managed-id key still works, and a session with no row and no role is no one', async () => {
+    const deps = { roles: async () => ({ 'm-2': 'worker' as const }), row: async () => undefined, roleOfRow }
+    expect(await bookRoleOf('m-2', deps)).toBe('worker')
+    expect(await bookRoleOf('m-3', deps)).toBeUndefined()
+  })
+})
 
 const deps = (verified: string | null, role: 'leader' | 'worker' | undefined = undefined) => ({
   verify: async () => verified,

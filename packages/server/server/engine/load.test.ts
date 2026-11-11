@@ -89,6 +89,17 @@ describe('loadEngine — the community build and the official one', () => {
     expect(log.some(l => l.includes('contract 2.0.0'))).toBe(true)
   })
 
+  it('an engine built against 1.25 (it reads no host.book) loads and runs on a 1.26 host that offers a book port', async () => {
+    let seen: EngineHostServices<AgentisticsEvent> | undefined
+    const create: CreateEngine<AgentisticsEvent> = async h => { seen = h; return fake({ apiVersion: '1.25.0' })(h) }
+    const withBook = () => ({ ...host(), book: { spawnSuccessor: async () => ({ ok: false as const, sentence: 'unused' }), stop: async () => ({ closed: true }), retire: async () => ({ retired: true }), isAlive: async () => true, taskOf: async () => undefined, verifySession: async () => false } })
+    const st = await loadEngine({ ...quiet, host: withBook, create })
+    expect(st.present).toBe(true)
+    expect(engine()?.manifest.apiVersion).toBe('1.25.0')
+    expect(seen?.book).toBeDefined()
+    expect(Object.keys(engineIntegrations())).toEqual(['claude', 'codex'])
+  })
+
   it('an engine that throws at creation never takes the host down', async () => {
     const create: CreateEngine<AgentisticsEvent> = async () => { throw new Error('boom') }
     const log: string[] = []

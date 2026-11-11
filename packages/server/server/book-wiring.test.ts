@@ -59,10 +59,15 @@ const post = (path: string, body: unknown) =>
   })
 
 describe('index.ts routes /api/book/* and /api/flow/op/* through handleBookRoutes', () => {
-  it('POST /api/book/takeover answers the explicit 501, never 405 or the generic 404', async () => {
-    const res = await post('/api/book/takeover', { taskId: 't', sessionId: 's', hmac: 'h' })
-    expect(res.status).toBe(501)
-    expect(await res.json()).toEqual({ ok: false, error: 'not-implemented', sentence: 'book takeover is not available yet' })
+  it('without a book, takeover, passage and the successor spawn answer the build\'s 501, never 405 or the generic 404', async () => {
+    for (const res of [
+      await post('/api/book/takeover', { taskId: 't', bookmarkHash: 'b' }),
+      await post('/api/book/passagem', { taskId: 't' }),
+      await post('/api/flow/op/abrir-sucessor', { stdin: '{}' }),
+    ]) {
+      expect(res.status).toBe(501)
+      expect(await res.json()).toEqual({ error: 'book not available in this build', sentence: 'book not available in this build' })
+    }
   })
 
   it('without a book capability /api/book/* and /api/flow/op/* answer 501 "book not available in this build"', async () => {

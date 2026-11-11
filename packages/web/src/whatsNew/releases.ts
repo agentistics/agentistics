@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.209.0': {
+    features: [
+      {
+        pt: 'Livro: a passagem de liderança agora é de verdade — o líder abre um sucessor pelo livro, e o sucessor confirma com a prova da própria sessão.',
+        en: 'Book: the leadership hand-off is now real — the leader opens a successor through the book, and the successor confirms with its own session proof.',
+      },
+      {
+        pt: 'Livro: quando o sucessor confirma, o líder antigo é encerrado automaticamente.',
+        en: 'Book: when the successor confirms, the old leader is closed automatically.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Livro: uma passagem que falhou não bloqueia mais a próxima tentativa.',
+        en: 'Book: a failed hand-off no longer blocks the next attempt.',
+      },
+    ],
+  },
   '2.208.0': {
     features: [
       {
