@@ -69,6 +69,15 @@ export const TEXT = {
   selectAll: t('Selecionar todas', 'Select all'),
   removeFilter: t('Tirar filtro', 'Remove filter'),
   more: t('mais', 'more'),
+  /** The title of a month cell's "+N": names what is actually hidden, from the real counts of each kind. */
+  moreHidden: (c: { total: number; expected: number; started: number; other: number; overdue: number }): L => {
+    const pt: string[] = []; const en: string[] = []
+    if (c.expected) { pt.push(`${c.expected} ${c.expected === 1 ? 'prevista' : 'previstas'}`); en.push(`${c.expected} expected`) }
+    if (c.started) { pt.push(`${c.started} ${c.started === 1 ? 'iniciada' : 'iniciadas'}`); en.push(`${c.started} started`) }
+    if (c.other) { pt.push(`${c.other} ${c.other === 1 ? 'versão ou prazo' : 'versões ou prazos'}`); en.push(`${c.other} ${c.other === 1 ? 'version or deadline' : 'versions or deadlines'}`) }
+    if (c.overdue) { pt.push(`${c.overdue} ${c.overdue === 1 ? 'atrasada' : 'atrasadas'}`); en.push(`${c.overdue} overdue`) }
+    return t(`+${c.total} mais: ${pt.join(', ')} — abrir o dia`, `+${c.total} more: ${en.join(', ')} — open the day`)
+  },
 } as const
 
 export const pick = (l: L, pt: boolean): string => (pt ? l.pt : l.en)
