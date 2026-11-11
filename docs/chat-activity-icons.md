@@ -13,7 +13,7 @@ plans ClipboardList, skills Sparkles, and unknown tools Wrench.
 
 For MCP activity, the most frequent server wins, again keeping first appearance on
 ties. Server names are extracted from both `mcp__server__tool` and `mcp_server_tool`.
-Agentistics uses its existing local minimalist mark (including central branding).
+Agentistics uses its existing local minimalist mark.
 Other servers use Plug until a real local server logo is available. A failed logo
 load also falls back to Plug. Harness logos are not used as MCP server logos.
 

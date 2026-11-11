@@ -65,7 +65,6 @@ SETTLE_MS=12000 TAIL_MS=1800 rec tui 120 34 "agentop tui" -- \
 # Non-interactive commands: one shot each, no keys. These are the ones a reader
 # copies, so they are recorded exactly as typed.
 SETTLE_MS=6000 TAIL_MS=1200 rec status 100 26 "agentop status"
-SETTLE_MS=3000 TAIL_MS=1200 rec member-list 100 22 "agentop member list"
 
 # agentistics' own palette, not a stock terminal theme: the background matches
 # the dashboard's (#0a0a0f) and index 3 is the product's amber rather than a

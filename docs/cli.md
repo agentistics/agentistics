@@ -1,7 +1,7 @@
 # agentistics CLI — `agentop`
 
 `agentop` is the single binary for everything agentistics does: run the dashboard,
-the terminal TUI, the OpenTelemetry daemon, host or join a **Team Mode** central,
+the terminal TUI, the OpenTelemetry daemon,
 and manage autostart + updates.
 
 Get the binary from the [install instructions](../README.md#install) (`install.sh`,
@@ -16,11 +16,8 @@ agentop --help       # full usage
 agentop --version    # print version (and a notice if an update exists)
 ```
 
-> **Ports:** a solo/member instance serves the **web dashboard on 47292** (the URL you open) and
+> **Ports:** an instance serves the **web dashboard on 47292** (the URL you open) and
 > the **api + mcp on 47291** (in dev, Vite serves the web on 47292 and the api runs on 47291 — same split).
-> A Team Mode **central** runs in Docker on **48080**
-> by default. These are intentionally distinct so a member and a central can
-> coexist on the same host.
 
 ---
 
@@ -29,27 +26,22 @@ agentop --version    # print version (and a notice if an update exists)
 | Command | Purpose |
 |---------|---------|
 | [`start`](#start) | The control center — services, setup, logs, commands, help (same as bare `agentop`) |
-| [`setup`](#setup) | Interactive first-run wizard (solo / central / member) |
+| [`setup`](#setup) | Interactive first-run wizard (history consent, start on boot) |
 | [`server`](#server) | Start the web dashboard + api + Nay + background daemon (non-interactive) |
 | [`restart`](#restart) | Restart a running mode so it picks up new code / config |
-| [`status`](#status) | At-a-glance: mode, services (server/central/machine) + health |
+| [`status`](#status) | At-a-glance: mode, services (server/machine) + health |
 | [`tui`](#tui) | Live terminal dashboard (no browser) |
 | [`watch`](#watch) | OpenTelemetry metrics daemon only (headless) |
-| [`central`](#central) | Manage the Team Mode central (wraps `central.sh`) |
-| [`member`](#member) | Join / leave / inspect a Team Mode central from this machine |
 | [`session`](#session) | Start / list / attach / kill background assistant sessions (tmux-backed); `ls` prints the cockpit's table |
 | [`run`](#run) | Execute a command with a disposable home and separate API/web ports |
 | [`hooks`](#hooks) | Teach Claude Code to fan work out across several assistants through agentop |
 | [`backup`](#backup) | Back up this machine's history — metrics, and a manifest that rebuilds every repository |
 | [`restore`](#restore) | Restore a backup, or pull one from the private GitHub repository holding them |
-| [`ci-push`](#ci-push) | One-shot push of a GitHub Actions run's metrics to a central (per repo) |
 | [`autostart`](#autostart) | Start a mode with the system (systemd user service) |
 | [`upgrade`](#upgrade) | Upgrade `agentop` to the latest release |
 | [`uninstall`](#uninstall) | Remove `agentop` — service, shell hook, binary; your data is asked about separately |
 | [`check-update`](#check-update) | Print an "update available" banner, else stay silent |
-| [`doctor`](#doctor) | Run the exposure preflight before publishing a central |
-| [`setup-token`](#setup-token) | Reissue a central's one-time owner setup token |
-| [`reset-password`](#reset-password) | Reset an account's password from the host (locked-out owner) |
+| [`doctor`](#doctor) | Run the exposure preflight before exposing an instance |
 
 Running **bare `agentop`** on an interactive terminal opens the
 [control center](#start). Without a terminal it prints this help; `--help` always prints it.
@@ -104,13 +96,13 @@ agentop start --lang pt      # force Portuguese for this run
 
 ```
  ▄▀█ █▀▀ █▀▀ █▄░█ ▀█▀ █ █▀ ▀█▀ █ █▀▀ █▀
- █▀█ █▄█ ██▄ █░▀█ ░█░ █ ▄█ ░█░ █ █▄▄ ▄█                           member · v1.7.3 · ● 1.7.4
+ █▀█ █▄█ ██▄ █░▀█ ░█░ █ ▄█ ░█░ █ █▄▄ ▄█                           solo · v1.7.3 · ● 1.7.4
 
   services   setup   logs   commands   help   contribute
  ━━━━━━━━━━
  ╭─ services ─────────────────────────────╮╭─ config ─────────────────────────────────────╮
- │ ❯ agentistics         native ● up      ││   mode     member                            │
- │   agentistics central        ○ stopped ││   endpoint http://198.51.100.199:48080       │
+ │ ❯ agentistics         native ● up      ││   mode     solo                              │
+ │   agentistics docker         ○ stopped ││   endpoint http://localhost:47292            │
  │                                        ││   history  consolidate                       │
  │                                        ││   language English                           │
  ╰────────────────────────────────────────╯╰──────────────────────────────────────────────╯
@@ -135,9 +127,6 @@ agentop start --lang pt      # force Portuguese for this run
  q quit  ·  ←→ screens  ·  tab pane  ·  ↑↓ move  ·  enter actions  ·  s stop  ·  R restart
 ```
 
-**Naming:** `agentistics` is the per-machine app; `agentistics central` is the team aggregator.
-Both serve a web dashboard, so neither is labelled "the dashboard".
-
 ### The screens
 
 Move between them with **`←` / `→`** — there are no digit shortcuts for screens, so the digits
@@ -145,8 +134,8 @@ always belong to whatever list is drawing them.
 
 | Screen | What it is for |
 |---|---|
-| **services** | The cockpit: start / stop / restart, connect to or leave a central, enable a boot service |
-| **setup** | The same solo / central / member wizard as [`setup`](#setup), plus the history-preservation consent |
+| **services** | The cockpit: start / stop / restart, enable a boot service |
+| **setup** | The same wizard as [`setup`](#setup): the history-preservation consent |
 | **logs** | A tailing viewer, one source per running service |
 | **commands** | The cheat sheet — every command, without leaving the app |
 | **help** · **contribute** | What the keys do, and how to contribute |
@@ -169,7 +158,7 @@ repaints it. `tab` cycles the panes (services → config → actions) and the ac
 - **A long action streams into the detail pane**, titled with the verb you pressed, while the lists
   stay standing beside it. `esc` puts the facts back.
 - The **Docker** option mounts the host's harness dirs read-only — run the machine in Docker **or**
-  natively, not both. See [a machine in Docker](central-deploy.md#a-machine-in-docker).
+  natively, not both.
 
 The footer always names the keys that work *in the current focus*; it is the only documentation the
 screen has, so a hint for a key that does nothing there is a bug.
@@ -188,15 +177,14 @@ config. Defaults to `server`.
 agentop restart                      # = restart server
 agentop restart server               # bounce the systemd user service (agentop-server)
 agentop restart watch                # bounce the watch service
-agentop restart central              # bounce the central's container
 agentop restart --all                # bounce every service currently up
-agentop restart central --rebuild    # rebuild the image first, then restart
-agentop restart central --rebuild --cache -n   # …reusing the layer cache, answering the prompt
+agentop restart --rebuild            # rebuild first, then restart
+agentop restart --rebuild --cache    # …reusing the layer cache
 ```
 
 `server`/`watch` bounce the installed [systemd user service](#autostart) — if none is installed it
 tells you to run it in the foreground or enable autostart first. `--all` bounces everything that is
-up (local + central + machine), non-interactively.
+up (local + machine), non-interactively.
 
 **`--rebuild` is a FULL rebuild.** The Docker paths pass `--no-cache`, because a cached build can
 hand you back the very image it was asked to replace — which is the one failure mode a rebuild
@@ -206,11 +194,8 @@ exists to prevent. That takes several minutes, and the command says so on the wa
 |---|---|
 | `--cache` | Reuse Docker's layer cache instead — the fast path |
 | `--no-cache` | The default for a rebuild; stated explicitly |
-| `-y` / `--yes` | Re-run the central's interactive setup, without being asked |
-| `-n` / `--no` | Do **not** re-run it — the default when there is no terminal to ask on |
 
-Passing `-y` with `-n` (or `--cache` with `--no-cache`) is **refused**, not silently resolved. A
-plain `agentop central up` is not a rebuild and keeps its cached build.
+Passing `--cache` with `--no-cache` is **refused**, not silently resolved.
 
 ---
 
@@ -218,10 +203,9 @@ plain `agentop central up` is not a rebuild and keeps its cached build.
 
 Non-interactive, at-a-glance report of this machine. Prints three blocks:
 
-- **CONFIG** — the team mode (`solo` / `central` / `member`) and, for a member, the
-  central endpoint (from preferences).
+- **CONFIG** — the mode and the history-preservation setting (from preferences).
 - **SERVICES** — detected live: the local server (`http://localhost:47291/api/health`;
-  shows the dashboard URL when up), the central container, and the machine container.
+  shows the dashboard URL when up), and the machine container.
 - **HEALTH** — a one-line summary from `/api/health` when the server is up, else `n/a`.
 
 ```bash
@@ -234,10 +218,7 @@ Handy for a quick "is everything up and healthy?" without opening the dashboard.
 
 ## `setup`
 
-Interactive first-run wizard. Walks you through picking a mode and wires up the
-rest for you: **solo** (local only, nothing leaves the machine), **central** (host
-the aggregator on this machine via `central.sh init`), or **member** (push this
-machine's computed metrics to a central via `member connect`). It then offers to
+Interactive first-run wizard. Asks the history-preservation consent and then offers to
 enable [autostart](#autostart).
 
 ```bash
@@ -245,8 +226,7 @@ agentop setup
 ```
 
 Needs a TTY. Ctrl-C is non-destructive — it aborts without touching your
-preferences. For non-interactive/scripted member onboarding, use
-[`agentop member connect`](#member) directly.
+preferences. `agentop setup --defaults` applies the recommended settings non-interactively.
 
 ---
 
@@ -260,30 +240,12 @@ everything in one process. Binds two ports: the **web dashboard on 47292** (open
 agentop server              # web: http://localhost:47292 · api/mcp: http://localhost:47291
 agentop server --port 4000  # api on 4000, web on 4001
 agentop server --bg         # detached, logging to ~/.agentistics
-agentop server --central    # run a central natively, no Docker
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--port <n>` | `47291` | The **api + mcp** port; the web dashboard is served on this + 1 (default 47292) |
 | `--bg` | off | Start detached in the background; logs go to `~/.agentistics` |
-| `--central` | off | Run this process as a **team central**, natively — see below |
-
-### `--central` — a central without Docker
-
-Runs the same server with `AGENTISTICS_TEAM_CENTRAL=1`, loading `central.env` (searched in
-`$AGENTISTICS_CENTRAL_ENV`, `./central.env`, then `~/.agentistics/central.env`) for the secrets and
-the database URL.
-
-There is **no bundled MongoDB on this path** — set `MONGO_URL` to an external cluster (Atlas, or a
-`mongod` you run yourself). For the all-in-one flow with Mongo included, use
-[`agentop central up`](#central) instead.
-
-> **`AGENTISTICS_TEAM_PASSWORD` in `central.env` selects the legacy shared-password login and masks
-> the accounts sign-in.** If you want accounts, remove it — the central will otherwise serve the old
-> "team password" screen with no error anywhere.
-
----
 
 ## `tui`
 
@@ -332,98 +294,6 @@ feed Grafana/Datadog. See [docs/opentelemetry.md](opentelemetry.md).
 
 ```bash
 agentop watch
-```
-
----
-
-## `central`
-
-Manage the **Team Mode central** — the Docker service that aggregates metrics from
-many members. This is a thin wrapper over the repo's `central.sh`, so it needs to
-run from an agentistics checkout (the compiled binary alone doesn't ship the
-Compose stack). Full deployment details live in [docs/central-deploy.md](central-deploy.md).
-
-```bash
-agentop central <up|init|down|logs|status|restart|pull>
-```
-
-| Action | What it does |
-|--------|--------------|
-| `init` | (Re)generate `central.env` interactively — auto-generates the secrets with `openssl`, detects your Tailscale IP for the bind, writes the file `chmod 600` |
-| `up` | Build the image and (re)create the containers (`--build --force-recreate`); offers `init` first if `central.env` is missing |
-| `restart` | Restart the `app` container without rebuilding |
-| `logs` | Follow the `app` container logs |
-| `status` | Show container + health status |
-| `down` | Stop and remove the containers — **keeps** the Mongo data volume |
-| `pull` | Rebuild from a fresh base image (run `git pull` first) |
-
-```bash
-agentop central init        # generate central.env (interactive)
-agentop central up          # build + (re)create — most common
-agentop central logs        # tail the app logs
-agentop central down        # stop, keep the data volume
-```
-
-From a checkout you can equivalently use the package scripts
-`bun run init:central` and `bun run up:central`, or call `./central.sh` directly.
-
----
-
-## `member`
-
-Configure this machine as a **member** that pushes computed metrics to a central.
-Only aggregated metrics are sent — **never** chat content or raw transcripts. The
-machine's display name is assigned by the central (baked into the minted token)
-and resolved via `/api/team/whoami`; there is no name field on the machine.
-
-```bash
-agentop member connect --token <token> [--endpoint <url>] [--org <org>]
-agentop member leave
-agentop member status
-```
-
-### `member connect`
-
-Verifies the token against the central's `whoami` endpoint, then saves the member
-config. On a bad token it prints an actionable error and writes **nothing** (no
-half-configured state).
-
-**The token usually carries the URL.** A central with a public URL configured mints a
-composite token (`act1_<base64 url>.<secret>`), which is what the Machines panel copies
-into a ready-to-paste command — so pasting that one command connects the machine.
-`--endpoint` is needed only for a bare token, or to override the embedded URL.
-
-| Flag | Required | Description |
-|------|----------|-------------|
-| `--token <token>` | yes | Token minted for this machine in the central's Machines panel |
-| `--endpoint <url>` | only for a bare token | Central base url, e.g. `http://host:48080` |
-| `--org <org>` | no | Org override; defaults to the org on the token |
-
-```bash
-# the copy-paste form: the token carries the central's URL
-agentop member connect --token act1_aHR0cHM6Ly9jZW50cmFsLmV4YW1wbGU.abc123
-
-# a bare token needs the URL beside it
-agentop member connect --endpoint http://100.64.0.2:48080 --token abc123
-```
-
-### `member leave`
-
-Best-effort notifies the central (so it drops this member's data) and resets this
-machine back to solo. Succeeds locally even if the central is unreachable.
-
-### `member status`
-
-Prints the current mode / endpoint / org / user plus the live uploader state
-(`last sync` timestamp and whether the token/endpoint are healthy).
-
-```
-mode:      member
-endpoint:  http://100.64.0.2:48080
-org:       default
-user:      alice-laptop
-last sync: 2026-07-01T12:34:56.000Z
-state:     ok
 ```
 
 ---
@@ -634,39 +504,6 @@ Full write-up, including why not `UserPromptSubmit` and why the session verbs ar
 
 ---
 
-## `ci-push`
-
-One-shot push of a **GitHub Actions** run's computed metrics to a central, attributed to
-the repository it ran in. Meant to be the **last step** of a workflow that already runs Claude
-Code (it does **not** run Claude) — the ephemeral runner populates `~/.claude`, then `ci-push`
-sends that run's session/token/cost aggregates before the runner is torn down. It reads
-everything from the environment and takes no flags.
-
-| Env var | Required | Description |
-|---------|----------|-------------|
-| `AGENTISTICS_CENTRAL_URL` | yes | Central base URL, e.g. `https://central.example.com` |
-| `AGENTISTICS_CI_TOKEN` | no | Repo-bound static token (fallback when OIDC is unavailable) |
-
-Auth is **keyless GitHub OIDC** by default: with `permissions: id-token: write` on the job,
-`ci-push` fetches a short-lived GitHub-signed token itself (audience = `AGENTISTICS_CENTRAL_URL`)
-and the central verifies it against GitHub's JWKS. No secret needed. If no OIDC token can be
-fetched it falls back to `AGENTISTICS_CI_TOKEN`. The repo must first be **registered** on the
-central (Settings → Team → Repositories, which allowlists the remote and, for the fallback,
-mints the token).
-
-```bash
-# inside a GitHub Actions job, after the Claude Code Action step:
-curl -fsSL "https://github.com/agentistics/agentistics/releases/latest/download/agentop" -o agentop
-chmod +x agentop
-./agentop ci-push
-```
-
-`ci-push` **never fails your job** — a push error (central down, unverifiable token) logs and
-exits 0. It pushes **computed metrics only**, never chat. See
-[`docs/github-actions.md`](./github-actions.md) for the full workflow + registration walkthrough.
-
----
-
 ## `autostart`
 
 Register a mode to start with the system. On **Linux/WSL** this installs a systemd
@@ -680,7 +517,7 @@ terminal open. macOS and Windows print the manual step instead.
 agentop autostart <mode> <enable|disable|status>
 ```
 
-- `mode` ∈ `server` · `central` · `watch`
+- `mode` ∈ `server` · `watch`
 - `enable` — register + start the service (and add the terminal update hook)
 - `disable` — stop and remove the service
 - `status` — show enabled/active state; **omit the mode** to list all services
@@ -704,17 +541,6 @@ agentop upgrade
 `agentop upgrade --help` (or `-h`) prints help. Any flag it does not know is refused and nothing is
 upgraded — an upgrade only runs with no flags or with `--lang en|pt`.
 
-On a **central** you upgrade the Docker stack instead — pull the repo and rebuild:
-
-```bash
-git pull && bun run up:central    # or: agentop central pull
-```
-
-On a **member** running as a systemd service, restart it after upgrading:
-
-```bash
-agentop upgrade && systemctl --user restart agentop-server
-```
 
 ---
 
@@ -762,8 +588,7 @@ version check:
 - **On terminal / boot** — the `~/.bashrc` hook added by `autostart … enable` runs
   `agentop check-update` when you open a shell (silent when you're current).
 - **On the dashboard** — a bell notification plus a **mode-aware** upgrade modal
-  showing the exact command for your role (a central shows `bun run up:central`; a
-  member shows `agentop upgrade` then `systemctl --user restart agentop-server`). A
+  showing the exact command (`agentop upgrade` then `systemctl --user restart agentop-server`). A
   periodic (~6h) server re-check pushes the notification live over SSE.
 
 
@@ -771,23 +596,13 @@ version check:
 
 ## `doctor`
 
-Runs the exposure preflight: nine checks that decide whether this instance is safe to publish.
-Exits non-zero on any failure, so going live can be gated on one command instead of on
-remembering nine environment variables.
+Runs the exposure preflight: a handful of checks that decide whether this instance is safe to expose.
+Exits non-zero on any failure, so going live can be gated on one command.
 
 ```bash
 agentop doctor              # check against the current profile
 agentop doctor --exposed    # check against the strict public bar
-
-./central.sh doctor --exposed        # from a repo checkout, INSIDE the container
-agentop central doctor --exposed     # same, from the standalone binary
 ```
-
-**On a Docker central, prefer the `central.sh` / `agentop central` form.** The command
-evaluates the configuration the deployment will actually run with — it reads `central.env` when
-present and prints which file it used — but the owner-MFA and machine-token checks also need
-MongoDB, which is reachable only from inside the compose network. Run on the host, those two
-report as unverified, which counts as a failure by design.
 
 `--exposed` evaluates as if `AGENTISTICS_EXPOSURE=public` were already set, which is how you
 verify readiness **before** flipping it.
@@ -797,55 +612,12 @@ What it checks:
 | Check | Fails when |
 |---|---|
 | `local-shell` | `/api/exec`, `/api/chat-tty`, the host transcript readers or `/api/mcp-action` are still reachable |
-| `session-secret` | The secret is missing, shorter than 32 chars, or equal to the dashboard password |
-| `tls` | `AGENTISTICS_TEAM_TLS` is unset on a public profile |
-| `bind-ip` | `BIND_IP` is not loopback on a public profile — the tunnel connects locally, so anything wider is a way in that bypasses it |
+| `tls` | `AGENTISTICS_TLS` is unset on a public profile |
 | `trust-proxy` | *(warn)* forwarded-IP trust does not match the deployment, so per-IP limits apply to everyone at once |
-| `owner-mfa` | Any owner account has no TOTP enrolled |
 | `cors` | A plaintext origin sits in `AGENTISTICS_ALLOWED_ORIGINS` |
-| `mongo-auth` | *(warn)* the database has no credentials — acceptable only while its port stays unpublished |
-| `machine-tokens` | *(warn)* no machine tokens have been minted yet |
+| `native-bind` | The native server listens on a non-loopback address on a public profile |
 
-A check that could not be verified — the database was unreachable, say — reports a **failure**,
-not a reassuring pass. See [exposure.md](exposure.md) for the full deployment runbook.
-
----
-
-## `setup-token`
-
-Reissues a central's **one-time owner setup token** — the token first boot prints, and which the
-dashboard asks for when it creates the first owner account.
-
-```bash
-agentop central setup-token      # from anywhere
-./central.sh setup-token         # from a checkout
-```
-
-Use it when the boot that printed the token has scrolled away or its log rotated. It is **refused
-once an owner exists**: past that point the way back in is [`reset-password`](#reset-password), not
-a fresh setup token.
-
-Run it **where the central runs** — inside the container/host serving it, not on a member.
+A check that could not be verified reports a **failure**,
+not a reassuring pass. See [exposure.md](exposure.md) for the exposure runbook.
 
 ---
-
-## `reset-password`
-
-Resets an account's password from the host. This is the **only way back in for a locked-out last
-owner**, so it deliberately requires shell access to the machine running the central.
-
-```bash
-agentop central reset-password                              # list the accounts
-agentop central reset-password --email ana@example.com      # prompts for the new password
-agentop central reset-password --email ana@example.com --password '<new>' --clear-mfa
-```
-
-| Flag | Effect |
-|---|---|
-| `--email <address>` | Which account. Omit to list them |
-| `--password <new>` | Set it non-interactively (subject to the password policy) |
-| `--clear-mfa` | Also drop the enrolled second factor — for a lost authenticator |
-
-Every reset is written to the audit log. `--clear-mfa` removes a security control, so on a public
-profile treat it as a break-glass action and re-enrol immediately: `owner-mfa` is one of the checks
-[`doctor --exposed`](#doctor) fails on.

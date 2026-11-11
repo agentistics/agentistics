@@ -51,9 +51,7 @@ window.
 unrelated line, so every new interactive shell ran an upgrade. The product must survive that, and
 the fixes below do not depend on it being removed.
 
-**Unrelated, seen in the same logs.** A member connection that a central rejects with 401/403
-logged `ingest returned 403; stopping push` every 2–5 s for hours. Each file change started
-another full ingest that was refused again.
+
 
 ## Fixes
 
@@ -78,9 +76,7 @@ another full ingest that was refused again.
   reopens refuse with a sentence.
 - **`agentop doctor`** names a server holding the data dir from outside the service, and an
   installed unit without the restart guards.
-- **Uploader** (`uploader-auth-stop.ts`). The first 401/403 stops that connection's pushes and logs
-  one line. A configuration change lifts the stop at once. A `whoami` probe, at most once a minute,
-  lifts it when the central accepts the token again.
+
 
 ## Manual check for the owner
 

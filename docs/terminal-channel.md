@@ -86,7 +86,6 @@ Accept: text/event-stream
 | `200` | Stream opens (`text/event-stream`). |
 | `400` | `{"error":"bad_request"}` — `id` missing. |
 | `404` | `{"error":"not_found"}` — `id` is not a session this machine manages (**scope**). |
-| `404` | `{"error":"fleet_central"}` — called on a team central (the fleet lives on members). |
 | `403` | `{"error":"capability_disabled","capability":"localShell"}` — exposed profile (see Security). |
 | `503` | `{"error":"too_many_streams"}` — process at `MAX_TERMINAL_STREAMS`. |
 
@@ -169,7 +168,6 @@ The read channel inherits the fleet's existing model exactly — it invents no n
 - **Scope.** A stream opens only for a session **this machine manages** (its own registry). The read
   power never reaches past the fleet the dashboard already lists — the boundary the Phase 2 *write*
   path will inherit, established here where it is cheap.
-- **404 on a central.** Like `/api/fleet`; the fleet is a member/solo concept.
 
 ## Status indicators beside the terminal
 

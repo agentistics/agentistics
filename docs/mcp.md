@@ -87,15 +87,10 @@ sections below document the ones whose shapes are stable.
   (`agentistics_task_delete`, `agentistics_delete_layout`, the `delete` action of
   `agentistics_session_group_edit`). There is no risk class, no audit and no notion of who called.
   The only protection is the server's own route guards and your client's tool-approval prompt.
-- **It cannot authenticate to a central.** Every call is a bare `fetch` to `AGENTISTICS_API` with
-  no credential, and a central requires an account session on every `/api/*` outside its public
-  set. Pointed at a central, the tools answer with the auth refusal. `agentistics_team_members`
-  describes central data, but in practice it only works when run against a central that does not
-  demand auth — i.e. it is effectively machine-side today.
 - **It does not control the live fleet.** No tool reads a session's screen, prompts one, starts one
   or stops one; the web workspace, the cockpit, the VS Code extension and `agentop session` can.
 - **The task-board and session-group tools need a machine.** Their routes (`/api/tasks`,
-  `/api/session-groups`) sit behind the `localShell` capability, so a central refuses them.
+  `/api/session-groups`) sit behind the `localShell` capability, so an exposed profile refuses them.
 
 These gaps are the subject of the MCP coverage design
 (`docs/superpowers/specs/2026-09-29-mcp-coverage-design.md`).
@@ -432,19 +427,11 @@ distributions, daily series and the tag's date window. Aggregates only — never
 
 ---
 
-### `agentistics_team_status` / `agentistics_team_members`
-
-Read-only. `agentistics_team_status` reports this machine's team mode (solo / central / member) and,
-as a member, its central connections. `agentistics_team_members` lists a central's members with
-presence; see the authentication limit above.
-
----
-
 ### Session groups — `agentistics_session_groups`, `agentistics_session_group_create`, `agentistics_session_group_edit`
 
 The Sessions sidebar lets a person keep their fleet in named groups ("Saved to later", "Pelvie"…).
 These three tools let an assistant do the same, so the sessions it starts are filed where the person
-will look for them. They work on a **machine**; a central has no local sessions and refuses them.
+will look for them. They need host power (`localShell`); a profile without it refuses them.
 
 The flow an assistant follows:
 

@@ -124,7 +124,7 @@ never-on-argv rule. Differences worth knowing:
 
 ## `agentop provider key status`
 
-Answers on every machine — with the flag off, with no key stored, on a central — rather than
+Answers on every machine — with the flag off, with no key stored — rather than
 refusing outright, because "is anything even configured" has to be answerable before anything is.
 Per provider it prints:
 
@@ -180,12 +180,3 @@ Restoring a backup never restores the key. Re-enter it on the new machine instea
 ```
 agentop provider key set anthropic
 ```
-
-## Centrals never hold one
-
-A central aggregates many members' metrics; a provider key is one person's own billing credential
-for the native runtime, which only ever runs locally (Track B's design keeps native execution off
-the wire entirely — no member pushes a key, and no central stores one). `agentop provider key set`
-and `agentop provider key remove` refuse outright on a central, with the reason stated in the same
-sentence. `agentop provider key status` still answers there too, and says plainly that the machine
-is a central.

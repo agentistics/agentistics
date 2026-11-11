@@ -28,8 +28,7 @@ only a patch whose base matches their last GET or patch; a mismatch, malformed p
 baseline or missed connection falls back to a GET. The following matching change causes no GET.
 A 15-second heartbeat allows healthy clients to suppress the dashboard interval too.
 
-Central data retains its scoped GET path. The shared broadcast stream must not carry unscoped
-team session bodies; extending patches to central deployments requires per-viewer subscriptions.
+
 
 ## Reproducible checks and measured limits
 

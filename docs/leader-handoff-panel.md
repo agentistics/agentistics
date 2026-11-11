@@ -68,7 +68,7 @@ Gemini usage is read directly from native artifacts, including in builds without
 harnesses use their journal/replay usage when available. Native artifacts replace their journal copy,
 rather than adding the same usage twice. Claude response IDs use final usage and the first timestamp;
 Codex uses cumulative token-count increments; Gemini snapshots are deduplicated by message ID.
-Costs use the central pricing functions, including Claude cache-write TTLs.
+Costs use the shared pricing functions, including Claude cache-write TTLs.
 An explicit transcript-root binding preserves the source login of historical usage. Otherwise,
 the managed session's account takes precedence over the default home's current login, so switching
 the default account does not move a bound session's usage into another account's calibration.
@@ -105,7 +105,7 @@ The cost panel opens with focus on the dialog container and its summary visible 
 including on mobile. The simulation percentage input receives focus through keyboard navigation
 or a click, rather than automatically when the panel opens.
 
-Current price rows added for this panel's coverage use the central `MODEL_PRICING` table and
+Current price rows added for this panel's coverage use the shared `MODEL_PRICING` table and
 `PRICE_PROVENANCE`, checked on 2026-10-20 against
 [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing),
 [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and

@@ -6,7 +6,7 @@ in issues and in code comments.
 
 | Name | What it is |
 |---|---|
-| **the Sessions workspace** | The **web** one: `/sessions`. The aside on the left holds the fleet; the centre holds either the overview or the open session's chat and terminal. On a central it is the same workspace, showing the relayed fleet of whichever machine its picker has chosen. |
+| **the Sessions workspace** | The **web** one: `/sessions`. The aside on the left holds the fleet; the centre holds either the overview or the open session's chat and terminal. |
 | **the cockpit** | The **terminal** one: `agentop`'s full-screen control center, whose `sessions` tab draws the fleet. |
 | **the VS Code extension** | `packages/vscode` — a client of `agentop server`, and nothing more. |
 | **`agentop session …`** | The CLI verbs (`start`, `ls`, `attach`, `kill`, `rename`, `note`, …). |

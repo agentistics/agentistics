@@ -78,7 +78,6 @@ A few of the named credentials, as the restore prints them:
 | Claude Code credentials | `claude login` |
 | Codex / Gemini / Copilot / agy auth | `codex login`, or sign in on first run |
 | Kimi's `api_key` | restore it in `~/.kimi-code/config.toml` |
-| The member's central token | `agentop member connect <url> <token>` |
 | The backup repository's GitHub token | `agentop backup github setup <url>` |
 | The envelope keypair | nothing — siblings re-pin this machine on its next announcement |
 
