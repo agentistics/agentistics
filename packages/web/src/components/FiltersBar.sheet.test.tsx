@@ -35,12 +35,15 @@ describe('FiltersBar inside the filters sheet', () => {
 })
 
 describe('FiltersBar inline strip', () => {
-  test('the + Filter button clips inside its narrowable wrapper, so it cannot overlap the active-filters chip', () => {
+  test('the inline bar reserves the add button instead of shrinking its wrapper below the painted control', () => {
     const html = at(1200, () => renderToStaticMarkup(
       <FiltersBar inline filters={filters} onChange={() => {}} projects={[]} sessionCountByProject={{}} models={['claude-opus-5']} harnesses={['claude', 'codex']}
         users={[]} lang="en" />,
     ))
     expect(html).toContain('See active filters')
-    expect(html).toMatch(/title="Add filter"[^>]*style="[^"]*min-width:0[^"]*overflow:hidden/)
+    expect(html).toContain('flex-wrap:nowrap')
+    expect(html).toContain('flex-shrink:0')
+    expect(html).not.toContain('height:34px')
+    expect(html).not.toMatch(/title="Add filter"[^>]*style="[^"]*overflow:hidden/)
   })
 })
