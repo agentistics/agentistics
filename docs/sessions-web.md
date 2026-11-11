@@ -2,8 +2,7 @@
 
 `/sessions` — the browser front door onto the fleet. The aside on the left lists the sessions; the
 centre holds either the **overview** (`FleetOverview`) or the open session's **chat**, **terminal**
-and **right aside**. On a central it is the same workspace, showing the relayed fleet of whichever
-machine the picker has chosen.
+and **right aside**.
 
 The names of the four surfaces are in [docs/surfaces.md](surfaces.md); what a session IS, how it is
 started and what its states mean is [docs/session-manager.md](session-manager.md). This page is
@@ -20,8 +19,6 @@ metric header's Active only switch. Changing metric filters preserves the curren
 - Terminal side: [terminal-channel.md](terminal-channel.md),
   [terminal-interactive.md](terminal-interactive.md),
   [terminal-write-channel.md](terminal-write-channel.md)
-- On a central: [architecture.md § Managing a machine's sessions](architecture.md) and
-  [security.md § 8c](security.md)
 
 The aside's **N leaders** toggle counts only sessions in the fleet's active states that match the
 current search and harness/project/repository/model filters. When enabled, it displays those
@@ -255,7 +252,7 @@ messages whose in-memory fingerprints were already lost cannot be identified ret
   FALSE, `SpeechRecognition.start()` answering `onerror: not-allowed`, which `dictationError` then
   reported as the browser having refused a permission the user was never asked for. It is
   `microphone=(self)`: same-origin only, and the browser's own prompt is still the consent gate.
-  `dictationSupport` has a `blocked` state for it, because a reverse proxy in front of a central can
+  `dictationSupport` has a `blocked` state for it, because a reverse proxy in front of the server can
   send the same header and the button must name what is actually refusing.
 - **A stale service worker carries stale HEADERS.** The PWA precache serves the whole document, and
   a cached response brings its `Permissions-Policy` with it — so the fix above appears not to work

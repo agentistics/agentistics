@@ -12,8 +12,7 @@
  * grows between the stat and the read stores newer content under an older version, which only ever
  * costs one extra parse on the next build; it can never serve stale content as current.
  *
- * Callers stamp fields onto the sessions they are handed (git remotes, session labels, the central's
- * user), so the remembered value is never handed out: a hit returns a COPY, and a miss stores one.
+ * Callers stamp fields onto the sessions they are handed (git remotes, session labels), so the remembered value is never handed out: a hit returns a COPY, and a miss stores one.
  * A SHALLOW copy: every such stamp assigns a top-level field and none writes into a nested one
  * (a deep copy of 300 sessions per build was most of what this memo still cost).
  * One entry per file key (`FileVersionCache`), so a live file being appended to replaces its own

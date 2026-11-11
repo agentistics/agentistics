@@ -7,7 +7,7 @@
  *
  * `identity` is a caller-supplied token for "whose settings these are" — `undefined`/a constant
  * while there is nobody (yet) to load for, a distinct value once someone is. It exists because
- * this hook is mounted above the login gate: on a central, `/api/accessibility` 401s/403s until
+ * this hook is mounted above the login gate:, `/api/accessibility` 401s/403s until
  * a session is fully authorized, and the load must re-run the moment one becomes available rather
  * than being stuck with whatever it saw on first mount.
  */
@@ -120,10 +120,10 @@ export function useAccessibility(identity: string | undefined): A11yState {
   const prefsRef = useRef<AccessibilityPrefs>(DEFAULT_ACCESSIBILITY_PREFS)
 
   // Re-runs whenever the signed-in identity changes (`App.tsx` passes `undefined` until a
-  // central session is fully authorized — signed in AND past MFA enrolment — and a stable
-  // constant on a non-central machine, where the route is never gated). On a central,
+  // session is fully authorized — signed in AND past MFA enrolment — and a stable
+  // constant on a machine, where the route is never gated). On a protected host,
   // `/api/accessibility` answers 401 before sign-in and 403 before MFA enrolment; without this
-  // dependency the hook would fetch exactly once, before either is possible, and a central user
+  // dependency the hook would fetch exactly once, before either is possible, and a user
   // would need a full page reload after logging in to ever see their saved lenses.
   useEffect(() => {
     let cancelled = false

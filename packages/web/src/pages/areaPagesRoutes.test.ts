@@ -13,7 +13,6 @@ test('activity and Actions routes resolve alongside the existing task and reposi
   expect(resolved('/tasks/activity')).toBe('tasks/activity')
   expect(resolved('/tasks/t-xxx')).toBe('tasks/:id')
   expect(resolved('/tasks')).toBe('tasks')
-  expect(resolved('/repositories/actions')).toBe('repositories/actions')
   expect(resolved('/repositories')).toBe('repositories')
   expect(resolved('/repo/github.com%2Fteam%2Frepo')).toBe('repo/:id')
   expect(source.indexOf('<Route path="tasks/activity"')).toBeLessThan(source.indexOf('<Route path="tasks/:id"'))

@@ -319,7 +319,7 @@ export function PanelRail({
       data-panel-rail="true"
       style={{
         position: 'relative', display: 'flex', flexDirection: 'column', width: railWidth, flexShrink: 0,
-        // The plain state carries NO line any more (owner-approved central-pane inset, 2026-09-26):
+        // The plain state carries NO line any more (owner-approved pane inset, 2026-09-26):
         // the pane immediately to this rail's left now has its OWN right border, 5px away, so a
         // second line here just sandwiched it. The drag-over highlight stays — that is a live
         // STATE, not the static frame divider the pane's own border replaced, and the resize

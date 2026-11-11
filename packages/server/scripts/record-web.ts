@@ -1,5 +1,5 @@
 /**
- * record-web.ts — record the web UI (a machine and a central) as GIFs.
+ * record-web.ts — record the web UI as GIFs.
  *
  * Playwright records each flow to webm; ffmpeg turns it into a GIF through a
  * generated palette (a straight webm→gif is dithered mud). Everything is driven
@@ -7,31 +7,21 @@
  * files get published, and a real project name in one cannot be taken back.
  *
  * Prerequisites:
- *   bun run packages/server/scripts/seed-demo.ts --split 3 --force
+ *   bun run packages/server/scripts/seed-demo.ts --force
  *   HOME=~/.agentistics-demo-home-1 PORT=47391 ./release/agentop server &
- *   PROJECT=capture ENV_FILE=central.capture.env ./central.sh up
- *   (owner bootstrapped, its TOTP secret in CENTRAL_TOTP_SECRET)
  *
  * Usage:
  *   bun run packages/server/scripts/record-web.ts [--only <name>]
  *
- * Env: MACHINE_URL (http://localhost:47392), CENTRAL_URL (http://localhost:48090),
- *      CENTRAL_EMAIL, CENTRAL_PASSWORD, CENTRAL_TOTP_SECRET, OUT_DIR (./casts).
+ * Env: MACHINE_URL (http://localhost:47392), OUT_DIR (./casts).
  */
 
 import { chromium, type Page, type Browser, type BrowserContext } from 'playwright'
 import { mkdir, readdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createHmac } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 
-type StorageState = Awaited<ReturnType<BrowserContext['storageState']>>
-
 const MACHINE_URL = process.env.MACHINE_URL ?? 'http://localhost:47392'
-const CENTRAL_URL = process.env.CENTRAL_URL ?? 'http://localhost:48090'
-const CENTRAL_EMAIL = process.env.CENTRAL_EMAIL ?? 'ana@northwind.example'
-const CENTRAL_PASSWORD = process.env.CENTRAL_PASSWORD ?? ''
-const CENTRAL_TOTP_SECRET = process.env.CENTRAL_TOTP_SECRET ?? ''
 const OUT_DIR = process.env.OUT_DIR ?? join(import.meta.dirname, '..', '..', '..', 'casts')
 
 const DESKTOP = { width: 1440, height: 900 }
@@ -39,33 +29,6 @@ const MOBILE = { width: 390, height: 844 }
 
 const onlyFlag = process.argv.indexOf('--only')
 const ONLY = onlyFlag >= 0 ? process.argv[onlyFlag + 1] : null
-
-/* --------------------------------------------------------------------- totp */
-
-const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
-function base32Decode(s: string): Buffer {
-  let bits = 0, value = 0
-  const out: number[] = []
-  for (const ch of s.toUpperCase().replace(/=+$/, '')) {
-    const i = B32.indexOf(ch)
-    if (i < 0) continue
-    value = (value << 5) | i
-    bits += 5
-    if (bits >= 8) { out.push((value >>> (bits - 8)) & 0xff); bits -= 8 }
-  }
-  return Buffer.from(out)
-}
-/** The central requires a second factor; a recording cannot type one by hand. */
-function totp(secret: string): string {
-  const counter = Math.floor(Date.now() / 1000 / 30)
-  const buf = Buffer.alloc(8)
-  buf.writeUInt32BE(Math.floor(counter / 2 ** 32), 0)
-  buf.writeUInt32BE(counter >>> 0, 4)
-  const mac = createHmac('sha1', base32Decode(secret)).update(buf).digest()
-  const o = mac[mac.length - 1]! & 0x0f
-  const bin = ((mac[o]! & 0x7f) << 24) | ((mac[o + 1]! & 0xff) << 16) | ((mac[o + 2]! & 0xff) << 8) | (mac[o + 3]! & 0xff)
-  return String(bin % 1e6).padStart(6, '0')
-}
 
 /* ------------------------------------------------------------------- helpers */
 
@@ -132,7 +95,6 @@ async function record(
   name: string,
   viewport: { width: number; height: number },
   drive: (page: Page, context: BrowserContext) => Promise<void>,
-  opts: { storageState?: StorageState } = {},
 ): Promise<void> {
   if (ONLY && ONLY !== name) return
   const dir = join(OUT_DIR, `.video-${name}`)
@@ -144,11 +106,6 @@ async function record(
     deviceScaleFactor: 1,
     recordVideo: { dir, size: viewport },
     colorScheme: 'dark',
-    // Signing in is setup, not content: it belongs to `central-login`, and
-    // leaving it at the head of the tour spends most of a 20s loop on a
-    // password field. Handing over an already-authenticated state also avoids
-    // trimming by a guessed duration, which changes with the machine.
-    ...(opts.storageState ? { storageState: opts.storageState } : {}),
   })
   // The first-run "install the app" modal dims the whole page behind it, so a
   // recording that meets it is a recording of a dimmed dashboard. It is keyed on
@@ -176,8 +133,8 @@ async function record(
 }
 
 /** Seconds to drop from the FRONT of a clip, for a flow whose opening is setup
- *  rather than content. Prefer `storageState` (below) where the setup is a
- *  login: trimming guesses at a duration that changes with the machine. */
+ *  rather than content. Trimming guesses at a duration that changes
+ *  with the machine. */
 const SKIP_SECONDS: Record<string, number> = {}
 
 /** Two passes: one to compute a palette from the whole clip, one to apply it.
@@ -203,54 +160,6 @@ function toGif(webm: string, gif: string, sourceWidth: number, skipSeconds = 0):
 }
 
 /* ---------------------------------------------------------------- the flows */
-
-async function loginToCentral(page: Page): Promise<void> {
-  await page.goto(CENTRAL_URL, { waitUntil: 'load' })
-  await wait(1500)
-  const email = page.locator('input[type="email"], input[name="email"]').first()
-  if (!(await email.count())) return // already signed in
-  await email.click()
-  await email.type(CENTRAL_EMAIL, { delay: 45 })
-  const pw = page.locator('input[type="password"]').first()
-  await pw.click()
-  await pw.type(CENTRAL_PASSWORD, { delay: 45 })
-  await wait(500)
-  await page.keyboard.press('Enter')
-  await wait(2200)
-  // Second factor, if the account has one enrolled. The field is a plain text
-  // input on the two-factor card, so it is found by the card rather than by an
-  // attribute — and the code is generated LAST, immediately before typing, since
-  // a TOTP minted before the password step can expire mid-login.
-  await page.getByText('Two-factor', { exact: false }).first()
-    .waitFor({ timeout: 8_000 }).catch(() => {})
-  const code = page.locator('input[type="text"]:visible').first()
-  if (await code.count()) {
-    await code.click()
-    await code.type(totp(CENTRAL_TOTP_SECRET), { delay: 70 })
-    await wait(500)
-    await page.keyboard.press('Enter')
-    await wait(3500)
-  }
-  await ready(page)
-}
-
-/** Sign in ONCE, in a context that is not being recorded, and keep the session
- *  so every central flow can start already authenticated. */
-async function centralSession(browser: Browser): Promise<StorageState | undefined> {
-  if (!CENTRAL_PASSWORD) return undefined
-  const context = await browser.newContext({ viewport: DESKTOP, colorScheme: 'dark' })
-  const page = await context.newPage()
-  try {
-    await loginToCentral(page)
-    const state = await context.storageState()
-    await context.close()
-    return state
-  } catch (err) {
-    console.warn(`  central login failed: ${String(err).slice(0, 160)}`)
-    await context.close()
-    return undefined
-  }
-}
 
 async function run(): Promise<void> {
   await mkdir(OUT_DIR, { recursive: true })
@@ -308,23 +217,6 @@ async function run(): Promise<void> {
     await click(page, 'button:has-text("More"), button[aria-label="More"]', 1600)
     await wait(1400)
   })
-
-  // --- central ---------------------------------------------------------
-
-  await record(browser, 'central-login', DESKTOP, async page => {
-    await page.goto(CENTRAL_URL, { waitUntil: 'load' })
-    await wait(2500)
-  })
-
-  const session = await centralSession(browser)
-
-  await record(browser, 'central-dashboard', DESKTOP, async page => {
-    await page.goto(CENTRAL_URL, { waitUntil: 'load' })
-    await ready(page)
-    await wait(2400)
-    await hop(page, 800)
-    await hop(page, 1600)
-  }, { storageState: session })
 
   await browser.close()
   console.log(`\ngifs in ${OUT_DIR}`)

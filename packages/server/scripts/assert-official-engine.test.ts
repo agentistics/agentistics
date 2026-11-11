@@ -76,8 +76,8 @@ describe('findLeakedMarkers', () => {
 })
 
 describe('the release workflows compile every public binary minified, with no source map', () => {
-  // release.yml builds the Linux binaries; the Tauri sidecar moved to publish-tauri.yml and the
-  // central image (two more compiles) was retired — so the count is over all three files.
+  // release.yml builds the Linux binaries; the Tauri sidecar moved to publish-tauri.yml —
+  // so the count is over all three files.
   const yml = ['release.yml', 'publish-npm.yml', 'publish-tauri.yml']
     .map(f => readFileSync(join(import.meta.dir, '..', '..', '..', '.github', 'workflows', f), 'utf8'))
     .join('\n')

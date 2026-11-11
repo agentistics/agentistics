@@ -12,19 +12,14 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { migratedSentence } from '@agentistics/vault'
-import { AGENTISTICS_DATA_DIR, envelopeKeyFile } from '../config'
+import { AGENTISTICS_DATA_DIR } from '../config'
 import {
   allRestoreWith, becomeVaultHolder, hardenThisProcess, displayPath, ensureVaultOpen, pendingPlaintext, runMigrations, vaultExists, vaultLang,
   vaultStatus,
 } from './service'
 import { installVaultOps } from './ops'
 import { hardeningLines } from './hardening'
-import { sealedPathFor } from './whole-file'
-import { tokensFileFor } from './prefs-tokens'
-import { STANDALONE_CENTRAL_ENV, centralSecretsFile, splitCentralEnv } from './central-env'
 import { GITHUB_BACKUP_SEALED_FILE } from '../backup/github-store'
-import { PREFERENCES_FILE } from '../preferences'
-import '../envelope-keys'
 
 /** Import every module that registers a migrator, so the pass and the pending count see them all. */
 export async function loadVaultConsumers(): Promise<void> {
@@ -39,9 +34,6 @@ export async function loadVaultConsumers(): Promise<void> {
 export function sealedFiles(): string[] {
   return [
     GITHUB_BACKUP_SEALED_FILE,
-    sealedPathFor(envelopeKeyFile()),
-    tokensFileFor(PREFERENCES_FILE),
-    centralSecretsFile(STANDALONE_CENTRAL_ENV),
   ].filter(p => existsSync(p))
 }
 
@@ -57,16 +49,6 @@ export function pendingSecretValues(): string[] {
   const read = (p: string) => { try { return readFileSync(p, 'utf8') } catch { return null } }
   const gh = read(join(AGENTISTICS_DATA_DIR, 'github-backup.json'))
   if (gh) { try { const t = (JSON.parse(gh) as { token?: unknown }).token; if (typeof t === 'string' && t) out.push(t) } catch { /* junk */ } }
-  const prefs = read(join(AGENTISTICS_DATA_DIR, 'preferences.json'))
-  if (prefs) {
-    try {
-      const team = (JSON.parse(prefs) as { team?: { token?: unknown; connections?: { token?: unknown }[] } }).team
-      if (typeof team?.token === 'string' && team.token) out.push(team.token)
-      for (const c of team?.connections ?? []) if (typeof c?.token === 'string' && c.token) out.push(c.token)
-    } catch { /* junk */ }
-  }
-  const env = read(STANDALONE_CENTRAL_ENV)
-  if (env) out.push(...Object.values(splitCentralEnv(env).secrets))
   return out
 }
 

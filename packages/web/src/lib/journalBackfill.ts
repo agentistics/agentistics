@@ -1,7 +1,7 @@
 /**
  * The one line the web shows while the journal's first import runs (`journal/backfill.ts` on the
  * server): what it is doing, and that the figures come from /api/data until it completes. `null` is
- * "nothing to say": the import completed, the journal is off, or this is a central.
+ * "nothing to say": the import completed, the journal is off.
  */
 export interface JournalBackfillSummary {
   state: 'pending' | 'running' | 'paused' | 'interrupted' | 'failed' | 'done'

@@ -18,7 +18,6 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
   ['/api/exec', 'localShell'],
   // It DOWNLOADS a release binary, EXECUTES it and restarts the service serving this page — the
   // most powerful thing this product does from a browser, so it rides the gate the shell rides.
-  // `upgrade-gate.ts` refuses a central on top of this, and says so in words.
   ['/api/upgrade', 'localShell'],
   ['/api/journal/import', 'localShell'],
   // It SPAWNS `tailscale` to read what this machine is already serving — a process, so it is host
@@ -108,7 +107,7 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/deliveries', 'localShell'],
   // User session groups: the routes behind the MCP tools that file a session under a group. They
   // resolve a session reference against THIS machine's fleet, so they read host state the same way
-  // `/api/fleet` does, and they are refused on a central for the same reason.
+  // `/api/fleet` does.
   ['/api/session-groups', 'localShell'],
   // Per-session notification switch: resolves a ref against THIS machine's fleet, same as above.
   ['/api/session-notify', 'localShell'],
@@ -135,8 +134,7 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // `/api/exec` carries, so it rides the same capability rather than a softer one.
   ['/api/backup', 'localShell'],
   // Settings → Vault: which secrets are sealed on this machine (metadata only, never a value) and the
-  // "lock now" action. It is about THIS host's key material, so it rides the host-power gate and is
-  // refused on a central by `index.ts` as well.
+  // "lock now" action. It is about THIS host's key material, so it rides the host-power gate.
   ['/api/vault', 'localShell'],
   // The running server's experimental-feature state (GET) and its switch (PUT, via the `agentop experimental` command).
   // It reports and changes which host features this machine runs, so it rides the same capability.

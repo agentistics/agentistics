@@ -95,7 +95,7 @@ export function SessionsRail({
   allRows?: readonly ControlSession[]
   selectedId?: string
   lang: 'pt' | 'en'
-  /** Withholds "New session" where this surface cannot start one (a central). */
+  /** Withholds "New session" where this surface cannot start one. */
   hideNew?: boolean
   /** The fleet's verb-carrying rows — which ones FELL, for the badge and the reopen. */
   rowsById?: Map<string, { verbs: RowVerb[]; fell?: boolean; title?: string; project?: string; cwd?: string; stateLabel?: string }>

@@ -172,126 +172,8 @@ describe('writing through to the server', () => {
 describe('localization', () => {
   test('a stored code+meta still resolves in the current language', async () => {
     const s = await freshStore()
-    const n = note('a', { code: 'member.reconnected' })
-    expect(s.resolveNotification(n, 'pt').title).toBe('Conectado à central')
-    expect(s.resolveNotification(n, 'en').title).toBe('Connected to the central')
-  })
-})
-
-describe('I3 — a per-connection notification names WHICH central it is about', () => {
-  const PER_CONNECTION = [
-    'member.unreachable',
-    'member.auth_rejected',
-    'member.reconnected',
-    'member.removed',
-    'member.disconnected',
-  ] as const
-
-  test('every member.* code carries a {central} placeholder in BOTH languages', async () => {
-    const s = await freshStore()
-    for (const code of PER_CONNECTION) {
-      for (const lang of ['pt', 'en'] as const) {
-        expect(s.NOTIFICATION_TEXT[code]![lang].message).toContain('{central}')
-      }
-    }
-  })
-
-  test('two centrals produce two DISTINCT rows instead of two identical ones', async () => {
-    const s = await freshStore()
-    // The dedupe key already includes meta.connectionId, so both rows survive; before this fix the
-    // bell showed two byte-identical messages and the user could not tell which central was down.
-    const a = note('a', { code: 'member.unreachable', meta: { connectionId: 'c_a', central: 'central-a.example.com' } })
-    const b = note('b', { code: 'member.unreachable', meta: { connectionId: 'c_b', central: 'work-central' } })
-    for (const lang of ['pt', 'en'] as const) {
-      const ma = s.resolveNotification(a, lang).message!
-      const mb = s.resolveNotification(b, lang).message!
-      expect(ma).toContain('central-a.example.com')
-      expect(mb).toContain('work-central')
-      expect(ma).not.toBe(mb)
-      expect(ma).not.toContain('{central}')
-    }
-  })
-
-  test('a label is used verbatim when the connection has one (the server sends label ?? host)', async () => {
-    const s = await freshStore()
-    const n = note('a', { code: 'member.removed', meta: { connectionId: 'c_a', central: 'Acme HQ' } })
-    expect(s.resolveNotification(n, 'en').message).toContain('Acme HQ')
-    expect(s.resolveNotification(n, 'pt').message).toContain('Acme HQ')
-  })
-
-  test('a row persisted before meta.central existed degrades to a generic noun, never a literal {central}', async () => {
-    const s = await freshStore()
-    for (const code of PER_CONNECTION) {
-      const legacy = note('a', { code, meta: { connectionId: 'c_a' } })
-      expect(s.resolveNotification(legacy, 'en').message).toContain('the central')
-      expect(s.resolveNotification(legacy, 'pt').message).toContain('a central')
-      expect(s.resolveNotification(legacy, 'en').message).not.toContain('{central}')
-      expect(s.resolveNotification(legacy, 'pt').message).not.toContain('{central}')
-      // An empty string is treated the same as missing.
-      const blank = note('a', { code, meta: { connectionId: 'c_a', central: '  ' } })
-      expect(s.resolveNotification(blank, 'en').message).not.toContain('{central}')
-    }
-  })
-
-  test('the auth-rejected HTTP status still appends, on top of the interpolated central', async () => {
-    const s = await freshStore()
-    const n = note('a', { code: 'member.auth_rejected', meta: { connectionId: 'c_a', central: 'hq', status: 401 } })
-    const msg = s.resolveNotification(n, 'en').message!
-    expect(msg).toContain('hq')
-    expect(msg).toContain('(HTTP 401)')
-  })
-})
-
-describe('Task 13 — the two resync notification codes (member.resync_started / _done)', () => {
-  const RESYNC = ['member.resync_started', 'member.resync_done'] as const
-
-  test('both codes resolve to non-empty EN and PT titles', async () => {
-    const s = await freshStore()
-    for (const code of RESYNC) {
-      for (const lang of ['pt', 'en'] as const) {
-        const { title } = s.resolveNotification(note('a', { code }), lang)
-        expect(title.length).toBeGreaterThan(0)
-      }
-    }
-  })
-
-  test('both codes interpolate {central} and {count} from meta, in both languages', async () => {
-    const s = await freshStore()
-    for (const code of RESYNC) {
-      for (const lang of ['pt', 'en'] as const) {
-        const n = note('a', { code, meta: { connectionId: 'c_a', central: 'Acme HQ', count: 7 } })
-        const msg = s.resolveNotification(n, lang).message!
-        expect(msg).toContain('Acme HQ')
-        expect(msg).toContain('7')
-        expect(msg).not.toContain('{central}')
-        expect(msg).not.toContain('{count}')
-      }
-    }
-  })
-
-  // The dedupe key that decides whether two rows collapse into one lives server-side
-  // (`notifications-store.ts`'s `keyOf`, `c:${code}:${JSON.stringify(meta)}`) — the web bundle may
-  // never import `packages/server/*`, so this cannot cross-check that function directly the way
-  // `shareRepos.test.ts` cross-checks `canonicalRepoKey`. `meta` there already carries
-  // `connectionId` for EVERY per-connection notification (`notifyMeta` in `team-uploader.ts` always
-  // sets it), so two different connections' resync events already produce two different JSON blobs
-  // and therefore two different keys — this was already true before this task (Plan 2 fixed the
-  // dedupe key itself for the member.* family), so nothing changes here; this test only asserts,
-  // at the one boundary the web side can observe, that the two rows carry enough distinguishing
-  // information to never be mistaken for the same central.
-  test('two resync notifications with the same code and different connectionId do not collapse', async () => {
-    const s = await freshStore()
-    for (const code of RESYNC) {
-      const a = note('a', { code, meta: { connectionId: 'c_a', central: 'central-a.example.com', count: 3 } })
-      const b = note('b', { code, meta: { connectionId: 'c_b', central: 'work-central', count: 5 } })
-      for (const lang of ['pt', 'en'] as const) {
-        const ma = s.resolveNotification(a, lang).message!
-        const mb = s.resolveNotification(b, lang).message!
-        expect(ma).not.toBe(mb)
-        expect(ma).toContain('central-a.example.com')
-        expect(mb).toContain('work-central')
-      }
-    }
+    const n = note('a', { code: 'backup.failed' })
+    expect(s.resolveNotification(n, 'pt').title).not.toBe(s.resolveNotification(n, 'en').title)
   })
 })
 
@@ -376,7 +258,7 @@ describe('Task 5 — sessions.idle: meta is language-neutral, {more}/{freed} are
 describe('every {placeholder} is interpolated, not only the hand-listed ones', () => {
   test('a placeholder with no hand-written case still resolves from meta', async () => {
     // Seen on screen: a toast reading "Salvando {layers}." and another "Motivo: {reason}".
-    // Interpolation was a hand-written list — `user`, `version`, `central` — so every new
+    // Interpolation was a hand-written list — `user`, `version` — so every new
     // notification with a new placeholder shipped showing its own braces. The list is the bug,
     // not the missing entries: the next person adding a code would have hit it again.
     const s = await freshStore()

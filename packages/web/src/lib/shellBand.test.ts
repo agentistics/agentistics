@@ -251,11 +251,6 @@ describe('a refusal is a sentence, never a blank pane', () => {
     expect(shellErrorText('shell_disabled', 'pt')).toContain('Configurações')
   })
 
-  it('a central says it has no host to open one on', () => {
-    expect(shellErrorText('shell_central', 'en')).not.toBe('shell_central')
-    expect(shellErrorText('shell_central', 'pt')).not.toBe('shell_central')
-  })
-
   it('an unknown code is shown verbatim rather than swallowed', () => {
     // A reason the reader cannot parse still beats a silent failure — `inputReasonText`'s own rule.
     expect(shellErrorText('something_new', 'en')).toBe('something_new')

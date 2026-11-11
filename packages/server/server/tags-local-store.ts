@@ -1,17 +1,11 @@
 /**
- * tags-local-store.ts — file persistence for tags on a NON-central instance (solo / member).
- *
- * Tags used to exist only on a central, because the only store was Mongo (tags-store.ts). A solo
- * machine has repos and projects worth grouping too, so the same CRUD surface is provided here on
- * top of a single JSON file in the app's writable data dir:
+ * tags-local-store.ts — file persistence for tags: a single JSON file in the app's writable data dir.
  *
  *   ~/.agentistics/tags.json   → { version: 1, tags: TagDoc[] }
  *
- * Same document shape as the Mongo store, so tags-handlers can swap one for the other and the pure
- * modules (resolve/aggregate/detail/authority) never learn which one is behind them. That includes
- * the timestamps: a TagDoc carries real `Date`s IN MEMORY from either store. Here they cross a JSON
- * file, where a date can only be an ISO string — `JSON.stringify` writes one automatically and
- * `sanitize()` revives it on the way back in, so the Date-typed contract never becomes a lie.
+ * A TagDoc carries real `Date`s IN MEMORY. Here they cross a JSON file, where a date can only be an
+ * ISO string — `JSON.stringify` writes one automatically and `sanitize()` revives it on the way
+ * back in, so the Date-typed contract never becomes a lie.
  *
  * Durability rules this file follows:
  *  - writes go to `<file>.tmp` and are then renamed over the target, so a crash mid-write leaves
@@ -30,9 +24,25 @@ import { randomBytes } from 'node:crypto'
 import { rename, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from './config'
-import type { TagDoc } from './tags-store'
-import { toBsonDate } from './mongo-dates'
-import type { TagSource, TagWindow } from './tags-resolve'
+import { TAG_SOURCE_TYPES, type TagSource, type TagWindow } from './tags-resolve'
+
+export interface TagDoc {
+  _id: string
+  name: string
+  color?: string
+  sources: TagSource[]
+  filters?: TagSource[]
+  window?: TagWindow
+  createdAt: Date
+  updatedAt: Date
+}
+
+function toDate(value: unknown): Date | undefined {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value
+  if (typeof value !== 'string') return undefined
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
 
 export const LOCAL_TAGS_FILE = join(AGENTISTICS_DATA_DIR, 'tags.json')
 
@@ -41,21 +51,19 @@ interface TagsFile {
   tags: TagDoc[]
 }
 
-/** The CRUD surface shared with tags-store.ts (the Mongo one). */
+/** The CRUD surface of the tag store. */
 export interface TagStore {
   listAllTags(): Promise<TagDoc[]>
   getTag(id: string): Promise<TagDoc | null>
   createTag(input: {
     name: string; color?: string; sources: TagSource[]; filters?: TagSource[]; window?: TagWindow
-    sharedWith: string[]; createdBy: string
   }): Promise<TagDoc>
   updateTag(id: string, patch: {
     name?: string; color?: string; sources?: TagSource[]; filters?: TagSource[]
     /** `null` clears the period; `undefined` leaves it alone. */
-    window?: TagWindow | null; sharedWith?: string[]
+    window?: TagWindow | null
   }): Promise<boolean>
   deleteTag(id: string): Promise<boolean>
-  visibleTagsFor(canRead: (tag: TagDoc) => boolean): Promise<TagDoc[]>
 }
 
 /** Keep only the fields a TagDoc is made of, and only when they have the right shape. A hand-edited
@@ -64,9 +72,10 @@ export interface TagStore {
  *  file cannot smuggle a malformed filter past the one and trip the other. */
 function sanitizeSources(raw: unknown): TagSource[] {
   if (!Array.isArray(raw)) return []
+  // A source of a type this version does not know (a tag written by an older one) is dropped.
   return raw.filter((s): s is TagSource =>
     !!s && typeof s === 'object'
-    && typeof (s as { type?: unknown }).type === 'string'
+    && (TAG_SOURCE_TYPES as readonly unknown[]).includes((s as { type?: unknown }).type)
     && typeof (s as { value?: unknown }).value === 'string')
     .map(s => ({ type: s.type, value: s.value }))
 }
@@ -101,12 +110,10 @@ function sanitize(raw: unknown): TagDoc | null {
     sources,
     ...(filters.length ? { filters } : {}),
     ...(window ? { window } : {}),
-    sharedWith: Array.isArray(d.sharedWith) ? d.sharedWith.filter((x): x is string => typeof x === 'string') : [],
-    createdBy: typeof d.createdBy === 'string' ? d.createdBy : 'local',
     // Revive the ISO strings the file holds back into Dates. An absent or unparseable value
     // falls back to `now` rather than propagating a bogus timestamp.
-    createdAt: toBsonDate(d.createdAt as string | undefined) ?? now,
-    updatedAt: toBsonDate(d.updatedAt as string | undefined) ?? now,
+    createdAt: toDate(d.createdAt) ?? now,
+    updatedAt: toDate(d.updatedAt) ?? now,
   }
 }
 
@@ -206,8 +213,6 @@ export function createLocalTagStore(file: string): TagStore {
         sources: input.sources,
         ...(input.filters && input.filters.length ? { filters: input.filters } : {}),
         ...(input.window ? { window: input.window } : {}),
-        sharedWith: [...new Set(input.sharedWith.filter(Boolean))],
-        createdBy: input.createdBy,
         createdAt: now,
         updatedAt: now,
       }
@@ -230,7 +235,6 @@ export function createLocalTagStore(file: string): TagStore {
           ...(patch.sources !== undefined ? { sources: patch.sources } : {}),
           ...(patch.filters !== undefined ? { filters: patch.filters } : {}),
           ...(patch.window ? { window: patch.window } : {}),
-          ...(patch.sharedWith !== undefined ? { sharedWith: [...new Set(patch.sharedWith.filter(Boolean))] } : {}),
           updatedAt: new Date(),
         }
         const copy = [...tags]
@@ -244,9 +248,6 @@ export function createLocalTagStore(file: string): TagStore {
         const changed = kept.length !== tags.length
         return { tags: kept, result: changed, changed }
       })
-    },
-    async visibleTagsFor(canRead) {
-      return (await listAllTags()).filter(canRead)
     },
   }
 }

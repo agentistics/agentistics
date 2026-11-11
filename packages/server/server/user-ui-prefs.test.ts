@@ -2,10 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  machineHome, machineUiPatch, parseUserUiPut, readMachineUiPrefs, readUserUiPrefs,
+  machineHome, machineUiPatch, parseUserUiPut, readMachineUiPrefs,
   USER_UI_PREF_KEYS, USER_UI_PREF_REGISTRY,
 } from './user-ui-prefs'
-import { resolveA11yStore } from './a11y-prefs'
 
 /** The top-level fields `Preferences` declares — read off the interface's own source, so a key
  *  cannot be "legacy" in the registry without actually being a field the server already has. */
@@ -59,14 +58,8 @@ describe('reading', () => {
     expect(readMachineUiPrefs({ taskBoard: { view: 'board' } })).toEqual({})
   })
 
-  test('an account document keeps known keys with any JSON value', () => {
-    expect(readUserUiPrefs({ theme: 'light', textScale: 2, fleetOpen: false, centralMachine: null, cardOrder: ['a'], other: 1 }))
-      .toEqual({ theme: 'light', textScale: 1.5, fleetOpen: false, centralMachine: null, cardOrder: ['a'] })
-  })
-
   test('junk yields an empty document instead of throwing', () => {
-    expect(readUserUiPrefs(undefined)).toEqual({})
-    expect(readUserUiPrefs('x')).toEqual({})
+    expect(readMachineUiPrefs({})).toEqual({})
     expect(readMachineUiPrefs({ ui: 'x' })).toEqual({})
   })
 })
@@ -98,7 +91,7 @@ describe('parseUserUiPut', () => {
   })
 
   test('an unknown key is REFUSED, never silently dropped', () => {
-    expect(parseUserUiPut({ taskBoard: {}, team: { mode: 'central' } }))
+    expect(parseUserUiPut({ taskBoard: {}, team: { mode: 'solo' } }))
       .toEqual({ ok: false, error: 'unknown_key', key: 'team' })
   })
 
@@ -110,13 +103,5 @@ describe('parseUserUiPut', () => {
   test('a non-object body is refused', () => {
     expect(parseUserUiPut([])).toEqual({ ok: false, error: 'not_an_object' })
     expect(parseUserUiPut('x')).toEqual({ ok: false, error: 'not_an_object' })
-  })
-})
-
-describe('where /api/user-prefs stores — the a11y resolution, reused', () => {
-  test('a central never falls back to the machine file', () => {
-    expect(resolveA11yStore(true, null)).toEqual({ kind: 'anonymous' })
-    expect(resolveA11yStore(true, 'acct-1')).toEqual({ kind: 'account', accountId: 'acct-1' })
-    expect(resolveA11yStore(false, 'acct-1')).toEqual({ kind: 'machine' })
   })
 })

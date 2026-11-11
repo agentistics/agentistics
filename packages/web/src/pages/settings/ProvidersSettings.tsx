@@ -5,9 +5,7 @@ import { CenteredLoader } from '../../components/CenteredLoader'
  * (`GET/PUT/DELETE /api/provider*`). Always all 7 providers, in the server's own order; never
  * anything about a key beyond its fingerprint and last 4 characters.
  *
- * Host-only, same as Chat/Connection/Live: a central has no local runtime, so the whole section
- * is absent there (`settingsSections.ts`) and the server itself refuses with 403 `central` should
- * this page somehow be reached — rendered here as the very same sentence.
+ * Host-only: the section is absent without a native runtime (`settingsSections.ts`).
  *
  * SECURITY: the API key field is an UNCONTROLLED input, read through a ref only at submit time.
  * It never enters React state, never touches localStorage/sessionStorage, and is cleared

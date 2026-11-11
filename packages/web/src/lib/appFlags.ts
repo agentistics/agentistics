@@ -1,6 +1,6 @@
 /**
  * appFlags.ts — three small CHOICES `App.tsx` used to keep in `localStorage` alone, now on the
- * server (`/api/user-prefs`; per ACCOUNT on a central) so they read the same on every device. Each
+ * server (`/api/user-prefs`; per ACCOUNT) so they read the same on every device. Each
  * keeps its old key AND its old `'1'`/`'0'` format as the first-paint copy and the one-time
  * migration source (see `sharedPref.ts`).
  */

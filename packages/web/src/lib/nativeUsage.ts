@@ -5,7 +5,7 @@
  * These calls belong to no harness transcript, so nothing else in the app shows them. The figures
  * come from the projection AS STATED: the cost the provider reported, or the table price of a model
  * the table knows — never a guessed price (an unknown model is "unpriced", see `hasModelPrice`).
- * A machine without projections (the flag off, a central) answers 404/409: no card, not a zero.
+ * A machine without projections (the flag off) answers 404/409: no card, not a zero.
  */
 import { useEffect, useState } from 'react'
 import { nativeRuntimeFrom } from './nativeSession'

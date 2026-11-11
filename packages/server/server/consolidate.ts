@@ -116,7 +116,7 @@ async function readRecordFile(path: string, stamp: string | null): Promise<Sessi
   const read = await safeReadJson<SessionMeta>(path)
   if (!read?.session_id) { if (stamp) lastLoaded.set(path, { stamp, value: null }); return null }
   // Same reasoning for the list fields: a record holding `languages: {}` crashed every
-  // dashboard that rendered it, here and on the central it was pushed to. See sessionShape.ts.
+  // dashboard that rendered it. See sessionShape.ts.
   const s = coerceSessionLists(read)
   if (!s.harness) s.harness = 'claude'
   // The store holds whatever an adapter wrote, including shapes it should not have written —

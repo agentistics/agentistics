@@ -279,8 +279,8 @@ describe('the load bar', () => {
 
 describe('headerMeta', () => {
   test('states the mode, the version and the update dot when there is room', () => {
-    const meta = headerMeta({ mode: 'member', version: '1.7.3', latestVersion: '1.7.4', width: 60 })
-    expect(meta.text).toBe('member · v1.7.3')
+    const meta = headerMeta({ mode: 'solo', version: '1.7.3', latestVersion: '1.7.4', width: 60 })
+    expect(meta.text).toBe('solo · v1.7.3')
     expect(meta.update).toBe('● 1.7.4')
   })
 
@@ -354,12 +354,12 @@ describe('headerMeta', () => {
   })
 
   test('drops the update notice before the version, and the version before the mode', () => {
-    const full = headerMeta({ mode: 'member', version: '1.7.3', latestVersion: '1.7.4', width: 60 })
-    const noUpdate = headerMeta({ mode: 'member', version: '1.7.3', latestVersion: '1.7.4', width: 16 })
-    const bare = headerMeta({ mode: 'member', version: '1.7.3', latestVersion: '1.7.4', width: 8 })
+    const full = headerMeta({ mode: 'solo', version: '1.7.3', latestVersion: '1.7.4', width: 60 })
+    const noUpdate = headerMeta({ mode: 'solo', version: '1.7.3', latestVersion: '1.7.4', width: 16 })
+    const bare = headerMeta({ mode: 'solo', version: '1.7.3', latestVersion: '1.7.4', width: 8 })
     expect(headerMetaWidth(full)).toBeGreaterThan(headerMetaWidth(noUpdate))
     expect(noUpdate.update).toBe('')
-    expect(bare.text).toBe('member')
+    expect(bare.text).toBe('solo')
   })
 
   test('never exceeds the width it was given, at any terminal size', () => {
@@ -407,7 +407,7 @@ describe('headerMeta', () => {
 })
 
 describe('headerLayout', () => {
-  const tag = { mode: 'member', version: '1.7.3', latestVersion: '1.7.4' }
+  const tag = { mode: 'solo', version: '1.7.3', latestVersion: '1.7.4' }
   /** The exact column at which the art stops being affordable — measured, never written down. */
   const threshold = (input: Omit<Parameters<typeof headerLayout>[0], 'width'>) =>
     artWidth(WORDMARK_ART) + HEADER_GAP + headerMetaWidth(headerMeta({ ...input, width: 1e9 }))
@@ -431,7 +431,7 @@ describe('headerLayout', () => {
     expect(headerLayout({ ...tag, width: at }).kind).toBe('art')
     expect(headerLayout({ ...tag, width: at - 1 }).kind).toBe('compact')
     // …and it MOVES with the tag: a longer mode word and an update notice both push it right.
-    expect(threshold({ mode: 'member', version: '1.7.3', latestVersion: '1.7.4' }))
+    expect(threshold({ mode: 'solo', version: '1.7.3', latestVersion: '1.7.4' }))
       .toBeGreaterThan(threshold({ mode: 'solo', version: '1.7.3' }))
   })
 
@@ -440,7 +440,7 @@ describe('headerLayout', () => {
     // for it would have spent a whole row on a worse answer.
     const at = threshold(tag)
     const layout = headerLayout({ ...tag, width: at })
-    expect(layout.meta.text).toBe('member · v1.7.3')
+    expect(layout.meta.text).toBe('solo · v1.7.3')
     expect(layout.meta.update).toBe('● 1.7.4')
   })
 
@@ -653,13 +653,13 @@ describe('cockpitLayout', () => {
 describe('serviceCells', () => {
   const rows = [
     { label: 'agentistics', runtime: 'native', state: '● no ar' },
-    { label: 'agentistics central', runtime: 'docker', state: '● desconhecido' },
+    { label: 'agentistics docker', runtime: 'docker', state: '● desconhecido' },
     { label: 'agentistics', runtime: 'docker', state: '● parado' },
   ]
 
   test('a wide pane gets the measured widths, so the columns are aligned and not merely fitting', () => {
     const cells = serviceCells(rows, 80)
-    expect(cells.label).toBe('agentistics central'.length)
+    expect(cells.label).toBe('agentistics docker'.length)
     expect(cells.runtime).toBe('docker'.length)
     expect(cells.state).toBe('● desconhecido'.length)
   })
@@ -688,7 +688,7 @@ describe('serviceCells', () => {
   /** The row the whole ladder exists for: the same program running under both runtimes. */
   const conflict = [
     { label: 'agentistics', runtime: 'native+docker', state: '▲ conflict' },
-    { label: 'agentistics central', runtime: '', state: '○ stopped' },
+    { label: 'agentistics docker', runtime: '', state: '○ stopped' },
   ]
 
   test('a conflicted row keeps SAYING conflict long after it can name the two runtimes', () => {
@@ -830,31 +830,31 @@ describe('fitActionRow', () => {
 })
 
 describe('fitValue', () => {
-  const sentence = 'member — sends metrics to a central'
+  const sentence = 'solo — keeps history on this machine'
 
   test('prefers the fuller wording whenever it fits whole', () => {
-    expect(fitValue(sentence, 'member', 40)).toBe(sentence)
+    expect(fitValue(sentence, 'solo', 40)).toBe(sentence)
   })
 
   test('falls back to the short form rather than to a prefix of the long one', () => {
-    expect(fitValue(sentence, 'member', 20)).toBe('member')
+    expect(fitValue(sentence, 'solo', 20)).toBe('solo')
   })
 
   test('cuts only when even the fallback will not fit', () => {
-    const out = fitValue(sentence, 'member', 4)
+    const out = fitValue(sentence, 'solo mode', 4)
     expect(out.length).toBeLessThanOrEqual(4)
     expect(out.endsWith('…')).toBe(true)
   })
 
   test('no room at all is nothing, not a stray ellipsis', () => {
-    expect(fitValue(sentence, 'member', 0)).toBe('')
+    expect(fitValue(sentence, 'solo', 0)).toBe('')
   })
 })
 
 describe('stripScheme', () => {
   test('drops the least informative part of a cramped URL', () => {
     expect(stripScheme('http://198.51.100.199:48080')).toBe('198.51.100.199:48080')
-    expect(stripScheme('https://central.example.com/x')).toBe('central.example.com/x')
+    expect(stripScheme('https://host.example.com/x')).toBe('host.example.com/x')
   })
 
   test('leaves something that is not a URL alone', () => {
@@ -1002,7 +1002,7 @@ describe('detailContent', () => {
   })
 
   test('a service with ONE runtime states the reason once, at the top where a short pane keeps it', () => {
-    // The central on a box without docker: the note answers "why does this offer me nothing", and
+    // The container on a box without docker: the note answers "why does this offer me nothing", and
     // repeating it on the single runtime row would spend two of a three-row pane on one fact.
     const c = detailContent(
       service({
@@ -1066,13 +1066,13 @@ describe('detailContent', () => {
   })
 
   test('the boot row NAMES the unit, which is the only thing a user can go and look at', () => {
-    // "starts at boot" on its own tells someone that SOMETHING will bring their central back and
+    // "starts at boot" on its own tells someone that SOMETHING will bring their server back and
     // gives them nowhere to go. With the unit named, `systemctl --user status <unit>` answers, and
     // the verb that removes it is on the same pane.
-    const named = detailContent(service({ boot: 'on', bootUnit: 'agentop-central.service' }), s, NOW)
+    const named = detailContent(service({ boot: 'on', bootUnit: 'agentop-machine.service' }), s, NOW)
     const row = rowsUnder(named, s.sectionMachine).find(r => r.label === s.bootLabel)
     expect(row?.value).toContain(s.bootOn)
-    expect(row?.value).toContain('agentop-central.service')
+    expect(row?.value).toContain('agentop-machine.service')
   })
 
   test('a unit with no boot state is not stated at all', () => {
@@ -1257,7 +1257,7 @@ describe('cockpitHints', () => {
   })
 
   test('a selection with no verbs at all never advertises the key that would open them', () => {
-    // A central on a box with no docker: down, and unstartable here. `enter` opens nothing.
+    // A container on a box with no docker: down, and unstartable here. `enter` opens nothing.
     const hints = cockpitHints('services', s, { ...full, canAct: false, canStop: false, canOpen: false })
     expect(hints).not.toContain(s.keyActions)
     expect(hints).toContain(s.keyQuit)
@@ -1504,7 +1504,7 @@ describe('attentionCell (GL-02)', () => {
     expect(tight.text).toBe('solo')
     for (let width = 0; width <= 90; width++) {
       for (const lang of ['en', 'pt'] as const) {
-        const meta = headerMeta({ mode: 'member', version: '1.7.3', latestVersion: '1.7.4', attention: 9, lang, width })
+        const meta = headerMeta({ mode: 'solo', version: '1.7.3', latestVersion: '1.7.4', attention: 9, lang, width })
         expect(headerMetaWidth(meta)).toBeLessThanOrEqual(width)
       }
     }

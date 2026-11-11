@@ -23,7 +23,6 @@ const VaultPage = lazy(() => import('./pages/VaultPage'))
 const TasksPage = lazy(() => import('./pages/TasksPage'))
 const TaskActivityPage = lazy(() => import('./pages/TaskActivityPage'))
 const DeliveryCalendarPage = lazy(() => import('./pages/DeliveryCalendarPage'))
-const ActionsPage = lazy(() => import('./pages/ActionsPage'))
 const TagDetailPage = lazy(() => import('./pages/TagDetailPage'))
 const ToolsPage = lazy(() => import('./pages/ToolsPage'))
 const CustomPage = lazy(() => import('./pages/CustomPage'))
@@ -47,7 +46,6 @@ const WhatsNewSettings = lazy(() => import('./pages/settings/WhatsNewSettings'))
 const ChatSettings = lazy(() => import('./pages/settings/ChatSettings'))
 const ProvidersSettings = lazy(() => import('./pages/settings/ProvidersSettings'))
 const MemorySettings = lazy(() => import('./pages/settings/MemorySettings'))
-const TeamsSettings = lazy(() => import('./pages/settings/TeamsSettings'))
 const PricingSettings = lazy(() => import('./pages/settings/PricingSettings'))
 const BillingSettings = lazy(() => import('./pages/settings/BillingSettings'))
 const EngineSurfacePageRoute = lazy(() => import('./pages/EngineSurfacePageRoute'))
@@ -100,7 +98,6 @@ export default function AppRouter() {
               A bookmark, a pinned tab or an old link still lands somewhere that answers. */}
           <Route path="projects" element={<Navigate to="/repositories" replace />} />
           <Route path="repositories" element={<Suspense fallback={<PageFallback />}><RepositoriesPage /></Suspense>} />
-          <Route path="repositories/actions" element={<Suspense fallback={<PageFallback />}><ActionsPage /></Suspense>} />
           <Route path="repo/:id" element={<Suspense fallback={<PageFallback />}><RepoDetailPage /></Suspense>} />
           <Route path="tasks" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
           <Route path="tasks/metrics" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
@@ -143,8 +140,7 @@ export default function AppRouter() {
             <Route path="vault" element={<LegacyVaultRedirect />} />
             <Route path="providers" element={<Suspense fallback={<PageFallback />}><ProvidersSettings /></Suspense>} />
             <Route path="memory" element={<Suspense fallback={<PageFallback />}><MemorySettings /></Suspense>} />
-            <Route path="teams" element={<Suspense fallback={<PageFallback />}><TeamsSettings /></Suspense>} />
-            {/* A removed or unknown section (e.g. the old central `/settings/connection`) lands on
+            {/* A removed or unknown section (e.g. an old `/settings/connection` link) lands on
                 Preferences instead of an empty panel. */}
             <Route path="*" element={<Navigate to="/settings/preferences" replace />} />
           </Route>

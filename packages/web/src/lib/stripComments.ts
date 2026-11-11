@@ -10,7 +10,7 @@
  * So every such test strips comments first. What went wrong is that the strippers were COPIED, and
  * the copies were not equally strong: `sessionsPage.lint.test.ts` dropped only lines whose trim
  * STARTS with `//`, so a **trailing** comment after real code survived it whole. A reviewer planted
- * the guard as `const x = y // const editorEnabled = ctx.editorEnabled === true && !isCentral`, the
+ * the guard as `const x = y // const editorEnabled = ctx.editorEnabled === true && !blocked`, the
  * needle test passed, and only a sibling assertion caught it. Two strippers of different strength
  * for one job is one stripper and one hole; this module is the strength, and there is no second one.
  *

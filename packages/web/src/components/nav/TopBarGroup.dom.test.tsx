@@ -89,7 +89,7 @@ describe('TopBarGroup', () => {
     expect(v.host.querySelector('[data-live-popover]')).toBeNull()
     await act(async () => v.root.unmount()); v.host.remove()
   })
-  test('on a central with no voice nothing is drawn at all', async () => {
+  test('with no voice nothing is drawn at all', async () => {
     const v = await mount({ enabled: false })
     expect(button(v.host)).toBeNull()
     await act(async () => v.root.unmount()); v.host.remove()

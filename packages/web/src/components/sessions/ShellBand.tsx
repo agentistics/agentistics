@@ -36,7 +36,7 @@ import { AgentisticsLoader } from '../../components/AgentisticsLoader'
  *
  * `/api/shell/open` answers a REFUSAL as a 200 carrying a sentence (`no-tmux`, `no-cwd`,
  * `cwd-missing`, `at-cap`) — shown verbatim, never re-worded here. The route-level errors upstream
- * of it (`shell_disabled`, `shell_central`) carry a CODE and no prose, and `shellErrorText` is the
+ * of it (`shell_disabled`) carry a CODE and no prose, and `shellErrorText` is the
  * one place that turns those into sentences. A blank band is never an answer.
  */
 
@@ -331,7 +331,7 @@ export interface ShellBandProps {
   shellCapable?: boolean
   /**
    * Called after "Enable now" or "Enable permanently" succeed, so the caller can re-read whatever
-   * answers `shellEnabled` (`AppContext.refreshTeamSession`, which re-fetches `/api/team/session`) —
+   * answers `shellEnabled` (`AppContext.refreshHostSession`, which re-fetches `/api/session`) —
    * this band has no way to update that itself, and the Shell tab / the pane's own content must
    * catch up WITHOUT a reload the instant either button lands.
    */

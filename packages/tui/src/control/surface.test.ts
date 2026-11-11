@@ -59,7 +59,7 @@ describe('sectionHead', () => {
 })
 
 describe('menuCells', () => {
-  const labels = ['solo', 'central', 'member']
+  const labels = ['solo', 'docker', 'native']
 
   test('without hints the label takes everything left of the marker', () => {
     const cells = menuCells(labels, { numbered: true, hints: false, width: 40 })
@@ -69,7 +69,7 @@ describe('menuCells', () => {
 
   test('with hints the label is capped at the longest label', () => {
     const cells = menuCells(labels, { numbered: true, hints: true, width: 80 })
-    expect(cells.label).toBe('central'.length)
+    expect(cells.label).toBe('docker'.length)
     expect(cells.hint).toBeGreaterThan(0)
   })
 
@@ -94,7 +94,7 @@ describe('menuCells', () => {
 })
 
 describe('promptLayout', () => {
-  const question = 'Central endpoint URL (e.g. http://host:48080)'
+  const question = 'Primary endpoint URL (e.g. http://host:48080)'
 
   test('a wide row keeps the field on the question row', () => {
     const layout = promptLayout(question, '', 100)
@@ -274,7 +274,7 @@ describe('logSources', () => {
   })
 
   test('one entry per LOGICAL service, under the name the cockpit prints', () => {
-    // The bug this replaces: a constant `['local', 'central', 'machine']` inside the component,
+    // The bug this replaces: a constant a constant list of ids inside the component,
     // rendered verbatim, so the selector offered the native process and the container of the SAME
     // service as two things — the exact distinction the logical-service model deleted.
     expect(logSources([service()])).toEqual([
@@ -313,9 +313,9 @@ describe('logSources', () => {
 })
 
 describe('sourceRowFit', () => {
-  const cells = ['1 local', '2 central', '3 machine']
+  const cells = ['1 local', '2 docker', '3 machine']
 
-  test('never lays out a row wider than the width — the bug that chopped `central` to `centra`', () => {
+  test('never lays out a row wider than the width — the bug that chopped `docker` to `docke`', () => {
     for (const label of ['SOURCE', 'FONTE', '']) {
       for (let width = 1; width <= 80; width++) {
         for (let selected = 0; selected < cells.length; selected++) {
@@ -351,7 +351,7 @@ describe('sourceRowFit', () => {
 })
 
 describe('sourceAtColumn', () => {
-  const cells = ['1 agentistics', '2 agentistics central']
+  const cells = ['1 agentistics', '2 agentistics docker']
 
   test('names the source the row actually drew there', () => {
     const fit = sourceRowFit('SOURCE', cells, 0, 80)

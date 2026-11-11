@@ -394,7 +394,7 @@ describe('§5.1 / §12.5 auto-lock', () => {
     dir = await mkdtemp(join(tmpdir(), 'agentistics-autolock-'))
     dpapi = fake('dpapi'); hello = fake('hello')
     restart()
-    await sealToFile(join(dir, 'x.sealed'), 'central-token', 'n', new Uint8Array([1, 2, 3]))
+    await sealToFile(join(dir, 'x.sealed'), 'github-backup', 'n', new Uint8Array([1, 2, 3]))
     const o = await ensureVaultOpen()
     const dekRef = o!.dek
     const t0 = T
@@ -404,7 +404,7 @@ describe('§5.1 / §12.5 auto-lock', () => {
     expect(autoLockTick(t0 + 49 * 60_000)).toBe(false)
     T = t0 + 45 * 60_000
     // A decrypt (a harness ref, a hook, a backup) is machine traffic: it never keeps the vault open.
-    expect((await openFromFile(join(dir, 'x.sealed'), 'central-token', 'n')).ok).toBe(true)
+    expect((await openFromFile(join(dir, 'x.sealed'), 'github-backup', 'n')).ok).toBe(true)
     expect(autoLockTick(t0 + 49 * 60_000)).toBe(false)
     expect(autoLockTick(t0 + 50 * 60_000)).toBe(true)
     expect(dekRef.every(b => b === 0)).toBe(true)

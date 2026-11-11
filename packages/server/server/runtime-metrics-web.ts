@@ -9,16 +9,10 @@
  *   1. `AGENTISTICS_PROJECTIONS` off (absent reads OFF, read PER REQUEST — P3 §7: flipping it back is
  *      immediate) → 404 `projections_disabled`, and NOTHING is touched: not the reader, not the query
  *      string. The flag being off must cost the product not one byte of behaviour.
- *   2. A central → 409 `unsupported_on_central`. The projection facts carry no machine or member
- *      attribution, so the visibility rule `/api/data` applies on a central (`scopeAppDataToTeams` +
- *      `dataTeamIdsOf`: owner sees all, anyone else the teams they MANAGE plus the machines they own)
- *      has nothing to key on; answering would show every viewer the central host's own projection,
- *      unscoped. Refusing is the honest answer until facts carry a machine id.
- *   3. Not GET → 405.
- *   4. No reader wired → 503 `projections_unavailable`.
- *   5. Bad input → 400 with the parser's code.
- * `capability-guard.ts` has already required `localTranscripts` before this runs, and the auth gate
- * already required a session wherever there is one (the path is not in AUTH_PUBLIC). An unexpected
+ *   2. Not GET → 405.
+ *   3. No reader wired → 503 `projections_unavailable`.
+ *   4. Bad input → 400 with the parser's code.
+ * `capability-guard.ts` has already required `localTranscripts` before this runs. An unexpected
  * failure is the CALLER's `safeError`.
  */
 import { EXPERIMENTAL_REFUSAL, NATIVE_HARNESS, nativeExperimentalOn } from './native-gate'
@@ -45,7 +39,6 @@ export function setRuntimeMetricsReader(reader: ProjectionReader | null): void {
 export interface RuntimeMetricsDeps {
   /** The flag's raw value, read by the caller per request. */
   flag: string | undefined
-  central: boolean
   reader: ProjectionReader | null
   /** The journal's first import (`journal/backfill.ts`): while it is pending, no projected answer. */
   backfill?: { pending: boolean; progress: import('./journal/backfill').BackfillProgress | null }
@@ -74,15 +67,6 @@ export async function handleRuntimeMetricsRequest(
     return {
       status: 404,
       body: { error: 'projections_disabled', sentence: 'the projection query is off on this machine (AGENTISTICS_PROJECTIONS is set off).' },
-    }
-  }
-  if (deps.central) {
-    return {
-      status: 409,
-      body: {
-        error: 'unsupported_on_central',
-        sentence: 'the projection query is not available on a central yet: its facts carry no machine or member attribution, so the viewer scoping /api/data applies cannot be enforced, and unscoped figures are not shown.',
-      },
     }
   }
   if (req.method !== 'GET') {
@@ -229,10 +213,10 @@ export function catchUpStateForTests(): { running: boolean; dirty: boolean } {
 /** The production dependencies, resolved per request (the flag in particular). With the flag OFF this
  *  touches nothing; with it on it opens the store lazily and nudges a catch-up. An injected reader
  *  (`setRuntimeMetricsReader`) wins, which is what tests use. */
-export async function liveRuntimeMetricsDeps(central: boolean): Promise<RuntimeMetricsDeps> {
+export async function liveRuntimeMetricsDeps(): Promise<RuntimeMetricsDeps> {
   const flag = process.env.AGENTISTICS_PROJECTIONS
   const nativeVisible = nativeExperimentalOn()
-  if (injectedReader || central || !projectionsEnabled(flag)) return { flag, central, reader: injectedReader, nativeVisible }
+  if (injectedReader || !projectionsEnabled(flag)) return { flag, reader: injectedReader, nativeVisible }
   const store = await openLive()
   // The catch-up keeps going while the route refuses (first import, a large lag), so the projections
   // are ready when it stops refusing.
@@ -241,7 +225,7 @@ export async function liveRuntimeMetricsDeps(central: boolean): Promise<RuntimeM
     import('./config'), import('./journal/backfill'),
   ])
   const backfill = { pending: backfillPending(JOURNAL_PATH, JOURNAL_BACKFILL_PATH), progress: readBackfillProgress(JOURNAL_BACKFILL_PATH) }
-  return { flag, central, reader: store?.reader ?? null, backfill, nativeVisible }
+  return { flag, reader: store?.reader ?? null, backfill, nativeVisible }
 }
 
 /** Test/teardown hook: close the lazily opened store. */

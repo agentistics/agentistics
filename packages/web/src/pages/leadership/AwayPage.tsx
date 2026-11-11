@@ -6,8 +6,8 @@ import { AwayImpact } from '../../components/AwayImpact'
 import AwaySection from '../settings/AwaySection'
 
 export default function AwayPage() {
-  const { lang, capabilities, isCentral } = useOutletContext<AppContext>()
-  return <AwayContent lang={lang} capable={capabilities?.localShell !== false && !isCentral} />
+  const { lang, capabilities } = useOutletContext<AppContext>()
+  return <AwayContent lang={lang} capable={capabilities?.localShell !== false} />
 }
 
 export function AwayContent({ lang, capable }: { lang: 'pt' | 'en'; capable: boolean }) {

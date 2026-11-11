@@ -25,7 +25,7 @@ import { bootDeadlineMs, fetchJsonWithTimeout, SMALL_TIMEOUT_MS } from './startu
  *    load; trusting the local copy is three applications again.
  *
  * 2. THE WRITE IS ARMED ONLY BY A SUCCESSFUL LOAD — the rule `a11y-prefs.ts` states for the same
- *    trap. A central answers 401 until login and a machine can still be starting up. Treating that
+ *    trap. A machine can still be starting up. Treating that
  *    failure as "the shared value is empty" would let the first change made on one device write its
  *    local state over what every other device holds. Unarmed, a device works from its local copy
  *    and writes nothing: a device that cannot READ the shared value is exactly the one that must
@@ -43,25 +43,25 @@ import { bootDeadlineMs, fetchJsonWithTimeout, SMALL_TIMEOUT_MS } from './startu
  * `createSharedPref` adopts from it immediately on registration, so a store's first answer is never
  * stale just because it was born late.
  *
- * ONE ENDPOINT. `/api/preferences` is the MACHINE's file, and on a central that file is shared by
+ * ONE ENDPOINT. `/api/preferences` is the MACHINE's file, and that file is shared by
  * everyone signed in — right for nothing a single person chooses. Every store here reads and writes
- * `PERSONAL_PREFS` (`/api/user-prefs`), which the server resolves per ACCOUNT on a central and to
+ * `PERSONAL_PREFS` (`/api/user-prefs`), which the server resolves per ACCOUNT and to
  * the machine's own file on a machine (`user-ui-prefs.ts`; the a11y rule, generalised). The
  * endpoint is still a per-store option, read once per load and ARMED on its own.
  *
  * EVERY CHOICE IS PERSONAL (2026-10-01). The stores that once went to `/api/preferences` (pins,
  * session groups, notification settings, dismissals, …) now pass `PERSONAL_PREFS` too: on a machine
  * the server keeps each of them at the very same top-level field (`USER_UI_PREF_REGISTRY` in
- * `user-ui-prefs.ts`), so nothing moves on disk; on a central they stop leaking across accounts.
+ * `user-ui-prefs.ts`), so nothing moves on disk; they stop leaking across accounts.
  *
- * READ-ONLY SESSIONS. A central session with no account reads `{}` and may not write; the GET says
+ * READ-ONLY SESSIONS. A session with no account reads `{}` and may not write; the GET says
  * so with `X-Prefs-Writable: false`. That endpoint then ADOPTS (the defaults are the truth for that
  * session) but stays UNARMED and leaves the browser copy alone, so what this browser held is still
  * there to migrate once somebody signs in.
  *
  * THE ONE-TIME MIGRATION (`adoptLocalWhenAbsent`, or `migrateLocalOnce` for a value held outside a
  * store) runs at most ONCE PER KEY PER BROWSER (`MIGRATED_PREFIX`). Without that bound, a shared
- * browser on a central would copy the first person's arrangement into every next account that
+ * browser would copy the first person's arrangement into every next account that
  * signs in there with nothing stored yet.
  */
 
@@ -337,7 +337,7 @@ function loadEndpoint(endpoint: string): Promise<void> {
       lastLoaded.set(endpoint, doc)
       for (const store of registry) if (store.endpoint === endpoint) store.adopt(doc[store.prefKey], writable)
     } catch {
-      /* offline, or a central that has not signed us in yet — stay unarmed and local */
+      /* offline that has not signed us in yet — stay unarmed and local */
       loadFailures.set(endpoint, (loadFailures.get(endpoint) ?? 0) + 1)
     } finally {
       inFlight.delete(endpoint)

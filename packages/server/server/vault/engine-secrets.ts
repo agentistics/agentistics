@@ -91,8 +91,7 @@ const VAULT_ACTIONS = new Set(['vault.migrated', 'vault.plaintext-pending', 'vau
 
 /**
  * engine-api 1.5: an engine reports ITS migration (S1, provider keys) through `host.audit` with a
- * `vault.*` action, and it lands in the same `vault/audit.jsonl` as the host's own — never in the
- * central's Mongo audit. Only `purpose` (an `engine/…` one) and `name` are carried, as bounded
+ * `vault.*` action, and it lands in the same `vault/audit.jsonl` as the host's own. Only `purpose` (an `engine/…` one) and `name` are carried, as bounded
  * strings; every other meta field is dropped, so nothing an engine passes can put a value there.
  * Returns whether the event was a vault event (handled here).
  */

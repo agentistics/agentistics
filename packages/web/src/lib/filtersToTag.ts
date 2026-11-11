@@ -37,10 +37,9 @@ export interface TagDraft {
 }
 
 /** Identity-shaped dimensions lead; everything else narrows. See the module doc for why exactly
- *  one type may become `sources`. `team`/`machine`/`user` are central concepts (see
- *  tagSourceTypes.ts) and are gated by `opts.central` before they ever reach this list. */
+ *  one type may become `sources`. */
 const PRIMARY_PRIORITY: readonly TagSourceType[] = [
-  'project', 'repo', 'harness', 'model', 'user', 'machine', 'team',
+  'project', 'repo', 'harness', 'model',
 ]
 
 /** The 7d/30d/90d presets as an inclusive `yyyy-MM-dd` window ending today. `all` with no custom
@@ -61,14 +60,12 @@ function dateRangeToWindow(dateRange: DateRange, customStart: string, customEnd:
 }
 
 /**
- * Build a tag draft from the currently active filters. `opts.central` gates the dimensions that
- * mean nothing off a central (see tagSourceTypes.ts: `machine`/`team` need IAM, `user` is never
- * set on a solo/local session).
+ * Build a tag draft from the currently active filters.
  *
  * Returns `sources: []` when nothing mappable is active — the caller's job to treat that as "there
  * is no tag to build here" (see `canCreateTagFromFilters`), never to save an empty tag.
  */
-export function filtersToTagDraft(filters: Filters, opts: { central: boolean }): TagDraft {
+export function filtersToTagDraft(filters: Filters): TagDraft {
   const groups: Partial<Record<TagSourceType, string[]>> = {}
   const put = (type: TagSourceType, values: string[] | undefined) => {
     if (values && values.length > 0) groups[type] = values
@@ -78,11 +75,6 @@ export function filtersToTagDraft(filters: Filters, opts: { central: boolean }):
   put('repo', filters.repos)
   put('harness', filters.harnesses?.length ? filters.harnesses : (filters.harness ? [filters.harness] : undefined))
   put('model', filters.models)
-  if (opts.central) {
-    put('user', filters.users)
-    put('machine', filters.machines)
-    put('team', filters.teams)
-  }
 
   const primaryType = PRIMARY_PRIORITY.find(t => groups[t])
 
@@ -103,6 +95,6 @@ export function filtersToTagDraft(filters: Filters, opts: { central: boolean }):
 
 /** Whether the current filters produce a usable tag draft at all — the button's own visibility
  *  check. A date range alone (or nothing) maps to no sources, and a sourceless tag covers nothing. */
-export function canCreateTagFromFilters(filters: Filters, opts: { central: boolean }): boolean {
-  return filtersToTagDraft(filters, opts).sources.length > 0
+export function canCreateTagFromFilters(filters: Filters): boolean {
+  return filtersToTagDraft(filters).sources.length > 0
 }

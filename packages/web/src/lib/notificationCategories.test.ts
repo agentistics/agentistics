@@ -8,10 +8,7 @@ describe('what kind of thing a bell notification is about', () => {
     expect(categoryOf('sessions.idle')).toBe('idle')
     expect(categoryOf('tasks.fire_filing_blocked')).toBe('tasks')
     expect(categoryOf('backup.failed')).toBe('backup')
-    expect(categoryOf('member.unreachable')).toBe('team')
-    expect(categoryOf('central.connect_failed')).toBe('team')
-    expect(categoryOf('machine.renamed')).toBe('team')
-    expect(categoryOf('iam.reset_requested')).toBe('accounts')
+    expect(categoryOf('member.unreachable')).toBeNull()
     expect(categoryOf('hardware.pressure')).toBe('hardware')
   })
   test('session events are not a category here — they have their own switches', () => {

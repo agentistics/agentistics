@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.207.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O agentistics é um app local só: conexões de time, contas, quadros compartilhados e a gravação de telas de time foram removidos; tudo roda na sua máquina.',
+        en: 'agentistics is one local app: team connections, accounts and shared boards were removed; everything runs on your machine.',
+      },
+    ],
+  },
   '2.206.0': {
     features: [
       {

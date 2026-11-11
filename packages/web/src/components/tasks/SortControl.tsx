@@ -1,7 +1,7 @@
 /**
  * SortControl — "sort by" for a list drawn as CARDS.
  *
- * A phone has no column headers to click, and the repository tab and the central's board collapse to
+ * A phone has no column headers to click, and the repository tab collapses to
  * a card per delivery there. This is the same three-state order those tables offer, reached through
  * one select and one direction button — both 44px. The select is the platform's own: on a phone that
  * is the touch-native picker (which is why this control is only ever drawn there), and `field()` gives

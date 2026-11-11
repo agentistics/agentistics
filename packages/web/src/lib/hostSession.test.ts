@@ -26,11 +26,11 @@ describe('App.tsx reads the host gates from the server', () => {
   const src = readFileSync(join(import.meta.dir, '..', 'App.tsx'), 'utf8')
   test('fetches the session route and can update the state', () => {
     expect(src.includes('fetchWithTimeout(HOST_SESSION_PATH')).toBe(true)
-    expect(/const \[teamSession, setTeamSession\] = useState/.test(src)).toBe(true)
-    expect(HOST_SESSION_PATH).toBe('/api/team/session')
+    expect(/const \[hostSession, setHostSession\] = useState/.test(src)).toBe(true)
+    expect(HOST_SESSION_PATH).toBe('/api/session')
   })
   test('the shell flag reaching the panels comes from that read', () => {
-    expect(/shellEnabled: teamSession\?\.shellEnabled === true/.test(src)).toBe(true)
+    expect(/shellEnabled: hostSession\?\.shellEnabled === true/.test(src)).toBe(true)
   })
 })
 

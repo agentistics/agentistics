@@ -53,7 +53,6 @@ export default function WorkflowsPage() {
     const { start, end } = getDateRangeFilter(filters.dateRange, filters.customStart, filters.customEnd)
     const projects = filters.projects ?? []
     const harnessSel = filters.harnesses ?? []
-    const users = filters.users ?? []
     const claudeExcluded = harnessSel.length > 0 && !harnessSel.includes('claude')
     if (claudeExcluded) return []
     return runs.filter(run => {
@@ -68,11 +67,9 @@ export default function WorkflowsPage() {
         const proj = sessionById.get(run.sessionId)?.project_path
         if (!proj || !projects.includes(proj)) return false
       }
-      // Team/central: filter by owning member when a member filter is active.
-      if (users.length > 0 && run.user && !users.includes(run.user)) return false
-      return true
+            return true
     })
-  }, [data.workflows, filters.dateRange, filters.customStart, filters.customEnd, filters.projects, filters.harnesses, filters.users, sessionById])
+  }, [data.workflows, filters.dateRange, filters.customStart, filters.customEnd, filters.projects, filters.harnesses, sessionById])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const safePage = Math.min(page, pageCount - 1)
@@ -234,9 +231,6 @@ function RunBlock({ run, pt, rate, currency, groupBy, query, sessionById }: {
           {/* A colour alone cannot carry five states — the word rides the title. */}
           <span title={runState.text} style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor }} />
           <span style={{ fontWeight: 700 }}>{run.name}</span>
-          {run.user && (
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)', border: '1px solid rgba(217,119,6,0.3)', borderRadius: 5, padding: '1px 7px' }}>{run.user}</span>
-          )}
           <span style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 400 }}>{pt ? 'sessão' : 'session'}: {sessionDisplay}</span>
           {project && (
             <span title={project} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 400, color: 'var(--text-tertiary)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

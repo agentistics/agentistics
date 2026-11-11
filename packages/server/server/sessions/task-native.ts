@@ -8,8 +8,8 @@
  * `nativeRows` builds a `BoardRow` flagged `native: true`, with `harness: 'agentistics'` (the native
  * runtime is a `RunHarness`, not a `HarnessId` — `BoardRow` is the one place the board's rows admit
  * it). It is built in memory, per read, and handed ONLY to the board's readers (`TaskWorld.rollupRows`):
- * nothing that probes, reopens, attaches to or ships a fleet session ever sees one, and the team
- * sharing path (`loadTaskBoard`) leaves them out (a central's model has no native harness).
+ * nothing that probes, reopens or attaches to a fleet session ever sees one, and the light
+ * reader (`loadTaskBoard`) leaves them out.
  *
  * `id` and `conversationId` are both the native session id: one session is one conversation, so the dedupe and
  * ownership rules (`distinctConversations`, `conversationOwners`) apply unchanged, and `createdAt` is

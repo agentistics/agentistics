@@ -48,8 +48,8 @@
  * follow-up `stat` of the lock found nothing, `inspectLock` answered `retry`, and the loop went
  * round again with no sleep and no deadline — forever. It surfaced as 42 uploader tests timing out
  * on a CI runner whose home had no `~/.agentistics`, and it is the same hang a real first-time
- * machine meets: `loadTaskBoard` seeds the task statuses through this lock on every push cycle, so
- * the push to a central never finished. Measured: `loadTaskBoard()` still pending after 6s under an
+ * machine meets: `loadTaskBoard` seeds the task statuses through this lock on every read, so
+ * the board never loaded. Measured: `loadTaskBoard()` still pending after 6s under an
  * empty HOME, instant with the directory present. So the parent is created first, a failure that is
  * not `EEXIST` never counts as someone else's lock, and even the vanished-lock retry answers to the
  * deadline.

@@ -898,9 +898,9 @@ if (command === 'server' || command === 'start' || !command) {
     await ensureBriefingInstalled({ toolNames: CONTEXT_TOOL_NAMES })
   }
   // Server, daemon and version check run in parallel — the daemon and the banner only where they
-  // belong (a central has no host sessions, a container is upgraded by its image): daemon-plan.ts.
+  // belong (a container is upgraded by its image): daemon-plan.ts.
   const { serverDaemonPlan } = await import('../server/daemon-plan.ts')
-  const plan = serverDaemonPlan({ central: false, container: process.env.AGENTISTICS_CONTAINER === '1' })
+  const plan = serverDaemonPlan({ container: process.env.AGENTISTICS_CONTAINER === '1' })
   await Promise.all([
     import('../server/index.ts'),
     plan.watcher ? import('../server/otel-watcher.ts') : null,

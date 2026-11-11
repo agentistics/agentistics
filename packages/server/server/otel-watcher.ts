@@ -43,7 +43,7 @@ import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions'
 import { calcCost, sessionCostUSD } from '@agentistics/core'
 import type { ModelUsage, HarnessId, SessionMeta } from '@agentistics/core'
 import type { OtelSnapshot } from '@agentistics/core'
-import { HOME_DIR, CLAUDE_DIR, PROJECTS_DIR, SESSION_META_DIR, STATS_CACHE_FILE, CONSOLIDATED_DIR, TEAM_CENTRAL, IN_CONTAINER } from './config'
+import { HOME_DIR, CLAUDE_DIR, PROJECTS_DIR, SESSION_META_DIR, STATS_CACHE_FILE, CONSOLIDATED_DIR, IN_CONTAINER } from './config'
 import { serverDaemonPlan } from './daemon-plan'
 import { createLimiter, safeReadJson, safeReadDir, safeStat } from './utils'
 import { getEnabledAdapters } from './adapters/types'
@@ -644,10 +644,9 @@ async function main() {
   // separate process the user must remember to start is a process that will be dead at the moment
   // it matters. Never fatal to this daemon — see events/daemon.ts.
   //
-  // NOT on a central and NOT in a container — daemon-plan.ts says why. Said in the log either way,
+  // NOT in a container — daemon-plan.ts says why. Said in the log either way,
   // so an `agentop events status` reporting no producer has a line to point at.
-  const plan = serverDaemonPlan({ central: TEAM_CENTRAL, container: IN_CONTAINER })
-  const where = TEAM_CENTRAL ? 'a central' : 'a container'
+  const plan = serverDaemonPlan({ container: IN_CONTAINER })
   let events: { stop(): Promise<void> } | null = null
   let retirer: { stop(): void } | null = null
   if (plan.eventProducer) {
@@ -657,7 +656,7 @@ async function main() {
     const { startRetireRunner } = await import('./sessions/retire-runner')
     retirer = await startRetireRunner()
   } else {
-    console.log(`[events] not started — ${where} has no host sessions to watch`)
+    console.log('[events] not started — a container has no host sessions to watch')
   }
 
   // The scheduled backup rides along for the same reason the event producer does — see
@@ -667,7 +666,7 @@ async function main() {
     const { startScheduledBackup } = await import('./backup/daemon')
     backups = startScheduledBackup()
   } else {
-    console.log(`[backup] scheduled backup not started in ${where}`)
+    console.log('[backup] scheduled backup not started in a container')
   }
 
   console.log('[watcher] Running — use `bun run dev` in a separate terminal for the dashboard UI')

@@ -23,9 +23,9 @@ const PORT = 47291
 const byNum = (a: number, b: number) => a - b
 const WEB_PORT = 47292
 
-const localCaps = capabilitiesFor('local', { central: false, exposure: undefined, allowLocalShell: false, tls: false })
-const lanCaps = capabilitiesFor('lan', { central: true, exposure: 'lan', allowLocalShell: false, tls: false })
-const publicCaps = capabilitiesFor('public', { central: true, exposure: 'public', allowLocalShell: true, tls: true })
+const localCaps = capabilitiesFor('local', { exposure: undefined, allowLocalShell: false, tls: false })
+const lanCaps = capabilitiesFor('lan', { exposure: 'lan', allowLocalShell: false, tls: false })
+const publicCaps = capabilitiesFor('public', { exposure: 'public', allowLocalShell: true, tls: true })
 
 function allowlist(overrides: Partial<Parameters<typeof buildHostAllowlist>[0]> = {}): HostAllowlist {
   return buildHostAllowlist({
@@ -448,13 +448,10 @@ describe('index.ts wires the gate in ONE place, ahead of every handler and every
     expect(gate).toBeLessThan(handler.indexOf('server.upgrade('))
   })
 
-  it('right after the capability guard and before the auth gate and the first route handler', () => {
+  it('right after the capability guard and before the first route handler', () => {
     const gate = handler.indexOf('hostGate(')
     expect(gate).toBeGreaterThan(handler.indexOf('capabilityDenied('))
-    expect(gate).toBeLessThan(handler.indexOf('getPrincipalSession('))
-    // The first route handler: the first `if (url.pathname === '/api/…'` in the handler. (The
-    // ingest-only block above the guards compares paths too, but inside a condition that only ever
-    // REFUSES — it serves nothing.)
+    // The first route handler: the first `if (url.pathname === '/api/…'` in the handler.
     const firstRoute = handler.search(/if \(url\.pathname === '\/api\//)
     expect(firstRoute).toBeGreaterThan(0)
     expect(gate).toBeLessThan(firstRoute)

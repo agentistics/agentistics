@@ -1,13 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { Trophy, Cpu, Boxes, FolderOpen, GitBranch, Users, Monitor } from 'lucide-react'
+import { Trophy, Cpu, Boxes, FolderOpen, GitBranch } from 'lucide-react'
 import { fmt, fmtCost, formatProjectName, planAllocation, repoShortName } from '@agentistics/core'
 import type { AppContext } from '../lib/app-context'
 import { Section } from '../components/Section'
 import { MetricNote } from '../components/MetricNote'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../lib/harness'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { rankTop, rankTopFromCaches, cacheTotalsUsable, shareOf, planCostOf, type TopDimension, type TopMetric, type TopEntry } from '../lib/topUsage'
+import { rankTop, shareOf, planCostOf, type TopDimension, type TopMetric, type TopEntry } from '../lib/topUsage'
 import type { SurfaceHarnessId } from '@agentistics/core'
 
 const METRICS: Array<{ id: TopMetric; en: string; pt: string }> = [
@@ -22,56 +22,25 @@ const MEDALS = ['#eab308', '#94a3b8', '#b45309']
 
 export default function TopUsagePage() {
   const ctx = useOutletContext<AppContext>()
-  const { data, derived, filters, lang, currency, brlRate, isCentral, machines } = ctx
+  const { derived, lang, currency, brlRate } = ctx
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
   const [metric, setMetric] = useState<TopMetric>('cost')
 
   const sessions = derived.filteredSessions
 
-  // Person and machine are ranked from the per-member/-machine statsCaches, not from the sessions:
-  // the caches hold the full history, the session documents only what has not been pruned. Summing
-  // sessions made this page disagree with the dashboard for the same selection (R$58k here against
-  // R$93k on Home) — and the dashboard was the one telling the truth. Every other dimension has no
-  // cache to read and stays on the per-session sum.
-  const cacheRank = useMemo(() => {
-    if (!cacheTotalsUsable(filters)) return null
-    return (dim: TopDimension) => {
-      if (dim === 'user' && data?.userStatsCaches)
-        return rankTopFromCaches(data.userStatsCaches, sessions, s => s.user ?? '', metric)
-      if (dim === 'machine' && data?.machineStatsCaches)
-        return rankTopFromCaches(data.machineStatsCaches, sessions, s => s.memberId ?? '', metric)
-      return null
-    }
-  }, [data?.userStatsCaches, data?.machineStatsCaches, filters, sessions, metric])
-
-  /** Machine and person only exist where there is more than one of each. On a solo machine they
-   *  would be a podium of one, which says nothing. */
-  const dimensions = useMemo(() => {
-    const base: Array<{ id: TopDimension; en: string; pt: string; icon: typeof Cpu }> = [
-      { id: 'harness', en: 'Harness', pt: 'Harness', icon: Boxes },
-      { id: 'model', en: 'Model', pt: 'Modelo', icon: Cpu },
-      { id: 'project', en: 'Project', pt: 'Projeto', icon: FolderOpen },
-      { id: 'repo', en: 'Repository', pt: 'Repositório', icon: GitBranch },
-    ]
-    if (isCentral) {
-      base.push({ id: 'user', en: 'Person', pt: 'Pessoa', icon: Users })
-      base.push({ id: 'machine', en: 'Machine', pt: 'Máquina', icon: Monitor })
-    }
-    return base
-  }, [isCentral])
-
-  const machineName = useMemo(() => {
-    const map = new Map((machines ?? []).map(m => [m.id, m.name]))
-    return (id: string) => map.get(id) ?? id
-  }, [machines])
+  const dimensions: Array<{ id: TopDimension; en: string; pt: string; icon: typeof Cpu }> = [
+    { id: 'harness', en: 'Harness', pt: 'Harness', icon: Boxes },
+    { id: 'model', en: 'Model', pt: 'Modelo', icon: Cpu },
+    { id: 'project', en: 'Project', pt: 'Projeto', icon: FolderOpen },
+    { id: 'repo', en: 'Repository', pt: 'Repositório', icon: GitBranch },
+  ]
 
   const labelFor = (dim: TopDimension, key: string): string => {
     switch (dim) {
       case 'harness': return HARNESS_LABELS[key as SurfaceHarnessId] ?? key
       case 'project': return formatProjectName(key)
       case 'repo': return repoShortName(key)
-      case 'machine': return machineName(key)
       default: return key
     }
   }
@@ -147,7 +116,7 @@ export default function TopUsagePage() {
 
       <div className="ag-grid cols-2">
         {dimensions.map(dim => {
-          const result = cacheRank?.(dim.id) ?? rankTop(sessions, dim.id, metric)
+          const result = rankTop(sessions, dim.id, metric)
           const Icon = dim.icon
           const totalLabel =
             metric === "cost" ? fmtCost(planFactors ? planCostOf(result.costByHarness, planFactors) : result.total, currency, brlRate)

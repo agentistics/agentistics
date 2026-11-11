@@ -28,7 +28,7 @@ import { confirmSentence, extendLabel, isLoopbackHost } from './vaultExpiry'
 describe('device up front', () => {
   test('loopback hosts are the machine; anything else is a phone', () => {
     for (const h of ['localhost', '127.0.0.1', '[::1]', 'x.localhost']) expect(isLoopbackHost(h)).toBe(true)
-    for (const h of ['192.168.0.7', 'central.example.com', '100.64.0.2']) expect(isLoopbackHost(h)).toBe(false)
+    for (const h of ['192.168.0.7', 'remote.example.com', '100.64.0.2']) expect(isLoopbackHost(h)).toBe(false)
   })
   test('a phone never gets the Hello sentence', () => {
     expect(confirmSentence(true, true)).not.toContain('Hello')

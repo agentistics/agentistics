@@ -5,28 +5,20 @@
  * Resolution returns a SET of sessions, which is what makes the aggregate dedupe-correct —
  * a session matching two sources is present once, never summed twice.
  *
- * `team` and `account` resolve dynamically (at query time), so a machine added to a team later
- * is automatically covered without editing the tag.
- *
- * No Mongo, no auth, no I/O — unit-tested with plain objects.
+ * No I/O — unit-tested with plain objects.
  */
 import type { SessionMeta } from '@agentistics/core'
 import { canonicalProjectPath } from '@agentistics/core'
 
-export type TagSourceType = 'repo' | 'project' | 'machine' | 'team' | 'account' | 'harness' | 'model' | 'user'
+export const TAG_SOURCE_TYPES = ['repo', 'project', 'machine', 'harness', 'model'] as const
+export type TagSourceType = typeof TAG_SOURCE_TYPES[number]
 
 export interface TagSource {
   type: TagSourceType
-  /** repo → normalized git remote; project → project path; machine → memberId (token hash);
-   *  team → teamId; account → accountId; harness → HarnessId ('claude'|'codex'|...); model → the
-   *  bare model id as stored on the session; user → the session's `user` display name. */
+  /** repo → normalized git remote; project → project path; machine → memberId;
+   *  harness → HarnessId ('claude'|'codex'|...); model → the bare model id as stored on the
+   *  session. */
   value: string
-}
-
-export interface TagLookups {
-  /** accountId → memberIds of every machine that account owns. Built by the caller from the
-   *  tokens collection; an account contributes no sessions of its own. */
-  machinesByAccount: Record<string, string[]>
 }
 
 /**
@@ -71,30 +63,17 @@ export function sessionInWindow(s: SessionMeta, window?: TagWindow): boolean {
   return true
 }
 
-/** All teams a session belongs to (multi-team machines), falling back to the legacy single id. */
-function teamsOf(s: SessionMeta): string[] {
-  if (s.teamIds && s.teamIds.length) return s.teamIds
-  return s.teamId ? [s.teamId] : []
-}
-
 /** Does a session match one source? The building block for both the union and the filters. */
-function matchesSource(s: SessionMeta, src: TagSource, lookups: TagLookups): boolean {
+function matchesSource(s: SessionMeta, src: TagSource): boolean {
   switch (src.type) {
     case 'repo': return !!s.git_remote && s.git_remote === src.value
     // Compared canonically so a worktree counts as the project it belongs to, and so a tag written
     // against a worktree path still resolves after the picker stopped offering them.
     case 'project': return canonicalProjectPath(s.project_path) === canonicalProjectPath(src.value)
     case 'machine': return !!s.memberId && s.memberId === src.value
-    case 'team': return teamsOf(s).includes(src.value)
-    case 'account': {
-      const machines = lookups.machinesByAccount[src.value]
-      return !!machines && !!s.memberId && machines.includes(s.memberId)
-    }
-    // Session ATTRIBUTES, not identity — visible to anyone (see tags-authority.ts canSeeSource)
-    // and meaningful on a solo machine too, unlike machine/team/account.
+    // Session ATTRIBUTES, not identity.
     case 'harness': return (s.harness ?? 'claude') === src.value
     case 'model': return s.model === src.value
-    case 'user': return s.user === src.value
     default: return false
   }
 }
@@ -108,7 +87,7 @@ function matchesSource(s: SessionMeta, src: TagSource, lookups: TagLookups): boo
  * unsatisfiable the moment two values of the same type are listed, since one session cannot sit in
  * two projects at once. A type nobody filtered on places no constraint at all.
  */
-export function sessionPassesFilters(s: SessionMeta, filters: TagSource[], lookups: TagLookups): boolean {
+export function sessionPassesFilters(s: SessionMeta, filters: TagSource[]): boolean {
   if (filters.length === 0) return true
   const byType = new Map<TagSourceType, TagSource[]>()
   for (const f of filters) {
@@ -117,7 +96,7 @@ export function sessionPassesFilters(s: SessionMeta, filters: TagSource[], looku
     else byType.set(f.type, [f])
   }
   for (const group of byType.values()) {
-    if (!group.some(f => matchesSource(s, f, lookups))) return false
+    if (!group.some(f => matchesSource(s, f))) return false
   }
   return true
 }
@@ -131,22 +110,20 @@ export function sessionPassesFilters(s: SessionMeta, filters: TagSource[], looku
 export function sessionMatchesTag(
   s: SessionMeta,
   sources: TagSource[],
-  lookups: TagLookups,
   filters: TagSource[] = [],
   window?: TagWindow,
 ): boolean {
-  return sources.some(src => matchesSource(s, src, lookups))
-    && sessionPassesFilters(s, filters, lookups)
+  return sources.some(src => matchesSource(s, src))
+    && sessionPassesFilters(s, filters)
     && sessionInWindow(s, window)
 }
 
 export function resolveTagSessions(
   sessions: SessionMeta[],
   sources: TagSource[],
-  lookups: TagLookups,
   filters: TagSource[] = [],
   window?: TagWindow,
 ): SessionMeta[] {
   if (sources.length === 0) return []
-  return sessions.filter(s => sessionMatchesTag(s, sources, lookups, filters, window))
+  return sessions.filter(s => sessionMatchesTag(s, sources, filters, window))
 }

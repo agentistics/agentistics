@@ -12,8 +12,8 @@ import { RecordCard, RecordCardAction } from '../settings/primitives'
 import CheckinDefaultsSection from '../settings/CheckinDefaultsSection'
 
 export default function CheckinsPage() {
-  const { lang, capabilities, isCentral } = useOutletContext<AppContext>()
-  const enabled = capabilities?.localShell !== false && !isCentral
+  const { lang, capabilities } = useOutletContext<AppContext>()
+  const enabled = capabilities?.localShell !== false
   const { reports, error } = useCheckinReports(enabled)
   const { fleet } = useFleet(lang, enabled)
   return <CheckinsContent lang={lang} reports={reports} rows={fleet.rows} error={error} capable={enabled} />

@@ -13,7 +13,7 @@
  *
  * ── LOCAL ONLY ───────────────────────────────────────────────────────────────────────────────
  * These live in `preferences.json` beside the billing timeline. They describe how one person
- * looks at their own data; nothing here travels to a central.
+ * looks at their own data; nothing here leaves the machine.
  */
 
 import type { Filters } from './types'
@@ -27,7 +27,7 @@ export interface ComparisonSide {
   /** The cost basis THIS side is measured in.
    *
    *  Per side, not per comparison: "what my plan cost" against "what the same work would have
-   *  cost at API prices" is the central question this whole feature exists for, and a single
+   *  cost at API prices" is the core question this whole feature exists for, and a single
    *  comparison-wide basis made it unaskable. Absent reads as `'api'`. */
   basis?: CostBasis
 }
@@ -63,12 +63,8 @@ function normalizeFilters(raw: unknown): Filters | null {
     models: strArray(r.models),
   }
   if (Array.isArray(r.repos)) out.repos = strArray(r.repos)
-  if (Array.isArray(r.users)) out.users = strArray(r.users)
-  if (Array.isArray(r.teams)) out.teams = strArray(r.teams)
-  if (Array.isArray(r.machines)) out.machines = strArray(r.machines)
   if (Array.isArray(r.tags)) out.tags = strArray(r.tags)
   if (Array.isArray(r.harnesses)) out.harnesses = strArray(r.harnesses) as Filters['harnesses']
-  if (r.presence === 'online' || r.presence === 'offline') out.presence = r.presence
   return out
 }
 

@@ -17,8 +17,8 @@
  *  carry since 2026-09-14. It used to read absence as OFF so that a machine installed for its
  *  metrics would not also ship a shell nobody chose — that is now the owner's accepted trade. An
  *  explicit `false` (a person who turned it off in Settings -> Chat) is respected exactly as before,
- *  and the SECURITY gate is untouched: `capable` still decides, so a `lan`/`public` profile or a
- *  central stays OFF whatever the preference says. */
+ *  and the SECURITY gate is untouched: `capable` still decides, so a `lan`/`public` profile stays OFF
+ *  whatever the preference says. */
 export function chatAllowed(capable: boolean, preference: boolean | undefined): boolean {
   return capable && preference !== false
 }

@@ -589,7 +589,7 @@ Colhido lendo as telas depois de responder o diálogo de onboarding. Isto é o "
 | `1ec25fc3d1` / `e477d4e628` remount-flash | terminou, **PR #126 aberto** | idem — mesma conversa duplicada. Nada a implementar |
 | `9a8ef383ec` dashboard-tab | terminou e mergeou (PR #114 → dev, #116 → main), tudo verificado | só resta apagar o branch `feat/dashboard-tab`. É chamada do usuário |
 | `6b23834c1a` aipe | trabalhando, com subagente rodando testes de `recoveryRecordCommand` | é outro repo (`~/aipe`), fora desta spec |
-| `29ca41da44` member-connect | parada num **quarto diálogo de onboarding** (ver 2.10), com "sobe a central pra mim" digitado e não enviado | o texto é do usuário; não envie por ele |
+| `29ca41da44` member-connect | parada num **quarto diálogo de onboarding** (ver 2.10), com um pedido para subir o servidor digitado e não enviado | o texto é do usuário; não envie por ele |
 | `91f21d7c9f` | estava fazendo **exatamente esta consolidação**, em paralelo | trabalho duplicado. Encerre uma das duas |
 | `7c7f9b2e70` session-approve | terminou a análise do token; concluiu "nada a rotacionar" | nada |
 

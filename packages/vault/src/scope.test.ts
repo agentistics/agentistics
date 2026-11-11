@@ -47,7 +47,7 @@ describe('seal under one scope, open under the other', () => {
     const { dek, kid } = newDataKey()
     const bytes = sealToBytes({ dek, kid, purpose: 'github-backup', name: 'n', plaintext: enc(MARKER) })
     expect(openRecord({ dek, kid, scope: 'cloud-runner', purpose: 'github-backup', name: 'n', bytes })).toEqual({ ok: false, code: 'purpose' })
-    expect(() => sealRecord({ dek, kid, scope: 'cloud-runner', purpose: 'central-token', name: 'n', plaintext: enc(MARKER) })).toThrow()
+    expect(() => sealRecord({ dek, kid, scope: 'cloud-runner', purpose: 'github-backup', name: 'n', plaintext: enc(MARKER) })).toThrow()
     expect(() => sealRecord({ dek, kid, scope: 'human', purpose: 'cloud-runner/identity', name: 'n', plaintext: enc(MARKER) })).toThrow()
   })
 
@@ -94,13 +94,13 @@ describe('the runner handle', () => {
   it('keeps its own copy of the DEK and close() zeroes it', () => {
     const { dek, kid } = newDataKey()
     const h = makeHandle('human', dek, kid)
-    const bytes = h.seal('central-token', 'n', enc(MARKER))
+    const bytes = h.seal('github-backup', 'n', enc(MARKER))
     dek.fill(0) // the caller's copy going away does not break the handle
-    expect(h.open('central-token', 'n', bytes).ok).toBe(true)
+    expect(h.open('github-backup', 'n', bytes).ok).toBe(true)
     h.close()
     expect(h.closed).toBe(true)
-    expect(h.open('central-token', 'n', bytes)).toEqual({ ok: false, code: 'closed' })
-    expect(() => h.seal('central-token', 'n', enc(MARKER))).toThrow()
+    expect(h.open('github-backup', 'n', bytes)).toEqual({ ok: false, code: 'closed' })
+    expect(() => h.seal('github-backup', 'n', enc(MARKER))).toThrow()
   })
 })
 

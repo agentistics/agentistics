@@ -1,12 +1,7 @@
 /**
  * user-ui-prefs.ts — a person's OWN interface choices, and where they live.
  *
- * `/api/preferences` is the MACHINE's file, and on a central that file belongs to the container and
- * is shared by everyone signed in — so one person's pins, theme or hidden columns became everyone's.
- * This is the rule `a11y-prefs.ts` already applies to the magnifiers, generalised to any key, and
- * the store resolution is that module's, reused rather than restated: a machine writes its
- * preferences file, a central writes the account's `userPrefs` document, and a central session with
- * no account reads nothing and writes nothing (never the machine file).
+ * They are stored in this machine's `preferences.json`, behind `/api/user-prefs`.
  *
  * THE LINE. A CHOICE lives here — something a person decided and expects to find again on another
  * device (a pin, a theme, how a list is grouped, which tab is where). What depends on the SCREEN
@@ -19,7 +14,6 @@
  *    groups the MCP writes…). It STAYS there: moving it would break every server-side reader and
  *    strand every machine's existing value. No data is migrated.
  *  - `ui`: a key that is new to the server, stored under `preferences.json`'s `ui.<key>`.
- * On a CENTRAL every key, whatever its machine home, lives in the account's `userPrefs.ui.<key>`.
  * `user-ui-prefs.test.ts` asserts that every legacy top-level key maps to `top`.
  *
  * VALUES are any JSON value — string, number, boolean, null, array or object — opaque to the server
@@ -93,7 +87,6 @@ export const USER_UI_PREF_REGISTRY = {
   sessionTabs: { machine: 'ui', maxBytes: SMALL },
   chatActivity: { machine: 'ui', maxBytes: SMALL },
   projectDisk: { machine: 'ui', maxBytes: SMALL },
-  centralMachine: { machine: 'ui', maxBytes: SMALL },
   sessionRoles: { machine: 'ui', maxBytes: MEDIUM },
   muteWorkers: { machine: 'ui', maxBytes: SMALL },
   updateSnooze: { machine: 'ui', maxBytes: SMALL },
@@ -128,20 +121,6 @@ const byteLength = (v: unknown): number => new TextEncoder().encode(JSON.stringi
 
 const clampTextScale = (v: unknown): number =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(1.5, Math.max(0.85, v)) : 1
-
-/**
- * PURE: what a stored PER-ACCOUNT document (`userPrefs.ui`) may be read back as. Total — a document
- * written by a later build yields only the keys this build knows.
- */
-export function readUserUiPrefs(stored: unknown): UserUiPrefs {
-  if (!isPlainObject(stored)) return {}
-  const out: UserUiPrefs = {}
-  for (const [k, v] of Object.entries(stored)) {
-    if (!isUserUiPrefKey(k) || !isJsonValue(v)) continue
-    out[k] = k === 'textScale' ? clampTextScale(v) : v
-  }
-  return out
-}
 
 /**
  * PURE: the personal keys of a MACHINE's preferences document — each read from its own home, so a

@@ -19,7 +19,7 @@ describe('stripComments', () => {
    * passes on a file that dropped the very line it was pinning.
    */
   it('drops a TRAILING comment written after real code', () => {
-    const planted = 'const x = 1 // const editorEnabled = ctx.editorEnabled === true && !isCentral\n'
+    const planted = 'const x = 1 // const editorEnabled = ctx.editorEnabled === true && !blocked\n'
     expect(planted).toContain('const editorEnabled')
     expect(stripComments(planted)).not.toContain('const editorEnabled')
     expect(stripComments(planted)).toContain('const x = 1')
@@ -29,7 +29,7 @@ describe('stripComments', () => {
     const weak = (s: string) => s
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
-    const planted = 'const x = 1 // const editorEnabled = ctx.editorEnabled === true && !isCentral\n'
+    const planted = 'const x = 1 // const editorEnabled = ctx.editorEnabled === true && !blocked\n'
     expect(weak(planted)).toContain('const editorEnabled')
   })
 

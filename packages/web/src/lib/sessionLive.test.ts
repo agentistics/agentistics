@@ -73,12 +73,3 @@ test('every impossible configuration explains itself in both languages, and none
   expect(checked).toBe(6)
 })
 
-test('a central explains the member channel instead of its own host', () => {
-  // Its own /proc is irrelevant there, so the reason must not leak into the sentence.
-  const en = liveEmptyNotice({ count: 0, lang: 'en', central: true, unavailable: 'container-isolated' })
-  expect(en!.title).toContain('No machine is reporting')
-  expect(en!.detail).toContain('does not share')
-  expect(en!.detail).not.toContain('pid: host')
-  const pt = liveEmptyNotice({ count: 0, lang: 'pt', central: true })
-  expect(pt!.detail).toContain('não compartilha')
-})

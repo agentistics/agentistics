@@ -11,7 +11,7 @@
 import { Database } from 'bun:sqlite'
 import { existsSync } from 'node:fs'
 import { opencodePaths } from './opencode-paths'
-import { HOME_DIR, TEAM_CENTRAL } from './config'
+import { HOME_DIR } from './config'
 import { opencodePlan, goUsage, goPlanLimits, GO_WINDOW_MS, type GoCostRow, type GoUsage, type OpencodePlanId } from '@agentistics/core'
 import { join } from 'node:path'
 import { readAuth, authDir, authDirCandidates } from './opencode-auth'
@@ -95,11 +95,11 @@ export const OPENCODE_USAGE_POLL_MS = 5 * 60_000
 
 /**
  * Feed `agentistics_plan_limits` for harness opencode: now, then every five minutes. `AGENTISTICS_OPENCODE_USAGE=0`
- * turns it off, as does a team central. Local costs cannot measure the provider quota: publish an
+ * turns it off. Local costs cannot measure the provider quota: publish an
  * unmeasured plan (including any observed refusal), never estimated routing windows. Returns the stop function.
  */
 export function startOpencodeUsagePoll(): () => void {
-  if (process.env.AGENTISTICS_OPENCODE_USAGE === '0' || TEAM_CENTRAL) return () => {}
+  if (process.env.AGENTISTICS_OPENCODE_USAGE === '0') return () => {}
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
   const tick = async (): Promise<void> => {

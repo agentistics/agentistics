@@ -113,12 +113,10 @@ function errText(e: unknown): string {
 }
 
 /**
- * Write `preferences.json` into a stage root with its live tokens removed, and report it as a
+ * Write `preferences.json` into a stage root without its retired `team` block (an older version's
+ * bearer token may still sit there), and report it as a
  * `WalkedFile` — it stats what it wrote itself, since `runBackup` needs the same bytes/layer/harness
  * shape as anything the ordinary walk produced, for the digest and the manifest's file count alike.
- *
- * The redaction mirrors what `preferences.ts` already does for its own API read-out — this is not a
- * new rule, it is the existing one applied to the copy that leaves the machine.
  *
  * This is called from INSIDE `runBackup`, not passed in by a caller. It used to be the other way
  * around — an optional `stagedRels` a caller supplied — and that shape let a caller omit it by
@@ -143,14 +141,7 @@ export async function stageRedactedFiles(
     return []
   }
 
-  const team = prefs.team as Record<string, unknown> | undefined
-  if (team) {
-    delete team.token
-    const conns = team.connections
-    if (Array.isArray(conns)) {
-      for (const c of conns) if (c && typeof c === 'object') delete (c as Record<string, unknown>).token
-    }
-  }
+  delete prefs.team
 
   const dest = join(stageRoot, rel)
   await mkdir(dirname(dest), { recursive: true })

@@ -6,13 +6,12 @@
  * `--exposed` evaluates against the strict (public) bar even when the profile is not yet set,
  * which is how you check readiness BEFORE flipping it.
  *
- * It evaluates this process's environment (see deployment-config.ts). The source is always
- * printed, so the verdict is never about an ambiguous machine.
+ * It evaluates this process's environment. The source is always printed, so the verdict is never
+ * about an ambiguous machine.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { capabilitiesFor, resolveProfile } from './exposure'
 import { runPreflight, allPassed } from './preflight'
-import { resolveDeploymentConfig } from './deployment-config'
 import { readNativeBind } from './native-bind'
 import { PORT, WEB_PORT } from './config'
 
@@ -32,37 +31,30 @@ export async function runDoctor(argv: string[]): Promise<never> {
     if (line) process.stdout.write(`  ${line}\n`)
   } catch { /* best-effort: the doctor's own checks must still run */ }
 
-  const cfg = resolveDeploymentConfig(null, process.env as Record<string, string | undefined>)
+  const envVars = process.env as Record<string, string | undefined>
+  const allowedOrigins = (envVars.AGENTISTICS_ALLOWED_ORIGINS ?? '').split(',').map(s => s.trim()).filter(Boolean)
+  const tls = envVars.AGENTISTICS_TLS === '1'
+  const trustProxy = envVars.AGENTISTICS_TRUST_PROXY === '1'
 
-  // Derive the profile and capabilities from the DEPLOYMENT's config, not from this process's
-  // singletons — the container is what will serve traffic.
+  // Derive the profile and capabilities from this process's environment.
   const env = {
-    central: false,
-    exposure: cfg.exposure,
-    allowLocalShell: cfg.allowLocalShell,
-    tls: cfg.tls,
+    exposure: envVars.AGENTISTICS_EXPOSURE,
+    allowLocalShell: envVars.AGENTISTICS_ALLOW_LOCAL_SHELL === '1',
+    tls,
   }
   const profile = resolveProfile(env)
   const caps = capabilitiesFor(profile, env)
 
-  // What THIS process's own server actually listens on, independent of BIND_IP/cfg.bindIp — the
-  // `bind-ip` check above only ever reads a Docker-only env var, and `index.ts` binds `0.0.0.0`
-  // unconditionally today regardless of it (security finding S-1; see native-bind.ts's header).
+  // What THIS process's own server actually listens on: `index.ts` binds `0.0.0.0` unconditionally
+  // today (security finding S-1; see native-bind.ts's header).
   const nativeBindResult = readNativeBind([PORT, WEB_PORT])
 
   const checks = runPreflight({
     profile: exposed ? 'public' : profile,
     caps,
-    sessionSecret: cfg.sessionSecret,
-    password: cfg.password,
-    tls: cfg.tls,
-    trustProxy: cfg.trustProxy,
-    bindIp: cfg.bindIp,
-    allowedOrigins: cfg.allowedOrigins,
-    ownersWithoutMfa: [],
-    mongoAuthenticated: cfg.mongoAuthenticated,
-    machineTokenCount: 0,
-    dbUnavailable: false,
+    tls,
+    trustProxy,
+    allowedOrigins,
     nativeBind: { ports: [PORT, WEB_PORT], result: nativeBindResult },
   })
 

@@ -5,7 +5,7 @@ import { VaultSafe, SAFE_OPEN_MS, SAFE_WIDTH_DESKTOP, SAFE_WIDTH_MOBILE, type Sa
 import { refreshVaultWatch } from '../../lib/vaultWatch'
 import { type UiAction } from '../../lib/vaultApi'
 import { lockedSubKey, vt } from '../../lib/vaultText'
-import { Err } from '../MfaSetup'
+import { Err } from '../dialogStyles'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
 
 type Lang = 'pt' | 'en'

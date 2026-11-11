@@ -41,13 +41,11 @@ packages/
 ```
 packages/server/bin/cli.ts  (binary entry point — agentop)
   ├── agentop (bare) / start → server/cli-start.ts → @agentistics/tui/control (the full-screen control center: Services / Sessions / Dashboard / Logs / Cheat sheet / Help / Contribute; EN default + pt-BR toggle; an unconfigured machine opens with the SETUP WIZARD already asking — `runControlCenter({ setup: true })`, a flag rather than a tab, because setup is a question the cockpit asks). Non-TTY stdin falls through to `server`; without a terminal bare `agentop` prints the help instead
-  ├── agentop setup        → server/cli-setup.ts (the same solo/central/member wizard, non-interactively scriptable; its interactive twin is the cockpit's wizard, reached from the config pane's mode row)
+  ├── agentop setup        → server/cli-setup.ts (the setup wizard, non-interactively scriptable; its interactive twin is the cockpit's wizard, reached from the config pane's mode row)
   ├── agentop server       → server/index.ts + server/otel-watcher.ts (always together)
-  ├── agentop restart …    → bounce a mode's service (`server`/`watch` → systemd; `central` → central.sh restart; `--all` → cli-start.ts restartAllServices over every running service). `--rebuild` rebuilds before restarting instead of just bouncing (`central` → `up`; machine → `compose build --no-cache` then `compose up -d --force-recreate`; `server`/`watch` → `rebuildNativeBinary()`, i.e. `bun run bin`, which needs the repo checkout — outside one it says so and restarts the existing build). **A rebuild is a FULL rebuild**: the Docker paths pass `--no-cache`, because a cached one could hand back the very image it was asked to replace, and they say so on the way in — that build is several minutes. `--cache` is the escape hatch (reuse Docker's layer cache); `-y`/`-n` answer `central.sh up`'s "re-run interactive setup?" prompt up front, so an unattended rebuild never waits on a keypress. All of it is resolved by the pure `rebuild-flags.ts` (`parseRebuildFlags` / `centralRebuildArgs` / `composeRebuildCommands`) — the shell receives an already-decided answer, `-y` with `-n` (or `--cache` with `--no-cache`) is refused rather than resolved, and the control center's rebuild verb passes `-n` EXPLICITLY instead of relying on its piped child failing `[ -t 0 ]`. A plain `agentop central up` / `central.sh up` is not a rebuild and keeps its cached build
+  ├── agentop restart …    → bounce a mode's service (`server`/`watch` → systemd; `--all` → cli-start.ts restartAllServices over every running service). `--rebuild` rebuilds before restarting instead of just bouncing (machine → `compose build --no-cache` then `compose up -d --force-recreate`; `server`/`watch` → `rebuildNativeBinary()`, i.e. `bun run bin`, which needs the repo checkout). A rebuild is a FULL rebuild; `--cache` is the escape hatch. Resolved by the pure `rebuild-flags.ts`
   ├── agentop tui          → an ALIAS for `start`, renamed in cli.ts's one-line dispatch. There is no second Ink app: the metrics ARE the control center's `dashboard` tab, and a branch of its own would be a copy that starts identical and drifts
   ├── agentop watch        → server/otel-watcher.ts (daemon only)
-  ├── agentop central …    → server/cli-central.ts (up/init/down/logs/status/restart/pull/setup-token/reset-password). **HOW a central runs is the USER'S choice, not an inference** — the pure `central-runtime.ts` holds the three shapes (`docker-build` = central.sh builds from the checkout, `docker-image` = pull ghcr.io/agentistics/agentistics, `native` = the binary IS the server) plus which of them work HERE and why not. It used to be pure inference (a checkout meant central.sh, no checkout meant the image), which made two reasonable requests impossible to express: the published image from inside a clone, and a native server anywhere. `up` now takes `--image` / `--build` / `--native` (+ `--bg`, which finally exposes the detached native start that only the control center could reach), the wizard ASKS and records the answer in `AGENTISTICS_CENTRAL_RUNTIME` — read by the CLI only, passed into no container — and every later action resolves the same way the first did. **A requested shape that cannot work is REFUSED in a sentence, never downgraded**: a `--native` that quietly became a Docker start is a central running under a shape its operator did not choose. `defaultCentralRuntime` reproduces the old inference exactly and `central-runtime.test.ts` pins it against `planCentralStart`, so an upgrade changes nothing for an existing central. `up` still takes -y/-n and --cache/--no-cache
-  ├── agentop member …     → server/cli-member.ts (connect/leave/status; whoami-verified, no browser)
   ├── agentop session …    → server/sessions/cli-session.ts (start/ls/list/attach/kill/rename/note;
   │                          `--bg` detaches via tmux, attach prints the REAL detach key; `list`
   │                          reports what each session is DOING and names the harnesses whose
@@ -72,7 +70,6 @@ packages/server/bin/cli.ts  (binary entry point — agentop)
   │                          orchestrating the fleet. See `events/` below and docs/session-events.md.
   │                          It is `events`, not `watch`, because `agentop watch` is already the
   │                          OTel daemon and `agentop restart watch` would become ambiguous)
-  ├── agentop ci-push      → server/ci-push.ts (one-shot GitHub Actions runner → central push; env AGENTISTICS_CENTRAL_URL/AGENTISTICS_CI_TOKEN)
   ├── agentop autostart …  → server/autostart.ts (systemd user service + linger + ~/.bashrc + ~/.zshrc update-check hook)
   ├── agentop upgrade      → server/upgrade.ts
   └── agentop check-update → server/version.ts (prints a banner only when outdated; silent otherwise)
@@ -102,10 +99,9 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          DIRECTORY is authoritative for which agents existed; the parent only for
   │                          how each was launched — and it does not always say even that
   ├── otel-watcher.ts      → chokidar file watcher + OTLP metrics export daemon
-  ├── preferences.ts       → ~/.agentistics prefs incl. team config (mode/endpoint/token/user)
+  ├── preferences.ts       → ~/.agentistics prefs 
   ├── version.ts           → getVersionInfo (current vs latest); drives update banners/notifications
   ├── autostart.ts         → systemd user service + loginctl linger + ~/.bashrc + ~/.zshrc update-check hook
-  ├── cli-setup.ts / cli-central.ts / cli-member.ts → the agentop setup/central/member command handlers
   ├── sessions/            → the session manager and the fleet monitor behind the cockpit's
   │                          `sessions` tab. `SessionBackend` is the platform boundary (tmux;
   │                          **there is no Windows backend and `index.ts` records why** — Bun
@@ -586,8 +582,8 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          — this is a decision about these switches, not a new house rule. An
   │                          explicit `false` is still respected exactly as before, and the SECURITY
   │                          gate (`capable`) is exactly as strict as it always was. Enforced in
-  │                          `index.ts` before the routes, not only in the UI, and a CENTRAL refuses
-  │                          outright. **Lifetime is a CEILING
+  │                          `index.ts` before the routes, not only in the UI, and the capability guard
+  │                          refuses it. **Lifetime is a CEILING
   │                          (`SHELL_CAP` = 8) and never a timer**: a TTL kills the `bun test` that
   │                          finished at minute 61 at an hour nobody was watching and needs a timer
   │                          running forever, while a ceiling is one check on open and only ever
@@ -633,29 +629,18 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   ├── cli-start.ts         → the control center's HOST (`ControlHost`): service detection, start/stop/restart, connect/disconnect, boot service, archive consent, language — every action returns an already-localized `ActionResult` instead of printing
   ├── cli-stream.ts        → the control center's OUTPUT CHANNEL: subscribers + `streamCommand` (both pipes captured, never `inherit`) → lines via the pure `@agentistics/tui/control/stream`
   ├── cli-ui.ts            → dependency-free arrow-key select/confirm/input/pause + clearScreen (bundles clean into the binary; no node_modules to resolve)
-  ├── central-runtime.ts   → **pure**: the three shapes a central can take here, each with `available` + a REASON CODE
-  │                          (`no-docker` / `no-checkout` / `no-env` / `bundled-mongo`) rendered by cli-i18n and the
-  │                          cockpit's own strings — the module is language-free, like `LiveUnavailableReason`. It is the
-  │                          ONE resolution behind BOTH front doors: `agentop central up --image|--build|--native` and the
-  │                          control center's start verbs, which is what stops the CLI and the cockpit offering different
-  │                          deployments. `no-env` and `bundled-mongo` are deliberately different codes — "not configured
-  │                          yet" and "configured for a database Docker alone can reach" send the user to different screens
   ├── service-manager.ts   → **pure**: which init system can keep a mode running here (systemd user units on Linux, launchd
   │                          user agents on macOS, pm2 anywhere it is installed) and the exact file/argv each needs. **pm2
   │                          never wins by default** even when installed — it is a list the user curates, and agentop filing
   │                          itself into it is their decision. The field the module exists for is `keepsRunning`: `agentop
-  │                          server` holds the foreground (`Type=simple`), while `docker compose up -d` and `central.sh up`
-  │                          RETURN once the container is up — registered as long-running, systemd marks the unit
+  │                          server` holds the foreground (`Type=simple`), while `docker compose up -d`
+  │                          RETURNS once the container is up — registered as long-running, systemd marks the unit
   │                          inactive(dead) a second after a perfectly successful start and every `is-active` then lies, so
   │                          those become `Type=oneshot` + `RemainAfterExit=yes`. Same distinction drives launchd's
-  │                          `KeepAlive` and pm2's `--no-autorestart`. It is a property of the COMMAND, so a NATIVE central
-  │                          gets a different unit type from a Docker one — which is why `serviceCommandFor` takes the
-  │                          central runtime, and why `agentop autostart central` finally works from an installed binary
-  │                          (it writes `agentop central up --image -n` instead of refusing for want of a central.sh).
+  │                          `KeepAlive` and pm2's `--no-autorestart`. It is a property of the COMMAND.
   │                          Each manager NAMES the one step it cannot take for the user (`bootCaveat`): linger on systemd,
   │                          login-not-boot on launchd, `pm2 save` + `pm2 startup` on pm2 — a service that will not survive
   │                          a reboot while the user believes it will is worse than none
-  ├── rebuild-flags.ts     → **pure**: the rebuild's two answers (`-y`/`-n` for central.sh's setup prompt, `--cache`/`--no-cache` for the image build) — parse, conflict-refuse, and the argv each path receives
   ├── cli-i18n.ts          → EN/PT strings the HOST produces (CLI is English by default; language follows --lang / preferences.lang / the in-app toggle). The control center's own chrome strings live in tui/src/control/i18n.ts
   ├── cli-hooks.ts + claude-hooks.ts / claude-skill.ts / session-context.ts → **the Claude Code
   │                          integration** (`agentop hooks install|uninstall|status|context`). Two
@@ -837,59 +822,14 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          ran at once. A store that cannot be read costs freshness, never the
   │                          profile on screen — the previous answer is kept, the same rule the
   │                          sessions poller applies to a failed poll
-  ├── team-tokens.ts       → mint / rotate / revoke / validate tokens (stored as sha256 hashes only)
-  ├── rotate-identity.ts   → **pure**: what a TOKEN ROTATION carries. `memberId = sha256(token)`, so rotating renames the machine in every collection keyed by that id — this module holds the ENUMERATION (`tokens`, `sessions`, `memberStats`, `workflows`, `machineKeys` and a tag's `machine` sources all migrate; `audit.targetId` is left as written, because an audit records what was true then; CI sessions are keyed by `ciMemberId(remote)` = `repo:<remote>` and move nothing; the member side's per-connection state is named by the LOCAL connection id and is reconciled by the sync fingerprint). **Any new collection keyed by a machine id must be added here or a rotation silently strands it — that is the same bug three times already.** `planEnvelopeRotation` is the mailbox decision and has NO re-address option: the routing is the GCM AAD, so mail addressed to the old id yields `recipient_mismatch` for anyone (dropped, and counted in the audit as a LOSS) while mail SENT by it still opens exactly as sealed (kept — re-stamping the sender would destroy it). `retargetMachineSources` matches on the source TYPE as well as the value, so an `account` id that happens to read the same is never dragged along. **Sibling pins are deliberately not carried**: to a sibling the rotated machine is new, is pinned on first sight and is ANNOUNCED — continuity would need a claim the central can forge (a "formerly" field, or "same public key", which a central can copy onto an invented machine), and the announcement is the one control against a fabricated peer
-  ├── mongo-dates.ts       → **the date boundary**: BSON `Date` in Mongo, ISO string on the wire. Pure toBsonDate/fromBsonDate(+OrNull)/toBsonDates/fromBsonDates + `DATE_FIELDS` (every stored timestamp, by collection) + `migrateStringDatesToBson()` (idempotent, runs at boot; also `scripts/migrate-mongo-dates.ts`)
-  ├── team-store.ts / team-stats.ts → Mongo team-session doc shape + per-member statsCache store
-  ├── team-ingest.ts       → POST /api/team/ingest → upsert + triggerSseNotification (real-time central)
-  ├── team-source.ts / team-admin.ts → central-side team read for buildApiResponse + members-panel admin routes
-  ├── team-uploader.ts     → member→central push: sent-state, sync-signature auto-reconcile, push-on-change (notifyDataChanged), auto-reset on revoke, /api/team/status pill
-  ├── ingest-batch.ts      → **pure**: how many sessions one ingest carries and how long it gets.
-  │                          **A BATCH IS THE UNIT OF DURABLE PROGRESS** — the sent-state advances
-  │                          only on an ACCEPTED batch, so a batch that cannot complete records
-  │                          NOTHING and the next cycle re-sends the same sessions forever. That
-  │                          happened: `BATCH_SIZE` 200 was chosen in one place and a flat 15s
-  │                          timeout in another, nothing checked that one fit the other, and a real
-  │                          central costs ~195 ms/session — so 200 needed ~39s and every first push
-  │                          aborted. Measured on a live member: 1.260 consecutive failures, a
-  │                          sent-state still `{}`, `lastSuccessAt: null`, against a central
-  │                          answering everything else in under a second. So the TIMEOUT IS DERIVED
-  │                          from the batch (`ingestTimeoutMs`, the only place either number is
-  │                          decided) and still BOUNDED (`MAX_TIMEOUT_MS`), because the timeout's
-  │                          original job is releasing a `MAX_CONCURRENT_PUSHES` slot held by a
-  │                          wedged proxy. And the batch ADAPTS (`nextBatchSize`): a derived timeout
-  │                          still rests on an estimate of someone else's hardware, so a failure
-  │                          HALVES and a success grows back GRADUALLY — jumping straight to the
-  │                          ceiling would fail, floor, and fail again, which is the same
-  │                          non-convergence in a slower loop. The ceiling is far below 200 on
-  │                          purpose: smaller batches cost round trips and buy durable progress
-  ├── account-repos.ts     → **pure**: buildAccountRepoList (central grouping) + findStillShared (the MACHINE-side intersection). A machine asks the central what repositories it holds FOR ITS ACCOUNT (`GET /api/team/account-repos`, team-account-repos.ts) — a question naming no repository and carrying no rule — and compares locally, so it learns a sibling still shares a repo it hid without disclosing anything
-  ├── team-elsewhere.ts    → member side of that: TTL-throttled fetch + cache → ConnectionStatusEntry.elsewhere (same-origin) → the orange banner on the connection card
-  ├── (core) siblingRules.ts → **pure** `@agentistics/core`: the REVERSE warning's arithmetic — `bucketSharedBy` (is this repo/project bucket shared by these announced rules?) + `siblingsRestricting` + `mergeSiblingFacts`. It may **never** be derived from the central: a sibling that hides a repo simply leaves the central without it, and absence is ambiguous between "restricted" and "never cloned", so the ONLY sound source is the sealed envelope inbox. `bucketSharedBy` is a second implementation of a privacy rule, so `share-rules.test.ts` cross-checks it against `sessionShared` over every mode x dimension x bucket combination — `share-rules.ts` stays the single source of the semantics. **Projects correlate across machines by FOLDER NAME** (`projectNameKey`: `\`→`/`, trailing separators stripped, final segment, case folded — case because WSL/Windows machines share these accounts), because the same project sits at a different path on every machine and full-`project_path` comparison correlates almost nothing. **That is the CROSS-MACHINE key only**: `bucketSharedBy` and the stored rules stay EXACT, or a local rule denying `/home/a/x/proj` would silently widen to every project named `proj` — `shareBucketKeys` (exact) and `crossMachineKeys` (correlation) must stay separate, and a test fails if the exact predicate is widened. It is a heuristic (`api`, `web`, `docs` collide), so `siblingsWithholding` reports the sibling's OWN path when the announcement carries one, and the UI says "a project with this name"
-  ├── (core) proposalApply.ts → **pure** `@agentistics/core`: `planProposalApply` — applying a sibling's proposal may only ever NARROW what this machine shares. It composes the two rule sets as their INTERSECTION per mode pair (denylist+denylist → union of denials; anything with an allowlist → an allowlist), never replacing the recipient's rules with the sender's snapshot: that lifted every restriction the sender did not happen to hold, which is the button that hides things starting to share hidden ones. The denylist+allowlist pair has NO single-rule-set intersection ("share only P, except D"), so the merge keeps only the sources that provably cannot overlap a local denial — denial wins across dimensions, and a bare repo allow would re-open a session sitting in a denied project. `share-rules.test.ts` cross-checks the whole table against `sessionShared`, THROUGH the ambiguous-directory (`conflicts`) clause the plan deliberately does not model — it only ever removes sharing. **A source names a bucket on ONE dimension while `sessionShared` decides on BOTH**, so the plan's `stopsSharing` is held to the joint reading (nothing of the row ships afterwards, something did before) and rows the rules alone cannot settle are demoted to `partlyRestricts`, which the UI may only render as "no longer listed" — deciding it by membership once named a project that kept shipping through its repository, a false sentence in the REASSURING direction at the moment of the decision. `proposalAddsNothing` is the same arithmetic read as a question: **an announcement that would add nothing to the recipient's rules is not a proposal** and raises no card and no `member.rules_proposed` — otherwise applying one announces back and the two machines offer each other the same rules forever. It suppresses the OFFER only; the FACT still lands in `siblingRules`
-  ├── envelope-crypto.ts   → **pure** sealed envelope: X25519 (ephemeral + static-static DH) → HKDF-SHA256 → AES-256-GCM, whole header as AAD. **Binding is only half the job — `open` REQUIRES the caller to state the sender the transport claimed, this machine's id and the connection's instanceId, and refuses any disagreement with the sealed header BEFORE any key agreement**; it also bounds `createdAt` and refuses a sender key that differs from the PINNED one. Those checks, not the cipher, are what make an invented identity or a substituted key visible. The pin is looked up by the id INSIDE the seal, never the one beside it
-  ├── envelope-message.ts  → **pure**: the one message kind (a restriction proposal) + decidePin (trust on first use)
-  ├── envelope-keys.ts     → this machine's keypair (0600, never logged/audited/returned) + per-connection peer pins
-  ├── envelope-store.ts / envelope-routes.ts → central `machineKeys` + `envelopes` collections and /api/team/keys + /api/team/envelopes. Sender stamped from the token; recipient must be a machine of the caller's own ACCOUNT (`allowedRecipients`)
-  ├── envelope-client.ts   → member: publish key, pin peers, seal on a rules change, collect + decrypt. Never applies anything. **A sender absent from the key directory is refused even when unpinned** (omitting a machine is the cheaper twin of fabricating one — no pin means no pin-comparison and no notification), and **every first-time pin is announced** (`member.peer_pinned`) — a central need not substitute a key, it can INVENT a machine under one it holds, so trust may be automatic but never silent. One unusable directory key is skipped and counted, never thrown (an unguarded `seal` in the peer loop was a free, silent off-switch for the whole channel)
-  ├── envelope-inbox.ts / envelope-proposals.ts → decrypted, NOT-YET-APPLIED proposals + GET/DELETE /api/team/proposals (capability-guarded: it returns a sibling's full source list). **There is deliberately no apply path**: applying is the ordinary PATCH /api/team/connections/:id a user's click performs. `openedDigests` (sha256 of ciphertext+tag, NOT the central-minted id) is the replay memory and **survives dismissal** — otherwise a permissive pre-restriction envelope could be replayed as a one-click downgrade. The inbox also holds `siblingRules` — the **FACT** each envelope carries (what that machine announced about its OWN rules), stored apart from the **PROPOSAL** because they have different lifetimes: dismissing "apply this here" must not erase "the sibling withholds this". Superseded per `machineId` (each message is a full snapshot, which is how a sibling that LIFTS a restriction retracts the fact); a machine that goes QUIET never retracts, and rules applied before the channel existed were never announced. **PROPOSALS are superseded per `machineId` too** (`mergeProposals`) — a newer announcement replaces its own sender's pending one rather than joining it, so a machine can never hold two cards — and a proposal with **nothing left to apply** is dropped on the READ path (`selectLiveProposals`, the same `proposalAddsNothing` arithmetic re-run against the connection's CURRENT rules). Filtered, never deleted: "nothing left to apply" is a statement about the RECIPIENT's rules, which the user can lift at any time, while a sibling only re-announces when its own rules change — the supersede case is the opposite, permanently stale, and IS pruned from the store
-  ├── workflow-metrics.ts / workflow-script.ts / workflow-agent.ts / workflow-match.ts → Dynamic Workflow runs. **A run's transcripts are `agent-<hash>.jsonl` and the hash carries NO order** — pairing them with the script's `agent()` calls by POSITION (after an alphabetical file sort) gave every agent a label belonging to some other agent, and the run still rendered as if it matched: the CLI said `recon:services · 71.2k` while the dashboard put that agent's numbers under `fix:backends`. The only thing a transcript and its call provably share is the PROMPT, so `parseWorkflowScript` extracts each call's literal (non-`${…}`) prompt segments as FINGERPRINTS and the pure `workflow-match.ts` pairs them by longest verbatim match. It is deliberately conservative — **no match, or a tie, yields the file name and no phase**, because a wrong label is worse than a missing one — and it is per transcript, never a bijection (a `pipeline()`/loop re-runs one call site many times, and all those transcripts legitimately carry that one label). **Tokens include cache**: `WorkflowRun.totals` carries `cacheRead`/`cacheWrite` (optional, so a doc from an older central still reads) and every surface sums them through `workflowTokens()` in `@agentistics/core` — a subagent's cache read dwarfs its input, so an in+out headline understated a real run by ~250x while the cost beside it (which always priced the cache) disagreed
-  ├── project-facts.ts / data.ts `resolveProjectFacts` → **a repository is a property of a DIRECTORY, not of whichever assistant visited it.** `getGitRemote` / `getProjectGitStats` used to be called only from inside the `~/.claude/projects` walk, so a repo used exclusively through Codex/Gemini/Copilot stayed invisible until a Claude session appeared in it (measured: claude 163 sessions / 95 with a remote, **codex 10 / 0**, copilot 8 / 1, gemini 15 / 1). The pure `planProjectFacts` keys on `project_path` from ANY harness and skips paths the Claude walk already read (a resolved path with no remote is not a repo — asking git again every build spends a process to learn the same nothing), and `applyProjectFacts` stamps the result. **It never overwrites a `git_remote` that is already set** — CI ingest stamps it authoritatively from a repo-bound token — and **an empty result clears nothing**: "not a repo here" is not evidence that a remote recorded elsewhere is wrong. It runs BEFORE `writeConsolidated`, so the remote reaches the store, the uploader and the central
+  ├── workflow-metrics.ts / workflow-script.ts / workflow-agent.ts / workflow-match.ts → Dynamic Workflow runs. **A run's transcripts are `agent-<hash>.jsonl` and the hash carries NO order** — pairing them with the script's `agent()` calls by POSITION (after an alphabetical file sort) gave every agent a label belonging to some other agent, and the run still rendered as if it matched: the CLI said `recon:services · 71.2k` while the dashboard put that agent's numbers under `fix:backends`. The only thing a transcript and its call provably share is the PROMPT, so `parseWorkflowScript` extracts each call's literal (non-`${…}`) prompt segments as FINGERPRINTS and the pure `workflow-match.ts` pairs them by longest verbatim match. It is deliberately conservative — **no match, or a tie, yields the file name and no phase**, because a wrong label is worse than a missing one — and it is per transcript, never a bijection (a `pipeline()`/loop re-runs one call site many times, and all those transcripts legitimately carry that one label). **Tokens include cache**: `WorkflowRun.totals` carries `cacheRead`/`cacheWrite` (optional, so an older record still reads) and every surface sums them through `workflowTokens()` in `@agentistics/core` — a subagent's cache read dwarfs its input, so an in+out headline understated a real run by ~250x while the cost beside it (which always priced the cache) disagreed
+  ├── project-facts.ts / data.ts `resolveProjectFacts` → **a repository is a property of a DIRECTORY, not of whichever assistant visited it.** `getGitRemote` / `getProjectGitStats` used to be called only from inside the `~/.claude/projects` walk, so a repo used exclusively through Codex/Gemini/Copilot stayed invisible until a Claude session appeared in it (measured: claude 163 sessions / 95 with a remote, **codex 10 / 0**, copilot 8 / 1, gemini 15 / 1). The pure `planProjectFacts` keys on `project_path` from ANY harness and skips paths the Claude walk already read (a resolved path with no remote is not a repo — asking git again every build spends a process to learn the same nothing), and `applyProjectFacts` stamps the result. **It never overwrites a `git_remote` that is already set** — CI ingest stamps it authoritatively from a repo-bound token — and **an empty result clears nothing**: "not a repo here" is not evidence that a remote recorded elsewhere is wrong. It runs BEFORE `writeConsolidated`, so the remote reaches the store
   ├── harness-activity.ts  → **pure, and the reason no adapter could count anything**: `countGitCommands` (a command line is a CHAIN — split it, judge each segment; `(?![\w-])` rather than `\b`, or `git commit-tree` counts as a commit) and `canonicalTool` (each harness's own name → the shared vocabulary, which is Claude's, because that is what every chart and filter is written against). Both lived INSIDE `jsonl.ts`, the Claude parser, which is exactly why every other adapter hardcoded `git_commits: 0` — the rule was not reachable, not the data missing. **`canonicalTool` is a MAPPING, never a filter**: an unmapped name passes through unchanged so a new tool shows up as itself. **Agy counts the EXECUTION, never the request** — a shell command appears twice there (a `run_command` tool_call asking, then a `RUN_COMMAND` step running, which is the one carrying the command text), and counting both doubled every shell call: same trap as Kimi's duplicated usage records, same answer
   ├── chat-gate.ts         → **pure**: `chatAllowed(capable, preference)`. Chat spawns an assistant CLI on the host — the most powerful thing this server does. For a while an absent preference read as OFF, so a machine installed for its metrics would not also ship a shell nobody chose. **OWNER DECISION, 2026-09-29: an ABSENT preference now reads as ON** (subject to `capable`) — Nay became real sessions and its button is on every screen, and the owner's call is that it works from the first run, the same reversal `shell-gate.ts`/`editor-gate.ts` carry since 2026-09-14. An explicit `false` is respected exactly as before, and the preference may only ever NARROW `CAPS.localChat` — a switch that could re-enable what `public` denied is the opt-in `exposure.ts` exists to make impossible. **Enforced in `index.ts` before the chat routes, not only in the UI** — a hidden button is not a closed door. `/api/team/session` carries `chatEnabled` (capability AND switch) separately from `capabilities.localChat` (the profile alone), so Settings → Chat can say "your profile allows this, you have it off"
-  ├── team-watch.ts        → central watches the team collection → SSE refresh (fallback)
-  ├── team-repos.ts        → central repo registry (`repos` collection): registerRepo (mints a repo-bound CI token + records name/remote; re-register rotates), listRepos, unregisterRepo
-  ├── ci-push.ts           → `agentop ci-push`: one-shot push of an ephemeral GitHub Actions runner's ~/.claude metrics to a central; prefers keyless OIDC (fetches the runner's id-token), falls back to a static token; never fails the CI job on a push error
-  ├── team-oidc.ts         → verifies GitHub Actions OIDC JWTs (jose createRemoteJWKSet + jwtVerify; issuer/audience/expiry) for keyless CI ingest; pure helpers pickCiClaims/looksLikeJwt/ciMemberId
-  ├── team-agent.ts / team-agent-client.ts → reverse-channel WebSocket: WS-authoritative presence signals, ping/pong latency, on-demand chat fetch
-  ├── team-presence.ts     → computePresence (WS-authoritative online/offline + latency; heartbeat only for pure-HTTP members)
-  ├── tags-store.ts        → Mongo CRUD for the `tags` collection (TagDoc: name/color/sources/sharedWith/createdBy) + visibleTagsFor(canRead)
-  ├── tags-resolve.ts      → **pure**: sessionMatchesTag / resolveTagSessions / sessionInWindow — a tag's sources (`repo` | `project` | `machine` | `team` | `account`) resolve to a deduped session SET (union/OR, counted once)
+  ├── tags-resolve.ts      → **pure**: sessionMatchesTag / resolveTagSessions / sessionInWindow — a tag's sources (`repo` | `project` | `machine` | `harness` | `model`) resolve to a deduped session SET (union/OR, counted once)
   ├── tags-aggregate.ts    → **pure**: aggregateSessions() → headline numbers (costUSD via calcCost, sessions, tokens, top project/model/harness)
-  ├── tags-detail.ts       → **pure**: aggregateTagDetail() → distributions (projects/models/harnesses/repos/members), daily series, activity window, distinct member/machine counts — counts and sums only
-  ├── tags-authority.ts    → **pure** gates: canSeeSource / canWriteTagSources (Rule 1) / canReadTag + redactBuckets / redactTopValue / **redactSources** (any key OR source value the viewer cannot see is collapsed into `__other__` / `__hidden__` — without redacting the source list the bucket redaction is bypassable by reading `tag.sources`)
-  ├── tags-handlers.ts     → GET/POST/PATCH/DELETE /api/tags and GET /api/tags/:id; the only tags module touching Mongo or auth (`tags:write` required on every write; unknown tag → 404, never 403)
-  ├── central-config.ts    → Mongo central config: instanceId + pushIntervalSec + includeOfflineData
+  ├── tags-detail.ts       → **pure**: aggregateTagDetail() → distributions (projects/models/harnesses/repos), daily series, activity window — counts and sums only
+  ├── tags-handlers.ts     → GET/POST/PATCH/DELETE /api/tags and GET /api/tags/:id; unknown tag → 404
   ├── adapters/types.ts    → HarnessAdapter contract + getEnabledAdapters() (async, memoized) registry + harnessEnabled(id)
   ├── adapters/claude.ts   → wraps the existing Claude pipeline behind the HarnessAdapter contract (zero behavior change)
   ├── adapters/codex.ts    → Codex CLI reader (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl)
@@ -922,11 +862,10 @@ packages/web/src/ (React + Vite, port 47292 in dev)
   │   ├── HomePage.tsx          → main dashboard (KPIs, charts, sessions)
   │   ├── CustomPage.tsx        → custom layout builder (/custom route)
   │   ├── CostsPage.tsx         → cost deep-dive page
-  │   ├── RepositoriesPage.tsx  → repositories overview (/repositories): cards grouped by normalized git remote (RepositoriesList) so the same repo unifies across devs/paths/machines. **Only repos WITH a remote are shown by default** — remote-less sessions can't be attributed to a repo (and would split the same repo's metrics across machines), so they're hidden behind an "Unlinked · N" toggle. Links to /repo/:id
-  │   ├── RepoDetailPage.tsx    → per-repo detail (/repo/:id): scopes a repo via an overridden `repos` filter (no global filter mutation) + tabs Overview/Members/Actions/Sessions/Dynamic Workflows. The "Actions" tab shows only when the repo has CI sessions; the "Dynamic Workflows" tab shows only when the repo has workflow runs from a `dynamicWorkflows`-capable harness, and renders each run as a step-by-step timeline (phases → agents) with a harness badge, and offers an "All / By session" view toggle that groups runs per session (see `lib/workflowSteps.ts` `buildWorkflowSteps` + `groupRunsBySession`)
-  │   ├── ActionsPage.tsx       → /repositories/actions: all CI-runner sessions (SessionMeta.ci) grouped by repo — the GitHub Actions submenu of Repositories
-  │   ├── TagsPage.tsx        → tags overview (/tags): a card per visible tag (GET /api/tags, aggregate-only) in a **grid or list** layout (persisted; grid ~6 metrics, list ~10), plus a create/edit drawer for principals with `tags:write` (source picker adds on pick, with a bulk checkbox mode beside it; searchable share-with). Clicking a tag navigates to /tags/:id
-  │   ├── TagDetailPage.tsx   → per-tag detail (/tags/:id) fed by GET /api/tags/:id: KPI row (cost, sessions, tokens, **distinct members + machines**), activity chart, ranked distributions (projects/repos/models/harnesses/machines), per-source breakdown, and a **Who has access** panel split by category — owners / creator / shared-with, each stating its own permission. Pencil + trash (ConfirmModal) when the viewer may edit
+  │   ├── RepositoriesPage.tsx  → repositories overview (/repositories): cards grouped by normalized git remote (RepositoriesList) so the same repo unifies across paths. **Only repos WITH a remote are shown by default** — remote-less sessions can't be attributed to a repo, so they're hidden behind an "Unlinked · N" toggle. Links to /repo/:id
+  │   ├── RepoDetailPage.tsx    → per-repo detail (/repo/:id): scopes a repo via an overridden `repos` filter (no global filter mutation) + tabs Overview/Sessions/Dynamic Workflows. The "Dynamic Workflows" tab shows only when the repo has workflow runs from a `dynamicWorkflows`-capable harness, and renders each run as a step-by-step timeline (phases → agents) with a harness badge, and offers an "All / By session" view toggle that groups runs per session (see `lib/workflowSteps.ts` `buildWorkflowSteps` + `groupRunsBySession`)
+  │   ├── TagsPage.tsx        → tags overview (/tags): a card per visible tag (GET /api/tags, aggregate-only) in a **grid or list** layout (persisted; grid ~6 metrics, list ~10), plus a create/edit drawer (source picker adds on pick, with a bulk checkbox mode beside it). Clicking a tag navigates to /tags/:id
+  │   ├── TagDetailPage.tsx   → per-tag detail (/tags/:id) fed by GET /api/tags/:id: KPI row (cost, sessions, tokens), activity chart, ranked distributions (projects/repos/models/harnesses), per-source breakdown. Pencil + trash (ConfirmModal)
   │   ├── ToolsPage.tsx         → tools breakdown page
   │   └── ComparePage.tsx       → unified side-by-side comparison at /compare (per-harness colors; N/A for incapable metrics; sessions/messages/tokens/cost + comparatives: usage-by-hour with peak hour, busiest day-of-week, activity-over-time sparkline, peak token day / peak session cost)
   └── components/               → UI (charts, cards, heatmap, modals, PDF export)
@@ -953,14 +892,6 @@ packages/web/src/ (React + Vite, port 47292 in dev)
       ├── nay/NayDock.tsx       → **the Nay chat is REAL SESSIONS** (docs/superpowers/specs/2026-09-29-nay-as-sessions-design.md). A Nay conversation is an ordinary managed `claude` session whose cwd is `~/.agentistics/nay-chat` (`isNayCwd`, core `nay.ts` — the cwd IS the marker, no new field), started by `POST /api/fleet/nay` (`sessions/nay-web.ts` = `runFleetSpawn` with the directory fixed, gated by `/api/fleet`'s `localShell` AND the chat switch) and filed under the user group "Nay" (`planNayFiling`). The panel draws the workspace's own `SessionChat`, so the composer (attachments, metrics chip, mic, auto mode) is that one, never a copy; its tabs are **Nay** (running Nay sessions + new conversation) and **Sessões** (the same `SessionsAside`, whose new `onCreated`/`selectedId` props keep it in the panel instead of navigating). The fixed button is ALWAYS the chat button; detached windows minimize to orange pills. The old `TtyChat` (`claude --print` per message) is gone; `chat-drivers/` + `/api/chat-tty` are no longer used by the panel
       ├── HarnessInfoPanel.tsx  → inline panel explaining each harness's data sources / what's captured / what's missing (and why) / caveats; driven by HARNESS_INFO in lib/harness.ts
       ├── PreferencesModal.tsx  → unified Settings modal with tabs: Preferences / Live / Install (Environment tab removed)
-      ├── TeamLogin.tsx / TeamMembers.tsx / TeamSettings.tsx → central: password login, members panel (mint/rotate/revoke/rename + presence), team settings (interval/express, offline-data policy)
-  ├── TeamRepos.tsx         → central admin panel rendered in its own **"GitHub Repositories"** Settings tab (central-only, separate from the Team tab): register/unregister repos (POST/DELETE /api/team/repos) + generates a ready-to-paste GitHub Actions workflow snippet + `gh` setup commands with the minted CI token
-      ├── team/restrictionTable.ts + NoticesModal.tsx → the notices modal is a TABLE of what is NOT shared with this central: rows are the restricted repositories/projects, cells name the machines that withhold each one (this machine included) and the ones that still share it. Built from the standing FACTS (`siblingRules`) plus this machine's live rules, so a dismissed proposal never erases a row; `bucketSharedBy` / `siblingsWithholding` / `planProposalApply` do all the arithmetic. Apply is per ROW (that same narrowing-only merge asked of a one-source denial) as well as per machine; a PROJECT row is actionable only when exactly one local project carries that folder name — a rule must name the exact path it denies. Allowlist machines withhold everything no row can name, so they are stated in words. **The connection card's own hidden block is the SAME builder** (`SharedReposPanel`'s `ReadView`), asked its narrower `scope: 'selfRestricted'` question — what THIS machine hides from THIS central — so the two surfaces can never disagree about what is hidden; it replaced red outlined chips that flattened repos and projects into one blob and never said where else a restriction was applied. It renders through `RestrictionMiniTable.tsx` as a REAL table of three columns — **what** (name + the dimension in words), **hidden on**, **still shared on** — and no more: session counts and last-active describe the project's activity rather than the restriction, and the picker one click away already shows them. Paging is the pure, tested `tablePaging.ts` (`resolvePaging` CLAMPS both page and size on every render, so a page left pointing past the end after a rule is lifted corrects itself; `PAGE_SIZE_OPTIONS` are owned by the MODE — inline 5/10/15 inside a card that must hold at 390px, maximized 10/25/50 — and a size from the other mode narrows rather than widens). The maximized view is the same table in a dialog: `esc` closes it and focus returns to the control that opened it. The table and its cells are **plain functions, not components** (`restrictionMiniTable({…})`), so the tree stays inline in `ReadView`'s and the block's content remains reachable to the tests that walk it. A row with no sibling information says so IN WORDS, and so does a "hidden on" cell holding only this machine (an empty or self-only cell reads as "nowhere else", a claim this machine cannot make); `machineCell` truncates with a truthful `+N` rather than silently dropping names; and the block carries no alarm colour: everything in it is there because the user chose it. The marker for "withheld" wherever it appears is the shared `withheldStyle.ts` token — a WEAK red, never `var(--accent-red)` itself, which is the fault colour `offline`/`unauthorized`/a broken connection use on the same card
-      ├── team/siblingWarnings.ts + SiblingWithheldBadge.tsx → the REVERSE sharing warning at the point of decision, in the rules picker: a per-row badge naming the sibling machines that withhold a row (readable BEFORE the switch is flipped) plus a `role="status"` block listing exactly the rows this edit STARTS sharing (the draft's was-off-now-on set). It **warns, never blocks**, and it always renders the best-effort caveat beside the list — this machine knows only what siblings announced to it, so **an absent warning is never proof that no machine restricts a repository**. The projects tab additionally carries the folder-name caveat and shows the sibling's own path, and its copy says **"a project with this name"** — never "this project", which would assert an identity a basename match never established
-      ├── DeployCentral.tsx / PresenceFilter.tsx / MemberConnectionStatus.tsx → central deploy help, online/offline member filter, member-side connection pill
-      └── NotificationToasts.tsx / NotificationBell.tsx / UpdateModal.tsx → auto-dismiss toasts, header bell (history + unread badge), mode-aware upgrade modal
-
-packages/core/src/              — shared across server + web + mcp (import as @agentistics/core)
   ├── types.ts              → all shared types + pricing functions (single source of truth)
   ├── session-profile.ts    → **pure**: `profileOf(sessions, now)` — what THIS machine's sessions
   │                          usually look like over 30 days, so a suggestion is read against a
@@ -1547,195 +1478,17 @@ preserved. Returns `''` for local paths / `file://` / junk. **Never key repos by
   as the stats helpers) and normalizes it.
 - `data.ts scanProjectDir` resolves the remote once per project and **stamps `SessionMeta.git_remote`
   onto every session** (+ `ServerProject.gitRemote`). Because it lives on the session, the remote
-  travels into the consolidate store → team uploader → Mongo — the central has no filesystem access
-  to members' repos, so per-session is the only place it can live.
+  travels into the consolidate store with the rest of the session.
 - Frontend: `useDerivedStats` builds `repoStats` (per-remote aggregate; `remote === ''` = the
   "no linked repository" bucket, never hidden) and honors a `Filters.repos` filter (scopes cost/
   tokens session-side like a project filter). `RepoStat` is exported from `hooks/useData.ts`.
 
-### GitHub Actions — `SessionMeta.ci` + repo-bound tokens
-
-An ephemeral Claude Code Actions runner pushes its metrics via `agentop ci-push` →
-`POST /api/team/ingest`. Auth is **keyless GitHub OIDC** (preferred): the runner presents a
-short-lived GitHub-signed JWT, the central verifies it against GitHub's JWKS (`team-oidc.ts`, uses
-`jose`) and checks the `repository` claim against the **registered repos allowlist** — no secret is
-stored. A **repo-bound static token** (minted by `POST /api/team/repos`) is the fallback. Either
-way the central **authoritatively stamps** `git_remote` + `ci: true` + `user = github-actions` (via
-`stampCiSessions`) — a runner cannot mis-report its repo. CI sessions are keyed by `ciMemberId`
-(`repo:<remote>`). `ci === true` sessions power the **Repositories → Actions** view. Enable OIDC by
-setting `AGENTISTICS_OIDC_AUDIENCE` on the central (the workflow requests that same audience).
-
-Cloud runners need the central reachable without exposing the dashboard. `AGENTISTICS_INGEST_ONLY=1`
-(config.ts) makes a central serve **only** `POST /api/team/ingest` (404 for everything else, checked
-right after the OPTIONS handler in `index.ts`) — run it as a public ingest instance sharing Mongo
-with a separate private dashboard instance. See `docs/github-actions.md`.
-
 ### Repository rules
 
 - **`normalizeGitRemote` is the only way to key a repo** — never parse `project_path` strings.
-- **`git_remote` lives on the session** (not only the project) so it reaches the central.
-- **CI attribution is server-authoritative** — stamped from the repo token, never trusted from the
-  runner's payload.
+- **`git_remote` lives on the session** (not only the project).
 - **`stats-cache.json` stays Claude-only** — repo/CI aggregates come from per-session sums, same as
   every non-Claude dimension.
-
----
-
-## Team mode
-
-One machine ("central") aggregates coding-assistant usage metrics from many machines ("members"). Members push **computed metrics only** (session/agent/token/cost aggregates + their statsCache) — **never chat** (raw chat is fetched on demand over a reverse WebSocket, never stored centrally). The central runs as a Docker service (`central.sh` at the repo root, default port `48080`, Mongo **not** published to the host). See `docs/architecture.md` for the full write-up.
-
-### Roles — `preferences.team.mode`
-
-- **solo** — local only, nothing leaves the machine (default).
-- **central** — the aggregator; serves the team dashboard behind a password.
-- **member** — pushes computed metrics to a central's `/api/team/ingest`.
-
-### Push model — central owns the cadence
-
-The **central owns the interval** (`central-config.ts`, `pushIntervalSec`; normal floor 15s, default 30s, express down to 5s = `EXPRESS_MIN_SEC`). Members read it from `GET /api/team/policy` and can only follow it — no member-side override that goes faster. Plus **push-on-change**: the file watcher calls `notifyDataChanged()` in `team-uploader.ts` → a debounced push floored by the central's interval. Members push their **supplemented** statsCache (the one the local dashboard shows, gap-filled past the stale `lastComputedDate`), never the raw `~/.claude/stats-cache.json`, so central totals match the member exactly. A member push triggers `triggerSseNotification()` on the central → dashboards refresh live, which is why the **"Live" toggle is hidden on a central**.
-
-### Member identity
-
-The display **name is set by the central** on the minted token — there is no name field on the machine; the member resolves it via `GET /api/team/whoami`. Sessions are keyed centrally by a stable `memberId` (token sha256 hash), so renames preserve history. `agentop member connect` never writes a half-config on a bad token.
-
-### Presence — WebSocket-authoritative
-
-`team-presence.ts` computes online/offline from the reverse-channel WS registry in `team-agent.ts`: online while the socket is live, **offline within ~8s** of a kill (`SOCKET_GRACE_MS`); once a member has ever held a socket that signal is trusted; a heartbeat window is only the fallback for pure-HTTP members. Latency comes from WS ping/pong RTT.
-
-### Auto-reconciliation (self-healing sync)
-
-`team-uploader.ts` fingerprints the target as `sha256(endpoint \0 token \0 instanceId)`. When it changes — central DB wiped (`down -v` → new `instanceId`), token revoked+re-added, or endpoint changed — the member clears its sent-state and **re-pushes its full history** (idempotent upserts, no double-count). No manual `team-sent.json` deletion. A persistent 401/403 (revoked token) auto-resets the member back to **solo** and fires a "removed from central" notification. A `null` instanceId (old/unreachable central) never triggers a spurious reset.
-
-### Notifications
-
-`web/src/lib/notifications.ts` is an external store rendered by `NotificationToasts` (auto-dismiss) + `NotificationBell` (history + unread badge). Notifications carry a `code` (+ `meta`) and are localized **at render time** (`NOTIFICATION_TEXT`, pt/en). The server emits them over SSE via `broadcastNotification()`.
-
-### Team-mode rules
-
-- **Members never push chat** — only computed metrics + statsCache; raw chat is on-demand over the WebSocket. The ONE exception is `first_prompt` / `title`, which are chat-derived and DO travel; they are scrubbed by `redactSecrets` (`@agentistics/core`, `redact.ts`) at **two** boundaries: `selectDeltas` on the member (so a pasted credential never crosses the wire) and `toTeamDoc` on the central (because a central cannot assume its members run current code — in a mixed-version fleet the machine on the old build is exactly the one that leaks). The redactor is deliberately PRECISE, not exhaustive: `first_prompt` labels every session in the UI, so a rule that also ate `input_tokens=123` would make labels useless and get switched off. Generic `key=value` rules are guarded by a value-shape test; when in doubt it leaves text alone. It is a safety net for the accidental paste — **never a substitute for rotating a leaked credential**.
-- **The compaction figures and `skill_uses` DO travel, and that is a recorded decision.**
-  `TeamSessionDoc` is `Omit<SessionMeta, …>`, so a field added to `SessionMeta` reaches a central
-  and Mongo by default — `compact_count`/`compact_ms`/`compact_dropped_tokens` are counts and
-  durations describing the SHAPE of a conversation (the same order of thing as
-  `user_message_count`), and `skill_uses` names the skills a session invoked. The name is the half
-  worth thinking about, because a house skill can be named after an internal system; it is
-  accepted as metadata about the machine's own tooling, of the same order as `model`, `languages`
-  and the `mcp__<server>__<tool>` keys `tool_counts` has always carried, and it is bounded by the
-  per-connection sharing rules like every other part of the document — a session in a withheld
-  repository never reaches that central at all. **Nothing on the central reads either field**
-  today; they travel because the document is whole. `redactSecrets` does not touch them and must
-  not be extended to: it is a value-shaped net for a pasted credential, and withholding a whole
-  field is a per-connection RULE, not a scrub. See
-  [docs/security.md](docs/security.md#80a-what-a-shared-session-document-carries--the-compaction-figures-and-the-skill-names).
-- **Tokens are stored only as sha256 hashes** (`team-tokens.ts`) and never logged; the central's session-cookie secret is **separate** from the dashboard password; auth compares are constant-time.
-- **Non-Claude team metrics still come from per-session sums** — `stats-cache.json` remains Claude-only, on the central too (Compare-page Claude totals match the dashboard).
-- **The member's deep Claude history exists ONLY aggregated** (`AppData.userStatsCaches`, keyed by
-  display name) — the individual session docs cover a fraction of it. Any filter that cannot be
-  expressed against those caches must NOT silently fall back to summing sessions, or the same scope
-  reports a fraction of itself. `userStatsCaches` sums a member's machines under one name, so the
-  **machine and team filters are served by `AppData.machineStatsCaches`** (the same caches keyed by
-  machine id) via the pure `resolveMachineCacheScope()` in `@agentistics/core`. It returns `null` —
-  meaning "fall back to the per-session sum" — whenever the caches cannot serve the scope exactly
-  (unknown machine, missing cache), so precision is added, never invented. Project / repo / tag /
-  model / date genuinely have no cache granularity and stay cache-blind (`cacheBlindScope`).
-- **The central is the sole authority on the push interval** — members clamp to `max(central, EXPRESS_MIN_SEC)`; there is no faster member override.
-- **`agentop central` runs from anywhere** — in a repo checkout it wraps `central.sh` (which does `build: .`); from the standalone binary (no repo) `cli-central.ts` falls back to a Docker-image path: it materializes a compose that pulls `ghcr.io/agentistics/agentistics:<version>` + generates `central.env` into `~/.agentistics/central/` and drives `docker compose` directly. The image is published to GHCR by the `publish-image` job in `release.yml`. Override the image with `AGENTISTICS_IMAGE`.
-- **Per-connection sharing rules — projects and repositories, denylist or allowlist, never on the
-  wire.** A connection restricts what it receives across two dimensions (`repo`/`project`, plus
-  the fixed `none` bucket for sessions with no resolvable repo) under one of two modes:
-  `shareMode: 'denylist'` (share everything except `sources` — the default) or `'allowlist'`
-  (share only `sources`). **`share-rules.ts` is the only place these semantics live** —
-  `sessionShared(session, rules, index)` where `rules = { mode, sources }`; nothing downstream
-  re-derives them. **Deny wins across dimensions in denylist mode**: matching a blocked repo denies
-  a session even if its project is not listed. **`shareMode` absent reads as `'denylist'`** —
-  every pre-existing config is one, and treating absence as anything else would silently invert
-  live rules; `migrateTeamConfig` (`@agentistics/core/team.ts`) derives `{shareMode:'denylist',
-  sources}` from a legacy `deniedRepos: string[]`, deterministically and idempotently, in the same
-  read path Plan 1's migration already used. **`deniedRepos` is derived-on-write only, from Task 2
-  onward** — it is kept solely as a read-migration source; any code that still *writes* it directly
-  is a bug. The typed rules live only in `preferences.json`, the in-memory `TeamConnection`, and the
-  browser tab on the machine's own origin; `IngestBody` gains no field for them, and
-  `GET /api/team/status` exposes only `shareMode` + a per-dimension **count**
-  (`deniedRepos`/`deniedProjects`, or `allowedCount` in allowlist mode) — never the values,
-  same-origin only. The restricted statsCache (`buildSplitStatsCache`, `share-rules.ts`) is
-  selected by the **declared** rule — `sourcesRestrict(conn.shareMode, conn.sources)`, where
-  allowlist mode is ALWAYS a restriction (even an empty allowlist, the strictest case) and
-  denylist mode is one only once it names a source — never by comparing a filtered count against
-  an unfiltered one; a count comparison fails open on a cold consolidate store. **There is no
-  fallback to the unsplit cache on the restricted path, ever** — when the split cannot be built
-  faithfully, the push omits `statsCache` entirely rather than shipping the real one.
-  **Allowlist mode still ships the prehistory rollup**: days at or before Claude's own
-  `lastComputedDate` watermark cannot be decomposed by repository or project by anyone, so that
-  block travels as unattributed daily volume in both modes — "share only X" narrows the
-  decomposable window, not that rollup. The retroactive-removal trigger (`planRulesReconcile`,
-  `team-rules.ts`) is **denial, never absence** — a session merely missing from a short store read
-  is never treated as newly denied, which would ask the central to delete perfectly valid sessions
-  and drop them from the sent-state forever. `stats-cache.json` stays Claude-only here too — the
-  split's synthetic and rebuilt halves are both accumulated from Claude sessions only
-  (`accumulateClaudeSessions`).
-  See [docs/architecture.md](docs/architecture.md#per-connection-repository-sharing) and
-  [docs/security.md](docs/security.md#8-per-connection-sharing-rules--the-guarantee-stated-precisely).
-
-### Managing a machine's sessions FROM a central — the machine decides, always
-
-`docs/architecture.md` and `docs/security.md` carry the write-up; these are the invariants a
-harness working here must not break.
-
-- **Two consent switches, and absent reads as OFF** (`remoteSessions.ts`, core). `sessions` grants
-  the row and the screenless verbs; `screens` additionally grants the terminal. `screens` is never
-  in force without `sessions`, and withdrawing `sessions` CLEARS `screens` rather than leaving it
-  stored — a grant left behind returns the moment the first switch is flipped again, which is a
-  grant nobody re-made. Deliberately NOT `shareMode`'s migration rule (and no longer `chat-gate.ts`'s, which reads absent as ON since 2026-09-29).
-- **The relayed row is an ALLOWLIST, never a delete-list** (`reduceMachineFleetRow`). A
-  spread-and-delete leaks the next field somebody adds to `ControlSession`, silently and on every
-  machine. `chatTurns`, `lastLines`, `approvalLines` and `dialogOptions` may never cross, and
-  `machineFleet.test.ts` asserts it over a row carrying all four.
-- **Rules first, then reduce.** The member applies `cwdShared` BEFORE building the row, so a
-  session in a withheld repository never becomes one — reducing first leaves no `cwd` to judge.
-  `withheld` is a count of SESSIONS and is reported, never silently subtracted.
-- **The sharing rules bind the ACT half exactly as they bind the READ half, and for one release
-  they did not.** `buildMachineFleetReply` filtered rows through `cwdShared` from the day it
-  shipped; `performMachineAction` checked consent and the verb and then handed the id to
-  `runFleetAction`, which resolves against the machine's RAW fleet and registry — so a central
-  could `kill`, `rename`, `resume` or re-task a session in a repository the member had explicitly
-  withheld from it. **A rule enforced when you LOOK and not when you ACT is not a rule.** Both
-  halves now resolve through the one `sharedCwd` helper, and an id the machine cannot find is
-  refused for the same reason a row with no `cwd` is: the rule names directories, and an
-  unresolvable target has none to judge.
-- **The TASK verbs no longer exist, and their dedicated refusal is gone with them.** `openTask`
-  expanded to every session filed under the row's task, over the whole registry, and a task
-  routinely spans repositories — so pressing it on a VISIBLE row spawned live assistants inside a
-  withheld directory and answered with a count of them. `machine-fleet.ts` carried a blunt refusal
-  for every restricted connection (refusing only when the task provably spans a withheld row would
-  be an ORACLE: repeated over the visible rows it maps which of them share work with the hidden
-  half). Both verbs are now absent from `FleetActionId` and from `REMOTE_SCREENLESS_ACTIONS`, which
-  is CLOSED — so the property is structural rather than guarded, and it holds for an unrestricted
-  connection too, which the old guard never covered. **Any future verb whose subject is a TASK
-  rather than a ROW needs that refusal back before it joins the list.**
-- **Consent is ORTHOGONAL to the sharing rules, and that is the trap.** The two switches are
-  machine-wide; turning on "manage my sessions" says nothing about WHICH sessions, so without the
-  rule check above it silently re-opened the act surface over every withheld repository.
-- **`machineActions.ts` is CLOSED.** A verb it does not know is refused. A new `FleetActionId` must
-  be listed there on purpose before a central can drive it. `approve`/`prompt` are excluded because
-  neither can be offered without the screen — refused with a sentence naming why, never a disabled
-  button implying it is merely off.
-- **The MACHINE re-checks everything.** Consent and the verb allowlist are re-read from preferences
-  on every request in `performMachineAction`. The central's copy of those checks spares a round
-  trip and nothing more: a check that runs only on the party whose behaviour cannot be verified is
-  not a check.
-- **`machineOwnedBy` is not `canManageMachine`.** The wider predicate is right for administering a
-  machine (rename, rotate, re-assign) and wrong for reaching into its sessions. An unknown machine
-  answers `not-owner` exactly like one you do not own, so the route is not an existence oracle.
-- **Four silences, four sentences**: `not-owner`, `refused`, `offline`, `silent`. An empty list may
-  never stand in for any of them. A machine that refuses while OFFLINE reports offline — the more
-  actionable half.
-- **The central composes no wording.** Every refusal is the machine's own already-localized
-  sentence, passed through untouched.
-- **`/api/fleet*` stays refused on a central** (`index.ts`'s `TEAM_CENTRAL` block, plus its
-  `localShell` entry in `capability-guard.ts`). The relay routes are separate and touch no host, and
-  their deliberate ABSENCE from `capability-guard.ts` is pinned by a test rather than left as an
-  omission.
 
 ---
 
@@ -1770,16 +1523,6 @@ actually pays.
   exist. The residue is the EXACT difference (`Σ days + undated === totalCostUSD`, pinned by a
   test) and is reported, never folded into a day it did not happen on. A **negative** residue is
   the two local sources contradicting each other and withholds the basis entirely.
-- **The plan basis is unavailable on a central, and the refusal lives in `usePlanBasis`.** It
-  aggregates many machines and could only ever hold its operator's timeline; Settings → Billing is
-  hidden there too. Forcing `costBasis` to `'api'` is NOT the guard — two surfaces read `planBasis`
-  directly and bypass the switch (Home's "API vs your plan" panel, gated on
-  `basis?.coverage.computable`, and `CompareByFilter`'s per-side Plan button, gated on
-  `billingReady.ready && basis !== null`). A central whose `preferences.json` still carried a
-  timeline — a machine that used to be solo, or a hand edit — would then price a whole FLEET from
-  one operator's subscription. `central: true` returns `{basis: null, blocked: 'central'}` at the
-  single place the basis is computed, so there is nothing downstream to forget. Hiding the settings
-  screen is the cheap fix that leaves exactly that hole open.
 - **A panel where "plan" has no meaning renders in API basis and says so** — `CacheHitRatePanel`
   is hard-wired, because cache does not reduce a subscription bill, it extends a rate limit. Same
   rule as `HARNESS_CAPABILITIES`, applied to a basis instead of a metric. `BudgetPanel` likewise
@@ -1838,7 +1581,7 @@ off by ~300×, and the cost beside it (which priced the cache) disagrees by ~10�
 
 This was found as a session-drawer bug and turned out to be 19 call sites: the Compare page's
 Tokens row and its cost-per-1M, the tag cards and tag detail, the repositories list and its sort,
-the repo-detail CI and member tiles, the model breakdown's filter, five points in the PDF export,
+the repo-detail tiles, the model breakdown's filter, five points in the PDF export,
 the header's `N tok` counter, `data.ts` and `tags-detail.ts` on the server, and the session drawer
 and recent-sessions list. Rules:
 
@@ -2106,9 +1849,9 @@ dropped by the 60 s idle timeout at 120 s, 180 s, 240 s — "sometimes the app n
   the QUICK subset (stats cache + session metas + consolidate store; no transcript walk, no git, no
   other harness). Both carry `partial: true` + `partialReason`. **Without `?partial=1` the answer is
   the full build exactly as before** — the MCP, the VS Code extension and every internal caller
-  (`buildApiResponse`) never see a partial payload, so a stale figure can never be pushed to a central.
+  (`buildApiResponse`) never see a partial payload, so a stale figure can never reach a caller that did not ask for a partial payload.
 - **The snapshot is DROPPED, never adapted**, when its app version, home or format differs, and is
-  never read or written on a central. Written at most every 5 min, atomically, mode 0600.
+  Written at most every 5 min, atomically, mode 0600.
 - **git runs under a SOFT deadline** (`soft-deadline.ts`, `gitBounded` in data.ts): past 2.5 s the
   build stops WAITING, not WORKING — the walk lands in git.ts's memo/disk cache, `deferredRepos` names
   the paths, and a rebuild is requested when the late ones settle. A hard timeout would discard the
@@ -2200,8 +1943,8 @@ Claude Code deletes session transcripts (`~/.claude/projects/**/*.jsonl`) older 
 
 ## Security rules
 
-A central can be published on the internet. The model is documented in **`docs/security.md`**
-(threat model, trust boundaries, request pipeline, limits of each control) and the deployment
+An instance can be exposed beyond this machine. The model is documented in **`docs/security.md`**
+(threat model, trust boundaries, request pipeline, limits of each control) and the exposure
 runbook in `docs/exposure.md`. These rules are what keep it safe; each exists because its
 absence was a real finding.
 
@@ -2221,26 +1964,13 @@ absence was a real finding.
   which abandons an oversized body mid-stream instead of buffering it first.
 - **Every authentication and admin action writes an audit event** (`audit.ts`). The pure builder
   redacts secret-shaped fields; never add a field that carries a credential.
-- **The session secret is never derived from the dashboard password**, and cookies are
-  `__Host-` prefixed + `SameSite=Strict` whenever they are Secure.
-- **Rate-limit anything that can be guessed.** `rate-limit.ts` keys hard blocks per IP and soft
-  backoff per account — per-account lockout must stay soft, or it becomes a DoS against a
-  colleague.
-- **Step-up gates escalation, not paperwork.** `PROTECTED` in `stepup.ts` is deliberately three
-  entries: editing/creating/deleting an ACCOUNT (role and memberships live there — it is where a
-  session becomes an owner), deleting a TEAM, and CHANGING A PASSWORD. Enrolling a machine, a
-  token or a repository is routine work and is NOT gated — a prompt people meet daily is a prompt
-  they clear without reading, and every other prompt pays for it. `stepup.test.ts` asserts the
-  table EXACTLY, so adding an entry is a product decision, not a drive-by. Those three call
-  `stepUpFetch` on the web side, never bare `fetch`; everything else, reads included, uses `fetch`.
 - **Every secret agentop writes is SEALED by the vault — never plain text, `0600` is only a second
   layer** (`packages/vault` + `packages/server/server/vault/`, docs/security.md §7a). A new secret
   goes through `sealToFile`/`openFromFile` (`vault/service.ts`) with a purpose from the closed
   `HostPurpose` set, gets a `secret` row in `backup-plan.ts` whose prefix covers its `.sealed` name,
   and registers a migrator (`registerVaultMigrator`) if an older version wrote it in plain text. A
   write that cannot seal THROWS the vault's sentence (`VaultRefusalError`); there is no fallback.
-  Central tokens live in `connections/tokens.sealed`, not `preferences.json` (`vault/prefs-tokens.ts`
-  strips/injects them at the file's two choke points). `ensureVaultOpen` SCHEDULES the migration pass
+  `ensureVaultOpen` SCHEDULES the migration pass
   and never awaits it — a caller inside the preferences write chain would deadlock. Under `bun test`
   the only protector is the in-memory one; never probe a real keychain from a test.
 - **`agentop doctor --exposed` must pass before exposing anything.** A check that could not be
@@ -2356,7 +2086,7 @@ packages/tui/scripts/preview.tsx   dev tool: render ONE control-center frame to 
   sentence — the last line becomes the status-line message), `streamOutput` (its output is the
   point — the child is spawned with BOTH pipes captured and every line is published on
   `ControlHost.onOutput`, which the cockpit draws into the detail region), or `suspend` (it asks a
-  QUESTION, so it needs the real tty; `central.sh init` is the whole of that list). A child on a
+  QUESTION, so it needs the real tty; none is left on that list today). A child on a
   streamed path also gets NO stdin — Ink owns the keyboard — and the streamed paths carry no
   `tty()` / `pauseForEnter` call. Ink itself draws through `altScreen.writeFrame`, NOT
   `process.stdout.write`: a frame written through a capture vanishes (the screen freezes for the
@@ -2402,7 +2132,7 @@ packages/tui/scripts/preview.tsx   dev tool: render ONE control-center frame to 
   (`PANE_ORDER`: services → config → actions) and **no log pane**: logs belong to the Logs screen,
   and a tailing viewer squeezed into six rows was a worse copy of a full screen one keypress away.
 - **A long action's output goes into the DETAIL region, and nothing else moves.** `docker compose up
-  --build`, `central.sh up` and `bun run bin` stream into a pane titled with the VERB the user
+  --build` and `bun run bin` stream into a pane titled with the VERB the user
   pressed, while the services list and the config pane stay standing beside it — the output is a view
   of what you acted on, so it has to be readable next to WHAT you acted on. It opens on the first
   line (a stop says one sentence and never takes the region), auto-follows the tail through
@@ -2414,14 +2144,14 @@ packages/tui/scripts/preview.tsx   dev tool: render ONE control-center frame to 
   and the state of each — with the localized reason when one cannot be run here at all, which is
   the answer to "why does this offer me nothing" — the pid and uptime of the one that is serving,
   the web and api addresses, and, under a `MACHINE` rule, whether it starts at boot plus the archive
-  mode and (in member mode) the endpoint. **Boot is `ControlService.boot?: 'on' | 'off'` and is
+  mode and the endpoint when one is set. **Boot is `ControlService.boot?: 'on' | 'off'` and is
   ABSENT when the host cannot tell** (`parseBootState` maps only the words systemd actually prints;
   macOS/Windows are never asked), and an absent boot draws no row — the same N/A-versus-real-0 rule
   the dashboard applies to harness capabilities. `fitDetailLines` cuts from the bottom and then
   drops a trailing rule or blank, so a short pane never spends a row heading nothing.
 - **The boot switch has TWO positions, and the row NAMES the unit.** `enableBoot` used to be the
   whole of it: the systemd user unit it wrote could be removed by nothing in the product, so a user
-  who stopped their central because they were finished with it got it back on the next boot — and on
+  who stopped the server because they were finished with it got it back on the next boot — and on
   the next login that reaches `default.target` — with nothing on screen naming what had brought it
   back. `ControlHost.disableBoot` is the other half, and it **never stops what is running**
   (`disableAutostart(mode, { stop: false })`; the older `agentop autostart <mode> disable` keeps its
@@ -2432,20 +2162,17 @@ packages/tui/scripts/preview.tsx   dev tool: render ONE control-center frame to 
   them; `bootModeFor` is the one mapping both halves resolve through, so the switch can never turn
   one mechanism on and a different one off. **Exactly one option per mechanism** — a row offering
   both directions of one switch asks which of two facts about the same unit is true — and a
-  mechanism whose unit could not be WRITTEN here (`serviceCommandFor` returns null: no `central.sh`,
-  no compose file) is ABSENT, because a unit whose `ExecStart` cannot resolve is a service systemd
+  mechanism whose unit could not be WRITTEN here (`serviceCommandFor` returns null: no compose file) is ABSENT, because a unit whose `ExecStart` cannot resolve is a service systemd
   restarts every five seconds forever. Off Linux the list is EMPTY. `ControlService.bootUnit` is the
-  honest trail: "starts at boot" alone tells someone that SOMETHING will bring their central back
-  and gives them nowhere to look, so the pane prints `starts at boot · agentop-central.service` and
+  honest trail: "starts at boot" alone tells someone that SOMETHING will bring the server back
+  and gives them nowhere to look, so the pane prints `starts at boot · agentop-machine.service` and
   `agentop autostart status` prints the unit's `ExecStart` and the command that removes it. **A stop
   that worked ASKS about the boot registration** (`BootOption.confirmAfterStop`, a different
   sentence because the user did not press a boot verb to get there) — the moment of the stop is the
   only moment the person knows whether they are done with the service or bouncing it.
-- **Setup is a QUESTION the cockpit asks, not a screen.** It was a tab; choosing solo / central /
-  member is a question ABOUT these services — you cannot re-run `central.sh init` on a central that
-  is up — so it is drawn in the detail region like every other question, reached from the config
-  pane's mode row, and the whole flow it already owned (the three connect prompts, the archive
-  consent, the boot offer) is the flow it routes into. **A mode that would reconfigure a RUNNING
+- **Setup is a QUESTION the cockpit asks, not a screen.** It was a tab; choosing how this box runs
+  is a question ABOUT these services, so it is drawn in the detail region like every other question, reached from the config
+  pane's mode row, and the whole flow it already owned (the archive consent, the boot offer) is the flow it routes into. **A mode that would reconfigure a RUNNING
   service is withheld with a SENTENCE**, never merely greyed: `ControlStatus.setupBlocked` is
   decided by the host, because only it knows what is running, and a disabled row that explains
   nothing is indistinguishable from a broken one. It is the same rule as the empty `startOptions` of
@@ -2480,9 +2207,9 @@ packages/tui/scripts/preview.tsx   dev tool: render ONE control-center frame to 
   NOT a constant, and `bodyHeight(rows, headerRows)` is what every screen's budget goes through.
 - **The Logs screen's sources are DERIVED from `ControlStatus.services`, never a constant.**
   `logSources` returns one entry per LOGICAL service under the service's own already-localized
-  label (`1 agentistics   2 agentistics central`), and expands a service into its running runtimes
+  label (`1 agentistics   2 agentistics docker`), and expands a service into its running runtimes
   ONLY in the conflict case, where they genuinely are two different logs. The screen used to hold
-  `['local', 'central', 'machine'] as const` and print those internal ids, so it offered the native
+  a constant list of ids and print those internal ids, so it offered the native
   process and the container of the same service as two things long after the model had merged them
   — the same class of bug CLAUDE.md forbids for a hardcoded harness list, failing the same way.
 - **Every scrolling surface answers the same keys, through the same pure reducer.**
@@ -2564,13 +2291,6 @@ packages/tui/scripts/preview.tsx   dev tool: render ONE control-center frame to 
   `x` deletes a task. Leaving is `ctrl+x` and deliberately NOT `esc` — `esc` here already drops the
   search, then the project, then the task, so one key would have to pick between un-narrowing the
   list and disarming a selection at the exact moment that choice matters.
-- **The header's central pill is `● machine · account · Nms`, and only when there IS a central.**
-  The dot is the one coloured thing in it and its STATE is the host's decision
-  (`ControlStatus.linkState`, from `/api/team/status`'s `errKind` + `lastSuccessAt`): `unauthorized`
-  and `offline` are red, `stale` is amber, `ok` is green. **`stale` is deliberately not red** — the
-  central owns the push cadence, so a member that has not pushed recently has not failed at
-  anything, and a warning that cries wolf is one people stop reading. Under width pressure the
-  account and the latency go before the name, and the name before the dot.
 - **The sessions cockpit is three framed panes and claims the ARROWS.** Menu, fleet, detail; the one
   holding the keyboard wears the accent border, and clicking the list focuses it too — a pointer
   that moves the selection without moving the focus leaves the frame saying one thing while the keys
@@ -2699,7 +2419,7 @@ packages/vscode/src/
   `waiting-approval` raises a toast; plain `waiting` is where every turn ends, so a toast on it is a
   toast per turn. It still counts toward the badge.
 - **An unreachable server prints a sentence, never a zero.** `down` (nothing answered), `refused`
-  (a central, or a profile with no host power) and a real empty fleet are three different facts and
+  (a profile with no host power) and a real empty fleet are three different facts and
   keep three different sentences — the same N/A-versus-a-confident-0 rule the dashboard applies to
   harness capabilities.
 - **The status bar's day is the UTC one** (`start_time.slice(0,10)`), matching the dashboard's own
@@ -2911,11 +2631,8 @@ by the compiler.
 - **A WIP limit WARNS, it never blocks.** A board that refuses a drop teaches people to route around
   it instead of looking at it.
 - **The board's arrangement is PER PERSON on the server — `/api/user-prefs`, never
-  `/api/preferences`** (`boardPrefs.ts` over `sharedPref.ts`'s `PERSONAL_PREFS`): on a central
-  `preferences.json` is shared by everyone signed in, so one person's hidden columns would hide them
-  for the whole team. `user-ui-prefs-routes.ts` reuses `resolveA11yStore` — a machine writes its own
-  preferences file (`ui.<key>`), a central the account's `userPrefs.ui.<key>`, and a central
-  session with no account reads `{}` and is refused on write. The keys are a CLOSED list
+  `/api/preferences`** (`boardPrefs.ts` over `sharedPref.ts`'s `PERSONAL_PREFS`).
+  `user-ui-prefs-routes.ts` writes the machine's own preferences file (`ui.<key>`). The keys are a CLOSED list
   (`USER_UI_PREF_KEYS`; an unknown key is refused, not dropped) and the values are opaque to the
   server — the web store's own `parse` sanitises them. The old `localStorage` key is kept as the
   first paint and written up ONCE when the server has nothing yet (`adoptLocalWhenAbsent`).
@@ -2939,39 +2656,6 @@ by the compiler.
   exists to have fixed once — and it counts `sessionsLinked`, never `sessionsUsed`: a row with no
   conversation link named no repository and contributed no numbers, so counting it would place a
   session in a repository nothing observed it in.
-- **A delivery reaches a CENTRAL only when its owner opts it in, one task at a time.**
-  `Task.shared`, **absent reading as NOT shared** — the strict opt-in reading (which `chat-gate.ts`
-  also used until 2026-09-29) and deliberately not the `shareMode` one, where absence must read as "share" or a live rule would invert. A board is
-  the one thing a member pushes that is free text BY DESIGN (a description, every comment, the
-  names of the files), so there is no "share everything" switch: that is the lenient default by
-  another door. `taskShared` is the one reading of the flag; `false` is written as a boolean rather
-  than by deleting the key, and the route tests `typeof body.shared === 'boolean'` — a truthiness
-  test would make turning sharing OFF indistinguishable from not asking.
-  **The connection's rules still decide the SESSIONS**: `selectSharedTasks` (`task-share.ts`,
-  pure) is handed the very set `sessionShared` produced, so sharing a task can never widen a
-  repository rule — a shared task in a withheld repository ships its record and NONE of its
-  sessions, and `sessionsWithheld` travels so the central says the delivery is **measured short**
-  rather than showing a smaller figure with nothing explaining it. `sessionsMissing` is kept apart
-  from it: a rule somebody set and a push still in flight are different sentences.
-  **The wire shape is a LIST** (`SharedTask` in core), never a projection of `Task`: a field added
-  to the record does not travel until somebody adds it there. It carries **no numbers** (the
-  central resolves them through the same `task-rollup.ts`, over the sessions it already holds — a
-  total shipped from the member would be a second answer), **no claim** (a 30-minute lease pushed
-  every few seconds arrives stale and reads as "somebody is on this right now") and **no file
-  bytes**. `redactSharedTask` runs on the member AND at ingest, the `first_prompt` rule.
-  Storage is `team-tasks.ts`, keyed `org:memberId:taskId` — so it is enumerated in
-  `rotate-identity.ts`, carried by `rotateToken`, in `DATE_FIELDS` (the three INSTANTS only:
-  `dueDate`/`startDate` are `yyyy-MM-dd` days, like `TagDoc.window`), and deleted by revoke and by
-  `leave`. The central's board is `GET /api/team/tasks` (a team route, not a branch of `/api/tasks`
-  — that one is `localShell` in `capability-guard.ts` precisely because the board is a LOCAL
-  store), grouped BY MACHINE with a see-all switch, and **read-only**: a machine that shares
-  nothing is listed and EMPTY, because "has no deliveries" and "shares none of them" are different
-  facts. It is **scoped to the viewer by the SAME rule `/api/data` uses** (owner sees all; anyone
-  else the teams they MANAGE plus the machines they own) and a machine outside that scope is never
-  BUILT, not merely filtered — a board is the most readable data on a central, and a second
-  visibility model for it would be a second place to get it wrong. **A delivery may only name its
-  OWN machine's sessions**: `sessionIds` comes from the member, so anything else counts as MISSING
-  rather than resolving a neighbour's cost and tokens under this delivery.
 - **A conversation whose registry row is GONE can still be filed on a task or subtask, and the link
   lives on the BOARD, never in the fleet registry.** A coordinator kills its subtask sessions before
   closing the subtasks and agentop purges the rows; the filing died with the row, so `done` subtasks read
@@ -3044,8 +2728,7 @@ interchangeable.
 
 - **the Sessions workspace** (the **Sessões area**) — the WEB one: `/sessions`, the aside with the fleet on the left and
   the centre holding either the overview (`FleetOverview`) or the open session's chat and terminal.
-  On a central it is the same workspace, showing the relayed fleet of the machine its picker has
-  chosen. When someone says "a interface de sessões", "a tela de sessões" or "the sessions view",
+  When someone says "a interface de sessões", "a tela de sessões" or "the sessions view",
   this is it. **Desktop, it is a VS-Code-style floating-panel workspace** (the "floating panels"
   design, owner-approved 2026-09-27): the sessions list, the conversation, the bottom band (Claude Code /
   Shell / Studio / Contents) and the artifacts aside are each their OWN bordered, 10px-radius panel
@@ -3112,12 +2795,8 @@ The idle RULE is pure and lives in `packages/core/src/idleSessions.ts` (`idleCan
 the EXACT conversation link only (`session-view.ts`'s `metricsOf`, reading the consolidate store's
 `user_message_timestamps`) — never the harness-and-directory guess `claimResume` falls back to —
 so a row with no exact link is never a candidate rather than one judged on a stranger's clock.
-**The machine→central relay row gains nothing here**: `reduceMachineFleetRow`'s allowlist carries
-neither `lastUserMessageAt` nor `taskId` (pinned by `machineFleet.test.ts`), because the feature is
-local-only and a central has no business suggesting to end another machine's session on a clock it
-did not measure. **The watch is off on a central** — `useIdleSessions`'s `enabled` is
-`!isCentral && !pollUnsupported && !loading`, the same three facts the page already states
-elsewhere, so a central never computes candidates for its relayed fleet. The `sessions.idle`
+**The watch is off without host power** — `useIdleSessions`'s `enabled` is
+`!pollUnsupported && !loading`. The `sessions.idle`
 notification's `meta` is deliberately LANGUAGE-NEUTRAL (`count`, `names`, a plain `more` count and a
 pre-formatted `freed` amount, never composed English/Portuguese) so a notification raised in one
 language still reads correctly after the language toggle flips; `idleMoreSuffix` /
@@ -3214,17 +2893,11 @@ harness must not break.
 - **There is no cap on the number of lenses** — the cost is bounded by `mirrorSchedule.ts` instead:
   two re-clones per frame, least-recently-synced first, off-screen never, with a backoff when a
   measured cycle overruns. Twenty lenses cost ten frames, not one frame of twenty clones.
-- **`/api/preferences` could NOT be reused for these settings**: it is per MACHINE, and on a central
-  that file is shared by every signed-in user, so one person's lenses would appear on everyone's
-  screen. `a11y-prefs.ts` is the single place that picks the machine file or the per-account
-  `userPrefs` document; a central session with no account reads defaults and is refused on write,
-  and must NEVER fall back to the machine file.
+- **The magnifier settings live in the machine's own preferences file** (`a11y-prefs.ts` is the single place that reads and writes them).
 - **A PUT replaces the whole `accessibility` value** so the last lens of a page can be deleted, and
   that rests on `writePreferences` staying a shallow merge across preference KEYS. Pinned by
   `a11y-persistence.test.ts`.
-- **Saving is armed only by a genuinely successful load.** A central answers 401 until login and the
-  hook mounts before it; treating that 401 as an empty document once armed a save that replaced the
-  account's stored lenses with defaults.
+- **Saving is armed only by a genuinely successful load.** Treating a refused load as an empty document once armed a save that replaced the stored lenses with defaults.
 - The border is always `var(--anthropic-orange)`, in every state and both themes. There is no colour
   option, and the settings screen says so rather than leaving a missing picker to read as an
   oversight.
@@ -3243,9 +2916,7 @@ harness must not break.
   When the socket cannot be opened at all a stream falls back to a real EventSource. A new push route
   must be added to the server's allowlist; `streamMux.test.ts` fails on any raw `new EventSource(`.
 - **A person's CHOICES live in `/api/user-prefs`, never `/api/preferences`, and the SCREEN stays in
-  the browser.** `/api/preferences` is the MACHINE's file, and on a central it is shared by everyone
-  signed in, so for months one person's pins, session groups, notification settings, theme and
-  board arrangement were the whole team's. Every `sharedPref.ts` store now defaults to
+  the browser.** `/api/preferences` is the MACHINE's file, and a choice does not belong there. Every `sharedPref.ts` store now defaults to
   `PERSONAL_PREFS`, App's choices (theme, lang, currency, card order/precision, budget, chat
   defaults) go through `putPersonal`, and App reads them ONLY from `/api/user-prefs` (the copies in
   the machine file are stripped from what it applies). Rules:
@@ -3253,19 +2924,15 @@ harness must not break.
     where the value lives ON A MACHINE.** A key that was already a top-level field of
     `preferences.json` (theme, lang, `chatHarness`/`chatModel`/`chatEffort` — read by the Nay
     launcher — `pinnedSessions`, `sessionGroups` — written by the MCP — …) stays `top`, so no data
-    moves and no server reader breaks; a new key goes under `ui.<key>`. On a central EVERY key lives
-    in the account's `userPrefs.ui.<key>`. `user-ui-prefs.test.ts` holds the mapping to the
+    moves and no server reader breaks; a new key goes under `ui.<key>`. `user-ui-prefs.test.ts` holds the mapping to the
     `Preferences` interface's own fields: a key is `top` exactly when that interface declares it.
   - **Values are any JSON value with a byte cap per key**; an unknown key or an oversized value is
     REFUSED (400), never dropped. Machine gates (`chatEnabled`, `shellEnabled`, `archiveMode`,
     `team`, …) are not personal and can never ride this door.
-  - **A central session with no account reads `{}` with `X-Prefs-Writable: false`**; the web then
-    adopts in memory, stays UNARMED and leaves the browser copy alone for a later migration.
   - **A store moved off `localStorage` keeps its old key AND its old format** (`encode`/`decode` for a
     `'1'`/`'0'` flag or a bare string, `seed` for a copy that lived under other keys) as the first
     paint, and is written up ONCE PER KEY PER BROWSER (`adoptLocalWhenAbsent`, `migrateLocalOnce`,
-    `MIGRATED_PREFIX`) — without that bound a shared browser on a central copies the first person's
-    arrangement into every next account. Components FOLLOW the store (`subscribe`), never seed once.
+    `MIGRATED_PREFIX`) — without that bound a shared browser copies one arrangement into another's. Components FOLLOW the store (`subscribe`), never seed once.
   - **The line**: a CHOICE moves (pins, groupings, which panel is docked where, which tab, which
     terminal the band shows, a dismissal); what depends on the SCREEN stays per device — pane widths
     and sizes, the rail width (split out of `panelSlots` on purpose), the shell band's height/open
@@ -3506,49 +3173,7 @@ harness must not break.
   card and the tag FILTER disagree — `tagMatch.test.ts` has a cross-check that fails when only one
   side is updated. Because the period is per tag, `makeTagFilter` evaluates tag by tag; the old
   flattened source union cannot express it.
-- **Tags are aggregate-only and explicitly shared** — a tag's visibility is the explicit `sharedWith` account list (plus its creator and every owner) and is **never** derived from teams; **anyone signed in may create a tag** — the role difference is REACH, not permission: writing requires that the principal can already see **every** one of its sources (`canWriteTagSources`, re-checked on edit), so an owner reaches anything, a manager what their teams reach, and a plain user only what their own account owns, otherwise a tag becomes a privilege-escalation path; and tag responses return **only counts and sums** — never session rows, transcripts or agent metrics — with keys the viewer cannot see collapsed into an "other" bucket. Tag math runs server-side against the unscoped session set, per-session (never from `stats-cache.json`).
-- **A team is a SCOPE KEY, never a label — and an account may have none.** `canCreateAccount` /
-  `canDeleteAccount` / `accountVisibleTo` / `teamVisibleTo` (`iam-view.ts`) all read memberships,
-  and **being in a team IS seeing it** — there is no separate view grant. Consequences:
-  - **An owner may create an account with NO team**; a manager may not. For the manager the
-    requirement is the boundary itself: an account placed outside their teams is one they created
-    and cannot then see or manage. The rule is stated ONCE, in `canCreateAccountWith`
-    (`@agentistics/core/iam.ts`) — `iam-view.ts` delegates to it and the create form
-    (`web/src/pages/settings/accountForm.ts`) calls the same function, with a cross-check test,
-    because the browser copy had drifted stricter than the server and refused an owner something
-    the server always allowed. A teamless account is invisible to and unmanageable by every
-    manager (owner-administered only); the form says so as a **hint** and never blocks.
-  - **There is deliberately NO team everybody joins.** A universal team was considered and
-    rejected: it would make every user see the team and its roster, make any manager of it manage
-    the whole company, and make any tag shared with it shared with everyone. Do not reintroduce one.
-  - **First boot creates ONE team named after `TEAM_ORG`, and creates it EMPTY** (`org-team.ts`'s
-    pure `planOrgTeam` decides; `createOrgTeam` in `teams.ts` does the IO, audited as
-    `team.create`). Nobody is auto-joined — creating the team is the convenience, populating it is
-    what would rebuild the universal team above. Nothing is created for the literal placeholder org
-    `default` (the same `isNamedOrg` from `@agentistics/core/org.ts` the connection card's title
-    uses), and nothing is created when the central already has any team, which is what makes it
-    idempotent across reboots. **It never auto-renames**: the guard is "does ANY team exist", not
-    "a team by this name", so changing the org config later leaves the team as it is. The
-    `TeamDoc.orgTeam` mark is provenance only — the account form pre-selects that team, and
-    pre-selected is not forced (the row is removable, and clearing it yields a teamless account).
-- **A date is NEVER stored as a string in Mongo.** Every persisted timestamp is a BSON `Date`;
-  the WIRE shape stays an ISO string (JSON has no date type and the frontend does `parseISO`), so
-  the conversion lives at the persistence boundary and nowhere else — `mongo-dates.ts`. Rules:
-  - Doc types (`TeamSessionDoc`, `TokenDoc`, `AccountDoc`, `TeamDoc`, `TagDoc`, `RepoDoc`,
-    `BootstrapDoc`, `TeamWorkflowDoc`, memberStats) declare `Date`; the API types they map to
-    (`MemberInfo`, `MachineInfo`, `RepoInfo`, `PublicAccount`, `SessionMeta`, `WorkflowRun`)
-    declare `string`. Write with `new Date()`, never `new Date().toISOString()`.
-  - **Reads must tolerate both shapes** — always go through `fromBsonDate`. A doc written by an
-    older central in a mixed-version fleet still holds a string, and rendering it as
-    "Invalid Date" is a regression the type checker cannot catch.
-  - **`''` is not a date.** An adapter that could not read a start time reports `''`; it is stored
-    as `null` and reads back as `''`. Storing `''` as a pseudo-date is the bug this replaced.
-  - **Add every new timestamp field to `DATE_FIELDS`** and bump `DATE_MIGRATION_VERSION`, or it
-    stays a string in the database forever while the writing code looks perfectly correct.
-  - Date-shaped map KEYS (`statsCache.dailyTokens`'s `YYYY-MM-DD`) stay strings — a BSON key must
-    be one. So do the local JSON stores (`tags-local-store.ts`, `preferences.ts`,
-    `~/.agentistics/sessions/*.json`), where ISO strings are the correct representation; the local
-    tag store revives them into `Date`s on read so the shared `TagDoc` contract holds in memory.
+- **Tags are aggregate-only** — tag responses return **only counts and sums**, never session rows, transcripts or agent metrics. Tag math runs against the machine's own session set, per-session (never from `stats-cache.json`).
 - **`stats-cache.json` is Claude-only** — never aggregate non-Claude harness metrics from it; use per-session sums for all other harnesses (see "Multi-harness tracking" above)
 - **Harness adapters are modules, not packages** — all adapters live under `packages/server/server/adapters/`; never create a separate package per harness
 - **`stats-cache.json`** has no project-level granularity — project filters are computed by summing individual sessions
@@ -3560,14 +3185,11 @@ harness must not break.
 - **BRL costs**: conversion via `/api/rates` (fetches live exchange rate); falls back to a fixed rate if the API fails
 - **Session sources**: `_source: 'meta'` sessions are the most complete; `'jsonl'` and `'subdir'` are fallbacks with partial data (no git line counts, no cache tokens)
 - **Binary mode**: `agentop server` sets `SERVE_STATIC=1`; `index.ts` then binds **two ports with one shared request handler** — `PORT` (47291) is the api + mcp endpoint, `WEB_PORT` (47292) serves the web dashboard (the URL you open). Same handler → the SPA on 47292 makes same-origin `/api/*` calls that resolve locally, so 91 stays api+mcp and 92 is the dashboard. The startup log lists `web` (92) above `api` (91)
-- **Machine in Docker**: `docker/machine.yml` runs a solo/member machine in a container — reuses the central image (minus Mongo/central mode), mounts the host harness dirs read-only + `~/.agentistics` read-write, host networking. Offered as the `docker` option in the control center's Services tab. Run the machine in Docker **or** natively, never both
+- **Machine in Docker**: `docker/machine.yml` runs a machine in a container — mounts the host harness dirs read-only + `~/.agentistics` read-write, host networking. Offered as the `docker` option in the control center's Services tab. Run the machine in Docker **or** natively, never both
 - **Live sessions are host-process detection, and every layer must stay honest about it.**
   `live-sessions.ts` reads the machine's own process list on Linux (`/proc`) and macOS (`ps` +
   `lsof`, via `macos-processes.ts` pure parsers + `macos-processes-io.ts` IO — no `/proc`
-  equivalent exists there); a central never does this for members (it has no visibility into
-  them) — members report their own snapshot over the reverse-channel WebSocket, filtered by that
-  connection's sharing rules exactly like their metrics, so **a repository a member withholds
-  does not appear on the central either**. Rules:
+  equivalent exists there). Rules:
   - **The macOS reader has a STATED LIMIT this repo's other readers don't carry: it was written
     against `ps`/`lsof`'s documented output shapes, never measured against a live Mac** (no macOS
     machine was available when it was built). Its own header names the two consequences —
@@ -3591,13 +3213,11 @@ harness must not break.
     list but `/proc/<pid>/cwd` is ptrace-gated, and the image runs as uid 10001 while the
     assistants run as the host user. `docker/machine.yml` sets `pid: host` and documents
     the `user:` line as a deliberate opt-in that trades the hardening for the feature.
-    `docker/central.yml` (the central) deliberately has NO `pid: host` — its own processes are not
-    what anyone is asking about. (Docker on macOS runs a Linux VM, so this container path is
+    (Docker on macOS runs a Linux VM, so this container path is
     Linux-only regardless of the host OS — it is not how the native macOS reader is exercised.)
   - **The process read is gated by `CAPS.localProcesses` inside the handler**
     (`readLocalLiveSnapshot` in `index.ts`), NOT by registering the path in `capability-guard.ts`:
-    `/api/live-sessions` also carries the members' self-reported snapshots on a central, and a
-    blanket 403 would take the central's "Open now" down with the host read.
+    `/api/live-sessions` is gated this way so the route itself stays registered.
     `capability-guard.test.ts` pins that exemption and asserts the module has exactly one import
     site.
   - **`mcp-admin.ts`'s separate `/proc` reader (for MCP server processes, matched on argv rather
@@ -3645,24 +3265,13 @@ harness must not break.
   `public/icons/`), tags the manifest icons and the two `index.html` icon links `?v=<hash>`, and injects the
   map as `__BRAND_TAGS__` for `versionedAsset()` / `brandAsset()` (`src/lib/brand.ts`). **Any new reference
   to a brand image goes through one of those**, never a bare `/logo.png`. The server matches on the PATH,
-  so the query is invisible to it, and `central-branding.ts` swaps on the path and carries the query along.
-- **A central installs as its own app** — same bundle, so the identity has to be applied when the
-  files are SERVED, not at build time (`TEAM_CENTRAL` is a runtime mode). `serveStatic` runs
-  `centralManifest()` / `centralHtml()` from `central-branding.ts` (pure, total — bad input is
-  returned untouched) over `/manifest.webmanifest` and `/index.html`, swapping in the **teal**
-  icon set, the name "Agentistics Central" and the teal `theme_color`. Regenerate every icon (teal ones included)
-  with `bun packages/web/scripts/gen-brand-assets.ts` from the four SVGs in `packages/web/branding/` —
-  the teal is a colour swap on the vector, not a badge: at
-  32px in a dock a corner badge is invisible. Both files are served `no-store`; **the app shell
-  must never get the year-long immutable cache** the hashed assets get, or a rebuild is pinned to
-  its old bundle. Anything the server rewrites must also be embedded as TEXT — `.webmanifest` was
-  missing from `embed-dist.ts`'s `TEXT_EXTS`, arrived base64 and skipped the rewrite in silence.
+  so the query is invisible to it.
 - **Mobile / responsive UI** — the whole dashboard is responsive; gate mobile-only branches on the `useIsMobile()` hook (`packages/web/src/hooks/useIsMobile.ts`, `MOBILE_BREAKPOINT = 768`). Conventions:
   - **Sticky header** holds everything needed for interaction. On mobile the header shows only the logo; the lang/theme/export/settings/health/live/refresh controls are **not** in the top row — they live in the bottom-nav "More" sheet (see below). Desktop keeps the full action row.
   - **`MobileAreaBar`** (`components/nav/MobileAreaBar.tsx`) is the phone's navigation: a floating place pill ("Uso › Agora", area quiet, page bold) beside a round Sessions shortcut (not drawn on Sessions itself), and the pill opens a `BottomSheet` holding the same `AreaTree` the desktop uses, the moved global action tiles and the account actions. See `docs/mobile-area-navigation.md`. Do not move those actions back into the top header on mobile.
   - **Collapsible filter bar**: on mobile the full `FiltersBar` (harness chips + date/projects/models) sits in the sticky header and can be minimized to a slim "Filters" row (with an active-filter count badge) via `filtersCollapsed`. The open/close is animated with a `grid-template-rows: 0fr↔1fr` transition. The animation wrapper needs `overflow: hidden`, which would clip the Models popover — so it's only clipped while animating/collapsed (`filtersClip` + `onTransitionEnd`), then switches to `visible`.
   - **`FiltersBar` `compact` prop** (used on mobile): hides the vestigial vertical dividers and tightens padding. On mobile the controls also stretch to fill each row (date presets `flex:1`, custom range full-width, the ＋ Filtro button full-width).
-  - **`FiltersBar` "＋ Filtro" model**: the top bar shows only the date presets + custom range + a single dashed **＋ Filtro** button (with an active-dimension count badge). It opens a menu of the *available* dimensions (Members/Harnesses/Presence shown only on central-with-data; Repos only when a repo dimension exists; Projects/Models when present); picking one opens that dimension's inline value picker (Projects opens the full `ProjectsModal`). The selected values are NOT shown in the top bar — they render in the animated per-category chip rows below (`AnimatedRow`/`ChipRow`/`FilterChip`, one row per dimension incl. Presence). Do not re-add always-visible dimension dropdowns to the top bar.
+  - **`FiltersBar` "＋ Filtro" model**: the top bar shows only the date presets + custom range + a single dashed **＋ Filtro** button (with an active-dimension count badge). It opens a menu of the *available* dimensions (Harnesses; Repos only when a repo dimension exists; Projects/Models when present); picking one opens that dimension's inline value picker (Projects opens the full `ProjectsModal`). The selected values are NOT shown in the top bar — they render in the animated per-category chip rows below (`AnimatedRow`/`ChipRow`/`FilterChip`, one row per dimension incl. Presence). Do not re-add always-visible dimension dropdowns to the top bar.
   - **Full-screen modals on mobile**: ProjectsModal, SessionDrilldownModal, PreferencesModal, the transcript viewer, etc. render full-screen (overlay padding 0, width/height 100%, `borderRadius: 0`) — iOS Safari pushes centered fixed-width modals off-screen when the page overflows horizontally.
   - **THE SESSIONS WORKSPACE STOPS THE DOCUMENT BOUNCING, AND NEVER BY RE-ANCHORING IT.** It is a
     fixed-height column whose conversation, list and aside each scroll inside themselves, so a flick
@@ -3785,5 +3394,4 @@ See `docs/f1-3-clients.md`. Browser, VS Code and cockpit consume fleet snapshots
 core's `fleetStream`; unhealthy SSE restores their poll fallback. Do not add an independent
 fleet poll to a surface. History is read from `/api/fleet/closed` when requested.
 `source: 'adapter'` chat consumes structured `live`/`state`; it never opens a terminal stream.
-Local dashboard patches are versioned and flag-gated; a central keeps its scoped GET path.
-Never put unscoped team data on the shared `/api/events` broadcast.
+Local dashboard patches are versioned and flag-gated.

@@ -15,13 +15,13 @@
  *
  * It is served ONLY to a client that asked for a partial answer (`/api/data?partial=1`) and only
  * while the first fresh build runs, marked `partial: true, partialReason: 'snapshot'` so the app says
- * it is refreshing. Internal callers (the team uploader, tags, the MCP) never see it: they wait for a
- * fresh build exactly as before, so a stale figure can never be pushed to a central.
+ * it is refreshing. Internal callers (tags, the MCP) never see it: they wait for a
+ * fresh build exactly as before, so a stale figure can never reach them.
  *
  * Written at most every `SNAPSHOT_MIN_INTERVAL_MS` (the build can run every few seconds while
  * sessions write; this file is for the NEXT boot and an hour-old copy serves that just as well),
  * atomically (temp + rename), mode 0600 — it holds the same per-session metrics as the consolidate
- * store beside it. Never on a central: its data lives in Mongo and is scoped per principal.
+ * store beside it.
  */
 import { join } from 'node:path'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'

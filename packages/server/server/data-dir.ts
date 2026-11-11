@@ -3,11 +3,9 @@
  * out of the owner's real `~/.agentistics`.
  *
  * WHY A GUARD AND NOT DISCIPLINE: a test that forgets ONE injection reaches the real store. It
- * happened: `envelope-client.test.ts` called `sendRestriction` without `notify`, the first-time
- * pin fell through to the real notifier, and the owner's bell showed "1 new machine on
- * https://central.example … laptop-b" — fixture values, in the real inbox
- * (`~/.agentistics/notifications.json`). `team-uploader.ts` had already grown a per-module
- * `__setNotifierForTests` for the same leak; a per-module seam fixes the module somebody noticed
+ * happened: a test called a notifying function without injecting its notifier, the call fell
+ * through to the real one, and the owner's bell showed fixture values in the real inbox
+ * (`~/.agentistics/notifications.json`). A per-module seam fixes the module somebody noticed
  * and no other. Every persisted path in `config.ts` derives from `AGENTISTICS_DATA_DIR`, so
  * resolving THAT one value under test closes the whole class at once.
  *

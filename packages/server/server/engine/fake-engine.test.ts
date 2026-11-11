@@ -38,7 +38,6 @@ const GiB = 1024 * 1024 * 1024
 const READERS = await buildReuseSurface()
 
 function hostServices(opts: {
-  central?: boolean
   audit?: EngineAuditEvent[]
   readers?: EngineHostServices['readers']
   origins?: string[]
@@ -55,7 +54,7 @@ function hostServices(opts: {
     protectedGlobs: opts.globs ?? [],
     protectedPaths: [],
     caps: CAPS,
-    isCentral: () => opts.central ?? false,
+    isCentral: () => false,
     flag: () => false,
     audit: e => { opts.audit?.push(e) },
     readJsonLimited,
@@ -169,17 +168,13 @@ describe('the fake engine against the host seam', () => {
     expect(await res!.json()).toEqual({ error: 'too_large' })
   })
 
-  it('dispatches a command, and the command reads the host, not the environment', async () => {
-    const run = async (central: boolean) => {
-      const { engine } = await load(makeFakeEngine(), hostServices({ central }))
-      const out: string[] = []
-      const err: string[] = []
-      const cmd = engine!.commands.find(c => c.verb === 'provider')!
-      const code = await cmd.run(['list'], { out: l => { out.push(l) }, err: l => { err.push(l) } })
-      return { code, out, err }
-    }
-    expect(await run(false)).toEqual({ code: 0, out: ['provider list'], err: [] })
-    expect((await run(true)).code).toBe(1)
+  it('dispatches a command', async () => {
+    const { engine } = await load(makeFakeEngine(), hostServices())
+    const out: string[] = []
+    const err: string[] = []
+    const cmd = engine!.commands.find(c => c.verb === 'provider')!
+    const code = await cmd.run(['list'], { out: l => { out.push(l) }, err: l => { err.push(l) } })
+    expect({ code, out, err }).toEqual({ code: 0, out: ['provider list'], err: [] })
   })
 
   it('replays in chunks, and folding the chunks equals folding it whole', async () => {

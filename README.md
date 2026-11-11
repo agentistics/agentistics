@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Track · Analyze · Improve</strong><br/>
-  Local-first analytics for AI coding assistants — one machine, or a whole team
+  Local-first analytics for AI coding assistants — on your own machine
 </p>
 
 <p align="center">
@@ -29,8 +29,6 @@
 
 <p align="center">
   <a href="#install"><strong>Install →</strong></a>
-  &nbsp;·&nbsp;
-  <a href="#team-mode"><strong>Team Mode →</strong></a>
   &nbsp;·&nbsp;
   <a href="docs/security.md"><strong>Security model →</strong></a>
   &nbsp;·&nbsp;
@@ -51,8 +49,7 @@
 
 agentistics reads what your AI coding assistants already write to disk and turns it into
 tokens, costs, sessions and activity you can actually reason about. Nothing is uploaded: on a
-single machine it never opens an outbound connection at all, and in Team Mode a machine sends
-**computed metrics only** — never chat.
+single machine it never opens an outbound connection at all.
 
 It tracks **six harnesses** side by side:
 
@@ -102,14 +99,7 @@ agentop
 Bare `agentop` on a terminal opens the **control center** — one full-screen application in the
 terminal's alternate buffer, so it adds nothing to your scrollback.
 
-<p align="center">
-  <img src="docs/media/control-center.gif" alt="The agentop control center" width="100%" />
-</p>
-
-Its tabs are **Services** (start / stop / restart this machine, a central, or the Docker machine;
-connect to or leave a central; enable a boot service), **Setup**, **Logs**, **Commands**, **Help**
-and **Contribute**. Screens change with `←`/`→`, panes with `tab`, and the footer always names the
-keys that work *in the current focus*.
+Bare `agentop` opens the control center: its tabs are **Services** (start / stop / restart this machine or the Docker machine; enable a boot service), **Setup**, **Logs**, **Commands**, **Help** and **Contribute**. Screens change with `←`/`→`, panes with `tab`, and the footer always names the keys that work *in the current focus*.
 
 Open the dashboard at **http://localhost:47292** (the API + MCP endpoint stays on **47291**).
 
@@ -173,8 +163,8 @@ browser — Overview, Projects, History, Costs, Harnesses and Hardware, switched
 ### Repositories
 
 Metrics group by **normalized git remote** (`host/org/repo`), independent of where the repo is
-checked out or which machine produced the work. A repo's detail page carries Overview, Members,
-Sessions, an **Actions** tab when it has CI runs, and a **Dynamic Workflows** tab that renders each
+checked out or which machine produced the work. A repo's detail page carries Overview,
+Sessions, and a **Dynamic Workflows** tab that renders each
 multi-agent Workflow run as a phase-by-phase timeline.
 
 <p align="center">
@@ -183,9 +173,9 @@ multi-agent Workflow run as a phase-by-phase timeline.
 
 ### Tags
 
-A tag is a saved grouping of sources — repositories, projects, machines, teams or accounts —
+A tag is a saved grouping of sources — repositories, projects, harnesses or models —
 optionally pinned to a date window. Tag responses are **aggregate-only**: counts and sums, never
-session rows or transcripts, with any key the viewer cannot see collapsed into an "other" bucket.
+session rows or transcripts.
 
 <p align="center">
   <img src="docs/media/machine-tags.gif" alt="Tags" width="100%" />
@@ -207,120 +197,38 @@ The whole dashboard is responsive and installs as a PWA.
 
 ---
 
-## Team Mode
+## Exposing an instance beyond this machine
 
-<a name="team-mode"></a>
-
-One machine runs as a **central** and aggregates usage from many **members**. Members push
-**computed metrics only** — raw chat is never stored centrally (it is fetched on demand over a
-reverse WebSocket, from the machine that holds it).
-
-Every machine has a role: **solo** (local only, the default), **central** (the aggregator, a Docker
-service on port **48080**), or **member**. A machine may be a member of **several centrals at
-once**, with different sharing rules for each.
-
-```bash
-# host a central
-agentop central init && agentop central up
-
-# join one — a token minted by a central with a public URL carries it,
-# so the token alone is enough (--endpoint only for a bare token)
-agentop member connect --token <token>
-```
-
-### Accounts, teams and roles
-
-A central is not a shared password. First boot prints a one-time **setup token** and asks you to
-create the **owner** account; everyone else is invited. Accounts carry argon2id passwords, optional
-**TOTP two-factor**, and a role. A **team** is a scope key, not a label — being in a team *is*
-seeing it.
-
-<p align="center">
-  <img src="docs/media/central-login.gif" alt="Signing in to a central" width="100%" />
-</p>
-
-**Step-up authentication** gates escalation, not paperwork: editing an account, deleting a team and
-changing a password ask for a second proof. Enrolling a machine, a token or a repository does not —
-a prompt people meet daily is a prompt they clear without reading.
-
-<p align="center">
-  <img src="docs/media/central-dashboard.gif" alt="The central dashboard" width="100%" />
-</p>
-
-### What a machine shares — and what it withholds
-
-Each connection carries its own rules across two dimensions (repositories and projects) in one of
-two modes: **denylist** (share everything except these) or **allowlist** (share only these). The
-rules never travel: the central is told nothing about them beyond a per-dimension *count*.
-
-When several of your machines share one account, they tell **each other** what they withhold over a
-**sealed machine-to-machine channel** (X25519 → HKDF → AES-256-GCM, sender and recipient bound into
-the authenticated header, keys pinned on first sight and every new pin announced). That is what
-makes two things possible:
-
-- A **warning at the point of decision**: before you start sharing a repository, the picker names
-  the sibling machines that withhold it. It warns, never blocks — and it always says that an absent
-  warning is not proof, because a machine knows only what its siblings announced.
-- A **proposal**: a sibling can offer its rules, and applying one may only ever **narrow** what this
-  machine shares. Never replace, never widen.
-
-### Presence, self-healing and CI
-
-- **Presence** is WebSocket-authoritative — online while the socket is live, offline within ~8s.
-- **Auto-reconciliation**: if the central's database is wiped, a token is rotated or an endpoint
-  changes, a member notices and re-pushes its full history. A revoked machine resets itself to solo.
-- **GitHub Actions**: an ephemeral runner pushes its metrics with `agentop ci-push`, authenticated
-  by **keyless GitHub OIDC** against a registered-repos allowlist. The central stamps the repository
-  itself, so a runner cannot mis-report which repo it ran for. See [docs/github-actions.md](docs/github-actions.md).
-
-→ [docs/architecture.md](docs/architecture.md) · [docs/central-deploy.md](docs/central-deploy.md) · [docs/security.md](docs/security.md)
-
----
-
-## Exposing a central on the internet
-
-A central can be published behind a tunnel. `AGENTISTICS_EXPOSURE` selects a profile —
+By default the instance listens on `127.0.0.1`. `AGENTISTICS_EXPOSURE` selects a profile —
 `local` | `lan` | `public` — and **`public` permanently revokes every route that touches the host**
-(shell, local chat, raw transcripts, MCP admin) and requires a second factor of every owner. The
-profile is the only thing that decides a capability; no opt-in re-enables host power on `public`.
+(shell, local chat, raw transcripts, MCP admin). The profile is the only thing that decides a
+capability; no opt-in re-enables host power on `public`.
 
 ```bash
 agentop doctor --exposed     # run this BEFORE opening a tunnel
 ```
 
-A check that could not be verified reports `fail`, never a reassuring `pass`. On a Docker central
-run it from inside the container instead — `./central.sh doctor --exposed` — where `central.env` is
-the live environment **and** the database is reachable, so the owner-MFA and machine-token checks
-actually run. On the host they cannot, and unverified counts as a failure.
+A check that could not be verified reports `fail`, never a reassuring `pass`.
 
-→ [docs/exposure.md](docs/exposure.md) · [SECURITY.md](SECURITY.md)
+→ [docs/exposure.md](docs/exposure.md) · [docs/architecture.md](docs/architecture.md) · [docs/security.md](docs/security.md) · [SECURITY.md](SECURITY.md)
 
 ---
 
 ## The CLI — `agentop`
 
-<p align="center">
-  <img src="docs/media/control-center-commands.gif" alt="The commands cheat sheet" width="100%" />
-</p>
-
 | Command | Purpose |
 |---|---|
 | *(bare)* / `start` | The control center |
-| `setup` | First-run wizard (solo / central / member) |
-| `server` | Web + API + MCP + daemon. `--central` runs a central natively (no Docker), `--bg` detaches |
+| `setup` | First-run wizard (history consent, start on boot) |
+| `server` | Web + API + MCP + daemon. `--bg` detaches |
 | `restart` | Bounce a mode; `--rebuild` rebuilds first (a **full**, cacheless rebuild — `--cache` opts out) |
 | `status` | Services + health |
 | `tui` | The live terminal dashboard |
 | `watch` | The OTel daemon only |
-| `central` | `up` / `init` / `down` / `logs` / `status` / `restart` / `pull` |
-| `member` | `connect` / `leave` / `status` / `list` |
 | `session` | Start / list / attach / kill background assistant sessions (tmux-backed), or a whole `batch` of them under one task |
 | `hooks` | Teach Claude Code to fan work out across several assistants through agentop |
-| `ci-push` | One-shot push of a CI runner's metrics |
 | `autostart` | Start a mode with the system (systemd user service) |
 | `doctor` | Exposure preflight; `--exposed` checks against the strict public bar |
-| `setup-token` | Reissue the one-time owner setup token |
-| `reset-password` | The way back in for a locked-out last owner |
 | `upgrade` · `check-update` | Update, or print a notice when one is due |
 
 `agentop hooks install` installs two things into Claude Code — a **skill** that teaches it to split
@@ -398,9 +306,7 @@ claude mcp list   # should show "agentistics"
 | [docs/cli.md](docs/cli.md) | Every `agentop` command, flag and example |
 | [docs/architecture.md](docs/architecture.md) | Structure, request lifecycle, build pipeline |
 | [docs/security.md](docs/security.md) | Threat model, trust boundaries, the limits of each control |
-| [docs/exposure.md](docs/exposure.md) | Publishing a central safely |
-| [docs/central-deploy.md](docs/central-deploy.md) | Running a central: every shape, `central.sh`, env vars |
-| [docs/github-actions.md](docs/github-actions.md) | CI ingest, OIDC, repo-bound tokens |
+| [docs/exposure.md](docs/exposure.md) | Exposing an instance safely |
 | [docs/harness-contract.md](docs/harness-contract.md) | What each metric must MEAN across harnesses |
 | [docs/data-sources.md](docs/data-sources.md) | Data sources, JSONL parsing, `SessionMeta` |
 | [docs/metrics.md](docs/metrics.md) | Pricing table, cost formula, streak, cache |
@@ -423,7 +329,7 @@ cannot be taken back, and a real project name or repository in one is a leak.
 ```bash
 # 1. a pseudonymized fleet, derived from this machine's computed metrics
 #    (never from transcripts, so chat cannot reach it by construction)
-bun run packages/server/scripts/seed-demo.ts --split 3 --force
+bun run packages/server/scripts/seed-demo.ts --force
 
 # 2. run them
 HOME=~/.agentistics-demo-home-1 PORT=47391 ./release/agentop server &

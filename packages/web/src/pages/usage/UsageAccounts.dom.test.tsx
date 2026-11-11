@@ -48,7 +48,7 @@ const flush = async () => { for (let i = 0; i < 5; i++) await act(async () => { 
 function mount(at: string, saves: unknown[] = [], billing: unknown = { profiles: {} }) {
   const { MemoryRouter, Routes, Route, Outlet, useLocation } = Router
   const ctx = {
-    lang: 'en', billing, data: { harnesses: ['claude'] }, isCentral: false,
+    lang: 'en', billing, data: { harnesses: ['claude'] },
     saveBilling: async (next: unknown) => { saves.push(next) },
   }
   const Where = () => { const l = useLocation(); return h('output', { 'data-where': `${l.pathname}${l.hash}` }) }

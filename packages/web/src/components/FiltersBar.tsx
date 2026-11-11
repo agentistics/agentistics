@@ -2,12 +2,11 @@ import { useEscapeOwner } from '../lib/overlayStack'
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import type { Filters, DateRange, Project, Lang, SurfaceHarnessId } from '@agentistics/core'
 import { formatModel, formatProjectName, repoShortName } from '@agentistics/core'
-import { Layers, Cpu, ChevronDown, SlidersHorizontal, X, CalendarDays, Check, Users, GitBranch, Search, Plus, Blocks, Radio, Server, FolderOpen, Tag as TagIcon } from 'lucide-react'
+import { Layers, Cpu, ChevronDown, SlidersHorizontal, X, CalendarDays, Check, GitBranch, Search, Plus, Blocks, Radio, FolderOpen, Tag as TagIcon } from 'lucide-react'
 import type { TagDef } from '../lib/tagMatch'
 import { countActiveFilters } from '../lib/activeFilterCount'
 import { HARNESS_LABELS, HARNESS_COLORS } from '../lib/harness'
 import { ProjectsModal } from './ProjectsModal'
-import type { MemberPresence } from '@agentistics/core'
 import { DatePicker } from './DatePicker'
 import { format } from 'date-fns'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -36,11 +35,8 @@ interface Props {
    *  unified view; a single group when a harness filter is active. */
   modelGroups?: { harness: SurfaceHarnessId; models: string[] }[]
   modelsInProject?: Set<string> | null
-  users: string[]
   /** Available harnesses in the data — drives visibility (show when length > 1). */
   harnesses?: SurfaceHarnessId[]
-  /** Team/central: live presence per member — drives the online/offline filter pill. */
-  presence?: Record<string, MemberPresence>
   lang: Lang
   compact?: boolean
   /** The host already offers a "Clear" for everything (the filters sheet's footer): drop this bar's
@@ -55,31 +51,18 @@ interface Props {
     fleet?: {
       updated: string
       since?: string
-      members?: number
-      online?: number
-      offline?: number
-      machines?: number
       projects: number
       repos: number
-      isCentral: boolean
     }
   }
-  /** Central-only: available teams for filter. Empty when not a central or no teams. */
-  teams?: { id: string; name: string }[]
-  /** Central-only: available machines for filter. Empty when not a central or no machines. */
-  machines?: { id: string; name: string; user: string; teamId?: string; teamIds?: string[] }[]
   /** Restrict which dimensions the "+ Filter" menu offers. Omitted = every dimension the data
    *  supports. A page whose numbers cannot react to a dimension should not offer it: a filter that
    *  visibly changes nothing reads as broken. */
-  only?: Array<'members' | 'teams' | 'machines' | 'harnesses' | 'presence' | 'repos' | 'tags' | 'projects' | 'models' | 'activeOnly'>
+  only?: Array<'harnesses' | 'repos' | 'tags' | 'projects' | 'models' | 'activeOnly'>
   /** Tags visible to the viewer (from GET /api/tags) — drives the `tags` dimension. Empty/omitted
    *  hides it. Selecting a tag can only NARROW the (already team-scoped) dashboard. */
   tags?: TagDef[]
-  /** Whether the viewer may filter BY member/presence (owner or a team manager). A plain user
-   *  only sees their own scoped data, so those dimensions are hidden for them. Defaults to true
-   *  (solo/non-central usage where the concept doesn't apply). */
-  canFilterMembers?: boolean
-  /** The active cost basis. Omit `onCostBasisChange` to hide the control entirely (a central, or
+  /** The active cost basis. Omit `onCostBasisChange` to hide the control entirely (or
    *  a bar embedded where the basis makes no sense). */
   costBasis?: 'api' | 'plan'
   onCostBasisChange?: (b: 'api' | 'plan') => void
@@ -199,7 +182,7 @@ const SEARCH_INPUT: React.CSSProperties = {
   borderRadius: 6, padding: '6px 8px 6px 26px', outline: 'none',
 }
 
-export function FiltersBar({ only, filters, onChange, projects, sessionCountByProject, models, modelGroups, modelsInProject, users, harnesses, presence, lang, compact, hideClearAll = false, summary, teams, machines, tags, canFilterMembers = true, onCreateTagFromFilters, activeOnly, onActiveOnlyChange, costBasis = "api", onCostBasisChange, costBasisReady = false, onCostBasisSetup, hideDateRange = false, inline = false, dateCompact = false, activeFiltersIcon = false, addFilterIcon = false, harnessesOutOfView }: Props) {
+export function FiltersBar({ only, filters, onChange, projects, sessionCountByProject, models, modelGroups, modelsInProject, harnesses, lang, compact, hideClearAll = false, summary, tags, onCreateTagFromFilters, activeOnly, onActiveOnlyChange, costBasis = "api", onCostBasisChange, costBasisReady = false, onCostBasisSetup, hideDateRange = false, inline = false, dateCompact = false, activeFiltersIcon = false, addFilterIcon = false, harnessesOutOfView }: Props) {
   // Fall back to a single unlabeled group when modelGroups isn't provided.
   const groups: { harness: SurfaceHarnessId | null; models: string[] }[] =
     modelGroups && modelGroups.length > 0
@@ -209,12 +192,9 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
   const isMobile = useIsMobile()
   const [showProjectsModal, setShowProjectsModal] = useState(false)
   const [repoQuery, setRepoQuery] = useState('')
-  const [memberQuery, setMemberQuery] = useState('')
-  const [teamQuery, setTeamQuery] = useState('')
-  const [machineQuery, setMachineQuery] = useState('')
   const [tagQuery, setTagQuery] = useState('')
   // "+ Filter" menu: pick a dimension → open its value picker. One open at a time.
-  type Dimension = 'members' | 'harnesses' | 'presence' | 'repos' | 'models' | 'teams' | 'machines' | 'tags' | 'activeOnly'
+  type Dimension = 'harnesses' | 'repos' | 'models' | 'tags' | 'activeOnly'
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [openPicker, setOpenPicker] = useState<Dimension | null>(null)
   // Desktop: collapse the active-filter chip rows (mobile has its own whole-bar minimize).
@@ -265,7 +245,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
     onChange({ ...filters, repos: next })
   }
 
-  // Tag filter (saved groupings of repos/projects/machines/teams/accounts) — options come from
+  // Tag filter (saved groupings of repos/projects/machines/harnesses/models) — options come from
   // the tags the viewer may see. Only exposed once there is at least one.
   const tagOptions = tags ?? []
   const selectedTags = filters.tags ?? []
@@ -300,8 +280,8 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
   const clearAllFilters = () => {
     onChange({
       ...filters,
-      users: [], harnesses: [], presence: undefined, repos: [], tags: [],
-      projects: [], models: [], teams: [], machines: [],
+      harnesses: [], repos: [], tags: [],
+      projects: [], models: [],
     })
     onActiveOnlyChange?.(false)
   }
@@ -378,44 +358,6 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
               </FilterChip>
             </ChipRow>
           </AnimatedRow>
-          <AnimatedRow show={(filters.users?.length ?? 0) > 0}>
-            <ChipRow label={lang === 'pt' ? 'Membros' : 'Members'}>
-              {(filters.users ?? []).map(u => (
-                <FilterChip key={`u:${u}`} title={u} onRemove={() => onChange({ ...filters, users: filters.users!.filter(x => x !== u) })} removeTitle={lang === 'pt' ? 'Remover membro' : 'Remove member'}>
-                  <Users size={10} style={{ flexShrink: 0 }} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{u}</span>
-                </FilterChip>
-              ))}
-            </ChipRow>
-          </AnimatedRow>
-          <AnimatedRow show={(filters.teams?.length ?? 0) > 0}>
-            <ChipRow label={lang === 'pt' ? 'Times' : 'Teams'}>
-              {(filters.teams ?? []).map(teamId => {
-                const team = teams?.find(t => t.id === teamId)
-                const label = team?.name ?? teamId
-                return (
-                  <FilterChip key={`t:${teamId}`} title={label} onRemove={() => onChange({ ...filters, teams: filters.teams!.filter(x => x !== teamId) })} removeTitle={lang === 'pt' ? 'Remover time' : 'Remove team'}>
-                    <Users size={10} style={{ flexShrink: 0 }} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-                  </FilterChip>
-                )
-              })}
-            </ChipRow>
-          </AnimatedRow>
-          <AnimatedRow show={(filters.machines?.length ?? 0) > 0}>
-            <ChipRow label={lang === 'pt' ? 'Máquinas' : 'Machines'}>
-              {(filters.machines ?? []).map(machineId => {
-                const machine = machines?.find(m => m.id === machineId)
-                const label = machine?.name ?? machineId
-                return (
-                  <FilterChip key={`m:${machineId}`} title={label} onRemove={() => onChange({ ...filters, machines: filters.machines!.filter(x => x !== machineId) })} removeTitle={lang === 'pt' ? 'Remover máquina' : 'Remove machine'}>
-                    <Cpu size={10} style={{ flexShrink: 0 }} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-                  </FilterChip>
-                )
-              })}
-            </ChipRow>
-          </AnimatedRow>
           <AnimatedRow show={hasProjects}>
             <ChipRow label={lang === 'pt' ? 'Projetos' : 'Projects'}>
               {filters.projects.map(path => (
@@ -479,29 +421,6 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatModel(m)}</span>
                 </FilterChip>
               ))}
-            </ChipRow>
-          </AnimatedRow>
-          <AnimatedRow show={filters.presence !== undefined}>
-            <ChipRow label={lang === 'pt' ? 'Presença' : 'Presence'}>
-              {filters.presence !== undefined && (() => {
-                const online = filters.presence === 'online'
-                const color = online ? '#22c55e' : '#ef4444'
-                return (
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600,
-                    color, background: `${color}1f`, border: `1px solid ${color}55`, borderRadius: 5,
-                    padding: '2px 6px 2px 8px', whiteSpace: 'nowrap',
-                  }}>
-                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
-                    {online ? 'Online' : 'Offline'}
-                    <button onClick={() => onChange({ ...filters, presence: undefined })}
-                      title={lang === 'pt' ? 'Remover filtro de presença' : 'Remove presence filter'} aria-label={lang === 'pt' ? 'Remover filtro de presença' : 'Remove presence filter'} className="ag-tap-icon"
-                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', color, opacity: 0.7, flexShrink: 0 }}>
-                      <X size={10} strokeWidth={2.5} />
-                    </button>
-                  </span>
-                )
-              })()}
             </ChipRow>
           </AnimatedRow>
     </div>
@@ -881,7 +800,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
         )}
 
         {/* + Filter — single entry point for all dimension filters (members/harnesses/
-            presence/repos/projects/models). Clicking it opens a menu of the AVAILABLE
+            repos/projects/models). Clicking it opens a menu of the AVAILABLE
             dimensions; picking one opens that dimension's value picker. The selected
             values themselves render in the animated chip rows below, not here. */}
         <div ref={addFilterRef} style={{
@@ -939,44 +858,12 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
                   onClick={() => { onActiveOnlyChange(!activeOnly); setShowAddMenu(false) }}
                 />
               )}
-              {allows('members') && canFilterMembers && users.length > 0 && (
-                <MenuItem
-                  icon={<Users size={13} />}
-                  label={lang === 'pt' ? 'Membros' : 'Members'}
-                  active={(filters.users?.length ?? 0) > 0}
-                  onClick={() => { setMemberQuery(''); setOpenPicker('members') }}
-                />
-              )}
-              {allows('teams') && teams && teams.length > 0 && (
-                <MenuItem
-                  icon={<Users size={13} />}
-                  label={lang === 'pt' ? 'Times' : 'Teams'}
-                  active={(filters.teams?.length ?? 0) > 0}
-                  onClick={() => { setTeamQuery(''); setOpenPicker('teams') }}
-                />
-              )}
-              {allows('machines') && machines && machines.length > 0 && (
-                <MenuItem
-                  icon={<Cpu size={13} />}
-                  label={lang === 'pt' ? 'Máquinas' : 'Machines'}
-                  active={(filters.machines?.length ?? 0) > 0}
-                  onClick={() => { setMachineQuery(''); setOpenPicker('machines') }}
-                />
-              )}
               {allows('harnesses') && harnesses && harnesses.length > 1 && (
                 <MenuItem
                   icon={<Blocks size={13} />}
                   label={lang === 'pt' ? 'Harnesses' : 'Harnesses'}
                   active={(filters.harnesses?.length ?? 0) > 0}
                   onClick={() => setOpenPicker('harnesses')}
-                />
-              )}
-              {allows('presence') && canFilterMembers && presence && Object.keys(presence).length > 0 && (
-                <MenuItem
-                  icon={<Radio size={13} />}
-                  label={lang === 'pt' ? 'Presença' : 'Presence'}
-                  active={filters.presence !== undefined}
-                  onClick={() => setOpenPicker('presence')}
                 />
               )}
               {allows('repos') && showRepoFilter && (
@@ -1049,173 +936,6 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
               </button>
               <div style={{ height: 1, background: 'var(--border)', margin: '0 0 4px' }} />
 
-              {/* Members (multi). When a presence filter is active, only list members with that
-                  status; with no presence filter, show a green/red online dot per member.
-                  Shows machine names under each user. */}
-              {openPicker === 'members' && (() => {
-                const pres = presence ?? {}
-                const hasPresence = Object.keys(pres).length > 0
-                const matchesPresence = (u: string) => {
-                  if (!filters.presence) return true
-                  const on = pres[u]?.online
-                  return filters.presence === 'online' ? on === true : on === false
-                }
-                const q = memberQuery.trim().toLowerCase()
-                const list = users.filter(u => matchesPresence(u) && u.toLowerCase().includes(q))
-                // Build map of user → machine names
-                const userMachines = new Map<string, string[]>()
-                for (const m of (machines ?? [])) {
-                  if (!userMachines.has(m.user)) userMachines.set(m.user, [])
-                  userMachines.get(m.user)!.push(m.name)
-                }
-                return (
-                  <>
-                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                      <Search size={13} color="var(--text-tertiary)" style={{ position: 'absolute', left: 8, pointerEvents: 'none' }} />
-                      <input
-                        value={memberQuery}
-                        onChange={e => setMemberQuery(e.target.value)}
-                        autoFocus
-                        placeholder={lang === 'pt' ? 'Buscar membro…' : 'Search member…'}
-                        style={SEARCH_INPUT}
-                      />
-                    </div>
-                    <div style={{ maxHeight: 240, overflowY: 'auto' }}>
-                      {list.length === 0 && (
-                        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '8px 10px', textAlign: 'center' }}>
-                          {lang === 'pt' ? 'Nenhum membro' : 'No members'}
-                        </div>
-                      )}
-                      {list.map(u => {
-                        const selected = (filters.users ?? []).includes(u)
-                        const dot = !filters.presence && hasPresence && pres[u]
-                          ? (pres[u]!.online ? '#22c55e' : '#ef4444')
-                          : undefined
-                        const machineNames = userMachines.get(u) ?? []
-                        return (
-                          <div key={u}>
-                            <PickerRow
-                              selected={selected}
-                              label={u}
-                              dotColor={dot}
-                              onClick={() => {
-                                const cur = filters.users ?? []
-                                const next = cur.includes(u) ? cur.filter(x => x !== u) : [...cur, u]
-                                onChange({ ...filters, users: next })
-                              }}
-                            />
-                            {machineNames.length > 0 && (
-                              <div style={{ fontSize: 10, color: 'var(--text-tertiary)', paddingLeft: 32, paddingBottom: 4, opacity: 0.7 }}>
-                                {machineNames.join(', ')}
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                    {(filters.users?.length ?? 0) > 0 && (
-                      <ClearFooter onClick={() => onChange({ ...filters, users: [] })} label={lang === 'pt' ? 'Limpar membros' : 'Clear members'} />
-                    )}
-                  </>
-                )
-              })()}
-
-              {/* Teams (multi) */}
-              {openPicker === 'teams' && teams && (() => {
-                const q = teamQuery.trim().toLowerCase()
-                const list = teams.filter(t => t.name.toLowerCase().includes(q))
-                return (
-                  <>
-                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                      <Search size={13} color="var(--text-tertiary)" style={{ position: 'absolute', left: 8, pointerEvents: 'none' }} />
-                      <input
-                        value={teamQuery}
-                        onChange={e => setTeamQuery(e.target.value)}
-                        autoFocus
-                        placeholder={lang === 'pt' ? 'Buscar time…' : 'Search team…'}
-                        style={SEARCH_INPUT}
-                      />
-                    </div>
-                    <div style={{ maxHeight: 240, overflowY: 'auto' }}>
-                      {list.length === 0 && (
-                        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '8px 10px', textAlign: 'center' }}>
-                          {lang === 'pt' ? 'Nenhum time' : 'No teams'}
-                        </div>
-                      )}
-                      {list.map(t => {
-                        const selected = (filters.teams ?? []).includes(t.id)
-                        return (
-                          <PickerRow
-                            key={t.id}
-                            selected={selected}
-                            label={t.name}
-                            onClick={() => {
-                              const cur = filters.teams ?? []
-                              const next = cur.includes(t.id) ? cur.filter(x => x !== t.id) : [...cur, t.id]
-                              onChange({ ...filters, teams: next })
-                            }}
-                          />
-                        )
-                      })}
-                    </div>
-                    {(filters.teams?.length ?? 0) > 0 && (
-                      <ClearFooter onClick={() => onChange({ ...filters, teams: [] })} label={lang === 'pt' ? 'Limpar times' : 'Clear teams'} />
-                    )}
-                  </>
-                )
-              })()}
-
-              {/* Machines (multi) */}
-              {openPicker === 'machines' && machines && (() => {
-                const q = machineQuery.trim().toLowerCase()
-                const list = machines.filter(m => m.name.toLowerCase().includes(q) || m.user.toLowerCase().includes(q))
-                return (
-                  <>
-                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                      <Search size={13} color="var(--text-tertiary)" style={{ position: 'absolute', left: 8, pointerEvents: 'none' }} />
-                      <input
-                        value={machineQuery}
-                        onChange={e => setMachineQuery(e.target.value)}
-                        autoFocus
-                        placeholder={lang === 'pt' ? 'Buscar máquina…' : 'Search machine…'}
-                        style={SEARCH_INPUT}
-                      />
-                    </div>
-                    <div style={{ maxHeight: 240, overflowY: 'auto' }}>
-                      {list.length === 0 && (
-                        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '8px 10px', textAlign: 'center' }}>
-                          {lang === 'pt' ? 'Nenhuma máquina' : 'No machines'}
-                        </div>
-                      )}
-                      {list.map(m => {
-                        const selected = (filters.machines ?? []).includes(m.id)
-                        return (
-                          <div key={m.id}>
-                            <PickerRow
-                              selected={selected}
-                              label={m.name}
-                              onClick={() => {
-                                const cur = filters.machines ?? []
-                                const next = cur.includes(m.id) ? cur.filter(x => x !== m.id) : [...cur, m.id]
-                                onChange({ ...filters, machines: next })
-                              }}
-                            />
-                            <div style={{ fontSize: 10, color: 'var(--text-tertiary)', paddingLeft: 32, paddingBottom: 4, opacity: 0.7 }}>
-                              {/* A machine with no owner account carries no `user` — say so instead
-                                  of rendering a blank line under its name. */}
-                              {m.user || (lang === 'pt' ? 'sem dono' : 'no owner')}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    {(filters.machines?.length ?? 0) > 0 && (
-                      <ClearFooter onClick={() => onChange({ ...filters, machines: [] })} label={lang === 'pt' ? 'Limpar máquinas' : 'Clear machines'} />
-                    )}
-                  </>
-                )
-              })()}
-
               {/* Harnesses (multi) */}
               {openPicker === 'harnesses' && harnesses && (
                 <>
@@ -1243,26 +963,6 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
                     <ClearFooter onClick={() => onChange({ ...filters, harnesses: [] })} label={lang === 'pt' ? 'Limpar harnesses' : 'Clear harnesses'} />
                   )}
                 </>
-              )}
-
-              {/* Presence (single) */}
-              {openPicker === 'presence' && presence && (
-                <div>
-                  {([
-                    { key: undefined, label: lang === 'pt' ? 'Todos' : 'All', count: null },
-                    { key: 'online' as const, label: 'Online', count: Object.values(presence).filter(p => p.online).length, dot: '#22c55e' },
-                    { key: 'offline' as const, label: 'Offline', count: Object.values(presence).filter(p => !p.online).length, dot: '#ef4444' },
-                  ]).map(opt => (
-                    <PickerRow
-                      key={opt.label}
-                      selected={filters.presence === opt.key}
-                      label={opt.label}
-                      count={opt.count ?? undefined}
-                      dotColor={opt.dot}
-                      onClick={() => { onChange({ ...filters, presence: opt.key }); setOpenPicker(null) }}
-                    />
-                  ))}
-                </div>
               )}
 
               {/* Repositories (multi) */}
@@ -1437,11 +1137,10 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
               <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{summary.tokens}</strong> tok</span>
             </div>
 
-            {/* Fleet stats row: updated · since/sessions · members · machines · projects · repos */}
+            {/* Fleet stats row: updated · since/sessions · projects · repos */}
             {summary.fleet && (() => {
               const f = summary.fleet
               const sep = <span style={{ color: 'var(--border)' }}>·</span>
-              const dot = (c: string) => <span style={{ width: 6, height: 6, borderRadius: '50%', background: c, display: 'inline-block', flexShrink: 0 }} />
               const iconSt: React.CSSProperties = { color: 'var(--text-tertiary)', flexShrink: 0 }
               return (
                 <div style={{
@@ -1452,20 +1151,6 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
                   {f.since && (<>
                     {sep}
                     <span style={{ color: 'var(--text-secondary)' }}>{f.since}</span>
-                  </>)}
-                  {f.isCentral && f.members !== undefined && (<>
-                    {sep}
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      <Users size={11} style={iconSt} />
-                      <span style={{ color: 'var(--text-secondary)' }}>{f.members} {lang === 'pt' ? (f.members === 1 ? 'membro' : 'membros') : (f.members === 1 ? 'member' : 'members')}</span>
-                      {f.online !== undefined && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>{dot('#22c55e')}{f.online}</span>}
-                      {f.offline !== undefined && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>{dot('#ef4444')}{f.offline}</span>}
-                    </span>
-                    {sep}
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      <Server size={11} style={iconSt} />
-                      <span style={{ color: 'var(--text-secondary)' }}>{f.machines} {lang === 'pt' ? (f.machines === 1 ? 'máquina' : 'máquinas') : (f.machines === 1 ? 'machine' : 'machines')}</span>
-                    </span>
                   </>)}
                   {sep}
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -1580,7 +1265,7 @@ function MenuItem({ icon, label, active, onClick }: { icon: React.ReactNode; lab
 }
 
 /** One selectable row inside a dimension value picker (checkbox-style; also used for the
- *  single-select presence picker, where "selected" just highlights the current choice). */
+ *  single-select picker, where "selected" just highlights the current choice). */
 function PickerRow({ selected, onClick, icon, label, count, disabled, tag, dotColor }: {
   selected: boolean
   onClick: () => void

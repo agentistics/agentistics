@@ -26,13 +26,6 @@ import { withNativeSessions } from './nativeFleetRow'
 import { isNativeSessionId } from './sessionRoute'
 import { endingTimeoutText, withEnding } from './endingSessions'
 
-// Central relay support was removed with the member UI. These local-only placeholders keep the
-// old transport branch inert while the shared fleet state remains a machine-local concern.
-const getCentralMachine = (): string | null => null
-type RelayedRow = Record<string, unknown>
-const relayedToSessions = (_rows: RelayedRow[]): ControlSession[] => []
-const parseRelayActResult = parseActResult
-
 /** Mirrors `SessionAction` in `@agentistics/tui/control/sessions`, minus the verbs a page cannot do. */
 export type FleetActionId =
   | 'resume' | 'approve' | 'prompt' | 'rename' | 'note' | 'task' | 'kill' | 'forget'
@@ -166,7 +159,7 @@ const EMPTY: FleetPayload = { sessions: [], rows: [], attention: 0, tasks: [], f
  * `/api/fleet` omitted `finishedTasks` when it was empty and the page called `.includes` on it, so
  * on every machine where no task had been finished the Sessions page threw (`TypeError: Cannot read
  * properties of undefined (reading 'includes')`, reported on v2.65.0). The server now always sends
- * it, but a newer page can be served by an older server (a central, a stale binary) and read back
+ * it, but a newer page can be served by an older server (a stale binary) and read back
  * from this browser's cache, so the boundary is where absence becomes an empty list. PURE.
  */
 /** The search index of one row, derived from fields it already carries (the wire strips it). PURE. */
@@ -228,7 +221,7 @@ export interface FleetState {
   /** True until the first answer arrives — an empty list before then is "not asked yet". */
   loading: boolean
   /**
-   * The route is absent or refused (a central, or an exposure profile with no host power).
+   * The route is absent or refused (an exposure profile with no host power).
    *
    * Distinct from an empty fleet on purpose: "there are no managed sessions" and "this page cannot
    * ask" are different facts, and rendering the second as the first is a confident zero from a
@@ -393,17 +386,6 @@ export const __endingFleetForTest = {
 }
 
 /**
- * On a CENTRAL there is no local fleet, and the workspace still has to work.
- *
- * The poller fetches the RELAYED fleet of whichever machine the aside's picker has chosen, and maps
- * it into the very same shape a machine returns. That is what lets the aside, the overview in the
- * centre and the header's counters stay one implementation: they read `fleet`, and none of them has
- * to know which kind of install it is. The alternative — a second list drawn in the centre while
- * the real aside said "no sessions on this machine yet" — is exactly what shipped and was wrong.
- */
-let pollCentral = false
-
-/**
  * How long to wait before the follow-up read after an action.
  *
  * A verb that changes what the SCREEN says — cycling the harness's mode is the one this exists for
@@ -431,59 +413,6 @@ export function nudgeFleet(): void {
   setTimeout(() => { if (!fleetStream?.healthy()) void pollOnce() }, NUDGE_FOLLOWUP_MS)
 }
 
-export function setFleetSourceCentral(on: boolean): void {
-  if (pollCentral === on) return
-  pollCentral = on
-  snapshot = EMPTY; snapLoading = true; cachedAt = 0
-  emit()
-  if (timer !== null) void pollOnce()
-}
-
-async function pollCentralOnce(): Promise<void> {
-  const machineId = getCentralMachine()
-  if (!machineId) {
-    // No machine chosen is not a failed poll and not an empty fleet — the picker above the list
-    // is what answers it, so this reports "nothing to show" and stops.
-    snapshot = EMPTY; snapUnsupported = false; snapLoading = false; snapFailures = 0
-    emit(); return
-  }
-  try {
-    const res = await fetch(`/api/team/machine-fleet?machineId=${encodeURIComponent(machineId)}&lang=${pollLang}`)
-    if (!res.ok) { snapFailures++; return }
-    const body = await res.json() as { reply?: { rows?: RelayedRow[]; withheld?: number }; reason?: string }
-    if (!body.reply) {
-      // A named refusal is a complete ANSWER, exactly as a machine's 403 is: it clears the failure
-      // count rather than reading as silence. The picker states the reason in words.
-      snapshot = EMPTY; snapUnsupported = true; snapFailures = 0; snapLastOkMs = Date.now()
-      return
-    }
-    snapUnsupported = false
-    const rows = relayedToSessions(body.reply.rows ?? [])
-    snapshot = {
-      rows,
-      // `FleetRow` is the shaped view the panel reads; the relayed row already carries the same
-      // fields the list needs, and the verbs it may take came decided from the machine.
-      sessions: rows as unknown as FleetRow[],
-      attention: rows.filter(r => r.state === 'waiting' || r.state === 'waiting-approval').length,
-      // A relayed fleet carries no task list of its own: tasks are a local grouping, and a
-      // FINISHED task is a statement the machine's own user made. Neither is invented here.
-      tasks: [],
-      finishedTasks: [],
-      // And no `baseline`, deliberately. It is THIS machine's own 30-day history, drawn under a
-      // heading that reads "your last 30 days" — attaching it over somebody else's fleet would put
-      // the operator's numbers under a sentence about the machine they are looking at.
-    }
-    snapFailures = 0
-    snapLastOkMs = Date.now()
-    cachedAt = 0
-  } catch {
-    snapFailures++
-  } finally {
-    snapLoading = false
-    emit()
-  }
-}
-
 /**
  * The previous snapshot's states, for the notifier. `null` until the first successful poll — see
  * `notifyFleetTransitions`, where the distinction between "not asked yet" and "asked, nothing
@@ -502,7 +431,6 @@ const ACT_TIMEOUT_MS = 20_000
 let fleetEpoch = 0
 async function pollOnce(): Promise<void> {
   const epoch = fleetEpoch
-  if (pollCentral) return pollCentralOnce()
   try {
     // NATIVE sessions ride the same poll (UI.UNIFY, `nativeFleet.ts`): asked in parallel, folded in
     // after the fleet answers, so every surface reading `fleet` — the aside, the overview, the
@@ -617,9 +545,8 @@ function ensurePolling(lang: 'pt' | 'en'): void {
     pollLang = lang
     openFleetStream()
     // The stream's own snapshot answers in the new language; the full poll is only the fallback for
-    // a stream that has not come up (a central, an old host) — PERF.SLOW.
-    if (pollCentral) void pollOnce()
-    else setTimeout(() => { if (!fleetStream?.healthy()) void pollOnce() }, STREAM_GRACE_MS)
+    // a stream that has not come up (an old host) — PERF.SLOW.
+    setTimeout(() => { if (!fleetStream?.healthy()) void pollOnce() }, STREAM_GRACE_MS)
   }
   if (timer !== null) return
   openFleetStream()
@@ -683,7 +610,6 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
   const refresh = useCallback(() => { void pollOnce() }, [])
 
   const actRaw = useCallback<FleetState['act']>(async req => {
-    let machineIdAtCall: string | null | undefined
     // A NATIVE session's row verbs go to the engine (`nativeFleet.ts`) — the machine's
     // `/api/fleet/act` has no row by that id. The answer has the same shape, so the menu needs no branch.
     if (isNativeSessionId(req.id)) {
@@ -713,26 +639,8 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
       const ctl = new AbortController()
       const timer = setTimeout(() => ctl.abort(), ACT_TIMEOUT_MS)
       let res: Response
-      /*
-       * A CENTRAL ACTS THROUGH THE RELAY, and for one release it did not.
-       *
-       * The fleet a central shows is the RELAYED one (`pollCentralOnce`), but every verb was posted
-       * to `/api/fleet/act` — the machine's own route, which a central refuses outright in
-       * `index.ts`'s `TEAM_CENTRAL` block and again under `localShell` in `capability-guard.ts`.
-       * Both refusals are correct and stay. The consequence was that the workspace on a central
-       * could READ a fleet and act on none of it: every button reached a 403 for a session that was
-       * right there on screen.
-       *
-       * So the verb goes where the rows came from, addressed to the same machine the picker chose.
-       * The machine re-checks its own consent, its verb allowlist and its sharing rules on arrival;
-       * nothing decided in this browser is trusted there.
-       */
-      const machineId = getCentralMachine()
-      machineIdAtCall = machineId
-      const url = machineId
-        ? `/api/team/machine-fleet/act?lang=${lang}`
-        : `/api/fleet/act?lang=${lang}`
-      const body = machineId ? { ...req, machineId } : req
+      const url = `/api/fleet/act?lang=${lang}`
+      const body = req
       try {
         res = await fetch(url, {
           method: 'POST',
@@ -747,11 +655,8 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
       // on" is written down and tested. This was an object literal building `{ ok, message }` while
       // the declared return type promised `id?: string` — so a reopen spawned its session and the
       // UI stood still on the dead row, because the id it needed to follow had been dropped.
-      // The two routes answer DIFFERENT SHAPES, and reading one as the other is how a silence
-      // becomes a success. A relayed answer is `{reply}` when the machine spoke and `{reason}` when
-      // it did not — the second is a statement about the CHANNEL, not about the verb.
       const raw = await res.json().catch(() => null)
-      const out = machineId ? parseRelayActResult(raw, lang) : parseActResult(raw, lang)
+      const out = parseActResult(raw, lang)
       /*
        * RE-READ SOON, BUT DO NOT MAKE THE CALLER WAIT FOR IT.
        *
@@ -783,7 +688,7 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
       // A SEND that timed out or hit a network error is checked against the session's own
       // conversation before it is called a failure: the keys usually landed and only the answer was
       // lost. A mid-turn delivery sits in `pending`, not yet in `turns`.
-      if (req.action === 'prompt' && req.text && !machineIdAtCall) {
+      if (req.action === 'prompt' && req.text) {
         const landed = await confirmSendLanded(async () => {
           const r = await fetch(`/api/fleet/chat?id=${encodeURIComponent(req.id)}&lang=${lang}`)
           if (!r.ok) return false

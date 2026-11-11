@@ -292,12 +292,6 @@ export const NEVER_ROUTES: readonly NeverRoute[] = [
   { prefix: '/api/shell', reason: 'a raw shell on the host is unbounded' },
   { prefix: '/api/fleet/tree', methods: WRITES, reason: 'writing files bypasses the target session\'s own permission prompts' },
   { prefix: '/api/provider', methods: ['PUT', 'DELETE'], reason: 'provider credentials' },
-  { prefix: '/api/team/connections', methods: WRITES, reason: 'adding a connection carries a credential' },
-  { prefix: '/api/team/tokens', reason: 'team credentials' },
-  { prefix: '/api/team/repos', methods: WRITES, reason: 'mints a CI credential' },
-  { prefix: '/api/iam', methods: WRITES, reason: 'identity and escalation; step-up territory' },
-  { prefix: '/api/team/members', methods: WRITES, reason: 'identity and escalation' },
-  { prefix: '/api/team/config', methods: WRITES, reason: 'the central\'s own policy' },
   { prefix: '/api/config', reason: 'the env config holds the gates that constrain the agent' },
   { prefix: '/api/mcp/install', reason: 'installs code' },
   { prefix: '/api/mcp/replace', reason: 'installs code' },
@@ -310,7 +304,7 @@ export const NEVER_ROUTES: readonly NeverRoute[] = [
  * of them in the MCP source. The spec's phone-pairing and voice-approval switches join this list the
  * day they exist.
  */
-export const NEVER_PREFERENCE_KEYS: readonly string[] = ['shellEnabled', 'chatEnabled', 'editorEnabled', 'remoteSessions']
+export const NEVER_PREFERENCE_KEYS: readonly string[] = ['shellEnabled', 'chatEnabled', 'editorEnabled']
 
 /** True when `METHOD path` hits a NEVER route. Pure; the lint and (from P2) the gate share it. */
 export function neverRouteFor(method: string, path: string): NeverRoute | null {

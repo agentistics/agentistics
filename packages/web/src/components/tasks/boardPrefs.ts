@@ -8,8 +8,8 @@
  * anything.
  *
  * It lives on the SERVER, per PERSON (`PERSONAL_PREFS` = `/api/user-prefs`): a machine keeps it in
- * its own preferences file, a central keeps it in the signed-in account's `userPrefs` document —
- * never in the central's `preferences.json`, which is shared by everyone signed in, so one
+ * its own preferences file keeps it in the signed-in account's `userPrefs` document —
+ * never in `preferences.json`, which is shared by everyone signed in, so one
  * person's hidden columns would hide them for the whole team (t-f4e5ecffe7). It used to be
  * `localStorage` alone, so the same board arranged on the desktop opened unarranged on the phone.
  * The browser copy (the old key, kept compatible) is now only the first paint, and the first armed

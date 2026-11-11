@@ -9,7 +9,7 @@ const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
 
 test('the loading notices are not pushed while the Sessions workspace is open', () => {
   const effect = app.slice(app.indexOf('const loadingNoticeSeen'))
-  const body = effect.slice(0, effect.indexOf('}, [startup, teamSession?.journalBackfill'))
+  const body = effect.slice(0, effect.indexOf('}, [startup, hostSession?.journalBackfill'))
   expect(body).toContain('if (inSessionsWorkspace) return')
   // The guard comes BEFORE either notice is built or pushed.
   expect(body.indexOf('if (inSessionsWorkspace) return')).toBeLessThan(body.indexOf('startupLoadingNotification('))

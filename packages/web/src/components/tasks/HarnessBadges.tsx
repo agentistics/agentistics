@@ -2,7 +2,7 @@
  * HarnessBadges — the harnesses a delivery's sessions ran on, as a bounded row of pills.
  *
  * One component instead of four near-identical inline renders (the main board table, a repo's
- * Tasks tab table and its mobile card, the kanban card, the central board table) is what
+ * Tasks tab table and its mobile card, the kanban card) is what
  * `TaskProgressBar` already does for the progress bar, and for the same reason: four copies of one
  * rule is four chances for it to read differently on each screen.
  *

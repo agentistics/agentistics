@@ -44,7 +44,7 @@
  * THE STORE, layered on top, keeps TWO halves apart (2026-10-01). Where each panel is docked, its
  * order, its pin and what is open are a person's CHOICES and live on the server (`/api/user-prefs`,
  * `panelSlots`, one record per pane), so the layout reads the same from every device — per ACCOUNT
- * on a central, never the shared machine file. The rail's WIDTH depends on the screen and stays per
+ *, never the shared machine file. The rail's WIDTH depends on the screen and stays per
  * browser: a phone and a desktop must not fight over one value. The browser copy (`localStorage`,
  * key `agentistics-panel-slots` — UNCHANGED, so an existing layout is still found; the first paint
  * plus the width) is guarded exactly like `shellBand.ts`'s own `readBandPrefs`: a private window,
@@ -551,7 +551,7 @@ export function resolveForViewport(layout: SlotLayout, isMobile: boolean): SlotL
 /**
  * The three server-decided facts that close a panel outright rather than merely greying its entry:
  * whether this machine serves the repository explorer at all, whether it serves the per-session
- * shell, and whether this session is reached through a central's relay (which has no `cli`/`shell`
+ * shell, and whether this session is reached through a relay (which has no `cli`/`shell`
  * stream of its own — the whole `/api/fleet` prefix is refused there).
  */
 export interface PanelGates {

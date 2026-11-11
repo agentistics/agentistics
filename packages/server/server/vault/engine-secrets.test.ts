@@ -43,7 +43,7 @@ describe('engine-api 1.5 secrets', () => {
     const hostBlob = await sealBytes('github-backup', 'github-backup', new TextEncoder().encode('TEST-NOT-A-SECRET-gh'))
     const asHost = await s.open('github-backup' as `engine/${string}`, 'github-backup', hostBlob)
     expect(asHost).toEqual({ ok: false, code: 'purpose', sentence: expect.any(String) })
-    const sealHost = await s.seal('central-token' as `engine/${string}`, 'x', new Uint8Array(1))
+    const sealHost = await s.seal('github-backup' as `engine/${string}`, 'x', new Uint8Array(1))
     expect(!sealHost.ok && sealHost.code).toBe('purpose')
     // And opening the host's blob under an engine purpose fails cryptographically.
     const crafted = await s.open('engine/github-backup', 'github-backup', hostBlob)

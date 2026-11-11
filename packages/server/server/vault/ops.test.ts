@@ -1,10 +1,9 @@
 /**
  * SECRETS.4 §5.2 / §11 S4.1 — "no socket op returns plaintext". Every op in the closed list is driven
- * over a REAL `vault.sock` while the vault holds marker secrets (a GitHub token, a central token, a
- * central env's secrets), and the markers must appear in no reply and no reply body.
+ * over a REAL `vault.sock` while the vault holds a marker secret (a GitHub token), and the marker
+ * must appear in no reply and no reply body.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdirSync, writeFileSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,13 +12,11 @@ import { openRecord } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { __resetVaultForTests, ensureVaultOpen, sealToFile, vaultRole } from './service'
 import { askVault, startVaultSocket, stopVaultSocket } from './socket'
-import { VAULT_OPS, composeFileAllowed, composeRestAllowed, githubUrlAllowed, handleVaultOp, installVaultOps } from './ops'
+import { VAULT_OPS, githubUrlAllowed, handleVaultOp, installVaultOps } from './ops'
 import { GITHUB_BACKUP_SEALED_FILE } from '../backup/github-store'
-import { STANDALONE_CENTRAL_ENV, centralSecretsFile } from './central-env'
 
 const M = 'TEST-NOT-A-SECRET-' + randomBytes(8).toString('hex')
 const GH_TOKEN = M + '-gh'
-const MONGO = `mongodb://user:${M}-mongo@db.example.invalid:27017/x`
 const enc = (s: string) => new TextEncoder().encode(s)
 let sock = ''
 
@@ -33,10 +30,6 @@ beforeAll(async () => {
   __resetVaultForTests({ dir: join(AGENTISTICS_DATA_DIR, 'vault'), lang: 'en' })
   await sealToFile(GITHUB_BACKUP_SEALED_FILE, 'github-backup', 'github-backup',
     enc(JSON.stringify({ url: 'https://github.com/o/r', owner: 'o', repo: 'r', token: GH_TOKEN, keepRemote: 0, deleteLocalAfterUpload: false })))
-  mkdirSync(join(AGENTISTICS_DATA_DIR, 'central'), { recursive: true })
-  writeFileSync(STANDALONE_CENTRAL_ENV, 'APP_PORT=48080\n', { mode: 0o600 })
-  await sealToFile(centralSecretsFile(STANDALONE_CENTRAL_ENV), 'central-env', 'central',
-    enc(JSON.stringify({ v: 1, env: { MONGO_URL: MONGO, AGENTISTICS_TEAM_PASSWORD: M + '-pw' } })))
   installVaultOps()
   sock = join(await mkdtemp(join(tmpdir(), 'agentistics-ops-')), 'vault.sock')
   expect((await startVaultSocket(sock)).ok).toBe(true)
@@ -49,14 +42,9 @@ describe('every vault.sock op, with marker secrets in the vault', () => {
     status: { req: { op: 'status' } },
     lock: { req: { op: 'lock' } },
     unlock: { req: { op: 'unlock' } },
-    seal: { req: { op: 'seal', purpose: 'central-token', name: 'n' }, body: enc(M + '-sealme') },
-    'prefs-tokens': { req: { op: 'prefs-tokens', prefsFile: join(AGENTISTICS_DATA_DIR, 'preferences.json'), next: { team: { connections: [{ id: 'c1', token: M + '-conn' }] } }, previous: null } },
+    seal: { req: { op: 'seal', purpose: 'github-backup', name: 'n' }, body: enc(M + '-sealme') },
     'github-config': { req: { op: 'github-config' } },
     'github-fetch': { req: { op: 'github-fetch', method: 'GET', url: 'https://api.github.com/repos/someone/else' } },
-    'central-mongo-kind': { req: { op: 'central-mongo-kind', envFile: STANDALONE_CENTRAL_ENV } },
-    'central-compose': { req: { op: 'central-compose', envFile: STANDALONE_CENTRAL_ENV, composeFiles: ['/etc/evil.yml'], rest: ['up'], image: 'x' } },
-    'central-native-tool': { req: { op: 'central-native-tool', envFile: '/tmp/not-vaulted.env', action: 'setup-token', extraArgs: [] } },
-    'central-env-write': { req: { op: 'central-env-write', envFile: STANDALONE_CENTRAL_ENV }, body: enc(`APP_PORT=48081\nAGENTISTICS_TEAM_PASSWORD=${M}-new\n`) },
     'vault-init': { req: { op: 'vault-init' } },
     'vault-rekey': { req: { op: 'vault-rekey', protector: 'nope' } },
     'vault-add-passphrase': { req: { op: 'vault-add-passphrase' } },
@@ -96,9 +84,9 @@ describe('every vault.sock op, with marker secrets in the vault', () => {
 
   test('seal returns SEALED bytes that open to the value, under this vault', async () => {
     const o = await ensureVaultOpen()
-    const r = await askVault({ op: 'seal', purpose: 'central-token', name: 'n' }, { path: sock, body: enc(M) })
+    const r = await askVault({ op: 'seal', purpose: 'github-backup', name: 'n' }, { path: sock, body: enc(M) })
     expect(r!.reply.ok).toBe(true)
-    const back = openRecord({ dek: o!.dek, kid: o!.kid, purpose: 'central-token', name: 'n', bytes: r!.body! })
+    const back = openRecord({ dek: o!.dek, kid: o!.kid, purpose: 'github-backup', name: 'n', bytes: r!.body! })
     expect(back.ok && new TextDecoder().decode(back.plaintext)).toBe(M)
   })
 
@@ -129,11 +117,6 @@ describe('every vault.sock op, with marker secrets in the vault', () => {
     expect(seen).toHaveLength(1)
   })
 
-  test('central-mongo-kind answers the KIND, never the URL', async () => {
-    const r = await askVault({ op: 'central-mongo-kind', envFile: STANDALONE_CENTRAL_ENV }, { path: sock })
-    expect(r!.reply).toMatchObject({ ok: true, kind: 'external' })
-  })
-
   test('there is no `open` op', async () => {
     const r = await askVault({ op: 'open', purpose: 'github-backup', name: 'github-backup' }, { path: sock })
     expect(r!.reply).toMatchObject({ ok: false, code: 'bad-request' })
@@ -156,13 +139,5 @@ describe('the allowlists', () => {
       'https://api.github.com:444/repos/o/r', 'https://api.github.com/user', 'not a url']) {
       expect(githubUrlAllowed(u, 'o', 'r')).toBe(false)
     }
-  })
-  test('compose: only known compose files and subcommands', () => {
-    expect(composeRestAllowed(['up', '-d', '--pull', 'always', '--force-recreate'])).toBe(true)
-    expect(composeRestAllowed(['exec', '-T', 'app', 'bun', 'run', 'packages/server/bin/cli.ts', 'setup-token'])).toBe(true)
-    expect(composeRestAllowed(['exec', '-T', 'app', 'sh', '-c', 'env'])).toBe(false)
-    expect(composeRestAllowed(['run', 'app'])).toBe(false)
-    expect(composeRestAllowed(['config'])).toBe(false)
-    expect(composeFileAllowed('/etc/evil.yml')).toBe(false)
   })
 })

@@ -29,7 +29,7 @@ Everything below is built so that this holds:
   whole of it. Nothing in this channel can answer such a prompt, and every message it sends carries
   a standing note saying so.
 - **What travels is yours.** A screen tail can contain anything you typed. It is written to
-  `~/.agentistics/events.jsonl` with mode `0600` and does not leave the machine — not to a central,
+  `~/.agentistics/events.jsonl` with mode `0600` and does not leave the machine — not to another machine,
   not anywhere.
 
 `events-frontier.test.ts` asserts all three, including by reading the modules' own source: a field

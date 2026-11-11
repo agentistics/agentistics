@@ -2,7 +2,7 @@
  * vault/bundle-io.ts — VAULT.PERSONAL backup, the SERVICE half of `packages/vault/src/bundle.ts`.
  *
  * BUILD (vault open): every `*.sealed` under the data dir sealed under the current key (the same walk
- * a key rotation uses — personal secrets, the GitHub token, the central tokens, the authenticator
+ * a key rotation uses — personal secrets, the GitHub token, the authenticator
  * seed), still sealed, plus `dek.recovery` and a vault.json holding only the recovery wrapper, into
  * ONE bundle. Nothing is opened to build it: the records go in as the bytes they are on disk.
  *

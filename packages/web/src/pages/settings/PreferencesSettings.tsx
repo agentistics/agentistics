@@ -43,68 +43,12 @@ export default function PreferencesSettings() {
   useEffect(() => sessionTabsStore.subscribe(() => setSessionTabsOn(sessionTabsStore.get())), [])
   const [chatActivityOn, setChatActivityOn] = useState(() => chatActivityStore.get())
   useEffect(() => chatActivityStore.subscribe(() => setChatActivityOn(chatActivityStore.get())), [])
-  // Central-wide delete policy. Owner-only AND central-only: it is not a personal preference —
-  // turning it off removes a safety net for everyone on this central. null until read, so the row
-  // never flashes a wrong state.
-  const isOwnerOnCentral = ctx.isCentral && ctx.me?.role === 'owner'
-  const [requireDeleteText, setRequireDeleteText] = useState<boolean | null>(null)
-  const [savingDeleteText, setSavingDeleteText] = useState(false)
-  const [includeDeleted, setIncludeDeleted] = useState<boolean | null>(null)
-  const [savingIncludeDeleted, setSavingIncludeDeleted] = useState(false)
   const [telemetryEnabled, setTelemetryEnabled] = useState(true)
   const [savingTelemetry, setSavingTelemetry] = useState(false)
   useEffect(() => { void fetch('/api/preferences').then(r => r.ok ? r.json() : null).then(p => { if (p) setTelemetryEnabled(p.telemetryEnabled !== false) }).catch(() => {}) }, [])
   async function toggleTelemetry(value: boolean) {
     setSavingTelemetry(true); setTelemetryEnabled(value)
     try { const r = await fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telemetryEnabled: value, telemetryNoticeDismissed: true }) }); if (!r.ok) throw new Error() } catch { setTelemetryEnabled(!value) } finally { setSavingTelemetry(false) }
-  }
-  useEffect(() => {
-    if (!isOwnerOnCentral) return
-    void fetch('/api/team/config')
-      .then(r => r.ok ? r.json() as Promise<{ requireDeleteConfirmText?: boolean; includeDeletedMembers?: boolean }> : null)
-      .then(c => {
-        if (!c) return
-        setRequireDeleteText(c.requireDeleteConfirmText ?? true)
-        setIncludeDeleted(c.includeDeletedMembers ?? false)
-      })
-      .catch(() => { /* leave null → row hidden */ })
-  }, [isOwnerOnCentral])
-  async function toggleIncludeDeleted() {
-    const next = !includeDeleted
-    setSavingIncludeDeleted(true)
-    setIncludeDeleted(next)
-    try {
-      const res = await fetch('/api/team/config', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ includeDeletedMembers: next }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const c = await res.json() as { includeDeletedMembers?: boolean }
-      setIncludeDeleted(c.includeDeletedMembers ?? next)
-    } catch {
-      setIncludeDeleted(!next)
-    } finally {
-      setSavingIncludeDeleted(false)
-    }
-  }
-
-  async function toggleRequireDeleteText() {
-    const next = !requireDeleteText
-    setSavingDeleteText(true)
-    setRequireDeleteText(next) // optimistic
-    try {
-      const res = await fetch('/api/team/config', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requireDeleteConfirmText: next }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const c = await res.json() as { requireDeleteConfirmText?: boolean }
-      setRequireDeleteText(c.requireDeleteConfirmText ?? next)
-    } catch {
-      setRequireDeleteText(!next) // revert (the server 403s anyone but an owner)
-    } finally {
-      setSavingDeleteText(false)
-    }
   }
   const [draft, setDraft] = useState<PrefsDraft>(() => seedDraft(ctx))
   const pt = draft.lang === 'pt'
@@ -145,39 +89,6 @@ export default function PreferencesSettings() {
 
   return (
     <>
-      {/* Central policy — owner only. Sits in Preferences because that is where a person looks for
-          a switch, but it is central-wide state, not a per-user setting. */}
-      {isOwnerOnCentral && requireDeleteText !== null && (
-        <>
-          <SectionHeader label={pt ? 'Segurança' : 'Safety'} />
-          <div style={{ marginBottom: 16 }}>
-            <PrefRow
-              label={pt ? 'Confirmar exclusões digitando o nome' : 'Confirm deletions by typing the name'}
-              sub={pt
-                ? 'Exige digitar o nome exato antes de excluir. Vale para toda a central.'
-                : 'Requires typing the exact name before deleting. Applies to the whole central.'}
-            >
-              <span style={{ opacity: savingDeleteText ? 0.6 : 1 }}>
-                <Toggle on={requireDeleteText} onToggle={() => { void toggleRequireDeleteText() }} />
-              </span>
-            </PrefRow>
-            {includeDeleted !== null && (
-              <PrefRow
-                label={pt ? 'Incluir métricas de contas e máquinas excluídas' : 'Include metrics from deleted accounts and machines'}
-                sub={pt
-                  ? 'Mantém o histórico de quem foi removido, para rastreio completo. Desligado, uma exclusão para de contar.'
-                  : 'Keeps the history of anyone removed, for full traceability. Off, a deletion stops counting.'}
-              >
-                <span style={{ opacity: savingIncludeDeleted ? 0.6 : 1 }}>
-                  <Toggle on={includeDeleted} onToggle={() => { void toggleIncludeDeleted() }} />
-                </span>
-              </PrefRow>
-            )}
-          </div>
-          <Divider />
-        </>
-      )}
-
       <SectionHeader label={pt ? 'Sessões' : 'Sessions'} />
       <PrefRow
         label={pt ? 'Abas de sessões (experimental)' : 'Session tabs (experimental)'}
@@ -244,12 +155,8 @@ export default function PreferencesSettings() {
 
       <Divider />
 
-      {!ctx.isCentral && (
-        <>
-          <ProjectDisksSection pt={pt} />
-          <Divider />
-        </>
-      )}
+      <ProjectDisksSection pt={pt} />
+      <Divider />
 
       {/*  Card order  */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>

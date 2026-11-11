@@ -8,7 +8,7 @@
  * they have their own master switch and per-kind switches (`NotificationSettings.enabled`/`events`).
  */
 
-export type NotificationCategory = 'updates' | 'idle' | 'tasks' | 'backup' | 'team' | 'accounts' | 'hardware' | 'limits'
+export type NotificationCategory = 'updates' | 'idle' | 'tasks' | 'backup' | 'hardware' | 'limits'
 
 export interface CategoryInfo { id: NotificationCategory; pt: string; en: string; hintPt: string; hintEn: string }
 
@@ -23,7 +23,7 @@ export const NOTIFICATION_CATEGORIES: readonly CategoryInfo[] = [
 
 const PREFIX: ReadonlyArray<[string, NotificationCategory]> = [
   ['app.', 'updates'], ['sessions.', 'idle'], ['tasks.', 'tasks'], ['backup.', 'backup'],
-  ['member.', 'team'], ['central.', 'team'], ['machine.', 'team'], ['iam.', 'accounts'], ['hardware.', 'hardware'], ['limits.', 'limits'], ['plan.', 'limits'],
+  ['hardware.', 'hardware'], ['limits.', 'limits'], ['plan.', 'limits'],
 ]
 
 /** The category a notification code belongs to, or null when none claims it (then it is never muted). */

@@ -17,7 +17,7 @@
  */
 import type { SessionMeta } from '@agentistics/core'
 
-export type TagSourceType = 'repo' | 'project' | 'machine' | 'team' | 'account' | 'harness' | 'model' | 'user'
+export type TagSourceType = 'repo' | 'project' | 'machine' | 'harness' | 'model'
 
 export interface TagSource {
   type: TagSourceType
@@ -39,38 +39,18 @@ export interface TagDef {
   window?: TagWindow
 }
 
-export interface TagLookups {
-  /** accountId → memberIds of every machine that account owns. Empty when unknown. */
-  machinesByAccount: Record<string, string[]>
-}
-
-export const EMPTY_TAG_LOOKUPS: TagLookups = { machinesByAccount: {} }
-
-/** All teams a session belongs to (multi-team machines), falling back to the legacy single id. */
-function teamsOf(s: SessionMeta): string[] {
-  if (s.teamIds && s.teamIds.length) return s.teamIds
-  return s.teamId ? [s.teamId] : []
-}
-
 /** True when the session matches ANY of the given sources. Mirrors the server rule. */
 export function sessionMatchesTagSources(
   s: SessionMeta,
   sources: TagSource[],
-  lookups: TagLookups = EMPTY_TAG_LOOKUPS,
 ): boolean {
   return sources.some(src => {
     switch (src.type) {
       case 'repo': return !!s.git_remote && s.git_remote === src.value
       case 'project': return s.project_path === src.value
       case 'machine': return !!s.memberId && s.memberId === src.value
-      case 'team': return teamsOf(s).includes(src.value)
-      case 'account': {
-        const machines = lookups.machinesByAccount[src.value]
-        return !!machines && !!s.memberId && machines.includes(s.memberId)
-      }
       case 'harness': return (s.harness ?? 'claude') === src.value
       case 'model': return s.model === src.value
-      case 'user': return s.user === src.value
       default: return false
     }
   })
@@ -133,12 +113,11 @@ export function selectedTagSources(selected: string[], tags: TagDef[]): TagSourc
 export function makeTagFilter(
   selected: string[],
   tags: TagDef[],
-  lookups: TagLookups = EMPTY_TAG_LOOKUPS,
 ): ((s: SessionMeta) => boolean) | null {
   if (selected.length === 0 || tags.length === 0) return null
   const wanted = new Set(selected)
   const active = tags.filter(t => wanted.has(t._id) && t.sources.length > 0)
   if (active.length === 0) return null
   return (s: SessionMeta) => active.some(t =>
-    sessionMatchesTagSources(s, t.sources, lookups) && sessionInTagWindow(s, t.window))
+    sessionMatchesTagSources(s, t.sources) && sessionInTagWindow(s, t.window))
 }

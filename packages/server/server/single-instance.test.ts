@@ -124,7 +124,7 @@ test('the lock names the data directory and carries no port', async () => {
 // seven hours after a boot because the lock named pid 2826, which by then belonged to something
 // else, and the unit restarted every 5s into the same refusal (9 116 times over the journal). In a
 // container it is worse: the server is PID 1 in its own namespace every time, the lock lives on a
-// persistent volume, and a central refused ITSELF after its first restart — forever.
+// persistent volume, and the server refused ITSELF after its first restart — forever.
 //
 // The rule: whoever wrote the lock was alive at the moment it wrote it, so a process holding that
 // pid which STARTED AFTER the lock was written cannot be the writer.

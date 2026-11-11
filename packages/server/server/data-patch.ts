@@ -1,4 +1,4 @@
-/** Local dashboard patches only. A central's data requires per-viewer scoping and keeps its GET. */
+/** Local dashboard patches. */
 import { randomUUID } from 'node:crypto'
 import { planDataPatch } from '@agentistics/core'
 import { versionOf } from './data-response-cache'

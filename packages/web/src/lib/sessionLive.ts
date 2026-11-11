@@ -39,34 +39,17 @@ export interface LiveEmptyNotice {
  *    one running under a uid that may not ptrace the host user cannot read its cwd; a non-Linux
  *    host has no /proc at all. Rendering `0` for any of those is the confident zero CLAUDE.md
  *    forbids for harness capabilities — and worse, because it never self-corrects.
- *  - **This is a central.** It never reads its own /proc for this; members report their own
- *    snapshots, and a member's sharing rules apply to that channel exactly as they do to its
- *    metrics. A repository withheld from this central does not appear here either — which is
- *    correct, and invisible unless it is said.
  *  - **Nothing is open.** The only case the plain sentence is true for.
  *
  * Pure, so every branch is testable without a /proc or a browser.
  */
 export function liveEmptyNotice(o: {
   count: number
-  central?: boolean
   unavailable?: LiveUnavailableReason
   lang: 'pt' | 'en'
 }): LiveEmptyNotice | null {
   if (o.count > 0) return null
   const pt = o.lang === 'pt'
-  // A central's own host processes are beside the point, so its reason is never shown: the
-  // question there is always about the members.
-  if (o.central) {
-    return {
-      title: pt
-        ? 'Nenhuma máquina está reportando um assistente aberto agora.'
-        : 'No machine is reporting an open assistant right now.',
-      detail: pt
-        ? 'As máquinas reportam as próprias sessões abertas por WebSocket. Um repositório ou projeto que uma máquina não compartilha com esta central também não aparece aqui.'
-        : 'Machines report their own open sessions over the reverse WebSocket. A repository or project a machine does not share with this central does not appear here either.',
-    }
-  }
   const reason = o.unavailable
   if (!reason) {
     return {

@@ -411,7 +411,7 @@ function mobilePanelTabStyle(on: boolean, hot: boolean): CSSProperties {
 function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: SessionsPageBodyProps) {
   const ctx = useOutletContext<AppContext>()
   const {
-    lang, isCentral, theme,
+    lang, theme,
     sessionsFilters, sessionsActiveOnly, setSessionsFilters, setSessionsActiveOnly,
     availableProjects, sessionCountByProject, models, availableHarnesses, derived,
     data, currency, brlRate,
@@ -455,27 +455,19 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     navigate(routeLocation.pathname, { replace: true, state: null })
   }, [newSessionPreset, navigate, routeLocation.pathname])
 
-  // Never on a central: it aggregates many machines and hosts none of their sessions, so the only
+  // Never: it aggregates many machines and hosts none of their sessions, so the only
   // fleet it could read is its own box's, drawn under someone else's rows.
   const { fleet, loading, unsupported: pollUnsupported, stale, act, refresh } = useFleet(pt ? 'pt' : 'en')
   useEffect(() => {
     if (sessionId && !loading && !fleet.sessions.some(r => r.id === sessionId || r.conversationId === sessionId)) loadClosedFleet()
   }, [sessionId, loading, fleet.sessions])
   /**
-   * A CENTRAL cannot list a fleet, and must SAY so.
+   * An install that cannot list a fleet must SAY so.
    *
-   * `useFleet`'s second argument only stops the polling, and its `unsupported` is reported as false
-   * whenever polling is off — so on a central the page fell through every branch to "No sessions on
-   * this machine yet.", which is false twice over: a central hosts no sessions, and the machines'
-   * sessions it CAN reach are one screen away in Settings → Machines. The one sentence that would
-   * have said the true thing was switched off by the very flag that makes it true.
-   *
-   * The same N/A-versus-a-confident-0 rule the dashboard applies to harness capabilities: an empty
+   * `useFleet`'s `unsupported` is exactly what the poller reports, including a named refusal.
+   * The N/A-versus-a-confident-0 rule the dashboard applies to harness capabilities: an empty
    * list may never stand in for "this install cannot answer".
    */
-  // NOT `|| isCentral` any more: on a central the fleet is answered by the RELAY for the machine
-  // the aside's picker has chosen, so `unsupported` is again exactly what the poller reports —
-  // including the machine's own named refusal.
   const unsupported = pollUnsupported
   const rowIndex = useFleetIndex(fleet.sessions)
 
@@ -496,10 +488,10 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     finishedTasks: fleet.finishedTasks,
     openSessionId: sessionId ?? null,
     underPressure: ramUnderPressure,
-    // Never on a central (it relays another machine's fleet; the feature is local-only), never while
+    // Never (it relays another machine's fleet; the feature is local-only), never while
     // the poll itself cannot be trusted, and never before the first answer has arrived — the same
     // three facts `unsupported`/`loading` already state elsewhere on this page.
-    enabled: pane === 'main' && !isCentral && !pollUnsupported && !loading,
+    enabled: pane === 'main' && !pollUnsupported && !loading,
   })
   const [idleOpen, setIdleOpen] = useState(false)
   useEffect(() => {
@@ -554,32 +546,25 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   // The disabled-shell empty state's two buttons need to make `ctx.shellEnabled` (and
   // `ctx.shellOverride`) catch up the instant either succeeds — this is the one way to do that
   // without a reload, the same call `SessionsSettings`'s own toggle already makes.
-  const onShellEnabledChange = ctx.refreshTeamSession
+  const onShellEnabledChange = ctx.refreshHostSession
   /**
    * The repository explorer's two switches, both already resolved upstream.
    *
    * `editorEnabled` is the server's own answer — the capability AND the user's switch, combined by
-   * `sessions/editor-gate.ts` and reported on `GET /api/team/session`. It is never re-derived here
+   * `sessions/editor-gate.ts` and reported on `GET /api/session`. It is never re-derived here
    * from `capabilities.localShell` plus a preference, and when it is not `true` the Studio is
    * ABSENT rather than an entry that refuses. `editorAutosave` is a plain preference, loaded with
    * the rest in `App.tsx`; absent reads as OFF for both.
    *
-   * **THE CENTRAL TERM IS ALREADY IN IT, AND IS NOT RE-APPLIED HERE.** The whole `/api/fleet`
-   * prefix is refused on a central, so every request the Studio makes is refused there — while
-   * `editor-gate.ts` carries no central term at all, so a central on a `local` profile with the
-   * preference on reports `true`. That subtraction happens where the value is PUBLISHED
-   * (`lib/editorGate.ts`, spent in `App.tsx`'s `appCtx`), which is what closes every consumer at
-   * once: this page's two entries, the desktop button beside them, and the `editorEnabled` prop
-   * `ArtifactsAside` gates its strip entry and its Studio layer on — that component has no notion of
-   * a central and must not grow one. Re-subtracting it here would be harmless arithmetic and a
-   * harmful statement: that the published value is not to be trusted.
+   * The value is already resolved by the server and published in `appCtx`; it is read here ONCE
+   * and never re-derived — that component has no second gate to grow.
    */
   const editorEnabled = ctx.editorEnabled === true
   const editorAutosave = ctx.editorAutosave
   /**
-   * Is THIS session reached through a central's relay? The same fact `SessionPanel` reads for the
+   * Is THIS session reached through a relay? The same fact `SessionPanel` reads for the
    * same reason: a relayed session's `cli`/`shell` panes have no stream here at all (`/api/fleet` is
-   * refused whole on a central), so those two switcher entries — and a `bottom`/`right` slot that
+   * refused whole), so those two switcher entries — and a `bottom`/`right` slot that
    * still names one from before the connection changed — must read as absent, never as present and
    * refusing. See `lib/panelSlots.ts`'s `resolveForGates`.
    */
@@ -829,7 +814,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    */
   useEffect(() => {
     // A relayed session's files are on ANOTHER machine; `/api/fleet/artifacts` is refused on a
-    // central, and polling it every 15s only produced 403s. See `lib/relayedAside.ts`.
+    // relay, and polling it every 15s only produced 403s. See `lib/relayedAside.ts`.
     if (!selected || relayed) { setOnDisk(new Map()); setOutsideNote(undefined); return }
     let alive = true
     // The sentence holds a count about ONE session, so it is cleared the moment the session changes
@@ -1502,10 +1487,10 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    *
    * MOBILE HAS NO FIXED HEADER FOR IT (`sessionTopBar` is desktop-only), so the picker survives here,
    * UNCHANGED in shape, for exactly that viewport — `rightSwitcherMobile` below. `hardware` joins the
-   * set (design item 3): right-slot only, ABSENT on a central the same way the header chip always
+   * set (design item 3): right-slot only, ABSENT the same way the header chip always
    * was (`hardwareOffered`).
    */
-  const hardwareOffered = !isCentral
+  const hardwareOffered = true
   /**
    * THE GATE — a single predicate, shared by the rail's own icon list AND its hidden list (spec
    * §5's eye): the same server/per-session gates `panelBarEntries` applies to the bottom band's
@@ -2146,7 +2131,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // WHICHEVER PANE the band is showing right now (`target`) — never a fixed `'shell'`. See
       // `paneForTarget`'s own header for the defect this closes.
       onOpenShellFullscreen={target => navigate(dedicatedTerminalPath(selected.id, paneForTarget(target)))}
-      // Hardware is meaningless (and refused) on a central — the same fact `hardwareOffered` already
+      // Hardware is meaningless (and refused) — the same fact `hardwareOffered` already
       // names for this page's own mobile switcher.
       hardwareOffered={hardwareOffered}
       // The Studio entry's first-open dot — one flag, read wherever the bar renders it.
@@ -2255,7 +2240,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             exactly this. */}
         {/* Autonomous mode, same reasoning as the bell: the phone's only header here is this slot, and the
             owner switches away on from the phone — without it the state is invisible on this screen. */}
-        <TopBarGroup lang={pt ? 'pt' : 'en'} enabled={!ctx.isCentral && ctx.capabilities?.localShell !== false} />
+        <TopBarGroup lang={pt ? 'pt' : 'en'} enabled={ctx.capabilities?.localShell !== false} />
         <NotificationBell lang={pt ? 'pt' : 'en'} buttonClassName="ag-tap-icon" buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 32, height: 32, borderRadius: 8,
@@ -2325,7 +2310,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         sessionCountByProject={sessionCountByProject}
         models={models}
         harnesses={availableHarnesses}
-        users={[]}
         lang={lang}
       />
     </FiltersSheet>
@@ -2858,11 +2842,11 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     /** The VIEW, as the segmented control it was in the ⋯ menu — now four alternatives, with the
      *  bottom bar's two terminals folded in (the bar is gone on a phone). */
     const viewTabs: { id: string; label: string; icon: ReactNode; on: boolean; go: () => void }[] = [
-      ...(!isCentral ? [
+      ...([
         { id: 'chat', label: pt ? 'Conversa' : 'Chat', icon: <MessagesSquare size={18} />, on: sessionView === 'chat' && !contentsOn, go: () => { if (contentsOn) closeSlotPanel(rightActivePanel!); setSessionView('chat') } },
         { id: 'terminal', label: 'Terminal', icon: <TerminalSquare size={18} />, on: sessionView === 'terminal' && !contentsOn, go: () => { if (contentsOn) closeSlotPanel(rightActivePanel!); setSessionView('terminal') } },
-      ] : []),
-      ...(shellEnabled && !isCentral ? [
+      ]),
+      ...(shellEnabled ? [
         { id: 'shell', label: 'Shell', icon: <SquareTerminal size={18} />, on: false, go: () => leaveDrawerTo(dedicatedTerminalPath(selected.id, 'shell')) },
       ] : []),
       { id: 'contents', label: pt ? 'Conteúdos' : 'Contents', icon: <FileText size={18} />, on: contentsOn, go: () => { if (!contentsOn) openSlotPanel('live') } },
@@ -3325,7 +3309,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const railDesktop = !isMobile && selected !== undefined
 
   /**
-   * OWNER-APPROVED VISUAL, mockup option "C" (2026-09-26): the central pane — the region below
+   * OWNER-APPROVED VISUAL, mockup option "C" (2026-09-26): the main pane — the region below
    * that holds the open session's conversation/terminal, and the fleet overview when nothing is
    * selected — reads as a card fitted into the surrounding frame. DESKTOP ONLY (`!isMobile`): a
    * phone's screens already cover the viewport edge to edge, and insetting them would just clip
@@ -3340,7 +3324,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    *     (header above, aside left, rail right) redundant against the panel's OWN border and lets
    *     them be dropped rather than sandwiched.
    */
-  const CENTRAL_PANE = { border: PANEL_BORDER, radius: PANEL_RADIUS, gap: 5 } as const
+  const PANE_INSET = { border: PANEL_BORDER, radius: PANEL_RADIUS, gap: 5 } as const
   // THE OUTER FRAME GAP is `OUTER_GAP` from `lib/panelLayout.ts` — it moved there once the dashboard
   // pages joined the same board, so both workspaces read one figure.
   /** The T-junction's own hit-zone square — `junctionHitRect`'s formula (`gap + extra`) applied to
@@ -3433,7 +3417,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         // `relative` so the floating-window layer below (`FloatingPanelLayer`, `inset: 0`) covers
         // exactly the session area and nothing beside it — the rail and the aside are siblings.
         position: 'relative',
-        // Desktop-only inset card (see `CENTRAL_PANE`, above). `margin`, never `padding`: this div
+        // Desktop-only inset card (see `PANE_INSET`, above). `margin`, never `padding`: this div
         // is a flex ITEM inside `splitRef`'s row (or the sole item in its column, in the fleet-
         // overview case), so the flex algorithm sizes it INCLUDING the margin — the pane simply
         // ends up 5px smaller on every side within the space it was already given, rather than the
@@ -3448,7 +3432,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         // from this box's edges, and stay inside it under normal use.
         //
         // ONLY `marginTop` SURVIVES HERE UNCONDITIONALLY. TOP ALIGNMENT (owner, 2026-09-27): this
-        // used to be `CENTRAL_PANE.gap` (5px) — close enough to flush that the panel read as touching
+        // used to be `PANE_INSET.gap` (5px) — close enough to flush that the panel read as touching
         // the header, while the left list (`App.tsx`'s `SideNav`) has real room above it from its own
         // mark/mode-switch row. It is now `OUTER_GAP` (6px), the SAME figure every outer edge already
         // uses, so no panel in this workspace sits closer to a frame edge than any other.
@@ -3467,7 +3451,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             // the header. A margin on the LEFT added itself to the left list's 10px gap (a 15px gap
             // with the grip's dots hugging the list — owner report); the sides are already the gaps.
             marginTop: OUTER_GAP, marginLeft: 0, marginRight: 0, marginBottom: 0,
-            border: CENTRAL_PANE.border, borderRadius: CENTRAL_PANE.radius, overflow: 'hidden',
+            border: PANE_INSET.border, borderRadius: PANE_INSET.radius, overflow: 'hidden',
           }),
       }}>
         {centre}

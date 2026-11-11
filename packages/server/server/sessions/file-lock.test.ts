@@ -68,7 +68,7 @@ test('the lock directory does not survive a release, so it cannot become stale g
 // A FIRST-TIME MACHINE HAS NO PARENT DIRECTORY, and the non-recursive `mkdir` of the lock failed
 // with ENOENT, which the old loop read as contention and retried forever with no sleep and no
 // deadline — the hang behind 42 uploader tests on a CI runner with no ~/.agentistics, and behind a
-// first push to a central that never finished. See the module header's last rule.
+// first push that never finished. See the module header's last rule.
 test('a lock whose PARENT directory does not exist is taken, not spun on forever', async () => {
   const root = await mkdtemp(join(tmpdir(), 'agentop-lock-'))
   const f = join(root, 'not', 'there', 'yet', 'file.json')

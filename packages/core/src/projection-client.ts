@@ -5,7 +5,7 @@
  * surfaces' figures are built from.
  *
  * The query is INJECTED: HTTP in a surface, the server's in-process query in the parity check. A
- * refusal (404 `projections_disabled`, 409 central, 503 no reader) throws `ProjectionUnavailable`,
+ * refusal (404 `projections_disabled`, 503 no reader) throws `ProjectionUnavailable`,
  * and the surface falls back to its legacy path.
  */
 

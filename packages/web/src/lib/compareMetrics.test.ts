@@ -95,7 +95,7 @@ describe('buildCompareRows — basis', () => {
   })
 
   test('PLAN AGAINST API in one row is allowed — it is the point of the feature', () => {
-    // "What my plan cost" vs "what the same work would have cost at API prices" is the central
+    // "What my plan cost" vs "what the same work would have cost at API prices" is the core
     // question. A comparison-wide basis made it unaskable; per-side makes it one click.
     const rows = buildCompareRows([side({ planCostUSD: 40, costUSD: 500 }), side({ costUSD: 500 })], ['plan', 'api'])
     const cost = row(rows, 'cost')

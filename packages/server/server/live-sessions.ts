@@ -405,7 +405,7 @@ export function harnessOfProcess(
  * cannot see the host's processes".
  *
  * An empty list rendered as an empty panel is the confident `0` CLAUDE.md forbids for harness
- * capabilities, and it is worse here: a containerized machine or central has NO way to observe a
+ * capabilities, and it is worse here: a containerized machine has NO way to observe a
  * host process, so the panel was permanently, silently wrong.
  */
 export function detectionUnavailable(o: {

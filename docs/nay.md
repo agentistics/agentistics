@@ -39,7 +39,7 @@ engine:
 - **Gates.** `/api/fleet/nay` rides `/api/fleet`'s `localShell` guard (`capability-guard.ts`) and
   additionally requires the chat switch (`chatAllowed`, Settings → Chat; ON unless turned off,
   owner decision 2026-09-29). So Nay is unavailable on a
-  central and on any profile where host power is off.
+  any profile where host power is off.
 
 The old one-shot `claude --print` path (`/api/chat-tty` driving `TtyChat.tsx`) is gone for Nay; the
 component was deleted in #780.
@@ -115,7 +115,7 @@ Nay has every agentistics MCP tool (38 at the time of writing — see
 | "How much have I spent talking to you?" | `agentistics_projects`, filtered to `~/.agentistics/nay-chat` |
 
 What Nay **cannot** do through the MCP today: control the live fleet (read a session's screen,
-prompt, start or stop one), or authenticate to a central. Both are planned in the MCP coverage
+prompt, start or stop one). Both are planned in the MCP coverage
 design (`docs/superpowers/specs/2026-09-29-mcp-coverage-design.md`).
 
 ## PDF export

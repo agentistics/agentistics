@@ -137,7 +137,7 @@ export interface SessionsAsideProps {
   historyLoading?: boolean
   /** Ended conversations the live view did not send: an empty list is not "no sessions" then. */
   closedTotal?: number
-  /** This machine may not be asked at all: a central, or a profile with no host power. */
+  /** This machine may not be asked at all: a profile with no host power. */
   unsupported: boolean
   /** Already-localized reason the list may not be the whole truth. */
   unavailable?: string
@@ -165,7 +165,7 @@ export interface SessionsAsideProps {
   /**
    * What clicking a row does, when it is not "open it on THIS machine".
    *
-   * The central's Sessions page draws the very same list for a machine's RELAYED rows, where
+   * A relay can draw the very same list for another machine's RELAYED rows, where
    * `/sessions/:id` would open a local session that does not exist here. Absent on a machine,
    * where the route is exactly right.
    */
@@ -173,7 +173,7 @@ export interface SessionsAsideProps {
   /**
    * Withholds "New session".
    *
-   * Starting one is a LOCAL act (`POST /api/fleet/new` spawns a process on the host), so a central
+   * Starting one is a LOCAL act (`POST /api/fleet/new` spawns a process on the host), so a relay
    * drawing this list for someone else's machine must not offer it — a button whose only outcome
    * is a refusal is a button that teaches the wrong thing.
    */
@@ -181,7 +181,7 @@ export interface SessionsAsideProps {
   /**
    * The fleet's own verb-carrying rows, keyed by id — for the row's context menu (Task 6).
    *
-   * Absent on a surface that cannot act (a central relaying a machine that has not granted the
+   * Absent on a surface that cannot act (a relay for a machine that has not granted the
    * screen/action switches yet): the menu is then not opened at all, rather than opened inert.
    */
   rowsById?: Map<string, {
@@ -1442,7 +1442,7 @@ export function SessionsAside({
     )
   }
 
-  /** Opening a row: the route on this machine, or the mount's own handler (a central's relay, the Nay dock). */
+  /** Opening a row: the route on this machine, or the mount's own handler. */
   const openRow = (s: ControlSession) => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))
   /** One session on one line (`SessionLine`), draggable into a folder like every row of this list. */
   const renderLine = (s: ControlSession, extra: Partial<SessionLineProps> = {}) => {
@@ -1819,7 +1819,7 @@ export function SessionsAside({
 
           Deliberately NOT `--accent-red`: nothing has failed in the seeded case, and in the stale
           case the machine being unreachable is a fact about the connection, not a fault in the
-          fleet. Same reasoning the cockpit's central pill applies to `stale`. */}
+          fleet. Same reasoning the cockpit's link pill applies to `stale`. */}
       {stale && (
         <p role="status" style={{
           display: 'flex', alignItems: 'flex-start', gap: 6,
@@ -2752,8 +2752,8 @@ function EmptyReason({
     ? (pt ? 'Lendo as sessões desta máquina…' : 'Reading this machine’s sessions…')
     : unsupported
       ? (pt
-          ? 'Esta instalação não lista sessões próprias — um central agrega várias máquinas e não hospeda as sessões de nenhuma delas.'
-          : 'This install lists no sessions of its own — a central aggregates many machines and hosts none of their sessions.')
+          ? 'Esta instalação não lista sessões: o perfil de exposição não dá poder sobre o host.'
+          : 'This install lists no sessions: its exposure profile has no host power.')
       : unavailable
         ? unavailable
         : leadersOnly

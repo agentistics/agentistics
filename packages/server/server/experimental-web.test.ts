@@ -104,13 +104,6 @@ describe('refused where the GET is refused', () => {
   test('the one path guards both methods under localShell', () => {
     expect(routeCapability('/api/experimental')).toBe('localShell')
   })
-  test('a central answers 404 for GET and PUT alike', () => {
-    const src = readFileSync(join(import.meta.dir, 'index.ts'), 'utf8')
-    const i = src.indexOf("url.pathname === '/api/experimental'")
-    const block = src.slice(i, i + 700)
-    expect(block).toContain("req.method === 'GET' || req.method === 'PUT'")
-    expect(block).toMatch(/if \(TEAM_CENTRAL\) return new Response\('Not found', \{ status: 404/)
-  })
 })
 
 describe('L1 — the switch refreshes what the server has cached', () => {

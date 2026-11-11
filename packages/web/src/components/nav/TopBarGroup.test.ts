@@ -14,7 +14,7 @@ describe('topBarGroupModel', () => {
   test('with no voice the Calls row disappears (kill switch AGENTISTICS_VOICE)', () => {
     expect(ids({ ...base, callsSurfaces: [] })).toEqual(['hardware', 'autonomous', 'vault', 'live'])
   })
-  test('on a central the host-only rows are absent; Hardware only where a handler exists', () => {
+  test('without host power the host-only rows are absent; Hardware only where a handler exists', () => {
     expect(ids({ ...base, host: false, hasHardware: false })).toEqual(['calls'])
     expect(ids({ ...base, host: false, hasHardware: false, callsSurfaces: [] })).toEqual([])
   })

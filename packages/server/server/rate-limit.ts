@@ -2,16 +2,12 @@
  * rate-limit.ts — fixed-window counters plus a progressive-backoff block, in memory.
  *
  * The math (evaluate / registerFailure) is pure and unit-tested; MemoryLimiter is the thin
- * process-local store. Process-local is deliberate: a central is a single container, and a
- * shared store would add a Mongo round-trip to every request on the hot path. If the central is
- * ever scaled horizontally, the edge limiter (Cloudflare WAF) is the front line — see
- * docs/exposure.md; this one is the backstop.
+ * process-local store. Process-local is deliberate: one server process, and a shared store
+ * would add a round-trip to every request on the hot path. Behind a public tunnel the edge limiter
+ * (Cloudflare WAF) is the front line — see docs/exposure.md; this one is the backstop.
  *
- * Two key shapes are used by callers:
- *   ip:<addr>:<route>  — hard blocking; stops one source from guessing at all.
- *   acct:<emailLower>  — soft backoff; slows credential stuffing across rotating IPs without
- *                        letting an attacker lock a colleague out permanently (the OWASP
- *                        lockout-as-DoS caveat: the block always expires on its own).
+ * The key shape used by callers is `ip:<addr>:api` — hard blocking; stops one source from
+ * scraping the whole dataset in a loop.
  */
 
 export interface Bucket {
@@ -45,33 +41,13 @@ const MAX_BLOCK_MS = 24 * 60 * 60 * 1000
  *  a BURST of guesses; without decay, a typo last Tuesday still doubles today's block. */
 const STRIKE_DECAY_MS = 24 * 60 * 60 * 1000
 
-export const RULES: Record<'login' | 'loginAttempts' | 'token' | 'api' | 'ingest', RateRule> = {
-  // 5 failed logins per 15 minutes, then a 15-minute block that doubles per strike.
-  login: { limit: 5, windowMs: 15 * 60_000, blockMs: 15 * 60_000, backoff: true },
-  // The per-IP ATTEMPT ceiling for the same routes. It counts calls, not failures, so it must
-  // not be the same number as the failure allowance above: at 5 it ran out at the same moment,
-  // and behind a reverse proxy — where every member shares one source address — it was five
-  // sign-ins per quarter hour for the whole team.
-  loginAttempts: { limit: 30, windowMs: 15 * 60_000, blockMs: 15 * 60_000, backoff: true },
-  // Bearer-token guessing (whoami / agent upgrade): tighter, longer block.
-  token: { limit: 10, windowMs: 5 * 60_000, blockMs: 30 * 60_000, backoff: true },
-  // Generic authenticated API ceiling — generous; exists only to blunt scraping.
+export const RULES: Record<'api', RateRule> = {
+  // Generic API ceiling — generous; exists only to blunt scraping.
   api: { limit: 600, windowMs: 60_000, blockMs: 60_000, backoff: false },
-  // Ingest is machine traffic; the central owns the push interval (>=5s), so 60/min is ample.
-  ingest: { limit: 60, windowMs: 60_000, blockMs: 5 * 60_000, backoff: false },
 }
 
-/** Routes where a wrong guess is the attack: credentials and bearer tokens. */
-const LOGIN_PATHS = new Set([
-  '/api/iam/login', '/api/iam/login/mfa', '/api/team/login', '/api/iam/bootstrap', '/api/iam/recover', '/api/iam/reset-request',
-])
-const TOKEN_PATHS = new Set(['/api/team/whoami', '/api/team/agent'])
-
 /** Which rule governs a path. Pure so the routing policy is testable without a server. */
-export function rateRuleFor(pathname: string): RateRule {
-  if (LOGIN_PATHS.has(pathname)) return RULES.loginAttempts
-  if (TOKEN_PATHS.has(pathname)) return RULES.token
-  if (pathname === '/api/team/ingest') return RULES.ingest
+export function rateRuleFor(_pathname: string): RateRule {
   return RULES.api
 }
 

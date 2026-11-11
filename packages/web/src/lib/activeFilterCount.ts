@@ -23,15 +23,11 @@ import type { Filters } from '@agentistics/core'
  */
 export function countActiveFilters(filters: Filters, activeOnly: boolean, leadersOnly = false): number {
   return [
-    (filters.users?.length ?? 0) > 0,
     (filters.harnesses?.length ?? 0) > 0,
-    filters.presence !== undefined,
     (filters.repos?.length ?? 0) > 0,
     (filters.tags?.length ?? 0) > 0,
     filters.projects.length > 0,
     (filters.models?.length ?? 0) > 0,
-    (filters.teams?.length ?? 0) > 0,
-    (filters.machines?.length ?? 0) > 0,
     activeOnly,
     // The aside's persisted "só líderes" switch (`leadersFilter.ts`) — a filter, so it counts here.
     leadersOnly,

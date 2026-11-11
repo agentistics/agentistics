@@ -32,8 +32,8 @@ export interface TopBarProps {
    */
   trailingFlush?: boolean
   /**
-   * OWNER-APPROVED VISUAL (2026-09-26): the sessions workspace's central pane now carries its own
-   * border, 5px below this strip — see `SessionsPage.tsx`'s `CENTRAL_PANE`. Keeping this bottom
+   * OWNER-APPROVED VISUAL (2026-09-26): the sessions workspace's pane now carries its own
+   * border, 5px below this strip — see `SessionsPage.tsx`'s `PANE_INSET`. Keeping this bottom
    * border too would sandwich a gap between two lines instead of reading as one inset card, so the
    * ONE caller in the sessions workspace passes `true`; every other screen keeps its border.
    */

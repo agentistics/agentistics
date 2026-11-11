@@ -27,7 +27,7 @@ import {
 } from '@agentistics/core'
 import { getDateRangeFilter } from './useData'
 
-export type PlanBasisBlock = 'no-window' | 'inconsistent-history' | 'central' | null
+export type PlanBasisBlock = 'no-window' | 'inconsistent-history' | null
 
 export interface PlanBasisView {
   /** `null` when no plan basis can be produced for this filter at all. */
@@ -44,17 +44,6 @@ export interface PlanBasisView {
 }
 
 const EMPTY: PlanBasisView = { basis: null, window: null, blocked: 'no-window' }
-/**
- * A central produces NO basis at all.
- *
- * Forcing `costBasis` to `'api'` there is not enough: two surfaces read `planBasis` directly
- * rather than through the basis switch — Home's "API vs your plan" panel and the compare page's
- * per-side Plan button — so a central whose `preferences.json` still carried a timeline (a machine
- * that used to be solo, or a hand edit) would price a whole FLEET from its operator's own
- * subscription. Refusing at the single place the basis is computed is what makes that
- * unreachable rather than merely unrendered.
- */
-const CENTRAL: PlanBasisView = { basis: null, window: null, blocked: 'central' }
 
 /**
  * @param today injected for tests; defaults to the real UTC day.
@@ -64,14 +53,11 @@ export function computePlanBasisView(args: {
   billing: BillingSettings
   brlRate: number
   filters: Filters
-  /** This instance aggregates other machines — see `CENTRAL` above. */
-  central?: boolean
   today?: string
   /** The machine's billable accounts. Absent, every harness prices on its single timeline. */
   accounts?: readonly PlanAccountRef[]
 }): PlanBasisView {
   const { apiCostByDay, billing, brlRate, filters } = args
-  if (args.central) return CENTRAL
   const today = args.today ?? new Date().toISOString().slice(0, 10)
 
   // A NEGATIVE residue means the day series accounts for more than the cumulative total it
@@ -148,13 +134,11 @@ export function usePlanBasis(args: {
   billing: BillingSettings
   brlRate: number
   filters: Filters
-  central?: boolean
   accounts?: readonly PlanAccountRef[]
 }): PlanBasisView {
-  const { apiCostByDay, billing, brlRate, filters, central, accounts } = args
+  const { apiCostByDay, billing, brlRate, filters, accounts } = args
   return useMemo(() => {
-    if (central) return CENTRAL
     if (!apiCostByDay) return EMPTY
     return computePlanBasisView({ apiCostByDay, billing, brlRate, filters, accounts })
-  }, [apiCostByDay, billing, brlRate, filters, central, accounts])
+  }, [apiCostByDay, billing, brlRate, filters, accounts])
 }

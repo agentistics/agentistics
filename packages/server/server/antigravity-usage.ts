@@ -13,7 +13,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseAntigravityModels, type PlanLimits } from '@agentistics/core'
-import { ANTIGRAVITY_DIR, TEAM_CENTRAL } from './config'
+import { ANTIGRAVITY_DIR } from './config'
 import { ingestFromRoot } from './plan-limits'
 
 export const ANTIGRAVITY_USAGE_POLL_MS = 5 * 60_000
@@ -148,10 +148,10 @@ export async function fetchAntigravityUsage(deps: AntigravityUsageDeps = {}): Pr
 
 /**
  * The server's poll: now, then every 5 minutes (under `PLAN_LIMITS_STALE_MS`), doubling up to 30 minutes
- * after a 429. `AGENTISTICS_ANTIGRAVITY_USAGE=0` turns it off, as does a team central. Returns the stop function.
+ * after a 429. `AGENTISTICS_ANTIGRAVITY_USAGE=0` turns it off. Returns the stop function.
  */
 export function startAntigravityUsagePoll(deps: AntigravityUsageDeps = {}): () => void {
-  if (process.env.AGENTISTICS_ANTIGRAVITY_USAGE === '0' || TEAM_CENTRAL) return () => {}
+  if (process.env.AGENTISTICS_ANTIGRAVITY_USAGE === '0') return () => {}
   let delay = ANTIGRAVITY_USAGE_POLL_MS
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false

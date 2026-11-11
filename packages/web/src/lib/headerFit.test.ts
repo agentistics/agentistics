@@ -94,7 +94,7 @@ test('budgets the cost-basis toggle when the page offers one', () => {
   expect(headerFit(FULL_BAR_W + COST_BASIS_W, COST_BASIS_W).date).toBe('full')
 })
 
-test('reserves nothing for a toggle that is not there — a central has none', () => {
+test('reserves nothing for a toggle that is not there — there is none', () => {
   expect(headerFit(FULL_BAR_W, 0)).toEqual(headerFit(FULL_BAR_W))
 })
 

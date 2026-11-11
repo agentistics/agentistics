@@ -97,8 +97,7 @@ test('the cockpit contract carries the GitHub section, and it is the SAME shape 
   // what this assertion exists to catch, before a cockpit renders `undefined`.
   expect(Object.keys(section).sort())
     .toEqual([
-      'auth', 'configured', 'deleteLocalAfterUpload', 'keepRemote', 'label', 'repo',
-      'suggestedLabel', 'url',
+      'auth', 'configured', 'deleteLocalAfterUpload', 'keepRemote', 'label', 'repo', 'url',
     ])
   expect(JSON.stringify(section)).not.toContain('ghp_')
   rmSync(dir, { recursive: true, force: true })

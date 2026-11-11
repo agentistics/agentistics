@@ -41,7 +41,7 @@ const MAX_CMD = 40
  * `· ` in front of a paragraph, with its continuation rows hanging under the text.
  *
  * Prose and commands used to land at the same indent, distinguished only by dim — so on a flat
- * palette a sentence like "add --central to run the team central natively" read as another command
+ * palette a sentence like "add --native to run the server natively" read as another command
  * to type. The marker is what carries that distinction with no color at all, and the hanging indent
  * is what keeps a three-row paragraph from looking like three separate notes.
  */

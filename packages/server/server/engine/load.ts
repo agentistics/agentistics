@@ -141,8 +141,8 @@ export function engine(): HostEngine | null {
  * CLI) does when it needs the engine's answer without going back out through its own HTTP door. The same
  * route list the HTTP door walks, so a path is reachable here exactly when it is reachable there. `null`:
  * no engine (a community build, switched off, refused), or no route of its owns that path. The CALLER
- * decides whether the native gate (`native-gate.ts`) allows asking; the engine's own `central` and
- * `flag-off` refusals still apply.
+ * decides whether the native gate (`native-gate.ts`) allows asking; the engine's own `flag-off`
+ * refusal still applies.
  */
 export async function engineFetch(path: string, init?: RequestInit): Promise<Response | null> {
   await loadEngine()
@@ -257,17 +257,11 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
   ])
   const floor = hostFloor(omittedSecrets(), config.HOME_DIR)
 
-  // The mode a machine was CONFIGURED in, read once: a central never runs an engine's runtime, and
-  // the host's own `TEAM_CENTRAL` is only half of that answer.
-  let centralPref = false
   let lang: 'en' | 'pt' = 'en'
   try {
     const { readPreferences } = await import('../preferences')
-    const prefs = await readPreferences()
-    const mode: string | undefined = prefs.team?.mode
-    centralPref = mode === 'central'
-    lang = prefs.lang === 'pt' ? 'pt' : 'en'
-  } catch { /* an unreadable preferences file leaves the defaults */ }
+    lang = (await readPreferences()).lang === 'pt' ? 'pt' : 'en'
+  } catch { /* an unreadable preferences file leaves the default */ }
 
   const { buildReuseSurface } = await import('./reuse-surface')
   const readers = await buildReuseSurface()
@@ -338,7 +332,8 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     protectedGlobs: floor.globs,
     protectedPaths: floor.paths,
     caps: CAPS,
-    isCentral: () => config.TEAM_CENTRAL || centralPref,
+    // Retained for the engine's pinned contract (it still reads it); there is no central any more.
+    isCentral: () => false,
     flag: name => (
       name === 'provider' ? config.providerFlagOn()
         : name === 'live' ? config.JOURNAL_LIVE_ENABLED

@@ -26,7 +26,7 @@ export interface ControlCenterOptions {
   /**
    * Open with the setup wizard already asking — a machine that has never been configured.
    *
-   * A flag rather than a tab, because Setup stopped being one: choosing solo / central / member is a
+   * A flag rather than a tab, because Setup stopped being one: choosing how this box runs is a
    * question ABOUT the services on this box, so it is drawn in the cockpit's detail region like
    * every other question. The caller still gets to say "start there", which is what it always meant.
    */
