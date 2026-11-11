@@ -100,6 +100,8 @@ export const AGENT_TOOL_NAMES = [
   // Layouts (8)
   'agentistics_component_catalog',
   'agentistics_get_layouts',
+  'agentistics_get_preferences',
+  'agentistics_set_preferences',
   'agentistics_create_layout',
   'agentistics_add_component',
   'agentistics_remove_component',
@@ -230,6 +232,8 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   // ------------------------------------------------------------------ Layouts (custom page, stored in preferences)
   agentistics_component_catalog: { ...DATA, risk: 'R', routes: [], reason: 'returns a static list; calls nothing' },
   agentistics_get_layouts: { ...PREFS, risk: 'R', routes: ['GET /api/preferences'], reason: 'reads the saved layouts' },
+  agentistics_get_preferences: { ...PREFS, risk: 'R', routes: ['GET /api/preferences'], reason: 'reads the Nay persona preferences' },
+  agentistics_set_preferences: { ...PREFS, risk: 'W', routes: ['GET /api/preferences', 'PUT /api/preferences'], reason: 'updates the Nay persona preferences through the validated preference boundary' },
   agentistics_create_layout: { ...PREFS, risk: 'W', routes: ['GET /api/preferences', 'PUT /api/preferences'], reason: 'adds a layout; removed by delete_layout' },
   agentistics_add_component: { ...PREFS, risk: 'W', routes: ['GET /api/preferences', 'PUT /api/preferences'], reason: 'adds a widget; removed by remove_component' },
   agentistics_remove_component: { ...PREFS, risk: 'W', routes: ['GET /api/preferences', 'PUT /api/preferences'], reason: 'removes a widget; re-added by add_component' },

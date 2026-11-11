@@ -792,6 +792,10 @@ export interface SessionBackend {
    * mid-conversation; `undefined` for a session whose driver offers no switch.
    */
   modelsOf?(id: string): { current: string | null; options: Array<{ id: string; label: string }> } | undefined
+  /** A structured session's live protocol usage gauge, absent when the driver states none. */
+  usageOf?(id: string): { contextTokens?: number; contextWindow?: number } | null | undefined
+  /** A structured session's live protocol title, absent when the driver states none. */
+  titleOf?(id: string): string | null | undefined
   /** 1.20 — switch a structured session's model THROUGH its driver. A refusal carries the driver's sentence. */
   setModel?(id: string, modelId: string, key?: string): Promise<StructuredSetModel>
   /** F2.0 — answer a structured session's open request through its driver. False: refused / stale. `key` as `setMode`. */

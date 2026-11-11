@@ -36,7 +36,7 @@ import { SOUND_PRESET_OPTIONS } from '../../lib/soundPresetOptions'
 import { AUTO_DISMISS_OPTIONS_SEC, NAY_ANIMATIONS, NAY_ANIMATION_HINT, NAY_ANIMATION_LABEL, type NayAnimation } from '../../lib/nayNotify'
 import { NAY_FAB_STYLES, NAY_FAB_STYLE_LABEL, isNayFabStyle, type NayFabPrefs, type NayFabStyle } from '../../lib/nayFab'
 import { setNayFabPrefs, useNayFabPrefs } from '../../lib/nayFabPrefsStore'
-import { Select } from '../../pages/settings/primitives'
+import { FieldInput, Select } from '../../pages/settings/primitives'
 
 export type ChatSoundCtx = Pick<AppContext, 'chatSoundEnabled' | 'setChatSoundEnabled' | 'chatSoundId' | 'setChatSoundId'>
 
@@ -83,6 +83,29 @@ export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = t
   const harnesses = useNayHarnesses(lang, true)
   const defaults = useNayDefaults()
   const [notify, setNotify] = useState<NotificationSettings>(getNotificationSettings)
+  const [persona, setPersona] = useState({ responder: 'analytics' as 'analytics' | 'own-agent', workingDir: '', label: 'Nay', mcpEnabled: false })
+  const [personaError, setPersonaError] = useState('')
+  useEffect(() => {
+    void fetch('/api/user-prefs').then(r => r.ok ? r.json() : {}).then((p: { chatResponder?: string; chatWorkingDir?: string; chatLabel?: string; chatMcpEnabled?: boolean }) => {
+      setPersona({ responder: p.chatResponder === 'own-agent' ? 'own-agent' : 'analytics', workingDir: p.chatWorkingDir ?? '', label: p.chatLabel ?? 'Nay', mcpEnabled: p.chatMcpEnabled === true })
+    }).catch(() => {})
+  }, [])
+  const savePersona = (patch: Partial<typeof persona>) => {
+    const next = { ...persona, ...patch }
+    setPersona(next)
+    setPersonaError('')
+    void fetch('/api/user-prefs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatResponder: next.responder, chatWorkingDir: next.workingDir, chatLabel: next.label, chatMcpEnabled: next.mcpEnabled }) }).then(async res => {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string; message?: string }
+        const raw = body.error ?? body.message
+        const human = raw?.replace(/chatWorkingDir/g, pt ? 'Pasta de trabalho' : 'Working folder')
+        setPersonaError(human ?? (pt ? 'Não foi possível salvar esta preferência.' : 'Could not save this preference.'))
+        return
+      }
+      setPersonaError('')
+    })
+  }
+  const commitPersona = (patch: Partial<typeof persona>) => savePersona(patch)
   useEffect(() => subscribeNotificationSettings(() => setNotify(getNotificationSettings())), [])
   const saveNotify = (patch: Partial<NotificationSettings>) => {
     const next = { ...getNotificationSettings(), ...patch }
@@ -248,6 +271,30 @@ export function NaySettingsPanel({ pt, isMobile, layout, chat, conversations = t
           ) : (
             <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{pt ? 'Carregando os assistentes…' : 'Loading the assistants…'}</div>
           )}
+          {choice(
+            pt ? 'Quem responde no painel' : 'Who answers in the panel',
+            pt ? 'Analytics mantém a Nay integrada; o agente próprio responde com sua identidade.' : 'Analytics keeps the built-in Nay; own-agent lets the selected harness answer as itself.',
+            <Select value={persona.responder} onChange={v => savePersona({ responder: v as 'analytics' | 'own-agent' })} options={[{ value: 'analytics', label: pt ? 'Analytics (padrão)' : 'Analytics (default)' }, { value: 'own-agent', label: pt ? 'Agente próprio' : 'Own agent' }]} />,
+          )}
+          {persona.responder === 'own-agent' && <>
+            {choice(
+              pt ? 'Pasta de trabalho' : 'Working folder',
+              pt ? 'Caminho absoluto de uma pasta existente; nada é escrito nela pelo agentistics.' : 'Absolute path to an existing folder; agentistics writes nothing there.',
+              <FieldInput label={pt ? 'Pasta de trabalho' : 'Working folder'} hideLabel value={persona.workingDir} onChange={v => setPersona(current => ({ ...current, workingDir: v }))} onBlur={() => commitPersona({ workingDir: persona.workingDir })} invalid={!!personaError} placeholder="/home/you/project" />,
+            )}
+            {personaError && <div role="alert" style={{ color: 'var(--danger, #dc2626)', fontSize: 12, marginTop: -4 }}>{personaError}</div>}
+            {choice(
+              pt ? 'Nome no painel' : 'Panel label',
+              pt ? 'O nome mostrado para a conversa.' : 'The name shown for the conversation.',
+              <FieldInput label={pt ? 'Nome no painel' : 'Panel label'} hideLabel value={persona.label} onChange={v => setPersona(current => ({ ...current, label: v }))} onBlur={() => commitPersona({ label: persona.label })} invalid={!!personaError} placeholder="Nay" />,
+            )}
+            {choice(
+              'MCP agentistics',
+              pt ? 'Anexa as ferramentas do agentistics ao agente próprio.' : 'Attach agentistics tools to the own agent.',
+              <Switch on={persona.mcpEnabled} label="MCP agentistics" tap={tap} onToggle={() => savePersona({ mcpEnabled: !persona.mcpEnabled })} />,
+              false,
+            )}
+          </>}
           {choice(
             pt ? 'Som quando a Nay responde' : 'Sound when Nay replies',
             pt ? 'Toca quando chega uma resposta com o chat minimizado.' : 'Plays when a reply arrives while the chat is minimized.',

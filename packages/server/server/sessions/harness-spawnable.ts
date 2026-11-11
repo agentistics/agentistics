@@ -26,6 +26,9 @@ export function harnessSpawnability(
 ): HarnessSpawnability {
   const spec = SPAWN_SPECS[harness]
   if (!spec) return { spawnable: false, unavailableReason: `${harness} has no session launcher` }
+  if (harness === 'hermes') return {
+    spawnable: false, unavailableReason: 'Hermes runs only as a structured chat (ACP)',
+  }
   if (!which(spec.bin)) return { spawnable: false, unavailableReason: `${spec.bin} is not on PATH: install ${harness}` }
   const last = outcomes.get(harness)
   if (last?.failed && now - last.checkedAt < STARTUP_FAILURE_TTL_MS) {

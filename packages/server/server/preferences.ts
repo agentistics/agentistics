@@ -121,6 +121,14 @@ export interface Preferences {
   chatSoundEnabled?: boolean
   /** Which synthesized sound the chat plays (`web/src/lib/chatSounds.ts`). */
   chatSoundId?: string
+  /** Whether the Nay panel is answered by the analytics persona or the selected harness itself. */
+  chatResponder?: 'analytics' | 'own-agent'
+  /** Existing absolute folder used as cwd by an own-agent Nay session. */
+  chatWorkingDir?: string
+  /** Label shown for an own-agent Nay session. */
+  chatLabel?: string
+  /** Opt in to attaching the agentistics MCP to an own-agent session. */
+  chatMcpEnabled?: boolean
   /** Whether this machine serves the chat at all. ABSENT READS AS ON (owner decision, 2026-09-29);
    *  an explicit false turns it off. It can only ever narrow `CAPS.localChat`; see chat-gate.ts. */
   chatEnabled?: boolean
@@ -991,7 +999,9 @@ export async function writePreferencesTo(primary: string, legacy: string | null,
     const release = await acquireFileLock(primary)
     try {
       const { prefs: current } = await readEffective(primary, legacy, true)
-      const merged = { ...current, ...prefs }
+      const { validateNayPreferencePatch } = await import('./sessions/nay-persona')
+      const nayPatch = await validateNayPreferencePatch(current as Record<string, unknown>, prefs as Record<string, unknown>)
+      const merged = { ...current, ...nayPatch } as Preferences
       if (prefs.team) merged.team = mergeTeamPayload(current.team, prefs.team)
       await writePrefsFile(primary, merged)
     } finally {
@@ -1067,7 +1077,9 @@ export async function updatePreferencesAt(primary: string, legacy: string | null
       const { prefs: current } = await readEffective(primary, legacy, true)
       const patch = mutate(current)
       if (patch === undefined) return current
-      const merged = { ...current, ...patch }
+      const { validateNayPreferencePatch } = await import('./sessions/nay-persona')
+      const normalized = await validateNayPreferencePatch(current as Record<string, unknown>, patch as Record<string, unknown>)
+      const merged = { ...current, ...normalized }
       await writePrefsFile(primary, merged)
       return merged
     } finally {

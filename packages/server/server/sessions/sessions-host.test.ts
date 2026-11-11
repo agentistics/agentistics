@@ -26,6 +26,8 @@ function fakeBackend(o: {
   unavailable?: string
   onCapture?: (id: string) => void
   panePids?: Record<string, number>
+  usage?: Record<string, { contextTokens?: number; contextWindow?: number }>
+  titles?: Record<string, string>
 }): SessionBackend {
   return {
     id: 'tmux',
@@ -45,6 +47,8 @@ function fakeBackend(o: {
     async sendKey() { return true },
     async sendPaste() { return true },
     ...(o.panePids ? { async listPanePids() { return new Map(Object.entries(o.panePids!)) } } : {}),
+    ...(o.usage ? { usageOf(id: string) { return o.usage?.[id] } } : {}),
+    ...(o.titles ? { titleOf(id: string) { return o.titles?.[id] } } : {}),
   }
 }
 
@@ -67,6 +71,22 @@ const poller = (o: {
 })
 
 describe('createSessionsPoller', () => {
+  it('carries a structured protocol title and context gauge into the session read', async () => {
+    const p = poller({
+      backend: fakeBackend({
+        sessions: [backendSession('structured')],
+        frames: { structured: ['❯ '] },
+        usage: { structured: { contextTokens: 1200, contextWindow: 1000000 } },
+        titles: { structured: 'Protocol title' },
+      }),
+      registry: [managed('structured')],
+    })
+    const row = (await p.poll()).sessions[0]!
+    expect(row.harnessName).toBe('Protocol title')
+    expect(row.contextTokens).toBe(1200)
+    expect(row.contextWindow).toBe(1000000)
+  })
+
   it('measures only a row with a living command — an exited or lost row never borrows a neighbour\'s pid', async () => {
     // A live claude process in the SAME folder as two dead rows: before F1.2b the directory match handed
     // its pid (and memory) to both, re-attributed on every poll, and every fleet push re-sent them.

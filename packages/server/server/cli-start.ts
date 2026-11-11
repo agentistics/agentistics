@@ -2065,6 +2065,8 @@ export async function spawnManaged(req: {
   prompt?: string
   model?: string
   effort?: string
+  /** Explicit false disables the agentistics MCP for an own-agent structured session. */
+  mcp?: boolean
   /** MODE.EVERYWHERE — the permission mode to start in (see `SpawnRequest.mode`). */
   mode?: CanonicalMode
   label?: string
@@ -2381,7 +2383,7 @@ export async function spawnManaged(req: {
         : {}),
       // F2.0 — the same spawn in a structured driver's terms; tmux ignores it (`structured-backend.ts`).
       structured: structuredIntentOf({ ...req, ...(mode ? { mode } : {}), origin: spawnOriginOf(req.origin, req.attach) }, {
-        model, effort, ctx, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } },
+        model, effort, ctx, mcp: req.mcp === false ? undefined : { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } },
         // The language of the screen that asked (the host is built per request language): QA F2.
         lang: lang === 'pt' ? 'pt' : 'en',
         // The driver applies it only where its declaration says the protocol assigns ids; the row is
@@ -5138,6 +5140,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.prompt ? { prompt: req.prompt } : {}),
         ...(launch.model ? { model: launch.model } : {}),
         ...(launch.effort ? { effort: launch.effort } : {}),
+        ...(req.mcp !== undefined ? { mcp: req.mcp } : {}),
         ...(launch.mode ? { mode: launch.mode } : {}),
         ...(label ? { label } : {}),
         ...(rowFiling.task ? { task: rowFiling.task } : {}),
