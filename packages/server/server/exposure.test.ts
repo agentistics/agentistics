@@ -58,7 +58,7 @@ describe('capabilitiesFor', () => {
   })
 
   it('requires owner MFA and secure cookies on public', () => {
-    const caps = capabilitiesFor('public', { ...base, central: true, exposure: 'public' })
+    const caps = capabilitiesFor('public', { ...base, exposure: 'public' })
     expect(caps.requireMfaForOwner).toBe(true)
     expect(caps.requireSecureCookies).toBe(true)
   })
