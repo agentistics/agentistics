@@ -1515,6 +1515,11 @@ tr:focus-within .ag-row-actions,
 }
 
 /* Shared pretty scrollbar (popup of plan usage; the Live board's horizontal scroll reuses it). */
+/* Let this popup's 8px WebKit scrollbar win over the global standard/mobile scrollbar rules. */
+@supports selector(::-webkit-scrollbar) {
+  [data-plan-usage-scroll].ag-scroll { scrollbar-width: auto; scrollbar-color: auto; }
+  [data-plan-usage-scroll].ag-scroll::-webkit-scrollbar { display: block; }
+}
 /* Standard properties only where ::-webkit-scrollbar is unsupported (Firefox): Chromium >=121 and WebKit ignore the pseudo-elements once they are set. */
 @supports not selector(::-webkit-scrollbar) {
   .ag-scroll { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--anthropic-orange) 60%, transparent) color-mix(in srgb, var(--text-primary) 6%, transparent); }
@@ -1532,7 +1537,11 @@ tr:focus-within .ag-row-actions,
 /* Session composer task controls share the desktop/mobile control geometry. */
 :root { --ag-composer-control: 32px; }
 .ag-composer-task-control { height: var(--ag-composer-control); box-sizing: border-box; font-family: inherit; color: var(--text-secondary); background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; }
+.ag-composer-icon { color: var(--text-tertiary); }
+.ag-composer-icon:hover:not(:disabled), .ag-composer-icon:focus-visible { color: var(--text-primary); }
+.ag-composer-icon:focus-visible { outline: 2px solid var(--anthropic-orange); outline-offset: 2px; }
 @media (max-width: 768px) {
   :root { --ag-composer-control: 44px; }
   .ag-composer-task-control { min-height: 44px; font-size: 16px; }
+  .ag-composer-icon { min-width: 44px; min-height: 44px; }
 }

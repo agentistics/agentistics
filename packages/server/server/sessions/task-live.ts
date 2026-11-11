@@ -103,8 +103,17 @@ export interface LiveDelivery {
   taskTitle: string
   subtaskId: string | null
   title: string
+  /** Owner requests retain their semantic kind for every consumer (Web, Calendar, MCP). */
+  kind?: 'owner-request'
   status: string
   stage: LiveStage
+  /** Presentation-only stage; the persisted/delivery stage remains `leader`. */
+  displayStage?: LiveStage | 'no-leader'
+  /** Availability of a leader for a review piece, from the live fleet read. Other stages omit it. */
+  leaderAvailability?: 'available' | 'absent' | 'unknown'
+  /** A short, user-facing explanation when leaderAvailability is not available. */
+  leaderAvailabilityReason?: string
+  leaderAvailabilityReasonCode?: 'fleet-unreadable' | 'no-live-leader'
   /** When the piece last changed status (the book's own stamp) — "time in this stage". */
   stageSinceMs: number | null
   /** Current stage round, from the session start or stage entry; shared by Web and MCP. */
@@ -167,6 +176,17 @@ export interface LiveDelivery {
    * Null/absent = just waiting its turn.
    */
   queue?: { hold: { kind: 'nao' | 'agendar'; reason: string; until: string | null; by: string; atMs: number | null } | null; asking: boolean; approved: boolean } | null
+}
+
+/** Clean legacy/current owner-request headings while preserving ordinary subtask titles. */
+export function ownerRequestDisplayTitle(title: string, fallback: string): { title: string; kind?: 'owner-request' } {
+  const raw = title.trim()
+  const match = raw.match(/^(?:owner['’]s request|pedido do dono)\s*:\s*(.*)$/i)
+  if (!match) return { title: raw || fallback }
+  const clean = match[1]!.replace(/\s*\[(?:high|urgent|medium|low) priority\]\s*/gi, ' ')
+    .replace(/\s*\[prioridade (?:urgente|alta|m[eé]dia|baixa)\]\s*/gi, ' ')
+    .replace(/\s*[·•]\s*p-[a-z0-9-]+\s*$/i, '').replace(/\s+/g, ' ').trim()
+  return { title: clean || fallback, kind: 'owner-request' }
 }
 
 /** PURE: the queue facts a card shows from the delivery record (a lapsed `agendar` is no hold any more). */
@@ -1043,7 +1063,7 @@ export function buildLive(o: {
       key: subject,
       taskId: p.task.id, taskTitle: p.task.title,
       subtaskId: p.sub?.id ?? null,
-      title: p.sub?.title ?? p.task.title,
+      ...(() => { const request = ownerRequestDisplayTitle(p.sub?.title ?? p.task.title, p.task.title); return { title: request.title, ...(request.kind ? { kind: request.kind } : {}) } })(),
       status: p.status, stage,
       stageSinceMs,
       round,

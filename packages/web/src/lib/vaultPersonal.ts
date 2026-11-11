@@ -61,6 +61,21 @@ export function newGroupName(typed: string, groups: readonly Pick<PersonalGroup,
 }
 export const purgePersonal = (id: string, code?: string, gestureToken?: string) => vaultPost(`${P}/purge`, withCode({ id, ...tok(gestureToken) }, code))
 export const movePersonal = (id: string, expectedVersion: number, groupId: string | null, code?: string) => vaultPost<{ meta: PersonalMeta }>(`${P}/move`, withCode({ id, expectedVersion, groupId }, code))
+/** Each move goes through the single-item gate. Never retry a successful item when a later one fails. */
+export async function moveBatch(items: readonly Pick<PersonalMeta, 'id' | 'version'>[], groupId: string | null,
+  run: (call: (code?: string) => Promise<Reply<{ meta: PersonalMeta }>>) => Promise<Reply<{ meta: PersonalMeta }>>,
+): Promise<BatchResult[]> {
+  const results: BatchResult[] = []
+  for (const item of items) {
+    try {
+      const r = await run(code => movePersonal(item.id, item.version, groupId, code))
+      results.push(r.ok ? { id: item.id, ok: true, meta: r.meta } : { id: item.id, ok: false, code: r.code, sentence: r.sentence })
+    } catch {
+      results.push({ id: item.id, ok: false, code: 'network' })
+    }
+  }
+  return results
+}
 export const createGroup = (name: string, code?: string) => vaultPost<{ group: PersonalGroup }>(`${P}/groups`, withCode({ name }, code))
 export const renameGroup = (id: string, expectedVersion: number, name: string, code?: string) => vaultPost<{ group: PersonalGroup }>(`${P}/groups/rename`, withCode({ id, expectedVersion, name }, code))
 export const deleteGroup = (id: string, code?: string, gestureToken?: string) => vaultPost<{ moved: number }>(`${P}/groups/delete`, withCode({ id, ...tok(gestureToken) }, code))

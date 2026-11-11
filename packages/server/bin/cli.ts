@@ -115,6 +115,7 @@ Commands:
                 'session ls' prints the cockpit's table of what is running
   task          the delivery board: what each piece of work cost, in how many rounds
                 and across how many sessions ('task ls | show | deliver | abandon')
+  tasks         review cleanup ('tasks limpar-revisao', dry-run by default)
   hooks         Teach Claude Code to run work in parallel through agentop
                 (installs a skill + SessionStart/Stop hooks; explicit, reversible)
   briefing      Install or remove agentistics onboarding skills/instruction blocks
@@ -403,6 +404,12 @@ if (command === 'task') {
   const { runTask } = await import('../server/sessions/cli-task.ts')
   const code = await runTask(args)
   process.exit(code)
+}
+
+if (command === 'tasks') {
+  if (args[0] !== 'limpar-revisao') { console.error('Usage: agentop tasks limpar-revisao [--json|--out <file>] [--apply <plan.json>]'); process.exit(2) }
+  const { runReviewClean } = await import('../server/sessions/review-clean.ts')
+  process.exit(await runReviewClean(args.slice(1)))
 }
 
 if (command === 'hooks') {

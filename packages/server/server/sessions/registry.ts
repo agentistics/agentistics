@@ -601,6 +601,16 @@ const defaultRegistry = withIdentityPreferences(createSessionRegistry(MANAGED_SE
 })
 
 export const readRegistry = (): Promise<ManagedSession[]> => defaultRegistry.read()
+/** True when the persisted fleet document exists but cannot be parsed safely. */
+export async function registryUnreadable(file = MANAGED_SESSIONS_FILE): Promise<boolean> {
+  try {
+    const raw = await readFile(file, 'utf8')
+    if (!raw.trim()) return false
+    return !Array.isArray(JSON.parse(raw))
+  } catch {
+    try { await stat(file); return true } catch { return false }
+  }
+}
 export const adoptSessionRecords = (rs: readonly ManagedSession[]): Promise<void> => defaultRegistry.adopt(rs)
 export const addSession = (s: ManagedSession): Promise<void> => defaultRegistry.add(s)
 export const removeSession = (id: string): Promise<void> => defaultRegistry.remove(id)

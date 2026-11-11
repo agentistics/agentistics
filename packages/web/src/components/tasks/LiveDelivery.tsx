@@ -149,7 +149,9 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet
   const shown = useMemo(() => filterCards(cards, { taskIds, tab, period, nowMs }), [cards, taskIds, tab, period, nowMs])
   const counts = useMemo(() => tabCounts(cards, { taskIds, period, nowMs }), [cards, taskIds, period, nowMs])
   const columns = useMemo(() => orderColumns(byStage(shown), sort), [shown, sort])
-  const visibleStages = stageFilter === 'all' ? LIVE_STAGES : LIVE_STAGES.filter(s => s === stageFilter)
+  const visibleStages = stageFilter === 'all'
+    ? LIVE_STAGES.filter(s => s !== 'no-leader' || columns[s].length > 0)
+    : LIVE_STAGES.filter(s => s === stageFilter)
   const sum = useMemo(() => summarize(shown, nowMs), [shown, nowMs])
   const options = useMemo(() => taskOptions(cards, nowMs), [cards, nowMs])
   const leaders = reply?.leaders ?? []

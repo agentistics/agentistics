@@ -5,7 +5,7 @@
  * same tree. The sheet starts folded; the aside expands the area holding the current URL. Group
  * headings only expand/collapse; their child pages navigate. A single-page area navigates directly.
  */
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { NavLink, useNavigate } from 'react-router-dom'
@@ -82,7 +82,7 @@ function Badge({ n }: { n: number }) {
     <span
       data-area-badge
       style={{
-        marginLeft: 'auto', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, boxSizing: 'border-box',
+        marginLeft: 'auto', flexShrink: 0, minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, boxSizing: 'border-box',
         ...SOLID_COUNT, fontSize: 11, fontWeight: 700,
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       }}
@@ -97,6 +97,10 @@ export interface AreaTreeProps {
   variant?: 'aside' | 'sheet'
   badges?: Partial<Record<AreaId, number>>
   onNavigate?: (to: string) => void
+  /** Widen the host aside when a collapsed group is selected. */
+  onExpand?: () => void
+  /** The rail already selected a group; mounting its tree is not a route arrival. */
+  preserveOpenOnMount?: boolean
   /** Settings section ids this viewer may see (`visibleSettingsSections`). Absent = all of them. */
   visibleSettings?: ReadonlySet<string>
 }
@@ -118,13 +122,22 @@ export function areaTrailingStyle(sheet: boolean): React.CSSProperties {
 
 const GROUP_HEADING = { personal: { pt: 'Pessoal', en: 'Personal' }, governance: { pt: 'Governança', en: 'Governance' } } as const
 
-export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside', badges = {}, onNavigate, visibleSettings }: AreaTreeProps) {
+export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside', badges = {}, onNavigate, onExpand, preserveOpenOnMount = false, visibleSettings }: AreaTreeProps) {
   const navigate = useNavigate()
   const go = (to: string) => { rememberAreaPath(to); (onNavigate ?? navigate)(to) }
   const sheet = variant === 'sheet'
   const pt = lang === 'pt'
   const current = areaOfPath(pathname)
   const openMap = useSyncExternalStore(areaOpenStore.subscribe, areaOpenStore.get, areaOpenStore.serverSnapshot)
+  const navRef = useRef<HTMLElement>(null)
+  const focusArea = useRef<AreaId | null>(null)
+  useLayoutEffect(() => {
+    if (collapsed || !focusArea.current) return
+    const heading = navRef.current?.querySelector<HTMLButtonElement>(`[data-area-heading="${focusArea.current}"]`)
+    heading?.focus({ preventScroll: true })
+    heading?.scrollIntoView?.({ block: 'nearest' })
+    focusArea.current = null
+  }, [collapsed])
   const [sheetArea, setSheetArea] = useState<AreaId | null>(null)
   const expandedArea = (area: Area) => sheet ? sheetArea === area.id : isAreaOpen(openMap, area.id, current?.area.id === area.id)
   const [query, setQuery] = useState('')
@@ -134,7 +147,12 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
   // Arriving in an area by ANY route (the rail, the sheet, a link) collapses areas left open from
   // earlier visits, exactly like choosing it in the tree does. Writes only when something changes.
   const currentId = current?.area.id
+  const preserveInitialOpen = useRef(preserveOpenOnMount)
+  const previousArea = useRef(preserveOpenOnMount ? currentId : undefined)
   useEffect(() => {
+    // Compare routes rather than counting effect runs: StrictMode replays mount effects.
+    if (preserveInitialOpen.current && previousArea.current === currentId) return
+    previousArea.current = currentId
     if (sheet || !currentId) return
     const map = areaOpenStore.get()
     // Arriving is also asking to see it: a `false` left by opening another area by hand is cleared.
@@ -159,10 +177,15 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
           data-area-heading={area.id}
           aria-label={collapsed ? label : undefined}
           aria-current={active && !area.pages.length ? 'page' : undefined}
-          aria-expanded={hasPages ? expanded : undefined}
+          aria-expanded={hasPages ? !collapsed && expanded : undefined}
           onClick={() => {
             if (hasPages) {
               if (sheet) setSheetArea(expanded ? null : area.id)
+              else if (collapsed) {
+                focusArea.current = area.id
+                areaOpenStore.set({ ...areaOpenStore.get(), [area.id]: true })
+                onExpand?.()
+              }
               else areaOpenStore.set(toggledAreaOpen(openMap, area.id, active, current?.area.id))
             } else go(to)
           }}
@@ -180,7 +203,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
             {AREA_ICON[area.icon](17)}
             {collapsed && n ? <span aria-hidden style={{ position: 'absolute', top: -3, right: -4, width: 8, height: 8, borderRadius: 4, background: 'var(--anthropic-orange)' }} /> : null}
           </span>
-          {!collapsed && label}
+          {!collapsed && <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>}
           {!collapsed && area.beta && <BetaTag what={label} lang={lang} style={{ marginLeft: 4 }} />}
           {!collapsed && n ? <Badge n={n} /> : null}
         </button>
@@ -270,7 +293,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
   )
 
   return (
-    <nav aria-label={pt ? 'Áreas do app' : 'App areas'} style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
+    <nav ref={navRef} aria-label={pt ? 'Áreas do app' : 'App areas'} style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
       {!collapsed && (
         <div
           id="ag-area-search"

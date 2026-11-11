@@ -74,6 +74,55 @@ test('link failure rolls back the subtask', async () => {
   expect((await x.store.read()).subtasks).toHaveLength(0)
 })
 
+test('automatic placement already linked the pedido: preserve and enrich its card instead of relinking a closed pedido', async () => {
+  const x = await world()
+  let pedidoId = ''
+  const d: ComposerTaskDeps = {
+    ...x.d,
+    emit: async event => {
+      const p = event.payload
+      pedidoId = `p-${createHash('sha256').update(`${p.conversationId}\0${p.at}\0${p.text}`).digest('hex').slice(0, 12)}`
+      await x.store.upsertSubtask({ id: 's-placed', taskId: 't1', title: `Owner request · ${pedidoId}`, status: 'todo', done: false, createdAt: String(p.at), updatedAt: String(p.at) })
+      return []
+    },
+    pedido: async () => ({ id: pedidoId, taskId: 't1', state: 'linked', linkedSubtaskIds: ['s-placed'] }),
+    run: async () => ({ status: 'refused', refusal: { message: 'pedido is already linked' } }),
+  }
+  const register = x.store.registerComposerSubtask.bind(x.store)
+  const adoption = spyOn(x.store, 'registerComposerSubtask').mockImplementation(async card => {
+    // A worker can file the engine's card after the caller read it but before the store's lock.
+    const placed = (await x.store.read()).subtasks.find(s => s.id === 's-placed')!
+    await x.store.upsertSubtask({ ...placed, status: 'in_progress', assignee: 'worker' })
+    return register(card)
+  })
+  const result = await registerComposerTask(request, 'en', d)
+  adoption.mockRestore()
+  expect(result.ok).toBe(true)
+  expect((await x.store.read()).subtasks).toMatchObject([{ id: 's-placed', status: 'in_progress', assignee: 'worker', title: 'Fix the calendar', priority: 'high', dueDate: '2026-11-12', ownerRequest: { messageId: 'msg-1' } }])
+  expect((await registerComposerTask(request, 'en', d)).ok).toBe(true)
+  expect((await x.store.read()).subtasks).toHaveLength(1)
+})
+
+test('a canonical link to an unrelated card is refused without changing or deleting it', async () => {
+  const x = await world()
+  const alien = { id: 's-alien', taskId: 't1', title: 'Unrelated work', status: 'in_progress', done: false, createdAt: '2026-11-09T10:00:00Z', updatedAt: '2026-11-09T10:00:00Z' }
+  await x.store.upsertSubtask(alien)
+  const result = await registerComposerTask(request, 'en', { ...x.d, pedido: async () => ({ id: 'p-other', taskId: 't1', state: 'linked', linkedSubtaskIds: [alien.id] }) })
+  expect(result.ok).toBe(false)
+  expect((await x.store.read()).subtasks).toEqual([alien])
+})
+
+test('a committed link whose response was lost keeps its card and completes successfully', async () => {
+  const x = await world()
+  let ids: string[] = []
+  const d: ComposerTaskDeps = { ...x.d, sleep: async () => {},
+    pedido: async id => ({ id, taskId: 't1', state: ids.length ? 'linked' : 'open', linkedSubtaskIds: ids }),
+    run: async (_name, input) => { ids = input.subtaskIds as string[]; throw new Error('response lost after commit') },
+  }
+  expect((await registerComposerTask(request, 'en', d)).ok).toBe(true)
+  expect((await x.store.read()).subtasks.map(s => s.id)).toEqual(ids)
+})
+
 test('event rollback never removes an unrelated concurrent subtask', async () => {
   const x = await world()
   const alien = { id: 's-alien', taskId: 't1', title: 'Parallel work', status: 'todo' as const, done: false,

@@ -14,7 +14,9 @@ const oc = (id: string, day: string, usd: number): SessionMeta => ({
   model_usage: { [model]: { inputTokens: 150171, outputTokens: 29678, cacheReadInputTokens: 6087671, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: usd, costSource: 'harness' } },
   git_commits: 0, files_modified: 0, user_message_timestamps: [`${day}T05:07:49.756Z`], message_hours: [5],
 }) as unknown as SessionMeta
-const sessions = [oc('a', '2026-11-08', 1.92), oc('b', '2026-11-09', 2.26)]
+// Days relative to today: the streak counts back from today, so fixed dates broke the day after.
+const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10)
+const sessions = [oc('a', daysAgo(1), 1.92), oc('b', daysAgo(0), 2.26)]
 const data: AppData = { statsCache: emptyStatsCache(), sessions, allSessions: [], projects: [], harnesses: ['claude', 'opencode'] }
 const filters: Filters = { ...base, harnesses: ['opencode'] }
 

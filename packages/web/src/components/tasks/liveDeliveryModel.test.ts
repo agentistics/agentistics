@@ -35,6 +35,14 @@ describe('joinLive', () => {
     const [c] = joinLive([rec({ stage: 'adjust', blockedReason: 'waiting for codex' })], [])
     expect(c!.alert).toBe(true)
   })
+  test('absence projects a review into No leader without changing its real stage; unknown stays in review', () => {
+    const [absent] = joinLive([rec({ stage: 'leader', leaderAvailability: 'absent' })], [])
+    expect(absent!.d.stage).toBe('leader')
+    expect(absent!.displayStage).toBe('no-leader')
+    expect(byStage([absent!])['no-leader']).toHaveLength(1)
+    const [unknown] = joinLive([rec({ stage: 'leader', leaderAvailability: 'unknown' })], [])
+    expect(unknown!.displayStage).toBe('leader')
+  })
 })
 
 describe('liveStateOf', () => {

@@ -43,6 +43,8 @@ export interface CalPiece {
   taskTitle: string
   subtaskId: string | null
   title: string
+  kind?: 'owner-request'
+  leaderAvailabilityReasonCode?: 'fleet-unreadable' | 'no-live-leader'
   stage: CalStage
   /** The release version it rides (`2.202.0`); null when none is declared (or the piece was deferred to `next`). */
   version: string | null
@@ -105,6 +107,8 @@ export interface CalLiveInput {
   taskTitle: string
   subtaskId: string | null
   title: string
+  kind?: 'owner-request'
+  leaderAvailabilityReasonCode?: 'fleet-unreadable' | 'no-live-leader'
   stage: CalStage
   startedAtMs: number | null
   stageSinceMs: number | null
@@ -133,6 +137,9 @@ export interface CalResetInput { harness: string; account: string; label: string
 const toPriority = (p: string | undefined): CalPriority | null => (p === 'urgent' || p === 'high' || p === 'medium' || p === 'low' ? p : null)
 const pickVersion = (v: string | undefined): string | null => (v && v !== 'next' && /^\d+\.\d+\.\d+/.test(v) ? v : null)
 const parseMs = (iso: string | undefined): number | null => { const n = iso ? Date.parse(iso) : NaN; return Number.isFinite(n) ? n : null }
+/** Calendar-only deadlines expire after their day; explicit local times expire at that clock reading. */
+const deadlinePassed = (due: string | null, nowMs: number, today: string) =>
+  due !== null && (due.includes('T') ? Date.parse(due) < nowMs : due < today)
 const eta = (e: { kind: string; atMs?: number; reason?: string }, confidence: CalConfidence | null): CalEta =>
   e.kind === 'estimate' && typeof e.atMs === 'number' ? { kind: 'estimate', atMs: e.atMs, confidence } : { kind: 'none', reason: e.reason ?? null }
 
@@ -173,7 +180,7 @@ export function buildCalendar(o: {
     const dueDate = sub?.dueDate ?? task?.dueDate ?? null
     const published = l.stage === 'published'
     pieces.push({
-      key: l.key, taskId: l.taskId, taskTitle: l.taskTitle, subtaskId: l.subtaskId, title: l.title, stage: l.stage,
+      key: l.key, taskId: l.taskId, taskTitle: l.taskTitle, subtaskId: l.subtaskId, title: l.title, ...(l.kind ? { kind: l.kind } : {}), ...(l.leaderAvailabilityReasonCode ? { leaderAvailabilityReasonCode: l.leaderAvailabilityReasonCode } : {}), stage: l.stage,
       version: pickVersion(rec?.versionTarget),
       harness: l.harnesses[0] ?? null, model: l.models[0] ?? null,
       priority: toPriority(sub?.priority ?? task?.priority),
@@ -182,7 +189,7 @@ export function buildCalendar(o: {
       stageEta: published ? { kind: 'none', reason: 'final' } : eta(l.stageEta, confidence),
       publishEta, publishedAtMs, dueDate,
       confirmed: published || (publishEta.kind === 'estimate' && publishEta.confidence !== null && RANK[publishEta.confidence] >= RANK.medium),
-      late: !published && ((dueDate !== null && dueDate < today) || (publishEta.kind === 'estimate' && publishEta.atMs < o.nowMs)),
+      late: !published && (deadlinePassed(dueDate, o.nowMs, today) || (publishEta.kind === 'estimate' && publishEta.atMs < o.nowMs)),
     })
     seen.add(l.key)
   }
@@ -207,7 +214,7 @@ export function buildCalendar(o: {
         startedAtMs: parseMs(r.firstAt), stageSinceMs: parseMs(r.lastAt), trail: [],
         stageEta: { kind: 'none', reason: 'not-started' }, publishEta: { kind: 'none', reason: 'not-started' },
         publishedAtMs: null, dueDate, confirmed: false,
-        late: dueDate !== null && dueDate < today,
+        late: deadlinePassed(dueDate, o.nowMs, today),
       })
       continue
     }
@@ -269,7 +276,7 @@ export function buildCalendar(o: {
   const marks: CalMark[] = o.resets.map(r => ({ kind: 'account-reset' as const, atMs: r.resetsAt, harness: r.harness, account: r.account, label: r.label, window: r.window }))
   for (const t of o.tasks) {
     if (!t.dueDate || t.status === 'done') continue
-    marks.push({ kind: 'task-due', day: t.dueDate, taskId: t.id, label: t.title, priority: toPriority(t.priority) })
+    marks.push({ kind: 'task-due', day: t.dueDate.slice(0, 10), taskId: t.id, label: t.title, priority: toPriority(t.priority) })
   }
   return { generatedAt: new Date(o.nowMs).toISOString(), nowMs: o.nowMs, timezone: CAL_TZ, pieces, versions, marks }
 }

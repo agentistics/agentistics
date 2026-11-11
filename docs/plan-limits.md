@@ -1,5 +1,12 @@
 # Account availability and plan limits
 
+The sidebar Plan usage popup uses one compact circle per account: the upper arc shows the
+5-hour window and the lower arc shows the week, with the existing green/amber/red thresholds.
+Percentages and known reset times remain beside it and in its hover/focus description. Scoped
+windows keep their individual labels; each arc shows the highest usage in its window kind.
+The scrollbar sits at the popup edge. An orange chevron 4px above the scroll area's bottom appears
+while more content remains; clicking it smoothly advances by a rounded number of visible accounts.
+
 The Plan usage modal also offers **Agent use** on each registered account card. The switch saves
 through `PATCH /api/accounts/:id` with `{ "available": boolean }`. It changes immediately while
 saving; a failed save restores the previous choice and shows an error toast. Accounts switched off

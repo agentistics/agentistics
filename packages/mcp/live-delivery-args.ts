@@ -1,5 +1,5 @@
 /** PURE: the query string (with its `?`, or empty) an `agentistics_live_delivery` call stands for. */
-export const LIVE_STAGES = ["queue", "running", "qa", "adjust", "leader", "merge", "published"] as const;
+export const LIVE_STAGES = ["queue", "running", "qa", "adjust", "leader", "no-leader", "merge", "published"] as const;
 /** The order a stage's cards are listed in — the same three the screen's "Ordenar" offers. */
 export const LIVE_SORTS = ["priority", "time-in-stage", "recent"] as const;
 /** The screen's tabs (Em andamento · Na fila · Publicado · Tudo) and the Publicado period. */
