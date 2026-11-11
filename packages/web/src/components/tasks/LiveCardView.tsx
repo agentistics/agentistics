@@ -10,7 +10,7 @@
  */
 
 import React from 'react'
-import { ArrowLeft, Check, CalendarClock, CircleDashed, Clock, CornerDownRight, ExternalLink } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, CalendarClock, CircleDashed, Clock, CornerDownRight, ExternalLink } from 'lucide-react'
 import type { FleetRow } from '../../lib/fleet'
 import { accountDisplayName } from '../../lib/planLimits'
 import { describeLastAction, shortTitle } from '@agentistics/core'
@@ -78,7 +78,7 @@ export function LiveCardView(p: LiveCardViewProps) {
 
   return (
     <button
-      type="button" data-live-card={d.key} data-stage={d.stage} data-alert={c.alert ? '1' : undefined} data-queued={queued ? '1' : undefined}
+      type="button" data-live-card={d.key} data-stage={c.displayStage} data-alert={c.alert ? '1' : undefined} data-queued={queued ? '1' : undefined}
       onClick={() => p.onOpen(c)}
       style={{
         ...surface, display: 'grid', gap: 5, textAlign: 'left', width: '100%', padding: mobile ? '10px 12px' : '8px 9px',
@@ -96,6 +96,7 @@ export function LiveCardView(p: LiveCardViewProps) {
       <span style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
         <span title={d.title} data-live-title style={{ flex: 1, minWidth: 0, fontWeight: 650, fontSize: 12, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{shortTitle(d.title)}</span>
         {d.old && <span data-live-old title={pt ? 'Revisão de antes do fluxo, sem prova de publicação e sem ninguém nela. Decida no botão Antigas, na barra desta aba.' : 'A review from before the flow, with no proof of release and nobody on it. Decide it from the Old button, in this tab\'s bar.'} style={{ flexShrink: 0, fontSize: 10, padding: '1px 6px', borderRadius: 999, border: '1px solid var(--border)', color: 'var(--text-tertiary)' }}>{pt ? 'antiga' : 'old'}</span>}
+        {d.kind === 'owner-request' && <span data-live-kind="owner-request" style={{ flexShrink: 0, fontSize: 9.5, color: MUTED }}>{pt ? 'Pedido do dono' : "Owner's request"}</span>}
         <LivePriorityChip priority={d.priority} pt={pt} />
       </span>
       {ctx && <span style={{ fontSize: 11, color: MUTED, overflowWrap: 'anywhere', lineHeight: 1.3 }}>{ctx}</span>}
@@ -107,6 +108,8 @@ export function LiveCardView(p: LiveCardViewProps) {
         {queued && <span data-live-queued style={{ color: MUTED, letterSpacing: '.04em', fontSize: 10.5 }}>{pt ? 'NA FILA' : 'QUEUED'}{pos ? ` · ${pos}${pt ? 'º' : pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'}` : ''}</span>}
       </span>
       {reason && <span data-live-reason style={{ display: 'flex', gap: 5, alignItems: 'flex-start', fontSize: 11.5, color: 'var(--accent-yellow, #e5b341)', lineHeight: 1.3, overflowWrap: 'anywhere' }}><Clock size={12} aria-hidden style={{ flexShrink: 0, marginTop: 1 }} /><span>{reason}</span></span>}
+      {d.leaderAvailability === 'absent' && <span data-live-no-leader style={{ display: 'flex', gap: 5, alignItems: 'flex-start', fontSize: 11.5, color: 'var(--accent-yellow, #e5b341)', lineHeight: 1.3, overflowWrap: 'anywhere' }}><AlertTriangle size={12} aria-hidden style={{ flexShrink: 0, marginTop: 1 }} /><span>{pt ? 'Sem líder · ' : 'No leader · '}{d.leaderAvailabilityReasonCode === 'no-live-leader' ? (pt ? 'nenhum líder vivo nesta tarefa' : 'no live leader is filed on this task') : d.leaderAvailabilityReason ?? (pt ? 'nenhum líder vivo nesta tarefa' : 'no live leader on this task')}</span></span>}
+      {d.leaderAvailability === 'unknown' && <span data-live-leader-unknown style={{ display: 'flex', gap: 5, alignItems: 'flex-start', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.3, overflowWrap: 'anywhere' }}><AlertTriangle size={12} aria-hidden style={{ flexShrink: 0, marginTop: 1 }} /><span>{pt ? 'Leitura do líder indisponível' : 'Leader availability could not be read'}</span></span>}
 
       {block && (
         <span data-live-block style={{ display: 'grid', gap: 1, fontSize: 11.5, padding: '5px 7px', borderRadius: 6, background: 'rgba(229,72,77,.10)', border: '1px solid rgba(229,72,77,.35)' }}>

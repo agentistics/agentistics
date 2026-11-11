@@ -58,7 +58,8 @@ export function CalendarDetail({ selection, anchor, pieces, versions, marks, now
     const p = pieces.find(x => x.key === selection.key)
     if (!p) return null
     taskId = p.taskId; title = p.title
-    sub = <>{pick(TEXT.taskWord, pt)} · {p.taskTitle}</>
+    sub = <>{p.kind === 'owner-request' && <span style={{ marginRight: 6, color: 'var(--text-tertiary)', fontSize: 10 }}>{pt ? 'Pedido do dono' : "Owner's request"}</span>}{pick(TEXT.taskWord, pt)} · {p.taskTitle}</>
+    if (p.leaderAvailabilityReasonCode) sub = <>{sub}<span data-cal-leader-reason style={{ display: 'block', color: 'var(--text-tertiary)', marginTop: 4 }}>{pt ? 'Sem líder · nenhum líder vivo nesta tarefa' : 'No leader · no live leader is filed on this task'}</span></>
     body = (
       <>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>

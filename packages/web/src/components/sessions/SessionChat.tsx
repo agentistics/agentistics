@@ -1,5 +1,5 @@
 import { HandoffBand } from './HandoffWarning'
-import { ComposerTaskButton, ComposerTaskFields, useComposerTask } from '../chat/ComposerTask'
+import { ComposerTaskButton, useComposerTask } from '../chat/ComposerTask'
 import { AccountLimitBand, AccountLoginBand } from './AccountSwitch'
 /**
  * SessionChat — one live session, read as a conversation.
@@ -396,6 +396,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const [loaded] = useState(() => loadComposer(scratchId))
   const [draft, setDraft] = useState(loaded.draft)
   const composerTask = useComposerTask()
+  const [taskSendError, setTaskSendError] = useState<string | null>(null)
+  useEffect(() => setTaskSendError(null), [session.id])
   const [taskSuggestion, setTaskSuggestion] = useState(false)
   useEffect(() => {
     setTaskSuggestion(false)
@@ -2537,6 +2539,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     const restore = { draft, attached, replyTo }
     const taskRequest: ReturnType<typeof composerTask.take> = answeringNow ? {} : composerTask.take(full)
     setSending(true)
+    setTaskSendError(null)
     setDeliveryFailure(null)
     // A SOURCE draws its own optimistic turn (the native runtime's `sent`); an echo would be a second copy.
     if (sentHere.current.id !== session.id) sentHere.current = { id: session.id, texts: new Set() }
@@ -2604,6 +2607,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // The server may already hold the message (it is drawn as delivered): then keep the echo and
     // leave the composer empty instead of duplicating it.
     if (out.failure === 'prompt' || out.failure === 'ended') setDeliveryFailure(out.failure)
+    if (taskRequest.asTask && !out.confirm) setTaskSendError(out.message)
     if (!out.confirm && !shouldRestoreDraft(pendingRef.current, full)) { setNotice(out.message); return }
     editEcho(list => list.filter(t => t !== full))
     // EXT.OPEN: not a failure — a QUESTION. The words stay in the field, and the one confirmation
@@ -3723,13 +3727,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     The gap is 6 rather than 4, and the two halves are separated by the whole
                     remaining width: asked for a row where the controls "nao fiquem entulhados". A
                     row of touching 34px squares reads as one object with lines in it. */}
-                {!answeringNow && <ComposerTaskFields options={composerTask.options} onChange={composerTask.setOptions} pt={pt} />}
                 {!answeringNow && taskSuggestion && <button type="button" className="ag-composer-task-control"
                   onClick={() => composerTask.setOptions({ priority: 'medium' })}>
                   {pt ? 'Parece um pedido — criar tarefa?' : 'Looks like a request — create a task?'}
                 </button>}
                 <ComposerToolbar>
-                {!answeringNow && <ComposerTaskButton options={composerTask.options} onChange={composerTask.setOptions} disabled={!canPrompt || sending} pt={pt} />}
                 {/* ANSWERING A QUESTION IS NOT WRITING A PROMPT, so the row is not the same row.
                     An answer travels a different route — `answerSession` presses the option's
                     digit, waits for the field to open, then types ONE line and returns — and an
@@ -3773,6 +3775,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 {!answeringNow && (
                   <EngineSurfaceButtons placement="composer" sessionId={session.id} sessionKind={isNayCwd(session.cwd) ? 'nay' : 'session'} slotId={engineSlotId} lang={pt ? 'pt' : 'en'} />
                 )}
+                {!answeringNow && <ComposerTaskButton options={composerTask.options} onChange={composerTask.setOptions} disabled={!canPrompt || sending} pt={pt} />}
 
                 {/* THE CONTEXT GAUGE (design item 3, owner 2026-09-27) — right after the
                     microphone, the header's old "66%" tab moved down into the composer it was
@@ -4253,7 +4256,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     )}
               </div>
               </div>
-              {!updateOffer && (notice ?? source?.notice) && (
+              {taskSendError && <p role="alert" data-composer-task-error style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--accent-red)', lineHeight: 1.5 }}>{taskSendError}</p>}
+              {!taskSendError && !updateOffer && (notice ?? source?.notice) && (
                 <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                   {notice ?? source?.notice}
                 </p>

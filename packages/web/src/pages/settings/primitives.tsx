@@ -971,9 +971,22 @@ export function popoverStyle(pos: PopoverRect | null): React.CSSProperties {
     position: 'fixed',
     left: pos?.left ?? 0,
     ...(pos?.bottom !== undefined ? { bottom: pos.bottom } : { top: pos?.top ?? 0 }),
-    width: pos?.width,
+    width: 'max-content',
+    minWidth: pos ? Math.min(pos.width, typeof window === 'undefined' ? pos.width : window.innerWidth - 16) : undefined,
+    maxWidth: 'calc(100vw / var(--ui-zoom, 1) - 16px)',
+    boxSizing: 'border-box',
     zIndex: 1200,
   }
+}
+
+/** Clamp after intrinsic sizing, before paint: a short trigger may open a much wider list. */
+function usePopoverContentPosition(ref: React.RefObject<HTMLDivElement | null>, open: boolean, pos: PopoverRect | null) {
+  React.useLayoutEffect(() => {
+    const panel = ref.current
+    if (!open || !pos || !panel) return
+    const width = panel.getBoundingClientRect().width
+    panel.style.left = `${Math.max(8, Math.min(pos.left, window.innerWidth - width - 8))}px`
+  })
 }
 
 /** The synthetic value of the "create" row a creatable `Select` appends; never reaches `onChange`. */
@@ -1024,6 +1037,7 @@ export function Select({ value, onChange, options, placeholder, disabled, search
   // as soon as the form was long enough to scroll.
   const [pos, setPos] = React.useState<PopoverRect | null>(null)
   const POPOVER_MAX_H = 280
+  usePopoverContentPosition(listRef, open, pos)
 
   const showSearch = creatable ? true : (searchable ?? options.length > 8)
   const matched = (showSearch && query.trim())
@@ -1039,7 +1053,7 @@ export function Select({ value, onChange, options, placeholder, disabled, search
     if (!open) return
     // "Inside" is the trigger's wrapper OR the list — the list is portalled out of the wrapper.
     const inside = (t: EventTarget | null) => {
-      const n = t as Node | null
+      const n = t instanceof Node ? t : null
       return !!n && (!!wrapperRef.current?.contains(n) || !!listRef.current?.contains(n))
     }
     const handleClickOutside = (e: MouseEvent) => {
@@ -1242,7 +1256,7 @@ export function Select({ value, onChange, options, placeholder, disabled, search
                 onMouseEnter={() => setActiveIndex(idx)}
                 style={{
                   padding: isMobile ? '11px 12px' : '8px 10px',
-                  minHeight: isMobile ? 44 : undefined,
+                  minHeight: isMobile ? 44 : 32,
                   boxSizing: 'border-box',
                   borderRadius: 6,
                   fontSize: 13,
@@ -1257,7 +1271,7 @@ export function Select({ value, onChange, options, placeholder, disabled, search
                   transition: 'background 0.1s, color 0.1s',
                 }}
               >
-                <span style={{ flex: 1 }}>{opt.label}</span>
+                <span style={{ flex: 1, whiteSpace: 'nowrap' }}>{opt.label}</span>
                 {opt.hint && (
                   <span style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{opt.hint}</span>
                 )}
@@ -1325,6 +1339,8 @@ export function MultiPicker({
   const [panelMaxH, setPanelMaxH] = React.useState(340)
   const wrapperRef = React.useRef<HTMLDivElement>(null)
   const searchRef = React.useRef<HTMLInputElement>(null)
+  const panelRef = React.useRef<HTMLDivElement>(null)
+  usePopoverContentPosition(panelRef, open, pos)
   const PANEL_MAX_H = 340
   // Ticking a checkbox reliably delivers a SECOND, browser-generated click to the trigger button
   // right after (same coordinates, no intervening mousedown/mouseup — verified with instrumented
@@ -1354,7 +1370,7 @@ export function MultiPicker({
     // options), which closed the whole picker the moment a user scrolled to reach — let alone
     // clicked — anything past the first screenful. Only close for a scroll outside this component.
     const onScroll = (e: Event) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) close()
+      if (wrapperRef.current && (!(e.target instanceof Node) || !wrapperRef.current.contains(e.target))) close()
     }
     document.addEventListener('mousedown', onDown)
     window.addEventListener('scroll', onScroll, true)
@@ -1372,7 +1388,7 @@ export function MultiPicker({
     const rect = wrapperRef.current?.getBoundingClientRect()
     if (rect) {
       const base = popoverPosition(rect, PANEL_MAX_H, window.innerHeight)
-      const width = Math.max(base.width ?? rect.width, Math.min(panelMinWidth ?? 0, window.innerWidth - 16))
+      const width = Math.min(window.innerWidth - 16, Math.max(base.width, panelMinWidth ?? 0))
       // Wider than its trigger: keep it on screen (a trigger near the right edge would push it off).
       setPos({ ...base, width, left: Math.max(8, Math.min(base.left, window.innerWidth - width - 8)) })
       setPanelMaxH(popoverRoom(rect, base, PANEL_MAX_H, window.innerHeight))
@@ -1422,6 +1438,7 @@ export function MultiPicker({
 
       {open && (
         <div
+          ref={panelRef}
           role="listbox"
           style={{
             ...popoverStyle(pos),
@@ -1453,7 +1470,7 @@ export function MultiPicker({
               />
             </div>
           )}
-          <div style={{ overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ overflow: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             {filtered.length === 0 && (
               <span style={{ fontSize: 12, color: 'var(--text-tertiary)', padding: '8px 4px' }}>{emptyLabel}</span>
             )}
@@ -1472,12 +1489,12 @@ export function MultiPicker({
                     opacity: o.disabled ? 0.45 : 1, pointerEvents: o.disabled ? 'none' : undefined,
                   }}>
                   <Checkbox checked={on} onChange={toggleRow} label="" ariaLabel={o.label} />
-                  {/* The label owns the room the count does not: at most two lines, ellipsis after, never over the count. */}
+                  {/* Intrinsic width keeps ordinary labels on one line; overlong rows scroll inside the viewport cap. */}
                   <span
                     onClick={() => toggleRow(!on)}
                     style={{
-                      flex: 1, minWidth: 0, fontSize: 12, lineHeight: 1.3, color: 'var(--text-secondary)', cursor: 'pointer',
-                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere',
+                      flex: '1 0 auto', fontSize: 12, lineHeight: 1.3, color: 'var(--text-secondary)', cursor: 'pointer',
+                      whiteSpace: 'nowrap',
                     }}
                   >{o.label}</span>
                   {o.hint && <span style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', flexShrink: 0, marginLeft: 'auto' }}>{o.hint}</span>}

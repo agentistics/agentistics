@@ -19,6 +19,16 @@ test('composer subtask priority and due date take precedence over its parent on 
 })
 const H = 3600_000
 
+test('a local composer deadline keeps its time and becomes late at that time, while day marks stay calendar days', () => {
+  const dueDate = '2026-11-12T14:35'
+  const nowMs = Date.parse(dueDate) + 60_000
+  const reply = buildCalendar({ nowMs, resets: [], tasks: [{ id: 't1', title: 'Timed', status: 'in_progress', dueDate }],
+    subtasks: [{ id: 's1', taskId: 't1', title: 'Explicit', dueDate }], lives: [], records: [{ subtaskId: 's1', taskId: 't1', phase: 'fila' }],
+  })
+  expect(reply.pieces[0]).toMatchObject({ dueDate, late: true })
+  expect(reply.marks[0]).toMatchObject({ kind: 'task-due', day: '2026-11-12' })
+})
+
 const live = (o: Partial<CalLiveInput> & { key: string; taskId: string; stage: CalLiveInput['stage'] }): CalLiveInput => ({
   taskTitle: `Task ${o.taskId}`, subtaskId: o.key.split('/')[1] ?? null, title: `Piece ${o.key}`,
   startedAtMs: NOW - 5 * H, stageSinceMs: NOW - H, harnesses: ['claude'], models: ['opus'],

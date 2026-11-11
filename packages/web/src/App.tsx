@@ -894,7 +894,7 @@ function SideNav({
       ) : (
       <>
       <div className="ag-noscroll" style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1, paddingTop: 4 }}>
-        <AreaTree lang={pt ? 'pt' : 'en'} pathname={location.pathname} collapsed={collapsed} badges={areaBadgeCounts} visibleSettings={visibleSettings} />
+        <AreaTree lang={pt ? 'pt' : 'en'} pathname={location.pathname} collapsed={collapsed} onExpand={onToggle} badges={areaBadgeCounts} visibleSettings={visibleSettings} />
       </div>
 
       {/* The resize handle. Unchanged — dashboard-mode keeps its plain edge-line resizer; the gap-

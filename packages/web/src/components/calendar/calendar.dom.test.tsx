@@ -9,6 +9,7 @@ import { icsQuery } from './DeliveryCalendar'
 import { DEFAULT_FILTERS, filtersActive, readCalendarFilters, toCalFilters } from './CalendarFilters'
 import { MobileDayGrid, phoneEvents } from './MobileDayGrid'
 import { MobileCalendar } from './MobileCalendar'
+import { CalendarDetail } from './CalendarDetail'
 
 const NOW = Date.parse('2026-11-07T18:40:00.000Z') // Sat 07/11 15h40 BRT
 const H = 3600_000
@@ -67,6 +68,15 @@ test('month: a published version and a planned one are ribbons; the version with
   expect(document.querySelector('[data-cal-ribbon="2.202.0"][data-cal-state="planned"]')!.textContent).toContain('prevista')
   expect(document.querySelector('[data-cal-ribbon="2.203.0"]')!.textContent).toContain('sem estimativa')
   expect(document.querySelector('[data-cal-due="t"]')).not.toBeNull()
+})
+
+test('calendar detail localizes the leader reason', async () => {
+  const piece = { ...view.pieces[0]!, leaderAvailabilityReasonCode: 'no-live-leader' as const }
+  await mount(createElement(MemoryRouter, null, createElement(CalendarDetail, { selection: { kind: 'piece', key: piece.key }, anchor: null, pieces: [piece], versions: [], marks: [], nowMs: NOW, pt: true, isMobile: false, onClose: noop, onSelect: noop })))
+  expect(document.querySelector('[data-cal-leader-reason]')!.textContent).toContain('nenhum líder vivo')
+  await act(async () => { root!.unmount(); root = undefined; document.body.innerHTML = '' })
+  await mount(createElement(MemoryRouter, null, createElement(CalendarDetail, { selection: { kind: 'piece', key: piece.key }, anchor: null, pieces: [piece], versions: [], marks: [], nowMs: NOW, pt: false, isMobile: false, onClose: noop, onSelect: noop })))
+  expect(document.querySelector('[data-cal-leader-reason]')!.textContent).toContain('no live leader is filed')
 })
 
 test('schedule: pieces by priority, a bar per piece, the "now" line, and "sem estimativa" where the model has none', async () => {

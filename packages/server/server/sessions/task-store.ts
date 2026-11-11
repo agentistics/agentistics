@@ -112,7 +112,7 @@ export interface TaskStore {
   updateThread(id: string, fn: (t: TaskThread) => TaskThread): Promise<boolean>
   updateComment(id: string, fn: (c: TaskComment) => TaskComment): Promise<boolean>
   upsertSubtask(t: Subtask): Promise<void>
-  /** Atomic insert-if-absent by message id; retries never overwrite progress. */
+  /** Atomic insert/adopt by message id; retries and adoption never overwrite progress. */
   registerComposerSubtask(t: Subtask): Promise<Subtask | null>
   removeSubtask(id: string): Promise<boolean>
   addFile(f: TaskFile): Promise<void>
@@ -708,12 +708,18 @@ export function createTaskStore(file: string): TaskStore {
         if (!request || !book.tasks.some(t => t.id === subtask.taskId)) return null
         const existing = book.subtasks.find(s => s.ownerRequest?.messageId === request.messageId)
         if (existing) return existing
-        const registered: TaskEvent = { id: `e-${subtask.id.slice(2)}`, taskId: subtask.taskId, subtaskId: subtask.id,
-          actor: 'owner:composer', kind: 'create', at: request.at, detail: subtask.title, to: subtask.status }
-        await write({ ...book, subtasks: [...book.subtasks, subtask],
+        const adopted = book.subtasks.find(s => s.id === subtask.id)
+        if (adopted && (adopted.taskId !== subtask.taskId || adopted.ownerRequest || !adopted.title.includes(request.pedidoId))) return null
+        // Read progress under THIS lock: filing may have started the engine's card since the caller read it.
+        const saved: Subtask = adopted ? { ...adopted, title: subtask.title, priority: subtask.priority,
+          notes: subtask.notes, dueDate: subtask.dueDate, ownerRequest: request, updatedAt: subtask.updatedAt,
+          assignee: adopted.assignee ?? subtask.assignee } : subtask
+        const registered: TaskEvent = { id: `e-${saved.id.slice(2)}`, taskId: saved.taskId, subtaskId: saved.id,
+          actor: 'owner:composer', kind: 'create', at: request.at, detail: saved.title, to: saved.status }
+        await write({ ...book, subtasks: [...book.subtasks.filter(s => s.id !== saved.id), saved],
           tasks: book.tasks.map(t => t.id === subtask.taskId ? { ...t, updatedAt: request.at } : t),
           events: [...book.events, registered].slice(-MAX_EVENTS) })
-        return subtask
+        return saved
       })
     },
     upsertTask(task) {

@@ -84,6 +84,18 @@ export async function readRolesDoc(dataDir: string): Promise<RolesDoc> {
   }
 }
 
+/** Distinguishes a missing role document from one that was present but unreadable. */
+export async function rolesDocUnreadable(dataDir: string): Promise<boolean> {
+  try {
+    const raw = await readFile(join(dataDir, SESSION_ROLES_FILE), 'utf-8')
+    if (!raw.trim()) return false
+    JSON.parse(raw)
+    return false
+  } catch {
+    try { await stat(join(dataDir, SESSION_ROLES_FILE)); return true } catch { return false }
+  }
+}
+
 /**
  * Atomic and durable: a temp file unique to this write, fsync'd, renamed over the document, then the
  * directory fsync'd. A failed write removes its own temp file — a crash cannot leave a half document,
@@ -213,6 +225,9 @@ export async function loadRoles(deps: Pick<RoleDeps, 'dataDir' | 'legacyPref'>):
     const latest = await readRolesDoc(deps.dataDir)
     if (latest.migrated) return latest
     const next = migrateLegacyRoles(latest, await deps.legacyPref().catch(() => undefined))
+    // A present but unparseable document is NOT rewritten on a read: overwriting it with an empty one
+    // would erase the evidence, and every later read would report "no leader" instead of "unknown".
+    if (await rolesDocUnreadable(deps.dataDir)) return next
     await writeRolesDoc(deps.dataDir, next).catch(() => {})
     return next
   }
