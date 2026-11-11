@@ -16,8 +16,8 @@ import { HarnessInstallDialog } from '../../components/HarnessInstallDialog'
 import { useChatHarnesses } from '../../hooks/useChatHarnesses'
 
 export default function UsageNowPage() {
-  const { lang, data, isCentral } = useOutletContext<AppContext>()
-  return <UsageNowContent lang={lang} sessions={data?.sessions} harnesses={data?.harnesses} accounts={!isCentral} />
+  const { lang, data } = useOutletContext<AppContext>()
+  return <UsageNowContent lang={lang} sessions={data?.sessions} harnesses={data?.harnesses} accounts />
 }
 
 /**

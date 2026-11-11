@@ -4,7 +4,6 @@ import { wsInputOriginOk } from '../sessions/input-protocol'
 import { routeCapability, capabilityDenied } from '../capability-guard'
 import { capabilitiesFor } from '../exposure'
 import { hostGate, buildHostAllowlist } from '../host-allow'
-import { AUTH_PUBLIC } from '../index-routes'
 import {
   CLOSE, admit, closeAllEngineSockets, closeEngineSocket, engineSocketCount, onEngineSocketMessage, openEngineSocket,
   planEngineUpgrade, resetEngineSocketsForTests, sweepEndedSessions, type EngineSocketState, type RawSocket,
@@ -26,13 +25,12 @@ function open(route: string, h: Partial<EngineSocketHandlers> & { got?: unknown[
 
 describe('the handshake gates in front of an engine socket', () => {
   const list = buildHostAllowlist({ hostname: 'h', interfaceAddresses: ['127.0.0.1'], ports: [47291, 47292], allowedOrigins: [], secureOrigin: null })
-  const local = capabilitiesFor('local', { central: false, exposure: undefined, allowLocalShell: false, tls: false })
-  const exposed = capabilitiesFor('public', { central: true, exposure: 'public', allowLocalShell: false, tls: true })
+  const local = capabilitiesFor('local', { exposure: undefined, allowLocalShell: false, tls: false })
+  const exposed = capabilitiesFor('public', { exposure: 'public', allowLocalShell: false, tls: true })
 
-  it('the prefix is localShell, authenticated, and refused on an exposed profile', () => {
+  it('the prefix is localShell and refused on an exposed profile', () => {
     expect(routeCapability('/api/engine/x/ws/demo')).toBe('localShell')
     expect(capabilityDenied('localShell', exposed)?.status).toBe(403)
-    expect(AUTH_PUBLIC.has('/api/engine/x')).toBe(false)
   })
   it('a rebinding Host is refused (421) before anything else', () => {
     expect(hostGate('/api/engine/x/ws/demo', 'evil.example:47291', list, local)?.status).toBe(421)

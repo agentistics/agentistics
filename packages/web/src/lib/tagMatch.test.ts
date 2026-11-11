@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test'
 import {
   sessionMatchesTagSources, selectedTagSources, makeTagFilter,
-  type TagDef, type TagSource, type TagLookups,
+  type TagDef, type TagSource,
 } from './tagMatch'
 import type { SessionMeta } from '@agentistics/core'
 
@@ -12,7 +12,6 @@ function s(over: Partial<SessionMeta>): SessionMeta {
   } as SessionMeta
 }
 
-const noLookups: TagLookups = { machinesByAccount: {} }
 
 function tag(id: string, sources: TagSource[]): TagDef {
   return { _id: id, name: id, sources }
@@ -20,56 +19,28 @@ function tag(id: string, sources: TagSource[]): TagDef {
 
 test('repo and project sources match their session fields', () => {
   const repo: TagSource[] = [{ type: 'repo', value: 'github.com/org/a' }]
-  expect(sessionMatchesTagSources(s({ git_remote: 'github.com/org/a' }), repo, noLookups)).toBe(true)
-  expect(sessionMatchesTagSources(s({ git_remote: 'github.com/org/b' }), repo, noLookups)).toBe(false)
-  expect(sessionMatchesTagSources(s({}), repo, noLookups)).toBe(false)
+  expect(sessionMatchesTagSources(s({ git_remote: 'github.com/org/a' }), repo)).toBe(true)
+  expect(sessionMatchesTagSources(s({ git_remote: 'github.com/org/b' }), repo)).toBe(false)
+  expect(sessionMatchesTagSources(s({}), repo)).toBe(false)
 
   const proj: TagSource[] = [{ type: 'project', value: '/home/me/app' }]
-  expect(sessionMatchesTagSources(s({ project_path: '/home/me/app' }), proj, noLookups)).toBe(true)
-  expect(sessionMatchesTagSources(s({ project_path: '/home/me/other' }), proj, noLookups)).toBe(false)
-})
-
-test('machine matches memberId; team matches ANY of teamIds (falling back to teamId)', () => {
-  const mach: TagSource[] = [{ type: 'machine', value: 'hash1' }]
-  expect(sessionMatchesTagSources(s({ memberId: 'hash1' }), mach, noLookups)).toBe(true)
-  expect(sessionMatchesTagSources(s({ memberId: 'hash2' }), mach, noLookups)).toBe(false)
-
-  const team: TagSource[] = [{ type: 'team', value: 'T1' }]
-  expect(sessionMatchesTagSources(s({ teamIds: ['T0', 'T1'] }), team, noLookups)).toBe(true)
-  expect(sessionMatchesTagSources(s({ teamId: 'T1' }), team, noLookups)).toBe(true)
-  expect(sessionMatchesTagSources(s({ teamIds: ['T9'] }), team, noLookups)).toBe(false)
-})
-
-test('account resolves to every machine that account owns; unknown account matches nothing', () => {
-  const lookups: TagLookups = { machinesByAccount: { acc1: ['hashA', 'hashB'] } }
-  const src: TagSource[] = [{ type: 'account', value: 'acc1' }]
-  expect(sessionMatchesTagSources(s({ memberId: 'hashB' }), src, lookups)).toBe(true)
-  expect(sessionMatchesTagSources(s({ memberId: 'hashZ' }), src, lookups)).toBe(false)
-  expect(sessionMatchesTagSources(s({ memberId: 'hashA' }), [{ type: 'account', value: 'ghost' }], lookups)).toBe(false)
-  // No lookups supplied (the usual browser case) → an account source matches nothing.
-  expect(sessionMatchesTagSources(s({ memberId: 'hashA' }), src)).toBe(false)
+  expect(sessionMatchesTagSources(s({ project_path: '/home/me/app' }), proj)).toBe(true)
+  expect(sessionMatchesTagSources(s({ project_path: '/home/me/other' }), proj)).toBe(false)
 })
 
 test('harness matches session.harness, defaulting to claude for legacy sessions with none', () => {
   const src: TagSource[] = [{ type: 'harness', value: 'codex' }]
-  expect(sessionMatchesTagSources(s({ harness: 'codex' }), src, noLookups)).toBe(true)
-  expect(sessionMatchesTagSources(s({ harness: 'claude' }), src, noLookups)).toBe(false)
+  expect(sessionMatchesTagSources(s({ harness: 'codex' }), src)).toBe(true)
+  expect(sessionMatchesTagSources(s({ harness: 'claude' }), src)).toBe(false)
   const claudeSrc: TagSource[] = [{ type: 'harness', value: 'claude' }]
-  expect(sessionMatchesTagSources(s({ harness: undefined }), claudeSrc, noLookups)).toBe(true)
+  expect(sessionMatchesTagSources(s({ harness: undefined }), claudeSrc)).toBe(true)
 })
 
 test('model matches session.model exactly; a session with no model matches nothing', () => {
   const src: TagSource[] = [{ type: 'model', value: 'claude-opus-4-8' }]
-  expect(sessionMatchesTagSources(s({ model: 'claude-opus-4-8' }), src, noLookups)).toBe(true)
-  expect(sessionMatchesTagSources(s({ model: 'claude-sonnet-4-6' }), src, noLookups)).toBe(false)
-  expect(sessionMatchesTagSources(s({}), src, noLookups)).toBe(false)
-})
-
-test('user matches session.user exactly; a local session with no user matches nothing', () => {
-  const src: TagSource[] = [{ type: 'user', value: 'alice' }]
-  expect(sessionMatchesTagSources(s({ user: 'alice' }), src, noLookups)).toBe(true)
-  expect(sessionMatchesTagSources(s({ user: 'bob' }), src, noLookups)).toBe(false)
-  expect(sessionMatchesTagSources(s({}), src, noLookups)).toBe(false)
+  expect(sessionMatchesTagSources(s({ model: 'claude-opus-4-8' }), src)).toBe(true)
+  expect(sessionMatchesTagSources(s({ model: 'claude-sonnet-4-6' }), src)).toBe(false)
+  expect(sessionMatchesTagSources(s({}), src)).toBe(false)
 })
 
 test('sources are an OR union', () => {
@@ -77,18 +48,18 @@ test('sources are an OR union', () => {
     { type: 'repo', value: 'github.com/org/a' },
     { type: 'machine', value: 'hash1' },
   ]
-  expect(sessionMatchesTagSources(s({ git_remote: 'github.com/org/a' }), sources, noLookups)).toBe(true)
-  expect(sessionMatchesTagSources(s({ memberId: 'hash1' }), sources, noLookups)).toBe(true)
-  expect(sessionMatchesTagSources(s({ memberId: 'hash9' }), sources, noLookups)).toBe(false)
+  expect(sessionMatchesTagSources(s({ git_remote: 'github.com/org/a' }), sources)).toBe(true)
+  expect(sessionMatchesTagSources(s({ memberId: 'hash1' }), sources)).toBe(true)
+  expect(sessionMatchesTagSources(s({ memberId: 'hash9' }), sources)).toBe(false)
 })
 
 test('selectedTagSources flattens only the selected tags and ignores unknown ids', () => {
   const tags = [
     tag('t1', [{ type: 'repo', value: 'r1' }]),
-    tag('t2', [{ type: 'team', value: 'T2' }, { type: 'project', value: '/p2' }]),
+    tag('t2', [{ type: 'repo', value: 'github.com/org/t2' }, { type: 'project', value: '/p2' }]),
   ]
   expect(selectedTagSources(['t2'], tags)).toEqual([
-    { type: 'team', value: 'T2' }, { type: 'project', value: '/p2' },
+    { type: 'repo', value: 'github.com/org/t2' }, { type: 'project', value: '/p2' },
   ])
   expect(selectedTagSources(['t1', 'ghost'], tags)).toEqual([{ type: 'repo', value: 'r1' }])
   expect(selectedTagSources([], tags)).toEqual([])
@@ -107,7 +78,7 @@ test('makeTagFilter keeps sessions matching ANY source of ANY selected tag', () 
     tag('t1', [{ type: 'repo', value: 'github.com/org/a' }]),
     tag('t2', [{ type: 'machine', value: 'hash1' }]),
   ]
-  const keep = makeTagFilter(['t1', 't2'], tags, noLookups)!
+  const keep = makeTagFilter(['t1', 't2'], tags)!
   const sessions = [
     s({ session_id: '1', git_remote: 'github.com/org/a' }),
     s({ session_id: '2', memberId: 'hash1' }),
@@ -150,12 +121,12 @@ test('makeTagFilter applies EACH tag its own period, not one flattened union', (
   const inAugust = dated('2026-08-10', { git_remote: 'r1' })
   const inSeptember = dated('2026-09-10', { git_remote: 'r1' })
 
-  const onlyJuly = makeTagFilter(['july'], [july, august], noLookups)!
+  const onlyJuly = makeTagFilter(['july'], [july, august])!
   expect(onlyJuly(inJuly)).toBe(true)
   expect(onlyJuly(inAugust)).toBe(false)
 
   // Selecting both is a union of the two periods — and still excludes what neither covers.
-  const both = makeTagFilter(['july', 'aug'], [july, august], noLookups)!
+  const both = makeTagFilter(['july', 'aug'], [july, august])!
   expect(both(inJuly)).toBe(true)
   expect(both(inAugust)).toBe(true)
   expect(both(inSeptember)).toBe(false)
@@ -163,7 +134,7 @@ test('makeTagFilter applies EACH tag its own period, not one flattened union', (
 
 test('makeTagFilter: a tag with no period still covers everything from its sources', () => {
   const allTime = windowed('all', [{ type: 'repo', value: 'r1' }])
-  const keep = makeTagFilter(['all'], [allTime], noLookups)!
+  const keep = makeTagFilter(['all'], [allTime])!
   expect(keep(dated('2020-01-01', { git_remote: 'r1' }))).toBe(true)
   expect(keep(s({ git_remote: 'r1' }))).toBe(true)          // undated: no period to fail
   expect(keep(dated('2026-07-10', { git_remote: 'other' }))).toBe(false)
@@ -176,10 +147,9 @@ test('the browser mirror and the server resolver agree, session for session', ()
   const sources: TagSource[] = [
     { type: 'repo', value: 'r1' }, { type: 'machine', value: 'm1' },
     { type: 'harness', value: 'codex' }, { type: 'model', value: 'claude-opus-4-8' },
-    { type: 'user', value: 'alice' },
   ]
   const tagDef = windowed('t', sources, w)
-  const filter = makeTagFilter(['t'], [tagDef], noLookups)!
+  const filter = makeTagFilter(['t'], [tagDef])!
 
   const corpus: SessionMeta[] = [
     dated('2026-07-03', { git_remote: 'r1' }),
@@ -189,12 +159,12 @@ test('the browser mirror and the server resolver agree, session for session', ()
     dated('2026-07-10', { git_remote: 'other' }),
     dated('2026-07-10', { git_remote: 'other', harness: 'codex' }),
     dated('2026-07-10', { git_remote: 'other', model: 'claude-opus-4-8' }),
-    dated('2026-07-10', { git_remote: 'other', user: 'alice' }),
+    dated('2026-07-10', { git_remote: 'other', harness: 'gemini' }),
     s({ git_remote: 'r1' }),
     s({ git_remote: 'r1', start_time: 'garbage' }),
   ]
   for (const session of corpus) {
-    expect(filter(session)).toBe(sessionMatchesTag(session, sources, noLookups, [], w))
+    expect(filter(session)).toBe(sessionMatchesTag(session, sources, [], w))
     expect(sessionInTagWindow(session, w)).toBe(sessionInWindow(session, w))
   }
 })

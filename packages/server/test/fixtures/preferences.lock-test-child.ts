@@ -8,14 +8,9 @@
 //
 // Usage: bun run preferences.lock-test-child.ts <primary> <legacy> <prefix4hex> <count> <readyFile> [--disable-lock]
 //
-// Performs <count> SEQUENTIAL updateTeamConfigAt calls against the given preferences file pair,
-// each appending one connection with a distinct id `c_<prefix4hex><i as 8 hex>` (exactly 12 hex
-// chars after `c_`, matching @agentistics/core's ID_RE, so migrateTeamConfig never regenerates it
-// out from under the test's ability to count survivors by prefix) AND a distinct endpoint — the
-// endpoint is `connections[]`'s uniqueness key (see TeamConnection's own doc comment in
-// core/src/team.ts), so migrateTeamConfig legitimately DEDUPES same-endpoint entries down to one;
-// reusing one endpoint here would look exactly like a lost-update bug in the lock, when it is
-// actually this fixture violating the schema's own invariant.
+// Performs <count> SEQUENTIAL updatePreferencesAt calls against the given preferences file pair,
+// each appending one entry `<prefix4hex><i as 8 hex>` to the `scanRoots` list, so the parent can
+// count survivors by prefix.
 //
 // `readyFile` is a synchronization barrier: this process creates it right before starting its
 // write loop (AFTER `bun run`'s own startup/import cost, which is the dominant source of the
@@ -23,7 +18,7 @@
 // can wait for it and start its own racing loop at approximately the same instant, instead of
 // hoping incidental process-scheduling luck produces overlap.
 
-import { updateTeamConfigAt, __setTestOnlyDisableLock } from '../../server/preferences'
+import { updatePreferencesAt, __setTestOnlyDisableLock } from '../../server/preferences'
 import { writeFile } from 'node:fs/promises'
 
 async function main(): Promise<void> {
@@ -41,19 +36,8 @@ async function main(): Promise<void> {
   await writeFile(readyFile, String(process.pid))
 
   for (let i = 0; i < count; i++) {
-    await updateTeamConfigAt(primary, legacy, (current) => ({
-      ...current,
-      connections: [
-        ...current.connections,
-        {
-          id: `c_${prefix}${i.toString(16).padStart(8, '0')}`,
-          endpoint: `http://127.0.0.1:1/${prefix}${i}`,
-          org: 'default',
-          user: '',
-          token: '',
-          deniedRepos: [],
-        },
-      ],
+    await updatePreferencesAt(primary, legacy, (current) => ({
+      scanRoots: [...(current.scanRoots ?? []), `${prefix}${i.toString(16).padStart(8, '0')}`],
     }))
   }
 }

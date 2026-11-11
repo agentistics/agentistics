@@ -7,7 +7,7 @@ import { AgentisticsLoader } from '../../components/AgentisticsLoader'
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Folder, KeyRound } from 'lucide-react'
-import { Err, card, input, overlay } from '../MfaSetup'
+import { Err, card, input, overlay } from '../dialogStyles'
 import { loadVault, stepUp } from '../../lib/vaultApi'
 import { VaultStage } from './VaultStage'
 import { Checkbox, DialogActions, dialogButtonStyle } from '../../pages/settings/primitives'

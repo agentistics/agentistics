@@ -13,7 +13,7 @@ const progress = (p: Partial<BackfillProgress>): BackfillProgress => ({
   v: 1, historyVersion: 1, identity: 'id-1', state: 'running', startedAt: '2026-10-03T11:00:00Z', updatedAt: '2026-10-03T11:59:00Z', written: 0, ...p,
 })
 const plan = (o: Partial<Parameters<typeof planAutoBackfill>[0]> = {}) => planAutoBackfill({
-  journalEnabled: true, central: false, optedOut: false, progress: null, journalIdentity: 'id-1', nowMs: NOW, staleMs: 10 * 60_000, ...o,
+  journalEnabled: true, optedOut: false, progress: null, journalIdentity: 'id-1', nowMs: NOW, staleMs: 10 * 60_000, ...o,
 })
 
 describe('planAutoBackfill: the first import starts by itself, once', () => {
@@ -28,9 +28,8 @@ describe('planAutoBackfill: the first import starts by itself, once', () => {
     expect(plan({ progress: done, catchUp: true })).toEqual({ start: true })
     expect(plan({ progress: progress({ state: 'running' }), catchUp: true })).toEqual({ start: false, reason: 'running-elsewhere' })
   })
-  test('journal off, a central, or opted out: never', () => {
+  test('journal off or opted out: never', () => {
     expect(plan({ journalEnabled: false })).toEqual({ start: false, reason: 'journal-off' })
-    expect(plan({ central: true })).toEqual({ start: false, reason: 'central' })
     expect(plan({ optedOut: true })).toEqual({ start: false, reason: 'opted-out' })
   })
   test('completed for THIS journal: never again; completed for a replaced journal: start over', () => {
@@ -118,7 +117,7 @@ describe('the child process', () => {
   test('maybeStartAutoBackfill spawns once the plan says start, and not otherwise', () => {
     const dir = mkdtempSync(join(tmpdir(), 'backfill-'))
     const spawned: string[][] = []
-    const deps = { journalEnabled: true, central: false, journalPath: join(dir, 'journal.db'), progressPath: join(dir, 'p.json'), env: {}, spawn: (a: string[]) => { spawned.push(a) } }
+    const deps = { journalEnabled: true, journalPath: join(dir, 'journal.db'), progressPath: join(dir, 'p.json'), env: {}, spawn: (a: string[]) => { spawned.push(a) } }
     expect(maybeStartAutoBackfill(deps)).toEqual({ start: true })
     expect(spawned[0]!.slice(-3)).toEqual(['journal', 'import', '--background'])
     expect(maybeStartAutoBackfill({ ...deps, env: { AGENTISTICS_JOURNAL_BACKFILL: '0' } })).toEqual({ start: false, reason: 'opted-out' })

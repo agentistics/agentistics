@@ -101,7 +101,7 @@ describe('filterFleet', () => {
       rows,
       filters: {
         ...BASE, dateRange: '24h' as Filters['dateRange'],
-        tags: ['t1'], users: ['u'], machines: ['m'], teams: ['x'], presence: 'offline',
+        tags: ['t1'],
       },
       activeOnly: false,
     })

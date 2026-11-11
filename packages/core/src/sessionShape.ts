@@ -4,16 +4,15 @@ import type { SessionMeta } from './types'
  * sessionShape.ts — PURE: the list-typed fields of a `SessionMeta` read back as the lists the type
  * promises, whatever the stored record actually holds.
  *
- * A central cannot assume its members run current code, nor that every record in a consolidate
- * store was written by the parser. One session pushed with `languages: {}` (a hand-built probe
- * record, measured on a live central 2026-09-25) made every dashboard on that central throw
- * `object is not iterable` inside `useDerivedStats` on its first render — the whole UI down, login
- * included, for one field on one document out of 1865. The dashboard iterates these fields, so a
+ * A consolidate store may hold records written by an older version or by hand, not by the parser.
+ * One session with `languages: {}` (a hand-built probe record, measured 2026-09-25) made the
+ * dashboard throw `object is not iterable` inside `useDerivedStats` on its first render — the whole
+ * UI down, for one field on one document out of 1865. The dashboard iterates these fields, so a
  * record that is not a list must become one at the boundary it crossed, never inside a render.
  *
  * `languages` has a second legitimate shape: Claude's own session-meta files carry
  * `Record<language, count>`, and `data.ts` already reads that as its KEYS. That rule lives here now,
- * so the local read and the central's read cannot disagree about it.
+ * so every reader agrees about it.
  */
 
 /** A language list from whatever was stored: a list is kept (strings only), a map yields its keys. */

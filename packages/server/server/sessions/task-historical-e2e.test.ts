@@ -23,7 +23,6 @@ async function run(body: string): Promise<{ out: any; dir: string }> {
     const { writeConsolidated } = await import(${JSON.stringify(join(SESSIONS_DIR, '..', 'consolidate.ts'))})
     const web = await import(${JSON.stringify(join(SESSIONS_DIR, 'task-web.ts'))})
     const source = await import(${JSON.stringify(join(SESSIONS_DIR, 'task-source.ts'))})
-    const share = await import(${JSON.stringify(join(SESSIONS_DIR, 'task-share.ts'))})
     const report = await import(${JSON.stringify(join(SESSIONS_DIR, 'task-report.ts'))})
     const conv = await import(${JSON.stringify(join(SESSIONS_DIR, 'task-conversations.ts'))})
     const store = createTaskStore(cfg.TASKS_FILE)
@@ -331,26 +330,6 @@ test('attachSession never resolves a historical id — the registry is the only 
     console.log(JSON.stringify(await web.attachSession('t1', 'hist:c1')))
   `)
   expect(out).toEqual({ ok: false, reason: 'no_such_session' })
-})
-
-test('sharing: a shared delivery ships a historical conversation under its OWN id, behind the same gate', async () => {
-  const { out } = await run(`
-    ${task('t1', 'shared: true,')}
-    ${meta('cOpen')}
-    ${meta('cHidden')}
-    await web.attachConversation('t1', 'cOpen')
-    await web.attachConversation('t1', 'cHidden')
-    const board = await source.loadTaskBoard()
-    const owners = conv.conversationOwners(board.rollupRows)
-    const shared = share.selectSharedTasks({
-      tasks: board.book.tasks, rows: board.rollupRows, comments: [], subtasks: [], files: [],
-      // The connection's rules let cOpen through and withhold cHidden — decided on the META.
-      sharedIds: new Set(['cOpen']), knownIds: new Set(['cOpen', 'cHidden']),
-      rowsOf: (t, all) => report.rowsOfTask(t, all, owners),
-    })
-    console.log(JSON.stringify({ ids: shared[0].sessionIds, withheld: shared[0].sessionsWithheld }))
-  `)
-  expect(out).toEqual({ ids: ['cOpen'], withheld: 1 })
 })
 
 test('the REGISTRY view of the world never contains a synthetic row', async () => {

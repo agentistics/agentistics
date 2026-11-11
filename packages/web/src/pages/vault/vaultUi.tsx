@@ -7,7 +7,7 @@
  */
 import { useEffect, useState } from 'react'
 import { Info, X } from 'lucide-react'
-import { card, overlay } from '../../components/MfaSetup'
+import { card, overlay } from '../../components/dialogStyles'
 import { dialogButtonStyle } from '../settings/primitives'
 import { Field, inputStyle } from '../../components/sessions/formBits'
 import { REVEAL_PAD, RevealButton } from '../../components/PasswordReveal'

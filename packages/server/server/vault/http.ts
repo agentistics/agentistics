@@ -4,8 +4,7 @@
  * Moved out of `index.ts` verbatim and extended, so every route can be called by a test with a plain
  * `Request`. It owns NO rule: each route is a thin door onto a `gate.ts` function, and the gate's
  * `VAULT_ACTION_ROWS` decides what each action asks (a code, a gesture, a grant). The capability guard
- * (`/api/vault`, localShell) has already refused an exposed profile and `index.ts` answers 404 on a
- * central BEFORE calling this.
+ * (`/api/vault`, localShell) has already refused an exposed profile BEFORE this is called.
  *
  * What a response may carry: state, metadata, the otpauth URI once, the 24 words once. Both of those
  * travel with `Cache-Control: no-store` and are never logged (nothing here logs a body). The 24 words

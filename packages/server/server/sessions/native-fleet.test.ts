@@ -137,30 +137,28 @@ describe('isNativeSessionId', () => {
 
 describe('the I/O seam', () => {
   const answer = (status: number, body: unknown) => async () => new Response(JSON.stringify(body), { status })
-  test('loadNativeFleet: gated off / central / failing engine → no rows, never a throw', async () => {
+  test('loadNativeFleet: gated off / failing engine → no rows, never a throw', async () => {
     const ok = answer(200, { sessions: [rec()] })
-    expect(await loadNativeFleet('en', { on: false, central: false, ask: ok })).toEqual([])
-    expect(await loadNativeFleet('en', { on: true, central: true, ask: ok })).toEqual([])
-    expect(await loadNativeFleet('en', { on: true, central: false, ask: async () => null })).toEqual([])
-    expect(await loadNativeFleet('en', { on: true, central: false, ask: async () => { throw new Error('x') } })).toEqual([])
-    expect((await loadNativeFleet('en', { on: true, central: false, ask: ok })).map(r => r.id)).toEqual([ID])
+    expect(await loadNativeFleet('en', { on: false, ask: ok })).toEqual([])
+    expect(await loadNativeFleet('en', { on: true, ask: async () => null })).toEqual([])
+    expect(await loadNativeFleet('en', { on: true, ask: async () => { throw new Error('x') } })).toEqual([])
+    expect((await loadNativeFleet('en', { on: true, ask: ok })).map(r => r.id)).toEqual([ID])
   })
   test('loadNativeFleet asks for archived sessions only when told to', async () => {
     const asked: string[] = []
-    await loadNativeFleet('en', { on: true, central: false, includeArchived: true, ask: async p => { asked.push(p); return null } })
+    await loadNativeFleet('en', { on: true, includeArchived: true, ask: async p => { asked.push(p); return null } })
     expect(asked.some(p => p.includes('archived=all'))).toBe(true)
     asked.length = 0
-    await loadNativeFleet('en', { on: true, central: false, ask: async p => { asked.push(p); return null } })
+    await loadNativeFleet('en', { on: true, ask: async p => { asked.push(p); return null } })
     expect(asked.some(p => p.includes('archived='))).toBe(false)
   })
   test('runNativeVerb: every refusal is a sentence', async () => {
-    expect((await runNativeVerb(ID, 'kill', 'en', { central: true })).message).toContain('central')
-    expect((await runNativeVerb(ID, 'kill', 'en', { central: false, on: false })).message)
+    expect((await runNativeVerb(ID, 'kill', 'en', { on: false })).message)
       .toBe('The native Agentistics harness is still in development and is not available in this version.')
-    expect((await runNativeVerb(ID, 'rename', 'en', { central: false, on: true, title: '  ' })).message).toBe('A name is required.')
-    expect((await runNativeVerb(ID, 'kill', 'en', { central: false, on: true, ask: async () => null })).message).toContain('not available')
+    expect((await runNativeVerb(ID, 'rename', 'en', { on: true, title: '  ' })).message).toBe('A name is required.')
+    expect((await runNativeVerb(ID, 'kill', 'en', { on: true, ask: async () => null })).message).toContain('not available')
     let call: { path: string; method?: string } | null = null
-    const out = await runNativeVerb(ID, 'kill', 'en', { central: false, on: true, ask: async (p, i) => { call = { path: p, method: i?.method }; return new Response(JSON.stringify({ ended: true }), { status: 200 }) } })
+    const out = await runNativeVerb(ID, 'kill', 'en', { on: true, ask: async (p, i) => { call = { path: p, method: i?.method }; return new Response(JSON.stringify({ ended: true }), { status: 200 }) } })
     expect(out).toEqual({ ok: true, message: 'Session ended.' })
     expect(call!).toEqual({ path: `/api/runtime/sessions/${ID}/end`, method: 'POST' })
   })
@@ -233,9 +231,9 @@ describe('archive and delete — native rows only, and only once ended', () => {
   test('runNativeVerb routes archive / unarchive / delete to the engine', async () => {
     const seen: string[] = []
     const ask = async (p: string, i?: RequestInit) => { seen.push(`${i?.method} ${p}`); return new Response('{}', { status: 200 }) }
-    expect((await runNativeVerb(ID, 'archive', 'pt', { central: false, on: true, ask })).message).toBe('Sessão arquivada.')
-    expect((await runNativeVerb(ID, 'unarchive', 'pt', { central: false, on: true, ask })).ok).toBe(true)
-    expect((await runNativeVerb(ID, 'delete', 'pt', { central: false, on: true, ask })).message).toBe('Sessão apagada.')
+    expect((await runNativeVerb(ID, 'archive', 'pt', { on: true, ask })).message).toBe('Sessão arquivada.')
+    expect((await runNativeVerb(ID, 'unarchive', 'pt', { on: true, ask })).ok).toBe(true)
+    expect((await runNativeVerb(ID, 'delete', 'pt', { on: true, ask })).message).toBe('Sessão apagada.')
     expect(seen).toEqual([`POST /api/runtime/sessions/${ID}/archive`, `POST /api/runtime/sessions/${ID}/unarchive`, `DELETE /api/runtime/sessions/${ID}`])
   })
 })

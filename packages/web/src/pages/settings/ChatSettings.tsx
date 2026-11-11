@@ -48,7 +48,7 @@ export default function ChatSettings() {
             chatSoundId?: string
           }>)
           .catch(() => ({}) as { chatEnabled?: boolean; chatModel?: string; chatSoundEnabled?: boolean; chatSoundId?: string }),
-        fetch('/api/team/session')
+        fetch('/api/session')
           .then(r => (r.ok ? r.json() : {}) as Promise<{ capabilities?: { localChat?: boolean } }>)
           .catch(() => ({}) as { capabilities?: { localChat?: boolean } }),
       ])

@@ -12,7 +12,7 @@
 import { useEffect, useId, useState } from 'react'
 import { FingerprintPattern, KeyRound, Lock, LockOpen, Printer } from 'lucide-react'
 import { AgentisticsLoader } from '../AgentisticsLoader'
-import { Err, card, codeBlock, dangerBtn, input, overlay, primaryBtn } from '../MfaSetup'
+import { Err, card, codeBlock, dangerBtn, input, overlay, primaryBtn } from '../dialogStyles'
 import { Disclosure } from '../Disclosure'
 import { methodNameKey, presenceKey, vt, vtf, type VaultKey } from '../../lib/vaultText'
 import { useEscapeOwner } from '../../lib/overlayStack'

@@ -331,7 +331,7 @@ export interface ShellBandProps {
   shellCapable?: boolean
   /**
    * Called after "Enable now" or "Enable permanently" succeed, so the caller can re-read whatever
-   * answers `shellEnabled` (`AppContext.refreshTeamSession`, which re-fetches `/api/team/session`) —
+   * answers `shellEnabled` (`AppContext.refreshHostSession`, which re-fetches `/api/session`) —
    * this band has no way to update that itself, and the Shell tab / the pane's own content must
    * catch up WITHOUT a reload the instant either button lands.
    */

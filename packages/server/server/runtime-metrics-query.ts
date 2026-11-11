@@ -58,8 +58,8 @@ export type GroupDimension = typeof GROUP_DIMENSIONS[number]
  */
 export const UNSUPPORTED_FILTERS: Record<'tag' | 'machine' | 'member', string> = {
   tag: 'tag filtering is not available on the projection query yet: a tag resolves to sessions through their SessionMeta (machine, team, account, user and a period window), and the projection facts carry none of those fields, so resolving it here would be a second, divergent implementation of the tag rule.',
-  machine: 'the machine dimension does not exist in this projection: every fact in it was produced by THIS machine, and a central has no projection of its members yet.',
-  member: 'the member dimension does not exist in this projection: every fact in it was produced by THIS machine, and a central has no projection of its members yet.',
+  machine: 'the machine dimension does not exist in this projection: every fact in it was produced by THIS machine, and there is no projection of any other machine.',
+  member: 'the member dimension does not exist in this projection: every fact in it was produced by THIS machine, and there is no projection of any other machine.',
 }
 
 export const METRICS = ['cost', 'tokens', 'responses', 'sessions', 'runs', 'messages', 'activeMinutes', 'tools'] as const

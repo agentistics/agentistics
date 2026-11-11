@@ -3,7 +3,7 @@ import { PAGE_MAX, WIDE_PAGE_MAX, isWidePage, pageMaxWidth } from './pageWidth'
 
 describe('pageMaxWidth', () => {
   it('lets the deliveries and repositories pages grow', () => {
-    for (const p of ['/tasks', '/tasks/abc', '/repositories', '/repositories/actions', '/repo/github.com%2Fo%2Fr']) {
+    for (const p of ['/tasks', '/tasks/abc', '/repositories', '/repo/github.com%2Fo%2Fr']) {
       expect(pageMaxWidth(p)).toBe(WIDE_PAGE_MAX)
     }
   })

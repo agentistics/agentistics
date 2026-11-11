@@ -63,20 +63,6 @@ export function scopeSentence(filters: Filters, lang: Lang): string {
   if (n(filters.tags) > 0) {
     parts.push(plural(n(filters.tags), 'tag', lang === 'pt' ? 'tags' : 'tags'))
   }
-  if (n(filters.users) > 0) {
-    parts.push(plural(n(filters.users), lang === 'pt' ? 'pessoa' : 'person', lang === 'pt' ? 'pessoas' : 'people'))
-  }
-  if (n(filters.machines) > 0) {
-    parts.push(plural(n(filters.machines), lang === 'pt' ? 'máquina' : 'machine', lang === 'pt' ? 'máquinas' : 'machines'))
-  }
-  if (n(filters.teams) > 0) {
-    parts.push(plural(n(filters.teams), lang === 'pt' ? 'time' : 'team', lang === 'pt' ? 'times' : 'teams'))
-  }
-  if (filters.presence) {
-    parts.push(filters.presence === 'online'
-      ? (lang === 'pt' ? 'somente online' : 'online only')
-      : (lang === 'pt' ? 'somente offline' : 'offline only'))
-  }
 
   return parts.join(' · ')
 }
@@ -89,8 +75,4 @@ export function scopeIsNarrowed(filters: Filters): boolean {
     || (filters.harnesses?.length ?? 0) > 0
     || Boolean(filters.harness)
     || (filters.tags?.length ?? 0) > 0
-    || (filters.users?.length ?? 0) > 0
-    || (filters.machines?.length ?? 0) > 0
-    || (filters.teams?.length ?? 0) > 0
-    || Boolean(filters.presence)
 }

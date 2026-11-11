@@ -17,18 +17,6 @@ export interface InfoItem {
 /** The `beforeinstallprompt` event, captured in App and threaded to the Install settings page. */
 export type PwaPrompt = Event & { prompt(): Promise<void>; userChoice: Promise<{ outcome: string }> }
 
-/** The logged-in IAM account (role + team memberships), threaded from App.tsx `iam.account`.
- *  Structurally matches `IamAccount` in App.tsx; kept inline here to avoid importing App into a lib. */
-export interface Principal {
-  id: string
-  name: string
-  email: string
-  role: 'owner' | 'member'
-  memberships: { teamId: string; role: 'manager' | 'user' }[]
-  /** Forces a blocking first-login password change when true (B4-EXT). */
-  mustChangePassword: boolean
-}
-
 /** Draft shape for the Preferences settings page / modal (single source of truth).
  *
  *  Chat's sound/model preferences moved to the Chat settings section (ChatSettings.tsx), which
@@ -79,7 +67,7 @@ export interface AppContext {
   brlRate: number
 
   /** How this machine is actually billed — the timeline the plan cost basis is computed from.
-   *  Local only; it never travels to a central, and on a central it is always empty. */
+   *  Local only. */
   billing: BillingSettings
   /** Saved comparisons, and which are pinned to Home. */
   comparisons: SavedComparison[]
@@ -90,7 +78,7 @@ export interface AppContext {
   saveBilling: (next: BillingSettings | ((cur: BillingSettings) => BillingSettings)) => Promise<void>
 
   /** Which basis every cost figure is expressed in. Plumbed exactly like `currency`.
-   *  Always `'api'` on a central, which cannot price a fleet from one operator's timeline. */
+   *  Plan pricing exists only where a plan timeline is registered (Settings → Billing). */
   costBasis: CostBasis
   /** Switch the basis. Refuses `'plan'` when it cannot be computed — the control is DISABLED in
    *  that case and opens the setup prompt instead, so this is the second gate, not the only one. */
@@ -155,21 +143,11 @@ export interface AppContext {
   models: string[]
   modelGroups: { harness: SurfaceHarnessId; models: string[] }[]
   modelsInProject: Set<string> | null
-  /** Distinct users present in the data (team mode). Empty in Solo mode. */
-  users: string[]
   /** Harnesses present in the data. Empty in Solo mode (Claude-only). */
   harnesses: SurfaceHarnessId[]
-  /** True when this instance is running as a team-mode central (aggregator). */
-  isCentral: boolean
-  /** The logged-in IAM account (role + memberships). Undefined when IAM is not active. */
-  me?: Principal
-  /** Central-only: available teams for filter. Empty when not a central or no teams. */
-  teams: { id: string; name: string }[]
-  /** Central-only: available machines for filter. Empty when not a central or no machines. */
-  machines: { id: string; name: string; user: string; teamId?: string; teamIds?: string[] }[]
 
   /** Local host-power capabilities the server still grants (`server/exposure.ts`'s `CAPS`, as
-   *  reported by `/api/team/session`). Undefined while `teamSession` has not loaded yet — treat
+   *  reported by `/api/session`). Undefined while `hostSession` has not loaded yet — treat
    *  the same as "granted", the same reading `App.tsx` already uses for an older server. */
   capabilities?: {
     localShell?: boolean
@@ -196,14 +174,12 @@ export interface AppContext {
   shellOverride?: boolean
 
   /** What `/api/fleet/tree*` will ACTUALLY answer: `CAPS.localShell` AND the user's own switch,
-   *  resolved by the server (`sessions/editor-gate.ts`) and reported by `GET /api/team/session`.
+   *  resolved by the server (`sessions/editor-gate.ts`) and reported by `GET /api/session`.
    *  The UI may NEVER re-derive it from `capabilities.localShell` + a preference — the resolved
    *  flag is the one answer, exactly as `shellEnabled` is for the shell. `editor-gate.ts` reads an
    *  ABSENT preference as ON now (owner decision, 2026-09-14, matching `shellEnabled` above); this
    *  field's own `undefined` is the context-not-loaded-yet / older-server case and reads as OFF for
-   *  the same reason `shellEnabled`'s does. It also has a CENTRAL subtracted from it before it is
-   *  published (`lib/editorGate.ts`) — the whole `/api/fleet` prefix is refused there, and a
-   *  consumer must not have to know that. When this is not `true` the Studio is ABSENT, never a
+   *  the same reason `shellEnabled`'s does.  When this is not `true` the Studio is ABSENT, never a
    *  greyed-out entry. */
   editorEnabled?: boolean
 
@@ -214,11 +190,11 @@ export interface AppContext {
    *  stay true regardless of which surface actually opened the Studio. */
   studioSeen: boolean
 
-  /** Re-reads `/api/team/session` and re-publishes everything above from a fresh answer — the ONE
+  /** Re-reads `/api/session` and re-publishes everything above from a fresh answer — the ONE
    *  way `SessionsSettings` can make `editorEnabled` (and `shellEnabled`, `chatEnabled`, …) catch up
    *  with a preference it just changed, without a reload and without re-deriving the resolved flag
    *  itself. Optional so a caller built for tests need not fabricate a live fetch. */
-  refreshTeamSession?: () => Promise<void>
+  refreshHostSession?: () => Promise<void>
 
   /** The user's own autosave switch INSIDE the repository explorer's editor. A convenience, not a
    *  gate: it is a plain preference read from `/api/preferences` like `chatSoundEnabled`, and it
@@ -235,19 +211,6 @@ export interface AppContext {
    *  default, whose fresh array identity kills the memo on every render — a full dashboard
    *  recompute per keystroke, and two sides that can tear apart mid-edit. */
   tags: TagDef[]
-
-  /** Task 13 — the hidden-repo badge: canonical repo key (or `NO_REPO_KEY`) → the labels of every
-   *  connection currently hiding it (`lib/shareRepos.ts`'s `buildDeniedRepoLabels`). OPTIONAL
-   *  (never a plain default) because `AppContext` is consumed by every page in the app — a new
-   *  required field would break every existing consumer/mock at once. Absent/undefined must be
-   *  treated exactly like an empty map (no hidden-repo badges), never as "not yet loaded" vs.
-   *  "definitely nothing hidden" — there is no meaningful distinction a badge needs to draw here. */
-  deniedRepoLabels?: Map<string, string[]>
-  /** Re-reads the connection list and rebuilds `deniedRepoLabels`. Called by `ConnectionsPanel`
-   *  after every write (connect / rules apply / rename / disconnect) so the hidden-repo badge can
-   *  never keep claiming "Hidden from N centrals" after the rule is gone. OPTIONAL for the same
-   *  reason `deniedRepoLabels` is — every page consumes `AppContext`. */
-  refreshDeniedRepoLabels?: () => void
 
   /** Magnifier lenses — the accessibility feature. Always present; `prefs.enabled` is the switch. */
   a11y: A11yState

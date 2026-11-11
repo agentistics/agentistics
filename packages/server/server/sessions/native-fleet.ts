@@ -16,7 +16,7 @@
  *     status is `closed` (ended, failed), which is reopenable.
  *   - A refusal is the ENGINE's own sentence, passed through. An engine that is absent, older than
  *     the lifecycle routes, or gated off answers a sentence too — never a silent no-op.
- *   - Gated like every native surface (`native-gate.ts`): flag off, or a central, and there is no
+ *   - Gated like every native surface (`native-gate.ts`): the flag off means there is no
  *     native row at all.
  *
  * The pure half is `nativeControlSessions` / `nativeVerbCall`; the rest is the one I/O seam
@@ -173,7 +173,6 @@ const SENTENCES = {
   en: {
     absent: 'The native Agentistics runtime is not available on this machine.',
     gated: 'The native Agentistics harness is still in development and is not available in this version.',
-    central: 'Native sessions do not run on a central.',
     ended: 'Session ended.',
     reopened: 'Session reopened.',
     renamed: 'Session renamed.',
@@ -187,7 +186,6 @@ const SENTENCES = {
   pt: {
     absent: 'O runtime nativo do Agentistics não está disponível nesta máquina.',
     gated: 'O harness nativo do Agentistics ainda está em desenvolvimento e não está disponível nesta versão.',
-    central: 'Sessões nativas não rodam num central.',
     ended: 'Sessão encerrada.',
     reopened: 'Sessão reaberta.',
     renamed: 'Sessão renomeada.',
@@ -220,8 +218,7 @@ async function defaultAsk(path: string, init?: RequestInit): Promise<Response | 
   return (await import('../engine/load')).engineFetch(path, init)
 }
 
-async function gateOpen(opts: { central?: boolean; on?: boolean }): Promise<boolean> {
-  if (opts.central) return false
+async function gateOpen(opts: { on?: boolean }): Promise<boolean> {
   if (opts.on !== undefined) return opts.on
   const { nativeExperimentalOn } = await import('../native-gate')
   return nativeExperimentalOn()
@@ -233,10 +230,9 @@ async function gateOpen(opts: { central?: boolean; on?: boolean }): Promise<bool
  */
 export async function loadNativeFleet(
   lang: CliLang,
-  opts: { central?: boolean; on?: boolean; ask?: EngineAsk; includeArchived?: boolean; dataDir?: string } = {},
+  opts: { on?: boolean; ask?: EngineAsk; includeArchived?: boolean; dataDir?: string } = {},
 ): Promise<ControlSession[]> {
-  const central = opts.central ?? (await import('../config')).TEAM_CENTRAL
-  if (!(await gateOpen({ central, ...(opts.on !== undefined ? { on: opts.on } : {}) }))) return []
+  if (!(await gateOpen({ ...(opts.on !== undefined ? { on: opts.on } : {}) }))) return []
   try {
     const ask = opts.ask ?? defaultAsk
     // The facts are asked beside the list: an engine older than that route still lists its sessions,
@@ -263,11 +259,9 @@ export async function runNativeVerb(
   id: string,
   verb: NativeVerb,
   lang: CliLang,
-  opts: { title?: string; central?: boolean; on?: boolean; ask?: EngineAsk } = {},
+  opts: { title?: string; on?: boolean; ask?: EngineAsk } = {},
 ): Promise<{ ok: boolean; message: string }> {
   const t = SENTENCES[lang]
-  const central = opts.central ?? (await import('../config')).TEAM_CENTRAL
-  if (central) return { ok: false, message: t.central }
   if (!(await gateOpen({ ...(opts.on !== undefined ? { on: opts.on } : {}) }))) return { ok: false, message: t.gated }
   if ((verb === 'rename' || verb === 'file') && !(opts.title ?? '').trim()) return { ok: false, message: t.noTitle }
   const call = nativeVerbCall(id, verb, opts.title?.trim())

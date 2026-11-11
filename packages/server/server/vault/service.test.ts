@@ -34,12 +34,9 @@ describe('{restoreWith} resolves through omittedSecrets()', () => {
     const rows = omittedSecrets()
     const cmd = (pattern: string) => rows.find(r => r.pattern === pattern)?.restoreWith
     expect(restoreWithFor('github-backup')).toBe(cmd('.agentistics/github-backup.')!)
-    expect(restoreWithFor('central-token')).toBe(cmd('.agentistics/preferences.json#team.token')!)
-    expect(restoreWithFor('envelope-key')).toBe(cmd('.agentistics/machine-key')!)
-    expect(restoreWithFor('central-env')).toBe(cmd('.agentistics/central')!)
     expect(restoreWithFor('engine/provider-key')).toBe(cmd('.agentistics/provider-keys')!)
     expect(cmd('.agentistics/vault')).toBe('agentop vault init (runs on first use)')
-    for (const p of ['github-backup', 'central-token', 'envelope-key', 'central-env']) expect(allRestoreWith()).toContain(restoreWithFor(p))
+    for (const p of ['github-backup']) expect(allRestoreWith()).toContain(restoreWithFor(p))
   })
 })
 

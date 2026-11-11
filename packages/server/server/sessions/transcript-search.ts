@@ -3,15 +3,13 @@
  *
  * A previous attempt (`3e9f06c`, reverted) put the conversation text on `SessionMeta` as
  * `transcript_text` so the browser could filter it client-side. That is the one place it must
- * never go: `SessionMeta` is what `team-uploader.ts` serialises whole into a member's push, and
- * `redactSessionText` covers `first_prompt`/`title`/`user_label`/`user_note` and nothing else — so
- * up to 200 KB of unredacted conversation crossed the wire to the central, against the standing
- * guarantee that members never push chat. It also did not work: the field was only written when a
+ * never go: `SessionMeta` is serialised whole into the consolidate store and the dashboard payload, so
+ * up to 200 KB of unredacted conversation would travel with every session row. It also did not work: the field was only written when a
  * transcript happened to be re-parsed, so on a real machine 1 session of 140 carried one and a
  * search for `docker` found nothing in a corpus holding it 317 times.
  *
  * So the text is never carried anywhere. It is READ, on the machine that owns it, at the moment
- * someone asks, and only an id comes back. Nothing here reaches the web dashboard or a central.
+ * someone asks, and only an id comes back. Nothing here reaches the web dashboard.
  *
  * ## Why `grep` and not a read loop
  *

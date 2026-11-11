@@ -52,8 +52,6 @@ export interface ServerProject {
   git_stats?: ProjectGitStats
   /** Normalized git remote (`host/org/repo`, no protocol) of this project's repo, when known. */
   gitRemote?: string
-  /** Team/central only: display names of members who own sessions in this project. */
-  users?: string[]
 }
 
 export interface ApiResponse {
@@ -64,12 +62,6 @@ export interface ApiResponse {
   healthIssues: HealthIssue[]
   homeDir: string
   harnesses: SurfaceHarnessId[]
-  /** Team/central only: each member's own statsCache, keyed by resolved display name. */
-  userStatsCaches?: Record<string, StatsCache>
-  /** Team/central only: the same caches keyed by machine id (memberId), un-grouped. */
-  machineStatsCaches?: Record<string, StatsCache>
-  /** Team/central only: machine id → owner display name + teams. */
-  machineOwners?: Record<string, { user: string; teamIds: string[] }>
   workflows?: WorkflowRun[]
   /** Set ONLY on an answer served before the first fresh build finished (`/api/data?partial=1`):
    *  `quick` is the cheap subset (stats cache + stored sessions, no project scan, no git), `snapshot`
@@ -364,8 +356,7 @@ async function scanProjectDir(
     : undefined
   // Resolve the repo's origin remote once per project. This is the local-machine source of
   // the group-by-repository key; it's stamped onto every session below so it survives being
-  // pushed to a central (which has no filesystem access to the member's repos) and persisted
-  // to the consolidate store. Only the STATS walk is bounded by the build's SOFT deadline
+  // persisted to the consolidate store. Only the STATS walk is bounded by the build's SOFT deadline
   // (`gitBounded`): one slow repository is reported and filled in by a later build, never waited out.
   // The remote is a config read and is NOT — a session written without it would be classified as the
   // `none` bucket by a per-connection denylist naming its repository, and pushed (H1, 2.103.2 review).
@@ -613,11 +604,9 @@ export function serializedData(data: ApiResponse): string {
 }
 
 /** Backfill `git_remote` onto remote-less sessions (and their projects) from any session/project
- *  at the same `project_path` that already carries a remote. Members stamp git_remote at push time
- *  from their local repo, but legacy pushes / older consolidated sessions lack it — without this an
- *  old remote-less session at a now-linked repo shows as a duplicate "no linked repository" card.
- *  The central has NO filesystem access to members' repos (so a git scan can't resolve it there),
- *  which is why the remote is sourced from the sessions themselves. Mutates in place; returns the
+ *  at the same `project_path` that already carries a remote. Older consolidated sessions lack it —
+ *  without this an old remote-less session at a now-linked repo shows as a duplicate "no linked
+ *  repository" card. Mutates in place; returns the
  *  number of sessions stamped. */
 function backfillGitRemote(sessions: SessionMeta[], projects: ServerProject[]): number {
   const pathToRemote = new Map<string, string>()
@@ -822,7 +811,6 @@ export function prepareQuickPayload(): void {
 
 /** What `/api/data?partial=1` answers. See the block comment above. */
 export async function buildApiResponseForClient(): Promise<ApiResponse> {
-  // A central's data comes from Mongo and is scoped per principal; it keeps the exact path.
   if ((_status === 'done' && _promise)) return buildApiResponse()
   const full = buildApiResponse()
   full.catch(() => { /* surfaced through the race below or the next request */ })
@@ -1152,8 +1140,6 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     const storedWorkflows = mode !== 'off' ? await loadWorkflowRuns() : new Map<string, WorkflowRun>()
     const workflowsById = new Map(storedWorkflows)
     for (const r of liveWorkflows) workflowsById.set(r.runId, r)
-    // `workflows` stays mutable — team/central workflow runs (from Mongo) are unioned in
-    // below, after the team-sessions block, then a final sort is applied.
     // Hide empty runs (0 agents) — including any persisted before extraction started dropping
     // them — so the Dynamic Workflows view never shows "0 agents · nothing ran" skeletons.
     let workflows: WorkflowRun[] = [...workflowsById.values()].filter(r => r.agents.length > 0)
@@ -1204,15 +1190,10 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     }
 
     // Backfill git_remote onto remote-less sessions from any session/project at the same path
-    // (see backfillGitRemote). This first pass covers LOCAL sessions; on a MEMBER, persist the
-    // result to the store so the uploader pushes git_remote (the central can only group by remote
-    // and has no filesystem to recover it). It runs AGAIN after the team merge below so a central
-    // also backfills the members' sessions it just read from Mongo.
+    // (see backfillGitRemote). This pass covers every session read so far.
     const localBackfilled = backfillGitRemote(sessions, projects)
     if (localBackfilled > 0 && mode !== 'off') {
       await writeConsolidated(sessions).catch(err => console.warn('[repo] store git_remote heal failed:', String(err)))
-      // The healed sessions now differ (git_remote added) → nudge the uploader to re-push so the
-      // central links them without a manual sent-state reset. No-op if not a running member.
     }
 
     // Sort sessions by start_time descending (most recent first)
@@ -1298,7 +1279,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     // codex 10 / 0, copilot 8 / 1, gemini 15 / 1.
     //
     // It runs BEFORE the writeConsolidated below, so the remote reaches the store — and therefore
-    // the uploader and the central, which has no filesystem to recover it from.
+    // every consumer of the store.
     timer.mark('harnesses')
     await resolveProjectFacts(sessions, projects, gitResolvedPaths)
     timer.mark('projectFacts')
@@ -1311,8 +1292,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     // WRONG conversation is a user reading someone else's work under a title they chose themselves.
     //
     // Before writeConsolidated, so the name reaches the store and survives the harness deleting its
-    // transcript — and it is scrubbed by `redactSecrets` on the way to a central exactly like
-    // `first_prompt`, which it sits beside in `sessionLabel()`.
+    // transcript.
     try {
       const { readRegistry } = await import('./sessions/registry')
       const { applySessionLabels, linkManagedSessions } = await import('./sessions/link-sessions')
@@ -1324,8 +1304,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
 
     // Persist non-Claude sessions to the consolidate store too. The Claude-only
     // writeConsolidated() above runs before this merge, so without this the store
-    // (and therefore the team uploader, which pushes loadConsolidated()) would only
-    // ever carry Claude — a central would never receive Codex/Gemini/Copilot data.
+    // would only ever carry Claude.
     // The store is namespaced per harness and writeConsolidated dedups by
     // (harness, session_id), so this never collides with the Claude entries.
     if (mode !== 'off' && extraHarnessSessions.length > 0) {
@@ -1335,11 +1314,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     sessions.sort(newestFirst)
 
     // Final safety net: dedup by (harness, session_id) — `sessionKey`.
-    // This key used to include `user`, which silently disabled it on a central that is also a
-    // member of itself: the local read of a session has no `user`, the ingested copy of the SAME
-    // session carries the member's display name, so the two keys differed and BOTH rows survived.
-    // `session_id` is a UUID — the same id on two rows is always the same session, never two
-    // people's work — so `user` must not be part of the identity.
+    // `session_id` is a UUID — the same id on two rows is always the same session.
     const seenHarnessKeys = new Set<string>()
     const dedupedSessions = sessions.filter(s => {
       const key = sessionKey(s)
@@ -1347,22 +1322,6 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
       seenHarnessKeys.add(key)
       return true
     })
-
-    // Tag each project with the set of members who own sessions in it, so the
-    // frontend project filter can be scoped to the selected members deterministically
-    // (no path re-matching, no fallback-to-all that leaks other members' projects).
-    // Built from the final deduped session set, where every team/central session carries `user`.
-    const pathToUsers = new Map<string, Set<string>>()
-    for (const s of dedupedSessions) {
-      if (!s.user || !s.project_path) continue
-      let set = pathToUsers.get(s.project_path)
-      if (!set) { set = new Set(); pathToUsers.set(s.project_path, set) }
-      set.add(s.user)
-    }
-    for (const p of projects) {
-      const set = pathToUsers.get(p.path)
-      if (set && set.size > 0) p.users = Array.from(set)
-    }
 
     const totalTokens = dedupedSessions.reduce((sum, s) => {
       const tokens = sessionTokenTotal(s)

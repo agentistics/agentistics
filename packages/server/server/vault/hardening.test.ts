@@ -111,7 +111,7 @@ describe('the hardening-failed gate', () => {
   test('a failed hardening opens neither scope, and says why', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'agentistics-hard-'))
     __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en' })
-    await sealToFile(join(dir, 'x.sealed'), 'central-token', 'n', new Uint8Array([1]))
+    await sealToFile(join(dir, 'x.sealed'), 'github-backup', 'n', new Uint8Array([1]))
     expect((await initRunnerVault(memoryProtector(), 'm1')).ok).toBe(true)
     // A new process (same disk) whose hardening failed:
     __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en' })

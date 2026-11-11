@@ -10,7 +10,7 @@
  * a fleet id ever being answered as a shell).
  *
  * `index.ts` has already refused this path where the exposure profile forbids it (`localShell` in
- * `capability-guard.ts`), on a central, and where the user's own `shellEnabled` switch is off. What
+ * `capability-guard.ts`) and where the user's own `shellEnabled` switch is off. What
  * is left here is the scope check, the stream ceiling and the SSE plumbing.
  */
 

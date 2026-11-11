@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, startTransition } fr
 import { accumulateUsageCost } from '@agentistics/core'
 import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, SurfaceHarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
-import { applyDataPatch, type DataPatch, calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, withoutHiddenNative, surfaceHarnesses, NATIVE_HARNESS_ID, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
+import { applyDataPatch, type DataPatch, calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, withoutHiddenNative, surfaceHarnesses, NATIVE_HARNESS_ID, HARNESS_CAPABILITIES, filterByHarnesses, distinctHarnesses, mergeStatsCaches, repoShortName, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
 import { startOfDay, endOfDay, subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { eventStream, subscribeEvent } from '../lib/eventStream'
@@ -263,8 +263,8 @@ export interface StageProgress {
 }
 
 /** Per-repository aggregate (group by normalized git remote), reactive to active filters.
- *  `remote === ''` is the "no linked repository" bucket. `_users`/`_harnesses` are internal
- *  accumulators; consumers read the finalized `members`/`harnesses` arrays. */
+ *  `remote === ''` is the "no linked repository" bucket. `_harnesses` is an internal
+ *  accumulator; consumers read the finalized `harnesses` array. */
 export interface RepoStat {
   /** Routing/identity key: the normalized remote for linked repos, or `folder:<project_path>`
    *  for unlinked folders (each unlinked folder is its own card). */
@@ -290,15 +290,10 @@ export interface RepoStat {
   linesAdded: number
   linesRemoved: number
   filesModified: number
-  /** Sessions produced by CI runners (GitHub Actions), i.e. SessionMeta.ci === true. */
-  ciSessions: number
-  /** Distinct member display names that contributed to this repo (team/central). */
-  members: string[]
   harnesses: SurfaceHarnessId[]
   firstActive: string
   lastActive: string
   activityByDay: Record<string, number>
-  _users: Set<string>
   _harnesses: Set<SurfaceHarnessId>
   _paths: Record<string, number>
 }
@@ -1036,25 +1031,6 @@ export function summarizeSessions(list: SessionMeta[], hasCost: boolean, hasToke
   }
 }
 
-export interface MemberSummary { user: string; summary: HarnessSummary }
-
-/**
- * Group a session list by `user` and summarize each member (across all harnesses), sorted by
- * cost desc. Drives the repo-detail "Compare" tab (member-vs-member), mirroring how
- * computeHarnessSummaries drives the /compare page (harness-vs-harness). Pure.
- */
-export function computeMemberSummaries(sessions: SessionMeta[]): MemberSummary[] {
-  const byUser = new Map<string, SessionMeta[]>()
-  for (const s of sessions) {
-    if (!s.user) continue
-    const arr = byUser.get(s.user) ?? []
-    arr.push(s)
-    byUser.set(s.user, arr)
-  }
-  return [...byUser.entries()]
-    .map(([user, list]) => ({ user, summary: summarizeSessions(list, true, true) }))
-    .sort((a, b) => b.summary.costUSD - a.summary.costUSD)
-}
 
 /**
  * Compute per-harness summary totals — pure function, no hooks.
@@ -1213,32 +1189,22 @@ export interface FilteredHarnessSummaries {
  * and the PDF Export page's Compare section so both always agree.
  */
 export function computeFilteredHarnessSummaries(data: AppData, filters: Filters): FilteredHarnessSummaries {
-  const usersSel = filters.users ?? []
   const harnessSel = filters.harnesses ?? []
   const projects = filters.projects ?? []
   const projectSet = new Set(projects)
   const modelSet = filters.models && filters.models.length > 0 ? new Set(filters.models) : null
   const { start, end } = getDateRangeFilter(filters.dateRange, filters.customStart, filters.customEnd)
 
-  // Team data present (a central) → always aggregate per-session: statsCache only
-  // represents the central machine's own Claude, never the members'.
-  const teamData = data.sessions.some(s => s.user)
-  const teamsSel = filters.teams ?? []
-  const machinesSel = filters.machines ?? []
   const anyFilter =
-    teamData ||
-    usersSel.length > 0 || harnessSel.length > 0 || teamsSel.length > 0 || machinesSel.length > 0 || projects.length > 0 ||
+    harnessSel.length > 0 || projects.length > 0 ||
     modelSet !== null || filters.dateRange !== 'all' || !!filters.customStart || !!filters.customEnd
 
-  // Columns: the explicitly selected harnesses, else the harnesses the selected users used
-  // (so picking a member narrows the columns), else every harness in the data.
+  // Columns: the explicitly selected harnesses, else every harness in the data.
   // `data` is already gated (`useData` → `withoutHiddenNative`), so the native column exists only when it may be seen.
   const order: SurfaceHarnessId[] = surfaceHarnesses(data.harnesses.includes(NATIVE_HARNESS_ID))
-  const userScoped = filterByUsers(data.sessions, usersSel)
-  const scopedHarnesses = distinctHarnesses(userScoped)
   const cols: SurfaceHarnessId[] = harnessSel.length > 0
     ? order.filter(h => harnessSel.includes(h))
-    : (scopedHarnesses.length > 0 ? scopedHarnesses : data.harnesses)
+    : data.harnesses
 
   if (!anyFilter) {
     const sums = computeHarnessSummaries(data)
@@ -1248,14 +1214,8 @@ export function computeFilteredHarnessSummaries(data: AppData, filters: Filters)
   }
 
   // Filtered per-session view — every harness (incl. Claude) summarized from sessions,
-  // since statsCache has no per-user/-harness/-date/-team/-machine granularity.
-  const filtered = filterByHarnesses(
-    filterByMachines(
-      filterByTeams(userScoped, teamsSel),
-      machinesSel
-    ),
-    harnessSel
-  ).filter(s => {
+  // since statsCache has no per-harness/-date/-project granularity.
+  const filtered = filterByHarnesses(data.sessions, harnessSel).filter(s => {
     if (!isDateStr(s.start_time)) return false
     const d = parseISO(s.start_time)
     if (d < start || d > end) return false
@@ -1264,49 +1224,10 @@ export function computeFilteredHarnessSummaries(data: AppData, filters: Filters)
     return true
   })
 
-  // Claude canonical source: on a central the deep Claude history lives only in
-  // data.userStatsCaches (aggregated, never as individual sessions). Merge the selected
-  // members' caches (or ALL when no member filter) so the Claude column matches the
-  // dashboard exactly — same rule as useDerivedStats' effectiveStatsCache. Only usable
-  // when NO slice filter is active (statsCache has no project/model/date granularity);
-  // otherwise fall back to the per-session sum.
-  const usc = data.userStatsCaches
-  const hasUserStats = !!usc && Object.keys(usc).length > 0
-  // Same machine/team resolution as useDerivedStats — the two must agree or the Compare page
-  // contradicts the dashboard for the exact same selection.
-  const machineScope = resolveMachineCacheScope({
-    machineOwners: data.machineOwners,
-    machineStatsCaches: data.machineStatsCaches,
-    users: usersSel, teams: teamsSel, machines: machinesSel,
-  })
-  const machineCacheScoped = machineScope !== null
-  const sliceActive =
-    projects.length > 0 || modelSet !== null ||
-    filters.dateRange !== 'all' || !!filters.customStart || !!filters.customEnd ||
-    ((teamsSel.length > 0 || machinesSel.length > 0) && !machineCacheScoped)
-  // Same "empty pool is not an authoritative zero" rule as useDerivedStats — a selected member
-  // whose cache this viewer never received must fall back to the per-session sum, not merge to an
-  // empty cache. The two must agree or Compare contradicts the dashboard for the same selection.
-  const resolvedUserCaches = (usersSel.length > 0 ? usersSel : Object.keys(usc ?? {}))
-    .map(u => usc![u])
-    .filter((c): c is NonNullable<typeof c> => !!c)
-  const userCacheUsable = hasUserStats && resolvedUserCaches.length > 0
-  const claudeStatsCache = machineCacheScoped
-    ? mergeStatsCaches(machineScope.map(id => data.machineStatsCaches![id]!))
-    : userCacheUsable
-      ? mergeStatsCaches(resolvedUserCaches)
-      : data.statsCache
-  const claudeFromStatsCache = (userCacheUsable || machineCacheScoped) && !sliceActive
-
   const sums = {} as Record<SurfaceHarnessId, HarnessSummary>
   const la = {} as Record<SurfaceHarnessId, string | null>
   for (const h of cols) {
-    // Gap-fill from the FULLY scoped slice, not just the user-scoped one: `claudeFromStatsCache`
-    // implies no date/project/model slice, so `filtered` differs from `userScoped` only by the
-    // team/machine/harness scoping the cache above was already narrowed to.
-    sums[h] = h === 'claude' && claudeFromStatsCache
-      ? claudeSummaryFromStatsCache(claudeStatsCache, filtered)
-      : summarizeHarnessSessions(filtered, h)
+    sums[h] = summarizeHarnessSessions(filtered, h)
     la[h] = lastActiveFor(filtered, h)
   }
   return { activeHarnesses: cols, summaries: sums, lastActive: la }
@@ -1394,50 +1315,6 @@ export function repositoryGitTotals(
 
 
 /**
- * The presence scope every scoped aggregate (header totals, per-member/-machine cache totals)
- * must agree on. An explicit `filters.presence` always wins; otherwise a central whose operator
- * turned OFF `includeOfflineData` narrows to online members by DEFAULT — a policy decision, not
- * something the viewer asked for on this screen.
- *
- * `isPolicyDefault` is what lets a consumer decide whether the narrowing needs a label: a viewer
- * who explicitly picked the "Offline" pill already knows their total is scoped, but nobody chose
- * the silent default, and CLAUDE.md's own rule is that an unexplained smaller total reads as a
- * bug. Any surface that reads a presence-scoped aggregate (a statsCache merge, a per-row cache
- * substitution) must resolve scope through THIS function — a second inline copy is exactly how
- * the header and the Members drill-down disagreed: the header excluded an offline machine's
- * history from its total while the machine's own row kept substituting that history whole,
- * unfiltered, with nothing on screen explaining why one dwarfed the other.
- */
-export interface PresenceScope {
-  /** The presence actually being enforced, or null when nothing narrows the scope. */
-  effective: 'online' | 'offline' | null
-  /** True when `effective` came from the central's policy default rather than an explicit
-   *  `filters.presence` choice. */
-  isPolicyDefault: boolean
-  /** Display names ("user") allowed under `effective`, or null when there is no scoping. */
-  allowedUsers: Set<string> | null
-}
-
-export function resolvePresenceScope(
-  data: Pick<AppData, 'presence' | 'includeOfflineData'> | null | undefined,
-  filters: Filters,
-): PresenceScope {
-  const presence = data?.presence
-  const effective: 'online' | 'offline' | null =
-    filters.presence ?? (presence && data?.includeOfflineData === false ? 'online' : null)
-  const isPolicyDefault = effective !== null && filters.presence == null
-  const allowedUsers: Set<string> | null =
-    effective && presence
-      ? new Set(
-          Object.entries(presence)
-            .filter(([, p]) => (effective === 'online' ? p.online : !p.online))
-            .map(([name]) => name),
-        )
-      : null
-  return { effective, isPolicyDefault, allowedUsers }
-}
-
-/**
  * The whole derivation, as a PURE function of (data, filters, tags).
  *
  * Extracted from the hook so it can be called N TIMES for N scopes — the compare page derives one
@@ -1480,35 +1357,13 @@ export function computeDerivedStats(
     // the server rule (see lib/tagMatch.ts). null = inert (nothing selected / unknown tag ids).
     const tagMatches = makeTagFilter(filters.tags ?? [], tags)
     const tagFiltered = tagMatches !== null
-    const users = filters.users ?? []
-    const userFiltered = users.length > 0
-    // Central-only dimensions (C3). statsCache has no team/machine granularity either, so they
-    // narrow the scope exactly as project/repo/tag do.
-    const teamsFiltered = (filters.teams ?? []).length > 0
-    const machinesFiltered = (filters.machines ?? []).length > 0
     const modelSet = filters.models && filters.models.length > 0 ? new Set(filters.models) : null
 
-    // Presence scope — team/central: restrict to online/offline members. Resolved through the
-    // single shared `resolvePresenceScope` so every scoped aggregate (this function's totals, the
-    // Members page's per-row cache substitution) agrees on the same scope — see its docstring.
-    const presenceScope = resolvePresenceScope(data, filters)
-    const effectivePresence = presenceScope.effective
-    const presenceAllowedUsers = presenceScope.allowedUsers
-
-    // Harness filter — applied first so all downstream filters compose on top
-    // Compose (all AND predicates): presence scope → legacy single-harness field (now always
-    // unset) → user filter → multi-select harnesses filter (the sole harness selection mechanism).
-    const presenceScoped = presenceAllowedUsers
-      ? data.sessions.filter(s => !!s.user && presenceAllowedUsers.has(s.user))
-      : data.sessions
+    // Harness filter — applied first so all downstream filters compose on top. The legacy
+    // single-harness field (now always unset) composes with the multi-select harnesses filter
+    // (the sole harness selection mechanism).
     const harnessSessions = filterByHarnesses(
-      filterByMachines(
-        filterByTeams(
-          filterByUsers(filterByHarness(presenceScoped, filters.harness), users),
-          filters.teams ?? []
-        ),
-        filters.machines ?? []
-      ),
+      filterByHarness(data.sessions, filters.harness),
       filters.harnesses ?? [],
     )
     // Harness selection comes solely from the multi-select filter (filters.harnesses).
@@ -1518,40 +1373,8 @@ export function computeDerivedStats(
     const harnessActive = harnessSel.length > 0
     const nonClaudeHarness = harnessActive && !harnessSel.includes('claude')
 
-    // Effective statsCache — the deep aggregated Claude history for the SELECTED scope
-    // On a central, each member pushes its own statsCache (data.userStatsCaches). We merge the
-    // selected members' caches (or ALL of them when no user filter) so the totals match each
-    // machine exactly — the deep history only exists aggregated, never as individual sessions.
-    // Solo (no userStatsCaches) → the machine's own statsCache, unchanged.
-    const userStatsCaches = data.userStatsCaches
-    const hasUserStats = !!userStatsCaches && Object.keys(userStatsCaches).length > 0
-    const statsCachePool = (users.length > 0 ? users : Object.keys(userStatsCaches ?? {}))
-      .filter(u => !presenceAllowedUsers || presenceAllowedUsers.has(u))
-    // Machine/team selection: `userStatsCaches` groups (and sums) a member's machines under one
-    // display name, so it cannot answer "these two machines". `machineStatsCaches` is the same
-    // history un-grouped — merging the machines in scope gives the machine/team filter the exact
-    // deep history the member filter already gets. `null` = not resolvable → previous behaviour.
-    const machineScope = resolveMachineCacheScope({
-      machineOwners: data.machineOwners,
-      machineStatsCaches: data.machineStatsCaches,
-      users, teams: filters.teams ?? [], machines: filters.machines ?? [],
-      allowedUsers: presenceAllowedUsers,
-    })
-    const machineCacheScoped = machineScope !== null
-    // The selected members' caches that actually resolved. A selection can name a member whose
-    // cache this viewer never received — a scoped principal (a manager) gets `userStatsCaches`
-    // pruned to the members they may see — and merging an EMPTY list yields an empty cache that
-    // every KPI then reports as a confident 0. An unusable pool must fall back to the per-session
-    // sum (`cacheBlindScope` below), never stand in as an authoritative zero.
-    const resolvedUserCaches = statsCachePool
-      .map(u => userStatsCaches![u])
-      .filter((c): c is NonNullable<typeof c> => !!c)
-    const userCacheUsable = hasUserStats && resolvedUserCaches.length > 0
-    const effectiveStatsCache = machineCacheScoped
-      ? mergeStatsCaches(machineScope.map(id => data.machineStatsCaches![id]!))
-      : userCacheUsable
-        ? mergeStatsCaches(resolvedUserCaches)
-        : data.statsCache
+    // Effective statsCache — the machine's own aggregated Claude history.
+    const effectiveStatsCache = data.statsCache
 
     // Filter daily activity (date-range only — no project granularity in statsCache)
     const filteredDailyActivity = (effectiveStatsCache.dailyActivity ?? []).filter(d =>
@@ -1742,20 +1565,11 @@ export function computeDerivedStats(
     // Annotated `boolean` on purpose: without it TypeScript treats this const as an aliased
     // condition and narrows `modelSet` to null inside every `else` branch below, breaking the
     // guards there. The annotation keeps the flag a plain boolean.
-    // Team/machine are only cache-blind when the per-machine caches cannot serve the selection
-    // (`machineCacheScoped` false) — otherwise `effectiveStatsCache` above already IS that scope's
-    // deep history, and forcing the per-session sum here is what made the same scope report a
-    // fraction of what the member filter reports.
     const cacheBlindScope: boolean = projectFiltered || repoFiltered || tagFiltered || modelSet !== null
-      || ((teamsFiltered || machinesFiltered) && !machineCacheScoped)
-      // `!userCacheUsable`, not `!hasUserStats`: a central HAS member caches, but the selected
-      // member's cache may be missing from this viewer's pruned copy. Keying on `hasUserStats`
-      // left that case cache-backed and reported the empty merge as a real zero.
-      || (userFiltered && !userCacheUsable)
       // A live-fleet intersection has no cache granularity of any kind: `stats-cache.json` is
       // keyed by day and model, never by conversation. Treating it as cache-backed would report
       // the CACHE's totals under a scope the cache cannot express — the same scope reporting a
-      // fraction of itself, which `resolveMachineCacheScope` exists to prevent for team/machine.
+      // fraction of itself.
       || activeOnly
 
     let allTimeTotalSessions: number
@@ -1794,7 +1608,7 @@ export function computeDerivedStats(
     // whenever any harness chip is set, so a cache-backed branch would silently drop Codex.
     const claudeOnlyHarness = harnessSel.length === 1 && harnessSel[0] === 'claude'
     const harnessesFiltered = harnessActive && !claudeOnlyHarness
-    const sessionFiltered = cacheBlindScope || nonClaudeHarness || harnessesFiltered || (userFiltered && !hasUserStats)
+    const sessionFiltered = cacheBlindScope || nonClaudeHarness || harnessesFiltered
 
     const totalMessages = sessionFiltered
       ? filteredSessions.reduce((s, sess) => s + (sess.user_message_count ?? 0) + (sess.assistant_message_count ?? 0), 0)
@@ -2372,9 +2186,9 @@ export function computeDerivedStats(
           sessions: 0, messages: 0, tools: 0, costUSD: 0, costByHarness: {},
           inputTokens: 0, outputTokens: 0, tokens: EMPTY_TOKENS,
           gitCommits: 0, linesAdded: 0, linesRemoved: 0, filesModified: 0,
-          ciSessions: 0, members: [], harnesses: [],
+          harnesses: [],
           firstActive: '', lastActive: '', activityByDay: {},
-          _users: new Set<string>(), _harnesses: new Set<SurfaceHarnessId>(), _paths: {},
+          _harnesses: new Set<SurfaceHarnessId>(), _paths: {},
         }
       }
       if (s.project_path) r._paths[s.project_path] = (r._paths[s.project_path] ?? 0) + 1
@@ -2393,8 +2207,6 @@ export function computeDerivedStats(
       r.linesAdded += s.lines_added ?? 0
       r.linesRemoved += s.lines_removed ?? 0
       r.filesModified += s.files_modified ?? 0
-      if (s.ci) r.ciSessions++
-      if (s.user) r._users.add(s.user)
       r._harnesses.add(s.harness ?? 'claude')
       if (s.start_time) {
         if (!r.firstActive || s.start_time < r.firstActive) r.firstActive = s.start_time
@@ -2405,7 +2217,6 @@ export function computeDerivedStats(
     }
     // Finalize Set-backed fields into plain arrays + resolve the representative folder path/name.
     for (const r of Object.values(repoStatsMap)) {
-      r.members = Array.from(r._users).sort()
       r.harnesses = Array.from(r._harnesses)
       const topPath = Object.entries(r._paths).sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
       r.path = topPath
@@ -2484,7 +2295,6 @@ export function computeDerivedStats(
       : filteredSessions.length > 0 ? 1 : 0
 
     return {
-      presenceScope,
       /** True when "active only" narrowed this scope to conversations running right now — the
        *  page must say so, exactly as every other cache-blind scope does (see `fleetFilter.ts`'s
        *  header and `activeConversations.ts`'s). */

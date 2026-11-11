@@ -12,9 +12,9 @@
  *
  * The heavy lifting (shared loop, dedup, death) is `terminal-hub.ts`; the framing is the pure
  * `terminal-stream.ts`. This file is just the singleton wiring and the SSE plumbing. The whole
- * surface is additionally gated by `localShell` in `capability-guard.ts` and 404'd on a central, so
- * it is unreachable on an internet-exposed instance regardless of who is authenticated — a captured
- * terminal is shell access with extra steps.
+ * surface is additionally gated by `localShell` in `capability-guard.ts`, so
+ * it is unreachable on an internet-exposed instance — a captured terminal is shell access with
+ * extra steps.
  */
 
 import { anyGrant, scrubTerminalLine } from '../vault/grants'

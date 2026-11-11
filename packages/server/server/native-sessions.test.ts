@@ -76,8 +76,7 @@ describe('nativeSessionsFrom', () => {
 
 describe('loadNativeSessions', () => {
   const ok = async () => new Response(JSON.stringify({ sessions: [facts()] }), { status: 200 })
-  test('a central and a switched-off flag answer nothing', async () => {
-    expect(await loadNativeSessions({ central: true, on: true, fetch: ok })).toEqual([])
+  test('a switched-off flag answers nothing', async () => {
     expect(await loadNativeSessions({ on: false, fetch: ok })).toEqual([])
   })
   test('an absent or failing engine answers nothing rather than throwing', async () => {

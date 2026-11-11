@@ -9,7 +9,7 @@
  *   local  — solo machine on 127.0.0.1. Full local power, no auth (today's behaviour).
  *   lan    — an instance reachable from a trusted network (LAN/Tailscale). Auth on, local power
  *            off unless explicitly opted in.
- *   public — a central published on the internet. Local power is unavailable, period: there is
+ *   public — an instance published on the internet. Local power is unavailable, period: there is
  *            no opt-in for arbitrary shell on an instance strangers can reach.
  *
  * Fail-closed: an unrecognised AGENTISTICS_EXPOSURE value resolves to `public`.
@@ -32,8 +32,8 @@ export interface Capabilities {
   localTranscripts: boolean
   /** GET /api/live-sessions' LOCAL half — reads /proc: which assistants run on the host and in
    *  which directories. A cwd is usually a repository name, so this is host state even though it
-   *  is not a transcript. The route is NOT registered in capability-guard, because on a central it
-   *  also serves members' self-reported snapshots, which stay available when this is off. */
+   *  is not a transcript. Gated inside the route handler (`readLocalLiveSnapshot` in index.ts), not
+   *  registered in capability-guard. */
   localProcesses: boolean
   /** `/api/mcp` and everything under it — reads this machine's MCP server configuration and, via
    *  `/api/mcp/install` and `/api/mcp/remove`, runs `claude mcp` to change it (~/.claude.json).

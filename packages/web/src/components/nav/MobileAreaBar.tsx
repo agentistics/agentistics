@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Ellipsis, Gauge, KeyRound, LogOut, MessageSquare, ShieldCheck, type LucideIcon } from 'lucide-react'
-import type { IamAccount } from '../../App'
+import { BarChart3, ChevronRight, ClipboardList, Ellipsis, Gauge, MessageSquare, type LucideIcon } from 'lucide-react'
 import { areaOfPath, APP_AREAS, type AreaId } from '../../lib/appAreas'
 import { mobileAreaSlot, previousPage, rememberPreviousPage } from '../../lib/mobileAreaTabs'
 import { BottomSheet } from '../BottomSheet'
-import { ChangePasswordSelf } from '../ChangePasswordSelf'
-import { MfaSetup } from '../MfaSetup'
 import { AREA_LUCIDE, AreaTree, areaRowStyle, areaTrailingStyle } from './AreaTree'
 import { MobilePillBar } from './MobilePillBar'
 
@@ -48,27 +45,23 @@ export function MobileActionRow({ action }: { action: MobileAreaAction }) {
   )
 }
 
-export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, actions, principal, visibleSettings, onSheetOpenChange }: {
+export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, actions, visibleSettings, onSheetOpenChange }: {
   lang: 'pt' | 'en'
   pathname: string
   badges?: Partial<Record<AreaId, number>>
   attention?: number
   onNavigate: (to: string) => void
   actions: MobileAreaAction[]
-  principal?: IamAccount
   visibleSettings?: ReadonlySet<string>
   onSheetOpenChange?: (open: boolean) => void
 }) {
   const pt = lang === 'pt'
   const [open, setOpen] = useState(false)
-  const [accountOpen, setAccountOpen] = useState(false)
-  const [pwOpen, setPwOpen] = useState(false)
-  const [mfaOpen, setMfaOpen] = useState(false)
   useEffect(() => {
     onSheetOpenChange?.(open)
     return () => onSheetOpenChange?.(false)
   }, [open, onSheetOpenChange])
-  const closeSheet = useCallback(() => { setOpen(false); setAccountOpen(false) }, [])
+  const closeSheet = useCallback(() => { setOpen(false) }, [])
   useEffect(() => { closeSheet() }, [pathname, closeSheet])
   const go = (to: string) => { closeSheet(); onNavigate(to) }
   const current = areaOfPath(pathname)
@@ -81,17 +74,6 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
   const backLabel = backArea ? (pt ? backArea.labelPt : backArea.labelEn) : ''
   const sessions = inSessions ? (pt ? `Voltar para ${backLabel}` : `Back to ${backLabel}`) : (pt ? 'Sessões' : 'Sessions')
   const sessionBadge = inSessions ? undefined : (badges?.sessions ?? attention)
-  const orange = 'var(--anthropic-orange)'
-  const roleLabel = principal
-    ? (principal.role === 'owner' ? 'Owner' : (principal.memberships.some(m => m.role === 'manager') ? 'Manager' : 'User'))
-    : ''
-  const logout = () => { void fetch('/api/iam/logout', { method: 'POST' }).then(() => window.location.reload()) }
-  const accountActionStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 44,
-    padding: '0 14px', borderRadius: 12, border: '1px solid var(--border)',
-    background: 'var(--bg-elevated)', color: 'var(--text-primary)',
-    fontSize: '0.8438rem', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
-  }
 
   return (
     <>
@@ -114,57 +96,8 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
             {actions.map(action => <MobileActionRow key={action.key} action={{ ...action, onClick: () => { if (!action.keepOpen) closeSheet(); action.onClick() } }} />)}
           </div>
-        {principal && (
-          <button
-            onClick={() => setAccountOpen(o => !o)}
-            aria-expanded={accountOpen}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 44,
-              padding: '8px 10px', marginBottom: 10, borderRadius: 12,
-              border: `1px solid ${accountOpen ? orange : 'var(--border)'}`,
-              background: accountOpen ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-              cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
-            }}
-          >
-            <span style={{
-              width: 32, height: 32, borderRadius: '50%', background: 'var(--bg-surface)',
-              border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0,
-            }}>{principal.name.slice(0, 2)}</span>
-            <span style={{ minWidth: 0, flex: 1 }}>
-              <span style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
-              <span style={{ display: 'block', fontSize: '0.625rem', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
-            </span>
-            <ChevronDown size={16} style={{ flexShrink: 0, color: 'var(--text-tertiary)', transform: accountOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-          </button>
-        )}
-        {accountOpen && principal && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button
-              onClick={() => { setAccountOpen(false); setOpen(false); setPwOpen(true) }}
-              style={accountActionStyle}
-            >
-              <KeyRound size={16} /> {pt ? 'Trocar senha' : 'Change password'}
-            </button>
-            <button
-              onClick={() => { setAccountOpen(false); setOpen(false); setMfaOpen(true) }}
-              style={accountActionStyle}
-            >
-              <ShieldCheck size={16} /> {pt ? 'Duas etapas' : 'Two-factor'}
-            </button>
-            <button
-              onClick={logout}
-              style={{ ...accountActionStyle, color: '#ef4444', borderColor: 'color-mix(in srgb, #ef4444 40%, transparent)' }}
-            >
-              <LogOut size={16} /> {pt ? 'Sair' : 'Log out'}
-            </button>
-          </div>
-        )}
-
         </div>
       </BottomSheet>
-      {pwOpen && <ChangePasswordSelf lang={lang} onClose={() => setPwOpen(false)} />}
-      {mfaOpen && <MfaSetup lang={lang} onClose={() => setMfaOpen(false)} canDisable={principal?.role !== 'owner'} />}
     </>
   )
 }

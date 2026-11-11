@@ -190,7 +190,7 @@ export async function serviceManagerFacts(): Promise<ServiceManagerFacts> {
  * The systemd unit that brings a mode back — the name a user has to be given.
  *
  * Exported because "starts at boot" is not an answer anyone can act on: the whole complaint this
- * module grew a `disable` path for was a central that came back with nothing on screen naming what
+ * module grew a `disable` path for was a service that came back with nothing on screen naming what
  * brought it. With the unit named, `systemctl --user status <unit>` answers, `agentop autostart
  * status` answers, and the cockpit's detail pane can print it beside the state.
  */

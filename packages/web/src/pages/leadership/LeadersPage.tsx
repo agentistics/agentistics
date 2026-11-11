@@ -17,8 +17,8 @@ import { RecordCard, RecordCardAction } from '../settings/primitives'
 type Lang = 'pt' | 'en'
 
 export default function LeadersPage() {
-  const { lang, capabilities, isCentral } = useOutletContext<AppContext>()
-  const enabled = capabilities?.localShell !== false && !isCentral
+  const { lang, capabilities } = useOutletContext<AppContext>()
+  const enabled = capabilities?.localShell !== false
   const { fleet, loading, unsupported, stale } = useFleet(lang, enabled)
   useSessionRoles()
   const rolesReady = useSessionRolesReady()

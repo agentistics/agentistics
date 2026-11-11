@@ -130,8 +130,7 @@ export function toControlSession(
   // `v.status === 'running'` with unread activity is deliberately excluded: that row's process may
   // still be alive, so it stays quiet rather than claim a link is gone that may arrive on the very
   // next poll.
-  // WHERE the link came from (LIVE.1), computed from legacy facts only — shipped to every build and
-  // NOT relayed to a central (`reduceMachineFleetRow` is an allowlist and does not name it).
+  // WHERE the link came from (LIVE.1), computed from legacy facts only — shipped to every build.
   const link = harness
     ? conversationLinkOf({
         harness: v.harness!,

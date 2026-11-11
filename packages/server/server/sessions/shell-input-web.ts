@@ -11,7 +11,7 @@
  * and this one against `shells.json`. Reusing it would have handed a shell id the fleet's answer.
  *
  * Everything harder is upstream, in `index.ts`, and it is the same gate the open route rides:
- * `localShell` (capability-guard), the user's own `shellEnabled` switch, a central refused outright,
+ * `localShell` (capability-guard), the user's own `shellEnabled` switch,
  * and — for the upgrade specifically — the same-origin check (CSWSH). A raw shell is the most
  * powerful thing this server does, so it rides the very same gates as the fleet channel and no
  * lower ones.

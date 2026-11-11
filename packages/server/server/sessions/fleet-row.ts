@@ -145,8 +145,7 @@ export type FleetActionId =
   /**
    * NATIVE-only (`native-fleet.ts`): file an ended native session away, or delete it. Only a native row
    * offers them — a pane session has no store of its own to archive or delete from — and both need
-   * the session ENDED first, so neither can remove work that is still running. Deliberately absent
-   * from `machineActions.ts`'s closed list: a central never reaches them.
+   * the session ENDED first, so neither can remove work that is still running. 
    */
   | 'archive' | 'delete'
 
@@ -238,7 +237,7 @@ export interface FleetRow {
   model?: string
   /** The reasoning effort this session was started with — see `ControlSession.effort`. */
   effort?: string
-  /** The account this session runs on now — see `ControlSession.accountId`. Not relayed to a central. */
+  /** The account this session runs on now — see `ControlSession.accountId`. */
   accountId?: string
   /** The harness mode, in the harness's own words — see `mode-spec.ts`. */
   mode?: SessionMode
@@ -249,7 +248,7 @@ export interface FleetRow {
   conversationId?: string
   /** Exact managed successor recorded by the existing handoff registry. */
   handoffTo?: string
-  /** WHERE the conversation link came from (LIVE.1). Not relayed to a central. */
+  /** WHERE the conversation link came from (LIVE.1). */
   link?: SessionConversationLink | null
   /**
    * HOW the conversation id was learned, as a flat field — `link.reason` when the row HAS a

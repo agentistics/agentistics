@@ -20,7 +20,6 @@ function ts(dir: string): string[] {
 const FILES = [
   ...ts(pkg('vault/src')),
   ...ts(pkg('server/server/vault')),
-  pkg('server/server/envelope-keys.ts'),
   pkg('server/server/backup/github-store.ts'),
   pkg('server/server/backup/github-api.ts'),
   pkg('server/server/backup/github-cli.ts'),
@@ -32,7 +31,6 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'vault/src/recovery.ts': { INDEX: 'the public BIP-39 word → index table', BY_PREFIX: 'the public 4-letter prefix → index table' },
   'vault/src/protectors/memory.ts': { store: 'the TEST-ONLY in-memory protector; the host never offers it outside `bun test`' },
   'vault/src/protectors/presence.ts': { _gestureListener: 'the service\'s progress callback; it receives no argument, so no key material can pass through it' },
-  'server/server/vault/central-env.ts': { SECRET_SET: 'the NAMES of the secret keys, not values' },
   'server/server/vault/engine-secrets.ts': { ENGINE_CODES: 'refusal codes', VAULT_ACTIONS: 'audit action names' },
   'server/server/vault/ops.ts': { _gate: 'the step-up gate function (S4.7)', HUMAN_OPS: 'op names that count as human activity', GH_HEADERS_IN: 'header names', GH_METHODS: 'HTTP methods', _installed: 'a flag' },
   'server/server/vault/service.ts': {
@@ -104,11 +102,10 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'server/server/vault/rekey.ts': { SKIP_DIRS: 'directory names the rotation scan skips', _crashAt: 'a test seam: the name of a point to inject a crash at' },
   'server/server/vault/sleep-watch.ts': { _proc: 'the gdbus monitor child process handle', _winProc: 'the powershell.exe session-event child process handle (WSL)', _exitHooked: 'a flag: the exit hook that stops both is registered' },
   'server/server/vault/socket.ts': { _handler: 'the op dispatcher', _server: 'the listening socket' },
-  'server/server/envelope-keys.ts': { _cachedPublic: 'the PUBLIC half only — the private key is opened per use' },
   'server/server/preferences.ts': {
     _tmpSeq: 'a counter', _testOnlyDisableLock: 'a test flag', _testOnlyForceLockVanished: 'a test flag',
     _testOnlyAcquireTimeoutMsOverride: 'a test number', _writeChain: 'a promise chain',
-    rawPrefsMemo: 'the file\'s raw JSON keyed by its stat (PERF.SLOW) — tokens are sealed apart and injected AFTER it, never held here',
+    rawPrefsMemo: 'the file\'s raw JSON keyed by its stat (PERF.SLOW) — the preferences file holds no secret',
   },
 }
 
@@ -164,10 +161,5 @@ describe('secret hygiene in the vault and its consumers', () => {
       if (!ALLOWED_IMPORTERS.has(rel)) offenders.push(relative(ROOT, f))
     }
     expect(offenders).toEqual([])
-  })
-
-  test('the private envelope key is no longer cached', () => {
-    const t = readFileSync(pkg('server/server/envelope-keys.ts'), 'utf8')
-    expect(/let\s+_cached\s*:\s*MachineKeypair/.test(t)).toBe(false)
   })
 })

@@ -62,11 +62,11 @@ describe('AreaTree', () => {
     expect(html).toContain('aria-expanded="false"')
     expect(html).toContain('aria-label="Recolher Uso"')
   })
-  it('Ajustes lists only the visible sections, grouped', () => {
-    const html = render({ at: '/settings/pricing', visibleSettings: new Set(['preferences', 'pricing', 'users']) })
+  it('Ajustes lists only the visible sections', () => {
+    const html = render({ at: '/settings/pricing', visibleSettings: new Set(['preferences', 'pricing']) })
     expect(html).toContain('Preços')
     expect(html).toContain('Pessoal')
-    expect(html).toContain('Governança')
+    expect(html).not.toContain('Governança')
     expect(html).not.toContain('Cobrança')
   })
 })

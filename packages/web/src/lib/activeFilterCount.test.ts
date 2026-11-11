@@ -22,10 +22,6 @@ describe('countActiveFilters', () => {
     expect(countActiveFilters({ ...emptyFilters(), harnesses: ['claude'] }, false)).toBe(1)
     expect(countActiveFilters({ ...emptyFilters(), repos: ['github.com/a/b'] }, false)).toBe(1)
     expect(countActiveFilters({ ...emptyFilters(), tags: ['t1'] }, false)).toBe(1)
-    expect(countActiveFilters({ ...emptyFilters(), users: ['u1'] }, false)).toBe(1)
-    expect(countActiveFilters({ ...emptyFilters(), teams: ['t1'] }, false)).toBe(1)
-    expect(countActiveFilters({ ...emptyFilters(), machines: ['m1'] }, false)).toBe(1)
-    expect(countActiveFilters({ ...emptyFilters(), presence: 'online' }, false)).toBe(1)
   })
 
   test('activeOnly counts as its own dimension', () => {
@@ -43,7 +39,7 @@ describe('countActiveFilters', () => {
   })
 
   test('an empty array is not an active dimension', () => {
-    const f: Filters = { ...emptyFilters(), projects: [], models: [], harnesses: [], repos: [], tags: [], users: [], teams: [], machines: [] }
+    const f: Filters = { ...emptyFilters(), projects: [], models: [], harnesses: [], repos: [], tags: [] }
     expect(countActiveFilters(f, false)).toBe(0)
   })
 })

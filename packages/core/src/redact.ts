@@ -1,13 +1,11 @@
 /**
  * redact.ts — strip credentials out of free text before it leaves the machine.
  *
- * WHY THIS EXISTS: `SessionMeta.first_prompt` (and `title`) are the only free text a member
- * pushes to a central. The privacy contract says members push "computed metrics, never chat" —
- * and that is true of the transcript, but a first prompt IS chat. Pasting
- * `MONGO_URL=mongodb+srv://user:pass@host` as the opening message of a session is enough for a
- * production credential to land, in plaintext, in the central's database, where it is then
- * replicated, backed up, and rendered in a dashboard. That is not hypothetical: it is how this
- * module came to be written.
+ * WHY THIS EXISTS: free text a person typed or pasted — a session's opening message, a note, an
+ * agent's report — can carry a credential. Pasting `DATABASE_URL=postgres://user:pass@host` as the
+ * opening message of a session is enough for a production credential to land, in plaintext, in a
+ * notification, an audit line or a push message. That is not hypothetical: it is how this module
+ * came to be written.
  *
  * DESIGN CONSTRAINT — precision matters more than reach. `first_prompt` is what labels a session
  * in every list in the product. A redactor that also eats `input_tokens=123` or "the token count
@@ -18,11 +16,8 @@
  *
  * It cannot promise to catch everything, and nothing here replaces rotating a leaked credential.
  *
- * Pure and dependency-free, so it runs identically on the member (before the push) and on the
- * central (on ingest, which is what protects against members still running older code).
+ * Pure and dependency-free.
  */
-
-import type { SharedTask, SharedTaskRecord } from './sharedTask'
 
 export const REDACTION = '[REDACTED]'
 
@@ -62,29 +57,7 @@ const STRONG: RegExp[] = [
   /\bAIza[A-Za-z0-9\-_]{35}/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
   /\beyJ[A-Za-z0-9\-_]{8,}\.eyJ[A-Za-z0-9\-_]{8,}\.[A-Za-z0-9\-_]{8,}/g, // JWT
-  // OUR OWN connect token — `act1_<base64url endpoint>.<hex secret>`, from `packConnectToken`.
-  //
-  // This list carried GitHub's, Anthropic's, OpenAI's, Slack's, Google's, AWS's and a JWT before it
-  // carried agentistics'. The gap was found the way these are: a real one, pasted as a session's
-  // opening message, sitting in plaintext in `first_prompt` in the local store — the exact field
-  // this module exists to protect, and the one that travels to a central.
-  //
-  // Unguarded like its neighbours, because `act1_` is a namespace this product mints: nothing else
-  // produces it, so there is no prose to protect from a false positive.
-  /\bact1_[A-Za-z0-9\-_]+\.[A-Za-z0-9]{16,}/g,
 ]
-
-/**
- * NOT in the list above, deliberately: the BARE secret half, 64 hex characters (96 for a repo/CI
- * token — see `mintToken`).
- *
- * It carries no namespace, and 64 hex is exactly the shape of a SHA-256 — which this product prints
- * constantly and legitimately, `hashToken`'s own output included. A rule for it would redact any
- * session label that merely quotes a hash, and the first thing anyone does with a noisy redactor is
- * switch it off. A bare secret pasted WITH context is already covered: `ASSIGNMENT` catches
- * `token=<hex>` and `BEARER` catches `Bearer <hex>`. Pasted entirely alone it is indistinguishable
- * from a hash, and this module's stated rule is to leave text alone when in doubt.
- */
 
 /**
  * The password inside a `scheme://user:password@host` URI.
@@ -133,78 +106,4 @@ export function redactSecrets(text: string): string {
 /** True when `redactSecrets` would change this text. Useful for logging/telemetry counts. */
 export function containsSecret(text: string): boolean {
   return typeof text === 'string' && text !== '' && redactSecrets(text) !== text
-}
-
-/**
- * Redact the free-text fields of one session. Pure — returns a new object only when something
- * actually changed, so an unchanged session keeps its identity and callers can cheaply detect
- * "nothing was scrubbed".
- *
- * `first_prompt` and `title` are the ONLY free text in a SessionMeta; every other field is a
- * count, an id, a path or a timestamp. If a future field carries user prose, add it here.
- */
-export function redactSessionText<
-  T extends { first_prompt?: string; title?: string; user_label?: string; user_note?: string },
->(session: T): T {
-  // Every field here is free text a person typed or pasted, and every one of them travels. Adding a
-  // new one to `SessionMeta` without adding it here is how a credential reaches a central through
-  // the one field nobody thought of — which is exactly why this is a list and not two lines.
-  const fp = session.first_prompt ? redactSecrets(session.first_prompt) : session.first_prompt
-  const ti = session.title ? redactSecrets(session.title) : session.title
-  const ul = session.user_label ? redactSecrets(session.user_label) : session.user_label
-  const un = session.user_note ? redactSecrets(session.user_note) : session.user_note
-  if (
-    fp === session.first_prompt && ti === session.title
-    && ul === session.user_label && un === session.user_note
-  ) return session
-  return {
-    ...session,
-    ...(fp !== undefined ? { first_prompt: fp } : {}),
-    ...(ti !== undefined ? { title: ti } : {}),
-    ...(ul !== undefined ? { user_label: ul } : {}),
-    ...(un !== undefined ? { user_note: un } : {}),
-  }
-}
-
-/**
- * The same scrub, applied to a delivery.
- *
- * A board carries MORE free text than a session does — a title, a description somebody wrote out,
- * every comment body, the subtasks, the reason a card is blocked, the names of the files attached
- * to it — and all of it is text a person typed while working, which is exactly the text a
- * credential gets pasted into. So the list below is the whole of what travels, and a field added
- * to `SharedTask` without an entry here is how a secret reaches a central through the one field
- * nobody thought of. Same reasoning as `redactSessionText`, applied to a bigger document.
- *
- * Called at BOTH boundaries: on the member before the push, and again on the central at ingest —
- * a central cannot assume its members run current code, and in a mixed-version fleet the machine
- * on the old build is exactly the one that leaks.
- *
- * Pure. Returns a new document only when something changed, like `redactSessionText`.
- */
-export function redactSharedTask(shared: SharedTask): SharedTask {
-  const t = shared.task
-  const task: SharedTaskRecord = {
-    ...t,
-    title: redactSecrets(t.title),
-    ...(t.detail !== undefined ? { detail: redactSecrets(t.detail) } : {}),
-    ...(t.blockedReason !== undefined ? { blockedReason: redactSecrets(t.blockedReason) } : {}),
-    ...(t.labels !== undefined ? { labels: t.labels.map(redactSecrets) } : {}),
-  }
-  const comments = shared.comments.map(c => ({
-    ...c, author: redactSecrets(c.author), body: redactSecrets(c.body),
-  }))
-  const subtasks = shared.subtasks.map(s => ({
-    ...s,
-    title: redactSecrets(s.title),
-    ...(s.notes !== undefined ? { notes: redactSecrets(s.notes) } : {}),
-  }))
-  // A file's NAME is text somebody chose, and a pasted screenshot can be named anything at all.
-  const files = shared.files.map(f => ({
-    ...f,
-    name: redactSecrets(f.name),
-    ...(f.kind !== undefined ? { kind: redactSecrets(f.kind) } : {}),
-    ...(f.author !== undefined ? { author: redactSecrets(f.author) } : {}),
-  }))
-  return { ...shared, task, comments, subtasks, files }
 }

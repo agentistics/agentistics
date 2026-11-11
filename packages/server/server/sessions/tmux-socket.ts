@@ -10,6 +10,7 @@
  */
 import { join, resolve } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
+import { accountHome } from '../account-home'
 
 /** FNV-1a, 32 bits, as 8 hex digits — stable across runs and platforms, no dependency. */
 function fnv8(s: string): string {
@@ -28,7 +29,7 @@ export function socketForDataDir(base: string, dataDir: string, ownerDataDir: st
 }
 
 function ownerDataDir(): string {
-  return join(process.env.HOME ?? '', '.agentistics')
+  return join(accountHome(), '.agentistics')
 }
 
 export const TMUX_SOCKET = socketForDataDir('agentop', AGENTISTICS_DATA_DIR, ownerDataDir())

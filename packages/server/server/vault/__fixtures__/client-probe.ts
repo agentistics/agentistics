@@ -11,7 +11,7 @@ const out: Record<string, unknown> = { role: vaultRole() }
 out.opened = (await ensureVaultOpen()) !== null
 const read = await openFromFile(sealedPath!, 'github-backup', 'github-backup')
 out.readCode = read.ok ? 'READ-PLAINTEXT' : read.absent ? 'absent' : read.code
-const sealed = await sealBytes('central-token', 'probe', new TextEncoder().encode(marker!))
+const sealed = await sealBytes('github-backup', 'probe', new TextEncoder().encode(marker!))
 out.sealed = Buffer.from(sealed).toString('base64')
 const gh = await readGithubConfigDetailed()
 out.gh = gh.state === 'ok' ? { state: 'ok', token: gh.config.token, owner: gh.config.owner } : { state: gh.state }

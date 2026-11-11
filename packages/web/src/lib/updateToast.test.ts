@@ -21,16 +21,15 @@ describe('version order', () => {
 })
 
 describe('when the toast shows', () => {
-  const base = { snooze: null, now: NOW, central: false }
+  const base = { snooze: null, now: NOW }
   test('a newer installable version shows', () => expect(shouldShowToast({ ...base, info: info() })).toEqual({ show: true }))
   test('no update / no answer', () => {
     expect(shouldShowToast({ ...base, info: info({ hasUpdate: false }) })).toEqual({ show: false, why: 'no-update' })
     expect(shouldShowToast({ ...base, info: null })).toEqual({ show: false, why: 'no-update' })
     expect(shouldShowToast({ ...base, info: info({ latest: '2.30.0' }) })).toEqual({ show: false, why: 'no-update' })
   })
-  test('a central never shows it', () => expect(shouldShowToast({ ...base, central: true, info: info() })).toEqual({ show: false, why: 'central' }))
   test('every gate refusal hides it', () => {
-    for (const r of ['container', 'no-capability', 'central', 'not-a-binary'])
+    for (const r of ['container', 'no-capability', 'not-a-binary'])
       expect(shouldShowToast({ ...base, info: info({ upgradable: r }) })).toEqual({ show: false, why: 'not-installable' })
   })
   test('a server that does not say is not offered a button the route may refuse', () => {
@@ -46,8 +45,8 @@ describe('remind me later', () => {
   })
   test('silences until it expires', () => {
     const s = snoozeFor('2.31.0', false, NOW)
-    expect(shouldShowToast({ info: info(), snooze: s, now: NOW + 1, central: false })).toEqual({ show: false, why: 'snoozed' })
-    expect(shouldShowToast({ info: info(), snooze: s, now: NOW + SNOOZE_MS, central: false })).toEqual({ show: true })
+    expect(shouldShowToast({ info: info(), snooze: s, now: NOW + 1 })).toEqual({ show: false, why: 'snoozed' })
+    expect(shouldShowToast({ info: info(), snooze: s, now: NOW + SNOOZE_MS })).toEqual({ show: true })
   })
   test('a newer version re-shows it', () => {
     const s = snoozeFor('2.31.0', false, NOW)
@@ -144,16 +143,15 @@ describe('UPD.NOTIFY: the page keeps asking, and a snooze is bounded', () => {
 describe('UPD.PINNED: the bell keeps the update pinned', () => {
   const info = { current: '1.0.0', latest: '1.1.0', hasUpdate: true, upgradable: null as string | null }
   test('present while an installable update exists, whatever the snooze', () => {
-    expect(pinnedUpdate(info, false)).toEqual({ current: '1.0.0', latest: '1.1.0', critical: false })
+    expect(pinnedUpdate(info)).toEqual({ current: '1.0.0', latest: '1.1.0', critical: false })
   })
   test('gone once the installed version reaches latest', () => {
-    expect(pinnedUpdate({ ...info, current: '1.1.0', hasUpdate: false }, false)).toBeNull()
-    expect(pinnedUpdate({ ...info, current: '1.1.0' }, false)).toBeNull()
+    expect(pinnedUpdate({ ...info, current: '1.1.0', hasUpdate: false })).toBeNull()
+    expect(pinnedUpdate({ ...info, current: '1.1.0' })).toBeNull()
   })
-  test('never on a central, when not installable, or with no answer', () => {
-    expect(pinnedUpdate(info, true)).toBeNull()
-    expect(pinnedUpdate({ ...info, upgradable: 'container' }, false)).toBeNull()
-    expect(pinnedUpdate(null, false)).toBeNull()
+  test('never when not installable, or with no answer', () => {
+    expect(pinnedUpdate({ ...info, upgradable: 'container' })).toBeNull()
+    expect(pinnedUpdate(null)).toBeNull()
   })
 })
 

@@ -62,9 +62,6 @@ export function displayPath(p: string): string {
 
 const RESTORE_ROW: Record<string, string> = {
   'github-backup': '.agentistics/github-backup.',
-  'central-token': '.agentistics/preferences.json#team.token',
-  'envelope-key': '.agentistics/machine-key',
-  'central-env': '.agentistics/central',
   'engine/provider-key': '.agentistics/provider-keys',
 }
 
@@ -1217,8 +1214,8 @@ export async function openFromFile(path: string, purpose: string, name: string):
 
 /**
  * The vault's own audit trail: `vault/audit.jsonl`, 0600, one line per event — `{at, type, purpose,
- * name}` and never a value, a length or a fragment of one. Local, because a solo or member machine
- * has no central audit store, and a migration is a fact about THIS machine.
+ * name}` and never a value, a length or a fragment of one. Local: a migration
+ * is a fact about THIS machine.
  */
 export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'

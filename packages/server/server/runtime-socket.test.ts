@@ -15,11 +15,10 @@ const route = (prefix: string, localSocket: boolean, seen: string[] = []): Engin
 })
 
 describe('B4.6: the runtime unix socket', () => {
-  test('bound only when not a central and some engine route asks for it', () => {
-    expect(shouldBindRuntimeSocket({ central: false, routes: [route('/api/runtime/sessions', true)] })).toBe(true)
-    expect(shouldBindRuntimeSocket({ central: true, routes: [route('/api/runtime/sessions', true)] })).toBe(false)
-    expect(shouldBindRuntimeSocket({ central: false, routes: [route('/api/provider', false)] })).toBe(false)
-    expect(shouldBindRuntimeSocket({ central: false, routes: null })).toBe(false)
+  test('bound only when some engine route asks for it', () => {
+    expect(shouldBindRuntimeSocket({ routes: [route('/api/runtime/sessions', true)] })).toBe(true)
+    expect(shouldBindRuntimeSocket({ routes: [route('/api/provider', false)] })).toBe(false)
+    expect(shouldBindRuntimeSocket({ routes: null })).toBe(false)
   })
 
   test('0600 in a 0700 dir; serves only localSocket routes (transport unix), through the guard; a stale socket is replaced; stop removes it', async () => {

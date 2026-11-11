@@ -42,9 +42,6 @@ describe('projectedScope: the filters the API can express', () => {
 
   test('a scope the API refuses is never approximated: null, and the legacy figures stay', () => {
     expect(projectedScope({ ...base, tags: ['t'] }, false, all)).toBeNull()
-    expect(projectedScope({ ...base, users: ['u'] }, false, all)).toBeNull()
-    expect(projectedScope({ ...base, machines: ['m'] }, false, all)).toBeNull()
-    expect(projectedScope({ ...base, presence: 'online' }, false, all)).toBeNull()
     expect(projectedScope(base, true, all)).toBeNull()
   })
 })

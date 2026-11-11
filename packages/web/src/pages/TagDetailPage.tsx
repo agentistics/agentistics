@@ -22,7 +22,7 @@ import { CenteredLoader } from '../components/CenteredLoader'
 
 // GET /api/tags/:id response. Aggregate-only by design (spec rule 2): the server never sends the
 // session rows behind a tag, so every value rendered here is a count or a sum it already computed.
-type TagSourceType = 'repo' | 'project' | 'machine' | 'team' | 'account'
+type TagSourceType = 'repo' | 'project' | 'machine'
 interface TagSource { type: TagSourceType; value: string }
 interface TagAggregate {
   sessions: number
@@ -47,25 +47,16 @@ interface Tag {
   sources: TagSource[]
   filters?: TagSource[]
   window?: TagWindow
-  sharedWith: string[]
-  createdBy: string
   aggregate: TagAggregate
 }
-/** A ranked bucket. `label` is only present for machines, whose key stays the opaque memberId. */
-interface Bucket { key: string; sessions: number; costUSD: number; tokens: number; label?: string }
+interface Bucket { key: string; sessions: number; costUSD: number; tokens: number }
 interface DayPoint { date: string; sessions: number; costUSD: number; tokens: number }
 interface TagStats {
   projects: Bucket[]
   models: Bucket[]
   harnesses: Bucket[]
   repos: Bucket[]
-  members: Bucket[]
-  /** People (session.user). A person can drive several machines, so this ranks differently. */
-  users: Bucket[]
   daily: DayPoint[]
-  /** Distinct contributors — plain counts, computed server-side before any bucket redaction. */
-  distinctMembers: number
-  distinctMachines: number
   firstSessionDate: string | null
   lastSessionDate: string | null
   sessionsWithoutModel: number
@@ -76,16 +67,9 @@ interface TagDetail {
   stats: TagStats
 }
 
-interface IamTeam { _id: string; name: string }
-interface IamAccount { id: string; name: string; email: string }
-interface IamMachine { id: string; machineName: string }
 
-/** Mirrors OTHER_BUCKET_KEY in packages/server/server/tags-authority.ts: the anonymous bucket that
- *  absorbs every key the viewer may not see by name, keeping the totals whole. */
-const OTHER_KEY = '__other__'
+
 const DEFAULT_COLOR = '#f59e0b'
-/** Mirrors LOCAL_MACHINE_ID in packages/server/server/tags-handlers.ts. */
-const LOCAL_MACHINE_ID = 'local'
 
 /**
  * Read a JSON response, refusing anything that is not JSON.
@@ -134,7 +118,7 @@ const OVERLAY_COLORS: Record<Metric, string> = {
 }
 
 export default function TagDetailPage() {
-  const { lang, currency, brlRate, me, isCentral, costBasis, planBasis } = useOutletContext<AppContext>()
+  const { lang, currency, brlRate, costBasis, planBasis } = useOutletContext<AppContext>()
   const { id } = useParams()
   const navigate = useNavigate()
   const pt = lang === 'pt'
@@ -146,79 +130,22 @@ export default function TagDetailPage() {
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  // Central policy: type the name before a destructive delete. Defaults ON, and stays ON if the
-  // config read fails — a safety guard must fail closed, never open.
-  const [requireDeleteText, setRequireDeleteText] = useState(true)
-  useEffect(() => {
-    void fetch('/api/team/config')
-      .then(r => r.ok ? r.json() as Promise<{ requireDeleteConfirmText?: boolean }> : null)
-      .then(c => { if (c && typeof c.requireDeleteConfirmText === 'boolean') setRequireDeleteText(c.requireDeleteConfirmText) })
-      .catch(() => { /* keep the safe default */ })
-  }, [])
   const [metric, setMetric] = useState<Metric>('costUSD')
   const [overlay, setOverlay] = useState(false)
-
-  // IAM lookups turn a source's opaque id into a readable label. Failures are non-fatal — the raw
-  // id is shown instead, which is still unambiguous.
-  const [teams, setTeams] = useState<IamTeam[]>([])
-  const [accounts, setAccounts] = useState<IamAccount[]>([])
-  const [machines, setMachines] = useState<IamMachine[]>([])
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true); setErr(null); setDetail(null)
-    void (async () => {
-      try {
-        const r = await fetch(`/api/tags/${encodeURIComponent(id ?? '')}`)
-        const d = await readJson<Partial<TagDetail>>(r)
-        if (cancelled) return
-        if (d.error || !d.tag) setErr(d.error ?? 'not found')
-        else setDetail({ tag: d.tag, breakdown: d.breakdown ?? [], stats: d.stats ?? emptyStats() })
-      } catch (e) {
-        if (!cancelled) setErr(errText(e))
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [id])
-
-  // IAM lookups exist only on a central; off one there is one machine and no accounts or teams.
-  useEffect(() => {
-    if (!isCentral) {
-      setTeams([]); setAccounts([])
-      setMachines([{ id: LOCAL_MACHINE_ID, machineName: pt ? 'Esta máquina' : 'This machine' }])
-      return
-    }
-    void (async () => {
-      const [t, a, m] = await Promise.all([
-        fetch('/api/iam/teams').then(r => r.ok ? r.json() as Promise<{ teams?: IamTeam[] }> : { teams: [] }).catch(() => ({ teams: [] })),
-        fetch('/api/iam/accounts').then(r => r.ok ? r.json() as Promise<{ accounts?: IamAccount[] }> : { accounts: [] }).catch(() => ({ accounts: [] })),
-        fetch('/api/iam/machines').then(r => r.ok ? r.json() as Promise<{ machines?: IamMachine[] }> : { machines: [] }).catch(() => ({ machines: [] })),
-      ])
-      setTeams(t.teams ?? []); setAccounts(a.accounts ?? []); setMachines(m.machines ?? [])
-    })()
-  }, [isCentral, pt])
-
-  const otherLabel = pt ? 'Outros (fora do seu escopo)' : 'Other (outside your scope)'
 
   const sourceTypeLabel = useCallback((t: TagSourceType) => ({
     repo: pt ? 'Repositório' : 'Repository',
     project: pt ? 'Projeto' : 'Project',
     machine: pt ? 'Máquina' : 'Machine',
-    team: pt ? 'Time' : 'Team',
-    account: pt ? 'Conta' : 'Account',
   }[t]), [pt])
 
   const sourceValueLabel = useCallback((s: TagSource) => {
     switch (s.type) {
-      case 'team': return teams.find(t => t._id === s.value)?.name ?? s.value
-      case 'account': return accounts.find(a => a.id === s.value)?.name ?? s.value
-      case 'machine': return machines.find(m => m.id === s.value)?.machineName ?? s.value
+      case 'machine': return pt ? 'Esta máquina' : 'This machine'
       case 'project': return formatProjectName(s.value)
       default: return s.value
     }
-  }, [teams, accounts, machines])
+  }, [pt])
 
   const doDelete = useCallback(async () => {
     setConfirmDelete(false)
@@ -240,8 +167,7 @@ export default function TagDetailPage() {
   const tag = detail?.tag
   const stats = detail?.stats
   const color = tag?.color || DEFAULT_COLOR
-  // Off a central nobody signs in — the single local user owns every tag on the machine.
-  const mayEdit = !!tag && (!isCentral || me?.role === 'owner' || tag.createdBy === me?.id)
+  const mayEdit = !!tag
 
   // Overlay mode draws all three series at once. They live on wildly different scales (cost in
   // hundreds, sessions in tens, tokens in millions), so each is normalised to 0-100% of its own
@@ -261,11 +187,6 @@ export default function TagDetailPage() {
       tokens_norm: (d.tokens / peak.tokens) * 100,
     }))
   }, [stats])
-  const hasRedacted = useMemo(() => {
-    if (!stats) return false
-    return [stats.projects, stats.repos, stats.members].some(list => list.some(b => b.key === OTHER_KEY))
-  }, [stats])
-
   const back = (
     <button
       type="button"
@@ -425,8 +346,6 @@ export default function TagDetailPage() {
           />
           {/* Counts, not names — so they need no redaction and stay honest even when the machine
               buckets below collapse several unseeable ones into a single "other". */}
-          <StatTile label={pt ? 'Membros' : 'Members'} value={(detail?.stats.distinctMembers ?? 0).toLocaleString()} />
-          <StatTile label={pt ? 'Máquinas' : 'Machines'} value={(detail?.stats.distinctMachines ?? 0).toLocaleString()} />
         </div>
         <TokenBreakdownLine tokens={tag.aggregate.tokens} lang={pt ? 'pt' : 'en'} />
         {/* A tag whose sources resolve to nothing is a real, common state (a brand-new grouping, or
@@ -566,13 +485,13 @@ export default function TagDetailPage() {
       {/* Bare `.ag-grid` is the 2-column utility, collapsing to one column below 420px. */}
       <div className="ag-grid">
         <Ranked title={pt ? 'Projetos' : 'Projects'} buckets={stats.projects} color={color} pt={pt}
-          currency={currency} brlRate={brlRate} planFactor={planFactor} otherLabel={otherLabel}
+          currency={currency} brlRate={brlRate} planFactor={planFactor}
           labelOf={b => formatProjectName(b.key)} />
         <Ranked title={pt ? 'Repositórios' : 'Repositories'} buckets={stats.repos} color={color} pt={pt}
-          currency={currency} brlRate={brlRate} planFactor={planFactor} otherLabel={otherLabel}
+          currency={currency} brlRate={brlRate} planFactor={planFactor}
           labelOf={b => repoShortName(b.key) || b.key} />
         <Ranked title={pt ? 'Modelos' : 'Models'} buckets={stats.models} color={color} pt={pt}
-          currency={currency} brlRate={brlRate} planFactor={planFactor} otherLabel={otherLabel}
+          currency={currency} brlRate={brlRate} planFactor={planFactor}
           labelOf={b => formatModel(b.key)}
           footnote={stats.sessionsWithoutModel > 0
             ? (pt
@@ -580,16 +499,8 @@ export default function TagDetailPage() {
               : `${stats.sessionsWithoutModel} session(s) carry no model id — they count in the total but not here.`)
             : undefined} />
         <Ranked title="Harnesses" buckets={stats.harnesses} color={color} pt={pt}
-          currency={currency} brlRate={brlRate} planFactor={planFactor} otherLabel={otherLabel}
+          currency={currency} brlRate={brlRate} planFactor={planFactor}
           labelOf={b => HARNESS_LABELS[b.key as keyof typeof HARNESS_LABELS] ?? b.key} />
-        {/* People first, then the machines they used: "who worked on this" is the question a
-            reader asks before "from where". A person on two machines is one row here and two below. */}
-        <Ranked title={pt ? 'Membros' : 'Members'} buckets={stats.users} color={color} pt={pt}
-          currency={currency} brlRate={brlRate} planFactor={planFactor} otherLabel={otherLabel}
-          labelOf={b => b.key} />
-        <Ranked title={pt ? 'Máquinas' : 'Machines'} buckets={stats.members} color={color} pt={pt}
-          currency={currency} brlRate={brlRate} planFactor={planFactor} otherLabel={otherLabel}
-          labelOf={b => b.label ?? b.key} />
       </div>
 
       {/* ---- per source ---- */}
@@ -679,75 +590,6 @@ export default function TagDetailPage() {
         )}
       </div>
 
-      {/* ---- access ----
-          Every line of this panel names an IAM concept (owners, the creator, grantees) and the
-          redaction that goes with them. Off a central none of it exists — one user, nothing
-          redacted, nothing shared — so the whole panel is hidden rather than shown stating rules
-          that do not apply. */}
-      {isCentral && (
-      <div style={card}>
-        <SectionHeader label={pt ? 'Quem tem acesso' : 'Who has access'} />
-        {/* Three DIFFERENT kinds of access were rendered as one flat row of identical chips, so
-            "Owners" (a standing role), the creator (implicit and revocable) and the explicit
-            grantees looked interchangeable. Each is now its own group stating where the access
-            comes from and what it allows — the same distinction the server enforces. */}
-        <div className="ag-grid cols-3">
-          <AccessGroup
-            title={pt ? 'Owners' : 'Owners'}
-            permission={pt ? 'ver · editar · excluir' : 'view · edit · delete'}
-            note={pt
-              ? 'Todo owner do central enxerga qualquer tag, por cargo.'
-              : 'Every central owner sees any tag, by role.'}
-          >
-            <AccessChip text={pt ? 'Todos os owners' : 'All owners'} muted />
-          </AccessGroup>
-
-          <AccessGroup
-            title={pt ? 'Criador' : 'Creator'}
-            permission={pt ? 'ver · editar · excluir' : 'view · edit · delete'}
-            note={pt
-              ? 'Mantém o acesso enquanto continuar enxergando todas as fontes da tag.'
-              : 'Keeps access while they can still see every one of the tag’s sources.'}
-          >
-            <AccessChip text={accounts.find(a => a.id === tag.createdBy)?.name ?? tag.createdBy} />
-          </AccessGroup>
-
-          <AccessGroup
-            title={pt ? 'Compartilhada com' : 'Shared with'}
-            permission={pt ? 'somente ver' : 'view only'}
-            note={pt
-              ? 'Vê os números completos da tag, mas não as sessões por trás deles nem pode editá-la.'
-              : 'Sees the tag’s full numbers, but not the sessions behind them, and cannot edit it.'}
-          >
-            {tag.sharedWith.length === 0
-              ? (
-                <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
-                  {pt ? 'Ainda não compartilhada com ninguém.' : 'Not shared with anyone yet.'}
-                </span>
-              )
-              : tag.sharedWith.map(accId => (
-                <AccessChip key={accId} text={accounts.find(a => a.id === accId)?.name ?? accId} />
-              ))}
-          </AccessGroup>
-        </div>
-        {/* Rule 2: the keys of buckets the viewer cannot see are collapsed server-side, never sent. */}
-        {hasRedacted && (
-          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 8, lineHeight: 1.5 }}>
-            {pt
-              ? `“${otherLabel}” agrupa itens fora do seu escopo: os números entram no total, mas os nomes não são exibidos.`
-              : `“${otherLabel}” groups items outside your scope: their numbers count towards the total, but their names are not shown.`}
-          </div>
-        )}
-        {me && me.role !== 'owner' && (
-          <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 8, lineHeight: 1.5 }}>
-            {pt
-              ? 'Filtrar o dashboard por esta tag mostra apenas as sessões que você já pode ver — os totais aqui podem ser maiores.'
-              : 'Filtering the dashboard by this tag shows only sessions you can already see — the totals here may be higher.'}
-          </div>
-        )}
-      </div>
-      )}
-
       <ConfirmModal
         open={confirmDelete}
         title={pt ? 'Excluir tag?' : 'Delete tag?'}
@@ -756,11 +598,8 @@ export default function TagDetailPage() {
           : `The tag "${tag.name}" will be removed. Sessions are not affected.`}
         confirmLabel={pt ? 'Excluir' : 'Delete'}
         cancelLabel={pt ? 'Cancelar' : 'Cancel'}
-        // Typing the name is the central's default; an owner can turn it off in Settings.
-        requireText={requireDeleteText ? tag.name : undefined}
-        requireTextHint={requireDeleteText
-          ? (pt ? `Digite "${tag.name}" para confirmar` : `Type "${tag.name}" to confirm`)
-          : undefined}
+        requireText={tag.name}
+        requireTextHint={pt ? `Digite "${tag.name}" para confirmar` : `Type "${tag.name}" to confirm`}
         onConfirm={() => void doDelete()}
         onCancel={() => setConfirmDelete(false)}
       />
@@ -770,8 +609,7 @@ export default function TagDetailPage() {
 
 function emptyStats(): TagStats {
   return {
-    projects: [], models: [], harnesses: [], repos: [], members: [], users: [], daily: [],
-    distinctMembers: 0, distinctMachines: 0,
+    projects: [], models: [], harnesses: [], repos: [], daily: [],
     firstSessionDate: null, lastSessionDate: null, sessionsWithoutModel: 0,
   }
 }
@@ -781,53 +619,10 @@ function niceDate(iso: string): string {
   try { return format(parseISO(iso), 'MMM d, yyyy') } catch { return iso }
 }
 
-/** One category of access: where it comes from, what it allows, and who holds it.
- *  The permission is stated per group because the three differ — only the shared-with group is
- *  read-only, and conflating them is what made the flat chip row misleading. */
-function AccessGroup({ title, permission, note, children }: {
-  title: string
-  permission: string
-  note: string
-  children: React.ReactNode
-}) {
-  return (
-    // A column in the access grid. The explanation is a `title` tooltip rather than a paragraph:
-    // three sentences stacked vertically turned a three-fact panel into a full screen of text.
-    <div title={note} style={{
-      minWidth: 0, padding: '10px 12px', borderRadius: 9,
-      border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
-      display: 'flex', flexDirection: 'column', gap: 7,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
-        <span style={{
-          fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)',
-          textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap',
-        }}>{title}</span>
-        <span style={{
-          fontSize: 9.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap',
-          overflow: 'hidden', textOverflow: 'ellipsis',
-        }}>{permission}</span>
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>{children}</div>
-    </div>
-  )
-}
-
-function AccessChip({ text, muted }: { text: string; muted?: boolean }) {
-  return (
-    <span style={{
-      display: 'inline-block', maxWidth: '100%', padding: '5px 10px', borderRadius: 999, fontSize: 11.5,
-      background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-      color: muted ? 'var(--text-tertiary)' : 'var(--text-secondary)',
-      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-    }}>{text}</span>
-  )
-}
-
 /** One ranked distribution: name, share-of-total bar, then sessions / cost / tokens.
  *  The share is computed on cost, falling back to sessions when nothing in the list cost anything
  *  (Gemini/Copilot sessions carry no token data, so a cost-only bar would render flat at zero). */
-function Ranked({ title, buckets, color, pt, currency, brlRate, planFactor, otherLabel, labelOf, footnote }: {
+function Ranked({ title, buckets, color, pt, currency, brlRate, planFactor, labelOf, footnote }: {
   title: string
   buckets: Bucket[]
   color: string
@@ -836,7 +631,6 @@ function Ranked({ title, buckets, color, pt, currency, brlRate, planFactor, othe
   brlRate: number
   /** `1` when the API basis is selected or no plan is registered — see the page-level comment. */
   planFactor: number
-  otherLabel: string
   labelOf: (b: Bucket) => string
   footnote?: string
 }) {
@@ -863,16 +657,14 @@ function Ranked({ title, buckets, color, pt, currency, brlRate, planFactor, othe
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {shown.map(b => {
-            const isOther = b.key === OTHER_KEY
             return (
               <div key={b.key} style={{ minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
                   <span style={{
                     fontSize: 12.5, fontWeight: 600, minWidth: 0, flex: 1,
-                    color: isOther ? 'var(--text-tertiary)' : 'var(--text-primary)',
-                    fontStyle: isOther ? 'italic' : 'normal',
+                    color: 'var(--text-primary)',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>{isOther ? otherLabel : labelOf(b)}</span>
+                  }}>{labelOf(b)}</span>
                   <span style={{
                     fontSize: 12, fontWeight: 700, color: 'var(--anthropic-orange)',
                     fontVariantNumeric: 'tabular-nums', flexShrink: 0,
@@ -881,7 +673,7 @@ function Ranked({ title, buckets, color, pt, currency, brlRate, planFactor, othe
                 <div style={{ height: 4, borderRadius: 2, background: 'var(--bg-elevated)', margin: '5px 0 4px', overflow: 'hidden' }}>
                   <div style={{
                     width: `${Math.max(2, Math.round(share(b) * 100))}%`, height: '100%',
-                    background: isOther ? 'var(--text-tertiary)' : color, borderRadius: 2,
+                    background: color, borderRadius: 2,
                   }} />
                 </div>
                 <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums' }}>

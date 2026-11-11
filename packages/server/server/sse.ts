@@ -5,10 +5,9 @@ import { spawn } from 'child_process'
 import { watch as fsWatch, statSync } from 'fs'
 import { watchedEvent, WATCH_DEPTH } from './watch-filter'
 import chokidar from 'chokidar'
-import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, TEAM_CENTRAL, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR, KIMI_DIR, OPENCODE_DB_PATH } from './config'
+import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR, KIMI_DIR, OPENCODE_DB_PATH } from './config'
 import { featureOn, HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { harnessOfPath, noteTranscriptActivity } from './sessions/transcript-activity'
-import { centralManifest, centralHtml } from './central-branding'
 import { invalidateCache, rebuildNow, useWatcherDrivenRefresh } from './data'
 import { createRebuildScheduler } from './rebuild-scheduler'
 import { mirrorFile } from './archive'
@@ -16,7 +15,6 @@ import { onBookWrite } from './sessions/task-store'
 import { harnessEnabled } from './adapters/types'
 import { LATE_WATCH_INTERVAL_MS, planLateWatches, type WatchWant } from './watch-plan'
 import { addStoredNotification } from './notifications-store'
-import type { NotificationSubject } from './notifications-authority'
 import { debounceWithMaxWait } from './debounce-maxwait'
 
 export type SseController = ReadableStreamDefaultController<Uint8Array>
@@ -27,7 +25,7 @@ export const sseEncoder = new TextEncoder()
 export async function notifySseClients() {
   if (sseClients.size === 0) return
   let event = 'event: change\ndata: {}\n\n'
-  if (!TEAM_CENTRAL && featureOn('adapter-chat')) {
+  if (featureOn('adapter-chat')) {
     try {
       const [{ buildApiResponse }, { patchDataBuild }] = await Promise.all([import('./data'), import('./data-patch')])
       const patch = patchDataBuild(await buildApiResponse())
@@ -53,9 +51,6 @@ export function broadcastNotification(n: {
   meta?: Record<string, unknown>
   title?: string
   message?: string
-  /** What this notification is about, for role/team scoping on a central — see
-   *  notifications-authority.ts. Omit for a genuinely instance-wide notification. */
-  subject?: NotificationSubject
 }) {
   // Persist FIRST, and independently of whether anyone is listening: a notification raised while
   // no dashboard is open (or only a phone that is asleep) still belongs in the history. Clients
@@ -63,12 +58,8 @@ export function broadcastNotification(n: {
   // the server's and every device dismisses the same row.
   addStoredNotification(n).catch(err => console.error('[notifications] failed to persist', err))
   // The SSE FRAME carries NOTHING about the notification itself — it is a refresh signal only.
-  // `sseClients` is a flat, unauthenticated broadcast set with no principal attached (unlike
-  // GET /api/notifications, which scopes by `Viewer.entitlement`), so putting `code`/`meta`/
-  // `subject` on the wire here would hand every open tab — any signed-in account, any role — the
-  // full body of a notification the entitlement check in notifications-authority.ts exists to
-  // withhold from it. Every listener (`useNotificationStream.ts`) already just re-fetches the
-  // already-scoped `/api/notifications` on this event; it never reads the payload.
+  // Every listener (`useNotificationStream.ts`) just re-fetches `/api/notifications` on this
+  // event; it never reads the payload.
   const payload = sseEncoder.encode('event: notification\ndata: {}\n\n')
   for (const ctrl of [...sseClients]) {
     try {
@@ -128,9 +119,6 @@ export function triggerSseNotification() {
     if (sseDebounce) clearTimeout(sseDebounce)
     sseDebounce = setTimeout(notifySseClients, 2000)
   }
-  // Member push-on-change: local data changed → nudge a debounced push to the central so its
-  // aggregate stays fresh while you work. No-op on a central/solo instance.
-  import('./team-uploader').then(m => m.notifyDataChanged()).catch(() => {})
 }
 
 /** Default noise filter for harness roots. */
@@ -343,20 +331,10 @@ export function serveStatic(pathname: string, ifNoneMatch?: string | null): Resp
   if (!SERVE_STATIC) return null
   const asset = embeddedDist[pathname]
   if (!asset) return null
-  let body =
+  const body =
     asset.encoding === 'base64'
       ? Buffer.from(asset.content, 'base64')
       : asset.content
-  // A central serves the same bundle as a machine, so its installed PWA was identical in the
-  // dock — same icon, same name. Re-brand the two files the browser reads for that identity as
-  // they go out; the mode is only known at runtime, so it cannot be baked into the build.
-  if (TEAM_CENTRAL && (pathname === '/manifest.webmanifest' || pathname === '/index.html')) {
-    // Read through WHICHEVER encoding the embedder chose. `.webmanifest` was not on its text-
-    // extension list, so it arrived here base64-encoded and a `typeof body === 'string'` guard
-    // skipped the rewrite in silence — the central installed with the machine's icon anyway.
-    const text = typeof body === 'string' ? body : body.toString('utf-8')
-    body = pathname === '/index.html' ? centralHtml(text) : centralManifest(text)
-  }
   // What a browser may keep is decided by `static-cache.ts`: the shell never, hashed assets and
   // fonts for a year, and everything whose URL stays put while its artwork changes (icons,
   // favicons, logos) is revalidated — a year-long lifetime there pinned a rebranded logo, and an

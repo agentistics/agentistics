@@ -30,7 +30,6 @@ describe('areaOfPath', () => {
     expect(areaOfPath('/leadership/away')?.page?.id).toBe('away')
     expect(areaOfPath('/tasks/activity')?.page?.id).toBe('activity')
     expect(areaOfPath('/tasks/t-123')?.page?.id).toBe('board')
-    expect(areaOfPath('/repositories/actions')?.page?.id).toBe('actions')
     expect(areaOfPath('/repo/abc')?.page?.id).toBe('list')
   })
   test('metrics owns the root and its pages', () => {

@@ -129,7 +129,7 @@ export interface SessionPanelProps {
   onOpenShellFullscreen?: (target: TerminalTarget) => void
   /**
    * May this machine serve a per-session utility SHELL right now — `CAPS.localShell` AND the
-   * user's own switch, as `/api/team/session` reports it.
+   * user's own switch, as `/api/session` reports it.
    *
    * Absent reads as OFF. It no longer decides whether the bottom band exists at all — see
    * `lib/panelBar.ts`'s own `bottomBandFor` for why that was the bug — only whether `ShellBand`
@@ -207,7 +207,7 @@ export function SessionPanel({
    * answer it — a relayed row is deliberately shaped like a local one so the list needs no branch.
    *
    * The CONVERSATION is unavailable too, and not by omission: on-demand chat retrieval was removed
-   * from the reverse channel and `GET /api/team/session-chat` answers 410. So the toggle is not
+   * from the reverse channel and `GET /api/session-chat` answers 410. So the toggle is not
    * offered, exactly as it is not offered for a harness that can never name its conversation — a
    * segmented control with one working segment is a label pretending to be a control.
    */

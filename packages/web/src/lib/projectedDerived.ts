@@ -1,7 +1,7 @@
 /**
  * projectedDerived.ts: the web's session, cost and tool figures read from the PROJECTIONS
  * (`GET /api/runtime/metrics`, P3 / A4.7). They are laid over `computeDerivedStats`'s answer when the
- * server says this surface reads them (`projectionsWeb` on `/api/team/session`: the default, unless
+ * server says this surface reads them (`projectionsWeb` on `/api/session`: the default, unless
  * `AGENTISTICS_PROJECTIONS_SURFACES=legacy`, whenever the server serves projections).
  *
  * What it replaces is the `derived` fields that the pages and the custom page's widgets (the "gallery":
@@ -65,8 +65,7 @@ const utcDay = (d: Date) => d.toISOString().slice(0, 10)
  * `range` is `getDateRangeFilter`'s answer (UTC bounds, the API's own day rule).
  */
 export function projectedScope(filters: Filters, activeOnly: boolean, range: { start: Date; end: Date }): MetricsParams | null {
-  const blocked = (filters.tags?.length ?? 0) > 0 || (filters.users?.length ?? 0) > 0 || (filters.teams?.length ?? 0) > 0
-    || (filters.machines?.length ?? 0) > 0 || filters.presence !== undefined || activeOnly
+  const blocked = (filters.tags?.length ?? 0) > 0 || activeOnly
   if (blocked) return null
   const p: MetricsParams = {}
   if (range.start.getTime() > 0) p.from = utcDay(range.start)

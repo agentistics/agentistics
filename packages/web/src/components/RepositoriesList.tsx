@@ -1,6 +1,6 @@
 import React from 'react'
-import { GitBranch, Zap, GitCommit, Clock, Link2Off } from 'lucide-react'
-import { fmt, fmtCost, formatProjectName, NO_REPO_KEY, totalTokens, totalTokensExplained } from '@agentistics/core'
+import { GitBranch, GitCommit, Clock, Link2Off } from 'lucide-react'
+import { fmt, fmtCost, formatProjectName, totalTokens, totalTokensExplained } from '@agentistics/core'
 import type { RepoStat } from '../hooks/useData'
 import { planCostOf } from '../lib/topUsage'
 
@@ -163,16 +163,11 @@ export function RepositoriesList({ repos, currency = 'USD', brlRate = 1, lang, o
               />
             </div>
 
-            {/* Footer chips: commits, members (central), actions, last active */}
+            {/* Footer chips: commits, last active */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-tertiary)' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={pt ? 'commits' : 'commits'}>
                 <GitCommit size={11} /> {r.gitCommits}
               </span>
-              {r.ciSessions > 0 && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--accent-blue)' }} title="GitHub Actions">
-                  <Zap size={11} /> {r.ciSessions}
-                </span>
-              )}
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 'auto' }}>
                 <Clock size={11} /> {relativeTime(r.lastActive, lang)}
               </span>

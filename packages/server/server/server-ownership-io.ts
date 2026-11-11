@@ -19,13 +19,14 @@ export const SERVER_UNIT = 'agentop-server'
 export async function ownershipFacts(): Promise<OwnershipFacts> {
   const { unitInstalled } = await import('./autostart.ts')
   const { isOwnersStore } = await import('./server-ports.ts')
-  const { AGENTISTICS_DATA_DIR, HOME_DIR } = await import('./config.ts')
+  const { accountHome } = await import('./account-home.ts')
+  const { AGENTISTICS_DATA_DIR } = await import('./config.ts')
   let cgroup = ''
   try { cgroup = readFileSync('/proc/self/cgroup', 'utf8') } catch { /* not Linux */ }
   return {
     platform: platform(),
     unitInstalled: await unitInstalled('server'),
-    ownersStore: isOwnersStore(AGENTISTICS_DATA_DIR, HOME_DIR),
+    ownersStore: isOwnersStore(AGENTISTICS_DATA_DIR, accountHome()),
     insideUnit: isInsideUnit(cgroup, process.env.INVOCATION_ID, process.env.AGENTISTICS_LAUNCHD === '1'),
     foregroundForced: process.env[FOREGROUND_ENV] === '1',
   }

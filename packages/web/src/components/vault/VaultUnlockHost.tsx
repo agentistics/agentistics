@@ -13,7 +13,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type React from 'react'
 import { X } from 'lucide-react'
-import { card, overlay } from '../MfaSetup'
+import { card, overlay } from '../dialogStyles'
 import { loadVault, unlockFor } from '../../lib/vaultApi'
 import { phoneFacts } from '../../lib/phoneVault'
 import { PhoneRequests, VaultUnlock, usePhoneRequests } from './VaultUnlock'

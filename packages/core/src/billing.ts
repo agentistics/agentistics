@@ -105,9 +105,7 @@ export function accountTimeline(
 export type BillingProfiles = Partial<Record<HarnessId, BillingTimeline>>
 
 /**
- * `Preferences.billing`. LOCAL ONLY — this never enters `IngestBody`, a team doc or an audit
- * event. What someone pays is theirs, and a central has no use for it: it cannot price a fleet
- * from one operator's timeline anyway.
+ * `Preferences.billing`. LOCAL ONLY — this never enters an audit event. What someone pays is theirs.
  */
 export interface BillingSettings {
   profiles: BillingProfiles

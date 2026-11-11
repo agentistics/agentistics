@@ -8,8 +8,7 @@
  * It keeps the same ONE rule the read channel keeps — SCOPE. A socket is opened only for a session
  * THIS MACHINE MANAGES (its own registry), so the write power never reaches past the fleet the
  * dashboard already lists. Everything harder is upstream of it: `index.ts` refuses the upgrade unless
- * `localShell` is granted (capability-guard) and the Origin is same-origin (CSWSH), and 404s it on a
- * central. A captured terminal is shell access with extra steps; typing into one is the shell itself,
+ * `localShell` is granted (capability-guard) and the Origin is same-origin (CSWSH). A captured terminal is shell access with extra steps; typing into one is the shell itself,
  * so it rides the very same gates, and no lower ones.
  *
  * The backend is resolved LAZILY via a dynamic import, exactly as `terminal-web.ts` reaches it

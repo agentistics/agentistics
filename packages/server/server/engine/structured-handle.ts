@@ -18,8 +18,8 @@
  * It is invalidated when ITS socket closes (not when another surface of the same session does) and when the
  * session ends; a dead handle stays dead and releases its subscriptions. Every method is total.
  *
- * Who may open a socket for a session is the host's gate: `/api/engine/x` is `localShell`, refused on a
- * central and on any exposed profile, so a socket exists only for the machine's own, authenticated owner.
+ * Who may open a socket for a session is the host's gate: `/api/engine/x` is `localShell`, refused on
+ * any exposed profile, so a socket exists only for the machine's own owner.
  */
 import { ENGINE_SOCKET_LIMITS, validIdempotencyKey, type EngineStructuredSessions, type HarnessChat, type HarnessChatDelta, type StructuredSessionHandle } from '@agentistics/engine-api'
 import type { SessionBackend } from '../sessions/types'

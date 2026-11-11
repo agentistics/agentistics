@@ -99,7 +99,7 @@ export async function enrolledVault(): Promise<{ words: string[] }> {
 }
 
 beforeEach(() => { STORE.clear() })
-// Leave the process the way every other vault test file expects it (central-env.test.ts reads the
+// Leave the process the way every other vault test file expects it (a test file that reads the
 // default test vault without resetting it — a locked fake left here would fail it).
 // A UNIQUE directory: a fixed one would keep the vault the next file creates there, and the run after
 // would read it as protector-lost (its memory key died with the previous process).

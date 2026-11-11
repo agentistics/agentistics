@@ -39,7 +39,7 @@ describe('/api/version in the restart-pending case', () => {
   })
   test('the toast is offered (upgradable never a refusal for it)', () => {
     const v = withRestartPending({ ...info, latest: '2.112.1', hasUpdate: false }, '2.112.2')
-    expect(shouldShowToast({ info: { ...v, upgradable: null }, snooze: null, now: 0, central: false })).toEqual({ show: true })
+    expect(shouldShowToast({ info: { ...v, upgradable: null }, snooze: null, now: 0 })).toEqual({ show: true })
     expect(upgradableHint).toBeDefined()
   })
 })

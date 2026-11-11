@@ -31,7 +31,6 @@ import { billingNotices } from './lib/billingNotices'
 import { planScopeHarnesses, planScopeNote } from './lib/costBasis'
 import { planCostOf } from './lib/topUsage'
 import { bootLoading } from './lib/bootPhase'
-import { editorEnabledFor } from './lib/editorGate'
 import { useProjectedDerived } from './hooks/useProjectedDerived'
 import { overlayProjected } from './lib/projectedDerived'
 import { ConfirmModal } from './pages/settings/primitives'
@@ -43,9 +42,9 @@ import { useIsMobile } from './hooks/useIsMobile'
 import { useAccessibility } from './hooks/useAccessibility'
 import type { TagDef } from './lib/tagMatch'
 import { canCreateTagFromFilters, filtersToTagDraft } from './lib/filtersToTag'
-import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison, TeamConfig } from '@agentistics/core'
+import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison } from '@agentistics/core'
 import type { Lang, Theme } from '@agentistics/core'
-import { costCellText, totalTokens as sumAllTokens, isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, fmt, totalTokens, totalTokensExplained, isNayCwd } from '@agentistics/core'
+import { costCellText, totalTokens as sumAllTokens, isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, planAllocation, formatProjectName, MODEL_PRICING, distinctHarnesses, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, fmt, totalTokens, totalTokensExplained, isNayCwd } from '@agentistics/core'
 import { StatCard } from './components/StatCard'
 import { StreakBreakdownButton } from './components/StreakBreakdownButton'
 import { ActivityHeatmap } from './components/ActivityHeatmap'
@@ -142,9 +141,6 @@ import { OUTER_GAP, PANEL_BORDER, PANEL_GAP, PANEL_RADIUS } from './lib/panelLay
 import { useFleet, useFleetIndex, type FleetActionId } from './lib/fleet'
 import { BandSegment, BandSegmentTab } from './components/sessions/bandControls'
 import { SessionActions } from './components/sessions/SessionActions'
-import { ChangePassword } from './components/ChangePassword'
-import { ChangePasswordSelf } from './components/ChangePasswordSelf'
-import { MfaSetup } from './components/MfaSetup'
 import { StepUpPrompt } from './components/StepUpPrompt'
 import { HARNESS_LABELS } from './lib/harness'
 import { PlanUsageFootButton } from './components/PlanUsageFootButton'
@@ -162,7 +158,6 @@ import { setLeftAsideOpen } from './lib/leftAsideOpen'
 // The sessions workspace's container geometry, named ONCE (see FleetOverview's header): the
 // filter row in the strip and the body under it have to move together at every width.
 import { PAGE_INSET } from './components/sessions/FleetOverview'
-import { setFleetSourceCentral } from './lib/fleet'
 import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { initialSessionView } from './lib/sessionView'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
@@ -198,17 +193,10 @@ import { ASIDE_Z } from './lib/zLayers'
  */
 const SESSIONS_FILTER_DIMS = SESSION_FILTER_DIMS as unknown as Array<'activeOnly' | 'harnesses' | 'repos' | 'projects' | 'models'>
 
-// Team session state
-const HOST_SESSION_BOOT: TeamSessionState = { required: false, authed: true }
+// Host session state
+const HOST_SESSION_BOOT: HostSessionState = {}
 
-interface TeamSessionState {
-  required: boolean
-  authed: boolean
-  /** true when the server is running in central (hub) mode */
-  central?: boolean
-  /** true when a central has NO local harness data (pure aggregator) — hide local-only UI
-   *  (archive consent gate, Nay chat) that only makes sense with a local harness installed. */
-  aggregatorOnly?: boolean
+interface HostSessionState {
   /** How reachable this instance is (server/exposure.ts). */
   profile?: 'local' | 'lan' | 'public'
   /** Local host-power capabilities the server still grants. Undefined on an older server
@@ -239,16 +227,6 @@ interface TeamSessionState {
   /** The journal's first import (`journal/backfill.ts`): its state for a one-line note; `null` or
    *  undefined when there is nothing to say. */
   journalBackfill?: JournalBackfillSummary | null
-}
-
-export interface IamAccount { id: string; name: string; email: string; role: 'owner' | 'member'; memberships: { teamId: string; role: 'manager' | 'user' }[]; mustChangePassword: boolean }
-interface IamState {
-  needsBootstrap: boolean
-  authed: boolean
-  account?: IamAccount
-  /** The server refuses this owner's requests until a second factor exists. Reported by
-   *  /api/iam/me so the app can show the enrolment screen instead of a wall of 403s. */
-  mfaEnrollmentRequired?: boolean
 }
 
 /**
@@ -544,18 +522,17 @@ function CollapsedTip({ label, show, children }: { label: string; show: boolean;
 }
 
 function SideNav({
-  lang, harnesses, isCentral, hasWorkflows, collapsed, width, onResize, onCommitWidth, onToggle,
-  theme, onToggleTheme, onToggleLang, onExport, principal, sessionsFilters, sessionsActiveOnly,
+  lang, harnesses, hasWorkflows, collapsed, width, onResize, onCommitWidth, onToggle,
+  theme, onToggleTheme, onToggleLang, onExport, sessionsFilters, sessionsActiveOnly,
   filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
 }: {
-  lang: Lang; harnesses?: SurfaceHarnessId[]; isCentral?: boolean; hasWorkflows?: boolean
+  lang: Lang; harnesses?: SurfaceHarnessId[]; hasWorkflows?: boolean
   collapsed: boolean; onToggle: () => void
   /** The width in force. Fixed in the dashboard workspace, user-set in the sessions one. */
   width: number
   onResize: (w: number) => void
   onCommitWidth: (w: number) => void
   theme: Theme; onToggleTheme: () => void; onToggleLang: () => void; onExport: () => void
-  principal?: IamAccount
   /** Session controls are independent of the metric header. SideNav only reads their scope. */
   sessionsFilters: Filters
   sessionsActiveOnly: boolean
@@ -586,41 +563,12 @@ function SideNav({
   // fall back on — in a plain tab they duplicate the browser's own, which is a cost worth paying
   // for the standalone case.
   const navigate = useNavigate()
-  // Profile menu (popover anchored to the avatar) + self-service change-password modal.
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [pwOpen, setPwOpen] = useState(false)
-  const [mfaOpen, setMfaOpen] = useState(false)
-  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
-  const avatarRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  useEscapeOwner(menuOpen, () => setMenuOpen(false))
-  useEffect(() => {
-    if (!menuOpen) return
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (menuRef.current?.contains(t) || avatarRef.current?.contains(t)) return
-      setMenuOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    return () => { window.removeEventListener('mousedown', onDown) }
-  }, [menuOpen])
-  const openMenu = () => {
-    const r = avatarRef.current?.getBoundingClientRect()
-    if (r) setMenuPos({ top: r.top, left: r.right + 10 })
-    setMenuOpen(o => !o)
-  }
-  const roleLabel = principal
-    ? (principal.role === 'owner' ? 'Owner' : (principal.memberships.some(m => m.role === 'manager') ? 'Manager' : 'User'))
-    : ''
-  const logout = () => { void fetch('/api/iam/logout', { method: 'POST' }).then(() => window.location.reload()) }
-  // Repositories highlights across the whole section (list, detail, actions) — Actions lives as a
-  // tab inside each repo, so there's no sidebar submenu.
+  // Repositories highlights across the whole section (list and detail).
   const inReposSection = location.pathname.startsWith('/repositories') || location.pathname.startsWith('/repo')
   // How many sessions are waiting on a person, for the switch's badge. Read HERE rather than
   // passed down, because the aside must carry it in BOTH workspaces — the badge exists precisely
   // for the moment you are looking at the dashboard and a session starts needing you. `useFleet`
-  // shares one poll across every consumer, so this costs no extra request. Never on a central: it
-  // aggregates many machines and hosts none of their sessions.
+  // shares one poll across every consumer, so this costs no extra request.
   const { fleet, loading: fleetLoading, unsupported: fleetUnsupported, stale: fleetStale, act: fleetAct } = useFleet(pt ? 'pt' : 'en')
   const attention = fleet.attention
   // The row's context menu (Task 6) needs the verb-carrying shape, not the arrangement-only one —
@@ -645,13 +593,11 @@ function SideNav({
 
   const { nativeRuntime } = useEngineCaps()
   const visibleSettings = useMemo(() => new Set(visibleSettingsSections({
-    central: !!isCentral,
-    ...(principal ? { role: principal.role === 'owner' ? 'owner' as const : 'member' as const, isManager: principal.memberships.some(m => m.role === 'manager') } : {}),
     ...(nativeRuntime !== null ? { nativeRuntime } : {}),
-  }).map(x => x.id)), [isCentral, principal, nativeRuntime])
+  }).map(x => x.id)), [nativeRuntime])
   // The rail/tree badges read the plan store the Uso page reads, so its badge matches the page.
   const planLimits = usePlanLimits()
-  const areaBadgeCounts = useMemo(() => areaBadges({ attention, usageRows: isCentral ? undefined : planLimits.budgets }), [attention, isCentral, planLimits.budgets])
+  const areaBadgeCounts = useMemo(() => areaBadges({ attention, usageRows: planLimits.budgets }), [attention, planLimits.budgets])
   const footBtn: React.CSSProperties = {
     width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
     borderRadius: 8, border: '1px solid var(--border)', background: 'transparent',
@@ -665,74 +611,6 @@ function SideNav({
    */
   const footer = (
     <div style={{ paddingTop: 10, marginTop: 6, borderTop: '1px solid var(--border)' }}>
-      {/* Row A — account: a single profile button (avatar) opening a popover menu */}
-      {principal && (
-        <div style={{ display: 'flex', justifyContent: collapsed ? 'center' : 'stretch', paddingBottom: 10 }}>
-          <CollapsedTip label={principal.name} show={collapsed}>
-            <button ref={avatarRef} onClick={openMenu} aria-haspopup="menu" aria-expanded={menuOpen}
-              title={collapsed ? undefined : principal.name}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, width: collapsed ? 'auto' : '100%',
-                padding: collapsed ? 0 : '4px 6px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
-                border: '1px solid transparent', background: menuOpen ? 'var(--bg-elevated)' : 'transparent', transition: 'background 0.15s',
-              }}
-              onMouseEnter={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-elevated)' }}
-              onMouseLeave={e => { if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}>
-              <span style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--bg-elevated)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7188rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0 }}>{principal.name.slice(0, 2)}</span>
-              {!collapsed && (
-                <span style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-                  <span style={{ display: 'block', fontSize: '0.7812rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
-                  <span style={{ display: 'block', fontSize: '0.625rem', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
-                </span>
-              )}
-              {!collapsed && <ChevronDown size={14} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />}
-            </button>
-          </CollapsedTip>
-        </div>
-      )}
-
-      {/* Profile popover — rendered via portal so it escapes the sidebar's overflow clip */}
-      {principal && menuOpen && menuPos && createPortal(
-        <div ref={menuRef} role="menu"
-          style={{
-            position: 'fixed', top: menuPos.top, left: menuPos.left, transform: 'translateY(-100%)',
-            minWidth: 220, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8,
-            boxShadow: '0 10px 30px rgba(0,0,0,0.35)', zIndex: 600, padding: 6,
-          }}>
-          <div style={{ padding: '8px 10px 10px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
-            <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</div>
-            <div style={{ fontSize: '0.7188rem', color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.email}</div>
-            <div style={{ marginTop: 4, fontSize: '0.625rem', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</div>
-          </div>
-          <button role="menuitem" onClick={() => { setMenuOpen(false); setPwOpen(true) }}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: '0.8125rem', fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
-            onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
-            onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
-            <KeyRound size={15} /> {pt ? 'Trocar senha' : 'Change password'}
-          </button>
-          <button role="menuitem" onClick={() => { setMenuOpen(false); setMfaOpen(true) }}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: '0.8125rem', fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
-            onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
-            onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
-            <ShieldCheck size={15} /> {pt ? 'Duas etapas' : 'Two-factor'}
-          </button>
-          <button role="menuitem" onClick={() => { setMenuOpen(false); logout() }}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: '0.8125rem', fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left' }}
-            onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'var(--bg-elevated)'; t.style.color = 'var(--text-primary)' }}
-            onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.background = 'transparent'; t.style.color = 'var(--text-secondary)' }}>
-            <LogOut size={15} /> {pt ? 'Sair' : 'Log out'}
-          </button>
-        </div>,
-        document.body,
-      )}
-
-      {/* Self-service change-password modal */}
-      {pwOpen && <ChangePasswordSelf lang={lang} onClose={() => setPwOpen(false)} />}
-      {mfaOpen && <MfaSetup lang={lang} onClose={() => setMfaOpen(false)} canDisable={principal?.role !== 'owner'} />}
-
-      {/* Thin divider between account and actions */}
-      {principal && <div style={{ height: 1, background: 'var(--border)', marginBottom: 10 }} />}
-
       {/* Row B — config actions (theme · language · export · usage), evenly spaced. Settings lives in the area tree. */}
       <div style={{ display: 'flex', flexDirection: collapsed ? 'column' : 'row', alignItems: 'center', gap: 6 }}>
         <CollapsedTip label={pt ? 'Tema' : 'Theme'} show={collapsed}>
@@ -755,7 +633,7 @@ function SideNav({
             <FileDown size={15} />{!collapsed && <span style={{ fontSize: 11, marginLeft: 4 }}>PDF</span>}
           </button>
         </CollapsedTip>
-        {!isCentral && <PlanUsageFootButton lang={pt ? 'pt' : 'en'} collapsed={collapsed} footBtn={footBtn} />}
+        <PlanUsageFootButton lang={pt ? 'pt' : 'en'} collapsed={collapsed} footBtn={footBtn} />
       </div>
     </div>
   )
@@ -990,14 +868,14 @@ export default function AppLayout() {
   // phone they take ~140px from the hour grid.
   const isDeliveryCalendarRoute = location.pathname === '/tasks/calendar'
 
-  /** Which filter dimensions a page can actually react to. Top usage ranks by member, team,
-   *  machine, presence, repo, tag, project and model, so those narrow it meaningfully — harness is
+  /** Which filter dimensions a page can actually react to. Top usage ranks by repo, tag,
+   *  project and model, so those narrow it meaningfully — harness is
    *  left out because the page already breaks every dimension down per harness. Every other page
    *  gets the full set (undefined = no restriction). A filter that visibly changes nothing reads as
    *  broken, so it is better not to offer it. */
   const filterDimsForRoute = location.pathname.startsWith('/top')
-    ? (['members', 'teams', 'machines', 'presence', 'repos', 'tags', 'projects', 'models'] as const).slice() as
-      Array<'members' | 'teams' | 'machines' | 'presence' | 'repos' | 'tags' | 'projects' | 'models'>
+    ? (['repos', 'tags', 'projects', 'models'] as const).slice() as
+      Array<'repos' | 'tags' | 'projects' | 'models'>
     : undefined
   const isMobile = useIsMobile()
   /**
@@ -1027,31 +905,28 @@ export default function AppLayout() {
     try { localStorage.setItem('agentistics-lang', lang) } catch { /* private mode */ }
   }, [lang])
 
-  // Team session gate
-  // undefined = not yet fetched, TeamSessionState after fetch
-  const [teamSession, setTeamSession] = useState<TeamSessionState>(HOST_SESSION_BOOT)
-  const iam: IamState = { needsBootstrap: false, authed: false }
+  // Host session: the gates the server has already resolved (`/api/session`).
+  const [hostSession, setHostSession] = useState<HostSessionState>(HOST_SESSION_BOOT)
   /**
    * Reads the host gates the server has already resolved — `shellEnabled`, `editorEnabled`,
-   * `chatEnabled`, `capabilities` — and re-reads them after a switch flips in Settings. NOT a central
-   * leftover: without it every gate reads OFF and the Shell/Studio tabs vanish (`lib/hostSession.ts`).
+   * `chatEnabled`, `capabilities` — and re-reads them after a switch flips in Settings. Without it every gate reads OFF and the Shell/Studio tabs vanish (`lib/hostSession.ts`).
    */
-  const refreshTeamSession = useCallback(() => {
+  const refreshHostSession = useCallback(() => {
     return fetchWithTimeout(HOST_SESSION_PATH, SMALL_TIMEOUT_MS)
-      .then(r => r.ok ? (r.json() as Promise<TeamSessionState>) : null)
-      .then(s => setTeamSession(prev => resolveHostSessionRefresh(prev, s, HOST_SESSION_BOOT)))
-      .catch(() => setTeamSession(prev => resolveHostSessionRefresh(prev, null, HOST_SESSION_BOOT)))
+      .then(r => r.ok ? (r.json() as Promise<HostSessionState>) : null)
+      .then(s => setHostSession(prev => resolveHostSessionRefresh(prev, s, HOST_SESSION_BOOT)))
+      .catch(() => setHostSession(prev => resolveHostSessionRefresh(prev, null, HOST_SESSION_BOOT)))
   }, [])
-  useEffect(() => { void refreshTeamSession() }, [refreshTeamSession])
+  useEffect(() => { void refreshHostSession() }, [refreshHostSession])
   // Journal backfill progress is part of the team-session response rather than the data poll. Keep
   // the bell current while the server is working (and after a failure, so a retry can resolve it),
   // then stop polling once the backfill reaches its terminal state.
   useEffect(() => {
-    const state = teamSession?.journalBackfill?.state
+    const state = hostSession?.journalBackfill?.state
     if (state !== 'running' && state !== 'failed') return
-    const timer = window.setInterval(() => { void refreshTeamSession() }, journalBackfillPollMs(state))
+    const timer = window.setInterval(() => { void refreshHostSession() }, journalBackfillPollMs(state))
     return () => window.clearInterval(timer)
-  }, [refreshTeamSession, teamSession?.journalBackfill?.state])
+  }, [refreshHostSession, hostSession?.journalBackfill?.state])
   /**
    * Whether to offer the chat at all.
    *
@@ -1060,17 +935,10 @@ export default function AppLayout() {
    * an older server that has no switch — then the capability alone decides, exactly as before, so
    * a web bundle newer than its server never hides a chat that still works.
    */
-  const chatOffered = teamSession?.chatEnabled ?? true
+  const chatOffered = hostSession?.chatEnabled ?? true
 
-  // `useAccessibility` is mounted here — ABOVE the `if (!iam.authed) return <Login/>` gate below —
-  // so its own load effect always runs before that gate can block anything. On a central,
-  // `/api/accessibility` answers 401 before sign-in and 403 before an owner's MFA enrolment
-  // (`AUTH_PUBLIC` / `MFA_EXEMPT` in `server/index-routes.ts` name neither route), so a stable
-  // identity of `undefined` through both of those states — collapsing to the account id only once
-  // a session is fully authorized — is what lets the hook's load effect re-fire the moment one
-  // becomes available, instead of being stuck forever with whatever its first, pre-auth fetch saw.
-  // On a non-central machine the route is never gated, so a constant identity is correct: the
-  // effect runs once, exactly as it always has.
+  // `useAccessibility` is mounted here, early, so its own load effect always runs first. The route
+  // is never gated, so a constant identity is correct: the effect runs once.
   const a11yIdentity = 'solo'
   const a11y = useAccessibility(a11yIdentity)
   const [theme, setThemeState] = useState<Theme>(() => {
@@ -1099,8 +967,6 @@ export default function AppLayout() {
 
   // Surface server-pushed notifications (member connection/auth errors) as toasts + bell.
   useNotificationStream(lang)
-
-  const isCentral = false
 
   /**
    * Set the language AND remember it — the same defect `setTheme`/`setCurrency` below had. It only
@@ -1181,10 +1047,10 @@ export default function AppLayout() {
   // something a tag can be built from (see filtersToTag.ts). The drawer opens on /tags pre-filled;
   // TagsPage reads `draftFromFilters` from router state the same way it already reads `editTagId`.
   const createTagFromFilters = useMemo(
-    () => (canCreateTagFromFilters(filters, { central: isCentral })
-      ? () => navigate('/tags', { state: { draftFromFilters: filtersToTagDraft(filters, { central: isCentral }) } })
+    () => (canCreateTagFromFilters(filters)
+      ? () => navigate('/tags', { state: { draftFromFilters: filtersToTagDraft(filters) } })
       : undefined),
-    [filters, isCentral, navigate],
+    [filters, navigate],
   )
   const [infoModalIndex, setInfoModalIndex] = useState<number | null>(null)
   const [pdfDirectExportRange, setPdfDirectExportRange] = useState<string | null>(null)
@@ -1764,14 +1630,9 @@ export default function AppLayout() {
    * subscription `SideNav` already holds.
    */
   const { sessionId: selectedSessionId } = useParams()
-  // A CENTRAL's fleet is the RELAY's, for the machine the aside's picker chose. Set once, here,
-  // because the poller is module-scoped and every surface reads the same snapshot.
-  useEffect(() => { setFleetSourceCentral(isCentral) }, [isCentral])
   const mobilePlanLimits = usePlanLimits()
   const { nativeRuntime: mobileNativeRuntime } = useEngineCaps()
   const mobileVisibleSettings = new Set(visibleSettingsSections({
-    central: !!isCentral,
-    ...(iam?.account ? { role: iam.account.role, isManager: iam.account.memberships.some(m => m.role === 'manager') } : {}),
     ...(mobileNativeRuntime !== null ? { nativeRuntime: mobileNativeRuntime } : {}),
   }).map(section => section.id))
   /**
@@ -1994,7 +1855,7 @@ export default function AppLayout() {
       pushNotification({ type: 'success', title: lang === 'pt' ? 'Carregamento concluído' : 'Loading complete', message: lang === 'pt' ? 'Os dados estão atualizados.' : 'The data is up to date.', meta: { notificationKey: 'loading.startup', loadingKind: 'startup', state: 'done' } })
       loadingNoticeSeen.current.startup = false
     }
-    const journalNotice = journalLoadingNotification(teamSession?.journalBackfill, lang === 'pt' ? 'pt' : 'en')
+    const journalNotice = journalLoadingNotification(hostSession?.journalBackfill, lang === 'pt' ? 'pt' : 'en')
     if (journalNotice) {
       loadingNoticeSeen.current.journal = true
       pushNotification(journalNotice)
@@ -2002,7 +1863,7 @@ export default function AppLayout() {
       pushNotification({ type: 'success', title: lang === 'pt' ? 'Importação concluída' : 'Import complete', message: lang === 'pt' ? 'O histórico foi importado.' : 'The history was imported.', meta: { notificationKey: 'loading.journal', loadingKind: 'journal', state: 'done' } })
       loadingNoticeSeen.current.journal = false
     }
-  }, [startup, teamSession?.journalBackfill, lang, inSessionsWorkspace])
+  }, [startup, hostSession?.journalBackfill, lang, inSessionsWorkspace])
   useEffect(() => {
     const openRetry = () => setRetryImportOpen(true)
     window.addEventListener('agentistics:retry-journal-import', openRetry)
@@ -2016,7 +1877,6 @@ export default function AppLayout() {
   // Task 13 — the hidden-repo badge: canonical repo key -> labels of the connections hiding it.
   // Populated from the same /api/preferences load `archiveChoice` uses below; empty map (never
   // undefined) so every consumer can read it without an extra "not loaded yet" branch.
-  const [deniedRepoLabels, setDeniedRepoLabels] = useState<Map<string, string[]>>(new Map())
   /** Re-reads the connection list so the hidden-repo badge follows the rules instead of freezing at
    *  whatever they were on page load. The preferences effect below is mount-only and this is an
    *  SPA, so un-blocking a repository (or disconnecting the central entirely) used to leave
@@ -2080,9 +1940,6 @@ export default function AppLayout() {
   // Show install modal once after first data load, unless dismissed or already installed
   useEffect(() => {
     if (installModalShownRef.current) return
-    // A central is a server, not an end-user machine — never prompt to install the app there
-    // (and its prefs are ephemeral/read-only in Docker, so a dismiss wouldn't persist anyway).
-    if (isCentral) return
     if (!data || loading) return
     if (pwaInstalled) return
     if (installDismissedPref === undefined) return // wait for prefs to load
@@ -2091,12 +1948,12 @@ export default function AppLayout() {
     if (isNoticeSnoozed(INSTALL_SNOOZE_KEY)) return // closed with "Not now": back only after the delay
     installModalShownRef.current = true
     setShowInstallModal(true)
-  }, [data, loading, pwaInstalled, installDismissedPref, isCentral])
+  }, [data, loading, pwaInstalled, installDismissedPref])
   const [chatModel, setChatModel] = useState<string | null>(null)
   const [chatSoundEnabled, setChatSoundEnabled] = useState(true)
   const [chatSoundId, setChatSoundId] = useState('ping')
   // The repository explorer's autosave switch. A plain preference, loaded with the rest below and
-  // defaulting to OFF — it is not a capability, so it is never read off `/api/team/session`.
+  // defaulting to OFF — it is not a capability, so it is never read off `/api/session`.
   const [editorAutosave, setEditorAutosave] = useState(false)
 
   const [cardPrecision, setCardPrecisionState] = useState<Record<string, boolean>>({})
@@ -2141,7 +1998,7 @@ export default function AppLayout() {
     // only a real 200 response with no archiveMode may set it. On failure we retry with
     // backoff and leave state at `undefined` (neutral loading bg) so nothing false-gates.
     let cancelled = false
-    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; textScale?: number; cardOrder?: string[]; monthlyBudgetUSD?: number | null; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; telemetryEnabled?: boolean; telemetryNoticeDismissed?: boolean; team?: TeamConfig; billing?: unknown }) => {
+    const apply = (prefs: { cardPrecision?: Record<string, boolean>; lang?: Lang; theme?: Theme; currency?: 'USD' | 'BRL'; textScale?: number; cardOrder?: string[]; monthlyBudgetUSD?: number | null; chatModel?: string; chatSoundEnabled?: boolean; editorAutosave?: boolean; archiveMode?: ArchiveMode; archiveSessions?: boolean; installDismissed?: boolean; telemetryEnabled?: boolean; telemetryNoticeDismissed?: boolean; billing?: unknown }) => {
       if (prefs.cardPrecision) setCardPrecisionState(prefs.cardPrecision)
       // Total and never throws: a hand-edited preferences.json must not blank the dashboard.
       const nextBilling = normalizeBillingSettings(prefs.billing)
@@ -2175,7 +2032,7 @@ export default function AppLayout() {
       // Resolve the archive mode (migrates the legacy archiveSessions boolean). Only reached on
       // a successful load — a failed fetch is retried in `load`, never funneled through here.
       setArchiveChoice(resolveArchiveChoice(prefs))
-      if (!isCentral && prefs.telemetryNoticeDismissed !== true) {
+      if (prefs.telemetryNoticeDismissed !== true) {
         pushNotification({ type: 'info', code: 'telemetry.first_use' })
         // Mark it at emission time: an auto-dismiss, reload, or notification-history clear must not
         // turn the first-use notice into a recurring prompt.
@@ -2292,8 +2149,8 @@ export default function AppLayout() {
   }, [])
 
   // May this machine be offered the update at all, and is it snoozed? (`shouldShowToast`)
-  const updateVerdict = shouldShowToast({ info: versionAnswer, snooze: updateSnooze, now: Date.now(), central: isCentral })
-  const pinned = pinnedUpdate(versionAnswer, isCentral)
+  const updateVerdict = shouldShowToast({ info: versionAnswer, snooze: updateSnooze, now: Date.now() })
+  const pinned = pinnedUpdate(versionAnswer)
   useEffect(() => { setPendingUpdate(pinned) }, [pinned?.latest, pinned?.current, pinned?.critical]) // eslint-disable-line react-hooks/exhaustive-deps
   const updateInstallable = updateVerdict.show || (updateVerdict.show === false && updateVerdict.why === 'snoozed')
   const promptRequested = !!pinned && requestedUpdate === pinned.latest
@@ -2308,8 +2165,8 @@ export default function AppLayout() {
     if (o.bell) pushNotification(o.bell)
     if (o.install) void startUpgrade(versionAnswer.latest, lang === 'pt' ? 'pt' : 'en')
   }, [versionAnswer, lang])
-  const nayOffered = !teamSession?.aggregatorOnly && teamSession?.capabilities?.localChat !== false
-    && teamSession?.capabilities?.localShell !== false && chatOffered
+  const nayOffered = hostSession?.capabilities?.localChat !== false
+    && hostSession?.capabilities?.localShell !== false && chatOffered
   const renderUpdatePrompt = promptVisible && versionAnswer
     ? (placement: UpdateCardPlacement) => (
         <HiddenWhileAreaSheetOpen>
@@ -2468,7 +2325,7 @@ export default function AppLayout() {
   // A4.7: the session, cost and tool figures from the projections, laid over the legacy answer when
   // the server says this surface opted in and the filters are ones the API can express.
   const projectedOverlay = useProjectedDerived({
-    enabled: teamSession?.projectionsWeb === true, filters, activeOnly: derivedActiveOnly, stamp: data,
+    enabled: hostSession?.projectionsWeb === true, filters, activeOnly: derivedActiveOnly, stamp: data,
   })
   // A harness the projections do not cover keeps its legacy (adapter) figures; the others use the projection.
   const derived = useMemo(() => {
@@ -2494,20 +2351,14 @@ export default function AppLayout() {
     brlRate,
     filters,
     accounts: billingAccounts,
-    // The basis does not exist on a central, and refusing HERE is what makes it unreachable: the
-    // surfaces that read `planBasis` directly (Home's plan panel, compare's per-side button) never
-    // pass through the `costBasis` switch below.
-    central: isCentral,
   })
   const billingReady = useMemo(
     () => billingReadiness(billing, data?.harnesses?.length ? data.harnesses.filter(isAdapterHarness) : ['claude'], billingAccounts),
     [billing, data?.harnesses, billingAccounts],
   )
-  // A central aggregates many machines; pricing a whole fleet from its operator's own timeline
-  // would be a fabricated number, so the basis does not exist there at all. And a basis the data
-  // cannot support falls back rather than rendering a page of N/A.
+  // A basis the data cannot support falls back rather than rendering a page of N/A.
   const costBasis: CostBasis =
-    isCentral || !billingReady.ready || planBasis.basis === null ? 'api' : costBasisState
+    !billingReady.ready || planBasis.basis === null ? 'api' : costBasisState
   /**
    * The centring padding the strip can AFFORD, and what the bar therefore has to draw in.
    *
@@ -2521,7 +2372,7 @@ export default function AppLayout() {
    * and on a machine with no billing set up, and reserving room for a control that is not on screen
    * compacts a bar that would have fitted.
    */
-  const stripExtra = (!isCentral && billingReady.ready && planBasis.basis !== null) ? COST_BASIS_W : 0
+  const stripExtra = (billingReady.ready && planBasis.basis !== null) ? COST_BASIS_W : 0
   // The SESSIONS strip mounts no inline `FiltersBar` of its own to centre or squeeze any more (see
   // `sessionTopBar`'s Filtros tab), so `filterSlotEl` is never set there and `filterSlotW` is
   // already 0 on that route — `stripPadding(0, …)` answers 0 on its own, which is what makes a
@@ -2538,24 +2389,23 @@ export default function AppLayout() {
   // What the registered plans commit to THIS calendar month — a different question from the
   // filter-window plan cost, and the one a monthly budget is set against.
   const monthCommitment = useMemo(
-    () => (isCentral ? null : monthlyCommitment({
+    () => (monthlyCommitment({
       profiles: billing.profiles,
       month: new Date().toISOString().slice(0, 10),
       brlRate,
       accounts: billingAccounts,
       accountProfiles: billing.accountProfiles,
     })),
-    [billing.profiles, billing.accountProfiles, billingAccounts, brlRate, isCentral],
+    [billing.profiles, billing.accountProfiles, billingAccounts, brlRate],
   )
 
   // The first-run invite returns after a week (snoozed on close) until dismissed for good — but only once preferences
   // have actually loaded (`introDismissed` absent during loading would flash it at someone who
-  // dismissed it months ago), only with nothing registered yet, and never on a central.
+  // dismissed it months ago), only with nothing registered yet.
   const BILLING_INTRO_SNOOZE_KEY = 'agentistics-billing-intro-snoozed-until'
   const [billingIntroSeen, setBillingIntroSeen] = useState(false)
   const showBillingIntro =
-    !isCentral
-    && !billingIntroSeen
+    !billingIntroSeen
     && !isNoticeSnoozed(BILLING_INTRO_SNOOZE_KEY)
     && archiveChoice !== null
     && billing.introDismissed !== true
@@ -2590,13 +2440,6 @@ export default function AppLayout() {
         lang: lang === 'pt' ? 'pt' : 'en',
       })
     : null
-  // The strip's totals (sessions/cost/tokens) all narrow to online members BY DEFAULT on a
-  // central whose operator turned off `includeOfflineData` — nobody chose that on this screen, so
-  // it needs the same disclosure `planScopeNote` gives a plan-basis figure. An explicit "Offline"
-  // presence pill already reads as a filter the user picked and needs no extra sentence.
-  const presenceScopeNote = derived?.presenceScope.isPolicyDefault
-    ? (lang === 'pt' ? 'somente membros online (política do central)' : 'online members only (central policy)')
-    : null
   const headerCostText = headerPlanBasis || !derived
     ? fmtCost(headerCostUSD, currency, brlRate)
     : costCellText(headerCostUSD, derived.unpricedTokens, sumAllTokens(derived.tokenTotals), lang === 'pt' ? 'pt' : 'en', usd => fmtCost(usd, currency, brlRate))
@@ -2607,7 +2450,6 @@ export default function AppLayout() {
           headerCostScope,
         ].filter(Boolean).join(' · ')
       : (lang === 'pt' ? 'Estimativa a preços de API' : 'API-price estimate'),
-    presenceScopeNote,
   ].filter(Boolean).join(' · ')
 
   /**
@@ -2620,8 +2462,7 @@ export default function AppLayout() {
    */
   const headerTokens = derived ? totalTokens(derived.tokenTotals) : 0
   const headerTokensTitle = derived
-    ? [totalTokensExplained(derived.tokenTotals, lang === 'pt' ? 'pt' : 'en'), presenceScopeNote]
-        .filter(Boolean).join(' · ')
+    ? totalTokensExplained(derived.tokenTotals, lang === 'pt' ? 'pt' : 'en')
     : ''
 
   const models = useMemo(() => {
@@ -2716,44 +2557,8 @@ export default function AppLayout() {
     return counts
   }, [data])
 
-  const users = useMemo(() => (data ? distinctUsers(data.sessions) : []), [data])
-
-  // Stable signature of who is online right now — drives the machines refetch below.
-  const presenceKey = useMemo(
-    () => Object.entries(data?.presence ?? {}).map(([u, p]) => `${u}:${p.online ? 1 : 0}`).sort().join('|'),
-    [data?.presence],
-  )
-
-  // Central-only: fetch teams and machines for filter dimensions
-  const [teamsList, setTeamsList] = useState<{ id: string; name: string }[]>([])
-  const [machinesList, setMachinesList] = useState<{ id: string; name: string; user: string; teamId?: string; teamIds?: string[]; online?: boolean }[]>([])
-  useEffect(() => {
-    if (!teamSession?.central) {
-      setTeamsList([])
-      setMachinesList([])
-      return
-    }
-    Promise.all([
-      fetch('/api/iam/teams').then(r => r.ok ? r.json() : { teams: [] }),
-      fetch('/api/iam/machines').then(r => r.ok ? r.json() : { machines: [] }),
-    ]).then(([teamsResp, machinesResp]) => {
-      setTeamsList((teamsResp.teams ?? []).map((t: { _id: string; name: string }) => ({ id: t._id, name: t.name })))
-      setMachinesList((machinesResp.machines ?? []).map((m: { id: string; machineName: string; user: string; teamId?: string; teamIds?: string[]; online?: boolean }) => ({ id: m.id, name: m.machineName, user: m.user, teamId: m.teamId, teamIds: m.teamIds, online: m.online === true })))
-    }).catch(() => {
-      setTeamsList([])
-      setMachinesList([])
-    })
-    // presenceKey: /api/iam/machines stamps each machine's `online` from computePresence(), so the
-    // list has to be refetched when presence flips — otherwise the online/offline machine counts
-    // would freeze at whatever they were when the central was first loaded.
-  }, [teamSession?.central, presenceKey])
-
   // Tags back the `tags` filter dimension; without them the dimension stays hidden and any stored
-  // filters.tags selection is inert. They exist in EVERY mode (a solo machine keeps them in
-  // ~/.agentistics/tags.json), so this load is not tied to the central fetch above.
-  //
-  // The response is only parsed once it IS json: the route used to answer a plain-text 404 off a
-  // central, and `r.json()` on that threw a SyntaxError out of this effect.
+  // filters.tags selection is inert.
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -2767,19 +2572,10 @@ export default function AppLayout() {
       }
     })()
     return () => { cancelled = true }
-  }, [teamSession?.central])
+  }, [])
 
   // Header summary counts (desktop only)
-  const memberCount = users.length
-  const onlineCount = data?.presence ? Object.values(data.presence).filter(p => p.online).length : 0
-  const offlineCount = data?.presence ? Object.values(data.presence).filter(p => !p.online).length : 0
-  const machineCount = machinesList.length
-  // Per-machine presence comes stamped on /api/iam/machines (server-side computePresence), so the
-  // machine chip can split total / online / offline exactly like the members chip does.
-  const machinesOnline = machinesList.filter(m => m.online).length
-  const machinesOffline = machineCount - machinesOnline
   const projectCount = data?.projects?.length ?? 0
-  const teamCount = teamsList.length
   const repoCount = useMemo(() => new Set((data?.sessions ?? []).map(s => s.git_remote).filter(Boolean)).size, [data])
   // Hardware is an OVERLAY, not a route: it answers "what is this machine doing right now", which
   // is asked from wherever you are and then dismissed. Desktop opens it from the header icon;
@@ -2788,7 +2584,7 @@ export default function AppLayout() {
   // "Open the plan usage" (foot button, session drawer, Nay card) is a trip to the Uso page — there is
   // no modal. Switching a session's account stays in the composer and in "Continue on another account".
   useEffect(() => subscribeUsagePage(() => navigate('/usage')), [navigate])
-  // Collapsible "fleet stats" tab below the header (updated/members/machines/teams/projects/repos).
+  // Collapsible "fleet stats" tab below the header (updated/projects/repos).
   // **CLOSED BY DEFAULT ON A PHONE, OPEN ON THE DESKTOP** — one preference, two defaults. A stored
   // choice wins on both (it is shared on purpose, so it survives a resize); this is only what
   // happens when there is no choice yet. On a phone this strip is a second band of chrome under a
@@ -2806,39 +2602,14 @@ export default function AppLayout() {
     fleetOpenStore.set(n)
   }
 
-  // Members list = users WITH machines only
-  const machineUsers = useMemo(() => new Set(machinesList.map(m => m.user)), [machinesList])
-  const usersWithMachines = useMemo(() => users.filter(u => machineUsers.has(u)), [users, machineUsers])
-
-  // Only member-managers (owner, or a manager of any team) may filter BY member — a plain user
-  // sees only their own scoped data, so member/presence filtering would be meaningless for them.
-  // They still get Teams (their teams) + Machines (their linked machines).
-  const canFilterMembers = iam?.account?.role === 'owner'
-    || (iam?.account?.memberships ?? []).some(m => m.role === 'manager')
-
-  // Harnesses available in the harness filter, scoped to the SELECTED users (empty = all
-  // users). So picking one member narrows the harness options to the harnesses that member
-  // actually used; "All members" shows the union. Falls back to all harnesses in the data
-  // when the scoped slice is empty (e.g. a selected member has no sessions yet).
+  // Harnesses available in the harness filter.
   const availableHarnesses = useMemo<SurfaceHarnessId[]>(() => {
     if (!data) return []
-    const scoped = filterByUsers(data.sessions, filters.users ?? [])
-    const present = distinctHarnesses(scoped)
+    const present = distinctHarnesses(data.sessions)
     return present.length > 0 ? present : data.harnesses
-  }, [data, filters.users])
+  }, [data])
 
-  // Projects offered in the filter, scoped to the SELECTED users (empty = all users).
-  // On a central, filtering by member X should only list X's projects — not everyone's.
-  const availableProjects = useMemo(() => {
-    if (!data) return []
-    const sel = filters.users ?? []
-    if (sel.length === 0) return data.projects
-    const selSet = new Set(sel)
-    // A project is in scope iff at least one of its owning members is selected.
-    // Projects carry an explicit `users` tag (built server-side), so this is
-    // deterministic — no path re-matching and no fallback that leaks other members' projects.
-    return data.projects.filter(p => (p.users ?? []).some(u => selSet.has(u)))
-  }, [data, filters.users])
+  const availableProjects = useMemo(() => (data ? data.projects : []), [data])
 
   // Prune any selected project no longer available after a user-selection change.
   useEffect(() => {
@@ -3125,13 +2896,10 @@ export default function AppLayout() {
     (harnessFilterActive ? 1 : 0)
 
   // Block the app until the user makes the first-run archive choice. `archiveChoice` is guaranteed
-  // resolved here (undefined would have kept `bootLoading` on the loader above) and `teamSession` is
+  // resolved here (undefined would have kept `bootLoading` on the loader above) and `hostSession` is
   // non-undefined since the auth gate at the top — so `null` is the one remaining case: "loaded, not
   // yet chosen", which is the consent prompt, never a silent blank.
-  // A central never shows the archive consent gate: it aggregates members' computed metrics
-  // (stored in Mongo) and any self-contributed host data defaults server-side — there's nothing
-  // for the operator to consent to here, so the blocking prompt would only annoy.
-  if (archiveChoice === null && !teamSession.aggregatorOnly && !isCentral) {
+  if (archiveChoice === null) {
     return (
       <ArchiveConsentModal
         lang={lang}
@@ -3200,25 +2968,17 @@ export default function AppLayout() {
     infoItems,
     cardOrder, setCardOrder,
     cardPrecision, setCardPrecision,
-    sessionCountByProject, models, modelGroups, modelsInProject, users: usersWithMachines,
+    sessionCountByProject, models, modelGroups, modelsInProject,
     harnesses: data.harnesses,
-    isCentral,
-    capabilities: teamSession?.capabilities,
-    shellEnabled: teamSession?.shellEnabled === true,
-    shellOverride: teamSession?.shellOverride === true,
+    capabilities: hostSession?.capabilities,
+    shellEnabled: hostSession?.shellEnabled === true,
+    shellOverride: hostSession?.shellOverride === true,
     // Already resolved by the server (capability AND switch) — never re-derived here. Undefined on
-    // an older server reads as OFF, so the Studio is simply absent there. `editorEnabledFor` also
-    // subtracts a CENTRAL, and this is the only place that happens: `editor-gate.ts` carries no
-    // central term, so the server says `true` there while the whole `/api/fleet` prefix is refused.
-    // Publishing the narrowed value closes every consumer at once — see `lib/editorGate.ts`.
-    editorEnabled: editorEnabledFor(teamSession?.editorEnabled, isCentral),
-    refreshTeamSession,
+    // an older server reads as OFF, so the Studio is simply absent there.
+    editorEnabled: hostSession?.editorEnabled === true,
+    refreshHostSession,
     studioSeen,
     editorAutosave, setEditorAutosave,
-    me: iam?.account,
-    teams: teamsList,
-    machines: machinesList,
-    deniedRepoLabels,
     a11y,
   }
 
@@ -3320,7 +3080,7 @@ export default function AppLayout() {
         <HideLensesButton ctx={appCtx} />
         <EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} />
         <EngineSurfaceButtons placement="app-bar" sessionId={null} lang={lang === 'pt' ? 'pt' : 'en'} />
-        <TopBarGroup lang={lang === 'pt' ? 'pt' : 'en'} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} onOpenHardware={() => setHardwareOpen(true)} />
+        <TopBarGroup lang={lang === 'pt' ? 'pt' : 'en'} enabled={hostSession?.capabilities?.localShell !== false} onOpenHardware={() => setHardwareOpen(true)} />
         <NotificationBell lang={lang} buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 32, height: 32, borderRadius: 8,
@@ -3500,7 +3260,6 @@ export default function AppLayout() {
                     models={models}
                     modelGroups={modelGroups}
                     modelsInProject={modelsInProject}
-                    users={[]}
                     /* HARNESSES come from the FLEET here and from the metrics everywhere else. The bar
                        offered all six the metrics know while the list it filters holds whatever is
                        running — three on this machine — so picking "antigravity" emptied the list.
@@ -3586,27 +3345,6 @@ export default function AppLayout() {
       {sep}
       <span>{lang === 'pt' ? 'Atualizado em' : 'Updated'} <span style={{ color: 'var(--text-secondary)' }}>{fleetUpdated}</span></span>
       {fleetSince && (<>{sep}<span style={{ color: 'var(--text-secondary)' }}>{fleetSince}</span></>)}
-      {isCentral && (<>
-        {sep}
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-          <Users size={11} style={iconSt} />
-          <span style={{ color: 'var(--text-secondary)' }}>{memberCount} {lang === 'pt' ? (memberCount === 1 ? 'membro' : 'membros') : (memberCount === 1 ? 'member' : 'members')}</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{onlineCount}</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{offlineCount}</span>
-        </span>
-        {sep}
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-          <Server size={11} style={iconSt} />
-          <span style={{ color: 'var(--text-secondary)' }}>{machineCount} {lang === 'pt' ? (machineCount === 1 ? 'máquina' : 'máquinas') : (machineCount === 1 ? 'machine' : 'machines')}</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={lang === 'pt' ? 'Máquinas online' : 'Machines online'}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{machinesOnline}</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={lang === 'pt' ? 'Máquinas offline' : 'Machines offline'}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{machinesOffline}</span>
-        </span>
-        {sep}
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-          <Users size={11} style={iconSt} />
-          <span style={{ color: 'var(--text-secondary)' }}>{teamCount} {lang === 'pt' ? (teamCount === 1 ? 'time' : 'times') : (teamCount === 1 ? 'team' : 'teams')}</span>
-        </span>
-      </>)}
       {sep}
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
         <FolderOpen size={11} style={iconSt} />
@@ -3657,7 +3395,7 @@ export default function AppLayout() {
           activeOnly={activeOnly}
           onActiveOnlyChange={fleetReadable ? setActiveOnly : undefined}
           costBasis={costBasis}
-          onCostBasisChange={isCentral ? undefined : setCostBasis}
+          onCostBasisChange={setCostBasis}
           costBasisReady={billingReady.ready && planBasis.basis !== null}
           onCostBasisSetup={openBillingSetup}
           filters={filters}
@@ -3667,17 +3405,12 @@ export default function AppLayout() {
           models={models}
           modelGroups={modelGroups}
           modelsInProject={modelsInProject}
-          users={usersWithMachines}
           // The METRICS' harnesses, because this bar is the dashboard's. The fleet's own
           // narrower list belongs to the sessions strip (see `sessionTopBar`), which is where
           // that override moved when the workspace stopped rendering this header.
           harnesses={availableHarnesses}
-          presence={data?.presence}
           lang={lang}
-          teams={teamsList}
-          machines={machinesList}
           tags={tagsList}
-          canFilterMembers={canFilterMembers}
           onCreateTagFromFilters={createTagFromFilters}
         />
       </div>
@@ -3708,7 +3441,7 @@ export default function AppLayout() {
             because it is a question about this machine and not a place to go. */}
         <EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} />
         <EngineSurfaceButtons placement="app-bar" sessionId={null} lang={lang === 'pt' ? 'pt' : 'en'} />
-        <TopBarGroup lang={lang === 'pt' ? 'pt' : 'en'} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} onOpenHardware={() => setHardwareOpen(true)} />
+        <TopBarGroup lang={lang === 'pt' ? 'pt' : 'en'} enabled={hostSession?.capabilities?.localShell !== false} onOpenHardware={() => setHardwareOpen(true)} />
         <NotificationBell lang={lang} buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 32, height: 32, borderRadius: 8,
@@ -4062,7 +3795,7 @@ export default function AppLayout() {
           is a pile nobody reads. It is the same component for the first-run invite and for the
           disabled cost-basis control, which opens it with the specific gaps listed. */}
       <BillingIntroModal
-        open={(billingSetupOpen || showBillingIntro) && !isCentral}
+        open={billingSetupOpen || showBillingIntro}
         mode={billingSetupOpen ? 'setup' : 'intro'}
         gaps={billingSetupOpen ? billingReady.gaps : []}
         lang={lang}
@@ -4119,7 +3852,6 @@ export default function AppLayout() {
       {!isMobile && <SideNav
         lang={lang}
         harnesses={data.harnesses}
-        isCentral={isCentral}
         hasWorkflows={(data.workflows?.length ?? 0) > 0}
         collapsed={sidebarCollapsed}
         width={liveAsideWidth}
@@ -4130,7 +3862,6 @@ export default function AppLayout() {
         onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
         onToggleLang={() => { const next = lang === 'pt' ? 'en' : 'pt'; setLang(next); if (next === 'pt') setCurrency('BRL'); else if (currency === 'BRL') setCurrency('USD') }}
         onExport={() => navigate('/export')}
-        principal={iam?.account}
         sessionsFilters={sessionsFilters}
         sessionsActiveOnly={sessionsActiveOnly}
         filtersOpen={sessionsFiltersOpen}
@@ -4190,7 +3921,7 @@ export default function AppLayout() {
               )}
         <EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} />
         <EngineSurfaceButtons placement="app-bar" sessionId={null} lang={lang === 'pt' ? 'pt' : 'en'} />
-              <TopBarGroup lang={lang === 'pt' ? 'pt' : 'en'} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} onOpenHardware={() => setHardwareOpen(true)} />
+              <TopBarGroup lang={lang === 'pt' ? 'pt' : 'en'} enabled={hostSession?.capabilities?.localShell !== false} onOpenHardware={() => setHardwareOpen(true)} />
               <NotificationBell lang={lang} buttonStyle={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 32, height: 32, borderRadius: 8,
@@ -4249,7 +3980,7 @@ export default function AppLayout() {
                 <FiltersBar
                   only={filterDimsForRoute}
                   costBasis={costBasis}
-                  onCostBasisChange={isCentral ? undefined : setCostBasis}
+                  onCostBasisChange={setCostBasis}
                   costBasisReady={billingReady.ready && planBasis.basis !== null}
                   onCostBasisSetup={openBillingSetup}
                   activeOnly={activeOnly}
@@ -4261,15 +3992,10 @@ export default function AppLayout() {
                   models={models}
                   modelGroups={modelGroups}
                   modelsInProject={modelsInProject}
-                  users={usersWithMachines}
                   harnesses={availableHarnesses}
-                  presence={data?.presence}
                   lang={lang}
                   compact
-                  teams={teamsList}
-                  machines={machinesList}
                   tags={tagsList}
-                  canFilterMembers={canFilterMembers}
                   onCreateTagFromFilters={createTagFromFilters}
                 />
                 {/* Collapse handle */}
@@ -4335,21 +4061,6 @@ export default function AppLayout() {
                     </span>
                     <span style={chip}>{lang === 'pt' ? 'Atualizado' : 'Updated'} <span style={val}>{fleetUpdated}</span></span>
                     {fleetSince && <span style={chip}><span style={val}>{fleetSince}</span></span>}
-                    {isCentral && (<>
-                      <span style={chip}>
-                        <Users size={11} />
-                        <span style={val}>{memberCount}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{onlineCount}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{offlineCount}</span>
-                      </span>
-                      <span style={chip}>
-                        <Server size={11} />
-                        <span style={val}>{machineCount}</span> {lang === 'pt' ? (machineCount === 1 ? 'máquina' : 'máquinas') : (machineCount === 1 ? 'machine' : 'machines')}
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{machinesOnline}</span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />{machinesOffline}</span>
-                      </span>
-                      <span style={chip}><Users size={11} /> <span style={val}>{teamCount}</span> {lang === 'pt' ? (teamCount === 1 ? 'time' : 'times') : (teamCount === 1 ? 'team' : 'teams')}</span>
-                    </>)}
                     <span style={chip}><FolderOpen size={11} /> <span style={val}>{projectCount}</span> {lang === 'pt' ? (projectCount === 1 ? 'projeto' : 'projetos') : (projectCount === 1 ? 'project' : 'projects')}</span>
                     <span style={chip}><GitBranch size={11} /> <span style={val}>{repoCount}</span> {lang === 'pt' ? (repoCount === 1 ? 'repositório' : 'repositórios') : (repoCount === 1 ? 'repository' : 'repositories')}</span>
                   </div>
@@ -4574,7 +4285,6 @@ export default function AppLayout() {
           attention={headerFleetUnsupported ? undefined : headerFleet.attention}
           badges={areaBadges({ attention: headerFleetUnsupported ? undefined : headerFleet.attention, usageRows: mobilePlanLimits.budgets })}
           visibleSettings={mobileVisibleSettings}
-          principal={iam?.account}
           actions={[
             ...(pinned && upgradeFlow.phase === 'idle' ? [{
               key: 'update-app', label: lang === 'pt' ? 'Atualizar app' : 'Update app', icon: Download,
@@ -4624,7 +4334,7 @@ export default function AppLayout() {
 
       {/* VAULT.PERSONAL §10: the one unlock any screen can ask for (ensureVaultOpen), and — on this
           computer — the phones waiting for approval. A central has no vault of its own here. */}
-      <VaultUnlockHost lang={lang === 'pt' ? 'pt' : 'en'} isMobile={isMobile} enabled={!isCentral} />
+      <VaultUnlockHost lang={lang === 'pt' ? 'pt' : 'en'} isMobile={isMobile} enabled />
 
       {/* THE KEYBOARD PROBE, and only when the URL asks for it (`?kbdebug=1`). It reads the three
           quantities that can hold the iOS displacement — the document scroll, the visual viewport's

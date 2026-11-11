@@ -60,9 +60,9 @@ describe('handleRequest composes the OWASP baseline correctly', () => {
     // The exact plant this test exists for: a delete of any header at all, once the baseline has
     // been stamped, is never legitimate in this function.
     expect(after).not.toMatch(/\.headers\.delete\(/)
-    // A `.set`/`.append` on anything other than the sliding-session cookie would silently re-open
-    // (or narrow) the framing guarantee `applyBaselineHeaders` just decided.
+    // A `.set`/`.append` of any header would silently re-open (or narrow) the framing guarantee
+    // `applyBaselineHeaders` just decided.
     const touchedHeaders = [...after.matchAll(/\.headers\.(?:set|append)\(\s*'([^']+)'/g)].map(m => m[1])
-    expect(touchedHeaders).toEqual(['Set-Cookie'])
+    expect(touchedHeaders).toEqual([])
   })
 })

@@ -24,7 +24,6 @@ test('create then read round-trips through the file', async () => {
   const doc = await store.createTag({
     name: 'Client X', color: '#f59e0b',
     sources: [{ type: 'repo', value: 'github.com/org/repo' }],
-    sharedWith: [], createdBy: 'local',
   })
   expect(doc._id).toMatch(/^[0-9a-f]{24}$/)
 
@@ -39,20 +38,19 @@ test('create then read round-trips through the file', async () => {
 test('update patches only the given fields and bumps updatedAt', async () => {
   const store = createLocalTagStore(tmpFile())
   const doc = await store.createTag({
-    name: 'A', color: '#ef4444', sources: [], sharedWith: ['acc1'], createdBy: 'local',
+    name: 'A', color: '#ef4444', sources: [],
   })
   expect(await store.updateTag(doc._id, { name: 'B' })).toBe(true)
   const after = await store.getTag(doc._id)
   expect(after!.name).toBe('B')
   expect(after!.color).toBe('#ef4444')
-  expect(after!.sharedWith).toEqual(['acc1'])
   expect(after!.createdAt.getTime()).toBe(doc.createdAt.getTime())
   expect(after!.updatedAt.getTime()).toBeGreaterThanOrEqual(doc.updatedAt.getTime())
 })
 
 test('update of an unknown id reports false and changes nothing', async () => {
   const store = createLocalTagStore(tmpFile())
-  await store.createTag({ name: 'A', sources: [], sharedWith: [], createdBy: 'local' })
+  await store.createTag({ name: 'A', sources: [] })
   expect(await store.updateTag('missing', { name: 'B' })).toBe(false)
   expect((await store.listAllTags())[0]!.name).toBe('A')
 })
@@ -60,7 +58,7 @@ test('update of an unknown id reports false and changes nothing', async () => {
 test('delete removes the tag and is idempotent', async () => {
   const file = tmpFile()
   const store = createLocalTagStore(file)
-  const doc = await store.createTag({ name: 'A', sources: [], sharedWith: [], createdBy: 'local' })
+  const doc = await store.createTag({ name: 'A', sources: [] })
   expect(await store.deleteTag(doc._id)).toBe(true)
   expect(await store.deleteTag(doc._id)).toBe(false)
   expect(await createLocalTagStore(file).listAllTags()).toEqual([])
@@ -70,7 +68,7 @@ test('concurrent creates are serialised — none is lost', async () => {
   const file = tmpFile()
   const store = createLocalTagStore(file)
   await Promise.all(['a', 'b', 'c', 'd', 'e'].map(n =>
-    store.createTag({ name: n, sources: [], sharedWith: [], createdBy: 'local' })))
+    store.createTag({ name: n, sources: [] })))
   const all = await createLocalTagStore(file).listAllTags()
   expect(all.map(t => t.name)).toEqual(['a', 'b', 'c', 'd', 'e'])
 })
@@ -96,7 +94,7 @@ test('the first write after a parse failure preserves the corrupt bytes in a bac
 
   const store = createLocalTagStore(file)
   expect(await store.listAllTags()).toEqual([])
-  await store.createTag({ name: 'New', sources: [], sharedWith: [], createdBy: 'local' })
+  await store.createTag({ name: 'New', sources: [] })
 
   // The new tag landed...
   expect((await createLocalTagStore(file).listAllTags()).map(t => t.name)).toEqual(['New'])
@@ -111,7 +109,7 @@ test('the first write after a parse failure preserves the corrupt bytes in a bac
 test('update/delete of an unknown id does not rewrite the file', async () => {
   const file = tmpFile()
   const store = createLocalTagStore(file)
-  await store.createTag({ name: 'A', sources: [], sharedWith: [], createdBy: 'local' })
+  await store.createTag({ name: 'A', sources: [] })
 
   const before = await stat(file)
   // mtime has 1ms resolution at best; wait so a real write would be visible.
@@ -133,7 +131,7 @@ test('a non-array tags field is treated as corrupt and backed up, not overwritte
 
   const store = createLocalTagStore(file)
   expect(await store.listAllTags()).toEqual([])
-  await store.createTag({ name: 'New', sources: [], sharedWith: [], createdBy: 'local' })
+  await store.createTag({ name: 'New', sources: [] })
 
   const backups = (await readdir(dir)).filter(f => f.startsWith('tags.json.corrupt-'))
   expect(backups).toHaveLength(1)
@@ -148,9 +146,9 @@ test('later writes after a recovery do not keep making backups', async () => {
   await writeFile(file, 'not json at all')
 
   const store = createLocalTagStore(file)
-  await store.createTag({ name: 'A', sources: [], sharedWith: [], createdBy: 'local' })
-  await store.createTag({ name: 'B', sources: [], sharedWith: [], createdBy: 'local' })
-  await store.createTag({ name: 'C', sources: [], sharedWith: [], createdBy: 'local' })
+  await store.createTag({ name: 'A', sources: [] })
+  await store.createTag({ name: 'B', sources: [] })
+  await store.createTag({ name: 'C', sources: [] })
 
   expect((await readdir(dir)).filter(f => f.startsWith('tags.json.corrupt-'))).toHaveLength(1)
   expect((await createLocalTagStore(file).listAllTags()).map(t => t.name)).toEqual(['A', 'B', 'C'])
@@ -171,21 +169,12 @@ test('garbage entries are dropped, valid ones survive', async () => {
     tags: [
       null,
       { name: 'no id' },
-      { _id: 'x', name: 'Good', sources: [{ type: 'project', value: '/p' }, 'junk'], sharedWith: ['a', 2], createdBy: 'local', createdAt: 'c', updatedAt: 'u' },
+      { _id: 'x', name: 'Good', sources: [{ type: 'project', value: '/p' }, 'junk'], createdAt: 'c', updatedAt: 'u' },
     ],
   }))
   const all = await createLocalTagStore(file).listAllTags()
   expect(all).toHaveLength(1)
   expect(all[0]!.sources).toEqual([{ type: 'project', value: '/p' }])
-  expect(all[0]!.sharedWith).toEqual(['a'])
-})
-
-test('visibleTagsFor applies the caller predicate', async () => {
-  const store = createLocalTagStore(tmpFile())
-  await store.createTag({ name: 'mine', sources: [], sharedWith: [], createdBy: 'local' })
-  await store.createTag({ name: 'theirs', sources: [], sharedWith: [], createdBy: 'someone' })
-  const visible = await store.visibleTagsFor(t => t.createdBy === 'local')
-  expect(visible.map(t => t.name)).toEqual(['mine'])
 })
 
 // --- the tag's period -------------------------------------------------------------------------
@@ -196,7 +185,6 @@ test('the period round-trips, is patchable, and is CLEARED rather than emptied',
   const doc = await store.createTag({
     name: 'Experiment', sources: [{ type: 'repo', value: 'github.com/org/repo' }],
     window: { start: '2026-07-04', end: '2026-07-18' },
-    sharedWith: [], createdBy: 'local',
   })
   expect(doc.window).toEqual({ start: '2026-07-04', end: '2026-07-18' })
   expect((await createLocalTagStore(file).getTag(doc._id))?.window)
@@ -223,7 +211,7 @@ test('a hand-edited period survives only when it is well-formed and ordered', as
   const file = tmpFile()
   await mkdir(join(file, '..'), { recursive: true })
   const doc = (window: unknown) => ({
-    _id: 'a'.repeat(24), name: 'T', sources: [], sharedWith: [], createdBy: 'local',
+    _id: 'a'.repeat(24), name: 'T', sources: [],
     createdAt: '2026-07-01T00:00:00.000Z', updatedAt: '2026-07-01T00:00:00.000Z', window,
   })
   const read = async (window: unknown) => {

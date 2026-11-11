@@ -24,10 +24,6 @@ async function resolveConfigUnder(dataDir: string): Promise<Record<string, strin
       sessions: c.CONSOLIDATED_DIR,
       archive: c.ARCHIVE_DIR,
       workflows: c.WORKFLOWS_STORE_DIR,
-      team: c.TEAM_DIR,
-      sent: c.TEAM_SENT_FILE,
-      sync: c.TEAM_SYNC_FILE,
-      conn: c.TEAM_CONN_DIR,
     }))
   `
   const proc = Bun.spawn(['bun', '-e', script], {
@@ -47,7 +43,7 @@ describe('AGENTISTICS_DIR relocates every persisted path', () => {
     const cfg = await resolveConfigUnder(dir)
 
     // Guard against a silently empty result making every assertion below vacuous.
-    expect(Object.keys(cfg).length).toBe(8)
+    expect(Object.keys(cfg).length).toBe(4)
     expect(cfg.data).toBe(dir)
 
     for (const [name, value] of Object.entries(cfg)) {

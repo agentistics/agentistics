@@ -255,10 +255,9 @@ async function findOtelWatcherPid(serverPid: number): Promise<{ pid: number | nu
   }
 }
 
-const CENTRAL_FILTER = 'label=com.docker.compose.project=team-mode'
 const MACHINE_FILTER = 'ancestor=agentistics-machine'
 
-/** Read Docker container metrics for agentistics central/machine/mcp containers. */
+/** Read Docker container metrics for agentistics machine/mcp containers. */
 async function readDockerMetrics(): Promise<{ containers: ContainerMetrics[]; available: boolean }> {
   try {
     const proc = Bun.spawn(
@@ -276,8 +275,6 @@ async function readDockerMetrics(): Promise<{ containers: ContainerMetrics[]; av
       return (
         lower.includes('agentop') ||
         lower.includes('agentistics') ||
-        lower.includes('team-mode') ||
-        lower.includes('central') ||
         lower.includes('machine')
       )
     })

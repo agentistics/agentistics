@@ -1,4 +1,5 @@
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR, HOME_DIR, WEB_PORT } from './config'
+import { accountHome } from './account-home'
 
 export interface McpRegistrationFacts {
   port: number
@@ -38,9 +39,9 @@ export function mayRegisterHarnessMcp(port: number): boolean {
     webPort: WEB_PORT,
     home: HOME_DIR,
     dataDir: AGENTISTICS_DATA_DIR,
-    defaultHome: HOME_DIR,
+    defaultHome: accountHome(),
     defaultDataDir: DEFAULT_AGENTISTICS_DATA_DIR,
-    explicitHome: false,
+    explicitHome: HOME_DIR !== accountHome(),
     explicitDataDir: Boolean(process.env.AGENTISTICS_DIR),
   })
   if (!decision.allowed && !refusalLogged) {

@@ -411,7 +411,7 @@ function mobilePanelTabStyle(on: boolean, hot: boolean): CSSProperties {
 function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: SessionsPageBodyProps) {
   const ctx = useOutletContext<AppContext>()
   const {
-    lang, isCentral, theme,
+    lang, theme,
     sessionsFilters, sessionsActiveOnly, setSessionsFilters, setSessionsActiveOnly,
     availableProjects, sessionCountByProject, models, availableHarnesses, derived,
     data, currency, brlRate,
@@ -499,7 +499,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     // Never on a central (it relays another machine's fleet; the feature is local-only), never while
     // the poll itself cannot be trusted, and never before the first answer has arrived — the same
     // three facts `unsupported`/`loading` already state elsewhere on this page.
-    enabled: pane === 'main' && !isCentral && !pollUnsupported && !loading,
+    enabled: pane === 'main' && !pollUnsupported && !loading,
   })
   const [idleOpen, setIdleOpen] = useState(false)
   useEffect(() => {
@@ -554,12 +554,12 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   // The disabled-shell empty state's two buttons need to make `ctx.shellEnabled` (and
   // `ctx.shellOverride`) catch up the instant either succeeds — this is the one way to do that
   // without a reload, the same call `SessionsSettings`'s own toggle already makes.
-  const onShellEnabledChange = ctx.refreshTeamSession
+  const onShellEnabledChange = ctx.refreshHostSession
   /**
    * The repository explorer's two switches, both already resolved upstream.
    *
    * `editorEnabled` is the server's own answer — the capability AND the user's switch, combined by
-   * `sessions/editor-gate.ts` and reported on `GET /api/team/session`. It is never re-derived here
+   * `sessions/editor-gate.ts` and reported on `GET /api/session`. It is never re-derived here
    * from `capabilities.localShell` plus a preference, and when it is not `true` the Studio is
    * ABSENT rather than an entry that refuses. `editorAutosave` is a plain preference, loaded with
    * the rest in `App.tsx`; absent reads as OFF for both.
@@ -1505,7 +1505,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * set (design item 3): right-slot only, ABSENT on a central the same way the header chip always
    * was (`hardwareOffered`).
    */
-  const hardwareOffered = !isCentral
+  const hardwareOffered = true
   /**
    * THE GATE — a single predicate, shared by the rail's own icon list AND its hidden list (spec
    * §5's eye): the same server/per-session gates `panelBarEntries` applies to the bottom band's
@@ -2255,7 +2255,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             exactly this. */}
         {/* Autonomous mode, same reasoning as the bell: the phone's only header here is this slot, and the
             owner switches away on from the phone — without it the state is invisible on this screen. */}
-        <TopBarGroup lang={pt ? 'pt' : 'en'} enabled={!ctx.isCentral && ctx.capabilities?.localShell !== false} />
+        <TopBarGroup lang={pt ? 'pt' : 'en'} enabled={ctx.capabilities?.localShell !== false} />
         <NotificationBell lang={pt ? 'pt' : 'en'} buttonClassName="ag-tap-icon" buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 32, height: 32, borderRadius: 8,
@@ -2325,7 +2325,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         sessionCountByProject={sessionCountByProject}
         models={models}
         harnesses={availableHarnesses}
-        users={[]}
         lang={lang}
       />
     </FiltersSheet>
@@ -2858,11 +2857,11 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     /** The VIEW, as the segmented control it was in the ⋯ menu — now four alternatives, with the
      *  bottom bar's two terminals folded in (the bar is gone on a phone). */
     const viewTabs: { id: string; label: string; icon: ReactNode; on: boolean; go: () => void }[] = [
-      ...(!isCentral ? [
+      ...([
         { id: 'chat', label: pt ? 'Conversa' : 'Chat', icon: <MessagesSquare size={18} />, on: sessionView === 'chat' && !contentsOn, go: () => { if (contentsOn) closeSlotPanel(rightActivePanel!); setSessionView('chat') } },
         { id: 'terminal', label: 'Terminal', icon: <TerminalSquare size={18} />, on: sessionView === 'terminal' && !contentsOn, go: () => { if (contentsOn) closeSlotPanel(rightActivePanel!); setSessionView('terminal') } },
-      ] : []),
-      ...(shellEnabled && !isCentral ? [
+      ]),
+      ...(shellEnabled ? [
         { id: 'shell', label: 'Shell', icon: <SquareTerminal size={18} />, on: false, go: () => leaveDrawerTo(dedicatedTerminalPath(selected.id, 'shell')) },
       ] : []),
       { id: 'contents', label: pt ? 'Conteúdos' : 'Contents', icon: <FileText size={18} />, on: contentsOn, go: () => { if (!contentsOn) openSlotPanel('live') } },

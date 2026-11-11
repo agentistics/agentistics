@@ -80,7 +80,7 @@ export function backfillPending(journalPath: string, progressPath: string): bool
 
 export type BackfillDecision =
   | { start: true }
-  | { start: false; reason: 'journal-off' | 'central' | 'complete' | 'running-elsewhere' | 'opted-out' }
+  | { start: false; reason: 'journal-off' | 'complete' | 'running-elsewhere' | 'opted-out' }
 
 /**
  * PURE. Whether a COMPLETED import ran under other adapter versions than the ones running now, for a
@@ -100,7 +100,6 @@ export function adapterUpgradePending(progress: BackfillProgress | null, current
 /** PURE. Should this server start the first import now? */
 export function planAutoBackfill(o: {
   journalEnabled: boolean
-  central: boolean
   /** `AGENTISTICS_JOURNAL_BACKFILL=0` turns the automatic import off; a person can still run it. */
   optedOut: boolean
   progress: BackfillProgress | null
@@ -114,7 +113,6 @@ export function planAutoBackfill(o: {
   catchUp?: boolean
 }): BackfillDecision {
   if (!o.journalEnabled) return { start: false, reason: 'journal-off' }
-  if (o.central) return { start: false, reason: 'central' }
   if (o.optedOut) return { start: false, reason: 'opted-out' }
   if (!o.catchUp && backfillComplete(o.progress, o.journalIdentity) && !adapterUpgradePending(o.progress, o.adapterVersions)) return { start: false, reason: 'complete' }
   const p = o.progress
@@ -196,7 +194,6 @@ export function backgroundImportArgv(cli: readonly string[], o: { nice: string |
 export interface AutoBackfillDeps {
   catchUp?: boolean
   journalEnabled: boolean
-  central: boolean
   journalPath: string
   progressPath: string
   /** The running integrations' adapter versions by harness id (`engineIntegrations()`), for the upgrade check. */
@@ -215,7 +212,6 @@ export function maybeStartAutoBackfill(d: AutoBackfillDeps): BackfillDecision {
   const env = d.env
   const decision = planAutoBackfill({
     journalEnabled: d.journalEnabled,
-    central: d.central,
     optedOut: ['0', 'false', 'off', 'no'].includes((env.AGENTISTICS_JOURNAL_BACKFILL ?? '').trim().toLowerCase()),
     progress: readBackfillProgress(d.progressPath),
     journalIdentity: fileIdentity(d.journalPath),

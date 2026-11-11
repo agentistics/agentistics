@@ -209,42 +209,13 @@ describe('MemoryLimiter', () => {
 })
 
 describe('RULES', () => {
-  it('uses OWASP-aligned login limits (5 attempts, 15m window, backoff on)', () => {
-    expect(RULES.login.limit).toBe(5)
-    expect(RULES.login.windowMs).toBe(15 * 60_000)
-    expect(RULES.login.backoff).toBe(true)
-  })
-
-  it('keeps the generic api ceiling well above normal dashboard use', () => {
+  it('the generic API ceiling is generous — it only blunts scraping', () => {
     expect(RULES.api.limit).toBeGreaterThanOrEqual(300)
   })
 })
 
 describe('rateRuleFor', () => {
-  it('puts every credential endpoint under the per-IP ATTEMPT rule', () => {
-    // The path-level rule counts calls; the failure allowance (RULES.login) is applied per
-    // ACCOUNT inside the handler. They are different questions and must not share a number —
-    // matching them meant the attempt ceiling ran out exactly when the failure one did.
-    expect(rateRuleFor('/api/iam/login')).toBe(RULES.loginAttempts)
-    expect(rateRuleFor('/api/iam/login/mfa')).toBe(RULES.loginAttempts)
-    expect(rateRuleFor('/api/team/login')).toBe(RULES.loginAttempts)
-    expect(rateRuleFor('/api/iam/bootstrap')).toBe(RULES.loginAttempts)
-    // Owner recovery is a credential endpoint: it is public, and a wrong guess there is the
-    // attack. Its per-account budget is what keeps a 40-bit recovery code out of reach.
-    expect(rateRuleFor('/api/iam/recover')).toBe(RULES.loginAttempts)
-    expect(RULES.loginAttempts.limit).toBeGreaterThan(RULES.login.limit)
-  })
-
-  it('puts bearer-token endpoints under the token rule', () => {
-    expect(rateRuleFor('/api/team/whoami')).toBe(RULES.token)
-    expect(rateRuleFor('/api/team/agent')).toBe(RULES.token)
-  })
-
-  it('gives ingest its own machine-traffic rule', () => {
-    expect(rateRuleFor('/api/team/ingest')).toBe(RULES.ingest)
-  })
-
-  it('falls back to the generic ceiling', () => {
+  it('every path is governed by the generic API ceiling', () => {
     expect(rateRuleFor('/api/data')).toBe(RULES.api)
     expect(rateRuleFor('/api/tags/abc')).toBe(RULES.api)
   })

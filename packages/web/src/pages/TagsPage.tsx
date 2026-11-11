@@ -13,7 +13,7 @@ import { DatePicker } from '../components/DatePicker'
 
 // /api/tags response shapes. Aggregate-only by design (spec rule 2): the server never sends the
 // session rows behind a tag, so everything rendered here is a number the server already computed.
-import { tagSourceTypes, type TagSourceType } from '../lib/tagSourceTypes'
+import { OFFERED_TAG_SOURCE_TYPES, type TagSourceType } from '../lib/tagSourceTypes'
 import { createSharedPref } from '../lib/sharedPref'
 
 /** SHARED: how a person reads their tags is about the work, not about the screen. */
@@ -47,14 +47,8 @@ interface Tag {
   sources: TagSource[]
   filters?: TagSource[]
   window?: TagWindow
-  sharedWith: string[]
-  createdBy: string
   aggregate: TagAggregate
 }
-// IAM lookups used to turn a source's opaque id into a readable label and to populate the pickers.
-interface IamTeam { _id: string; name: string }
-interface IamAccount { id: string; name: string; email: string }
-interface IamMachine { id: string; machineName: string }
 
 const SWATCHES: string[] = [
   '#f59e0b', '#ef4444', '#ec4899', '#a855f7',
@@ -63,9 +57,6 @@ const SWATCHES: string[] = [
 // Explicit, not SWATCHES[0]: noUncheckedIndexedAccess types an index read as `string | undefined`,
 // which would leak `undefined` into every consumer of the selected colour.
 const DEFAULT_COLOR = '#f59e0b'
-/** Mirrors LOCAL_MACHINE_ID in packages/server/server/tags-handlers.ts — the single machine a
- *  non-central instance knows about, which every local session is attributed to. */
-const LOCAL_MACHINE_ID = 'local'
 /** Source types that only exist where there is IAM. Hidden off a central, and refused there too. */
 
 /** A label/value pair inside a grid card. */
@@ -175,7 +166,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 export default function TagsPage() {
-  const { lang, currency, brlRate, data, me, isCentral, costBasis, planBasis } = useOutletContext<AppContext>()
+  const { lang, currency, brlRate, data, costBasis, planBasis } = useOutletContext<AppContext>()
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
   const navigate = useNavigate()
@@ -192,11 +183,6 @@ export default function TagsPage() {
   const [err, setErr] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
 
-  // IAM lookups (labels + picker options). Failures are non-fatal: the pickers just come up empty.
-  const [teams, setTeams] = useState<IamTeam[]>([])
-  const [accounts, setAccounts] = useState<IamAccount[]>([])
-  const [machines, setMachines] = useState<IamMachine[]>([])
-
   const loadTags = useCallback(async () => {
     try {
       const r = await fetch('/api/tags')
@@ -206,25 +192,6 @@ export default function TagsPage() {
   }, [])
 
   useEffect(() => { void loadTags() }, [loadTags])
-
-  // IAM only exists on a central. Off one there is a single machine and no teams or accounts at
-  // all, so the endpoints are not called (they are central-only and would answer with a non-JSON
-  // 404) and the machine list is the one synthetic entry the server resolves `machine` sources to.
-  useEffect(() => {
-    if (!isCentral) {
-      setTeams([]); setAccounts([])
-      setMachines([{ id: LOCAL_MACHINE_ID, machineName: pt ? 'Esta máquina' : 'This machine' }])
-      return
-    }
-    void (async () => {
-      const [t, a, m] = await Promise.all([
-        fetch('/api/iam/teams').then(r => r.ok ? r.json() as Promise<{ teams?: IamTeam[] }> : { teams: [] }).catch(() => ({ teams: [] })),
-        fetch('/api/iam/accounts').then(r => r.ok ? r.json() as Promise<{ accounts?: IamAccount[] }> : { accounts: [] }).catch(() => ({ accounts: [] })),
-        fetch('/api/iam/machines').then(r => r.ok ? r.json() as Promise<{ machines?: IamMachine[] }> : { machines: [] }).catch(() => ({ machines: [] })),
-      ])
-      setTeams(t.teams ?? []); setAccounts(a.accounts ?? []); setMachines(m.machines ?? [])
-    })()
-  }, [isCentral, pt])
 
   // repo / project options come from the data the page already has — no extra endpoint.
   const repoOptions = useMemo(() => {
@@ -251,14 +218,6 @@ export default function TagsPage() {
     for (const s of data.sessions) if (s.model) set.add(s.model)
     return [...set].sort().map(v => ({ value: v, label: v }))
   }, [data.sessions])
-  // `user` only ever has values in team mode (SessionMeta.user is unset on a solo session — see
-  // tagSourceTypes.ts) — the empty list on a machine is correct, not a bug.
-  const userOptions = useMemo(() => {
-    const set = new Set<string>()
-    for (const s of data.sessions) if (s.user) set.add(s.user)
-    return [...set].sort().map(v => ({ value: v, label: v }))
-  }, [data.sessions])
-
   /** Which repo each project belongs to, so the picker can say a path is already covered by one. */
   const repoByProject = useMemo(() => {
     const map = new Map<string, string>()
@@ -269,48 +228,34 @@ export default function TagsPage() {
     return map
   }, [data.sessions])
 
-  const teamName = useCallback((id: string) => teams.find(t => t._id === id)?.name ?? id, [teams])
-  const accountName = useCallback((id: string) => accounts.find(a => a.id === id)?.name ?? id, [accounts])
-  const machineName = useCallback((id: string) => machines.find(m => m.id === id)?.machineName ?? id, [machines])
-
   const sourceTypeLabel = useCallback((t: TagSourceType): string => ({
     repo: pt ? 'Repositório' : 'Repository',
     project: pt ? 'Projeto' : 'Project',
     machine: pt ? 'Máquina' : 'Machine',
-    team: pt ? 'Time' : 'Team',
-    account: pt ? 'Conta' : 'Account',
     harness: pt ? 'Harness' : 'Harness',
     model: pt ? 'Modelo' : 'Model',
-    user: pt ? 'Pessoa' : 'Person',
   }[t]), [pt])
 
   const sourceValueLabel = useCallback((s: TagSource) => {
     switch (s.type) {
-      case 'team': return teamName(s.value)
-      case 'account': return accountName(s.value)
-      case 'machine': return machineName(s.value)
+      case 'machine': return pt ? 'Esta máquina' : 'This machine'
       case 'project': return formatProjectName(s.value)
       case 'harness': return HARNESS_LABELS[s.value as keyof typeof HARNESS_LABELS] ?? s.value
       default: return s.value
     }
-  }, [teamName, accountName, machineName])
+  }, [pt])
 
-  /** Which dimensions can be picked here — see `tagSourceTypes`. */
-  const sourceTypes = useMemo<TagSourceType[]>(() => tagSourceTypes(isCentral), [isCentral])
+  const sourceTypes = OFFERED_TAG_SOURCE_TYPES
 
   const optionsForType = useCallback((t: TagSourceType) => {
     switch (t) {
       case 'repo': return repoOptions
       case 'project': return projectOptions
-      case 'machine': return machines.map(m => ({ value: m.id, label: m.machineName }))
-      case 'team': return teams.map(t2 => ({ value: t2._id, label: t2.name }))
-      case 'account': return accounts.map(a => ({ value: a.id, label: `${a.name} (${a.email})` }))
       case 'harness': return harnessOptions
       case 'model': return modelOptions
-      case 'user': return userOptions
       default: return []
     }
-  }, [repoOptions, projectOptions, machines, teams, accounts, harnessOptions, modelOptions, userOptions])
+  }, [repoOptions, projectOptions, harnessOptions, modelOptions])
 
   /** The read-only detail is a page of its own (/tags/:id) — a card click navigates there. */
   const openDetail = useCallback((id: string) => {
@@ -337,7 +282,6 @@ export default function TagsPage() {
   const [windowEditing, setWindowEditing] = useState(true)
   // True when the chosen colour is not one of the presets — drives the custom circle's ring.
   const isCustomColor = !SWATCHES.some(c => c.toLowerCase() === color.toLowerCase())
-  const [sharedWith, setSharedWith] = useState<string[]>([])
   const [draftType, setDraftType] = useState<TagSourceType>('repo')
   const [draftValue, setDraftValue] = useState('')
   const [saving, setSaving] = useState(false)
@@ -346,7 +290,7 @@ export default function TagsPage() {
   const [shareEditing, setShareEditing] = useState(true)
 
   const openCreate = useCallback(() => {
-    setEditingId(null); setName(''); setColor(DEFAULT_COLOR); setSources([]); setFilters([]); setSharedWith([])
+    setEditingId(null); setName(''); setColor(DEFAULT_COLOR); setSources([]); setFilters([])
     setWinStart(''); setWinEnd('')
     setDraftType('repo'); setDraftValue(''); setSaveErr(null)
     setSourcesEditing(true); setShareEditing(true); setWindowEditing(true)
@@ -355,7 +299,7 @@ export default function TagsPage() {
 
   const openEdit = useCallback((t: Tag) => {
     setEditingId(t._id); setName(t.name); setColor(t.color || DEFAULT_COLOR)
-    setSources(t.sources); setFilters(t.filters ?? []); setSharedWith(t.sharedWith)
+    setSources(t.sources); setFilters(t.filters ?? [])
     setWinStart(t.window?.start ?? ''); setWinEnd(t.window?.end ?? '')
     setDraftType('repo'); setDraftValue(''); setSaveErr(null)
     setSourcesEditing(true); setShareEditing(true); setWindowEditing(true)
@@ -372,7 +316,6 @@ export default function TagsPage() {
       || JSON.stringify(filters) !== JSON.stringify(original.filters ?? [])
       || winStart !== (original.window?.start ?? '')
       || winEnd !== (original.window?.end ?? '')
-      || JSON.stringify([...sharedWith].sort()) !== JSON.stringify([...original.sharedWith].sort())
     )
     : name.trim().length > 0 || sources.length > 0 || !!winStart || !!winEnd
 
@@ -466,7 +409,7 @@ export default function TagsPage() {
       const window = winStart || winEnd
         ? { ...(winStart ? { start: winStart } : {}), ...(winEnd ? { end: winEnd } : {}) }
         : null
-      const body = { id: editingId ?? undefined, name: name.trim(), color, sources, filters, window, sharedWith }
+      const body = { id: editingId ?? undefined, name: name.trim(), color, sources, filters, window }
       const res = await fetch('/api/tags', {
         method: editingId ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -478,14 +421,6 @@ export default function TagsPage() {
       await loadTags()
     } catch (e) { setSaveErr(errText(e)) } finally { setSaving(false) }
   }
-
-  // Anyone signed in may create a tag; what differs is the REACH, enforced server-side by
-  // canWriteTagSources — owner: anything, manager: what their teams reach, user: what their own
-  // account owns. Hiding the button from a plain user would block "tag my own machines" while
-  // adding no protection, since the source check already refuses everything else.
-  // Off a central nobody signs in at all (there is one user), so `me` is absent and writing is
-  // always allowed — the server runs those requests as a single-user owner.
-  const mayWrite = !isCentral || !!me
 
   // The detail page's pencil navigates back here carrying the tag to edit. Open the editor once the
   // list has loaded, then clear the history state so a reload does not reopen it.
@@ -522,19 +457,15 @@ export default function TagsPage() {
         <div style={{ minWidth: 0 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Tags</h1>
           <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>
-            {isCentral
-              ? (pt
-                ? 'Agrupamentos salvos de repositórios, projetos, máquinas, times e contas.'
-                : 'Saved groupings of repositories, projects, machines, teams and accounts.')
-              : (pt
-                ? 'Agrupamentos salvos de repositórios e projetos desta máquina.'
-                : 'Saved groupings of this machine’s repositories and projects.')}
+            {pt
+              ? 'Agrupamentos salvos de repositórios e projetos desta máquina.'
+              : 'Saved groupings of this machine’s repositories and projects.'}
           </div>
         </div>
         {/* Full width on a phone, so it keeps 44px of PAINT — `.ag-tap` is for controls whose
             smallness is their meaning, which a page's primary action is not. `primaryBtn`'s 34 is
             the DESKTOP height, which is what carrying 44 in a module object had broken. */}
-        {mayWrite && (
+        {(
           <button type="button" onClick={openCreate} style={{ ...primaryBtn, minHeight: isMobile ? 44 : primaryBtn.minHeight, width: isMobile ? '100%' : undefined }}>
             <Plus size={14} /> {pt ? 'Nova tag' : 'New tag'}
           </button>
@@ -620,7 +551,7 @@ export default function TagsPage() {
                     recognise your own folder. On a CENTRAL it is some other machine's local path,
                     which identifies nothing about the tag, so it is omitted there. Same rule the
                     repositories view already follows. */}
-                {!isCentral && t.aggregate.topProject && <Pill text={`${pt ? 'Projeto' : 'Project'}: ${formatProjectName(t.aggregate.topProject)}`} />}
+                {t.aggregate.topProject && <Pill text={`${pt ? 'Projeto' : 'Project'}: ${formatProjectName(t.aggregate.topProject)}`} />}
                 {t.aggregate.topModel && <Pill text={`${pt ? 'Modelo' : 'Model'}: ${t.aggregate.topModel}`} />}
                 {t.aggregate.topHarness && <Pill text={`Harness: ${HARNESS_LABELS[t.aggregate.topHarness as keyof typeof HARNESS_LABELS] ?? t.aggregate.topHarness}`} />}
               </div>
@@ -663,7 +594,7 @@ export default function TagsPage() {
               <Cell label={pt ? 'Sessões' : 'Sessions'} value={t.aggregate.sessions.toLocaleString()} />
               <Cell label={pt ? 'Entrada' : 'Input'} value={fmt(t.aggregate.inputTokens)} />
               <Cell label={pt ? 'Saída' : 'Output'} value={fmt(t.aggregate.outputTokens)} />
-              {!isCentral && <Cell label={pt ? 'Projeto' : 'Project'} value={t.aggregate.topProject ? formatProjectName(t.aggregate.topProject) : '—'} />}
+              <Cell label={pt ? 'Projeto' : 'Project'} value={t.aggregate.topProject ? formatProjectName(t.aggregate.topProject) : '—'} />
               <Cell label={pt ? 'Modelo' : 'Model'} value={t.aggregate.topModel ?? '—'} />
               <Cell label="Harness" value={t.aggregate.topHarness ? (HARNESS_LABELS[t.aggregate.topHarness as keyof typeof HARNESS_LABELS] ?? t.aggregate.topHarness) : '—'} />
               <Cell label={pt ? 'Fontes' : 'Sources'} value={String(t.sources.length)} />
@@ -781,13 +712,9 @@ export default function TagsPage() {
           editChildren={
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-                {isCentral
-                  ? (pt
-                    ? 'A tag reúne as sessões de qualquer uma das fontes (união). Time e conta resolvem dinamicamente.'
-                    : 'The tag covers sessions matching any of its sources (union). Team and account resolve dynamically.')
-                  : (pt
-                    ? 'A tag reúne as sessões de qualquer uma das fontes (união).'
-                    : 'The tag covers sessions matching any of its sources (union).')}
+                {pt
+                  ? 'A tag reúne as sessões de qualquer uma das fontes (união).'
+                  : 'The tag covers sessions matching any of its sources (union).'}
               </div>
               <Field label={pt ? 'Tipo' : 'Type'}>
                 <Select
@@ -846,7 +773,7 @@ export default function TagsPage() {
               <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                 {pt
                   ? 'Opcional. Estreita a tag sem ampliá-la: dentro de um mesmo tipo vale QUALQUER um, e entre tipos vale TODOS. Ex.: contas A e B + projetos C e D = só o que A ou B fizeram, e só em C ou D.'
-                  : 'Optional. Narrows the tag without widening it: within one type ANY value counts, across types ALL must. E.g. accounts A and B + projects C and D = only what A or B did, and only in C or D.'}
+                  : 'Optional. Narrows the tag without widening it: within one type ANY value counts, across types ALL must. E.g. repositories A and B + projects C and D = only what A or B did, and only in C or D.'}
               </div>
               <Field label={pt ? 'Tipo' : 'Type'}>
                 <Select
@@ -958,82 +885,6 @@ export default function TagsPage() {
           </div>
         </Section>
 
-        {/* Sharing is an IAM act — it grants a tag's numbers to another ACCOUNT. Off a central
-            there are no other accounts, so the whole section is hidden (and the server ignores
-            `sharedWith` there) rather than shown as a control that can never do anything. */}
-        {isCentral && (
-        <Section
-          title={pt ? 'Compartilhar com' : 'Share with'}
-          editing={shareEditing}
-          onEdit={() => setShareEditing(true)}
-          onCancel={() => setShareEditing(false)}
-          onSave={() => setShareEditing(false)}
-          hideActions
-          labels={{ edit: pt ? 'Editar' : 'Edit', save: pt ? 'Pronto' : 'Done', cancel: pt ? 'Fechar' : 'Close' }}
-          editChildren={
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-                {pt
-                  ? 'Quem receber a tag vê os números completos dela. Owners e o criador já têm acesso.'
-                  : 'Anyone granted the tag sees its full numbers. Owners and the creator already have access.'}
-              </div>
-              {accounts.length === 0 && (
-                <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)' }}>
-                  {pt ? 'Nenhuma conta disponível.' : 'No accounts available.'}
-                </div>
-              )}
-              {/* Type-to-filter picker rather than a checkbox list: on a central with many accounts
-                  the list is unscannable, and picking adds immediately (same one-click rule as
-                  sources). Granted accounts show as removable chips below. */}
-              {accounts.length > 0 && (
-                <Field label={pt ? 'Adicionar conta' : 'Add account'}>
-                  <MultiPicker tall
-                    options={accounts
-                      .filter(a => a.id !== me?.id && !sharedWith.includes(a.id))
-                      .map(a => ({ value: a.id, label: `${a.name} (${a.email})` }))}
-                    onCommit={ids => setSharedWith(prev => [...prev, ...ids.filter(id => !prev.includes(id))])}
-                    placeholder={pt ? 'Buscar e selecionar…' : 'Search and select…'}
-                    searchPlaceholder={pt ? 'Buscar…' : 'Search…'}
-                    confirmLabel={n => (pt ? `Adicionar ${n}` : `Add ${n}`)}
-                    selectAllLabel={pt ? 'Selecionar tudo' : 'Select all'}
-                    emptyLabel={pt ? 'Nenhuma conta disponível.' : 'No accounts available.'}
-                  />
-                </Field>
-              )}
-              {sharedWith.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {sharedWith.map(id => {
-                    const a = accounts.find(x => x.id === id)
-                    return (
-                      <span key={id} style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 8px 5px 10px',
-                        borderRadius: 999, fontSize: 11.5, background: 'var(--bg-elevated)',
-                        border: '1px solid var(--border)', color: 'var(--text-secondary)',
-                      }}>
-                        {a ? a.name : id}
-                        <button
-                          type="button"
-                          onClick={() => setSharedWith(prev => prev.filter(x => x !== id))}
-                          aria-label={pt ? 'Remover' : 'Remove'}
-                          style={{ border: 'none', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'inline-flex', padding: 2 }}
-                        >
-                          <X size={12} />
-                        </button>
-                      </span>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          }
-        >
-          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
-            {sharedWith.length === 0
-              ? (pt ? 'Somente você e os owners.' : 'Only you and the owners.')
-              : sharedWith.map(accountName).join(', ')}
-          </div>
-        </Section>
-        )}
       </Drawer>
     </div>
   )

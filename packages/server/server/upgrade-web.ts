@@ -24,7 +24,7 @@ import { basename } from 'node:path'
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { CAPS } from './exposure'
-import { TEAM_CENTRAL, IN_CONTAINER } from './config'
+import { IN_CONTAINER } from './config'
 import { getVersionInfo, CURRENT_VERSION } from './version'
 import { upgradeFromUiDecision, UPGRADE_REFUSALS, type UpgradeRefusal } from './upgrade-gate'
 import { writeAudit } from './audit'
@@ -90,7 +90,7 @@ export function upgradeBinary(execPath: string): string | null {
  */
 export function upgradableHint(info: { hasUpdate: boolean; latest: string } | null): UpgradeRefusal | null {
   const d = upgradeFromUiDecision({
-    capable: CAPS.localShell, central: TEAM_CENTRAL, container: IN_CONTAINER,
+    capable: CAPS.localShell, container: IN_CONTAINER,
     hasUpdate: info?.hasUpdate === true, latest: info?.latest ?? null,
   })
   if (!d.ok) return d.reason
@@ -146,7 +146,6 @@ export async function handleUpgradeRoute(
   const restartOnly = info?.restartNeeded === true
   const decision = upgradeFromUiDecision({
     capable: CAPS.localShell,
-    central: TEAM_CENTRAL,
     container: IN_CONTAINER,
     hasUpdate: info?.hasUpdate === true,
     latest: info?.latest ?? null,

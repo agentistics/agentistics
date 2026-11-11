@@ -396,8 +396,6 @@ export async function editTask(
     dueDate?: string
     startDate?: string
     labels?: string[]
-    /** Opt this delivery in or out of travelling to the centrals this machine is connected to. */
-    shared?: boolean
     actor?: string
   },
 ): Promise<boolean> {
@@ -424,11 +422,6 @@ export async function editTask(
     ...(patch.labels !== undefined
       ? { labels: patch.labels.map(l => l.trim()).filter(Boolean) }
       : {}),
-    // Written as a BOOLEAN, never as an absence: turning sharing off must record `false` rather
-    // than delete the key, so the log and the switch both say a person decided it. Absent still
-    // READS as not shared (`taskShared`) — the two are the same for the uploader and different
-    // for a reader asking whether anybody has ever chosen.
-    ...(patch.shared !== undefined ? { shared: patch.shared === true } : {}),
     updatedAt: now,
   })
   if (!ok) return false
@@ -439,14 +432,6 @@ export async function editTask(
   }
   if (nextType !== undefined && nextType !== (task.type ?? '')) {
     changes.push(event(task.id, actor, 'type', { from: task.type ?? '', to: nextType }))
-  }
-  if (patch.shared !== undefined && (patch.shared === true) !== (task.shared === true)) {
-    // Logged like every other decision: which central a delivery's text reaches is exactly the
-    // kind of change somebody may need to account for later.
-    changes.push(event(task.id, actor, 'shared', {
-      from: task.shared === true ? 'shared' : 'not shared',
-      to: patch.shared === true ? 'shared' : 'not shared',
-    }))
   }
   await w.store.logEvents(changes)
   return true

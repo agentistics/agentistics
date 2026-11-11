@@ -116,9 +116,6 @@ export function ignoredDimensions(filters: Filters, lang: 'en' | 'pt'): string |
   const named: string[] = []
   if (filters.dateRange && filters.dateRange !== 'all') named.push(pt ? 'o período' : 'the date range')
   if ((filters.tags?.length ?? 0) > 0) named.push(pt ? 'as tags' : 'tags')
-  if ((filters.users?.length ?? 0) > 0) named.push(pt ? 'os membros' : 'members')
-  if ((filters.teams?.length ?? 0) > 0) named.push(pt ? 'os times' : 'teams')
-  if ((filters.machines?.length ?? 0) > 0) named.push(pt ? 'as máquinas' : 'machines')
   if (named.length === 0) return null
   const list = named.length === 1
     ? named[0]!
