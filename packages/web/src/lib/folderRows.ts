@@ -44,7 +44,7 @@ export function endedAutoOpen(
 
 /** A folder is busy only when someone is working, waiting or asking for approval. */
 export function isFolderSessionActive(row: Pick<ControlSession, 'state'>): boolean {
-  return row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval'
+  return row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval' || row.state === 'idle'
 }
 
 /**

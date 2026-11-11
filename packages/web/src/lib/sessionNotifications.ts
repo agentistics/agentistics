@@ -739,7 +739,7 @@ export function notifyFleetTransitions(
     if (getReopening().has(id)) continue
     const continued = rows.some(r => r.id !== id &&
       (r.id === source.handoffTo || (!!source.conversationId && r.conversationId === source.conversationId)) &&
-      (r.state === 'working' || r.state === 'waiting' || r.state === 'waiting-approval'))
+      (r.state === 'working' || r.state === 'waiting' || r.state === 'waiting-approval' || r.state === 'idle'))
     next[id] = 'exited'
     if (!continued) announce[id] = 'exited'
   }

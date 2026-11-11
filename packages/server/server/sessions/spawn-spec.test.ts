@@ -94,11 +94,14 @@ describe('SPAWN_SPECS', () => {
 })
 
 describe('planSpawn', () => {
-  test('planSpawn refuses Hermes as a terminal launcher with the structured-only notice', () => {
+  test('planSpawn for hermes returns a plan', () => {
+    // The structured doors plan before the structured backend takes over; the refusal for a terminal
+    // launch lives in `withStructured.spawn`, not here.
     const r = planSpawn({ harness: 'hermes', cwd: '/tmp' })
-    expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toMatchObject({ code: 'structured-only', harness: 'hermes' })
-    if (!r.ok) expect('notice' in r.error ? r.error.notice : '').toContain('Hermes runs only as a structured chat (ACP)')
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.plan.argv[0]).toBe('hermes')
+    const resumed = planSpawn({ harness: 'hermes', cwd: '/tmp', resumeId: 'conv-1' })
+    expect(resumed.ok).toBe(true)
   })
 
   it('puts a claude prompt in the positional slot, after the flags, and marks it for submit', () => {

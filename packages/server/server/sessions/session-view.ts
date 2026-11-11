@@ -1097,8 +1097,13 @@ export function attentionCount(views: readonly SessionView[]): number {
   return views.filter(v => v.status !== 'external' && needsAttention(v.activity) && !declaredIdle(v)).length
 }
 
-/** A structured Hermes turn has no permission/question capability in its measured declaration. */
-function declaredIdle(v: Pick<SessionView, 'harness' | 'structured' | 'approvalDetection' | 'activity'>): boolean {
+/**
+ * A structured Hermes turn has no permission/question capability in its measured declaration, so its
+ * ended turn is idle, not a request. The row's published `state` (`sessionState`) says `idle` for the
+ * same predicate, which is what keeps the web, TUI and CLI from counting it; this function also
+ * serves the two counters below, which read the view's `activity` rather than a row state.
+ */
+export function declaredIdle(v: Pick<SessionView, 'harness' | 'structured' | 'approvalDetection' | 'activity'>): boolean {
   return v.harness === 'hermes' && v.structured === true && v.approvalDetection && v.activity === 'waiting'
 }
 

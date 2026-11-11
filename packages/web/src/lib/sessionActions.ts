@@ -63,6 +63,7 @@ export function primaryAction(row: FleetRow): PrimaryAction | null {
       if (v) return { kind: 'approve', action: 'approve', verb: v, human: true }
       return { kind: 'watch', human: false }
     }
+    case 'idle':
     case 'waiting': {
       const v = find('prompt')
       if (v) return { kind: 'prompt', action: 'prompt', verb: v, human: false }

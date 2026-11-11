@@ -67,7 +67,6 @@ import { ISOLATION_ENV } from '../account-isolation'
 import { isManagedAccountRoot } from '../default-claude-root'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import type { InitialPrompt, SpawnRequest, SpawnPlanResult, SpawnSpec } from './types'
-import { HERMES_STRUCTURED_ONLY_NOTICE } from './structured-route'
 
 /** A canonical UUID. Local so this module stays free of the server's git helpers. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -437,9 +436,8 @@ export function conversationLinkGoneForever(harness: HarnessId): boolean {
 
 /** Decide the exact argv (and any text to type in); unconfirmed capabilities default to absent. */
 export function planSpawn(req: SpawnRequest, capabilities: { codexNoDaemon?: boolean } = {}): SpawnPlanResult {
-  if (req.harness === 'hermes') {
-    return { ok: false, error: { code: 'structured-only', harness: req.harness, notice: HERMES_STRUCTURED_ONLY_NOTICE } }
-  }
+  // Hermes is structured-only, but that is refused where a plan would become a TERMINAL launch
+  // (`withStructured.spawn`), never here: every structured door plans first.
   const spec = SPAWN_SPECS[req.harness]
   if (!spec) return { ok: false, error: { code: 'unsupported-harness', harness: req.harness } }
 

@@ -275,7 +275,7 @@ async function readSessionChatCore(
   const sessionEnded = historicalWireRow(row)
   // EXT.OPEN: an EXTERNAL row is a RUNNING process (agentop only cannot see its screen), so its
   // conversation is live and more is expected — it is read exactly like a session agentop hosts.
-  const live = row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval'
+  const live = row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval' || row.state === 'idle'
     || (row.state === 'unknown' && isExternalRowId(row.id))
 
   // The EXACT link, or nothing. `conversationBlind` is the row's own sentence for a harness that

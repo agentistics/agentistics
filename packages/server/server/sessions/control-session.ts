@@ -20,7 +20,7 @@ import { approvalFor, canPick, isFreeTextOption } from './approval-spec'
 import { needsChoice } from './dialog-choice'
 import { pickTitle } from './harness-session-file'
 import type { ResolvedRepoFacts } from './repo-facts'
-import type { SessionView } from './session-view'
+import { declaredIdle, type SessionView } from './session-view'
 import { conversationLinkGoneForever, conversationLinkable, SPAWN_SPECS } from './spawn-spec'
 import { HARNESS_PROCESS_TRANSCRIPTS, HARNESS_SESSION_SOURCES } from './harness-session-file'
 
@@ -32,7 +32,7 @@ export function sessionState(v: SessionView): SessionState {
   if (v.status === 'lost') return 'lost'
   switch (v.activity) {
     case 'waiting-approval': return 'waiting-approval'
-    case 'waiting': return 'waiting'
+    case 'waiting': return declaredIdle(v) ? 'idle' : 'waiting'
     case 'working': return 'working'
     case 'exited': return 'exited'
     // A row with no activity that is not external is one the poller could not read this time round.
@@ -50,6 +50,7 @@ export function stateLabel(state: SessionState, s: CliStrings, external = false)
     case 'working': return s.sessState.working
     case 'waiting-approval': return s.sessState.waitingApproval
     case 'waiting': return s.sessState.waiting
+    case 'idle': return s.sessState.idle
     case 'exited': return s.sessState.exited
     case 'lost': return s.sessState.lost
     case 'unknown': return s.sessState.external
@@ -178,9 +179,7 @@ export function toControlSession(
     // still has work running, which is the reading this mark exists to correct.
     stateLabel: v.background
       ? `${stateLabel(state, s, v.status === 'external')} · ${s.sessBackground}`
-      : state === 'waiting' && v.harness === 'hermes' && v.structured && v.approvalDetection
-        ? s.sessState.waitingExternal
-        : stateLabel(state, s, v.status === 'external'),
+      : stateLabel(state, s, v.status === 'external'),
     // The machine-readable half, for a surface that wants to style it rather than read it.
     ...(v.background ? { background: true } : {}),
     actionable: v.status !== 'external' && v.status !== 'closed',
@@ -225,7 +224,8 @@ export function toControlSession(
     // answer to "where does it continue from". Never filled from the harness+directory guess.
     ...(v.conversationId ? { conversationId: v.conversationId } : {}),
     ...(link !== undefined ? { link } : {}),
-    ...(v.conversationLinkVia ? { conversationLinkVia: v.conversationLinkVia } : {}),
+    // Always present (null without a conversation), like `FleetRow.conversationLinkVia`.
+    conversationLinkVia: v.conversationLinkVia ?? null,
     // …and where no answer can ever exist, that is stated instead. Only on a row we HOST and only
     // while it has no id: an `external` or `closed` row was never ours to record, and a claude row
     // that has not been polled yet is about to have one. Same shape as `approvalBlind`.

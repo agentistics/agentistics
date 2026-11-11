@@ -28,7 +28,7 @@ export const TEXT_VERBS: ReadonlySet<string> = new Set([
 ])
 
 export type SessionState =
-  | 'working' | 'waiting' | 'waiting-approval' | 'exited' | 'lost' | 'unknown' | 'closed'
+  | 'working' | 'waiting' | 'waiting-approval' | 'idle' | 'exited' | 'lost' | 'unknown' | 'closed'
 
 export interface FleetVerb {
   action: string

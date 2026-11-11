@@ -54,8 +54,8 @@ export interface NativeFilingFacts {
 type State = FleetRow['state']
 
 const STATE_WORD: Record<'pt' | 'en', Record<State, string>> = {
-  en: { working: 'working', 'waiting-approval': 'needs approval', waiting: 'needs you', exited: 'off', lost: 'off', closed: 'off', unknown: 'external' },
-  pt: { working: 'trabalhando', 'waiting-approval': 'precisa de aprovação', waiting: 'precisa de você', exited: 'encerrada', lost: 'desconectada', closed: 'fechada', unknown: 'externa' },
+  en: { working: 'working', 'waiting-approval': 'needs approval', waiting: 'needs you', idle: 'idle', exited: 'off', lost: 'off', closed: 'off', unknown: 'external' },
+  pt: { working: 'trabalhando', 'waiting-approval': 'precisa de aprovação', waiting: 'precisa de você', idle: 'ociosa', exited: 'encerrada', lost: 'desconectada', closed: 'fechada', unknown: 'externa' },
 }
 
 const VERB_WORD: Record<'pt' | 'en', Record<'rename' | 'note' | 'task' | 'resume' | 'kill' | 'interrupt', string>> = {

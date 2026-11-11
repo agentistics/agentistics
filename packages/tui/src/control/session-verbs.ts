@@ -86,7 +86,7 @@ export function sessionActions(
   // `attach` there was a button whose only outcome was an error.
   const live = hosted
     && (selected.state === 'working' || selected.state === 'waiting'
-      || selected.state === 'waiting-approval')
+      || selected.state === 'waiting-approval' || selected.state === 'idle')
   const canReopen = Boolean(selected?.resume)
 
   return [
