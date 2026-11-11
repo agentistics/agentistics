@@ -224,7 +224,7 @@ test('a queued card says why it waits in plain words; the raw gate text is only 
   expect(slot.getAttribute('title')).toBe(raw)
 })
 
-test('the task picker opens at least 360px wide, titles clamp to two lines, the count never sits on the text, no duplicated heading', async () => {
+test('the task picker opens at least 360px wide, titles stay on one line inside the viewport cap, the count never sits on the text, no duplicated heading', async () => {
   const ds = [
     piece('a', 'running', { taskId: 'ta', taskTitle: 'A very long task title that used to wrap on top of the section label and of the live counter next to it', sessionIds: ['s1'] }),
     piece('b', 'qa', { taskId: 'tb', taskTitle: 'Another task' }),
@@ -234,13 +234,14 @@ test('the task picker opens at least 360px wide, titles clamp to two lines, the 
   expect(trigger.textContent).toContain('Todas as tarefas')
   await act(async () => trigger.click())
   const panel = document.querySelector('[role="listbox"]') as HTMLElement
-  expect(panel.style.width).toBe('360px')
+  // Content-sized list (#1405): the 360px floor is the minimum width, the viewport the cap.
+  expect(panel.style.width).toBe('max-content')
+  expect(panel.style.minWidth).toBe('360px')
   const headings = Array.from(panel.querySelectorAll('[data-multipicker-heading]')).map(h => h.textContent)
   expect(headings).toContain('Recentes (com atividade)')
   expect(headings.filter(h => h === 'Todas as tarefas')).toEqual([])
   const label = Array.from(panel.querySelectorAll('span')).find(s => s.textContent?.startsWith('A very long task title')) as HTMLElement
-  expect(label.style.webkitLineClamp || label.getAttribute('style')).toContain('2')
-  expect(Number.parseInt(label.style.minWidth, 10)).toBe(0)
+  expect(label.style.whiteSpace).toBe('nowrap')
   // the count is its own, non-shrinking cell
   const count = Array.from(panel.querySelectorAll('span')).find(s => s.textContent === '1 ativo') as HTMLElement
   expect(count.style.flexShrink).toBe('0')
