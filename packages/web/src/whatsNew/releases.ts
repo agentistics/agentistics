@@ -10,6 +10,40 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.205.1': {
+    features: [
+      {
+        pt: 'Cofre: marque várias entradas e mova todas para um grupo (novo ou existente) de uma vez; se alguma falhar, a tela diz qual.',
+        en: 'Vault: select several entries and move them all to a group (new or existing) at once; if any fails, the screen says which.',
+      },
+      {
+        pt: 'Registrar tarefa: o botão de prancheta fica ao lado do botão de ligação, sem moldura, com uma explicação ao passar o mouse; clicar abre um painel com a prioridade e um prazo opcional com hora, botão Hoje e calendário novo (hoje em verde, dia escolhido em laranja).',
+        en: 'Register a task: the clipboard button sits next to the call button, without a frame, with an explanation on hover; clicking opens a panel with the priority and an optional due date with time, a Today button and a new calendar (today in green, the chosen day in orange).',
+      },
+      {
+        pt: 'Live: entregas sem nenhum líder vivo na tarefa aparecem na coluna "Sem líder", com o motivo; cartões de pedido mostram o texto do pedido como título.',
+        en: 'Live: deliveries with no live leader on their task appear in the "No leader" column, with the reason; request cards show the request text as their title.',
+      },
+      {
+        pt: 'Uso dos planos: cada conta mostra um indicador compacto (janela de 5 h em cima, semana embaixo) e uma setinha indica quando a lista tem mais contas para rolar.',
+        en: 'Plan usage: each account shows a compact indicator (5 h window on top, week below) and a small arrow shows when the list has more accounts to scroll.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Registrar tarefa: enviar com o botão ligado voltava a mensagem para o campo de texto; agora ela chega e vira uma única subtarefa ligada ao pedido.',
+        en: 'Register a task: sending with the button on put the message back in the box; now it arrives and becomes a single subtask linked to the request.',
+      },
+      {
+        pt: 'Menu lateral recolhido: clicar num ícone abre o menu e o grupo daquele ícone.',
+        en: 'Collapsed side menu: clicking an icon opens the menu and that icon\'s group.',
+      },
+      {
+        pt: 'Menus de filtro mostram as opções inteiras, sem cortar o texto, e os filtros não se sobrepõem mais.',
+        en: 'Filter menus show their options in full, without cutting the text, and filters no longer overlap.',
+      },
+    ],
+  },
   '2.205.0': {
     features: [
       {
