@@ -6,6 +6,8 @@ test('task options require an explicit priority and real optional ISO date', () 
   for (const priority of ['urgent', 'high', 'medium', 'low']) expect(validComposerTask({ priority })).toBe(true)
   for (const value of [null, true, {}, { priority: 'none' }, { priority: 'medium', dueDate: '2026-02-31' }, { priority: 'medium', dueDate: 'tomorrow' }]) expect(validComposerTask(value)).toBe(false)
   expect(validComposerTask({ priority: 'medium', dueDate: '2028-02-29' })).toBe(true)
+  expect(validComposerTask({ priority: 'medium', dueDate: '2028-02-29T23:45' })).toBe(true)
+  for (const dueDate of ['2026-02-31T10:00', '2026-11-11T24:00', '2026-11-11T12:60', '2026-11-11T12:00Z']) expect(validComposerTask({ priority: 'medium', dueDate })).toBe(false)
 })
 
 test('autonomous registration paragraph appears once, for active leaders only, in both languages', () => {
