@@ -27,6 +27,10 @@ describe('summarizeFleet', () => {
     expect(s.waiting).toBe(2)
     expect(s.off).toBe(2)
   })
+  test('counts idle as running and active', () => {
+    expect(summarizeFleet([row({ id: 'idle', harness: 'hermes', state: 'idle', startedAt: NOW - 5_000 })], NOW))
+      .toMatchObject({ total: 1, running: 1, waiting: 0, off: 0, activeMs: 5_000 })
+  })
 
   test('slices by harness, busiest first, ties broken by name so polls do not shuffle it', () => {
     const s = summarizeFleet([
@@ -80,6 +84,7 @@ describe('summarizeFleet', () => {
     expect(s.activeMs).toBeUndefined()
   })
 })
+
 
 describe('formatUptime', () => {
   test('at most two units, so a long total stays readable', () => {
@@ -155,4 +160,3 @@ describe('summarizeFleet — how many of those projects are repositories', () =>
     expect(s.projectRepos).toBe(0)
   })
 })
-

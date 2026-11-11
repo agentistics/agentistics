@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, Bot, CalendarClock, CircleCheck, ListChecks, MessageSquare, Paperclip, Terminal } from 'lucide-react'
-import { canReorderBy, DEFAULT_SORT, sortRows, taskProgress, type SortSpec, type TaskStatusDef } from '@agentistics/core'
+import { canReorderBy, DEFAULT_SORT, isLiveState, sortRows, taskProgress, type SortSpec, type TaskStatusDef } from '@agentistics/core'
 import {
   PRIORITY, cardStyle, claimLeft, fmtInt, fmtTokens, liveStatusOrder, microLabel,
   numeric, pill, statusStyle, surface, type BoardStatus,
@@ -158,7 +158,6 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
 
 /** A session counts as "on" while it could still be doing something — the same set
  *  `SessionPicker`/`TaskComposer`/`BlockedSubtaskResolve` already use for "this session is live". */
-const ACTIVE_SESSION_STATES = new Set(['working', 'waiting', 'waiting-approval'])
 
 /**
  * Who is ON this card right now, and how it is progressing — as COUNTS, never a pill per session.
@@ -179,7 +178,7 @@ function Agents({ row, live, nowMs }: {
   const claim = row.task.claim
   const lease = claim ? claimLeft(claim.expiresAt, nowMs) : null
   const counts = row.counts
-  const sessionsOn = live.filter(s => ACTIVE_SESSION_STATES.has(s.state)).length
+  const sessionsOn = live.filter(s => isLiveState(s.state)).length
   const hasSubtasks = counts && counts.subtasks > 0
   const hasDone = counts && counts.subtasksDone > 0
   if (!claim && !hasSubtasks && sessionsOn === 0 && !hasDone) return null

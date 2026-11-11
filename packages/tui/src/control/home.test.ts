@@ -38,6 +38,9 @@ describe('today (HM-03)', () => {
     expect(f.spark).toHaveLength(14)
     expect(f.spark.at(-1)).toBeCloseTo(f.costUSD!, 10)
   })
+  test('counts an idle fleet row as live', () => {
+    expect(todayFigures([], [row('idle', 'idle')], NOW).live).toBe(1)
+  })
   test('N/A is never 0: no reported counter → tokens null; nothing today → cost null', () => {
     const f = todayFigures([meta('a', '2026-10-03T01:00:00.000Z', { input_tokens: undefined, output_tokens: undefined, cache_read_input_tokens: undefined, cache_creation_input_tokens: undefined })], [], NOW)
     expect(f.tokens).toBeNull()

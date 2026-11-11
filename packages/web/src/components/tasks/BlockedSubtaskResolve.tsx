@@ -33,6 +33,7 @@ import { useFleet, type FleetRow } from '../../lib/fleet'
 import { messageTime } from '../../lib/messageTime'
 import { patchSubtask, type Subtask, type TaskSessionRow } from '../../lib/tasks'
 import { button, pill, surface, SESSION_STATE } from './board'
+import { isLiveState } from '@agentistics/core'
 
 export interface BlockedSubtaskResolveProps {
   taskId: string
@@ -51,7 +52,6 @@ export interface BlockedSubtaskResolveProps {
 }
 
 /** LIVE, in the sense this question means: the fleet still holds it and it has not finished. */
-const LIVE_STATES = new Set(['working', 'waiting', 'waiting-approval'])
 
 type OpenSession = { blocker: Subtask; row: FleetRow }
 
@@ -92,7 +92,7 @@ export function BlockedSubtaskResolve(p: BlockedSubtaskResolveProps) {
     for (const blocker of blockers) {
       const rowIds = new Set(p.sessions.filter(s => s.subtaskId === blocker.id).map(s => s.id))
       for (const fr of fleetRows) {
-        if (rowIds.has(fr.id) && LIVE_STATES.has(fr.state)) found.push({ blocker, row: fr })
+        if (rowIds.has(fr.id) && isLiveState(fr.state)) found.push({ blocker, row: fr })
       }
     }
     if (found.length === 0) { void finishBlockers(blockers.map(b => b.id)); return }

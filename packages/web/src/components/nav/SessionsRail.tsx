@@ -50,11 +50,12 @@ import {
 } from '../../lib/sessionsAsidePrefs'
 import { buildTeams, endedSections, isWaitingState, teamSummary, type AsideTab } from '../../lib/asideTabs'
 import { SegmentedTabs } from './SegmentedTabs'
+import { isLiveState } from '@agentistics/core'
 
 /** The dot a state earns on a mark: orange for needs-you, green for working, nothing otherwise. */
 function stateDot(state: string): string | null {
   if (state === 'waiting' || state === 'waiting-approval') return 'var(--anthropic-orange)'
-  if (state === 'working') return '#22c55e'
+  if (isLiveState(state)) return '#22c55e'
   return null
 }
 

@@ -432,7 +432,6 @@ describe('MODE.EVERYWHERE — the TUI starts in the asked mode, by its own flag'
   test('"default" and no mode pass nothing — the harness\'s own configuration decides', () => {
     for (const h of HARNESS_ORDER) {
       if (!SPAWN_SPECS[h]) continue
-      if (h === 'hermes') continue // Hermes is structured-only; it has no TUI mode.
       expect(argvOf(h, 'default').argv).toEqual(argvOf(h).argv)
       expect(argvOf(h).modeNeedsProtocol).toBeUndefined()
     }

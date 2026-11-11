@@ -130,6 +130,7 @@ const STATUS_BUCKETS: Record<SessionActivity, { label: string; color: string }> 
   'waiting-approval': { label: 'Aguardando aprovação', color: '#ef4444' },
   waiting: { label: 'Aguardando resposta', color: '#f59e0b' },
   working: { label: 'Trabalhando', color: '#22c55e' },
+  idle: { label: 'Ociosa', color: '#22c55e' },
   exited: { label: 'Encerradas / Histórico', color: 'var(--text-tertiary)' },
 }
 export type StatusShortcut = 'all' | 'active' | 'waiting' | 'closed'

@@ -9,11 +9,11 @@
  */
 
 import type { TaskSessionRow } from '../../lib/tasks'
+import { isLiveState } from '@agentistics/core'
 
 export type SessionsFilter = 'alive' | 'ended' | 'all'
 
 /** The fleet states that mean a process is still there to talk to. */
-const ALIVE_STATES = new Set(['working', 'waiting', 'waiting-approval'])
 
 export interface PlanRow {
   row: TaskSessionRow
@@ -36,7 +36,7 @@ export interface SessionGroup {
 }
 
 export function isAlive(state: string | undefined): boolean {
-  return state !== undefined && ALIVE_STATES.has(state)
+  return isLiveState(state)
 }
 
 export function toPlanRows(

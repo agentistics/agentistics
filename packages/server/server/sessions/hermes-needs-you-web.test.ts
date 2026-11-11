@@ -52,10 +52,9 @@ describe('other harnesses are unchanged', () => {
     const rows = fleet([
       ['claude-a', 'claude', 'waiting-approval'],
       ['claude-b', 'claude', 'waiting'],
-      ['hermes', 'hermes', 'waiting'],
-    ], ['claude-a', 'hermes'])
+    ], ['claude-a'])
     expect(webAttentionCount(rows)).toBe(2)
-    expect(summaryCounts(rows)).toEqual({ active: 3, working: 0, needs: 2 })
+    expect(summaryCounts(rows)).toEqual({ active: 2, working: 0, needs: 2 })
     expect(rows.find(r => r.id === 'claude-a')!.state).toBe('waiting-approval')
   })
 
@@ -93,7 +92,7 @@ describe('the turn notification', () => {
     memory = notifyFleetTransitions(memory, working, 'en')
     memory = notifyFleetTransitions(memory, done, 'en')
     notifyFleetTransitions(memory, done, 'en')
-    expect(fleetActivityStates(done)).toEqual({})
+    expect(fleetActivityStates(done)).toEqual({ hermes: 'idle' })
     expect(deliveries).toEqual([])
   })
 

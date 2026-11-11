@@ -53,10 +53,11 @@ test('trigger host ops: the managed-session universe and a nudge through the com
   const ops = triggerHostOps({
     registry: async () => [
       { id: 'live', cwd: '/w/a', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1', subtaskId: 's-1', parentSessionId: 'lead' },
+      { id: 'idle', cwd: '/w/a', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1' },
       { id: 'gone', cwd: '/w/b', createdAt: '2026-10-28T00:00:00.000Z', endedAt: '2026-10-29T01:00:00.000Z', taskId: 't-1' },
       { id: 'lead', cwd: '/w', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1', conversationId: 'conv-l' },
     ],
-    rows: async () => [{ id: 'live', state: 'working' }, { id: 'gone', state: 'working' }, { id: 'lead', conversationId: 'conv-l', state: 'waiting' }],
+    rows: async () => [{ id: 'live', state: 'working' }, { id: 'idle', state: 'idle' }, { id: 'gone', state: 'working' }, { id: 'lead', conversationId: 'conv-l', state: 'waiting' }],
     roles: async () => row => (row.conversationId === 'conv-l' ? 'leader' : undefined),
     prompt: async (id, text) => { prompts.push([id, text]); return id === 'live' ? { ok: true } : { ok: false, message: 'ended' } },
     awayNotice: async text => { notices.push(text); return true },
@@ -64,6 +65,7 @@ test('trigger host ops: the managed-session universe and a nudge through the com
   })
   expect(await ops['sessoes-gerenciadas']()).toEqual({ sessions: [
     { id: 'live', cwd: '/w/a', alive: true, state: 'working', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1', subtaskId: 's-1', parentSessionId: 'lead' },
+    { id: 'idle', cwd: '/w/a', alive: true, state: 'idle', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1' },
     { id: 'gone', cwd: '/w/b', alive: false, state: 'working', createdAt: '2026-10-28T00:00:00.000Z', endedAt: '2026-10-29T01:00:00.000Z', taskId: 't-1' },
     { id: 'lead', cwd: '/w', alive: true, state: 'waiting', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1', conversationId: 'conv-l', role: 'leader' },
   ] })

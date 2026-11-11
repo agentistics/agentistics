@@ -16,8 +16,8 @@ import { Search, Terminal, X } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useFleet } from '../../lib/fleet'
 import { SESSION_STATE, button, field, harnessColor, microLabel, pill, surface } from './board'
+import { isLiveState } from '@agentistics/core'
 
-const LIVE = new Set(['working', 'waiting', 'waiting-approval'])
 
 /**
  * A page, not the whole fleet.
@@ -51,13 +51,13 @@ export function SessionPicker({
     const all = fleet.sessions ?? []
     const needle = q.trim().toLowerCase()
     return all
-      .filter(s => (scope === 'active' ? LIVE.has(s.state) : true))
+      .filter(s => (scope === 'active' ? isLiveState(s.state) : true))
       .filter(s => !needle
         || s.title.toLowerCase().includes(needle)
         || s.cwd.toLowerCase().includes(needle)
         || s.harness.toLowerCase().includes(needle))
       // Live first, then the rest — the thing you are most likely filing is the thing running.
-      .sort((a, b) => Number(LIVE.has(b.state)) - Number(LIVE.has(a.state)))
+      .sort((a, b) => Number(isLiveState(b.state)) - Number(isLiveState(a.state)))
   }, [fleet.sessions, q, scope])
 
   const pages = Math.max(1, Math.ceil(matched.length / PAGE))

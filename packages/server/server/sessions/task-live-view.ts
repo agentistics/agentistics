@@ -10,7 +10,7 @@
  */
 
 import {
-  humanizeAction, inPublishedPeriod, liveCapOmitted, type LiveCutFacts, liveComparator, LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, liveTabCounts, liveTabMatches, plainLeaderName,
+  humanizeAction, inPublishedPeriod, isLiveState, liveCapOmitted, type LiveCutFacts, liveComparator, LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, liveTabCounts, liveTabMatches, plainLeaderName,
   type LiveLang, type LivePeriod, type LiveSortId, type LiveTab,
 } from '@agentistics/core'
 import { HISTORY_CAP, LIVE_STAGES, type LiveDelivery, type LiveReply, type LiveStage } from './task-live'
@@ -42,7 +42,6 @@ export interface RuntimeFacts { model?: string; effort?: string; effortConcept: 
 
 export type LiveState = 'working' | 'waiting' | 'needs-you' | 'down' | 'none'
 
-const ALIVE = new Set(['working', 'waiting', 'waiting-approval'])
 const DOWN = new Set(['lost', 'unknown'])
 
 export interface LiveAgentView { id: string; harness: string; model: string | null; effort: string | null; accountId: string | null; state: string }
@@ -160,7 +159,7 @@ export interface LiveFilters { task?: string; stage?: LiveStage | 'no-leader'; s
 function leaderForTask(o: { taskId: string; taskTitle: string; rows: readonly FleetRowLite[]; leaderIds: ReadonlySet<string>; fleetRead: 'ok' | 'unknown' }): { availability: LeaderAvailability; reason?: string; reasonCode?: 'fleet-unreadable' | 'no-live-leader' } {
   if (o.fleetRead === 'unknown') return { availability: 'unknown', reason: 'leader availability could not be read from the fleet', reasonCode: 'fleet-unreadable' }
   const sameTask = (r: FleetRowLite) => r.task === o.taskId || r.task === o.taskTitle
-  const leader = o.rows.some(r => o.leaderIds.has(r.id) && sameTask(r) && ALIVE.has(r.state))
+  const leader = o.rows.some(r => o.leaderIds.has(r.id) && sameTask(r) && isLiveState(r.state))
   return leader ? { availability: 'available' } : { availability: 'absent', reason: 'no live leader is filed on this task', reasonCode: 'no-live-leader' }
 }
 
@@ -185,7 +184,7 @@ export function describeLive(o: {
   const all: LiveDeliveryView[] = [...o.reply.deliveries, ...(o.reply.history ?? []), ...(o.reply.oldReviews ?? [])].map(d => {
     const agents: LiveAgentView[] = d.sessionIds.flatMap(id => {
       const r = byId.get(id)
-      return r && (ALIVE.has(r.state) || DOWN.has(r.state))
+      return r && (isLiveState(r.state) || DOWN.has(r.state))
         ? [{ id: r.id, harness: r.harness, model: r.observedModel ?? r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null, state: r.state }]
         : []
     })
@@ -195,7 +194,7 @@ export function describeLive(o: {
       || (d.sessionIds.length > 0 && agents.length === 0 && (d.stage === 'running' || d.stage === 'qa'))
     // MEASURED work only: the book's `activeMinutes`, or — when nothing was measured — the span of a session the
     // FLEET shows alive right now. A session the book thinks open while no agent runs counts nothing.
-    const alive = agents.some(a => ALIVE.has(a.state))
+    const alive = agents.some(a => isLiveState(a.state))
     const workMs = d.workMs ?? (alive && d.startedAtMs !== null ? Math.max(0, o.nowMs - d.startedAtMs) : null)
     const leader = d.stage === 'leader'
       ? leaderForTask({ taskId: d.taskId, taskTitle: d.taskTitle, rows: o.rows, leaderIds: o.leaderIds, fleetRead: o.fleetRead ?? 'ok' })
@@ -212,7 +211,7 @@ export function describeLive(o: {
   const openTasks = new Set(all.filter(d => d.subtaskId !== null && !d.old && d.stage !== 'published' && d.stage !== 'completed').map(d => d.taskId))
   // A task that rolled up to `done` (its last subtask finished) while a leader filed on it is still LIVE keeps that one
   // card: the leader is still there. A dead, exited or lost leader on a done task gets none, or old tasks would return.
-  const liveLeaderOn = (d: LiveDeliveryView) => d.sessionIds.some(id => o.leaderIds.has(id) && ALIVE.has(byId.get(id)?.state ?? ''))
+  const liveLeaderOn = (d: LiveDeliveryView) => d.sessionIds.some(id => o.leaderIds.has(id) && isLiveState(byId.get(id)?.state))
   const isLeaderFiling = (d: LiveDeliveryView) => d.subtaskId === null && d.sessionIds.length > 0 && d.sessionIds.every(id => o.leaderIds.has(id))
     && (d.stage === 'running' || (d.stage === 'completed' && !d.old && liveLeaderOn(d)))
   const leaderOnly = (d: LiveDeliveryView) => isLeaderFiling(d) && openTasks.has(d.taskId)
@@ -244,8 +243,8 @@ export function describeLive(o: {
   const pieceOf = new Map<string, LiveDeliveryView>()
   // A piece published more than 24 h ago is history: a worker still filed on it is not "delivering" it.
   for (const d of all) if (d.stage !== 'published' || inPublishedPeriod(d.deliveredAtMs, LIVE_PERIOD_DEFAULT, o.nowMs)) for (const id of d.sessionIds) pieceOf.set(id, d)
-  const leaders: LeaderView[] = o.rows.filter(r => o.leaderIds.has(r.id) && (ALIVE.has(r.state) || DOWN.has(r.state))).map(r => {
-    const workers = o.rows.filter(w => w.parentSessionId === r.id && !o.leaderIds.has(w.id) && ALIVE.has(w.state))
+  const leaders: LeaderView[] = o.rows.filter(r => o.leaderIds.has(r.id) && (isLiveState(r.state) || DOWN.has(r.state))).map(r => {
+    const workers = o.rows.filter(w => w.parentSessionId === r.id && !o.leaderIds.has(w.id) && isLiveState(w.state))
     const awaiting = [r, ...workers].filter(x => x.state === 'waiting-approval').map(x => ({ id: x.id, title: x.title }))
     const pubs = workers.flatMap(w => { const d = pieceOf.get(w.id); return d && d.publishEta.kind === 'estimate' ? [d.publishEta.atMs] : [] })
     const taskId = [...pieceOf.values()].find(d => d.sessionIds.includes(r.id))?.taskId ?? o.reply.sessionTasks?.[r.id] ?? null
