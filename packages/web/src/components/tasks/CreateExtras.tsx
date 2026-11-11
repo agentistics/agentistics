@@ -5,8 +5,8 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { Select } from '../../pages/settings/primitives'
 import { SESSION_STATE, field, harnessColor, microLabel, pill } from './board'
 import type { Lang } from './copy'
+import { isLiveState } from '@agentistics/core'
 
-const LIVE = new Set(['working', 'waiting', 'waiting-approval'])
 
 const W = {
   summary: { en: 'Link sessions and break it into subtasks', pt: 'Vincular sessões e quebrar em subtarefas' },
@@ -40,7 +40,7 @@ export function CreateExtras({ lang, subs, setSubs, picked, setPicked }: {
   const isMobile = useIsMobile()
   const { fleet } = useFleet(lang)
   const t = <K extends keyof typeof W>(k: K) => W[k][lang]
-  const live = useMemo(() => (fleet.sessions ?? []).filter(s => LIVE.has(s.state)), [fleet.sessions])
+  const live = useMemo(() => (fleet.sessions ?? []).filter(s => isLiveState(s.state)), [fleet.sessions])
   const add = (el: HTMLInputElement) => {
     const v = el.value.trim()
     if (v) { setSubs(list => [...list, v]); el.value = ''; }

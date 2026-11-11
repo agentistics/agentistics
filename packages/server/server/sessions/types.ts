@@ -215,6 +215,7 @@ export type SpawnPlanError =
   | { code: 'unknown-mode'; harness: HarnessId; value: string }
   /** An account root was asked for on a harness with no isolation variable. */
   | { code: 'account-unsupported'; harness: HarnessId }
+  | { code: 'structured-only'; harness: HarnessId; notice: string }
 
 export type SpawnPlanResult =
   | { ok: true; plan: SpawnPlan }
@@ -822,7 +823,7 @@ export interface SessionBackend {
    * F2.0b — "open in terminal" on a live STRUCTURED session: end its child, then resume the same
    * conversation as a TUI under the same managed id. `not-structured` for every other session.
    */
-  toTerminal?(id: string): Promise<{ ok: true } | { ok: false; why: 'not-structured' | 'no-conversation' | 'no-resume' | 'still-running' | 'spawn-failed' }>
+  toTerminal?(id: string): Promise<{ ok: true } | { ok: false; why: 'not-structured' | 'no-conversation' | 'no-resume' | 'still-running' | 'spawn-failed' | 'hermes-structured-only' }>
   /**
    * F2.0b — whether this session is RUNNING over its harness's protocol right now (one this process
    * drives, or one a surviving relay still owns). The web's "open in terminal" is offered on exactly

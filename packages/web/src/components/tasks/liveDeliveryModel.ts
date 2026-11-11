@@ -8,7 +8,7 @@
  */
 
 import {
-  LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, LIVE_TAB_DEFAULT, liveComparator, liveTabCounts, liveTabMatches,
+  LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, LIVE_TAB_DEFAULT, liveComparator, liveTabCounts, liveTabMatches, isLiveState,
   type LiveCutFacts, type LivePeriod, type LiveSortId, type LiveTab, type LiveTabbable,
 } from '@agentistics/core'
 import type { FleetRow } from '../../lib/fleet'
@@ -111,7 +111,6 @@ export interface LiveCard {
   alert: boolean
 }
 
-const RUNNING_STATES = new Set<FleetRow['state']>(['working', 'waiting', 'waiting-approval'])
 
 /** PURE: the state a piece shows, from its agents. */
 export function liveStateOf(agents: readonly LiveAgent[]): LiveState {
@@ -129,7 +128,7 @@ export function joinLive(
   return deliveries.map(d => {
     const agents: LiveAgent[] = d.sessionIds.flatMap(id => {
       const r = byId.get(id)
-      return r && RUNNING_STATES.has(r.state) || r && (r.state === 'lost' || r.state === 'unknown')
+      return r && (isLiveState(r.state) || r.state === 'lost' || r.state === 'unknown')
         ? [{ id: r.id, harness: r.harness, model: r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null, state: r.state, stateLabel: r.stateLabel }]
         : []
     })

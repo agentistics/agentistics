@@ -256,7 +256,7 @@ export interface FleetRow {
    * for every row. Absent while there is no id: `no-id-route` and friends say why there is NONE,
    * which is not a way the link was established.
    */
-  conversationLinkVia?: SessionConversationLink['reason']
+  conversationLinkVia: SessionConversationLink['reason'] | null
   /** The dialog this session is blocked on, verbatim, and the options read off it. */
   approvalLines?: string[]
   dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean; checked?: boolean }[]
@@ -348,7 +348,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
   // Appended rather than folded into `sessionActions`: the cockpit answers "stop" with the Escape
   // key inside an attached pane, so it never needed a listed verb. The browser has no pane.
   verbs.push(interruptVerb(row, s))
-  if (row.structured && row.actionable) verbs.push(terminalVerb(s))
+  if (row.structured && row.actionable && row.harness !== 'hermes') verbs.push(terminalVerb(s))
   if (row.structured && row.actionable && row.conversationId && FORK_ACTION_HARNESSES.has(row.harness)) {
     verbs.push({ action: 'fork' as SessionAction, label: s.sessionsFork, enabled: true })
   }
@@ -374,7 +374,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.handoffTo ? { handoffTo: row.handoffTo } : {}),
     ...(row.conversationId ? { conversationId: row.conversationId } : {}),
     ...(row.link !== undefined ? { link: row.link } : {}),
-    ...(row.conversationId && row.link ? { conversationLinkVia: row.link.reason } : {}),
+    conversationLinkVia: row.conversationId ? (row.conversationLinkVia ?? row.link?.reason ?? null) : null,
     ...(row.approvalLines?.length ? { approvalLines: row.approvalLines } : {}),
     ...(row.dialogOptions?.length ? { dialogOptions: [...row.dialogOptions] } : {}),
     ...(row.dialogOptions?.length && row.dialogForm ? { dialogForm: row.dialogForm } : {}),
@@ -384,7 +384,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.dialogBlind ? { dialogBlind: row.dialogBlind } : {}),
     ...(row.conversationBlind ? { conversationBlind: row.conversationBlind } : {}),
     // A native session has no terminal to attach to — its chat is the way in.
-    attachCommand: isNativeRow(row) ? '' : `agentop session attach ${sessionHandleOf(row.id)}`,
+    attachCommand: isNativeRow(row) || (row.structured && row.harness === 'hermes') ? '' : `agentop session attach ${sessionHandleOf(row.id)}`,
     verbs,
   }
 }

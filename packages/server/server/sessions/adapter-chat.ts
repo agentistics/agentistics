@@ -97,7 +97,7 @@ export function pickAdapterChat(
 
 /** PURE. Is this row's session running (the legacy reader's own `live` rule). */
 export function rowLive(row: Pick<AdapterChatRow, 'id' | 'state'>): boolean {
-  return row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval'
+  return row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval' || row.state === 'idle'
     || (row.state === 'unknown' && isExternalRowId(row.id))
 }
 

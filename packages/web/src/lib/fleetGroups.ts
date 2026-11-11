@@ -75,6 +75,7 @@ function wordBook(lang: Lang): DimensionWordBook {
 const STATUS_GROUP_WORDS: Record<SessionState, { en: string; pt: string }> = {
   working: { en: 'Working', pt: 'Trabalhando' },
   waiting: { en: 'Needs you', pt: 'Precisa de você' },
+  idle: { en: 'Idle', pt: 'Ociosas' },
   'waiting-approval': { en: 'Needs approval', pt: 'Precisa de aprovação' },
   exited: { en: 'Finished', pt: 'Encerradas' },
   lost: { en: 'Lost', pt: 'Desconectadas' },

@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.207.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Hermes: a conversa estruturada não oferece mais abrir no terminal nem aparece como precisando de você depois de concluir um turno.',
+        en: 'Hermes: structured conversations no longer offer opening in a terminal or appear to need you after finishing a turn.',
+      },
+      {
+        pt: 'Lista de sessões: cada linha diz como a sessão foi ligada à conversa (antes vinha vazio).',
+        en: 'Session list: each row now says how the session was linked to its conversation (it used to be empty).',
+      },
+      {
+        pt: 'Preferências: idioma, tema e as outras preferências voltam a ser salvas mesmo quando a pasta escolhida para o agente do painel foi apagada.',
+        en: 'Preferences: language, theme and the other preferences save again even when the folder chosen for the panel agent was deleted.',
+      },
+      {
+        pt: 'Uso dos planos: os dois anéis (5 h em cima, semana embaixo) agora começam do mesmo lado e crescem no mesmo sentido.',
+        en: 'Plan usage: both arcs (5 h on top, week below) now start on the same side and grow the same way.',
+      },
+    ],
+  },
   '2.207.0': {
     features: [],
     fixes: [

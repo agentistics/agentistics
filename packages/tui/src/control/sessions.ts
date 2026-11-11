@@ -1482,7 +1482,7 @@ export function lastLiveOfTask(
   session: Pick<ControlSession, 'id' | 'task'>,
 ): boolean {
   if (!session.task) return false
-  const live = (st: ControlSession['state']) => st === 'working' || st === 'waiting' || st === 'waiting-approval'
+  const live = (st: ControlSession['state']) => st === 'working' || st === 'waiting' || st === 'waiting-approval' || st === 'idle'
   return !fleet.some(f => f.id !== session.id && f.task === session.task && live(f.state))
 }
 

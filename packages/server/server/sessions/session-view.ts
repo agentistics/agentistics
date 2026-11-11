@@ -786,7 +786,9 @@ export function buildSessionViews(o: {
           }
         : {}),
       attached: r.backend?.attached ?? false,
-      approvalDetection: harness !== undefined && rulesFor(harness) !== undefined,
+      // Hermes declares both permission and question handling absent in its ACP contract. A finished
+      // structured turn therefore has no owner-facing approval state despite lacking TUI markers.
+      approvalDetection: harness !== undefined && (rulesFor(harness) !== undefined || (harness === 'hermes' && o.structured?.has(r.id) === true)),
       // The harness's own name is searchable too: it is the name the person reading this screen may
       // well be the only one they remember, having typed it inside the session.
       searchFields: {
@@ -1092,7 +1094,17 @@ export function buildSessionViews(o: {
 
 export function attentionCount(views: readonly SessionView[]): number {
   // An external row's activity is shown, never counted: nobody asked agentop to watch it, so it is no one's alert.
-  return views.filter(v => v.status !== 'external' && needsAttention(v.activity)).length
+  return views.filter(v => v.status !== 'external' && needsAttention(v.activity) && !declaredIdle(v)).length
+}
+
+/**
+ * A structured Hermes turn has no permission/question capability in its measured declaration, so its
+ * ended turn is idle, not a request. The row's published `state` (`sessionState`) says `idle` for the
+ * same predicate, which is what keeps the web, TUI and CLI from counting it; this function also
+ * serves the two counters below, which read the view's `activity` rather than a row state.
+ */
+export function declaredIdle(v: Pick<SessionView, 'harness' | 'structured' | 'approvalDetection' | 'activity'>): boolean {
+  return v.harness === 'hermes' && v.structured === true && v.approvalDetection && v.activity === 'waiting'
 }
 
 /**
@@ -1108,7 +1120,7 @@ export function bellTransitions(
 ): string[] {
   const out: string[] = []
   for (const v of next) {
-    if (v.status === 'external' || !needsAttention(v.activity)) continue
+    if (v.status === 'external' || !needsAttention(v.activity) || declaredIdle(v)) continue
     const before = prev.get(v.id)
     if (before === v.activity) continue
     out.push(v.id)

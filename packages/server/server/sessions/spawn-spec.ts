@@ -436,6 +436,8 @@ export function conversationLinkGoneForever(harness: HarnessId): boolean {
 
 /** Decide the exact argv (and any text to type in); unconfirmed capabilities default to absent. */
 export function planSpawn(req: SpawnRequest, capabilities: { codexNoDaemon?: boolean } = {}): SpawnPlanResult {
+  // Hermes is structured-only, but that is refused where a plan would become a TERMINAL launch
+  // (`withStructured.spawn`), never here: every structured door plans first.
   const spec = SPAWN_SPECS[req.harness]
   if (!spec) return { ok: false, error: { code: 'unsupported-harness', harness: req.harness } }
 

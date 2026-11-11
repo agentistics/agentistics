@@ -161,6 +161,7 @@ const STATE_COLOR: Record<SessionState, string | undefined> = {
   // Amber is also the selection colour, which they can share: a selected row already carries the
   // `❯` cursor and a bold title, so the two never have to be told apart by hue alone.
   waiting: COLORS.accent,
+  idle: COLORS.running,
   working: COLORS.running,
   exited: COLORS.muted,
   lost: COLORS.muted,
@@ -652,7 +653,7 @@ export function Sessions({
   const canPrompt = Boolean(selected)
     && selected!.actionable
     && (selected!.state === 'working' || selected!.state === 'waiting'
-      || selected!.state === 'waiting-approval')
+      || selected!.state === 'waiting-approval' || selected!.state === 'idle')
 
   const [detailTab, setDetailTab] = useState<DetailTab>('chat')
   const detail = useMemo(() => (selected ? detailTabLines(selected, detailTab, detailLines(selected, {
@@ -961,7 +962,7 @@ export function Sessions({
         return
       }
       if (a === 'reopenFell' || a === 'resume') {
-        const openSessions = markedList.filter(sess => sess.state === 'working' || sess.state === 'waiting' || sess.state === 'waiting-approval')
+        const openSessions = markedList.filter(sess => sess.state === 'working' || sess.state === 'waiting' || sess.state === 'waiting-approval' || sess.state === 'idle')
         if (openSessions.length > 0) {
           const names = openSessions.map(s => s.title || s.id)
           setAsk({ kind: 'openWarning', openSessions: names })
@@ -1042,7 +1043,7 @@ export function Sessions({
     // done it, is a refusal about bookkeeping rather than about anything the user did. It covers
     // an EXTERNAL session too: agentop did not start it, but the conversation is on this disk.
     const running = selected.state === 'working' || selected.state === 'waiting'
-      || selected.state === 'waiting-approval'
+      || selected.state === 'waiting-approval' || selected.state === 'idle'
     if (kind === 'attach' && !running && selected.resume) {
       setAsk({ kind: 'resume', session: selected })
       return

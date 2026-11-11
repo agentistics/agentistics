@@ -25,6 +25,10 @@ export async function validateNayPreferencePatch(
   current: Record<string, unknown>,
   patch: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
+  // A stale own-agent directory must not make unrelated preference writes fail. The
+  // merged persona is only meaningful when this patch actually changes Nay settings.
+  const nayKeys = ['chatResponder', 'chatWorkingDir', 'chatLabel', 'chatMcpEnabled']
+  if (!Object.keys(patch).some(key => nayKeys.includes(key))) return patch
   const next = { ...current, ...patch }
   if (next.chatResponder !== undefined && next.chatResponder !== 'analytics' && next.chatResponder !== 'own-agent') {
     throw new Error('chatResponder must be analytics or own-agent')

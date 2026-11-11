@@ -12,6 +12,7 @@ import { stalledHostOps } from './stalled-host'
 import { perfWatchHostOps } from './perf-watch'
 import { pipelineHostOps } from './pipeline-host'
 import { deliveryHostOps } from '../delivery/host-ops'
+import { isLiveState } from '@agentistics/core'
 
 const exec = promisify(execFile)
 /**
@@ -327,7 +328,6 @@ export function judgeStopped(id: string, snapshot: { polledAtMs: number; session
   return count >= 2 ? { ok: true, sessionId: id, polls: count } : refuse('session is waiting, but needs a second confirmed poll', ['second waiting poll'])
 }
 
-const LIVE_STATES = new Set(['working', 'waiting', 'waiting-approval'])
 /** A row in one of these is not a process to type into (`successorAlive` reads the same words). */
 const DEAD_STATES = new Set(['exited', 'lost', 'closed', 'finished'])
 
@@ -433,7 +433,7 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps(),
     },
     'sessoes-gerenciadas': async () => {
       const [registry, rows, roleOf] = await Promise.all([deps.registry(), deps.rows().catch(() => []), deps.roles().catch(() => () => undefined)])
-      const live = new Set(rows.filter(r => LIVE_STATES.has(r.state ?? '')).map(r => r.id))
+      const live = new Set(rows.filter(r => isLiveState(r.state)).map(r => r.id))
       const stateOf = new Map(rows.map(r => [r.id, r.state]))
       const sessions = registry.map(m => ({
         id: m.id,

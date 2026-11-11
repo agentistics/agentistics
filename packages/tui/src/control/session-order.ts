@@ -21,11 +21,12 @@ import type { ControlSession, SessionState } from './types'
 const RANK: Record<SessionState, number> = {
   'waiting-approval': 0,
   waiting: 1,
-  working: 2,
-  exited: 3,
-  lost: 4,
-  unknown: 5,
-  closed: 6,
+  idle: 2,
+  working: 3,
+  exited: 4,
+  lost: 5,
+  unknown: 6,
+  closed: 7,
 }
 
 /**

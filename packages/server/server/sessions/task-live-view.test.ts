@@ -181,7 +181,7 @@ describe('a leader working alone gets a card (LIVE.EM-ANDAMENTO-E-LIDER)', () =>
   const runDone = (state: string) => describeLive({
     reply: reply([doneTask, finishedSub]), rows: [row('L', state, { createdMs: 777 })], leaderIds: new Set(['L']), nowMs: NOW, filters: { tab: 'active' },
   })
-  for (const state of ['working', 'waiting', 'waiting-approval']) {
+  for (const state of ['working', 'waiting', 'waiting-approval', 'idle']) {
     test(`task rolled up to done, leader ${state}: it keeps its one leader card`, () => {
       const v = runDone(state)
       expect(v.deliveries.map(x => x.key)).toEqual(['t'])

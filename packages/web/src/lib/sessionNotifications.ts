@@ -20,7 +20,7 @@ import { isNotificationCategory } from './notificationCategories'
 import { getMuteWorkers, getSessionRole, isWorkerMuted, ensureRoleFresh, registerSessionRoleAlias } from './sessionRoles'
 import { DEFAULT_QUIET_HOURS, readQuietHours, type QuietHours } from './checkinNotify'
 
-export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'exited'
+export type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'idle' | 'exited'
 /** The four original chimes, plus the thirteen synthesized in `notificationSounds.ts`. */
 export type LegacySoundPreset = 'chime' | 'soft' | 'alert' | 'ping'
 export type SoundPreset = LegacySoundPreset | NaySoundId
@@ -30,7 +30,7 @@ export function isSoundPreset(v: unknown): v is SoundPreset {
 }
 
 /** The events the settings screen lists: the four states, plus "not opened for a while". */
-export type NotifyEvent = SessionActivity | 'stale'
+export type NotifyEvent = Exclude<SessionActivity, 'idle'> | 'stale'
 
 export interface NotificationSettings {
   enabled: boolean
@@ -361,6 +361,7 @@ export function handleSessionStateTransitions(
   for (const [id, nextState] of Object.entries(nextActivities)) {
     const prevState = prevActivities[id]
     if (prevState && prevState === nextState) continue
+    if (nextState === 'idle') continue
 
     // Check if this event type is enabled in settings
     if (!settings.events[nextState]) continue
@@ -599,7 +600,7 @@ export function fleetActivityStates(
     // Only the four this feature has words for. `lost`, `closed` and `unknown` are not events that
     // happened to a person — they are what a row IS — and inventing a sentence for them would put
     // "your session is unknown" on someone's desktop.
-    if (r.state === 'working' || r.state === 'waiting' || r.state === 'waiting-approval' || r.state === 'exited') {
+    if (r.state === 'working' || r.state === 'waiting' || r.state === 'waiting-approval' || r.state === 'idle' || r.state === 'exited') {
       out[r.id] = r.state
     }
   }
@@ -739,7 +740,7 @@ export function notifyFleetTransitions(
     if (getReopening().has(id)) continue
     const continued = rows.some(r => r.id !== id &&
       (r.id === source.handoffTo || (!!source.conversationId && r.conversationId === source.conversationId)) &&
-      (r.state === 'working' || r.state === 'waiting' || r.state === 'waiting-approval'))
+      (r.state === 'working' || r.state === 'waiting' || r.state === 'waiting-approval' || r.state === 'idle'))
     next[id] = 'exited'
     if (!continued) announce[id] = 'exited'
   }

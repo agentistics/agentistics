@@ -7,6 +7,7 @@ import { applyClean } from './clean-io'
 import { fmtBytes, planClean, type CleanItem, type WorktreeFacts } from './clean-plan'
 import { broadcastNotification } from '../sse'
 import type { CleanWebPlan, CleanJob, CleanScanState } from '@agentistics/core'
+import { isLiveState } from '@agentistics/core'
 import { newCleanScan, scanEstimate, scanLog, wireCleanPlan } from './clean-state'
 
 export type { CleanWebItem, CleanWebPlan, CleanJob } from '@agentistics/core'
@@ -114,7 +115,7 @@ export async function protectedPaths(): Promise<Map<string, string>> {
     const { readFleet } = await import('../sessions/fleet-web')
     const fleet = await readFleet('en')
     for (const row of fleet.rows) {
-      if (['working', 'waiting', 'waiting-approval', 'unknown'].includes(row.state) && row.cwd) out.set(row.cwd, 'an active session')
+      if ((isLiveState(row.state) || row.state === 'unknown') && row.cwd) out.set(row.cwd, 'an active session')
     }
   } catch {
     // A failed fleet read must not turn historical sessions into permanent locks. processIn below
