@@ -38,6 +38,16 @@ export const FORECAST_WINDOW_MS = 90 * 24 * 3600_000
 export const FORECAST_MIN_REMAINING_MS = 15 * 60_000
 export const FORECAST_BUCKET_MS = 3600_000
 export const FORECAST_BOOTSTRAP = { centerMs: 4 * 3600_000, lowerMs: 3600_000, upperMs: 12 * 3600_000 } as const
+/**
+ * Honest bounds for a stage with no closed history yet. These are deliberately
+ * generous operational ceilings (rather than optimistic medians): review and
+ * merge need several working days, while queue/CI are normally same-day.
+ */
+export const STAGE_CEILING_MS: Readonly<Record<LiveStage, number>> = {
+  queue: 12 * 3600_000, blocked: 3 * 24 * 3600_000, running: 2 * 24 * 3600_000,
+  qa: 2 * 24 * 3600_000, adjust: 24 * 3600_000, leader: 3 * 24 * 3600_000,
+  merge: 2 * 24 * 3600_000, ci: 24 * 3600_000, completed: 24 * 3600_000, published: 0,
+}
 export type ForecastScope = 'type-harness-model' | 'type-harness' | 'harness-model' | 'harness' | 'general' | 'bootstrap' | 'stages'
 export interface ForecastBasis {
   n: number; scope: ForecastScope; harness: string; model: string | null; medianMs: number
@@ -134,6 +144,8 @@ export interface LiveDelivery {
   /** Estimated time to LEAVE the current stage, and when the piece reaches Publicado. */
   stageEta: LiveStageEta
   publishEta: LivePublishEta
+  /** Original current-stage estimate once it has elapsed without a transition. */
+  overdueSinceMs?: number | null
   block: LiveBlock | null
   /** "Antiga sem registro" (`delivery/antigas.ts`): shown (marked "antiga") only in "Tudo", where its group decides it in one click. */
   old?: boolean
@@ -627,9 +639,22 @@ export function resolvePieceForecast(o: EstimateOptions & {
   }
   const total = estimateEta({ ...o, startedAtMs: o.stage === 'queue' ? null : o.startedAtMs, blocked: o.stage === 'blocked' })
   if (o.stage === 'queue' || o.startedAtMs === null) {
-    return { eta: total, stageEta: { kind: 'none', reason: 'not-started' }, publishEta: totalOnly(total) }
+    // A stage already past its boundary has no future estimate: never a publish time in the past.
+    if (stageOverdueSinceMs(o.stage, o.sinceMs, o.nowMs, o.typicals) !== null) {
+      return { eta: total, stageEta: { kind: 'none', reason: 'beyond-range' }, publishEta: { kind: 'none', reason: 'beyond-range' } }
+    }
+    const fallback = stageCeilingForecast(o)
+    return fallback ?? { eta: total, stageEta: { kind: 'none', reason: 'not-started' }, publishEta: totalOnly(total) }
   }
   const result = estimateStages({ ...o, totalEta: total })
+  const overdueSinceMs = stageOverdueSinceMs(o.stage, o.sinceMs, o.nowMs, o.typicals)
+  if (overdueSinceMs !== null) {
+    return { eta: total, stageEta: result.stageEta, publishEta: { kind: 'none', reason: 'beyond-range' } }
+  }
+  if (!o.typicals[o.stage] && o.sinceMs !== null) {
+    const fallback = stageCeilingForecast(o)
+    if (fallback) return fallback
+  }
   const p = result.publishEta
   // Blocking has no known resumption date. Do not subtract the blocked wait or compose a
   // running stage across it; keep the conditional whole-piece interval instead.
@@ -638,6 +663,38 @@ export function resolvePieceForecast(o: EstimateOptions & {
     return { ...result, eta: { ...total, ...p, plusMinusMs: (p.latestAtMs! - p.earliestAtMs!) / 2 } }
   }
   return { ...result, eta: p.kind === 'estimate' ? { ...total, ...p } : total }
+}
+
+/** The same boundary drives Live's late flag and the calendar's late bucket. */
+export function stageOverdueSinceMs(stage: LiveStage, sinceMs: number | null, nowMs: number,
+  typicals: Partial<Record<LiveStage, StageTypical>>): number | null {
+  if (sinceMs === null || stage === 'published' || stage === 'completed') return null
+  const typical = typicals[stage]?.medianMs
+  const ceiling = STAGE_CEILING_MS[stage]
+  const boundary = sinceMs + (typical !== undefined && Number.isFinite(typical) ? typical : ceiling)
+  return boundary <= nowMs ? boundary : null
+}
+
+function stageCeilingForecast(o: EstimateOptions & {
+  stage: LiveStage; origin: LiveStage | null; sinceMs: number | null
+  typicals: Partial<Record<LiveStage, StageTypical>>
+}): { eta: LiveEta; stageEta: LiveStageEta; publishEta: LivePublishEta } | null {
+  const ceiling = STAGE_CEILING_MS[o.stage]
+  if (!Number.isFinite(ceiling) || o.sinceMs === null) return null
+  const nextStage = nextStageOf(o.stage, o.origin)
+  const ahead: LiveStage[] = []
+  for (let s: LiveStage | null = nextStage; s && s !== 'published'; s = nextStageOf(s, null)) ahead.push(s)
+  const parts = ahead.map(stage => ({ stage, medianMs: o.typicals[stage]?.medianMs ?? STAGE_CEILING_MS[stage] }))
+  const atMs = o.sinceMs + ceiling
+  const publishAtMs = atMs + parts.reduce((sum, part) => sum + part.medianMs, 0)
+  const basis: ForecastBasis = { n: 0, scope: 'stages', endpoint: 'stage', statistic: 'sum', harness: o.harness ?? '', model: o.model, medianMs: ceiling + parts.reduce((sum, part) => sum + part.medianMs, 0) }
+  const meta = { confidence: 'low' as const, basis, computedAtMs: o.nowMs, methodVersion: FORECAST_METHOD_VERSION,
+    overrun: false, conditional: o.blocked ? 'blocked' as const : null, assumption: 'started' as const,
+    queueTimeUnknown: false, blockReason: o.blockReason ?? null }
+  const stageEta: LiveStageEta = { kind: 'estimate', atMs, medianMs: ceiling, n: 0, nextStage, ...meta }
+  const publishEta: LivePublishEta = { kind: 'estimate', atMs: publishAtMs, source: 'stages', n: 0, parts, ...meta }
+  const eta: LiveEta = { kind: 'estimate', atMs: publishAtMs, plusMinusMs: (publishAtMs - o.sinceMs) / 2, ...meta }
+  return { eta, stageEta, publishEta }
 }
 
 const dominant = (xs: readonly string[]): string | null => {
@@ -1073,6 +1130,8 @@ export function buildLive(o: {
       models: [...new Set(liveSessions.concat(p.sessions).map(s => s.model).filter((m): m is string => !!m))],
       efforts: [...new Set(liveSessions.concat(p.sessions).map(s => s.effort).filter((m): m is string => !!m))],
       eta, workMs, trail, stageEta, publishEta,
+      ...(stageOverdueSinceMs(stage, stageSinceMs, o.nowMs, typicals) !== null
+        ? { overdueSinceMs: stageOverdueSinceMs(stage, stageSinceMs, o.nowMs, typicals) } : {}),
       block: stage === 'blocked' ? blockOf({ text: rec?.block ? `${rec.block.reason}: ${rec.block.text}` : p.blockedReason, dependsOn: p.dependsOn, originStage }) : null,
       ci: stage === 'ci' ? (ciSignalOf(rec?.ci ?? ((p.sub ?? p.task) as { ci?: unknown }).ci) ?? { mergedMain: true, releaseGreen: false, tagPublished: false, tag: null, pr: null }) : null,
       step: stepInfo?.step ?? null,
