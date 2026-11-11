@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.206.0': {
+    features: [
+      {
+        pt: 'Hermes: abra uma conversa com o agente Hermes pelo agentistics (página de sessões, painel ou CLI); o medidor de contexto e o título da conversa aparecem no painel.',
+        en: 'Hermes: open a conversation with the Hermes agent from agentistics (sessions page, panel or CLI); the context gauge and the conversation title show in the panel.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Custo: uma sessão sem nenhum uso cobrado aparece como "sem medição", não como custo zero; modelos atrás de gateway com uso real continuam com o preço da API, e um custo zero declarado pelo próprio harness continua zero.',
+        en: 'Cost: a session with no billed usage shows as "not recorded", not as zero cost; models behind a gateway with real usage keep the API price, and a zero cost declared by the harness itself stays zero.',
+      },
+    ],
+  },
   '2.205.1': {
     features: [
       {
