@@ -12,10 +12,9 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 
 const GROUP_LABELS: Record<SettingsGroup, { en: string; pt: string }> = {
   personal: { en: 'Personal', pt: 'Pessoal' },
-  governance: { en: 'Governance', pt: 'Governança' },
 }
 
-const GROUP_ORDER: SettingsGroup[] = ['personal', 'governance']
+const GROUP_ORDER: SettingsGroup[] = ['personal']
 
 /**
  * Settings hub — a two-column page: a grouped internal section menu (left) and the active
@@ -35,9 +34,6 @@ export default function SettingsPage() {
   const { nativeRuntime } = useEngineCaps()
 
   const viewer: SettingsViewer = {
-    central: ctx.isCentral,
-    role: ctx.me?.role,
-    isManager: ctx.me?.memberships.some(m => m.role === 'manager'),
     localChat: ctx.capabilities?.localChat,
     ...(nativeRuntime !== null ? { nativeRuntime } : {}),
   }
@@ -108,7 +104,7 @@ export default function SettingsPage() {
   )
 
   return (
-    // `ag-settings` drives the mobile touch-target rule in index.css — the governance pages style
+    // `ag-settings` drives the mobile touch-target rule in index.css — the settings pages style
     // their buttons with module-level inline objects that a hook cannot reach.
     <div className="ag-settings" style={{ maxWidth: 1100 }}>
       <h1

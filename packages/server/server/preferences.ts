@@ -1,10 +1,7 @@
 import { join, dirname } from 'path'
 import { mkdir, rename, writeFile, open, unlink, stat, readFile, utimes, chmod } from 'node:fs/promises'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR, CLAUDE_DIR } from './config'
-import type { AccessibilityPrefs, AwayState, BillingSettings, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
-import { migrateTeamConfig } from '@agentistics/core'
-import { injectSealedTokens, plaintextTokenCount, stripAndSealTokens, withoutTokenFields } from './vault/prefs-tokens'
-import { registerVaultMigrator, sentence as vaultSentence, type MigrationReport } from './vault/service'
+import type { AccessibilityPrefs, AwayState, BillingSettings, SavedComparison, SessionPreset } from '@agentistics/core'
 // TYPE-only, and the allowed direction: `server -> tui`. The arrangements are declared once, in
 // `session-dimensions.ts`, and this file stores whichever one was chosen.
 import type { SessionGroupingId } from '@agentistics/tui/control'
@@ -39,13 +36,10 @@ function sameDir(a: string, b: string): boolean {
  * is derived from `CLAUDE_DIR`, the one persisted path in this product that is NOT under
  * `AGENTISTICS_DATA_DIR`, so the migration read it no matter which data dir the instance was
  * given. Starting a server with a brand-new, empty `AGENTISTICS_DIR` therefore wrote a
- * `preferences.json` into it holding a `mode: 'member'` connection to a central the operator
- * never configured — INCLUDING ITS BEARER TOKEN — and then created the connection state files
- * for it. A second instance on one host, a container with its own volume and a test rig each
- * silently inherited a credential, and would have pushed to that central under it. That is the
- * same class of defect config.ts's header records (three isolated machines each pushing 108
- * sessions belonging to none of them), reached through the one path that had escaped the rule:
- * a path derived from `AGENTISTICS_DIR` may never be seeded from a location outside it.
+ * `preferences.json` into it holding settings the operator never configured. A second instance on
+ * one host, a container with its own volume and a test rig each silently inherited another
+ * instance's choices. A path derived from `AGENTISTICS_DIR` may never be seeded from a location
+ * outside it.
  *
  * The legacy import itself is still correct where it belongs — `~/.claude/agentistics-preferences.json`
  * is the predecessor of `$HOME/.agentistics/preferences.json` and of nothing else, so native
@@ -205,22 +199,18 @@ export interface Preferences {
   galleryScope?: string
   skillFormat?: 'md' | 'text'
   pricingGroupBy?: string
-  /** Magnifier lenses and their settings, for a MACHINE. On a central the same object lives per
-   *  account in the `userPrefs` collection instead — see a11y-prefs.ts, which owns that choice. */
+  /** Magnifier lenses and their settings — see a11y-prefs.ts. */
   accessibility?: AccessibilityPrefs
   /** A person's own interface choices that are NEW to the server (the task board's arrangement,
-   *  the sessions aside, the panel layout…), for a MACHINE. Legacy choices that were already
-   *  top-level fields (theme, lang, pins, chat defaults…) stay top-level. On a central EVERY such
-   *  key lives per account in `userPrefs.ui` — see user-ui-prefs.ts, which owns the closed list
-   *  and each key's machine home, and `/api/user-prefs`. */
+   *  the sessions aside, the panel layout…). Legacy choices that were already top-level fields
+   *  (theme, lang, pins, chat defaults…) stay top-level — see user-ui-prefs.ts, which owns the
+   *  closed list and each key's home, and `/api/user-prefs`. */
   ui?: Record<string, unknown>
   /** How this machine is actually billed — a timeline of periods per harness, plus the display
    *  basis. Drives the "plan" cost basis; see `billing.ts` in @agentistics/core.
    *
-   *  LOCAL ONLY. This never enters `IngestBody`, a team document or an audit event: what someone
-   *  pays is theirs, and a central cannot price a fleet from one operator's timeline anyway.
-   *  It needs no `redactPreferences` entry — a plan id and a monthly amount are not credentials,
-   *  and the writes go through the same shallow merge as every other field, so the settings screen
+   *  LOCAL ONLY: it never enters an audit event — what someone pays is theirs. A plan id and a
+   *  monthly amount are not credentials, and the writes go through the same shallow merge as every other field, so the settings screen
    *  must always PUT the complete object rather than a partial one. */
   billing?: BillingSettings
   /** Saved comparisons — N filter scopes the user asks about repeatedly, and which of them are
@@ -229,7 +219,7 @@ export interface Preferences {
   /**
    * Saved "quick launch" session templates — harness + first message + optional cwd/model/effort.
    * Per-machine, local only, same as `comparisons`: a preset is a fact about how one person works,
-   * never board data, and it never travels to a central. See `@agentistics/core`'s
+   * never board data. See `@agentistics/core`'s
    * `sessionPresets.ts` for the shape and the pure helpers (`normalizeSessionPresets` is what a
    * reader must run this array through — never trust it verbatim, a hand-edited file can hold a
    * relative `cwd` or a blank prompt).
@@ -342,8 +332,6 @@ export interface Preferences {
   finishedTasks?: string[]
   /** @deprecated legacy boolean — read by resolveArchiveMode for migration only */
   archiveSessions?: boolean
-  /** Team mode configuration. Absent / mode=solo means solo behavior (no push). */
-  team?: TeamConfig
   /** Whether the `agentop` control center puts the terminal into mouse-reporting mode.
    *  Absent = on, which is the default the control center assumes. Turned off with `m` in the app
    *  by anyone who would rather keep their terminal's own click-drag text selection. */
@@ -417,7 +405,7 @@ export function resolveSessionSearchScopes(p: Preferences): SearchScope[] {
   return SEARCH_SCOPES.filter(s => set.has(s))
 }
 
-/** Read the on-disk JSON without re-injecting tokens. Preserve corrupt bytes before defaulting.
+/** Read the on-disk JSON. Preserve corrupt bytes before defaulting.
  * Recovery takes the writer's lock and re-reads: another process may already have repaired the
  * file. Writers pass `lockHeld` to avoid re-entering their own cross-process lock. */
 async function readRawPrefs(path: string, lockHeld = false): Promise<Record<string, unknown> | null> {
@@ -445,8 +433,7 @@ async function readRawPrefs(path: string, lockHeld = false): Promise<Record<stri
   }
 }
 
-/** Parse a preferences file and put its SEALED tokens back (see vault/prefs-tokens.ts): every
- *  reader keeps seeing `connections[].token`, while the file itself holds none. */
+/** Parse a preferences file (memoized against its stat). */
 async function readJsonPrefs(path: string, lockHeld = false): Promise<Preferences | null> {
   // PERF.SLOW: a server reads preferences many times a second (timers, every route, every poll) and
   // the file changes a few times a day. Re-reading and re-parsing it each time was ~15 % of an idle
@@ -465,7 +452,7 @@ async function readJsonPrefs(path: string, lockHeld = false): Promise<Preference
     else rawPrefsMemo.delete(path)
   }
   if (!raw) return null
-  return injectSealedTokens(path, raw as Preferences)
+  return raw as Preferences
 }
 
 function deepFreezePrefs<T>(v: T): T {
@@ -488,10 +475,9 @@ async function prefsStatKey(path: string): Promise<string | null> {
   } catch { return null }
 }
 
-/** A FRESH defaults object every call — never a shared const. `team` in particular is spread
- *  into every read, and an aliased connections array becomes a live cross-caller bug. */
+/** A FRESH defaults object every call — never a shared const. */
 function defaultPrefs(): Preferences {
-  return { customLayout: [], team: migrateTeamConfig(undefined) }
+  return { customLayout: [] }
 }
 
 /** Read the effective preferences (primary, else migrated legacy, else defaults) without a
@@ -500,10 +486,10 @@ function defaultPrefs(): Preferences {
  *  an already-running chained callback — see the deadlock note on `enqueueWrite`. */
 async function readEffective(primary: string, legacy: string | null, lockHeld = false): Promise<{ prefs: Preferences; migratedFromLegacy: boolean }> {
   const p = await readJsonPrefs(primary, lockHeld)
-  if (p) return { prefs: withMigratedTeam(p), migratedFromLegacy: false }
+  if (p) return { prefs: withoutRetiredKeys(p), migratedFromLegacy: false }
   // `legacy === null` means this data dir has no legacy predecessor and MUST NOT be seeded from
   // outside itself — see `legacyPreferencesSource`. It is not "the file is missing": nothing is
-  // even looked at, so an isolated instance cannot inherit a stranger's bearer token.
+  // even looked at, so an isolated instance cannot inherit a stranger's settings.
   if (legacy === null) return { prefs: defaultPrefs(), migratedFromLegacy: false }
   let l: Preferences | null = null
   try {
@@ -513,7 +499,7 @@ async function readEffective(primary: string, legacy: string | null, lockHeld = 
     // location is read-only in Docker. Treat it as absent.
     l = null
   }
-  if (l) return { prefs: withMigratedTeam(l), migratedFromLegacy: true }
+  if (l) return { prefs: withoutRetiredKeys(l), migratedFromLegacy: true }
   return { prefs: defaultPrefs(), migratedFromLegacy: false }
 }
 
@@ -547,7 +533,7 @@ export async function readPreferencesFrom(primary: string, legacy: string | null
       // created — by our own read above racing another queued write, by that write itself, or
       // by a SEPARATE PROCESS that migrated first — since we decided to migrate.
       const p2 = await readJsonPrefs(primary, true)
-      if (p2) return withMigratedTeam(p2)
+      if (p2) return withoutRetiredKeys(p2)
       // The legacy dir may be read-only (Docker), so a failed migration write is expected and
       // ignored — the caller still gets the migrated-in-memory result.
       try { await writePrefsFile(primary, prefs) } catch { /* read-only legacy dir, or a vault that cannot seal yet */ }
@@ -558,11 +544,12 @@ export async function readPreferencesFrom(primary: string, legacy: string | null
   })
 }
 
-/** The ONE choke point where the shape migration runs, so every reader — CLI, uploader, WS
- *  client, GET/PUT /api/preferences — sees connections[]. Migrating only in the uploader
- *  would leave cli-status.ts, cli-start.ts and bin/cli.ts on the un-migrated shape. */
-function withMigratedTeam(p: Preferences): Preferences {
-  return { ...defaultPrefs(), ...p, team: migrateTeamConfig(p.team) }
+/** The ONE choke point every reader goes through. A file written by an older version may still
+ *  carry the `team` block of a feature that no longer exists; it is dropped here, so the next
+ *  write removes it from disk (a leftover bearer token included). */
+function withoutRetiredKeys(p: Preferences): Preferences {
+  const { team: _retired, ...rest } = p as Preferences & { team?: unknown }
+  return { ...defaultPrefs(), ...rest }
 }
 
 /**
@@ -582,7 +569,7 @@ export async function readPreferences(): Promise<Preferences> {
  * CLI entry points: read the preferences or die with ONE clear line naming the file.
  *
  * Corrupt JSON is quarantined by the reader. Other IO failures still need a clear sentence
- * instead of an unhandled rejection. Never prints the file's contents (it may hold tokens).
+ * instead of an unhandled rejection. Never prints the file's contents.
  */
 export async function readPreferencesOrExit(): Promise<Preferences> {
   try {
@@ -607,8 +594,7 @@ let _tmpSeq = 0
  *
  *  Mode 0600, set on the tmp file at creation AND re-applied after the rename: this file used to be
  *  written with no mode at all, so it took the umask's — 0664 on the reference machine, readable by
- *  every account on it, while it carried live central tokens. It no longer carries any (they are
- *  sealed, see `writePrefsFile`), and it is still private. */
+ *  every account on it. */
 async function writeFileAtomic(path: string, text: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const tmp = `${path}.tmp-${process.pid}-${++_tmpSeq}-${Math.random().toString(36).slice(2, 8)}`
@@ -617,27 +603,19 @@ async function writeFileAtomic(path: string, text: string): Promise<void> {
   await chmod(path, 0o600).catch(() => { /* a filesystem that refuses chmod (DrvFs) keeps its own mode */ })
 }
 
-/**
- * The ONE way the preferences file is written: the central tokens are taken OUT and sealed into
- * `connections/tokens.sealed` (verified from disk first), then the file is written without them.
- * Throws the vault's sentence when a token must be sealed and cannot be — never plain text.
- */
+/** The ONE way the preferences file is written. */
 async function writePrefsFile(primary: string, prefs: Preferences): Promise<void> {
-  const previous = await readRawPrefs(primary, true)
-  const toWrite = await stripAndSealTokens(primary, prefs as unknown as Record<string, unknown>, previous)
-  await writeFileAtomic(primary, JSON.stringify(toWrite, null, 2))
+  await writeFileAtomic(primary, JSON.stringify(prefs, null, 2))
   rawPrefsMemo.delete(primary)
 }
 
 // ---------------------------------------------------------------------------
 // Cross-process lock — `enqueueWrite` only serializes writes WITHIN this process. Bun serves
-// dashboard requests concurrently in the long-running server process while `cli-member.ts` (and
-// any other CLI subcommand that falls back to a direct write — see cli-member.ts's docstring)
-// writes the SAME preferences.json from a SEPARATE `bun` process with its own, independent
-// `_writeChain`. Two processes racing a read-merge-write on the same file is the exact "two
-// connections read [A,B,C], one writes [B,C], the other writes [A,C] from a stale read" hazard
-// `updateTeamConfig` closes WITHIN a process — an O_EXCL lock FILE closes it ACROSS processes,
-// since the filesystem is the only thing both processes can see.
+// dashboard requests concurrently in the long-running server process while any CLI subcommand that
+// falls back to a direct write writes the SAME preferences.json from a SEPARATE `bun` process with
+// its own, independent `_writeChain`. Two processes racing a read-merge-write on the same file lose
+// one side's change — an O_EXCL lock FILE closes that ACROSS processes, since the filesystem is the
+// only thing both processes can see.
 // ---------------------------------------------------------------------------
 
 /**
@@ -682,7 +660,7 @@ function lockPathFor(primary: string): string {
 
 /** Thrown when `acquireFileLock` cannot get the lock within `LOCK_ACQUIRE_TIMEOUT_MS`. A caller
  *  that reaches this must NOT proceed unlocked — that was the B-1 finding: doing so silently
- *  drops whichever side loses the resulting race, including a connection's token that exists
+ *  drops whichever side loses the resulting race, including a setting that exists
  *  nowhere else. Surfacing this as a typed error lets a CLI command print an actionable message
  *  ("another agentop process is writing preferences, retry") and exit non-zero instead. */
 export class PreferencesLockTimeoutError extends Error {
@@ -748,7 +726,7 @@ export function __setTestOnlyAcquireTimeoutMs(ms: number | null): void {
  * a lock it still owns.
  *
  * Returns a release function; the caller MUST call it in a `finally` (see
- * `writePreferencesTo`/`updateTeamConfigAt` below) or a crash mid-critical-section leaves a lock
+ * `writePreferencesTo`/`updatePreferencesAt` below) or a crash mid-critical-section leaves a lock
  * for the NEXT writer to reclaim once it goes stale — never a permanent deadlock, but a real wait
  * for `LOCK_STALE_MS`.
  */
@@ -896,17 +874,16 @@ async function releaseFileLock(lockPath: string, owner: string, heartbeat: Retur
 }
 
 /** Single write chain for the WHOLE module: every enqueued function awaits the previous one,
- *  so a read-merge-write can never interleave with another queued write and lose the
- *  connections array. `writePreferencesTo`, `readPreferencesFrom`'s legacy-migration branch, and
- *  `updateTeamConfig` all enqueue onto this SAME chain, so none of the three can interleave or
- *  clobber another.
+ *  so a read-merge-write can never interleave with another queued write and lose a change.
+ *  `writePreferencesTo`, `readPreferencesFrom`'s legacy-migration branch, and `updatePreferencesAt`
+ *  all enqueue onto this SAME chain, so none of them can interleave or clobber another.
  *
- *  Deadlock-freedom: `enqueueWrite` is called only from those three call sites (never from inside
+ *  Deadlock-freedom: `enqueueWrite` is called only from those call sites (never from inside
  *  a callback already running as part of this chain). The callbacks queued here call
  *  `readEffective` (a plain, non-enqueuing read) and `writeFileAtomic` (plain fs I/O) — neither
- *  calls back into `enqueueWrite`. `updateTeamConfig`'s `mutate` callback is synchronous and pure
+ *  calls back into `enqueueWrite`. `updatePreferences`'s `mutate` callback is synchronous and pure
  *  by contract (it must never itself call `readPreferences`/`writePreferences`/
- *  `updateTeamConfig`), so it cannot reintroduce a cycle either. No queued callback ever awaits a
+ *  `updatePreferences`), so it cannot reintroduce a cycle either. No queued callback ever awaits a
  *  promise that is itself waiting on that same callback to finish; the chain is a straight FIFO
  *  with no cycle. */
 let _writeChain: Promise<unknown> = Promise.resolve()
@@ -915,77 +892,6 @@ function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
   const next = _writeChain.then(fn, fn)
   _writeChain = next.catch(() => {})
   return next
-}
-
-/**
- * Spec §5.8: **a `team` payload with no `connections` key is a legacy single-connection edit,
- * never a replacement of the array.**
- *
- * The top-level merge is shallow, so any caller handing over a `team` object replaces the whole
- * connections array. An old cached tab — or an older sidecar sharing ~/.agentistics — that saves
- * Settings, or clicks Disconnect (which PUTs a full flat solo object), would otherwise delete
- * every connection and every denylist. When the payload carries `connections` explicitly it
- * replaces, exactly as before.
- */
-/**
- * Spec §5.8: the GET response blanks every token, so the shape the UI holds cannot be written
- * back verbatim without destroying the credentials. An EMPTY incoming token therefore means
- * "unchanged", never "clear it": a stored non-empty token survives, matched by connection id and
- * falling back to the normalized endpoint for a payload that predates ids.
- *
- * A genuinely new connection carries no stored counterpart, so its empty token stays empty —
- * token-less members against an open central remain expressible.
- */
-function keepStoredTokens(current: TeamConfig | undefined, incoming: TeamConfig): TeamConfig {
-  const stored = current?.connections ?? []
-  if (stored.length === 0) return incoming
-  const byId = new Map(stored.map(c => [c.id, c]))
-  const byEndpoint = new Map(stored.map(c => [c.endpoint.replace(/\/+$/, ''), c]))
-  return {
-    ...incoming,
-    connections: (incoming.connections ?? []).map(c => {
-      if (c.token) return c
-      const previous = byId.get(c.id) ?? byEndpoint.get((c.endpoint ?? '').replace(/\/+$/, ''))
-      return previous?.token ? { ...c, token: previous.token } : c
-    }),
-  }
-}
-
-function mergeTeamPayload(current: TeamConfig | undefined, incoming: TeamConfig): TeamConfig {
-  if (Object.prototype.hasOwnProperty.call(incoming, 'connections')) {
-    return keepStoredTokens(current, incoming)
-  }
-  const stored = current?.connections ?? []
-  // With nothing stored there is no array to protect: run the payload through the migration so
-  // a legacy flat edit that DOES name an endpoint still lands as a connection.
-  if (stored.length === 0) return migrateTeamConfig(incoming)
-  return migrateTeamConfig({ ...incoming, connections: stored })
-}
-
-/**
- * C1 guard for `PUT /api/preferences` ONLY — a `team` payload whose `connections` array is present
- * and EMPTY while connections are stored is almost certainly a stale client wiping the fleet, not
- * an intentional disconnect-all. It strips the `connections` key so `mergeTeamPayload`'s legacy
- * branch preserves the stored array (and therefore the tokens, which exist nowhere else on this
- * machine and cannot be recovered without re-minting them on each central).
- *
- * Why it is NOT inside `mergeTeamPayload`, where `current` would be atomically available: two
- * legitimate in-process callers write exactly this shape on purpose — `removeConnection` splicing
- * the LAST connection, and `cli-setup`'s solo branch (which confirms first). Guarding at the merge
- * would resurrect a connection the user just removed. The route is the untrusted boundary, so the
- * route is where the guard belongs; a real disconnect goes through
- * `DELETE /api/team/connections/:id`.
- *
- * Pure. Returns the payload unchanged (same object) when there is nothing to guard.
- */
-export function guardTeamConnectionsWipe(
-  team: TeamConfig,
-  storedCount: number,
-): { team: TeamConfig; guarded: boolean } {
-  if (!Object.prototype.hasOwnProperty.call(team, 'connections')) return { team, guarded: false }
-  if ((team.connections?.length ?? 0) > 0 || storedCount === 0) return { team, guarded: false }
-  const { connections: _dropped, ...rest } = team
-  return { team: rest as TeamConfig, guarded: true }
 }
 
 /** Merge `prefs` over the current preferences and persist to `primary`. Exported for tests. */
@@ -1002,7 +908,6 @@ export async function writePreferencesTo(primary: string, legacy: string | null,
       const { validateNayPreferencePatch } = await import('./sessions/nay-persona')
       const nayPatch = await validateNayPreferencePatch(current as Record<string, unknown>, prefs as Record<string, unknown>)
       const merged = { ...current, ...nayPatch } as Preferences
-      if (prefs.team) merged.team = mergeTeamPayload(current.team, prefs.team)
       await writePrefsFile(primary, merged)
     } finally {
       await release()
@@ -1015,60 +920,15 @@ export async function writePreferences(prefs: Preferences): Promise<void> {
 }
 
 /**
- * Atomically read-modify-write JUST the team config, running `mutate` INSIDE the single write
- * chain (`enqueueWrite`) instead of outside it.
- *
- * Why this exists: a plain `readPreferences()` followed by `writePreferences({ team })` reads the
- * current `connections[]` OUTSIDE the chain, then writes a value computed from that stale read.
- * With two callers racing (e.g. two connections both crossing their auth-error threshold in the
- * same window, which the concurrency cap makes routine, not theoretical) both read `[A, B, C]`;
- * A's removal writes `[B, C]`, then B's (computed from the SAME stale `[A, B, C]`) writes
- * `[A, C]` — A is back in preferences with its state files already unlinked, B is gone. A
- * mutator run inside the chain instead reads the CURRENT array at the moment it is its turn to
- * write, so the second caller sees the first caller's result and can never resurrect it.
- *
- * `mutate` receives the current (already-migrated) team config and returns the new one, or
- * `undefined` to signal "nothing to do" — no write happens in that case, so a caller like
- * `removeConnection` can stay idempotent without an extra disk write on a repeat call.
- */
-export type TeamConfigMutator = (current: TeamConfig) => TeamConfig | undefined
-
-/** Path-parameterized implementation — exported for tests (mirrors `writePreferencesTo`'s split
- *  from `writePreferences`), so the atomicity `updateTeamConfig` provides can be exercised
- *  against real tmp files and the REAL `enqueueWrite` chain, without ever touching the
- *  developer's actual `~/.agentistics/preferences.json`. */
-export async function updateTeamConfigAt(primary: string, legacy: string | null, mutate: TeamConfigMutator): Promise<TeamConfig> {
-  return enqueueWrite(async () => {
-    const release = await acquireFileLock(primary)
-    try {
-      const { prefs: current } = await readEffective(primary, legacy, true)
-      const currentTeam = current.team ?? migrateTeamConfig(undefined)
-      const nextTeam = mutate(currentTeam)
-      if (nextTeam === undefined) return currentTeam
-      const merged = { ...current, team: mergeTeamPayload(current.team, nextTeam) }
-      await writePrefsFile(primary, merged)
-      return merged.team as TeamConfig
-    } finally {
-      await release()
-    }
-  })
-}
-
-export async function updateTeamConfig(mutate: TeamConfigMutator): Promise<TeamConfig> {
-  return updateTeamConfigAt(PREFERENCES_FILE, LEGACY_PREFERENCES_FILE, mutate)
-}
-
-/**
- * Atomically read-modify-write the preferences OUTSIDE the team config, running `mutate` inside the
+ * Atomically read-modify-write the preferences, running `mutate` inside the
  * single write chain — for state two writers can both change (the browser and an MCP tool filing
  * a session under a group). A plain `readPreferences()` then `writePreferences()` reads outside the
  * chain and writes a value computed from a stale read.
  *
  * `mutate` receives the current preferences and returns the keys to change (a shallow patch, like
- * `writePreferences`) or `undefined` for "nothing to do" — no write happens then. `team` is never
- * touched through this door; use `updateTeamConfig`.
+ * `writePreferences`) or `undefined` for "nothing to do" — no write happens then.
  */
-export type PreferencesMutator = (current: Preferences) => Partial<Omit<Preferences, 'team'>> | undefined
+export type PreferencesMutator = (current: Preferences) => Partial<Preferences> | undefined
 
 export async function updatePreferencesAt(primary: string, legacy: string | null, mutate: PreferencesMutator): Promise<Preferences> {
   return enqueueWrite(async () => {
@@ -1090,87 +950,4 @@ export async function updatePreferencesAt(primary: string, legacy: string | null
 
 export async function updatePreferences(mutate: PreferencesMutator): Promise<Preferences> {
   return updatePreferencesAt(PREFERENCES_FILE, LEGACY_PREFERENCES_FILE, mutate)
-}
-
-/**
- * S3/S4 — move plaintext central tokens out of the preferences files (spec §3.3). Order:
- *  1. rewrite the PRIMARY through the normal locked write path — which seals the tokens into
- *     `connections/tokens.sealed`, verifies them from disk, and only then writes the file without
- *     them (now 0600);
- *  2. THEN scrub the token fields of the LEGACY copy under `~/.claude` in place, leaving the rest of
- *     that file alone. It is only ever read when the primary is absent, and after step 1 it is not.
- * A crash between any two steps leaves tokens in a place the next pass finds and finishes.
- */
-export async function migratePreferencesTokensAt(primary: string, legacy: string | null): Promise<MigrationReport> {
-  const report: MigrationReport = { migrated: 0, lines: [] }
-  const rawPrimary = await readRawPrefs(primary).catch(() => null)
-  const rawLegacy = legacy ? await readRawPrefs(legacy).catch(() => null) : null
-  const inPrimary = plaintextTokenCount(rawPrimary)
-  const legacyFeedsPrimary = !rawPrimary && plaintextTokenCount(rawLegacy) > 0
-  if (inPrimary > 0 || legacyFeedsPrimary) {
-    try {
-      await enqueueWrite(async () => {
-        const release = await acquireFileLock(primary)
-        try {
-          const { prefs } = await readEffective(primary, legacy, true)
-          await writePrefsFile(primary, prefs)
-        } finally {
-          await release()
-        }
-      })
-      report.migrated += inPrimary
-    } catch (err) {
-      report.lines.push(vaultSentence('migration-failed', { file: primary, reason: err instanceof Error ? err.message : 'write failed' }))
-      return report
-    }
-  }
-  const legacyCount = plaintextTokenCount(rawLegacy)
-  if (legacy && rawLegacy && legacyCount > 0) {
-    try {
-      await writeFileAtomic(legacy, JSON.stringify(withoutTokenFields(rawLegacy), null, 2))
-      if (inPrimary === 0) report.migrated += legacyCount
-    } catch (err) {
-      report.lines.push(vaultSentence('migration-failed', { file: legacy, reason: (err as NodeJS.ErrnoException)?.code ?? 'write failed' }))
-    }
-  }
-  return report
-}
-
-/** How many plaintext tokens the two preference files still hold. Never opens the vault. */
-export async function pendingPreferencesTokensAt(primary: string, legacy: string | null): Promise<number> {
-  const a = plaintextTokenCount(await readRawPrefs(primary).catch(() => null))
-  const b = legacy ? plaintextTokenCount(await readRawPrefs(legacy).catch(() => null)) : 0
-  return a + b
-}
-
-registerVaultMigrator({
-  id: 'preferences-tokens',
-  pending: () => pendingPreferencesTokensAt(PREFERENCES_FILE, LEGACY_PREFERENCES_FILE),
-  async pendingFiles() {
-    const out: string[] = []
-    if (plaintextTokenCount(await readRawPrefs(PREFERENCES_FILE).catch(() => null)) > 0) out.push(PREFERENCES_FILE)
-    if (LEGACY_PREFERENCES_FILE && plaintextTokenCount(await readRawPrefs(LEGACY_PREFERENCES_FILE).catch(() => null)) > 0) out.push(LEGACY_PREFERENCES_FILE)
-    return out
-  },
-  run: () => migratePreferencesTokensAt(PREFERENCES_FILE, LEGACY_PREFERENCES_FILE),
-})
-
-/**
- * Strip every secret from a preferences object before it leaves the process.
- *
- * `GET /api/preferences` is reachable from any page the user happens to visit (the port is
- * local, not private), and nothing in the UI needs a token: adding a connection POSTs one,
- * and probe/leave/test all run server-side. So the read-out blanks `team.connections[].token`
- * and drops the legacy `team.token` mirror entirely.
- *
- * Pure — never mutates its input. Total: a solo config, an absent `team` and a malformed one
- * all pass through without throwing.
- */
-export function redactPreferences(prefs: Preferences): Preferences {
-  if (!prefs?.team) return { ...prefs }
-  const { token: _dropped, ...teamRest } = prefs.team
-  const connections = Array.isArray(prefs.team.connections)
-    ? prefs.team.connections.map(c => ({ ...c, token: '' }))
-    : prefs.team.connections
-  return { ...prefs, team: { ...teamRest, connections } as TeamConfig }
 }

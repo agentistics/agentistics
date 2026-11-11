@@ -84,7 +84,7 @@ export interface FleetPayload {
    * bridge exists to prevent — the same argument `fleet-row.ts` makes about the verbs.
    *
    * It carries nothing `FleetRow` did not already carry, including the approval screen: this route
-   * is `localShell` in `capability-guard.ts`, refused on a central and on every exposed profile, so
+   * is `localShell` in `capability-guard.ts`, refused on every exposed profile, so
    * it is not a new class of exposure. It is the same machine reading its own terminals.
    */
   rows: ControlSession[]
@@ -160,7 +160,7 @@ export interface FleetActionResponse {
 }
 
 /**
- * `suspend` exists for the one action that needs a real terminal (`central.sh init`). Nothing the
+ * `suspend` exists for the one action that needs a real terminal (a setup question). Nothing the
  * web routes call goes near it, and it throws rather than silently running a prompt against a
  * stdin no browser owns.
  */
@@ -970,7 +970,7 @@ async function runFleetActionOnce(
      * delivery's status lives; reopening a whole task is `agentop session open`.
      *
      * Removing the ids rather than the buttons is what makes it true: a hidden button is not a
-     * closed door, and this route is reachable from a central's relay.
+     * closed door.
      */
     case 'resume': {
       if (!host.resumeSession || !host.sessions) return { ok: false, message: s.sessionsNoHost }
@@ -1326,7 +1326,7 @@ export interface FleetNewOptions {
   /**
    * How many places of each kind MATCHED, before the cap — the number the tabs carry.
    *
-   * Optional so a client reading an older central still parses; absent means "this server does not
+   * Optional so a client reading an older server still parses; absent means "this server does not
    * say", and the wizard then counts its rows and stops claiming a total it cannot know.
    */
   projectTotals?: Record<ProjectKind, number>

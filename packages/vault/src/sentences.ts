@@ -79,7 +79,7 @@ const EN: Record<VaultRefusal, (a: SentenceArgs) => string> = {
   uninitialized: () =>
     'There is no vault on this machine yet, so this secret cannot be stored — Agentistics never writes one in plain text. Run `agentop vault init`.',
   locked: () =>
-    'The vault is locked: the agentop service started without its passphrase. Run `agentop vault unlock`. Until then provider keys, the GitHub backup token and central tokens cannot be read, and only what needs them is paused.',
+    'The vault is locked: the agentop service started without its passphrase. Run `agentop vault unlock`. Until then provider keys and the GitHub backup token cannot be read, and only what needs them is paused.',
   'no-protector': (a) =>
     `This machine has no system keychain Agentistics can use (checked: ${a.checked ?? 'nothing'}). Secrets are never stored in plain text, so they will be protected by a passphrase you choose. You will type it once each time the agentop service starts.`,
   'protector-lost': (a) =>
@@ -121,7 +121,7 @@ const PT: Record<VaultRefusal, (a: SentenceArgs) => string> = {
   uninitialized: () =>
     'Ainda não existe um cofre nesta máquina, então este segredo não pode ser guardado — o Agentistics nunca grava um em texto puro. Rode `agentop vault init`.',
   locked: () =>
-    'O cofre está trancado: o serviço do agentop iniciou sem a frase-senha. Rode `agentop vault unlock`. Até lá as chaves de provedor, o token do backup no GitHub e os tokens de central não podem ser lidos, e só o que depende deles fica pausado.',
+    'O cofre está trancado: o serviço do agentop iniciou sem a frase-senha. Rode `agentop vault unlock`. Até lá as chaves de provedor e o token do backup no GitHub não podem ser lidos, e só o que depende deles fica pausado.',
   'no-protector': (a) =>
     `Esta máquina não tem um chaveiro do sistema que o Agentistics possa usar (verificado: ${a.checked ?? 'nada'}). Segredos nunca são guardados em texto puro, então serão protegidos por uma frase-senha que você escolhe. Você vai digitá-la uma vez a cada início do serviço do agentop.`,
   'protector-lost': (a) =>

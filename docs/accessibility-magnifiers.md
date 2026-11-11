@@ -106,24 +106,13 @@ catching up rather than one frame of twenty clones.
 `/api/accessibility` (GET/PUT, authenticated by the default rule, not in `AUTH_PUBLIC`) resolves to
 one of two stores — `a11y-prefs.ts` is the only place that decides which:
 
-| mode | store | key |
-|---|---|---|
-| machine (solo / member) | `~/.agentistics/preferences.json`, field `accessibility` | the machine |
-| central | Mongo collection `userPrefs` | `_id` = the signed-in `accountId` |
-
-`/api/preferences` could not be reused: it is **per machine**, and on a central that file belongs to
-the container and is shared by every signed-in user. One person's magnifiers would appear on
-everyone's screen. A central session that resolves without an account reads defaults and is refused
-on write — it must never fall back to the machine file.
+The magnifier settings live in `~/.agentistics/preferences.json`, field `accessibility`.
 
 **A PUT replaces the whole `accessibility` value**, so deleting the last lens of a page actually
 deletes it. That rests on `writePreferences` staying a shallow merge across preference KEYS (which
 must not wipe language, theme, layouts or connections) — pinned by `a11y-persistence.test.ts`.
 
-**Saving is armed only by a genuinely successful load.** On a central the route answers 401 until a
-principal session exists, and the hook mounts before login; treating that 401 as an empty document
-armed a save that then replaced the account's stored lenses with defaults. The load re-runs when
-the signed-in identity changes.
+**Saving is armed only by a genuinely successful load.** A failed or refused load must not be read as an empty document, or the next save replaces the stored lenses with defaults.
 
 ## Known limitations
 
@@ -159,4 +148,4 @@ button reappears over whatever that screen is showing.
 | `packages/web/src/hooks/useAccessibility.ts` | the state, loaded from and saved to `/api/accessibility` |
 | `packages/web/src/pages/settings/AccessibilitySettings.tsx` | the settings tab |
 | `packages/server/server/a11y-prefs.ts` | the one resolution of where settings live (pure) |
-| `packages/server/server/a11y-routes.ts` / `user-prefs-store.ts` | the routes and the central's per-account store |
+| `packages/server/server/a11y-routes.ts` | the routes and the store |

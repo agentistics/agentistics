@@ -12,12 +12,7 @@ import { journalLiveEnabled } from './journal/live-flag'
 loadEnvConfig()
 
 export const HOME_DIR = process.env.HOME ?? process.env.USERPROFILE ?? ''
-// A "self-contributing" central (TEAM_CENTRAL + AGENTISTICS_CENTRAL_USER set) reads the
-// host's ~/.claude that docker-compose mounts read-only at /host-claude, so the machine
-// running the central also shows its own usage. Explicit CLAUDE_DIR always wins.
-const _selfContributingCentral =
-  process.env.AGENTISTICS_TEAM_CENTRAL === '1' && !!(process.env.AGENTISTICS_CENTRAL_USER || '')
-export const CLAUDE_DIR = process.env.CLAUDE_DIR ?? (_selfContributingCentral ? '/host-claude' : join(HOME_DIR, '.claude'))
+export const CLAUDE_DIR = process.env.CLAUDE_DIR ?? join(HOME_DIR, '.claude')
 export const PROJECTS_DIR = join(CLAUDE_DIR, 'projects')
 export const SESSION_META_DIR = join(CLAUDE_DIR, 'usage-data', 'session-meta')
 export const STATS_CACHE_FILE = join(CLAUDE_DIR, 'stats-cache.json')
@@ -50,7 +45,7 @@ export const WEB_PORT = parseInt(process.env.WEB_PORT ?? String(PORT + 1), 10)
 // Reads union live + archive (live always wins); set AGENTISTICS_ARCHIVE=0 to disable.
 // ---------------------------------------------------------------------------
 export const ARCHIVE_ENABLED = process.env.AGENTISTICS_ARCHIVE !== '0'
-// The app's own writable data dir. In Docker (machine + self-contributing central) this is
+// The app's own writable data dir. In Docker this is
 // the read-WRITE ~/.agentistics mount, whereas CLAUDE_DIR is the host ~/.claude mounted
 // read-only — so anything the app must persist (preferences, consolidate store, sync state)
 // belongs here, never under CLAUDE_DIR.
@@ -148,8 +143,8 @@ export const PARSE_CACHE_FILE = process.env.AGENTISTICS_PARSE_CACHE_FILE ?? join
  *  cost the git walks as well — each degrades to a no-op independently. */
 export const GIT_STATS_CACHE_FILE = process.env.AGENTISTICS_GIT_STATS_CACHE_FILE ?? join(AGENTISTICS_DATA_DIR, 'git-stats.db')
 
-/** One server per PORT. Keyed on the port rather than the machine because a local server and a
- *  central are two legitimate processes on one host — what must never happen twice is two servers
+/** One server per PORT. Keyed on the port rather than the machine because two servers with
+ *  different ports are two legitimate processes on one host — what must never happen twice is two servers
  *  answering for the same address while both scan every repository on disk. */
 /**
  * The instance claim, keyed on the DATA DIRECTORY — never on the port.
@@ -169,57 +164,15 @@ export const GIT_STATS_CACHE_FILE = process.env.AGENTISTICS_GIT_STATS_CACHE_FILE
 export const serverLockFile = (): string => join(AGENTISTICS_DATA_DIR, 'server.lock')
 export const PARSE_CACHE_ENABLED = process.env.AGENTISTICS_PARSE_CACHE !== '0'
 
-// ---------------------------------------------------------------------------
-// Team mode (Phase 1: folder union). When AGENTISTICS_TEAM=1 the server unions
-// per-user consolidated SessionMeta JSONs from TEAM_DIR/<user>/sessions/*.json
-// and tags each session with its owning user. Off by default (Solo behavior).
-// ---------------------------------------------------------------------------
-export const TEAM_MODE = process.env.AGENTISTICS_TEAM === '1'
-export const TEAM_DIR = process.env.AGENTISTICS_TEAM_DIR ?? join(AGENTISTICS_DATA_DIR, 'team')
-
-// ---------------------------------------------------------------------------
-// Phase 2 — central aggregator. When AGENTISTICS_TEAM_CENTRAL=1 the instance
-// sources team sessions from MongoDB (not the folder) and accepts pushed
-// sessions on POST /api/team/ingest. MONGO_URL/MONGO_DB point at the store;
-// TEAM_ORG namespaces docs; TEAM_INGEST_TOKEN (optional) gates ingestion.
-// ---------------------------------------------------------------------------
-export const TEAM_CENTRAL = process.env.AGENTISTICS_TEAM_CENTRAL === '1'
 // Set by the Dockerfile's runtime stage. Inside an image this process is replaced by pulling or
 // rebuilding the image, never by swapping its own binary, and it cannot reach the host's tmux — see
 // daemon-plan.ts and upgrade-gate.ts.
 export const IN_CONTAINER = process.env.AGENTISTICS_CONTAINER === '1'
-// Ingest-only hardening: when set on a central, the instance serves ONLY
-// `POST /api/team/ingest` (+ its OPTIONS preflight) and returns 404 for everything else —
-// the dashboard, login, /api/data, static assets, all of it. Intended for a public-facing
-// central (for cloud GitHub Actions runners to push to) that shares its MongoDB with a
-// SEPARATE, private admin/dashboard instance. Exposing an ingest-only instance is low-risk:
-// there is nothing to read, only a token-gated write endpoint.
-export const INGEST_ONLY = process.env.AGENTISTICS_INGEST_ONLY === '1'
-// ---------------------------------------------------------------------------
-// GitHub Actions OIDC (keyless CI auth). A runner presents a short-lived,
-// GitHub-signed JWT instead of a static secret; the central verifies it against
-// GitHub's public JWKS and checks the `repository` claim against the registered
-// repos. Enabled only when an AUDIENCE is configured (forces a deliberate, secure
-// config — the workflow must request that same audience). Issuer defaults to GitHub.
-// ---------------------------------------------------------------------------
-export const OIDC_ISSUER = process.env.AGENTISTICS_OIDC_ISSUER ?? 'https://token.actions.githubusercontent.com'
-export const OIDC_AUDIENCE = process.env.AGENTISTICS_OIDC_AUDIENCE || undefined
-// Trim surrounding whitespace: a stray space in `MONGO_URL= mongodb+srv://…` (easy to leave
-// in an env file) otherwise reaches the driver as an invalid connection string.
-export const MONGO_URL = (process.env.MONGO_URL ?? 'mongodb://localhost:27017').trim()
-export const MONGO_DB = (process.env.MONGO_DB ?? 'agentistics').trim()
-export const TEAM_ORG = process.env.AGENTISTICS_TEAM_ORG ?? 'default'
-export const TEAM_INGEST_TOKEN = process.env.AGENTISTICS_TEAM_INGEST_TOKEN || undefined
-// Self-contribution: when set on a central, the central machine's own local sessions
-// (read from the mounted host ~/.claude) are attributed to this user, so one instance
-// can be both the central AND a contributing member. Unset = isolated central.
-export const CENTRAL_USER = process.env.AGENTISTICS_CENTRAL_USER || undefined
-
 // ---------------------------------------------------------------------------
 // Exposure profile (see exposure.ts). AGENTISTICS_EXPOSURE=local|lan|public.
-// Unset → 'lan' on a central, 'local' otherwise. An unknown value fails closed to 'public'.
+// Unset → 'local'. An unknown value fails closed to 'public'.
 // AGENTISTICS_ALLOW_LOCAL_SHELL=1 re-enables /api/exec, /api/chat-tty, the host transcript
-// readers and /api/mcp-action on a 'lan' central. It is IGNORED on 'public'.
+// readers and /api/mcp-action on a 'lan' instance. It is IGNORED on 'public'.
 // ---------------------------------------------------------------------------
 export const EXPOSURE = process.env.AGENTISTICS_EXPOSURE
 export const ALLOW_LOCAL_SHELL = process.env.AGENTISTICS_ALLOW_LOCAL_SHELL === '1'
@@ -235,40 +188,15 @@ export const ALLOWED_ORIGINS = (process.env.AGENTISTICS_ALLOWED_ORIGINS ?? '')
   .map(s => s.trim())
   .filter(Boolean)
 
-// ---------------------------------------------------------------------------
-// Phase 3 — auth gate. When AGENTISTICS_TEAM_PASSWORD is set, the central
-// dashboard requires a valid session cookie to access all /api/* routes except
-// the public allowlist. TEAM_TLS=1 adds the Secure flag to the session cookie.
-// ---------------------------------------------------------------------------
-export const TEAM_PASSWORD = process.env.AGENTISTICS_TEAM_PASSWORD || undefined
-// SECURITY: the session secret NEVER falls back to the password. It used to, which meant a
-// leaked or shared password also let anyone forge a session cookie for any account, since the
-// HMAC key equalled the password. Resolution order (see secret-store.ts + the boot block in
-// index.ts): the env var if set and valid → a random secret persisted in Mongo (central) → a
-// random per-process secret (non-central; sessions simply do not survive a restart).
-export const TEAM_SESSION_SECRET_ENV = process.env.AGENTISTICS_TEAM_SESSION_SECRET || undefined
-export let TEAM_SESSION_SECRET = TEAM_SESSION_SECRET_ENV ?? randomBytes(32).toString('hex')
-/** Called once at boot by index.ts. `export let` gives importers a live binding. */
-export function setResolvedSessionSecret(value: string): void {
-  TEAM_SESSION_SECRET = value
-}
-export const TEAM_TLS = process.env.AGENTISTICS_TEAM_TLS === '1'
-
-// ---------------------------------------------------------------------------
-// Team uploader — tracks which sessions have already been pushed to the central.
-// Override with AGENTISTICS_TEAM_SENT_FILE.
-// ---------------------------------------------------------------------------
-export const TEAM_SENT_FILE = process.env.AGENTISTICS_TEAM_SENT_FILE ?? join(AGENTISTICS_DATA_DIR, 'team-sent.json')
-// Records the central "sync signature" (endpoint+token+instanceId) the sent-state was built
-// against. When it changes — new token, new central, or a wiped central DB — the uploader
-// clears the sent-state and re-pushes everything automatically.
-export const TEAM_SYNC_FILE = process.env.AGENTISTICS_TEAM_SYNC_FILE ?? join(AGENTISTICS_DATA_DIR, 'team-sync.json')
+/** The app is reached over HTTPS (a tunnel or reverse proxy terminates TLS): HSTS is sent and
+ *  cookies are Secure. AGENTISTICS_TLS=1. */
+export const TLS = process.env.AGENTISTICS_TLS === '1'
 
 // ---------------------------------------------------------------------------
 // Other harnesses (Phase 1: Codex). Each adapter checks its own root.
 // Override with CODEX_DIR; disable with AGENTISTICS_HARNESS_CODEX=0.
 // ---------------------------------------------------------------------------
-export const CODEX_DIR = process.env.CODEX_DIR ?? (_selfContributingCentral ? '/host-codex' : join(HOME_DIR, '.codex'))
+export const CODEX_DIR = process.env.CODEX_DIR ?? join(HOME_DIR, '.codex')
 export const CODEX_SESSIONS_DIR = join(CODEX_DIR, 'sessions')
 // Codex's own billing signal. `auth.json` holds the OAuth tokens AND an optional API key; only
 // the plan tier and the PRESENCE of a key are ever read — see `billing-detect.ts`.
@@ -277,13 +205,13 @@ export const CODEX_AUTH_FILE = process.env.CODEX_AUTH_FILE ?? join(CODEX_DIR, 'a
 // ---------------------------------------------------------------------------
 // Gemini CLI harness. Override with GEMINI_DIR; disable with AGENTISTICS_HARNESS_GEMINI=0.
 // ---------------------------------------------------------------------------
-export const GEMINI_DIR = process.env.GEMINI_DIR ?? (_selfContributingCentral ? '/host-gemini' : join(HOME_DIR, '.gemini'))
+export const GEMINI_DIR = process.env.GEMINI_DIR ?? join(HOME_DIR, '.gemini')
 
 // ---------------------------------------------------------------------------
 // GitHub Copilot CLI harness. Override with COPILOT_DIR; disable with
 // AGENTISTICS_HARNESS_COPILOT=0.
 // ---------------------------------------------------------------------------
-export const COPILOT_DIR = process.env.COPILOT_DIR ?? (_selfContributingCentral ? '/host-copilot' : join(HOME_DIR, '.copilot'))
+export const COPILOT_DIR = process.env.COPILOT_DIR ?? join(HOME_DIR, '.copilot')
 
 // ---------------------------------------------------------------------------
 // Antigravity CLI (agy) harness. It lives INSIDE the Gemini home
@@ -315,57 +243,6 @@ export const ANTIGRAVITY_HISTORY_FILE = join(ANTIGRAVITY_DIR, 'history.jsonl')
 export const ANTIGRAVITY_CONVERSATIONS_DIR = join(ANTIGRAVITY_DIR, 'conversations')
 /** Optional enrichment (title / parent link). Frequently exists but with zero rows. */
 export const ANTIGRAVITY_SUMMARIES_DB = join(ANTIGRAVITY_DIR, 'conversation_summaries.db')
-
-// ---------------------------------------------------------------------------
-// Multi-central support. Per-connection state lives in its own directory so one
-// central's sent-state can never be handed to another by a positional accident.
-// ---------------------------------------------------------------------------
-/** Per-connection state lives in its own directory so one central's sent-state can never be
- *  handed to another by a positional accident. `export let` (mirroring
- *  `TEAM_SESSION_SECRET`/`setResolvedSessionSecret` above) gives importers a live binding, so
- *  `__setTeamConnDirForTests` below can redirect it. */
-export let TEAM_CONN_DIR = process.env.AGENTISTICS_TEAM_CONN_DIR
-  ?? join(AGENTISTICS_DATA_DIR, 'connections')
-
-/** Test-only override. `TEAM_CONN_DIR` is computed once at module load from the environment, so
- *  a test can't reliably set `AGENTISTICS_TEAM_CONN_DIR` beforehand — by the time any given test
- *  file runs, `config.ts` has typically already been imported (and evaluated) by another file
- *  earlier in the same `bun test` process. This lets team-uploader.test.ts point per-connection
- *  state files at a tmp directory instead of the developer's real `~/.agentistics/connections`.
- *  Never called from production code. */
-export function __setTeamConnDirForTests(dir: string): void {
-  TEAM_CONN_DIR = dir
-}
-
-const CONN_ID_RE = /^c_[a-f0-9]{12}$/
-
-/** Connection ids arrive from HTTP bodies on the connection routes, so they are interpolated
- *  into a path only after this check — `../` would escape ~/.agentistics. */
-export function safeConnId(id: string): string {
-  if (typeof id !== 'string' || !CONN_ID_RE.test(id)) {
-    throw new Error(`invalid connection id: ${JSON.stringify(id)}`)
-  }
-  return id
-}
-
-export function teamSentFile(connId: string): string {
-  return join(TEAM_CONN_DIR, `team-sent-${safeConnId(connId)}.json`)
-}
-/** { sig } — the central-identity fingerprint. */
-export function teamSyncFile(connId: string): string {
-  return join(TEAM_CONN_DIR, `team-sync-${safeConnId(connId)}.json`)
-}
-/** { rulesHash, sharedIds[], boundary } — deliberately SEPARATE from the sent-state and the
- *  sync signature: the sig path clears the sent-state on a token rotation, and if the rules
- *  hash lived there a rotation coinciding with a rules change would erase the evidence of the
- *  change and the removal would never run. */
-export function teamRulesFile(connId: string): string {
-  return join(TEAM_CONN_DIR, `team-rules-${safeConnId(connId)}.json`)
-}
-/** { state, ids, runIds, rulesHash, startedAt } — the removal journal. */
-export function teamForgetFile(connId: string): string {
-  return join(TEAM_CONN_DIR, `team-forget-${safeConnId(connId)}.json`)
-}
 
 /** The native runtime's feature flag. ABSENT reads as OFF: with it off no provider module is
  *  loaded, no credential file is read, and every `agentop provider` verb but `status` refuses in a
@@ -445,28 +322,6 @@ export function providerKeyFile(provider: KeyedProviderId, dir: string = PROVIDE
     throw new Error(`invalid provider id: ${JSON.stringify(provider)}`)
   }
   return join(dir, `${provider}.json`)
-}
-
-/** This machine's sealed-envelope keypair. The PRIVATE half lives here and NOWHERE else — never in
- *  preferences.json (which is served, redacted, over `GET /api/preferences`), never in an audit
- *  event, never in a log line. Written 0600. Machine-wide, not per connection: the same machine
- *  identity faces every central, which is what lets one pin work across them. */
-export function envelopeKeyFile(): string {
-  return join(TEAM_CONN_DIR, 'envelope-key.json')
-}
-
-/** machineId → the peer public key this machine PINNED on first sight, per connection. Per
- *  connection because a machine id is only meaningful within one central: the same id string from
- *  two different centrals is two different machines, and sharing one pin map across them would let
- *  one central's key set trigger a "changed key" refusal against another's. */
-export function envelopePinsFile(connId: string): string {
-  return join(TEAM_CONN_DIR, `envelope-pins-${safeConnId(connId)}.json`)
-}
-
-/** Decrypted, NOT-YET-APPLIED restriction proposals received from sibling machines, per
- *  connection. A proposal sits here until the user acts on it — see envelope-inbox.ts. */
-export function envelopeInboxFile(connId: string): string {
-  return join(TEAM_CONN_DIR, `envelope-inbox-${safeConnId(connId)}.json`)
 }
 
 // ---------------------------------------------------------------------------

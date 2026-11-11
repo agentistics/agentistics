@@ -9,7 +9,12 @@
  * log that stores credentials is a liability, not a control — and truncates long values so one
  * call cannot bloat the collection.
  */
-import { getMongoDb } from './mongo'
+import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { AGENTISTICS_DATA_DIR } from './config'
+
+/** The machine's own append-only log. One JSON object per line; never leaves the machine. */
+const auditFile = (): string => join(AGENTISTICS_DATA_DIR, 'audit.jsonl')
 
 export type AuditAction =
   | 'login.success' | 'login.failure' | 'login.mfa_challenge' | 'login.mfa_failure'
@@ -25,7 +30,7 @@ export type AuditAction =
   // A machine's name, owner accounts, or team links changed — distinct from mint/rotate/revoke,
   // which touch the credential itself.
   | 'machine.update'
-  // A verb performed on one of ANOTHER machine's live sessions, relayed from this central. Its own
+  // A verb performed on one of ANOTHER machine's live sessions (kept for the engine-api contract). Its own
   // action rather than a flavour of `machine.update`, which means the token document changed:
   // renaming a session and re-assigning a machine's owner account are not the same event, and an
   // audit that cannot tell them apart cannot answer "who killed my session".
@@ -63,9 +68,6 @@ export interface AuditEvent {
   actorId?: string
   targetId?: string
   ip: string
-  /** BSON Date, NOT an ISO string. The retention index below is a TTL index, and MongoDB's TTL
-   *  monitor only expires documents whose indexed field is a Date — with a string here the index
-   *  is created happily, reports no error, and nothing is ever deleted. See mongo-dates.ts. */
   at: Date
   meta?: Record<string, unknown>
 }
@@ -107,8 +109,8 @@ export function buildAuditEvent(input: AuditInput, now: Date): AuditEvent {
 /** Fire-and-forget: an audit write must never break the request it is describing. */
 export async function writeAudit(input: AuditInput, onFailure?: () => void): Promise<void> {
   try {
-    const db = await getMongoDb()
-    await db.collection<AuditEvent>('audit').insertOne(buildAuditEvent(input, new Date()))
+    await mkdir(AGENTISTICS_DATA_DIR, { recursive: true })
+    await appendFile(auditFile(), JSON.stringify(buildAuditEvent(input, new Date())) + '\n', { mode: 0o600 })
   } catch {
     // Swallowed on purpose. A failing audit sink is an operational problem, not a reason to
     // deny a legitimate login. Callers may report failure without exposing database diagnostics.
@@ -121,22 +123,18 @@ export function reportAuditFailure(op: unknown, targetId: string | undefined): v
   console.error('[audit] write failed:', op, targetId)
 }
 
-/** Owner-only reader, newest first. */
+/** Newest first. */
 export async function listAudit(opts: { limit?: number; action?: AuditAction } = {}): Promise<AuditEvent[]> {
-  const db = await getMongoDb()
-  const filter = opts.action ? { action: opts.action } : {}
-  return db
-    .collection<AuditEvent>('audit')
-    .find(filter)
-    .sort({ at: -1 })
-    .limit(Math.min(opts.limit ?? 200, 1000))
-    .toArray()
-}
-
-/** Index + a 180-day TTL. Idempotent; called at boot next to ensureAccountIndexes. */
-export async function ensureAuditIndexes(): Promise<void> {
-  const db = await getMongoDb()
-  const col = db.collection<AuditEvent>('audit')
-  await col.createIndex({ at: -1 })
-  await col.createIndex({ at: 1 }, { expireAfterSeconds: 180 * 24 * 60 * 60 })
+  let raw = ''
+  try { raw = await readFile(auditFile(), 'utf8') } catch { return [] }
+  const out: AuditEvent[] = []
+  for (const line of raw.split('\n')) {
+    if (!line) continue
+    try {
+      const e = JSON.parse(line) as Omit<AuditEvent, 'at'> & { at: string }
+      if (opts.action && e.action !== opts.action) continue
+      out.push({ ...e, at: new Date(e.at) })
+    } catch { /* a torn line is skipped */ }
+  }
+  return out.reverse().slice(0, Math.min(opts.limit ?? 200, 1000))
 }

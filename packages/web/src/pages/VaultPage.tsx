@@ -24,7 +24,7 @@ import { Field, TabStrip, inputStyle } from '../components/sessions/formBits'
 import { BandOverflowMenu, type BandOverflowEntry } from '../components/sessions/bandControls'
 import type { AppContext } from '../lib/app-context'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { Err, card, overlay } from '../components/MfaSetup'
+import { Err, card, overlay } from '../components/dialogStyles'
 import { loadVault, vaultPost, type Reply, type VaultItem } from '../lib/vaultApi'
 import { itemStateKey, kindKey, orderItems, reasonKey, vt } from '../lib/vaultText'
 

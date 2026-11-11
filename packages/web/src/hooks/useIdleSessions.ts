@@ -1,13 +1,13 @@
 /**
  * Derives idle candidates from the LIVE fleet on every poll and announces each new batch once.
- * Local machine only — the caller passes `enabled: false` on a central.
+ * Local machine only — the caller passes `enabled: false`.
  *
  * NEVER POLLS HARDWARE ITSELF. `useHardwareSnapshot` is NOT a shared/module-level poller like
  * `useFleet` — every call mounts its OWN `setInterval(…, 5000)` against `/api/hardware-resources`
  * (see `HardwareModal.tsx`'s own header, which claims one shared loop but implements a per-call
  * one). `SessionsPage.tsx` already calls `useHardwarePressureWatch`, which itself calls
  * `useHardwareSnapshot` — so a second call here would run a SECOND, independent 5s poll of the same
- * endpoint, and would keep polling even with `enabled: false` (a central, where this feature must
+ * endpoint, and would keep polling even with `enabled: false` (where this feature must
  * not run at all). The CALLER passes `underPressure`, read from `useHardwarePressureWatch`'s own
  * `ramUnderPressure` (the poll it already runs), so there is exactly one hardware poll on the page.
  */
@@ -44,7 +44,7 @@ export function useIdleSessions(args: {
   }), [inputs, prefs, args.underPressure, args.openSessionId, args.enabled])
 
   useEffect(() => {
-    // Disabled (a central, an unsupported poll, or still loading) must touch NEITHER half of this
+    // Disabled (an unsupported poll, or still loading) must touch NEITHER half of this
     // effect. `candidates` is already `[]` while disabled, and running the arithmetic anyway would
     // fold that emptiness into `notifiedIds` — wiping the memory of what was already announced — so
     // the moment the page re-enables (the poll comes back, the load finishes) every idle session
@@ -76,7 +76,7 @@ export function useIdleSessions(args: {
   }, [candidates, args.rows, args.enabled])
 
   // Keep marks for sessions that no longer exist are dropped — skipped while disabled for the same
-  // reason the notify effect is: `args.rows` on a disabled page (a central's own, unrelayed fleet;
+  // reason the notify effect is: `args.rows` on a disabled page (an unrelayed fleet;
   // an empty poll before the first successful load) names nothing this feature is tracking, and
   // pruning against it would erase every "keep" mark before the page ever gets to read them back.
   useEffect(() => {

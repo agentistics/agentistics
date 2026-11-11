@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { AUTH_PUBLIC } from './index-routes'
 import { routeCapability } from './capability-guard'
 import type { ProjectionReader } from './projections/facts'
 import { handleRuntimeMetricsRequest, MAX_ANSWER_LAG, projectionsEnabled, RUNTIME_METRICS_PATH } from './runtime-metrics-web'
@@ -29,33 +28,27 @@ describe('the flag', () => {
   })
   it('off → projections_disabled, nothing touched (not even a bad query string is parsed)', async () => {
     const [req, url] = get('?bogus=1')
-    const out = await handleRuntimeMetricsRequest(req, url, { flag: '0', central: false, reader: untouchable })
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: '0', reader: untouchable })
     expect(out.status).toBe(404)
     expect((out.body as { error: string }).error).toBe('projections_disabled')
   })
 })
 
 describe('the route', () => {
-  it('on a central it refuses with a sentence, without touching the reader', async () => {
-    const [req, url] = get()
-    const out = await handleRuntimeMetricsRequest(req, url, { flag: '1', central: true, reader: untouchable })
-    expect(out.status).toBe(409)
-    expect((out.body as { error: string }).error).toBe('unsupported_on_central')
-  })
   it('no reader wired → projections_unavailable', async () => {
     const [req, url] = get()
-    const out = await handleRuntimeMetricsRequest(req, url, { flag: '1', central: false, reader: null })
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: '1', reader: null })
     expect(out.status).toBe(503)
   })
   it('non-GET → 405', async () => {
     const url = new URL(`http://x${RUNTIME_METRICS_PATH}`)
-    const out = await handleRuntimeMetricsRequest(new Request(url, { method: 'POST' }), url, { flag: '1', central: false, reader: untouchable })
+    const out = await handleRuntimeMetricsRequest(new Request(url, { method: 'POST' }), url, { flag: '1', reader: untouchable })
     expect(out.status).toBe(405)
   })
   it('the first import not complete → projections_backfilling (every surface reads /api/data), reader untouched', async () => {
     const [req, url] = get()
     const out = await handleRuntimeMetricsRequest(req, url, {
-      flag: '1', central: false, reader: untouchable,
+      flag: '1', reader: untouchable,
       backfill: { pending: true, progress: { v: 1, identity: 'i', state: 'running', startedAt: 's', updatedAt: 'u', written: 42 } },
     })
     expect(out.status).toBe(503)
@@ -64,21 +57,21 @@ describe('the route', () => {
   it('the projections far behind the journal → projections_catching_up, never a partial answer', async () => {
     const [req, url] = get()
     const reader = fakeReader([costFact()], [], { cursor: 10, journalHead: 10 + MAX_ANSWER_LAG + 1, versions: {}, rebuilding: false })
-    const out = await handleRuntimeMetricsRequest(req, url, { flag: '1', central: false, reader })
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: '1', reader })
     expect(out.status).toBe(503)
     expect(out.body).toMatchObject({ error: 'projections_catching_up', lag: MAX_ANSWER_LAG + 1 })
     const near = fakeReader([costFact()], [], { cursor: 10, journalHead: 10 + MAX_ANSWER_LAG, versions: {}, rebuilding: false })
-    expect((await handleRuntimeMetricsRequest(req, url, { flag: '1', central: false, reader: near })).status).toBe(200)
+    expect((await handleRuntimeMetricsRequest(req, url, { flag: '1', reader: near })).status).toBe(200)
   })
   it('bad input → 400 with the code', async () => {
     const [req, url] = get('?metrics=vibes')
-    const out = await handleRuntimeMetricsRequest(req, url, { flag: '1', central: false, reader: untouchable })
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: '1', reader: untouchable })
     expect(out.status).toBe(400)
     expect((out.body as { code: string }).code).toBe('unknown_metric')
   })
   it('answers a query', async () => {
     const [req, url] = get('?metrics=cost')
-    const out = await handleRuntimeMetricsRequest(req, url, { flag: 'on', central: false, reader: fakeReader([costFact({ costUSD: 2 })], []) })
+    const out = await handleRuntimeMetricsRequest(req, url, { flag: 'on', reader: fakeReader([costFact({ costUSD: 2 })], []) })
     expect(out.status).toBe(200)
     expect((out.body as { groups: { metrics: { cost: { usd: number } } }[] }).groups[0]!.metrics.cost.usd).toBe(2)
   })
@@ -88,19 +81,15 @@ describe('registration', () => {
   it('is guarded by localTranscripts before it answers', () => {
     expect(routeCapability(RUNTIME_METRICS_PATH)).toBe('localTranscripts')
   })
-  it('is authenticated by default: not in AUTH_PUBLIC', () => {
-    expect(AUTH_PUBLIC.has(RUNTIME_METRICS_PATH)).toBe(false)
-  })
   it('index.ts routes it through the handler with the per-request deps and safeError', () => {
     const src = readFileSync(new URL('./index.ts', import.meta.url), 'utf8')
     const at = src.indexOf("url.pathname === '/api/runtime/metrics'")
     expect(at).toBeGreaterThan(-1)
     const block = src.slice(at, at + 700)
-    expect(block).toContain('liveRuntimeMetricsDeps(TEAM_CENTRAL)')
+    expect(block).toContain('liveRuntimeMetricsDeps()')
     expect(block).toContain('safeError(')
-    // The guard and the auth gate run before every route; the route must come after them.
+    // The capability guard runs before every route; the route must come after it.
     expect(at).toBeGreaterThan(src.indexOf('const needed = routeCapability(url.pathname)'))
-    expect(at).toBeGreaterThan(src.indexOf('!AUTH_PUBLIC.has(url.pathname)'))
   })
 })
 
@@ -133,17 +122,17 @@ describe('the native harness is experimental (owner, 2026-10-03)', () => {
   const facts = [costFact({ costUSD: 2 }), costFact({ harness: 'agentistics', costUSD: 5, eventId: 'n1' } as never)]
   it('off: its figures are left out of every answer; asking for it by name is a 403 "experimental"', async () => {
     const url = new URL('http://x/api/runtime/metrics?groupBy=harness&metrics=cost')
-    const hidden = await handleRuntimeMetricsRequest(new Request(url), url, { flag: '1', central: false, reader: fakeReader(facts, []), nativeVisible: false })
+    const hidden = await handleRuntimeMetricsRequest(new Request(url), url, { flag: '1', reader: fakeReader(facts, []), nativeVisible: false })
     expect(hidden.status).toBe(200)
     const keys = (hidden.body as { groups: { key: { harness: string } }[] }).groups.map(g => g.key.harness)
     expect(keys).toEqual(['claude'])
     const named = new URL('http://x/api/runtime/metrics?harness=agentistics&metrics=cost')
-    const refused = await handleRuntimeMetricsRequest(new Request(named), named, { flag: '1', central: false, reader: fakeReader(facts, []), nativeVisible: false })
+    const refused = await handleRuntimeMetricsRequest(new Request(named), named, { flag: '1', reader: fakeReader(facts, []), nativeVisible: false })
     expect(refused).toMatchObject({ status: 403, body: { error: 'experimental' } })
   })
   it('on: shown as before', async () => {
     const url = new URL('http://x/api/runtime/metrics?groupBy=harness&metrics=cost')
-    const out = await handleRuntimeMetricsRequest(new Request(url), url, { flag: '1', central: false, reader: fakeReader(facts, []), nativeVisible: true })
+    const out = await handleRuntimeMetricsRequest(new Request(url), url, { flag: '1', reader: fakeReader(facts, []), nativeVisible: true })
     const keys = (out.body as { groups: { key: { harness: string } }[] }).groups.map(g => g.key.harness).sort()
     expect(keys).toEqual(['agentistics', 'claude'])
   })

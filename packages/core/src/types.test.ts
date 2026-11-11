@@ -330,9 +330,9 @@ describe('formatProjectName', () => {
     expect(formatProjectName('')).toBe('Unknown')
   })
 
-  // The home directory is NEVER abbreviated: on a central the same `~/app` would be three
-  // different people's folders, and `~` would resolve against the central's own home rather than
-  // the machine the session came from. The username is part of the path's identity.
+  // The home directory is NEVER abbreviated: the same `~/app` can be different
+  // people's folders, and `~` would resolve against this process's home rather than the machine
+  // the session came from. The username is part of the path's identity.
   test('keeps the full path even inside the home directory', () => {
     expect(formatProjectName('/home/user/projetos/app')).toBe('/home/user/projetos/app')
   })

@@ -89,7 +89,6 @@ channel rides exactly the gates `/api/fleet` and `/api/fleet/act` carry:
 
 - **`localShell` capability** (`capability-guard.ts`) — refused (403) on any exposed profile,
   **before** the upgrade. There is no deployment that should expose someone's keyboard to the network.
-- **404 on a central** (`TEAM_CENTRAL`) — a central hosts no sessions.
 - **Same-origin** — the upgrade is refused unless the browser's `Origin` is the dashboard's own (or
   an allowlisted) origin (`wsInputOriginOk`). CSWSH protection: `localShell` being on does not stop a
   malicious page in the user's own browser from opening a socket to `localhost`.

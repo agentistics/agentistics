@@ -17,7 +17,7 @@ function fixture() {
 describe('seal / open', () => {
   it('round-trips per purpose', () => {
     const { dek, kid } = newDataKey()
-    for (const purpose of ['github-backup', 'central-token', 'envelope-key', 'central-env', 'engine/provider-key']) {
+    for (const purpose of ['github-backup', 'mobile-push-vapid', 'engine/provider-key']) {
       const b = sealToBytes({ dek, kid, purpose, name: 'n', plaintext: enc(MARKER) })
       const o = openRecord({ dek, kid, purpose, name: 'n', bytes: b })
       expect(o.ok).toBe(true)
@@ -27,7 +27,7 @@ describe('seal / open', () => {
 
   it('the wrong purpose or name is tampered; the wrong kid is wrong-machine — distinct codes', () => {
     const { dek, kid, bytes } = fixture()
-    expect(openRecord({ dek, kid, purpose: 'central-token', name: 'github-backup', bytes })).toEqual({ ok: false, code: 'tampered' })
+    expect(openRecord({ dek, kid, purpose: 'mobile-push-vapid', name: 'github-backup', bytes })).toEqual({ ok: false, code: 'tampered' })
     expect(openRecord({ dek, kid, purpose: 'github-backup', name: 'other', bytes })).toEqual({ ok: false, code: 'tampered' })
     const other = newDataKey()
     const r = openRecord({ dek: other.dek, kid: other.kid, purpose: 'github-backup', name: 'github-backup', bytes })
@@ -38,8 +38,8 @@ describe('seal / open', () => {
   it('a header rewritten to the expected purpose still fails the tag (AAD binds the original)', () => {
     const { dek, kid, text } = fixture()
     const f = JSON.parse(text)
-    f.purpose = 'central-token'
-    const r = openRecord({ dek, kid, purpose: 'central-token', name: 'github-backup', bytes: JSON.stringify(f) })
+    f.purpose = 'mobile-push-vapid'
+    const r = openRecord({ dek, kid, purpose: 'mobile-push-vapid', name: 'github-backup', bytes: JSON.stringify(f) })
     expect(r).toEqual({ ok: false, code: 'tampered' })
   })
 
@@ -68,7 +68,7 @@ describe('seal / open', () => {
     const { dek, kid } = newDataKey()
     const seen = new Set<string>()
     for (let i = 0; i < 100_000; i++) {
-      const f = sealRecord({ dek, kid, purpose: 'central-token', name: 'x', plaintext: new Uint8Array(1) })
+      const f = sealRecord({ dek, kid, purpose: 'github-backup', name: 'x', plaintext: new Uint8Array(1) })
       expect(Buffer.from(f.nonce, 'base64').length).toBe(NONCE_BYTES)
       seen.add(f.nonce)
     }
@@ -107,7 +107,7 @@ describe('HKDF', () => {
   it('subkeys differ per purpose and per kid', () => {
     const { dek, kid } = newDataKey()
     const a = Buffer.from(subkey(dek, kid, 'github-backup')).toString('hex')
-    const b = Buffer.from(subkey(dek, kid, 'central-token')).toString('hex')
+    const b = Buffer.from(subkey(dek, kid, 'engine-token')).toString('hex')
     const c = Buffer.from(subkey(dek, 'ffffffffffffffff', 'github-backup')).toString('hex')
     expect(new Set([a, b, c]).size).toBe(3)
   })
@@ -120,7 +120,7 @@ describe('purposes', () => {
     expect(isPurpose('provider-key')).toBe(false)
     expect(isEnginePurpose('engine/')).toBe(false)
     expect(isEnginePurpose('engine/../x')).toBe(false)
-    expect(isEnginePurpose('central-token')).toBe(false)
+    expect(isEnginePurpose('engine-token')).toBe(false)
   })
 })
 

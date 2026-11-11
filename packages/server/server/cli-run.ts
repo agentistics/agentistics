@@ -81,10 +81,9 @@ export const THROWAWAY_ENV_DROP: readonly string[] = [
   // Harness homes the server reads (config.ts, account-roots.ts).
   'CLAUDE_DIR', 'CODEX_DIR', 'GEMINI_DIR', 'COPILOT_DIR', 'ANTIGRAVITY_DIR', 'HERMES_HOME',
   'CLAUDE_CREDENTIALS_FILE', 'CLAUDE_JSON_FILE', 'CLAUDE_SETTINGS_FILE', 'CLAUDE_SETTINGS_LOCAL_FILE', 'CODEX_AUTH_FILE',
-  // Per-file / per-directory relocations of the store's own state (events, tasks, team sync, parse cache).
+  // Per-file / per-directory relocations of the store's own state (events, tasks, parse cache).
   'AGENTISTICS_EVENTS_FILE', 'AGENTISTICS_EVENT_PRODUCER_FILE', 'AGENTISTICS_EVENT_SUBSCRIPTIONS_FILE', 'AGENTISTICS_MOBILE_SUBSCRIPTIONS_FILE',
-  'AGENTISTICS_PARSE_CACHE_FILE', 'AGENTISTICS_DELIVERIES_FILE', 'AGENTISTICS_TASKS_FILE', 'AGENTISTICS_TEAM_CONN_DIR', 'AGENTISTICS_TEAM_DIR', 'AGENTISTICS_TEAM_SENT_FILE',
-  'AGENTISTICS_TEAM_SYNC_FILE',
+  'AGENTISTICS_PARSE_CACHE_FILE', 'AGENTISTICS_DELIVERIES_FILE', 'AGENTISTICS_TASKS_FILE',
   // R1: read through an injected `env` object (opencode-paths.ts, account-login.ts), invisible to a `process.env.X` grep.
   'OPENCODE_DB', 'OPENCODE_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
   // A leaked git hook environment would point the run's git at the owner's real repository / index.
@@ -97,7 +96,6 @@ export const THROWAWAY_ENV_KEEP: Readonly<Record<string, string>> = {
   TMPDIR: 'overwritten by buildThrowawayEnv to the run tmp',
   VOLTA_HOME: 'toolchain location, re-set explicitly from the real one so shims resolve',
   AGENTISTICS_DIR: 'overwritten by buildThrowawayEnv to <home>/.agentistics',
-  MONGO_DB: 'a database NAME on the (never contacted) central, not a path',
   GIT_COMMON_DIR: 'a git variable, not a store path; the fixtures scrub it through gitEnv()',
   FIXTURE_DIR: 'test-only fixture location, never set in a run',
   XDG_CONFIG_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',

@@ -172,7 +172,7 @@ half of the same rule applies: write the real `0`, so "answered none" stays dist
 ## 5. Filters and aggregation
 
 - **`stats-cache.json` is Claude-only.** Never aggregate another harness from it. Non-Claude
-  totals come from per-session sums, everywhere — dashboard, Compare page, team central.
+  totals come from per-session sums, everywhere — dashboard, Compare page.
 - **Never hardcode a harness list.** `HARNESS_ORDER` derives from a `Record`, because TypeScript
   accepts an array literal with a member missing — that silently dropped a harness from the Compare
   page, the filter bar, the data-source list and the consolidate store while the build stayed green.

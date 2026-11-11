@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { upgradeFromUiDecision, UPGRADE_REFUSALS } from './upgrade-gate'
 
-const base = { capable: true, central: false, hasUpdate: true, latest: '2.30.0' }
+const base = { capable: true, hasUpdate: true, latest: '2.30.0' }
 
 describe('who may press "update now"', () => {
   test('a local machine with an update waiting may', () => {
@@ -15,15 +15,6 @@ describe('who may press "update now"', () => {
       .toEqual({ ok: false, reason: 'no-capability' })
   })
 
-  // A central is reachable from the internet and its upgrade is a compose rebuild of minutes, not
-  // a binary swap — a button here would be a remote rebuild trigger on a published host.
-  test('a central may not, whatever its profile says', () => {
-    expect(upgradeFromUiDecision({ ...base, central: true }))
-      .toEqual({ ok: false, reason: 'central' })
-    expect(upgradeFromUiDecision({ ...base, central: true, capable: true }))
-      .toEqual({ ok: false, reason: 'central' })
-  })
-
   // The published image runs the compiled `agentop`, so the not-a-binary refusal no longer catches
   // it: without this a machine container would swap the binary inside itself, lost on recreate.
   test('a container may not upgrade itself — it is replaced by its image', () => {
@@ -31,9 +22,6 @@ describe('who may press "update now"', () => {
       .toEqual({ ok: false, reason: 'container' })
     expect(upgradeFromUiDecision({ ...base, container: false }))
       .toEqual({ ok: true, version: '2.30.0' })
-    // A central container keeps the central's sentence: it names the command to run on its host.
-    expect(upgradeFromUiDecision({ ...base, central: true, container: true }))
-      .toEqual({ ok: false, reason: 'central' })
   })
 
   // Without this the button is a free "download a release again" trigger, repeatable at will.
@@ -47,22 +35,16 @@ describe('who may press "update now"', () => {
     expect(upgradeFromUiDecision({ ...base, latest: null })).toEqual({ ok: false, reason: 'up-to-date' })
   })
 
-  test('the capability is checked BEFORE the central, so a published central never reports its profile', () => {
-    // Both wrong at once: the answer must be the one that discloses least.
-    expect(upgradeFromUiDecision({ ...base, capable: false, central: true }))
-      .toEqual({ ok: false, reason: 'no-capability' })
-  })
-
   // "não é um binário" NÃO pode reusar a frase de "perfil sem permissão": num checkout de
   // desenvolvimento o perfil permite perfeitamente, e a frase mandaria a pessoa mexer na exposição
   // por um motivo que não existe.
   test('every refusal has a sentence in both languages, and none is reused for another reason', () => {
     const seen = new Set<string>()
-    for (const reason of ['no-capability', 'central', 'container', 'up-to-date', 'busy', 'not-a-binary'] as const) {
+    for (const reason of ['no-capability', 'container', 'up-to-date', 'busy', 'not-a-binary'] as const) {
       expect(seen.has(UPGRADE_REFUSALS[reason].pt), reason).toBe(false)
       seen.add(UPGRADE_REFUSALS[reason].pt)
     }
-    for (const reason of ['no-capability', 'central', 'container', 'up-to-date', 'busy', 'not-a-binary'] as const) {
+    for (const reason of ['no-capability', 'container', 'up-to-date', 'busy', 'not-a-binary'] as const) {
       expect(UPGRADE_REFUSALS[reason].pt.length, reason).toBeGreaterThan(10)
       expect(UPGRADE_REFUSALS[reason].en.length, reason).toBeGreaterThan(10)
     }

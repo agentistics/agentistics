@@ -131,12 +131,8 @@ test('the names this pins still exist in the file', () => {
 /**
  * THE STUDIO'S GATE IS READ HERE AND NARROWED NOWHERE.
  *
- * `/api/fleet` is refused WHOLE on a central, and `editor-gate.ts` carries no central term — so a
- * central on a `local` profile with the preference on reports `editorEnabled: true`. That term used
- * to be subtracted on this line, which was correct for the two entries this page owns and said
- * nothing about the next surface to read `ctx.editorEnabled`. It is now subtracted where the value
- * is PUBLISHED (`lib/editorGate.ts`, spent in `App.tsx`'s `appCtx`), and the property — a central
- * never publishes a true `editorEnabled` — is asserted app-wide in `lib/editorGate.test.ts`.
+ * The value is resolved by the server and PUBLISHED once in `App.tsx`'s `appCtx`; nothing here
+ * narrows it again.
  *
  * What is left for THIS page is narrower and still worth pinning: it reads the published value ONCE
  * and adds nothing to it. A second reading is a second gate, which is how the mobile entry came to

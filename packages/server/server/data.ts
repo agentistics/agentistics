@@ -3,13 +3,13 @@ import { join } from 'path'
 import { readFile } from 'fs/promises'
 import type { StatsCache, SessionMeta, ProjectGitStats, HealthIssue, SurfaceHarnessId, WorkflowRun } from '@agentistics/core'
 import { mergeStatsCaches, sessionDay, sanitizeStatsCache, normalizeSessionTimes, sessionTokenTotal, coerceLanguages } from '@agentistics/core'
-import { AGENTISTICS_DATA_DIR, PROJECTS_DIR, SESSION_META_DIR, ARCHIVE_PROJECTS_DIR, ARCHIVE_SESSION_META_DIR, STATS_CACHE_FILE, ARCHIVE_STATS_DIR, ARCHIVE_ENABLED, HOME_DIR, TEAM_MODE, TEAM_CENTRAL, CENTRAL_USER, PARSE_CACHE_ENABLED, JOURNAL_ENABLED, harnessRoots } from './config'
+import { AGENTISTICS_DATA_DIR, PROJECTS_DIR, SESSION_META_DIR, ARCHIVE_PROJECTS_DIR, ARCHIVE_SESSION_META_DIR, STATS_CACHE_FILE, ARCHIVE_STATS_DIR, ARCHIVE_ENABLED, HOME_DIR, PARSE_CACHE_ENABLED, JOURNAL_ENABLED, harnessRoots } from './config'
 import { getArchiveMode } from './preferences'
 import { writeConsolidated, loadConsolidated } from './consolidate'
 import { shadowIngest } from './journal/shadow'
 import { engineIntegrations, loadEngine } from './engine/load'
 import { planProjectFacts, applyProjectFacts, type ResolvedFacts } from './project-facts'
-import { mergeLocalAndIngestedSessions, sessionKey } from './session-merge'
+import { sessionKey } from './session-merge'
 import { writeWorkflowRuns, loadWorkflowRuns } from './workflow-store'
 import { createLimiter, safeReadDir, safeReadJson, safeStat } from './utils'
 import { withTimeout } from './with-timeout'
@@ -20,7 +20,6 @@ import { UUID_RE, decodeProjectDir, getProjectGitStats, getGitRemote, gcGitStats
 // here — the meta-session enrichment they served now runs inside `cachedEnrich`, which
 // reads the transcript once per file VERSION instead of once per build.
 import { parseSessionJsonl } from './jsonl'
-import type { MachineInfo } from './team-tokens'
 import { runHealthChecks, analyzeToolHealthIssues, analyzeCacheStaleness } from './health'
 import { openParseCache, NOOP_PARSE_CACHE, type ParseCache } from './parse-cache'
 import { cachedParseSession, cachedEnrich } from './parse-cache-jsonl'
@@ -53,8 +52,6 @@ export interface ServerProject {
   git_stats?: ProjectGitStats
   /** Normalized git remote (`host/org/repo`, no protocol) of this project's repo, when known. */
   gitRemote?: string
-  /** Team/central only: display names of members who own sessions in this project. */
-  users?: string[]
 }
 
 export interface ApiResponse {
@@ -65,12 +62,6 @@ export interface ApiResponse {
   healthIssues: HealthIssue[]
   homeDir: string
   harnesses: SurfaceHarnessId[]
-  /** Team/central only: each member's own statsCache, keyed by resolved display name. */
-  userStatsCaches?: Record<string, StatsCache>
-  /** Team/central only: the same caches keyed by machine id (memberId), un-grouped. */
-  machineStatsCaches?: Record<string, StatsCache>
-  /** Team/central only: machine id → owner display name + teams. */
-  machineOwners?: Record<string, { user: string; teamIds: string[] }>
   workflows?: WorkflowRun[]
   /** Set ONLY on an answer served before the first fresh build finished (`/api/data?partial=1`):
    *  `quick` is the cheap subset (stats cache + stored sessions, no project scan, no git), `snapshot`
@@ -365,8 +356,7 @@ async function scanProjectDir(
     : undefined
   // Resolve the repo's origin remote once per project. This is the local-machine source of
   // the group-by-repository key; it's stamped onto every session below so it survives being
-  // pushed to a central (which has no filesystem access to the member's repos) and persisted
-  // to the consolidate store. Only the STATS walk is bounded by the build's SOFT deadline
+  // persisted to the consolidate store. Only the STATS walk is bounded by the build's SOFT deadline
   // (`gitBounded`): one slow repository is reported and filled in by a later build, never waited out.
   // The remote is a config read and is NOT — a session written without it would be classified as the
   // `none` bucket by a per-connection denylist naming its repository, and pushed (H1, 2.103.2 review).
@@ -614,11 +604,9 @@ export function serializedData(data: ApiResponse): string {
 }
 
 /** Backfill `git_remote` onto remote-less sessions (and their projects) from any session/project
- *  at the same `project_path` that already carries a remote. Members stamp git_remote at push time
- *  from their local repo, but legacy pushes / older consolidated sessions lack it — without this an
- *  old remote-less session at a now-linked repo shows as a duplicate "no linked repository" card.
- *  The central has NO filesystem access to members' repos (so a git scan can't resolve it there),
- *  which is why the remote is sourced from the sessions themselves. Mutates in place; returns the
+ *  at the same `project_path` that already carries a remote. Older consolidated sessions lack it —
+ *  without this an old remote-less session at a now-linked repo shows as a duplicate "no linked
+ *  repository" card. Mutates in place; returns the
  *  number of sessions stamped. */
 function backfillGitRemote(sessions: SessionMeta[], projects: ServerProject[]): number {
   const pathToRemote = new Map<string, string>()
@@ -711,7 +699,7 @@ let _snapshotWrittenAt = 0
 
 /** The previous run's full build, read once per process. Null when absent or not servable here. */
 export function loadDataSnapshot(): Promise<ApiResponse | null> {
-  if (TEAM_CENTRAL) return Promise.resolve(null)
+  if (false) return Promise.resolve(null)
   _snapshot ??= (async () => {
     const text = await readSnapshotFile(snapshotPath(AGENTISTICS_DATA_DIR))
     if (text === null) return null
@@ -735,7 +723,7 @@ function onFreshBuild(result: ApiResponse): void {
     // Clients holding a partial answer refetch now rather than at their next poll.
     import('./sse').then(m => m.notifySseClients()).catch(() => {})
   }
-  if (!TEAM_CENTRAL && Date.now() - _snapshotWrittenAt >= SNAPSHOT_MIN_INTERVAL_MS) {
+  if (Date.now() - _snapshotWrittenAt >= SNAPSHOT_MIN_INTERVAL_MS) {
     _snapshotWrittenAt = Date.now()
     void (async () => {
       const { CURRENT_VERSION } = await import('./version')
@@ -816,15 +804,14 @@ async function buildQuickResponse(): Promise<ApiResponse> {
  *  snapshot): it is cheap, but once the full build is parsing transcripts the event loop is busy,
  *  and a quick payload STARTED then waits behind it. Started first, it is simply there. */
 export function prepareQuickPayload(): void {
-  if (TEAM_CENTRAL || _status === 'done') return
+  if (_status === 'done') return
   _quick ??= buildQuickResponse()
   _quick.catch(() => { _quick = null })
 }
 
 /** What `/api/data?partial=1` answers. See the block comment above. */
 export async function buildApiResponseForClient(): Promise<ApiResponse> {
-  // A central's data comes from Mongo and is scoped per principal; it keeps the exact path.
-  if (TEAM_CENTRAL || (_status === 'done' && _promise)) return buildApiResponse()
+  if ((_status === 'done' && _promise)) return buildApiResponse()
   const full = buildApiResponse()
   full.catch(() => { /* surfaced through the race below or the next request */ })
   const early = await Promise.race([
@@ -1153,8 +1140,6 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     const storedWorkflows = mode !== 'off' ? await loadWorkflowRuns() : new Map<string, WorkflowRun>()
     const workflowsById = new Map(storedWorkflows)
     for (const r of liveWorkflows) workflowsById.set(r.runId, r)
-    // `workflows` stays mutable — team/central workflow runs (from Mongo) are unioned in
-    // below, after the team-sessions block, then a final sort is applied.
     // Hide empty runs (0 agents) — including any persisted before extraction started dropping
     // them — so the Dynamic Workflows view never shows "0 agents · nothing ran" skeletons.
     let workflows: WorkflowRun[] = [...workflowsById.values()].filter(r => r.agents.length > 0)
@@ -1205,16 +1190,10 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     }
 
     // Backfill git_remote onto remote-less sessions from any session/project at the same path
-    // (see backfillGitRemote). This first pass covers LOCAL sessions; on a MEMBER, persist the
-    // result to the store so the uploader pushes git_remote (the central can only group by remote
-    // and has no filesystem to recover it). It runs AGAIN after the team merge below so a central
-    // also backfills the members' sessions it just read from Mongo.
+    // (see backfillGitRemote). This pass covers every session read so far.
     const localBackfilled = backfillGitRemote(sessions, projects)
-    if (localBackfilled > 0 && !TEAM_CENTRAL && mode !== 'off') {
+    if (localBackfilled > 0 && mode !== 'off') {
       await writeConsolidated(sessions).catch(err => console.warn('[repo] store git_remote heal failed:', String(err)))
-      // The healed sessions now differ (git_remote added) → nudge the uploader to re-push so the
-      // central links them without a manual sent-state reset. No-op if not a running member.
-      import('./team-uploader').then(m => m.notifyDataChanged()).catch(() => {})
     }
 
     // Sort sessions by start_time descending (most recent first)
@@ -1264,7 +1243,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     // Its sessions are rows like any other once the engine has stated their numbers; they join here —
     // BEFORE repository discovery, so a native session's repository resolves exactly as a Codex one does —
     // and are never persisted (`consolidate.ts`) nor fed to the shadow journal (they ARE the journal's).
-    if (!TEAM_CENTRAL) {
+    {
       const { loadNativeSessions } = await import('./native-sessions')
       for (const s of await loadNativeSessions()) {
         sessions.push(s)
@@ -1300,7 +1279,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     // codex 10 / 0, copilot 8 / 1, gemini 15 / 1.
     //
     // It runs BEFORE the writeConsolidated below, so the remote reaches the store — and therefore
-    // the uploader and the central, which has no filesystem to recover it from.
+    // every consumer of the store.
     timer.mark('harnesses')
     await resolveProjectFacts(sessions, projects, gitResolvedPaths)
     timer.mark('projectFacts')
@@ -1313,8 +1292,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     // WRONG conversation is a user reading someone else's work under a title they chose themselves.
     //
     // Before writeConsolidated, so the name reaches the store and survives the harness deleting its
-    // transcript — and it is scrubbed by `redactSecrets` on the way to a central exactly like
-    // `first_prompt`, which it sits beside in `sessionLabel()`.
+    // transcript.
     try {
       const { readRegistry } = await import('./sessions/registry')
       const { applySessionLabels, linkManagedSessions } = await import('./sessions/link-sessions')
@@ -1326,158 +1304,17 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
 
     // Persist non-Claude sessions to the consolidate store too. The Claude-only
     // writeConsolidated() above runs before this merge, so without this the store
-    // (and therefore the team uploader, which pushes loadConsolidated()) would only
-    // ever carry Claude — a central would never receive Codex/Gemini/Copilot data.
+    // would only ever carry Claude.
     // The store is namespaced per harness and writeConsolidated dedups by
     // (harness, session_id), so this never collides with the Claude entries.
     if (mode !== 'off' && extraHarnessSessions.length > 0) {
       await writeConsolidated(extraHarnessSessions)
     }
 
-    // --- Team sessions: central reads Mongo (Phase 2); else folder union (Phase 1) ---
-    if (TEAM_MODE || TEAM_CENTRAL) {
-      let teamSessions: SessionMeta[] = []
-      if (TEAM_CENTRAL) {
-        const { loadTeamSessionsFromMongo } = await import('./team-source')
-        teamSessions = await loadTeamSessionsFromMongo().catch(() => [] as SessionMeta[])
-      } else {
-        const { loadTeamSessions } = await import('./team-source')
-        teamSessions = await loadTeamSessions().catch(() => [] as SessionMeta[])
-      }
-      // A central very often runs on a machine that is ALSO a member of itself, so the same
-      // physical session arrives twice: once from the live `~/.claude` read above, once from
-      // Mongo. Both copies share the `session_id`, so appending blindly double-counted that
-      // machine everywhere sessions are summed. `mergeLocalAndIngestedSessions` collapses the
-      // pair to one row (local data + ingested identity — see session-merge.ts) and tells us
-      // which ingested rows were genuinely new, so only THOSE still need a project entry;
-      // rows that merged into a local session were already surfaced when that session was
-      // scanned, and re-adding them duplicated the project's `sessions[]` list too.
-      const mergedTeam = mergeLocalAndIngestedSessions(sessions, teamSessions)
-      sessions = mergedTeam.sessions
-      for (const s of teamSessions) harnessSet.add(s.harness)
-      for (const s of mergedTeam.ingestOnly) {
-        const existing = projects.find(p => p.path === s.project_path && p.path)
-        if (existing) {
-          existing.sessions.push({ sessionId: s.session_id, created: s.start_time })
-          // Backfill the repo remote if the project was created from a session that lacked it.
-          if (!existing.gitRemote && s.git_remote) existing.gitRemote = s.git_remote
-        } else if (s.project_path) {
-          projects.push({
-            path: s.project_path,
-            name: s.project_path.split('/').filter(Boolean).pop() ?? s.project_path,
-            sessions: [{ sessionId: s.session_id, created: s.start_time }],
-            gitRemote: s.git_remote || undefined,
-          })
-        }
-      }
-      // Central: fold team sessions into statsCache so the unfiltered (no user
-      // selected) Cost/Tokens KPIs reflect the whole team. Safe on a dedicated
-      // central (empty local statsCache → nothing to corrupt); the day<=lastComputed
-      // guard inside supplementStatsCache prevents any double-count.
-      // NOTE: the central's own `statsCache` is NOT supplemented with team sessions here.
-      // Each member's deep history is exposed separately via `userStatsCaches` (below) and
-      // aggregated per-selected-member on the frontend, so the numbers match each machine
-      // exactly. `statsCache` stays the central machine's own (used for CENTRAL_USER).
-
-      // Second backfill pass: now that the members' sessions (from Mongo) are merged in, link any
-      // remote-less session to a repo that ANOTHER session at the same path resolved. Without this
-      // the central's own first pass (local sessions only) never touched the team data, so the
-      // same repo showed up both linked and unlinked. In-memory only (never persisted centrally).
-      backfillGitRemote(sessions, projects)
-    }
-
-    // Central self-contribution: the central machine's OWN local sessions have no `user`
-    // (team sessions from Mongo always do). When AGENTISTICS_CENTRAL_USER is set, tag those
-    // untagged sessions with it so the machine running the central also appears as a member
-    // in the dashboard's user filter — one instance, both roles. No double-count: the
-    // central never pushes itself to Mongo; it reads its own ~/.claude live.
-    if (TEAM_CENTRAL && CENTRAL_USER) {
-      for (const s of sessions) {
-        if (!s.user) s.user = CENTRAL_USER
-      }
-    }
-
-    // --- Team workflow runs: central reads Mongo, unioned with local runs ---
-    // Mirrors the team-sessions block above: each member pushes its own local
-    // WorkflowRun[] (computed metrics only — no chat/prompt text) to the central via
-    // team-uploader.ts → POST /api/team/ingest, stored per (org, memberId, runId) in
-    // team-workflows.ts. Keyed by runId here too, so a run pushed by its own member never
-    // collides with the central's own local discovery of the same run.
-    if (TEAM_CENTRAL) {
-      const { loadTeamWorkflowsFromMongo } = await import('./team-source')
-      const teamWorkflows = await loadTeamWorkflowsFromMongo().catch(() => [] as WorkflowRun[])
-      const merged = new Map(workflows.map(w => [w.runId, w]))
-      for (const w of teamWorkflows) merged.set(w.runId, w)
-      workflows = [...merged.values()]
-      // Same self-contribution as sessions: the central's own local runs have no `user` yet
-      // (team runs from Mongo always do) — tag them with CENTRAL_USER so they surface under
-      // the central machine's own member entry too.
-      if (CENTRAL_USER) {
-        workflows = workflows.map(w => (w.user ? w : { ...w, user: CENTRAL_USER }))
-      }
-    }
-    workflows.sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || ''))
-
-    // Per-member statsCaches: each member's authoritative aggregated history, keyed by the
-    // member's CURRENT display name (resolved via the tokens table). The central's own
-    // self-contribution is added under CENTRAL_USER. The frontend merges the selected
-    // members' caches so KPIs match each machine exactly.
-    let userStatsCaches: Record<string, StatsCache> | undefined
-    // The same caches un-grouped, one per machine. Keeping BOTH shapes is the point: the
-    // display-name grouping above is what the member filter needs, and it is exactly what makes
-    // the machine/team filter impossible to serve from `userStatsCaches` — hence this second map.
-    let machineStatsCaches: Record<string, StatsCache> | undefined
-    let machineOwners: Record<string, { user: string; teamIds: string[] }> | undefined
-    if (TEAM_CENTRAL) {
-      const { loadAllMemberStats } = await import('./team-stats')
-      const { getMemberNameMap, getLiveTokenIds, listMachines } = await import('./team-tokens')
-      const [memberStats, nameMap, liveIds, machines] = await Promise.all([
-        loadAllMemberStats().catch(() => [] as { memberId: string; user: string; statsCache: StatsCache }[]),
-        getMemberNameMap().catch(() => ({} as Record<string, string>)),
-        getLiveTokenIds().catch(() => null),
-        // The empty fallback must be typed as MachineInfo[], not a narrower literal: a literal
-        // missing the effective/inherited/excluded team fields collapses the union and hides them.
-        listMachines().catch(() => [] as MachineInfo[]),
-      ])
-      userStatsCaches = {}
-      machineStatsCaches = {}
-      for (const m of memberStats) {
-        // Skip revoked members — their orphaned statsCache must not keep inflating team KPIs.
-        if (liveIds && !liveIds.has(m.memberId)) continue
-        // Multiple machines can share one display name (a dev with two machines). Key by name and
-        // SUM their caches instead of overwriting — otherwise only the last machine's totals survive.
-        const key = nameMap[m.memberId] ?? m.user
-        const prev = userStatsCaches[key]
-        userStatsCaches[key] = prev ? mergeStatsCaches([prev, m.statsCache]) : m.statsCache
-        machineStatsCaches[m.memberId] = m.statsCache
-      }
-      if (CENTRAL_USER) userStatsCaches[CENTRAL_USER] = statsCache
-      // Owner/teams per machine, resolved from the tokens table — NOT from the sessions, so a
-      // machine whose individual session docs are gone still resolves to its owner and its cache.
-      machineOwners = {}
-      for (const m of machines) {
-        if (liveIds && !liveIds.has(m.id)) continue
-        // EFFECTIVE teams (explicit ∪ inherited-from-owner-accounts − excluded), not the stored
-        // ones: this feeds resolveMachineCacheScope(), which expands a team selection into
-        // machineStatsCaches keys. With the stored list, a team whose machines are inherited
-        // through its member accounts would list the right sessions but resolve fewer caches
-        // than the scope covers — the "a scope reports a fraction of itself" failure that
-        // cacheBlindScope exists to prevent. Authority checks still use the stored fields.
-        machineOwners[m.id] = {
-          user: nameMap[m.id] ?? m.user,
-          teamIds: m.effectiveTeamIds ?? m.teamIds ?? [],
-        }
-      }
-    }
-
     sessions.sort(newestFirst)
 
     // Final safety net: dedup by (harness, session_id) — `sessionKey`.
-    // This key used to include `user`, which silently disabled it on a central that is also a
-    // member of itself: the local read of a session has no `user`, the ingested copy of the SAME
-    // session carries the member's display name, so the two keys differed and BOTH rows survived.
-    // `session_id` is a UUID — the same id on two rows is always the same session, never two
-    // people's work — so `user` must not be part of the identity.
+    // `session_id` is a UUID — the same id on two rows is always the same session.
     const seenHarnessKeys = new Set<string>()
     const dedupedSessions = sessions.filter(s => {
       const key = sessionKey(s)
@@ -1485,22 +1322,6 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
       seenHarnessKeys.add(key)
       return true
     })
-
-    // Tag each project with the set of members who own sessions in it, so the
-    // frontend project filter can be scoped to the selected members deterministically
-    // (no path re-matching, no fallback-to-all that leaks other members' projects).
-    // Built from the final deduped session set, where every team/central session carries `user`.
-    const pathToUsers = new Map<string, Set<string>>()
-    for (const s of dedupedSessions) {
-      if (!s.user || !s.project_path) continue
-      let set = pathToUsers.get(s.project_path)
-      if (!set) { set = new Set(); pathToUsers.set(s.project_path, set) }
-      set.add(s.user)
-    }
-    for (const p of projects) {
-      const set = pathToUsers.get(p.path)
-      if (set && set.size > 0) p.users = Array.from(set)
-    }
 
     const totalTokens = dedupedSessions.reduce((sum, s) => {
       const tokens = sessionTokenTotal(s)
@@ -1530,7 +1351,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     if (deferredGit.size > 0) {
       console.warn(`[data] git for ${deferredGit.size} project(s) took longer than ${GIT_SOFT_DEADLINE_MS} ms; their figures follow in a later build: ${[...deferredGit].slice(0, 5).join(', ')}${deferredGit.size > 5 ? ', …' : ''}`)
     }
-    return { statsCache, projects, allSessions: [] as [], sessions: dedupedSessions, healthIssues, homeDir: HOME_DIR, harnesses: Array.from(harnessSet), userStatsCaches, machineStatsCaches, machineOwners, workflows, ...(deferredGit.size > 0 ? { deferredRepos: [...deferredGit] } : {}) }
+    return { statsCache, projects, allSessions: [] as [], sessions: dedupedSessions, healthIssues, homeDir: HOME_DIR, harnesses: Array.from(harnessSet), workflows, ...(deferredGit.size > 0 ? { deferredRepos: [...deferredGit] } : {}) }
   }
 
   // `withTimeout`, never a bare `Promise.race` against `setTimeout`: the bare form left the 5-minute

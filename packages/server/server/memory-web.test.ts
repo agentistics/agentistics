@@ -7,7 +7,7 @@ const svc = {
   recall: async () => [],
   forget: async (c: string) => (c === 'mem_aaaaaaaa' ? { ok: true as const, versions: 1 } : { ok: false as const, reason: 'not-found' as const }),
 } as unknown as MemoryService
-const deps = (over: Partial<Parameters<typeof handleMemoryRequest>[2]> = {}) => ({ central: false, nativeOn: true, service: async () => svc, ...over })
+const deps = (over: Partial<Parameters<typeof handleMemoryRequest>[2]> = {}) => ({ nativeOn: true, service: async () => svc, ...over })
 const call = (method: string, path: string, d = deps()) => handleMemoryRequest(new Request(`http://x${path}`, { method }), new URL(`http://x${path}`), d)
 
 describe('B6.6: /api/memory', () => {
@@ -17,8 +17,7 @@ describe('B6.6: /api/memory', () => {
     expect((await call('DELETE', '/api/memory/mem_bbbbbbbb')).status).toBe(404)
     expect((await call('DELETE', '/api/memory/..%2Fetc')).status).toBe(404)
   })
-  test('experimental with the native harness; never on a central', async () => {
+  test('experimental with the native harness', async () => {
     expect(await call('GET', '/api/memory', deps({ nativeOn: false }))).toMatchObject({ status: 403, body: { error: 'experimental' } })
-    expect((await call('GET', '/api/memory', deps({ central: true }))).status).toBe(409)
   })
 })

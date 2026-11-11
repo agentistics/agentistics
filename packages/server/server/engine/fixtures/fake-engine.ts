@@ -120,10 +120,6 @@ export function makeFakeEngine(opts: FakeEngineOptions = {}): (host: EngineHostS
           verb: 'provider',
           summary: { en: 'fake provider command', pt: 'comando de provedor falso' },
           async run(args, io) {
-            if (host.isCentral()) {
-              io.err('refused: a central runs no engine command')
-              return 1
-            }
             io.out(`provider ${args.join(' ')}`.trim())
             return 0
           },

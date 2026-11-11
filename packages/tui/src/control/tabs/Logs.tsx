@@ -2,13 +2,13 @@
  * Logs.tsx — a tailing viewer over this machine's service logs.
  *
  * This screen knows nothing about files, journals or docker: every line comes from
- * `host.readLog(source, max)`. That is deliberate — the log for the central is a `docker logs` call
+ * `host.readLog(source, max)`. That is deliberate — the log for the container is a `docker logs` call
  * and the one for a native server is a file, and letting the presentation layer learn that
  * difference is exactly how the TUI would grow a dependency on the host's filesystem.
  *
  * Nor does it know what the sources ARE. They come from `ControlStatus.services` through the pure
  * `logSources`, which is the fix for the one thing this file got persistently wrong: it used to
- * hold `['local', 'central', 'machine'] as const` and print those internal ids as labels, so the
+ * hold a constant list of internal ids and print those internal ids as labels, so the
  * selector offered `local` and `machine` — the native process and the container of the SAME logical
  * service — as two independent things, long after the model had made them one row everywhere else.
  *

@@ -42,7 +42,7 @@ describe('ONE OWNER PER FILE — the host never touches provider-keys (the engin
       }
     }
     expect(offenders).toEqual([])
-    expect(vaultMigrators().map(m => m.id).sort()).toEqual(['central-env', 'envelope-key', 'github-backup', 'preferences-tokens'])
+    expect(vaultMigrators().map(m => m.id).sort()).toEqual(['github-backup'])
   })
 })
 

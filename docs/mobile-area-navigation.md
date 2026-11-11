@@ -46,7 +46,7 @@ Default timer adapters call browser timers through wrappers; storing native time
 on an adapter object gives them a foreign receiver and can crash the browser with Illegal invocation.
 
 Leaders, Check-ins, Hand-offs and Autonomous mode are subpages of Sessions, retaining their `/leadership`
-URLs. The central Home tab returns these document pages to the session list.
+URLs. The Home tab returns these document pages to the session list.
 The shared tree has one Sessions area, with combined session-attention and check-in warning counts.
 On mobile, the list's duplicate page title is omitted. Its local view toggle reads List / Fleet summary:
 the latter shows live fleet cards and differs from the bottom bar's Metrics (the stored dashboard at `/`).

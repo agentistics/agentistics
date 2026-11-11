@@ -7,8 +7,7 @@
  * refusals applies.
  *
  * A REFUSAL IS A CODE, NEVER A SENTENCE. The route renders it, so this module stays language-free —
- * the same split `central-runtime.ts` makes with its reason codes and `LiveUnavailableReason` makes
- * with its own.
+ * the same split `LiveUnavailableReason` makes with its own reason codes.
  */
 
 /**

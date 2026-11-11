@@ -7,7 +7,6 @@
 
 import { TASKS_FILE } from '../config'
 import { loadConsolidated } from '../consolidate'
-import { sessionCostUSD } from '../member-metrics'
 import { readPreferences } from '../preferences'
 import { readRegistry } from './registry'
 import { createTaskStore, type TaskStore } from './task-store'
@@ -16,7 +15,28 @@ import { historicalRows } from './task-historical'
 import { nativeRows } from './task-native'
 import { withNativeAliases } from './native-id-alias'
 import type { BoardRow, ManagedSession } from './types'
-import { CORE_TYPE_ID, coreStatusMigration, planInReviewAdd, planStatusMigration, planTypeMigration, type SessionMeta } from '@agentistics/core'
+import {
+  CORE_TYPE_ID, calcCost, coreStatusMigration, planInReviewAdd, planStatusMigration, planTypeMigration, sessionCostUSD as costByModel,
+  type SessionMeta,
+} from '@agentistics/core'
+
+/** Cost of a single session. Always via `calcCost` — never an inline pricing formula. */
+function sessionCostUSD(s: SessionMeta): number {
+  // Per-model when the session spans several models; single-model otherwise.
+  const byModel = costByModel(s)
+  if (byModel !== null) return byModel
+  return calcCost(
+    {
+      inputTokens: s.input_tokens ?? 0,
+      outputTokens: s.output_tokens ?? 0,
+      cacheReadInputTokens: s.cache_read_input_tokens ?? 0,
+      cacheCreationInputTokens: s.cache_creation_input_tokens ?? 0,
+      webSearchRequests: 0,
+      costUSD: 0,
+    },
+    s.model ?? '',
+  )
+}
 
 /**
  * THE BOARD'S TWO ROW SETS, and why there is no field called plain `rows`.
@@ -33,11 +53,10 @@ import { CORE_TYPE_ID, coreStatusMigration, planInReviewAdd, planStatusMigration
  *    (`attachSession`'s lookup, `detachSession`, `conversation_in_fleet`), or seeds legacy names.
  *  - `rollupRows` — `registryRows` plus one synthetic row per historical link, APPENDED after them.
  *    Use it to answer "what belongs to this delivery and what did it cost": the list, detail,
- *    overview, stats, done gates, subtask `hasSession`, evidence and the sharing to a central.
+ *    overview, stats, done gates, subtask `hasSession`, evidence.
  *    `loadTaskWorld` also appends one NATIVE row per `NativeSessionLink` (`task-native.ts`): a
  *    `BoardRow` whose harness is the native runtime — never a `ManagedSession`, so no fleet code can
- *    take one by type. `loadTaskBoard` (the sharing path) leaves them out: a central's model has no
- *    native harness, and shipping one would be shipping a row nobody there can price or open.
+ *    take one by type. `loadTaskBoard` (the light reader, no consolidate store) leaves them out.
  *
  * Audit of the readers (the registry itself is untouched, so fleet code that calls `readRegistry()`
  * directly — cli-session, cli-start, the sessions host, terminal/input channels, live claims, hardware
@@ -156,10 +175,8 @@ async function readSeededBook(store: TaskStore, registryRows: readonly ManagedSe
 /**
  * The board and the fleet, WITHOUT the consolidate store.
  *
- * The uploader runs on the central's cadence — as often as every few seconds — and already holds
- * the sessions it is about to push, so making it re-read a multi-megabyte store to answer "which
- * deliveries travel" would spend that read on every cycle to learn what it already knows.
- * `loadTaskWorld` is this plus the store, so there is still one reader of the book.
+ * Callers that only need the filing (thread delivery, spawn context) would otherwise re-read a
+ * multi-megabyte store on every call to learn what they do not use. `loadTaskWorld` is this plus the store, so there is still one reader of the book.
  */
 export async function loadTaskBoard(): Promise<{
   store: TaskStore
@@ -170,9 +187,7 @@ export async function loadTaskBoard(): Promise<{
   const store = createTaskStore(TASKS_FILE)
   const registryRows = await readRegistry()
   const book = await readSeededBook(store, registryRows)
-  // No metas here (see this function's note): the rows carry the FILING, which is all the sharing
-  // path reads — the conversation id it ships is the conversation's own, subject to the same
-  // `sessionShared` gate as any other.
+  // No metas here (see this function's note): the rows carry the FILING, which is all these callers read.
   return { store, book, registryRows, rollupRows: [...registryRows, ...historicalRows(book.historicalSessions)] }
 }
 

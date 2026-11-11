@@ -38,7 +38,7 @@ import { join } from 'node:path'
 
 const ROOT = join(import.meta.dir, '..', '..', '..')
 const WORKFLOW_DIR = join(ROOT, '.github', 'workflows')
-const SHELL_SCRIPTS = ['install.sh', 'central.sh', 'start.sh']
+const SHELL_SCRIPTS = ['install.sh', 'start.sh']
 const MARKER = '@git-format-intentional'
 
 /** The non-terminating pretty format, in every spelling git accepts (quoted or bare). */

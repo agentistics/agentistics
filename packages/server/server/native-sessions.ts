@@ -141,15 +141,13 @@ export const NATIVE_FACTS_PATH = '/api/runtime/sessions/facts'
 
 /**
  * The native sessions of THIS machine, or `[]`: the native runtime is experimental (`native-gate.ts` — the
- * flag off means no native figure anywhere), a central has none, and an engine that is absent, older than
+ * flag off means no native figure anywhere), and an engine that is absent, older than
  * this route, or failing answers nothing rather than breaking the data build.
  */
 export async function loadNativeSessions(opts: {
-  central?: boolean
   on?: boolean
   fetch?: (path: string) => Promise<Response | null>
 } = {}): Promise<SessionMeta[]> {
-  if (opts.central) return []
   const { nativeExperimentalOn } = await import('./native-gate')
   if (!(opts.on ?? nativeExperimentalOn())) return []
   try {

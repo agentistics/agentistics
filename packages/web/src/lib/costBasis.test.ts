@@ -206,7 +206,7 @@ describe('sessionPlanFactor — a session allocates against ITS OWN harness', ()
     expect(sessionPlanFactor(basis, 'gemini')).toBe(null)
   })
 
-  it('is null with no basis at all — a central, or nobody has registered a plan', () => {
+  it('is null with no basis at all — or nobody has registered a plan', () => {
     expect(sessionPlanFactor(null, 'claude')).toBe(null)
   })
 })

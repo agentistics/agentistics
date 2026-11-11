@@ -13,7 +13,7 @@
  * `relayed`). `hardware`'s own gate is per-SESSION (`hardwareOffered`), read only at the render
  * layer and never by `resolveForGates` (`panelSlots.ts`'s own `gateOpen`, which does not mention
  * `hardware` at all). So a browser that once docked Hardware at the bottom on an ordinary machine,
- * now pointed at a CENTRAL (`hardwareOffered` always false there), keeps `bottomOccupant ===
+ * now pointed at a relay (`hardwareOffered` always false there), keeps `bottomOccupant ===
  * 'hardware'`; `bottomBandFor` still returns `'hardware'`; `panelBarEntries` filters the one entry
  * this band would have shown. `SimpleDockedBand` mounted anyway — its grip, its (now empty)
  * `PanelBar`, and `PanelFixedControls`' own literal `−` (that component's own header: "ALWAYS THE

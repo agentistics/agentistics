@@ -124,7 +124,6 @@ export default function ExportPage() {
     }
     if (appFilters.projects.length > 0) parts.push(`${appFilters.projects.length} ${t('export.filters.projects', lang)}`)
     if (appFilters.models.length > 0) parts.push(`${appFilters.models.length} ${t('export.filters.models', lang)}`)
-    if ((appFilters.users?.length ?? 0) > 0) parts.push(`${appFilters.users!.length} ${t('export.filters.members', lang)}`)
     if ((appFilters.harnesses?.length ?? 0) > 0) parts.push(`${appFilters.harnesses!.length} ${t('export.filters.harnesses', lang)}`)
     return parts.join(' · ')
   }, [appFilters, lang, pt])

@@ -59,7 +59,7 @@ describe('MobileAreaBar', () => {
     }
   })
 
-  test('the central destination reports attention only when measured and positive', () => {
+  test('the sessions destination reports attention only when measured and positive', () => {
     const html = render('/usage', 4)
     expect(html).toContain('aria-label="Sessões, 4 precisam de você"')
     expect(html).toContain('background:var(--anthropic-orange);color:#0a0a0f')

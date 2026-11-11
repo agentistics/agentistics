@@ -24,9 +24,9 @@ export function runtimeSocketPath(dataDir: string): string {
   return join(dataDir, 'run', 'runtime.sock')
 }
 
-/** PURE: bind the socket at all? Never on a central, and only when some engine route asks for it. */
-export function shouldBindRuntimeSocket(o: { central: boolean; routes: readonly EngineRoute[] | null }): boolean {
-  return !o.central && !!o.routes?.some(r => r.localSocket === true)
+/** PURE: bind the socket at all? Only when some engine route asks for it. */
+export function shouldBindRuntimeSocket(o: { routes: readonly EngineRoute[] | null }): boolean {
+  return !!o.routes?.some(r => r.localSocket === true)
 }
 
 /** The socket's request handler (exported for tests). */

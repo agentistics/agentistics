@@ -3,7 +3,7 @@
  *
  * Only explicit choices are stored (`areaId -> boolean`); an area with no entry follows the default
  * rule in `isAreaOpen` — open when it holds the current URL. A personal choice, so it rides
- * `/api/user-prefs` (per account on a central), never `/api/preferences`.
+ * `/api/user-prefs` (per account), never `/api/preferences`.
  */
 import { createSharedPref } from './sharedPref'
 

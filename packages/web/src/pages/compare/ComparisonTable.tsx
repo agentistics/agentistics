@@ -23,7 +23,7 @@ export interface TableSide {
   label: string
   description?: string
   /** The basis this side asks for. Shown in the header so a mixed table — plan against API, the
-   *  central question of this feature — reads as deliberate rather than inconsistent. */
+   *  core question of this feature — reads as deliberate rather than inconsistent. */
   basis?: 'api' | 'plan'
 }
 

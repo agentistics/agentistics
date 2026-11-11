@@ -6,7 +6,7 @@
 # own: the recordings are published, and a real project name or repository in one
 # cannot be taken back. Build the fleet first:
 #
-#   bun run packages/server/scripts/seed-demo.ts --split 3 --force
+#   bun run packages/server/scripts/seed-demo.ts --force
 #   HOME=~/.agentistics-demo-home-1 PORT=47391 ./release/agentop server &
 #
 # Then:  packages/server/scripts/record-all.sh
@@ -40,21 +40,6 @@ rec() {
     "$HERE/record-cast.sh" "$@"
 }
 
-# The control center's Services tab: move across the tabs, then into the panes.
-# Only navigation — nothing here presses enter on a verb that would start, stop
-# or rebuild anything.
-SETTLE_MS=3500 rec control-center 120 34 "agentop start" -- \
-  Down 1100 Tab 1000 Down 900 Down 900 Tab 1100 Right 1400 Right 1400 Right 1300 Left 1300 Left 1300 Left 1300 q 500
-
-# Setup tab — the solo / central / member wizard, shown but never submitted.
-SETTLE_MS=3500 rec control-center-setup 120 34 "agentop start" -- \
-  Right 1600 Down 1000 Down 1000 Up 1000 q 500
-
-# The cheat sheet: the one screen that is pure reference, so it reads well as a
-# still image too.
-SETTLE_MS=3500 rec control-center-commands 120 34 "agentop start" -- \
-  Right 900 Right 900 Right 1800 Down 900 Down 900 Down 900 q 500
-
 # The live terminal dashboard. It scans the demo home's harness dirs first, so it
 # needs a longer settle before the first keypress. Its screens are bound to the
 # DIGITS and to tab — not to the arrows, which the control center uses; pressing
@@ -65,7 +50,6 @@ SETTLE_MS=12000 TAIL_MS=1800 rec tui 120 34 "agentop tui" -- \
 # Non-interactive commands: one shot each, no keys. These are the ones a reader
 # copies, so they are recorded exactly as typed.
 SETTLE_MS=6000 TAIL_MS=1200 rec status 100 26 "agentop status"
-SETTLE_MS=3000 TAIL_MS=1200 rec member-list 100 22 "agentop member list"
 
 # agentistics' own palette, not a stock terminal theme: the background matches
 # the dashboard's (#0a0a0f) and index 3 is the product's amber rather than a

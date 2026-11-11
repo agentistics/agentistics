@@ -15,8 +15,6 @@
  * Rendered with Chromium (Playwright), not ImageMagick: the plate carries an SVG inner-shadow
  * filter that ImageMagick's own renderer silently drops.
  *
- * The central variant is the same artwork with the accent swapped for teal — a colour swap on
- * the vector, not a hue-rotate of pixels, so it is exact at every size.
  */
 import { chromium } from 'playwright'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -32,20 +30,17 @@ const VSCODE = join(ROOT, 'packages/vscode/media')
 const EXPORTS = join(SRC, 'exports')
 
 const AMBER = '#FD8924'
-const TEAL = '#06B6D4' // central-branding.ts CENTRAL_THEME_COLOR
 const PLATE_DARK = '#191C24'
 
 const read = (f: string) => readFileSync(join(SRC, f), 'utf8')
 const inner = (svg: string) => svg.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '')
-const teal = (svg: string) => svg.split(AMBER).join(TEAL)
 
 const DARK = read('logo-dark.svg')
 const LIGHT = read('logo-light.svg')
 const GLYPH = read('logo-no-background.svg')
 /** The owner's own export of the light logo, when present. It is the final art (the SVG renders
  *  a hairline seam on the left wing and a harder shadow), so where it exists it is used as-is and
- *  only scaled. The teal central variant still comes from the SVG: a raster cannot be recoloured
- *  without touching pixels. */
+ *  only scaled. Anything else comes from the SVG. */
 const LIGHT_PNG = existsSync(join(SRC, 'logo-light.png'))
   ? `data:image/png;base64,${readFileSync(join(SRC, 'logo-light.png')).toString('base64')}`
   : null
@@ -92,7 +87,7 @@ const bare = (svg: string) => svg.replace(/<svg[^>]*>/, '<svg xmlns="http://www.
 
 // THE LOGO'S GEOMETRY IS NEVER TOUCHED. The SVGs are the design: stroke widths, shapes and
 // proportions between the parts are the owner's, and a script may only change SCALE (how big the
-// drawing sits in its canvas) and COLOUR (the teal central set). Thickening a stroke "for
+// drawing sits in its canvas) and nothing else. Thickening a stroke "for
 // legibility" was tried once and rejected outright: it is a different drawing.
 //
 // The Windows taskbar draws an icon at ~26 px on a dark bar, where a dark plate vanishes into it.
@@ -164,9 +159,9 @@ function icns(entries: [string, Buffer][]): Buffer {
   return Buffer.concat([h, body])
 }
 
-for (const central of [false, true]) {
-  const c = central ? teal : (s: string) => s
-  const tag = central ? '-central' : ''
+{
+  const c = (s: string) => s
+  const tag = ''
 
   // ---- Web / PWA -------------------------------------------------------------------------
   for (const s of [192, 512]) {
@@ -190,13 +185,6 @@ put(join(PUBLIC, 'markMask.png'), await png(bare(GLYPH), 512))
 // places that are themselves light (light theme, PDF on white paper, README on GitHub light).
 put(join(PUBLIC, 'logo.png'), await png(plateFull(DARK), 512))
 put(join(PUBLIC, 'logo-light.png'), await png(lightLogo(), 512))
-// The central's in-app marks: the same drawings in teal, picked at runtime by `brandAsset()`
-// (web/src/lib/brand.ts) — a central and a machine serve one bundle, so the choice cannot be made
-// at build time. Without these the central's sidebar, footer and login kept the amber mark while
-// its favicon and installed icon were already teal.
-put(join(PUBLIC, 'minimalistLogo-central.png'), await png(teal(bare(GLYPH)), 512))
-put(join(PUBLIC, 'logo-central.png'), await png(teal(plateFull(DARK)), 512))
-put(join(PUBLIC, 'logo-light-central.png'), await png(teal(plateFull(LIGHT)), 512))
 put(join(ROOT, 'packages/desktop/ui/logo.png'), await png(bare(GLYPH), 256)) // dark window, bare glyph
 
 // ---- Exports for docs / README / store listings ----------------------------------------------
@@ -204,7 +192,6 @@ for (const s of [1024, 512, 256]) {
   put(join(EXPORTS, `logo-dark-${s}.png`), await png(plateFull(DARK), s))
   put(join(EXPORTS, `logo-light-${s}.png`), await png(lightLogo(), s))
   put(join(EXPORTS, `logo-mark-${s}.png`), await png(bare(GLYPH), s))
-  put(join(EXPORTS, `logo-mark-teal-${s}.png`), await png(teal(bare(GLYPH)), s))
 }
 const inter = readFileSync(join(PUBLIC, 'fonts/inter-700.woff2')).toString('base64')
 const social = (w: number, h: number) => `

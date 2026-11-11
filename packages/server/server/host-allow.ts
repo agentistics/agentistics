@@ -362,7 +362,7 @@ function refusalMessage(verdict: Exclude<HostVerdict, { ok: true }>, raw: string
  * when the request may proceed.
  *
  * Applies ONLY while `localShell` is ON. When it is off the capability guard has already answered
- * 403 (it runs first), and a central or a public profile must keep answering exactly as it did —
+ * 403 (it runs first), and a public profile must keep answering exactly as it did —
  * this gate exists for the profile where that 403 is not there to protect anything.
  *
  * 421 Misdirected Request is the status for "this server is not authoritative for the name you

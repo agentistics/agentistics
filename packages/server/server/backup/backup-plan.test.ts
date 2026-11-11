@@ -62,7 +62,6 @@ test('every credential path is excluded, and names how to re-establish it', () =
     '.claude/.credentials.json',
     '.codex/auth.json',
     '.gemini/oauth_creds.json',
-    '.agentistics/connections/some-central.json',
     '.agentistics/provider-keys/anthropic.json',
   ]) {
     const rule = excludeFor(rel)
@@ -177,14 +176,13 @@ test('the repos layer contributes no $HOME source — its content is made, not f
 // billing-detect.test.ts, which greps its own module rather than trusting a reviewer.
 test('no credential filename can pass the filter — asserted over the source itself', () => {
   const src = readFileSync(join(import.meta.dir, 'backup-plan.ts'), 'utf8')
-  for (const needle of ['.credentials.json', 'auth.json', 'oauth_creds.json', 'connections', 'provider-keys']) {
+  for (const needle of ['.credentials.json', 'auth.json', 'oauth_creds.json', 'provider-keys']) {
     expect(src).toContain(needle)
   }
   for (const probe of [
     '.claude/.credentials.json',
     '.codex/auth.json',
     '.gemini/oauth_creds.json',
-    '.agentistics/connections/x',
     '.agentistics/provider-keys/anthropic.json',
   ]) {
     expect(excludeFor(probe)).not.toBeNull()
@@ -214,8 +212,7 @@ test('BACKUP_LAYERS is the whole set and metrics leads it', () => {
 // `packages/tui` may not import from `packages/server` (server -> tui is the only allowed
 // direction), so `BackupLayer` is redeclared there. This is what stops the two drifting: a layer
 // added here and not there would compile fine and simply never be offered by the cockpit's
-// harness list or config pane — the same guard `central-runtime.test.ts` runs for
-// `CentralRuntimeId`.
+// harness list or config pane — a layer added here and not there never reaches it.
 test('the control center\'s BackupLayer union matches BACKUP_LAYERS, member for member', () => {
   const source = readFileSync(join(import.meta.dir, '..', '..', '..', 'tui', 'src', 'control', 'types.ts'), 'utf8')
   const decl = source.match(/export type BackupLayer = ([^\n]+)/)?.[1]
@@ -236,7 +233,7 @@ test('the control center\'s BACKUP_LAYER_ORDER matches BACKUP_LAYERS, in order',
 })
 
 // Found by probing KEY NAMES (never values) under each harness's data dir: `~/.copilot/config.json`
-// carries `copilotTokens`, and `~/.claude/agentistics-preferences.json` carries `team.token`. Neither
+// carries `copilotTokens`, and `~/.claude/agentistics-preferences.json` may carry a legacy `team.token`. Neither
 // was excluded, so both rode out in the raw layer of a published backup. The fixtures below hold key
 // names and empty placeholders only.
 test('config files holding credential keys are excluded from the raw layer', () => {

@@ -24,7 +24,7 @@ import { UPDATE_STRINGS } from '../lib/updateI18n'
 import { resolveNotification } from '../lib/notifications'
 import { UPDATE_NOTICE_CODE } from '../lib/updateToast'
 
-const FORBIDDEN = [/agentop\s+upgrade/i, /systemctl/i, /up:central/i, /\$\s*agentop/i, /terminal/i]
+const FORBIDDEN = [/agentop\s+upgrade/i, /systemctl/i, /\$\s*agentop/i, /terminal/i]
 const noop = () => {}
 const info = { current: '2.30.0', latest: '2.31.0', critical: false }
 

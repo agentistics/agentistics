@@ -81,10 +81,10 @@ export function snoozeActive(s: Snooze | null, latest: string, now: number): boo
 
 export type ToastVerdict =
   | { show: true }
-  | { show: false; why: 'no-update' | 'central' | 'not-installable' | 'snoozed' }
+  | { show: false; why: 'no-update' | 'not-installable' | 'snoozed' }
 
 /**
- * Should the toast appear? LOCAL installs only: a central, a container, a source checkout and a
+ * Should the toast appear? LOCAL installs only: a container, a source checkout and a
  * profile without host power never see it (the modal keeps explaining those by hand). `upgradable`
  * undefined means an older server that does not say — then the toast stays away rather than offer
  * a button the route may refuse.
@@ -93,10 +93,8 @@ export function shouldShowToast(o: {
   info: VersionAnswer | null
   snooze: Snooze | null
   now: number
-  central: boolean
 }): ToastVerdict {
   const { info } = o
-  if (o.central) return { show: false, why: 'central' }
   if (!info || !info.hasUpdate || !isNewer(info.latest, info.current)) return { show: false, why: 'no-update' }
   if (info.upgradable !== null) return { show: false, why: 'not-installable' }
   if (snoozeActive(o.snooze, info.latest, o.now)) return { show: false, why: 'snoozed' }
@@ -112,8 +110,8 @@ export interface PinnedUpdate { current: string; latest: string; critical: boole
  * from the live `/api/version` answer — never stored — so clearing notifications cannot remove it and the
  * upgrade itself (installed version reaches latest) makes it vanish. A snooze silences the POPUP only.
  */
-export function pinnedUpdate(info: VersionAnswer | null, central: boolean): PinnedUpdate | null {
-  if (central || !info || !info.hasUpdate || !isNewer(info.latest, info.current)) return null
+export function pinnedUpdate(info: VersionAnswer | null): PinnedUpdate | null {
+  if (!info || !info.hasUpdate || !isNewer(info.latest, info.current)) return null
   if (info.upgradable !== null) return null
   return { current: info.current, latest: info.latest, critical: info.critical === true }
 }

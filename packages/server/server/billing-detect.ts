@@ -25,10 +25,8 @@
  * absent signal is simply absent, and the chain falls through to the next one.
  *
  * ── EXPOSURE ────────────────────────────────────────────────────────────────────────────────
- * The route is registered in `capability-guard.ts` under `localTranscripts` and additionally
- * 404s on a central. Detection describes ONE machine's own configuration; a central aggregating
- * many machines has no use for its operator's, and the result must never enter an ingest body,
- * a team document or an audit event.
+ * The route is registered in `capability-guard.ts` under `localTranscripts`. Detection describes
+ * ONE machine's own configuration, and the result must never enter an audit event.
  */
 
 import { safeReadJson } from './utils'

@@ -99,7 +99,7 @@ export interface CliStrings {
   rebuildNoCache: string
   restartedAll: string
   restartedDone: string
-  /** A central/machine restart or rebuild whose docker command failed — the old (or no) container
+  /** A restart or rebuild whose docker command failed — the old (or no) container
    *  is what's actually running, and this replaces a false "restarted" banner. */
   restartFailed: string
   noComposeFrom: (dir: string) => string
@@ -441,8 +441,7 @@ export interface CliStrings {
    * The BOOT switch, both positions, composed here for the same reason the starts are: which unit
    * brings a service back is a fact about this box, and `agentistics` has two of them.
    *
-   * `mech` is the mechanism in one word — the runtime for `agentistics`, nothing for the central,
-   * which has only one. The confirmations NAME the unit, because a sentence that says "it will not
+   * `mech` is the mechanism in one word — the runtime for `agentistics`. The confirmations NAME the unit, because a sentence that says "it will not
    * come back" and does not say what was doing the bringing back leaves the user with nothing to go
    * look at — which is the whole of the complaint these strings answer.
    */
@@ -523,7 +522,6 @@ export interface CliStrings {
   /** The restart command reported success, but the server answering requests never confirmed it. */
   upgradeVersionUnconfirmed: (version: string) => string
 
-  // multi-central member commands (Task 6 — spec §8.2)
   cancel: string
 
   // `agentop backup` / `agentop restore` — see backup/daemon.ts and cli-backup.ts

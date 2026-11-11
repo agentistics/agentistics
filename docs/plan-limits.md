@@ -21,8 +21,8 @@ it is unavailable; other available accounts of the same harness remain usable. T
 
 `GET /api/accounts` discovers current accounts for enabled adapters and lists known accounts.
 `PATCH /api/accounts/:harness/:key` accepts `{ "available": false }` (or `true`); keys must be URL
-encoded. Both routes use the billing detection capability and auth gates and are unavailable on a
-team central. The local data directory stores the non-secret registry in `accounts.json`.
+encoded. Both routes use the billing detection capability and auth gates and are unavailable when
+the profile has no host power. The local data directory stores the non-secret registry in `accounts.json`.
 
 Identity probes cache for 60 seconds and fall back to `default` after errors or a two-second timeout.
 An unknown identity inherits the most recently confirmed account's availability, including after

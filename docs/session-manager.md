@@ -657,7 +657,7 @@ to explain themselves in terms of the registry.
 A raw shell is strictly more powerful than the chat, which `chat-gate.ts` already calls the most
 powerful thing this server does: the chat at least spawns a NAMED assistant CLI. So it is a
 separate switch from `chatEnabled`, it is enforced in `index.ts` before the routes rather than only
-in the UI, and a central refuses outright.
+in the UI.
 
 **Owner decision, 2026-09-14: an absent preference now reads as ON** (subject to `capable`), not
 off — reversing the strict rule this section carried before. The bottom bar under every session's

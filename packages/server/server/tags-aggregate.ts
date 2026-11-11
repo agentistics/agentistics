@@ -4,7 +4,7 @@
  * Always per-session sums: `stats-cache.json` is Claude-only and must never back a tag total.
  * Cost goes through calcCost() from @agentistics/core — never inline pricing.
  *
- * No Mongo, no auth, no I/O.
+ * No I/O.
  */
 import {
   EMPTY_TOKENS, addTokens, calcCost, sessionCostUSD, sessionTokens, unpricedTokens,

@@ -5,7 +5,7 @@
  *  spawns whatever the person types into it. So it takes the same two gates, in the same order:
  *
  *  - `capable` is `CAPS.localShell`, decided by the exposure profile in `exposure.ts`. It is the
- *    SECURITY answer, and it is UNCHANGED by the rule below: `lan`/`public` and a central stay OFF
+ *    SECURITY answer, and it is UNCHANGED by the rule below: `lan`/`public` stay OFF
  *    regardless of the preference — the profile is the one thing a preference may never widen past.
  *  - `preference` is the user's own switch, and it may only ever NARROW `capable` — never re-enable
  *    what the profile denied.

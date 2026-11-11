@@ -13,7 +13,7 @@ describe('isServerCommand', () => {
   it('does not match the other agentop verbs', () => {
     expect(isServerCommand('agentop session ls')).toBe(false)
     expect(isServerCommand('agentop check-update')).toBe(false)
-    expect(isServerCommand('agentop central up')).toBe(false)
+    expect(isServerCommand('agentop restart --all')).toBe(false)
   })
 
   it('does not match a command line that merely mentions it', () => {

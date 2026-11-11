@@ -44,7 +44,7 @@ const flush = async () => { for (let i = 0; i < 6; i++) await act(async () => { 
 
 function mount(at: string, lang: 'en' | 'pt' = 'en') {
   const { MemoryRouter, Routes, Route, Outlet } = Router
-  const ctx = { lang, billing: { profiles: {} }, data: { harnesses: ['claude', 'opencode'] }, isCentral: false, saveBilling: async () => {} }
+  const ctx = { lang, billing: { profiles: {} }, data: { harnesses: ['claude', 'opencode'] }, saveBilling: async () => {} }
   const el = document.createElement('div'); document.body.append(el)
   root = createRoot(el)
   act(() => root!.render(h(MemoryRouter, { initialEntries: [at] },

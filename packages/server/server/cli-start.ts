@@ -1520,7 +1520,7 @@ export interface StartHost extends ControlHost {
 async function isUnconfigured(): Promise<boolean> {
   try {
     const prefs = await readPreferences()
-    return !prefs.team || resolveArchiveMode(prefs) === undefined
+    return resolveArchiveMode(prefs) === undefined
   } catch {
     return false
   }

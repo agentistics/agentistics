@@ -5,7 +5,7 @@
  * literal first message, and optionally where to run it and which model/effort to ask for. It is
  * per-MACHINE preference (`Preferences.sessionPresets` in `packages/server/server/preferences.ts`),
  * never board data — "a template I like to reuse" is a fact about how one person works, not about
- * the work itself, and it never travels to a central (same reasoning as `billing`/`comparisons`).
+ * the work itself, and it never leaves the machine (same reasoning as `billing`/`comparisons`).
  *
  * WHY `promptTemplate` HAS NO TEMPLATING SYNTAX: it is the literal text typed into the session's
  * first message, unchanged — exactly the convention `fleet-spawn.ts`'s own `prompt` field already

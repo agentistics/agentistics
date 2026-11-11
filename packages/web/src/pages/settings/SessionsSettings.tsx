@@ -88,16 +88,9 @@ export default function SessionsSettings() {
   const [taskSuggestions, setTaskSuggestions] = useState(false)
   const [taskSuggestionsSaving, setTaskSuggestionsSaving] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
-  // A CENTRAL CAN NEVER RUN THE STUDIO, and this screen is the one place a user turns it on — so it
-  // is the one place a false sentence about it is expensive. `CAPS.localShell` carries no central
-  // term, so a central on a `local` profile reported "your profile allows this and you have it ON.
-  // Each session gets the Studio in the side panel" over a deployment that refuses the whole
-  // `/api/fleet` prefix — every request the Studio makes. It joins the capability rather than
-  // becoming a fourth state: "this instance cannot do this, and nothing here can change that" is
-  // exactly what the unavailable branch already means. Only the REASON differs, so only the reason
-  // is worded apart — the three-way shape the shell's switch above keeps is untouched.
-  const editorCentral = ctx.isCentral
-  const editorCapable = ctx.capabilities?.localShell !== false && !editorCentral
+  // The Studio needs host power: `CAPS.localShell` decides, and this screen is the one place a user
+  // turns it on, so it is the one place a false sentence about it is expensive.
+  const editorCapable = ctx.capabilities?.localShell !== false
   // Autosave is a CONVENIENCE, not a gate: no capability guards it, because it can only ever
   // narrow what `editorEnabled` already gates. It still has to reach the Studio without a
   // reload, so the change is MIRRORED into the app context — but the switch is RENDERED from this
@@ -211,7 +204,7 @@ export default function SessionsSettings() {
       // `ctx.editorEnabled` is the SERVER's own resolved flag (`editorGate.ts`), never re-derived
       // here — so reaching every Studio entry without a reload means asking the server again, in
       // BOTH directions of this switch, rather than mirroring `next` into context as a guess.
-      .then(() => ctx.refreshTeamSession?.())
+      .then(() => ctx.refreshHostSession?.())
       .catch(() => setEditorEnabled(!next))  // put the switch back; nothing was saved
       .finally(() => setEditorSaving(false))
   }
@@ -288,7 +281,7 @@ export default function SessionsSettings() {
 
       <Divider />
 
-      <AwaySection lang={pt ? 'pt' : 'en'} capable={shellCapable && !ctx.isCentral} />
+      <AwaySection lang={pt ? 'pt' : 'en'} capable={shellCapable} />
 
       <PrefRow label={pt ? 'Sugerir criar tarefa ao escrever um pedido (nunca cria automaticamente)' : 'Suggest creating a task when writing a request (never creates automatically)'}>
         <Toggle on={taskSuggestions} disabled={taskSuggestionsSaving} onToggle={() => {
@@ -425,10 +418,6 @@ export default function SessionsSettings() {
           ? (pt
             ? 'Ligado por padrão nesta instância. Dá a cada sessão um "Studio" na barra inferior: a árvore de arquivos e um editor de verdade — desligue aqui se não quiser isso disponível.'
             : 'On by default on this instance. Gives each session a "Studio" entry in the bottom bar: the file tree and a real editor — turn it off here if you would rather not have that available.')
-          : editorCentral
-            ? (pt
-              ? 'Indisponível neste central: ele agrega métricas de outras máquinas e recusa /api/fleet/* por inteiro — não há arquivos daqui para abrir. Ligue o Studio na máquina onde a sessão roda.'
-              : 'Unavailable on a central: it aggregates other machines’ metrics and refuses the whole of /api/fleet/* — there are no files here to open. Turn the Studio on over on the machine the session runs on.')
             : (pt
               ? 'Indisponível: o perfil de exposição desta instância não permite ler nem escrever arquivos do host — o interruptor só pode restringir, nunca reabrir.'
               : 'Unavailable: this instance’s exposure profile does not allow reading or writing host files — the switch can only narrow, never re-open.')}
@@ -458,11 +447,7 @@ export default function SessionsSettings() {
             "your profile denies this" and "your profile allows it, you have it off" are one
             disabled toggle apart and mean different things. */}
         {!editorCapable
-          ? editorCentral
-            ? (pt
-              ? 'Este central recusa /api/fleet/* por inteiro, então o Studio não tem o que abrir aqui — o interruptor está inerte nesta tela, e nem o botão aparece. É uma configuração de máquina, não de central.'
-              : 'This central refuses the whole of /api/fleet/*, so the Studio has nothing to open here — the switch is inert on this screen, and not even the button appears. It is a machine’s setting rather than a central’s.')
-            : (pt
+          ? (pt
               ? 'O perfil desta instância já nega o acesso a arquivos do host; nada aqui pode reabri-lo.'
               : 'This instance’s profile already denies host file access; nothing here can re-open it.')
           : editorEnabled

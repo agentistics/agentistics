@@ -90,8 +90,6 @@ For questions about total Claude Code usage across ALL projects, use agentistics
 | "Generate/export a PDF report" | agentistics_export_pdf |
 | "What tags exist / cost of tag X?" | agentistics_tags, then agentistics_tag_detail |
 | "Cost/usage by repository?" | agentistics_repos |
-| "Am I connected to a team/central?" | agentistics_team_status |
-| "Who's on the team? (central only)" | agentistics_team_members |
 | Any follow-up question | Call tools again — never rely on prior conversation |
 
 ---
@@ -116,8 +114,6 @@ For questions about total Claude Code usage across ALL projects, use agentistics
 | agentistics_tags | List all tags with aggregate sessions/cost/tokens |
 | agentistics_tag_detail | Full detail for one tag: breakdown + top projects/models/harnesses/repos/members |
 | agentistics_repos | Repository breakdown by normalized git remote |
-| agentistics_team_status | This machine's team mode (solo/central/member) and central connections |
-| agentistics_team_members | Team roster (central only): presence, latency, last seen |
 | agentistics_session_groups | The user's session folders/groups and which sessions each holds |
 | agentistics_session_group_create | Create a folder (group), optionally filing sessions into it |
 | agentistics_session_group_edit | Add/remove a session, rename, nest or delete a folder |
@@ -243,7 +239,7 @@ export async function registerMcpGlobally(port: number): Promise<void> {
   // Use the official CLI to register at user scope.
   //
   // A MISSING `claude` binary is a normal state, not a failure: every container image ships
-  // without it (the central and the Docker machine both), and so does any host that runs
+  // without it (the Docker machine too), and so does any host that runs
   // agentistics without Claude Code installed. It used to throw ENOENT out of here into the
   // boot's `.catch(err => console.error(…, err))`, which Bun renders as a ten-line stack with a
   // source snippet — a startup that looks broken while everything except nay-chat is fine.

@@ -7,7 +7,7 @@
  * the remaining sessions; replacing it with another fallen session does.
  *
  * A CHOICE, so it is stored on the SERVER (`/api/user-prefs`, `fellDismissed`; per ACCOUNT on a
- * central) and a banner dismissed on the desktop stays dismissed on the phone. The browser copy
+ * account) and a banner dismissed on the desktop stays dismissed on the phone. The browser copy
  * under the old key is the first paint and the one-time migration source; every accessor is
  * guarded, because a private window or blocked storage must not stop the banner from working.
  */

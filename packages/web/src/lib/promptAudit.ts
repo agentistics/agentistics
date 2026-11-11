@@ -108,7 +108,7 @@ export function auditForSession(
 }
 
 /**
- * Who the send is attributed to. An IAM display name wins where the dashboard knows one (a central /
+ * Who the send is attributed to. An IAM display name wins where the dashboard knows one (
  * IAM login); otherwise this browser's stable operator id, which at least tells two people sharing
  * one local dashboard apart. Never invents a name it does not have — an empty account name falls
  * through to the operator id rather than being recorded as blank.

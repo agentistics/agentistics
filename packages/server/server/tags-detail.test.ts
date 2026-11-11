@@ -41,16 +41,14 @@ test('buckets rank by cost, highest first', () => {
   expect(d.projects[0]!.key).toBe('/pricey')
 })
 
-test('repos, harnesses and members bucket only when the field is present', () => {
+test('repos and harnesses bucket only when the field is present', () => {
   const d = aggregateTagDetail([
-    s({ git_remote: 'github.com/org/a', memberId: 'hash1', harness: 'claude' }),
-    s({ memberId: 'hash1' }),               // no repo
-    s({ git_remote: 'github.com/org/a' }),  // no member
+    s({ git_remote: 'github.com/org/a', harness: 'claude' }),
+    s({ harness: 'claude' }),               // no repo
+    s({ git_remote: 'github.com/org/a' }),
   ])
   expect(d.repos).toHaveLength(1)
   expect(d.repos[0]!.sessions).toBe(2)
-  expect(d.members).toHaveLength(1)
-  expect(d.members[0]!.sessions).toBe(2)
 })
 
 test('daily series is sorted and the window spans first to last active day', () => {
@@ -77,34 +75,4 @@ test('a malformed start_time does not create a bogus day bucket', () => {
   const d = aggregateTagDetail([s({ start_time: 'not-a-date' })])
   expect(d.daily).toEqual([])
   expect(d.firstSessionDate).toBeNull()
-})
-
-test('counts distinct members and machines, not sessions', () => {
-  const d = aggregateTagDetail([
-    s({ user: 'vini', memberId: 'machA' }),
-    s({ user: 'vini', memberId: 'machA' }),   // same person, same machine
-    s({ user: 'vini', memberId: 'machB' }),   // same person, second machine
-    s({ user: 'bryan', memberId: 'machC' }),
-    s({}),                                     // neither → counted in neither set
-  ])
-  expect(d.distinctMembers).toBe(2)
-  expect(d.distinctMachines).toBe(3)
-})
-
-test('an empty tag reports zero members and machines', () => {
-  const d = aggregateTagDetail([])
-  expect(d.distinctMembers).toBe(0)
-  expect(d.distinctMachines).toBe(0)
-})
-
-test('users rank people, not machines — one person on two machines is a single row', () => {
-  const d = aggregateTagDetail([
-    s({ user: 'vini', memberId: 'machA' }),
-    s({ user: 'vini', memberId: 'machB' }),
-    s({ user: 'bryan', memberId: 'machC' }),
-  ])
-  expect(d.users.map(u => u.key).sort()).toEqual(['bryan', 'vini'])
-  expect(d.users.find(u => u.key === 'vini')!.sessions).toBe(2)
-  // The machine ranking still has three rows — the two views answer different questions.
-  expect(d.members).toHaveLength(3)
 })

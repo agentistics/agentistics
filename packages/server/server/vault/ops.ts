@@ -8,21 +8,9 @@
  *   status / lock / unlock      the vault's state; drop the key; give a passphrase vault its passphrase
  *   seal                        plaintext in (the body), the SEALED bytes out — for a CLI that has a
  *                               value the user just typed and must store it
- *   prefs-tokens                the preferences write's token half (prefs-tokens.ts), done here: the
- *                               sealed map is written and verified by the service; the reply is the
- *                               preferences object WITHOUT any token
  *   github-config               the GitHub-backup config with the token REMOVED (`hasToken` instead)
  *   github-fetch                one GitHub REST call to the CONFIGURED repository, the token added
  *                               here; the reply is GitHub's answer (never the token)
- *   central-mongo-kind          'none' | 'bundled' | 'external' — a fact derived from MONGO_URL, never
- *                               the URL (which can carry credentials)
- *   central-compose             `docker compose …` for a vaulted central, SPAWNED here with the sealed
- *                               env (the §5.2 stated exception: Docker needs the env, the CLI never
- *                               sees it); output streamed back
- *   central-native-tool         `agentop setup-token|reset-password` for a native central, spawned
- *                               here with its env, output streamed back
- *   central-env-write           the wizard's new central.env: secrets sealed (merged with the ones
- *                               already sealed) and verified here, the public half written
  *   vault-init / vault-rekey / vault-add-passphrase / vault-reset
  *                               the vault's own administration, run where the key is
  *
@@ -33,9 +21,6 @@ import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { noteFreshSpawn } from '../sessions/harness-spawnable'
 import { grantOf, grantedRef, scrubFor, scrubWithinLimit, useRef } from './grants'
 import { buildVaultBundle, stageBundleRestore } from './bundle-io'
-import { existsSync } from 'node:fs'
-import { basename, dirname, join, resolve, sep } from 'node:path'
-import { homedir } from 'node:os'
 import {
   addPassphraseWrapper, destroyVault, initSentence, rekeyVault, scopeOfPurpose, setupCodeCommand, setupCodeTtyRefusal, type ProtectorId,
 } from '@agentistics/vault'
@@ -124,29 +109,6 @@ async function opSeal(ctx: OpContext): Promise<OpResult> {
   }
 }
 
-// ── preferences tokens ──────────────────────────────────────────────────────────────────────
-
-/** A path the service will write a sealed map beside: the data directory and nothing else. */
-function inDataDir(p: string): boolean {
-  const abs = resolve(p)
-  return abs === resolve(AGENTISTICS_DATA_DIR) || abs.startsWith(resolve(AGENTISTICS_DATA_DIR) + sep)
-}
-
-async function opPrefsTokens(h: Record<string, unknown>): Promise<OpResult> {
-  const { prefsFile, next, previous } = h
-  if (!str(prefsFile) || !inDataDir(prefsFile) || basename(prefsFile) !== 'preferences.json') return bad()
-  if (!next || typeof next !== 'object' || Array.isArray(next)) return bad()
-  if (previous !== null && (typeof previous !== 'object' || Array.isArray(previous))) return bad()
-  const { stripAndSealTokens } = await import('./prefs-tokens')
-  try {
-    const stripped = await stripAndSealTokens(prefsFile, next as Record<string, unknown>, previous as Record<string, unknown> | null)
-    return { reply: { ok: true, stripped } }
-  } catch (err) {
-    const e = err as { code?: string; message?: string }
-    return { reply: refused(e.code ?? 'failed', e.message ?? 'the tokens could not be stored') }
-  }
-}
-
 // ── GitHub backup ───────────────────────────────────────────────────────────────────────────
 
 async function opGithubConfig(): Promise<OpResult> {
@@ -202,130 +164,6 @@ async function opGithubFetch(ctx: OpContext, fetchImpl: typeof fetch = fetch): P
   })
   if (r.ok) return r.value
   return { reply: r.absent ? refused('absent', 'no GitHub backup is configured') : refused(r.code ?? 'locked', r.sentence ?? sentence('locked')) }
-}
-
-// ── central ─────────────────────────────────────────────────────────────────────────────────
-
-const STANDALONE_CENTRAL_DIR = join(homedir(), '.agentistics', 'central')
-
-/** PURE-ish. A central env file this service will load sealed secrets for. */
-async function vaultedEnv(envFile: unknown): Promise<string | null> {
-  if (!str(envFile)) return null
-  const { isVaultedEnvFile } = await import('./central-env')
-  return isVaultedEnvFile(envFile) ? envFile : null
-}
-
-/** PURE. A compose file the service will run: the standalone dir's, or a checkout's docker/central*.yml. */
-export function composeFileAllowed(f: string): boolean {
-  const abs = resolve(f)
-  if (dirname(abs) === resolve(STANDALONE_CENTRAL_DIR) && /^central(\.[a-z]+)*\.yml$/.test(basename(abs))) return true
-  return /^central\.(image|localdb|selfcontrib)\.yml$/.test(basename(abs)) && basename(dirname(abs)) === 'docker'
-    && existsSync(join(dirname(dirname(abs)), 'central.sh'))
-}
-
-const COMPOSE_EXEC = ['exec', '-T', 'app', 'bun', 'run', 'packages/server/bin/cli.ts']
-
-/** PURE. The compose subcommands the service runs for a client. */
-export function composeRestAllowed(rest: readonly string[]): boolean {
-  const [cmd] = rest
-  if (cmd === 'exec') {
-    return COMPOSE_EXEC.every((a, i) => rest[i] === a) && (rest[COMPOSE_EXEC.length] === 'setup-token' || rest[COMPOSE_EXEC.length] === 'reset-password')
-  }
-  return ['up', 'ps', 'logs', 'down', 'restart', 'pull'].includes(cmd ?? '') && rest.every(a => /^[A-Za-z0-9=._-]{1,64}$/.test(a))
-}
-
-async function streamChild(ctx: OpContext, argv: string[], env: Record<string, string>): Promise<OpResult> {
-  let proc: ReturnType<typeof Bun.spawn>
-  try {
-    proc = Bun.spawn(argv, { env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
-  } catch (err) {
-    return { reply: refused('spawn-failed', `could not run ${basename(argv[0] ?? '')}: ${(err as Error)?.message ?? 'spawn failed'}`) }
-  }
-  void ctx.closed.then(() => { try { proc.kill() } catch { /* exited */ } })
-  const pump = async (s: ReadableStream<Uint8Array> | null | undefined, which: 'out' | 'err') => {
-    if (!s) return
-    const dec = new TextDecoder()
-    const reader = s.getReader()
-    try {
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        if (value) ctx.emit(which, dec.decode(value, { stream: true }))
-      }
-    } catch { /* the child went away mid-read */ }
-  }
-  await Promise.all([pump(proc.stdout as ReadableStream<Uint8Array>, 'out'), pump(proc.stderr as ReadableStream<Uint8Array>, 'err')])
-  return { reply: { ok: true, exit: await proc.exited } }
-}
-
-async function centralEnvOf(envFile: string): Promise<{ ok: true; env: Record<string, string> } | { ok: false; sentence: string }> {
-  const { loadCentralSecrets } = await import('./central-env')
-  return loadCentralSecrets(envFile)
-}
-
-async function opCentralMongoKind(h: Record<string, unknown>): Promise<OpResult> {
-  const envFile = await vaultedEnv(h.envFile)
-  if (!envFile) return bad()
-  const s = await centralEnvOf(envFile)
-  if (!s.ok) return { reply: refused('locked', s.sentence) }
-  const url = s.env.MONGO_URL ?? ''
-  const kind = url === '' ? 'none' : /(?:\/\/|@)mongo:\d+/.test(url) ? 'bundled' : 'external'
-  return { reply: { ok: true, kind } }
-}
-
-async function opCentralCompose(ctx: OpContext): Promise<OpResult> {
-  const h = ctx.header
-  const envFile = await vaultedEnv(h.envFile)
-  const files = h.composeFiles
-  const rest = h.rest
-  if (!envFile || !Array.isArray(files) || !files.every(f => typeof f === 'string' && composeFileAllowed(f))) return bad()
-  if (!Array.isArray(rest) || !rest.every(a => typeof a === 'string') || !composeRestAllowed(rest as string[])) return bad()
-  const image = typeof h.image === 'string' && /^[A-Za-z0-9./:@_-]{1,200}$/.test(h.image) ? h.image : null
-  const project = typeof h.project === 'string' && /^[a-z0-9_-]{1,64}$/.test(h.project) ? h.project : 'team-mode'
-  if (!image) return bad()
-  const s = await centralEnvOf(envFile)
-  if (!s.ok && rest[0] === 'up') return { reply: refused('locked', s.sentence) }
-  const argv = ['docker', 'compose', '-p', project, '--env-file', envFile, ...(files as string[]).flatMap(f => ['-f', f]), ...(rest as string[])]
-  const env: Record<string, string> = {
-    ...(process.env as Record<string, string>),
-    ...(s.ok ? s.env : {}),
-    AGENTISTICS_IMAGE: image,
-    ...(h.streamed === true ? { NO_COLOR: '1', BUILDKIT_PROGRESS: 'plain' } : {}),
-  }
-  return streamChild(ctx, argv, env)
-}
-
-/** How THIS service re-invokes agentop (the compiled binary, or `bun cli.ts` from a checkout). */
-function selfArgv(): string[] {
-  const script = process.argv[1]
-  return script && (script.endsWith('.ts') || script.endsWith('.js')) ? [process.execPath, script] : [process.execPath]
-}
-
-async function opCentralNativeTool(ctx: OpContext): Promise<OpResult> {
-  const h = ctx.header
-  const envFile = await vaultedEnv(h.envFile)
-  if (!envFile || (h.action !== 'setup-token' && h.action !== 'reset-password')) return bad()
-  const extra = Array.isArray(h.extraArgs) && h.extraArgs.every(a => typeof a === 'string' && a.length <= 512) ? h.extraArgs as string[] : null
-  if (!extra) return bad()
-  const { loadCentralEnv } = await import('./central-env')
-  const { env, refusal } = await loadCentralEnv(envFile)
-  if (refusal) return { reply: refused('locked', refusal) }
-  return streamChild(ctx, [...selfArgv(), h.action, ...extra], { ...(process.env as Record<string, string>), ...env, AGENTISTICS_TEAM_CENTRAL: '1' })
-}
-
-async function opCentralEnvWrite(ctx: OpContext): Promise<OpResult> {
-  const envFile = await vaultedEnv(ctx.header.envFile)
-  if (!envFile || !ctx.body) return bad()
-  // A vaulted central env lives under the data directory, by definition of isVaultedEnvFile.
-  const text = new TextDecoder().decode(ctx.body)
-  const { writeCentralEnv } = await import('./central-env')
-  try {
-    await writeCentralEnv(envFile, text)
-    return { reply: { ok: true } }
-  } catch (err) {
-    const e = err as { code?: string; message?: string }
-    return { reply: refused(e.code ?? 'failed', e.message ?? 'the central env could not be written') }
-  }
 }
 
 // ── the vault's own administration ──────────────────────────────────────────────────────────
@@ -588,13 +426,8 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
     case 'lock': return opLock(h)
     case 'unlock': return opUnlock(h)
     case 'seal': return opSeal(ctx)
-    case 'prefs-tokens': return opPrefsTokens(h)
     case 'github-config': return opGithubConfig()
     case 'github-fetch': return opGithubFetch(ctx, deps.fetch)
-    case 'central-mongo-kind': return opCentralMongoKind(h)
-    case 'central-compose': return opCentralCompose(ctx)
-    case 'central-native-tool': return opCentralNativeTool(ctx)
-    case 'central-env-write': return opCentralEnvWrite(ctx)
     case 'vault-init': return opInit(h)
     case 'vault-rekey': return opRekey(h)
     case 'vault-add-passphrase': return opAddPassphrase(h)
@@ -615,8 +448,8 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
  */
 export const VAULT_OPS = [
   'fresh-spawn', 'status', 'lock', 'unlock', 'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm',
-  'recovery-begin', 'recovery-confirm', 'setup-code', 'presence-enroll', 'set-auto-lock', 'activity', 'seal', 'prefs-tokens', 'github-config', 'github-fetch', 'central-mongo-kind',
-  'central-compose', 'central-native-tool', 'central-env-write', 'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
+  'recovery-begin', 'recovery-confirm', 'setup-code', 'presence-enroll', 'set-auto-lock', 'activity', 'seal', 'github-config', 'github-fetch',
+  'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
   'personal-refs', 'personal-ref', 'personal-scrub', 'vault-bundle', 'vault-stage-bundle',
 ] as const
 

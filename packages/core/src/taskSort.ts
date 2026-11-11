@@ -89,8 +89,7 @@ export const DEFAULT_SORT: SortSpec = { key: 'manual', dir: 'asc' }
  * `statusOrder` is the board's pipeline (`liveStatusOrder`). Without it `status` compares the raw
  * ids, which is alphabetical — `blocked` before `done` before `todo` — and says nothing a reader can
  * check against the board. With it, "sort by status" means what the columns of the kanban mean: the
- * order the work moves through. A status the list does not know (deleted since, or one a central
- * cannot see) sorts AFTER every known one, deterministically, never as a crash.
+ * order the work moves through. A status the list does not know (deleted since) sorts AFTER every known one, deterministically, never as a crash.
  */
 export interface SortContext {
   statusOrder?: readonly string[]
@@ -188,7 +187,7 @@ export function sortRows<T extends SortableRow>(
  * `sortRows` over a row that is not itself a `SortableRow`, through a projection.
  *
  * A screen sorts by what it DISPLAYS, and that is not always what the shared row type reads: the
- * repository tab and the central's board print `sessionsLinked` (what this view can actually see)
+ * repository tab prints `sessionsLinked` (what this view can actually see)
  * in the "Sessions" column while `SortableRow.rollup.sessionsUsed` is the count of every session
  * filed. Ordering a column by a number other than the one printed in it is a table that looks
  * shuffled, so the projection says which number the column means and the comparator stays one.
@@ -216,7 +215,7 @@ export function nextSort(current: SortSpec, key: SortKey): SortSpec {
 }
 
 /**
- * `nextSort`'s twin for a list with NO board order of its own — the central's board, a subtask list
+ * `nextSort`'s twin for a list with NO board order of its own — a subtask list
  * (whose "own order" is creation) — where the way back from a sort is "no sort at all", not a key.
  * none → ascending → descending → none, generic over the key type so a subtask list, whose columns
  * are not `SortKey`s, cycles through the same three states with the same rule.

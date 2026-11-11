@@ -72,7 +72,7 @@ const CARD_EVENTS: { key: 'nay' | 'waiting' | 'waiting-approval' | 'stale'; pt: 
 ]
 
 /** A chat sound is a person's CHOICE, so it goes through `/api/user-prefs` (per account on a
- *  central) — never the machine file. */
+ *  — never the machine file. */
 function putPreference(body: Record<string, unknown>): void {
   putPersonal(body)
 }

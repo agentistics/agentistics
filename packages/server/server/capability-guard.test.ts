@@ -9,13 +9,11 @@ import { capabilitiesFor, resolveProfile, type ExposureEnv } from './exposure'
 import { RESERVED_PREFIXES } from '@agentistics/engine-api'
 
 const publicCaps = capabilitiesFor('public', {
-  central: true,
   exposure: 'public',
   allowLocalShell: true,
   tls: true,
 })
 const localCaps = capabilitiesFor('local', {
-  central: false,
   exposure: undefined,
   allowLocalShell: false,
   tls: false,
@@ -140,16 +138,6 @@ describe('routeCapability', () => {
     expect(routeCapability('/api/health')).toBeNull()
   })
 
-  it('the RELAYED machine fleet is unguarded ON PURPOSE, not by omission', () => {
-    // The guard maps a path to the LOCAL capability it needs, and this one needs none: it spawns
-    // nothing, reads no transcript and touches no dotfile — the fleet comes from the machine over
-    // the reverse channel. It must not ride `localShell` like /api/fleet does, or it would be
-    // dead on every central (localShell is false on lan and public), which is every deployment
-    // where it means anything. Its own three gates are in machine-fleet-route.ts.
-    expect(routeCapability('/api/team/machine-fleet')).toBeNull()
-    // And it must not accidentally inherit /api/fleet's entry through some prefix rule.
-    expect(routeCapability('/api/fleet')).toBe('localShell')
-  })
 
   it('does not match a route that merely starts with the same characters', () => {
     expect(routeCapability('/api/execute-order-66')).toBeNull()
@@ -177,12 +165,9 @@ describe('capabilityDenied', () => {
 })
 
 test('/api/live-sessions is deliberately NOT blanket-guarded, and the reason is load-bearing', () => {
-  // The route has two halves. Its LOCAL half reads /proc and IS gated — by `CAPS.localProcesses`,
-  // inside the handler (`readLocalLiveSnapshot` in index.ts). Its other half, on a central, is the
-  // members' own self-reported snapshots: not this host's state, and the whole reason the panel
-  // exists there. Registering the path here would return 403 for both and take the central's
-  // "Open now" down with the /proc read. If this ever becomes a single-purpose host route,
-  // register it — until then the guard must stay silent about it on purpose.
+  // The route reads /proc and IS gated — by `CAPS.localProcesses`, inside the handler
+  // (`readLocalLiveSnapshot` in index.ts), which answers with the reason (`capability-off`)
+  // instead of a bare 403. Registering the path here would turn that sentence into a refusal.
   expect(routeCapability('/api/live-sessions')).toBeNull()
   const src = readFileSync(new URL('./index.ts', import.meta.url), 'utf-8')
   expect(src).toContain('CAPS.localProcesses')
@@ -262,10 +247,10 @@ type RegisteredRouteMutable = { path: string; match: 'exact' | 'prefix'; capabil
 
 describe('the dev config routes (/api/config*) — they write the file the server boots from', () => {
   // `PUT /api/config` rewrites `.env.config` and `POST /api/config/restore` copies its backup over
-  // it; `loadEnvConfig` feeds that file into process.env at the next start. Unguarded, a central
-  // refused `/api/fleet` while leaving writable the file that can re-open it.
-  const centralEnv: ExposureEnv = { central: true, exposure: undefined, allowLocalShell: false, tls: false }
-  const centralCaps = capabilitiesFor(resolveProfile(centralEnv), centralEnv)
+  // it; `loadEnvConfig` feeds that file into process.env at the next start. Unguarded, a profile
+  // that refused `/api/fleet` would leave writable the file that can re-open it.
+  const lanEnv: ExposureEnv = { exposure: 'lan', allowLocalShell: false, tls: false }
+  const lanCaps = capabilitiesFor(resolveProfile(lanEnv), lanEnv)
 
   it('maps both writes, and any sub-path added later, to localShell', () => {
     expect(routeCapability('/api/config')).toBe('localShell')
@@ -275,13 +260,12 @@ describe('the dev config routes (/api/config*) — they write the file the serve
     expect(routeCapability('/api/configuration')).toBeNull()
   })
 
-  it('is refused wherever localShell is off: a default central, and public even with the opt-in', () => {
-    // A central with no AGENTISTICS_EXPOSURE resolves to `lan`, where host power is off unless
-    // the operator opted in — so both routes answer 403 there.
-    expect(resolveProfile(centralEnv)).toBe('lan')
+  it('is refused wherever localShell is off: lan without the opt-in, and public even with it', () => {
+    // On `lan` host power is off unless the operator opted in — so both routes answer 403 there.
+    expect(resolveProfile(lanEnv)).toBe('lan')
     for (const path of ['/api/config', '/api/config/restore']) {
       const cap = routeCapability(path)!
-      expect(capabilityDenied(cap, centralCaps)?.status).toBe(403)
+      expect(capabilityDenied(cap, lanCaps)?.status).toBe(403)
       expect(capabilityDenied(cap, publicCaps)?.status).toBe(403)
       // The solo machine keeps its dev panel.
       expect(capabilityDenied(cap, localCaps)).toBeNull()

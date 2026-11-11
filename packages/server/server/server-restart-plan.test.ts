@@ -38,7 +38,7 @@ describe('isAgentopServerArgv — the process IS `agentop server`, judged on its
 describe('managedByAgentopUnit — read off /proc/<pid>/cgroup', () => {
   test('a process inside an agentop systemd unit belongs to the service manager', () => {
     expect(managedByAgentopUnit(SERVICE_CGROUP)).toBe(true)
-    expect(managedByAgentopUnit('0::/user.slice/user-1000.slice/user@1000.service/app.slice/agentop-central.service')).toBe(true)
+    expect(managedByAgentopUnit('0::/user.slice/user-1000.slice/user@1000.service/app.slice/agentop-machine.service')).toBe(true)
   })
   test('the root cgroup, a tmux scope, or a terminal session does not', () => {
     expect(managedByAgentopUnit(ROOT_CGROUP)).toBe(false)

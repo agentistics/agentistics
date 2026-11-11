@@ -18,14 +18,8 @@
  *
  * Usage:
  *   bun run packages/server/scripts/seed-demo.ts [--out <dir>] [--force]
- *   bun run packages/server/scripts/seed-demo.ts --split 3 --force
  *   HOME=<dir> agentop server        # run the demo machine against it
  *
- * `--split <n>` writes n sibling homes (`<out>-1`, `<out>-2`, …) instead of one,
- * partitioning the sessions by project so each machine has its own working set.
- * Some repositories are deliberately left on more than one machine: a central
- * only shows cross-machine repository grouping, per-machine filters and the
- * sibling sharing-rule warnings when the same repo genuinely appears twice.
  *
  * Default output: ~/.agentistics-demo-home
  */
@@ -43,20 +37,6 @@ const argv = process.argv.slice(2)
 const outFlag = argv.indexOf('--out')
 const OUT_HOME = outFlag >= 0 ? argv[outFlag + 1]! : join(HOME, '.agentistics-demo-home')
 const FORCE = argv.includes('--force')
-const splitFlag = argv.indexOf('--split')
-const SPLIT = splitFlag >= 0 ? Math.max(1, parseInt(argv[splitFlag + 1] ?? '1', 10)) : 1
-
-/** Which machines a demo project lives on. Most sit on exactly one; the first
- *  three are shared, because the cross-machine views (repository grouping, the
- *  per-machine filter, the sibling withheld-repository warning) are only
- *  demonstrable when one repository is genuinely present on two machines. */
-function machinesFor(projectName: string, total: number): number[] {
-  if (total === 1) return [0]
-  const shared = ['atlas-api', 'harbor-web', 'kiln']
-  if (shared.includes(projectName)) return [0, 1 % total]
-  const h = createHash('sha256').update('machine\0' + projectName).digest()
-  return [h.readUInt32BE(0) % total]
-}
 
 /* ------------------------------------------------------------------ names */
 
@@ -125,8 +105,6 @@ const FILES = [
   'src/store/session.ts', 'src/workers/queue.ts', 'docs/architecture.md',
 ]
 
-const USERS = ['ana', 'bruno', 'chen', 'dara', 'emil', 'farid']
-const MACHINES = ['workstation', 'laptop', 'devbox', 'mac-mini']
 
 /* ------------------------------------------------------------- pseudonyms */
 
@@ -154,8 +132,6 @@ function demoRemote(realRemote: string | undefined, realPath: string): string | 
 }
 
 const demoPrompt = (real: string, key: string) => (real ? pick(PROMPTS, key, 'prompt') : real)
-const demoUser = (real: string | undefined, key: string) =>
-  real === undefined ? undefined : `${pick(USERS, key, 'user')}-${pick(MACHINES, key, 'machine')}`
 
 /** A session id is not itself identifying, but it appears in URLs next to
  *  pseudonymized data; rehashing keeps the demo home internally consistent
@@ -182,7 +158,6 @@ function scrubSession(real: SessionMeta): SessionMeta {
   if (real.native_session_id !== undefined) out.native_session_id = demoId(real.native_session_id)
   if (real.title !== undefined) out.title = real.title ? pick(PROMPTS, key, 'title') : real.title
   if (real.git_remote !== undefined) out.git_remote = demoRemote(real.git_remote, real.project_path)
-  if (real.user !== undefined) out.user = demoUser(real.user, real.user)
 
   // agent_file_reads is keyed by real file paths.
   if (real.agent_file_reads && Object.keys(real.agent_file_reads).length) {
@@ -253,7 +228,6 @@ function synthesize(harness: HarnessId, count: number, template: SessionMeta[]):
       harness,
       model: MODELS[harness],
       model_usage: undefined,
-      user: undefined,
       input_tokens: Math.round(base.input_tokens * scale),
       output_tokens: Math.round(base.output_tokens * scale),
       cache_read_input_tokens: Math.round((base.cache_read_input_tokens ?? 0) * scale),
@@ -300,11 +274,9 @@ async function readStore(): Promise<Map<HarnessId, SessionMeta[]>> {
   return byHarness
 }
 
-/** Writes one demo home. `machine` is its index in a `--split` run; -1 means
- *  the single-home case, where every session belongs to it. */
+/** Writes the demo home. */
 async function writeHome(
   home: string,
-  machine: number,
   byHarness: Map<HarnessId, SessionMeta[]>,
   statsRaw: string | null,
 ): Promise<number> {
@@ -315,12 +287,7 @@ async function writeHome(
   let written = 0
   const perHarness: string[] = []
   for (const [harness, sessions] of byHarness) {
-    const mine = machine < 0
-      ? sessions
-      : sessions.filter(s => {
-          const name = s.project_path.split('/').filter(Boolean).pop() ?? ''
-          return machinesFor(name, SPLIT).includes(machine)
-        })
+    const mine = sessions
     if (!mine.length) continue
     const dir = join(home, '.agentistics', 'sessions', harness)
     await mkdir(dir, { recursive: true })
@@ -338,10 +305,6 @@ async function writeHome(
     const stats = JSON.parse(statsRaw) as Record<string, unknown>
     const longest = stats.longestSession as { sessionId?: string } | undefined
     if (longest?.sessionId) longest.sessionId = demoId(longest.sessionId)
-    // In a split run the Claude-only cache would otherwise report the SAME
-    // full-history totals on every machine, so the central would show three
-    // machines each claiming all of it. Scale it down to this machine's share.
-    if (machine >= 0) scaleStats(stats, written, [...byHarness.values()].reduce((n, l) => n + l.length, 0))
     await writeFile(join(home, '.claude', 'stats-cache.json'), JSON.stringify(stats))
   }
 
@@ -357,32 +320,6 @@ async function writeHome(
   return written
 }
 
-/** The Claude stats cache carries no project dimension, so it cannot be split
- *  by project the way the sessions are. Scaling every count by this machine's
- *  share of the sessions keeps the three demo machines from each reporting the
- *  whole fleet's history — the shapes stay real, the totals stay plausible. */
-function scaleStats(stats: Record<string, unknown>, mine: number, total: number): void {
-  const f = total > 0 ? mine / total : 1
-  const n = (v: unknown) => (typeof v === 'number' ? Math.max(1, Math.round(v * f)) : v)
-  stats.totalSessions = n(stats.totalSessions)
-  stats.totalMessages = n(stats.totalMessages)
-  for (const day of (stats.dailyActivity as Record<string, unknown>[] | undefined) ?? []) {
-    day.messageCount = n(day.messageCount)
-    day.sessionCount = n(day.sessionCount)
-    day.toolCallCount = n(day.toolCallCount)
-  }
-  for (const day of (stats.dailyModelTokens as Record<string, unknown>[] | undefined) ?? []) {
-    const byModel = day.tokensByModel as Record<string, number> | undefined
-    for (const k of Object.keys(byModel ?? {})) byModel![k] = n(byModel![k]) as number
-  }
-  const usage = stats.modelUsage as Record<string, Record<string, number>> | undefined
-  for (const model of Object.values(usage ?? {})) {
-    for (const k of Object.keys(model)) model[k] = n(model[k]) as number
-  }
-  const hours = stats.hourCounts as Record<string, number> | undefined
-  for (const k of Object.keys(hours ?? {})) hours![k] = n(hours![k]) as number
-}
-
 async function run(): Promise<void> {
   if (!HOME) throw new Error('HOME is not set')
 
@@ -394,29 +331,16 @@ async function run(): Promise<void> {
     )
   }
 
-  // Scrub once, up front, so every home is written from the same pseudonymized
-  // set — a session must not land on two machines under two different names.
+  // Scrub once, up front, so the home is written from one pseudonymized set.
   const scrubbed = buildDemoStore(real)
 
   const statsRaw = await readFile(REAL_STATS, 'utf8').catch(() => null)
 
   console.log()
-  let total = 0
-  if (SPLIT === 1) {
-    total = await writeHome(OUT_HOME, -1, scrubbed, statsRaw)
-  } else {
-    for (let i = 0; i < SPLIT; i++) {
-      total += await writeHome(`${OUT_HOME}-${i + 1}`, i, scrubbed, statsRaw)
-    }
-  }
+  const total = await writeHome(OUT_HOME, scrubbed, statsRaw)
 
   console.log(`\n${total} sessions across ${scrubbed.size} harnesses`)
-  console.log(
-    SPLIT === 1
-      ? `\nrun it with:\n  HOME=${OUT_HOME} agentop server`
-      : `\nrun them with:\n${Array.from({ length: SPLIT }, (_, i) =>
-          `  HOME=${OUT_HOME}-${i + 1} PORT=${47391 + i * 10} agentop server`).join('\n')}`,
-  )
+  console.log(`\nrun it with:\n  HOME=${OUT_HOME} agentop server`)
 }
 
 if (import.meta.main) await run()

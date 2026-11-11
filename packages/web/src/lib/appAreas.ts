@@ -25,7 +25,7 @@ export interface AreaPage {
   labelEn: string
   beta?: boolean
   /** Settings sections only: the heading the tree groups them under. */
-  group?: 'personal' | 'governance'
+  group?: 'personal'
 }
 
 export interface Area {
@@ -70,7 +70,6 @@ export const APP_AREAS: readonly Area[] = [
   ] },
   { id: 'repositories', icon: 'git', labelPt: 'Repositórios', labelEn: 'Repositories', pages: [
     { id: 'list', path: '/repositories', also: ['/repo'], labelPt: 'Lista', labelEn: 'List' },
-    { id: 'actions', path: '/repositories/actions', labelPt: 'Execuções de CI', labelEn: 'Actions' },
     { id: 'workflows', path: '/workflows', labelPt: 'Workflows', labelEn: 'Workflows' },
   ] },
   { id: 'vault', icon: 'lock', labelPt: 'Cofre', labelEn: 'Vault', pages: [], root: '/vault' },

@@ -27,7 +27,7 @@ export type VaultItemReason = 'plaintext' | 'wrong-machine' | 'unparseable' | 'm
 
 export interface VaultItem {
   /** What the secret IS — a stable code the web maps to words. */
-  kind: 'github-backup' | 'central-token' | 'envelope-key' | 'central-env' | 'other'
+  kind: 'github-backup' | 'other'
   state: VaultItemState
   reason?: VaultItemReason
   /** ISO instant the file was sealed (from its own header). Absent for a pending item. */
@@ -112,17 +112,13 @@ export function methodGestures(id: string): { enroll: number; unlock: number } {
 }
 
 const KIND_OF_PURPOSE: Record<string, VaultItem['kind']> = {
-  'github-backup': 'github-backup', 'central-token': 'central-token',
-  'envelope-key': 'envelope-key', 'central-env': 'central-env',
+  'github-backup': 'github-backup',
 }
 
 /** PURE. Which secret a plaintext file still holds, from its name. */
 export function kindOfPendingFile(file: string): VaultItem['kind'] {
   const b = basename(file)
   if (b.startsWith('github-backup')) return 'github-backup'
-  if (b === 'preferences.json' || b === '.claude.json') return 'central-token'
-  if (b.startsWith('machine-key') || b.startsWith('envelope-key')) return 'envelope-key'
-  if (b.endsWith('.env')) return 'central-env'
   return 'other'
 }
 

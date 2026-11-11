@@ -97,7 +97,7 @@ export interface CompareSide {
 export interface CompareCell {
   value: number | null
   /** The basis THIS column actually used. Columns may differ — comparing what a plan cost against
-   *  what the same work would have cost at API prices is the central question this feature exists
+   *  what the same work would have cost at API prices is the core question this feature exists
    *  for, and forbidding it forbade the point. What must never happen is a column QUIETLY falling
    *  back while wearing the other's label, which is why every cell carries its own. */
   basis: MetricBasis

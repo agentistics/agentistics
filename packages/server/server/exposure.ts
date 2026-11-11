@@ -7,9 +7,9 @@
  *
  * Profiles:
  *   local  — solo machine on 127.0.0.1. Full local power, no auth (today's behaviour).
- *   lan    — a central reachable from a trusted network (LAN/Tailscale). Auth on, local power
+ *   lan    — an instance reachable from a trusted network (LAN/Tailscale). Auth on, local power
  *            off unless explicitly opted in.
- *   public — a central published on the internet. Local power is unavailable, period: there is
+ *   public — an instance published on the internet. Local power is unavailable, period: there is
  *            no opt-in for arbitrary shell on an instance strangers can reach.
  *
  * Fail-closed: an unrecognised AGENTISTICS_EXPOSURE value resolves to `public`.
@@ -18,7 +18,6 @@
 export type ExposureProfile = 'local' | 'lan' | 'public'
 
 export interface ExposureEnv {
-  central: boolean
   exposure: string | undefined
   allowLocalShell: boolean
   tls: boolean
@@ -33,8 +32,8 @@ export interface Capabilities {
   localTranscripts: boolean
   /** GET /api/live-sessions' LOCAL half — reads /proc: which assistants run on the host and in
    *  which directories. A cwd is usually a repository name, so this is host state even though it
-   *  is not a transcript. The route is NOT registered in capability-guard, because on a central it
-   *  also serves members' self-reported snapshots, which stay available when this is off. */
+   *  is not a transcript. Gated inside the route handler (`readLocalLiveSnapshot` in index.ts), not
+   *  registered in capability-guard. */
   localProcesses: boolean
   /** `/api/mcp` and everything under it — reads this machine's MCP server configuration and, via
    *  `/api/mcp/install` and `/api/mcp/remove`, runs `claude mcp` to change it (~/.claude.json).
@@ -47,7 +46,7 @@ export interface Capabilities {
 }
 
 export function resolveProfile(env: ExposureEnv): ExposureProfile {
-  if (env.exposure === undefined || env.exposure === '') return env.central ? 'lan' : 'local'
+  if (env.exposure === undefined || env.exposure === '') return 'local'
   if (env.exposure === 'local' || env.exposure === 'lan' || env.exposure === 'public') return env.exposure
   return 'public' // unknown value → most restrictive
 }
@@ -74,8 +73,7 @@ export function capabilitiesFor(profile: ExposureProfile, env: ExposureEnv): Cap
       localShell: env.allowLocalShell,
       localChat: env.allowLocalShell,
       localTranscripts: env.allowLocalShell,
-      // A LAN central is normally the aggregator, not a workstation; its own /proc says nothing
-      // useful and its members report their own. Follows the same opt-in as the other host powers.
+      // LAN host powers require explicit opt-in.
       localProcesses: env.allowLocalShell,
       mcpAdmin: env.allowLocalShell,
       requireMfaForOwner: true,
@@ -99,10 +97,9 @@ export function capabilitiesFor(profile: ExposureProfile, env: ExposureEnv): Cap
 // ---------------------------------------------------------------------------
 
 export const EXPOSURE_ENV: ExposureEnv = {
-  central: process.env.AGENTISTICS_TEAM_CENTRAL === '1',
   exposure: process.env.AGENTISTICS_EXPOSURE,
   allowLocalShell: process.env.AGENTISTICS_ALLOW_LOCAL_SHELL === '1',
-  tls: process.env.AGENTISTICS_TEAM_TLS === '1',
+  tls: process.env.AGENTISTICS_TLS === '1',
 }
 
 export const PROFILE: ExposureProfile = resolveProfile(EXPOSURE_ENV)

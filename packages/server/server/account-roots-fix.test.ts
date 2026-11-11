@@ -40,7 +40,7 @@ describe('H1 — the roots routes ride the shell gate', () => {
     expect(routeCapability('/api/accounts/abc')).toBe('localTranscripts')
   })
   test('a foreign Host gets 421 on every roots route', () => {
-    const caps = capabilitiesFor('local', { central: false, exposure: undefined, allowLocalShell: false, tls: false })
+    const caps = capabilitiesFor('local', { exposure: undefined, allowLocalShell: false, tls: false })
     const list = buildHostAllowlist({ hostname: 'box', interfaceAddresses: ['127.0.0.1'], ports: [PORT, PORT + 1], allowedOrigins: [], secureOrigin: undefined } as never)
     for (const path of ['/api/accounts/roots', '/api/accounts/roots/r_1', '/api/accounts/roots/r_1/code']) {
       const res = hostGate(path, `evil.example:${PORT}`, list, caps)

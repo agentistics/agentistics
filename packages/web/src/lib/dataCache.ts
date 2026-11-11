@@ -19,7 +19,7 @@
  *    kept growing (`machineStatsCaches`, `harnesses`, workflow runs…), so an upgrade reads a
  *    payload shaped for a different version of this code.
  *  - `fetch('/api/data')` answered 200 with something that is not an `AppData` — a proxy page, a
- *    captive portal, an ingest-only central — and the same blind cast cached it.
+ *    captive portal, an ingest-only host — and the same blind cast cached it.
  *
  * This is deliberately a SHAPE check and not a schema: it asserts only what the render path
  * dereferences without its own guard. `statsCache` is the one that actually crashes today; the

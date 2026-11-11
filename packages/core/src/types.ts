@@ -477,25 +477,14 @@ export interface SessionMeta {
   /** Registry account id of the root this session was read from. Absent for the default root
    *  without a binding (PLAN.ACCOUNTS D2). */
   account?: string
-  /** Owning user in team mode. Undefined for local/Solo sessions. */
-  user?: string
   /** Normalized git remote of the session's repo (`host/org/repo`, no protocol) — the
    *  "group by repository" key. Set server-side from the local repo's `remote.origin.url`
    *  (or authoritatively from a repo-bound token on CI ingest). Empty/undefined when the
    *  project is not a git repo or has no origin remote. See `normalizeGitRemote`. */
   git_remote?: string
-  /** Primary team of the owning machine (teamIds[0]) — central read-time tag; kept for
-   *  single-value consumers. */
-  teamId?: string
-  /** ALL teams the owning machine belongs to (central read-time tag). A session is visible/filtered
-   *  by ANY of these — a machine can be in several teams. Falls back to [teamId] on legacy data. */
-  teamIds?: string[]
-  /** Stable machine identity (the member token's sha256 hash) — central read-time tag, used to
-   *  filter by an individual machine. Matches `machine.id` from /api/iam/machines. */
+  /** Stable machine identity. Tags resolve a `machine` source against it; on a single machine every
+   *  session carries the same one (`tags-handlers.ts` stamps it). */
   memberId?: string
-  /** True when this session was produced by a CI runner (Claude Code GitHub Actions), stamped
-   *  authoritatively by the central on ingest via a repo-bound token. Powers the Actions view. */
-  ci?: boolean
   _source?: 'meta' | 'jsonl' | 'subdir'
   agentMetrics?: SessionAgentMetrics
   /** Number of MCP tool calls recorded in this session (Copilot adapter). */
@@ -565,7 +554,7 @@ export interface WorkflowAgent {
   label: string
   phase: string
   /** The id its transcript is named after (`agent-<id>.jsonl`) — what a detail view asks for.
-   *  Optional because a doc written by an older central predates it. */
+   *  Optional because a record written by an older version predates it. */
   agentId?: string
   /** Where `label`/`phase` came from. `record` is the run's own `workflowProgress` and is exact;
    *  `matched` is `workflow-match.ts` pairing by prompt; `none` means neither could say, and the
@@ -609,8 +598,6 @@ export interface WorkflowRun {
   runId: string
   name: string
   sessionId: string
-  /** Owning user in team mode (set by the central on ingest). Undefined for local runs. */
-  user?: string
   /** `running` and `abandoned` exist because absence of a completion report is not evidence of
    *  completion — see workflow-live.ts. A run in flight used to be published as `completed`. */
   status: 'completed' | 'failed' | 'partial' | 'running' | 'abandoned' | 'killed'
@@ -618,7 +605,7 @@ export interface WorkflowRun {
   durationMs: number
   phases: WorkflowPhase[]
   agents: WorkflowAgent[]
-  /** `cacheRead`/`cacheWrite` are optional only because a doc written by an older central (or an
+  /** `cacheRead`/`cacheWrite` are optional only because a record written by an older version (or an
    *  older consolidate store) predates them — read them through `workflowTokens()`, never bare, or
    *  the headline understates a cache-heavy run by orders of magnitude while the cost beside it
    *  (which always priced the cache) says otherwise. */
@@ -735,10 +722,6 @@ export interface Project {
   /** Normalized git remote (`host/org/repo`, no protocol) of this project's repo, when known.
    *  Drives the group-by-repository dimension (Repositories page). See `normalizeGitRemote`. */
   gitRemote?: string
-  /** Team/central only: display names of the members who own sessions in this project.
-   *  Lets the frontend scope the project filter to the selected members deterministically,
-   *  instead of re-matching paths against user-filtered sessions. Absent/empty on solo. */
-  users?: string[]
 }
 
 export interface HealthIssue {
@@ -748,16 +731,6 @@ export interface HealthIssue {
   description: string
   guide?: string
   auto_fixed?: boolean
-}
-
-/** Team/central only: a member's live connection status, keyed by resolved display name. */
-export interface MemberPresence {
-  /** True when the member has a live reverse-channel socket OR a recent heartbeat push. */
-  online: boolean
-  /** ISO timestamp of the member's last contact (push/whoami), or null if never seen. */
-  lastSeenAt: string | null
-  /** Round-trip latency in ms from the last WebSocket ping/pong, or null when no live socket. */
-  latencyMs: number | null
 }
 
 /**
@@ -837,9 +810,6 @@ export interface LiveProcess {
   startedMs?: number
   /** Set when the process named a session id we have no record of. */
   sessionId?: string
-  /** Central only: the member (display name) this process is running on. Absent on a solo machine,
-   *  where every process is by definition local. */
-  user?: string
 }
 
 export interface AppData {
@@ -850,23 +820,6 @@ export interface AppData {
   healthIssues?: HealthIssue[]
   homeDir?: string
   harnesses: SurfaceHarnessId[]
-  /** Team/central only: each member's own raw statsCache, keyed by resolved display name.
-   *  Lets the central reproduce the member's authoritative totals (deep Claude history that
-   *  only exists aggregated in statsCache, never as individual sessions). Absent on solo. */
-  userStatsCaches?: Record<string, StatsCache>
-  /** Team/central only: the SAME caches un-grouped — one entry per machine, keyed by machine id
-   *  (`memberId`, the token hash). `userStatsCaches` sums a member's machines under one display
-   *  name and so cannot serve a machine/team filter; without this the machine dimension falls back
-   *  to a per-session sum, which only covers the sessions still stored individually and therefore
-   *  reports far less than the same scope selected by member. Absent on solo. */
-  machineStatsCaches?: Record<string, StatsCache>
-  /** Team/central only: machine id → its owner (resolved display name) and teams. Resolves a
-   *  machine/team/member selection to the exact set of `machineStatsCaches` keys to merge. */
-  machineOwners?: Record<string, { user: string; teamIds: string[] }>
-  /** Team/central only: live presence per member (resolved display name → status). */
-  presence?: Record<string, MemberPresence>
-  /** Team/central only: central policy — whether offline members' data is shown by default. */
-  includeOfflineData?: boolean
   workflows?: WorkflowRun[]
   /** session_ids open in a live `claude` process right now (computed per-request, not cached).
    *  Empty/absent when live detection is unavailable (e.g. non-Linux host). */
@@ -942,8 +895,7 @@ export function emptyStatsCache(): StatsCache {
 }
 
 /**
- * Merge (sum) several statsCaches into one. Pure. Used by the central to combine the
- * selected members' per-member statsCaches so KPIs match each machine exactly.
+ * Merge (sum) several statsCaches into one. Pure.
  * - dailyActivity / dailyModelTokens / modelUsage / hourCounts: summed by key
  * - totals: summed; longestSession: max by duration
  * - firstSessionDate: earliest non-empty; lastComputedDate: latest
@@ -1006,14 +958,10 @@ export interface Filters {
   customEnd: string
   projects: string[]   // empty = all projects
   repos?: string[]     // empty/undefined = all repos; [''] targets the "no linked repo" bucket
-  users?: string[]     // empty/undefined = all users (member = user; scoped to users with machines)
-  teams?: string[]     // central: empty/undefined = all teams; matches session.teamId
-  machines?: string[]  // central: empty/undefined = all machines; matches session.memberId (token hash)
-  tags?: string[]      // central: empty/undefined = all; a tag narrows to its resolved sessions (tag ids)
+  tags?: string[]      // empty/undefined = all; a tag narrows to its resolved sessions (tag ids)
   models: string[]     // empty = all models
   harness?: SurfaceHarnessId
   harnesses?: SurfaceHarnessId[]  // multi-select harness filter; empty/undefined = all harnesses
-  presence?: 'online' | 'offline'  // team/central: filter members by live status; undefined = policy default
 }
 
 export type Lang = 'pt' | 'en'
@@ -1451,8 +1399,8 @@ export function formatModel(modelId: string): string {
  * Display form of a project path: the FULL path, always.
  *
  * It used to collapse the home directory to `~`, which reads fine on a single machine and is
- * actively misleading anywhere else: on a central the same `~/app` can be three different people's
- * folders, and `~` is resolved against the CENTRAL's home, not the machine the session came from.
+ * actively misleading anywhere else: the same `~/app` can be different folders on different machines
+ * and `~` is resolved against the viewer's home, not the machine the session came from.
  * The username is part of what identifies a path, so it is never hidden.
  */
 export function formatProjectName(projectPath: string): string {

@@ -14,7 +14,7 @@ afterAll(() => { root.window = had })
 const filters: Filters = { dateRange: 'all', customStart: '', customEnd: '', projects: [], models: ['claude-opus-5'], harnesses: ['claude', 'codex'] }
 const render = (lang: 'pt' | 'en', width: number, hideClearAll?: boolean) => at(width, () => renderToStaticMarkup(
   <FiltersBar compact filters={filters} onChange={() => {}} projects={[]} sessionCountByProject={{}} models={['claude-opus-5']} harnesses={['claude', 'codex']}
-    users={[]} lang={lang} hideClearAll={hideClearAll} />,
+    lang={lang} hideClearAll={hideClearAll} />,
 ))
 
 describe('FiltersBar inside the filters sheet', () => {
@@ -38,7 +38,7 @@ describe('FiltersBar inline strip', () => {
   test('the inline bar reserves the add button instead of shrinking its wrapper below the painted control', () => {
     const html = at(1200, () => renderToStaticMarkup(
       <FiltersBar inline filters={filters} onChange={() => {}} projects={[]} sessionCountByProject={{}} models={['claude-opus-5']} harnesses={['claude', 'codex']}
-        users={[]} lang="en" />,
+        lang="en" />,
     ))
     expect(html).toContain('See active filters')
     expect(html).toContain('flex-wrap:nowrap')

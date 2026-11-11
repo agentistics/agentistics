@@ -547,7 +547,6 @@ const CONFIGURED: GithubSection & { configured: true } = {
   keepRemote: 5,
   deleteLocalAfterUpload: true,
   auth: 'token',
-  suggestedLabel: null,
 }
 
 const rowText = (rows: GithubRow[]) =>

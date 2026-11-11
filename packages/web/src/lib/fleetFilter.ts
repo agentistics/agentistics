@@ -9,7 +9,7 @@
  * - `dateRange` / `customStart` / `customEnd` — a live session is happening now, and "last 7 days"
  *   would silently hide a session that started eight days ago and is still working.
  * - `users` / `teams` / `machines` / `presence` — every row here is on THIS machine by definition;
- *   the fleet route is refused on a central.
+ *   the fleet route is refused.
  * - `tags` — a tag resolves to a set of stored sessions server-side, and a live row is not in that
  *   set until its metrics are written.
  *
@@ -116,9 +116,6 @@ export function ignoredDimensions(filters: Filters, lang: 'en' | 'pt'): string |
   const named: string[] = []
   if (filters.dateRange && filters.dateRange !== 'all') named.push(pt ? 'o período' : 'the date range')
   if ((filters.tags?.length ?? 0) > 0) named.push(pt ? 'as tags' : 'tags')
-  if ((filters.users?.length ?? 0) > 0) named.push(pt ? 'os membros' : 'members')
-  if ((filters.teams?.length ?? 0) > 0) named.push(pt ? 'os times' : 'teams')
-  if ((filters.machines?.length ?? 0) > 0) named.push(pt ? 'as máquinas' : 'machines')
   if (named.length === 0) return null
   const list = named.length === 1
     ? named[0]!

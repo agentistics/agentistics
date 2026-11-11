@@ -111,7 +111,7 @@ export function headerFit(available: number, extra = 0): HeaderFit {
   const widest: HeaderFit = { date: 'full', activeFilters: 'label', addFilter: 'label' }
   if (!Number.isFinite(available) || available <= 0) return widest
   // `extra` is what the bar draws that these tiers do not name — the cost-basis toggle, which is
-  // absent on a central and on a machine with no billing set up. Budgeted by the CALLER rather than
+  // absent and on a machine with no billing set up. Budgeted by the CALLER rather than
   // assumed here: a tier that reserves room for a control that is not on screen compacts a bar that
   // would have fitted.
   const room = available - extra

@@ -23,7 +23,7 @@
  *  - THE STORE is per SESSION (`sessionIdentityKey`, the one key a session survives a reopen
  *    under) and per PERSON on the server (`/api/user-prefs`, `floatingPanels`, through
  *    `sharedPref.ts`; owner, 2026-09-30: "a posição das abas" must survive a device change). On a
- *    central that route is per ACCOUNT, so one person's windows still never open on everyone's
+ *    an account store that route is per ACCOUNT, so one person's windows still never open on everyone's
  *    screen. Positions are stored relative to the session area and re-clamped on draw (above),
  *    which is what lets one stored arrangement serve a phone-sized and a desktop-sized area. The
  *    browser copy under the old key is the first paint and the one-time migration source; every

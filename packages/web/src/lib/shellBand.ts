@@ -20,7 +20,7 @@
  * on the SCREEN, so they stay per browser in `localStorage` — a phone and a desktop must not fight
  * over one value, and an open band on one device must never open (and start capturing) a shell on
  * another. WHICH terminal the band shows (`target`) is a CHOICE and lives on the server
- * (`/api/user-prefs`, `shellBand`, per pane; per ACCOUNT on a central) so it reads the same from
+ * (`/api/user-prefs`, `shellBand`, per pane; per ACCOUNT) so it reads the same from
  * every device. Every storage read and write is guarded: a private window, cleared site data or a
  * browser blocking storage makes the accessor itself throw.
  */
@@ -188,10 +188,6 @@ const ERROR_TEXT: Record<string, { en: string; pt: string }> = {
   shell_disabled: {
     en: 'The terminal is off on this machine. Turn it on in Settings → Sessions.',
     pt: 'O terminal está desligado nesta máquina. Ligue em Configurações → Sessões.',
-  },
-  shell_central: {
-    en: 'A central aggregates other machines and has no host of its own to open a terminal on.',
-    pt: 'Uma central agrega outras máquinas e não tem host próprio para abrir um terminal.',
   },
   no_host: {
     en: 'This server cannot reach its session host right now.',

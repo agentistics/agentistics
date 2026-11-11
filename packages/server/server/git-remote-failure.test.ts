@@ -13,7 +13,6 @@ import type { SessionMeta } from '@agentistics/core'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { getGitRemote, isAuthoritativeNoRemote } from './git'
 import { keepStoredRemote, loadConsolidated, writeConsolidated } from './consolidate'
-import { sessionShared } from './share-rules'
 
 const run = promisify(execFile)
 
@@ -71,7 +70,7 @@ describe('a session is never written WITHOUT the remote its stored record had', 
     expect(keepStoredRemote(base, 'not json').git_remote).toBeUndefined()
   })
 
-  test('denylisted repo: after a transient git failure the stored session still has its remote, so it is NOT shared', async () => {
+  test('after a transient git failure the stored session still has its remote', async () => {
     const withRemote = meta({ git_remote: 'github.com/acme/secret' })
     await writeConsolidated([withRemote])
     // the next build's git read failed: the same session arrives with no remote
@@ -79,9 +78,7 @@ describe('a session is never written WITHOUT the remote its stored record had', 
     await writeConsolidated([failed as SessionMeta])
     const stored = (await loadConsolidated()).get(withRemote.session_id)!
     expect(stored.git_remote).toBe('github.com/acme/secret')
-    const deny = { mode: 'denylist' as const, sources: new Set(['repo:github.com/acme/secret']) }
-    expect(sessionShared(stored, deny)).toBe(false)
-    // and the failure mode it prevents: without the remote the same rule shares it
-    expect(sessionShared(failed as SessionMeta, deny)).toBe(true)
+    // and the failure mode it prevents: the session arriving without it would be filed under no repository
+    expect((failed as SessionMeta).git_remote).toBeUndefined()
   })
 })

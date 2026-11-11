@@ -19,24 +19,6 @@ describe('repoFailureText', () => {
     expect(repoFailureText(gate, 'pt')).toContain('Configurações → Sessões')
   })
 
-  test('a CENTRAL gets its own sentence — it is refused before the editor gate is ever reached', () => {
-    const central: RepoFailure = { ok: false, failure: 'refused', status: 404, reason: 'fleet_central' }
-    const en = repoFailureText(central, 'en')
-    const pt = repoFailureText(central, 'pt')
-    expect(en).toContain('central')
-    expect(pt).toContain('central')
-    // Never the editor switch's sentence: a reader on a central has no switch to go and flip.
-    expect(en).not.toContain('Settings → Sessions')
-    expect(pt).not.toContain('Configurações → Sessões')
-  })
-
-  test('the two gates do not share a sentence', () => {
-    const disabled: RepoFailure = { ok: false, failure: 'refused', status: 403, reason: 'editor_disabled' }
-    const central: RepoFailure = { ok: false, failure: 'refused', status: 404, reason: 'fleet_central' }
-    expect(repoFailureText(disabled, 'en')).not.toBe(repoFailureText(central, 'en'))
-    expect(repoFailureText(disabled, 'pt')).not.toBe(repoFailureText(central, 'pt'))
-  })
-
   test('an empty `message` is not a sentence — the gate wording still wins', () => {
     const gate = {
       ok: false, failure: 'refused', status: 403, reason: 'editor_disabled', message: '',

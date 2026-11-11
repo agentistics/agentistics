@@ -5,8 +5,8 @@
  * - `DELETE /api/memory/:chainId` — forget one (rule 6: its versions leave memory and their statements
  *   are deleted).
  *
- * Experimental with the native harness (`native-gate.ts`): 403 with the flag off. Never on a central
- * (D14: memory stays on the machine). Facts are folded from the journal on every read
+ * Experimental with the native harness (`native-gate.ts`): 403 with the flag off. Memory stays on
+ * the machine. Facts are folded from the journal on every read
  * (`memory-service.ts`), so an answer is never staler than the journal.
  */
 import { createMemoryService, type MemoryService } from './memory-service'
@@ -23,7 +23,6 @@ const EXPERIMENTAL_REFUSAL = {
 const nativeExperimentalOn = () => providerFlagOn()
 
 export interface MemoryWebDeps {
-  central: boolean
   nativeOn: boolean
   service: () => Promise<MemoryService | null>
 }
@@ -34,7 +33,6 @@ const CHAIN = /^mem_[0-9a-z]{8,40}$/
 
 export async function handleMemoryRequest(req: Request, url: URL, d: MemoryWebDeps): Promise<MemoryAnswer> {
   if (!d.nativeOn) return { status: 403, body: { ...EXPERIMENTAL_REFUSAL } }
-  if (d.central) return { status: 409, body: { error: 'unsupported_on_central', sentence: 'memory stays on the machine it was noted on; a central holds none.' } }
   const svc = await d.service()
   if (!svc) return { status: 503, body: { error: 'journal_unavailable', sentence: 'memory needs the journal, and it is not open on this machine.' } }
   if (url.pathname === '/api/memory') {
@@ -52,9 +50,8 @@ export async function handleMemoryRequest(req: Request, url: URL, d: MemoryWebDe
 let live: MemoryService | null = null
 
 /** The server's own service: the journal opened once, lazily; the content store beside it. */
-export async function liveMemoryDeps(central: boolean): Promise<MemoryWebDeps> {
+export async function liveMemoryDeps(): Promise<MemoryWebDeps> {
   return {
-    central,
     nativeOn: nativeExperimentalOn(),
     service: async () => {
       if (live) return live

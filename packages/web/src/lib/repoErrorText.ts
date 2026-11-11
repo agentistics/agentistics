@@ -7,11 +7,8 @@
  * `shellBand.ts` already makes for the utility shell, mirrored here on purpose:
  *
  *  - **The PRE-HANDLER GATES.** `index.ts` refuses `/api/fleet/tree*` before `editor-web.ts` can
- *    compose anything, answering `{error: 'editor_disabled'}` (the switch is off) or
- *    `{error: 'fleet_central'}` (a central hosts no sessions of its own). Both carry a CODE and no
- *    prose, so the UI owns the wording. `fleet_central` is covered as well as `editor_disabled`
- *    because the fleet prefix is refused a few lines EARLIER than the editor gate — a central hits
- *    that one first, and a reader there must not be told their switch is off.
+ *    compose anything, answering `{error: 'editor_disabled'}` (the switch is off). It carries a CODE and no prose, so
+ *    the UI owns the wording.
  *  - **`unreachable`.** Nothing came back that honours the contract, so there is no server sentence
  *    to show at all. The three causes stay three sentences: "nothing answered", "it is answering,
  *    just not in time" and "something answered and it was not this" send a reader somewhere
@@ -36,10 +33,6 @@ const GATE_TEXT: Record<string, { en: string; pt: string }> = {
   editor_disabled: {
     en: 'The Studio is off on this machine. Turn it on in Settings → Sessions.',
     pt: 'O Studio está desligado nesta máquina. Ligue em Configurações → Sessões.',
-  },
-  fleet_central: {
-    en: 'A central aggregates other machines and hosts none of their sessions, so there is no repository here to open.',
-    pt: 'Uma central agrega outras máquinas e não hospeda as sessões delas, então não há repositório aqui para abrir.',
   },
 }
 

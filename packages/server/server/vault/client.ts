@@ -64,26 +64,3 @@ export async function serviceGithubFetch(input: string | URL | Request, init: Re
   }
   return new Response((r.body ?? new Uint8Array(0)) as unknown as BodyInit, { status: Number(rep.httpStatus), headers: rep.headers as Record<string, string> })
 }
-
-export type MongoKind = 'none' | 'bundled' | 'external'
-export async function remoteCentralMongoKind(envFile: string): Promise<MongoKind | null> {
-  const r = await askVault({ op: 'central-mongo-kind', envFile })
-  const k = r?.reply.ok ? (r.reply as { kind?: unknown }).kind : null
-  return k === 'none' || k === 'bundled' || k === 'external' ? k : null
-}
-
-/** Run a command the service spawns for us; its output is written to OUR stdout/stderr. */
-export async function remoteSpawn(req: Record<string, unknown> & { op: string }, write: { out(s: string): void; err(s: string): void }): Promise<{ ok: true; exit: number } | { ok: false; sentence: string }> {
-  const ac = new AbortController()
-  const onSig = () => ac.abort()
-  process.once('SIGINT', onSig)
-  try {
-    const r = await askVault(req, { signal: ac.signal, timeoutMs: 0, onStream: (s, d) => (s === 'out' ? write.out(d) : write.err(d)) })
-    if (!r) return { ok: false, sentence: ac.signal.aborted ? 'stopped' : refusal('service-down').message }
-    const rep = r.reply as Record<string, unknown>
-    if (!rep.ok) return { ok: false, sentence: String(rep.sentence ?? 'refused') }
-    return { ok: true, exit: Number(rep.exit ?? 1) }
-  } finally {
-    process.off('SIGINT', onSig)
-  }
-}

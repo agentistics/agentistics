@@ -96,7 +96,7 @@ test('health answers during a slow cold build; concurrent data requests share on
   try {
     const child = Bun.spawnSync([process.execPath, '-e', HTTP_SCENARIO], {
       cwd: import.meta.dir,
-      env: { ...process.env, HOME: home, CLAUDE_DIR: join(home, '.claude'), AGENTISTICS_DIR: join(home, 'data'), AGENTISTICS_ARCHIVE: '0', AGENTISTICS_JOURNAL: '0', AGENTISTICS_ENGINE: '0', AGENTISTICS_PARSE_CACHE: '0', AGENTISTICS_TEAM_CENTRAL: '0', AGENTISTICS_TEAM: '0', AGENTISTICS_TELEMETRY: '0', PORT: '0', WEB_PORT: '0' },
+      env: { ...process.env, HOME: home, CLAUDE_DIR: join(home, '.claude'), AGENTISTICS_DIR: join(home, 'data'), AGENTISTICS_ARCHIVE: '0', AGENTISTICS_JOURNAL: '0', AGENTISTICS_ENGINE: '0', AGENTISTICS_PARSE_CACHE: '0', AGENTISTICS_TEAM: '0', AGENTISTICS_TELEMETRY: '0', PORT: '0', WEB_PORT: '0' },
       timeout: 15_000,
       stdout: 'pipe', stderr: 'pipe',
     })

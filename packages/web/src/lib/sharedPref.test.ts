@@ -69,7 +69,7 @@ describe('a store registered AFTER loadSharedPrefs() has already landed', () => 
   })
 })
 
-describe('a PERSONAL store (per account on a central, the machine file on a machine)', () => {
+describe('a PERSONAL store (the machine file)', () => {
   const originalFetch = globalThis.fetch
   const g = globalThis as unknown as { localStorage?: unknown }
   let savedLS: unknown

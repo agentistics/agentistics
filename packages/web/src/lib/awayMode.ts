@@ -16,7 +16,7 @@ import { Infinity as InfinityIcon, type LucideIcon } from 'lucide-react'
 export const AUTONOMOUS_ICON: LucideIcon = InfinityIcon
 
 export interface AwaySnapshot {
-  /** `null` until the first answer, or when this server has no away route (older build / central). */
+  /** `null` until the first answer, or when this server has no away route (older build). */
   state: AwayState | null
   active: boolean
   activeSessions?: number

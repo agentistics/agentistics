@@ -16,8 +16,7 @@
  * - **Timer-driven, on DEMAND.** While something holds a subscription (the event producer, a
  *   `/api/fleet/events` stream, an open chat waiting for its link) or a reader asked within the last
  *   `leaseMs`, the hub polls every `intervalMs` on its own and readers are answered from the last
- *   snapshot. With no demand at all it does not poll — a central, or a machine nobody is looking at,
- *   pays nothing. N clients cost one tick, never N.
+ *   snapshot. With no demand at all it does not poll — a machine nobody is looking at pays nothing. N clients cost one tick, never N.
  * - **`refresh()` after an act.** A spawn, a kill, a rename changes the fleet NOW; the caller asks for
  *   a poll that STARTS after the act (one already in flight began before it and cannot have seen it),
  *   and subscribers get the result on the same push path as any tick.

@@ -178,7 +178,7 @@ being unmounted, and it stays mounted while the person navigates; `unmount(el)` 
 A surface reaches the session it was opened from through its own socket: `socket.structured()` returns a
 handle on the session the handshake declared (the host accepted that socket only for a session that existed
 and was live), bound to THAT socket. An id the engine supplies never selects the session, and the handle
-exists only on a machine that serves `/api/engine/x` at all — a `localShell` route, refused on a central and
+exists only on a machine that serves `/api/engine/x` at all — a `localShell` route, refused without host power and
 on any exposed profile.
 
 `host.structuredSessions.get(id)` is the other door and it is narrower still: it resolves only a session this

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { useOutletContext, useNavigate } from 'react-router-dom'
-import { GitBranch, Search, Zap } from 'lucide-react'
+import { GitBranch, Search } from 'lucide-react'
 import type { AppContext } from '../lib/app-context'
 import type { RepoStat, RepoSortKey } from '../hooks/useData'
 import { sortRepos } from '../hooks/useData'
@@ -49,7 +49,6 @@ export default function RepositoriesPage() {
 
   const linkedCount = repos.filter(r => r.linked).length
   const unlinkedCount = repos.length - linkedCount
-  const ciTotal = repos.reduce((a, r) => a + r.ciSessions, 0)
 
   const openRepo = (r: RepoStat) => {
     navigate(`/repo/${encodeURIComponent(r.id)}`)
@@ -87,19 +86,6 @@ export default function RepositoriesPage() {
                 }}
               >
                 <GitBranch size={12} /> {pt ? 'Sem repo' : 'Unlinked'} · {unlinkedCount}
-              </button>
-            )}
-            {ciTotal > 0 && (
-              <button
-                onClick={() => navigate('/repositories/actions')}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600,
-                  color: 'var(--accent-blue)', background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                  borderRadius: 7, padding: '5px 9px', cursor: 'pointer', fontFamily: 'inherit',
-                }}
-                title="GitHub Actions"
-              >
-                <Zap size={12} /> Actions{ciTotal > 0 ? ` · ${ciTotal}` : ''}
               </button>
             )}
             <SortControl

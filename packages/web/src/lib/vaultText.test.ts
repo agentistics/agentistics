@@ -10,7 +10,7 @@ test('every key has both languages, non-empty', () => {
 })
 
 test('every code the server can send resolves to a key', () => {
-  for (const kind of ['github-backup', 'central-token', 'envelope-key', 'central-env']) expect(kindKey(kind)).not.toBe('kind_other')
+  for (const kind of ['github-backup', 'envelope-key']) expect(kindKey(kind)).not.toBe('kind_other')
   expect(kindKey('github-backup')).toBe('kind_github_backup')
   expect(kindKey('nonsense')).toBe('kind_other')
   for (const s of ['open', 'locked', 'uninitialized', 'protector-lost', 'corrupt']) expect(VAULT_TEXT[stateKey(s)]).toBeDefined()

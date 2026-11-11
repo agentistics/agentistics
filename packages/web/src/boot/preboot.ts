@@ -21,7 +21,6 @@ const BOOT_ANCHOR_KEY = 'ag-boot-anchor'
 const ANCHOR_REUSE_MS = 60_000
 /** The status line appears only when the boot takes longer than this. */
 const STATUS_AFTER_MS = 4_000
-const CENTRAL_ACCENT = '#06B6D4'
 
 function bootAnchor(now: number): number {
   try {
@@ -72,8 +71,7 @@ function startPreboot(): void {
   if (upgradeFinalePending()) { svg.style.display = 'none'; root.style.background = '#0a0a0f'; return }
   root.setAttribute('aria-label', bootLang() === 'pt' ? 'Carregando o Agentistics' : 'Loading Agentistics')
   const reduced = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  const accent = document.documentElement.hasAttribute('data-central') ? CENTRAL_ACCENT : undefined
-  svg.innerHTML = d1Markup(56, 'ag-d1-boot', reduced, accent)
+  svg.innerHTML = d1Markup(56, 'ag-d1-boot', reduced)
   if (reduced) breatheD1(svg)
   else {
     const now = Date.now()

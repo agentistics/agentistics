@@ -2,10 +2,9 @@
  * shell-web.ts — the routes behind the per-session utility shell.
  *
  * `capability-guard.ts` has already refused these paths where the exposure profile forbids them,
- * and `index.ts` has already applied the user's own `shellEnabled` switch on top and refused a
- * central outright. What is left here is resolving the session and turning a `ShellRefusal` code
- * into a localized sentence — the modules below stay language-free, like `central-runtime.ts`'s
- * reason codes.
+ * and `index.ts` has already applied the user's own `shellEnabled` switch on top. What is left here
+ * is resolving the session and turning a `ShellRefusal` code into a localized sentence — the modules
+ * below stay language-free.
  */
 
 import { shellTmux as tmux } from './shell-tmux'

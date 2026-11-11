@@ -9,7 +9,7 @@
  *  - `capable` is `CAPS.localShell`, decided by the exposure profile in `exposure.ts`. This is
  *    deliberately the SAME capability the shell rides, not a new one — the spec is explicit that
  *    there is no deployment that should expose a shell but not this. It remains the SECURITY
- *    answer and is UNCHANGED by the rule below: a `lan`/`public` profile, or a central, stays OFF
+ *    answer and is UNCHANGED by the rule below: a `lan`/`public` profile stays OFF
  *    regardless of the preference.
  *  - `preference` is the user's own switch (`Preferences.editorEnabled`), and it may only ever
  *    NARROW `capable` — never widen it past what the profile allows.

@@ -1,13 +1,12 @@
-import { canonicalProjectPath, sessionCostUSD, sessionModelUsage, sessionTokenTotal, calcCost } from '@agentistics/core'
-import type { SessionMeta, StatsCache, Filters } from '@agentistics/core'
-import { format, parseISO } from 'date-fns'
+import { canonicalProjectPath, calcCost, sessionCostUSD, sessionModelUsage, sessionTokenTotal } from '@agentistics/core'
+import type { SessionMeta } from '@agentistics/core'
 
 /** What the podium is ranked by. Cost answers "where is the money", tokens "where is the volume",
  *  sessions "where do I actually spend my days" — and they routinely disagree, which is the point
  *  of offering all three rather than picking one and calling it "usage". */
 export type TopMetric = 'cost' | 'tokens' | 'sessions'
 
-export type TopDimension = 'harness' | 'model' | 'project' | 'repo' | 'user' | 'machine'
+export type TopDimension = 'harness' | 'model' | 'project' | 'repo'
 
 export interface TopEntry {
   key: string
@@ -57,8 +56,7 @@ function contributions(s: SessionMeta, dim: TopDimension): Array<{ key: string; 
     dim === 'harness' ? s.harness
     : dim === 'project' ? canonicalProjectPath(s.project_path ?? '')
     : dim === 'repo' ? (s.git_remote ?? '')
-    : dim === 'user' ? (s.user ?? '')
-    : (s.memberId ?? '')
+    : ''
 
   if (!key) return []
   const tokens = tokensOf(s)
@@ -99,115 +97,6 @@ export function rankTop(
     || b.tokens - a.tokens
     || a.key.localeCompare(b.key))
 
-  const costByHarness: Record<string, number> = {}
-  for (const e of all) for (const [h, cost] of Object.entries(e.costByHarness ?? {})) {
-    costByHarness[h] = (costByHarness[h] ?? 0) + cost
-  }
-  return {
-    entries: all.slice(0, limit),
-    total: all.reduce((sum, e) => sum + value(e), 0),
-    costByHarness,
-    distinct: all.length,
-  }
-}
-
-/**
- * True when the podium may be built from the per-member/-machine statsCaches instead of from the
- * sessions.
- *
- * Those caches are the authoritative deep history — the sessions are only what still exists as
- * individual documents, which is a fraction of it (a real machine showed R$54.5k of history against
- * R$19.3k of surviving session docs, so its person and machine podiums under-reported by 65%). The
- * caches are all-time totals with no project / repo / tag / model granularity, so ANY filter along
- * one of those dimensions — or a date range — makes them the wrong answer and the per-session sum
- * the right one, undercount and all. Member / machine / team / presence filters are fine: they
- * select WHICH caches to read, not a slice inside them. Pure.
- */
-export function cacheTotalsUsable(filters: Filters): boolean {
-  return (filters.projects?.length ?? 0) === 0
-    && (filters.repos?.length ?? 0) === 0
-    && (filters.tags?.length ?? 0) === 0
-    && (filters.models?.length ?? 0) === 0
-    && (filters.harnesses?.length ?? 0) === 0   // statsCache is Claude-only
-    && !filters.harness
-    && filters.dateRange === 'all'
-    && !filters.customStart
-    && !filters.customEnd
-}
-
-/** One podium entry's totals, read from a statsCache rather than summed from sessions. */
-function entryFromCache(key: string, c: StatsCache): TopEntry {
-  let cost = 0, tokens = 0
-  for (const [model, u] of Object.entries(c.modelUsage ?? {})) {
-    cost += calcCost(u, model)
-    // Every billed counter, same as tokensOf — cache reads are ~96% of the volume, so leaving
-    // them out would rank the podium by the 4% that barely costs anything.
-    tokens += (u.inputTokens ?? 0) + (u.outputTokens ?? 0)
-      + (u.cacheReadInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0)
-  }
-  const sessions = (c.dailyActivity ?? []).reduce((s, d) => s + (d.sessionCount ?? 0), 0)
-  return { key, cost, costByHarness: { claude: cost }, tokens, sessions }
-}
-
-/**
- * Rank a dimension from per-key statsCaches (person → display name, machine → machine id),
- * supplemented by the sessions the caches cannot represent.
- *
- * Who is in scope comes from the already-filtered session set — the sessions went through every
- * filter, presence and teams included — while how much comes from the caches. A key with no
- * surviving session is left out rather than guessed at.
- *
- * The supplement is not optional: `stats-cache.json` is **Claude-only**, so a person's Codex or
- * Gemini spend appears in NO cache. Reading the caches alone reported a mixed-harness person at
- * $4.50 instead of $225 and inverted the podium. Mirrors `useDerivedStats` exactly, so the two
- * pages agree: non-Claude sessions contribute their full cost, tokens and count, while a Claude
- * session on a day the cache has not computed yet contributes only its COUNT — its money is
- * already whole inside `modelUsage`, and adding it again would double-count.
- */
-export function rankTopFromCaches(
-  caches: Record<string, StatsCache>,
-  sessions: SessionMeta[],
-  keyOf: (s: SessionMeta) => string,
-  metric: TopMetric,
-  limit = 3,
-): TopResult {
-  const acc = new Map<string, TopEntry>()
-  const cachedDays = new Map<string, Set<string>>()
-
-  for (const s of sessions) {
-    if (s.tokens_unavailable) continue
-    const key = keyOf(s)
-    if (!key) continue
-    let e = acc.get(key)
-    if (!e) {
-      const c = caches[key]
-      // A key with sessions but no cache still belongs on the podium — its sessions are all the
-      // history there is, which is exactly the case for a member who only runs a non-Claude CLI.
-      e = c ? entryFromCache(key, c) : { key, cost: 0, costByHarness: {}, tokens: 0, sessions: 0 }
-      acc.set(key, e)
-      cachedDays.set(key, new Set((c?.dailyActivity ?? []).map(d => d.date)))
-    }
-    if ((s.harness ?? 'claude') !== 'claude') {
-      const cost = sessionCostUSD(s) ?? 0
-      e.cost += cost
-      const harness = s.harness ?? 'claude'
-      const byHarness = (e.costByHarness ??= {})
-      byHarness[harness] = (byHarness[harness] ?? 0) + cost
-      const tokens = tokensOf(s)
-      if (tokens !== undefined) e.tokens += tokens
-      e.sessions += 1
-    } else if (s.start_time && !cachedDays.get(key)!.has(format(parseISO(s.start_time), 'yyyy-MM-dd'))) {
-      e.sessions += 1
-    }
-  }
-
-  const all = [...acc.values()]
-  const value = (e: TopEntry): number => (metric === 'cost' ? e.cost : metric === 'tokens' ? e.tokens : e.sessions)
-  all.sort((a, b) =>
-    value(b) - value(a)
-    || b.cost - a.cost
-    || b.tokens - a.tokens
-    || a.key.localeCompare(b.key))
   const costByHarness: Record<string, number> = {}
   for (const e of all) for (const [h, cost] of Object.entries(e.costByHarness ?? {})) {
     costByHarness[h] = (costByHarness[h] ?? 0) + cost

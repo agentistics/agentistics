@@ -35,7 +35,7 @@ describe('D1 · Clássico markup', () => {
     expect(d1Order(38, 28)).toBeCloseTo(228 / 360, 5)
   })
 
-  test('only the amber follows the accent (a central draws teal); the harness colours stay', () => {
+  test('only the amber follows the accent (a custom accent); the harness colours stay', () => {
     const teal = d1Markup(56, 'c', false, '#06B6D4')
     expect(teal).not.toContain(D1_ACCENT)
     expect(teal).toContain('#06B6D4')

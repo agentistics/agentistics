@@ -120,7 +120,7 @@ export function areaTrailingStyle(sheet: boolean): React.CSSProperties {
   return { width: sheet ? 44 : 28, height: sheet ? 44 : 28, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }
 }
 
-const GROUP_HEADING = { personal: { pt: 'Pessoal', en: 'Personal' }, governance: { pt: 'Governança', en: 'Governance' } } as const
+const GROUP_HEADING = { personal: { pt: 'Pessoal', en: 'Personal' } } as const
 
 export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside', badges = {}, onNavigate, onExpand, preserveOpenOnMount = false, visibleSettings }: AreaTreeProps) {
   const navigate = useNavigate()

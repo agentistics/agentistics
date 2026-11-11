@@ -156,7 +156,7 @@ export interface PromptLayout {
 /**
  * Decides whether a text field shares the question's row or gets one of its own.
  *
- * The connect questions are sentences — "Central endpoint URL (e.g. http://host:48080)" is
+ * The prompt questions are sentences — "Server endpoint URL (e.g. http://host:48080)" is
  * forty-four columns before the user types anything — and the cockpit asks them inside the right
  * column of a split screen. Kept on one row there, the question eats the field and the answer
  * becomes invisible as it is typed. Stacking is not a fallback for a tiny terminal; at 80 columns
@@ -240,8 +240,8 @@ export interface LogSourceOption {
 /**
  * The logs this machine has, derived from the services the host reported.
  *
- * This used to be `['local', 'central', 'machine'] as const` written into the component, and the
- * selector rendered those internal ids verbatim: `1 local  2 central  3 machine`. Two of those are
+ * This used to be a constant list of internal ids written into the component, and the
+ * selector rendered those internal ids verbatim: `1 local  2 machine`. Two of those are
  * one thing — `local` and `machine` are the native process and the container of the SAME logical
  * service — which is the exact distinction the logical-service model deleted, leaking back through
  * a constant that kept compiling while the model changed under it. It is the same class of bug
@@ -406,7 +406,7 @@ export function staticRows(height: number, introHeight: number): StaticRows {
 /*
  * `SetupRows` / `setupRows` / `setupBodyTop` lived here and are gone with the screen they budgeted.
  *
- * Setup stopped being a linear screen of its own: choosing solo / central / member is a question
+ * Setup stopped being a linear screen of its own: choosing how this box runs is a question
  * ABOUT the services on this box, so it is drawn in the cockpit's detail region like every other
  * question and is budgeted by `cockpitLayout`'s `QUESTION_ROWS` instead. A row budget for a screen
  * that no longer exists is documentation of a program that no longer exists — the same reason

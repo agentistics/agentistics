@@ -3,7 +3,7 @@
 exports[`§2.8 refusal sentences — snapshot, EN and PT English 1`] = `
 {
   "conflict": "~/.agentistics/github-backup.sealed is still in plain text and differs from its encrypted copy (an older agentop re-entered it after it was encrypted). Both were kept and nothing was deleted. Keep the one you want: re-enter it with agentop backup github setup <url>, or delete the plain-text file to keep the encrypted one.",
-  "locked": "The vault is locked: the agentop service started without its passphrase. Run \`agentop vault unlock\`. Until then provider keys, the GitHub backup token and central tokens cannot be read, and only what needs them is paused.",
+  "locked": "The vault is locked: the agentop service started without its passphrase. Run \`agentop vault unlock\`. Until then provider keys and the GitHub backup token cannot be read, and only what needs them is paused.",
   "migration-failed": "~/.agentistics/github-backup.sealed could not be encrypted (DPAPI refused). The original was left untouched and will be retried at the next start.",
   "no-protector": "This machine has no system keychain Agentistics can use (checked: libsecret — no Secret Service answered; systemd-creds — no TPM2). Secrets are never stored in plain text, so they will be protected by a passphrase you choose. You will type it once each time the agentop service starts.",
   "plaintext-pending": "3 secret(s) are still stored in plain text from an earlier version. They are encrypted as soon as the vault is open — run \`agentop vault unlock\` (or \`agentop vault init\`).",
@@ -19,7 +19,7 @@ exports[`§2.8 refusal sentences — snapshot, EN and PT English 1`] = `
 exports[`§2.8 refusal sentences — snapshot, EN and PT Português 1`] = `
 {
   "conflict": "~/.agentistics/github-backup.sealed ainda está em texto puro e difere da cópia cifrada (um agentop antigo o recadastrou depois de cifrado). Os dois foram mantidos e nada foi apagado. Fique com o que você quer: cadastre-o de novo com agentop backup github setup <url>, ou apague o arquivo em texto puro para ficar com o cifrado.",
-  "locked": "O cofre está trancado: o serviço do agentop iniciou sem a frase-senha. Rode \`agentop vault unlock\`. Até lá as chaves de provedor, o token do backup no GitHub e os tokens de central não podem ser lidos, e só o que depende deles fica pausado.",
+  "locked": "O cofre está trancado: o serviço do agentop iniciou sem a frase-senha. Rode \`agentop vault unlock\`. Até lá as chaves de provedor e o token do backup no GitHub não podem ser lidos, e só o que depende deles fica pausado.",
   "migration-failed": "~/.agentistics/github-backup.sealed não pôde ser cifrado (DPAPI refused). O original foi mantido intacto e será tentado de novo no próximo início.",
   "no-protector": "Esta máquina não tem um chaveiro do sistema que o Agentistics possa usar (verificado: libsecret — no Secret Service answered; systemd-creds — no TPM2). Segredos nunca são guardados em texto puro, então serão protegidos por uma frase-senha que você escolhe. Você vai digitá-la uma vez a cada início do serviço do agentop.",
   "plaintext-pending": "3 segredo(s) ainda estão guardados em texto puro, de uma versão anterior. Eles são cifrados assim que o cofre estiver aberto — rode \`agentop vault unlock\` (ou \`agentop vault init\`).",
