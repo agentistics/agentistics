@@ -6,7 +6,7 @@
  *
  * Every figure comes from the pure `summarizeFleet`, and the one figure that can be absent — how
  * long the running sessions have been up — is rendered as a SENTENCE when it is, never as a zero.
- * Same for the whole screen: a central hosts no sessions, an exposed profile refuses the route, and
+ * Same for the whole screen: an exposed profile refuses the route, and
  * a failed poll is not an empty fleet. Those are four different facts and this file keeps them four
  * different sentences.
  */
@@ -91,8 +91,8 @@ export function FleetOverview({
           ? (pt ? 'Lendo as sessões desta máquina…' : 'Reading this machine’s sessions…')
           : unsupported
             ? (pt
-                ? 'Esta instalação não pode ler sessões. Um central agrega várias máquinas e não hospeda as sessões de nenhuma delas, e um perfil de exposição sem poder sobre o host também recusa essa leitura — então não há frota para resumir aqui, o que é diferente de uma frota vazia.'
-                : 'This install cannot read sessions. A central aggregates many machines and hosts none of their sessions, and an exposure profile with no host power refuses the read too — so there is no fleet to summarize here, which is not the same as an empty one.')
+                ? 'Esta instalação não pode ler sessões: um perfil de exposição sem poder sobre o host recusa essa leitura — então não há frota para resumir aqui, o que é diferente de uma frota vazia.'
+                : 'This install cannot read sessions: an exposure profile with no host power refuses the read — so there is no fleet to summarize here, which is not the same as an empty one.')
             : unavailable
               ? unavailable
               // The list beside this already says what is (not) running and how many ended; the

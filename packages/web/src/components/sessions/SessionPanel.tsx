@@ -159,7 +159,7 @@ export interface SessionPanelProps {
    */
   onStudioBandRef?: (el: HTMLDivElement | null) => void
   /** Hardware reads THIS machine's own process list — offered on the panel bar unless this session
-   *  is viewed through a central (`!isCentral`, the same fact the header's old switcher read). */
+   *  is viewed through a relay. */
   hardwareOffered?: boolean
   /** The Studio entry's first-open dot — `App.tsx`'s own `studioSeen`, so every surface that can
    *  open the Studio clears the same one flag. */
@@ -201,7 +201,7 @@ export function SessionPanel({
   /**
    * Is this a session of ANOTHER machine, reached through the relay?
    *
-   * Asked of the picker rather than of the row, because it is a fact about THIS page: a central
+   * Asked of the picker rather than of the row, because it is a fact about THIS page: a relay
    * shows one machine's relayed fleet at a time, and every route this panel would otherwise call
    * (`/api/fleet/stream`, the chat read) is the machine's own and refused here. The row cannot
    * answer it — a relayed row is deliberately shaped like a local one so the list needs no branch.
@@ -461,7 +461,7 @@ export function SessionPanel({
         // own border, via the Fragment split in `StudioBand`/`SimpleDockedBand`/`ShellBand`). Mobile
         // is untouched — a phone's screens run edge to edge, and a rounded inset here would just
         // clip the composer against the curve for no visual gain, the same reasoning
-        // `SessionsPage.tsx`'s old `CENTRAL_PANE` comment already gave for skipping `isMobile`.
+        // `SessionsPage.tsx`'s old `PANE_INSET` comment already gave for skipping `isMobile`.
         ...(isMobile ? {} : { border: '1px solid var(--border)', borderRadius: 10 }),
       }}>
         {tabStrip ?? null}
@@ -522,7 +522,7 @@ export function SessionPanel({
           WHICH BAND renders is `bottomBand` (`lib/panelBar.ts`'s `bottomBandFor`, computed above).
           `shellEnabled` no longer decides PRESENCE — only `ShellBand`'s own shell half, through its
           own `shellEnabled` prop below. Absent on a RELAYED session for the same reason the live
-          stream is: those routes are the machine's own and a central refuses them outright, so a
+          stream is: those routes are the machine's own and a relay refuses them outright, so a
           band there could only ever draw a refusal (`bar-only`, or `none` on a phone — untouched by
           this fix, see `bottomBandFor`'s own doc comment).
 
@@ -1073,7 +1073,7 @@ function SimpleDockedBand({
    * (`editorEnabled`/`shellEnabled`/`relayed`); `hardware`'s own gate is per-SESSION
    * (`hardwareOffered`, read at the render layer, never by `resolveForGates` — see that function's
    * own header) and is therefore never cleared from a stored preference. A browser that once docked
-   * Hardware at the bottom on an ordinary machine and is now looking at a CENTRAL (`hardwareOffered`
+   * Hardware at the bottom on an ordinary machine and is now looking at a relay (`hardwareOffered`
    * always false there) keeps `bottomOccupant === 'hardware'`, `bottomBandFor` still returns this
    * band, and `panelBarEntries` filters the one entry this band would have shown — leaving the grip,
    * an empty `PanelBar` and `PanelFixedControls`' own literal `−` (that component's own header:

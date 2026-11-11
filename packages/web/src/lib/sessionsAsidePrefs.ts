@@ -3,7 +3,7 @@
  *
  * A CHOICE, so it lives on the SERVER (`/api/user-prefs`, `sessionsAside`, through
  * `sharedPref.ts`) and reads the same on every device (owner, 2026-09-30: "o estilo das sessões
- * listadas no aside"). It used to be `localStorage` because on a central `preferences.json` is
+ * listadas no aside"). It used to be `localStorage` because `preferences.json` is
  * shared by every signed-in user; `/api/user-prefs` is per ACCOUNT there, so one person's collapsed
  * groups still never collapse them for the team. The browser copy under the same key is the first
  * paint and the one-time migration source.

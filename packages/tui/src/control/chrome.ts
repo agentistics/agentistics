@@ -212,7 +212,7 @@ export interface HeaderMetaInput {
    * itself beside the icon (HM-01), and the same art twice on one screen is a fact in two places.
    */
   compact?: boolean
-  /** The SHORT mode token — `solo` / `central` / `member`, never the sentence. */
+  /** The SHORT mode token — `solo`, never the sentence. */
   mode: string
   version: string
   latestVersion?: string
@@ -342,8 +342,7 @@ export function attentionRings(prev: number, next: number): boolean {
 /**
  * The header's right-hand tag: mode, version, and the update dot.
  *
- * The mode SENTENCE used to live here and blew the row apart in member mode — "member — sends
- * metrics to a central · http://198.51.100.199:48080" is a paragraph, not a tag. Only the short
+ * The mode SENTENCE used to live here and blew the row apart — a sentence plus an endpoint is a paragraph, not a tag. Only the short
  * token survives; the sentence and the endpoint moved to the config pane, which has rows to spare.
  *
  * Under width pressure the pieces drop from the right, LEAST ACTIONABLE FIRST: the update notice,
@@ -957,7 +956,7 @@ export interface ServiceCells {
 /**
  * The narrowest label cell that still tells the two services apart.
  *
- * They are `agentistics` and `agentistics central`, forever, and they differ only in the SUFFIX —
+ * They are `agentistics` and its sibling, and they differ only in the SUFFIX —
  * so a squeezed name stays honest as long as the ellipsis is visible past the shared prefix. Below
  * that the two rows read as the same row, and the list that drives the whole screen has become
  * ambiguous, which is worse than any cell it could buy.
@@ -1050,9 +1049,9 @@ export function serviceCells(
  * The fuller wording when it fits, the shorter one when it does not, a cut only as a last resort.
  *
  * The config pane is the left column, which is the narrow one, and two of its rows have a long form
- * that is genuinely better: the mode SENTENCE ("member — sends metrics to a central") says what the
+ * that is genuinely better: the mode SENTENCE says what the
  * mode means, and the full endpoint URL is the thing you would paste. Neither is worth showing as
- * "member — sen…", which reads as a broken row and answers nothing, so each falls back to a short
+ * a clipped prefix, which reads as a broken row and answers nothing, so each falls back to a short
  * form that is still TRUE and whole rather than to a prefix of itself.
  */
 export function fitValue(preferred: string, fallback: string, room: number): string {
@@ -1156,7 +1155,7 @@ export interface MachineFacts {
  *    which is the most confusing thing a service panel can fail to say;
  *  - the ADDRESSES, which are the things you retype into a browser;
  *  - the MACHINE's own settings that bear on it — whether it comes back on boot (only when the host
- *    can tell), how history is preserved, and the central it pushes to.
+ *    can tell), and how history is preserved.
  *
  * Every part is dropped when it is absent rather than rendered as a zero: a service whose pid the
  * box would not give up says nothing about a pid, and never `pid 0`; a box whose init system we
@@ -1210,7 +1209,7 @@ export function detailContent(
   }
 
   // What this box CANNOT start, and why. Placed after the runtimes — it is the same subject read
-  // one level down — and only while the service is DOWN: a running central has no start verbs at
+  // one level down — and only while the service is DOWN: a running service has no start verbs at
   // all, so listing what it could not have started is a paragraph about a decision nobody is
   // making. Absent when nothing is withheld, rather than a line saying so.
   const startNotes = service.state === 'up' ? [] : service.startNotes ?? []
@@ -1240,7 +1239,7 @@ export function detailContent(
     // Absent, not "no": a box whose init system this host cannot ask must say nothing at all.
     //
     // The UNIT is named beside the state whenever the host carried one, and that is the whole of
-    // the honest trail: "starts at boot" tells a user that SOMETHING will bring their central back
+    // the honest trail: "starts at boot" tells a user that SOMETHING will bring their server back
     // and gives them nothing to go and look at. With the unit named, the answer to "why did this
     // come back after I stopped it" is on the same row as the verb that turns it off.
     ...(boot
@@ -1504,7 +1503,7 @@ export interface HintContext {
    * The selection has any verbs at all.
    *
    * Normally it does — a service is either startable or stoppable. It does NOT when this box
-   * cannot run the thing: a central on a machine without docker is down, unstartable, and `enter`
+   * cannot run the thing: a docker service on a machine without docker is down, unstartable, and `enter`
    * on it opens an empty action row, so the hint that names that key would be the lie this whole
    * function exists to prevent.
    */

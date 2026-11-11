@@ -52,30 +52,6 @@ export interface AttemptRollup {
   mixedCurrency: boolean
 }
 
-/** One machine's shared board, as `GET /api/team/tasks` reports it. */
-export interface CentralTaskRow {
-  memberId: string
-  user: string
-  task: TaskRecord
-  comments: TaskComment[]
-  subtasks: Subtask[]
-  files: TaskFile[]
-  counts: { comments: number; subtasks: number; subtasksDone: number; subtasksInProgress?: number; subtasksByStatus?: Record<string, number>; files: number }
-  rollup: AttemptRollup
-  harnesses: string[]
-  repos: string[]
-  /** Sessions its machine withholds from this central — a rule somebody set. */
-  sessionsWithheld: number
-  /** Sessions this central does not hold — a push in flight, or one removed since. */
-  sessionsMissing: number
-}
-
-export interface CentralTaskMachine {
-  memberId: string
-  user: string
-  rows: CentralTaskRow[]
-}
-
 export interface TaskRecord {
   id: string
   title: string
@@ -107,8 +83,6 @@ export interface TaskRecord {
   claim?: TaskClaim
   /** Why it is blocked. `blocked` cannot be recorded without this or a blocking task. */
   blockedReason?: string
-  /** Does this delivery travel to a central? ABSENT READS AS NOT SHARED — see `TaskFieldPatch`. */
-  shared?: boolean
 }
 
 export interface TaskClaim {
@@ -455,7 +429,7 @@ export interface TaskDetail {
 /**
  * Three states, and an empty list is only ever ONE of them.
  *
- * `refused` is what a central (or a profile with no host power) answers — the board is a local
+ * `refused` is what a profile with no host power answers — the board is a local
  * store and there is nothing there to show. Rendering that as "no tasks yet" would invite someone
  * to look for work that was never going to appear. Same rule the fleet already follows.
  */
@@ -582,37 +556,6 @@ export function useTaskList(filters?: Filters) {
     partial: entry?.partial ?? false,
     reload: load,
   }
-}
-
-/**
- * The central's board: what each machine of this central chose to share.
- *
- * A DIFFERENT route from `useTaskList`, deliberately. `/api/tasks` is the local store — on a
- * central it answers `refused`, and it should keep doing so: there is no board on that machine.
- * This one reads team data through the team surface, is read-only, and groups by machine because a
- * board belongs to the person whose machine runs it.
- */
-export function useCentralTasks(enabled: boolean) {
-  const [machines, setMachines] = useState<CentralTaskMachine[] | null>(null)
-  const [error, setError] = useState<TasksError>(null)
-
-  const load = useCallback(async () => {
-    if (!enabled) return
-    try {
-      const res = await fetch('/api/team/tasks')
-      if (res.status === 403 || res.status === 404) { setError('refused'); setMachines([]); return }
-      if (!res.ok) { setError('down'); setMachines([]); return }
-      const body = await res.json() as { machines: CentralTaskMachine[] }
-      setError(null)
-      setMachines(body.machines ?? [])
-    } catch {
-      setError('down')
-      setMachines([])
-    }
-  }, [enabled])
-
-  useEffect(() => { void load() }, [load])
-  return { machines, error, reload: load }
 }
 
 export type TaskDetailResult =
@@ -754,13 +697,6 @@ export interface TaskFieldPatch {
   dueDate?: string
   startDate?: string
   labels?: string[]
-  /**
-   * Does this delivery travel to the centrals this machine is connected to?
-   *
-   * Absent reads as NOT shared on the server, and `false` here is a DECISION rather than an
-   * absence — which is why the route tests it as a boolean instead of for truthiness.
-   */
-  shared?: boolean
   /** Who is making the change — it goes into the activity log. */
   actor?: string
 }

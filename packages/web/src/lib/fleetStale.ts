@@ -15,7 +15,7 @@
  * ONE failure is not staleness. A single missed poll during a rebuild, a laptop waking up, or a
  * server restart is the normal noise of a 5s poll, and a warning that fires on it is a warning
  * people stop reading — the same argument `linkState` makes for not colouring `stale` red on the
- * cockpit's central pill.
+ * cockpit's link pill.
  */
 
 /** Consecutive failures before the list is called into question. Two misses is ~10s of silence. */

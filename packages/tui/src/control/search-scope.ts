@@ -22,7 +22,7 @@ export type SearchScope = typeof SEARCH_SCOPES[number]
  *
  * `transcript` is deliberately absent: it is not a property of the row but the answer to a
  * question asked of the disk, and putting it here would mean holding conversation text in the
- * view — the exact shape that leaked whole transcripts to a central once already. It reaches
+ * view — the exact shape that leaked whole transcripts off the machine once already. It reaches
  * `matchScopes` as a boolean the caller resolved.
  */
 export interface SearchFields {

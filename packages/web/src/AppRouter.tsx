@@ -140,7 +140,7 @@ export default function AppRouter() {
             <Route path="vault" element={<LegacyVaultRedirect />} />
             <Route path="providers" element={<Suspense fallback={<PageFallback />}><ProvidersSettings /></Suspense>} />
             <Route path="memory" element={<Suspense fallback={<PageFallback />}><MemorySettings /></Suspense>} />
-            {/* A removed or unknown section (e.g. the old central `/settings/connection`) lands on
+            {/* A removed or unknown section (e.g. an old `/settings/connection` link) lands on
                 Preferences instead of an empty panel. */}
             <Route path="*" element={<Navigate to="/settings/preferences" replace />} />
           </Route>

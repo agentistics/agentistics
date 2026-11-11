@@ -7,8 +7,7 @@ import { AgentisticsLoader } from '../../components/AgentisticsLoader'
  * `cli-start.ts`'s `backupStatus` calls for the cockpit) and the only write it performs is
  * `POST /api/backup/run` — the same `performBackup` the CLI and the cockpit's `b` key call.
  *
- * Absent on a central (`settingsSections.ts`'s `backup` gate) — a central aggregates other
- * machines and has no local harness directories of its own to back up.
+ * Machine-only: it backs up this machine's own harness directories.
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import { ensureVaultOpen } from '../../components/vault/VaultUnlockHost'
@@ -147,15 +146,6 @@ type GithubSectionJson =
     deleteLocalAfterUpload: boolean
     /** Which credential this machine uses. `'gh'` means nothing is stored here. */
     auth: 'token' | 'gh'
-    /**
-     * A better name for this machine than the one stored, or null.
-     *
-     * Non-null only when the stored label is the hostname — a default nobody typed — AND a central
-     * holds a real name for the same machine. OFFERED, never applied: the label rides in the
-     * release tag, so switching it splits this machine's history into two that retention then
-     * treats as two machines.
-     */
-    suggestedLabel: string | null
   }
 
 /**
@@ -572,10 +562,9 @@ export default function BackupSettings() {
     }
   }, [pt])
 
-  // GitHub versioning — its OWN read, and its own silence. A central answers 404 here
-  // (`index.ts`'s `TEAM_CENTRAL` guard) and 404 renders NOTHING: a central aggregates other
-  // machines and has no local machine to version, so an error box would report a fault that isn't
-  // one. `github === null` therefore means "not available here", never "failed".
+  // GitHub versioning — its OWN read, and its own silence. A 404 here
+  // renders NOTHING: there is no local machine to version, so an error box would report a fault
+  // that isn't one. `github === null` therefore means "not available here", never "failed".
   const [github, setGithub] = useState<GithubSectionJson | null>(null)
   // The two text fields are drafts with an explicit Save — a rename or a retention change that
   // fired on every keystroke would write a half-typed name into every future release tag.
@@ -794,11 +783,9 @@ export default function BackupSettings() {
   // `gh` login) a token, and every fact it shows comes from the repository.
   // -------------------------------------------------------------------------
   /**
-   * Whether this machine can restore at all. `null` while the probe is in flight, `false` for a
-   * central — `GET /api/backup/restore/status` answers 404 there (`index.ts`'s `TEAM_CENTRAL`
-   * guard) and 404 renders NOTHING, exactly like the GitHub block above: a central aggregates other
-   * machines and has no harness directories of its own to restore into, so an error box would
-   * report a fault that isn't one.
+   * Whether this machine can restore at all. `null` while the probe is in flight, `false` when
+   * `GET /api/backup/restore/status` answers 404, which renders NOTHING exactly like the GitHub
+   * block above: an error box would report a fault that isn't one.
    */
   const [restoreSupported, setRestoreSupported] = useState<boolean | null>(null)
   const [restoreUrl, setRestoreUrl] = useState('')
@@ -1030,7 +1017,7 @@ export default function BackupSettings() {
               whole history lives only on the disk being replaced, and burying that under four
               sections about format and recurrence answers questions nobody asked yet.
 
-              Its `Divider` is INSIDE the conditional: a central answers 404 here and renders
+              Its `Divider` is INSIDE the conditional: a 404 here renders
               nothing, and a divider left standing outside would draw two rules with nothing
               between them. Same for the restore block below. */}
           {github && (
@@ -1083,7 +1070,7 @@ export default function BackupSettings() {
           {/* SECTION 3 — Restoring: the other half of versioning, and until now CLI-only. It sits
               right under the repository block because that is the same question read backwards:
               where the history goes, and where it comes back from. Absent entirely when the
-              endpoint 404s (a central) — see `loadRestoreJob`. */}
+              endpoint 404s — see `loadRestoreJob`. */}
           {restoreSupported === true && (
             <>
               <RestoreSection
@@ -1903,11 +1890,6 @@ function GithubVersioning({
                 ? `Várias máquinas podem versionar no MESMO repositório, e este nome é o que separa os backups delas: ele entra na tag do release, e a retenção só apaga releases desta máquina — nunca os de outra. \`agentop restore <url> --from ${section.label}\` restaura especificamente esta máquina.`
                 : `Several machines can version to the SAME repository, and this name is what tells their backups apart: it rides in the release tag, and retention only ever deletes this machine’s own releases — never another machine’s. \`agentop restore <url> --from ${section.label}\` restores this machine specifically.`}
               value={labelDraft}
-              suggestion={section.suggestedLabel}
-              suggestionText={pt
-                ? 'A central chama esta máquina de'
-                : 'The central calls this machine'}
-              onSuggestion={onLabelDraft}
               onChange={onLabelDraft}
               onSave={onSaveLabel}
               saveLabel={pt ? 'Salvar' : 'Save'}
@@ -2171,12 +2153,7 @@ function GithubDisconnectModal({ repo, url, pt, busy, error, onCancel, onConfirm
  */
 function GithubTextField({
   label, hint, value, onChange, onSave, saveLabel, savingLabel, saving, busy, dirty, numeric, feedback,
-  suggestion, suggestionText, onSuggestion,
 }: {
-  /** A better value this machine could use, offered as one click. See `suggestedLabel`. */
-  suggestion?: string | null
-  suggestionText?: string
-  onSuggestion?: (v: string) => void
   label: string
   hint: string
   value: string
@@ -2245,26 +2222,6 @@ function GithubTextField({
             : saveLabel}
         </button>
       </div>
-      {/* The offer. It fills the FIELD rather than saving: the label rides in the release tag, so
-          the person should see the value land and press Save themselves — a one-click rename that
-          also splits a machine's history is a click nobody agreed to. */}
-      {suggestion && suggestion !== value && onSuggestion && (
-        <p style={{ fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5, margin: '6px 0 0' }}>
-          {suggestionText}{' '}
-          <button
-            type="button"
-            onClick={() => onSuggestion(suggestion)}
-            disabled={busy}
-            style={{
-              padding: 0, border: 'none', background: 'none', font: 'inherit',
-              color: 'var(--anthropic-orange)', fontWeight: 700,
-              cursor: busy ? 'not-allowed' : 'pointer', textDecoration: 'underline',
-            }}
-          >
-            {suggestion}
-          </button>
-        </p>
-      )}
       <GithubFeedback feedback={feedback} />
     </div>
   )

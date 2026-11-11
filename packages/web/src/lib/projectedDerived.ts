@@ -24,7 +24,7 @@
  * **A scope the API cannot express is never approximated.** With a tag, member, team, machine or
  * presence filter, or with "active only", `projectedScope` is `null` and the legacy figures stay.
  * The API refuses those filters, and dropping one silently would answer a wider question than the one
- * asked. A refusal of the route itself (404 when the gate is off, 409 on a central, 503 with no reader)
+ * asked. A refusal of the route itself (404 when the gate is off, 409, 503 with no reader)
  * also leaves the legacy figures.
  */
 import {

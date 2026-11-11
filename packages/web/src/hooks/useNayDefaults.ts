@@ -18,7 +18,7 @@ const emit = () => { for (const l of listeners) l() }
 
 function load(): Promise<void> {
   if (loading) return loading
-  // `/api/user-prefs`: these are a person's defaults, per ACCOUNT on a central. On a machine they
+  // `/api/user-prefs`: these are a person's defaults, per ACCOUNT. On a machine they
   // stay the top-level keys of preferences.json the Nay launcher reads server-side.
   loading = fetch('/api/user-prefs')
     .then(r => (r.ok ? r.json() : {}) as Promise<{ chatHarness?: string; chatModel?: string; chatEffort?: string }>)

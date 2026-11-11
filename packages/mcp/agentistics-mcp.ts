@@ -143,7 +143,7 @@ interface AnalyticsSources {
 /**
  * One analytics tool's answer. Projected (A4.4) by default (`AGENTISTICS_PROJECTIONS_SURFACES=legacy`
  * is the fallback) whenever the server serves projections — a refusal
- * (the server's `AGENTISTICS_PROJECTIONS` gate off, a central, no reader) answers from `/api/data`.
+ * (the server's `AGENTISTICS_PROJECTIONS` gate off, no reader) answers from `/api/data`.
  */
 async function analytics(tool: ProjectedTool, harness: string | undefined, from: AnalyticsSources): Promise<unknown> {
   if (projectionSurfaceOn("mcp")) {
@@ -712,7 +712,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_session_groups",
     description:
-      "List the user's SESSION GROUPS — the named folders in the Sessions sidebar (\"Saved to later\", \"Pelvie\", …) — with the sessions in each. A group is how a person keeps a fleet of assistants organised; every session belongs to at most one. Each member carries its `id` (the managed session id you can pass to the other tools), `title`, `state` and `harness` when the session is on this machine right now, or only its `key` when it is gone. Call this BEFORE creating a group, so you file a session under an existing one instead of making a near-duplicate. Only works on a machine, not on a central (a central has no local sessions to organise).",
+      "List the user's SESSION GROUPS — the named folders in the Sessions sidebar (\"Saved to later\", \"Pelvie\", …) — with the sessions in each. A group is how a person keeps a fleet of assistants organised; every session belongs to at most one. Each member carries its `id` (the managed session id you can pass to the other tools), `title`, `state` and `harness` when the session is on this machine right now, or only its `key` when it is gone. Call this BEFORE creating a group, so you file a session under an existing one instead of making a near-duplicate.",
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
@@ -1092,7 +1092,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_tag_detail",
     description:
-      "Get full detail for one tag by name or id: aggregate totals plus per-source breakdown and distributions (top projects, models, harnesses, repos, members/users), daily activity series, and the active date window. Call agentistics_tags first to find the id/name.",
+      "Get full detail for one tag by name or id: aggregate totals plus per-source breakdown and distributions (top projects, models, harnesses, repos), daily activity series, and the active date window. Call agentistics_tags first to find the id/name.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1619,8 +1619,8 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const limit = Math.min((args as any)?.limit ?? 20, 50);
         const harness = (args as any)?.harness as string | undefined;
         const data = await apiGet("/api/data");
-        // Who started each session — read off the fleet (best effort: a central, or a server with no
-        // host power, has no fleet and the field is simply absent).
+        // Who started each session — read off the fleet (best effort: a server with no
+        // host power has no fleet and the field is simply absent).
         const startedBy = await apiGet("/api/fleet?format=links-v1").then((f: any) => startedByFleetPayload(f ?? {})).catch(() => new Map<string, { id: string; title?: string }>());
         // SESSÕES.FECHAR: delivered workers still open (flows off / older server = none).
         const delivered = await apiGet("/api/flows/delivered-open").then((d: any) => deliveredOpenByConversation(d)).catch(() => new Map<string, Record<string, unknown>>());
@@ -1948,9 +1948,6 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
               topModels: bucketTop(d.stats?.models),
               topHarnesses: bucketTop(d.stats?.harnesses),
               topRepos: bucketTop(d.stats?.repos),
-              topMembers: bucketTop(d.stats?.members),
-              distinctMembers: d.stats?.distinctMembers ?? 0,
-              distinctMachines: d.stats?.distinctMachines ?? 0,
               firstSessionDate: d.stats?.firstSessionDate ?? null,
               lastSessionDate: d.stats?.lastSessionDate ?? null,
             }, null, 2),

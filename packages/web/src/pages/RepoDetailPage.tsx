@@ -63,7 +63,7 @@ export default function RepoDetailPage() {
     [data.sessions],
   )
   // The board, scoped by the SAME filters as every other tab — `/api/tasks` already takes `repos`
-  // and `projects`, so nothing here re-derives a scope. A central (or a profile with no host power)
+  // and `projects`, so nothing here re-derives a scope. A profile with no host power
   // answers `refused`, which arrives as an empty list and simply leaves the tab out.
   const { rows: taskRows } = useTaskList(scopedFilters)
   // A task belongs to a repository through its SESSIONS' `git_remote` — `''` on a `folder:` route
@@ -118,7 +118,7 @@ export default function RepoDetailPage() {
             </a>
           )}
         </div>
-        {/* Full folder path subtitle — a machine-local detail, hidden on the central where a repo
+        {/* Full folder path subtitle — a machine-local detail, hidden where a repo
             is keyed by its remote (the title/host chip already identify it). Shown on machines,
             where the same repo can live at several local paths. */}
         {(folderPath || scoped.repoStats[0]?.path) && (

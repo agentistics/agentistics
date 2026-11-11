@@ -46,9 +46,9 @@ export type TabId =
 // documentation. The dashboard sits where it does because it answers a question about the same work
 // the two screens before it are managing.
 //
-// There is no `setup` screen any more, and its absence is the point: choosing solo / central /
-// member is a question ABOUT the services on this box — you cannot re-run `central.sh init` on a
-// central that is up, and the only way to know that is to be looking at whether it is up. The
+// There is no `setup` screen any more, and its absence is the point: choosing how this box runs
+// is a question ABOUT the services on this box, and the only way to answer it is to be looking at
+// whether they are up. The
 // wizard is a QUESTION the cockpit asks, drawn in the detail region like every other one, reached
 // from the config pane's mode row. `agentop setup` still exists as the non-interactive command —
 // one implementation, two entrances.
@@ -174,10 +174,7 @@ export interface ServiceRuntimeState {
 /**
  * `fg` (attached — runs on this terminal, or the docker/native equivalent of that) versus `bg`
  * (detached — returns immediately, keeps running). Every runtime that CAN run has both shapes now:
- * `local` always did, `machine` runs `docker compose up [--build]` with or without `-d`, and
- * `central` offers it only when a native start is even possible (see `StartFacts.centralPlan`) —
- * the Docker central still has one shape, `bg`, because its `up` (central.sh or the standalone
- * image path) has no attached variant.
+ * `local` always did, and `machine` runs `docker compose up [--build]` with or without `-d`.
  */
 export type StartHow = 'fg' | 'bg'
 
@@ -223,10 +220,7 @@ export interface StartOption extends StartRequest {
    * blocks it under `suspend` until Ctrl-C), so the question would be about something that has not
    * finished happening yet. Among the detached options, it is further true only where a genuine,
    * separate boot mechanism exists: `local` background installs the native `agentop-server` unit,
-   * `machine` background installs `agentop-machine` (`docker compose … up -d`), Docker `central`
-   * keeps its existing `agentop-central` unit. A NATIVE central background start does not offer
-   * it — no native-central systemd unit exists yet, and installing the Docker one would claim a
-   * mechanism that does not match what actually started.
+   * `machine` background installs `agentop-machine` (`docker compose … up -d`).
    */
   offersBoot?: boolean
 }
@@ -236,13 +230,13 @@ export interface StartOption extends StartRequest {
  *
  * It exists because `enableBoot` alone was a switch with one position. A service registered at boot
  * comes back after every reboot and after every login that starts the user's systemd manager, so a
- * user who deliberately stopped their central found it running again and had nowhere in the product
+ * user who deliberately stopped the server found it running again and had nowhere in the product
  * to say "stay down" — the machine could disable it (`disableAutostart` has always existed), the
  * cockpit simply had no way to ask.
  *
  * Composed by the host for the same reason `StartOption` is: WHICH mechanism brings a service back
  * is a fact about this box (`agentistics` has two — a native unit and one that runs `docker compose
- * … up -d` — and the central has one), and whether a mechanism can be registered here at all
+ * … up -d`), and whether a mechanism can be registered here at all
  * depends on files only the host can look for. A mechanism the host cannot ask about produces NO
  * option, never a disabled one: the same absence-is-absence rule `ControlService.boot` follows.
  */
@@ -260,7 +254,7 @@ export interface BootOption {
    *
    * The confirmation may not be "are you sure?": this writes or removes a systemd user unit, which
    * is a change to the machine that outlives the session. Naming the unit is also the only way the
-   * answer to "what keeps bringing my central back" is discoverable from inside agentop.
+   * answer to "what keeps bringing my server back" is discoverable from inside agentop.
    */
   confirm: string
   /**
@@ -288,8 +282,7 @@ export interface RestartRequest {
    * Rebuild before restarting instead of just bouncing what is already built.
    *
    * What that MEANS is per runtime and is the host's business: the native server recompiles the
-   * binary (`bun run bin`), a container rebuilds its image and is recreated, the central goes
-   * through its own `up`. The UI hands the flag back and learns none of it.
+   * binary (`bun run bin`), a container rebuilds its image and is recreated. The UI hands the flag back and learns none of it.
    */
   rebuild?: boolean
 }
@@ -312,15 +305,15 @@ export interface RestartOption extends RestartRequest {
 /**
  * One logical service, as the host currently sees it.
  *
- * The list shows one row per service whether it is up or down — a stopped central stays visible
- * (dim) rather than being hidden, because hiding it would turn "start the central" into a hunt
+ * The list shows one row per service whether it is up or down — a stopped service stays visible
+ * (dim) rather than being hidden, because hiding it would turn "start it" into a hunt
  * through a menu. What changes with the state is what the row can DO: a running service offers
  * restart / stop / open and no start at all, a stopped one offers exactly the starts this box can
  * perform.
  */
 export interface ControlService {
   id: ServiceId
-  /** Already-localized name — "agentistics", "agentistics central". */
+  /** Already-localized name — "agentistics". */
   label: string
   /**
    * The service's state, aggregated from its runtimes: `up` when any runtime is up, `unknown` when
@@ -375,7 +368,7 @@ export interface ControlService {
    * WHAT brings it back — the systemd unit name, present only when `boot` is known.
    *
    * A proper noun, deliberately untranslated, and the whole of the honest trail: "starts at boot" on
-   * its own tells a user that something will restart their central and gives them nothing to go
+   * its own tells a user that something will restart their server and gives them nothing to go
    * look at. With the unit named, `systemctl --user status <unit>` and `agentop autostart status`
    * both answer, and the verb that turns it off is on the same pane.
    */
@@ -395,9 +388,8 @@ export interface ControlService {
    * Already-localized sentences naming the starts this box CANNOT perform, and why.
    *
    * The absent-beats-present-and-failing rule says a verb that cannot work is not offered. On its
-   * own that leaves the opposite problem: a central offering one way to start when the operator
-   * knows there are three reads as a broken screen, and nothing on it says `--native` is missing
-   * because the database is the bundled one. So the verbs stay absent and the REASONS are said, in
+   * own that leaves the opposite problem: a service offering one way to start when the operator
+   * knows there are more reads as a broken screen, and nothing on it says why one is missing. So the verbs stay absent and the REASONS are said, in
    * the detail pane, where there is room for a sentence.
    *
    * Empty whenever nothing is withheld — never a "nothing is blocked" line, which is a row spent
@@ -432,8 +424,7 @@ export type BootState = 'on' | 'off'
 /**
  * Redeclared from `server/backup/backup-plan.ts`'s `BackupLayer` — `packages/tui` may not import
  * from `packages/server` (server -> tui is the only allowed direction). `backup-plan.test.ts`
- * cross-checks this union against `BACKUP_LAYERS`, member for member, the same guard
- * `central-runtime.test.ts` runs for `CentralRuntimeId`.
+ * cross-checks this union against `BACKUP_LAYERS`, member for member.
  */
 export type BackupLayer = 'metrics' | 'repos' | 'archive' | 'raw'
 
@@ -1437,8 +1428,8 @@ export interface ControlHost {
    * Install the newer release and restart whatever is running onto it.
    *
    * Offered only while `ControlStatus.latestVersion` says there IS one. It is the whole of
-   * `agentop upgrade` — download, verify, install, then restart the active systemd services, the
-   * central's containers and a machine container — run as a CHILD process, because that command
+   * `agentop upgrade` — download, verify, install, then restart the active systemd services and a
+   * machine container — run as a CHILD process, because that command
    * prints, and nothing may print while the alternate buffer is live. Its output is the point, so
    * it streams into the detail pane like a build.
    */
@@ -1456,8 +1447,7 @@ export interface ControlHost {
    * directly), so the host needs to know which was used in order to write the matching unit rather
    * than defaulting to the native one regardless. It is optional because the manual "enable boot"
    * action row — offered while the service is down, with no runtime yet running to name — has no
-   * runtime to hand over; the host then falls back to its default (native for `agentistics`,
-   * Docker for `central`, its only mechanism).
+   * runtime to hand over; the host then falls back to its default (native for `agentistics`).
    */
   enableBoot(service: ServiceId, runtime?: RuntimeId): Promise<ActionResult>
 
@@ -1467,7 +1457,7 @@ export interface ControlHost {
    * It was missing, and its absence is the bug this pair exists to fix: `enableBoot` wrote a
    * systemd user unit that nothing in the product could take away, so stopping a service stopped
    * only this instance of it. The unit stayed enabled, and the next boot — or the next login that
-   * starts the user's systemd manager — ran it again. "I stopped my central and it keeps coming
+   * starts the user's systemd manager — ran it again. "I stopped it and it keeps coming
    * back" is exactly what a one-way switch produces.
    *
    * It NEVER stops what is running. Turning off "come back after a reboot" is a statement about the
@@ -1599,8 +1589,7 @@ export interface ControlHost {
    *
    * Reads the transcripts on THIS machine and answers with conversation ids only. The text is
    * never carried: it does not go on a session row, it does not reach the web dashboard, and it
-   * cannot reach a central. A previous attempt put it on `SessionMeta` and shipped whole
-   * conversations to a central in the member push — see the header of `transcript-search.ts`.
+   * cannot leave this machine — see the header of `transcript-search.ts`.
    *
    * OPTIONAL like `sessions`: a host that cannot search transcripts here (no `grep`, no
    * transcripts, not this platform) says so through `TranscriptSearch.unavailable`, and the screen
@@ -1615,7 +1604,7 @@ export interface ControlHost {
    * Returned rather than PERFORMED, exactly as the backend's own `attachCommand` is: attaching needs
    * the real tty, which it can only have once the control center has released it. The cockpit
    * reports the intent as `ControlExit.attach` and `cli-start.ts` takes over — the same discipline
-   * `central.sh init` already follows.
+   * every other interactive command follows.
    */
   attachSession?(id: string): Promise<AttachTicket | null>
 

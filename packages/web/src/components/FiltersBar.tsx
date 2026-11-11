@@ -62,7 +62,7 @@ interface Props {
   /** Tags visible to the viewer (from GET /api/tags) — drives the `tags` dimension. Empty/omitted
    *  hides it. Selecting a tag can only NARROW the (already team-scoped) dashboard. */
   tags?: TagDef[]
-  /** The active cost basis. Omit `onCostBasisChange` to hide the control entirely (a central, or
+  /** The active cost basis. Omit `onCostBasisChange` to hide the control entirely (or
    *  a bar embedded where the basis makes no sense). */
   costBasis?: 'api' | 'plan'
   onCostBasisChange?: (b: 'api' | 'plan') => void

@@ -30,7 +30,7 @@
  *
  * Everything else is preserved to the letter — the archive gate before a foreground and a
  * background start (skipped for docker, never re-asked), the port-collision question, the
- * confirmed disconnect, the boot offer after a background start and after a central came up, and
+ * confirmed disconnect, the boot offer after a background start, and
  * the foreground handover through `onExit({ kind: 'foreground' })`. Nothing here decides what an
  * action DOES: every choice becomes one `host` call.
  */
@@ -125,7 +125,7 @@ type View =
   /** `gate` marks the one nobody asked for: the question raised on OPEN, because a machine enabled
    *  at boot never crosses the start path that used to be the only place it was asked. Only that
    *  one may be skipped — see `archive-gate.ts`. */
-  /** `thenBoot` is the wizard's tail: after the consent, member and central offer the boot unit. */
+  /** `thenBoot` is the wizard's tail: after the consent, the wizard offers the boot unit. */
   | { kind: 'archive'; suggested: ArchiveMode; then: StartOption | null; gate?: boolean; thenBoot?: ServiceId }
   /** `runtime` is the one that just started, when this came from a fresh start's boot question —
    *  `enableBoot` needs it to write the matching unit. Absent for the manual "enable boot" action
@@ -142,13 +142,13 @@ type View =
    */
   | { kind: 'bootSwitch'; service: ServiceId; option: BootOption; afterStop?: boolean }
   /**
-   * THE WIZARD — solo / central / member, the whole of what the Setup tab used to be.
+   * THE WIZARD — the whole of what the Setup tab used to be.
    *
    * A question here rather than a screen of its own because it is a question ABOUT these services:
-   * you cannot re-run `central.sh init` on a central that is up, and the only way to know that is to
-   * be looking at whether it is up. The host says which modes are withheld and WHY
+   * the only way to answer it is to
+   * be looking at what is running. The host says which modes are withheld and WHY
    * (`ControlStatus.setupBlocked`); this file draws the menu and routes each answer into the flow
-   * that already existed here — the three connect prompts, the archive consent, the boot offer.
+   * that already existed here — the archive consent, the boot offer.
    */
   | { kind: 'setup' }
 
@@ -381,7 +381,7 @@ export function Services({
     // Only `local` foreground needs to leave the app: it is about to become THIS process's own
     // foreground job, which can only happen once we have unmounted and left the alternate screen
     // — the same `'foreground'` sentinel `runStart()` has always returned, after which the host
-    // starts the in-process server. A Docker (or native-central) foreground start is a plain CHILD
+    // starts the in-process server. A Docker foreground start is a plain CHILD
     // this process can still supervise: `host.start()` runs it under `suspend()`, which hands the
     // real tty to that child and returns control to the cockpit the moment it exits (Ctrl-C). It
     // never needs — and must never trigger — the exit that would otherwise start the wrong thing
@@ -416,8 +416,8 @@ export function Services({
   /**
    * Stopping a WHOLE service — and, when it worked, asking about the boot registration.
    *
-   * The moment of the stop is the only moment the person knows the answer. Someone stopping their
-   * central because they are finished with it wants it to stay stopped; someone stopping it to
+   * The moment of the stop is the only moment the person knows the answer. Someone stopping the
+   * server because they are finished with it wants it to stay stopped; someone stopping it to
    * restart it does not — and nothing on this screen can tell those two apart, which is exactly why
    * it is a question rather than a rule. Asked ONLY when there is something to turn off: a service
    * with no registration, or on a box with no user systemd, has no such option and is never asked.
@@ -525,12 +525,12 @@ export function Services({
      *
      * It used to be one verb (`Start at boot`) offered only beside a start, which made it a switch
      * with a single position: the unit it wrote could be turned off by nothing in this product. A
-     * user who stopped their central because they were done with it got it back on the next boot —
+     * user who stopped the server because they were done with it got it back on the next boot —
      * and on the next login that starts the user's systemd manager — with nothing on screen naming
      * what had brought it back or offering to stop it. That is the whole complaint.
      *
      * The host composes these: which mechanisms exist is a fact about this box (`agentistics` has
-     * two, the central has one), and a box with no user systemd gets an EMPTY list rather than a
+     * two), and a box with no user systemd gets an EMPTY list rather than a
      * verb that refuses on principle. Placed AFTER the state verbs because `fitActionRow` drops
      * from the right and stopping a service outranks scheduling one.
      */
@@ -548,7 +548,7 @@ export function Services({
     // The update, where the update dot already is. The header has been able to say a newer version
     // EXISTS for a long time while the only way to take it was to quit, remember the command and
     // type it — so the notice pointed at work the user had to do by hand. `agentop upgrade`
-    // already installs and then restarts the active systemd services, the central's containers and
+    // already installs and then restarts the active systemd services and
     // a machine container; this is that same command, one keypress from the dot. Offered LAST
     // because it acts on the whole install rather than on the selected service, and only while
     // there is genuinely something to install.
@@ -565,17 +565,16 @@ export function Services({
   const configRows = useMemo<ConfigRow[]>(() => {
     const rows: ConfigRow[] = [
       // The short token is the fallback and the sentence is the preference: `fitValue` shows
-      // whichever the column can hold whole, because "member — sen…" answers nothing.
+      // whichever the column can hold whole, because a clipped prefix answers nothing.
       {
         key: 'mode',
         label: s.modeLabel,
         value: status?.modeLabel ?? status?.mode ?? '—',
-        // "member — sends metrics to a central" degrades to "member", never to "member — sen…".
+        // The sentence degrades to the short token, never to a clipped prefix.
         short: status?.mode ?? '—',
         // THE SETUP TAB'S DOOR. The mode row is what the wizard changes, so the wizard is what
-        // `enter` on it opens — the three modes, with whichever the host has withheld greyed and
-        // explained. `Connect` used to live here and is now what the `member` item does, which is
-        // the same three prompts in the same order: one implementation, one entrance.
+        // `enter` on it opens — the modes the host offers, with whichever it has withheld greyed and
+        // explained.
         action: { label: s.actSetup, run: () => setView({ kind: 'setup' }) },
       },
     ]
@@ -649,8 +648,7 @@ export function Services({
    *
    * Composed here rather than inside `detailContent` because they come off the `ControlStatus`
    * rather than off the service, and they are already localized by the host. Both are shown for
-   * every service without branching on an id: how history is preserved and which central this box
-   * pushes to are facts about the box, and the box is what every service on this screen runs on.
+   * every service without branching on an id: how history is preserved is a fact about the box, and the box is what every service on this screen runs on.
    */
   const machine = useMemo(() => ({
     rows: [
@@ -678,7 +676,7 @@ export function Services({
     // Per COLUMN, not per row: `serviceCells` aligns the runtime and state cells across the whole
     // list, so a budget taken from the widest single ROW is short by however much the longest name
     // and the longest runtime differ — which is exactly enough to drop the runtime cell off a list
-    // whose two entries are `agentistics` and `agentistics central`.
+    // whose entries are `agentistics` and its sibling.
     const servicesWidth =
       SERVICE_MARKER + widest(r => r.label) + 1 + widest(r => r.runtime) + 1 + widest(r => r.state)
     const configWidth = configRows.reduce(
@@ -1389,15 +1387,7 @@ export function Services({
   /**
    * The wizard's answer, routed into the flow that already lived on this screen.
    *
-   * Order preserved from `cli-setup.ts` exactly: solo persists the mode and then asks the archive
-   * consent; central runs `central.sh init` and only offers boot when the init SUCCEEDED; member
-   * gathers endpoint → token → org, connects, and only then asks the consent and the boot question.
-   * Anything that ran before a successful connect would be a preference written for a machine that
-   * never joined.
-   *
-   * `solo` on a machine that IS a member goes through the confirmed disconnect rather than straight
-   * to `setMode`, because there it is a leave: it surrenders the member tokens, which are minted on
-   * the central and stored nowhere else on this box.
+   * Order preserved from `cli-setup.ts`: solo persists the mode and then asks the archive consent.
    */
   function onSetupMode(mode: TeamMode) {
     return void run(() => host.setMode('solo'), s.setupMode.solo).then(res => {

@@ -88,14 +88,8 @@ export default function SessionsSettings() {
   const [taskSuggestions, setTaskSuggestions] = useState(false)
   const [taskSuggestionsSaving, setTaskSuggestionsSaving] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
-  // A CENTRAL CAN NEVER RUN THE STUDIO, and this screen is the one place a user turns it on — so it
-  // is the one place a false sentence about it is expensive. `CAPS.localShell` carries no central
-  // term, so a central on a `local` profile reported "your profile allows this and you have it ON.
-  // Each session gets the Studio in the side panel" over a deployment that refuses the whole
-  // `/api/fleet` prefix — every request the Studio makes. It joins the capability rather than
-  // becoming a fourth state: "this instance cannot do this, and nothing here can change that" is
-  // exactly what the unavailable branch already means. Only the REASON differs, so only the reason
-  // is worded apart — the three-way shape the shell's switch above keeps is untouched.
+  // The Studio needs host power: `CAPS.localShell` decides, and this screen is the one place a user
+  // turns it on, so it is the one place a false sentence about it is expensive.
   const editorCapable = ctx.capabilities?.localShell !== false
   // Autosave is a CONVENIENCE, not a gate: no capability guards it, because it can only ever
   // narrow what `editorEnabled` already gates. It still has to reach the Studio without a

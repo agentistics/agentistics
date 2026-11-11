@@ -23,10 +23,10 @@ export interface PanelBarGates {
   editorEnabled: boolean
   /** `appCtx.shellEnabled` — ditto. */
   shellEnabled: boolean
-  /** This session is another machine's, reached through a central's relay — no `cli`/`shell` stream
+  /** This session is another machine's, reached through a relay — no `cli`/`shell` stream
    *  of its own exists to show. */
   relayed: boolean
-  /** Hardware reads THIS machine's own process list — meaningless (and refused) on a central. */
+  /** Hardware reads THIS machine's own process list — meaningless (and refused). */
   hardwareOffered: boolean
   /**
    * The session HAS a screen — a harness process in a pane. Absent reads as true; `false` for a
@@ -102,7 +102,7 @@ export interface BottomBandInput {
    *  nothing is placed at the bottom right now (every bottom-placed panel was moved away), or a
    *  server gate closed the one that was there. Never `'cli'` — see `BottomBandKind`'s own header. */
   bottomOccupant: Exclude<PanelId, 'cli'> | null
-  /** This session belongs to another machine, reached through a central's relay — no `cli`/`shell`
+  /** This session belongs to another machine, reached through a relay — no `cli`/`shell`
    *  stream of its own exists to dock. */
   relayed: boolean
   /** Phone viewport — the relayed fallback (`bar-only`) is desktop-only. */

@@ -57,7 +57,6 @@ const SWATCHES: string[] = [
 // Explicit, not SWATCHES[0]: noUncheckedIndexedAccess types an index read as `string | undefined`,
 // which would leak `undefined` into every consumer of the selected colour.
 const DEFAULT_COLOR = '#f59e0b'
-/** Source types that only exist where there is IAM. Hidden off a central, and refused there too. */
 
 /** A label/value pair inside a grid card. */
 function MiniStat({ label, value, title }: { label: string; value: string; title?: string }) {
@@ -134,7 +133,7 @@ const trashBtn: React.CSSProperties = {
 /**
  * Read a JSON response, refusing anything that is not JSON.
  *
- * The route used to 404 with the PLAIN-TEXT body "Not found" on a non-central instance, and this
+ * The route used to 404 with the PLAIN-TEXT body "Not found", and this
  * page called `r.json()` on it unconditionally — so the page died with
  * `SyntaxError: Unexpected token 'N'` instead of showing anything. Every tags fetch goes through
  * here now: status and content-type are checked first, and a non-JSON body becomes a readable
@@ -434,8 +433,7 @@ export default function TagsPage() {
 
   // "Create tag with these filters" (the FiltersBar button, see filtersToTag.ts) hands off a
   // precomputed draft via router state exactly the way the detail page's pencil hands off
-  // `editTagId` above — same mechanism, opens the SAME drawer, so central-only sections (sharing,
-  // etc.) show up for free. Does not wait on `loaded`: unlike editing, there is no existing tag to
+  // `editTagId` above — same mechanism, opens the SAME drawer, so the same form serves both. Does not wait on `loaded`: unlike editing, there is no existing tag to
   // find first.
   const draftFromFilters = (location.state as { draftFromFilters?: { sources: TagSource[]; filters: TagSource[]; window?: TagWindow } } | null)?.draftFromFilters
   useEffect(() => {
@@ -548,9 +546,7 @@ export default function TagsPage() {
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
                 {/* The project pill is a filesystem path. On a MACHINE that is meaningful — you
-                    recognise your own folder. On a CENTRAL it is some other machine's local path,
-                    which identifies nothing about the tag, so it is omitted there. Same rule the
-                    repositories view already follows. */}
+                    recognise your own folder. */}
                 {t.aggregate.topProject && <Pill text={`${pt ? 'Projeto' : 'Project'}: ${formatProjectName(t.aggregate.topProject)}`} />}
                 {t.aggregate.topModel && <Pill text={`${pt ? 'Modelo' : 'Model'}: ${t.aggregate.topModel}`} />}
                 {t.aggregate.topHarness && <Pill text={`Harness: ${HARNESS_LABELS[t.aggregate.topHarness as keyof typeof HARNESS_LABELS] ?? t.aggregate.topHarness}`} />}

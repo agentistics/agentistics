@@ -39,10 +39,6 @@ export interface LiveEmptyNotice {
  *    one running under a uid that may not ptrace the host user cannot read its cwd; a non-Linux
  *    host has no /proc at all. Rendering `0` for any of those is the confident zero CLAUDE.md
  *    forbids for harness capabilities — and worse, because it never self-corrects.
- *  - **This is a central.** It never reads its own /proc for this; members report their own
- *    snapshots, and a member's sharing rules apply to that channel exactly as they do to its
- *    metrics. A repository withheld from this central does not appear here either — which is
- *    correct, and invisible unless it is said.
  *  - **Nothing is open.** The only case the plain sentence is true for.
  *
  * Pure, so every branch is testable without a /proc or a browser.

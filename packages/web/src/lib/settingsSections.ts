@@ -21,7 +21,7 @@ export interface SettingsViewer {
 // `/settings/billing` route stays only as a redirect there, so bookmarks still land.
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'preferences', labelEn: 'Preferences', labelPt: 'Preferências', group: 'personal' },
-  // Visible in BOTH modes: the magnifiers are stored per account on a central and per machine
+  // Visible in BOTH modes: the magnifiers are stored per account and per machine
   // otherwise, so there is no mode in which this screen has nothing to configure.
   { id: 'accessibility', labelEn: 'Accessibility', labelPt: 'Acessibilidade', group: 'personal' },
   { id: 'notifications', labelEn: 'Notifications', labelPt: 'Notificações', group: 'personal' },

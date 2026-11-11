@@ -124,10 +124,6 @@ const REFUSAL_TEXT: Record<string, { en: string; pt: string }> = {
     en: `The native provider runtime is off on this machine — set ${FLAG_ASSIGNMENT} to turn it on.`,
     pt: `O runtime nativo de provedores está desligado nesta máquina — defina ${FLAG_ASSIGNMENT} para ligá-lo.`,
   },
-  central: {
-    en: 'A central has no local runtime, so there is nothing here to configure.',
-    pt: 'Uma central não tem runtime local, então não há nada aqui para configurar.',
-  },
   key_required: {
     en: 'An API key is required.',
     pt: 'É necessária uma chave de API.',
@@ -247,7 +243,7 @@ export const SYSTEMD_BUS_CAVEAT = {
   pt: 'se o systemctl disser Failed to connect to bus, use o comando em primeiro plano.',
 }
 
-/** Only ever shown for a solo/member machine: a central is refused (403 `central`) before the
+/** Only ever shown for a solo/member machine: 
  *  flag is looked at, and the Providers section is hidden there. */
 export function providerOffGuide(pt: boolean): ProviderOffGuide {
   const dropIn = `[Service]\nEnvironment=${FLAG_ASSIGNMENT}`

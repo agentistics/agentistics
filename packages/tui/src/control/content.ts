@@ -68,7 +68,7 @@ const HELP_EN: ContentSection[] = [
       { cmd: 'agentop', text: '(on a terminal)' },
       { cmd: 'agentop start', text: '' },
       { text: "One full-screen application, in the terminal's alternate buffer — it adds nothing to your scrollback." },
-      { text: 'Screens: Services (start/stop/restart this machine, a central or the Docker machine; turn boot on or off; and the SETUP wizard — solo / central / member, the history-preservation consent, connecting to or leaving a central — reached from the config pane\'s mode row), Sessions (the fleet running right now), Dashboard (the metrics — 1-6 or tab to change screen, `f` filters by assistant, `,`/`.` page a list), Logs, Cheat sheet, Help, Contribute.' },
+      { text: 'Screens: Services (start/stop/restart this machine or the Docker machine; turn boot on or off; and the SETUP wizard — the history-preservation consent — reached from the config pane\'s mode row), Sessions (the fleet running right now), Dashboard (the metrics — 1-6 or tab to change screen, `f` filters by assistant, `,`/`.` page a list), Logs, Cheat sheet, Help, Contribute.' },
       { text: 'Picking "foreground" closes it and starts the server in this terminal. Non-interactive stdin runs like `agentop server`.' },
     ],
   },
@@ -87,19 +87,19 @@ const HELP_EN: ContentSection[] = [
   {
     title: 'Restart',
     rows: [
-      { cmd: 'agentop restart', text: '[server|watch|central|--all] [--rebuild]' },
+      { cmd: 'agentop restart', text: '[server|watch|--all] [--rebuild]' },
       { text: 'Restart a running mode so it picks up new code (after an upgrade or pull) or config. With no argument it restarts server.' },
-      { text: 'server and watch bounce the systemd user service; central restarts its container.' },
-      { cmd: '--all', text: 'bounce every service currently up (local + central + machine), non-interactively' },
+      { text: 'server and watch bounce the systemd user service.' },
+      { cmd: '--all', text: 'bounce every service currently up (local + machine), non-interactively' },
       { cmd: '--rebuild', text: 'rebuild before restarting, instead of just bouncing' },
-      { text: 'central and machine: recreate the Docker image/container. server and watch: rebuild and reinstall the native binary (`bun run bin`), which needs the repo checkout — outside one the rebuild is refused and `agentop upgrade` is the way to get new code.' },
+      { text: 'machine: recreate the Docker image/container. server and watch: rebuild and reinstall the native binary (`bun run bin`), which needs the repo checkout — outside one the rebuild is refused and `agentop upgrade` is the way to get new code.' },
     ],
   },
   {
     title: 'Setup',
     rows: [
       { cmd: 'agentop setup', text: '' },
-      { text: 'Interactive wizard: pick solo, host a central, or join one as a member.' },
+      { text: 'Interactive wizard: history-preservation consent and start on boot.' },
       { text: "The control center's Setup screen asks the same questions." },
     ],
   },
@@ -118,7 +118,7 @@ const HELP_EN: ContentSection[] = [
   {
     title: 'Autostart',
     rows: [
-      { cmd: 'agentop autostart', text: '<mode> <enable|disable|status>   mode ∈ { server, central, watch }' },
+      { cmd: 'agentop autostart', text: '<mode> <enable|disable|status>   mode ∈ { server, watch }' },
       { cmd: 'enable', text: 'register + start the service at boot (also adds a terminal update-check hook to ~/.bashrc)' },
       { cmd: 'disable', text: 'stop and remove the service' },
       { cmd: 'status', text: 'show enabled/active state — omit the mode to list all' },
@@ -159,7 +159,7 @@ const HELP_PT: ContentSection[] = [
       { cmd: 'agentop', text: '(num terminal)' },
       { cmd: 'agentop start', text: '' },
       { text: 'Uma única aplicação em tela cheia, no buffer alternativo do terminal — ela não deixa nada no seu scrollback.' },
-      { text: 'Telas: Serviços (subir/parar/reiniciar esta máquina, uma central ou a máquina em Docker; ligar ou desligar o boot; e o assistente de SETUP — solo / central / member, o consentimento de preservação do histórico, conectar ou sair de uma central — aberto pela linha de modo no painel de config), Sessões (a frota rodando agora), Dashboard (as métricas — 1-6 ou tab troca de tela, `f` filtra por assistente, `,`/`.` pagina uma lista), Logs, Comandos, Ajuda, Contribuir.' },
+      { text: 'Telas: Serviços (subir/parar/reiniciar esta máquina ou a máquina em Docker; ligar ou desligar o boot; e o assistente de SETUP — o consentimento de preservação do histórico — aberto pela linha de modo no painel de config), Sessões (a frota rodando agora), Dashboard (as métricas — 1-6 ou tab troca de tela, `f` filtra por assistente, `,`/`.` pagina uma lista), Logs, Comandos, Ajuda, Contribuir.' },
       { text: 'Escolher "foreground" fecha a tela e sobe o servidor neste terminal. Com stdin não interativo, roda como `agentop server`.' },
     ],
   },
@@ -175,19 +175,19 @@ const HELP_PT: ContentSection[] = [
   {
     title: 'Restart',
     rows: [
-      { cmd: 'agentop restart', text: '[server|watch|central|--all] [--rebuild]' },
+      { cmd: 'agentop restart', text: '[server|watch|--all] [--rebuild]' },
       { text: 'Reinicia um modo em execução para ele pegar código novo (depois de um upgrade ou pull) ou config nova. Sem argumento, reinicia o server.' },
-      { text: 'server e watch reiniciam o serviço systemd; central reinicia o container dela.' },
-      { cmd: '--all', text: 'reinicia todos os serviços no ar (local + central + máquina), sem interação' },
+      { text: 'server e watch reiniciam o serviço systemd.' },
+      { cmd: '--all', text: 'reinicia todos os serviços no ar (local + máquina), sem interação' },
       { cmd: '--rebuild', text: 'reconstrói antes de reiniciar, em vez de só reiniciar' },
-      { text: 'central e máquina: recria a imagem/container Docker. server e watch: reconstrói e reinstala o binário nativo (`bun run bin`), o que exige o checkout do repositório — fora dele a reconstrução é recusada e `agentop upgrade` é o caminho para pegar código novo.' },
+      { text: 'máquina: recria a imagem/container Docker. server e watch: reconstrói e reinstala o binário nativo (`bun run bin`), o que exige o checkout do repositório — fora dele a reconstrução é recusada e `agentop upgrade` é o caminho para pegar código novo.' },
     ],
   },
   {
     title: 'Setup',
     rows: [
       { cmd: 'agentop setup', text: '' },
-      { text: 'Assistente interativo: escolher solo, hospedar uma central ou entrar em uma como membro.' },
+      { text: 'Assistente interativo: consentimento de preservação do histórico e início no boot.' },
       { text: 'A tela Setup do control center faz as mesmas perguntas.' },
     ],
   },
@@ -206,7 +206,7 @@ const HELP_PT: ContentSection[] = [
   {
     title: 'Autostart',
     rows: [
-      { cmd: 'agentop autostart', text: '<modo> <enable|disable|status>   modo ∈ { server, central, watch }' },
+      { cmd: 'agentop autostart', text: '<modo> <enable|disable|status>   modo ∈ { server, watch }' },
       { cmd: 'enable', text: 'registra + inicia o serviço no boot (e adiciona um hook de checagem de versão ao ~/.bashrc)' },
       { cmd: 'disable', text: 'para e remove o serviço' },
       { cmd: 'status', text: 'mostra se está habilitado/ativo — omita o modo para listar todos' },
@@ -338,7 +338,6 @@ const CONTRIBUTE_EN: ContentSection[] = [
       { cmd: 'docs/architecture.md', text: 'how the pieces fit, including team mode' },
       { cmd: 'docs/data-sources.md', text: 'what is read from each assistant, and what is not' },
       { cmd: 'docs/metrics.md', text: 'how each number is computed' },
-      { cmd: 'docs/github-actions.md', text: 'pushing CI runs to a central' },
       { cmd: 'docs/mcp.md', text: 'the MCP server and its tools' },
       { cmd: 'docs/opentelemetry.md', text: 'exporting metrics over OTLP' },
     ],
@@ -379,7 +378,6 @@ const CONTRIBUTE_PT: ContentSection[] = [
       { cmd: 'docs/architecture.md', text: 'como as peças se encaixam, inclusive o modo time' },
       { cmd: 'docs/data-sources.md', text: 'o que é lido de cada assistente, e o que não é' },
       { cmd: 'docs/metrics.md', text: 'como cada número é calculado' },
-      { cmd: 'docs/github-actions.md', text: 'enviar execuções de CI para uma central' },
       { cmd: 'docs/mcp.md', text: 'o servidor MCP e suas ferramentas' },
       { cmd: 'docs/opentelemetry.md', text: 'exportar métricas via OTLP' },
     ],

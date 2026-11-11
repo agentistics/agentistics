@@ -74,7 +74,7 @@ const DEFAULT_COLOR = '#f59e0b'
 /**
  * Read a JSON response, refusing anything that is not JSON.
  *
- * `/api/tags` used to answer with the plain-TEXT body "Not found" off a central, and this page fed
+ * `/api/tags` used to answer with the plain-TEXT body "Not found", and this page fed
  * it straight to `r.json()` — a SyntaxError that took the whole page down instead of an error
  * state. Status and content-type are checked before parsing now.
  */

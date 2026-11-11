@@ -383,7 +383,7 @@ function flushDataCache(): void {
 
 function writeDataCache(data: AppData): void {
   // Guarded on the way IN as well as out. A 200 that is not an `AppData` (a proxy page, a captive
-  // portal, an ingest-only central) was cached by the same blind cast that read it back, so the
+  // portal, an ingest-only host) was cached by the same blind cast that read it back, so the
   // next reopen started from a snapshot no server would ever produce again.
   if (!isUsableDataCache(data) || cacheWriteFailed) return
   // Off the refresh's own turn, and coalesced: only the newest payload is ever written.
@@ -1574,7 +1574,7 @@ export function computeDerivedStats(
 
     let allTimeTotalSessions: number
     if (nonClaudeHarness || cacheBlindScope) {
-      // Pure per-session count: non-Claude-only selection, a cache-blind filter, or team/central
+      // Pure per-session count: non-Claude-only selection, a cache-blind filter, or team
       // data (statsCache does not represent the members). harnessSessions is already scoped.
       allTimeTotalSessions = cacheBlindScope ? filteredSessions.length : harnessSessions.length
     } else {

@@ -48,12 +48,7 @@ test('providerCredentialMask: neither field -> null, never a placeholder that lo
 // ---------------------------------------------------------------------------------------------
 
 test('refusalMessage: exact code, localized both ways', () => {
-  expect(refusalMessage({ code: 'central', sentence: 'x' }, false)).toBe(
-    'A central has no local runtime, so there is nothing here to configure.',
-  )
-  expect(refusalMessage({ code: 'central', sentence: 'x' }, true)).toBe(
-    'Uma central não tem runtime local, então não há nada aqui para configurar.',
-  )
+  expect(refusalMessage({ code: 'key_required', sentence: 'x' }, false)).toBe('An API key is required.')
 })
 
 test('refusalMessage: key_* and base_url_* families resolve to a generic sentence naming the field', () => {

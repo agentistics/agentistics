@@ -44,7 +44,7 @@ export function CompareByFilter({ ctx }: { ctx: AppContext }) {
     { id: newId('s'), filters: blankFilters() },
   ])
   /** One basis PER SIDE. Comparing what the plan cost against what the same work would have cost
-   *  at API prices is the central question here, and a single comparison-wide basis forbade it. */
+   *  at API prices is the core question here, and a single comparison-wide basis forbade it. */
   const [bases, setBases] = useState<CostBasis[]>(() => [ctx.costBasis, 'api'])
   const [name, setName] = useState('')
   /** The saved comparison currently loaded, so Save updates it instead of duplicating it. */

@@ -35,7 +35,7 @@ export interface StagedSessionViewProps {
   draft: StagedSessionDraft
   taskFiles: readonly TaskFile[]
   /** Absent hides the Edit shortcut — every current caller has one, but a future read-only surface
-   *  (a shared/central view, say) should not be forced to invent one. */
+   *  (a read-only view, say) should not be forced to invent one. */
   onEdit?: () => void
   onClose: () => void
 }

@@ -67,8 +67,7 @@ export default function WorkflowsPage() {
         const proj = sessionById.get(run.sessionId)?.project_path
         if (!proj || !projects.includes(proj)) return false
       }
-      // Team/central: filter by owning member when a member filter is active.
-      return true
+            return true
     })
   }, [data.workflows, filters.dateRange, filters.customStart, filters.customEnd, filters.projects, filters.harnesses, sessionById])
 

@@ -1,6 +1,6 @@
 /**
  * upgradeFlow.ts — the ONE install flow every update surface starts: the popup in the Nay window,
- * the bell's sheet (`UpdateModal`) and nothing else. Module scope, like `centralMachinePick.ts`,
+ * the bell's sheet (`UpdateModal`) and nothing else. Module scope, like the other stores,
  * because three components draw it and two copies of "is an upgrade running" is how a loader ends
  * up on screen twice.
  *

@@ -4,7 +4,7 @@
  *
  * `null` means "draw the selectors over `/api/data`". That is the answer when this surface did not opt
  * in, while the first answer is pending, and whenever the server refuses: 404 when its
- * `AGENTISTICS_PROJECTIONS` gate is off, 409 on a central, 503 with no reader. The server's refusal
+ * `AGENTISTICS_PROJECTIONS` gate is off, 409, 503 with no reader. The server's refusal
  * decides, because the TUI process does not see the server's environment or its preference.
  *
  * It re-reads whenever `/api/data` was re-read (`stamp`, the snapshot's identity). The server's push

@@ -15,7 +15,7 @@ export interface GroupFacts {
   pt: boolean
   /** Hardware is an overlay opened by a callback; absent where the page has no such handler. */
   hasHardware: boolean
-  /** The host-only entries (autonomous, vault, live) are absent on a central. */
+  /** The host-only entries (autonomous, vault, live) are absent. */
   host: boolean
   awayActive: boolean
   awayUntil?: string

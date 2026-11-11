@@ -141,7 +141,6 @@ import { OUTER_GAP, PANEL_BORDER, PANEL_GAP, PANEL_RADIUS } from './lib/panelLay
 import { useFleet, useFleetIndex, type FleetActionId } from './lib/fleet'
 import { BandSegment, BandSegmentTab } from './components/sessions/bandControls'
 import { SessionActions } from './components/sessions/SessionActions'
-import { StepUpPrompt } from './components/StepUpPrompt'
 import { HARNESS_LABELS } from './lib/harness'
 import { PlanUsageFootButton } from './components/PlanUsageFootButton'
 import { format, parseISO, parse } from 'date-fns'
@@ -806,7 +805,7 @@ export const STUDIO_SEEN_KEY = 'agentistics.studio.seen'
 
 /**
  * The App-wide CHOICES read off `/api/user-prefs` rather than `/api/preferences` — each is a
- * personal key in `USER_UI_PREF_REGISTRY` (server). On a central the copy in the shared machine
+ * personal key in `USER_UI_PREF_REGISTRY` (server). The copy in the machine
  * file is somebody else's and is never read.
  */
 export const APP_CHOICE_KEYS = [
@@ -994,7 +993,7 @@ export default function AppLayout() {
   const setTheme = useCallback((t: Theme) => {
     setThemeState(t)
     try { localStorage.setItem('agentistics-theme', t) } catch { /* private mode */ }
-    // A person's choice — `/api/user-prefs`, per ACCOUNT on a central. The local copy above still
+    // A person's choice — `/api/user-prefs`, per ACCOUNT. The local copy above still
     // holds for this browser if the write cannot happen.
     putPersonal({ theme: t })
   }, [])
@@ -1009,7 +1008,7 @@ export default function AppLayout() {
     putPersonal({ currency: c })
   }, [])
 
-  // How this machine is actually billed. Local only — it never travels to a central.
+  // How this machine is actually billed. Local only — it never leaves this machine.
   const [billing, setBilling] = useState<BillingSettings>({ profiles: {} })
   const [comparisons, setComparisons] = useState<SavedComparison[]>([])
   const saveComparisons = useCallback(async (next: SavedComparison[]) => {
@@ -1079,7 +1078,7 @@ export default function AppLayout() {
       if (v === null) localStorage.removeItem('agentistics-monthly-budget-usd')
       else localStorage.setItem('agentistics-monthly-budget-usd', String(v))
     } catch { /* ignore quota/disabled storage */ }
-    // A CHOICE, so it lives on the server (per account on a central); the browser copy above is
+    // A CHOICE, so it lives on the server (per account); the browser copy above is
     // the first paint only.
     putPersonal({ monthlyBudgetUSD: v })
   }, [])
@@ -1420,7 +1419,7 @@ export default function AppLayout() {
    *
    * Measured rather than guessed because the cluster grows and shrinks with what it holds: the
    * health warnings appear only when there are issues, the update dot comes and goes, and the
-   * central pill is absent on a solo machine. A constant would be right on one machine.
+   * link pill is absent on a solo machine. A constant would be right on one machine.
    */
   const [actionsEl, setActionsEl] = useState<HTMLDivElement | null>(null)
   const [actionsW, setActionsW] = useState(0)
@@ -1637,7 +1636,7 @@ export default function AppLayout() {
   }).map(section => section.id))
   /**
    * "Active only" needs a fleet to intersect against, on EITHER page. An exposed profile with no
-   * host power, or a central with no machine chosen, both report `unsupported` here — offering the
+   * host power with no machine chosen, both report `unsupported` here — offering the
    * dimension there would be a filter whose only possible answer is "nothing", the confident-zero
    * shape this whole file is written against.
    */
@@ -1828,7 +1827,7 @@ export default function AppLayout() {
   /**
    * THE UPDATE EXPERIENCE (UPD.1). `/api/version` is read once; `shouldShowToast` (updateToast.ts)
    * decides whether this machine is offered the popup at all — a LOCAL installed binary only, with
-   * the server's own `upgradable` verdict, so a central, a container or a source checkout never
+   * the server's own `upgradable` verdict, so a container or a source checkout never
    * sees a button the route would refuse. The popup is spoken by the Nay window (`NayUpdateCard`);
    * leaving it hands the news to the bell (`promptExit`), and the bell entry opens `UpdateModal`.
    * Both buttons start the one `startUpgrade` (upgradeFlow.ts), drawn by `UpgradeOverlay`.
@@ -1879,8 +1878,8 @@ export default function AppLayout() {
   // undefined) so every consumer can read it without an extra "not loaded yet" branch.
   /** Re-reads the connection list so the hidden-repo badge follows the rules instead of freezing at
    *  whatever they were on page load. The preferences effect below is mount-only and this is an
-   *  SPA, so un-blocking a repository (or disconnecting the central entirely) used to leave
-   *  `/repositories` still claiming "Hidden from 1 central" until a manual reload — told hidden,
+   *  SPA, so un-blocking a repository used to leave
+   *  `/repositories` still claiming it was hidden until a manual reload — told hidden,
    *  not hidden. Fired by `ConnectionsPanel`'s `onConnectionsChanged` after EVERY write it makes,
    *  which is the single source both `RepositoriesList` and `RepoDetailPage` read through. */
   // THE SHARED PREFERENCES ARE READ HERE and re-read whenever this tab comes back to the front: a
@@ -2043,7 +2042,7 @@ export default function AppLayout() {
       try {
         // TWO documents. `/api/preferences` still answers for the machine's own settings (archive
         // mode, team, billing, the gates); every CHOICE comes from `/api/user-prefs`, which is per
-        // ACCOUNT on a central. The choice keys are stripped from the first one, so on a central
+        // ACCOUNT. The choice keys are stripped from the first one, so
         // nobody reads the theme, language or card order somebody else saved in the shared file.
         const [r, personal] = await Promise.all([fetchJsonWithTimeout<Record<string, unknown>>('/api/preferences', bootDeadlineMs(SMALL_TIMEOUT_MS, attempt)), loadPersonalPrefs()])
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -2287,7 +2286,7 @@ export default function AppLayout() {
   // "Active only" on the dashboard means "conversations running right now" — the stored session
   // set intersected with the live fleet by conversation id (see `activeConversations.ts`'s
   // header). `&& fleetReadable` rather than trusting `activeOnly` alone: the switch could still
-  // read true from before the fleet became unreadable (a central with no machine chosen), and an
+  // read true from before the fleet became unreadable, and an
   // empty `runningIds` there would silently report a confident zero instead of the unfiltered
   // totals — the exact defect `resolveMachineCacheScope` exists to prevent for team/machine scope.
   const derivedActiveOnly = activeOnly && fleetReadable
@@ -2368,7 +2367,7 @@ export default function AppLayout() {
    * empty beside it. `stripPadding` takes the centring out of the SLACK instead: centring is a
    * nicety, a date control collapsed into a popover is something somebody has to go looking for.
    *
-   * The cost-basis toggle is budgeted only where it is actually drawn — it is absent on a central
+   * The cost-basis toggle is budgeted only where it is actually drawn — it is absent
    * and on a machine with no billing set up, and reserving room for a control that is not on screen
    * compacts a bar that would have fitted.
    */
@@ -2837,7 +2836,7 @@ export default function AppLayout() {
   // Errors are checked BEFORE the boot loader below: an error means the load settled (`complete()`
   // cleared `loading`), and it must win — otherwise a failed load would spin the loader forever.
 
-  // A 403 on a central is an AUTH state, not a broken server: the gate refuses data until the
+  // A 403 is an AUTH state, not a broken server: the gate refuses data until the
   // enrolment (or the sign-in) it is waiting for happens, and the effect above is already
   // re-reading that state. Showing "Failed to load data — HTTP 403" in that gap turns the
   // moment right after signing up into a dead end with a Retry button that cannot help.
@@ -3101,7 +3100,7 @@ export default function AppLayout() {
       {/* THE ARTIFACTS BUTTON, beside the view tabs — the panel is a view OF this session, so it
           belongs with the two that already are.
 
-          ABSENT ON A CENTRAL, not disabled: the list is derived from the session's own
+          ABSENT when unavailable, not disabled: the list is derived from the session's own
           conversation, and the conversation does not leave the machine. A control that cannot work
           is not rendered inert — the same rule the fleet's verbs keep. The sentence is on the row
           in the panel's place, so the absence is explained where the button would have been. */}
@@ -3389,7 +3388,7 @@ export default function AppLayout() {
           // only" existing on one page of two.
           //
           // It stays ABSENT rather than disabled where no fleet can be read (an exposed profile,
-          // a central with no machine chosen): `fleetReadable` withholds the callback, and
+          // an unreadable fleet): `fleetReadable` withholds the callback, and
           // FiltersBar renders nothing for a dimension it was given no way to change. A control
           // whose only possible answer is "nothing" is not offered.
           activeOnly={activeOnly}
@@ -3816,9 +3815,9 @@ export default function AppLayout() {
           onBelowHeight={setTabNoticeHeight}
           height={TOPBAR_H}
           asideWidth={leftAsideW}
-          // Owner-approved central-pane inset (2026-09-26): the sessions workspace's pane now
+          // Owner-approved pane inset (2026-09-26): the sessions workspace's pane now
           // carries its own top border 5px below this strip — see `SessionsPage.tsx`'s
-          // `CENTRAL_PANE` and `TopBar`'s own doc comment on `noBottomBorder`.
+          // `PANE_INSET` and `TopBar`'s own doc comment on `noBottomBorder`.
           noBottomBorder
           {...(tabsRowOn && headerSession ? {
             aboveHeight: TABS_ROW_H,
@@ -4304,7 +4303,7 @@ export default function AppLayout() {
       {/* The Nay chat — floating button + a panel of REAL sessions (`NayDock`). A Nay conversation
           is a managed session, so the panel needs BOTH the chat switch and the session power: the
           `localChat` capability + the user's chat switch (`chatOffered`), and `localShell`, which
-          guards every `/api/fleet` route. Hidden on a pure central, which has no local harness. */}
+          guards every `/api/fleet` route. */}
       {nayOffered && (
         <NayDock
           lang={lang}
@@ -4333,7 +4332,7 @@ export default function AppLayout() {
       <EngineSurfaceHost />
 
       {/* VAULT.PERSONAL §10: the one unlock any screen can ask for (ensureVaultOpen), and — on this
-          computer — the phones waiting for approval. A central has no vault of its own here. */}
+          computer — the phones waiting for approval. */}
       <VaultUnlockHost lang={lang === 'pt' ? 'pt' : 'en'} isMobile={isMobile} enabled />
 
       {/* THE KEYBOARD PROBE, and only when the URL asks for it (`?kbdebug=1`). It reads the three
@@ -4345,12 +4344,6 @@ export default function AppLayout() {
 
       {/* Accessibility magnifiers — a portal appended to document.body, outside #root. */}
       <MagnifierLayer ctx={appCtx} hasHeaderSlot={headerHostsMagnifier} />
-
-      {/* Mounted once, at the ROOT: stepUpFetch opens this whenever the server demands re-auth,
-          and every page can trigger that. It used to live inside SideNav — desktop-only chrome —
-          so on a phone the prompter was never registered at all and a protected action just
-          failed with the 403 nobody could answer. */}
-      <StepUpPrompt lang={lang} />
     </div>
   )
 }

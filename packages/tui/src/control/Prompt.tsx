@@ -104,7 +104,7 @@ export function TextPrompt({
   const suffix = defaultValue ? ` (${defaultValue})` : ''
   const shown = secret ? '•'.repeat(value.length) : value
   // Whether the field shares the question's row is a measurement, not a preference: inside the
-  // cockpit's right column "Member token (from the central's Team Manager)" leaves a field five
+  // cockpit's right column a long question leaves a field five
   // columns wide, and a field that narrow cannot show that a paste arrived.
   const layout = promptLayout(label, suffix, width)
   // Keep the TAIL of a long value: what was just typed matters more than what scrolled off the left.

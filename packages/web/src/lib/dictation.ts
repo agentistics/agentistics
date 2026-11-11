@@ -63,7 +63,7 @@ export function dictationSupport(
   // `not-allowed` — indistinguishable, from inside the recogniser, from someone clicking "Block".
   // That is exactly what shipped: agentop's own baseline said `microphone=()`, which denies the
   // page itself, so dictation was dead on `localhost` too and the message blamed the browser.
-  // A reverse proxy in front of a central can do the same thing, so the check stays whatever the
+  // A reverse proxy in front of the server can do the same thing, so the check stays whatever the
   // baseline says.
   if (micDenied(win)) {
     return {

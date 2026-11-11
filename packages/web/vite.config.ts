@@ -161,8 +161,7 @@ export default defineConfig({
       // Service worker disabled in dev: it cached stale bundles during iteration,
       // making code changes appear not to take effect. Still enabled for prod builds.
       devOptions: { enabled: false, suppressWarnings: true, type: 'module' },
-      // `icons/*.png` covers the central variants too; the central favicon needs naming.
-      includeAssets: ['favicon.ico', 'favicon-central.ico', 'apple-touch-icon.png', 'apple-touch-icon-central.png', 'minimalistLogo.png', 'icons/*.png'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'minimalistLogo.png', 'icons/*.png'],
       manifest: {
         name: 'Agentistics',
         short_name: 'Agentistics',
@@ -280,8 +279,7 @@ export default defineConfig({
   server: {
     allowedHosts: true,
     host: true,
-    // Dev UI port. Defaults to 47292; the central dev flow sets WEB_PORT=48080 so you open the
-    // same URL as the Docker container (which publishes 48080). API stays proxied below.
+    // Dev UI port. Defaults to 47292; API stays proxied below.
     port: Number(process.env.WEB_PORT ?? 47292),
     proxy: {
       '/api': {

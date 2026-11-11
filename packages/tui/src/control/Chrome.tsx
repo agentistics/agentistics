@@ -39,13 +39,12 @@ import type { ControlStrings } from './i18n'
  *
  * Which branch is drawn is decided by `headerLayout`, in the pure module, from the MEASURED art and
  * the measured tag — this component chooses nothing. The mode SENTENCE is not here either, only the
- * short token (`solo` / `central` / `member`): in member mode this row once read "member — sends
- * metrics endpoint" and wrapped, which shears every row below it.
+ * short token (`solo`): a longer sentence once wrapped here, which shears every row below it.
  *
  * In the compact branch the MARK's columns are reserved before the tag is fitted, and `brandMark`
  * takes what that left. Both are total and neither can exceed what it was given, so the row cannot
  * wrap. Without the reservation the tag was fitted against the whole row and the mark got the
- * remainder, which in Portuguese member mode at twenty-eight columns was zero — a title row naming
+ * remainder, which in Portuguese at twenty-eight columns was zero — a title row naming
  * the version and not the application.
  */
 export function Header({ layout, width }: { layout: HeaderLayout; width: number }) {
@@ -291,7 +290,7 @@ export function stateWord(state: ServiceState, strings: ControlStrings): string 
  * One row of the cockpit's services pane: cursor, name, runtime, state.
  *
  * One row per LOGICAL service, up or down. A stopped one is DIMMED rather than hidden: hiding it
- * would turn "start the central" into a hunt through a menu, while dimming says the same thing the
+ * would turn "start the server" into a hunt through a menu, while dimming says the same thing the
  * glyph does — this is here, and it is not running.
  *
  * Every cell width is handed in, measured across the whole list at once by `serviceCells` — a row

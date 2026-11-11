@@ -30,7 +30,7 @@ export const D1_PATHS = {
   eyeRight: 'M33 26.5L37 19.5L41 26.5',
 } as const
 
-/** The brand amber. A central draws its mark in its own teal; `d1Markup` takes that as `accent`. */
+/** The brand amber. `d1Markup` takes another colour as `accent`. */
 export const D1_ACCENT = '#FD8924'
 const HARNESS = ['#D97757', '#10A37F', '#4E86F7', '#A371F7']
 const E = 'cubic-bezier(.5,0,.2,1)'
@@ -62,7 +62,7 @@ export const d1Cells = (px: number) => (px >= 40 ? 10 : 7)
  * The SVG's inner markup (viewBox 0 0 56 56) for a loader drawn at `px`. `id` must be unique on the
  * page: it prefixes the filter and mask ids. Built from constants only — nothing user-supplied.
  * `still` draws the logo at rest, for reduced motion (it then only breathes). `accent` replaces the
- * amber only (a central's teal); the harness colours and the white comet are D1's own.
+ * amber only; the harness colours and the white comet are D1's own.
  * `baseOpacity` keeps a small retry indicator visible between the animated passes.
  */
 export function d1Markup(px: number, id: string, still = false, accent: string = D1_ACCENT, baseOpacity = 0.1): string {

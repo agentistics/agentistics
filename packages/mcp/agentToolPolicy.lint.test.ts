@@ -187,12 +187,12 @@ describe('the lint catches what it is for', () => {
       'await apiGet(`/api/tasks/${encodeURIComponent(ref)}`)',
       'await apiGet(`/api/tasks/next${q.toString() ? `?${q}` : ""}`)',
       'await apiSend("DELETE", `/api/tasks/${ref}`)',
-      'await fetch(`${API}/api/team/members`)',
+      'await fetch(`${API}/api/health`)',
       'await fetch(`${API}/api/exec`, { method: "POST" })',
       'await getPrefs(); await putPrefs({})',
     ].join('\n')
     expect(apiCallsIn(src).map(key)).toEqual([
-      'GET /api/tasks/*', 'GET /api/tasks/next', 'DELETE /api/tasks/*', 'GET /api/team/members',
+      'GET /api/tasks/*', 'GET /api/tasks/next', 'DELETE /api/tasks/*', 'GET /api/health',
       'POST /api/exec', 'GET /api/preferences', 'PUT /api/preferences',
     ])
   })

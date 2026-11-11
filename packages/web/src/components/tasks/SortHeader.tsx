@@ -1,7 +1,7 @@
 /**
  * SortHeader — the column title that sorts, drawn ONCE for every list on the board.
  *
- * The table's headers, the subtask grids, the repository's Tasks tab and the central's board all
+ * The table's headers, the subtask grids, the repository's Tasks tab all
  * order their rows when a title is clicked, and they must look and answer the same way: a real
  * `<button>` inside the `<th>` (so it is reachable and operable from the keyboard), `aria-sort` on
  * the `th` saying which column is in force, and an arrow on that one column only. A column that

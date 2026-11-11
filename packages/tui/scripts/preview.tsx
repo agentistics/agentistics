@@ -10,12 +10,12 @@
  * instead of a bug report three days later.
  *
  *   bun run packages/tui/scripts/preview.tsx [--cols 100] [--rows 34]
- *                                            [--lang en|pt] [--screen services] [--mode solo|central|member]
+ *                                            [--lang en|pt] [--screen services] [--mode <case>]
  *
  * The host is a FAKE. It answers instantly, performs nothing, and is deliberately stocked with the
  * awkward cases rather than the happy one: a native server with a pid and an uptime, a service that
  * is down, a runtime whose state could not be detected at all, both runtimes of one service up at
- * once (the CONFLICT), a box with no repo checkout (so no rebuild is offered), and a member endpoint
+ * once (the CONFLICT), a box with no repo checkout (so no rebuild is offered), and an endpoint
  * long enough to have wrecked the header once already. `--mode` picks which arrangement you get.
  *
  * `--task` is the other half: it makes the fake host STREAM a realistic build into the output channel
@@ -321,7 +321,7 @@ function services(mode: Case, s: CliStrings, apiUrl?: string): ControlService[] 
 
   return [
     // `boot` is what only an OS probe can answer, so the preview states BOTH shapes at once: the
-    // native server is registered with systemd, and the central's boot state could not be
+    // native server is registered with systemd, and the container's boot state could not be
     // determined — which must render as no boot row at all rather than as "no".
     buildService('agentistics', s.svcAgentistics, [native, machine], s, {
       boot: 'on',
@@ -345,15 +345,15 @@ function fakeStatus(opts: Options, apiUrl?: string): ControlStatus {
     mode: 'solo',
     modeLabel: s.configSolo,
     services: services(opts.mode, s, apiUrl),
-    // A member machine carries a NAME and a latency; the sweep has to see the header at its widest,
-    // or the fit is only ever checked in the shape that happens to be shortest.
+    // The sweep has to see the header at its widest, or the fit is only ever checked in the shape
+    // that happens to be shortest.
     version: '1.7.3',
     latestVersion: '1.7.4',
     // The parallel-sessions budget, so the width sweep exercises the header WITH it. A calm one:
     // the red case gives way later than this does, so a frame that fits this fits that too.
     memory: { used: 3, max: 17, red: false, percent: 62 },
     archiveMode: 'consolidate',
-    // The wizard's blocked row, stated whenever the fake central is up: it is the case the fold
+    // The wizard's blocked row, stated whenever the fake container is up: it is the case the fold
     // exists for, and a preview that only ever drew three selectable modes would never show it.
     // `--group` arrives as a stored arrangement, exactly as a real machine's preferences would —
     // the screen reads its own default otherwise. It is the only way to LOOK at an arrangement
