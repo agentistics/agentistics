@@ -716,7 +716,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
         onClick={() => setDateOpen(o => !o)}
         title={lang === 'pt' ? 'Período' : 'Date range'}
         style={{
-          ...CTL, gap: 5,
+          ...CTL, ...(isMobile ? mobileTarget : {}), gap: 5,
           border: hasCustomDates ? '1px solid rgba(217,119,6,0.55)' : '1px solid var(--border)',
           background: hasCustomDates ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
           color: hasCustomDates ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
@@ -745,15 +745,15 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
         display: 'flex',
         gap: 8,
         alignItems: 'center',
-        // Inline mode has ONE row and may not grow into a second: everything that would have
-        // wrapped is either dropped by the caller (via `only`) or lives in the `+ Filtro` popover.
+        // The header budgets the compact tier's width. Keep each control's intrinsic minimum:
+        // shrinking the add button's wrapper below its painted padding makes adjacent buttons overlap.
         flexWrap: inline ? 'nowrap' : 'wrap',
         // `position: relative` is what the active-filter panel hangs from: `left: 0; right: 0`
         // against THIS box is exactly the filter region, which is where it was asked to drop from.
         // `maxWidth: 100%` is the no-overlap guarantee that replaced an `overflow: hidden` on the
         // slot — that clipped the bar's own popovers, so the `+ Filtro` menu opened into a hidden
         // box and the button read as dead.
-        ...(inline ? { height: 34, minWidth: 0, maxWidth: '100%', position: 'relative' as const } : {}),
+        ...(inline ? { minHeight: isMobile ? 44 : 32, minWidth: 0, maxWidth: '100%', position: 'relative' as const } : {}),
         padding: inline ? 0 : (compact ? '10px 12px' : '8px 0'),
       }}>
 
@@ -886,9 +886,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
             values themselves render in the animated chip rows below, not here. */}
         <div ref={addFilterRef} style={{
           position: 'relative',
-          // The one child that may narrow. Its popover holds everything it gives up, so a squeezed
-          // `+ Filtro` is still a complete filter control; a squeezed date preset is not a date.
-          ...(inline ? { minWidth: 0 } : {}),
+          ...(inline ? { flexShrink: 0 } : {}),
           flex: isMobile ? '1 1 0' : undefined,
         }}>
           <button
@@ -900,9 +898,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
               gap: 5,
               width: isMobile ? '100%' : undefined,
               justifyContent: isMobile ? 'center' : undefined,
-              // Inline: the wrapper may narrow, so the button must narrow with it (clipping its own
-              // content) instead of spilling over the "see active filters" chip beside it.
-              ...(inline ? { minWidth: 0, maxWidth: '100%', overflow: 'hidden' } : {}),
+              ...(inline ? { whiteSpace: 'nowrap' } : {}),
               border: '1px dashed var(--border)',
               background: 'transparent',
               color: 'var(--text-secondary)',
@@ -1400,7 +1396,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
             onClick={() => setActiveOpen(o => !o)}
             title={lang === 'pt' ? 'Ver filtros ativos' : 'See active filters'}
             style={{
-              ...CTL, gap: 5, flexShrink: 0,
+              ...CTL, ...(isMobile ? mobileTarget : {}), gap: 5, flexShrink: 0,
               border: '1px solid rgba(217,119,6,0.45)',
               background: activeOpen ? 'var(--anthropic-orange-dim)' : 'transparent',
               color: 'var(--anthropic-orange)', fontWeight: 600,

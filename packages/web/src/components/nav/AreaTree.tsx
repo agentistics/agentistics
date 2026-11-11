@@ -82,7 +82,7 @@ function Badge({ n }: { n: number }) {
     <span
       data-area-badge
       style={{
-        marginLeft: 'auto', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, boxSizing: 'border-box',
+        marginLeft: 'auto', flexShrink: 0, minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, boxSizing: 'border-box',
         ...SOLID_COUNT, fontSize: 11, fontWeight: 700,
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       }}
@@ -180,7 +180,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
             {AREA_ICON[area.icon](17)}
             {collapsed && n ? <span aria-hidden style={{ position: 'absolute', top: -3, right: -4, width: 8, height: 8, borderRadius: 4, background: 'var(--anthropic-orange)' }} /> : null}
           </span>
-          {!collapsed && label}
+          {!collapsed && <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>}
           {!collapsed && area.beta && <BetaTag what={label} lang={lang} style={{ marginLeft: 4 }} />}
           {!collapsed && n ? <Badge n={n} /> : null}
         </button>
