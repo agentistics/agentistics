@@ -10,6 +10,15 @@ explicit priority (medium initially) and an optional ISO calendar deadline, and 
 the message is submitted. A refused delivery restores the marked draft and its message id for
 retry. A subsequent successful, deliberately repeated message gets a fresh id.
 
+The bare clipboard sits immediately after the call control. Hover or keyboard focus explains it
+in a glass tooltip with an orange Info icon. Clicking opens a glass popover containing the board's
+priority select and the shared calendar. Today selects the local day; an optional local time is
+stored as `YYYY-MM-DDTHH:mm`, while existing `YYYY-MM-DD` deadlines remain valid. Escape, clicking
+outside and Close preserve the orange armed state and its choices; Turn off clears them. The
+calendar uses white day numbers, green for today and orange for the selected day. Task deadlines
+allow future months; analytics date filters retain their existing maximum. Registration failures
+appear as an alert beside the composer even when an installation/update offer is also present.
+
 Web desktop, phone, Nay's shared SessionChat and the native runtime's NativeChatHost use the
 same controls. The VS Code extension has its own DOM composer, so it does not inherit this
 button; this change does not claim VS Code coverage.
@@ -35,13 +44,15 @@ under an existing id refuses. The subtask contains:
   Native filing also starts these explicitly registered pieces. Historical filing is unchanged.
 - Actual completion remains the normal system `deliveredAt` stamp when the piece reaches done.
 
-The host directly runs the existing `pedido-do-dono` and `pedido-link` operations. It does not
-emit the automatic placement event: that older placement can skip a free leader and hardcodes
-high priority. Direct registration records one linked pedido without creating another subtask.
-Crash recovery retries those operations with the original saved timestamp and text. The board
-and private flow documents are separate transactions: a failed flow leaves a recoverable saved
-subtask and a visible refusal; retry finishes it. Registration precedes delivery, so a failed send
-may leave the already registered request on the board.
+The host emits the existing `owner.message` event (`pedido-do-dono` is event-only). If automatic
+placement already linked the pedido, the host atomically adopts that same card and fills in the
+explicit title, priority, deadline and request metadata. It never deletes a canonically linked
+card or tries to close an already-linked pedido again: those two actions caused flagged sends
+to fail in 2.205.0 and left pedidos pointing at missing subtasks. If placement did not link a
+card, registration creates its own card and calls `pedido-link`. Message-id deduplication keeps
+confirmed registrations stable across retry. Registration precedes delivery, so a failed delivery
+may leave the already registered request on the board. Historical orphan links are reported for
+leader review rather than rewritten automatically.
 
 The message still reaches the addressed session, with a short agentistics registration note.
 The existing `agentistics_task` detail includes the new fields; Live includes registered queued

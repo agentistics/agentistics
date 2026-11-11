@@ -11,6 +11,8 @@ export interface ComposerTaskDeps {
   /** Only explicit single-operation commands are allowed here; event-triggered flows use emit. */
   run(name: string, inputs: Record<string, unknown>): Promise<unknown>
   emit?(event: { type: string; id: string; payload: Record<string, unknown> }): Promise<unknown>
+  /** Canonical engine request: placement may have linked it before emit completes. */
+  pedido?(id: string, taskId: string): Promise<{ id: string; taskId?: string; state: string; linkedSubtaskIds: string[] } | undefined>
   sleep?(ms: number): Promise<void>
   now(): number
 }
@@ -85,8 +87,9 @@ async function registerLocked(req: Request & { text?: string; messageId?: string
   const sleep = d.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)))
   /** Own cards only: new since the emit AND carrying this request's identity (ownerRequest, or the pedido id the flow writes in its title). */
   const rollbackEventCards = async (keepId?: string) => {
+    const linked = await d.pedido?.(request.pedidoId, target.taskId)
     const after = await store.read()
-    await Promise.all(after.subtasks.filter(s => s.id !== keepId && !beforeEvent.has(s.id) && s.taskId === target.taskId &&
+    await Promise.all(after.subtasks.filter(s => s.id !== keepId && !linked?.linkedSubtaskIds.includes(s.id) && !beforeEvent.has(s.id) && s.taskId === target.taskId &&
       (s.ownerRequest?.pedidoId === request.pedidoId || s.ownerRequest?.messageId === request.messageId || (!s.ownerRequest && s.title.includes(request.pedidoId)))).map(s => store.removeSubtask(s.id)))
   }
   /** The flow's card can land after the first sweep; a failed registration sweeps again once it settles. */
@@ -100,12 +103,19 @@ async function registerLocked(req: Request & { text?: string; messageId?: string
     } })
   } catch { await failAndSweep(); return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' } }
   if (emitted === false) { await failAndSweep(); return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' } }
-  await rollbackEventCards()
+  const placed = await d.pedido?.(request.pedidoId, target.taskId)
+  const placedCard = placed?.state === 'linked' && placed.taskId === target.taskId && placed.linkedSubtaskIds.length === 1
+    ? (await store.read()).subtasks.find(s => s.id === placed.linkedSubtaskIds[0] && s.taskId === target.taskId && !s.ownerRequest && s.title.includes(request.pedidoId))
+    : undefined
+  // Encaixe already closes the pedido. Adopt its card atomically; removing it and calling pedido-link
+  // again refuses an already-linked pedido and leaves the engine pointing at a deleted subtask.
+  if (placed?.state === 'linked' && !placedCard) return { ok: false, message: pt ? 'O pedido já está vinculado a outra subtarefa. Confira o Agentask antes de tentar novamente.' : 'The request is already linked to another subtask. Check Agentask before retrying.' }
+  if (!placedCard) await rollbackEventCards()
   const subtask = await store.registerComposerSubtask({
-    id: `s-${hash(req.messageId)}`, taskId: target.taskId, title,
-    status: 'todo', done: false, createdAt: at, updatedAt: at,
+    ...(placedCard ?? {}), id: placedCard?.id ?? `s-${hash(req.messageId)}`, taskId: target.taskId, title,
+    status: placedCard?.status ?? 'todo', done: placedCard?.done ?? false, createdAt: placedCard?.createdAt ?? at, updatedAt: at,
     // This request has not been dispatched yet: startedAt is stamped by ordinary filing.
-    priority: req.asTask.priority, assignee: 'leader', notes: text,
+    priority: req.asTask.priority, assignee: placedCard?.assignee ?? 'leader', notes: text,
     ...(req.asTask.dueDate ? { dueDate: req.asTask.dueDate } : {}),
     ownerRequest: request,
   })
@@ -113,8 +123,8 @@ async function registerLocked(req: Request & { text?: string; messageId?: string
   if (subtask.ownerRequest.text !== text) return { ok: false, message: pt ? 'Esta identificação de mensagem já foi usada com outro texto.' : 'This message id was already used with different text.' }
   const r = subtask.ownerRequest
   // Retries use the ORIGINAL timestamp and text, including after a crash between these two runs.
-  let linked: { status?: string } = {}
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let linked: { status?: string } = placedCard ? { status: 'success' } : {}
+  for (let attempt = 0; !placedCard && attempt < 3; attempt++) {
     try {
       linked = await d.run('pedido-link', { id: r.pedidoId, subtaskIds: [subtask.id], by: 'owner:composer' }) as { status?: string }
     } catch { linked = {} }
@@ -122,9 +132,13 @@ async function registerLocked(req: Request & { text?: string; messageId?: string
     if (attempt < 2) await sleep(200)
   }
   if (linked?.status !== 'success') {
-    await store.removeSubtask(subtask.id)
-    await failAndSweep()
-    return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' }
+    // A link can commit before its response fails. The canonical document decides whether it landed.
+    const recorded = await d.pedido?.(r.pedidoId, target.taskId)
+    if (!(recorded?.state === 'linked' && recorded.taskId === target.taskId && recorded.linkedSubtaskIds.length === 1 && recorded.linkedSubtaskIds[0] === subtask.id)) {
+      if (!recorded?.linkedSubtaskIds.includes(subtask.id)) await store.removeSubtask(subtask.id)
+      await failAndSweep()
+      return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' }
+    }
   }
   await rollbackEventCards(subtask.id)
   return { ok: true, subtask, note: pt ? `Registrado como tarefa: ${subtask.title}` : `Registered as task: ${subtask.title}` }
@@ -136,9 +150,14 @@ export function defaultComposerTaskDeps(): ComposerTaskDeps {
     ready: async () => {
       const { loadEngine, engine } = await import('../engine/load')
       await loadEngine()
-      return process.env.AGENTISTICS_FLOWS === '1' && !!engine()?.flows
+      return process.env.AGENTISTICS_FLOWS === '1' && !!engine()?.flows?.emit && !!engine()?.flows?.read
     },
     store: async () => (await (await import('../sessions/task-source')).loadTaskWorld()).store,
+    pedido: async (id, taskId) => {
+      const { engine } = await import('../engine/load')
+      const view = await engine()?.flows?.read?.('pedidos', { taskId, state: 'all' }) as { pedidos?: Array<{ id: string; taskId?: string; state: string; linkedSubtaskIds: string[] }> } | undefined
+      return view?.pedidos?.find(p => p.id === id)
+    },
     target: async id => {
       const { readRegistry } = await import('../sessions/registry')
       const rows = await readRegistry()
