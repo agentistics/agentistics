@@ -1338,7 +1338,11 @@ export function sessionCostUSD(
   // Only models the table knows are priced. A session whose every model is unknown has NO cost (null) —
   // not a guess and not a confident zero; a mixed one is the sum of what could be priced (the caller
   // reports `unpricedTokens` so the total can say it is a floor).
-  const priced = entries.filter(([model, u]) => u.costSource !== undefined || !isUnpricedModel(model))
+  // A model name alone is not billed usage: table pricing applies only to tokens actually reported.
+  // Declared harness costs remain authoritative, including an explicit zero.
+  const priced = entries.filter(([model, u]) =>
+    (u.costSource !== undefined || usageTokens(u) > 0)
+    && (u.costSource !== undefined || !isUnpricedModel(model)))
   if (priced.length === 0) return null
   return priced.reduce((sum, [model, u]) => sum + (modelCostUSD(u, model) ?? 0), 0)
 }
