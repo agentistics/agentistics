@@ -18,6 +18,12 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Hermes: open a conversation with the Hermes agent from agentistics (sessions page, panel or '
           + '`agentop session hermes --bg`); the context gauge and the conversation title show in the panel.',
       },
+      {
+        pt: 'Painel flutuante: em Configurações → Chat, escolha quem responde — a persona de análise (padrão) ou o '
+          + 'próprio agente do harness, numa pasta sua, com o nome que quiser e sem nenhum arquivo escrito nela.',
+        en: 'Floating panel: in Settings → Chat, choose who answers — the analytics persona (default) or the '
+          + "harness's own agent, in a folder of yours, under the name you pick, with no file written into it.",
+      },
     ],
     fixes: [
       {
