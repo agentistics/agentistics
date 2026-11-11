@@ -1,5 +1,6 @@
 import { describe, expect, it, test } from 'bun:test'
 import { HARNESS_ORDER, SPAWN_SPECS_MODEL_IDS, type CanonicalMode, type HarnessId } from '@agentistics/core'
+import { harnessSpawnability } from './harness-spawnable'
 import { SPAWN_SPECS, conversationLinkGoneForever, conversationLinkable, planSpawn, tuiStartModes } from './spawn-spec'
 
 describe('SPAWN_SPECS', () => {
@@ -18,14 +19,10 @@ describe('SPAWN_SPECS', () => {
     }
   })
 
-  it('launches Hermes through its ACP subcommand and leaves model choice to the protocol', () => {
-    expect(planSpawn({ harness: 'hermes', cwd: '/tmp', prompt: 'hello' })).toEqual({
-      ok: true,
-      plan: { argv: ['hermes', 'acp'], initialPrompt: { mode: 'type', text: 'hello' } },
-    })
-    expect(planSpawn({ harness: 'hermes', cwd: '/tmp', resumeId: 'hermes-session' })).toEqual({
-      ok: true,
-      plan: { argv: ['hermes', 'acp'], conversationId: 'hermes-session' },
+  it('refuses Hermes as a terminal launcher even when its binary is installed', () => {
+    expect(harnessSpawnability('hermes', 0, bin => (bin === 'hermes' ? '/test/bin/hermes' : null))).toEqual({
+      spawnable: false,
+      unavailableReason: 'Hermes runs only as a structured chat (ACP)',
     })
   })
 
