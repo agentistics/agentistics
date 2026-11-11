@@ -30,6 +30,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Custo: uma sessão sem nenhum uso cobrado aparece como "sem medição", não como custo zero; modelos atrás de gateway com uso real continuam com o preço da API, e um custo zero declarado pelo próprio harness continua zero.',
         en: 'Cost: a session with no billed usage shows as "not recorded", not as zero cost; models behind a gateway with real usage keep the API price, and a zero cost declared by the harness itself stays zero.',
       },
+      {
+        pt: 'OpenCode: sessões vazias (sem nenhuma mensagem) não entram mais nas métricas como sessões de custo zero.',
+        en: 'OpenCode: empty sessions (no message at all) no longer count in the metrics as zero-cost sessions.',
+      },
     ],
   },
   '2.205.1': {
