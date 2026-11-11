@@ -21,39 +21,12 @@
 const command = process.argv[2] === 'tui' ? 'start' : process.argv[2]
 const args = process.argv.slice(3)
 
-// A shell started by the server can inherit this marker. Only this process's server
-// dispatch below may enable it; one-shot CLI readers must never act as the server.
-delete process.env.SERVE_STATIC
-
-// `run` must be dispatched before the normal bootstrap: its child receives a fresh HOME and must
-// never let this parent read or write the owner's preferences, harness configs, or proc card.
-if (command === 'run') {
-  const { runRun } = await import('../server/cli-run.ts')
-  process.exit(await runRun(args))
-}
-
 // RES.1 — declare this process to the governor. Bun makes its processes non-dumpable, so the
 // environment the governor would read (HOME, CLAUDE_PID) is unreadable from outside; the card is how
 // it learns who owns this process. Synchronous and tiny; never throws.
 {
   const { writeProcCard } = await import('../server/resources/proc-card.ts')
   writeProcCard(command ?? 'start')
-}
-
-if (command === '__relay-worker') {
-  const { runRelayWorker } = await import('../server/sessions/relay-worker.ts')
-  runRelayWorker()
-  await new Promise<never>(() => {})
-}
-
-// F2.0b — the relay that holds a structured session's child so it outlives `agentop server`
-// (`server/sessions/structured-relay.ts`). Internal: started detached by the server, never typed.
-// First, before anything writes a file or prints: it is its own long-lived process.
-if (command === '__structured-relay') {
-  const { runRelay } = await import('../server/sessions/structured-relay.ts')
-  if (!args[0]) process.exit(2)
-  runRelay(args[0])
-  await new Promise<never>(() => {})
 }
 
 // `preferences.experimental` → the feature variables, BEFORE any module that reads one loads
@@ -78,12 +51,7 @@ if (command === '__structured-relay') {
  * below, whose default for an unknown command prints the help to stdout.
  */
 if (command === 'mcp') {
-  if (process.env.AGENTOP_MCP_WORKER === '1') await import('../../mcp/agentistics-mcp.ts')
-  else {
-    await import('../../mcp/orphan-guard-boot.ts')
-    const { runMcpForwarder } = await import('../server/mcp-forwarder.ts')
-    runMcpForwarder()
-  }
+  await import('../../mcp/agentistics-mcp.ts')
   await new Promise<never>(() => {})
 }
 
@@ -105,25 +73,17 @@ Commands:
   heavy         Run a heavy job (tsc -b, a full test suite, a build) through the machine-wide slot:
                 'agentop heavy -- <cmd>' waits its turn, shows its queue position, runs, exits with
                 the command's code. Slot 1 is /tmp/agentistics-heavy.lock (the manual flock)
-  run           Run a command or throwaway server with isolated HOME, ports and process scope
-                ('run --rm'; 'run ls' and 'run stop <name>' manage active throwaways).
-                TMPDIR is a short /tmp/agr-<id> (sockets stay under 108 bytes). A command run holds
-                the heavy slot and sets AGENTISTICS_HEAVY_JOB=1: nested 'agentop heavy' is a no-op,
-                but a raw 'flock /tmp/agentistics-heavy.lock' inside would block — skip it there
   resources     Print the agentop processes on this machine, what each costs, and the alerts
   session       Start / list / attach assistant sessions (tmux-backed; --bg detaches);
                 'session ls' prints the cockpit's table of what is running
-  task          the delivery board: what each piece of work cost, in how many rounds
+  task          BETA — the delivery board: what each piece of work cost, in how many rounds
                 and across how many sessions ('task ls | show | deliver | abandon')
-  tasks         review cleanup ('tasks limpar-revisao', dry-run by default)
   hooks         Teach Claude Code to run work in parallel through agentop
                 (installs a skill + SessionStart/Stop hooks; explicit, reversible)
-  briefing      Install or remove agentistics onboarding skills/instruction blocks
   events        Be told when a session starts waiting, blocks on a permission prompt or
                 exits — in an inbox, in another Claude session, and on your desktop
                 ('events watch' to subscribe, 'events status' to see who is watching)
   experimental  Turn every experimental feature on or off ('experimental enable|disable|status')
-  away          Autonomous mode — sessions decide and proceed without asking permission ('away on|off|status')
   journal       The durable event journal: a read-only look ('journal status') and the
                 historical import of this machine's history into it ('journal import')
 __ENGINE_VERBS__
@@ -388,7 +348,7 @@ if (!command) {
 
 if (command === 'setup') {
   const { runSetup } = await import('../server/cli-setup.ts')
-  const code = await runSetup(process.argv.slice(3))
+  const code = await runSetup()
   process.exit(code)
 }
 
@@ -406,29 +366,10 @@ if (command === 'task') {
   process.exit(code)
 }
 
-if (command === 'tasks') {
-  if (args[0] !== 'limpar-revisao') { console.error('Usage: agentop tasks limpar-revisao [--json|--out <file>] [--apply <plan.json>]'); process.exit(2) }
-  const { runReviewClean } = await import('../server/sessions/review-clean.ts')
-  process.exit(await runReviewClean(args.slice(1)))
-}
-
 if (command === 'hooks') {
   const { runHooks } = await import('../server/cli-hooks.ts')
   const code = await runHooks(args)
   process.exit(code)
-}
-
-if (command === 'briefing') {
-  const { installBriefing, uninstallBriefing } = await import('../server/briefing-installer.ts')
-  const mode = args[0] === 'uninstall' ? 'uninstall' : args[0] === 'install' ? 'install' : null
-  if (!mode) {
-    console.error('Usage: agentop briefing <install|uninstall>')
-    process.exit(1)
-  }
-  const home = process.env.HOME ?? process.env.USERPROFILE ?? ''
-  const rows = mode === 'install' ? await installBriefing({ home }) : await uninstallBriefing({ home })
-  for (const row of rows) console.log(`${row.changed ? (mode === 'install' ? 'updated' : 'removed') : 'unchanged'} ${row.path}`)
-  process.exit(0)
 }
 
 if (command === 'events') {
@@ -436,8 +377,6 @@ if (command === 'events') {
   const code = await runEvents(args)
   process.exit(code)
 }
-
-if (command === 'away') process.exit(await (await import('../server/cli-away.ts')).runAway(args))
 
 if (command === 'experimental') {
   const { runExperimental } = await import('../server/cli-experimental.ts')
@@ -463,16 +402,9 @@ if (command === 'restore') {
   process.exit(code)
 }
 
-// FLUXO.ENTREGA-DSL — the delivery verbs (`flow gate|phase|stage run|qa open|merge|…`) are the host's, not the engine's:
-// they run against the delivery records in-process, with or without the experimental flows flag.
-if (command === 'flow') {
-  const delivery = await import('../server/delivery/cli.ts')
-  if (delivery.isDeliveryFlowVerb(args)) process.exit(await delivery.runDeliveryCli(args))
-}
-
 // The engine's verbs — recognised by every build, run by the engine when it offers them, and
 // answered in a sentence (exit 2) when it does not (`engine/cli.ts`).
-if (command === 'code' || command === 'provider' || command === 'ingest' || command === 'flow') {
+if (command === 'code' || command === 'provider' || command === 'ingest') {
   // `agentop code` on a terminal opens the control center on its `code` tab (ES.6h) when the engine offers a typed
   // code host; everything else — a pipe, `ls`, `--help`, an engine without one — is the engine's line mode.
   if (command === 'code') {
@@ -758,13 +690,6 @@ if (command === 'start') {
 }
 
 if (command === 'server' || command === 'start' || !command) {
-  // FIRST, before anything is claimed: re-execute with two GC marker threads — see gc-markers.ts for
-  // what an idle server paid without it. Same pid, same fds; returns only when it did not happen.
-  // `--bg` only detaches a copy that does this itself: re-executing the parent first would be one exec wasted.
-  if (command === 'server' && !args.includes('--bg') && !args.includes('--background')) {
-    const { reexecWithGcMarkers } = await import('../server/gc-markers.ts')
-    await reexecWithGcMarkers()
-  }
   // WSL2 CAN HAVE OUR PORTS EXCLUDED BY WINDOWS BEFORE WE EVER BIND THEM. Windows' WinNAT reserves
   // a port range for itself every time the Hyper-V/WSL network stack comes up (reboot, `wsl
   // --shutdown`, Docker or a VPN reconnecting), and it is not the same range twice. When it lands
@@ -882,20 +807,11 @@ if (command === 'server' || command === 'start' || !command) {
   }
 
   process.env.SERVE_STATIC = '1'
-  const { bootstrapServer } = await import('../server/server-bootstrap.ts')
-  await bootstrapServer()
   // The vault BEFORE the server: open it (migrating any plaintext secret an earlier version left),
-  // or say in one line why it cannot be. See vault/boot.ts.
+  // or say in one line why it cannot be — then the unlock socket. See vault/boot.ts.
   {
     const { bootVault } = await import('../server/vault/boot.ts')
     await bootVault()
-  }
-  // Managed onboarding is versioned in agentop's own data directory; harness instruction files
-  // receive only the agentistics-owned blocks/skills and are never used as state.
-  {
-    const { ensureBriefingInstalled } = await import('../server/briefing-installer.ts')
-    const { CONTEXT_TOOL_NAMES } = await import('../server/sessions/agentistics-context.ts')
-    await ensureBriefingInstalled({ toolNames: CONTEXT_TOOL_NAMES })
   }
   // Server, daemon and version check run in parallel — the daemon and the banner only where they
   // belong (a central has no host sessions, a container is upgraded by its image): daemon-plan.ts.
@@ -912,8 +828,6 @@ if (command === 'server' || command === 'start' || !command) {
 } else if (command === 'clean') {
   const { runClean } = await import('../server/cli-clean.ts')
   await runClean(args)
-  // Leave explicitly: a stdin listener or a leftover handle must not keep the command alive.
-  process.exit(0)
 } else if (command === 'doctor') {
   const { runDoctor } = await import('../server/cli-doctor.ts')
   await runDoctor(args)
