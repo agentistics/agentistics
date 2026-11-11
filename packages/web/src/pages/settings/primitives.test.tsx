@@ -1,7 +1,7 @@
 import React from 'react'
 import { describe, test, expect } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { RowSwitch, StatusDot, Select, MultiPicker, popoverPosition, popoverRoom } from './primitives'
+import { RowSwitch, StatusDot, Select, MultiPicker, popoverPosition, popoverRoom, popoverStyle } from './primitives'
 
 describe('RowSwitch', () => {
   test('the row itself is a <button role="switch"> with aria-checked reflecting `on`', () => {
@@ -179,6 +179,13 @@ describe('Select trigger touch target', () => {
 })
 
 describe('popoverPosition', () => {
+  test('shared lists size to content with a viewport cap and a trigger-width floor', () => {
+    const style = popoverStyle({ left: 8, top: 40, width: 116 })
+    expect(style.width).toBe('max-content')
+    expect(style.minWidth).toBe(116)
+    expect(style.maxWidth).toBe('calc(100vw - 16px)')
+    expect(style.boxSizing).toBe('border-box')
+  })
   const rect = (top: number, height = 40, left = 100, width = 240) =>
     ({ top, bottom: top + height, left, width, right: left + width, height, x: left, y: top, toJSON: () => ({}) }) as DOMRect
 
