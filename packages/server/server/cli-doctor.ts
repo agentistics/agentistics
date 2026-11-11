@@ -12,9 +12,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { capabilitiesFor, resolveProfile } from './exposure'
 import { runPreflight, allPassed } from './preflight'
-import { resolveDeploymentConfig } from './deployment-config'
 import { readNativeBind } from './native-bind'
-import { PORT, WEB_PORT } from './config'
+import { PORT, WEB_PORT, EXPOSURE, ALLOW_LOCAL_SHELL, TEAM_SESSION_SECRET_ENV, TEAM_PASSWORD, TEAM_TLS, TRUST_PROXY, ALLOWED_ORIGINS } from './config'
 
 const GREEN = '\x1b[92m'
 const RED = '\x1b[91m'
@@ -32,7 +31,17 @@ export async function runDoctor(argv: string[]): Promise<never> {
     if (line) process.stdout.write(`  ${line}\n`)
   } catch { /* best-effort: the doctor's own checks must still run */ }
 
-  const cfg = resolveDeploymentConfig(null, process.env as Record<string, string | undefined>)
+  const cfg = {
+    exposure: EXPOSURE,
+    allowLocalShell: ALLOW_LOCAL_SHELL,
+    tls: TEAM_TLS,
+    sessionSecret: TEAM_SESSION_SECRET_ENV,
+    password: TEAM_PASSWORD,
+    trustProxy: TRUST_PROXY,
+    bindIp: process.env.BIND_IP ?? '127.0.0.1',
+    allowedOrigins: ALLOWED_ORIGINS,
+    mongoAuthenticated: false,
+  }
 
   // Derive the profile and capabilities from the DEPLOYMENT's config, not from this process's
   // singletons — the container is what will serve traffic.

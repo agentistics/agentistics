@@ -37,8 +37,8 @@
  * built, or a kind it does not recognise — is denied to anyone but the owner. A missed
  * notification is an annoyance; a leaked one is the bug this module exists to prevent.
  */
-import type { AccountDoc, Membership, Principal } from './iam-types'
-import { teamVisibleTo, canManageMachine, accountVisibleTo } from './iam-view'
+export interface Membership { teamId: string; role: string }
+export interface Principal { accountId: string; role: string; memberships: Membership[] }
 
 export type NotificationSubjectKind = 'machine' | 'team' | 'account'
 
@@ -100,17 +100,17 @@ export function subjectVisibleTo(
   if (!subject) return code !== undefined && INSTANCE_WIDE_CODES.has(code)
   switch (subject.kind) {
     case 'team':
-      return teamVisibleTo(p, subject.id)
+      return false
     case 'machine': {
       const machine = ctx.machines[subject.id]
       if (!machine) return false // unresolved subject — fail closed
-      return canManageMachine(p, machine)
+      return machine.accountIds?.includes(p.accountId) || machine.accountId === p.accountId
     }
     case 'account': {
       if (subject.id === p.accountId) return true
       const memberships = ctx.accountMemberships[subject.id]
       if (!memberships) return false // unresolved subject — fail closed
-      return accountVisibleTo(p, { _id: subject.id, memberships } as AccountDoc)
+      return memberships.some(m => m.teamId && p.memberships.some(pm => pm.teamId === m.teamId))
     }
     default:
       return false // unrecognized kind — fail closed

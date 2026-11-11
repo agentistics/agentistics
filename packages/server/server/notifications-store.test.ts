@@ -7,7 +7,7 @@ import {
   clearNotificationsIn, listNotificationsFor, localViewer, MAX_ITEMS, type Viewer,
 } from './notifications-store'
 import type { NotificationAuthorityContext } from './notifications-authority'
-import type { Principal } from './iam-types'
+import type { Principal } from './notifications-authority'
 
 /** A central account: per-account read/dismiss state. */
 const account = (id: string, canSeeNames = true): Viewer => ({ id, canSeeNames, multiTenant: true })

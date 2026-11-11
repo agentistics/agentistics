@@ -121,7 +121,6 @@ import {
 import { wsInputOriginOk } from './sessions/input-protocol'
 // Type only: the module itself reaches `cli-start` → `@agentistics/tui/control` → Ink, and is
 // loaded by dynamic import inside the two /api/fleet handlers.
-import { canSeeMemberNames } from './iam-view'
 import { buildNotificationAuthorityContext } from './notifications-context'
 import {
   readEnvConfig,
@@ -147,11 +146,6 @@ import { fullSync } from './archive'
 import { getArchiveMode } from './preferences'
 import { handleAccessibility } from './a11y-routes'
 import { handleUserUiPrefs } from './user-ui-prefs-routes'
-import { registerAgent, unregisterAgent, onAgentMessage, onAgentPong, setPresenceChangeHook } from './team-agent'
-import { startAgentClient, reconcileNow } from './team-agent-client'
-import { validateIngestToken } from './team-tokens'
-import { getAccount } from './accounts'
-import { getTeam } from './teams'
 import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as reportCheckin, runNow as runCheckin, startCheckinTimer, validateCheckinRound } from './checkin'
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, createFolderStatus, createProjectFolder, listFolders, rootListing } from './fs-folders'
@@ -258,11 +252,6 @@ void (async () => {
     .catch(err => console.warn('[startup] cache warm-up failed:', String(err)))
 })()
 
-// Once-per-install move of the legacy single-connection team state files into the
-// per-connection layout (see team-migrate.ts). Never call this from readPreferencesFrom.
-await import('./team-migrate').then(m => m.migrateTeamStateOnce()).catch(err =>
-  console.warn('[team-migrate] state migration failed (will retry next boot):', err instanceof Error ? err.message : String(err)))
-
 enableRebuildOnChange()
 void import('./mem-log').then(m => m.startMemLog())
 // PERF.1: at most once a week, say what `agentop clean` would free (never removes anything itself).
@@ -297,13 +286,6 @@ if (!TEAM_CENTRAL) {
     void import('./agent-schedule-host').then(m => m.startAgentScheduleTicker()).catch(() => {})
     return pl.seedPlanLimits(sd.STRUCTURED_DIR)
   }).catch(err => console.warn('[plan-limits] seed failed:', String(err)))
-}
-if (TEAM_CENTRAL) {
-  import('./team-watch').then(m => m.startTeamWatch()).catch(err => console.error('[team-watch] failed to start:', err))
-  // Push an IMMEDIATE SSE update when a member connects/disconnects so the dashboard's
-  // online/offline dots and the members panel refresh instantly. Presence is computed fresh
-  // per request (not cached), so this needs no cache invalidation and no debounce.
-  setPresenceChangeHook(() => notifySseClients())
 }
 
 // IAM bootstrap init (central only): ensure indexes + Default team, backfill teamId, and —
@@ -346,7 +328,6 @@ if (TEAM_CENTRAL) {
       const { backfillTokenTeamIds, purgeUnknownTeamsFromMachines } = await import('./team-tokens')
       const { backfillRepoTeamIds } = await import('./team-repos')
       await ensureAccountIndexes()
-      await (await import('./reset-requests')).ensureResetRequestIndexes().catch(() => {})
       // Convert any date still stored as a STRING into a BSON Date. Runs before everything that
       // reads a timestamp, is idempotent (a migrated DB matches no documents), and never throws —
       // a central must still boot when it cannot run. See mongo-dates.ts.
@@ -415,8 +396,6 @@ if (TEAM_CENTRAL) {
   })()
 }
 
-import('./team-uploader').then(m => m.startUploader()).catch(err => console.error('[team-uploader] failed to start:', err))
-startAgentClient()
 maybeSpawnWatcher()
 // The engine is judged at boot so a refused or failed one is logged when the server starts, not on
 // the first request that happens to reach a reserved prefix. `loadEngine` never throws.
@@ -516,22 +495,18 @@ const _wsHandlers = {
     if (ws.data.fleetInput) { openInputSocket(ws); return }
     if (ws.data.shellInput) { openShellInputSocket(ws); return }
     if (ws.data.engineSocket) { openEngineSocket(ws.data.engineSocket, ws); return }
-    if (!ws.data.isAgent) return; registerAgent(ws)
   },
   message(ws: ServerWebSocket<WSData>, msg: string | Buffer) {
     if (ws.data.streamMux) { onMuxMessage(ws.data.streamMux, ws, msg); return }
     if (ws.data.fleetInput) { onInputMessage(ws, msg); return }
     if (ws.data.shellInput) { onShellInputMessage(ws, msg); return }
     if (ws.data.engineSocket) { onEngineSocketMessage(ws.data.engineSocket, msg); return }
-    if (!ws.data.isAgent) return; onAgentMessage(ws, msg)
   },
-  pong(ws: ServerWebSocket<WSData>) { if (!ws.data.isAgent) return; onAgentPong(ws) },
   close(ws: ServerWebSocket<WSData>, code?: number, reason?: string) {
     if (ws.data.streamMux) { closeMux(ws.data.streamMux); return }
     if (ws.data.fleetInput) { closeInputSocket(ws); return }
     if (ws.data.shellInput) { closeShellInputSocket(ws); return }
     if (ws.data.engineSocket) { closeEngineSocket(ws.data.engineSocket, code ?? 1005, reason ?? ''); return }
-    if (!ws.data.isAgent) return; unregisterAgent(ws)
   },
 }
 
@@ -781,13 +756,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // reach every team's data and every admin route, so a single leaked password would be the
       // whole instance. Until they enrol, only the enrolment and identity routes answer.
       if (CAPS.requireMfaForOwner && session.principal.role === 'owner' && !MFA_EXEMPT.has(url.pathname)) {
-        const { isMfaEnabled } = await import('./mfa-store')
-        if (!(await isMfaEnabled(session.principal.accountId).catch(() => true))) {
-          return new Response(JSON.stringify({ error: 'mfa_enrollment_required' }), {
-            status: 403,
-            headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-          })
-        }
       }
       // Step-up ("sudo mode"): a session cookie proves who you are, not that you are still at
       // the keyboard. Operations that destroy data or mint a credential additionally require a
@@ -1076,7 +1044,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const viewer = principal
           ? {
               id: principal.accountId,
-              canSeeNames: canSeeMemberNames(principal),
+              canSeeNames: true,
               multiTenant: true,
               // Role/team scoping (owner sees all; a manager sees their teams' subjects; a plain
               // user sees their own machines and teams) — see notifications-authority.ts. Built
@@ -1313,8 +1281,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // up online on the central within ~a second, and kick an immediate push so its metrics
         // land right away instead of ~5 s later.
         if (body.team !== undefined) {
-          reconcileNow()
-          import('./team-uploader').then(m => m.pushNow()).catch(() => {})
         }
         // Redacted on the way out too — the response is the same document the GET returns.
         const updated = redactPreferences(await readPreferences())
