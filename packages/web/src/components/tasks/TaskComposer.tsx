@@ -26,7 +26,7 @@ import { useMemo, useState } from 'react'
 import {
   ArrowLeft, ArrowRight, Check, CornerDownRight, Link2, ListPlus, Plus, Terminal, X,
 } from 'lucide-react'
-import { PRIORITY_ORDER, type TaskPriorityId } from '@agentistics/core'
+import { isLiveState, PRIORITY_ORDER, type TaskPriorityId } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useFleet } from '../../lib/fleet'
 import {
@@ -39,7 +39,6 @@ import {
   addSubtask, attachSession, createTask, editTask, markTask, useTaskStatuses, type Subtask,
 } from '../../lib/tasks'
 
-const LIVE = new Set(['working', 'waiting', 'waiting-approval'])
 
 export interface TaskComposerProps {
   /** The session this is being created FROM. Pre-linked, and stated rather than asked about. */
@@ -82,7 +81,7 @@ export function TaskComposer(p: TaskComposerProps) {
    * later; offering it here, under "link a running session", answers a different question.
    */
   const live = useMemo(
-    () => (fleet.sessions ?? []).filter(s => LIVE.has(s.state)),
+    () => (fleet.sessions ?? []).filter(s => isLiveState(s.state)),
     [fleet.sessions],
   )
 

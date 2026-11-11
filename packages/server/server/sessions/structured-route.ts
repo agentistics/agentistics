@@ -45,7 +45,7 @@ export type SpawnRoute = 'structured' | 'acp-legacy' | 'tmux'
 
 /** Hermes speaks ACP only; it must never be started in a terminal pane. */
 export const HERMES_STRUCTURED_ONLY_NOTICE = 'Hermes runs only as a structured chat (ACP); '
-  + 'open it from the sessions page, the panel or `agentop session hermes --bg`.'
+  + 'open it from the sessions page or reach the existing conversation with `session send`.'
 
 export interface RouteInput {
   flagOn: boolean

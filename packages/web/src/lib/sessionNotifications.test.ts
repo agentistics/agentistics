@@ -63,6 +63,13 @@ afterEach(() => {
 const map = new Map([['a', session('a')], ['b', session('b')]])
 
 describe('what counts as news', () => {
+  it('working to idle is silent, but idle to exited announces exactly once', () => {
+    handleSessionStateTransitions({ a: 'working' }, { a: 'idle' }, map, 'en')
+    expect(captured).toHaveLength(0)
+    handleSessionStateTransitions({ a: 'idle' }, { a: 'exited' }, map, 'en')
+    expect(captured).toHaveLength(1)
+    expect(captured[0]!.title).toContain('Session Closed')
+  })
   it('says nothing when a state has not changed', () => {
     const same: Record<string, SessionActivity> = { a: 'waiting' }
     handleSessionStateTransitions(same, same, map, 'en')
@@ -573,14 +580,14 @@ describe('account switches announce continuation instead of a generic exit', () 
   })
 
 
-  for (const state of ['working', 'waiting', 'waiting-approval', 'exited', 'lost', 'unknown', 'closed', 'missing']) {
+  for (const state of ['working', 'waiting', 'waiting-approval', 'idle', 'exited', 'lost', 'unknown', 'closed', 'missing']) {
     it(`cross-harness handoff to a ${state} successor only suppresses a live continuation`, () => {
       const linked = { ...source, handoffTo: 'cross-harness-target' }
       let prev = notifyFleetTransitions(null, [linked], 'en')
       const target = { id: linked.handoffTo, conversationId: 'new-conversation', harness: 'codex', state }
       const rows = [{ ...linked, state: 'exited' }, ...(state === 'missing' ? [] : [target])]
       prev = notifyFleetTransitions(prev, rows, 'en')
-      const live = ['working', 'waiting', 'waiting-approval'].includes(state)
+      const live = ['working', 'waiting', 'waiting-approval', 'idle'].includes(state)
       expect(bells.filter(code => code === 'session.exited')).toEqual(live ? [] : ['session.exited'])
       prev = notifyFleetTransitions(prev, rows, 'en')
       notifyFleetTransitions(prev, rows, 'en')

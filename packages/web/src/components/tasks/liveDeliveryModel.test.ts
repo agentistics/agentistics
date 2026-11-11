@@ -26,6 +26,11 @@ describe('joinLive', () => {
     expect(c!.liveState).toBe('needs-you')
     expect(c!.alert).toBe(true)
   })
+  test('keeps an idle agent on its delivery card', () => {
+    const [c] = joinLive([rec({ sessionIds: ['idle'] })], [row('idle', 'idle', { harness: 'hermes' })])
+    expect(c!.agents).toHaveLength(1)
+    expect(c!.agents[0]).toMatchObject({ id: 'idle', state: 'idle' })
+  })
   test('filed sessions the fleet shows nowhere, in a running stage, are an alert too', () => {
     const [c] = joinLive([rec({ sessionIds: ['a'] })], [])
     expect(c!.liveState).toBe('none')

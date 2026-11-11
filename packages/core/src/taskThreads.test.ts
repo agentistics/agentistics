@@ -48,6 +48,10 @@ describe('planThreadFanout — the explicit send to N sessions', () => {
     expect(by.a).toMatchObject({ action: 'send', rowId: 'a' })
     expect(by.b).toMatchObject({ action: 'send', rowId: 'b' })
   })
+  test('an idle Hermes session receives it now because idle is live', () => {
+    expect(planThreadFanout([P('hermes-idle')], [R('hermes-idle', 'idle')]))
+      .toEqual([{ sessionId: 'hermes-idle', rowId: 'hermes-idle', action: 'send' }])
+  })
   test('a session on a permission dialog is queued, never typed into', () => {
     expect(by.c).toMatchObject({ action: 'queue', reason: 'dialog-open' })
   })
@@ -69,9 +73,9 @@ describe('planThreadFanout — the explicit send to N sessions', () => {
 
 describe('planQueuedFlush', () => {
   test('goes once the conversation runs again and is not on a dialog', () => {
-    const rows = [R('n1', 'waiting', { conversationId: 'c1' }), R('n2', 'waiting-approval', { conversationId: 'c2' })]
-    expect(planQueuedFlush([{ sessionId: 'old1', conversationId: 'c1' }, { sessionId: 'old2', conversationId: 'c2' }, { sessionId: 'z' }], rows))
-      .toEqual([{ sessionId: 'old1', rowId: 'n1' }])
+    const rows = [R('n1', 'waiting', { conversationId: 'c1' }), R('n2', 'waiting-approval', { conversationId: 'c2' }), R('n3', 'idle', { conversationId: 'c3' })]
+    expect(planQueuedFlush([{ sessionId: 'old1', conversationId: 'c1' }, { sessionId: 'old2', conversationId: 'c2' }, { sessionId: 'old3', conversationId: 'c3' }, { sessionId: 'z' }], rows))
+      .toEqual([{ sessionId: 'old1', rowId: 'n1' }, { sessionId: 'old3', rowId: 'n3' }])
   })
 })
 

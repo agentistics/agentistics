@@ -7,7 +7,7 @@
  * token counters (`sessionTokenTotal`), cost labelled api-equivalent, and N/A — never 0 — for what the
  * source cannot produce, with the sentence that says why.
  */
-import { sessionCostUSD, sessionTokenTotal, type SessionMeta } from '@agentistics/core'
+import { isLiveState, sessionCostUSD, sessionTokenTotal, type SessionMeta } from '@agentistics/core'
 import type { ControlSession, SessionState } from './types'
 
 // ── layout ────────────────────────────────────────────────────────────────────────────────────────
@@ -55,7 +55,6 @@ function dayBefore(day: string, n: number): string {
   return d.toISOString().slice(0, 10)
 }
 
-const LIVE: ReadonlySet<SessionState> = new Set(['working', 'waiting-approval', 'waiting'])
 
 /**
  * The day's figures from the dashboard's own data (`/api/data` sessions). `sessions` counts sessions
@@ -90,7 +89,7 @@ export function todayFigures(sessions: readonly SessionMeta[], fleet: readonly C
   while (active.has(cursor)) { streak += 1; cursor = dayBefore(cursor, 1) }
   const spark: number[] = []
   for (let i = days - 1; i >= 0; i--) spark.push(byDay.get(dayBefore(today, i)) ?? 0)
-  return { costUSD: cost, tokens, sessions: count, live: fleet.filter(f => LIVE.has(f.state)).length, streak, spark }
+  return { costUSD: cost, tokens, sessions: count, live: fleet.filter(f => isLiveState(f.state)).length, streak, spark }
 }
 
 // ── formatting ────────────────────────────────────────────────────────────────────────────────────
@@ -160,7 +159,7 @@ export function resumeRows(
     stateLabel: f.stateLabel,
     native: f.harness === 'agentistics',
     at: when(f),
-    live: LIVE.has(f.state) ? 1 : 0,
+    live: isLiveState(f.state) ? 1 : 0,
   }))
   for (const n of native) {
     const at = Date.parse(n.updatedAt) || 0

@@ -43,7 +43,7 @@ describe('folder activity before filters', () => {
   const folder = (id: string, state?: ControlSession['state'], parentId?: string, hidden = false) => ({
     group: { id, ...(parentId ? { parentId } : {}), hidden }, rows: state ? [{ state }] : [],
   })
-  test.each(['working', 'waiting', 'waiting-approval'] as const)('%s keeps the folder and its parent visible', state => {
+  test.each(['working', 'waiting', 'waiting-approval', 'idle'] as const)('%s keeps the folder and its parent visible', state => {
     const entries = [folder('parent'), folder('live-child', state, 'parent'), folder('ended-child', 'exited', 'parent')]
     expect([...activeFolderIds(entries)].sort()).toEqual(['live-child', 'parent'])
   })

@@ -19,15 +19,15 @@
  */
 
 import type { SessionMeta } from '@agentistics/core'
+import { isLiveState } from '@agentistics/core'
 
-const ACTIVE = new Set(['working', 'waiting', 'waiting-approval'])
 
 export function runningConversationIds(
   rows: readonly { state: string; conversationId?: string }[],
 ): Set<string> {
   const out = new Set<string>()
   for (const r of rows) {
-    if (!ACTIVE.has(r.state)) continue
+    if (!isLiveState(r.state)) continue
     if (r.conversationId === undefined || r.conversationId === '') continue
     out.add(r.conversationId)
   }
