@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { registryUnreadable } from './registry'
-import { rolesDocUnreadable } from './session-roles'
+import { listRoles, rolesDocUnreadable } from './session-roles'
 import { describeLive } from './task-live-view'
 import type { LiveDelivery, LiveReply } from './task-live'
 
@@ -33,4 +33,17 @@ test('corrupt managed-sessions is unreadable and also cannot become absent', asy
   const view = describeLive({ reply, rows: [], leaderIds: new Set(), fleetRead: 'unknown', nowMs: 1 })
   expect(view.deliveries[0]).toMatchObject({ leaderAvailability: 'unknown', leaderAvailabilityReasonCode: 'fleet-unreadable' })
   expect(view.deliveries[0]!.leaderAvailability).not.toBe('absent')
+})
+
+test('reading roles twice never rewrites a corrupt session-roles, so it stays unknown on every read', async () => {
+  const roles = await mkdtemp(join(tmpdir(), 'agentistics-roles-')); dirs.push(roles)
+  const file = join(roles, 'session-roles.json')
+  await writeFile(file, '{broken', 'utf8')
+  const deps = { dataDir: roles, legacyPref: async () => undefined }
+  for (let read = 0; read < 2; read++) {
+    expect(await rolesDocUnreadable(roles)).toBe(true)
+    expect(await listRoles(deps)).toEqual({})
+  }
+  expect(await readFile(file, 'utf8')).toBe('{broken')
+  expect(await rolesDocUnreadable(roles)).toBe(true)
 })

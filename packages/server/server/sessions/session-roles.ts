@@ -225,6 +225,9 @@ export async function loadRoles(deps: Pick<RoleDeps, 'dataDir' | 'legacyPref'>):
     const latest = await readRolesDoc(deps.dataDir)
     if (latest.migrated) return latest
     const next = migrateLegacyRoles(latest, await deps.legacyPref().catch(() => undefined))
+    // A present but unparseable document is NOT rewritten on a read: overwriting it with an empty one
+    // would erase the evidence, and every later read would report "no leader" instead of "unknown".
+    if (await rolesDocUnreadable(deps.dataDir)) return next
     await writeRolesDoc(deps.dataDir, next).catch(() => {})
     return next
   }
