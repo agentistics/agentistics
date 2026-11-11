@@ -216,7 +216,15 @@
  * printed, trimmed by the source). Both additive: an older host ignores them — it keeps growing the last turn, which is the
  * pre-fix behaviour, and shows no output — so they ride 1.24 rather than refusing a mixed fleet.
  */
-export const ENGINE_API_VERSION = '1.24.0'
+/**
+ * 1.25.0 — LIVRO.SEAMS: `Engine.book` (optional, `EngineBook`) and the `book` verb in `EngineCommand.verb`. The engine
+ * serves the local hand-off book over `/api/book/*` (`handleHttp`), `agentop book` (`executeCli`) and the flow-op
+ * transport behind `/api/flow/op/:name` (`invokeFlowOpTransport`). The HOST authenticates: every call carries an
+ * `EngineBookContext` whose actor comes only from a verified session proof, else an unverified local user — never the
+ * owner. The engine opens the book lazily, so an engine without a book call creates no files. Additive only: a host
+ * that predates it never reads `book`; an engine built against 1.25 negotiates down to an older host without it.
+ */
+export const ENGINE_API_VERSION = '1.25.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

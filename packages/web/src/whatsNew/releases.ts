@@ -11,7 +11,12 @@ export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
   '2.208.0': {
-    features: [],
+    features: [
+      {
+        pt: 'Livro: novo comando `agentop book` para ler as páginas do livro de passagem da liderança; um livro com defeito não derruba mais o resto do app.',
+        en: 'Book: new `agentop book` command to read the pages of the leadership hand-off book; a damaged book no longer takes the rest of the app down.',
+      },
+    ],
     fixes: [
       {
         pt: 'Calendário: o que está atrasado aparece agrupado em um só aviso "N atrasadas" no dia de hoje, no mês e na semana, em vez de empilhar tudo em hoje.',

@@ -141,6 +141,8 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/experimental', 'localShell'],
   // Deterministic worker gates and git inspection are host-local operations.
   ['/api/flows', 'localShell'],
+  ['/api/book', 'localShell'],
+  ['/api/flow/op', 'localShell'],
   // Reading and WRITING this machine's MCP server configuration. `/api/mcp/servers` reports what is
   // configured and what is running; `/api/mcp/install` and `/api/mcp/remove` run `claude mcp` to
   // change it. A PREFIX for the same reason `/api/fleet` is one: the next route here is guarded by
