@@ -76,7 +76,9 @@ export function PlanUsageIndicator({ limits, now, lang }: { limits: PlanLimits; 
   const arc = (kind: '5h' | 'week') => {
     const windows = limits.windows.filter(w => w.kind === kind)
     const pct = windows.length ? Math.max(...windows.map(w => currentUsedPct(w, now))) : null
-    const d = kind === '5h' ? 'M 4.17 14 A 12 12 0 0 1 27.83 14' : 'M 27.83 18 A 12 12 0 0 1 4.17 18'
+    // Both arcs start on the LEFT and fill toward the right (the upper one over the top, the lower one
+    // under the bottom), so the two readings grow the same way instead of one looking like it shrinks.
+    const d = kind === '5h' ? 'M 4.17 14 A 12 12 0 0 1 27.83 14' : 'M 4.17 18 A 12 12 0 0 0 27.83 18'
     return <g data-plan-indicator-arc={kind} data-position={kind === '5h' ? 'top' : 'bottom'}>
       <path d={d} fill="none" stroke="var(--ag-tint-4)" strokeWidth={2.5} strokeDasharray={pct === null ? '2 3' : undefined} />
       {pct !== null && <path data-plan-indicator-fill d={d} pathLength={100} fill="none" stroke={limitTone(pct)} strokeWidth={2.5} strokeDasharray={`${Math.min(100, Math.max(0, pct))} 100`} strokeLinecap={pct > 0 ? 'round' : 'butt'} />}
