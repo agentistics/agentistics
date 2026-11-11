@@ -111,6 +111,7 @@ export function recordingSession(s: StructuredSession, t: Pick<DurableTransport,
     lastActivityMs: () => s.lastActivityMs(),
     // Optional members are forwarded only where the driver has them — absent stays absent.
     ...(s.usage ? { usage: () => s.usage!() } : {}),
+    ...(s.title ? { title: () => s.title!() } : {}),
     ...(s.modes ? { modes: () => s.modes!() } : {}),
     ...(s.mode ? { mode: () => s.mode!() } : {}),
     // MODE.EVERYWHERE — setting a mode WRITES to the child, so it is recorded (before the write leaves,
@@ -687,6 +688,16 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       if (!l) return base.modelsOf?.(id)
       if (!l.s.models || !l.s.setModel) return undefined
       return { current: l.s.model?.() ?? null, options: l.s.models().map(m => ({ id: m.id, label: m.label })) }
+    },
+    usageOf(id) {
+      const l = structuredOnly(id)
+      if (!l) return base.usageOf?.(id)
+      const usage = l.s.usage?.() ?? null
+      return usage ? { ...(usage.contextTokens !== undefined ? { contextTokens: usage.contextTokens } : {}), ...(usage.contextWindow !== undefined ? { contextWindow: usage.contextWindow } : {}) } : null
+    },
+    titleOf(id) {
+      const l = structuredOnly(id)
+      return l ? (l.s.title?.() ?? null) : base.titleOf?.(id)
     },
     async setModel(id, modelId, key) {
       const l = structuredOnly(id)

@@ -561,6 +561,10 @@ export function buildSessionViews(o: {
   closedLimit?: number
   /** Hardware metrics for managed sessions, keyed by managed session ID. */
   sessionHardware?: ReadonlyMap<string, { pid?: number; cpuPercent?: number | null; rssBytes?: number | null }>
+  /** Live context gauge stated by a structured protocol. */
+  structuredUsage?: ReadonlyMap<string, { contextTokens?: number; contextWindow?: number }>
+  /** Live title stated by a structured protocol. */
+  structuredTitles?: ReadonlyMap<string, string>
 }): SessionView[] {
   /**
    * Conversations already spoken for, so ONE is never offered to two rows.
@@ -653,7 +657,7 @@ export function buildSessionViews(o: {
     // session's `/rename` name lives only in the registry copy — without this fallback the title
     // flipped to a different source on finish and `CTRL+F` stopped finding the row by the name it
     // wore a second earlier. A title is an identity; it must not change because the process died.
-    const ownName = chosenName(own) ?? r.managed?.harnessName
+    const ownName = chosenName(own) ?? r.managed?.harnessName ?? o.structuredTitles?.get(r.id)
     // The recency stamp travels with whichever name won: the live file's `nameSince` while alive,
     // the persisted mirror once it is gone. `pickTitle` then settles the label-vs-harness contest
     // identically in both states.
@@ -769,8 +773,10 @@ export function buildSessionViews(o: {
       ...(conv?.turns ? { turns: conv.turns } : {}),
       ...(conv?.calls ? { calls: conv.calls } : {}),
       ...(conv?.costUSD !== undefined ? { costUSD: conv.costUSD } : {}),
-      ...(conv?.contextTokens !== undefined ? { contextTokens: conv.contextTokens } : {}),
-      ...(conv?.contextWindow !== undefined ? { contextWindow: conv.contextWindow } : {}),
+      ...((o.structuredUsage?.get(r.id)?.contextTokens ?? conv?.contextTokens) !== undefined
+        ? { contextTokens: o.structuredUsage?.get(r.id)?.contextTokens ?? conv?.contextTokens } : {}),
+      ...((o.structuredUsage?.get(r.id)?.contextWindow ?? conv?.contextWindow) !== undefined
+        ? { contextWindow: o.structuredUsage?.get(r.id)?.contextWindow ?? conv?.contextWindow } : {}),
       ...(conv?.lastUserMessageMs !== undefined ? { lastUserMessageMs: conv.lastUserMessageMs } : {}),
       ...(o.sessionHardware?.get(r.id)
         ? {
