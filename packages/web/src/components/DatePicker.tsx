@@ -6,6 +6,8 @@ import {
 } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import type { Lang } from '@agentistics/core'
+import { useIsMobile } from '../hooks/useIsMobile'
+import { useEscapeOwner } from '../lib/overlayStack'
 
 interface DatePickerProps {
   value: string
@@ -20,12 +22,17 @@ interface DatePickerProps {
   lang: Lang
   align?: 'left' | 'right'
   labelStyle?: CSSProperties
+  /** Task deadlines may be in the future; analytics filters retain their historical bound. */
+  allowFuture?: boolean
+  /** Embed the same calendar in an existing glass popover. */
+  inline?: boolean
 }
 
 export function DatePicker({
   value, onChange, label, placeholder, max, min,
-  rangeStart, rangeEnd, stuck, lang, align = 'left', labelStyle,
+  rangeStart, rangeEnd, stuck, lang, align = 'left', labelStyle, allowFuture = false, inline = false,
 }: DatePickerProps) {
+  const mobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const [triggerHovered, setTriggerHovered] = useState(false)
   const [viewDate, setViewDate] = useState<Date>(() => {
@@ -33,6 +40,7 @@ export function DatePicker({
     return new Date()
   })
   const ref = useRef<HTMLDivElement>(null)
+  useEscapeOwner(open && !inline, () => setOpen(false))
 
   useEffect(() => {
     if (!open) return
@@ -50,7 +58,7 @@ export function DatePicker({
   }, [value])
 
   const today = new Date()
-  const maxDate = max ? parseISO(max) : today
+  const maxDate = max ? parseISO(max) : allowFuture ? null : today
   const minDate = min ? parseISO(min) : null
 
   const firstOfMonth = startOfMonth(viewDate)
@@ -86,7 +94,7 @@ export function DatePicker({
 
   const isDisabled = (date: Date) => {
     const d = endOfDayLocal(date)
-    if (isAfter(d, endOfDayLocal(maxDate))) return true
+    if (maxDate && isAfter(d, endOfDayLocal(maxDate))) return true
     if (minDate) {
       const md = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate(), 0)
       if (isBefore(d, md)) return true
@@ -100,7 +108,7 @@ export function DatePicker({
     setOpen(false)
   }
 
-  const canGoNext = !isAfter(startOfMonth(addMonths(viewDate, 1)), maxDate)
+  const canGoNext = !maxDate || !isAfter(startOfMonth(addMonths(viewDate, 1)), maxDate)
 
   const displayValue = selectedDate ? format(selectedDate, 'dd/MM/yyyy') : ''
   const hasValue = !!value
@@ -113,8 +121,8 @@ export function DatePicker({
     : ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
   return (
-    <div ref={ref} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-      <div
+    <div ref={ref} style={{ position: 'relative', display: 'flex', alignItems: 'center', ...(inline ? { width: '100%' } : {}) }}>
+      {!inline && <button type="button" aria-label={label} aria-haspopup="dialog" aria-expanded={open}
         onClick={() => setOpen(o => !o)}
         onMouseEnter={() => setTriggerHovered(true)}
         onMouseLeave={() => setTriggerHovered(false)}
@@ -128,6 +136,7 @@ export function DatePicker({
             ? 'var(--ag-tint-2)'
             : 'transparent',
           transition: 'background 0.12s ease',
+          border: 'none', fontFamily: 'inherit', minHeight: mobile ? 44 : 32,
         }}
       >
         <span style={{
@@ -147,20 +156,20 @@ export function DatePicker({
         }}>
           {displayValue || placeholder}
         </span>
-      </div>
+      </button>}
 
-      {open && (
-        <div style={{
-          position: 'absolute',
-          top: 'calc(100% + 10px)',
+      {(open || inline) && (
+        <div data-composer-menu role={inline ? 'group' : 'dialog'} aria-label={label} style={{
+          position: inline ? 'relative' : 'absolute',
+          top: inline ? undefined : 'calc(100% + 10px)',
           [align === 'right' ? 'right' : 'left']: 0,
           zIndex: 9999,
           background: 'var(--bg-card)',
           border: '1px solid var(--border)',
           borderRadius: 14,
-          padding: '14px 16px 16px',
+          padding: inline ? 8 : '14px 16px 16px',
           boxShadow: '0 20px 60px rgba(0,0,0,0.45), 0 6px 20px rgba(0,0,0,0.25), inset 0 1px 0 var(--ag-tint-2)',
-          width: 256,
+          width: inline ? '100%' : mobile ? 352 : 288, maxWidth: 'calc(100vw / var(--ui-zoom, 1) - 24px)', boxSizing: 'border-box',
           userSelect: 'none',
         }}>
           {/* Month nav */}
@@ -168,11 +177,13 @@ export function DatePicker({
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12,
           }}>
             <button
+              type="button" aria-label={lang === 'pt' ? 'Mês anterior' : 'Previous month'}
               onClick={(e) => { e.stopPropagation(); setViewDate(d => subMonths(d, 1)) }}
               style={{
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 borderRadius: 7, cursor: 'pointer', color: 'var(--text-secondary)',
                 padding: '4px 7px', display: 'flex', alignItems: 'center',
+                minWidth: mobile ? 44 : 28, minHeight: mobile ? 44 : 28,
               }}
             >
               <ChevronLeft size={14} />
@@ -184,12 +195,14 @@ export function DatePicker({
               {monthLabel}
             </span>
             <button
+              type="button" aria-label={lang === 'pt' ? 'Próximo mês' : 'Next month'} disabled={!canGoNext}
               onClick={(e) => { e.stopPropagation(); if (canGoNext) setViewDate(d => addMonths(d, 1)) }}
               style={{
                 background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                 borderRadius: 7, cursor: canGoNext ? 'pointer' : 'not-allowed',
                 opacity: canGoNext ? 1 : 0.3,
                 color: 'var(--text-secondary)', padding: '4px 7px', display: 'flex', alignItems: 'center',
+                minWidth: mobile ? 44 : 28, minHeight: mobile ? 44 : 28,
               }}
             >
               <ChevronRight size={14} />
@@ -227,21 +240,24 @@ export function DatePicker({
                   inRange={inRange}
                   isToday={isToday}
                   onSelect={handleSelect}
+                  mobile={mobile}
                 />
               )
             })}
           </div>
 
           {/* Today shortcut */}
-          {!isSameDay(today, selectedDate ?? new Date('1970-01-01')) && (
+          {(
             <div style={{ marginTop: 10, textAlign: 'center' }}>
               <button
+                type="button" disabled={isDisabled(today)}
                 onClick={() => handleSelect(today)}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer',
                   fontSize: 11, color: 'var(--anthropic-orange)', fontFamily: 'inherit',
                   fontWeight: 500, padding: '3px 8px', borderRadius: 6,
                   textDecoration: 'underline', textDecorationColor: 'rgba(217,119,6,0.3)',
+                  minHeight: mobile ? 44 : 32,
                 }}
               >
                 {lang === 'pt' ? 'Hoje' : 'Today'}
@@ -254,13 +270,14 @@ export function DatePicker({
   )
 }
 
-function DayButton({ date, disabled, selected, inRange, isToday, onSelect }: {
+function DayButton({ date, disabled, selected, inRange, isToday, onSelect, mobile }: {
   date: Date
   disabled: boolean
   selected: boolean
   inRange: boolean
   isToday: boolean
   onSelect: (d: Date) => void
+  mobile: boolean
 }) {
   const [hovered, setHovered] = useState(false)
 
@@ -269,19 +286,21 @@ function DayButton({ date, disabled, selected, inRange, isToday, onSelect }: {
   else if (inRange) bg = 'rgba(217,119,6,0.15)'
   else if (hovered && !disabled) bg = 'var(--bg-elevated)'
 
-  let color = 'var(--text-primary)'
+  let color = '#fff'
   if (selected) color = '#fff'
-  else if (inRange || isToday) color = 'var(--anthropic-orange)'
+  else if (isToday) color = 'var(--accent-green)'
+  else if (inRange) color = 'var(--anthropic-orange)'
   else if (disabled) color = 'var(--text-tertiary)'
 
   return (
     <button
+      type="button" disabled={disabled} aria-label={format(date, 'yyyy-MM-dd')} aria-pressed={selected} aria-current={isToday ? 'date' : undefined}
       onClick={() => onSelect(date)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
         background: bg,
-        border: isToday && !selected ? '1px solid rgba(217,119,6,0.45)' : '1px solid transparent',
+        border: isToday && !selected ? '1px solid var(--accent-green)' : '1px solid transparent',
         borderRadius: 7,
         color,
         fontSize: 12, fontFamily: 'inherit',
@@ -293,6 +312,7 @@ function DayButton({ date, disabled, selected, inRange, isToday, onSelect }: {
         transition: 'background 0.12s ease, color 0.12s ease',
         outline: 'none',
         width: '100%',
+        minHeight: mobile ? 44 : 30,
       }}
     >
       {format(date, 'd')}

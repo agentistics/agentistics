@@ -9,7 +9,7 @@
  * so the session chat looks and behaves as it did.
  */
 
-import { forwardRef, useLayoutEffect, useRef, type ReactNode, type TextareaHTMLAttributes } from 'react'
+import { forwardRef, useLayoutEffect, useRef, type ButtonHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react'
 import { Loader, Mic, Paperclip, Send, X } from 'lucide-react'
 
 /** The box: field column + attachments + text + toolbar. `hidden` keeps the caller's reopen state. */
@@ -128,25 +128,29 @@ export function ComposerAttachments({ items, pt, isImage, imageSrc, onOpenImage,
   )
 }
 
+/** Bare toolbar icon shared by attach and task registration. */
+export const ComposerIconButton = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement>>(function ComposerIconButton({ style, className, ...props }, ref) {
+  return <button {...props} ref={ref} type="button" className={`ag-composer-icon ${className ?? ''}`} style={{
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    width: 34, height: 34, borderRadius: 9, border: 'none', flexShrink: 0,
+    background: 'transparent',
+    cursor: props.disabled ? 'default' : 'pointer', ...style,
+  }} />
+})
+
 export function ComposerAttachButton({ onClick, disabled, uploading, label }: {
   onClick: () => void; disabled: boolean; uploading: boolean; label: string
 }) {
   return (
-    <button
+    <ComposerIconButton
       type="button"
       onClick={onClick}
       disabled={disabled || uploading}
       aria-label={label}
       title={label}
-      style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        width: 34, height: 34, borderRadius: 9, border: 'none', flexShrink: 0,
-        background: 'transparent', color: 'var(--text-tertiary)',
-        cursor: !disabled && !uploading ? 'pointer' : 'default',
-      }}
     >
       {uploading ? <Loader size={15} className="ag-working-spin" /> : <Paperclip size={15} />}
-    </button>
+    </ComposerIconButton>
   )
 }
 

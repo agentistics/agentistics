@@ -138,7 +138,7 @@ export function ChipSelect({
             onClick={e => { e.stopPropagation(); setOpen(false) }}
             style={{ position: 'fixed', inset: 0, zIndex: 1199 }}
           />
-          <div ref={panel} style={{
+          <div ref={panel} data-chip-select-panel data-composer-menu style={{
             position: 'fixed', left: at.left, width: at.width, zIndex: 1200,
             ...(at.bottom !== undefined ? { bottom: at.bottom } : { top: at.top }),
             ...surface, background: 'var(--bg-elevated)', padding: 4, display: 'grid', gap: 2,

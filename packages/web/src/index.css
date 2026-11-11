@@ -1532,7 +1532,11 @@ tr:focus-within .ag-row-actions,
 /* Session composer task controls share the desktop/mobile control geometry. */
 :root { --ag-composer-control: 32px; }
 .ag-composer-task-control { height: var(--ag-composer-control); box-sizing: border-box; font-family: inherit; color: var(--text-secondary); background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; }
+.ag-composer-icon { color: var(--text-tertiary); }
+.ag-composer-icon:hover:not(:disabled), .ag-composer-icon:focus-visible { color: var(--text-primary); }
+.ag-composer-icon:focus-visible { outline: 2px solid var(--anthropic-orange); outline-offset: 2px; }
 @media (max-width: 768px) {
   :root { --ag-composer-control: 44px; }
   .ag-composer-task-control { min-height: 44px; font-size: 16px; }
+  .ag-composer-icon { min-width: 44px; min-height: 44px; }
 }
