@@ -224,7 +224,14 @@
  * owner. The engine opens the book lazily, so an engine without a book call creates no files. Additive only: a host
  * that predates it never reads `book`; an engine built against 1.25 negotiates down to an older host without it.
  */
-export const ENGINE_API_VERSION = '1.25.0'
+/**
+ * 1.26.0 — LIVRO.SEAMS (slice 2): `EngineHostServices.book` (optional, `EngineBookHost`) — the host's side of a
+ * book takeover: start a leader's successor through the host's own hand-off spawn path, stop an unconfirmed one,
+ * retire the predecessor the way `retirePredecessor` does, say whether a session is alive and which task it is
+ * filed on, and CHECK a session-identity proof (never mint one). Additive only: an engine built against 1.25 never
+ * reads it; on a host without it the engine answers a takeover with 501 and spawns nothing.
+ */
+export const ENGINE_API_VERSION = '1.26.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

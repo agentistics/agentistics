@@ -40,6 +40,7 @@ import { engineSecrets, routeEngineVaultAudit } from '../vault/engine-secrets'
 import { engineMachineSecrets } from '../vault/machine-secrets-host'
 import { hostEngineBoard } from './engine-board'
 import { hostDelegateMembers } from './engine-delegate'
+import { hostBookPort } from './engine-book-host'
 import { nativeVaultRefs } from '../vault/grants'
 import { flowHostOps } from '../flows/host-ops'
 import { createStructuredSessions } from './structured-handle'
@@ -430,6 +431,8 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     apiVersion: ENGINE_API_VERSION,
     // 1.7 (B6.2): delegation to another harness — consent (default deny), admission and filing are the host's.
     fleet: { subscribe: cb => fleetHub.subscribe(cb), ...hostDelegateMembers(() => lang) },
+    // 1.26 (LIVRO.SEAMS slice 2): a book takeover's spawn / stop / retire / proof check, through the fleet's own doors.
+    book: hostBookPort(() => lang),
     // 1.7 (A5.2): the API port, for an engine to write into a harness's OTel exporter config.
     serverPort: () => config.PORT,
     // 1.8 — VAULT.PERSONAL §8.3: a native session's granted secrets, as an env overlay per tool call and
