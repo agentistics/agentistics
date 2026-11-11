@@ -191,7 +191,10 @@ async function putPrefs(patch: Record<string, unknown>) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new Error(`PUT /api/preferences → HTTP ${res.status}`);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`PUT /api/preferences → HTTP ${res.status}${detail ? ` ${detail.slice(0, 400)}` : ''}`)
+  }
   return res.json();
 }
 
@@ -928,6 +931,25 @@ const TOOLS: Tool[] = [
     description:
       "Get all custom layouts: names, components in each, which is active, and each component's instance ID for removal.",
     inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "agentistics_get_preferences",
+    description: "Read the Nay persona preferences (chatResponder, chatWorkingDir, chatLabel and chatMcpEnabled).",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "agentistics_set_preferences",
+    description: "Set Nay persona preferences. chatWorkingDir must be an existing absolute directory; the server canonicalises and validates it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chatResponder: { type: "string", enum: ["analytics", "own-agent"] },
+        chatWorkingDir: { type: "string" },
+        chatLabel: { type: "string" },
+        chatMcpEnabled: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "agentistics_create_layout",
@@ -1675,6 +1697,34 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
             text: JSON.stringify({ activeLayout: active, layouts: summary }, null, 2),
           }],
         };
+      }
+
+      case "agentistics_get_preferences": {
+        const prefs = await getPrefs();
+        return text({
+          chatResponder: prefs.chatResponder ?? 'analytics',
+          chatWorkingDir: prefs.chatWorkingDir ?? null,
+          chatLabel: prefs.chatLabel ?? 'Nay',
+          chatMcpEnabled: prefs.chatMcpEnabled === true,
+        });
+      }
+
+      case "agentistics_set_preferences": {
+        const a = (args ?? {}) as Record<string, unknown>;
+        const patch: Record<string, unknown> = {};
+        for (const key of ['chatResponder', 'chatWorkingDir', 'chatLabel', 'chatMcpEnabled']) {
+          if (a[key] !== undefined) patch[key] = a[key];
+        }
+        await putPrefs(patch);
+        return text(await (async () => {
+          const prefs = await getPrefs();
+          return {
+            chatResponder: prefs.chatResponder ?? 'analytics',
+            chatWorkingDir: prefs.chatWorkingDir ?? null,
+            chatLabel: prefs.chatLabel ?? 'Nay',
+            chatMcpEnabled: prefs.chatMcpEnabled === true,
+          };
+        })());
       }
 
       case "agentistics_create_layout": {

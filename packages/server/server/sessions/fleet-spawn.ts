@@ -76,6 +76,8 @@ export interface FleetSpawnBody {
   prompt?: unknown
   model?: unknown
   effort?: unknown
+  /** Internal Nay setting: false explicitly omits the agentistics MCP from structured sessions. */
+  mcp?: unknown
   /** MODE.EVERYWHERE — one of `CANONICAL_MODES`; absent or `default` = the harness's own configuration. */
   mode?: unknown
   label?: unknown
@@ -116,6 +118,7 @@ export interface FleetSpawnPlan {
   prompt?: string
   model?: string
   effort?: string
+  mcp?: boolean
   mode?: CanonicalMode
   label?: string
   /** A leader title prefix is an explicit leader-role request, shared with the CLI path. */
@@ -263,6 +266,7 @@ export function planFleetSpawn(
       ...(prompt ? { prompt } : {}),
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
+      ...(body.mcp === true || body.mcp === false ? { mcp: body.mcp } : {}),
       ...(mode ? { mode } : {}),
       ...(label ? { label } : {}),
       ...(role ? { role } : {}),
