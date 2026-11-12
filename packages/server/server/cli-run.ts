@@ -5,6 +5,7 @@ import { freemem, homedir, tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
+import { CURRENT_VERSION } from './version'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
@@ -134,6 +135,7 @@ function usage(): string {
   return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] -- <command...>
        agentop run --rm [--ttl 2h] [--port-offset N] [--name x]
        agentop run --rm --serve [--seed-from <staging> | --seed-real] [--cwd <worktree>] [--ttl 2h] [--name x] [-- <server command...>]
+       --serve with no command runs the installed agentop; use --cwd with an explicit checkout command to serve that checkout.
        agentop run ls
        agentop run stop <name>`
 }
@@ -500,6 +502,27 @@ export function serveCwdOk(dir: string): string | null {
   } catch { return null }
 }
 
+/** Identifies an agentistics checkout without trusting the caller's spelling or current directory. */
+export function isAgentisticsCheckout(dir: string): boolean {
+  try {
+    const real = realpathSync(dir)
+    const env = gitEnv()
+    const result = Bun.spawnSync(['git', '-C', real, 'rev-parse', '--show-toplevel'], { stdout: 'pipe', stderr: 'ignore', env })
+    if (result.exitCode !== 0) return false
+    const root = realpathSync(result.stdout.toString().trim())
+    return existsSync(join(root, 'packages/server/bin/cli.ts'))
+  } catch { return false }
+}
+
+/** The explicit warning and summary line for the surprising no-command `--serve` default. */
+export function serveBuildNotice(cwd: string | null, command: string[]): { warning: string; summary: string } | null {
+  if (command.length || !cwd || !isAgentisticsCheckout(cwd)) return null
+  return {
+    warning: `agentop run --serve is serving the installed agentop v${CURRENT_VERSION}, not this checkout. To serve the checkout, pass -- bun packages/server/bin/cli.ts server (and build/serve the web with vite from the checkout).`,
+    summary: `  servedBuild: installed agentop v${CURRENT_VERSION}`,
+  }
+}
+
 /** `--serve` is long-lived: it must never sit under (or hold a descriptor of) the machine-wide heavy lock. */
 export function serveLockRefusal(env: NodeJS.ProcessEnv, ancestors: string[], fds: number[]): string | null {
   if (insideHeavyLock(env, ancestors)) return 'agentop run --serve was started inside a heavy job; the server would stay tied to its lock. Run it from outside.'
@@ -508,11 +531,13 @@ export function serveLockRefusal(env: NodeJS.ProcessEnv, ancestors: string[], fd
 }
 
 async function startRun(options: RunOptions): Promise<number> {
+  const serveBuildNoticeResult = options.serve ? serveBuildNotice(options.cwd, options.command) : null
   if (options.serve) {
     const refusal = serveLockRefusal(process.env, ancestorCmdlines(), heavyLockFds('self'))
     if (refusal) { console.error(refusal); return 4 }
     if (options.seedFrom !== null && !seedSourceOk(options.seedFrom)) { console.error('--seed-from must be a staged seed under <dataDir>/flows/ambientes/<id>/semente/'); return 2 }
     if (options.cwd !== null && !serveCwdOk(options.cwd)) { console.error('--cwd must be a linked git worktree'); return 2 }
+    if (serveBuildNoticeResult) console.error(serveBuildNoticeResult.warning)
   }
   if (!await waitForMemory()) return 3
   mkdirSync(stateRoot(), { recursive: true, mode: 0o700 })
@@ -572,6 +597,7 @@ async function startRun(options: RunOptions): Promise<number> {
   console.log(`  web:  http://localhost:${webPort}`)
   console.log(`  home: ${home}`)
   console.log(`  stop: agentop run stop ${options.name}`)
+  if (serveBuildNoticeResult) console.log(serveBuildNoticeResult.summary)
 
   // One shared promise: a signal handler and the normal exit path both call this, and the second
   // caller must wait for the first one's removal instead of exiting the process under it.
