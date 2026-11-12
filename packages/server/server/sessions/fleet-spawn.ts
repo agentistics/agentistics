@@ -73,6 +73,8 @@ export interface FleetSpawnBody {
   parentVerified?: unknown
   /** A leader hand-off: the child inherits the parent's task/subtask filing. Strict boolean. */
   handoff?: unknown
+  /** SET BY THE SERVER ONLY (the route deletes it from the wire): this hand-off is a hand-off-book passage. */
+  bookPassage?: unknown
   prompt?: unknown
   model?: unknown
   effort?: unknown
@@ -115,6 +117,8 @@ export interface FleetSpawnPlan {
   /** The caller proved it is `parentSessionId` (server-set). */
   parentVerified?: true
   handoff?: true
+  /** A hand-off-book passage (server-set): the successor keeps the predecessor as parent until the book confirms. */
+  bookPassage?: true
   prompt?: string
   model?: string
   effort?: string
@@ -263,6 +267,7 @@ export function planFleetSpawn(
       ...(parentSessionId ? { parentSessionId } : {}),
       ...(parentVerified ? { parentVerified: true as const } : {}),
       ...(handoff ? { handoff: true as const } : {}),
+      ...(handoff && body.bookPassage === true ? { bookPassage: true as const } : {}),
       ...(prompt ? { prompt } : {}),
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),

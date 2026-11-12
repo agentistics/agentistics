@@ -218,8 +218,9 @@ export function planTeamMove(
 export function rootIfLeader<R extends { parentSessionId?: string | undefined; parentConversationId?: string | undefined }>(
   row: R,
   role: 'leader' | 'worker' | undefined,
+  preserveParent = false,
 ): R {
-  if (role !== 'leader' || (!row.parentSessionId && !row.parentConversationId)) return row
+  if (preserveParent || role !== 'leader' || (!row.parentSessionId && !row.parentConversationId)) return row
   const { parentSessionId: _s, parentConversationId: _c, ...rest } = row
   return rest as R
 }
