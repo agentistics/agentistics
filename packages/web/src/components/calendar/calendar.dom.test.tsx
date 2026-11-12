@@ -115,6 +115,38 @@ test('month: with a day holding >= cap "started" pieces, today still gets exactl
   }
 })
 
+test('month: room is per day — a quiet future day shows its predicted chips even when another day is full and today has overdue', async () => {
+  const original = HTMLElement.prototype.getBoundingClientRect
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
+  try {
+    const base = { ...view.pieces[1]!, version: null, publishedAtMs: null }
+    const dayMs = (d: string) => brtDayStartMs(d) + 12 * H
+    // Week of 2026-11-08..14 (today = 07/11 is Saturday, so use the week holding 11/11 as "now" instead).
+    const now = Date.parse('2026-11-11T15:00:00.000Z')
+    const started = Array.from({ length: 5 }, (_, i) => ({ ...base, key: `st/${i}`, stage: 'running' as const, startedAtMs: dayMs('2026-11-09'), stageSinceMs: dayMs('2026-11-09'), publishEta: { kind: 'none' as const, reason: 'no-history' } }))
+    const late = { ...base, key: 'od/0', stage: 'running' as const, startedAtMs: now - 40 * 24 * H, stageSinceMs: now - 40 * 24 * H, overdueSinceMs: now - 24 * H, late: true, publishEta: { kind: 'none' as const, reason: 'overdue' } }
+    const predicted = Array.from({ length: 2 }, (_, i) => ({ ...base, key: `pr/${i}`, stage: 'qa' as const, startedAtMs: now - H, publishEta: { kind: 'estimate' as const, atMs: dayMs('2026-11-13'), confidence: 'low' as const } }))
+    await mount(createElement(Month, { ...common, nowMs: now, versions: [], marks: [], pieces: [...started, late, ...predicted], anchor: '2026-11-11', onPickDay: noop, onOpenVersion: noop, onOpenMark: noop, onOpenPiece: noop }))
+    const row = document.querySelector('[data-cal-day="2026-11-13"]')!.closest('[data-cal-week]')!
+    expect(row.querySelectorAll('[data-cal-expected-piece]').length).toBe(2)
+    expect(row.querySelector('[data-cal-more="2026-11-13"]')).toBeNull()
+  } finally {
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: original })
+  }
+})
+
+test('month: the "+N" title names what is hidden', async () => {
+  const original = HTMLElement.prototype.getBoundingClientRect
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
+  try {
+    const many = Array.from({ length: 30 }, (_, i) => ({ ...view.pieces[0]!, key: `many/${i}`, version: null, publishEta: { kind: 'estimate' as const, atMs: NOW + H, confidence: 'low' as const } }))
+    await mount(createElement(Month, { ...common, pieces: many, anchor: '2026-11-07', onPickDay: noop, onOpenVersion: noop, onOpenMark: noop, onOpenPiece: noop }))
+    expect(document.querySelector('[data-cal-more="2026-11-07"]')!.getAttribute('title')).toMatch(/mais: \d+ previstas/)
+  } finally {
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: original })
+  }
+})
+
 test('week: today column shows the overdue chip with the count', async () => {
   const od = Array.from({ length: 2 }, (_, i) => ({ ...view.pieces[1]!, key: `wk/${i}`, version: null, publishEta: { kind: 'none' as const, reason: 'overdue' }, overdueSinceMs: NOW - H, late: true }))
   await mount(createElement(Agenda, { ...common, pieces: od, mode: 'week', anchor: '2026-11-07', onOpenPiece: noop, onOpenVersion: noop, onOpenMark: noop }))

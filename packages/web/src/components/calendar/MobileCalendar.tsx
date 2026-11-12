@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, Filter } from 'lucide-react'
 import { brtDay, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
-import { addMonths, dowShort, monthCells, rangeLabel, swipeDay, weekDays } from '../../lib/calendarModel'
+import { addMonths, dowShort, monthCells, overduePiecesOfDay, rangeLabel, swipeDay, weekDays } from '../../lib/calendarModel'
 import { TEXT, VIEW_LABEL, pick } from './calendarText'
 import { MobileDayGrid, phoneEvents } from './MobileDayGrid'
 import type { CalSelection } from './CalendarDetail'
@@ -30,7 +30,9 @@ export function MobileCalendar(p: {
     {Array.from({ length: 7 }, (_, i) => <span key={i}>{dowShort(i, p.pt).slice(0, 1)}</span>)}
     {monthCells(p.anchor).map(c => {
       const count = phoneEvents(c.day, p).length + p.marks.filter(m => m.kind === 'task-due' && m.day === c.day).length
-      return <button type="button" key={c.day} className="cal-phone-button" data-cal-day={c.day} aria-label={`${c.day} · ${count}`} aria-current={c.day === today ? 'date' : undefined} style={{ opacity: c.inMonth ? 1 : 0.45 }} onClick={() => { openDay(c.day); setSheet(null) }}>
+      const late = overduePiecesOfDay(c.day, p.pieces, p.nowMs).length
+      return <button type="button" key={c.day} className="cal-phone-button" data-cal-day={c.day} aria-label={`${c.day} · ${count}${late ? ` · ${late} ${pick(TEXT.overdue, p.pt)}` : ''}`} aria-current={c.day === today ? 'date' : undefined} style={{ opacity: c.inMonth ? 1 : 0.45, position: 'relative' }} onClick={() => { openDay(c.day); setSheet(null) }}>
+        {late > 0 && <b data-cal-overdue={c.day} title={`${late} ${pick(TEXT.overdue, p.pt)}`} style={{ position: 'absolute', top: 1, right: 1, minWidth: 14, height: 14, padding: '0 3px', boxSizing: 'border-box', borderRadius: 7, background: 'var(--accent-red)', color: '#fff', fontSize: 9, lineHeight: '14px', fontWeight: 700 }}>{late}</b>}
         <span>{Number(c.day.slice(8))}</span><span aria-hidden style={{ display: 'flex', gap: 2 }}>{Array.from({ length: Math.min(count, 3) }, (_, i) => <i key={i} style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--anthropic-orange)' }} />)}</span>
       </button>
     })}
