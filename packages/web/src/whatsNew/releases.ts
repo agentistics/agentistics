@@ -17,6 +17,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Sessões: o popup de uso continua aberto quando chegam mensagens ou atualizações da sessão; clique fora, Esc e o botão ainda fecham normalmente.',
         en: 'Sessions: the usage popup stays open when messages or session updates arrive; outside click, Escape and the button still close it normally.',
       },
+      {
+        pt: 'Ao vivo e Calendário: a primeira carga espera um servidor lento com um carregamento centralizado; depois de 60 s aparece um alerta local com "Tentar de novo", em vez de um falso aviso de servidor offline.',
+        en: 'Live and Calendar: the first load waits for a slow server with a centred loader; after 60 s a local "Try again" alert appears instead of a false "server offline" banner.',
+      },
     ],
   },
   '2.209.2': {
