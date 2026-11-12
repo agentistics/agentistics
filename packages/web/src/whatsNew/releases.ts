@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.209.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Calendário: no mês, os dias futuros da semana atual mostram as previsões, em vez de só "+N".',
+        en: 'Calendar: in the month view, future days of the current week show their predictions instead of only "+N".',
+      },
+      {
+        pt: 'Calendário: o "+N" diz o que está escondido (por exemplo, "7 iniciadas, 1 versão ou prazo").',
+        en: 'Calendar: "+N" now says what is hidden (for example, "7 started, 1 version or deadline").',
+      },
+      {
+        pt: 'Calendário no celular: o dia de hoje mostra quantas peças estão atrasadas.',
+        en: 'Calendar on the phone: today shows how many pieces are overdue.',
+      },
+    ],
+  },
   '2.209.0': {
     features: [
       {
