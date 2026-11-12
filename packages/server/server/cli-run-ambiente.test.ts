@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { resolveDataDir } from './data-dir'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
-import { guardedSeed, realDataDir, parseArgs, buildThrowawayEnv, isThrowawayEnvDrop, seedSourceOk, serveCwdOk, serveLockRefusal, runOwnedPids, THROWAWAY_ENV_DROP, THROWAWAY_ENV_KEEP } from './cli-run'
+import { guardedSeed, realDataDir, parseArgs, buildThrowawayEnv, isThrowawayEnvDrop, seedSourceOk, serveCwdOk, serveLockRefusal, runOwnedPids, isAgentisticsCheckout, serveBuildNotice, THROWAWAY_ENV_DROP, THROWAWAY_ENV_KEEP } from './cli-run'
 import { buildSeed } from './run-seed'
 
 describe('throwaway env (I8, I12)', () => {
@@ -57,6 +57,27 @@ describe('--seed-from / --cwd validation', () => {
     expect(serveCwdOk(d)).toBeNull()
     Bun.spawnSync(['git', 'init', '-q', d], { env: gitTestEnv() })
     expect(serveCwdOk(d)).toBeNull()
+  })
+})
+
+describe('--serve checkout warning', () => {
+  test('warns for a checkout-shaped cwd with no command and includes the installed version', () => {
+    const checkout = mkdtempSync(join(tmpdir(), 'serve-cwd-'))
+    mkdirSync(join(checkout, 'packages/server/bin'), { recursive: true })
+    writeFileSync(join(checkout, 'packages/server/bin/cli.ts'), '')
+    const git = Bun.spawnSync(['git', '-C', checkout, 'init', '-q'], { env: gitTestEnv() })
+    expect(git.exitCode).toBe(0)
+    expect(isAgentisticsCheckout(checkout)).toBe(true)
+    expect(serveBuildNotice(checkout, [])).toMatchObject({ warning: expect.stringContaining('installed agentop v'), summary: expect.stringContaining('servedBuild: installed agentop v') })
+  })
+
+  test('does not warn when a command is provided or cwd is not a checkout', () => {
+    const checkout = mkdtempSync(join(tmpdir(), 'serve-cwd-command-'))
+    mkdirSync(join(checkout, 'packages/server/bin'), { recursive: true })
+    writeFileSync(join(checkout, 'packages/server/bin/cli.ts'), '')
+    Bun.spawnSync(['git', '-C', checkout, 'init', '-q'], { env: gitTestEnv() })
+    expect(serveBuildNotice(checkout, ['bun', 'server'])).toBeNull()
+    expect(serveBuildNotice(mkdtempSync(join(tmpdir(), 'serve-cwd-plain-')), [])).toBeNull()
   })
 })
 
