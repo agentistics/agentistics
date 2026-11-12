@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.209.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Calendário: um prazo urgente num dia vazio do mês não fica mais escondido por causa de outro dia cheio da mesma semana.',
+        en: 'Calendar: an urgent deadline on an empty month day is no longer hidden by another busy day of the same week.',
+      },
+      {
+        pt: 'Calendário: as faixas das versões voltam a aparecer no mês, mesmo em telas mais baixas.',
+        en: 'Calendar: version ribbons show again in the month view, even on shorter screens.',
+      },
+      {
+        pt: 'Calendário no celular: os pontinhos do dia de hoje agora aparecem sobre o fundo laranja.',
+        en: 'Calendar on the phone: the dots on today are now visible on the orange background.',
+      },
+    ],
+  },
   '2.209.1': {
     features: [],
     fixes: [

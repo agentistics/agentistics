@@ -68,27 +68,38 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
   const days = week.map(c => c.day)
   const allRibbons = weekRibbons(days, versions, pieces, today)
   const lanes = allRibbons.reduce((m, r) => Math.max(m, r.lane + 1), 0)
-  const dueMarks = week.map(c => marksOfDay(c.day, marks).filter((m): m is Extract<CalMark, { kind: 'task-due' }> => m.kind === 'task-due'))
-  // Pieces with no version and no estimate (a leader working alone) sit on the day their work began, after the due chips.
+  const PRIO: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
+  const dueMarks = week.map(c => marksOfDay(c.day, marks).filter((m): m is Extract<CalMark, { kind: 'task-due' }> => m.kind === 'task-due')
+    .sort((a, b) => (PRIO[a.priority ?? ''] ?? 4) - (PRIO[b.priority ?? ''] ?? 4)))
+  // Pieces with no version and no estimate (a leader working alone) sit on the day their work began.
   const started = week.map(c => startedPiecesOfDay(c.day, pieces))
   const expected = week.map(c => expectedPiecesOfDay(c.day, pieces))
   const overdue = week.map(c => overduePiecesOfDay(c.day, pieces, nowMs))
-  // The work in progress outranks release context: one row is reserved for these chips before ribbons and due chips share the rest.
-  // The overdue chip of today has a guaranteed row, taken BEFORE ribbons, dues and started chips compete for the rest;
-  // when it is drawn, its pieces are said by the chip itself and never counted in the day's "+N".
-  const overdueRow = cap >= 1 && overdue.some(s => s.length > 0) ? 1 : 0
-  const capRest = Number.isFinite(cap) ? cap - overdueRow : cap
-  const reserve = Number.isFinite(capRest) ? Math.min(Math.max(0, ...started.map(s => s.length)), capRest) : Number.POSITIVE_INFINITY
-  const baseFit = fitWeek({ ribbons: allRibbons, dues: dueMarks.map(d => d.length), cap: Number.isFinite(reserve) ? capRest - reserve : capRest })
-  const shownStarted = started.map(s => s.slice(0, Number.isFinite(reserve) ? reserve : s.length))
-  const shownOverdue = overdue.map(s => (s.length > 0 && (cap >= 1) ? s : []))
-  const chipBase = 2 + Math.min(lanes, Number.isFinite(reserve) ? capRest - reserve : lanes) + Math.max(0, ...baseFit.dues)
-  // Room for predicted chips is PER DAY: a day spends only its own started chips and its own overdue row (ribbons and due
-  // chips are per week, they already sit above `chipBase`), so a quiet future day shows its predictions beside a full one.
-  const shownExpected = expected.map((s, i) => Number.isFinite(cap)
-    ? s.slice(0, Math.max(0, cap - (chipBase - 2) - shownStarted[i]!.length - (shownOverdue[i]!.length > 0 ? 1 : 0)))
-    : s)
-  const fit = { ...baseFit, more: baseFit.more.map((n, i) => n + started[i]!.length - shownStarted[i]!.length + expected[i]!.length - shownExpected[i]!.length + (overdue[i]!.length - shownOverdue[i]!.length)) }
+  // Rows are a PER-DAY budget. Only the version ribbons are per week (they span days, so they sit on the same top rows in
+  // every column): they may take about half of `cap`, never all of it. Each day then spends its own rows in this order:
+  // the overdue chip (a guaranteed row), deadlines (urgent first), started pieces, predicted pieces. A day with nothing
+  // started therefore shows its deadline and its predictions, whatever another day of the week is carrying.
+  const anyOverdue = cap >= 1 && overdue.some(s => s.length > 0)
+  const laneRoom = Number.isFinite(cap) ? Math.max(0, cap - (anyOverdue ? 1 : 0)) : cap
+  const laneCap = Number.isFinite(laneRoom) ? (laneRoom > 0 ? Math.max(1, Math.floor(laneRoom / 2)) : 0) : laneRoom
+  const baseFit = fitWeek({ ribbons: allRibbons, dues: week.map(() => 0), cap: laneCap })
+  const shownLanes = Math.min(lanes, laneCap)
+  const plan = week.map((_, i) => {
+    let room = Number.isFinite(cap) ? Math.max(0, cap - shownLanes) : Number.POSITIVE_INFINITY
+    const od = overdue[i]!.length > 0 && cap >= 1
+    if (od) room -= 1
+    const take = <T,>(s: T[]): T[] => { const r = s.slice(0, Math.max(0, room)); room -= r.length; return r }
+    const dues = take(dueMarks[i]!)
+    const st = take(started[i]!)
+    const ex = take(expected[i]!)
+    return { dues, st, ex, od }
+  })
+  const shownDues = plan.map(p => p.dues)
+  const shownStarted = plan.map(p => p.st)
+  const shownExpected = plan.map(p => p.ex)
+  const shownOverdue = plan.map((p, i) => (p.od ? overdue[i]! : []))
+  const hiddenDues = week.map((_, i) => dueMarks[i]!.length - shownDues[i]!.length)
+  const fit = { ...baseFit, more: baseFit.more.map((n, i) => n + hiddenDues[i]! + started[i]!.length - shownStarted[i]!.length + expected[i]!.length - shownExpected[i]!.length + (overdue[i]!.length - shownOverdue[i]!.length)) }
   return (
     <div ref={rowRef} data-cal-week style={{ position: 'relative', minHeight: 0, overflow: 'hidden', borderBottom: !last ? '1px solid var(--border)' : 0 }}>
       <div aria-hidden style={{ position: 'absolute', inset: 0, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
@@ -121,10 +132,10 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
           )
         })}
         {fit.ribbons.map(r => <RibbonBar key={r.version} r={r} pt={pt} selected={selected === r.version} onOpen={e => onOpenVersion(r.version, e)} />)}
-        {week.map((c, i) => dueMarks[i]!.slice(0, fit.dues[i]).map((m, k) => (
+        {week.map((c, i) => shownDues[i]!.map((m, k) => (
           <button key={`${c.day}-${m.taskId}`} type="button" data-cal-due={m.taskId} onClick={e => onOpenMark(m, e)} title={m.label}
             style={{
-              gridColumn: i + 1, gridRow: 2 + lanes + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0,
+              gridColumn: i + 1, gridRow: 2 + shownLanes + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0,
               border: 0, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden',
               color: brtDay(nowMs) > c.day ? 'var(--accent-red)' : 'var(--accent-amber)',
               background: brtDay(nowMs) > c.day ? 'var(--accent-red-dim)' : 'color-mix(in srgb, var(--accent-amber) 10%, transparent)',
@@ -136,7 +147,7 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
         {week.map((c, i) => shownStarted[i]!.map((p, k) => (
           <button key={`${c.day}-${p.key}`} type="button" data-cal-started={p.key} onClick={e => onOpenPiece?.(p.key, e)} title={`${p.title} · ${pick(TEXT.noEstimate, pt)}`}
             style={{
-              gridColumn: i + 1, gridRow: chipBase + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0,
+              gridColumn: i + 1, gridRow: 2 + shownLanes + shownDues[i]!.length + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0,
               border: `1px dashed ${stageColor(p.stage)}`, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden',
               color: 'var(--text-primary)', background: 'transparent',
             }}>
@@ -146,14 +157,14 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
         )))}
         {week.map((c, i) => shownExpected[i]!.map((p, k) => (
           <button key={`${c.day}-expected-${p.key}`} type="button" data-cal-expected-piece={p.key} onClick={e => onOpenPiece?.(p.key, e)} title={`${p.title} · ${pick(TEXT.expected, pt)}`}
-            style={{ gridColumn: i + 1, gridRow: chipBase + shownStarted[i]!.length + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0, border: `1px dashed ${stageColor(p.stage)}`, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', color: 'var(--text-primary)', background: 'transparent' }}>
+            style={{ gridColumn: i + 1, gridRow: 2 + shownLanes + shownDues[i]!.length + shownStarted[i]!.length + k, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', gap: 4, padding: '0 5px', minWidth: 0, border: `1px dashed ${stageColor(p.stage)}`, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', color: 'var(--text-primary)', background: 'transparent' }}>
             <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, flexShrink: 0, background: stageColor(p.stage) }} />
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</span>
           </button>
         )))}
         {week.map((c, i) => shownOverdue[i]!.length > 0 && (
           <button key={`${c.day}-overdue`} type="button" data-cal-overdue={c.day} onClick={() => onPickDay(c.day)} title={pick(TEXT.overdue, pt)}
-            style={{ gridColumn: i + 1, gridRow: chipBase + shownStarted[i]!.length + shownExpected[i]!.length, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', padding: '0 5px', minWidth: 0, border: 0, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
+            style={{ gridColumn: i + 1, gridRow: 2 + shownLanes + shownDues[i]!.length + shownStarted[i]!.length + shownExpected[i]!.length, margin: '0 4px', height: RIBBON_H, display: 'flex', alignItems: 'center', padding: '0 5px', minWidth: 0, border: 0, borderRadius: 4, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
             {overdue[i]!.length} {pick(TEXT.overdue, pt)}
           </button>
         ))}
@@ -162,7 +173,7 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
             // "+N" counts what this cell had no row for: predicted and started pieces, version ribbons and due dates. The title names each kind.
             title={pick(TEXT.moreHidden({
               total: fit.more[i]!, expected: expected[i]!.length - shownExpected[i]!.length, started: started[i]!.length - shownStarted[i]!.length,
-              overdue: overdue[i]!.length - shownOverdue[i]!.length, other: baseFit.more[i]!,
+              overdue: overdue[i]!.length - shownOverdue[i]!.length, other: baseFit.more[i]! + hiddenDues[i]!,
             }), pt)}
             style={{
               gridColumn: i + 1, gridRow: 1, justifySelf: 'end', alignSelf: 'center', marginRight: marksOfDay(c.day, marks).some(m => m.kind === 'account-reset') ? 26 : 5,
