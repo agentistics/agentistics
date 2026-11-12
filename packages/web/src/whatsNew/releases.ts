@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  // Placeholder version for BOOT.LOCK-REBOOT: the leader sets the real number at release.
+  '2.210.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Depois que o computador reinicia, o agentistics volta a subir sozinho, sem precisar ser iniciado à mão.',
+        en: 'After the computer restarts, agentistics starts by itself again — no need to start it by hand.',
+      },
+      {
+        pt: 'Quando o agentistics se recusa a iniciar por achar que outro servidor está rodando, a mensagem agora diz que programa é esse.',
+        en: 'When agentistics refuses to start because it thinks another server is running, the message now says which program that is.',
+      },
+    ],
+  },
   '2.210.0': {
     features: [
       {
