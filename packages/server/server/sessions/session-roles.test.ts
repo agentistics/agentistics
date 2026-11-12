@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, rekeyStoredRoleBatch, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, markParentVerified, markCallerVerified, roleOp, roleStatus, writeRolesDoc, gateAnswerOf, handoffGateViaServer, type RoleDeps,
+  SESSION_ROLES_FILE, applyRoleTitle, clearStoredRole, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, rekeyStoredRoleBatch, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, markParentVerified, markCallerVerified, roleOp, roleStatus, writeRolesDoc, gateAnswerOf, handoffGateViaServer, type RoleDeps,
 } from './session-roles'
 
 let dir = ''
@@ -662,5 +662,30 @@ describe('ORQ.H3 hand-off gate answers', () => {
       const down = (async () => { throw new Error('ECONNREFUSED') }) as unknown as typeof fetch
       expect(await handoffGateViaServer('t-1', { fetch: down, port: 1 })).toMatchObject({ ok: false, reason: expect.stringContaining('ECONNREFUSED') })
     } finally { if (prev === undefined) delete process.env.AGENTISTICS_FLOWS; else process.env.AGENTISTICS_FLOWS = prev }
+  })
+})
+
+describe('clearStoredRole (a confirmed book takeover removes the predecessor\'s role)', () => {
+  test('removes the roles, origins and delivery marks under the given keys and leaves every other key alone', async () => {
+    const deps = { dataDir: dir, legacyPref: async () => undefined }
+    const full = fake([]).deps
+    await ensureSpawnRole(['old', 'conv-old'], 'leader', full)
+    await ensureSpawnRole(['other', 'conv-other'], 'leader', full)
+    await ensureSpawnRole(['bystander'], 'worker', full)
+    await clearStoredRole(['old', undefined, 'conv-old'], deps)
+    const doc = await loadRoles(deps)
+    expect(Object.keys(doc.roles).sort()).toEqual(['bystander', 'conv-other', 'other'])
+    for (const k of ['old', 'conv-old']) {
+      expect(doc.origins?.[k]).toBeUndefined()
+      expect(doc.at?.[k]).toBeUndefined()
+    }
+    expect(doc.origins?.other).toBeDefined()
+  })
+  test('no keys (or only undefined ones) change nothing', async () => {
+    const deps = { dataDir: dir, legacyPref: async () => undefined }
+    await ensureSpawnRole(['keep'], 'leader', fake([]).deps)
+    await clearStoredRole([], deps)
+    await clearStoredRole([undefined], deps)
+    expect((await loadRoles(deps)).roles).toEqual({ keep: 'leader' })
   })
 })

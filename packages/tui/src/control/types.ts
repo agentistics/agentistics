@@ -1993,6 +1993,8 @@ export interface SpawnSessionRequest {
   parentVerified?: boolean
   /** Leader hand-off: inherit the parent's task/subtask filing when none is given. */
   handoff?: boolean
+  /** A hand-off-book passage (server-set): no spawn-time re-root / retire; the book confirm retires. */
+  bookPassage?: boolean
   /** Explicit briefing role for CLI/web callers. */
   role?: 'leader' | 'worker'
   /** Per-session autonomous mode: on, off, or inherit a verified away parent's (absent = inherit). */

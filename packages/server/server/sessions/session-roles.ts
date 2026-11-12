@@ -659,6 +659,26 @@ export async function rekeyStoredRole(
   })
 }
 
+/** Remove a predecessor's stored role after a confirmed book takeover. */
+export async function clearStoredRole(
+  keys: readonly (string | undefined)[],
+  providedDeps?: Pick<RoleDeps, 'dataDir' | 'legacyPref'>,
+): Promise<void> {
+  const depsP = providedDeps ? Promise.resolve(providedDeps) : defaultRoleDeps()
+  return serial(depsP.then(d => d.dataDir), async () => {
+    const deps = await depsP
+    const doc = await loadRoles(deps)
+    const roles = { ...doc.roles }
+    const origins = { ...(doc.origins ?? {}) }
+    const at = { ...(doc.at ?? {}) }
+    const delivered = { ...(doc.lastDeliveredRole ?? {}) }
+    for (const key of new Set(keys.filter((k): k is string => Boolean(k)))) {
+      delete roles[key]; delete origins[key]; delete at[key]; delete delivered[key]
+    }
+    await writeRolesDoc(deps.dataDir, { ...doc, roles, origins, at, lastDeliveredRole: delivered })
+  })
+}
+
 /** Repair the whole registry with one locked read/write; migrated managed keys are removed.
  * Returns the number of repaired identities. A second boot performs no moves or writes.
  */

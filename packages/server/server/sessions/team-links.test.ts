@@ -25,6 +25,11 @@ describe('spawn: every session a leader starts is its child, except a leader', (
     const w = { id: 'x', parentSessionId: 'L' }
     expect(rootIfLeader(w, 'worker')).toBe(w)
   })
+  test('a handoff successor keeps the passage parent link until handoff completes', () => {
+    const successor: { id: string; parentSessionId?: string; parentConversationId?: string } = { id: 'x', parentSessionId: 'old', parentConversationId: 'c-old' }
+    expect(rootIfLeader(successor, 'leader', true)).toBe(successor)
+    expect(rootIfLeader(successor, 'leader')).toEqual({ id: 'x' })
+  })
 })
 
 describe('a predecessor that handed off files new workers under its successor', () => {

@@ -116,6 +116,8 @@ export const AGENT_TOOL_NAMES = [
   // Experimental flows (2)
   'agentistics_flow_run',
   'agentistics_flow_status',
+  // Hand-off book (1)
+  'agentistics_book_takeover',
   // Vault (1) — COFRE.DESBLOQUEIO
   'agentistics_vault_status',
 ] as const
@@ -162,6 +164,10 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_task_delete: {
     ...TASKS, risk: 'D', routes: ['DELETE /api/tasks/:ref'],
     reason: 'destroys a task with its history; re-classed D by the spec (§3.5), moves behind an intent in P2.6',
+  },
+  agentistics_book_takeover: {
+    ...TASKS, risk: 'W', routes: ['POST /api/book/takeover'],
+    reason: 'confirms the calling successor session against its durable hand-off bookmark; the server attaches and verifies the session proof',
   },
   // ------------------------------------------------------------------ Session groups
   agentistics_session_groups: { ...GROUPS, risk: 'R', routes: ['GET /api/session-groups'], reason: 'lists the session folders' },
