@@ -33,7 +33,7 @@ export function MobileCalendar(p: {
       const late = overduePiecesOfDay(c.day, p.pieces, p.nowMs).length
       return <button type="button" key={c.day} className="cal-phone-button" data-cal-day={c.day} aria-label={`${c.day} · ${count}${late ? ` · ${late} ${pick(TEXT.overdue, p.pt)}` : ''}`} aria-current={c.day === today ? 'date' : undefined} style={{ opacity: c.inMonth ? 1 : 0.45, position: 'relative' }} onClick={() => { openDay(c.day); setSheet(null) }}>
         {late > 0 && <b data-cal-overdue={c.day} title={`${late} ${pick(TEXT.overdue, p.pt)}`} style={{ position: 'absolute', top: 1, right: 1, minWidth: 14, height: 14, padding: '0 3px', boxSizing: 'border-box', borderRadius: 7, background: 'var(--accent-red)', color: '#fff', fontSize: 9, lineHeight: '14px', fontWeight: 700 }}>{late}</b>}
-        <span>{Number(c.day.slice(8))}</span><span aria-hidden style={{ display: 'flex', gap: 2 }}>{Array.from({ length: Math.min(count, 3) }, (_, i) => <i key={i} style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--anthropic-orange)' }} />)}</span>
+        <span>{Number(c.day.slice(8))}</span><span aria-hidden style={{ display: 'flex', gap: 2 }}>{Array.from({ length: Math.min(count, 3) }, (_, i) => <i key={i} data-cal-dot style={{ width: 4, height: 4, borderRadius: '50%', background: c.day === today ? 'var(--bg-primary)' : 'var(--anthropic-orange)' }} />)}</span>
       </button>
     })}
   </div>
