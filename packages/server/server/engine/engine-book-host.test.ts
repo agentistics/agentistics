@@ -18,6 +18,7 @@ function deps(over: Partial<BookHostDeps> = {}): BookHostDeps & { log: string[];
     spawn: async body => { bodies.push(body); return { ok: true, message: 'started', id: 'succ-1' } },
     kill: async id => { log.push(`kill:${id}`); return { ok: true } },
     requestRetire: async (pred, succ) => { log.push(`retire:${pred}->${succ}`); return true },
+    clearRole: async predecessor => { log.push(`clear-role:${predecessor}`) },
     verify: async (id, token) => (typeof id === 'string' && token === `ok:${id}` ? id : null),
     ...over,
   }
@@ -32,7 +33,7 @@ describe('book host', () => {
     expect(out).toEqual({ ok: true, sessionId: 'succ-1' })
     expect(d.bodies).toEqual([{
       harness: 'opencode', cwd: '/work/repo', parent: 'lead-1', parentVerified: true, callerVerified: true,
-      handoff: true, prompt: 'take over', model: 'opencode/big-pickle',
+      handoff: true, bookPassage: true, prompt: 'take over', model: 'opencode/big-pickle',
     }])
   })
 
@@ -60,12 +61,30 @@ describe('book host', () => {
     const host = createBookHost(d)
     expect(await host.stop('succ-1')).toEqual({ closed: true })
     expect(await host.retire('lead-1', 'succ-1')).toEqual({ retired: true })
-    expect(d.log).toEqual(['kill:succ-1', 'retire:lead-1->succ-1'])
+    expect(d.log).toEqual(['kill:succ-1', 'clear-role:succ-1', 'retire:lead-1->succ-1', 'clear-role:lead-1'])
     expect(await host.isAlive('lead-1')).toBe(true)
     expect(await host.isAlive('gone')).toBe(false)
     expect(await host.isAlive('nobody')).toBe(false)
     expect(await host.taskOf('lead-1')).toBe('t-1')
     expect(await host.taskOf('nobody')).toBeUndefined()
+  })
+
+  test('a role is cleared only when the retire / kill actually happened', async () => {
+    const d = deps({ requestRetire: async () => false, kill: async () => ({ ok: false }) })
+    const host = createBookHost(d)
+    expect(await host.retire('lead-1', 'succ-1')).toEqual({ retired: false })
+    expect(await host.stop('succ-1')).toEqual({ closed: false })
+    expect(d.log).toEqual([])
+    const throws = deps({ requestRetire: async () => { throw new Error('boom') }, kill: async () => { throw new Error('boom') } })
+    expect(await createBookHost(throws).retire('lead-1', 'succ-1')).toEqual({ retired: false })
+    expect(await createBookHost(throws).stop('succ-1')).toEqual({ closed: false })
+    expect(throws.log).toEqual([])
+  })
+
+  test('the spawn states a book passage (so the spawn path keeps the parent link and does not retire)', async () => {
+    const d = deps()
+    await createBookHost(d).spawnSuccessor(spawnReq)
+    expect(d.bodies[0]).toMatchObject({ handoff: true, bookPassage: true, parent: 'lead-1' })
   })
 
   test('verifySession checks a session-identity proof and never accepts another id\'s token', async () => {

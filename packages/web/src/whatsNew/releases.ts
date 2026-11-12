@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.210.0': {
+    features: [
+      {
+        pt: 'Livro: o novo líder confirma a passagem sozinho, pela própria sessão, sem nenhum passo manual.',
+        en: 'Book: the new leader confirms the hand-off on its own, from its own session, with no manual step.',
+      },
+      {
+        pt: 'Livro: uma passagem em andamento sobrevive a um reinício do agentistics; se o tempo acabou, ela é desfeita com segurança e o líder antigo continua.',
+        en: 'Book: a hand-off in progress survives an agentistics restart; if its time ran out, it is safely undone and the old leader stays.',
+      },
+      {
+        pt: 'Livro: o novo líder fica ligado ao líder anterior, e o líder antigo perde o papel de líder quando é encerrado.',
+        en: 'Book: the new leader is linked to the previous one, and the old leader loses its leader role when it is closed.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Livro: um arquivo do livro corrompido não derruba mais o motor; só as funções do livro ficam indisponíveis.',
+        en: 'Book: a corrupt book file no longer takes the engine down; only the book features become unavailable.',
+      },
+    ],
+  },
   '2.209.3': {
     features: [],
     fixes: [

@@ -30,6 +30,7 @@ export interface BookHostDeps {
   spawn: (body: FleetSpawnBody) => Promise<{ ok: boolean; message: string; id?: string; queued?: unknown }>
   kill: (id: string) => Promise<{ ok: boolean }>
   requestRetire: (predecessorId: string, successorId: string) => Promise<boolean>
+  clearRole?: (predecessorId: string) => Promise<void>
   verify: (id: unknown, token: unknown) => Promise<string | null>
 }
 
@@ -47,6 +48,7 @@ export function createBookHost(d: BookHostDeps): EngineBookHost {
         // An agent's passage, never the owner's privilege on an account that is off for agents.
         callerVerified: true,
         handoff: true,
+        bookPassage: true,
         prompt: req.prompt,
         ...(req.model ? { model: req.model } : {}),
         ...(req.account ? { account: req.account } : {}),
@@ -56,10 +58,15 @@ export function createBookHost(d: BookHostDeps): EngineBookHost {
       return { ok: true, sessionId: out.id }
     },
     async stop(sessionId) {
-      return { closed: (await d.kill(sessionId).catch(() => ({ ok: false }))).ok }
+      const closed = (await d.kill(sessionId).catch(() => ({ ok: false }))).ok
+      // A rolled-back successor must not keep the leader role it was born with.
+      if (closed && d.clearRole) await d.clearRole(sessionId).catch(() => {})
+      return { closed }
     },
     async retire(predecessorId, successorId) {
-      return { retired: await d.requestRetire(predecessorId, successorId).catch(() => false) }
+      const retired = await d.requestRetire(predecessorId, successorId).catch(() => false)
+      if (retired && d.clearRole) await d.clearRole(predecessorId).catch(() => {})
+      return { retired }
     },
     async isAlive(sessionId) {
       const r = await row(sessionId)
@@ -74,6 +81,14 @@ export function createBookHost(d: BookHostDeps): EngineBookHost {
   }
 }
 
+/** Removes a session's stored role under BOTH its keys (managed id and conversation id); other sessions keep theirs. */
+export async function clearSessionRole(sessionId: string): Promise<void> {
+  const { clearStoredRole } = await import('../sessions/session-roles')
+  const { readRegistry } = await import('../sessions/registry')
+  const row = (await readRegistry().catch(() => [])).find(r => r.id === sessionId)
+  await clearStoredRole([sessionId, row?.conversationId])
+}
+
 /** The real members, over the fleet's and the registry's own functions, loaded on first use. */
 export function hostBookPort(lang: () => 'en' | 'pt'): EngineBookHost {
   return createBookHost({
@@ -81,6 +96,7 @@ export function hostBookPort(lang: () => 'en' | 'pt'): EngineBookHost {
     spawn: async body => (await import('../sessions/fleet-web')).runFleetSpawn(lang(), body),
     kill: async id => (await import('../sessions/fleet-web')).runFleetAction(lang(), { id, action: 'kill' }),
     requestRetire: async (predecessorId, successorId) => (await import('../sessions/team-links-io')).requestRetire(predecessorId, successorId),
+    clearRole: clearSessionRole,
     verify: async (id, token) => (await import('../sessions/session-identity')).verifySessionIdentity(id, token),
   })
 }

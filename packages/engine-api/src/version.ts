@@ -231,7 +231,12 @@
  * filed on, and CHECK a session-identity proof (never mint one). Additive only: an engine built against 1.25 never
  * reads it; on a host without it the engine answers a takeover with 501 and spawns nothing.
  */
-export const ENGINE_API_VERSION = '1.26.0'
+/**
+ * 1.27.0 — LIVRO.SEAMS (slice 3a): `EngineBook.start` (optional) — the long-lived server asks the book to reconcile
+ * its durable passages once at boot; a one-shot CLI never calls it. Additive only: an engine without it is simply
+ * never reconciled, and a host that predates it never calls it.
+ */
+export const ENGINE_API_VERSION = '1.27.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

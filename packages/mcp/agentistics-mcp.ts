@@ -25,6 +25,7 @@ import {
 import { createAgentAuditSink } from "./agent-audit.js";
 import { taskCommentRequest } from "./task-comment-args.js";
 import { sessionProof } from "./session-proof.js";
+import { bookTakeoverPayload } from "./book-takeover-payload.js";
 import { HARNESS_CAPABILITIES, contextReading, nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
 import { planLimitsTool } from "./plan-limits-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
@@ -1128,6 +1129,19 @@ const TOOLS: Tool[] = [
       required: ["runId"],
     },
   },
+  {
+    name: "agentistics_book_takeover",
+    description: "Confirm a real successor's takeover of a task through the hand-off book. The MCP server attaches this session's proof automatically; never provide a token.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string", description: "Task whose passage this successor is confirming." },
+        bookmarkHash: { type: "string", description: "Bookmark hash from the successor spawn prompt." },
+        lastDeltaHash: { type: "string", description: "Required after the server's 409 challenge." },
+      },
+      required: ["taskId", "bookmarkHash"],
+    },
+  },
 ];
 
 /** Exported for the session-context parity test; the live list remains the single MCP registry. */
@@ -1191,6 +1205,17 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       case "agentistics_flow_status": {
         const runId = String((args as any)?.runId ?? "");
         const body = await apiGet(`/api/flows/status/${flowStatusRunId(runId)}`);
+        return text(body);
+      }
+      case "agentistics_book_takeover": {
+        const a = args as any;
+        const response = await fetch(`${API}/api/book/takeover`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(bookTakeoverPayload(a, sessionProof(process.env))),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok && response.status !== 409) throw new Error(`POST /api/book/takeover → HTTP ${response.status} ${JSON.stringify(body).slice(0, 400)}`);
         return text(body);
       }
       case "agentistics_task_create": {

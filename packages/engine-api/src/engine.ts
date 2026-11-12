@@ -118,6 +118,12 @@ export interface EngineBook {
     env?: Record<string, string | undefined>
     context?: EngineBookContext
   }): Promise<{ stdout: string; exitCode: number }>
+  /**
+   * 1.27 (optional) — reconcile durable hand-off passages after a restart (reattach a live one, roll back an
+   * expired one). ONLY the long-lived server calls it, once, after the engine loads — a one-shot CLI process never
+   * does. Contained: it logs and never throws.
+   */
+  start?(): Promise<void>
 }
 
 export interface EngineCommand {

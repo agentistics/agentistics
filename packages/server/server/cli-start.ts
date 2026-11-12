@@ -2089,6 +2089,8 @@ export async function spawnManaged(req: {
   parentVerified?: boolean
   parentConversationId?: string
   handoff?: boolean
+  /** A hand-off-book passage (server-set): no spawn-time re-root / retire; the book confirm retires. */
+  bookPassage?: boolean
   /** CONTA.TROCA — the row an account/harness switch replaces: the gate judges it as a reopen (same work, same filing). */
   switchFrom?: string
   role?: 'leader' | 'worker'
@@ -2337,7 +2339,7 @@ export async function spawnManaged(req: {
     ...req, ...(mode ? { mode } : {}),
     ...(parentLink.parentSessionId ? { parentSessionId: parentLink.parentSessionId } : {}),
     ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
-  }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }), bornRole), req.inherit && req.inherit.id !== id ? req.inherit.id : undefined))
+  }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }), bornRole, req.bookPassage === true), req.inherit && req.inherit.id !== id ? req.inherit.id : undefined))
   // A worker must be filed before its process can receive the first prompt.
   if (req.contextTaskId) {
     const { configureSpawn } = await import('./sessions/spawn-configuration')
@@ -2428,7 +2430,7 @@ export async function spawnManaged(req: {
       return { ok: false, message: `The session started but its role (${gate.role}) could not be recorded, so it was stopped — try again.` }
     }
   }
-  if (handoffParentRow && inheritedRole !== 'worker') {
+  if (handoffParentRow && inheritedRole !== 'worker' && !req.bookPassage) {
     // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
     await import('./sessions/team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
   }
@@ -5151,6 +5153,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.parentSessionId && req.parentVerified ? { parentVerified: true } : {}),
         ...(req.handoff ? { handoff: true } : {}),
+        ...(req.bookPassage ? { bookPassage: true } : {}),
         ...(req.switchFrom ? { switchFrom: req.switchFrom } : {}),
         ...(filing.role ? { role: filing.role } : {}),
         ...(req.away !== undefined ? { away: req.away } : {}),

@@ -40,7 +40,8 @@ import { getEnabledAdapters } from './adapters/types'
 import { handleSession } from './session-info'
 import { routeCapability, capabilityDenied } from './capability-guard'
 import { RESERVED_PREFIXES } from '@agentistics/engine-api'
-import { disposeEngine, reservedPrefixMiss, engine, engineStatus, loadEngine } from './engine/load'
+import { startEngineBook } from './engine/start-book'
+import { disposeEngine,reservedPrefixMiss, engine, engineStatus, loadEngine } from './engine/load'
 import { applyAssetVerdict } from './engine/engine-assets'
 import {
   admit as admitEngineSocket, closeEngineSocket, planEngineUpgrade, onEngineSocketMessage, openEngineSocket,
@@ -292,6 +293,8 @@ void loadEngine().then(st => {
   // Event-triggered flows (DSL.GATILHOS): their timers run in the SERVER process only, never in a CLI
   // that loads the engine. The engine starts nothing while AGENTISTICS_FLOWS is off.
   try { engine()?.flows?.start?.() } catch (err) { console.warn('[flows] triggers failed to start:', err instanceof Error ? err.message : String(err)) }
+  // LIVRO.SEAMS: hand-off passages are reconciled here and nowhere else — never in a one-shot CLI process.
+  void startEngineBook(engine())
 })
 // Periodic best-effort re-check so a long-running daemon surfaces new releases
 // without a page reload (broadcasts an SSE notification when an update appears).
@@ -3007,6 +3010,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const spawnBody = body.value as FleetSpawnBody & { session?: { id?: unknown; token?: unknown } }
         const { markParentVerified, markCallerVerified } = await import('./sessions/session-roles')
         const { verifySessionIdentity } = await import('./sessions/session-identity')
+        delete spawnBody.bookPassage // only the book host states a passage, never the wire
         await markParentVerified(spawnBody, verifySessionIdentity)
         // PLAN.ACCOUNTS D3: an agent is asking only when the body carries a VALID session proof.
         await markCallerVerified(spawnBody, verifySessionIdentity)
