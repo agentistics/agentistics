@@ -246,7 +246,10 @@ function useBootWatchdog(): BootVerdict {
     const probe = () => {
       fetchWithTimeout('/api/health', 4000, { cache: 'no-store' })
         .then(r => { health = r.ok ? 'ok' : 'down' })
-        .catch(() => { health = 'down' })
+        // A probe deadline means the server is busy, not that it is unreachable: a delayed 200
+        // from a live server must not turn the global banner into "inacessível". Connection
+        // failures and explicit 5xx responses remain real down signals.
+        .catch(error => { health = (error as { name?: string } | null)?.name === 'AbortError' ? 'unknown' : 'down' })
         .finally(tick)
     }
     const ticker = setInterval(tick, 1000)
@@ -4103,7 +4106,7 @@ export default function AppLayout() {
               // nav leave and SCROLLS INSIDE ITSELF, like an editor pane — all four corners stay
               // on screen, which is the point of the design. The page's own max-width box lives
               // one level down (`pageScrollRef`'s child), so the panel itself runs edge to edge.
-              flex: 1, minWidth: 0, minHeight: 0,
+              position: 'relative', flex: 1, minWidth: 0, minHeight: 0,
               margin: OUTER_GAP,
               border: PANEL_BORDER, borderRadius: PANEL_RADIUS,
               background: 'var(--bg-surface)',
@@ -4113,6 +4116,7 @@ export default function AppLayout() {
           : {
               // Table pages grow with the screen; the rest keep 1400 — see `pageWidth.ts`.
               maxWidth: pageMaxWidth(location.pathname),
+              position: 'relative',
               margin: '0 auto',
               width: '100%',
               boxSizing: 'border-box',

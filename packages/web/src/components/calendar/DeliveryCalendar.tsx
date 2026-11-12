@@ -14,7 +14,7 @@ import { CenteredLoader } from '../CenteredLoader'
 import { SegmentedTabs } from '../nav/SegmentedTabs'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { addDays, rangeLabel, stepAnchor, viewWindow, weekDays, type CalView } from '../../lib/calendarModel'
-import { dialogButtonStyle } from '../../pages/settings/primitives'
+import { Button } from '../../pages/settings/primitives'
 import { STAGE_LABEL } from '../tasks/liveDeliveryModel'
 import { AgendaView } from './AgendaView'
 import { CalendarDetail, type Anchor, type CalSelection } from './CalendarDetail'
@@ -48,7 +48,7 @@ export function icsQuery(f: UiFilters, win: { fromMs: number; toMs: number }): s
 export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
-  const { reply, error, nowMs, reload } = useDeliveryCalendar()
+  const { reply, error, slow, nowMs, reload } = useDeliveryCalendar()
   const [query, setQuery] = useSearchParams()
   const phoneView = (['day', 'three', 'week', 'month', 'schedule', 'agenda'].includes(query.get('calView') ?? '') ? query.get('calView') : 'day') as PhoneView
   const [desktopView, setView] = useState<CalView>('month')
@@ -60,7 +60,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
   const setFilters = (f: UiFilters) => setQuery(q => { q.set('calFilters', JSON.stringify(f)); return q }, { replace: true })
   const [sel, setSel] = useState<CalSelection | null>(null)
   const [point, setPoint] = useState<Anchor | null>(null)
-  const { ref, height } = useFitHeight<HTMLDivElement>(isMobile ? 0 : 520, isMobile)
+  const { ref, height } = useFitHeight<HTMLDivElement>(isMobile ? 0 : 520, `${isMobile}:${!reply}`)
   const today = brtDay(nowMs)
 
   const shown = useMemo(() => (reply ? filterCalendar(reply, toCalFilters(filters)) : null), [reply, filters])
@@ -121,7 +121,14 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
     }
   })()
 
-  if (isMobile) return <div ref={ref} data-cal-root style={{ height: height ?? undefined, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+  if (!reply) return error
+    ? <div role="alert" style={{ padding: 20, textAlign: 'center', color: 'var(--text-secondary)' }}><p>{pick(TEXT.loadError, pt)}</p><Button onClick={() => void reload()}>{pick(TEXT.retry, pt)}</Button></div>
+    : <div data-cal-loading style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+        <CenteredLoader placement="fill" />
+        {slow && <Button onClick={() => void reload()} style={{ position: 'absolute', left: '50%', bottom: 16, transform: 'translateX(-50%)', width: 'auto', pointerEvents: 'auto' }}>{pick(TEXT.retry, pt)}</Button>}
+      </div>
+
+  if (isMobile) return <div ref={ref} data-cal-root style={{ height: height ?? '100%', flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
     <MobileCalendar anchor={anchor} onDay={d => { setAnchor(d); setSel(null) }} view={phoneView} onView={v => { setQuery(q => { q.set('calView', v); return q }, { replace: true }); setSel(null) }}
       // Opening a day is ONE URL change (day + view together, two setQuery calls race and lose the day) and it is
       // PUSHED, not replaced, so the phone's Back returns to the Week/3-days it came from.
@@ -129,12 +136,12 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
       nowMs={nowMs} pt={pt} versions={shown?.versions ?? []} pieces={shown?.pieces ?? []} marks={shown?.marks ?? []} onOpen={open} ready={!!shown}
       filterCount={Number(filters.tasks !== 'active') + filters.versions.length + filters.stages.length + filters.harnesses.length + filters.priorities.length + Number(filters.confirmedOnly)}
       exportIcs={exportIcs} filters={reply && <CalendarFilters value={filters} onChange={setFilters} pieces={reply.pieces} harnessOf={harnessOf} versionList={versionList} showVersions={realVersions} pt={pt} mobile sheet shown={caption} />}
-      body={shown ? body : error ? <div role="alert" style={{ padding: 20 }}><p>{pick(TEXT.loadError, pt)}</p><button className="cal-phone-button" type="button" onClick={() => void reload()}>{pick(TEXT.retry, pt)}</button></div> : <CenteredLoader placement="area" />} />
+      body={body} />
     {sel && reply && shown && <CalendarDetail selection={sel} anchor={point} pieces={reply.pieces} versions={reply.versions} marks={reply.marks} nowMs={nowMs} pt={pt} isMobile onClose={close} onSelect={setSel} />}
   </div>
 
   return (
-    <div ref={ref} data-cal-root style={{ height: height ?? undefined, minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+    <div ref={ref} data-cal-root style={{ height: height ?? '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       {/* Desktop is exactly TWO rows, the same in every engine: this one (title, views, navigation, export — never
           wrapping, the date range gives way with an ellipsis) and the filters row below it. */}
       <div data-cal-nav style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', paddingBottom: 8, flexShrink: 0, minWidth: 0 }}>
@@ -180,12 +187,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
             </div>
           )}
         </>
-      ) : error ? (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--text-secondary)' }}>
-          <span>{pick(TEXT.loadError, pt)}</span>
-          <button type="button" onClick={() => void reload()} style={dialogButtonStyle('secondary', isMobile)}>{pick(TEXT.retry, pt)}</button>
-        </div>
-      ) : <CenteredLoader placement="area" />}
+      ) : null}
 
       {sel && reply && shown && (
         <CalendarDetail selection={sel} anchor={point} pieces={reply.pieces} versions={reply.versions} marks={reply.marks}

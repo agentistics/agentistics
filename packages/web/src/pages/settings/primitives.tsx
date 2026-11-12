@@ -769,6 +769,12 @@ export function dialogButtonStyle(kind: 'secondary' | 'primary' | 'danger', isMo
   return { ...base, fontWeight: 700, border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }
 }
 
+/** Standard action button, using the same styles as dialog actions. */
+export function Button({ kind = 'secondary', style, disabled, type = 'button', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { kind?: 'secondary' | 'primary' | 'danger' }) {
+  const isMobile = useIsMobile()
+  return <button {...props} type={type} disabled={disabled} style={{ ...dialogButtonStyle(kind, isMobile, disabled), ...style }} />
+}
+
 /** The dialog footer row: right-aligned with an 8px gap; on mobile stacked, the primary on top. */
 export function DialogActions({ children, start }: { children: React.ReactNode; start?: React.ReactNode }) {
   const isMobile = useIsMobile()
