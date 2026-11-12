@@ -9,7 +9,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { RefreshCw, Flag } from 'lucide-react'
 import { brtDay, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
-import { dowShort, expectedPiecesOfDay, fitWeek, marksOfDay, monthCells, overduePiecesOfDay, piecesOnDay, startedPiecesOfDay, weekRibbons, type Ribbon } from '../../lib/calendarModel'
+import { dowShort, expectedPiecesOfDay, fitWeek, marksOfDay, monthCells, overduePiecesOfDay, startedPiecesOfDay, weekRibbons, type Ribbon } from '../../lib/calendarModel'
 import { TEXT, pick } from './calendarText'
 import { EXPECTED_COLOR, PUBLISHED_COLOR, VersionGlyph, stageColor } from './calendarUi'
 
@@ -81,11 +81,14 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
   const reserve = Number.isFinite(capRest) ? Math.min(Math.max(0, ...started.map(s => s.length)), capRest) : Number.POSITIVE_INFINITY
   const baseFit = fitWeek({ ribbons: allRibbons, dues: dueMarks.map(d => d.length), cap: Number.isFinite(reserve) ? capRest - reserve : capRest })
   const shownStarted = started.map(s => s.slice(0, Number.isFinite(reserve) ? reserve : s.length))
-  const expectedRoom = Number.isFinite(capRest) ? Math.max(0, capRest - (Number.isFinite(reserve) ? reserve : 0) - lanes - Math.max(0, ...baseFit.dues)) : Number.POSITIVE_INFINITY
-  const shownExpected = expected.map(s => s.slice(0, expectedRoom))
   const shownOverdue = overdue.map(s => (s.length > 0 && (cap >= 1) ? s : []))
+  const chipBase = 2 + Math.min(lanes, Number.isFinite(reserve) ? capRest - reserve : lanes) + Math.max(0, ...baseFit.dues)
+  // Room for predicted chips is PER DAY: a day spends only its own started chips and its own overdue row (ribbons and due
+  // chips are per week, they already sit above `chipBase`), so a quiet future day shows its predictions beside a full one.
+  const shownExpected = expected.map((s, i) => Number.isFinite(cap)
+    ? s.slice(0, Math.max(0, cap - (chipBase - 2) - shownStarted[i]!.length - (shownOverdue[i]!.length > 0 ? 1 : 0)))
+    : s)
   const fit = { ...baseFit, more: baseFit.more.map((n, i) => n + started[i]!.length - shownStarted[i]!.length + expected[i]!.length - shownExpected[i]!.length + (overdue[i]!.length - shownOverdue[i]!.length)) }
-  const chipBase = 2 + Math.min(lanes, Number.isFinite(reserve) ? capRest - reserve : lanes) + Math.max(0, ...fit.dues)
   return (
     <div ref={rowRef} data-cal-week style={{ position: 'relative', minHeight: 0, overflow: 'hidden', borderBottom: !last ? '1px solid var(--border)' : 0 }}>
       <div aria-hidden style={{ position: 'absolute', inset: 0, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
@@ -156,8 +159,11 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
         ))}
         {week.map((c, i) => fit.more[i]! > 0 && (
           <button key={`more-${c.day}`} type="button" data-cal-more={c.day} onClick={() => onPickDay(c.day)}
-            // "+N" counts ONLY the month cell's own rows that had no room (version ribbons and due dates); the day's pieces are not drawn here.
-            title={pt ? `+${fit.more[i]}: versões e prazos sem espaço nesta célula (${piecesOnDay(pieces, c.day, nowMs).length} peças no dia) — abrir o dia` : `+${fit.more[i]}: versions and due dates without room in this cell (${piecesOnDay(pieces, c.day, nowMs).length} pieces that day) — open the day`}
+            // "+N" counts what this cell had no row for: predicted and started pieces, version ribbons and due dates. The title names each kind.
+            title={pick(TEXT.moreHidden({
+              total: fit.more[i]!, expected: expected[i]!.length - shownExpected[i]!.length, started: started[i]!.length - shownStarted[i]!.length,
+              overdue: overdue[i]!.length - shownOverdue[i]!.length, other: baseFit.more[i]!,
+            }), pt)}
             style={{
               gridColumn: i + 1, gridRow: 1, justifySelf: 'end', alignSelf: 'center', marginRight: marksOfDay(c.day, marks).some(m => m.kind === 'account-reset') ? 26 : 5,
               height: 17, display: 'inline-flex', alignItems: 'center', padding: '0 5px', minWidth: 0, zIndex: 1,
