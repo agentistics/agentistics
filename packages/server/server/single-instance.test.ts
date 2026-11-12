@@ -237,6 +237,102 @@ test('ticks that DIFFER mean the pid was reused — debris, whatever the wall cl
 })
 
 import { waitForInstanceLock } from './single-instance'
+import { describeHolder } from './single-instance'
+
+// ---------------------------------------------------------------------------
+// 2026-11-12 (BOOT.LOCK-REBOOT): after a WSL reboot the unit found pid 740 — a process of the NEW
+// boot — "holding" a lock written in the previous one, waited 10 min, and exited 75 (which the unit
+// refuses to restart on). Boot-clock ticks are only comparable WITHIN a boot, so the lock now records
+// the kernel boot id and a lock from another boot is stale whatever pid and ticks say.
+// ---------------------------------------------------------------------------
+const BOOT_A = 'aaaaaaaa-0000-0000-0000-000000000001'
+const BOOT_B = 'bbbbbbbb-0000-0000-0000-000000000002'
+
+test('boot: the claim records the boot id after pid and ticks', async () => {
+  const file = await lockPath()
+  const claim = await claimInstanceLock(file, process.pid, { processStartMs: () => undefined, processStartTicks: () => 55, bootId: () => BOOT_A })
+  expect(claim.ok).toBe(true)
+  expect((await readFile(file, 'utf-8')).trim()).toBe(`${process.pid} 55 ${BOOT_A}`)
+})
+
+test('boot: a lock from ANOTHER boot is reclaimed even when a live recycled pid has the SAME ticks', async () => {
+  const file = await lockPath()
+  await writeFile(file, `${process.pid} 740 ${BOOT_A}`)
+  const probe = { processStartMs: () => undefined, processStartTicks: () => 740, bootId: () => BOOT_B }
+  expect(await probeInstanceLock(file, probe)).toBeNull()
+  const claim = await claimInstanceLock(file, 7777, probe)
+  expect(claim.ok).toBe(true)
+  expect((await readFile(file, 'utf-8')).trim().split(/\s+/)[0]).toBe('7777')
+})
+
+test('boot: the same boot with a live holder whose ticks match is still refused', async () => {
+  const file = await lockPath()
+  await writeFile(file, `${process.pid} 740 ${BOOT_A}`)
+  const probe = { processStartMs: () => undefined, processStartTicks: () => 740, bootId: () => BOOT_A }
+  expect(await probeInstanceLock(file, probe)).toBe(process.pid)
+  const claim = await claimInstanceLock(file, 7777, probe)
+  expect(claim.ok).toBe(false)
+})
+
+test('boot: an old-format lock (pid only) older than the current boot is reclaimed', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const beforeBoot = new Date(Date.now() - 2 * 60 * 60_000)
+  await utimes(file, beforeBoot, beforeBoot)
+  // Booted ten minutes ago; the lock is two hours old, so it was written in a previous boot.
+  const probe = { processStartMs: () => undefined, bootStartMs: () => Date.now() - 10 * 60_000 }
+  expect(await probeInstanceLock(file, probe)).toBeNull()
+  expect((await claimInstanceLock(file, 7777, probe)).ok).toBe(true)
+})
+
+test('boot: an old-format pid+ticks lock older than the boot is reclaimed even when ticks match', async () => {
+  const file = await lockPath()
+  await writeFile(file, `${process.pid} 740`)
+  const beforeBoot = new Date(Date.now() - 2 * 60 * 60_000)
+  await utimes(file, beforeBoot, beforeBoot)
+  const probe = { processStartMs: () => undefined, processStartTicks: () => 740, bootStartMs: () => Date.now() - 10 * 60_000 }
+  expect(await probeInstanceLock(file, probe)).toBeNull()
+})
+
+test('boot: an old-format lock written AFTER the boot is still obeyed', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const probe = { processStartMs: () => undefined, bootStartMs: () => Date.now() - 60 * 60_000 }
+  expect(await probeInstanceLock(file, probe)).toBe(process.pid)
+})
+
+test('boot: waitForInstanceLock reclaims a lock that becomes recognisable as stale mid-wait', async () => {
+  const file = await lockPath()
+  await writeFile(file, `${process.pid} 740 ${BOOT_A}`)
+  let calls = 0
+  // First polls: the boot id cannot be read (unknown keeps the conservative answer); later it can.
+  const probe = {
+    processStartMs: () => undefined,
+    processStartTicks: () => 740,
+    bootId: () => (++calls < 4 ? undefined : BOOT_B),
+  }
+  const r = await waitForInstanceLock(file, { timeoutMs: 5_000, pollMs: 5, pid: 424242, probe })
+  expect(r.ok).toBe(true)
+  expect(calls).toBeGreaterThanOrEqual(4)
+})
+
+test('boot: waitForInstanceFree sees a recycled pid as free once the boot id says so', async () => {
+  const file = await lockPath()
+  await writeFile(file, `${process.pid} 740 ${BOOT_A}`)
+  let calls = 0
+  const probe = { processStartMs: () => undefined, processStartTicks: () => 740, bootId: () => (++calls < 3 ? undefined : BOOT_B) }
+  expect(await waitForInstanceFree(file, { timeoutMs: 5_000, pollMs: 5, probe })).toBeNull()
+})
+
+test('describeHolder names what the holder pid is, truncated, and degrades to nothing', () => {
+  const own = describeHolder(process.pid)
+  expect(own).toBeTruthy()
+  expect(own!.length).toBeLessThanOrEqual(120)
+  expect(describeHolder(0x7ffffff0)).toBeUndefined()
+  const long = describeHolder(1, () => 'x'.repeat(500).split('').join('\0'))
+  expect(long!.length).toBeLessThanOrEqual(120)
+  expect(describeHolder(1, () => 'a\0b\0c')).toBe('a b c')
+})
 
 test('waitForInstanceLock: a service start WAITS for the holder to let go, then claims (no outage after a refusal)', async () => {
   const file = await lockPath()

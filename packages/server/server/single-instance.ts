@@ -104,6 +104,47 @@ export interface LockProbe {
    * wall-clock steps WSL makes (2026-10-03: a live holder read as recycled, 153 s "too young").
    */
   processStartTicks?(pid: number): number | undefined
+  /**
+   * The kernel's boot id (`/proc/sys/kernel/random/boot_id`), or `undefined` where there is none.
+   * Recorded in the lock; a lock written under a DIFFERENT boot id is stale whatever its pid and
+   * ticks say — boot-clock ticks are only comparable within one boot, and an early process of the
+   * new boot can match the ticks of a process of the previous one (2026-11-12, pid 740).
+   */
+  bootId?(): string | undefined
+  /** When this boot started, as epoch ms (now − uptime, on the boot clock), for locks with no boot id. */
+  bootStartMs?(): number | undefined
+}
+
+/** `/proc/sys/kernel/random/boot_id`, or `undefined` off Linux. */
+export function linuxBootId(): string | undefined {
+  try {
+    const id = readFileSync('/proc/sys/kernel/random/boot_id', 'utf-8').trim()
+    return id || undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Boot instant from `/proc/uptime` (boot clock) anchored to now — immune to wall-clock steps at boot. */
+export function linuxBootStartMs(): number | undefined {
+  try {
+    const up = Number(readFileSync('/proc/uptime', 'utf-8').split(' ')[0])
+    return Number.isFinite(up) ? Date.now() - up * 1000 : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** What a pid IS — its argv from `/proc/<pid>/cmdline`, truncated — so a refusal can show that the
+ *  "holder" is not agentop. `undefined` when it cannot be read. */
+export function describeHolder(pid: number, read: (path: string) => string = p => readFileSync(p, 'utf-8')): string | undefined {
+  try {
+    const text = read(`/proc/${pid}/cmdline`).split('\0').filter(Boolean).join(' ').trim()
+    if (!text) return undefined
+    return text.length > 120 ? `${text.slice(0, 117)}...` : text
+  } catch {
+    return undefined
+  }
 }
 
 /** `/proc/<pid>/stat` field 22 — never rewritten by a wall-clock step. */
@@ -117,16 +158,22 @@ export function linuxProcessStartTicks(pid: number): number | undefined {
   }
 }
 
-const OS_PROBE: LockProbe = { processStartMs: linuxProcessStartMs, processStartTicks: linuxProcessStartTicks }
+const OS_PROBE: LockProbe = {
+  processStartMs: linuxProcessStartMs,
+  processStartTicks: linuxProcessStartTicks,
+  bootId: linuxBootId,
+  bootStartMs: linuxBootStartMs,
+}
 
-/** A lock's contents: `<pid>` (older writers) or `<pid> <startTicks>`. */
-function parseLock(raw: string): { pid?: number; ticks?: number } {
-  const [a, b] = raw.trim().split(/\s+/)
+/** A lock's contents: `<pid>` (oldest), `<pid> <startTicks>`, or `<pid> <startTicks> <bootId>`. */
+function parseLock(raw: string): { pid?: number; ticks?: number; boot?: string } {
+  const [a, b, c] = raw.trim().split(/\s+/)
   const pid = parseInt(a ?? '', 10)
   const ticks = b === undefined ? NaN : Number(b)
   return {
     ...(Number.isInteger(pid) && pid > 0 ? { pid } : {}),
     ...(Number.isFinite(ticks) ? { ticks } : {}),
+    ...(c ? { boot: c } : {}),
   }
 }
 
@@ -144,7 +191,23 @@ function parseLock(raw: string): { pid?: number; ticks?: number } {
  * have started before the write — pids are not reused while their owner lives. A holder that
  * started after the lock's mtime therefore cannot be the writer, whoever it is — including us.
  */
-async function holdsLock(file: string, holder: number, probe: LockProbe, recordedTicks?: number): Promise<boolean> {
+async function holdsLock(file: string, holder: number, probe: LockProbe, recordedTicks?: number, recordedBoot?: string): Promise<boolean> {
+  // A lock from another boot is stale, full stop: neither the pid nor the ticks mean anything across
+  // boots (an early process of this boot can carry the very same number and ticks).
+  if (recordedBoot !== undefined) {
+    const nowBoot = probe.bootId?.()
+    if (nowBoot !== undefined && nowBoot !== recordedBoot) return false
+  } else {
+    // No boot id in the lock (older writer): a file older than this boot was written in a previous one.
+    const bootStart = probe.bootStartMs?.()
+    if (bootStart !== undefined) {
+      try {
+        if ((await stat(file)).mtimeMs < bootStart - START_SKEW_MS) return false
+      } catch {
+        return false
+      }
+    }
+  }
   if (!isAlive(holder)) return false
   // EXACT when the writer recorded its start ticks: same pid AND same boot-clock start is the same
   // process, and nothing else is. The mtime comparison below is only for locks written without them.
@@ -219,7 +282,10 @@ export async function claimInstanceLock(
       const handle = await open(file, 'wx')
       try {
         const ticks = probe.processStartTicks?.(pid)
-        await handle.writeFile(ticks === undefined ? String(pid) : `${pid} ${ticks}`)
+        const boot = probe.bootId?.()
+        await handle.writeFile(
+          ticks === undefined ? String(pid) : boot === undefined ? `${pid} ${ticks}` : `${pid} ${ticks} ${boot}`,
+        )
       } finally {
         await handle.close()
       }
@@ -248,14 +314,16 @@ export async function claimInstanceLock(
       }
       let holder: number | undefined
       let ticks: number | undefined
+      let boot: string | undefined
       try {
         const parsed = parseLock(await readFile(file, 'utf-8'))
         holder = parsed.pid
         ticks = parsed.ticks
+        boot = parsed.boot
       } catch { /* unreadable — handled with the same grace as an empty file */ }
 
       if (holder !== undefined) {
-        if (await holdsLock(file, holder, probe, ticks)) return { ok: false, holder }
+        if (await holdsLock(file, holder, probe, ticks, boot)) return { ok: false, holder }
       } else if (await isFresh(file)) {
         // Empty or unparseable, but new: almost certainly a winner mid-write. Yield to it.
         return { ok: false }
@@ -287,9 +355,9 @@ export async function probeInstanceLock(file: string, probe: LockProbe = OS_PROB
   } catch {
     return null
   }
-  const { pid: holder, ticks } = parseLock(raw)
+  const { pid: holder, ticks, boot } = parseLock(raw)
   if (holder === undefined) return null
-  return (await holdsLock(file, holder, probe, ticks)) ? holder : null
+  return (await holdsLock(file, holder, probe, ticks, boot)) ? holder : null
 }
 
 /** How long a start made by the service manager waits for another server to let go of the data dir. */
