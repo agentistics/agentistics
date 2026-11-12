@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.209.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões: o popup de uso continua aberto quando chegam mensagens ou atualizações da sessão; clique fora, Esc e o botão ainda fecham normalmente.',
+        en: 'Sessions: the usage popup stays open when messages or session updates arrive; outside click, Escape and the button still close it normally.',
+      },
+    ],
+  },
   '2.209.2': {
     features: [],
     fixes: [
