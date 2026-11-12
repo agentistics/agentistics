@@ -36,6 +36,20 @@ import { sessionPlan } from '../../lib/accountPicker'
 import { PlanSessionBlock } from '../PlanLimitMeter'
 import { HarnessMark } from './HarnessMark'
 
+// The session panel can be remounted when its live row is replaced by a fresh fleet snapshot.
+// Keep only the transient open/closed intent outside the component so that an update does not
+// turn an already-open usage card into a closed one. This is memory-only: a new session, an
+// explicit close, or a page reload does not inherit another session's popup.
+const openPopovers = new Map<string, boolean>()
+
+function popoverKey(sessionId: string, variant: SessionStatsMenuProps['variant'], inline: boolean): string {
+  return `${sessionId}:${variant ?? 'button'}:${inline ? 'inline' : 'floating'}`
+}
+
+export function resetSessionStatsPopoverState(): void {
+  openPopovers.clear()
+}
+
 /**
  * The trigger button's own percentage colour — a THREE-tier ramp, deliberately not the same as the
  * expanded bar's two (see the bar's own comment for why they may not share one). The button sat
@@ -229,7 +243,15 @@ export function SessionStatsMenu({
   const resolvedPlan = sessionPlan(planSnap.limits, planSnap.registered, harness, accountId)
   const plan = resolvedPlan.limits ?? undefined
   const planName = resolvedPlan.name
-  const [open, setOpen] = useState(inline)
+  const stateKey = popoverKey(sessionId, variant, inline)
+  const [open, setOpenValue] = useState(() => inline || openPopovers.get(stateKey) === true)
+  const setOpen = (next: boolean | ((current: boolean) => boolean)) => {
+    setOpenValue(current => {
+      const value = typeof next === 'function' ? next(current) : next
+      openPopovers.set(stateKey, value)
+      return value
+    })
+  }
 
   /**
    * How many times this conversation has been COMPACTED — read only when the card is opened, and
@@ -356,7 +378,15 @@ export function SessionStatsMenu({
    */
   useEffect(() => {
     if (!open || variant !== 'gauge') return
-    const onScroll = (e: Event) => { if (scrollIsOutside(panelRef.current, e.target)) setOpen(false) }
+    // A scroll that did not move the trigger (the chat auto-scrolling when a message arrives) leaves
+    // the panel exactly where it belongs: only a scroll that carried the trigger away closes it.
+    const anchor = boxRef.current?.getBoundingClientRect()
+    const onScroll = (e: Event) => {
+      if (!scrollIsOutside(panelRef.current, e.target)) return
+      const now = boxRef.current?.getBoundingClientRect()
+      if (anchor && now && Math.abs(now.top - anchor.top) < 1 && Math.abs(now.left - anchor.left) < 1) return
+      setOpen(false)
+    }
     window.addEventListener('scroll', onScroll, true)
     return () => window.removeEventListener('scroll', onScroll, true)
   }, [open, variant])

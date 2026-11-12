@@ -591,10 +591,21 @@ export function useData(working = false) {
   useEffect(() => {
     let down = false
     let stopped = false
+    let consecutiveTimeouts = 0
     const probe = async () => {
       if (stopped || (typeof document !== 'undefined' && document.hidden)) return
       let answered = false
-      try { answered = (await fetchWithTimeout('/api/health', LIVENESS_TIMEOUT_MS)).ok } catch { answered = false }
+      try {
+        answered = (await fetchWithTimeout('/api/health', LIVENESS_TIMEOUT_MS)).ok
+        consecutiveTimeouts = 0
+      } catch (error) {
+        // A slow route can occupy the browser's connection slots, delaying even /api/health.
+        // Ignore isolated deadlines, but report a hung server after three consecutive ones.
+        if (classifyLoadError(error).kind === 'timeout') {
+          if (++consecutiveTimeouts < 3) return
+        } else consecutiveTimeouts = 0
+        answered = false
+      }
       if (stopped) return
       const step = livenessStep(down, answered)
       if (step === 'mark-offline') {
