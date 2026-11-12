@@ -851,8 +851,10 @@ if (command === 'server' || command === 'start' || !command) {
       : await probeInstanceLock(serverLockFile())
     if (holder !== null) {
       const { EXIT_INSTANCE_HELD } = await import('../server/service-exit.ts')
+      const { describeHolder } = await import('../server/single-instance.ts')
+      const what = describeHolder(holder)
       console.error(
-        `[startup] another agentop server (pid ${holder}) is already using ${AGENTISTICS_DATA_DIR} — not starting a second one.\n` +
+        `[startup] another agentop server (pid ${holder}${what ? `, running: ${what}` : ''}) is already using ${AGENTISTICS_DATA_DIR} — not starting a second one.\n` +
         '          `agentop doctor` says which one it is and whether it is the service.',
       )
       process.exit(EXIT_INSTANCE_HELD)
