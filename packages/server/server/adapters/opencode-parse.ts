@@ -25,7 +25,7 @@ const str = (v: unknown): string => typeof v === 'string' ? v : ''
 function lineCount(counted: unknown, text: unknown): number {
   if (typeof counted === 'number' && Number.isFinite(counted) && counted >= 0) return counted
   if (typeof text !== 'string' || text === '') return 0
-  return text.split('\n').length - (text.endsWith('\n') ? 1 : 0)
+  return text.replace(/\n+$/, '').split('\n').length // same rule as agy's countLines (the engine replay shares it)
 }
 const iso = (v: number): string => v > 0 && Number.isFinite(v) && !Number.isNaN(new Date(v).getTime()) ? new Date(v).toISOString() : ''
 
