@@ -180,7 +180,7 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   return (
     <>
       <ConfirmModal
-        open={open} title={L.title(visible.length)} message={L.note} tone="default" confirmLabel={L.close} cancelLabel={L.close}
+        open={open} title={visible.length === 1 ? shortTitle(visible[0]!.title, 60) : L.title(visible.length)} message={L.note} tone="default" confirmLabel={L.close} cancelLabel={L.close}
         onConfirm={onClose} onCancel={onClose} maxWidth={720} mobileSheet focusPanel layer={mobile ? 2000 : 300} footer={footer}
       >
         <div data-live-antigas style={{ display: 'grid', gap: 10, fontSize: 12, minWidth: 0 }}>

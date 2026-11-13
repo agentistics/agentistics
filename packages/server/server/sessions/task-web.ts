@@ -12,6 +12,7 @@ import { readForecastAnchors, saveForecastAnchors } from './task-forecast-cache'
 import { dirsForShas } from './release-repos'
 import { firstTagContaining, publishedAmong } from './release-tags'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
+import { isLiveState } from '@agentistics/core'
 import { stat } from 'node:fs/promises'
 import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
 import {
@@ -435,7 +436,7 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
       const all = describeLive({ reply, rows, leaderIds, nowMs, filters: { tab: 'all', period: 'all' }, runtime, fleetRead })
       await sweepOrphanReviews({
         cards: all.deliveries.map(d => ({ key: d.key, title: d.title, stage: d.stage, stageSinceMs: d.stageSinceMs, old: d.old === true, ...(d.leaderAvailability ? { leaderAvailability: d.leaderAvailability } : {}) })),
-        nowMs, dataDir: AGENTISTICS_DATA_DIR, leaderLive: all.leaders.length > 0, hours: orphanHours(process.env.AGENTISTICS_ORPHAN_REVIEW_HOURS),
+        nowMs, dataDir: AGENTISTICS_DATA_DIR, leaderLive: all.leaders.some(l => isLiveState(l.state)), hours: orphanHours(process.env.AGENTISTICS_ORPHAN_REVIEW_HOURS),
       })
     })().catch(() => {})
   }

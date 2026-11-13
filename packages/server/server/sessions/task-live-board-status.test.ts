@@ -41,6 +41,14 @@ test('blocked subtask with a leader-phase record shows as blocked', () => {
   expect(d?.stage).toBe('blocked')
 })
 
+test('blocked from a review record keeps its originStage (leader); an owner wait states its reason once', () => {
+  const b = live([sub('s-blk3', { status: 'blocked', blockedReason: 'esperando o dono' })], new Map([['s-blk3', rec()]])).find(x => x.subtaskId === 's-blk3')
+  expect(b?.block?.originStage).toBe('leader')
+  const g = live([sub('s-gate3')], new Map([['s-gate3', rec({ humanGates: ['revisao_lider'], revision: 3, asked: { revisao_lider: 3 }, approvals: {} })]])).find(x => x.subtaskId === 's-gate3')
+  expect(g?.block?.reason).toBe('decisao_do_dono')
+  expect(g?.block?.text).toBeNull()
+})
+
 test('a real in_review subtask with a leader-phase record stays in leader review (control)', () => {
   const out = live([sub('s-ok')], new Map([['s-ok', rec()]]))
   expect(out.find(x => x.subtaskId === 's-ok')?.stage).toBe('leader')
@@ -54,6 +62,36 @@ test('leader-phase record whose commit is in a published release leaves leader r
   const reply = buildLive({ details: [detail(sh)], nowMs, events: [], deliveries: dl as never, ...extra })
   const all = describeLive({ reply, rows: [], leaderIds: new Set(), nowMs, filters: { period: 'all', tab: 'all' } as never }).deliveries
   expect(all.find(x => x.subtaskId === 's-pub')?.stage).toBe('published')
+})
+
+test('a record piece whose commit a published tag holds becomes Publicado THROUGH the collection and the git question', async () => {
+  const { legacyReviewShaPieces } = await import('./task-live')
+  const { publishedAmong, releaseTagsIdle, resetReleaseTagsForTest } = await import('./release-tags')
+  await resetReleaseTagsForTest()
+  const sha = '1cad21b582268546dcede622845cd4612b49a15c'
+  const sh = [sub('s-pub2', { notes: `entrega commit ${sha}` })]
+  const dl = new Map([['s-pub2', rec()]])
+  const pieces = legacyReviewShaPieces([detail(sh)], [], dl as never)
+  expect([...pieces.keys()]).toContain(sha)
+  const asked: string[] = []
+  const ask = async (s: string) => { asked.push(s); return true }
+  publishedAmong([...pieces.keys()], nowMs, ask)   // first read: answer arrives in the background
+  await releaseTagsIdle()
+  const publishedShas = publishedAmong([...pieces.keys()], nowMs, ask)   // next read: cached, no new git call
+  expect(asked).toEqual([sha])
+  expect(live(sh, dl, [], { publishedShas }).find(x => x.subtaskId === 's-pub2')).toBeUndefined()
+  const reply = buildLive({ details: [detail(sh)], nowMs, events: [], deliveries: dl as never, publishedShas })
+  const all = describeLive({ reply, rows: [], leaderIds: new Set(), nowMs, filters: { period: 'all', tab: 'all' } as never }).deliveries
+  expect(all.find(x => x.subtaskId === 's-pub2')?.stage).toBe('published')
+  await resetReleaseTagsForTest()
+})
+
+test('a record already published or still queued asks git nothing', async () => {
+  const { legacyReviewShaPieces } = await import('./task-live')
+  const sha = '2cad21b582268546dcede622845cd4612b49a15c'
+  const sh = [sub('s-p', { notes: sha }), sub('s-q', { notes: sha })]
+  const dl = new Map([['s-p', rec({ phase: 'publicado' })], ['s-q', rec({ phase: 'fila' })]])
+  expect(legacyReviewShaPieces([detail(sh)], [], dl as never).size).toBe(0)
 })
 
 // ---- Item D2: work waiting on the USER is shown as waiting on the user, never as leader review.

@@ -965,7 +965,12 @@ export function legacyReviewShaPieces(details: readonly TaskDetail[], events: re
   const { eventsBySubject } = indexEvents(details, events)
   const out = new Map<string, ShaPiece[]>()
   for (const d of details) for (const p of piecesOf(d)) {
-    if (!['in_review', 'done'].includes(p.status) || deliveries?.has(p.sub ? p.sub.id : p.task.id)) continue
+    if (!['in_review', 'done'].includes(p.status)) continue
+    // A piece with a delivery record is asked about too when its record is still open in a late phase: the board says
+    // it is in review (or done) and a release may already hold the commit (buildLive turns that into Publicado). Only
+    // a `publicado` record, or an early phase (fila/executando…), has nothing to ask git.
+    const rec = deliveries?.get(p.sub ? p.sub.id : p.task.id)
+    if (rec && !(['revisao_lider', 'pr_merge', 'ci'].includes(rec.phase) || (p.status === 'done' && rec.phase !== 'publicado'))) continue
     const piece: ShaPiece = { taskId: p.task.id, subtaskId: p.sub?.id ?? null, ...(p.task.repo ? { repo: p.task.repo } : {}) }
     for (const g of legacyShaGroups(p, eventsBySubject.get(p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id))) for (const sha of g) {
       const l = out.get(sha)
@@ -1075,6 +1080,7 @@ export function buildLive(o: {
     // A task-level piece (a task with no subtasks) is keyed by its TASK id in the delivery book, exactly as a subtask is by its own.
     const stored = o.deliveries?.get(p.sub ? p.sub.id : p.task.id)
     // A stale queue record must never override work the board already sent for review or closed.
+    let fromReview = false
     let rec = stored?.dequeued || (stored?.phase === 'fila' && ['in_review', 'done', 'abandoned'].includes(p.status)) ? undefined : stored
     let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfStatus(p.status, o.statusLabel?.(p.status))
     const id = p.sub?.id ?? p.task.id
@@ -1094,7 +1100,7 @@ export function buildLive(o: {
       const closedNow = p.status === 'abandoned' || CLOSED_WORD.test(`${p.status} ${o.statusLabel?.(p.status) ?? ''}`)
       const lateOpen = rec.phase === 'revisao_lider' || rec.phase === 'pr_merge' || rec.phase === 'ci'
       if (closedNow) { rec = undefined; stage = null }
-      else if (boardStage === 'blocked' && lateOpen) { rec = undefined; stage = 'blocked' }
+      else if (boardStage === 'blocked' && lateOpen) { rec = undefined; stage = 'blocked'; fromReview = true }
       else if (lateOpen && (boardStage === 'running' || boardStage === 'queue')) { rec = undefined; stage = boardStage }
       else if (rec.phase === 'revisao_lider' && boardStage === 'leader') {
         const subj = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
@@ -1178,7 +1184,7 @@ export function buildLive(o: {
       number: currentSession ? roundSessions.filter(s => s.id === currentSession.id || (s.startMs !== null && currentSession.startMs !== null && s.startMs < currentSession.startMs)).length : Math.max(1, visits.length),
       startedAtMs: roundStart,
     }
-    const originStage = userWait ? 'leader' as LiveStage : stage === 'blocked'
+    const originStage = userWait || (fromReview && stage === 'blocked') ? 'leader' as LiveStage : stage === 'blocked'
       ? (rec?.origin ? PHASE_STAGE[rec.origin] ?? null : ([...trail].reverse().find(v => v.stage !== 'blocked')?.stage ?? null))
       : null
     // THE REAL WORK OF THIS PIECE: its sessions' active time. Never the task's age (a 52-day-old task
@@ -1226,7 +1232,7 @@ export function buildLive(o: {
       eta, workMs, trail, stageEta, publishEta,
       ...(stageOverdueSinceMs(stage, stageSinceMs, o.nowMs, typicals) !== null
         ? { overdueSinceMs: stageOverdueSinceMs(stage, stageSinceMs, o.nowMs, typicals) } : {}),
-      block: stage === 'blocked' ? blockOf({ text: userWait ? 'decisao_do_dono: aguardando você' : rec?.block ? `${rec.block.reason}: ${rec.block.text}` : p.blockedReason, dependsOn: p.dependsOn, originStage }) : null,
+      block: stage === 'blocked' ? blockOf({ text: userWait ? 'decisao_do_dono:' : rec?.block ? `${rec.block.reason}: ${rec.block.text}` : p.blockedReason, dependsOn: p.dependsOn, originStage }) : null,
       ci: stage === 'ci' ? (ciSignalOf(rec?.ci ?? ((p.sub ?? p.task) as { ci?: unknown }).ci) ?? { mergedMain: true, releaseGreen: false, tagPublished: false, tag: null, pr: null }) : null,
       step: stepInfo?.step ?? null,
       stepSource: stepInfo?.source ?? null,
