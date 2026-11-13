@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { AGENT_TOOL_POLICY } from '../core/src/agentToolPolicy'
+import { proofAudit } from './write-proof-audit'
 
 /**
  * S1c (Codex QA gap): every MCP tool that WRITES to the board or the delivery book must carry the calling session's proof —
@@ -49,7 +50,7 @@ describe('every MCP write tool proves which session it runs in', () => {
       if (NO_PROOF_BY_DESIGN[tool]) return
       const body = handlerOf(tool)
       expect(body.length, `handler for ${tool} not found`).toBeGreaterThan(0)
-      const proves = /sessionProof\(/.test(body)
+      const proves = proofAudit(body, tool === 'agentistics_task_phase')
       if (UNPROVEN_UNTIL_S0A.has(tool)) {
         // listed = known gap; it must really still be one (so a delivered proof forces the entry out)
         expect(proves, `${tool} now sends the proof: delete it from UNPROVEN_UNTIL_S0A`).toBe(false)
@@ -63,7 +64,16 @@ describe('every MCP write tool proves which session it runs in', () => {
     for (const t of UNPROVEN_UNTIL_S0A) expect(WRITERS, t).toContain(t)
   })
 
-  test('the exemption list is empty or explained (no silent holes)', () => {
-    for (const [tool, why] of Object.entries(NO_PROOF_BY_DESIGN)) { expect(WRITERS).toContain(tool); expect(why.length).toBeGreaterThan(20) }
+  test('F8 the S0a exception baseline can only shrink', () => {
+    // Fixed snapshot of the eleven inherited gaps at 91032af0a. Adding a writer above fails here.
+    const baseline = new Set([
+      'agentistics_task_create', 'agentistics_task_status', 'agentistics_task_status_edit', 'agentistics_task_type_edit', 'agentistics_task_subtask',
+      'agentistics_task_link', 'agentistics_task_blocked_by', 'agentistics_task_claim', 'agentistics_task_edit', 'agentistics_task_session', 'agentistics_task_delete',
+    ])
+    for (const tool of UNPROVEN_UNTIL_S0A) expect(baseline.has(tool), `new proof exception: ${tool}`).toBe(true)
+  })
+
+  test('the design exemption baseline remains empty', () => {
+    expect(Object.keys(NO_PROOF_BY_DESIGN)).toEqual([])
   })
 })

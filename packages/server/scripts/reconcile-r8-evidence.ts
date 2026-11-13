@@ -27,7 +27,7 @@ const liveIds = new Set<string>(capturedBefore.deliveries.flatMap((d: { sessionI
 const rows = registry.filter((r: { taskId?: string }) => r.taskId).map((r: { id: string; endedAt?: string }) => ({ ...r, endedAt: liveIds.has(r.id) ? undefined : r.endedAt ?? capturedBefore.generatedAt }))
 const alive = rows.filter((r: { endedAt?: string }) => !r.endedAt).map((r: object) => ({ ...r, alive: true }))
 const service = createDeliveryService({
-  store: { path: '<in-memory evidence copy>', read: async () => doc, get: async id => doc.deliveries[id] ?? null, update: async fn => fn(doc) },
+  store: { path: '<in-memory evidence copy>', read: async () => doc, readStrict: async () => doc, get: async id => doc.deliveries[id] ?? null, update: async fn => fn(doc) },
   now: () => nowMs, autonomous: async () => true,
   facts: {
     sessions: async () => alive,

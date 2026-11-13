@@ -32,6 +32,7 @@ import { isDocPath } from './classify'
 import { repoRefFacts } from './classify-declare'
 import { buildEvidenceItem, checkReuse, type EvidenceItem, type EvidenceKind, type Probe, type RepoRef, type ReuseEntry } from './evidence'
 import { createGuardsStore, defaultGuardsPath } from './guards-store'
+import { GuardBusy } from './guard-locks'
 import { ownerIntent } from '../flows/owner-intent'
 import { requestReminderText } from './request-reminder'
 import {
@@ -202,7 +203,11 @@ const RELEASE_POLL_MAX_MS = 10 * 60_000
 const QUEUE_SLOT_REFRESH_MS = 5 * 60_000
 
 const safe = <A extends unknown[]>(fn: (...a: A) => Promise<DeliveryReply>) => async (...a: A): Promise<DeliveryReply> => {
-  try { return await fn(...a) } catch (e) { if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message); throw e }
+  try { return await fn(...a) } catch (e) {
+    if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message)
+    if (e instanceof GuardBusy) return fail(e.status, e.code, e.message)
+    throw e
+  }
 }
 
 /** The repositories this product ships from: a card whose host cannot say its repository is read against these. */
@@ -525,7 +530,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     try {
       const doc = await createGuardsStore(d.guardsPath ?? defaultGuardsPath()).read()
       const ids = new Set<string>()
-      for (const cp of Object.values(doc.checkpoints)) for (const a of cp.auth) if (a.kind === 'evidence') for (const id of a.ids) ids.add(id)
+      for (const cp of [...Object.values(doc.checkpoints), ...Object.values(doc.intents).map(i => i.target)]) for (const a of cp.auth) if (a.kind === 'evidence') for (const id of a.ids) ids.add(id)
       return ids
     } catch { return 'unreadable' }
   }
@@ -565,24 +570,48 @@ export function createDeliveryService(d: DeliveryDeps) {
     }
     // The upload becomes a TaskFile only after the bytes passed every validator (a refused upload leaves nothing behind).
     let item = built.item
+    const rollbackUpload = async (cause?: unknown) => {
+      if (!item.fileId || !upload) return
+      try {
+        if (!(await d.evidenceFiles?.remove(item.fileId))) throw new Error('TaskFile removal was refused')
+      } catch (cleanup) {
+        throw new AggregateError(cause ? [cause, cleanup] : [cleanup], `evidence upload rollback failed for ${item.fileId}`)
+      }
+    }
     if (upload && bytes) {
       const id = await d.evidenceFiles?.create({ taskId: got.taskId, name: upload.name, bytes, kind: 'evidence', author: actor })
       if (!id) return fail(500, 'evidence_store_failed', 'the upload could not be stored', [], got)
       item = { ...item, fileId: id }
     }
-    const stored = await d.store.update(doc => {
+    let stored
+    try { stored = await d.store.update(doc => {
       const cur = doc.deliveries[subtaskId]!
+      // The revision used to build/bind this item must still be current under the lock.
+      if (!cur || cur.revision !== item.revision) return { refused: 'the delivery revision changed during the upload; retry with fresh evidence' }
       // Re-checked UNDER the store lock against the freshest history: two attaches racing for the same bytes cannot both win.
       const fresh = checkReuse(Object.values(doc.deliveries).flatMap(r => r.evidenceHistory ?? []), { sha256: item.sha256, pieceKey: subtaskId, revision: cur.revision })
       if (!fresh.ok) return { refused: fresh.message }
+      if (fresh.duplicate) {
+        const existing = (cur.evidence ?? []).find(i => i.sha256 === item.sha256 && i.revision === item.revision)
+        if (existing) return { record: structuredClone(cur), existing }
+      }
       cur.evidence = [...(cur.evidence ?? []), item]
       cur.evidenceHistory = [...(cur.evidenceHistory ?? []), { sha256: item.sha256, pieceKey: subtaskId, revision: item.revision }]
       cur.updatedAt = iso(d)
       return { record: structuredClone(cur) }
-    })
+    }, { evidence: true }) } catch (error) {
+      await rollbackUpload(error)
+      if (error instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', error.message)
+      if (error instanceof GuardBusy) return fail(error.status, error.code, error.message)
+      throw error
+    }
     if ('refused' in stored) {
-      if (item.fileId && upload) await d.evidenceFiles?.remove(item.fileId).catch(() => false)
+      await rollbackUpload()
       return fail(409, 'evidence_reused', `evidence_reused: ${stored.refused}`, [], got)
+    }
+    if ('existing' in stored && stored.existing) {
+      await rollbackUpload()
+      return { ok: true, status: 200, record: stored.record, warnings: ['the same evidence was already attached; nothing changed'], evidence: stored.existing }
     }
     return { ok: true, status: 200, record: stored.record, warnings: [], evidence: item }
   }
@@ -604,21 +633,25 @@ export function createDeliveryService(d: DeliveryDeps) {
     const item = (got.evidence ?? []).find(i => i.id === evidenceId)
     if (!item) return fail(404, 'no_such_evidence', `no evidence ${evidenceId} on ${subtaskId}`, [], got)
     if (!(item.by === actor || (await leads(got, actor)))) return fail(403, 'evidence_forbidden', 'only the item\'s author, the task leader or the owner removes evidence', [], got)
-    const used = await checkpointEvidenceIds()
-    if (used === 'unreadable' || used.has(evidenceId)) return fail(409, 'evidence_in_use', 'this evidence backs a checkpoint (or the checkpoints cannot be read): it cannot be removed', [], got)
-    const after = await d.store.update(doc => {
+    const after = await d.store.update(async doc => {
       const cur = doc.deliveries[subtaskId]!
+      const used = await checkpointEvidenceIds()
+      if (used === 'unreadable' || used.has(evidenceId)) return null
       cur.evidence = (cur.evidence ?? []).filter(i => i.id !== evidenceId)   // evidenceHistory is NOT pruned: a removal frees nothing
       cur.updatedAt = iso(d)
       return structuredClone(cur)
-    })
+    }, { evidence: true, guardsPath: d.guardsPath ?? defaultGuardsPath() })
+    if (!after) return fail(409, 'evidence_in_use', 'this evidence backs a checkpoint or pending intent (or the checkpoints cannot be read): it cannot be removed', [], got)
     if (item.fileId) await d.evidenceFiles?.remove(item.fileId).catch(() => false)
     return { ok: true, status: 200, record: after, warnings: [] }
   }
 
   /** May this TaskFile be deleted? false = it backs evidence that a checkpoint names (or the checkpoints cannot be read while it backs any evidence). */
   const evidenceFileInUse = async (fileId: string): Promise<boolean> => {
-    const backing = Object.values((await d.store.read()).deliveries).flatMap(r => (r.evidence ?? []).filter(i => i.fileId === fileId))
+    let doc
+    try { doc = await d.store.readStrict() } catch { return true }
+    if (Object.keys(doc.preserved ?? {}).length) return true
+    const backing = Object.values(doc.deliveries).flatMap(r => (r.evidence ?? []).filter(i => i.fileId === fileId))
     if (backing.length === 0) return false
     const used = await checkpointEvidenceIds()
     return used === 'unreadable' || backing.some(i => used.has(i.id))

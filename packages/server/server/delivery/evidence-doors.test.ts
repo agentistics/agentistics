@@ -223,12 +223,13 @@ describe('the real doors are wired (structural: index.ts routes, host compositio
     expect(idx).toMatch(/evidenceRoute && \(req\.method === 'POST' \|\| req\.method === 'GET' \|\| req\.method === 'DELETE'\)/)
     expect(idx).toMatch(/evidenceRequest\(req\.method, decodeURIComponent\(evidenceRoute\[1\]!\)/)
   })
-  test('deleting a TaskFile asks the evidence book first (409 evidence_in_use) before removeFile', () => {
+  test('both REST delete routes use the structured result of the atomic store guard', () => {
     const idx = src('../index.ts')
-    const guard = idx.indexOf('evidenceFileInUse(fileId)')
-    const remove = idx.indexOf('mod.removeFile(fileId)')
-    expect(guard).toBeGreaterThan(-1); expect(remove).toBeGreaterThan(guard)
-    expect(idx).toMatch(/error: 'evidence_in_use'[^}]*\}, 409\)/)
+    expect(idx).toContain('evidenceDeleteRequest(() => mod.removeFile(fileId))')
+    expect(idx).toContain('evidenceDeleteRequest(() => deleteTask(ref))')
+    const web = src('../sessions/task-web.ts')
+    expect(web).toContain('withEvidenceDeletion({ fileId }')
+    expect(web).toContain('withEvidenceDeletion({ taskId: task.id }')
   })
   test('the host composition carries the evidence files (uploads become TaskFiles of the piece\'s task; fileId reads the task-aware reader)', () => {
     const host = src('host.ts')

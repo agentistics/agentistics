@@ -108,14 +108,14 @@ export interface TaskStore {
   removeSubtask(id: string): Promise<boolean>
   addFile(f: TaskFile): Promise<void>
   /** Removes the RECORD. The bytes on disk are the caller's to unlink — see `task-files.ts`. */
-  removeFile(id: string): Promise<boolean>
+  removeFile(id: string, deletion?: TaskDeletionPort): Promise<boolean>
   /**
    * Delete a task and everything hanging off it.
    *
    * Sessions are NOT touched: a row's `taskId` becomes a dangling reference, which reads as
    * "no attempt named" rather than vanishing. Deleting a board entry must never delete work.
    */
-  removeTask(id: string): Promise<boolean>
+  removeTask(id: string, deletion?: TaskDeletionPort): Promise<boolean>
   /** Forget a tombstone, so a name the user deleted can be created again. */
   clearTombstone(id: string): Promise<void>
   /**
@@ -580,6 +580,10 @@ function deepFreeze<T>(v: T): T {
   return v
 }
 
+/** Optional deletion composition, invoked under tasks before any read/mutation. It owns later locks and byte cleanup. */
+export type TaskDeletionPort = (remove: () => Promise<boolean>) => Promise<boolean>
+const directDeletion: TaskDeletionPort = remove => remove()
+
 export function createTaskStore(file: string): TaskStore {
   // One in-process writer. Each mutation appends to this chain, so read-modify-write sequences run
   // strictly one after another even when several land at once.
@@ -855,16 +859,16 @@ export function createTaskStore(file: string): TaskStore {
         await write({ ...book, files: [...book.files, f] })
       })
     },
-    removeFile(id) {
-      return enqueue(async () => {
+    removeFile(id, deletion = directDeletion) {
+      return enqueue(() => deletion(async () => {
         const book = await read()
         if (!book.files.some(f => f.id === id)) return false
         await write({ ...book, files: book.files.filter(f => f.id !== id) })
         return true
-      })
+      }))
     },
-    removeTask(id) {
-      return enqueue(async () => {
+    removeTask(id, deletion = directDeletion) {
+      return enqueue(() => deletion(async () => {
         const book = await read()
         if (!book.tasks.some(t => t.id === id)) return false
         await write({
@@ -891,7 +895,7 @@ export function createTaskStore(file: string): TaskStore {
           tombstones: [...new Set([...book.tombstones, id])],
         })
         return true
-      })
+      }))
     },
     clearTombstone(id) {
       return enqueue(async () => {

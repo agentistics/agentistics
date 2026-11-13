@@ -2360,11 +2360,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const fileId = decodeURIComponent(url.pathname.slice('/api/task-files/'.length))
       const mod = await import('./sessions/task-web')
       if (req.method === 'DELETE') {
-        // S1c: a file that backs evidence a checkpoint names cannot be deleted (409), and neither can any file while the
-        // checkpoints are unreadable — authorization must not lose its evidence.
-        const { deliveryService } = await import('./delivery/host')
-        if (await deliveryService().evidenceFileInUse(fileId)) return json({ ok: false, error: 'evidence_in_use', sentence: 'this file backs evidence that authorizes a piece; it cannot be deleted' }, 409)
-        return json({ ok: await mod.removeFile(fileId) }, 200)
+        const { evidenceDeleteRequest } = await import('./delivery/evidence-delete')
+        const result = await evidenceDeleteRequest(() => mod.removeFile(fileId))
+        return json(result.body, result.status)
       }
       const got = await mod.fetchFile(fileId)
       if (!got) return json({ error: 'no_such_file' }, 404)
@@ -2403,7 +2401,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'DELETE') {
       const ref = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
       const { deleteTask } = await import('./sessions/task-web')
-      return json({ ok: await deleteTask(ref) })
+      const { evidenceDeleteRequest } = await import('./delivery/evidence-delete')
+      const result = await evidenceDeleteRequest(() => deleteTask(ref))
+      return json(result.body, result.status)
     }
 
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'POST') {
