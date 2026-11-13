@@ -138,7 +138,7 @@ export function heroOf(entry: Entry, observed: Observed | null, lang: Lang, mone
       tone: 'none', word: pt ? 'Não dá para provar ainda' : 'Cannot be proven yet', delta: null, score: null, firm: null, range: null,
       say: pt ? 'Peças difíceis vão para o método pesado, então comparar custo cru engana: o histórico descreve o que aconteceu, não prova que o método compensa. O que se vê:'
         : 'Hard pieces go to the heavy method, so comparing raw cost misleads: history describes what happened, it does not prove the method pays off. What is seen:',
-      facts: h ? observedFacts(h, observed, lang, money) : [],
+      facts: h ? coverageFacts(h, lang) : [],
       why: [
         min, pt ? 'Falta rodar um experimento controlado: nenhum rodou ainda.' : 'A controlled experiment still has to run: none has yet.',
         pt ? 'Qualidade final não é medida: defeito escapado depois do release e peça reaberta não são registrados, e o QA reprovar não diz que o defeito escaparia.' : 'Final quality is not measured: defects escaped after release and reopened pieces are not recorded, and a QA rejection does not mean the defect would have escaped.',
@@ -292,35 +292,44 @@ export const durationText = (ms: number, lang: Lang): string => fmtValue('wallMe
 
 const sizeWord = (s: 'S' | 'M' | 'L', lang: Lang) => (lang === 'pt' ? (s === 'S' ? 'P' : s === 'M' ? 'M' : 'G') : s)
 export const sizeLabel = sizeWord
-const MIN_GROUP = 3
-const med = (v: number[]) => percentile(v, 0.5)
 
-/** What the observed history lets us state (ANALISE.md): counts, medians by size, QA first-round rejection, and the cost of extra QA rounds — only where each side has enough pieces. */
-export function observedFacts(h: ObservedHistory, observed: Observed | null, lang: Lang, money: Money): string[] {
+/**
+ * What the observed history lets us state ABOUT THE DATA, never about a comparison: how many pieces, and where cost is missing.
+ * No ratio or median is computed here — those come from the server's `comparisons`.
+ */
+export function coverageFacts(h: ObservedHistory, lang: Lang, withCount = true): string[] {
   const pt = lang === 'pt'
-  const subs: HistorySubtaskRow[] = h.tasks.flatMap(t => t.subtasks)
-  const out: string[] = []
-  out.push(pt ? `${nf(h.pieces, lang, 0)} peças entregues com sessão vinculada, em ${nf(h.tasks.length, lang, 0)} tarefas.` : `${nf(h.pieces, lang, 0)} delivered pieces with a linked session, in ${nf(h.tasks.length, lang, 0)} tasks.`)
-  const sizes = (['S', 'M', 'L'] as const).flatMap(sz => {
-    const c = subs.filter(s => s.size === sz && s.costUSD !== null).map(s => s.costUSD!)
-    return c.length >= MIN_GROUP ? [`${sizeWord(sz, lang)} ${moneyText(med(c)!, lang, money)} (n=${c.length})`] : []
-  })
-  if (sizes.length) out.push(`${pt ? 'Custo mediano por peça' : 'Median cost per piece'}: ${sizes.join(' · ')}.`)
-  const q = observed?.metrics?.qaFirstRoundRejection
-  if (q && q.value !== null && q.value !== undefined) out.push(pt ? `A QA devolve ${nf(q.value * 100, lang, 1)}% das peças na primeira rodada (n=${nf(q.n, lang, 0)}).` : `QA sends back ${nf(q.value * 100, lang, 1)}% of the pieces in the first round (n=${nf(q.n, lang, 0)}).`)
-  for (const sz of ['S', 'M', 'L'] as const) {
-    const one = subs.filter(s => s.size === sz && s.qaRounds === 1), many = subs.filter(s => s.size === sz && s.qaRounds !== null && s.qaRounds >= 2)
-    const c1 = one.map(s => s.costUSD).filter((v): v is number => v !== null), c2 = many.map(s => s.costUSD).filter((v): v is number => v !== null)
-    const w1 = one.map(s => s.wallMs).filter((v): v is number => v !== null), w2 = many.map(s => s.wallMs).filter((v): v is number => v !== null)
-    if (c1.length < MIN_GROUP || c2.length < MIN_GROUP || w1.length < MIN_GROUP || w2.length < MIN_GROUP) continue
-    const cr = med(c2)! / med(c1)!, wr = med(w2)! / med(w1)!
-    out.push(pt ? `Peças ${sizeWord(sz, lang)} com 2+ rodadas de QA custam ${nf(cr, lang, 1)}× e levam ${nf(wr, lang, 1)}× o tempo das de 1 rodada (n=${c1.length} e ${c2.length}).`
-      : `${sizeWord(sz, lang)} pieces with 2+ QA rounds cost ${nf(cr, lang, 1)}× and take ${nf(wr, lang, 1)}× the time of 1-round ones (n=${c1.length} and ${c2.length}).`)
-  }
   const c = h.coverage
+  const out: string[] = []
+  if (withCount) out.push(pt ? `${nf(h.pieces, lang, 0)} peças entregues com sessão vinculada, em ${nf(h.tasks.length, lang, 0)} tarefas.` : `${nf(h.pieces, lang, 0)} delivered pieces with a linked session, in ${nf(h.tasks.length, lang, 0)} tasks.`)
   out.push(pt ? `Custo medido em ${nf(c.withCost, lang, 0)} de ${nf(c.pieces, lang, 0)} peças${c.pctWithCost === null ? '' : ` (${nf(c.pctWithCost, lang, 0)}%)`}${c.harnessesWithoutCost.length ? `; sem custo: ${c.harnessesWithoutCost.join(', ')}` : ''}${c.harnessesPartialCost.length ? `; custo parcial: ${c.harnessesPartialCost.join(', ')}` : ''}.`
     : `Cost measured in ${nf(c.withCost, lang, 0)} of ${nf(c.pieces, lang, 0)} pieces${c.pctWithCost === null ? '' : ` (${nf(c.pctWithCost, lang, 0)}%)`}${c.harnessesWithoutCost.length ? `; no cost: ${c.harnessesWithoutCost.join(', ')}` : ''}${c.harnessesPartialCost.length ? `; partial cost: ${c.harnessesPartialCost.join(', ')}` : ''}.`)
   return out
+}
+
+/** Sizes whose own ratio runs against the headline's direction (clearly: more than 10% on the other side of 1). */
+function oppositeSizes(c: Comparison): { metric: 'cost' | 'wall'; size: 'S' | 'M' | 'L' }[] {
+  const out: { metric: 'cost' | 'wall'; size: 'S' | 'M' | 'L' }[] = []
+  for (const metric of ['wall', 'cost'] as const) {
+    const k = c[metric]
+    if (!k || Math.abs(k.ratio - 1) < 0.05) continue
+    for (const p of k.sizes) {
+      const r = p.medB / p.medA
+      if ((k.ratio > 1 && r < 0.9) || (k.ratio < 1 && r > 1.1)) out.push({ metric, size: p.size })
+    }
+  }
+  return out
+}
+
+function oppositeNote(c: Comparison, lang: Lang): string {
+  const pt = lang === 'pt'
+  const o = oppositeSizes(c)
+  if (!o.length) return ''
+  const sizes = [...new Set(o.map(x => x.size))]
+  const metrics = [...new Set(o.map(x => x.metric))]
+  const list = sizes.map(s => sizeWord(s, lang)).join(pt ? ' e ' : ' and ')
+  const what = metrics.map(m => (m === 'wall' ? (pt ? 'tempo' : 'time') : (pt ? 'custo' : 'cost'))).join(pt ? ' e ' : ' and ')
+  return pt ? `no ${what}, nas peças ${list} foi o contrário` : `in ${what}, the opposite for ${list} pieces`
 }
 
 export type HistorySortKey = 'title' | 'cost' | 'wall' | 'qa' | 'sessions'
@@ -395,7 +404,7 @@ function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Mo
   return {
     tone: 'none', word: pt ? 'Indício, não prova' : 'Evidence, not proof', delta: null, score: null, firm: null, range: null,
     say: comparisonSentence(c, lang),
-    caption: pt ? `contra ${c.aShort} · ${c.nA} × ${c.nB} peças · mesmo tamanho` : `against ${c.aShort} · ${c.nA} × ${c.nB} pieces · same size`,
+    caption: (pt ? `contra ${c.aShort} · ${c.nA} × ${c.nB} peças · mesmo tamanho` : `against ${c.aShort} · ${c.nA} × ${c.nB} pieces · same size`) + (oppositeNote(c, lang) ? ` · ${oppositeNote(c, lang)}` : ''),
     disclosure: pt ? 'Por que não é prova?' : 'Why is this not proof?',
     why: [
       pt ? 'Peças difíceis vão para o método pesado e tendem a ter mais rodadas e mais sessões: a diferença pode ser a dificuldade, não o método. Comparar dentro do mesmo tamanho (linhas) é um controle fraco.' : 'Hard pieces go to the heavy method and tend to have more rounds and sessions: the difference may be the difficulty, not the method. Matching by size (lines) is a weak control.',
@@ -403,7 +412,7 @@ function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Mo
       pt ? 'Qualidade final não é medida: defeito escapado depois do release e peça reaberta não são registrados.' : 'Final quality is not measured: defects escaped after release and reopened pieces are not recorded.',
       ...(c.id === 'qa' ? [pt ? 'As rodadas de QA vêm do rótulo das sessões de QA: indicativo, o fluxo ainda não registra veredito estruturado.' : 'QA rounds come from the QA sessions\' labels: indicative, the flow does not record a structured verdict yet.'] : []),
     ],
-    facts: observedFacts(h, observed, lang, money),
+    facts: coverageFacts(h, lang, false),
   }
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { buildComparisons, type HistorySubtaskRow, type Observed, type ObservedHistory } from '@agentistics/core/benchmark'
-import { entriesOf, heroOf, historyTaskRows, observedFacts } from './benchmarkView'
+import { entriesOf, heroOf, historyTaskRows } from './benchmarkView'
 
 const H = 3_600_000
 const sub = (id: string, o: Partial<HistorySubtaskRow> = {}): HistorySubtaskRow => ({
@@ -28,9 +28,7 @@ describe('the observed hero — what ANALISE.md lets us say, never a "paid off X
     expect(hero.score).toBeNull()
     expect(hero.say).toContain('Peças difíceis vão para o método pesado')
     expect(hero.facts!.join('\n')).toContain('8 peças entregues')
-    expect(hero.facts!.join('\n')).toContain('M US$ 3,5')                 // median of 4×2 and 4×5
-    expect(hero.facts!.join('\n')).toContain('2,5×')                       // 5 / 2 cost, with 2+ QA rounds against 1
-    expect(hero.facts!.join('\n')).toContain('36,5%')
+    expect(hero.facts!.join('\n')).not.toMatch(/×|US\$/)
     expect(hero.facts!.join('\n')).toContain('codex')
     expect(hero.why.join('\n')).toContain('experimento')
     expect(JSON.stringify(hero)).not.toMatch(/Compensou \d|Custou \d/)
@@ -40,13 +38,7 @@ describe('the observed hero — what ANALISE.md lets us say, never a "paid off X
     const hero = heroOf(entriesOf(obs(undefined), [], 'en')[0]!, obs(history(subs)), 'en', { currency: 'USD' })
     expect(hero.word).toBe('Cannot be proven yet')
     expect(hero.facts!.join('\n')).toContain('8 delivered pieces')
-    expect(hero.facts!.join('\n')).toContain('$3.5')
     expect(hero.say).toContain('Hard pieces go to the heavy method')
-  })
-
-  test('a comparison needs enough pieces on both sides, otherwise it is not made', () => {
-    const f = observedFacts(history([sub('a', { qaRounds: 1 }), sub('b', { qaRounds: 3 })]), obs(undefined), 'pt', { currency: 'USD' })
-    expect(f.join('\n')).not.toContain('rodadas de QA custam')
   })
 
   test('without history (an older server) it says the per-piece figures are absent', () => {
@@ -108,12 +100,31 @@ describe('observed comparisons the history already allows', () => {
     expect(hero.disclosure).toBe('Por que não é prova?')
     expect(hero.why.join('\n')).toContain('experimento')
     expect(hero.facts!.length).toBeGreaterThan(0)
+    // L1: the disclosure speaks of THIS comparison only, repeats no Partes row and carries no ratio of its own
+    expect(hero.facts!.join('\n')).not.toMatch(/×|rodadas de QA custam|US\$/)
     const s = heroOf(entriesOf(obs(h), [], 'pt')[1]!, obs(h), 'pt', { currency: 'USD' })
     expect(s.say).toContain('retrabalho 0% → 100%')
     const en = heroOf(entriesOf(obs(h), [], 'en')[0]!, obs(h), 'en', { currency: 'USD' })
     expect(en.word).toBe('Evidence, not proof')
     expect(en.say).toBe('With 2+ QA rounds: 2.5× more cost, 4× more time, 5× more sessions.')
     expect(en.disclosure).toBe('Why is this not proof?')
+  })
+
+  test('L1: the sessions comparison carries no QA lines in its disclosure', () => {
+    const s = heroOf(entriesOf(obs(h), [], 'pt')[1]!, obs(h), 'pt', { currency: 'USD' })
+    expect(JSON.stringify([s.why, s.facts])).not.toMatch(/rodadas de QA custam|primeira rodada/)
+  })
+
+  test('L2: a size that goes the opposite way of the headline is said in plain words; none when all agree', () => {
+    const rows = [
+      ...Array.from({ length: 3 }, (_, i) => sub(`a${i}`, { size: 'M', qaRounds: 1, wallMs: H })), ...Array.from({ length: 3 }, (_, i) => sub(`b${i}`, { size: 'M', qaRounds: 3, wallMs: 5 * H })),
+      ...Array.from({ length: 3 }, (_, i) => sub(`c${i}`, { size: 'L', qaRounds: 1, wallMs: 10 * H })), ...Array.from({ length: 3 }, (_, i) => sub(`d${i}`, { size: 'L', qaRounds: 3, wallMs: 5 * H })),
+    ]
+    const hh = history(rows)
+    const hero = heroOf(entriesOf(obs(hh), [], 'pt')[0]!, obs(hh), 'pt', { currency: 'USD' })
+    expect(hero.caption).toContain('nas peças G foi o contrário')
+    expect(heroOf(entriesOf(obs(hh), [], 'en')[0]!, obs(hh), 'en', { currency: 'USD' }).caption).toContain('the opposite for L pieces')
+    expect(heroOf(entriesOf(obs(h), [], 'pt')[0]!, obs(h), 'pt', { currency: 'USD' }).caption).not.toContain('contrário')
   })
 
   test('parts: the observed multiplier per type with the "observado" label; no data only where there really is none', () => {

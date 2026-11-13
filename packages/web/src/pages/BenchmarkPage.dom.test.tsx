@@ -418,6 +418,16 @@ describe('per-piece history from the server fills the blocks with real rows', ()
   })
 })
 
+describe('L3: the subtitle claims nothing is proven', () => {
+  test('it does not say which one "compensou" / paid off', () => {
+    const pt = render('pt', observed as never), en = render('en', observed as never)
+    expect(pt).not.toContain('Aqui você vê qual compensou')
+    expect(pt).toContain('Aqui você vê o que se observou até agora.')
+    expect(en).not.toContain('Here you see which one paid off')
+    expect(en).toContain('Here you see what has been observed so far.')
+  })
+})
+
 describe('Retrabalho tile from the observed history', () => {
   test('states the share of pieces with 2+ QA rounds and the median, flagged as read from labels', () => {
     const h = { pieces: 2, tasks: [{ id: 'T', title: 'T', status: 'done', size: 'M', pieces: 2, sessions: 4, costUSD: 1, costPartial: false, wallMs: H, activeMs: null, qaRounds: 4, reworkedPieces: 1, lines: 10,

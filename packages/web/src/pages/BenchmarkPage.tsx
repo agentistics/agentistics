@@ -65,7 +65,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
     <header style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
       <div>
         <h1 style={{ margin: 0, fontSize: 22, display: 'flex', gap: 8, alignItems: 'center' }}>Benchmark <BetaTag lang={L} what="Benchmark" /></h1>
-        <p style={{ ...muted, margin: '4px 0 0', fontSize: 13 }}>{pt ? 'Dois jeitos de trabalhar fazem as mesmas tarefas. Aqui você vê qual compensou.' : 'Two ways of working do the same tasks. Here you see which one paid off.'}</p>
+        <p style={{ ...muted, margin: '4px 0 0', fontSize: 13 }}>{pt ? 'Dois jeitos de trabalhar fazem as mesmas tarefas. Aqui você vê o que se observou até agora.' : 'Two ways of working do the same tasks. Here you see what has been observed so far.'}</p>
       </div>
       <Link to="/benchmark/como-funciona" className="bm-btn" data-testid="benchmark-how" style={how}><CircleHelp size={15} style={{ color: 'var(--accent-cyan, var(--accent-blue))' }} />{pt ? 'Como funciona?' : 'How it works'}</Link>
     </header>
