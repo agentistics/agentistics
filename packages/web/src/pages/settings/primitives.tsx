@@ -979,7 +979,7 @@ export function popoverStyle(pos: PopoverRect | null): React.CSSProperties {
     left: pos?.left ?? 0,
     ...(pos?.bottom !== undefined ? { bottom: pos.bottom } : { top: pos?.top ?? 0 }),
     width: 'max-content',
-    minWidth: pos ? Math.min(pos.width, typeof window === 'undefined' ? pos.width : window.innerWidth - 16) : undefined,
+    minWidth: pos ? Math.min(pos.width, typeof window === 'undefined' || !Number.isFinite(window.innerWidth) ? pos.width : window.innerWidth - 16) : undefined,
     maxWidth: 'calc(100vw / var(--ui-zoom, 1) - 16px)',
     boxSizing: 'border-box',
     zIndex: 1200,
