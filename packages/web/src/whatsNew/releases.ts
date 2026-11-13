@@ -19,6 +19,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'After the computer restarts, agentistics starts by itself again — no need to start it by hand.',
       },
       {
+        pt: 'O agentistics não espera mais 10 minutos por um "servidor" que, na verdade, é outro programa qualquer com o mesmo número.',
+        en: 'agentistics no longer waits 10 minutes for a "server" that is actually some other program with the same number.',
+      },
+      {
         pt: 'Quando o agentistics se recusa a iniciar por achar que outro servidor está rodando, a mensagem agora diz que programa é esse.',
         en: 'When agentistics refuses to start because it thinks another server is running, the message now says which program that is.',
       },

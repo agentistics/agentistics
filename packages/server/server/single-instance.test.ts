@@ -66,7 +66,7 @@ test('a live holder is obeyed — this process is the liveness proof', async () 
   const file = await lockPath()
   await writeFile(file, String(process.pid))
 
-  const claim = await claimInstanceLock(file, 5555)
+  const claim = await claimInstanceLock(file, 5555, { processStartMs: () => undefined, holderCommand: () => 'agentop server' })
   expect(claim.ok).toBe(false)
 })
 
@@ -383,4 +383,56 @@ test('waitForInstanceFree: bounded — a holder that never lets go is still repo
   expect(await waitForInstanceFree(file, { timeoutMs: 60, pollMs: 10 })).toBe(process.pid)
   expect(Date.now() - t0).toBeGreaterThanOrEqual(55)
   await first.release()
+})
+
+// ---------------------------------------------------------------------------
+// 2026-11-13 (BOOT.LOCK-ANTIGO): an OLD-format lock (only `<pid>`) whose pid is alive but is NOT an
+// agentop server is stale — nothing proves who wrote it, and a stranger holding the number is the
+// reboot failure again. A holder that cannot be described is still believed (never steal).
+// ---------------------------------------------------------------------------
+import { isAgentopServerCommand } from './single-instance'
+
+const base = { processStartMs: () => undefined }
+
+test('old-format lock + live NON-agentop pid is reclaimed at once', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const probe = { ...base, holderCommand: () => 'sleep 1000' }
+  expect(await probeInstanceLock(file, probe)).toBeNull()
+  expect((await claimInstanceLock(file, 7777, probe)).ok).toBe(true)
+})
+
+test('old-format lock + live agentop server pid still refuses', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const probe = { ...base, holderCommand: () => '/home/u/.local/bin/agentop server' }
+  expect(await probeInstanceLock(file, probe)).toBe(process.pid)
+  expect((await claimInstanceLock(file, 7777, probe)).ok).toBe(false)
+})
+
+test('old-format lock + holder that cannot be described still refuses (never steal)', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const probe = { ...base, holderCommand: () => undefined }
+  expect(await probeInstanceLock(file, probe)).toBe(process.pid)
+  expect((await claimInstanceLock(file, 7777, probe)).ok).toBe(false)
+})
+
+test('new-format lock is not judged by its command line', async () => {
+  const file = await lockPath()
+  await writeFile(file, `${process.pid} 740 ${BOOT_A}`)
+  const probe = { ...base, processStartTicks: () => 740, bootId: () => BOOT_A, holderCommand: () => 'sleep 1000' }
+  expect(await probeInstanceLock(file, probe)).toBe(process.pid)
+})
+
+test('isAgentopServerCommand: any agentop executable, nothing else', () => {
+  expect(isAgentopServerCommand('/home/u/.local/bin/agentop server')).toBe(true)
+  expect(isAgentopServerCommand('agentop server --port 1')).toBe(true)
+  expect(isAgentopServerCommand('bun /r/packages/server/bin/cli.ts server')).toBe(true)
+  expect(isAgentopServerCommand('bun run /r/packages/server/server/index.ts')).toBe(true)
+  expect(isAgentopServerCommand('sleep 1000')).toBe(false)
+  expect(isAgentopServerCommand('agentop session ls')).toBe(true)
+  expect(isAgentopServerCommand('/home/u/.local/bin/agentop start')).toBe(true)
+  expect(isAgentopServerCommand('vim agentop server.txt')).toBe(false)
+  expect(isAgentopServerCommand('bun test packages/server/server/single-instance.test.ts')).toBe(false)
 })

@@ -1,5 +1,6 @@
 import { open, readFile, unlink, stat } from 'fs/promises'
 import { readFileSync, unlinkSync } from 'fs'
+import { spawnSync } from 'child_process'
 import { dirname } from 'path'
 import { mkdir } from 'fs/promises'
 
@@ -113,6 +114,50 @@ export interface LockProbe {
   bootId?(): string | undefined
   /** When this boot started, as epoch ms (now − uptime, on the boot clock), for locks with no boot id. */
   bootStartMs?(): number | undefined
+  /**
+   * The holder's FULL command line, or `undefined` when it cannot be read (permission, no such
+   * tool). Used only for OLD-format locks, which carry no identity of their own: a live holder
+   * that is not an agentop server cannot be the writer. `undefined` keeps the pid-only answer.
+   */
+  holderCommand?(pid: number): string | undefined
+}
+
+/**
+ * Could this command line be an agentop process holding the server lock? Conservative on purpose
+ * (2026-11-13, leader review): `agentop start` and other subcommands can run the server in-process,
+ * so ANY agentop executable counts, whatever its subcommand. True for the compiled binary
+ * (`…/agentop <anything>`) and the dev forms run by bun/node (`bin/cli.ts`, `server/index.ts`).
+ * Anything whose executable is something else — `sleep`, `vim agentop server.txt`, `bun test …` — is not.
+ */
+export function isAgentopServerCommand(cmd: string): boolean {
+  const argv = cmd.trim().split(/\s+/).filter(Boolean)
+  if (argv.length === 0) return false
+  const base = (a: string) => a.slice(a.lastIndexOf('/') + 1)
+  const exe = base(argv[0]!)
+  if (exe === 'agentop') return true
+  if (exe !== 'bun' && exe !== 'node') return false
+  return argv.slice(1).some(a => /(^|\/)bin\/cli\.ts$/.test(a) || /(^|\/)server\/index\.ts$/.test(a))
+}
+
+/** The holder's command line: `/proc/<pid>/cmdline` on Linux, `ps -o command=` elsewhere (macOS has no /proc). */
+export function readHolderCommand(pid: number): string | undefined {
+  const proc = describeFull(pid)
+  if (proc !== undefined || process.platform === 'linux') return proc
+  try {
+    const r = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf-8', timeout: 2000 })
+    const out = r.status === 0 ? r.stdout.trim() : ''
+    return out || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function describeFull(pid: number): string | undefined {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0').filter(Boolean).join(' ').trim() || undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** `/proc/sys/kernel/random/boot_id`, or `undefined` off Linux. */
@@ -163,6 +208,7 @@ const OS_PROBE: LockProbe = {
   processStartTicks: linuxProcessStartTicks,
   bootId: linuxBootId,
   bootStartMs: linuxBootStartMs,
+  holderCommand: readHolderCommand,
 }
 
 /** A lock's contents: `<pid>` (oldest), `<pid> <startTicks>`, or `<pid> <startTicks> <bootId>`. */
@@ -209,6 +255,12 @@ async function holdsLock(file: string, holder: number, probe: LockProbe, recorde
     }
   }
   if (!isAlive(holder)) return false
+  if (recordedTicks === undefined && recordedBoot === undefined) {
+    // OLD format: nothing identifies the writer, so a live holder that is not an agentop server
+    // is a stranger holding the number (2026-11-13). Undescribable → keep believing it.
+    const cmd = probe.holderCommand?.(holder)
+    if (cmd !== undefined && !isAgentopServerCommand(cmd)) return false
+  }
   // EXACT when the writer recorded its start ticks: same pid AND same boot-clock start is the same
   // process, and nothing else is. The mtime comparison below is only for locks written without them.
   if (recordedTicks !== undefined) {
