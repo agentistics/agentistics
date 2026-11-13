@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { liveDeepLink } from './liveDeepLink'
 import { idleSessionNoun } from './idleExecution'
 import { notificationMuted } from './notificationCategories'
 import { limitNoticeMeta, limitNoticeText, segmentNoticeText } from './planLimits'
@@ -40,6 +41,16 @@ export const RETIRE_REASON_TEXT: Record<string, { pt: string; en: string }> = {
 /** Localized copy for server- and client-emitted notification codes. Resolved at
  *  render time by resolveNotification so switching the language re-translates. */
 export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }> = {
+  // A piece waited in leader review for over 24 h with no live leader on its task (sessions/orphan-review-notice.ts).
+  'delivery.orphan-review': {
+    pt: { title: 'Entrega esperando revisão sem líder', message: '"{title}" está em revisão há mais de {hours} h e nenhum líder vivo a acompanha. Ação: revisar e concluir, ou abandonar.' },
+    en: { title: 'Delivery waiting for review with no leader', message: '"{title}" has been in review for over {hours} h and no live leader follows it. Action: review and finish, or abandon.' },
+  },
+  // The same, for the old pile summarised in ONE notice instead of one per piece.
+  'delivery.orphan-review-many': {
+    pt: { title: 'Entregas antigas esperando revisão sem líder', message: '{count} peças estão em revisão há mais de {hours} h sem líder vivo. Ação: revisar e concluir, ou abandonar cada uma.' },
+    en: { title: 'Old deliveries waiting for review with no leader', message: '{count} pieces have been in review for over {hours} h with no live leader. Action: review and finish, or abandon each.' },
+  },
   // Spawn-filing refusals (spawn-filing-io.ts): shown when a session could not be started.
   'subtask_refused': {
     pt: { title: 'Sessão não iniciada', message: 'A subtarefa escolhida não pode receber uma sessão.' },
@@ -563,6 +574,12 @@ export function notificationLink(n: Pick<AppNotification, 'code' | 'meta'>): str
     const sid = String(n.meta?.sessionId ?? '').trim()
     return sid ? `/sessions/${encodeURIComponent(sid)}` : null
   }
+  // A delivery waiting for review with no leader leads to its card on the Live (the one-click action lives there).
+  if (n.code === 'delivery.orphan-review') {
+    const key = String(n.meta?.key ?? '').trim()
+    return key ? liveDeepLink({ card: key }) : null
+  }
+  if (n.code === 'delivery.orphan-review-many') return liveDeepLink({ orphans: true })
   return null
 }
 

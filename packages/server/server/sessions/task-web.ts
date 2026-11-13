@@ -429,8 +429,25 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
   const reply = await replyPromise
   const { liveRuntimeFacts } = await import('./live-runtime')
   const runtime = await liveRuntimeFacts(nowMs).catch(() => ({}))
-  return describeLive({ reply, rows, leaderIds, nowMs, filters, runtime, fleetRead })
+  const view = describeLive({ reply, rows, leaderIds, nowMs, filters, runtime, fleetRead })
+  // A card with no live leader for over N hours is told ONCE (bell). At most every 10 min, over the UNFILTERED line, and only
+  // when the fleet was read (an unreadable fleet must never read as "no leader"). Fire and forget: never slows or fails the read.
+  if (fleetRead === 'ok' && nowMs - lastOrphanSweepMs > ORPHAN_SWEEP_EVERY_MS) {
+    lastOrphanSweepMs = nowMs
+    void (async () => {
+      const [{ sweepOrphanReviews, orphanHours, leaderLiveOf }, { AGENTISTICS_DATA_DIR }] = await Promise.all([import('./orphan-review-notice'), import('../config')])
+      const all = describeLive({ reply, rows, leaderIds, nowMs, filters: { tab: 'all', period: 'all' }, runtime, fleetRead })
+      await sweepOrphanReviews({
+        cards: all.deliveries.map(d => ({ key: d.key, title: d.title, stage: d.stage, stageSinceMs: d.stageSinceMs, old: d.old === true, ...(d.leaderAvailability ? { leaderAvailability: d.leaderAvailability } : {}) })),
+        nowMs, dataDir: AGENTISTICS_DATA_DIR, leaderLive: leaderLiveOf(all.leaders), hours: orphanHours(process.env.AGENTISTICS_ORPHAN_REVIEW_HOURS),
+      })
+    })().catch(() => {})
+  }
+  return view
 }
+
+const ORPHAN_SWEEP_EVERY_MS = 10 * 60_000
+let lastOrphanSweepMs = 0
 
 /** Create a task. Title is required; a description is not — a task nobody described is a task. */
 export async function createTask(o: { title: string; detail?: string; type?: string; /** urgent | high | medium | low; absent = low. FLUXO.AVISOS 9. */ priority?: string }): Promise<Task | null> {
