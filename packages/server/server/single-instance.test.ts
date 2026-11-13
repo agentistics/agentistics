@@ -492,12 +492,33 @@ test('R1: a REAL process whose executable path contains a space reads back whole
   chmodSync(exe, 0o755)
   const child = spawn(exe, ['999'], { stdio: 'ignore' })
   try {
-    const c = readHolderCommand(child.pid!) as { exe: string; args: string[] }
+    // spawn() returns before exec: until then /proc/<pid>/cmdline still shows the parent's argv.
+    const deadline = Date.now() + 2000
+    let c = readHolderCommand(child.pid!) as { exe: string; args: string[] }
+    while (c?.exe !== exe && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 10))
+      c = readHolderCommand(child.pid!) as { exe: string; args: string[] }
+    }
     expect(c.exe).toBe(exe)
     expect(isAgentopServerCommand(c)).toBe(true)
   } finally {
     child.kill()
   }
+})
+
+test('R1b: a symlinked agentop (comm resolves to another basename) is still agentop via the invoked name', async () => {
+  expect(isAgentopServerCommand({ exe: '/opt/x/agentop-bin', args: '/usr/local/bin/agentop server' })).toBe(true)
+  expect(isAgentopServerCommand({ exe: '/opt/x/agentop-bin', args: '/opt/x/agentop-bin server' })).toBe(false)
+  expect(isAgentopServerCommand({ exe: '/usr/bin/vim', args: 'vim agentop server.txt' })).toBe(false)
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const hourAgo = new Date(Date.now() - 3_600_000)
+  await utimes(file, hourAgo, hourAgo)
+  const probe = {
+    processStartMs: () => Date.now(),
+    holderCommand: () => ({ exe: '/opt/x/agentop-bin', args: '/usr/local/bin/agentop server' }),
+  }
+  expect((await claimInstanceLock(file, 7777, probe)).ok).toBe(false)
 })
 
 test('leader decision: old-format lock + LIVE agentop holder is held even when the mtime says "started after the write"', async () => {

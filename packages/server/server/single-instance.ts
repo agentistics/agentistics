@@ -142,6 +142,9 @@ export function isAgentopServerCommand(cmd: HolderCommand): boolean {
   const exe = cmd.exe.trim()
   const base = exe.slice(exe.lastIndexOf('/') + 1)
   if (base === 'agentop') return true
+  // macOS: `ps -o comm=` resolves a symlinked `/usr/local/bin/agentop` to its target, whose basename
+  // may not be "agentop"; the INVOKED name survives in the `command=` string. Either saying agentop counts.
+  if (typeof cmd.args === 'string' && /(^|\/)agentop(\s|$)/.test(cmd.args.trim())) return true
   if (base !== 'bun' && base !== 'node') return false
   const args = Array.isArray(cmd.args) ? cmd.args : [cmd.args]
   return args.some(a => DEV_ENTRY.test(a))
