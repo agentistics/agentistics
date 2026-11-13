@@ -1,9 +1,9 @@
 import React from 'react'
 import { describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom'
 import type { Covered, Gap, Interval, Observed } from '@agentistics/core/benchmark'
-import { BenchmarkContent } from './BenchmarkPage'
+import { BenchmarkContent, BenchmarkHowItWorksPage } from './BenchmarkPage'
 import { benchmarkQuery, cardHeadline, dayLabel, formulaText, fmtValue, harnessState, METRIC_ORDER } from '../lib/benchmarkFormat'
 
 const H = 3_600_000
@@ -35,17 +35,10 @@ const observed: Observed = {
   notStructured: { qaVerdict: 1000, escapedLink: 1000 },
 }
 const render = (lang: 'pt' | 'en', o: Observed | null = observed, extra: Record<string, unknown> = {}) =>
-  renderToStaticMarkup(<MemoryRouter><BenchmarkContent lang={lang} observed={o} {...extra} /></MemoryRouter>)
+  renderToStaticMarkup(<MemoryRouter><BenchmarkContent lang={lang} observed={o} initialNumbers {...extra} /></MemoryRouter>)
 
 describe('benchmark page — real figures, honest gaps', () => {
   const pt = render('pt'), en = render('en')
-
-  test('the experiment region is always visible and says what is missing, in both languages', () => {
-    for (const html of [pt, en]) expect(html).toContain('benchmark-experiment-empty')
-    expect(pt).toContain('Sem dados suficientes — nenhum experimento rodado')
-    expect(pt).toContain('8 tarefas')
-    expect(en).toContain('Not enough data — no experiment has run')
-  })
 
   test('durations and rates carry units and the locale: hours, days and per week, never raw milliseconds', () => {
     expect(pt).toContain('28,2 h')
@@ -72,7 +65,7 @@ describe('benchmark page — real figures, honest gaps', () => {
 
   test('a figure nobody could measure is a dash with the reason, never a 0', () => {
     for (const k of ['qaFirstRoundRejection', 'qaRoundsMedian', 'escapedDefectRate']) {
-      const card = pt.split(`data-testid="metric-${k}"`)[1]!.split('</article>')[0]!
+      const card = pt.split(`data-testid="metric-${k}"`)[1]!.split('</li>')[0]!
       expect(card).toContain('data-measured="no"')
       expect(card).toContain('—')
       expect(card).toContain('sem medição')
@@ -84,7 +77,7 @@ describe('benchmark page — real figures, honest gaps', () => {
   })
 
   test('coordination is shown as a range, never a point', () => {
-    const card = pt.split('data-testid="metric-coordinationShare"')[1]!.split('</article>')[0]!
+    const card = pt.split('data-testid="metric-coordinationShare"')[1]!.split('</li>')[0]!
     expect(card).toContain('30% – 50%')
     expect(card).toContain('faixa, nunca um ponto')
   })
@@ -101,12 +94,11 @@ describe('benchmark page — real figures, honest gaps', () => {
   })
 
   test('coverage per harness: measured, partial and not measured are three different things, with the cause', () => {
-    expect(pt).toContain('claude: 10/10 com custo')
-    expect(pt).toContain('codex: parcial 3/6 com custo')
+    expect(pt).toContain('claude 10/10')
+    expect(pt).toContain('codex 3/6 parcial')
     expect(pt).toContain('1 sem tokens guardados · 2 com modelo sem preço')
-    expect(pt).toContain('kimi: sem medição (0/5)')
-    expect(en).toContain('kimi: not measured (0/5)')
-    expect(pt).not.toContain('kimi: 0/5 com custo')
+    expect(pt).toContain('kimi 0/5 sem medição')
+    expect(en).toContain('kimi 0/5 not measured')
   })
 
   test('the scope line says what the delivery count is made of', () => {
@@ -122,12 +114,158 @@ describe('benchmark page — real figures, honest gaps', () => {
     const failed = render('en', null, { status: 'error' })
     expect(failed).toContain('benchmark-error')
     expect(failed).not.toContain('metric-costPerDelivery')
-    expect(failed).toContain('benchmark-experiment-empty')
+    expect(failed).not.toContain('benchmark-hero')
+  })
+})
+
+// ---- the approved D3 structure ------------------------------------------------------------------------
+const sc = (display: number, status: 'better' | 'worse' | 'tie', max: number, ratio: number) => ({
+  max, points: display, lo: display - 3, hi: display + 3, displayPoints: display, ratio, status,
+  metrics: [{ id: 'hidden_tests', type: 'quality', kind: 'rate-higher', candidate: 0.91, reference: 0.78, nCandidate: 30, nReference: 30, ratio, missing: null }], missing: [],
+})
+const verdictResult = (verdict: string, final: number | null, ratioPoint: number | null) => ({
+  verdict, candidate: 'Líder + worker + QA', reference: 'Uma sessão', methodVersion: 'v1', size: 'M', delta: 0.1, seed: 1, resamples: 10000,
+  ratio: { point: ratioPoint, lo: null, hi: null },
+  sample: { tasks: 10, runsCandidate: 30, runsReference: 30, acceptedCandidate: 20, acceptedReference: 18, unmeasured: 0 },
+  minimum: { tasks: 8, repsPerTask: 2, acceptedPerArm: 5 }, reason: 'Em custo por entrega aceita, o novo jeito saiu melhor.',
+  secondary: { acceptRate: {}, wallPerAccepted: {}, defectsPerRun: {}, humanInterventions: {} }, coverage: {},
+  score: final === null ? null : {
+    methodVersion: 'v1', gateBlocked: false, rework: { A: 2.1, B: 1.4 },
+    final: { value: final, lo: final - 4, hi: final + 4, display: final, nullReason: null },
+    sensitivity: { result: 'depends_on_weights', rows: [{ name: 'pesos iguais', weights: {}, final: 48, lo: 44, hi: 52, verdict: 'tie' }] },
+    types: { quality: sc(31, 'better', 40, 2.4), cost: sc(11, 'worse', 30, 0.4), time: sc(7, 'worse', 20, 0.4), reliability: { ...sc(0, 'tie', 10, 1), displayPoints: null, status: 'missing', metrics: [] } },
+  },
+})
+const taskRow = (id: string, title: string, size: 'S' | 'M' | 'L', score: number | null, subtasks: unknown[] = []) => ({
+  id, title, size, sessions: [1, 3], costUSD: [0.9, 2.1], wallMs: [22 * 60_000, 58 * 60_000], qaRounds: [0, 1], defects: [0, 0], accepted: [true, true], score, note: `nota de ${title}`, subtasks,
+})
+const exp = {
+  id: 'exp-a', name: 'Uma sessão × líder + worker + QA', result: verdictResult('pays', 61, 0.62),
+  tasks: [
+    taskRow('t1', 'Corrigir parser', 'S', 30, [{ id: 's1', title: 'Parser: limites', costUSD: [0.4, 1], wallMs: [600000, 1200000], qaRounds: [0, 1], accepted: [true, true] }, { id: 's2', title: 'Parser: testes', costUSD: [0.5, 1.1], wallMs: [700000, 1300000], qaRounds: [0, 0], accepted: [true, true] }]),
+    taskRow('t2', 'Filtro de período', 'M', 70), taskRow('t3', 'Passagem de líder', 'L', null),
+  ],
+  buckets: [{ label: '1 sessão', tasks: 86, costMedianUSD: 1.4, wallMedianMs: 38 * 60_000, escapedDefects: 0.5, firstTryRate: 0.71, notReopenedRate: 0.93 }],
+}
+const experimentsOf = (...r: unknown[]) => ({ experiments: r })
+
+describe('the Benchmark screen follows the approved D3 layout', () => {
+  test('every block is present, in the prototype order', () => {
+    const html = render('pt', observed, experimentsOf(exp))
+    const at = (s: string) => html.indexOf(s)
+    const order = ['benchmark-how', 'benchmark-list', 'benchmark-hero', 'benchmark-parts', 'benchmark-tasks', 'benchmark-buckets', 'benchmark-coverage']
+    for (const k of order) expect(at(k)).toBeGreaterThan(-1)
+    expect([...order].sort((a, b) => at(a) - at(b))).toEqual(order)
+    expect(html).toContain('Como funciona?')
+    expect(html).toContain('Por tarefa')
+    expect(html).toContain('Por número de sessões')
   })
 
-  test('a recorded experiment is counted, not drawn as a result', () => {
-    expect(render('en', observed, { experiments: [{ id: 'x' }] })).toContain('1 experiment(s) recorded')
-    expect(en).not.toContain('experiment(s) recorded')
+  test('the list holds the observed history and each experiment; selecting one changes the whole page', () => {
+    const history = render('pt', observed, experimentsOf(exp))
+    expect(history.match(/data-testid="benchmark-item"/g)!.length).toBe(2)
+    expect(history).toContain('data-bench="observed"')
+    expect(history).toContain('data-tone="none"')
+    expect(history).not.toContain('benchmark-task-row')
+    const picked = render('pt', observed, { ...experimentsOf(exp), initialSelected: 'exp-a' })
+    expect(picked).toContain('data-bench="exp-a"')
+    expect(picked).toContain('data-tone="good"')
+    expect(picked).toContain('>Compensou<')
+    expect(picked).toContain('Compensou 38%')
+    expect(picked).toContain('61')
+    expect(picked).toContain('Depende do que você valoriza')
+    expect(picked).toContain('Corrigir parser')
+    expect(picked).toContain('1 sessão')
+  })
+
+  test('hero in the "none" state names what is missing and never draws a score or bar', () => {
+    for (const [lang, word, miss] of [['pt', 'Sem dados ainda', 'Falta rodar um experimento controlado'], ['en', 'No data yet', 'A controlled experiment still has to run']] as const) {
+      const html = render(lang, observed)
+      const hero = html.split('data-testid="benchmark-hero"')[1]!.split('</details>')[0]!
+      expect(hero).toContain(word)
+      expect(hero).toContain(miss)
+      expect(hero).toContain('8 ')
+      expect(hero).not.toContain('de 100')
+      expect(hero).not.toContain('role="img"')
+    }
+    const insufficient = render('pt', observed, { ...experimentsOf({ ...exp, result: verdictResult('insufficient', null, null) }), initialSelected: 'exp-a' })
+    expect(insufficient).toContain('data-tone="none"')
+    expect(insufficient).toContain('10/8 tarefas')
+  })
+
+  test('"Partes": one tile per type, the real per-metric numbers inside their type, a type without data says so', () => {
+    const html = render('pt', observed)
+    for (const t of ['quality', 'cost', 'time', 'reliability', 'rework']) expect(html).toContain(`data-testid="part-${t}"`)
+    expect(html).toContain('Retrabalho')
+    const tile = (t: string) => html.split(`data-testid="part-${t}"`)[1]!.split('data-testid="part-')[0]!
+    expect(tile('cost')).toContain('data-testid="metric-costPerDelivery"')
+    expect(tile('cost')).toContain('US$ 12,35')
+    expect(tile('time')).toContain('data-testid="metric-wallMedian"')
+    expect(tile('quality')).toContain('data-testid="metric-escapedDefectRate"')
+    expect(tile('quality')).not.toContain('metric-wallMedian')
+    expect(tile('reliability')).toContain('sem dados suficientes')
+    expect(tile('reliability')).toContain('data-state="none"')
+    const closed = render('pt', observed, { initialNumbers: false })
+    expect(closed).not.toContain('data-testid="metric-costPerDelivery"')
+    expect(closed).toContain('Ver os números')
+  })
+
+  test('"Partes" of an experiment: points of the type, a status word, "sem dados" for an unmeasured type', () => {
+    const html = render('pt', observed, { ...experimentsOf(exp), initialSelected: 'exp-a' })
+    const tile = (t: string) => html.split(`data-testid="part-${t}"`)[1]!.split('data-testid="part-')[0]!
+    expect(tile('quality')).toContain('78%')
+    expect(tile('quality')).toContain('31 de 40 pontos')
+    expect(tile('quality')).toContain('Compensou · 2,4× melhor')
+    expect(tile('cost')).toContain('Não compensou')
+    expect(tile('reliability')).toContain('sem dados suficientes')
+    expect(tile('rework')).toContain('evidência, sem pontos')
+  })
+
+  test('"Por tarefa": one row per task, both sides in each column, the score and its word; open row shows note and subtasks', () => {
+    const html = render('pt', observed, { ...experimentsOf(exp), initialSelected: 'exp-a', initialOpenTask: 't1' })
+    expect(html.match(/data-testid="benchmark-task-row"/g)!.length).toBe(3)
+    expect(html).toContain('1 → 3')
+    expect(html).toContain('22 min → 58 min')
+    expect(html).toContain('sim → sim')
+    expect(html).toContain('Não compensou')
+    expect(html).toContain('sem nota')
+    expect(html).toContain('nota de Corrigir parser')
+    expect(html.match(/data-testid="benchmark-subtask-row"/g)!.length).toBe(2)
+    expect(html).toContain('Filtrar subtarefa')
+    expect(html).toContain('Filtrar tarefa')
+  })
+
+  test('mobile: the task rows are labelled cards and the buckets stack, by the same @media rules as the prototype', () => {
+    const html = render('pt', observed, { ...experimentsOf(exp), initialSelected: 'exp-a' })
+    expect(html).toContain('@media (max-width:700px)')
+    expect(html).toContain('td[data-l]:not(.bm-cp)::before')
+    expect(html).toContain('data-l="Custo"')
+    expect(html).toContain('data-l="Tarefas"')
+    expect(html).toContain('.bm-top{grid-template-columns:minmax(0,1fr)}')
+  })
+
+  test('without data the task and bucket blocks say why, never an empty table or zeros', () => {
+    const html = render('pt', observed)
+    expect(html).toContain('benchmark-tasks-empty')
+    expect(html).toContain('benchmark-buckets-empty')
+    expect(html).not.toContain('<table')
+  })
+
+  test('coverage by harness is one quiet line, not a row of pills, and keeps the cause', () => {
+    const html = render('pt', observed)
+    const foot = html.split('data-testid="benchmark-coverage"')[1]!
+    expect(foot).toContain('claude 10/10')
+    expect(foot).toContain('codex 3/6 parcial')
+    expect(foot).toContain('kimi 0/5 sem medição')
+    expect(foot).toContain('1 sem tokens guardados · 2 com modelo sem preço')
+    expect(render('en', observed)).toContain('kimi 0/5 not measured')
+  })
+
+  test('the "how it works" page carries the method version and date', () => {
+    const page = (lang: string) => renderToStaticMarkup(<MemoryRouter><Routes><Route element={<Outlet context={{ lang }} />}><Route index element={<BenchmarkHowItWorksPage />} /></Route></Routes></MemoryRouter>)
+    expect(page('pt')).toContain('Método v1, 08/11/2026')
+    expect(page('pt')).toContain('Empate não quer dizer igual')
+    expect(page('en')).toContain('Method v1, 2026-11-08')
   })
 })
 
