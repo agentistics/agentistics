@@ -50,7 +50,7 @@ beforeAll(async () => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   globalThis.EventSource = class { close() {} addEventListener() {} removeEventListener() {} } as never
   svgAnimate = Object.getOwnPropertyDescriptor(SVGElement.prototype, 'animate')
-  Object.defineProperty(SVGElement.prototype, 'animate', { configurable: true, value: undefined })
+  Object.defineProperty(SVGElement.prototype, 'animate', { configurable: true, writable: true, value: undefined })
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method && init.method !== 'GET') return Response.json({ ok: true })
     if (String(input) === '/api/user-prefs') return Response.json(prefs, { headers: { 'X-Prefs-Writable': 'false' } })

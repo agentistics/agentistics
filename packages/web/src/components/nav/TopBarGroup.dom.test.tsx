@@ -19,7 +19,8 @@ beforeAll(async () => {
     return new Response(JSON.stringify(body), { status: 200 })
   }
   // happy-dom cannot cancel the loader's Web Animations while the preview's board is still loading.
-  ;(window.SVGElement.prototype as { animate?: unknown }).animate = undefined
+  // defineProperty, never assignment: another file may have left a non-writable `animate` on the shared prototype.
+  Object.defineProperty(window.SVGElement.prototype, 'animate', { configurable: true, writable: true, value: undefined })
   createRoot = (await import('react-dom/client')).createRoot
   router = await import('react-router-dom')
   Group = (await import('./TopBarGroup')).TopBarGroup

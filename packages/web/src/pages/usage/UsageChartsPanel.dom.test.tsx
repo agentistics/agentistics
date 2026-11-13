@@ -17,7 +17,7 @@ const readings: PlanReadings[] = [
 beforeAll(async () => {
   GlobalRegistrator.register()
   // This suite checks markup/state; happy-dom animation cancellation rejects finished promises.
-  Object.defineProperty(SVGElement.prototype, 'animate', { configurable: true, value: undefined })
+  Object.defineProperty(SVGElement.prototype, 'animate', { configurable: true, writable: true, value: undefined })
   ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
   ;({ createRoot } = await import('react-dom/client'))
   ;({ UsageChartsPanel: Panel } = await import('./UsageChartsPanel'))

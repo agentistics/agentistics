@@ -42,7 +42,7 @@ beforeAll(async () => {
   // This suite checks rows and reopen actions, not Web Animations. Happy DOM rejects unfinished
   // animation promises on cancel; a busy loader must not leak those rejections into later tests.
   svgAnimate = Object.getOwnPropertyDescriptor(SVGElement.prototype, 'animate')
-  Object.defineProperty(SVGElement.prototype, 'animate', { configurable: true, value: undefined })
+  Object.defineProperty(SVGElement.prototype, 'animate', { configurable: true, writable: true, value: undefined })
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
