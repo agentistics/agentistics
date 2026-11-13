@@ -132,7 +132,9 @@ describe('tasks.json: new code → v2.210.1 writer → mirror restore (§2.7, re
     writeFileSync(file, newBook())
     const real = (await createTaskStore(file).read()).statuses
     const captured = loadV2210(newBook()).statuses
-    expect(real.map(s => ({ ...s }))).toEqual(captured.map(s => ({ ...s })))
+    // S0c: this build ADDS the stored `stage`; the old whitelist drops it. Every other field must still agree exactly.
+    expect(real.every(s => typeof s.stage === 'string')).toBe(true)
+    expect(real.map(({ stage: _s, ...rest }) => rest)).toEqual(captured.map(s => ({ ...s })))
   })
 })
 

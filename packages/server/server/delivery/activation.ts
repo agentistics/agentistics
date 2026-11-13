@@ -21,14 +21,14 @@
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { STATUS_STAGES } from '@agentistics/core'
 
 export const RULE_IDS = ['a', 'b', 'c', 'd'] as const
 export type RuleId = (typeof RULE_IDS)[number]
 export type RuleState = 'off' | 'shadow' | 'on'
 
-/** The Live's stage vocabulary as a closed list. S0c reconciles this with the stored `TaskStatusDef.stage`. */
-export const LIVE_STAGES = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'no-leader', 'merge', 'ci', 'completed', 'published'] as const
-const STAGE_SET: ReadonlySet<string> = new Set(LIVE_STAGES)
+// The stage vocabulary is core's (`TaskStatusDef.stage`, S0c): a mirror entry is valid exactly when a stored stage is.
+const STAGE_SET: ReadonlySet<string> = new Set(STATUS_STAGES)
 
 export interface RuleEntry { state: RuleState; since?: string; build: string }
 export interface GuaranteeChange { rule: RuleId; from: RuleState; to: RuleState; via: OwnerVia; at: string; build: string }

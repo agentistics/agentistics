@@ -20,7 +20,7 @@
 
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
+import { isStatusStage, isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import { withFileLock } from './file-lock'
 import { historicalLinkId, migratePriority, migrateStatus, nativeLinkId, subtaskDone } from './task-model'
 import { heldByOther } from './task-next'
@@ -157,6 +157,12 @@ export interface TaskStore {
    *  create mints a fresh entry, edit finds the existing one by `id` and replaces label/color only. */
   upsertStatus(def: TaskStatusDef): Promise<void>
   reorderStatuses(ids: readonly string[]): Promise<void>
+  /**
+   * Fill the stored stage of every status that has NONE (S0c load-time backfill/restore). Re-checked under the
+   * lock against the freshest read: a status that already has a valid stage is never overwritten here — changing
+   * a stage is `upsertStatus`, gated by `status_stage_in_use` in `task-web.ts`.
+   */
+  setStatusStages(stages: Readonly<Record<string, string>>): Promise<void>
   /** False when no status carries that id — never a silent success. The caller (`task-web.ts`) is
    *  the one that checks `canDeleteStatus` BEFORE calling this; this method trusts that call. */
   removeStatus(id: string): Promise<boolean>
@@ -490,6 +496,8 @@ function sanitizeStatusDef(raw: unknown): TaskStatusDef | null {
     id, label, color: s.color,
     protected: s.protected === true,
     order: typeof s.order === 'number' && Number.isFinite(s.order) ? s.order : 0,
+    // The stored stage (S0c). An invalid value reads as absent: the load-time pass restores it from the mirror.
+    ...(isStatusStage(s.stage) ? { stage: s.stage } : {}),
   }
 }
 
@@ -986,6 +994,19 @@ export function createTaskStore(file: string): TaskStore {
           ...book,
           statuses: [...book.statuses.filter(s => s.id !== def.id), def],
         })
+      })
+    },
+    setStatusStages(stages) {
+      return enqueue(async () => {
+        const book = await read()
+        let changed = false
+        const next = book.statuses.map(s => {
+          const st = stages[s.id]
+          if (isStatusStage(s.stage) || !isStatusStage(st)) return s
+          changed = true
+          return { ...s, stage: st }
+        })
+        if (changed) await write({ ...book, statuses: next })
       })
     },
     reorderStatuses(ids) {

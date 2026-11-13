@@ -35,10 +35,11 @@ export function defaultDeliveryBoard(): DeliveryBoard {
   return {
     async setPhaseStatus(subtaskId, phase) {
       const m = await web()
-      const { stageOfStatus } = await import('../sessions/task-live')
+      const { storedStageOf } = await import('@agentistics/core')
       const want = PHASE_STATUS[phase]
       const statuses = await m.listStatuses()
-      let id = statuses.find(s => s.id === want.id)?.id ?? statuses.find(s => stageOfStatus(s.id, s.label) === LIVE_STAGE[phase])?.id
+      // The phase's status is found by its STORED stage (S0c) — a relabelled status is never mistaken for another stage.
+      let id = statuses.find(s => s.id === want.id)?.id ?? statuses.find(s => storedStageOf(s) === LIVE_STAGE[phase])?.id
       if (!id) {
         const made = await m.createStatus({ label: want.label, color: want.color })
         if (!made.ok) return { ok: false, message: made.message }

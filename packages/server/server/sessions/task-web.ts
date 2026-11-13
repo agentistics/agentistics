@@ -13,11 +13,12 @@ import { dirsForShas } from './release-repos'
 import { publishedAmong } from './release-tags'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
 import { stat } from 'node:fs/promises'
-import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
+import type { StagedSessionDraft, StatusStage, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
 import {
-  canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
+  canChangeStatusStage, classifyStatusStage, canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
 } from '@agentistics/core'
 import { loadTaskWorld } from './task-source'
+import { writeStatusStageMirror } from './status-stage-sync'
 import { conversationOwners } from './task-conversations'
 import { historicalLinkId, nativeLinkId, type HistoricalSession, type NativeSessionLink, type NativeSessionUsage } from './task-model'
 import { sanitizeNativeUsage } from './task-native'
@@ -136,6 +137,8 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
       files: [],
     }))
     const labels = new Map(w.book.statuses.map(s => [s.id, s.label]))
+    // S0c: the Live reads the STORED stage of each status; a label never classifies a card.
+    const stageById = new Map(w.book.statuses.flatMap(s => (s.stage !== undefined ? [[s.id, s.stage] as const] : [])))
     // FLUXO.ENTREGA-DSL: the delivery records are the state machine; the Live is their projection.
     const deliveries = await (async () => {
       try {
@@ -175,11 +178,11 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
     const forecastKey = `${key}|${Math.floor(nowMs / FORECAST_BUCKET_MS)}`
     if (forecastHistoryCache?.key !== forecastKey) {
       forecastHistoryCache = { key: forecastKey, history: prepareForecastHistory({
-        details, events: w.book.events, nowMs, deliveries, statusLabel: id => labels.get(id),
+        details, events: w.book.events, nowMs, deliveries, statusLabel: id => labels.get(id), statusStage: id => stageById.get(id),
       }) }
     }
     const overrunAnchors = await readForecastAnchors()
-    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas,
+    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), statusStage: id => stageById.get(id), deliveries, publishedShas,
       forecastHistory: forecastHistoryCache.history, overrunAnchors, ...(roleOf ? { roleOf } : {}), ...proof })
     const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result
@@ -1709,8 +1712,11 @@ export async function createStatus(o: { label: string; color: string }): Promise
   const w = await loadTaskWorld()
   const id = nextStatusId(label, w.book.statuses.map(s => s.id))
   const order = w.book.statuses.reduce((max, s) => Math.max(max, s.order), -1) + 1
-  const def: TaskStatusDef = { id, label, color: o.color, protected: false, order }
+  // The stage is classified ONCE, here, from what the person just typed; it is stored and never re-derived (S0c).
+  // Creating a status whose stage is guarded is allowed — the guard binds the stage, not the id.
+  const def: TaskStatusDef = { id, label, color: o.color, protected: false, order, stage: classifyStatusStage({ id, label }) }
   await w.store.upsertStatus(def)
+  await writeStatusStageMirror(TASKS_FILE, [...w.book.statuses, def])
   return { ok: true, status: def }
 }
 
@@ -1718,8 +1724,8 @@ export async function createStatus(o: { label: string; color: string }): Promise
  * Edit a status's label and/or color. Works on a PROTECTED status exactly like any other — only its
  * `id` can never change, and this never offers a way to change it (there is no `id` in the patch).
  */
-export async function editStatus(id: string, patch: { label?: string; color?: string }): Promise<
-  { ok: true } | { ok: false; message: 'no_such_status' | 'bad_color' }
+export async function editStatus(id: string, patch: { label?: string; color?: string; stage?: string }): Promise<
+  { ok: true } | { ok: false; message: 'no_such_status' | 'bad_color' | 'bad_stage' } | { ok: false; message: 'status_stage_in_use'; usageCount: number }
 > {
   const w = await loadTaskWorld()
   const found = w.book.statuses.find(s => s.id === id)
@@ -1727,12 +1733,24 @@ export async function editStatus(id: string, patch: { label?: string; color?: st
   if (patch.color !== undefined && !isValidStatusColor(patch.color)) {
     return { ok: false, message: 'bad_color' }
   }
+  // A label edit NEVER touches the stored stage. Changing the stage itself is refused while anything points at the
+  // status: a card would silently change rank without a transition (spec §2.2).
+  let stage = found.stage
+  if (patch.stage !== undefined) {
+    const usageCount = w.book.tasks.filter(t => t.status === id).length + w.book.subtasks.filter(s => s.status === id).length
+    const check = canChangeStatusStage({ current: found.stage, next: patch.stage, usageCount })
+    if (!check.ok) return check.reason === 'bad_stage' ? { ok: false, message: 'bad_stage' } : { ok: false, message: 'status_stage_in_use', usageCount: check.usageCount }
+    stage = patch.stage as StatusStage
+  }
   const label = patch.label?.trim()
-  await w.store.upsertStatus({
+  const next: TaskStatusDef = {
     ...found,
     ...(label ? { label } : {}),
     ...(patch.color !== undefined ? { color: patch.color } : {}),
-  })
+    ...(stage !== undefined ? { stage } : {}),
+  }
+  await w.store.upsertStatus(next)
+  if (stage !== found.stage) await writeStatusStageMirror(TASKS_FILE, w.book.statuses.map(s => (s.id === id ? next : s)))
   return { ok: true }
 }
 

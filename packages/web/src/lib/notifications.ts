@@ -74,6 +74,48 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Passagem sem conta com folga', message: 'Nenhuma conta tem folga agora: a passagem do líder abriu na conta com a janela que reabre primeiro, nunca na conta limitada do antecessor.' },
     en: { title: 'Hand-off with no account that has room', message: 'No account has room right now: the leader hand-off opened on the account whose window reopens first, never on the predecessor\'s limit-blocked one.' },
   },
+  // ENTREGA.GARANTIDA (S0b/S1a) refusal codes. They are returned to the calling door; the copy exists so a card can
+  // never render blank if one is ever surfaced.
+  evidence_invalid: {
+    pt: { title: 'Evidência recusada', message: 'O anexo não passou na verificação: {rule}.' },
+    en: { title: 'Evidence rejected', message: 'The attachment did not pass the check: {rule}.' },
+  },
+  evidence_reused: {
+    pt: { title: 'Evidência já usada', message: 'Esse mesmo arquivo já comprova outra peça ou revisão. Faça uma nova captura.' },
+    en: { title: 'Evidence already used', message: 'This exact file already backs another piece or revision. Capture it again.' },
+  },
+  guarantees_unreadable: {
+    pt: { title: 'Garantias ilegíveis', message: 'O arquivo de garantias não pôde ser lido; todas as regras ficam desligadas até ele ser corrigido.' },
+    en: { title: 'Guarantees unreadable', message: 'The guarantees file could not be read; every rule stays off until it is fixed.' },
+  },
+  migration_missing: {
+    pt: { title: 'Migração pendente', message: 'Esta garantia só pode ser ativada depois da migração.' },
+    en: { title: 'Migration pending', message: 'This guarantee can only be activated after the migration.' },
+  },
+  owner_required: {
+    pt: { title: 'Só o dono pode fazer isso', message: 'Mudar uma garantia é uma ação exclusiva do dono.' },
+    en: { title: 'Owner only', message: 'Changing a guarantee is an owner-only action.' },
+  },
+  prerequisite_capability: {
+    pt: { title: 'Recurso ausente', message: 'Esta versão ainda não tem tudo o que a garantia exige.' },
+    en: { title: 'Capability missing', message: 'This build does not yet have everything the guarantee requires.' },
+  },
+  prerequisite_rule: {
+    pt: { title: 'Regra anterior necessária', message: 'Outra garantia precisa estar ativa antes desta.' },
+    en: { title: 'Earlier rule required', message: 'Another guarantee must be on before this one.' },
+  },
+  shadow_required: {
+    pt: { title: 'Modo sombra necessário', message: 'A garantia precisa rodar em modo sombra antes de ser ativada.' },
+    en: { title: 'Shadow mode required', message: 'The guarantee must run in shadow mode before it is activated.' },
+  },
+  shadow_too_short: {
+    pt: { title: 'Sombra curta demais', message: 'O modo sombra precisa rodar por pelo menos 24 horas antes da ativação.' },
+    en: { title: 'Shadow period too short', message: 'Shadow mode must run for at least 24 hours before activation.' },
+  },
+  unexplained_would_refuse: {
+    pt: { title: 'Recusas sem explicação', message: 'O modo sombra registrou recusas ainda não explicadas; revise antes de ativar.' },
+    en: { title: 'Unexplained refusals', message: 'Shadow mode recorded refusals nobody has explained yet; review them before activating.' },
+  },
   'retire.done': {
     pt: { title: 'Sessão encerrada', message: 'A sessão {label} ({id}) foi encerrada.' },
     en: { title: 'Session retired', message: 'Session {label} ({id}) was retired.' },

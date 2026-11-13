@@ -2252,13 +2252,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
     if (url.pathname.startsWith('/api/tasks/statuses/') && req.method === 'POST') {
       const id = decodeURIComponent(url.pathname.slice('/api/tasks/statuses/'.length))
-      const body = await req.json().catch(() => ({})) as { label?: string; color?: string }
+      const body = await req.json().catch(() => ({})) as { label?: string; color?: string; stage?: string }
       const { editStatus } = await import('./sessions/task-web')
       const out = await editStatus(id, {
         ...(typeof body.label === 'string' ? { label: body.label } : {}),
         ...(typeof body.color === 'string' ? { color: body.color } : {}),
+        ...(typeof body.stage === 'string' ? { stage: body.stage } : {}),
       })
-      return json(out, out.ok ? 200 : (out.message === 'no_such_status' ? 404 : 400))
+      // `status_stage_in_use` is 422 like `in_use`: the request is understood, the status is just not free to change.
+      return json(out, out.ok ? 200 : (out.message === 'no_such_status' ? 404 : out.message === 'status_stage_in_use' ? 422 : 400))
     }
     if (url.pathname.startsWith('/api/tasks/statuses/') && req.method === 'DELETE') {
       const id = decodeURIComponent(url.pathname.slice('/api/tasks/statuses/'.length))

@@ -19,14 +19,16 @@
  *    retain an interval even with no history or after overrunning their original range.
  */
 
+import { LIVE_STAGES, stageOfStatus, type LiveStage, type StatusStage } from '@agentistics/core'
 import { migratePriority, subtaskDone, type Subtask, type Task, type TaskEvent } from './task-model'
 import type { PieceTimes } from './task-times'
 import type { TaskDetail } from './task-report'
 import { ANTIGA_AFTER_MS, isAntiga } from '../delivery/antigas'
 import { deriveStep, mergeStep, type SessionActivity, type StepRecord } from './task-live-steps'
 
-export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'completed' | 'published'
-export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'completed', 'published']
+// The stage vocabulary lives in core beside `TaskStatusDef.stage` (S0c) and is re-exported so every importer is unchanged.
+export { LIVE_STAGES }
+export type { LiveStage }
 
 /** The happy path a piece follows once it runs; `adjust` and `blocked` are detours that return to it. */
 export const HAPPY_PATH: readonly LiveStage[] = ['running', 'qa', 'leader', 'merge', 'ci', 'published']
@@ -243,28 +245,21 @@ export interface LiveReply {
 
 // ---------------------------------------------------------------------------------- stage
 
-const words = (s: string) => s.toLowerCase()
+// `stageOfStatus` is the CLASSIFIER and lives in core next to `TaskStatusDef.stage` (S0c): it runs once when a status
+// is created or backfilled. Everything below reads the STORED stage through `stageOfPieceStatus`.
+export { stageOfStatus }
 
-/** PURE: the stage a status names, by id then label; null when it names none of them. */
-export function stageOfStatus(status: string, label?: string): LiveStage | null {
-  switch (status) {
-    case 'todo': return 'queue'
-    case 'in_progress': return 'running'
-    case 'blocked': return 'blocked'
-    case 'in_review': return 'leader'
-    case 'done': return 'published'
-    default: break
-  }
-  const t = `${words(status)} ${words(label ?? '')}`
-  if (/\bqa\b|\btest/.test(t)) return 'qa'
-  if (/ajust|adjust|\bfix|rework|retrab/.test(t)) return 'adjust'
-  if (/review|revis/.test(t)) return 'leader'
-  if (/\bci\b|publicando|publishing/.test(t)) return 'ci'
-  if (/merge|\bpr\b|pull.?request/.test(t)) return 'merge'
-  if (/publish|publicad|releas|shipped/.test(t)) return 'published'
-  if (/progress|andamento|doing|executando|running/.test(t)) return 'running'
-  if (/todo|backlog|queue|fila/.test(t)) return 'queue'
-  return null
+/**
+ * The stage of a board status. `statusStage` is the board's stored stage (`TaskStatusDef.stage` by id): when it
+ * answers, the label plays no part — a relabel cannot reclassify a card. `'none'` stays null. When it has no answer
+ * (an id the vocabulary does not carry, or a caller with no book) only the ID is classified, never an unrelated label.
+ */
+export function stageOfPieceStatus(
+  status: string, statusLabel?: (id: string) => string | undefined, statusStage?: (id: string) => StatusStage | undefined,
+): LiveStage | null {
+  const stored = statusStage?.(status)
+  if (stored !== undefined) return stored === 'none' ? null : stored
+  return stageOfStatus(status, statusStage ? undefined : statusLabel?.(status))
 }
 
 // A WHOLE word ("[ LÍDER ] - Motor", "Leader of X"), never a substring: "Leaderboard UI" is a worker.
@@ -507,10 +502,11 @@ export function stepOf(events: readonly TaskEvent[], sinceMs: number | null): nu
 /** PURE: the stage visits of one piece from its `status` events (oldest first); the last runs to `nowMs`. */
 export function trailOf(
   events: readonly TaskEvent[], nowMs: number, statusLabel?: (id: string) => string | undefined,
+  statusStage?: (id: string) => StatusStage | undefined,
 ): StageVisit[] {
   const moves = events
     .filter(e => e.kind === 'status' && e.to)
-    .map(e => ({ at: ms(e.at), stage: stageOfStatus(e.to!, statusLabel?.(e.to!)) }))
+    .map(e => ({ at: ms(e.at), stage: stageOfPieceStatus(e.to!, statusLabel, statusStage) }))
     .filter((m): m is { at: number; stage: LiveStage } => m.at !== null && m.stage !== null)
     .sort((a, b) => a.at - b.at)
   const visits: StageVisit[] = []
@@ -916,6 +912,8 @@ export interface ForecastHistory { cohorts: ForecastCohorts; typicals: Partial<R
 export function prepareForecastHistory(o: {
   details: readonly TaskDetail[]; events: readonly TaskEvent[]; nowMs: number
   deliveries?: ReadonlyMap<string, LiveDeliveryFacts>; statusLabel?: (id: string) => string | undefined
+  /** The board's STORED stage per status id (`TaskStatusDef.stage`); when given, labels never classify. */
+  statusStage?: (id: string) => StatusStage | undefined
 }): ForecastHistory {
   function* samples(): Generator<Sample> {
     for (const d of o.details) for (const p of piecesOf(d, undefined, true)) {
@@ -951,7 +949,7 @@ export function prepareForecastHistory(o: {
   }
   const cohorts = buildForecastCohorts(samples(), o.nowMs)
   const { eventsBySubject } = indexEvents(o.details, o.events)
-  const typicals = stageTypicals(cohorts.samples.map(s => trailOf(eventsBySubject.get(s.key!) ?? [], o.nowMs, o.statusLabel)))
+  const typicals = stageTypicals(cohorts.samples.map(s => trailOf(eventsBySubject.get(s.key!) ?? [], o.nowMs, o.statusLabel, o.statusStage)))
   return { cohorts, typicals }
 }
 
@@ -962,6 +960,8 @@ export function buildLive(o: {
   nowMs: number
   /** id → label of the board's status vocabulary, for statuses people invented. */
   statusLabel?: (id: string) => string | undefined
+  /** id → the board's STORED stage (`TaskStatusDef.stage`). When given, a label never classifies a piece (S0c). */
+  statusStage?: (id: string) => StatusStage | undefined
   /** FLUXO.ENTREGA-DSL delivery records by subtask id: when one exists its PHASE decides the stage. */
   deliveries?: ReadonlyMap<string, LiveDeliveryFacts>
   /** Commit ids (as `legacyReviewShas` named them) that a published release tag contains — a legacy review piece naming one is Publicado. */
@@ -989,7 +989,7 @@ export function buildLive(o: {
 
   const { lastBySubject, eventsBySubject } = indexEvents(o.details, o.events)
   const trails = new Map<string, StageVisit[]>()
-  for (const [subject, list] of eventsBySubject) trails.set(subject, trailOf(list, o.nowMs, o.statusLabel))
+  for (const [subject, list] of eventsBySubject) trails.set(subject, trailOf(list, o.nowMs, o.statusLabel, o.statusStage))
   const { cohorts, typicals } = o.forecastHistory ?? prepareForecastHistory(o)
 
   const deliveries: LiveDelivery[] = []
@@ -1004,7 +1004,7 @@ export function buildLive(o: {
     const stored = o.deliveries?.get(p.sub ? p.sub.id : p.task.id)
     // A stale queue record must never override work the board already sent for review or closed.
     const rec = stored?.dequeued || (stored?.phase === 'fila' && ['in_review', 'done', 'abandoned'].includes(p.status)) ? undefined : stored
-    let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfStatus(p.status, o.statusLabel?.(p.status))
+    let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfPieceStatus(p.status, o.statusLabel, o.statusStage)
     const id = p.sub?.id ?? p.task.id
     // Board completion is not evidence of a public release. Preserve the card in Tudo, outside the queue.
     if (p.status === 'done' && rec?.phase !== 'publicado') {

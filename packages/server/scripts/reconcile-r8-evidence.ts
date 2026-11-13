@@ -65,7 +65,7 @@ const { outcomes } = await service.proofOutcomes()
 const view = () => describeLive({
   reply: buildLive({
     details: book.tasks.map(task => buildTaskDetail({ task, attempts: book.attempts, rows, metas: new Map(), costOf: () => 0, comments: book.comments.filter(c => c.taskId === task.id), subtasks: book.subtasks.filter(s => s.taskId === task.id), files: [] })),
-    events: book.events, nowMs, deliveries: new Map(Object.entries(doc.deliveries)), statusLabel: id => book.statuses.find(s => s.id === id)?.label,
+    events: book.events, nowMs, deliveries: new Map(Object.entries(doc.deliveries)), statusLabel: id => book.statuses.find(s => s.id === id)?.label, statusStage: id => book.statuses.find(s => s.id === id)?.stage,
     proven: new Set([...outcomes].filter(([, o]) => o.proven).map(([id]) => id)),
     suggestions: new Map([...outcomes].flatMap(([id, o]) => o.suggestion ? [[id, o.suggestion] as const] : [])),
     unchecked: new Set([...outcomes].filter(([, o]) => o.unchecked).map(([id]) => id)),
