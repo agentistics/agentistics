@@ -325,11 +325,15 @@ function oppositeNote(c: Comparison, lang: Lang): string {
   const pt = lang === 'pt'
   const o = oppositeSizes(c)
   if (!o.length) return ''
-  const sizes = [...new Set(o.map(x => x.size))]
+  // Per METRIC: "in time, S; in cost, L" never "in time and cost, S and L" (that would say S was opposite in cost too).
   const metrics = [...new Set(o.map(x => x.metric))]
-  const list = sizes.map(s => sizeWord(s, lang)).join(pt ? ' e ' : ' and ')
-  const what = metrics.map(m => (m === 'wall' ? (pt ? 'tempo' : 'time') : (pt ? 'custo' : 'cost'))).join(pt ? ' e ' : ' and ')
-  return pt ? `no ${what}, nas peças ${list} foi o contrário` : `in ${what}, the opposite for ${list} pieces`
+  const parts = metrics.map((m, i) => {
+    const list = o.filter(x => x.metric === m).map(x => sizeWord(x.size, lang)).join(pt ? ' e ' : ' and ')
+    const what = m === 'wall' ? (pt ? 'tempo' : 'time') : (pt ? 'custo' : 'cost')
+    if (pt) return i === 0 ? `no ${what}, nas peças ${list} foi o contrário` : `no ${what}, nas ${list}`
+    return i === 0 ? `in ${what}, the opposite for ${list} pieces` : `in ${what}, for ${list}`
+  })
+  return parts.join('; ')
 }
 
 export type HistorySortKey = 'title' | 'cost' | 'wall' | 'qa' | 'sessions'

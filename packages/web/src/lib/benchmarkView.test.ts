@@ -127,6 +127,39 @@ describe('observed comparisons the history already allows', () => {
     expect(heroOf(entriesOf(obs(h), [], 'pt')[0]!, obs(h), 'pt', { currency: 'USD' }).caption).not.toContain('contrário')
   })
 
+  test('R5-1: opposite sizes are grouped PER METRIC, never as a cross product', () => {
+    const grp = (p: string, n: number, o: Partial<HistorySubtaskRow>) => Array.from({ length: n }, (_, i) => sub(`${p}${i}`, { qaRounds: p.startsWith('a') ? 1 : 3, ...o }))
+    const rows = [
+      ...grp('aM', 5, { size: 'M', wallMs: H, costUSD: 1 }), ...grp('bM', 5, { size: 'M', wallMs: 5 * H, costUSD: 5 }),
+      // S: opposite in TIME only (B faster), cost agrees
+      ...grp('aS', 3, { size: 'S', wallMs: 10 * H, costUSD: 1 }), ...grp('bS', 3, { size: 'S', wallMs: 5 * H, costUSD: 5 }),
+      // L: opposite in COST only (B cheaper), time agrees
+      ...grp('aL', 3, { size: 'L', wallMs: H, costUSD: 8 }), ...grp('bL', 3, { size: 'L', wallMs: 5 * H, costUSD: 2 }),
+    ]
+    const hh = history(rows)
+    const pt = heroOf(entriesOf(obs(hh), [], 'pt')[0]!, obs(hh), 'pt', { currency: 'USD' }).caption
+    expect(pt).toContain('no tempo, nas peças P foi o contrário; no custo, nas G')
+    const en = heroOf(entriesOf(obs(hh), [], 'en')[0]!, obs(hh), 'en', { currency: 'USD' }).caption
+    expect(en).toContain('in time, the opposite for S pieces; in cost, for L')
+  })
+
+  test('R5-2: a headline within ±5% of 1 says nothing about opposite sizes', () => {
+    const grp = (p: string, n: number, o: Partial<HistorySubtaskRow>) => Array.from({ length: n }, (_, i) => sub(`${p}${i}`, { qaRounds: p.startsWith('a') ? 1 : 3, ...o }))
+    // overall medians within 3% (headline flat), but S and L go opposite ways
+    const rows = [
+      ...grp('aM', 5, { size: 'M', wallMs: 2 * H, costUSD: 4 }), ...grp('bM', 5, { size: 'M', wallMs: 2.06 * H, costUSD: 4.12 }),
+      ...grp('aS', 3, { size: 'S', wallMs: H, costUSD: 1 }), ...grp('bS', 3, { size: 'S', wallMs: 3 * H, costUSD: 8 }),
+      ...grp('aL', 3, { size: 'L', wallMs: 3 * H, costUSD: 8 }), ...grp('bL', 3, { size: 'L', wallMs: H, costUSD: 1 }),
+    ]
+    const hh = history(rows)
+    const k = hh.comparisons![0]!
+    expect(k.wall!.ratio).toBeGreaterThan(1)
+    expect(k.wall!.ratio - 1).toBeLessThan(0.05)
+    expect(k.cost!.ratio).toBeGreaterThan(1)
+    expect(k.cost!.ratio - 1).toBeLessThan(0.05)
+    expect(heroOf(entriesOf(obs(hh), [], 'pt')[0]!, obs(hh), 'pt', { currency: 'USD' }).caption).not.toContain('contrário')
+  })
+
   test('parts: the observed multiplier per type with the "observado" label; no data only where there really is none', () => {
     const p = partsOf(entriesOf(obs(h), [], 'pt')[0]!, obs(h), 'pt', { currency: 'USD' })
     const by = Object.fromEntries(p.map(x => [x.type, x]))
