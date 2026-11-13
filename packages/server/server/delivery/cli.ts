@@ -23,6 +23,8 @@
  * else the owner at their own terminal.
  */
 import type { DeliveryReply, DeliveryService } from './service'
+import { actorOf, isOwner, ownerMove, ownerRefusal, type RequestPrincipal } from './principal'
+import { realCliAuth, resolveCliPrincipal, type CliAuth } from './cli-principal'
 
 /** What `agentop flow --help` prints about the delivery verbs (they live here, not in the engine, so the engine's help never lists them). */
 export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subtask walks fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado; any skipped phase is refused)
@@ -90,13 +92,24 @@ function report(r: DeliveryReply, io: Io): number {
   return r.status === 400 ? 2 : 1
 }
 
-export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env: Record<string, string | undefined> = process.env, service?: DeliveryService): Promise<number> {
+export async function runDeliveryCli(
+  argv: readonly string[], io: Io = STD, env: Record<string, string | undefined> = process.env, service?: DeliveryService,
+  auth: () => Promise<CliAuth> = realCliAuth,
+): Promise<number> {
   if (argv[0] === 'help' || argv[0] === '--help' || argv[0] === '-h') { io.out(DELIVERY_FLOW_HELP.trimEnd()); return 0 }
   const svc = service ?? (await import('./host')).deliveryService()
-  const actor = env.AGENTOP_MANAGED_ID || 'owner'
   const isTaskStage = argv[0] === 'task-stage'
   const { pos, flags } = parseFlags(isTaskStage ? argv.slice(1) : argv)
   const sub = flags.subtask ?? (isTaskStage ? pos[0] : undefined)
+  // ENTREGA.GARANTIDA §2.3: WHO this is is what the process PROVES — an ancestor session (`session`), or `--owner` on a
+  // terminal after the vault's fresh proof — never "no AGENTOP_MANAGED_ID, so the owner". A read needs no principal.
+  const readOnly = argv[0] === 'help' || argv[0] === 'entrega' || argv[0] === 'get' || (argv[0] === 'fila' && !argv[1]?.match(/^(responder|proximo)$/))
+  const resolved = readOnly
+    ? { principal: { kind: 'unattributed' } as RequestPrincipal }
+    : await resolveCliPrincipal(env, flags.owner === 'true', { pieceKey: sub ?? '*', move: ownerMove(isTaskStage ? 'stage' : argv[0], flags.phase ?? pos[0]) }, await auth())
+  if (resolved.note) io.err(resolved.note)
+  const principal = resolved.principal
+  const actor = actorOf(principal)
   const needSub = () => { if (!sub) { io.err('--subtask <id> is required'); return false } return true }
   if (isTaskStage) {
     if (!needSub()) return 2
@@ -144,7 +157,12 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
     case 'block': if (!needSub()) return 2; return report(await svc.block(sub!, flags.reason, flags.text ?? '', actor), io)
     case 'unblock': if (!needSub()) return 2; return report(await svc.unblock(sub!, actor, flags.detail), io)
     case 'dequeue': if (!needSub()) return 2; return report(await svc.dequeue(sub!, flags.reason, actor), io)
-    case 'approve': if (!needSub()) return 2; return report(await svc.approve(sub!, flags.phase, flags.decision, flags.note, !env.AGENTOP_MANAGED_ID), io)
+    case 'approve': {
+      if (!needSub()) return 2
+      const denied = ownerRefusal(principal, 'legacy')
+      if (denied || !isOwner(principal)) { io.err(`${denied?.code ?? 'so_o_dono'}: only the owner approves a human gate — run \`agentop flow approve … --owner\` in a terminal and confirm with the vault`); return 1 }
+      return report(await svc.approve(sub!, flags.phase, flags.decision, flags.note, true), io)
+    }
     case 'release': {
       const subs = argv.flatMap((a, i) => (a === '--subtask' && argv[i + 1] && !argv[i + 1]!.startsWith('--') ? [argv[i + 1]!] : []))
       const r = await svc.release({ version: flags.version, mergeSha: flags.mergeSha, ...(flags.repo ? { repo: flags.repo } : {}), subtaskIds: subs }, actor)

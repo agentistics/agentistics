@@ -25,6 +25,19 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+/**
+ * ENTREGA.GARANTIDA §2.3: every task / subtask / evidence / phase / comment WRITE carries the session proof, so the
+ * server sees a `session` principal instead of an anonymous one. PURE: adds `session` to a JSON-object body of a
+ * non-GET `/api/tasks…` or `/api/task-files…` request that does not already carry one; no proof → untouched
+ * (the server then reads the call as `unattributed`).
+ */
+export function withTaskWriteProof(method: string, path: string, body: unknown, proof: { id: string; token: string } | undefined): unknown {
+  if (!proof || method === "GET" || body === undefined || body === null || typeof body !== "object" || Array.isArray(body)) return body;
+  if (!(path === "/api/tasks" || path.startsWith("/api/tasks/") || path.startsWith("/api/task-files"))) return body;
+  if ((body as Record<string, unknown>).session !== undefined) return body;
+  return { ...(body as Record<string, unknown>), session: proof };
+}
+
 export function sessionProofToken(key: Uint8Array, id: string): string {
   return createHmac("sha256", key).update(`agentop-session:${id}`).digest("hex");
 }

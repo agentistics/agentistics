@@ -1046,6 +1046,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/preferences' && req.method === 'PUT') {
       try {
         let body = await req.json() as Preferences
+        // ENTREGA.GARANTIDA: `delivery.ownerProof` moves only through the owner's fresh proof (vault door), so a
+        // whole-document PUT (the page echoes the document it read) can neither flip the mode nor erase it.
+        delete body.delivery
         if (body.handoffConfig !== undefined) {
           const { normalizeHandoffConfig } = await import('@agentistics/core')
           body.handoffConfig = normalizeHandoffConfig(body.handoffConfig)
@@ -1182,11 +1185,18 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(filtered)
     }
     if (url.pathname === '/api/deliveries' || url.pathname.startsWith('/api/deliveries/')) {
-      const [{ deliveryRequest }, { deliveryService }, { verifySessionIdentity }] = await Promise.all([
+      const [{ deliveryRequest }, { deliveryService }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
         import('./delivery/web'), import('./delivery/host'), import('./sessions/session-identity'),
+        import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
       ])
       const body = req.method === 'POST' ? await req.json().catch(() => ({})) as Record<string, unknown> : {}
-      const out = await deliveryRequest(req.method, url.pathname, body, { service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token) }, req.signal)
+      const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+      const out = await deliveryRequest(req.method, url.pathname, body, {
+        service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token),
+        mode: readOwnerProofMode, browser,
+        // The vault's session for the page is the constant `http:local` (vault/http.ts) — the same one the proof was minted under.
+        consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+      }, req.signal)
       return json(out.body, out.status)
     }
 
@@ -2169,6 +2179,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(out, groupStatus(out))
     }
 
+    // ENTREGA.GARANTIDA §2.3: a task WRITE may not claim the engine or the owner in `actor`, nor a session it cannot prove.
+    if ((url.pathname === '/api/tasks' || url.pathname.startsWith('/api/tasks/')) && req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS'
+      && (req.headers.get('content-type') ?? '').includes('application/json')) {
+      const [{ screenTaskWrite }, { verifySessionIdentity }] = await Promise.all([import('./delivery/principal-http'), import('./sessions/session-identity')])
+      const screened = await screenTaskWrite(await req.clone().json().catch(() => null), (id, token) => verifySessionIdentity(id, token))
+      if (screened) return json(screened.body, screened.status)
+    }
     if (url.pathname === '/api/tasks' && req.method === 'GET') {
       const { listTasks } = await import('./sessions/task-web')
       const { listOptionsOf } = await import('./sessions/task-list-window')

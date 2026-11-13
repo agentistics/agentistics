@@ -25,7 +25,8 @@ const PLAN_CODES = new Set([
   'gate_failed', 'gate_refused',
 ])
 
-const FIXTURES = new Set(['a', 'b', 'c', 'x', 'custom', 'ambiguous', 'missing_field', 'some.new_code_nobody_scoped'])
+// 'owner_proof_required' / 'reserved_actor' / 'so_o_dono' are HTTP refusal codes of the request principal (delivery/principal.ts), not notifications.
+const FIXTURES = new Set(['a', 'b', 'c', 'x', 'custom', 'ambiguous', 'missing_field', 'some.new_code_nobody_scoped', 'owner_proof_required', 'reserved_actor', 'so_o_dono'])
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

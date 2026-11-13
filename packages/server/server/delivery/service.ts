@@ -258,6 +258,9 @@ export function createDeliveryService(d: DeliveryDeps) {
 
   /** The owner (no session proof), the flow engine itself, the recorded leader, or a leader session of this delivery's task. */
   const leads = async (r: DeliveryRecord, actor: string): Promise<boolean> => {
+    // `actor` here was RESOLVED from a principal (delivery/principal.ts): `owner` means a proven owner or the legacy
+    // browser, `unattributed` ("no proof") is never the owner, and a body can no longer claim either name.
+    if (actor === 'unattributed') return false
     if (actor === 'owner' || actor.startsWith('flow:')) return true
     if (r.leaderSessionId && actor === r.leaderSessionId) return true
     const sessions = await d.facts.sessions().catch(() => [])

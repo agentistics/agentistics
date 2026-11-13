@@ -6,7 +6,8 @@
  * proof (the server reads that as the owner).
  */
 import { useState } from 'react'
-import { approveSentence, type ApproveState } from './liveApproveModel'
+import { approveSentence, provingSentence, type ApproveState } from './liveApproveModel'
+import { ownerMove, postWithOwnerProof } from '../../lib/ownerProof'
 
 export interface LiveApproveProps { subtaskId: string; phase: string; pt: boolean; mobile: boolean }
 
@@ -15,17 +16,18 @@ export function LiveApprove({ subtaskId, phase, pt, mobile }: LiveApproveProps) 
   const send = async (decision: 'approve' | 'reject') => {
     setState({ kind: 'sending', decision })
     try {
-      const res = await fetch(`/api/deliveries/${encodeURIComponent(subtaskId)}`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'approve', phase, decision }),
-      })
-      const body = await res.json().catch(() => ({})) as { sentence?: string; error?: string }
-      setState(res.ok ? { kind: 'done', decision } : { kind: 'failed', sentence: body.sentence ?? body.error ?? String(res.status) })
+      // Sent plain first; when the server needs the owner's fresh proof (`ownerProof: required`) the vault is asked
+      // (its own password prompt / Hello) and the SAME request is repeated with the single-use grant.
+      const res = await postWithOwnerProof(
+        `/api/deliveries/${encodeURIComponent(subtaskId)}`, { action: 'approve', phase, decision },
+        { pieceKey: subtaskId, move: ownerMove('approve', phase) }, () => setState({ kind: 'proving', decision }), pt,
+      )
+      setState(res.status < 400 ? { kind: 'done', decision } : { kind: 'failed', sentence: res.body.sentence ?? res.body.error ?? String(res.status) })
     } catch (e) {
       setState({ kind: 'failed', sentence: e instanceof Error ? e.message : String(e) })
     }
   }
-  const busy = state.kind === 'sending' || state.kind === 'done'
+  const busy = state.kind === 'sending' || state.kind === 'proving' || state.kind === 'done'
   const btn = (primary: boolean): React.CSSProperties => ({
     minHeight: mobile ? 44 : 28, padding: '0 12px', borderRadius: 6, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: 12,
     border: `1px solid ${primary ? 'var(--anthropic-orange)' : 'var(--border)'}`,
@@ -42,7 +44,8 @@ export function LiveApprove({ subtaskId, phase, pt, mobile }: LiveApproveProps) 
           <button type="button" data-live-approve-no disabled={busy} onClick={() => void send('reject')} style={btn(false)}>{pt ? 'Reprovar' : 'Reject'}</button>
         </span>
       )}
-      {state.kind === 'failed' && <span data-live-approve-error style={{ fontSize: 11, color: 'var(--accent-red, #ff5f5f)', overflowWrap: 'anywhere' }}>{state.sentence}</span>}
+      {state.kind === 'proving' && <span data-live-approve-proving style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{provingSentence(pt)}</span>}
+      {state.kind === 'failed' &&<span data-live-approve-error style={{ fontSize: 11, color: 'var(--accent-red, #ff5f5f)', overflowWrap: 'anywhere' }}>{state.sentence}</span>}
     </div>
   )
 }

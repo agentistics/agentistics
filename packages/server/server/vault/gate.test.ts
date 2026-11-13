@@ -137,6 +137,8 @@ describe('§2.4 — every row of the table', () => {
     // COFRE.DESBLOQUEIO (owner, 2026-11-07): every row that asked the code OR the gesture now asks the
     // person's ONE proof — here Windows Hello. A code is never asked and never helps.
     test(`${action}: asks ${row.code || row.gesture ? 'the proof' : 'nothing'}${row.code && !row.gesture && row.grant ? ', reusable for 5 min' : row.code || row.gesture ? ', fresh' : ''}`, async () => {
+      // ENTREGA.GARANTIDA §2.3.1: a DEDICATED gate (`requireDeliveryOwner`), never this generic one — covered in delivery-owner.test.ts.
+      if (action === 'delivery-owner') { expect(await requireVaultStepUp(action, S)).toMatchObject({ ok: false, code: 'bad-request' }); return }
       if (action === 'personal-grant') return // VAULT.UI2: loopback needs no proof, a phone needs its passkey — see the dedicated describe below
       if (!row.code && !row.gesture) {
         expect((await requireVaultStepUp(action, S)).ok).toBe(true)

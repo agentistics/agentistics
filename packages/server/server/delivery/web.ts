@@ -15,11 +15,31 @@
  *                                         their merged PR and first release tag (dry-run unless `apply`; applying: a leader or the owner)
  */
 import type { DeliveryReply, DeliveryService } from './service'
+import { actorOf, ownerMove, ownerRefusal, resolveRestPrincipal, type OwnerProofMode, type OwnerScope } from './principal'
+
+/** What the HTTP adapter (`index.ts`) observed about the browser. Absent = not a browser (a plain `curl`, a test). */
+export interface BrowserFacts {
+  /** Loopback socket peer and loopback Host (vault `loopbackRequest`). */
+  loopbackPeer: boolean
+  /** `Origin` is this server's own web origin. */
+  originOwn: boolean
+  /** `Sec-Fetch-Site: same-origin`. */
+  sameOriginFetch: boolean
+  /** The `X-Agentop-Owner-Grant` header, verbatim. Never logged. */
+  grantHeader?: string | null
+}
+
+export type GrantUse = { ok: true; grantId: string } | { ok: false; code: string }
 
 export interface DeliveryWebDeps {
   service: DeliveryService
   /** Verifies a session proof; null = not a verified session. */
   verify(id: unknown, token: unknown): Promise<string | null>
+  /** `delivery.ownerProof`. Absent = `legacy`. */
+  mode?: () => Promise<OwnerProofMode>
+  browser?: BrowserFacts
+  /** Spends a single-use `delivery` grant for exactly this scope (vault `consumeDeliveryGrant`). */
+  consumeGrant?: (token: string, scope: OwnerScope) => GrantUse
 }
 
 export interface WebReply { status: number; body: unknown }
@@ -45,10 +65,27 @@ export async function deliveryRequest(method: string, path: string, body: Record
   }
   if (method !== 'POST') return { status: 405, body: { error: 'method' } }
   // Who asks. A body naming a session must PROVE it; no session at all is the owner (the board's own rule).
+  // ENTREGA.GARANTIDA §2.3 — WHO asks is what the caller PROVED. "No proof" is `unattributed`, never the owner.
   const proof = body.session as { id?: unknown; token?: unknown } | undefined
   const session = proof ? await d.verify(proof.id, proof.token) : null
-  if (proof && !session) return { status: 403, body: { error: 'unverified_sender', sentence: 'the session identity could not be verified' } }
-  const actor = session ?? 'owner'
+  const mode = d.mode ? await d.mode() : 'legacy'
+  const piece = rest === '' ? '*' : rest
+  const scope: OwnerScope = { pieceKey: piece, move: ownerMove(body.action ?? rest, body.phase ?? body.to) }
+  // A grant is spent only for a request that carries no session proof (a session is never the owner).
+  let grant: { id: string } | null = null
+  const grantHeader = d.browser?.grantHeader
+  if (grantHeader && !proof) {
+    const used = d.consumeGrant ? d.consumeGrant(grantHeader, scope) : { ok: false as const, code: 'grant-invalid' }
+    if (!used.ok) return { status: 403, body: { ok: false, error: used.code.replace(/-/g, '_'), sentence: 'the owner proof was not accepted for this move — confirm it again' } }
+    grant = { id: used.grantId }
+  }
+  const resolved = resolveRestPrincipal({
+    mode, grant, sessionClaimed: Boolean(proof), sessionVerified: session, actor: body.actor,
+    loopbackPeer: d.browser?.loopbackPeer ?? false, originOwn: d.browser?.originOwn ?? false, sameOriginFetch: d.browser?.sameOriginFetch ?? false,
+  })
+  if (!resolved.ok) return { status: resolved.status, body: { error: resolved.code, sentence: resolved.sentence } }
+  const principal = resolved.principal
+  const actor = actorOf(principal)
   if (rest === 'tick') return { status: 200, body: await d.service.tick() }
   if (rest === 'queue-next') return { status: 200, body: await d.service.queueNext() }
   if (rest === 'reconcile') {
@@ -89,7 +126,12 @@ export async function deliveryRequest(method: string, path: string, body: Record
     case 'dequeue': return out(await d.service.dequeue(subtaskId, body.reason, actor))
     // The leader's (or owner's) answer to the queue's question, or the tab's "iniciar agora" (`sim`) / "agendar".
     case 'queue-answer': return out(await d.service.answerQueue(subtaskId, body.answer ?? { decision: body.decision, reason: body.reason, at: body.at }, actor))
-    case 'approve': return out(await d.service.approve(subtaskId, body.phase, body.decision, str(body.note), session === null))
+    case 'approve': {
+      // Approving a human gate is an OWNER move (§2.3.2): a fresh vault proof, or — legacy only — the browser shape.
+      const denied = ownerRefusal(principal, mode)
+      if (denied) return { status: denied.status, body: { ok: false, error: denied.code, sentence: denied.sentence } }
+      return out(await d.service.approve(subtaskId, body.phase, body.decision, str(body.note), true))
+    }
     case 'configure': return out(await d.service.configure(subtaskId, (body.patch ?? {}) as Record<string, unknown>, actor))
     case 'step': {
       // A piece the flow never adopted has no record to hold the step: only the board's `step` event is written.

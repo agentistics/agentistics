@@ -175,6 +175,15 @@ export function analyzeOpencodeV2Status(status: OpencodeV2Status | null, now: nu
 export async function runHealthChecks(): Promise<HealthIssue[]> {
   const issues: HealthIssue[] = []
   analyzeOpencodeV2Status(opencodeV2Status(), Date.now(), issues)
+  // ENTREGA.GARANTIDA: the owner is unproven while `delivery.ownerProof` is `legacy` (the default).
+  try {
+    const [{ readOwnerProofMode }, { analyzeOwnerProof }, gate, service] = await Promise.all([
+      import('./delivery/owner-mode'), import('./delivery/owner-health'), import('./vault/gate'), import('./vault/service'),
+    ])
+    const st = (await service.vaultStatus()).state
+    const human = st === 'uninitialized' ? false : await gate.ownerProofAvailable()
+    analyzeOwnerProof(await readOwnerProofMode(), st === 'uninitialized' ? 'none' : human === null ? 'unknown' : human ? 'human' : 'silent-only', (await gate.stepUpState()).frozen === true, issues)
+  } catch { /* a health check never breaks the others */ }
 
   // Determine which harnesses are active so Claude-specific checks can be
   // skipped when only non-Claude harnesses are present.

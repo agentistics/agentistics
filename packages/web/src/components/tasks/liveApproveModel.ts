@@ -3,6 +3,7 @@
 export type ApproveState =
   | { kind: 'idle' }
   | { kind: 'sending'; decision: 'approve' | 'reject' }
+  | { kind: 'proving'; decision: 'approve' | 'reject' }
   | { kind: 'done'; decision: 'approve' | 'reject' }
   | { kind: 'failed'; sentence: string }
 
@@ -21,4 +22,9 @@ export function approveSentence(phase: string, pt: boolean): string {
   const w = PHASE_WORD[phase]
   const name = w ? (pt ? w.pt : w.en) : phase
   return pt ? `Precisa da sua aprovação para entrar em ${name}.` : `Needs your approval to enter ${name}.`
+}
+
+/** What the card says while the vault is asked to confirm it is the owner (ENTREGA.GARANTIDA §2.3.1). */
+export function provingSentence(pt: boolean): string {
+  return pt ? 'Confirme que é você (senha ou biometria do cofre)…' : 'Confirm it is you (vault password or biometrics)…'
 }

@@ -114,7 +114,13 @@ function attemptBlock(v: AttemptView): string[] {
 }
 
 async function runMark(ref: string, to: TaskStatus, json: boolean): Promise<number> {
-  const out = await markTask(ref, to)
+  // ENTREGA.GARANTIDA §2.3: the move is recorded against the principal this process PROVES (a session by its process
+  // tree, else `unattributed`) — never the old implicit "you". The CLI gets the owner only through `--owner` on a
+  // verb that needs it (`agentop flow approve`), never here.
+  const { resolveCliPrincipal, realCliAuth } = await import('../delivery/cli-principal')
+  const { actorOf } = await import('../delivery/principal')
+  const who = await resolveCliPrincipal(process.env, false, { pieceKey: ref, move: `mark:${to}` }, await realCliAuth())
+  const out = await markTask(ref, to, actorOf(who.principal))
   if (!out.ok) {
     // `unknown_status` is new: the status vocabulary is an editable list now
     // (`@agentistics/core`'s `taskStatus.ts`), and `abandoned` in particular is no longer seeded by
