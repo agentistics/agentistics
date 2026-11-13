@@ -5,6 +5,8 @@ import { TabStrip } from '../sessions/formBits'
 import { nf, type Lang, type Money } from '../../lib/benchmarkFormat'
 import { durationText, historyTaskRows, matches, moneyText, sizeLabel, type HistorySortKey, type SizeFilter } from '../../lib/benchmarkView'
 import { Bar } from './BenchStyle'
+import { statusLabel } from '../tasks/copy'
+import { useTaskStatuses } from '../../lib/tasks'
 
 const muted: React.CSSProperties = { color: 'var(--text-tertiary)', fontSize: 12, lineHeight: 1.45 }
 const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 14, minWidth: 0 }
@@ -17,6 +19,8 @@ const dash = '—'
 /** "Por tarefa" over the OBSERVED history: one row per task, a row opens its subtasks. Cost is tokens × price of priced sessions; `*` = some session had no price. */
 export function BenchHistoryTasks({ tasks, coverage, lang, money, initialOpen = null }: { tasks: HistoryTaskRow[]; coverage: HistoryCoverage; lang: Lang; money: Money; initialOpen?: string | null }) {
   const pt = lang === 'pt'
+  const { statuses } = useTaskStatuses()
+  const st = (s: string) => statusLabel(s, lang, statuses)
   const [size, setSize] = useState<SizeFilter>('all')
   const [needle, setNeedle] = useState('')
   const [sort, setSort] = useState<{ key: HistorySortKey; dir: 1 | -1 }>({ key: 'cost', dir: -1 })
@@ -58,7 +62,7 @@ export function BenchHistoryTasks({ tasks, coverage, lang, money, initialOpen = 
                   <td className="bm-num" data-l={pt ? 'Tempo' : 'Time'}>{ms(t.wallMs)}</td><td className="bm-num" data-l={pt ? 'Ativo' : 'Active'}>{ms(t.activeMs)}</td>
                   <td className="bm-num" data-l="QA">{q(t.qaRounds)}</td>
                   <td className="bm-num" data-l={pt ? 'Retrabalho' : 'Rework'}>{t.reworkedPieces === null ? dash : `${t.reworkedPieces}/${t.pieces}`}</td>
-                  <td data-l="Status">{t.status}</td>
+                  <td data-l="Status">{st(t.status)}</td>
                 </tr>
                 {open === t.id && <tr className="bm-d" data-testid="benchmark-task-detail"><td className="bm-d" colSpan={10}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Info size={13} /> {pt ? `${t.pieces} peças, ${t.sessions} sessões${t.lines === null ? '' : `, ${nf(t.lines, lang, 0)} linhas alteradas`}.` : `${t.pieces} pieces, ${t.sessions} sessions${t.lines === null ? '' : `, ${nf(t.lines, lang, 0)} lines changed`}.`}</div>
@@ -71,7 +75,7 @@ export function BenchHistoryTasks({ tasks, coverage, lang, money, initialOpen = 
                       : subs.map(s => <div key={s.id} data-testid="benchmark-subtask-row" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', padding: '4px 0', borderTop: '1px solid var(--border)' }}>
                         <span style={{ flex: '1 1 220px', color: 'var(--text-primary)' }}>{s.title}</span>
                         <span>{sz(s.size)}</span><span>{s.sessions} {pt ? (s.sessions === 1 ? 'sessão' : 'sessões') : (s.sessions === 1 ? 'session' : 'sessions')}</span><span>{cost(s.costUSD, s.costPartial)}</span><span>{ms(s.wallMs)}</span>
-                        <span>QA {q(s.qaRounds)}</span><span>{s.status}</span>
+                        <span>QA {q(s.qaRounds)}</span><span>{st(s.status)}</span>
                       </div>)}
                   </div>
                 </td></tr>}

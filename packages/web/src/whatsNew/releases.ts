@@ -21,8 +21,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Benchmark: filter by task and size, open a task to see the reason and filter its subtasks; on phones each task becomes a card.',
       },
       {
-        pt: 'Benchmark: sem dados suficientes, a tela diz o que falta em palavras, sem inventar nota; a cobertura por harness virou uma linha discreta no rodapé.',
-        en: 'Benchmark: without enough data the screen says what is missing in words, without inventing a score; coverage by harness is now one quiet line in the footer.',
+        pt: 'Benchmark: com o histórico real, compara peças de 1 rodada de QA com as de 2+ rodadas e peças de 1 sessão com as de 4+ — como indício observado, nunca como prova — e diz o que falta para um veredito.',
+        en: 'Benchmark: with the real history it compares pieces with 1 QA round against 2+ rounds and 1 session against 4+ — as observed evidence, never as proof — and says what is missing for a verdict.',
       },
       {
         pt: '"Como funciona?" explica a nota passo a passo, com a versão e a data do método.',

@@ -450,3 +450,75 @@ describe('Retrabalho tile from the observed history', () => {
     expect(tile).toContain('indicativo')
   })
 })
+
+describe('phase 3: the list holds observed comparisons, the hero is one sentence', () => {
+  const mk = (id: string, o: Record<string, unknown>) => ({ id, title: id, status: 'done', size: 'M', sessions: 1, costUSD: 2, costPartial: false, wallMs: H, activeMs: null, qaRounds: 1, reworked: false, lines: 200, ...o })
+  const subs = [...Array.from({ length: 4 }, (_, i) => mk(`o${i}`, {})), ...Array.from({ length: 4 }, (_, i) => mk(`m${i}`, { qaRounds: 3, reworked: true, costUSD: 5, wallMs: 4 * H, sessions: 5 }))]
+  const history = { pieces: 8, tasks: [{ id: 'T', title: 'Tarefa real', status: 'done', size: 'M', pieces: 8, sessions: 24, costUSD: 28, costPartial: false, wallMs: H, activeMs: null, qaRounds: 16, reworkedPieces: 4, lines: 1600, subtasks: subs }],
+    buckets: [{ label: '1', pieces: 4, costMedianUSD: 2, nCost: 4, wallMedianMs: H, nWall: 4, reworkRate: 0, nRework: 4 }, { label: '2-3', pieces: 0, costMedianUSD: null, nCost: 0, wallMedianMs: null, nWall: 0, reworkRate: null, nRework: 0 }, { label: '4-6', pieces: 4, costMedianUSD: 5, nCost: 4, wallMedianMs: 4 * H, nWall: 4, reworkRate: 1, nRework: 4 }, { label: '7+', pieces: 0, costMedianUSD: null, nCost: 0, wallMedianMs: null, nWall: 0, reworkRate: null, nRework: 0 }],
+    coverage: { pieces: 8, withCost: 8, withWall: 8, withQa: 8, withSize: 8, withActive: 0, pctWithCost: 100, harnessesWithoutCost: [], harnessesPartialCost: [] } }
+  const html = render('pt', { ...observed, history } as unknown as Observed)
+
+  test('items are the comparisons, stamped "observado", with no score and no verdict word', () => {
+    expect(html.match(/data-testid="benchmark-item"/g)!.length).toBe(2)
+    expect(html.match(/data-testid="benchmark-seal"/g)!.length).toBe(2)
+    expect(html).toContain('1 rodada de QA × 2+ rodadas')
+    expect(html).toContain('1 sessão × 4+ sessões')
+    const list = html.split('data-testid="benchmark-list"')[1]!.split('</nav>')[0]!
+    expect(list).not.toMatch(/Compensou|Empate|>—<|role="img"/)
+  })
+
+  test('hero: short title, ONE sentence, a caption, no bar, and the reasons folded in a closed disclosure', () => {
+    const hero = html.split('data-testid="benchmark-hero"')[1]!.split('data-testid="benchmark-parts"')[0]!
+    expect(hero).toContain('Indício, não prova')
+    expect(hero).toContain('custaram 2,5× mais e levaram 4× mais tempo')
+    expect(hero).toContain('benchmark-caption')
+    expect(hero).not.toContain('role="img"')
+    expect(hero).not.toContain('de 100')
+    expect(hero).toContain('Por que não é prova?')
+    expect(hero).not.toMatch(/<details[^>]* open/)
+    // the facts list lives INSIDE the disclosure, not beside the sentence
+    expect(hero.indexOf('benchmark-facts')).toBeGreaterThan(hero.indexOf('Por que não é prova?'))
+    expect(hero.match(/<p /g)!.length).toBeGreaterThanOrEqual(3)
+  })
+
+  test('Partes show the observed multiplier per type; "sem dados" only for quality and reliability, in one line each', () => {
+    const tile = (t: string) => html.split(`data-testid="part-${t}"`)[1]!.split('data-testid="part-')[0]!
+    expect(tile('cost')).toContain('2,5×')
+    expect(tile('cost')).toContain('observado')
+    expect(tile('time')).toContain('4×')
+    expect(tile('rework')).toContain('5×')
+    expect(tile('rework')).toContain('Sessões por peça')
+    expect(tile('rework').split('data-testid="benchmark-tasks"')[0]).not.toContain('Retrabalho')
+    expect(tile('quality')).toContain('>sem dados<')
+    expect(tile('quality')).toContain('title="defeito escapado e peça reaberta não são registrados"')
+    expect(tile('quality')).not.toContain('não são registrados</')
+    expect(tile('reliability')).toContain('title="nenhuma tarefa foi repetida"')
+  })
+
+  test('Por tarefa and the buckets still show the real rows', () => {
+    expect(html).toContain('Tarefa real')
+    expect(html).toContain('1 sessão')
+    expect(html).toContain('4–6 sessões')
+  })
+
+  test('selecting the second comparison changes the hero and the third tile', () => {
+    const second = render('pt', { ...observed, history } as unknown as Observed, { initialSelected: 'sessions' })
+    expect(second).toContain('retrabalho 100% × 0%')
+    expect(second.split('data-testid="part-rework"')[1]!.split('data-testid="part-')[0]!).toContain('100% × 0%')
+  })
+})
+
+describe('Por tarefa status uses the board\'s own labels', () => {
+  const row = (status: string) => ({ id: status, title: `T ${status}`, status, size: 'M', pieces: 1, sessions: 1, costUSD: 1, costPartial: false, wallMs: H, activeMs: null, qaRounds: null, reworkedPieces: null, lines: 10, subtasks: [] })
+  const h = { pieces: 3, tasks: [row('in_progress'), row('done'), row('in_review')], buckets: [], coverage: { pieces: 3, withCost: 3, withWall: 3, withQa: 0, withSize: 3, withActive: 0, pctWithCost: 100, harnessesWithoutCost: [], harnessesPartialCost: [] } }
+  test('pt and en show the translated status, never the raw id', () => {
+    const pt = render('pt', { ...observed, history: h } as unknown as Observed), en = render('en', { ...observed, history: h } as unknown as Observed)
+    for (const id of ['in_progress', 'in_review']) for (const html of [pt, en]) expect(html.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!).not.toMatch(new RegExp(`>${id}<`))
+    expect(pt).toContain('>Em andamento<')
+    expect(pt).toContain('>Concluído<')
+    expect(pt).toContain('>Em revisão<')
+    expect(en).toContain('>In progress<')
+    expect(en).toContain('>Delivered<')
+  })
+})
