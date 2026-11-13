@@ -176,7 +176,9 @@ export const HARNESS_CAPABILITIES: Record<SurfaceHarnessId, HarnessCapabilities>
   // `command` — so tools and commits are both real, read from what it actually ran.
   kimi: { tokens: true, cost: true, model: true, tools: true, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true, contextWindow: true, compaction: false, skills: false, mcpServers: true },
   // OpenCode message usage feeds the SQLite adapter. Prices use the shared model table;
-  // unknown routes stay unpriced. The last response's input side supplies the context gauge.
+  // unknown routes stay unpriced. The last response's input side supplies the context gauge. Commits come from
+  // the bash tool's command and lines/files from the edit/write inputs (edit deltas, not git diff); gitLines stays
+  // false until the canonical replay (engine) states them too — LEGACY_FALSE_NOTES pins that.
   opencode: { tokens: true, cost: true, model: true, tools: true, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true, contextWindow: true, compaction: false, skills: false, mcpServers: false },
   // Hermes (Nous Research): DECLARED only. No adapter reads its store yet and no live probe has run, so
   // nothing is claimed — every metric is false until a recorded run proves otherwise.
