@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { act, createElement } from 'react'
 
@@ -13,6 +13,9 @@ const stats = {
   context: { fraction: 0.4, used: 400, window: 1000 }, contextUsed: null, messages: null,
   subagents: null, git: null, activeMinutes: null, model: null,
 } as const
+
+const realFetch = globalThis.fetch
+const realEventSource = (globalThis as { EventSource?: unknown }).EventSource
 
 beforeAll(async () => {
   GlobalRegistrator.register({ width: 1200, height: 800 })
@@ -33,9 +36,19 @@ beforeEach(async () => {
   root = createRoot(host)
 })
 
-afterAll(async () => {
+// Every test mounts its own root; one left mounted keeps its subscriptions (plan limits, event
+// stream) alive for the rest of a single-process run and leaks into later files.
+afterEach(async () => {
   await act(async () => { root?.unmount() })
+  root = undefined
+  host?.remove()
+  host = undefined
+})
+
+afterAll(async () => {
   await GlobalRegistrator.unregister()
+  globalThis.fetch = realFetch
+  ;(globalThis as { EventSource?: unknown }).EventSource = realEventSource
 })
 
 const element = (key?: string, sessionId = 'conversation-1') => createElement(SessionStatsMenu, {

@@ -12,7 +12,7 @@
  */
 
 import {
-  FileDiff, Bot, BarChart3, ClipboardList, Cpu, FolderTree, GitBranch, GitPullRequest, Image, Plug,
+  Activity, CalendarDays, FileDiff, Bot, BarChart3, ClipboardList, Cpu, FolderTree, GitBranch, GitPullRequest, Image, Plug,
   Search, Sparkles, TerminalSquare, Workflow, type LucideIcon,
 } from 'lucide-react'
 import { HarnessMark } from '../components/sessions/HarnessMark'
@@ -30,6 +30,8 @@ const ICON: Record<Exclude<PanelId, 'cli' | 'shell'>, LucideIcon> = {
   prs: GitPullRequest,
   tasks: ClipboardList,
   metrics: BarChart3,
+  calendar: CalendarDays,
+  livedelivery: Activity,
   studio: FolderTree,
   hardware: Cpu,
 }

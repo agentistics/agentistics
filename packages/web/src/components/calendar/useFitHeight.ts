@@ -7,10 +7,11 @@ import { fitHeight, holdPageFit, reserveBelow } from '../../lib/pageFit'
  * `lib/pageFit.ts` — so the two cannot disagree about the panel frame's padding). Outside the app shell (no scroller) the
  * window is the box.
  */
-export function useFitHeight<T extends HTMLElement>(min = 420, dep: unknown = null): { ref: React.RefObject<T | null>; height: number | null } {
+export function useFitHeight<T extends HTMLElement>(min = 420, dep: unknown = null, enabled = true): { ref: React.RefObject<T | null>; height: number | null } {
   const ref = useRef<T | null>(null)
   const [height, setHeight] = useState<number | null>(null)
   useLayoutEffect(() => {
+    if (!enabled) return
     const measure = () => {
       const el = ref.current
       if (!el) return
@@ -34,6 +35,6 @@ export function useFitHeight<T extends HTMLElement>(min = 420, dep: unknown = nu
     window.addEventListener('resize', measure)
     return () => { window.removeEventListener('resize', measure); ro?.disconnect(); release() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [min, dep])
+  }, [min, dep, enabled])
   return { ref, height }
 }

@@ -108,6 +108,20 @@ export const PANEL_META: Record<PanelId, PanelMetaEntry> = {
       pt: 'Tudo que o banco sabe sobre esta conversa — tokens, custo, duração.',
     },
   },
+  calendar: {
+    title: { en: 'Calendar', pt: 'Calendário' },
+    description: {
+      en: 'Versions and pieces by day, week or month — the delivery calendar.',
+      pt: 'Versões e peças por dia, semana ou mês — o calendário de entregas.',
+    },
+  },
+  livedelivery: {
+    title: { en: 'Live', pt: 'Live' },
+    description: {
+      en: 'The live delivery board: what every leader and session is doing now.',
+      pt: 'O quadro Live das entregas: o que cada líder e sessão está fazendo agora.',
+    },
+  },
   studio: {
     title: { en: 'Studio', pt: 'Studio' },
     description: {

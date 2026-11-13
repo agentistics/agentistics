@@ -70,7 +70,6 @@ import { SessionTabStrip } from '../components/sessions/SessionTabStrip'
 import { panelTitle } from '../lib/panelMeta'
 import { tabStripEdgeFade, tabStripFadeMask } from '../lib/tabStripEdge'
 import { PanelRail, panelTile } from '../components/sessions/PanelRail'
-import { TaskNavigationLinks } from '../components/sessions/TaskNavigationLinks'
 import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
 import type { HarnessId } from '@agentistics/core'
 import { freedBytes, fmt } from '@agentistics/core'
@@ -1656,7 +1655,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       display: 'flex', alignItems: 'flex-start', gap: 4, flexShrink: 0,
       padding: '4px 6px', borderBottom: '1px solid var(--border)',
     }}>
-      <TaskNavigationLinks lang={pt ? 'pt' : 'en'} onNavigate={navigate} mobile />
       <div
         ref={attachTabStrip}
         className="tabscroll"

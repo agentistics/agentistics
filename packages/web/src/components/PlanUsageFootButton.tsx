@@ -5,7 +5,7 @@ import { Gauge } from 'lucide-react'
 import { HARNESS_LABELS } from '../lib/harness'
 import { currentUsedPct, limitLevel, limitLevelWord, usePlanLimits, windowLabel } from '../lib/planLimits'
 import { requestUsagePage } from '../lib/usagePageRequests'
-import { scrollIsOutside } from '../lib/popoverScroll'
+import { scrollClosesPopover } from '../lib/popoverScroll'
 import { LimitLevelIcon, PlanUsageSummary } from './PlanLimitMeter'
 import { usePlanAgentUse } from '../lib/usePlanAgentUse'
 import { ReloginModal } from '../pages/settings/ReloginModal'
@@ -65,9 +65,29 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
   useEscapeOwner(!!rect, close)
   useEffect(() => {
     if (!rect) return
-    const onScroll = (e: Event) => { if (scrollIsOutside(popRef.current, e.target)) close() }
+    // Only a PERSON's gesture may close it: a conversation that scrolls itself on a new message is not one. A press
+    // outside the popup (or its button) closes it the way any popover does; a scroll closes it only right after a
+    // wheel / touch / key gesture.
+    let lastGesture: number | null = null
+    const gesture = () => { lastGesture = Date.now() }
+    const onScroll = (e: Event) => { if (scrollClosesPopover(popRef.current, e.target, lastGesture, Date.now())) close() }
+    const onPress = (e: Event) => {
+      const t = e.target as Node | null
+      if (t && (popRef.current?.contains(t) || btnRef.current?.contains(t))) return
+      close()
+    }
     window.addEventListener('scroll', onScroll, true)
-    return () => { window.removeEventListener('scroll', onScroll, true) }
+    window.addEventListener('wheel', gesture, true)
+    window.addEventListener('touchmove', gesture, true)
+    window.addEventListener('keydown', gesture, true)
+    window.addEventListener('pointerdown', onPress, true)
+    return () => {
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('wheel', gesture, true)
+      window.removeEventListener('touchmove', gesture, true)
+      window.removeEventListener('keydown', gesture, true)
+      window.removeEventListener('pointerdown', onPress, true)
+    }
   }, [rect, close])
 
   // The popover is portaled to <body>, so the browser's tab order never reaches it from the button.

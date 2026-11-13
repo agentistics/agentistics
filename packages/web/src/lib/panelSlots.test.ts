@@ -31,9 +31,9 @@ function memory(): Storage {
 // ---------------------------------------------------------------------------------------------
 
 describe('PANEL_IDS', () => {
-  test('is exactly the fifteen panels — the ten former Contents tabs, search, plus studio/hardware/cli/shell', () => {
+  test('is exactly the seventeen panels — the former Contents tabs, search, calendar, livedelivery, plus studio/hardware/cli/shell', () => {
     expect(PANEL_IDS.slice().sort()).toEqual([
-      'agents', 'cli', 'forks', 'gallery', 'hardware', 'live', 'mcps', 'metrics', 'prs', 'search',
+      'agents', 'calendar', 'cli', 'forks', 'gallery', 'hardware', 'live', 'livedelivery', 'mcps', 'metrics', 'prs', 'search',
       'shell', 'skills', 'studio', 'tasks', 'workflows',
     ])
   })
