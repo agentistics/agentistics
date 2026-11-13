@@ -10,6 +10,7 @@
  */
 import { classifyPiece, evaluateEvidence, type Classification } from './classify'
 import { gatherFacts, type ClassifyDeps } from './classify-host'
+import { declareClassification } from './classify-declare'
 import type { EvidenceItem } from './evidence'
 import { applyGuardedWrite, type PieceCheckpoint } from './guards-store'
 import type { GuardLockName, GuardLockPaths } from './guard-locks'
@@ -46,11 +47,15 @@ export async function guardedReviewEntry(o: ReviewEntry): Promise<ReviewResult> 
   // A declaration names where to look; it only stands in when the live checkout is unresolvable (a removed worktree, a
   // session filed late). It never overrides a checkout the server CAN read, and never supplies the category itself.
   if (!c.ok && c.code === 'classification_required' && o.declared) {
-    declared = o.declared
-    const cat = o.declared.category
-    if (cat === 'screen' || cat === 'code' || cat === 'docs' || cat === 'none-verified') {
-      c = { ok: true, category: cat, headSha: o.declared.head, treeClean: true, diffPaths: [], structuralAllowed: false }
+    // The persisted declaration is only a POINTER (repo + head). The classification is RE-DERIVED from that repository and
+    // commit now — it must exist and be reachable from a remote branch — and the whole derived result is used (including the
+    // structural-probe allowance). `declared.category` is audit data and is never read here.
+    const again = await declareClassification(o.deps, { piece: o.piece, repo: o.declared.repo, head: o.declared.head })
+    if (!again.ok) {
+      return { ok: false, code: 'classification_required', message: `The leader's classification declaration no longer holds (${again.code}): ${again.message}`, messagePt: `A declaração de classificação do líder não vale mais (${again.code}): ${again.message}` }
     }
+    declared = { ...o.declared, head: again.declaration.head, category: again.declaration.category }
+    c = again.classification
   }
   if (!c.ok) return c
   const ev = evaluateEvidence(c, o.items)

@@ -4,9 +4,9 @@
  * a GIT_* variable. These tests export those variables pointing at a throwaway "victim" repo and prove it is untouched.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { join, sep } from 'node:path'
 import { cleanGitEnv, gitSpawnEnv } from './git-env'
 import { gitSync, originWithClone, put } from './git-fixture.testing'
 import { execGit, forgetClassifyCache, gatherFacts } from './classify-host'
@@ -51,6 +51,20 @@ describe('the environment helper', () => {
     const spawn = gitSpawnEnv({ GIT_AUTHOR_NAME: 't' }, base)
     expect(Object.keys(spawn).filter(k => k.startsWith('GIT_')).sort()).toEqual(['GIT_AUTHOR_NAME', 'GIT_TERMINAL_PROMPT'])
     expect(spawn.GIT_DIR).toBeUndefined()
+  })
+  test('QA r2 F5: a symlink INSIDE the temp dir that points OUTSIDE it is refused before git runs (realpath containment)', () => {
+    const outside = mkdtempSync(join(homedir(), 'git-env-ext-'))
+    try {
+      // when the platform's home lives under the temp dir there is no "outside" to point at: nothing to prove
+      if (realpathSync(outside).startsWith(realpathSync(tmpdir()) + sep)) return
+      Bun.spawnSync(['git', 'init', '-b', 'main', outside], { env: cleanGitEnv(), stdout: 'pipe', stderr: 'pipe' })
+      const link = join(root, 'link'); symlinkSync(outside, link)
+      expect(() => gitSync(link, 'status')).toThrow(/not inside the temp directory/)
+      expect(() => gitSync(join(link, 'sub'), 'status')).toThrow(/not inside the temp directory|does not resolve/)
+    } finally { rmSync(outside, { recursive: true, force: true }) }
+  })
+  test('QA r2 F5: a cwd that does not resolve is refused, not trusted by its text', () => {
+    expect(() => gitSync(join(root, 'does', 'not', 'exist'), 'status')).toThrow(/not inside the temp directory|resolve/)
   })
   test('the fixture helper refuses a cwd outside the temp directory', () => {
     expect(() => gitSync('/', 'status')).toThrow(/not inside the temp directory/)

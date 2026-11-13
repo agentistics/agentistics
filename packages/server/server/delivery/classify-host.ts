@@ -3,9 +3,13 @@
  * about it. The pure verdict is `classify.ts`'s `classifyPiece`.
  *
  * The checkout is the `cwd` of the sessions filed under the piece (newest first); a worktree, a removed directory or a
- * folder that is not a repository is skipped. HEAD and `git status --porcelain` are read on EVERY call — the guard runs
- * at every guarded move, and a commit or a dirty file between two moves must be seen. Only the diff against the release
- * line's merge-base is cached, by (repository, HEAD, dirty hash): the one expensive read, and a pure function of those.
+ * folder that is not a repository is skipped. HEAD, `git status`, the release line and its merge-base are read on EVERY
+ * call — the guard runs at every guarded move, and a commit, a dirty file or a moved base between two moves must be seen.
+ * Only the diff is cached, by (repository, HEAD, merge-base, dirty hash): a pure function of exactly those.
+ *
+ * Paths are read NUL-delimited (`-z`) and verbatim: git quotes non-ASCII names in line mode (`"packages/web/\303\247.tsx"`),
+ * which would not match `packages/web/` and silently turn a screen change into a code change. A rename or copy counts BOTH
+ * sides — `src/a.ts → docs/a.md` removes code, it is not a documentation-only change.
  */
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -35,16 +39,31 @@ export function cwdsOfPiece(rows: readonly ClassifySession[], piece: { taskId: s
   return [...new Set(sorted.map(r => r.cwd))]
 }
 
-/** Paths out of `git status --porcelain` (v1): renames report the destination, quoted names are unquoted. */
-export function parsePorcelain(text: string): string[] {
+/**
+ * Paths out of `git status --porcelain -z` (v1). Each entry is `XY <path>\0`; a rename or copy (X or Y is R or C) is followed
+ * by a second NUL-terminated token, the ORIGINAL path — both are returned. Names are verbatim (no unquoting, no trimming).
+ */
+export function parseStatusZ(text: string): string[] {
+  const tok = text.split('\0')
   const out: string[] = []
-  for (const line of text.split('\n')) {
-    if (line.length < 4) continue
-    let p = line.slice(3)
-    const arrow = p.indexOf(' -> ')
-    if (arrow !== -1) p = p.slice(arrow + 4)
-    if (p.startsWith('"') && p.endsWith('"')) p = p.slice(1, -1)
-    out.push(p)
+  for (let i = 0; i < tok.length; i++) {
+    const entry = tok[i]!
+    if (entry.length < 4) continue
+    out.push(entry.slice(3))
+    if (/[RC]/.test(entry.slice(0, 2))) { const orig = tok[++i]; if (orig) out.push(orig) }
+  }
+  return out
+}
+
+/** Paths out of `git diff --name-status -z -M`: `S\0path\0` or, for R/C, `Sxxx\0old\0new\0` — both sides of a rename/copy. */
+export function parseNameStatusZ(text: string): string[] {
+  const tok = text.split('\0')
+  const out: string[] = []
+  for (let i = 0; i < tok.length;) {
+    const st = tok[i++]!
+    if (!st) continue
+    const n = st[0] === 'R' || st[0] === 'C' ? 2 : 1
+    for (let k = 0; k < n; k++) { const p = tok[i++]; if (p) out.push(p) }
   }
   return out
 }
@@ -53,7 +72,6 @@ const diffCache = new Map<string, string[]>()
 const DIFF_CACHE_MAX = 500
 export function forgetClassifyCache(): void { diffCache.clear() }
 
-const lines = (s: string) => s.split('\n').map(x => x.trim()).filter(Boolean)
 const digest = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 16)
 
 /** The release line this repository compares against, as a resolvable ref; null when none exists. */
@@ -64,10 +82,19 @@ export async function resolveBase(deps: Pick<ClassifyDeps, 'git'>, cwd: string):
   return null
 }
 
+/** The merge-base of `base` and `head` (a full sha). Throws when git cannot say. */
+export async function mergeBaseOf(deps: Pick<ClassifyDeps, 'git'>, cwd: string, base: string, head: string): Promise<string> {
+  return (await deps.git(cwd, ['merge-base', base, head])).trim()
+}
+
+/** Paths changed between `mb` and `head` (renames/copies count both sides). Throws when git cannot say. */
+export async function diffPathsBetween(deps: Pick<ClassifyDeps, 'git'>, cwd: string, mb: string, head: string): Promise<string[]> {
+  return parseNameStatusZ(await deps.git(cwd, ['diff', '--name-status', '-z', '-M', '--no-color', `${mb}..${head}`]))
+}
+
 /** Paths changed between the merge-base of `base` and `head`, and `head`. Throws when git cannot say. */
 export async function diffAgainstBase(deps: Pick<ClassifyDeps, 'git'>, cwd: string, base: string, head: string): Promise<string[]> {
-  const mb = (await deps.git(cwd, ['merge-base', base, head])).trim()
-  return lines(await deps.git(cwd, ['diff', '--name-only', `${mb}..${head}`]))
+  return diffPathsBetween(deps, cwd, await mergeBaseOf(deps, cwd, base, head), head)
 }
 
 export async function gatherFacts(deps: ClassifyDeps, piece: { taskId: string; subtaskId?: string }): Promise<ClassifyFacts> {
@@ -83,15 +110,19 @@ export async function gatherFacts(deps: ClassifyDeps, piece: { taskId: string; s
     let head: string; let status: string
     try {
       head = (await deps.git(top, ['rev-parse', 'HEAD'])).trim()
-      status = await deps.git(top, ['status', '--porcelain'])
+      status = await deps.git(top, ['status', '--porcelain', '-z', '--untracked-files=all'])
     } catch { return { ...none, checkout: 'unreadable', everHadRepoCwd: true } }
-    const dirtyPaths = parsePorcelain(status)
-    const key = `${top}|${head}|${digest(status)}`
+    const dirtyPaths = parseStatusZ(status)
+    // The release line is MUTABLE (a fetch, a force-update, a deleted ref): it is re-resolved on every call, and the cache key
+    // carries the merge-base it produced, so a moved or vanished base can never be answered from a stale diff.
+    const base = await resolveBase(deps, top)
+    if (!base) return { checkout: 'base-unresolved', everHadRepoCwd: true, headSha: head, dirtyPaths, diffPaths: [] }
+    let mb: string
+    try { mb = await mergeBaseOf(deps, top, base, head) } catch { return { checkout: 'unreadable', everHadRepoCwd: true, headSha: head, dirtyPaths, diffPaths: [] } }
+    const key = `${top}|${head}|${mb}|${digest(status)}`
     let diffPaths = diffCache.get(key)
     if (!diffPaths) {
-      const base = await resolveBase(deps, top)
-      if (!base) return { checkout: 'base-unresolved', everHadRepoCwd: true, headSha: head, dirtyPaths, diffPaths: [] }
-      try { diffPaths = await diffAgainstBase(deps, top, base, head) } catch { return { checkout: 'unreadable', everHadRepoCwd: true, headSha: head, dirtyPaths, diffPaths: [] } }
+      try { diffPaths = await diffPathsBetween(deps, top, mb, head) } catch { return { checkout: 'unreadable', everHadRepoCwd: true, headSha: head, dirtyPaths, diffPaths: [] } }
       if (diffCache.size >= DIFF_CACHE_MAX) diffCache.delete(diffCache.keys().next().value as string)
       diffCache.set(key, diffPaths)
     }

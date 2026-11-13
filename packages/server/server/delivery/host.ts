@@ -5,6 +5,7 @@
  */
 import { createDeliveryService, type DeliveryBoard, type DeliveryDeps, type DeliveryNotify, type DeliveryService } from './service'
 import { defaultGateFacts } from './gates'
+import { execGit } from './classify-host'
 import { createDeliveryStore } from './store'
 import { PHASE_STATUS, type DeliveryRecord, type Phase } from './machine'
 import { boardReviewTargets } from './review-board'
@@ -284,8 +285,12 @@ let cached: DeliveryService | null = null
 export function deliveryService(overrides: Partial<DeliveryDeps> = {}): DeliveryService {
   if (cached && Object.keys(overrides).length === 0) return cached
   const store = overrides.store ?? createDeliveryStore()
+  const facts = overrides.facts ?? defaultGateFacts()
   const svc = createDeliveryService({
-    store, facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
+    store, facts, board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
+    // S1b: the classification host — the registered sessions' checkouts + a GIT_*-free git. Without it every real door
+    // (CLI, HTTP, MCP) answered 501 `classify_unavailable`.
+    classify: { sessions: () => facts.sessions(), git: execGit },
     autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, accountName: accountNameOf, now: () => Date.now(),
     reviewPieces: boardReviewPieces, closeLegacy: closeLegacyPiece, hasSession: pieceHasSession, hasSessions: piecesWithSession,
     oldPieces: async () => (await import('../sessions/task-web')).liveAntigaPieces(),

@@ -137,6 +137,26 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Declaração inválida', message: 'Informe o repositório e um commit (de 7 a 40 caracteres) para declarar a classificação.' },
     en: { title: 'Invalid declaration', message: 'Give a repository and a commit (7–40 characters) to declare the classification.' },
   },
+  declaration_repo_unresolved: {
+    pt: { title: 'Repositório não encontrado', message: 'Não encontramos esse repositório aqui. Informe o caminho de um checkout, ou um remoto que um dos checkouts da peça use.' },
+    en: { title: 'Repository not found', message: 'We could not find that repository here. Give the path of a checkout, or a remote one of the piece\'s checkouts uses.' },
+  },
+  declaration_commit_missing: {
+    pt: { title: 'Commit inexistente', message: 'Esse commit não existe no repositório informado.' },
+    en: { title: 'Commit not found', message: 'That commit does not exist in the repository you named.' },
+  },
+  declaration_unpushed: {
+    pt: { title: 'Commit não enviado', message: 'Esse commit ainda não está em nenhuma branch remota. Faça o push antes de declarar.' },
+    en: { title: 'Commit not pushed', message: 'That commit is not on any remote branch yet. Push it before declaring.' },
+  },
+  classify_unavailable: {
+    pt: { title: 'Classificação indisponível', message: 'Este servidor não consegue classificar peças agora.' },
+    en: { title: 'Classification unavailable', message: 'This server cannot classify pieces right now.' },
+  },
+  classify_leader_only: {
+    pt: { title: 'Só o líder declara', message: 'Apenas o líder da tarefa (ou o dono) pode dizer onde está o checkout de uma peça.' },
+    en: { title: 'Leader only', message: 'Only the task leader (or the owner) can say where a piece\'s checkout is.' },
+  },
   declaration_unclassifiable: {
     pt: { title: 'Não foi possível classificar', message: 'O servidor não conseguiu classificar a peça a partir desse commit.' },
     en: { title: 'Could not classify', message: 'The server could not classify the piece from that commit.' },

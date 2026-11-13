@@ -164,6 +164,52 @@ describe('the declaration reaches the checkpoint', () => {
     expect(cp.classification).toMatchObject({ category: 'screen', headSha: pushed, declared: { by: 'leader', repo, head: pushed } })
   })
 
+  describe('QA r2 F2 — the fallback RE-DERIVES from repo/head; the persisted category is audit only', () => {
+    const paths = () => ({ tasks: join(root, 'tasks.json'), deliveries: join(root, 'deliveries.json'), guards: join(root, 'guards.json') })
+    const entry = async (declared: Record<string, unknown>, head: string, kinds: Array<'report' | 'test-log'>) => {
+      const mk = (kind: EvidenceItem['kind']) => { const bytes = kind === 'test-log' ? new TextEncoder().encode(' 5 pass\n 0 fail\n') : new TextEncoder().encode(`Result: ok\n${'x'.repeat(400)}`); const r = buildEvidenceItem({ kind, bytes } as never, { revision: 1, headSha: head, treeClean: true, by: 'x', at: T, items: [] }); if (!r.ok) throw new Error(r.message); return r.item }
+      const items = kinds.map(mk)
+      return guardedReviewEntry({ deps: sessionsFor([]), piece, key: 'p1', revision: 1, items, now: T, paths: paths(), locks: ['guards'] as const, declared: declared as never, checkpoint: { boardStatus: 'in_review', boardStage: 'leader', phase: 'revisao_lider', by: { kind: 'session' }, transitionId: 'tr-r2' }, writeDocuments: async () => undefined })
+    }
+    test('a declaration whose stored category LIES (docs) for a commit that changed a screen → the derived requirement (screenshots) applies; a lone report is refused', async () => {
+      const { repo, pushed } = fixture()
+      const r = await entry({ by: 'leader', at: T, repo, head: pushed, category: 'docs' }, pushed, ['report'])
+      expect(r).toMatchObject({ ok: false, code: 'evidence_required' })
+      if (!r.ok) expect(r.missing).toContain('desktop screenshot (≥ 1000 px wide)')
+      expect(existsSync(join(root, 'guards.json'))).toBe(false)
+    })
+    test('a declaration naming a repository that does not exist / a commit that is absent / a commit that was never pushed → refused, nothing written', async () => {
+      const { repo, pushed, unpushed } = fixture()
+      for (const d of [
+        { by: 'leader', at: T, repo: join(root, 'removed'), head: pushed, category: 'docs' },
+        { by: 'leader', at: T, repo, head: 'deadbeefdeadbeefdeadbeef', category: 'docs' },
+        { by: 'leader', at: T, repo, head: unpushed, category: 'docs' },
+      ]) {
+        const r = await entry(d, pushed, ['report'])
+        expect(r, JSON.stringify(d)).toMatchObject({ ok: false, code: 'classification_required' })
+      }
+      expect(existsSync(join(root, 'guards.json'))).toBe(false)
+    })
+    test('the derived result keeps the structural allowance: a test-only commit accepts a structural probe through the fallback', async () => {
+      const { repo } = fixture()
+      put(repo, 'packages/server/server/only.test.ts', 'x'); git(repo, 'add', '-A'); git(repo, 'commit', '-m', 'test only'); git(repo, 'push', 'origin', 'feat/x')
+      const head = git(repo, 'rev-parse', 'HEAD')
+      // main..HEAD still contains the web commit from the fixture, so build a fresh test-only branch off main
+      git(repo, 'checkout', '-b', 'only-tests', 'origin/main'); put(repo, 'packages/server/server/t2.test.ts', 'y'); git(repo, 'add', '-A'); git(repo, 'commit', '-m', 't2'); git(repo, 'push', '-u', 'origin', 'only-tests')
+      const h2 = git(repo, 'rev-parse', 'HEAD')
+      const derived = await declareClassification(sessionsFor([]), { piece, repo, head: h2 })
+      expect(derived).toMatchObject({ ok: true, classification: { category: 'code', structuralAllowed: true } })
+      void head
+      // ...and the guard's fallback keeps it: test-log + a structural probe at h2 satisfy the requirement
+      const log = buildEvidenceItem({ kind: 'test-log', bytes: new TextEncoder().encode(' 5 pass\n 0 fail\n') }, { revision: 1, headSha: h2, treeClean: true, by: 'x', at: T, items: [] })
+      if (!log.ok) throw new Error('setup')
+      const st = buildEvidenceItem({ kind: 'probe', probe: { kind: 'structural', reason: 'a test-only change no read-only probe can observe', testLogId: log.item.id } }, { revision: 1, headSha: h2, treeClean: true, by: 'x', at: T, items: [log.item] })
+      if (!st.ok) throw new Error(st.message)
+      const r = await guardedReviewEntry({ deps: sessionsFor([]), piece, key: 'p1', revision: 1, items: [log.item, st.item], now: T, paths: paths(), locks: ['guards'] as const, declared: { by: 'leader', at: T, repo, head: h2, category: 'code' }, checkpoint: { boardStatus: 'in_review', boardStage: 'leader', phase: 'revisao_lider', by: { kind: 'session' }, transitionId: 'tr-r3' }, writeDocuments: async () => undefined })
+      expect(r.ok).toBe(true)
+    })
+  })
+
   test('a declaration NEVER overrides a checkout the server can read: the live classification wins and the checkpoint records no declaration', async () => {
     const { repo } = fixture(); const live = git(repo, 'rev-parse', 'HEAD')
     const paths = { tasks: join(root, 'tasks.json'), deliveries: join(root, 'deliveries.json'), guards: join(root, 'guards.json') }

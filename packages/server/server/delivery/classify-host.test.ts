@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { classifyPiece } from './classify'
 import { gitSync, originWithClone, put } from './git-fixture.testing'
-import { cwdsOfPiece, execGit, forgetClassifyCache, gatherFacts, parsePorcelain, type ClassifyDeps, type ClassifySession } from './classify-host'
+import { cwdsOfPiece, execGit, forgetClassifyCache, gatherFacts, parseNameStatusZ, parseStatusZ, type ClassifyDeps, type ClassifySession } from './classify-host'
 
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'classify-host-')); forgetClassifyCache() })
@@ -69,6 +69,13 @@ describe('§3.5.12 / §3.5.13 / unknown', () => {
     const { repo } = fixture(); commit(repo, 'packages/server/server/b.ts'); put(repo, 'docs/draft.md', 'wip')
     expect(await classify(deps([sess(repo)]))).toMatchObject({ ok: true, category: 'code' })
   })
+  test('several uncommitted docs (a root .md and a docs/ file) are all read as docs — the status is parsed record by record', async () => {
+    const { repo } = fixture(); commit(repo, 'packages/server/server/b.ts')
+    put(repo, 'NOTES.md', 'wip'); put(repo, 'docs/draft.md', 'wip'); put(repo, 'docs/more.md', 'wip')
+    expect(await classify(deps([sess(repo)]))).toMatchObject({ ok: true, category: 'code' })
+    put(repo, 'packages/server/server/oops.ts', 'x')
+    expect(await classify(deps([sess(repo)]))).toMatchObject({ ok: false, code: 'uncommitted_changes', paths: ['packages/server/server/oops.ts'] })
+  })
   test('a piece with no filed session → classification_required (never docs/none-verified by silence)', async () => {
     const r = await classify(deps([]))
     expect(r).toMatchObject({ ok: false, code: 'classification_required', nonCodeOnly: true })
@@ -95,6 +102,68 @@ describe('§3.5.12 / §3.5.13 / unknown', () => {
   })
 })
 
+describe('QA r2 F3 — renames count BOTH sides', () => {
+  test('a STAGED rename code → docs is uncommitted_changes (the removed code is real uncommitted work)', async () => {
+    const { repo } = fixture(); commit(repo, 'packages/server/server/b.ts')
+    mkdirSync(join(repo, 'docs'), { recursive: true }); git(repo, 'mv', 'packages/server/server/b.ts', 'docs/b.md')
+    expect(await classify(deps([sess(repo)]))).toMatchObject({ ok: false, code: 'uncommitted_changes' })
+  })
+  test('a STAGED rename of a screen file into docs is uncommitted_changes too', async () => {
+    const { repo } = fixture(); commit(repo, 'packages/web/src/s.tsx')
+    mkdirSync(join(repo, 'docs'), { recursive: true }); git(repo, 'mv', 'packages/web/src/s.tsx', 'docs/s.md')
+    expect(await classify(deps([sess(repo)]))).toMatchObject({ ok: false, code: 'uncommitted_changes' })
+  })
+  test('a COMMITTED rename code → docs is not "docs only": the old side keeps the category at code', async () => {
+    const { repo } = fixture()   // packages/server/server/a.ts already exists on main
+    mkdirSync(join(repo, 'docs'), { recursive: true }); git(repo, 'mv', 'packages/server/server/a.ts', 'docs/b.md'); git(repo, 'commit', '-m', 'move to docs')
+    expect(await classify(deps([sess(repo)]))).toMatchObject({ ok: true, category: 'code' })
+  })
+  test('a COMMITTED rename of a web file into docs stays a SCREEN change', async () => {
+    const { repo } = fixture(); commit(repo, 'packages/web/src/s.tsx'); git(repo, 'push', 'origin', 'HEAD:main')   // the screen file is on main
+    mkdirSync(join(repo, 'docs'), { recursive: true }); git(repo, 'mv', 'packages/web/src/s.tsx', 'docs/s.md'); git(repo, 'commit', '-m', 'move to docs')
+    expect(await classify(deps([sess(repo)]))).toMatchObject({ ok: true, category: 'screen' })
+  })
+})
+
+describe('QA r2 F4 — paths git would quote are read NUL-delimited, verbatim', () => {
+  test('a non-ASCII file under packages/web is a SCREEN change (committed) and refuses when dirty', async () => {
+    const { repo } = fixture(); commit(repo, 'packages/web/src/ação.tsx')
+    expect(await classify(deps([sess(repo)]))).toMatchObject({ ok: true, category: 'screen' })
+    put(repo, 'packages/server/server/ção.ts', 'x')
+    expect(await classify(deps([sess(repo)]))).toMatchObject({ ok: false, code: 'uncommitted_changes' })
+  })
+  test('quotes and a newline in a web file name stay a screen change', async () => {
+    const { repo } = fixture(); commit(repo, 'packages/web/src/we"ird\nname.tsx')
+    expect(await classify(deps([sess(repo)]))).toMatchObject({ ok: true, category: 'screen' })
+  })
+  test('a non-ASCII DOC under docs/ is docs, not code', async () => {
+    const { repo } = fixture(); commit(repo, 'docs/relatório.md')
+    expect(await classify(deps([sess(repo)]))).toMatchObject({ ok: true, category: 'docs' })
+  })
+})
+
+describe('QA r2 — the cache key includes the merge-base, and the base is re-read on every call', () => {
+  test('HEAD and status unchanged, the release line moves to another ancestor → the category is recomputed (a warm cache equals a cold one)', async () => {
+    const { repo, origin } = fixture(); commit(repo, 'docs/a.md')                      // feature: docs on top of main@0
+    const d = deps([sess(repo)])
+    expect(await classify(d)).toMatchObject({ ok: true, category: 'docs' })           // warms the cache
+    // main absorbs the feature's commit then moves on: the merge-base becomes HEAD itself → an EMPTY diff
+    git(repo, 'push', 'origin', 'HEAD:main'); git(repo, 'fetch', 'origin')
+    const warm = await classify(d)
+    forgetClassifyCache()
+    const cold = await classify(d)
+    expect(warm).toEqual(cold); expect(warm).toMatchObject({ ok: true, category: 'none-verified' })
+    void origin
+  })
+  test('the release line disappears at the same HEAD/status → classification_required, not the cached category', async () => {
+    const { repo } = fixture(); commit(repo, 'docs/a.md')
+    const d = deps([sess(repo)])
+    expect(await classify(d)).toMatchObject({ ok: true, category: 'docs' })
+    git(repo, 'branch', '-m', 'main', 'gone-main'); git(repo, 'update-ref', '-d', 'refs/remotes/origin/main')
+    expect(await classify(d)).toMatchObject({ ok: false, code: 'classification_required' })
+  })
+})
+
 describe('cache by (repo, HEAD, dirty hash) — and it never answers for a different HEAD or dirt', () => {
   const counting = () => { const calls: string[] = []; return { calls, git: async (cwd: string, args: string[]) => { calls.push(args.join(' ')); return execGit(cwd, args) } } }
   test('a second call at the same HEAD and dirt does not re-run the diff; a new commit or new dirt does', async () => {
@@ -117,9 +186,19 @@ describe('cache by (repo, HEAD, dirty hash) — and it never answers for a diffe
 })
 
 describe('pure helpers', () => {
-  test('parsePorcelain reads paths, renames and untracked entries', () => {
-    expect(parsePorcelain(' M packages/web/a.tsx\n?? docs/b.md\nR  old.ts -> new.ts\nA  "sp ace.ts"\n')).toEqual(['packages/web/a.tsx', 'docs/b.md', 'new.ts', 'sp ace.ts'])
-    expect(parsePorcelain('')).toEqual([])
+  test('parseStatusZ (NUL-delimited): paths verbatim, a rename/copy yields BOTH sides, " -> " in a name is not a rename', () => {
+    const z = (...p: string[]) => p.join('\0') + '\0'
+    expect(parseStatusZ(z(' M packages/web/a.tsx', '?? docs/b.md', 'R  new.ts', 'old.ts', 'A  sp ace.ts'))).toEqual(['packages/web/a.tsx', 'docs/b.md', 'new.ts', 'old.ts', 'sp ace.ts'])
+    expect(parseStatusZ(z('?? a -> b.ts'))).toEqual(['a -> b.ts'])
+    expect(parseStatusZ(z('?? packages/web/src/ação.tsx', ' M "quoted".ts'))).toEqual(['packages/web/src/ação.tsx', '"quoted".ts'])
+    expect(parseStatusZ(z('C  copy.ts', 'orig.ts'))).toEqual(['copy.ts', 'orig.ts'])
+    expect(parseStatusZ('')).toEqual([])
+  })
+  test('parseNameStatusZ: modified/added/deleted one path, rename/copy both, names verbatim', () => {
+    const z = (...p: string[]) => p.join('\0') + '\0'
+    expect(parseNameStatusZ(z('M', 'a.ts', 'A', 'docs/b.md', 'D', 'c.ts', 'R100', 'old.ts', 'new.md', 'C75', 'src.ts', 'dst.ts'))).toEqual(['a.ts', 'docs/b.md', 'c.ts', 'old.ts', 'new.md', 'src.ts', 'dst.ts'])
+    expect(parseNameStatusZ(z('A', 'packages/web/src/ação.tsx', 'M', 'we"ird\nname.tsx'))).toEqual(['packages/web/src/ação.tsx', 'we"ird\nname.tsx'])
+    expect(parseNameStatusZ('')).toEqual([])
   })
   test('cwdsOfPiece: only the piece\'s own rows (task-level piece = rows with no subtask), newest first, unique, non-empty', () => {
     const rows: ClassifySession[] = [

@@ -64,6 +64,28 @@ describe('notification coverage', () => {
     }
   })
 
+  // QA r2 F6: the delivery guard's refusals are returned by helpers (`fail(422, 'code', …)`, `bad('code', …)`) and typed in unions,
+  // forms the `code: '…'` scanner above cannot see. They are enumerated here AND scanned out of the guard's own modules.
+  const DELIVERY_REFUSALS = [
+    'classification_required', 'uncommitted_changes', 'evidence_required', 'evidence_stale', 'evidence_invalid', 'evidence_reused',
+    'declaration_invalid', 'declaration_unclassifiable', 'declaration_repo_unresolved', 'declaration_commit_missing', 'declaration_unpushed',
+    'classify_unavailable', 'classify_leader_only',
+  ]
+  it('every delivery-guard refusal has EN and PT text, whatever syntax emits it', () => {
+    const missing = DELIVERY_REFUSALS.filter(c => !NOTIFICATION_TEXT[c]?.en?.title || !NOTIFICATION_TEXT[c]?.pt?.title || !NOTIFICATION_TEXT[c]?.en?.message || !NOTIFICATION_TEXT[c]?.pt?.message)
+    expect(missing).toEqual([])
+  })
+  it('...and every refusal literal in the guard\'s modules is in that list (a new code cannot be added silently)', () => {
+    const dir = join(SERVER, 'delivery')
+    const found = new Set<string>()
+    for (const name of readdirSync(dir)) {
+      if (!/^(classify|evidence)[a-z-]*\.ts$/.test(name) || name.endsWith('.test.ts') || name.endsWith('.testing.ts')) continue
+      const src = readFileSync(join(dir, name), 'utf8')
+      for (const m of src.matchAll(/'((?:classification|declaration|evidence|classify)_[a-z_]+|uncommitted_changes)'/g)) found.add(m[1]!)
+    }
+    expect([...found].filter(c => !DELIVERY_REFUSALS.includes(c) && !NOTIFICATION_TEXT[c])).toEqual([])
+  })
+
   it('every code the server emits has EN and PT text', () => {
     const missing: string[] = []
     for (const code of [...emitted()].sort()) {

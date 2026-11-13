@@ -12,12 +12,11 @@ import { gitSpawnEnv } from './git-env'
 const TMP = realpathSync(tmpdir())
 const AUTHOR = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }
 
+/** The REAL path must be inside the real temp dir. A symlink inside it pointing out is refused; a path that does not resolve is refused. */
 function assertTemp(cwd: string): void {
-  const abs = resolve(cwd)
-  const real = (() => { try { return realpathSync(abs) } catch { return abs } })()
-  if (!(real === TMP || real.startsWith(TMP + sep) || abs === tmpdir() || abs.startsWith(tmpdir() + sep))) {
-    throw new Error(`git fixture refused: ${cwd} is not inside the temp directory`)
-  }
+  let real: string
+  try { real = realpathSync(resolve(cwd)) } catch { throw new Error(`git fixture refused: ${cwd} does not resolve to a real directory, so it cannot be shown to be inside the temp directory`) }
+  if (!(real === TMP || real.startsWith(TMP + sep))) throw new Error(`git fixture refused: ${cwd} is not inside the temp directory`)
 }
 
 export function gitSync(cwd: string, ...args: string[]): string {
