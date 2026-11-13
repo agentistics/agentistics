@@ -18,3 +18,17 @@ export function scrollIsOutside(panel: Node | null, target: EventTarget | null):
   if (target == null) return true
   return !panel.contains(target as Node)
 }
+
+/** How long after a wheel/touch/key gesture a scroll still counts as the person's own. */
+export const USER_SCROLL_WINDOW_MS = 700
+
+/**
+ * A popover may close on a scroll only when the PERSON scrolled: some scroller outside it moved within
+ * `USER_SCROLL_WINDOW_MS` of a wheel / touch / key gesture. A scroll with no gesture behind it is the page
+ * moving on its own — a conversation following a message that just arrived — and must never close a popup the
+ * person is reading (owner, 10/11: "isso não pode acontecer"). `lastGestureAt` is `null` before any gesture.
+ */
+export function scrollClosesPopover(panel: Node | null, target: EventTarget | null, lastGestureAt: number | null, now: number): boolean {
+  if (!scrollIsOutside(panel, target)) return false
+  return lastGestureAt !== null && now - lastGestureAt <= USER_SCROLL_WINDOW_MS
+}

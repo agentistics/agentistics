@@ -276,9 +276,16 @@ const QA_NAME =/(^|[^a-z])qa([^a-z]|$)|\bquality\b/i
 /** The stored session role (`session-roles.ts`); a session that has one is never read as the QA's by its NAME. */
 export type StoredRoleOf = (s: { id: string; conversationId?: string }) => string | undefined
 /** QA by name — only the fallback, and only for a session with no stored leader/worker role. */
-const isQaName = (s: { label?: string; role?: string }): boolean => !!s.label && s.role !== 'leader' && s.role !== 'worker' && QA_NAME.test(s.label)
+const QA_DIR = /(^|[-_.])qa([-_.]|$)/i
+const isQaName = (s: { label?: string; role?: string; cwd?: string }): boolean => {
+  if (s.role === 'leader' || s.role === 'worker') return false
+  if (s.label && QA_NAME.test(s.label)) return true
+  // A QA session is often titled after the task and only its WORKTREE says what it is (`.worktrees/qa-livro-3b-r3`).
+  const dir = s.cwd?.split('/').filter(Boolean).pop()
+  return !!dir && QA_DIR.test(dir)
+}
 
-interface PieceSession { id: string; harness: string; model: string | null; effort?: string; label?: string; role?: string; live: boolean; seenMs?: number; startMs: number | null; activity?: SessionActivity }
+interface PieceSession { id: string; cwd?: string; harness: string; model: string | null; effort?: string; label?: string; role?: string; live: boolean; seenMs?: number; startMs: number | null; activity?: SessionActivity }
 
 // ---------------------------------------------------------------------------------- ETA
 
@@ -525,6 +532,44 @@ export function trailOf(
   return visits
 }
 
+/**
+ * A record's history entry that is BOOKKEEPING, not an observation of the moment a stage began or ended: the flow
+ * adopting a piece that was already in that stage, a release declared after the fact (by a leader or by the
+ * reconcile), a reconciliation, a dequeue/restage. Measured on the real store: 106 adoptions, 107 declarations and
+ * 75 reconcile moves against 4 live dispatches — timing those gave a "leader" median of 1.3 h and a "ci" of 12 min
+ * (the seconds between an adoption and a declaration), which made every open piece overdue.
+ */
+const BOOKKEEPING_DETAIL = /^(adotada|adiada|dequeue|restaged|reconcilia)|declarada por/i
+const isBookkeeping = (h: { from?: string; to: string; actor?: string; detail?: string }): boolean =>
+  h.actor === 'flow:reconcile' || (h.from !== undefined && h.from === h.to) || BOOKKEEPING_DETAIL.test(h.detail ?? '')
+
+/**
+ * PURE: the stage visits a delivery record's phase history states (oldest first); the last runs to `endMs`.
+ * A visit is a MEASUREMENT only when both its start and its end were observed live; one entered or left through a
+ * bookkeeping entry (`isBookkeeping`) keeps its place in the trail with `ms = NaN`, which `stageTypicals` skips.
+ */
+export function recordTrailOf(history: readonly { from?: string; to: string; at: string; actor?: string; detail?: string }[] | undefined, endMs: number): StageVisit[] {
+  const moves = (history ?? [])
+    .map(h => ({ at: ms(h.at), stage: PHASE_STAGE[h.to] ?? null, observed: !isBookkeeping(h) }))
+    .filter((m): m is { at: number; stage: LiveStage; observed: boolean } => m.at !== null && m.stage !== null)
+    .sort((a, b) => a.at - b.at)
+  const visits: StageVisit[] = []
+  let enteredObserved = false
+  for (const m of moves) {
+    const last = visits[visits.length - 1]
+    if (last && last.stage === m.stage) continue
+    if (last) last.ms = enteredObserved && m.observed ? Math.max(0, m.at - last.enteredMs) : NaN
+    visits.push({ stage: m.stage, enteredMs: m.at, ms: 0 })
+    enteredObserved = m.observed
+  }
+  const tail = visits[visits.length - 1]
+  if (tail) tail.ms = Math.max(0, endMs - tail.enteredMs)
+  return visits
+}
+
+/** How many CLOSED visits of a trail are real measurements (a finite, positive duration). */
+const measuredVisits = (t: readonly StageVisit[]): number => t.slice(0, -1).filter(v => Number.isFinite(v.ms) && v.ms > 0).length
+
 export interface StageTypical { medianMs: number; p25Ms?: number; p75Ms: number; n: number }
 
 /** PURE: how long pieces typically sit in each stage, from the CLOSED visits of every piece. */
@@ -651,6 +696,10 @@ export function resolvePieceForecast(o: EstimateOptions & {
   if (overdueSinceMs !== null) {
     return { eta: total, stageEta: result.stageEta, publishEta: { kind: 'none', reason: 'beyond-range' } }
   }
+  // A stage with no MEASURED visits (record trails count only live-observed transitions, see `recordTrailOf`) keeps
+  // its declared ceiling: a future, low-confidence bound for the stage and the stages ahead. Round 1 switched this
+  // off whenever whole-piece publications existed, and with the record trails timing bookkeeping (adoption → declared
+  // release, seconds apart) every stage typical collapsed to minutes and the calendar's future went empty.
   if (!o.typicals[o.stage] && o.sinceMs !== null) {
     const fallback = stageCeilingForecast(o)
     if (fallback) return fallback
@@ -745,7 +794,7 @@ function piecesOf(d: TaskDetail, roleOf?: StoredRoleOf, includeMembers = false):
     d.sessions
       .filter(s => (s.subtaskId ?? null) === subtaskId && !s.historical)
       .map(s => ({
-        id: s.id, harness: s.harness, model: s.model, ...(s.label ? { label: s.label } : {}),
+        id: s.id, harness: s.harness, model: s.model, ...(s.cwd ? { cwd: s.cwd } : {}), ...(s.label ? { label: s.label } : {}),
         ...(roleOf ? (() => { const r = roleOf({ id: s.id, ...(s.conversationId ? { conversationId: s.conversationId } : {}) }); return r ? { role: r } : {} })() : {}),
         ...(s.effort ? { effort: s.effort } : {}),
         live: !s.endedAt, startMs: ms(s.createdAt),
@@ -788,6 +837,20 @@ export function shasIn(text: string | null | undefined): string[] {
   if (!text) return []
   const out = new Set<string>()
   for (const m of text.matchAll(SHA_AT)) if (/\d/.test(m[1]!)) out.add(m[1]!.toLowerCase())
+  return [...out]
+}
+
+/**
+ * r4 — the commit ids a COMMENT declares as the piece's OWN delivery. A handback also cites commits it merely depends on
+ * ("Public 2.205.1 commit e0a499f00 is deliberate", "rebased on commit X"); taking any hex word as delivered published
+ * HERMES.ACP in a release from before it started. A sha counts only when the label opens a clause (line start, or after
+ * `. ; , ( : — –`) or reads "delivered in / committed as / entregue em <sha>"; a label in the middle of a sentence is a citation.
+ */
+const DELIVERED_SHA = /(?:^|[.;,(:—–]\s*|\s-\s)(?:commit|sha|head)\b\s*[:=]?\s*`?([0-9a-f]{7,40})\b|(?:delivered\s+(?:in|as)|committed\s+(?:as|in)|entregue\s+em)\s+(?:commit\s+)?`?([0-9a-f]{7,40})\b/gim
+export function deliveredShasIn(text: string | null | undefined): string[] {
+  if (!text) return []
+  const out = new Set<string>()
+  for (const m of text.matchAll(DELIVERED_SHA)) { const s = m[1] ?? m[2]; if (s && /\d/.test(s)) out.add(s.toLowerCase()) }
   return [...out]
 }
 
@@ -877,7 +940,7 @@ function legacyShaGroups(p: Piece, events: readonly TaskEvent[] | undefined): st
   let newest: { at: string; shas: string[] } | null = null
   for (const c of p.comments) {
     if ((c.subtaskId ?? null) !== (p.sub?.id ?? null)) continue
-    const shas = shasIn(c.body)
+    const shas = deliveredShasIn(c.body)
     if (shas.length > 0 && (!newest || c.createdAt >= newest.at)) newest = { at: c.createdAt, shas }
   }
   if (newest) groups.push(newest.shas)
@@ -951,7 +1014,14 @@ export function prepareForecastHistory(o: {
   }
   const cohorts = buildForecastCohorts(samples(), o.nowMs)
   const { eventsBySubject } = indexEvents(o.details, o.events)
-  const typicals = stageTypicals(cohorts.samples.map(s => trailOf(eventsBySubject.get(s.key!) ?? [], o.nowMs, o.statusLabel)))
+  const typicals = stageTypicals(cohorts.samples.map(s => {
+    const byEvents = trailOf(eventsBySubject.get(s.key!) ?? [], o.nowMs, o.statusLabel)
+    // The delivery record's own phase history is the exact witness of every stage a piece went through; the board's
+    // status events only know three of them. Whichever tells more is the measurement.
+    const rec = o.deliveries?.get(s.key!.includes('/') ? s.key!.split('/')[1]! : s.key!)
+    const byRecord = rec ? recordTrailOf(rec.history, s.completedAtMs ?? o.nowMs) : []
+    return measuredVisits(byRecord) > measuredVisits(byEvents) ? byRecord : byEvents
+  }))
   return { cohorts, typicals }
 }
 

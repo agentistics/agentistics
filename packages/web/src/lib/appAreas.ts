@@ -46,6 +46,7 @@ export const APP_AREAS: readonly Area[] = [
     { id: 'costs', path: '/costs', labelPt: 'Custos', labelEn: 'Costs' },
     { id: 'top', path: '/top', labelPt: 'Top de uso', labelEn: 'Top usage' },
     { id: 'compare', path: '/compare', labelPt: 'Comparar', labelEn: 'Compare' },
+    { id: 'benchmark', path: '/benchmark', labelPt: 'Benchmark', labelEn: 'Benchmark', beta: true },
     { id: 'tools', path: '/tools', labelPt: 'Ferramentas', labelEn: 'Tools' },
     { id: 'custom', path: '/custom', labelPt: 'Personalizado', labelEn: 'Custom' },
     { id: 'tags', path: '/tags', labelPt: 'Tags', labelEn: 'Tags' },

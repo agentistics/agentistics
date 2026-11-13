@@ -97,6 +97,8 @@ import { turnAnchorIds } from '../../lib/promptHistory'
 // file's own call sites already use: one shape, one place for it to change.
 import { RepoNote as Note } from './repoNote'
 import { createSharedPref } from '../../lib/sharedPref'
+import { DeliveryCalendar } from '../calendar/DeliveryCalendar'
+import { LiveDelivery } from '../tasks/LiveDelivery'
 import type { TabPanelId } from '../../lib/panelSlots'
 import { SessionLimitsCard } from './SessionLimitsCard'
 import { panelTitle } from '../../lib/panelMeta'
@@ -1350,7 +1352,11 @@ export function ArtifactsAside({
           <div style={{
             flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column',
           }}>
-          {tab === 'tasks' && session ? (
+          {tab === 'calendar' ? (
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><DeliveryCalendar lang={lang} embedded /></div>
+          ) : tab === 'livedelivery' ? (
+            <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}><LiveDelivery lang={lang} compact /></div>
+          ) : tab === 'tasks' && session ? (
             <div style={{ overflowY: 'auto', minHeight: 0 }}>
               <SessionTasksTab
                 session={session}

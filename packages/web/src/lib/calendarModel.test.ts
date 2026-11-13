@@ -108,6 +108,28 @@ describe('ribbons', () => {
     expect(new Set(r.map(x => x.lane)).size).toBe(2)
     expect(r.find(x => x.version === '2.202.0')!.contRight).toBe(true)
   })
+  test('versions published the SAME day share ONE ribbon that names every one — none is pushed into "+N"', () => {
+    const days = weekDays('2026-11-12')
+    const at = (iso: string) => Date.parse(iso)
+    const vs = [
+      version({ version: '2.209.3', state: 'published', atMs: at('2026-11-12T03:47:00.000Z') }),
+      version({ version: '2.210.0', state: 'published', atMs: at('2026-11-12T04:21:00.000Z') }),
+      version({ version: '2.210.1', state: 'published', atMs: at('2026-11-12T22:41:00.000Z') }),
+    ]
+    const r = weekRibbons(days, vs, [], '2026-11-13')
+    expect(r).toHaveLength(1)
+    expect(r[0]!.versions).toEqual(['2.209.3', '2.210.0', '2.210.1'])
+    expect(r[0]!.version).toBe('2.210.1')
+    expect(new Set(r.map(x => x.lane)).size).toBe(1)
+  })
+  test('a published and a planned version of one day stay separate ribbons', () => {
+    const days = weekDays('2026-11-12')
+    const vs = [
+      version({ version: '2.210.1', state: 'published', atMs: Date.parse('2026-11-12T22:41:00.000Z') }),
+      version({ version: '2.211.0', atMs: Date.parse('2026-11-12T15:00:00.000Z'), basis: 'estimate', pieceKeys: [] }),
+    ]
+    expect(weekRibbons(days, vs, [], '2026-11-12')).toHaveLength(2)
+  })
 })
 
 describe('agenda', () => {
@@ -153,15 +175,15 @@ describe('time axis', () => {
     expect(f.ribbons).toHaveLength(1)
     expect(f.more).toEqual([0, 0, 0, 0, 0, 0, 0])
   })
-  test('fitWeek: 4 versions on one day with room for 3 rows show 3 + a "+1" that counts the hidden one', () => {
+  test('fitWeek: 4 PLANNED versions on one day with room for 3 rows show 3 + a "+1" that counts the hidden one', () => {
     const days = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07', '2026-11-08']
-    const at = Date.parse('2026-11-06T15:00:00Z')
-    const vs = ['2.200.0', '2.200.4', '2.200.5', '2.200.6'].map(v => version({ version: v, state: 'published', atMs: at }))
+    const at = Date.parse('2026-11-07T15:00:00Z')
+    const vs = ['2.200.0', '2.200.4', '2.200.5', '2.200.6'].map(v => version({ version: v, atMs: at, basis: 'estimate', pieceKeys: [] }))
     const rs = weekRibbons(days, vs, [], '2026-11-07')
     expect(rs).toHaveLength(4)
     const f = fitWeek({ ribbons: rs, dues: [0, 0, 0, 0, 0, 0, 0], cap: 3 })
     expect(f.ribbons).toHaveLength(3)
-    expect(f.more[4]).toBe(1)
+    expect(f.more[5]).toBe(1)
     expect(f.more.reduce((a, b) => a + b, 0)).toBe(1)
   })
   test('fitWeek: due chips are counted too, never dropped (the old slice(0, 2))', () => {

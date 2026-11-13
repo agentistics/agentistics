@@ -38,8 +38,8 @@ const mount = async (el: React.ReactElement) => {
 const noop = () => {}
 const withRowHeight = async (h: number, fn: () => Promise<void>) => {
   const original = HTMLElement.prototype.getBoundingClientRect
-  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 900, height: h, top: 0, left: 0, right: 900, bottom: h }) })
-  try { await fn() } finally { Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: original }) }
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: () => ({ width: 900, height: h, top: 0, left: 0, right: 900, bottom: h }) })
+  try { await fn() } finally { Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: original }) }
 }
 const base = { ...view.pieces[0]!, version: null, publishedAtMs: null, overdueSinceMs: undefined, late: false }
 const startedOn = (day: string, n: number) => Array.from({ length: n }, (_, i) => ({ ...base, key: `st/${day}/${i}`, stage: 'running' as const, startedAtMs: dayMs(day), stageSinceMs: dayMs(day), publishEta: { kind: 'none' as const, reason: 'no-history' } }))

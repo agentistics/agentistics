@@ -74,7 +74,6 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { railTooltipShown } from '../../lib/railTooltip'
-import { TaskNavigationLinks } from './TaskNavigationLinks'
 import { createPortal } from 'react-dom'
 import { ArrowDown, Eye, EyeOff, MoreHorizontal } from 'lucide-react'
 import { PanelContextMenu, PanelTileDropdown, type PanelContextMenuEntry, type PanelTile } from './bandControls'
@@ -330,7 +329,6 @@ export function PanelRail({
       }}
     >
       <RailResizeHandle width={railWidth} onResize={onResizeWidth} lang={lang} />
-      <TaskNavigationLinks lang={lang} pathname={pathname} onNavigate={onNavigate} size={iconPx} />
       <div
         ref={colRef}
         role="tablist"

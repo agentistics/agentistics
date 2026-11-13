@@ -97,6 +97,7 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_sessions',
   'agentistics_costs',
   'agentistics_repos',
+  'agentistics_benchmark_observed',
   // Layouts (8)
   'agentistics_component_catalog',
   'agentistics_get_layouts',
@@ -234,6 +235,7 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_projects: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics per project' },
   agentistics_sessions: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/fleet', 'GET /api/flows/delivered-open'], reason: 'reads session metadata (first_prompt is untrusted text, §4.8)' },
   agentistics_costs: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed costs' },
+  agentistics_benchmark_observed: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['GET /api/benchmark/observed'], reason: 'reads the observed delivery history (cost, time, QA, throughput) with n, intervals and gaps; no verdict, no writes' },
   agentistics_repos: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics per repository' },
   // ------------------------------------------------------------------ Layouts (custom page, stored in preferences)
   agentistics_component_catalog: { ...DATA, risk: 'R', routes: [], reason: 'returns a static list; calls nothing' },

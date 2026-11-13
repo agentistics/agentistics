@@ -1,5 +1,6 @@
 import { open, readFile, unlink, stat } from 'fs/promises'
 import { readFileSync, unlinkSync } from 'fs'
+import { spawnSync } from 'child_process'
 import { dirname } from 'path'
 import { mkdir } from 'fs/promises'
 
@@ -113,6 +114,72 @@ export interface LockProbe {
   bootId?(): string | undefined
   /** When this boot started, as epoch ms (now − uptime, on the boot clock), for locks with no boot id. */
   bootStartMs?(): number | undefined
+  /**
+   * The holder's FULL command line, or `undefined` when it cannot be read (permission, no such
+   * tool). Used only for OLD-format locks, which carry no identity of their own: a live holder
+   * that is not an agentop server cannot be the writer. `undefined` keeps the pid-only answer.
+   */
+  holderCommand?(pid: number): HolderCommand | undefined
+}
+
+/**
+ * Could this command line be an agentop process holding the server lock? Conservative on purpose
+ * (2026-11-13, leader review): `agentop start` and other subcommands can run the server in-process,
+ * so ANY agentop executable counts, whatever its subcommand. True for the compiled binary
+ * (`…/agentop <anything>`) and the dev forms run by bun/node (`bin/cli.ts`, `server/index.ts`).
+ * Anything whose executable is something else — `sleep`, `vim agentop server.txt`, `bun test …` — is not.
+ */
+export type HolderCommand = { exe: string; args: string[] | string } | string
+
+const DEV_ENTRY = /(^|\/)(bin\/cli\.ts|server\/index\.ts)(\s|$)/
+
+export function isAgentopServerCommand(cmd: HolderCommand): boolean {
+  if (typeof cmd === 'string') {
+    // Argv boundaries are lost (a path may hold spaces: `/Applications/Agent Tools/agentop server`),
+    // so be conservative: a false positive only makes us wait, a false negative would steal a live lock.
+    return /(^|\/)agentop(\s|$)/.test(cmd.trim()) || DEV_ENTRY.test(cmd)
+  }
+  const exe = cmd.exe.trim()
+  const base = exe.slice(exe.lastIndexOf('/') + 1)
+  if (base === 'agentop') return true
+  // macOS: `ps -o comm=` resolves a symlinked `/usr/local/bin/agentop` to its target, whose basename
+  // may not be "agentop"; the INVOKED name survives in the `command=` string. Either saying agentop counts.
+  if (typeof cmd.args === 'string' && /(^|\/)agentop(\s|$)/.test(cmd.args.trim())) return true
+  if (base !== 'bun' && base !== 'node') return false
+  const args = Array.isArray(cmd.args) ? cmd.args : [cmd.args]
+  return args.some(a => DEV_ENTRY.test(a))
+}
+
+/**
+ * The holder's executable and args. Linux: `/proc/<pid>/cmdline` is NUL-separated, so argv[0] keeps
+ * its spaces. macOS (no /proc): `ps -o comm=` gives the executable's full path, spaces kept, and
+ * `ps -o command=` the (unsplittable) command line.
+ */
+export function readHolderCommand(pid: number): HolderCommand | undefined {
+  const proc = describeFull(pid)
+  if (proc !== undefined || process.platform === 'linux') return proc
+  try {
+    const ps = (field: string) => {
+      const r = spawnSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf-8', timeout: 2000 })
+      return r.status === 0 ? r.stdout.trim() : ''
+    }
+    const exe = ps('comm')
+    const command = ps('command')
+    if (exe && command) return { exe, args: command }
+    return command || exe || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function describeFull(pid: number): HolderCommand | undefined {
+  try {
+    const argv = readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0').filter(Boolean)
+    if (argv.length === 0) return undefined
+    return { exe: argv[0]!, args: argv.slice(1) }
+  } catch {
+    return undefined
+  }
 }
 
 /** `/proc/sys/kernel/random/boot_id`, or `undefined` off Linux. */
@@ -163,6 +230,7 @@ const OS_PROBE: LockProbe = {
   processStartTicks: linuxProcessStartTicks,
   bootId: linuxBootId,
   bootStartMs: linuxBootStartMs,
+  holderCommand: readHolderCommand,
 }
 
 /** A lock's contents: `<pid>` (oldest), `<pid> <startTicks>`, or `<pid> <startTicks> <bootId>`. */
@@ -209,6 +277,16 @@ async function holdsLock(file: string, holder: number, probe: LockProbe, recorde
     }
   }
   if (!isAlive(holder)) return false
+  if (recordedTicks === undefined && recordedBoot === undefined) {
+    // OLD format: nothing identifies the writer, so a live holder that is not an agentop server
+    // is a stranger holding the number (2026-11-13). Undescribable → keep believing it.
+    const cmd = probe.holderCommand?.(holder)
+    if (cmd !== undefined && !isAgentopServerCommand(cmd)) return false
+    // A live agentop holder is held WITHOUT the wall-clock mtime check below (jittery on WSL: a live
+    // server read as "started after the write" and was robbed). Two servers on one store is worse than
+    // waiting, and the wait has a ceiling.
+    if (cmd !== undefined) return true
+  }
   // EXACT when the writer recorded its start ticks: same pid AND same boot-clock start is the same
   // process, and nothing else is. The mtime comparison below is only for locks written without them.
   if (recordedTicks !== undefined) {

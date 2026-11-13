@@ -70,7 +70,6 @@ import { SessionTabStrip } from '../components/sessions/SessionTabStrip'
 import { panelTitle } from '../lib/panelMeta'
 import { tabStripEdgeFade, tabStripFadeMask } from '../lib/tabStripEdge'
 import { PanelRail, panelTile } from '../components/sessions/PanelRail'
-import { TaskNavigationLinks } from '../components/sessions/TaskNavigationLinks'
 import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
 import type { HarnessId } from '@agentistics/core'
 import { freedBytes, fmt } from '@agentistics/core'
@@ -991,7 +990,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const engineOwned = engineActive && engineAsideId === engineSlotId
   const engineTabShown = engineOwned && (engineTabOn || slotLayout.right === null)
   /** A person picking a panel from the rail or the phone's tabs: that panel is what they want to see. */
-  const openSlotPanelPicked = useCallback((id: PanelId) => { setEngineTabOn(false); openSlotPanel(id) }, [openSlotPanel])
+  const openSlotPanelPicked = useCallback((id: PanelId) => { setEngineTabOn(false); openSlotPanel(id, isMobile) }, [openSlotPanel, isMobile])
   const [rightSlotEl, setRightSlotEl] = useState<HTMLDivElement | null>(null)
   const [bottomStudioEl, setBottomStudioEl] = useState<HTMLDivElement | null>(null)
   /** The floating window's box, when the Studio floats — a third place `StudioHost` can move its
@@ -1656,7 +1655,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       display: 'flex', alignItems: 'flex-start', gap: 4, flexShrink: 0,
       padding: '4px 6px', borderBottom: '1px solid var(--border)',
     }}>
-      <TaskNavigationLinks lang={pt ? 'pt' : 'en'} onNavigate={navigate} mobile />
       <div
         ref={attachTabStrip}
         className="tabscroll"

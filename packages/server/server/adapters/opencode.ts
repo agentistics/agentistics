@@ -12,6 +12,12 @@ import { configModels, mergeModels, parseJsonc } from './opencode-models'
 import { generationOfTables, loadOpencodeV2, opencodeStateDirFor, opencodeTables, readServiceRecord } from './opencode-v2'
 import { parseOpencodeSession, type OpencodeSessionRow, type OpencodeMessageRow, type OpencodePartRow, type OpencodeModels } from './opencode-parse'
 
+/** SQL line count of a JSON string field: newlines, plus one for an unterminated last line; NULL stays NULL. */
+function LINES(expr: string, raw = false): string {
+  const x = raw ? expr : `json_extract(data, '${expr}')`
+  return `CASE WHEN ${x} IS NULL OR ${x} = '' THEN NULL ELSE length(${x}) - length(replace(${x}, char(10), '')) + (substr(${x}, -1) != char(10)) END`
+}
+
 /** Read-only, WAL-aware: never immutable, journal_mode, checkpoint, or an immediate transaction.
  * A short deferred snapshot sees all committed WAL writes without blocking OpenCode's writer.
  * No auth/config/account tables are read. Exported path allows isolated fixture tests.
@@ -34,7 +40,10 @@ export function readOpencodeDb(path: string, models: OpencodeModels = {}): { ses
       // and the parser only counts the request and whether it failed).
       parts: db!.query<OpencodePartRow, []>(
         "SELECT id, message_id, session_id, time_created, CASE WHEN json_extract(data, '$.type') = 'tool' " +
-        "THEN json_object('type', 'tool', 'tool', json_extract(data, '$.tool'), 'state', json_object('status', json_extract(data, '$.state.status'))) " +
+        "THEN json_object('type', 'tool', 'tool', json_extract(data, '$.tool'), 'state', json_object('status', json_extract(data, '$.state.status'), " +
+        "'input', json_object('command', substr(json_extract(data, '$.state.input.command'), 1, 4000), " +
+        "'filePath', coalesce(json_extract(data, '$.state.input.filePath'), json_extract(data, '$.state.input.path')), " +
+        "'oldLines', " + LINES('$.state.input.oldString') + ", 'newLines', " + LINES("coalesce(json_extract(data, '$.state.input.newString'), json_extract(data, '$.state.input.content'))", true) + "))) " +
         "ELSE data END AS data FROM part WHERE json_valid(data) AND json_extract(data, '$.type') IN ('text', 'tool') ORDER BY time_created, id",
       ).all(),
     }))()

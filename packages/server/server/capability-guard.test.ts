@@ -303,3 +303,10 @@ describe("the engine's reserved prefixes", () => {
     })
   })
 })
+
+test('F14: /api/benchmark reads the board, the registry and the token store, so it rides localShell by prefix', () => {
+  expect(routeCapability('/api/benchmark/observed')).toBe('localShell')
+  expect(routeCapability('/api/benchmark/experiments')).toBe('localShell')
+  expect(routeCapability('/api/benchmark/anything-added-later')).toBe('localShell')
+  expect(routeCapability('/api/benchmarks-neighbour')).toBeNull()
+})

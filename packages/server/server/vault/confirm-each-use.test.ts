@@ -3,7 +3,7 @@
  * import, and THE LINT: a value never leaves except through `reveal`. Fake protectors and a fake clock;
  * nothing is spawned and nothing under ~/.agentistics is touched.
  */
-import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { readdirSync, readFileSync, renameSync } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -85,6 +85,8 @@ async function presenceOn(): Promise<void> {
 
 afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdir(), 'agentistics-cfu-done-')), 'vault') }) })
 beforeEach(async () => { await fresh(); __resetGrantsForTests(clock) })
+// grants.ts keeps module state shared by every test file in one `bun test` process: never leave the override ON.
+afterEach(() => { __resetGrantsForTests() })
 
 const key = { kind: 'api-key', name: 'OpenAI', fields: { value: 'MARKER-http-cfu' } }
 const tick = (ms = 10) => new Promise(r => setTimeout(r, ms))

@@ -66,7 +66,7 @@ test('a live holder is obeyed — this process is the liveness proof', async () 
   const file = await lockPath()
   await writeFile(file, String(process.pid))
 
-  const claim = await claimInstanceLock(file, 5555)
+  const claim = await claimInstanceLock(file, 5555, { processStartMs: () => undefined, holderCommand: () => 'agentop server' })
   expect(claim.ok).toBe(false)
 })
 
@@ -383,4 +383,183 @@ test('waitForInstanceFree: bounded — a holder that never lets go is still repo
   expect(await waitForInstanceFree(file, { timeoutMs: 60, pollMs: 10 })).toBe(process.pid)
   expect(Date.now() - t0).toBeGreaterThanOrEqual(55)
   await first.release()
+})
+
+// ---------------------------------------------------------------------------
+// 2026-11-13 (BOOT.LOCK-ANTIGO): an OLD-format lock (only `<pid>`) whose pid is alive but is NOT an
+// agentop server is stale — nothing proves who wrote it, and a stranger holding the number is the
+// reboot failure again. A holder that cannot be described is still believed (never steal).
+// ---------------------------------------------------------------------------
+import { isAgentopServerCommand } from './single-instance'
+
+const base = { processStartMs: () => undefined }
+
+test('old-format lock + live NON-agentop pid is reclaimed at once', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const probe = { ...base, holderCommand: () => 'sleep 1000' }
+  expect(await probeInstanceLock(file, probe)).toBeNull()
+  expect((await claimInstanceLock(file, 7777, probe)).ok).toBe(true)
+})
+
+test('old-format lock + live agentop server pid still refuses', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const probe = { ...base, holderCommand: () => '/home/u/.local/bin/agentop server' }
+  expect(await probeInstanceLock(file, probe)).toBe(process.pid)
+  expect((await claimInstanceLock(file, 7777, probe)).ok).toBe(false)
+})
+
+test('old-format lock + holder that cannot be described still refuses (never steal)', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const probe = { ...base, holderCommand: () => undefined }
+  expect(await probeInstanceLock(file, probe)).toBe(process.pid)
+  expect((await claimInstanceLock(file, 7777, probe)).ok).toBe(false)
+})
+
+test('new-format lock is not judged by its command line', async () => {
+  const file = await lockPath()
+  await writeFile(file, `${process.pid} 740 ${BOOT_A}`)
+  const probe = { ...base, processStartTicks: () => 740, bootId: () => BOOT_A, holderCommand: () => 'sleep 1000' }
+  expect(await probeInstanceLock(file, probe)).toBe(process.pid)
+})
+
+test('isAgentopServerCommand: any agentop executable, nothing else', () => {
+  expect(isAgentopServerCommand('/home/u/.local/bin/agentop server')).toBe(true)
+  expect(isAgentopServerCommand('agentop server --port 1')).toBe(true)
+  expect(isAgentopServerCommand('bun /r/packages/server/bin/cli.ts server')).toBe(true)
+  expect(isAgentopServerCommand('bun run /r/packages/server/server/index.ts')).toBe(true)
+  expect(isAgentopServerCommand('sleep 1000')).toBe(false)
+  expect(isAgentopServerCommand('agentop session ls')).toBe(true)
+  expect(isAgentopServerCommand('/home/u/.local/bin/agentop start')).toBe(true)
+  expect(isAgentopServerCommand('vim agentop server.txt')).toBe(false)
+  expect(isAgentopServerCommand('bun test packages/server/server/single-instance.test.ts')).toBe(false)
+})
+
+// ---------------------------------------------------------------------------
+// BOOT.LOCK R1 (macOS): an executable path with spaces must not be cut at the first space.
+// ---------------------------------------------------------------------------
+import { readHolderCommand } from './single-instance'
+import { spawn } from 'child_process'
+
+test('R1: Linux argv form keeps argv[0] whole (spaces inside)', () => {
+  expect(isAgentopServerCommand({ exe: '/Applications/Agent Tools/agentop', args: ['server'] })).toBe(true)
+  expect(isAgentopServerCommand({ exe: '/usr/bin/sleep', args: ['999'] })).toBe(false)
+  expect(isAgentopServerCommand({ exe: '/usr/bin/vim', args: ['agentop.txt'] })).toBe(false)
+  expect(isAgentopServerCommand({ exe: '/opt/My Tools/bun', args: ['/r/packages/server/bin/cli.ts', 'server'] })).toBe(true)
+  expect(isAgentopServerCommand({ exe: 'bun', args: ['test', 'x'] })).toBe(false)
+})
+
+test('R1: macOS form (comm= with spaces, command= unsplit) via the seam', () => {
+  expect(isAgentopServerCommand({ exe: '/Applications/Agent Tools/agentop', args: '/Applications/Agent Tools/agentop server' })).toBe(true)
+  expect(isAgentopServerCommand({ exe: '/usr/bin/vim', args: 'vim agentop.txt' })).toBe(false)
+  expect(isAgentopServerCommand({ exe: '/opt/My Tools/node', args: 'node /r/packages/server/bin/cli.ts server' })).toBe(true)
+})
+
+test('R1: joined-string fallback is conservative', () => {
+  expect(isAgentopServerCommand('/Applications/Agent Tools/agentop server')).toBe(true)
+  expect(isAgentopServerCommand('sleep 999')).toBe(false)
+  expect(isAgentopServerCommand('vim agentop.txt')).toBe(false)
+  expect(isAgentopServerCommand('bun test x')).toBe(false)
+})
+
+test('R1/R4: the REAL readHolderCommand on this process and on a spawned sleep', async () => {
+  if (process.platform !== 'linux') return
+  const me = readHolderCommand(process.pid)
+  expect(typeof me).toBe('object')
+  expect(typeof (me as { exe: string }).exe).toBe('string')
+  expect(Array.isArray((me as { args: unknown }).args)).toBe(true)
+  expect(isAgentopServerCommand(me!)).toBe(false) // bun test …
+  const child = spawn('sleep', ['999'], { stdio: 'ignore' })
+  try {
+    // Right after spawn the child may not have exec'd `sleep` yet (its /proc entry still shows the
+    // parent image or is empty): wait up to 2 s for the exec before reading it back.
+    let c = readHolderCommand(child.pid!) as { exe: string; args: string[] } | null
+    for (let i = 0; i < 100 && !(c && c.exe.endsWith('sleep')); i++) {
+      await Bun.sleep(20)
+      c = readHolderCommand(child.pid!) as { exe: string; args: string[] } | null
+    }
+    if (!c) throw new Error('readHolderCommand returned nothing for the spawned sleep')
+    expect(c.exe.endsWith('sleep')).toBe(true)
+    expect(c.args).toEqual(['999'])
+    expect(isAgentopServerCommand(c)).toBe(false)
+  } finally {
+    child.kill()
+  }
+})
+
+test('R1: a REAL process whose executable path contains a space reads back whole and is agentop', async () => {
+  if (process.platform !== 'linux') return
+  const { mkdtempSync, symlinkSync } = await import('fs')
+  const dir = join(mkdtempSync(join(tmpdir(), 'r1 ')), 'Agent Tools')
+  require('fs').mkdirSync(dir)
+  const exe = join(dir, 'agentop')
+  // A SYMLINK, not a copy: /proc/<pid>/cmdline carries argv[0] as invoked (all readHolderCommand reads), and a symlink
+  // has no write handle that could leave the target "text file busy" (ETXTBSY) at exec time.
+  symlinkSync(require('fs').realpathSync('/bin/sleep'), exe)
+  // Belt and braces: should exec still see a busy file (a handle another fork inherited)
+  // (another test's fork inherited the fd) → ETXTBSY from spawn. Wait for the child's own 'spawn' /
+  // 'error' event, retry on ETXTBSY, and name the cause instead of timing out on a null read.
+  let child: ReturnType<typeof spawn> | undefined
+  let lastError = ''
+  for (let attempt = 0; attempt < 8 && !child; attempt++) {
+    const candidate = spawn(exe, ['999'], { stdio: 'ignore' })
+    const outcome = await new Promise<string>(resolve => {
+      candidate.once('spawn', () => resolve(''))
+      candidate.once('error', e => resolve(`${(e as NodeJS.ErrnoException).code ?? 'error'}: ${e.message}`))
+    })
+    if (outcome === '') child = candidate
+    else {
+      lastError = outcome
+      if (!/ETXTBSY|EBUSY|EAGAIN/.test(outcome)) break
+      await Bun.sleep(50 * (attempt + 1))
+    }
+  }
+  if (!child) throw new Error(`could not spawn the copied executable ${exe}: ${lastError}`)
+  let exited = ''
+  child.once('exit', (code, signal) => { exited = `exited early (code ${code}, signal ${signal})` })
+  try {
+    // spawn() returns before exec: until then /proc/<pid>/cmdline still shows the parent's argv.
+    const deadline = Date.now() + 5000
+    let c = readHolderCommand(child.pid!) as { exe: string; args: string[] } | null
+    while (c?.exe !== exe && !exited && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 10))
+      c = readHolderCommand(child.pid!) as { exe: string; args: string[] } | null
+    }
+    if (!c) throw new Error(`readHolderCommand returned nothing for pid ${child.pid}${exited ? `: the child ${exited}` : ' within 5 s'}`)
+    expect(c.exe).toBe(exe)
+    expect(isAgentopServerCommand(c)).toBe(true)
+  } finally {
+    child.kill()
+  }
+})
+
+test('R1b: a symlinked agentop (comm resolves to another basename) is still agentop via the invoked name', async () => {
+  expect(isAgentopServerCommand({ exe: '/opt/x/agentop-bin', args: '/usr/local/bin/agentop server' })).toBe(true)
+  expect(isAgentopServerCommand({ exe: '/opt/x/agentop-bin', args: '/opt/x/agentop-bin server' })).toBe(false)
+  expect(isAgentopServerCommand({ exe: '/usr/bin/vim', args: 'vim agentop server.txt' })).toBe(false)
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const hourAgo = new Date(Date.now() - 3_600_000)
+  await utimes(file, hourAgo, hourAgo)
+  const probe = {
+    processStartMs: () => Date.now(),
+    holderCommand: () => ({ exe: '/opt/x/agentop-bin', args: '/usr/local/bin/agentop server' }),
+  }
+  expect((await claimInstanceLock(file, 7777, probe)).ok).toBe(false)
+})
+
+test('leader decision: old-format lock + LIVE agentop holder is held even when the mtime says "started after the write"', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const hourAgo = new Date(Date.now() - 3_600_000)
+  await utimes(file, hourAgo, hourAgo)
+  // The wall-clock fallback would read the holder as younger than the file and steal it.
+  const probe = {
+    processStartMs: () => Date.now(),
+    holderCommand: () => ({ exe: '/Applications/Agent Tools/agentop', args: ['server'] }),
+  }
+  expect(await probeInstanceLock(file, probe)).toBe(process.pid)
+  expect((await claimInstanceLock(file, 7777, probe)).ok).toBe(false)
 })
