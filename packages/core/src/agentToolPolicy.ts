@@ -120,6 +120,8 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_book_takeover',
   // Vault (1) — COFRE.DESBLOQUEIO
   'agentistics_vault_status',
+  // Install ledger (1) — ENTREGA.GARANTIDA §4.2
+  'agentistics_installs',
 ] as const
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]
@@ -259,6 +261,7 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
     ...TASKS, risk: 'R', routes: ['GET /api/vault'],
     reason: 'reads how the vault is protected (state, ways to confirm in use and offered, password rules) through an allowlist; never an item, a key id or a secret',
   },
+  agentistics_installs: { ...TASKS, risk: 'R', routes: ['GET /api/deliveries/installs'], reason: 'reads the local install ledger (build repo/sha/tree/version history); writes nothing' },
   // ------------------------------------------------------------------ Experimental flows (read-only host operations)
   agentistics_flow_run: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['POST /api/flows/run'], reason: 'runs only the built-in deterministic flow gates; it deletes nothing' },
   agentistics_flow_status: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['GET /api/flows/status/:runId'], reason: 'reads a durable deterministic flow run' },

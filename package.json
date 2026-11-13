@@ -29,7 +29,7 @@
     "build": "bun run --cwd packages/web build",
     "bin": "bun build:binary && mkdir -p ~/.local/bin && cp -f ./release/agentop ~/.local/bin/.agentop.new && mv -f ~/.local/bin/.agentop.new ~/.local/bin/agentop",
     "restart:all": "bun run bin && agentop restart all --rebuild",
-    "build:assets": "bun run packages/server/scripts/embed-dist.ts && bun run engine:slot",
+    "build:assets": "bun run packages/server/scripts/embed-dist.ts && bun run engine:slot --build",
     "engine:slot": "bun run packages/server/scripts/engine-slot.ts",
     "engine:slot:null": "bun run packages/server/scripts/engine-slot.ts --null",
     "build:vscode": "bun run --cwd packages/vscode build",

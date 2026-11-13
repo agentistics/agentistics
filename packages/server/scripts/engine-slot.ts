@@ -19,6 +19,8 @@
  */
 import { existsSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
+import { readBuildIdentity, type BuildIdentity } from '../server/build-identity.ts'
+import { gitRunnerIn } from '../server/build-info.ts'
 
 const SERVER_PKG = new URL('..', import.meta.url).pathname
 const ROOT = resolve(SERVER_PKG, '..', '..')
@@ -48,8 +50,11 @@ const HEADER = [
 ]
 
 /** PURE. The slot file's text. `slotDir` is where the file lives, for a relative engine path. */
-export function renderSlot(src: SlotSource, slotDir: string): string {
+export function renderSlot(src: SlotSource, slotDir: string, build?: BuildIdentity): string {
   const lines = [...HEADER]
+  // The build identity (ENTREGA.GARANTIDA §4.2) is written only by `build:assets` (`--build`); a stub slot has none
+  // and a dev server then reads git live (build-info.ts).
+  if (build) lines.push(`export const build = ${JSON.stringify(build)} as const`)
   switch (src.kind) {
     case 'null':
       lines.push(
@@ -87,6 +92,7 @@ if (import.meta.main) {
     engineDir: process.env.AGENTISTICS_ENGINE_DIR,
     packageExists: existsSync(join(ROOT, 'packages', 'engine', 'package.json')),
   })
-  writeFileSync(SLOT_PATH, renderSlot(src, join(SERVER_PKG, 'server')))
+  const build = argv.includes('--build') ? readBuildIdentity(gitRunnerIn(ROOT), new Date()) : undefined
+  writeFileSync(SLOT_PATH, renderSlot(src, join(SERVER_PKG, 'server'), build))
   process.stdout.write(`engine slot: ${src.kind}${src.kind === 'dir' ? ` (${src.dir})` : ''} → packages/server/server/engine-slot.generated.ts\n`)
 }

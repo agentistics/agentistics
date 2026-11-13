@@ -1109,6 +1109,11 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: { harness: HARNESS_PARAM }, required: [] },
   },
   {
+    name: "agentistics_installs",
+    description: "Read-only: the install ledger — each time the build running on this machine changed ({repoKey, version, buildSha, tree, firstSeenAt, previousBuildSha}), oldest first. Same data as `agentop flow installs`.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "agentistics_flow_run",
     description: "Run an official deterministic flow. Flows are experimental and read-only host operations; the server refuses when AGENTISTICS_FLOWS is off or the official engine is absent.",
     inputSchema: {
@@ -1426,6 +1431,10 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       case "agentistics_task_delete": {
         const ref = String((args as any)?.ref ?? "");
         const body = await apiSend("DELETE", `/api/tasks/${encodeURIComponent(ref)}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_installs": {
+        const body = await apiGet("/api/deliveries/installs");
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_delivery_calendar": {

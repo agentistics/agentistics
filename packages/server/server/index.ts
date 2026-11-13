@@ -214,6 +214,11 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
   // behind by a hard kill (or a reboot) is still reclaimed as stale by the next start —
   // `claimInstanceLock` checks that the holder is the process that WROTE it, not merely a live pid.
   console.log(`[boot] +${Math.round(performance.now())} ms data dir claimed`)
+  // ENTREGA.GARANTIDA §4.2 — the install ledger: one line when {repoKey, sha, version} changed. Never fatal.
+  void import('./installs-ledger').then(m => m.recordBootInstall()).then(r => {
+    if (r.appended) console.log(`[boot] install recorded: ${r.entry.version} ${r.entry.buildSha?.slice(0, 12) ?? '-'}`)
+    else if (r.error) console.error('[boot] install ledger not written:', r.error)
+  }).catch(err => console.error('[boot] install ledger not written:', err instanceof Error ? err.message : String(err)))
   const release = () => { lock.releaseSync() }
   process.on('exit', release)
   // The engine is disposed on the way out (its sockets close 1001), bounded so a stuck dispose
@@ -732,7 +737,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const info = versionWithRestart(await getVersionInfo())
         // `upgradable`: whether THIS machine could press "install now" — the very gate the route
         // applies, so the update toast is never offered where the route would refuse. Additive.
-        return new Response(JSON.stringify({ ...info, upgradable: upgradableHint(info) }), {
+        // `build` (ENTREGA.GARANTIDA §4.2) is ADDITIVE: every field above is exactly what it was.
+        const { currentBuild, versionPayload } = await import('./build-info')
+        return new Response(JSON.stringify(versionPayload(info, upgradableHint(info), await currentBuild())), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
@@ -1170,6 +1177,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // `agentop flow calendario` all read THIS. Matched before the generic `<subtaskId>` GET below, or `calendar`
     // resolves as a subtask reference and answers 404. `?format=ics` is the same filtered view as an .ics file;
     // without filters in the query the reply is the whole calendar (the screen filters in the browser).
+    // ENTREGA.GARANTIDA §4.2 — the install ledger, read-only (`agentop flow installs` and the MCP tool read THIS shape).
+    if (url.pathname === '/api/deliveries/installs' && req.method === 'GET') {
+      const [{ readInstalls, installsFile }, { AGENTISTICS_DATA_DIR }] = await Promise.all([import('./installs-ledger'), import('./config')])
+      return json({ installs: readInstalls(installsFile(AGENTISTICS_DATA_DIR)) })
+    }
     if (url.pathname === '/api/deliveries/calendar' && req.method === 'GET') {
       const { deliveryCalendar, answerCalendar, calendarFiltersOf } = await import('./delivery/calendar')
       const reply = await deliveryCalendar()
