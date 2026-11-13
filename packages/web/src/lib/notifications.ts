@@ -85,8 +85,13 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     en: { title: 'Evidence already used', message: 'This exact file already backs another piece or revision. Capture it again.' },
   },
   guarantees_unreadable: {
-    pt: { title: 'Garantias ilegíveis', message: 'O arquivo de garantias não pôde ser lido; todas as regras ficam desligadas até ele ser corrigido.' },
-    en: { title: 'Guarantees unreadable', message: 'The guarantees file could not be read; every rule stays off until it is fixed.' },
+    pt: { title: 'Garantias ilegíveis', message: 'O arquivo de garantias não pôde ser lido; nada foi alterado e as regras mantêm o último estado selado.' },
+    en: { title: 'Guarantees unreadable', message: 'The guarantees file could not be read; nothing was changed and the rules keep their last sealed state.' },
+  },
+  // S0d.2: guards.json is not what agentop sealed (deleted, edited by hand, or its key is gone) — fail closed.
+  guards_unreadable: {
+    pt: { title: 'Pontos de controle adulterados', message: 'O arquivo de pontos de controle das entregas (guards.json) não é o que o agentistics selou. Nenhuma mudança protegida é aceita até ele ser reparado.' },
+    en: { title: 'Checkpoints tampered with', message: 'The delivery checkpoint file (guards.json) is not what agentistics sealed. No guarded change is accepted until it is repaired.' },
   },
   migration_missing: {
     pt: { title: 'Migração pendente', message: 'Esta garantia só pode ser ativada depois da migração.' },

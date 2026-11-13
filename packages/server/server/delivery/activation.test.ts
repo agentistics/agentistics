@@ -44,11 +44,15 @@ describe('absent = off (spec §2.7, review r2 N2)', () => {
     for (const r of RULE_IDS) expect(ruleState(doc, r)).toBe('off')
     expect(warn).toContain('guarantees.json')
   })
-  test('a write over an unparseable file is refused and keeps the bytes (never repairs by overwriting)', async () => {
+  test('S0d.2: an unparseable file is TAMPERED — a non-owner changes nothing; the owner\'s proven move re-seals it and keeps a copy of the bytes', async () => {
     writeFileSync(file, '{ not json')
-    const r = await createGuaranteesStore(file).setState('a', 'shadow', { check: owner, facts: facts() })
-    expect(r).toEqual({ ok: false, code: 'guarantees_unreadable' })
+    expect(await createGuaranteesStore(file).setState('a', 'shadow', { check: notOwner, facts: facts() })).toEqual({ ok: false, code: 'owner_required' })
     expect(readFileSync(file, 'utf8')).toBe('{ not json')
+    const r = await createGuaranteesStore(file).setState('a', 'shadow', { check: owner, facts: facts() })
+    expect(r).toEqual({ ok: true })
+    expect(readFileSync(`${file}.unreadable.bak`, 'utf8')).toBe('{ not json')
+    const after = await createGuaranteesStore(file).read()
+    expect(after.tampered).toBeUndefined(); expect(ruleState(after.doc, 'a')).toBe('shadow')
   })
 })
 

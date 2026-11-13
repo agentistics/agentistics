@@ -64,6 +64,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _localProof: 'a deadline (ms) + the session whose loopback page gave ONE presence gesture (v2.98.1); no key material',
     _recoverPage: 'a deadline (ms) + the session whose loopback page recovered with the 24 words (v2.98.1); never the words',
     _recoverWrong: 'a wrong-words counter and a pause deadline for the page recovery (v2.98.1)',
+    _liveDeliveryGrants: 'nonces (random, not derived from any credential) of the unspent single-use `delivery` grants, with their expiry (ms), so a spent or expired one is refused (ENTREGA.GARANTIDA §2.3.1); authorises one move, decrypts nothing',
   },
   'server/server/vault/machine-secrets-host.ts': { cached: 'the one machine-secrets instance for the current vault directory; it holds the wrapping machine key in memory (zeroed on dispose), never a sealed value' },
   'server/server/vault/http.ts': { LOOPBACK_HOSTS: 'host names that mean "this computer"' },

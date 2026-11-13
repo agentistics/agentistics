@@ -16,9 +16,10 @@
  * Types below mirror the spec's `PieceCheckpoint`; `by` is typed structurally here because the request principal
  * (`principal.ts`) lands with S0a — S0b only stores it.
  */
-import { mkdir, readFile, rename, writeFile, copyFile, stat } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { readFile, copyFile, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import { withGuardLocks, type GuardLockName, type GuardLockPaths } from './guard-locks'
+import { unsealed, verdictFor, writeSealed, type TamperReason } from './guard-integrity'
 
 export type GuardAuth =
   | { kind: 'evidence'; ids: string[]; sha256: string[] }
@@ -47,11 +48,17 @@ export interface PieceCheckpoint {
 }
 
 export interface GuardIntent { transitionId: string; target: PieceCheckpoint; at: string }
-export interface GuardsDoc { version: 1; checkpoints: Record<string, PieceCheckpoint>; intents: Record<string, GuardIntent> }
+/** `rules`: S0d.2's authenticated MIRROR of each guarantee rule's state (`activation.ts` writes it in the same guards-locked section). */
+export interface GuardsDoc { version: 1; checkpoints: Record<string, PieceCheckpoint>; intents: Record<string, GuardIntent>; rules?: Record<string, 'off' | 'shadow' | 'on'> }
 
 export class GuardsUnreadable extends Error {
   readonly code = 'guards_unreadable'
-  constructor(readonly path: string, readonly why: string) { super(`guards.json is unreadable (${why}); guarded writes are refused so no authorization is lost`) }
+  /** S0d.2: set when the file is not what agentop sealed (deleted, hand-edited, unsealed, or its key is gone). */
+  readonly tampered?: TamperReason
+  constructor(readonly path: string, readonly why: string, tampered?: TamperReason) {
+    super(`guards.json is unreadable (${why}); guarded writes are refused so no authorization is lost`)
+    if (tampered) this.tampered = tampered
+  }
 }
 
 export const emptyGuards = (): GuardsDoc => ({ version: 1, checkpoints: {}, intents: {} })
@@ -72,6 +79,12 @@ export function parseGuards(text: string): GuardsDoc {
   for (const [k, v] of Object.entries((raw.intents as Record<string, unknown>) ?? {})) {
     if (!isRec(v) || typeof v.transitionId !== 'string' || !isRec(v.target) || v.target.key !== k) throw new Error(`intent ${k} is malformed`)
     intents[k] = v as unknown as GuardIntent
+  }
+  if (raw.rules !== undefined) {
+    if (!isRec(raw.rules)) throw new Error('rules is not an object')
+    const rules: Record<string, 'off' | 'shadow' | 'on'> = {}
+    for (const [k, v] of Object.entries(raw.rules)) { if (v !== 'off' && v !== 'shadow' && v !== 'on') throw new Error(`rule ${k} is malformed`); rules[k] = v }
+    return { version: 1, checkpoints, intents, rules }
   }
   return { version: 1, checkpoints, intents }
 }
@@ -110,23 +123,24 @@ export function defaultGuardsPath(dataDir = process.env.AGENTISTICS_DIR ?? join(
 
 export function createGuardsStore(path = defaultGuardsPath()): GuardsStore {
   const read = async (): Promise<GuardsDoc> => {
-    let text: string
+    let text: string | null
     try { text = await readFile(path, 'utf8') } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return emptyGuards()
-      throw new GuardsUnreadable(path, e instanceof Error ? e.message.split('\n')[0]! : String(e))
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw new GuardsUnreadable(path, e instanceof Error ? e.message.split('\n')[0]! : String(e))
+      text = null
     }
+    // S0d.2: the seal first. A deleted, hand-edited, unsealed or key-less file is TAMPERED — refused, never "empty".
+    const v = await verdictFor(path, 'guards', text)
+    if (v.state === 'tampered') throw new GuardsUnreadable(path, `tampered: ${v.reason}`, v.reason)
+    if (text === null) return emptyGuards()
     if (!text.trim()) throw new GuardsUnreadable(path, 'the file is empty')
-    try { return parseGuards(text) } catch (e) { throw new GuardsUnreadable(path, e instanceof Error ? e.message : String(e)) }
+    try { return parseGuards(unsealed(text)) } catch (e) { throw new GuardsUnreadable(path, e instanceof Error ? e.message : String(e)) }
   }
   return {
     path,
     read,
     async write(doc) {
-      await read() // throws when unreadable: the bytes stay, nothing replaces them
-      await mkdir(dirname(path), { recursive: true })
-      const tmp = `${path}.tmp`
-      await writeFile(tmp, JSON.stringify(doc, null, 2) + '\n', { mode: 0o600 })
-      await rename(tmp, path)
+      await read() // throws when unreadable or tampered: the bytes stay, nothing replaces them
+      await writeSealed(path, 'guards', doc)
     },
   }
 }

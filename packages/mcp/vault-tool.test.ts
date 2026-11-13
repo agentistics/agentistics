@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { checkVaultPassword, VAULT_PASSWORD_RULES } from "@agentistics/core";
-import { vaultStatusTool } from "./vault-tool.js";
+import { deliveryIntegrityOf, vaultStatusTool } from "./vault-tool.js";
 
 const view = {
   state: "open", wrappers: ["keychain", "touchid", "password", "recovery"], presence: true,
@@ -36,6 +36,12 @@ describe("agentistics_vault_status", () => {
     // a password exactly at the stated minimums passes the shared checker; one under fails it
     expect(checkVaultPassword("Abcdef!#1").ok).toBe(true);
     expect(checkVaultPassword("Abcdefg!1").ok).toBe(false);
+  });
+  test("S0d: the delivery integrity block is kept only in its expected shape", () => {
+    const ok = { ownerProof: { mode: "required", tampered: "forged" }, guarantees: { rules: { a: "shadow" } }, guards: { tampered: "missing" } };
+    expect(deliveryIntegrityOf(ok)).toEqual(ok);
+    expect(deliveryIntegrityOf(null)).toBeUndefined();
+    expect(deliveryIntegrityOf({ ownerProof: {} })).toBeUndefined();
   });
   test("junk is answered with facts it can stand behind, never a throw", () => {
     const a = vaultStatusTool(null);

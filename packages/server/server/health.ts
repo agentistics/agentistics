@@ -175,6 +175,28 @@ export function analyzeOpencodeV2Status(status: OpencodeV2Status | null, now: nu
 export async function runHealthChecks(): Promise<HealthIssue[]> {
   const issues: HealthIssue[] = []
   analyzeOpencodeV2Status(opencodeV2Status(), Date.now(), issues)
+  // ENTREGA.GARANTIDA: the owner is unproven while `delivery.ownerProof` is `legacy` (the default).
+  try {
+    const [{ readOwnerModeState }, { analyzeOwnerProof, analyzeOwnerModeTamper }, gate, service] = await Promise.all([
+      import('./delivery/owner-mode'), import('./delivery/owner-health'), import('./vault/gate'), import('./vault/service'),
+    ])
+    const st = (await service.vaultStatus()).state
+    const human = st === 'uninitialized' ? false : await gate.ownerProofAvailable()
+    const owner = await readOwnerModeState()
+    analyzeOwnerModeTamper(owner.tampered, issues)
+    analyzeOwnerProof(owner.mode, st === 'uninitialized' ? 'none' : human === null ? 'unknown' : human ? 'human' : 'silent-only', (await gate.stepUpState()).frozen === true, issues)
+  } catch { /* a health check never breaks the others */ }
+  // S0d.2: the guard's own files carry a seal; a deleted / edited / unsealed one is WARNed, never silently "off".
+  try {
+    const [{ createGuaranteesStore, guaranteeWarnings }, { createGuardsStore, GuardsUnreadable }, { defaultGuardLockPaths }, { analyzeGuardIntegrity }, { dirname, join }] = await Promise.all([
+      import('./delivery/activation'), import('./delivery/guards-store'), import('./delivery/guard-locks'), import('./delivery/owner-health'), import('node:path'),
+    ])
+    const dir = dirname(defaultGuardLockPaths().tasks)
+    const g = await createGuaranteesStore(join(dir, 'guarantees.json')).read()
+    let guardsTamper: string | undefined
+    try { await createGuardsStore(join(dir, 'guards.json')).read() } catch (e) { guardsTamper = e instanceof GuardsUnreadable ? (e.tampered ?? e.why) : 'unreadable' }
+    analyzeGuardIntegrity({ ...(g.warn ? { guaranteesWarn: g.warn } : {}), ...(guardsTamper ? { guardsTamper } : {}), offWarnings: guaranteeWarnings(g.doc) }, issues)
+  } catch { /* a health check never breaks the others */ }
 
   // Determine which harnesses are active so Claude-specific checks can be
   // skipped when only non-Claude harnesses are present.

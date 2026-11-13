@@ -56,8 +56,16 @@ describe('the composition the real doors use carries the classification host', (
   })
   test('CLI: `agentop flow classify <piece> --repo --head` prints the classification and exits 0', async () => {
     const { svc, repo, head } = hostService(); const { out, io: i } = io()
-    const code = await runDeliveryCli(['classify', 'p1', '--repo', repo, '--head', head], i, { AGENTOP_MANAGED_ID: 'leader' }, svc)
+    // S0a: the CLI's principal is the process tree, never the env var alone — the test hands it an auth that proves `leader`.
+    const auth = async () => ({ interactive: false, prove: async (id: string) => id === 'leader', stepUp: async () => false })
+    const code = await runDeliveryCli(['classify', 'p1', '--repo', repo, '--head', head], i, { AGENTOP_MANAGED_ID: 'leader' }, svc, auth)
     expect(code).toBe(0); expect(JSON.parse(out.join('\n'))).toMatchObject({ ok: true, classification: { category: 'screen', headSha: head } })
+  })
+  test('CLI: an exported AGENTOP_MANAGED_ID the process tree does not prove cannot classify (S0a)', async () => {
+    const { svc, repo, head } = hostService(); const { err, io: i } = io()
+    const auth = async () => ({ interactive: false, prove: async () => false, stepUp: async () => false })
+    const code = await runDeliveryCli(['classify', 'p1', '--repo', repo, '--head', head], i, { AGENTOP_MANAGED_ID: 'leader' }, svc, auth)
+    expect(code).toBe(1); expect(err.join('\n')).toMatch(/not running inside that session/)
   })
   test('the production entry points obtain the service from the host factory with no override (so the wiring above is what runs)', () => {
     const src = (f: string) => readFileSync(join(import.meta.dir, f), 'utf8')

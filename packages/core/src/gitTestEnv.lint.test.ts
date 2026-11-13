@@ -139,11 +139,18 @@ export interface GitEnvViolation {
   snippet: string
 }
 
-/** Every `git` spawn in `src` that does not reference `gitTestEnv(` inside its own call, unexcused. */
+/**
+ * The scrubbed-environment helpers a test may pass to a `git` spawn: core's `gitTestEnv()` and the delivery guard's
+ * `cleanGitEnv()` / `gitSpawnEnv()` (`server/delivery/git-env.ts` — both drop EVERY inherited `GIT_*` key). A whole-word match,
+ * so `notCleanGitEnv(` is not one.
+ */
+const SCRUBBED_ENV = /\b(?:gitTestEnv|cleanGitEnv|gitSpawnEnv)\(/
+
+/** Every `git` spawn in `src` that does not reference a scrubbed-env helper inside its own call, unexcused. */
 export function findGitEnvViolations(src: string): GitEnvViolation[] {
   const out: GitEnvViolation[] = []
   for (const call of gitSpawnCalls(src)) {
-    if (call.snippet.includes('gitTestEnv(')) continue
+    if (SCRUBBED_ENV.test(call.snippet)) continue
     if (excused(src, call.index)) continue
     out.push({ index: call.index, line: lineAt(src, call.index), snippet: call.snippet.replace(/\s+/g, ' ').slice(0, 140) })
   }
@@ -229,6 +236,18 @@ describe('gitTestEnv.lint — a test may only spawn `git` with the scrubbed envi
     // the marker must carry a reason on the SAME/adjacent line, not float unrelated in the file
     const farAway = `${MARKER} — unrelated\n${'\n'.repeat(10)}${violatingCall()}`
     expect(findGitEnvViolations(farAway).length).toBe(1)
+  })
+
+  it('self-test: the delivery guard\'s cleanGitEnv() / gitSpawnEnv() count as a scrubbed environment too — as whole words only', () => {
+    const withEnv = (helper: string) => `${EFS}(${GIT_LIT}, args, { cwd, env: ${helper} })`
+    expect(findGitEnvViolations(withEnv('cleanGitEnv()')).length).toBe(0)
+    expect(findGitEnvViolations(withEnv('gitSpawnEnv({ GIT_AUTHOR_NAME: \'t\' })')).length).toBe(0)
+    expect(findGitEnvViolations(withEnv('{ ...cleanGitEnv(), GIT_DIR: x }')).length).toBe(0)   // a deliberate control still names the helper
+    // a look-alike or a bare inherited environment is not one
+    expect(findGitEnvViolations(withEnv('notcleanGitEnv()')).length).toBe(1)
+    expect(findGitEnvViolations(withEnv('mygitSpawnEnv()')).length).toBe(1)
+    expect(findGitEnvViolations(withEnv('{ ...process.env }')).length).toBe(1)
+    expect(findGitEnvViolations(withEnv('cleanGitEnv')).length).toBe(1)   // referenced, not called
   })
 
   it('self-test: gitTestEnv() itself actually strips what it claims to (sanity on the helper this lint enforces the use of)', () => {

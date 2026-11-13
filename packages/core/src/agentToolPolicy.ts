@@ -256,8 +256,8 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_tag_detail: { ...DATA, risk: 'R', routes: ['GET /api/tags', 'GET /api/tags/:id'], reason: 'reads one tag aggregate (counts and sums only)' },
   // ------------------------------------------------------------------ Vault (COFRE.DESBLOQUEIO)
   agentistics_vault_status: {
-    ...TASKS, risk: 'R', routes: ['GET /api/vault'],
-    reason: 'reads how the vault is protected (state, ways to confirm in use and offered, password rules) through an allowlist; never an item, a key id or a secret',
+    ...TASKS, risk: 'R', routes: ['GET /api/vault', 'GET /api/deliveries/integrity'],
+    reason: 'reads how the vault is protected (state, ways to confirm in use and offered, password rules) through an allowlist, plus the delivery owner-proof mode and whether the guard files carry their seal; never an item, a key id or a secret',
   },
   // ------------------------------------------------------------------ Experimental flows (read-only host operations)
   agentistics_flow_run: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['POST /api/flows/run'], reason: 'runs only the built-in deterministic flow gates; it deletes nothing' },

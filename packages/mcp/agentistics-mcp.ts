@@ -24,12 +24,12 @@ import {
 } from "./session-tokens.js";
 import { createAgentAuditSink } from "./agent-audit.js";
 import { taskCommentRequest } from "./task-comment-args.js";
-import { sessionProof } from "./session-proof.js";
+import { sessionProof, withTaskWriteProof } from "./session-proof.js";
 import { bookTakeoverPayload } from "./book-takeover-payload.js";
 import { HARNESS_CAPABILITIES, contextReading, nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
 import { planLimitsTool } from "./plan-limits-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
-import { vaultStatusTool } from "./vault-tool.js";
+import { deliveryIntegrityOf, vaultStatusTool } from "./vault-tool.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
 
@@ -169,11 +169,12 @@ async function getPrefs() {
 }
 
 async function apiSend(method: string, path: string, body?: unknown) {
+  const payload = withTaskWriteProof(method, path, body, sessionProof(process.env));
   const res = await fetch(`${API}${path}`, {
     method,
-    ...(body === undefined ? {} : {
+    ...(payload === undefined ? {} : {
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     }),
   });
   if (!res.ok) {
@@ -1466,8 +1467,9 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         if (action !== "tick" && (typeof a.subtaskId !== "string" || !a.subtaskId)) throw new Error("subtaskId is required");
         const { subtaskId: _s, action: _a, ...rest } = a;
         const subtaskId = action === "tick" ? "tick" : a.subtaskId;
-        // `approve` is the OWNER's answer to a human gate: no session identity travels with it (the server reads "no session proof" as the owner).
-        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(subtaskId)}`, { ...rest, action, ...(action === "approve" ? {} : { session: sessionProof(process.env) }) });
+        // Every call carries the session proof. `approve` is the OWNER's answer to a human gate and a session is never
+        // the owner: the server refuses it (`so_o_dono`); the owner answers on the Live card or `agentop flow approve --owner`.
+        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(subtaskId)}`, { ...rest, action, session: sessionProof(process.env) });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_stage": {
@@ -1940,7 +1942,9 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const res = await fetch(`${API}/api/vault`);
         const body = await res.json().catch(() => ({})) as any;
         if (!res.ok && !(body && typeof body === "object" && body.view)) throw new Error(`GET /api/vault → HTTP ${res.status}`);
-        return text(vaultStatusTool(body));
+        // S0d: the delivery owner-proof mode and the guard files' seal ride along (absent when the server cannot say).
+        const delivery = deliveryIntegrityOf(await apiGet("/api/deliveries/integrity").catch(() => null));
+        return text({ ...vaultStatusTool(body), ...(delivery ? { delivery } : {}) });
       }
 
       case "agentistics_tag_detail": {

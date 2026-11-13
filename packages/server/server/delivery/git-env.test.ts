@@ -77,7 +77,7 @@ describe('CONTROL — the hazard is real: a raw spawn that inherits the hook var
     const v = victim('v-control'); const elsewhere = join(root, 'elsewhere'); gitSync(root, 'init', '-b', 'main', elsewhere)
     const before = gitSync(v, 'rev-parse', 'HEAD')
     const env = { ...cleanGitEnv(), GIT_DIR: join(v, '.git'), GIT_WORK_TREE: v, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }
-    const p = Bun.spawnSync(['git', 'commit', '--allow-empty', '-m', 'oops'], { cwd: elsewhere, env, stdout: 'pipe', stderr: 'pipe' })
+    const p = Bun.spawnSync(['git', 'commit', '--allow-empty', '-m', 'oops'], { cwd: elsewhere, env, stdout: 'pipe', stderr: 'pipe' }) // @git-env-intentional — CONTROL: env deliberately carries GIT_DIR/GIT_WORK_TREE to prove the hazard is real (victim is a throwaway)
     expect(p.exitCode).toBe(0)
     expect(gitSync(v, 'rev-parse', 'HEAD')).not.toBe(before)
   })
@@ -117,7 +117,7 @@ describe('the guard\'s git use never reaches the victim', () => {
   test('mutation: if execGit passed the inherited environment through, this test would fail (the victim would answer)', async () => {
     const v = victim('v3'); const { repo } = originWithClone(root, 'fx3')
     const viaInherited = await inHook(v, () => {
-      const p = Bun.spawnSync(['git', '-C', repo, 'rev-parse', 'HEAD'], { env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' })
+      const p = Bun.spawnSync(['git', '-C', repo, 'rev-parse', 'HEAD'], { env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' }) // @git-env-intentional — CONTROL: the INHERITED env (hook variables pointing at a throwaway victim) is the thing being demonstrated
       return p.stdout.toString().trim()
     })
     const viaHelper = await inHook(v, async () => (await execGit(repo, ['rev-parse', 'HEAD'])).trim())

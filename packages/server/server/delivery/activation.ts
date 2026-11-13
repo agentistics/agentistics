@@ -18,10 +18,16 @@
  *
  * No locking here: the caller holds the guards lock through `withGuardLocks` (a guarantee change is a guards-set
  * write). Writes are atomic, 0600, and never replace an unreadable file.
+ *
+ * S0d.2 (QA F2): the file is SEALED (`guard-integrity.ts`). Deleted, hand-edited or unsealed reads as TAMPERED: the
+ * rules then come from the authenticated mirror `setState` keeps in guards.json (`rulesWhenTampered`), with a WARN —
+ * never "every rule off" in silence, and a forged `on` / forged owner log line is not believed.
  */
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { STATUS_STAGES } from '@agentistics/core'
+import { unsealed, verdictFor, writeSealed, type TamperReason } from './guard-integrity'
+import { createGuardsStore, keepUnreadableCopy, type GuardsDoc } from './guards-store'
 
 export const RULE_IDS = ['a', 'b', 'c', 'd'] as const
 export type RuleId = (typeof RULE_IDS)[number]
@@ -119,13 +125,29 @@ export const RULE_CAPABILITIES: Record<RuleId, readonly string[]> = {
 const RULE_REQUIRES_RULES: Record<RuleId, readonly RuleId[]> = { a: [], b: ['a'], c: [], d: [] }
 
 export type MoveRefusal =
-  | { ok: false; code: 'owner_required' | 'owner_proof_required' | 'guarantees_unreadable' | 'shadow_required' | 'shadow_too_short' | 'unexplained_would_refuse' | 'migration_missing' }
+  | { ok: false; code: 'owner_required' | 'owner_proof_required' | 'guarantees_unreadable' | 'guards_unreadable' | 'shadow_required' | 'shadow_too_short' | 'unexplained_would_refuse' | 'migration_missing' }
   | { ok: false; code: 'prerequisite_capability' | 'prerequisite_rule'; missing: string[] }
 export type MoveResult = { ok: true } | MoveRefusal
 
+/**
+ * S0d.2 — the rules when guarantees.json is TAMPERED (deleted, hand-edited, unsealed, key gone). PURE.
+ *   the authenticated mirror in guards.json → those states (setState writes it before guarantees.json);
+ *   guards.json fine but no mirror → no rule was ever moved by the owner → every rule `off` (still WARNed);
+ *   guards.json tampered too → every rule `on`: nothing trustworthy is left, so the guard binds rather than vanish.
+ */
+export function rulesWhenTampered(mirror: { rules?: Record<string, string> } | 'tampered' | null): GuaranteesDoc['rules'] {
+  const rules: GuaranteesDoc['rules'] = {}
+  for (const r of RULE_IDS) {
+    const s = mirror === 'tampered' ? 'on' : mirror?.rules?.[r]
+    if (s === 'off' || s === 'shadow' || s === 'on') rules[r] = { state: s, build: '' }
+  }
+  return rules
+}
+
 export interface GuaranteesStore {
   readonly path: string
-  read(): Promise<{ doc: GuaranteesDoc; warn?: string }>
+  /** `tampered`: S0d.2 — the file is not what agentop sealed; `doc.rules` then come from `rulesWhenTampered`. */
+  read(): Promise<{ doc: GuaranteesDoc; warn?: string; tampered?: TamperReason }>
   setState(rule: RuleId, to: RuleState, ctx: { check: OwnerCheck; facts: ActivationFacts }): Promise<MoveResult>
   /** Mirror each status's stored stage (statuses without one are not mirrored). */
   writeStatusStages(statuses: ReadonlyArray<{ id: string; stage?: string }>): Promise<void>
@@ -136,28 +158,33 @@ export function defaultGuaranteesPath(dataDir = process.env.AGENTISTICS_DIR ?? j
 }
 
 export function createGuaranteesStore(path = defaultGuaranteesPath()): GuaranteesStore {
-  /** `null` text = no file. Unreadable (present, but not valid) is distinguished so a write can refuse. */
-  const load = async (): Promise<{ doc: GuaranteesDoc; warn?: string; unreadable: boolean }> => {
-    let text: string
+  const guards = createGuardsStore(join(dirname(path), 'guards.json'))
+  /** The authenticated mirror, or `'tampered'` when guards.json itself cannot be trusted. */
+  const mirror = async (): Promise<GuardsDoc | 'tampered'> => { try { return await guards.read() } catch { return 'tampered' } }
+  /**
+   * `null` text = no file. A TAMPERED file (S0d.2) yields the mirror's rules, a WARN and the reason — never "every
+   * rule off" in silence. A file that cannot be read at all (an IO error) counts as tampered too.
+   */
+  const load = async (): Promise<{ doc: GuaranteesDoc; warn?: string; tampered?: TamperReason }> => {
+    let text: string | null
     try { text = await readFile(path, 'utf8') } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { ...parseGuarantees(null), unreadable: false }
-      return { doc: { rules: {} }, warn: 'guarantees.json cannot be read; every rule is off', unreadable: true }
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') return { doc: { rules: rulesWhenTampered(await mirror()) }, warn: 'guarantees-tampered: guarantees.json cannot be read', tampered: 'unsealed' }
+      text = null
     }
-    const p = parseGuarantees(text)
-    return { ...p, unreadable: p.warn !== undefined }
+    const v = await verdictFor(path, 'guarantees', text)
+    if (v.state === 'tampered') {
+      return { doc: { rules: rulesWhenTampered(await mirror()) }, warn: `guarantees-tampered: ${v.reason} — guarantees.json is not what agentop sealed; the rules come from the sealed mirror in guards.json, never silently off`, tampered: v.reason }
+    }
+    return text === null ? parseGuarantees(null) : parseGuarantees(unsealed(text))
   }
-  const save = async (doc: GuaranteesDoc) => {
-    await mkdir(dirname(path), { recursive: true })
-    const tmp = `${path}.tmp`
-    await writeFile(tmp, JSON.stringify(doc, null, 2) + '\n', { mode: 0o600 })
-    await rename(tmp, path)
-  }
+  const save = (doc: GuaranteesDoc) => writeSealed(path, 'guarantees', doc)
   return {
     path,
-    async read() { const { doc, warn } = await load(); return warn ? { doc, warn } : { doc } },
+    async read() { const { doc, warn, tampered } = await load(); return { doc, ...(warn ? { warn } : {}), ...(tampered ? { tampered } : {}) } },
     async setState(rule, to, { check, facts }) {
-      const { doc, unreadable } = await load()
-      if (unreadable) return { ok: false, code: 'guarantees_unreadable' }
+      // A tampered file is not a refusal for the OWNER: their proven move re-seals from the effective (mirrored) state.
+      const { doc, warn, tampered } = await load()
+      if (warn && !tampered) return { ok: false, code: 'guarantees_unreadable' }
       const from = ruleState(doc, rule)
       const who = await check({ rule, from, to })
       if (!who.ok) return { ok: false, code: who.code }
@@ -169,12 +196,18 @@ export function createGuaranteesStore(path = defaultGuaranteesPath()): Guarantee
       // staying in the same state keeps its original `since`
       if (from === to && doc.rules[rule]?.since) entry.since = doc.rules[rule]!.since
       const log = [...(doc.log ?? []), { rule, from, to, via: who.via, at: facts.now, build: facts.build }].slice(-LOG_CAP)
-      await save({ ...doc, rules: { ...doc.rules, [rule]: entry }, log })
+      const rules = { ...doc.rules, [rule]: entry }
+      // The authenticated mirror FIRST: a crash between the two leaves guarantees.json at its older, still-sealed state.
+      let g: GuardsDoc
+      try { g = await guards.read() } catch { return { ok: false, code: 'guards_unreadable' } }
+      if (tampered) await keepUnreadableCopy(path) // the owner's re-seal replaces the bytes: one copy stays for a person to read
+      await guards.write({ ...g, rules: Object.fromEntries(Object.entries(rules).map(([k, e]) => [k, e!.state])) })
+      await save({ ...doc, rules, log })
       return { ok: true }
     },
     async writeStatusStages(statuses) {
-      const { doc, unreadable } = await load()
-      if (unreadable) throw new Error('guarantees.json is unreadable; the stage mirror was not written')
+      const { doc, warn } = await load()
+      if (warn) throw new Error('guarantees.json is unreadable or tampered; the stage mirror was not written')
       const m: Record<string, string> = {}
       for (const s of statuses) if (s.stage !== undefined && STAGE_SET.has(s.stage)) m[s.id] = s.stage
       await save({ ...doc, statusStages: m })

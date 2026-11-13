@@ -676,6 +676,14 @@ export async function editComment(commentId: string, body: string): Promise<bool
   return await w.store.editComment(commentId, text)
 }
 
+/** S0d.6: who a comment speaks as — `undefined` when no comment carries that id. A plain book read, no world. */
+export async function commentRole(commentId: string): Promise<'owner' | 'session' | null | undefined> {
+  const { createTaskStore } = await import('./task-store')
+  const { TASKS_FILE } = await import('../config')
+  const c = (await createTaskStore(TASKS_FILE).read()).comments.find(x => x.id === commentId)
+  return c ? (c.role ?? null) : undefined
+}
+
 export async function removeComment(commentId: string): Promise<boolean> {
   const w = await loadTaskWorld()
   return await w.store.removeComment(commentId)

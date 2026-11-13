@@ -1046,6 +1046,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/preferences' && req.method === 'PUT') {
       try {
         let body = await req.json() as Preferences
+        // ENTREGA.GARANTIDA: `delivery.ownerProof` moves only through the owner's fresh proof (vault door), so a
+        // whole-document PUT (the page echoes the document it read) can neither flip the mode nor erase it.
+        delete body.delivery
         if (body.handoffConfig !== undefined) {
           const { normalizeHandoffConfig } = await import('@agentistics/core')
           body.handoffConfig = normalizeHandoffConfig(body.handoffConfig)
@@ -1181,12 +1184,24 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
       return json(filtered)
     }
+    // S0d: the owner-proof mode and the guard files' seal, as one read (the MCP's `agentistics_vault_status` shows it).
+    if (url.pathname === '/api/deliveries/integrity' && req.method === 'GET') {
+      const { deliveryIntegrity } = await import('./delivery/integrity-status')
+      return json(await deliveryIntegrity())
+    }
     if (url.pathname === '/api/deliveries' || url.pathname.startsWith('/api/deliveries/')) {
-      const [{ deliveryRequest }, { deliveryService }, { verifySessionIdentity }] = await Promise.all([
+      const [{ deliveryRequest }, { deliveryService }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
         import('./delivery/web'), import('./delivery/host'), import('./sessions/session-identity'),
+        import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
       ])
       const body = req.method === 'POST' ? await req.json().catch(() => ({})) as Record<string, unknown> : {}
-      const out = await deliveryRequest(req.method, url.pathname, body, { service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token) }, req.signal)
+      const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+      const out = await deliveryRequest(req.method, url.pathname, body, {
+        service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token),
+        mode: readOwnerProofMode, browser,
+        // The vault's session for the page is the constant `http:local` (vault/http.ts) — the same one the proof was minted under.
+        consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+      }, req.signal)
       return json(out.body, out.status)
     }
 
@@ -2169,6 +2184,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(out, groupStatus(out))
     }
 
+    // ENTREGA.GARANTIDA §2.3: a task WRITE may not claim the engine or the owner in `actor`, nor a session it cannot prove.
+    // S0d.3: EVERY write, whatever its content-type — the handlers parse JSON regardless of the header.
+    if ((url.pathname === '/api/tasks' || url.pathname.startsWith('/api/tasks/')) && req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+      const [{ screenTaskRequest }, { verifySessionIdentity }] = await Promise.all([import('./delivery/principal-http'), import('./sessions/session-identity')])
+      const screened = await screenTaskRequest(
+        { path: url.pathname, method: req.method, contentType: req.headers.get('content-type'), text: () => req.clone().text() },
+        (id, token) => verifySessionIdentity(id, token),
+      )
+      if (screened) return json(screened.body, screened.status)
+    }
     if (url.pathname === '/api/tasks' && req.method === 'GET') {
       const { listTasks } = await import('./sessions/task-web')
       const { listOptionsOf } = await import('./sessions/task-list-window')
@@ -2415,9 +2440,25 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
 
       const body = await req.json().catch(() => ({})) as Record<string, unknown>
+      // S0d.6 (QA F6): a write that SPEAKS AS THE OWNER (an owner comment created/edited/removed, a thread sent "as the
+      // person") needs the owner principal — the same resolution as `/api/deliveries` (grant → session → legacy browser).
+      const ownerGate = async (pieceKey: string, move: string) => {
+        const [{ ownerCommentGate }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
+          import('./delivery/web'), import('./sessions/session-identity'), import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
+        ])
+        const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+        return ownerCommentGate(body, { pieceKey, move }, {
+          verify: (id, token) => verifySessionIdentity(id, token), mode: readOwnerProofMode, browser,
+          consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+        })
+      }
       if (verb === 'comments') {
         // `id` present means an EDIT or a DELETE of that comment; absent means a new one.
         if (typeof body.id === 'string') {
+          if (await mod.commentRole(body.id) === 'owner') {
+            const denied = await ownerGate(body.id, body.remove === true ? 'comment:remove' : 'comment:edit')
+            if (denied) return json(denied.body, denied.status)
+          }
           const ok = body.remove === true
             ? await mod.removeComment(body.id)
             : await mod.editComment(body.id, String(body.body ?? ''))
@@ -2432,6 +2473,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         const claimed = body.session as { id?: unknown; token?: unknown } | undefined
         const session = claimed ? await verifySessionIdentity(claimed.id, claimed.token) : null
+        if (!session && body.owner === true) {
+          const denied = await ownerGate(ref, 'comment:create')
+          if (denied) return json(denied.body, denied.status)
+        }
         const nt = body.newThread as { title?: unknown; kind?: unknown } | undefined
         const { isCommentKind } = await import('@agentistics/core')
         const res = await mod.addComment(ref, {
@@ -2469,6 +2514,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           return json({ ok: false, reason: res.reason, message: res.message }, res.reason === 'no_such_task' ? 404 : 422)
         }
         if (action === 'send') {
+          // The send records an owner-role comment (`task-threads.ts`): only the owner principal may speak as the person.
+          // A request carrying a session is refused below (`session_fanout`) whatever this answers.
+          if (body.session === undefined) {
+            const denied = await ownerGate(ref, 'thread:send')
+            if (denied) return json(denied.body, denied.status)
+          }
           const { fleetLang } = await import('./sessions/fleet-web')
           const { sanitizeCommentAttachments } = await import('@agentistics/core')
           const { resolveAttachmentRead } = await import('./sessions/attachment-web')
