@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.211.0': {
+    features: [
+      {
+        pt: 'Livro: quando um novo líder assume, os workers do líder anterior passam a responder a ele sozinhos, sem nenhum passo manual.',
+        en: 'Book: when a new leader takes over, the previous leader\'s workers start reporting to it on their own, with no manual step.',
+      },
+      {
+        pt: 'Livro: o líder antigo não consegue mais agir no lugar do novo depois da passagem.',
+        en: 'Book: after the hand-off, the old leader can no longer act in place of the new one.',
+      },
+    ],
+    fixes: [],
+  },
   // Placeholder version for BOOT.LOCK-REBOOT: the leader sets the real number at release.
   '2.210.1': {
     features: [],

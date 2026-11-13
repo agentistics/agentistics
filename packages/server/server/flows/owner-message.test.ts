@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from 'bun:test'
-import { emitOwnerMessage, emitRelayedOwnerMessages, enableOwnerRequestFlows, ownerMessageTarget, isOwnerComposerRequest, type OwnerMessageDeps } from './owner-message'
+import { defaultOwnerMessageDeps, emitOwnerMessage, emitRelayedOwnerMessages, enableOwnerRequestFlows, ownerMessageTarget, isOwnerComposerRequest, type OwnerMessageDeps } from './owner-message'
 import { ownerTaskSuggestion } from './owner-intent'
 import type { ManagedSession } from '../sessions/types'
 import { contextText } from '../sessions/agentistics-context'
@@ -35,6 +35,74 @@ test('a confirmed shared send still reaches the session without automatically re
     expect(delivered).toEqual(phrases)
     expect(events).toEqual([])
   } finally { hook.mockRestore(); fleet.__setFleetHostForTest('en', null) }
+})
+
+// LIVRO.SEAMS 3b (N3): one owner composer order = exactly one owner.message; the five non-owner sources = none.
+// Flows off there is NO owner-order path at all (the "as task" gesture is refused before delivery by
+// composer-task.ts), so the same six requests emit nothing.
+test('only the owner composer request emits owner.message (flows on); flows off nothing does', async () => {
+  const base = { action: 'prompt', id: 'lead', text: 'faz o hotfix', asTask: { priority: 'high' as const } }
+  const nonOwner = [
+    { session: { id: 'worker', token: 'proof' } },
+    { session: { id: 'worker', token: 'proof' }, handoff: true },
+    { callerVerified: true },
+    { handoff: true },
+    { session: { id: 'worker', token: 'proof' }, callerVerified: true },
+  ]
+  const on = deps()
+  const outcomes = await Promise.all(nonOwner.map(extra => emitOwnerMessage({ ...base, ...extra }, on.d)))
+  expect(outcomes).toEqual(['not-composer', 'not-composer', 'not-composer', 'handoff', 'not-composer'])
+  expect(on.events).toHaveLength(0)
+  expect(await emitOwnerMessage(base, on.d)).toBe('emitted')
+  expect(on.events).toHaveLength(1)
+  expect(on.events[0]).toMatchObject({ type: 'owner.message', payload: { text: 'faz o hotfix', sessionId: 'lead', role: 'leader' } })
+
+  const off = deps()
+  off.d.flowsOn = () => false
+  for (const extra of [{}, ...nonOwner]) expect(await emitOwnerMessage({ ...base, ...extra }, off.d)).toBe('flows-off')
+  expect(off.events).toHaveLength(0)
+})
+
+test('an owner message to a session with no leader/worker role is not an order (no-role)', async () => {
+  const { d, events } = deps()
+  d.roleOf = async () => undefined
+  expect(await emitOwnerMessage({ action: 'prompt', id: 'lead', text: 'faz o hotfix', asTask: { priority: 'high' } }, d)).toBe('no-role')
+  d.roleOf = async () => 'observer'
+  expect(await emitOwnerMessage({ action: 'prompt', id: 'lead', text: 'faz o hotfix', asTask: { priority: 'high' } }, d)).toBe('no-role')
+  expect(events).toHaveLength(0)
+})
+
+test('the default emitter hands owner.message to the engine flows bus only when the flows are on', async () => {
+  const load = await import('../engine/load')
+  const { makeFakeEngine } = await import('../engine/fixtures/fake-engine')
+  const emitted: unknown[] = []
+  const create = async (host: never) => {
+    const e = await makeFakeEngine()(host)
+    return {
+      ...e,
+      commands: [...e.commands, { verb: 'flow', summary: { en: 'flow', pt: 'flow' }, run: async (args: string[], io: { out(s: string): void }) => {
+        if (args[0] === 'ls') { io.out('pedido-do-dono\tenabled'); io.out('encaixe-do-pedido\tenabled') }
+        return 0
+      } }],
+      flows: { list: () => [], run: async () => null, status: async () => null, emit: async (ev: unknown) => { emitted.push(ev); return true } },
+    }
+  }
+  const prev = process.env.AGENTISTICS_FLOWS
+  load.resetEngineForTests()
+  try {
+    await load.loadEngine({ create: create as never, host: () => ({}) as never, env: {}, log: () => {} })
+    expect(load.engine()?.flows?.emit).toBeDefined()
+    const event = { type: 'owner.message', id: 'owner.message:c:1', payload: { text: 'x' } }
+    delete process.env.AGENTISTICS_FLOWS
+    expect(await defaultOwnerMessageDeps().emit(event)).toBe(false)
+    expect(emitted).toHaveLength(0)
+    process.env.AGENTISTICS_FLOWS = '1'
+    expect(await defaultOwnerMessageDeps().emit(event)).toBe(true)
+    expect(emitted).toEqual([event])
+  } finally {
+    if (prev === undefined) delete process.env.AGENTISTICS_FLOWS; else process.env.AGENTISTICS_FLOWS = prev
+    load.resetEngineForTests()
+  }
 })
 
 test('the classifier is an opt-in hint, off by default; a suggestion never emits anything', () => {

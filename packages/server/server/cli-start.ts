@@ -5164,6 +5164,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(chosen.accountId ? { accountId: chosen.accountId } : {}),
         ...(req.callerVerified ? { callerVerified: true } : {}),
         ...(req.spawnDoor ? { spawnDoor: req.spawnDoor } : {}),
+        // The gate is told the task this spawn is FILED on (a hand-off inherits its predecessor's), so the engine's
+        // `portao-de-spawn` checks the right task's open owner requests; an explicit gate task still wins.
+        ...(taskId ? { gateTaskId: taskId } : {}),
         ...(req.gateTaskId ? { gateTaskId: req.gateTaskId } : {}),
         ...(req.gateSubtaskId ? { gateSubtaskId: req.gateSubtaskId } : {}),
       }, S(), lang).then(afterStart)
