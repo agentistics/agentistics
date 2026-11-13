@@ -2502,6 +2502,19 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
         })
       }
+      // QA eg-integ W3: the free-text author of a comment / thread. A reserved name in it ("owner", "you", "dono") is the real
+      // principal when owner proof is REQUIRED (`keep` = the owner gate already ran for this request); legacy keeps the text.
+      const authorField = async (raw: unknown, move: string, known?: 'keep' | { kind: 'session'; id: string; via: 'token' }) => {
+        const text = String(raw ?? '')
+        if (!isReservedActor(text) || known === 'keep') return { ok: true as const, value: text }
+        const { readOwnerProofMode } = await import('./delivery/owner-mode')
+        if (await readOwnerProofMode() === 'legacy') return { ok: true as const, value: text }
+        const who = known ? { ok: true as const, principal: known } : await requestPrincipal({}, move)
+        if (!who.ok) return { ok: false as const, reply: who.reply }
+        const { freeTextAuthorAs } = await import('./delivery/principal-http')
+        const named = freeTextAuthorAs(text, who.principal, 'required')
+        return named.ok ? named : { ok: false as const, reply: { status: named.status, body: named.body } }
+      }
       if (verb === 'comments') {
         // `id` present means an EDIT or a DELETE of that comment; absent means a new one.
         if (typeof body.id === 'string') {
@@ -2527,10 +2540,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           const denied = await ownerGate(ref, 'comment:create')
           if (denied) return json(denied.body, denied.status)
         }
+        const commentAuthor = await authorField(body.author ?? 'unknown', 'comment:create',
+          session ? { kind: 'session', id: session, via: 'token' } : body.owner === true ? 'keep' : undefined)
+        if (!commentAuthor.ok) return json(commentAuthor.reply.body, commentAuthor.reply.status)
         const nt = body.newThread as { title?: unknown; kind?: unknown } | undefined
         const { isCommentKind } = await import('@agentistics/core')
         const res = await mod.addComment(ref, {
-          author: String(body.author ?? 'unknown'),
+          author: commentAuthor.value,
           body: String(body.body ?? ''),
           ...(typeof body.subtaskId === 'string' && body.subtaskId ? { subtaskId: body.subtaskId } : {}),
           ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
@@ -2555,8 +2571,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const threadId = typeof body.threadId === 'string' ? body.threadId : ''
         if (action === 'open') {
           const kind = body.kind === 'handback' || body.kind === 'block' || body.kind === 'topic' ? body.kind : undefined
+          const threadAuthor = await authorField(body.author ?? 'owner', 'thread:open')
+          if (!threadAuthor.ok) return json(threadAuthor.reply.body, threadAuthor.reply.status)
           const res = await th.openThread(ref, {
-            title: String(body.title ?? ''), openedBy: String(body.author ?? 'owner'),
+            title: String(body.title ?? ''), openedBy: threadAuthor.value,
             ...(kind ? { kind } : {}),
             ...(typeof body.subtaskId === 'string' && body.subtaskId ? { subtaskId: body.subtaskId } : {}),
           })
@@ -2575,8 +2593,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           const { resolveAttachmentRead } = await import('./sessions/attachment-web')
           const attachments = sanitizeCommentAttachments(body.attachments, resolveAttachmentRead)
           const { isCommentKind } = await import('@agentistics/core')
+          const sendAuthor = await authorField(body.author ?? 'owner', 'thread:send', 'keep') // the owner gate above already ran
+          if (!sendAuthor.ok) return json(sendAuthor.reply.body, sendAuthor.reply.status)
           const res = await th.sendFromThread(ref, threadId, {
-            body: String(body.body ?? ''), author: String(body.author ?? 'owner'),
+            body: String(body.body ?? ''), author: sendAuthor.value,
             ...(isCommentKind(body.kind) ? { kind: body.kind } : {}),
             ...(attachments.length ? { attachments } : {}),
             fromSession: body.session !== undefined,

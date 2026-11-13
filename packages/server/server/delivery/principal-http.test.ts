@@ -3,7 +3,7 @@
  * T1/T3/T4: `actor: "flow:entrega"` and a forged session passed with `text/plain`, no header or `Application/Json`.
  */
 import { describe, expect, test } from 'bun:test'
-import { reservedNameAs, screenTaskRequest } from './principal-http'
+import { reservedNameAs, screenTaskRequest, freeTextAuthorAs as authorAs } from './principal-http'
 
 const verify = async (id: unknown, token: unknown) => (id === 'leader' && token === 'good' ? 'leader' : null)
 const req = (body: string, contentType: string | null, path = '/api/tasks/t-1', method = 'POST') =>
@@ -73,5 +73,35 @@ describe('N3 a reserved name outside `actor` is the REAL principal, never a clai
     expect(claim).not.toMatch(/by: String\(body\.by/)
     const files = src.slice(src.indexOf("if (verb === 'files') {"), src.indexOf("const body = await req.json()", src.indexOf("if (verb === 'files') {")))
     expect(files).toMatch(/reservedNameAs\(form\?\.get\('author'\), [^)]*'record'\)/)
+  })
+})
+
+// QA eg-integ W3: comment and thread authors are free text, but a reserved name in them is the real principal too.
+describe('W3 a reserved comment / thread author is the REAL principal (required mode); legacy is untouched', () => {
+  const owner = { kind: 'owner', via: 'vault-credential', grantId: 'g' } as const
+  const legacyOwner = { kind: 'owner', via: 'legacy-browser' } as const
+  const session = { kind: 'session', id: 's-worker', via: 'token' } as const
+  const nobody = { kind: 'unattributed' } as const
+  test('required: no proof → unattributed; session → itself; owner → keeps the name; ordinary names pass', () => {
+    expect(authorAs('owner', nobody, 'required')).toEqual({ ok: true, value: 'unattributed' })
+    expect(authorAs('Dono', session, 'required')).toEqual({ ok: true, value: 's-worker' })
+    expect(authorAs('you', owner, 'required')).toEqual({ ok: true, value: 'you' })
+    expect(authorAs('worker-7', nobody, 'required')).toEqual({ ok: true, value: 'worker-7' })
+    expect(authorAs('flow:entrega', owner, 'required')).toMatchObject({ ok: false, status: 400 })
+  })
+  test('legacy (how every current user runs): every door keeps exactly what it sent — web UI (browser owner), MCP/CLI (session / unattributed)', () => {
+    for (const p of [legacyOwner, session, nobody]) for (const v of ['owner', 'you', 'dono', 'worker-7', 'unknown']) {
+      expect(authorAs(v, p, 'legacy')).toEqual({ ok: true, value: v })
+    }
+  })
+  test('index.ts routes the comment author and the thread opener/sender through it', async () => {
+    const src = await Bun.file(new URL('../index.ts', import.meta.url)).text()
+    const comments = src.slice(src.indexOf("if (verb === 'comments') {"), src.indexOf("if (verb === 'threads') {"))
+    expect(comments).toMatch(/author: (commentAuthor|authorField)\b/)
+    expect(comments).not.toMatch(/author: String\(body\.author/)
+    const threads = src.slice(src.indexOf("if (verb === 'threads') {"), src.indexOf("if (verb === 'sessions') {"))
+    expect(threads).toMatch(/openedBy: (threadAuthor|authorField)\b/)
+    expect(threads).not.toMatch(/openedBy: String\(body\.author/)
+    expect(threads).not.toMatch(/author: String\(body\.author/)
   })
 })

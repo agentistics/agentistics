@@ -4,7 +4,7 @@
  * `session` that claims an identity it cannot prove (`unverified_sender`). The guards that USE the principal arrive
  * with the store guard (S2a); this slice makes sure the display string can no longer impersonate anybody.
  */
-import { actorOf, isReservedActor, type RequestPrincipal } from './principal'
+import { actorOf, isReservedActor, type OwnerProofMode, type RequestPrincipal } from './principal'
 
 /**
  * S0d security re-QA N3 — a reserved name (`owner`, `you`, `dono`, `flow:*`) in a field the actor screen does not read
@@ -23,6 +23,18 @@ export function reservedNameAs(
   if (principal.kind === 'session') return { ok: true, value: principal.id }
   if (unproven === 'record') return { ok: true, value: actorOf({ kind: 'unattributed' }) }
   return { ok: false, status: 403, body: { error: 'reserved_actor', sentence: '"owner", "you" and "dono" are the owner\'s names — only a request carrying the owner\'s proof may use them' } }
+}
+
+/**
+ * QA eg-integ W3 — the author of a comment / a thread opener / a thread message is free text, but a reserved name in it
+ * ("owner", "you", "dono") reads as the owner to whoever scans the board. With owner proof REQUIRED it is the real
+ * principal (the proven owner keeps the name; a proven session is recorded as itself; no proof → `unattributed`);
+ * in LEGACY mode (nothing turned on) the text is kept exactly as before. Required mode also refuses `flow:*`. PURE.
+ */
+export function freeTextAuthorAs(value: unknown, principal: RequestPrincipal, mode: OwnerProofMode): ReturnType<typeof reservedNameAs> {
+  const v = typeof value === 'string' ? value : value === undefined || value === null ? '' : String(value)
+  if (mode === 'legacy') return { ok: true, value: v }
+  return reservedNameAs(v, principal, 'record')
 }
 
 export type PrincipalScreen = { status: 400 | 403 | 415; body: { error: string; sentence: string } } | null

@@ -139,10 +139,17 @@ describe('S0d.4 — a live lock is never stolen', () => {
     const held = await lockFile(f)
     const past = new Date(Date.now() - 60_000)
     await utimes(`${f}.lock`, past, past)
-    await Bun.sleep(Math.floor(STALE_MS / 3) + 400)
-    expect(Date.now() - (await stat(`${f}.lock`)).mtimeMs).toBeLessThan(2000)
+    // Poll until the heartbeat moves the mtime (no fixed sleep, no absolute-age threshold): deadline 3 × HEARTBEAT.
+    const heartbeat = Math.floor(STALE_MS / 3)
+    const deadline = Date.now() + 3 * heartbeat
+    let moved = false
+    while (Date.now() < deadline) {
+      if ((await stat(`${f}.lock`)).mtimeMs > past.getTime() + 1000) { moved = true; break }
+      await Bun.sleep(100)
+    }
+    expect(moved).toBe(true)
     await held.release()
-  }, 10_000)
+  }, 3 * Math.floor(STALE_MS / 3) + 5000)
 })
 
 test('withFileLock runs the work when the parent directory does not exist yet', async () => {

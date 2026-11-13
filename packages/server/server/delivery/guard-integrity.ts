@@ -20,6 +20,11 @@
  *        its MAC, and records it in the witness (MAC'd with the same key); a document whose generation is below the
  *        witness's (or below what this process already saw) is `rolled-back`.
  *
+ *   W1 — copying the three `.json` files (documents + witness) back from an older sealed copy and restarting: the KEY FILE
+ *        also records the highest generation per document (line 4, `guards=3,guarantees=5`), written last on every sealed
+ *        write. It is not a `.json`, is excluded from backups, and a backup restore does not carry it, so the copy-back reads
+ *        `rolled-back`. Remaining limit: restoring the KEY FILE itself from the same old copy (four files) reverts every anchor.
+ *
  * Stated limits (spec § S0d): a same-uid process that reads the key file can compute a MAC. Deleting (or rolling back)
  * the documents, the key AND the witness, in two directories, and then restarting the server reads a fresh machine; the
  * latch only covers the process that saw the newer state.
@@ -38,7 +43,16 @@ export type IntegrityDocName = 'guards' | 'guarantees'
 const DOC_NAMES: readonly IntegrityDocName[] = ['guards', 'guarantees']
 const DOC_FILES: Record<IntegrityDocName, string> = { guards: 'guards.json', guarantees: 'guarantees.json' }
 
-export interface IntegrityKey { key: Buffer; sealed: ReadonlySet<IntegrityDocName> }
+export interface IntegrityKey {
+  key: Buffer
+  sealed: ReadonlySet<IntegrityDocName>
+  /**
+   * The highest generation sealed per document (W1). The key file is not a `.json`, is excluded from backups and sits outside
+   * `guard-seal/`, so copying `guarantees.json` + `guards.json` + `witness.json` back from an older sealed copy cannot lower it.
+   * Absent on a key file written before W1 (nothing to compare; the next sealed write starts recording).
+   */
+  gens?: Partial<Record<IntegrityDocName, number>>
+}
 export type TamperReason = 'unsealed' | 'forged' | 'missing' | 'key-missing' | 'key-unreadable' | 'rolled-back' | 'witness-missing' | 'witness-forged'
 export type IntegrityVerdict = { state: 'ok'; gen?: number } | { state: 'fresh' } | { state: 'tampered'; reason: TamperReason }
 
@@ -152,23 +166,32 @@ export function checkIntegrity(key: IntegrityKey | null, name: IntegrityDocName,
     if (w && g < (w.gens[name] ?? 0)) return { state: 'tampered', reason: 'rolled-back' }
   }
   if (ctx.seenGen !== undefined && g < ctx.seenGen) return { state: 'tampered', reason: 'rolled-back' }
+  if (g < (key.gens?.[name] ?? 0)) return { state: 'tampered', reason: 'rolled-back' } // W1: the key file's own record
   return { state: 'ok', gen: g }
 }
 
 /** PURE. The key file's text. */
 export function formatKeyFile(k: IntegrityKey): string {
-  return `${KEY_HEADER}\n${k.key.toString('base64')}\n${DOC_NAMES.filter(n => k.sealed.has(n)).join(',')}\n`
+  const gens = DOC_NAMES.filter(n => k.gens?.[n] !== undefined).map(n => `${n}=${k.gens![n]}`).join(',')
+  return `${KEY_HEADER}\n${k.key.toString('base64')}\n${DOC_NAMES.filter(n => k.sealed.has(n)).join(',')}\n${gens}${gens ? '\n' : ''}`
 }
 
 /** PURE. `null` for anything that is not exactly a key file. */
 export function parseKeyFile(text: string): IntegrityKey | null {
-  const [head, b64, list = ''] = text.split('\n')
+  const [head, b64, list = '', genLine = ''] = text.split('\n')
   if (head !== KEY_HEADER || !b64) return null
   const key = Buffer.from(b64, 'base64')
   if (key.length !== 32) return null
   const sealed = new Set<IntegrityDocName>()
   for (const n of list.split(',').filter(Boolean)) { if (!DOC_NAMES.includes(n as IntegrityDocName)) return null; sealed.add(n as IntegrityDocName) }
-  return { key, sealed }
+  const gens: Partial<Record<IntegrityDocName, number>> = {}
+  for (const part of genLine.split(',').filter(Boolean)) {
+    const [n, v] = part.split('=')
+    const num = Number(v)
+    if (!DOC_NAMES.includes(n as IntegrityDocName) || !Number.isInteger(num) || num < 0) return null
+    gens[n as IntegrityDocName] = num
+  }
+  return Object.keys(gens).length ? { key, sealed, gens } : { key, sealed }
 }
 
 export const keyPathFor = (docPath: string): string => join(dirname(docPath), GUARD_KEY_FILE)
@@ -232,7 +255,7 @@ export async function writeSealed(docPath: string, name: IntegrityDocName, doc: 
   if (found === 'unreadable') throw new Error(`${GUARD_KEY_FILE} is unreadable; ${name}.json was not written`)
   let key = found
   if (!key || !key.sealed.has(name)) {
-    key = { key: key?.key ?? randomBytes(32), sealed: new Set([...(key?.sealed ?? []), name]) }
+    key = { key: key?.key ?? randomBytes(32), sealed: new Set([...(key?.sealed ?? []), name]), ...(key?.gens ? { gens: key.gens } : {}) }
     await writePrivate(keyPathFor(docPath), formatKeyFile(key))
   }
   const wPath = witnessPathFor(docPath)
@@ -241,10 +264,12 @@ export async function writeSealed(docPath: string, name: IntegrityDocName, doc: 
   // A forged/unreadable witness is REPLACED only by a writer allowed past the read (the owner's repair, or a clean store).
   const gens: Partial<Record<IntegrityDocName, number>> = prior && prior !== 'bad' ? { ...prior.gens } : {}
   const cur = await readOrNull(docPath)
-  const gen = Math.max(gens[name] ?? 0, seen(docPath, name) ?? 0, docGen(typeof cur === 'string' ? cur : null)) + 1
+  const gen = Math.max(gens[name] ?? 0, key.gens?.[name] ?? 0, seen(docPath, name) ?? 0, docGen(typeof cur === 'string' ? cur : null)) + 1
   await writePrivate(wPath, formatWitness(key.key, key.sealed, gens))
   await writePrivate(docPath, JSON.stringify(sealDoc(key.key, name, doc, gen), null, 2) + '\n')
   await writePrivate(wPath, formatWitness(key.key, key.sealed, { ...gens, [name]: gen }))
+  // W1: the third anchor, written LAST (a crash before it leaves a document newer than the record, which is accepted).
+  await writePrivate(keyPathFor(docPath), formatKeyFile({ ...key, gens: { ...key.gens, [name]: gen } }))
   remember(docPath, name, gen)
 }
 

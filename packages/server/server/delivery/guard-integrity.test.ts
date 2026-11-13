@@ -212,6 +212,41 @@ describe('QA s0b-tamper.ts against the real stores', () => {
       writeFileSync(gp(), old.g); writeFileSync(join(dir, 'guards.json'), old.d); writeFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), old.w)
       expect((await createGuaranteesStore(gp()).read()).tampered).toBe('rolled-back')
     })
+    // QA eg-integ W1: the three `.json` files restored together from a backup, then a restart. The key file is not a `.json`
+    // and is excluded from backups, so its own generation record is the anchor the copy-back cannot reach.
+    test('W1: guarantees.json + guards.json + witness.json restored from an older sealed copy, then a restart → rolled-back', async () => {
+      const { old } = await toOn()
+      writeFileSync(gp(), old.g); writeFileSync(join(dir, 'guards.json'), old.d); writeFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), old.w)
+      __resetGuardLatchForTests()
+      const r = await createGuaranteesStore(gp()).read()
+      expect(r.tampered).toBe('rolled-back'); expect(r.warn).toMatch(/guarantees-tampered: rolled-back/)
+      expect(ruleState(r.doc, 'b')).toBe('on') // no trusted mirror → fail closed
+      expect(((await createGuardsStore(join(dir, 'guards.json')).read().catch(e => e)) as GuardsUnreadable).tampered).toBe('rolled-back')
+    })
+    test('W1b: the same copy-back with only guards.json + witness.json (guarantees untouched) is rolled-back for guards', async () => {
+      const { old } = await toOn()
+      writeFileSync(join(dir, 'guards.json'), old.d); writeFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), old.w)
+      __resetGuardLatchForTests()
+      expect(((await createGuardsStore(join(dir, 'guards.json')).read().catch(e => e)) as GuardsUnreadable).tampered).toBe('rolled-back')
+    })
+    test('W1c: the key file records the generations and health WARNs the copy-back', async () => {
+      const { old, store } = await toOn()
+      expect(parseKeyFile(readFileSync(kp(), 'utf8'))!.gens?.guarantees).toBeGreaterThanOrEqual(2)
+      writeFileSync(gp(), old.g); writeFileSync(join(dir, 'guards.json'), old.d); writeFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), old.w)
+      __resetGuardLatchForTests()
+      const r = await store.read()
+      expect(r.tampered).toBe('rolled-back')
+      const issues: HealthIssue[] = []
+      analyzeGuardIntegrity({ guaranteesWarn: r.warn, offWarnings: [] }, issues)
+      expect(issues.map(i => i.id)).toContain('guarantees-tampered')
+    })
+    test('W1d: an OLD key file (no generation line) still verifies; the next write starts recording', async () => {
+      await ownerShadowsA()
+      const k = parseKeyFile(readFileSync(kp(), 'utf8'))!
+      writeFileSync(kp(), formatKeyFile({ key: k.key, sealed: k.sealed }))
+      __resetGuardLatchForTests()
+      expect((await createGuaranteesStore(gp()).read()).tampered).toBeUndefined()
+    })
     test('a forged witness (edited generation) is tampered', async () => {
       await toOn()
       const w = JSON.parse(readFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), 'utf8')); w.gens.guarantees = 0
