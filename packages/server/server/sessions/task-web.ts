@@ -194,9 +194,20 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
 /**
  * The version each piece with NO delivery-record version shipped in, PROVEN by the repository: the first release tag
  * that contains a commit the piece delivered (its handback/`legacyReviewShas`). Key = the Live piece key. The Delivery
- * calendar links these to versions; a piece nothing proves anything about is simply absent. Bounded (40 commits per
- * call, each git call has its own timeout) so a calendar read never waits on a whole history.
+ * calendar links these to versions; a piece nothing proves anything about is simply absent. Never waits for git (40 commits per
+ * background pass, each git call has its own timeout), so a calendar read never waits on a whole history.
  */
+const SHA_BATCH = 40
+const SHA_MISS_TTL_MS = 10 * 60_000
+/** sha → the version a release tag (or the squash that carried it) proved. A positive answer is permanent. */
+const shaVersion = new Map<string, string>()
+const shaMissAt = new Map<string, number>()
+let shaRefill: Promise<void> | null = null
+/** Test seam: wait for the background pass, or forget everything. */
+export const pieceVersionsIdle = (): Promise<void> => shaRefill ?? Promise.resolve()
+export function resetPieceVersionsForTest(): void { shaVersion.clear(); shaMissAt.clear() }
+
+/** See the block above the memo: answers from the memo, resolves the rest in the background (40 commits per pass). */
 export async function pieceVersionsFromTags(): Promise<Record<string, string>> {
   const w = await loadTaskWorld()
   const owners = conversationOwners(w.rollupRows)
@@ -211,10 +222,21 @@ export async function pieceVersionsFromTags(): Promise<Record<string, string>> {
   const dirsFor = dirsForShas({
     pieces, rowsOf: id => { const t = taskById.get(id); return t ? rowsOfTask(t, w.rollupRows, owners) : [] }, metas: w.metas.values(),
   })
+  // Never wait for git: what is known NOW is answered, the rest (newest commits first, a bounded batch per pass, one
+  // pass at a time) is resolved in the background and the next read — the calendar is rebuilt every few seconds — has it.
+  const now = Date.now()
+  const todo = [...pieces.keys()].reverse().filter(sha => !shaVersion.has(sha) && (shaMissAt.get(sha) ?? 0) < now - SHA_MISS_TTL_MS)
+  if (todo.length > 0 && !shaRefill) {
+    shaRefill = (async () => {
+      for (const sha of todo.slice(0, SHA_BATCH)) {
+        const version = await firstTagContaining(sha, dirsFor(sha)).catch(() => null)
+        if (version) shaVersion.set(sha, version); else shaMissAt.set(sha, Date.now())
+      }
+    })().finally(() => { shaRefill = null })
+  }
   const out: Record<string, string> = {}
-  for (const sha of [...pieces.keys()].slice(0, 40)) {
-    const version = await firstTagContaining(sha, dirsFor(sha)).catch(() => null)
-    if (!version) continue
+  for (const [sha, version] of shaVersion) {
+    if (!pieces.has(sha)) continue
     for (const p of pieces.get(sha) ?? []) {
       const key = p.subtaskId ? `${p.taskId}/${p.subtaskId}` : p.taskId
       // A piece naming several commits ships with the LAST of them.

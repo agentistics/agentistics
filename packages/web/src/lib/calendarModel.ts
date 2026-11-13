@@ -167,6 +167,8 @@ export function stageSegments(v: CalVersion): { stage: CalStage; count: number; 
 
 export interface Ribbon {
   version: string
+  /** Every version this ribbon stands for, oldest first: several releases of ONE day share a ribbon (a lane each pushed all but the first into "+N"). `version` is the newest. */
+  versions: string[]
   state: 'published' | 'planned'
   /** The label's right side: `publicada` / `prevista` / `sem estimativa`. */
   note: 'published' | 'expected' | 'none'
@@ -196,8 +198,15 @@ export function weekRibbons(days: readonly string[], versions: readonly CalVersi
     const span = versionDays(v, pieces, todayDay)
     if (!span || span.end < first || span.start > last) continue
     const startCol = Math.max(0, diffDays(first, span.start)), endCol = Math.min(6, diffDays(first, span.end))
+    const same = v.state === 'published' && startCol === endCol && span.start === span.end
+      ? out.find(r => r.state === 'published' && r.startCol === startCol && r.endCol === startCol && !r.contLeft && !r.contRight) : undefined
+    if (same) {
+      same.versions = [...same.versions, v.version].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      same.version = same.versions[same.versions.length - 1]!
+      continue
+    }
     out.push({
-      version: v.version, state: v.state, note: v.state === 'published' ? 'published' : v.atMs === null ? 'none' : 'expected',
+      version: v.version, versions: [v.version], state: v.state, note: v.state === 'published' ? 'published' : v.atMs === null ? 'none' : 'expected',
       startCol, endCol, lane: 0, contLeft: span.start < first, contRight: span.end > last,
     })
   }

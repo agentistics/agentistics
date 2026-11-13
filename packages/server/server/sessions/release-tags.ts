@@ -25,7 +25,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { gitEnv } from './release-repos'
-import { resetReleaseSquashForTest, squashPublishedIn } from './release-squash'
+import { resetReleaseSquashForTest, squashPublishedIn, squashTagOf } from './release-squash'
 
 const NEGATIVE_TTL_MS = 10 * 60_000
 const MAX_PER_REFILL = 40
@@ -97,7 +97,7 @@ const firstTagMemo = new Map<string, string>()
  * The EARLIEST version tag (`v<x.y.z>` → `x.y.z`) of any of these repositories that contains the commit — the version
  * the commit shipped in. null when no clone names one (no clone, unknown commit, not in a tag yet, git failed).
  * A positive answer is immutable (a commit does not leave a tag, and the earliest does not change), so it is kept;
- * a null is never cached — the tag may simply not exist yet. Squash-merged work is not found here: its tag holds the
+ * a null is never cached — the tag may simply not exist yet. Squash-merged work is found through its patch-id (`squashTagOf`): its tag holds the
  * squash commit, not the worker's.
  */
 export async function firstTagContaining(sha: string, dirs: readonly string[]): Promise<string | null> {
@@ -109,6 +109,14 @@ export async function firstTagContaining(sha: string, dirs: readonly string[]): 
     const r = await git(d, ['tag', '--contains', sha, '--list', 'v[0-9]*', '--sort=version:refname'])
     const tag = r.ok ? r.out.split('\n').map(t => /^v(\d+\.\d+\.\d+)$/.exec(t.trim())?.[1]).find(Boolean) : undefined
     if (tag && (best === null || compareSemver(tag, best) < 0)) best = tag
+  }
+  // Our pull requests land by SQUASH: the tag holds "fix: … (#N)", not the worker's commit, so `--contains` is
+  // silent. The squash's change (patch-id of the commit or of its whole branch) names the release that carried it.
+  if (best === null) {
+    for (const d of await distinctRepos(dirs)) {
+      const tag = await squashTagOf(sha, d, (await repoKey(d)) ?? d).catch(() => null)
+      if (tag && /^\d+\.\d+\.\d+$/.test(tag) && (best === null || compareSemver(tag, best) < 0)) best = tag
+    }
   }
   if (best) { if (firstTagMemo.size >= MAX_POSITIVE) firstTagMemo.clear(); firstTagMemo.set(sha, best) }
   return best
@@ -224,6 +232,6 @@ export function publishedAmong(
 /** Test seam: forget everything, and wait for the refill in flight. */
 export async function resetReleaseTagsForTest(): Promise<void> {
   await running
-  positive.clear(); negative.clear(); repoKeyMemo.clear(); pinMemo.clear(); tagPin.clear(); resetReleaseSquashForTest()
+  positive.clear(); negative.clear(); firstTagMemo.clear(); repoKeyMemo.clear(); pinMemo.clear(); tagPin.clear(); resetReleaseSquashForTest()
 }
 export const releaseTagsIdle = (): Promise<void> => running ?? Promise.resolve()

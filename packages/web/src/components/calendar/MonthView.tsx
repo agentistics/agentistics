@@ -194,7 +194,7 @@ function RibbonBar({ r, pt, selected, onOpen }: { r: Ribbon; pt: boolean; select
   const color = published ? PUBLISHED_COLOR : EXPECTED_COLOR
   return (
     <button type="button" data-cal-ribbon={r.version} data-cal-state={r.state} onClick={onOpen}
-      title={`${r.version} · ${r.note === 'published' ? pick(TEXT.published, pt) : r.note === 'none' ? pick(TEXT.noEstimate, pt) : pick(TEXT.expected, pt)}`}
+      title={`${r.versions.join(' · ')} · ${r.note === 'published' ? pick(TEXT.published, pt) : r.note === 'none' ? pick(TEXT.noEstimate, pt) : pick(TEXT.expected, pt)}`}
       style={{
         gridColumn: `${r.startCol + 1} / ${r.endCol + 2}`, gridRow: 2 + r.lane, margin: `0 ${r.contRight ? 0 : 4}px 0 ${r.contLeft ? 0 : 4}px`, height: RIBBON_H,
         display: 'flex', alignItems: 'center', gap: 4, padding: '0 6px', minWidth: 0, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden',
@@ -205,9 +205,12 @@ function RibbonBar({ r, pt, selected, onOpen }: { r: Ribbon; pt: boolean; select
       }}>
       <VersionGlyph published={published} size={10} />
       <span>{r.version}</span>
-      <span style={{ marginLeft: 'auto', color: 'var(--text-secondary)', fontWeight: 400 }}>
-        {r.note === 'published' ? pick(TEXT.published, pt) : r.note === 'none' ? pick(TEXT.noEstimate, pt) : pick(TEXT.expected, pt)}
-      </span>
+      {r.versions.length > 1
+        // Several releases of one day: the newest, and how many more share the ribbon (the title lists them all).
+        ? <span data-cal-ribbon-more style={{ marginLeft: 'auto', fontWeight: 600 }}>+{r.versions.length - 1}</span>
+        : <span style={{ marginLeft: 'auto', color: 'var(--text-secondary)', fontWeight: 400 }}>
+            {r.note === 'published' ? pick(TEXT.published, pt) : r.note === 'none' ? pick(TEXT.noEstimate, pt) : pick(TEXT.expected, pt)}
+          </span>}
     </button>
   )
 }

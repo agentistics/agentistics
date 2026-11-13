@@ -132,22 +132,36 @@ async function treeHoldsDiff(dir: string, tag: string, diff: string): Promise<bo
   } finally { rmSync(tmp, { recursive: true, force: true }) }
 }
 
-/** Is the work of `sha` inside a release tag of this repository, though the commit itself is not? Any failure is "no". */
-export async function squashPublishedIn(sha: string, dir: string, repoKey: string, nowMs = Date.now()): Promise<boolean> {
-  if (!HEX.test(sha)) return false
-  if (!(await run(dir, ['cat-file', '-e', `${sha}^{commit}`])).ok) return false
+/**
+ * The version (`x.y.z`) of the release whose range first carried the WORK of `sha`, though the commit itself is in no
+ * tag — the squash-merge case ("fix: … (#N)" on main). Tags are checked newest to oldest and ranges are disjoint, so
+ * a patch-id match names exactly the release that added it. The reverse-apply proof only says "the tree of the tag
+ * holds the change", so the oldest of the few tags it is tried on answers (a stated approximation). null: unproven.
+ */
+export async function squashTagOf(sha: string, dir: string, repoKey: string, nowMs = Date.now()): Promise<string | null> {
+  if (!HEX.test(sha)) return null
+  if (!(await run(dir, ['cat-file', '-e', `${sha}^{commit}`])).ok) return null
   const tags = await newestTags(dir, repoKey, nowMs)
-  if (tags.length === 0) return false
+  if (tags.length === 0) return null
+  const versionOf = (tag: string): string | null => /^v(\d+\.\d+\.\d+)$/.exec(tag)?.[1] ?? tag.replace(/^v/, '')
   const cand = await candidates(dir, sha, tags[0]!)
   if (cand.ids.length > 0) {
     for (let i = 0; i < Math.min(tags.length, MAX_TAGS); i++) {
       const ids = await idsOfTag(dir, repoKey, tags[i]!, tags[i + 1] ?? null)
-      if (cand.ids.some(c => ids.has(c))) return true
+      if (cand.ids.some(c => ids.has(c))) return versionOf(tags[i]!)
     }
   }
-  // several branches squashed together, or an edit after the release: the newest releases' trees still hold the change
-  for (const diff of cand.diffs) for (const tag of tags.slice(0, REVERSE_APPLY_TAGS)) if (await treeHoldsDiff(dir, tag, diff)) return true
-  return false
+  for (const diff of cand.diffs) {
+    let found: string | null = null
+    for (const tag of tags.slice(0, REVERSE_APPLY_TAGS)) if (await treeHoldsDiff(dir, tag, diff)) found = versionOf(tag) ?? found
+    if (found) return found
+  }
+  return null
+}
+
+/** Is the work of `sha` inside a release tag of this repository, though the commit itself is not? Any failure is "no". */
+export async function squashPublishedIn(sha: string, dir: string, repoKey: string, nowMs = Date.now()): Promise<boolean> {
+  return (await squashTagOf(sha, dir, repoKey, nowMs)) !== null
 }
 
 export function resetReleaseSquashForTest(): void { tagIds.clear(); tagLists.clear() }
