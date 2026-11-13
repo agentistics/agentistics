@@ -252,6 +252,22 @@ export function openPanel(layout: SlotLayout, panel: PanelId): SlotLayout {
     : { ...cleared, bottom: panel, bottomOpen: true }
 }
 
+/**
+ * `openPanel` AS A PHONE NEEDS IT. A phone has one sheet — the right slot — and `resolveForViewport`
+ * only folds the bottom band into it while the right is EMPTY. A panel PLACED on the bottom band
+ * (a desktop choice) therefore opened under whatever already held the right (the session feed): the
+ * phone's tab went selected and the body never changed. On a phone the panel just picked takes the
+ * sheet: the right occupant is vacated so the fold reads the band's panel as the sheet. The layout
+ * stays one `parseLayout` accepts (an occupant must sit in the slot its placement names — writing
+ * `right: <bottom-placed panel>` is dropped on the next read), and the placement is untouched, so a
+ * desktop still finds the panel on the band.
+ */
+export function openPanelOnPhone(layout: SlotLayout, panel: PanelId): SlotLayout {
+  const next = openPanel(layout, panel)
+  if (next.bottom !== panel || next.right === null) return next
+  return { ...next, right: null, rightOpen: true }
+}
+
 /** Remove `panel` from wherever it is the active occupant. A no-op (same object) when it was not
  *  shown — placement untouched, exactly like the old model's `closePanel`. */
 export function closePanel(layout: SlotLayout, panel: PanelId): SlotLayout {
@@ -846,14 +862,14 @@ export function subscribePanelLayout(cb: () => void, pane: PaneId = getActivePan
  * it does; MOVING it (it stays shown, just in the other slot) never does, because `isPanelShown`
  * reads `true` on both sides of a move.
  */
-export function showPanel(panel: PanelId, pane: PaneId = getActivePane()): void {
+export function showPanel(panel: PanelId, pane: PaneId = getActivePane(), phone = false): void {
   const commit = (n: SlotLayout) => commitTo(n, pane)
   // A panel floating as a window has no docked slot to open into — asking for it (a rail pick, a
   // chat note's "open the Gallery") brings its window to the front instead — and a MINIMIZED one
   // back exactly where it was left.
   if (getFloating(pane)[panel] !== undefined) { restoreFloatingPanel(panel, pane); return }
   const state = getPanelLayout(pane)
-  const next = openPanel(state, panel)
+  const next = phone ? openPanelOnPhone(state, panel) : openPanel(state, panel)
   if (next === state) return
   const studioDisplaced = panel !== 'studio'
     && isPanelShown(state, 'studio') && !isPanelShown(next, 'studio')
@@ -959,7 +975,8 @@ export function resetPanelSlots(): void {
 
 export interface PanelSlotsApi {
   layout: SlotLayout
-  openPanel: (panel: PanelId) => void
+  /** `phone`: the phone's single sheet — see `openPanelOnPhone`. */
+  openPanel: (panel: PanelId, phone?: boolean) => void
   closePanel: (panel: PanelId) => void
   movePanel: (panel: PanelId, to: OpenPlacement) => void
   /** A drag's drop (spec §3) — see `dropPanel`/`planPanelDrop`. */
@@ -1004,7 +1021,7 @@ export function usePanelSlots(): PanelSlotsApi {
   )
   return {
     layout,
-    openPanel: panel => showPanel(panel, pane),
+    openPanel: (panel, phone) => showPanel(panel, pane, phone === true),
     closePanel: panel => hidePanel(panel, undefined, pane),
     movePanel: (panel, to) => relocatePanel(panel, to, pane),
     dropPanel: (panel, target) => dropPanel(panel, target, pane),

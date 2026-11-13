@@ -990,7 +990,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const engineOwned = engineActive && engineAsideId === engineSlotId
   const engineTabShown = engineOwned && (engineTabOn || slotLayout.right === null)
   /** A person picking a panel from the rail or the phone's tabs: that panel is what they want to see. */
-  const openSlotPanelPicked = useCallback((id: PanelId) => { setEngineTabOn(false); openSlotPanel(id) }, [openSlotPanel])
+  const openSlotPanelPicked = useCallback((id: PanelId) => { setEngineTabOn(false); openSlotPanel(id, isMobile) }, [openSlotPanel, isMobile])
   const [rightSlotEl, setRightSlotEl] = useState<HTMLDivElement | null>(null)
   const [bottomStudioEl, setBottomStudioEl] = useState<HTMLDivElement | null>(null)
   /** The floating window's box, when the Studio floats — a third place `StudioHost` can move its
