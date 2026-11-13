@@ -1134,6 +1134,28 @@ Binding design for slice S0d. It amends §2.3, §2.3.1, §2.6, §2.6.1 and §2.7
 - **Stated limit.** A same-uid process that reads `guard-integrity.key` can forge a MAC. This closes the §1.1
   `*.json`-edit capability and every deletion/edit that does not also read a key file; moving the key under the
   machine key (`vault/machine-secrets.ts`, silent OS wrapper) is a follow-up, not S0d.
+- **N1 (re-QA, deletion never reads fresh).** A sealed witness in its own directory (`<dataDir>/guard-seal/witness.json`,
+  0600, MAC'd with the same key) repeats which documents were sealed, a sealed sibling with no key proves a key existed,
+  and the running process latches every generation it verified — any of the three makes an absent document `missing` /
+  `key-missing` (rules from the mirror or all `on`, WARN), and a key with no witness is `witness-missing`; only deleting
+  documents, key AND witness and then restarting reads a fresh machine (stated limit).
+- **N2 (re-QA, rollback).** Every sealed write bumps the document's generation, sealed inside its MAC (`integrity.gen`,
+  `mac` over `"<name>"∖0"g<gen>"∖0…`) and recorded in the witness, so an older sealed copy (generation below the witness
+  or below what this process saw) is `rolled-back` — fail closed and WARNed exactly like any other tamper; rolling back
+  the witness too is caught only by the process that saw the newer state (stated limit).
+- **N3 (re-QA, reserved names outside `actor`).** A claim's `by` and an upload's `author` naming `owner`/`you`/`dono` are
+  the real principal (the proven owner keeps the name, a proven session is recorded as itself; with no proof the claim is
+  403 `reserved_actor` and the upload's author is `unattributed`); `flow:*` is always refused.
+- **W1 (integration QA, cold rollback).** The key file also records the highest generation sealed per document,
+  written last on every sealed write, so copying back an older documents + witness set and restarting reads
+  `rolled-back` (WARN, guards refuse writes). Stated limit: restoring the key file too from the same old copy (four
+  files) reverts every anchor and reads as the older state, and a same-uid process that reads the key still forges a
+  MAC; a vault-held counter would close it (needs the vault at boot, follow-up). `rolled-back` guards have no owner
+  repair path yet (as with any tampered guards file).
+- **W3 (integration QA, comments and threads).** In required mode a reserved author (`owner`/`you`/`dono`) on a new
+  comment, thread open or thread send is the proven principal, a proven session is recorded as itself, no proof is
+  `unattributed`, `flow:*` is refused; legacy mode keeps the text as sent (no change for users who never turned
+  required on).
 
 ### S0d.3 (F3) The `/api/tasks*` principal screen runs on every write
 
