@@ -65,7 +65,7 @@ export async function readCalendarSources(): Promise<CalendarSources> {
       ...(t.priority ? { priority: t.priority } : {}),
       ...(t.dueDate ? { dueDate: t.dueDate } : {}),
     })),
-    subtasks: world.book.subtasks.map(s => ({ id: s.id, taskId: s.taskId, title: s.title,
+    subtasks: world.book.subtasks.map(s => ({ id: s.id, taskId: s.taskId, title: s.title, status: s.status,
       ...(s.priority ? { priority: s.priority } : {}), ...(s.dueDate ? { dueDate: s.dueDate } : {}) })),
     resets: await readResets(nowMs).catch(() => []),
   }

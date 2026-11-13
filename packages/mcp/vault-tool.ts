@@ -34,6 +34,19 @@ export interface VaultStatusAnswer {
   passwordRules: { minLength: number; minSpecial: number; rules: { id: string; en: string; pt: string }[] };
   /** Who decides: what a person has to do on the machine, said once. */
   note: string;
+  /**
+   * ENTREGA.GARANTIDA S0d: the delivery owner-proof mode (`legacy` | `required`, and `tampered` when a file around it was
+   * edited, so it is read as `required`), the guarantee rules, and whether guards.json / guarantees.json carry
+   * agentistics' seal. Absent when the server could not say (an older server).
+   */
+  delivery?: { ownerProof: { mode: string; tampered?: string }; guarantees: { rules: Record<string, string>; tampered?: string }; guards: { tampered?: string } };
+}
+
+/** PURE. `GET /api/deliveries/integrity`'s answer, kept only when it has the expected shape. */
+export function deliveryIntegrityOf(body: unknown): VaultStatusAnswer["delivery"] | undefined {
+  const b = (body && typeof body === "object" ? body : {}) as Record<string, any>;
+  if (!b.ownerProof || typeof b.ownerProof.mode !== "string" || !b.guarantees || typeof b.guarantees.rules !== "object" || !b.guards) return undefined;
+  return { ownerProof: b.ownerProof, guarantees: b.guarantees, guards: b.guards };
 }
 
 const PRESENCE = new Set(["touchid", "hello", "password", "fido2"]);

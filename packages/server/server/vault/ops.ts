@@ -32,7 +32,7 @@ import {
 } from './service'
 import {
   addPassphraseAllowed, beginAuthenticator, mintSetupCode, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
-  disablePresence, enrolPresence, recoverWithWords, requirePresenceHere, requireVaultStepUp, setAutoLockMinutes, type GateContext, type VaultAction,
+  disablePresence, enrolPresence, recoverWithWords, requireDeliveryOwner, requirePresenceHere, requireVaultStepUp, setAutoLockMinutes, type GateContext, type VaultAction,
 } from './gate'
 import { readVaultView } from './inventory'
 import { setVaultOpHandler, type OpContext, type OpResult } from './socket'
@@ -388,7 +388,7 @@ async function opVaultStageBundle(ctx: OpContext): Promise<OpResult> {
 const HUMAN_OPS: ReadonlySet<string> = new Set([
   'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm', 'recovery-begin', 'setup-code',
   'recovery-confirm', 'presence-enroll', 'presence-disable', 'require-presence', 'view', 'set-auto-lock', 'activity', 'unlock',
-  'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
+  'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset', 'delivery-owner',
 ])
 
 export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch } = {}): Promise<OpResult> {
@@ -408,6 +408,13 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
         || (h.status !== undefined && (typeof h.status !== 'number' || !Number.isSafeInteger(h.status) || h.status < 0))) return bad()
       noteFreshSpawn(h.harness as HarnessId, { died: h.died, status: h.status as number | undefined, message: '' }, h.startedAt, now)
       return { reply: { ok: true } }
+    }
+    case 'delivery-owner': {
+      // ENTREGA.GARANTIDA §2.3.1: the terminal's fresh owner proof (`agentop flow approve --owner`). The grant is
+      // not handed back — the CLI acts in-process, so the proof's success IS the authorization for that one move.
+      if (!str(h.pieceKey, 200) || !str(h.move, 200)) return bad()
+      const r = await requireDeliveryOwner({ session: SOCKET }, { pieceKey: h.pieceKey, move: h.move })
+      return { reply: r.ok ? { ok: true } : r }
     }
     case 'status': return opStatus()
     case 'unlock-code': return opUnlockCode(h)

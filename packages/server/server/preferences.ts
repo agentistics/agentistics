@@ -72,6 +72,11 @@ export interface CustomGridItem {
 }
 
 export interface Preferences {
+  /**
+   * ENTREGA.GARANTIDA §2.3: `ownerProof` absent reads as `legacy`. Written ONLY by the owner-proof door
+   * (`vault/gate.ts` `setOwnerProofMode`); the generic PUT /api/preferences strips it.
+   */
+  delivery?: { ownerProof?: 'legacy' | 'required' }
   /** Owner-selected leader handoff cut and visible warnings. */
   handoffConfig?: import('@agentistics/core').HandoffConfig
   /** Server-owned leadership check-in agendas, keyed by conversation id. */

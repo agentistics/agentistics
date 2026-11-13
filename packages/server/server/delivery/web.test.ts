@@ -28,7 +28,8 @@ describe('/api/deliveries', () => {
     const { svc, calls } = fakeService()
     const dry = await deliveryRequest('POST', '/api/deliveries/reconcile', {}, { service: svc, verify })
     expect(dry.status).toBe(200)
-    expect(calls.at(-1)).toEqual({ fn: 'reconcile', args: [{ apply: undefined }, 'owner'] })
+    // ENTREGA.GARANTIDA: no proof is `unattributed`, not the owner.
+    expect(calls.at(-1)).toEqual({ fn: 'reconcile', args: [{ apply: undefined }, 'unattributed'] })
     await deliveryRequest('POST', '/api/deliveries/reconcile', { apply: true, session: { id: 'w1', token: 'good' } }, { service: svc, verify })
     expect(calls.at(-1)).toEqual({ fn: 'reconcile', args: [{ apply: true }, 'w1'] })
     expect((await deliveryRequest('POST', '/api/deliveries/reconcile', { apply: true, session: { id: 'w1', token: 'bad' } }, { service: svc, verify })).status).toBe(403)
@@ -39,11 +40,16 @@ describe('/api/deliveries', () => {
     await deliveryRequest('POST', '/api/deliveries/s1', { action: 'phase', to: 'qa', session: { id: 'w1', token: 'good' }, verdict: 'APROVADO', findings: ' x ' }, { service: svc, verify })
     expect(calls.at(-1)).toEqual({ fn: 'transition', args: ['s1', 'qa', { verdict: 'APROVADO', findings: 'x' }, 'w1'] })
   })
-  test('only a request with no session proof approves (the owner)', async () => {
+  test('only the owner approves: a session and a proof-less call are refused; the legacy browser shape is the owner', async () => {
     const { svc, calls } = fakeService()
-    await deliveryRequest('POST', '/api/deliveries/s1', { action: 'approve', phase: 'pr_merge', decision: 'approve', session: { id: 'w1', token: 'good' } }, { service: svc, verify })
-    expect(calls.at(-1)!.args[4]).toBe(false)
-    await deliveryRequest('POST', '/api/deliveries/s1', { action: 'approve', phase: 'pr_merge', decision: 'approve' }, { service: svc, verify })
+    const before = calls.length
+    const asSession = await deliveryRequest('POST', '/api/deliveries/s1', { action: 'approve', phase: 'pr_merge', decision: 'approve', session: { id: 'w1', token: 'good' } }, { service: svc, verify })
+    expect(asSession.status).toBe(403)
+    const bare = await deliveryRequest('POST', '/api/deliveries/s1', { action: 'approve', phase: 'pr_merge', decision: 'approve' }, { service: svc, verify })
+    expect(bare.status).toBe(403)
+    expect(calls.length).toBe(before)
+    const browser = { loopbackPeer: true, originOwn: true, sameOriginFetch: true }
+    await deliveryRequest('POST', '/api/deliveries/s1', { action: 'approve', phase: 'pr_merge', decision: 'approve' }, { service: svc, verify, browser })
     expect(calls.at(-1)!.args[4]).toBe(true)
   })
   test('unknown action is 400', async () => {
@@ -76,9 +82,9 @@ describe('delivery CLI parsing', () => {
     const { runDeliveryCli } = await import('./cli')
     const { svc, calls } = fakeService()
     const out: string[] = []
-    expect(await runDeliveryCli(['dequeue', '--subtask', 's1', '--reason', 'already delivered'], { out: l => out.push(l), err: l => out.push(l) }, { AGENTOP_MANAGED_ID: 'leader' }, svc)).toBe(0)
+    expect(await runDeliveryCli(['dequeue', '--subtask', 's1', '--reason', 'already delivered'], { out: l => out.push(l), err: l => out.push(l) }, { AGENTOP_MANAGED_ID: 'leader' }, svc, async () => ({ prove: async id => id === 'leader', stepUp: async () => false, interactive: false }))).toBe(0)
     expect(calls.at(-1)).toEqual({ fn: 'dequeue', args: ['s1', 'already delivered', 'leader'] })
-    expect(await runDeliveryCli(['dequeue', '--reason', 'x'], { out: () => {}, err: () => {} }, {}, svc)).toBe(2)
+    expect(await runDeliveryCli(['dequeue', '--reason', 'x'], { out: () => {}, err: () => {} }, {}, svc, async () => ({ prove: async () => false, stepUp: async () => false, interactive: false }))).toBe(2)
   })
   test('delivery verbs are recognised, the engine keeps its own', () => {
     expect(isDeliveryFlowVerb(['gate', 'salvo'])).toBe(true)

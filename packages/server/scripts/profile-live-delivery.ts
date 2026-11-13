@@ -33,7 +33,7 @@ const details = world.book.tasks.map(task => buildTaskDetail({
 }))
 const afterDetails = clock()
 const labels = new Map(world.book.statuses.map(status => [status.id, status.label]))
-buildLive({ details, events: world.book.events, nowMs: Date.now(), statusLabel: id => labels.get(id) })
+buildLive({ details, events: world.book.events, nowMs: Date.now(), statusLabel: id => labels.get(id), statusStage: id => world.book.statuses.find(s => s.id === id)?.stage })
 const afterBuild = clock()
 const coldFleet = await readLiveFleet('en')
 const afterColdFleet = clock()

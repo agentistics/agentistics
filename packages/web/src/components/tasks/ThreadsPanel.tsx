@@ -162,7 +162,10 @@ export function ThreadsPanel({ id, detail, lang, reload, renderBody, loose }: {
     setCreatingBusy(true)
     try {
       const r = await openThread(id, title)
-      if (!r.ok) return
+      if (!r.ok) {
+        pushNotification({ type: 'error', title: lang === 'pt' ? 'Não foi possível abrir o tópico' : 'Could not open the topic', message: r.message ?? '' })
+        return
+      }
       // Opening a topic and writing its first record are separate server operations. Keeping the
       // first message in this form means the topic field has the same #/^ picker as every later
       // comment, while the thread API remains backward-compatible with title-only callers.

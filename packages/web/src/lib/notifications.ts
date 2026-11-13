@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { liveDeepLink } from './liveDeepLink'
 import { idleSessionNoun } from './idleExecution'
 import { notificationMuted } from './notificationCategories'
 import { limitNoticeMeta, limitNoticeText, segmentNoticeText } from './planLimits'
@@ -40,6 +41,16 @@ export const RETIRE_REASON_TEXT: Record<string, { pt: string; en: string }> = {
 /** Localized copy for server- and client-emitted notification codes. Resolved at
  *  render time by resolveNotification so switching the language re-translates. */
 export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }> = {
+  // A piece waited in leader review for over 24 h with no live leader on its task (sessions/orphan-review-notice.ts).
+  'delivery.orphan-review': {
+    pt: { title: 'Entrega esperando revisão sem líder', message: '"{title}" está em revisão há mais de {hours} h e nenhum líder vivo a acompanha. Ação: revisar e concluir, ou abandonar.' },
+    en: { title: 'Delivery waiting for review with no leader', message: '"{title}" has been in review for over {hours} h and no live leader follows it. Action: review and finish, or abandon.' },
+  },
+  // The same, for the old pile summarised in ONE notice instead of one per piece.
+  'delivery.orphan-review-many': {
+    pt: { title: 'Entregas antigas esperando revisão sem líder', message: '{count} peças estão em revisão há mais de {hours} h sem líder vivo. Ação: revisar e concluir, ou abandonar cada uma.' },
+    en: { title: 'Old deliveries waiting for review with no leader', message: '{count} pieces have been in review for over {hours} h with no live leader. Action: review and finish, or abandon each.' },
+  },
   // Spawn-filing refusals (spawn-filing-io.ts): shown when a session could not be started.
   'subtask_refused': {
     pt: { title: 'Sessão não iniciada', message: 'A subtarefa escolhida não pode receber uma sessão.' },
@@ -73,6 +84,132 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   'account.handoff_no_room': {
     pt: { title: 'Passagem sem conta com folga', message: 'Nenhuma conta tem folga agora: a passagem do líder abriu na conta com a janela que reabre primeiro, nunca na conta limitada do antecessor.' },
     en: { title: 'Hand-off with no account that has room', message: 'No account has room right now: the leader hand-off opened on the account whose window reopens first, never on the predecessor\'s limit-blocked one.' },
+  },
+  // ENTREGA.GARANTIDA (S0b/S1a) refusal codes. They are returned to the calling door; the copy exists so a card can
+  // never render blank if one is ever surfaced.
+  evidence_invalid: {
+    pt: { title: 'Evidência recusada', message: 'O anexo não passou na verificação: {rule}.' },
+    en: { title: 'Evidence rejected', message: 'The attachment did not pass the check: {rule}.' },
+  },
+  evidence_reused: {
+    pt: { title: 'Evidência já usada', message: 'Esse mesmo arquivo já comprova outra peça ou revisão. Faça uma nova captura.' },
+    en: { title: 'Evidence already used', message: 'This exact file already backs another piece or revision. Capture it again.' },
+  },
+  guarantees_unreadable: {
+    pt: { title: 'Garantias ilegíveis', message: 'O arquivo de garantias não pôde ser lido; nada foi alterado e as regras mantêm o último estado selado.' },
+    en: { title: 'Guarantees unreadable', message: 'The guarantees file could not be read; nothing was changed and the rules keep their last sealed state.' },
+  },
+  // S0d.2: guards.json is not what agentop sealed (deleted, edited by hand, or its key is gone) — fail closed.
+  guards_unreadable: {
+    pt: { title: 'Pontos de controle adulterados', message: 'O arquivo de pontos de controle das entregas (guards.json) não é o que o agentistics selou. Nenhuma mudança protegida é aceita até ele ser reparado.' },
+    en: { title: 'Checkpoints tampered with', message: 'The delivery checkpoint file (guards.json) is not what agentistics sealed. No guarded change is accepted until it is repaired.' },
+  },
+  migration_missing: {
+    pt: { title: 'Migração pendente', message: 'Esta garantia só pode ser ativada depois da migração.' },
+    en: { title: 'Migration pending', message: 'This guarantee can only be activated after the migration.' },
+  },
+  owner_required: {
+    pt: { title: 'Só o dono pode fazer isso', message: 'Mudar uma garantia é uma ação exclusiva do dono.' },
+    en: { title: 'Owner only', message: 'Changing a guarantee is an owner-only action.' },
+  },
+  prerequisite_capability: {
+    pt: { title: 'Recurso ausente', message: 'Esta versão ainda não tem tudo o que a garantia exige.' },
+    en: { title: 'Capability missing', message: 'This build does not yet have everything the guarantee requires.' },
+  },
+  prerequisite_rule: {
+    pt: { title: 'Regra anterior necessária', message: 'Outra garantia precisa estar ativa antes desta.' },
+    en: { title: 'Earlier rule required', message: 'Another guarantee must be on before this one.' },
+  },
+  shadow_required: {
+    pt: { title: 'Modo sombra necessário', message: 'A garantia precisa rodar em modo sombra antes de ser ativada.' },
+    en: { title: 'Shadow mode required', message: 'The guarantee must run in shadow mode before it is activated.' },
+  },
+  shadow_too_short: {
+    pt: { title: 'Sombra curta demais', message: 'O modo sombra precisa rodar por pelo menos 24 horas antes da ativação.' },
+    en: { title: 'Shadow period too short', message: 'Shadow mode must run for at least 24 hours before activation.' },
+  },
+  unexplained_would_refuse: {
+    pt: { title: 'Recusas sem explicação', message: 'O modo sombra registrou recusas ainda não explicadas; revise antes de ativar.' },
+    en: { title: 'Unexplained refusals', message: 'Shadow mode recorded refusals nobody has explained yet; review them before activating.' },
+  },
+  // ENTREGA.GARANTIDA S1b — classification and the evidence requirement (refusals returned to the calling door).
+  classification_required: {
+    pt: { title: 'Checkout não resolvido', message: 'Não foi possível saber onde esta peça foi feita. Arquive a sessão que fez o trabalho ou declare um resultado fora de código.' },
+    en: { title: 'Checkout not resolved', message: 'We could not tell where this piece was built. File the session that did the work, or declare a non-code outcome.' },
+  },
+  uncommitted_changes: {
+    pt: { title: 'Alterações não commitadas', message: 'O checkout tem alterações não commitadas. Faça o commit antes de enviar para revisão.' },
+    en: { title: 'Uncommitted changes', message: 'The checkout has uncommitted changes. Commit them before moving to review.' },
+  },
+  evidence_required: {
+    pt: { title: 'Falta evidência', message: 'Esta peça ainda não pode ir para revisão: faltam {missing}.' },
+    en: { title: 'Evidence required', message: 'This piece cannot move to review yet: {missing} is missing.' },
+  },
+  evidence_stale: {
+    pt: { title: 'Evidência desatualizada', message: 'A evidência foi tirada em outro commit, ou a peça mudou durante o envio. Capture de novo no estado atual.' },
+    en: { title: 'Evidence out of date', message: 'The evidence was taken at another commit, or the piece changed during the upload. Capture it again at the current state.' },
+  },
+  declaration_invalid: {
+    pt: { title: 'Declaração inválida', message: 'Informe o repositório e um commit (de 7 a 40 caracteres) para declarar a classificação.' },
+    en: { title: 'Invalid declaration', message: 'Give a repository and a commit (7–40 characters) to declare the classification.' },
+  },
+  declaration_repo_unresolved: {
+    pt: { title: 'Repositório não encontrado', message: 'Não encontramos esse repositório aqui. Informe o caminho de um checkout, ou um remoto que um dos checkouts da peça use.' },
+    en: { title: 'Repository not found', message: 'We could not find that repository here. Give the path of a checkout, or a remote one of the piece\'s checkouts uses.' },
+  },
+  declaration_commit_missing: {
+    pt: { title: 'Commit inexistente', message: 'Esse commit não existe no repositório informado.' },
+    en: { title: 'Commit not found', message: 'That commit does not exist in the repository you named.' },
+  },
+  declaration_unpushed: {
+    pt: { title: 'Commit não enviado', message: 'Esse commit ainda não está em nenhuma branch remota. Faça o push antes de declarar.' },
+    en: { title: 'Commit not pushed', message: 'That commit is not on any remote branch yet. Push it before declaring.' },
+  },
+  classify_unavailable: {
+    pt: { title: 'Classificação indisponível', message: 'Este servidor não consegue classificar peças agora.' },
+    en: { title: 'Classification unavailable', message: 'This server cannot classify pieces right now.' },
+  },
+  classify_leader_only: {
+    pt: { title: 'Só o líder declara', message: 'Apenas o líder da tarefa (ou o dono) pode dizer onde está o checkout de uma peça.' },
+    en: { title: 'Leader only', message: 'Only the task leader (or the owner) can say where a piece\'s checkout is.' },
+  },
+  // ENTREGA.GARANTIDA S1c — the evidence doors.
+  evidence_too_large: {
+    pt: { title: 'Arquivo grande demais', message: 'Um anexo de evidência pode ter no máximo 8 MB.' },
+    en: { title: 'File too large', message: 'An evidence upload can be at most 8 MB.' },
+  },
+  evidence_forbidden: {
+    pt: { title: 'Sem permissão para anexar', message: 'Só a sessão da própria peça, o líder da tarefa ou o dono mexem na evidência.' },
+    en: { title: 'Not allowed to attach', message: 'Only the piece\'s own session, the task leader or the owner can change its evidence.' },
+  },
+  evidence_in_use: {
+    pt: { title: 'Evidência em uso', message: 'Esta evidência sustenta uma autorização de revisão (ou uma autorização pendente), ou o índice de evidências não pôde ser lido; ela (e o arquivo dela) não pode ser apagada agora.' },
+    en: { title: 'Evidence in use', message: 'This evidence backs a review authorization (or a pending one), or the evidence index could not be read; it (and its file) cannot be deleted now.' },
+  },
+  // QA S1c r2 R7 — reachable from the task and file delete doors (and every guarded write) when another process holds a lock.
+  guard_busy: {
+    pt: { title: 'Quadro ocupado', message: 'Outro processo do agentistics está gravando o quadro agora. Tente de novo em instantes.' },
+    en: { title: 'Board busy', message: 'Another agentistics process is writing the board right now. Try again in a moment.' },
+  },
+  no_such_evidence: {
+    pt: { title: 'Evidência não encontrada', message: 'Não há essa evidência nesta peça.' },
+    en: { title: 'Evidence not found', message: 'There is no such evidence on this piece.' },
+  },
+  evidence_store_failed: {
+    pt: { title: 'Falha ao guardar o anexo', message: 'O arquivo não pôde ser guardado. Tente de novo.' },
+    en: { title: 'Could not store the upload', message: 'The file could not be stored. Try again.' },
+  },
+  evidence_id_required: {
+    pt: { title: 'Falta o id da evidência', message: 'Informe qual evidência remover.' },
+    en: { title: 'Evidence id required', message: 'Say which evidence to remove.' },
+  },
+  wrong_task: {
+    pt: { title: 'Peça de outra tarefa', message: 'Essa peça pertence a outra tarefa.' },
+    en: { title: 'Piece of another task', message: 'That piece belongs to a different task.' },
+  },
+  declaration_unclassifiable: {
+    pt: { title: 'Não foi possível classificar', message: 'O servidor não conseguiu classificar a peça a partir desse commit.' },
+    en: { title: 'Could not classify', message: 'The server could not classify the piece from that commit.' },
   },
   'retire.done': {
     pt: { title: 'Sessão encerrada', message: 'A sessão {label} ({id}) foi encerrada.' },
@@ -437,6 +574,12 @@ export function notificationLink(n: Pick<AppNotification, 'code' | 'meta'>): str
     const sid = String(n.meta?.sessionId ?? '').trim()
     return sid ? `/sessions/${encodeURIComponent(sid)}` : null
   }
+  // A delivery waiting for review with no leader leads to its card on the Live (the one-click action lives there).
+  if (n.code === 'delivery.orphan-review') {
+    const key = String(n.meta?.key ?? '').trim()
+    return key ? liveDeepLink({ card: key }) : null
+  }
+  if (n.code === 'delivery.orphan-review-many') return liveDeepLink({ orphans: true })
   return null
 }
 

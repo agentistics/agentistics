@@ -55,8 +55,10 @@
  * deadline.
  */
 
-import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { hostname } from 'node:os'
+import { randomUUID } from 'node:crypto'
 
 /** A lock older than this is assumed abandoned. Longer than any write; far shorter than a coffee. */
 export const STALE_MS = 15_000
@@ -83,10 +85,48 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
  */
 type Blocked = 'retry' | 'steal' | 'wait'
 
+/**
+ * ENTREGA.GARANTIDA S0d.4 (QA F4) — A LIVE LOCK IS NEVER STOLEN. Age alone said "abandoned" after 15 s, so a holder
+ * that ran longer (a slow write, a GC or WSL pause, a `sleep` inside the critical section) was joined by a second
+ * writer, and its release then `rm`'d the second writer's lock. Measured by the QA: both inside the guards lock at
+ * once. Now the holder writes an `owner` file `{pid, host, token}` before the lock counts as held, HEARTBEATS the
+ * directory's mtime every `STALE_MS / 3`, and a blocked acquirer steals only when the lock is old AND its owner is not
+ * alive (same host, `kill(pid, 0)` → ESRCH; no readable owner; or another host). `HARD_STALE_MS` bounds a recycled pid:
+ * a live holder heartbeats, so ten missed beats is a dead one whatever answers on that pid. `release` removes the
+ * directory only when the token inside is its own.
+ */
+export const HARD_STALE_MS = STALE_MS * 10
+const OWNER_FILE = 'owner'
+const HEARTBEAT_MS = Math.floor(STALE_MS / 3)
+
+interface LockOwner { pid: number; host: string; token: string }
+
+/** PURE: may a lock this old, with this owner, be taken over? `alive` answers for a pid on THIS host. */
+export function mayStealLock(ageMs: number, owner: LockOwner | null, thisHost: string, alive: (pid: number) => boolean): boolean {
+  if (ageMs <= STALE_MS) return false
+  if (ageMs > HARD_STALE_MS) return true
+  if (!owner) return true
+  if (owner.host !== thisHost) return true
+  return !alive(owner.pid)
+}
+
+export function pidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try { process.kill(pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' }
+}
+
+async function readOwner(dir: string): Promise<LockOwner | null> {
+  try {
+    const j = JSON.parse(await readFile(join(dir, OWNER_FILE), 'utf-8')) as Partial<LockOwner>
+    return typeof j.pid === 'number' && typeof j.host === 'string' && typeof j.token === 'string' ? { pid: j.pid, host: j.host, token: j.token } : null
+  } catch { return null }
+}
+
 async function inspectLock(dir: string, nowMs: number): Promise<Blocked> {
   try {
     const st = await stat(dir)
-    return nowMs - st.mtimeMs > STALE_MS ? 'steal' : 'wait'
+    if (nowMs - st.mtimeMs <= STALE_MS) return 'wait'
+    return mayStealLock(nowMs - st.mtimeMs, await readOwner(dir), hostname(), pidAlive) ? 'steal' : 'wait'
   } catch {
     // Gone between the failed mkdir and this stat — whoever held it released it. RETRY, never
     // delete: see the header's second rule.
@@ -94,15 +134,38 @@ async function inspectLock(dir: string, nowMs: number): Promise<Blocked> {
   }
 }
 
+/** The holder's side: the owner file, the heartbeat, and a release that removes only its own lock. */
+async function heldLock(dir: string): Promise<LockHandle> {
+  const token = randomUUID()
+  // Awaited: a lock with no owner reads as abandoned once old. Best effort all the same — the DIRECTORY is the lock.
+  await writeFile(join(dir, OWNER_FILE), JSON.stringify({ pid: process.pid, host: hostname(), token }), 'utf-8').catch(() => undefined)
+  await writeFile(join(dir, 'pid'), String(process.pid), 'utf-8').catch(() => undefined)
+  const beat = setInterval(() => { const t = new Date(); void utimes(dir, t, t).catch(() => undefined) }, HEARTBEAT_MS)
+  beat.unref?.()
+  let released = false
+  return {
+    contended: false,
+    async release() {
+      if (released) return
+      released = true
+      clearInterval(beat)
+      const owner = await readOwner(dir)
+      // Somebody else's token means this lock was taken over (we were presumed dead): never delete THEIR lock.
+      if (owner && owner.token !== token) return
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+    },
+  }
+}
+
 /**
  * Take the lock for `file`, or give up waiting and say so.
  *
- * The lock is `<file>.lock`, a directory. The pid is written inside it purely so a person looking
- * at a stuck machine can see who to blame; nothing reads it.
+ * The lock is `<file>.lock`, a directory. Inside it: `pid` (for a person looking at a stuck machine)
+ * and `owner` (`{pid, host, token}`, read by a blocked acquirer's liveness check and by `release`, S0d.4).
  */
-export async function lockFile(file: string, nowMs = () => Date.now()): Promise<LockHandle> {
+export async function lockFile(file: string, nowMs = () => Date.now(), waitMs = WAIT_MS): Promise<LockHandle> {
   const dir = `${file}.lock`
-  const deadline = nowMs() + WAIT_MS
+  const deadline = nowMs() + waitMs
   // The PARENT must exist for the atomic, non-recursive `mkdir` below to mean anything — see the
   // header's last rule. Best effort: if it cannot be created, the loop's non-EEXIST branch decides.
   await mkdir(dirname(dir), { recursive: true }).catch(() => undefined)
@@ -110,9 +173,6 @@ export async function lockFile(file: string, nowMs = () => Date.now()): Promise<
   for (;;) {
     try {
       await mkdir(dir)
-      // Best effort, and deliberately not awaited for correctness: the lock is the DIRECTORY.
-      void writeFile(join(dir, 'pid'), String(process.pid), 'utf-8').catch(() => undefined)
-      return { contended: false, release: () => rm(dir, { recursive: true, force: true }).catch(() => undefined) }
     } catch (err) {
       const code = (err as NodeJS.ErrnoException)?.code
       if (code !== 'EEXIST') {
@@ -150,7 +210,10 @@ export async function lockFile(file: string, nowMs = () => Date.now()): Promise<
         return { contended: true, release: async () => undefined }
       }
       await sleep(RETRY_MS)
+      continue
     }
+    // `mkdir` succeeded: the lock is ours. Owner file + heartbeat (S0d.4).
+    return heldLock(dir)
   }
 }
 

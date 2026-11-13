@@ -138,7 +138,7 @@ const PHASE_STAGE: Record<string, CalStage> = {
   fila: 'queue', executando: 'running', qa: 'qa', ajuste: 'adjust', revisao_lider: 'leader', pr_merge: 'merge', ci: 'ci', publicado: 'published', bloqueado: 'blocked',
 }
 export interface CalTaskInput { id: string; title: string; status: string; priority?: string; dueDate?: string }
-export interface CalSubtaskInput { id: string; taskId: string; title: string; priority?: string; dueDate?: string }
+export interface CalSubtaskInput { id: string; taskId: string; title: string; status?: string; priority?: string; dueDate?: string }
 export interface CalResetInput { harness: string; account: string; label: string; window: '5h' | 'week'; resetsAt: number }
 
 const toPriority = (p: string | undefined): CalPriority | null => (p === 'urgent' || p === 'high' || p === 'medium' || p === 'low' ? p : null)
@@ -232,7 +232,8 @@ export function buildCalendar(o: {
     // a task-level piece (no subtask) IS the task, so its deadline is the task's.
     const dueDate = l.subtaskId ? sub?.dueDate ?? null : task?.dueDate ?? null
     const parentDueDate = l.subtaskId ? task?.dueDate ?? null : null
-    const published = stage === 'published'
+    // A finished piece without a release (`completed`) is closed: neither open nor late.
+    const published = stage === 'published' || (stage as string) === 'completed'
     pieces.push({
       key: l.key, taskId: l.taskId, taskTitle: l.taskTitle, subtaskId: l.subtaskId, title: l.title, ...(l.kind ? { kind: l.kind } : {}), ...(l.leaderAvailabilityReasonCode ? { leaderAvailabilityReasonCode: l.leaderAvailabilityReasonCode } : {}), stage,
       version,
@@ -258,6 +259,14 @@ export function buildCalendar(o: {
     const dueDate = sub?.dueDate ?? null
     const parentDueDate = task?.dueDate ?? null
     const phaseStage = PHASE_STAGE[r.phase]
+    // THE BOARD OUTRANKS A STALE RECORD (same rule as the Live projection, `task-live.ts`): an unpublished record is a
+    // piece only while the board still says it is open. Abandoned/done work is closed, and a rework (in_progress/todo/
+    // blocked) is not waiting on the leader/merge/CI any more.
+    if (phaseStage && phaseStage !== 'published') {
+      const board = sub?.status
+      if (board === 'abandoned' || board === 'done') continue
+      if ((board === 'in_progress' || board === 'todo' || board === 'blocked') && (phaseStage === 'leader' || phaseStage === 'merge' || phaseStage === 'ci')) continue
+    }
     // Waiting on the leader/merge/CI with a version that already went out: published, exactly as for a Live piece.
     const openVersion = phaseStage && phaseStage !== 'published' ? pickVersion(r.versionTarget) ?? provenVersion(key, phaseStage, parseMs(r.firstAt)) : null
     const flippedAt = openVersion && phaseStage && FLIPS.has(phaseStage) ? releasePublishedAt.get(openVersion) ?? null : null

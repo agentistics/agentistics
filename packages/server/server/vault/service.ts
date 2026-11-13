@@ -1218,6 +1218,7 @@ export async function openFromFile(path: string, purpose: string, name: string):
  * is a fact about THIS machine.
  */
 export type VaultAuditType =
+  | 'delivery.owner-proof'
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.auto-lock-extended' | 'vault.recovered' | 'vault.recover-failed'
@@ -1247,6 +1248,19 @@ export function vaultStatusSync(): { state: 'open' | 'locked' | 'uninitialized' 
 
 /** Is the vault open in this process right now (without trying to open it)? */
 export function vaultIsOpen(): boolean { return _opened !== null }
+
+/**
+ * ENTREGA.GARANTIDA S0d.1 — an HMAC-SHA256 under a key derived from the OPEN vault's DEK (HKDF, salt = kid, `info`),
+ * the `unlock-window.json` pattern. Holder only and never opens anything: `null` when the vault is not open in this
+ * process, or when `kid` names another key (a rekeyed vault cannot vouch for a record sealed under the old one).
+ * The key never leaves this function; the caller only ever sees the MAC.
+ */
+export function vaultDerivedMac(info: string, message: string, kid?: string): { kid: string; mac: string } | null {
+  const o = _opened
+  if (!o || _role !== 'holder' || (kid !== undefined && kid !== o.kid)) return null
+  const key = Buffer.from(hkdfSync('sha256', o.dek, Buffer.from(o.kid), Buffer.from(info), 32))
+  try { return { kid: o.kid, mac: createHmac('sha256', key).update(message).digest('base64url') } } finally { key.fill(0) }
+}
 /** V4 product setting. Missing/locked values are deliberately OFF. */
 export function vaultConfirmEachUse(): boolean { return _opened?.vault.confirmEachUse === true }
 
@@ -1341,6 +1355,7 @@ export function __resetVaultForTests(opts: {
   /** Presence kinds to report as "coming soon" (never offered). */
   presenceSoon?: ProtectorId[]
 } = {}): void {
+  _pw = { wrong: 0, pausedUntil: 0 } // the password back-off is process state: one test's pause must not leak into the next file
   lockVault()
   _soonForTests = opts.presenceSoon ?? []
   _unlockWindowAnchorMs = null // a fresh service process: the window comes back only from its MACed file

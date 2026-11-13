@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.213.0': {
+    features: [
+      {
+        pt: 'Benchmark refeito no desenho aprovado, com "Por tarefa" em páginas e "Como funciona?" explicando o método passo a passo.',
+        en: 'Benchmark rebuilt to the approved design, with "By task" in pages and a "How it works" explaining the method step by step.',
+      },
+      {
+        pt: 'Benchmark: com o histórico real, compara peças com 1 rodada de QA contra 2 ou mais, e 1 sessão contra 5 ou mais, dentro do mesmo tamanho — como indício observado ("Indício, não prova"). Ainda não há nota de 0 a 100, porque nenhum experimento controlado rodou.',
+        en: 'Benchmark: with the real history it compares pieces with 1 QA round against 2 or more, and 1 session against 5 or more, within the same size — as observed evidence ("Evidence, not proof"). There is no 0–100 score yet, because no controlled experiment has run.',
+      },
+      {
+        pt: 'Live: o status da peça no quadro sempre vale — abandonada ou concluída saem das colunas ativas e bloqueada aparece como bloqueada.',
+        en: 'Live: a piece\'s status on the board always wins — abandoned or done pieces leave the active columns and a blocked one shows as blocked.',
+      },
+      {
+        pt: 'Live: o trabalho entregue cuja versão já foi publicada passa sozinho para Publicado, e peças antigas sem líder ganham um único aviso com um botão para resolver.',
+        en: 'Live: delivered work whose version is already published moves to Published on its own, and old pieces without a leader get a single notice with a one-click action.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Proteção do dono: renomear e outras edições continuam como antes; uma edição recusada agora mostra um erro em vez de falhar em silêncio, e aprovar entregas no modo protegido exige a prova do dono.',
+        en: 'Owner protection: renaming and other edits work as before; a refused edit now shows an error instead of failing quietly, and approving deliveries in protected mode needs the owner\'s proof.',
+      },
+    ],
+  },
   '2.212.0': {
     features: [
       {

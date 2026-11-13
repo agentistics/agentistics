@@ -49,7 +49,7 @@ const T = (pt: boolean) => pt ? {
   confirmArchiveTitle: (n: number) => `Arquivar ${n} ${n === 1 ? 'peça' : 'peças'}?`,
   confirmArchive: 'Elas saem da revisão como abandonadas. Nada é apagado, mas para voltar é preciso abrir cada tarefa. Uma peça que ainda espera alguém não é tocada.',
   counting: 'Contando o que a ação fará…', breakdown: (c: number, a: number) => ` (${c} ${c === 1 ? 'concluída' : 'concluídas'}, ${a} ${a === 1 ? 'arquivada' : 'arquivadas'})`,
-  concludeAll: 'Concluir', counts: (c: number, a: number) => `${c} ${c === 1 ? 'concluída' : 'concluídas'}, ${a} ${a === 1 ? 'arquivada' : 'arquivadas'}`,
+  concludeAll: 'Concluir', concludeOne: 'Concluir esta peça', counts: (c: number, a: number) => `${c} ${c === 1 ? 'concluída' : 'concluídas'}, ${a} ${a === 1 ? 'arquivada' : 'arquivadas'}`,
   confirmConcludeTitle: (n: number) => `Concluir ${n} ${n === 1 ? 'peça' : 'peças'} de uma vez?`,
   confirmConclude: 'Quem tem sessão vai para Concluído, sem prova de release; quem não tem é arquivada. Nada é apagado. Uma peça que ainda espera alguém não é tocada.',
   confirmPublishTitle: (n: number) => `Marcar ${n} ${n === 1 ? 'peça' : 'peças'} como concluídas?`,
@@ -70,7 +70,7 @@ const T = (pt: boolean) => pt ? {
   confirmArchiveTitle: (n: number) => `Archive ${n} ${n === 1 ? 'piece' : 'pieces'}?`,
   confirmArchive: 'They leave review as abandoned. Nothing is deleted, but bringing one back means opening its task. A piece still waiting on somebody is not touched.',
   counting: 'Counting what the action will do…', breakdown: (c: number, a: number) => ` (${c} completed, ${a} archived)`,
-  concludeAll: 'Conclude', counts: (c: number, a: number) => `${c} completed, ${a} archived`,
+  concludeAll: 'Conclude', concludeOne: 'Conclude this piece', counts: (c: number, a: number) => `${c} completed, ${a} archived`,
   confirmConcludeTitle: (n: number) => `Conclude ${n} ${n === 1 ? 'piece' : 'pieces'} in one go?`,
   confirmConclude: 'Pieces with a session go to Completed, no release proof; the rest are archived. Nothing is deleted. A piece still waiting on somebody is not touched.',
   confirmPublishTitle: (n: number) => `Mark ${n} ${n === 1 ? 'piece' : 'pieces'} as completed?`,
@@ -180,14 +180,14 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   return (
     <>
       <ConfirmModal
-        open={open} title={L.title(visible.length)} message={L.note} tone="default" confirmLabel={L.close} cancelLabel={L.close}
+        open={open} title={visible.length === 1 ? shortTitle(visible[0]!.title, 60) : L.title(visible.length)} message={L.note} tone="default" confirmLabel={L.close} cancelLabel={L.close}
         onConfirm={onClose} onCancel={onClose} maxWidth={720} mobileSheet focusPanel layer={mobile ? 2000 : 300} footer={footer}
       >
         <div data-live-antigas style={{ display: 'grid', gap: 10, fontSize: 12, minWidth: 0 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <input data-live-antigas-version value={version} onChange={e => setVersion(e.target.value)} placeholder={L.version} aria-label={L.version} style={{ ...field, width: mobile ? '100%' : 130 }} />
             <input data-live-antigas-reason value={reason} onChange={e => setReason(e.target.value)} placeholder={L.reason} aria-label={L.reason} style={{ ...field, width: mobile ? '100%' : 160 }} />
-            <button type="button" data-live-antigas-all disabled={busy || actionable.length === 0} onClick={() => void askConclude()} style={btn(true)}>{L.concludeAll} · {L.all(actionable.length)}</button>
+            <button type="button" data-live-antigas-all disabled={busy || actionable.length === 0} onClick={() => void askConclude()} style={btn(true)}>{actionable.length === 1 ? L.concludeOne : `${L.concludeAll} · ${L.all(actionable.length)}`}</button>
           </div>
           {summary && !busy && <p role="status" data-live-antigas-summary style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 12 }}>{L.summary(summary.done, summary.left, summary.stopped)}{summary.concluded + summary.archived > 0 ? L.breakdown(summary.concluded, summary.archived) : ''}</p>}
           {visible.length !== actionable.length && <p data-live-antigas-why style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: 11.5 }}>{L.whyFewer(visible.length, actionable.length)}</p>}
