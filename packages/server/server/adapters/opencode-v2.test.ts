@@ -137,3 +137,44 @@ test('health shows the OpenCode issue (and nothing when there is none)', () => {
   expect(issues[0]!.title).toBe('OpenCode sessions cannot be read')
   expect(issues[0]!.description).toContain('neither')
 })
+
+test('2.x assistant content blocks shaped like 1.x tool parts feed commits, files and lines', async () => {
+  const { parseOpencodeSession } = await import('./opencode-parse')
+  const msgs = [
+    { id: 'm1', type: 'user', time: { created: 1793887700000 }, text: 'commit it' },
+    { id: 'm2', type: 'assistant', time: { created: 1793887700100, completed: 1793887700200 }, model: { id: 'fable-5.1', providerID: 'upx' }, finish: 'stop', cost: 0,
+      tokens: { input: 100, output: 10, reasoning: 0, cache: { read: 200, write: 0 } },
+      content: [
+        { type: 'text', text: 'ok' },
+        { type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'git commit -m x' }, output: 'big' } },
+        { type: 'tool', tool: 'edit', state: { status: 'completed', input: { filePath: '/w/a.ts', oldString: 'a', newString: 'a\nb' } } },
+      ] },
+  ] as never
+  const { messages, parts } = rowsOfV2Messages('s', msgs)
+  const row = { id: 's', directory: '/w', title: 't', time_created: 1793887700000, time_updated: 1793887700300 }
+  const s = parseOpencodeSession(row, messages, parts, {})!
+  expect(s.git_commits).toBe(1)
+  expect(s.files_modified).toBe(1)
+  expect(s.lines_added).toBe(2)
+  expect(s.tool_counts).toEqual({ Bash: 1, Edit: 1 })
+  expect(JSON.stringify(parts)).not.toContain('big') // tool output never crosses
+})
+
+test('2.x session whose message list is empty but whose summary carries tokens is still measured', async () => {
+  // MEASURED on opencode 1.19.5 (serve): GET /api/session lists the session with model/tokens/cost, while
+  // GET /api/session/{id}/message answers {"data":[]} (session_message is never written there).
+  const service = { url: 'http://x', password: 'p' }
+  const sessions = { data: [{ id: 'ses_1', agent: 'build', model: { id: 'fable-5.1', providerID: 'upx', variant: 'default' }, cost: 0,
+    tokens: { input: 15000, output: 900, reasoning: 0, cache: { read: 24000, write: 0 } }, time: { created: 1794541131370, updated: 1794541132913 },
+    title: 'T', location: { directory: '/w' } }], cursor: { next: null } }
+  const fetch = async (url: string) => {
+    const body = url.includes('/message') ? { data: [], cursor: {} } : url.includes('/api/info') ? { ok: 1 } : sessions
+    return { status: 200, ok: true, json: async () => body }
+  }
+  const [s] = await loadOpencodeV2(service, {}, '', createOpencodeV2Client(service, { fetch: fetch as never }))
+  expect(s!.input_tokens).toBe(15000)
+  expect(s!.output_tokens).toBe(900)
+  expect(s!.cache_read_input_tokens).toBe(24000)
+  expect(s!.model).toBe('upx/fable-5.1')
+  expect(sessionCostUSD(s!)).toBeGreaterThan(0)
+})
