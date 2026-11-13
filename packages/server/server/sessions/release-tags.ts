@@ -91,6 +91,35 @@ export async function tagContainsIn(sha: string, dir: string): Promise<boolean> 
   return r.ok && r.out.length > 0
 }
 
+const firstTagMemo = new Map<string, string>()
+
+/**
+ * The EARLIEST version tag (`v<x.y.z>` → `x.y.z`) of any of these repositories that contains the commit — the version
+ * the commit shipped in. null when no clone names one (no clone, unknown commit, not in a tag yet, git failed).
+ * A positive answer is immutable (a commit does not leave a tag, and the earliest does not change), so it is kept;
+ * a null is never cached — the tag may simply not exist yet. Squash-merged work is not found here: its tag holds the
+ * squash commit, not the worker's.
+ */
+export async function firstTagContaining(sha: string, dirs: readonly string[]): Promise<string | null> {
+  if (!HEX.test(sha)) return null
+  const hit = firstTagMemo.get(sha)
+  if (hit) return hit
+  let best: string | null = null
+  for (const d of await distinctRepos(dirs)) {
+    const r = await git(d, ['tag', '--contains', sha, '--list', 'v[0-9]*', '--sort=version:refname'])
+    const tag = r.ok ? r.out.split('\n').map(t => /^v(\d+\.\d+\.\d+)$/.exec(t.trim())?.[1]).find(Boolean) : undefined
+    if (tag && (best === null || compareSemver(tag, best) < 0)) best = tag
+  }
+  if (best) { if (firstTagMemo.size >= MAX_POSITIVE) firstTagMemo.clear(); firstTagMemo.set(sha, best) }
+  return best
+}
+
+function compareSemver(a: string, b: string): number {
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) { const d = (pa[i] ?? 0) - (pb[i] ?? 0); if (d) return d }
+  return 0
+}
+
 // ------------------------------------------------------------------ engine pins
 
 interface PinCache { at: number; pins: string[] }

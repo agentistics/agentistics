@@ -276,9 +276,16 @@ const QA_NAME =/(^|[^a-z])qa([^a-z]|$)|\bquality\b/i
 /** The stored session role (`session-roles.ts`); a session that has one is never read as the QA's by its NAME. */
 export type StoredRoleOf = (s: { id: string; conversationId?: string }) => string | undefined
 /** QA by name — only the fallback, and only for a session with no stored leader/worker role. */
-const isQaName = (s: { label?: string; role?: string }): boolean => !!s.label && s.role !== 'leader' && s.role !== 'worker' && QA_NAME.test(s.label)
+const QA_DIR = /(^|[-_.])qa([-_.]|$)/i
+const isQaName = (s: { label?: string; role?: string; cwd?: string }): boolean => {
+  if (s.role === 'leader' || s.role === 'worker') return false
+  if (s.label && QA_NAME.test(s.label)) return true
+  // A QA session is often titled after the task and only its WORKTREE says what it is (`.worktrees/qa-livro-3b-r3`).
+  const dir = s.cwd?.split('/').filter(Boolean).pop()
+  return !!dir && QA_DIR.test(dir)
+}
 
-interface PieceSession { id: string; harness: string; model: string | null; effort?: string; label?: string; role?: string; live: boolean; seenMs?: number; startMs: number | null; activity?: SessionActivity }
+interface PieceSession { id: string; cwd?: string; harness: string; model: string | null; effort?: string; label?: string; role?: string; live: boolean; seenMs?: number; startMs: number | null; activity?: SessionActivity }
 
 // ---------------------------------------------------------------------------------- ETA
 
@@ -525,6 +532,24 @@ export function trailOf(
   return visits
 }
 
+/** PURE: the stage visits a delivery record's phase history states (oldest first); the last runs to `endMs`. */
+export function recordTrailOf(history: readonly { to: string; at: string }[] | undefined, endMs: number): StageVisit[] {
+  const moves = (history ?? [])
+    .map(h => ({ at: ms(h.at), stage: PHASE_STAGE[h.to] ?? null }))
+    .filter((m): m is { at: number; stage: LiveStage } => m.at !== null && m.stage !== null)
+    .sort((a, b) => a.at - b.at)
+  const visits: StageVisit[] = []
+  for (const m of moves) {
+    const last = visits[visits.length - 1]
+    if (last && last.stage === m.stage) continue
+    if (last) last.ms = Math.max(0, m.at - last.enteredMs)
+    visits.push({ stage: m.stage, enteredMs: m.at, ms: 0 })
+  }
+  const tail = visits[visits.length - 1]
+  if (tail) tail.ms = Math.max(0, endMs - tail.enteredMs)
+  return visits
+}
+
 export interface StageTypical { medianMs: number; p25Ms?: number; p75Ms: number; n: number }
 
 /** PURE: how long pieces typically sit in each stage, from the CLOSED visits of every piece. */
@@ -643,7 +668,7 @@ export function resolvePieceForecast(o: EstimateOptions & {
     if (stageOverdueSinceMs(o.stage, o.sinceMs, o.nowMs, o.typicals) !== null) {
       return { eta: total, stageEta: { kind: 'none', reason: 'beyond-range' }, publishEta: { kind: 'none', reason: 'beyond-range' } }
     }
-    const fallback = stageCeilingForecast(o)
+    const fallback = (o.cohorts?.sampleCount ?? o.samples?.length ?? 0) >= MIN_SAMPLES ? null : stageCeilingForecast(o)
     return fallback ?? { eta: total, stageEta: { kind: 'none', reason: 'not-started' }, publishEta: totalOnly(total) }
   }
   const result = estimateStages({ ...o, totalEta: total })
@@ -651,7 +676,11 @@ export function resolvePieceForecast(o: EstimateOptions & {
   if (overdueSinceMs !== null) {
     return { eta: total, stageEta: result.stageEta, publishEta: { kind: 'none', reason: 'beyond-range' } }
   }
-  if (!o.typicals[o.stage] && o.sinceMs !== null) {
+  // The flat stage ceilings are the answer for a machine with NO history. Once measured publications exist the
+  // whole-piece estimate (cohort median by type/harness, else the overall mean, confidence by sample count) is
+  // the honest one — a fixed +2d/+3d offset is not learned from anything.
+  const measured = (o.cohorts?.sampleCount ?? o.samples?.length ?? 0) >= MIN_SAMPLES
+  if (!o.typicals[o.stage] && o.sinceMs !== null && !measured) {
     const fallback = stageCeilingForecast(o)
     if (fallback) return fallback
   }
@@ -745,7 +774,7 @@ function piecesOf(d: TaskDetail, roleOf?: StoredRoleOf, includeMembers = false):
     d.sessions
       .filter(s => (s.subtaskId ?? null) === subtaskId && !s.historical)
       .map(s => ({
-        id: s.id, harness: s.harness, model: s.model, ...(s.label ? { label: s.label } : {}),
+        id: s.id, harness: s.harness, model: s.model, ...(s.cwd ? { cwd: s.cwd } : {}), ...(s.label ? { label: s.label } : {}),
         ...(roleOf ? (() => { const r = roleOf({ id: s.id, ...(s.conversationId ? { conversationId: s.conversationId } : {}) }); return r ? { role: r } : {} })() : {}),
         ...(s.effort ? { effort: s.effort } : {}),
         live: !s.endedAt, startMs: ms(s.createdAt),
@@ -951,7 +980,14 @@ export function prepareForecastHistory(o: {
   }
   const cohorts = buildForecastCohorts(samples(), o.nowMs)
   const { eventsBySubject } = indexEvents(o.details, o.events)
-  const typicals = stageTypicals(cohorts.samples.map(s => trailOf(eventsBySubject.get(s.key!) ?? [], o.nowMs, o.statusLabel)))
+  const typicals = stageTypicals(cohorts.samples.map(s => {
+    const byEvents = trailOf(eventsBySubject.get(s.key!) ?? [], o.nowMs, o.statusLabel)
+    // The delivery record's own phase history is the exact witness of every stage a piece went through; the board's
+    // status events only know three of them. Whichever tells more is the measurement.
+    const rec = o.deliveries?.get(s.key!.includes('/') ? s.key!.split('/')[1]! : s.key!)
+    const byRecord = rec ? recordTrailOf(rec.history, s.completedAtMs ?? o.nowMs) : []
+    return byRecord.length > byEvents.length ? byRecord : byEvents
+  }))
   return { cohorts, typicals }
 }
 

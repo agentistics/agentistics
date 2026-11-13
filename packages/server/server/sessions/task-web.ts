@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { buildLive, legacyReviewShaPieces, prepareForecastHistory, FORECAST_BUCKET_MS, FORECAST_METHOD_VERSION, type ForecastHistory } from './task-live'
 import { readForecastAnchors, saveForecastAnchors } from './task-forecast-cache'
 import { dirsForShas } from './release-repos'
-import { publishedAmong } from './release-tags'
+import { firstTagContaining, publishedAmong } from './release-tags'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
 import { stat } from 'node:fs/promises'
 import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
@@ -189,6 +189,40 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
   try { return (await promise).reply } finally {
     if (liveBuildInFlight?.promise === promise) liveBuildInFlight = null
   }
+}
+
+/**
+ * The version each piece with NO delivery-record version shipped in, PROVEN by the repository: the first release tag
+ * that contains a commit the piece delivered (its handback/`legacyReviewShas`). Key = the Live piece key. The Delivery
+ * calendar links these to versions; a piece nothing proves anything about is simply absent. Bounded (40 commits per
+ * call, each git call has its own timeout) so a calendar read never waits on a whole history.
+ */
+export async function pieceVersionsFromTags(): Promise<Record<string, string>> {
+  const w = await loadTaskWorld()
+  const owners = conversationOwners(w.rollupRows)
+  const commentsOfTask = new Map<string, typeof w.book.comments>()
+  for (const c of w.book.comments) { const l = commentsOfTask.get(c.taskId); if (l) l.push(c); else commentsOfTask.set(c.taskId, [c]) }
+  const details = w.book.tasks.map(task => buildTaskDetail({
+    owners, task, attempts: w.book.attempts, rows: w.rollupRows, metas: w.metas, costOf: w.costOf,
+    comments: commentsOfTask.get(task.id) ?? [], threads: [], subtasks: w.book.subtasks.filter(t => t.taskId === task.id), files: [],
+  }))
+  const pieces = legacyReviewShaPieces(details, w.book.events)
+  const taskById = new Map(w.book.tasks.map(t => [t.id, t]))
+  const dirsFor = dirsForShas({
+    pieces, rowsOf: id => { const t = taskById.get(id); return t ? rowsOfTask(t, w.rollupRows, owners) : [] }, metas: w.metas.values(),
+  })
+  const out: Record<string, string> = {}
+  for (const sha of [...pieces.keys()].slice(0, 40)) {
+    const version = await firstTagContaining(sha, dirsFor(sha)).catch(() => null)
+    if (!version) continue
+    for (const p of pieces.get(sha) ?? []) {
+      const key = p.subtaskId ? `${p.taskId}/${p.subtaskId}` : p.taskId
+      // A piece naming several commits ships with the LAST of them.
+      const cur = out[key]
+      if (!cur || version.localeCompare(cur, undefined, { numeric: true }) > 0) out[key] = version
+    }
+  }
+  return out
 }
 
 /** The pieces the Live lists as "antigas" (same cached build the screen reads): the ONE set every antigas surface acts on. */
