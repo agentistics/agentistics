@@ -436,3 +436,80 @@ test('isAgentopServerCommand: any agentop executable, nothing else', () => {
   expect(isAgentopServerCommand('vim agentop server.txt')).toBe(false)
   expect(isAgentopServerCommand('bun test packages/server/server/single-instance.test.ts')).toBe(false)
 })
+
+// ---------------------------------------------------------------------------
+// BOOT.LOCK R1 (macOS): an executable path with spaces must not be cut at the first space.
+// ---------------------------------------------------------------------------
+import { readHolderCommand } from './single-instance'
+import { spawn } from 'child_process'
+
+test('R1: Linux argv form keeps argv[0] whole (spaces inside)', () => {
+  expect(isAgentopServerCommand({ exe: '/Applications/Agent Tools/agentop', args: ['server'] })).toBe(true)
+  expect(isAgentopServerCommand({ exe: '/usr/bin/sleep', args: ['999'] })).toBe(false)
+  expect(isAgentopServerCommand({ exe: '/usr/bin/vim', args: ['agentop.txt'] })).toBe(false)
+  expect(isAgentopServerCommand({ exe: '/opt/My Tools/bun', args: ['/r/packages/server/bin/cli.ts', 'server'] })).toBe(true)
+  expect(isAgentopServerCommand({ exe: 'bun', args: ['test', 'x'] })).toBe(false)
+})
+
+test('R1: macOS form (comm= with spaces, command= unsplit) via the seam', () => {
+  expect(isAgentopServerCommand({ exe: '/Applications/Agent Tools/agentop', args: '/Applications/Agent Tools/agentop server' })).toBe(true)
+  expect(isAgentopServerCommand({ exe: '/usr/bin/vim', args: 'vim agentop.txt' })).toBe(false)
+  expect(isAgentopServerCommand({ exe: '/opt/My Tools/node', args: 'node /r/packages/server/bin/cli.ts server' })).toBe(true)
+})
+
+test('R1: joined-string fallback is conservative', () => {
+  expect(isAgentopServerCommand('/Applications/Agent Tools/agentop server')).toBe(true)
+  expect(isAgentopServerCommand('sleep 999')).toBe(false)
+  expect(isAgentopServerCommand('vim agentop.txt')).toBe(false)
+  expect(isAgentopServerCommand('bun test x')).toBe(false)
+})
+
+test('R1/R4: the REAL readHolderCommand on this process and on a spawned sleep', () => {
+  if (process.platform !== 'linux') return
+  const me = readHolderCommand(process.pid)
+  expect(typeof me).toBe('object')
+  expect(typeof (me as { exe: string }).exe).toBe('string')
+  expect(Array.isArray((me as { args: unknown }).args)).toBe(true)
+  expect(isAgentopServerCommand(me!)).toBe(false) // bun test …
+  const child = spawn('sleep', ['999'], { stdio: 'ignore' })
+  try {
+    const c = readHolderCommand(child.pid!) as { exe: string; args: string[] }
+    expect(c.exe.endsWith('sleep')).toBe(true)
+    expect(c.args).toEqual(['999'])
+    expect(isAgentopServerCommand(c)).toBe(false)
+  } finally {
+    child.kill()
+  }
+})
+
+test('R1: a REAL process whose executable path contains a space reads back whole and is agentop', async () => {
+  if (process.platform !== 'linux') return
+  const { mkdtempSync, copyFileSync, chmodSync } = await import('fs')
+  const dir = join(mkdtempSync(join(tmpdir(), 'r1 ')), 'Agent Tools')
+  require('fs').mkdirSync(dir)
+  const exe = join(dir, 'agentop')
+  copyFileSync('/bin/sleep', exe)
+  chmodSync(exe, 0o755)
+  const child = spawn(exe, ['999'], { stdio: 'ignore' })
+  try {
+    const c = readHolderCommand(child.pid!) as { exe: string; args: string[] }
+    expect(c.exe).toBe(exe)
+    expect(isAgentopServerCommand(c)).toBe(true)
+  } finally {
+    child.kill()
+  }
+})
+
+test('leader decision: old-format lock + LIVE agentop holder is held even when the mtime says "started after the write"', async () => {
+  const file = await lockPath()
+  await writeFile(file, String(process.pid))
+  const hourAgo = new Date(Date.now() - 3_600_000)
+  await utimes(file, hourAgo, hourAgo)
+  // The wall-clock fallback would read the holder as younger than the file and steal it.
+  const probe = {
+    processStartMs: () => Date.now(),
+    holderCommand: () => ({ exe: '/Applications/Agent Tools/agentop', args: ['server'] }),
+  }
+  expect(await probeInstanceLock(file, probe)).toBe(process.pid)
+  expect((await claimInstanceLock(file, 7777, probe)).ok).toBe(false)
+})

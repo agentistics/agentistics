@@ -119,7 +119,7 @@ export interface LockProbe {
    * tool). Used only for OLD-format locks, which carry no identity of their own: a live holder
    * that is not an agentop server cannot be the writer. `undefined` keeps the pid-only answer.
    */
-  holderCommand?(pid: number): string | undefined
+  holderCommand?(pid: number): HolderCommand | undefined
 }
 
 /**
@@ -129,32 +129,51 @@ export interface LockProbe {
  * (`…/agentop <anything>`) and the dev forms run by bun/node (`bin/cli.ts`, `server/index.ts`).
  * Anything whose executable is something else — `sleep`, `vim agentop server.txt`, `bun test …` — is not.
  */
-export function isAgentopServerCommand(cmd: string): boolean {
-  const argv = cmd.trim().split(/\s+/).filter(Boolean)
-  if (argv.length === 0) return false
-  const base = (a: string) => a.slice(a.lastIndexOf('/') + 1)
-  const exe = base(argv[0]!)
-  if (exe === 'agentop') return true
-  if (exe !== 'bun' && exe !== 'node') return false
-  return argv.slice(1).some(a => /(^|\/)bin\/cli\.ts$/.test(a) || /(^|\/)server\/index\.ts$/.test(a))
+export type HolderCommand = { exe: string; args: string[] | string } | string
+
+const DEV_ENTRY = /(^|\/)(bin\/cli\.ts|server\/index\.ts)(\s|$)/
+
+export function isAgentopServerCommand(cmd: HolderCommand): boolean {
+  if (typeof cmd === 'string') {
+    // Argv boundaries are lost (a path may hold spaces: `/Applications/Agent Tools/agentop server`),
+    // so be conservative: a false positive only makes us wait, a false negative would steal a live lock.
+    return /(^|\/)agentop(\s|$)/.test(cmd.trim()) || DEV_ENTRY.test(cmd)
+  }
+  const exe = cmd.exe.trim()
+  const base = exe.slice(exe.lastIndexOf('/') + 1)
+  if (base === 'agentop') return true
+  if (base !== 'bun' && base !== 'node') return false
+  const args = Array.isArray(cmd.args) ? cmd.args : [cmd.args]
+  return args.some(a => DEV_ENTRY.test(a))
 }
 
-/** The holder's command line: `/proc/<pid>/cmdline` on Linux, `ps -o command=` elsewhere (macOS has no /proc). */
-export function readHolderCommand(pid: number): string | undefined {
+/**
+ * The holder's executable and args. Linux: `/proc/<pid>/cmdline` is NUL-separated, so argv[0] keeps
+ * its spaces. macOS (no /proc): `ps -o comm=` gives the executable's full path, spaces kept, and
+ * `ps -o command=` the (unsplittable) command line.
+ */
+export function readHolderCommand(pid: number): HolderCommand | undefined {
   const proc = describeFull(pid)
   if (proc !== undefined || process.platform === 'linux') return proc
   try {
-    const r = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf-8', timeout: 2000 })
-    const out = r.status === 0 ? r.stdout.trim() : ''
-    return out || undefined
+    const ps = (field: string) => {
+      const r = spawnSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf-8', timeout: 2000 })
+      return r.status === 0 ? r.stdout.trim() : ''
+    }
+    const exe = ps('comm')
+    const command = ps('command')
+    if (exe && command) return { exe, args: command }
+    return command || exe || undefined
   } catch {
     return undefined
   }
 }
 
-function describeFull(pid: number): string | undefined {
+function describeFull(pid: number): HolderCommand | undefined {
   try {
-    return readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0').filter(Boolean).join(' ').trim() || undefined
+    const argv = readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0').filter(Boolean)
+    if (argv.length === 0) return undefined
+    return { exe: argv[0]!, args: argv.slice(1) }
   } catch {
     return undefined
   }
@@ -260,6 +279,10 @@ async function holdsLock(file: string, holder: number, probe: LockProbe, recorde
     // is a stranger holding the number (2026-11-13). Undescribable → keep believing it.
     const cmd = probe.holderCommand?.(holder)
     if (cmd !== undefined && !isAgentopServerCommand(cmd)) return false
+    // A live agentop holder is held WITHOUT the wall-clock mtime check below (jittery on WSL: a live
+    // server read as "started after the write" and was robbed). Two servers on one store is worse than
+    // waiting, and the wait has a ceiling.
+    if (cmd !== undefined) return true
   }
   // EXACT when the writer recorded its start ticks: same pid AND same boot-clock start is the same
   // process, and nothing else is. The mtime comparison below is only for locks written without them.
