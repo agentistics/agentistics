@@ -143,6 +143,20 @@ export interface EngineBookSuccessorSpawn {
   account?: string
 }
 
+export interface EngineBookWorkState {
+  currentWork?: { subtaskId?: string; source: 'board' | 'wait' | 'session' | 'idle'; pageIds: string[] }
+  nextStep?: { source: 'wait' | 'queue' | 'takeover' | 'none'; id?: string; pageIds: string[] }
+  lastHandbacks?: Array<{ sessionId: string; pageId: string; at: string }>
+  open?: {
+    sessions?: Array<{ id: string; role: 'leader' | 'worker'; state: string; subtaskId?: string; harness: string }>
+    waits?: Array<{ id: string; until?: string; on: string }>
+    queue?: Array<{ subtaskId: string; title: string; phase: string }>
+    unsaved?: Array<{ path: string; branch: string }>
+  }
+  /** Present when the host supplied live board data; absent means the engine used its safe fallback. */
+  source?: 'host' | 'fallback'
+}
+
 export type EngineBookSuccessorResult =
   | { ok: true; sessionId: string }
   | { ok: false; sentence: string }
@@ -158,6 +172,10 @@ export interface EngineBookHost {
   stop(sessionId: string): Promise<{ closed: boolean }>
   /** Retires the predecessor the way `retirePredecessor` does: it is closed once it goes quiet. */
   retire(predecessorId: string, successorId: string): Promise<{ retired: boolean }>
+  /** Re-parents the predecessor's live workers after the book successor is confirmed. */
+  reparentWorkers?(predecessorId: string, successorId: string): Promise<{ moved: number }>
+  /** Supplies board/fleet inputs for the bookmark; absent hosts use idle/none. */
+  workState?(taskId: string): Promise<EngineBookWorkState | undefined>
   isAlive(sessionId: string): Promise<boolean>
   /** The board task a managed session is filed on, if any. */
   taskOf(sessionId: string): Promise<string | undefined>

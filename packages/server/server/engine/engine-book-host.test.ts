@@ -33,7 +33,7 @@ describe('book host', () => {
     expect(out).toEqual({ ok: true, sessionId: 'succ-1' })
     expect(d.bodies).toEqual([{
       harness: 'opencode', cwd: '/work/repo', parent: 'lead-1', parentVerified: true, callerVerified: true,
-      handoff: true, bookPassage: true, prompt: 'take over', model: 'opencode/big-pickle',
+      handoff: true, bookPassage: true, taskId: 't-1', prompt: 'take over', model: 'opencode/big-pickle',
     }])
   })
 
@@ -97,7 +97,7 @@ describe('book host', () => {
   test('the REAL host services hand the book host to the engine (1.26), and a junk proof is refused', async () => {
     const { hostServices } = await import('./load')
     const h = await hostServices()
-    expect(Object.keys(h.book ?? {}).sort()).toEqual(['isAlive', 'retire', 'spawnSuccessor', 'stop', 'taskOf', 'verifySession'])
+    expect(Object.keys(h.book ?? {}).sort()).toEqual(['isAlive', 'reparentWorkers', 'retire', 'spawnSuccessor', 'stop', 'taskOf', 'verifySession', 'workState'])
     expect(await h.book!.verifySession('nobody', 'f'.repeat(64))).toBe(false)
   })
 })

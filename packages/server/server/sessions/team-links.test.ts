@@ -3,7 +3,7 @@ import {
   currentLeaderId, liveLeaderId, messageTargetFor, namesParent, planHandoffReparent, planLeaderRoot, planTeamMove, rootIfLeader, ROOT_PATCH, spawnParentLink,
   type TeamRow,
 } from './team-links'
-import { completeLeaderHandoff, teamOp } from './team-links-io'
+import { completeLeaderHandoff, reparentLeaderWorkers, teamOp } from './team-links-io'
 import { sessionOwningChain, callerSessionFromTree } from './session-identity'
 import type { ManagedSession } from './types'
 
@@ -101,6 +101,26 @@ describe('hand-off moves the whole team to the successor', () => {
       read: async () => rows, patch: async () => true, patchMany: async () => 0, recordLink: async () => {}, now: Date.now,
     })
     expect(out.retireRequested).toBe(false)
+  })
+
+  test('book confirmation reparents workers without rooting or retiring either leader', async () => {
+    const store = new Map<string, ManagedSession>([
+      ['old', row('old', { conversationId: 'c-old' })],
+      ['new', row('new', { conversationId: 'c-new', parentSessionId: 'old' })],
+      ['worker', row('worker', { parentSessionId: 'old' })],
+    ])
+    const apply = (id: string, patch: Record<string, unknown>) => {
+      const current = store.get(id); if (!current) return false
+      store.set(id, { ...current, ...patch } as ManagedSession); return true
+    }
+    const moved = await reparentLeaderWorkers('old', 'new', {
+      read: async () => [...store.values()], patch: async (id, p) => apply(id, p as Record<string, unknown>),
+      patchMany: async (ids, p) => ids.filter(id => apply(id, p as Record<string, unknown>)).length,
+      recordLink: async () => {}, now: Date.now,
+    })
+    expect(moved).toBe(1)
+    expect(store.get('worker')!.parentSessionId).toBe('new')
+    expect(store.get('new')!.parentSessionId).toBe('old')
   })
 })
 

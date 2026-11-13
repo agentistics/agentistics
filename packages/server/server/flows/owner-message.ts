@@ -178,8 +178,11 @@ export function defaultOwnerMessageDeps(): OwnerMessageDeps {
     },
     emit: async event => {
       const { engine } = await import('../engine/load')
+      // Flows off: nothing is emitted, so nothing becomes an owner order. LIVRO.SEAMS 3b (N3) decided there is NO
+      // flows-off owner-order path: the only owner gesture that makes one (the composer's "as task") is refused by
+      // `registerComposerTask` before delivery when the registration flow is off, and a plain send is not an order.
       if (!(await prepareOwnerRequestFlows())) return false
-      return engine()!.flows!.emit!(event)
+      return engine()?.flows?.emit ? engine()!.flows!.emit!(event) : false
     },
     now: () => Date.now(),
   }

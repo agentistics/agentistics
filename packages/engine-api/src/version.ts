@@ -236,7 +236,13 @@
  * its durable passages once at boot; a one-shot CLI never calls it. Additive only: an engine without it is simply
  * never reconciled, and a host that predates it never calls it.
  */
-export const ENGINE_API_VERSION = '1.27.0'
+/**
+ * 1.28.0 — LIVRO.SEAMS (slice 3b): `EngineBookHost.reparentWorkers` and `workState` (optional) — after a successor
+ * confirms, the host moves the predecessor's live workers to that successor before retiring the predecessor, and
+ * supplies live board/session state to the book bookmark. Owner-order pages still come only from the canonical
+ * pedidos of the owner-request flow (no new book door). Additive only: older hosts simply omit these capabilities.
+ */
+export const ENGINE_API_VERSION = '1.28.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
