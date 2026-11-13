@@ -30,7 +30,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
 }) {
   const pt = lang === 'pt'
   const L = lang as Lang
-  return <main data-testid="benchmark-page" style={{ maxWidth: 1180, margin: '0 auto', display: 'grid', gap: 10 }}>
+  return <main data-testid="benchmark-page" style={{ maxWidth: 1180, margin: '0 auto', display: 'grid', gap: 8 }}>
     <header style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0, fontSize: 22 }}>Benchmark <span style={beta}>beta</span></h1>
@@ -44,7 +44,8 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
       {status === 'loading' && <div data-testid="benchmark-loading" style={empty}>{pt ? 'Carregando dados reais…' : 'Loading real data…'}</div>}
       {status === 'error' && <div data-testid="benchmark-error" style={empty}>{pt ? 'Não foi possível ler os dados reais agora. Nenhum número é mostrado no lugar.' : 'The real data could not be read right now. No number is shown in its place.'}</div>}
       {status === 'ready' && observed && <>
-        <p data-testid="benchmark-scope" style={{ ...muted, margin: '6px 0 8px' }}>{scopeLine(observed, L)}</p>
+        <p data-testid="benchmark-scope" style={{ ...muted, margin: '4px 0 6px' }}>{scopeLine(observed, L)}
+          <details style={{ display: 'inline', marginLeft: 6 }}><summary style={{ display: 'inline', cursor: 'pointer' }}>{pt ? 'o que não conta' : 'what does not count'}</summary> {scopeExclusions(observed, L)}</details></p>
         <div style={grid}>{METRIC_ORDER.map(k => <Metric key={k} k={k} observed={observed} lang={L} />)}</div>
         <div style={coverage} data-testid="benchmark-coverage"><strong>{pt ? 'Cobertura por harness' : 'Coverage by harness'}</strong>
           {Object.entries(observed.coverage).map(([h, c]) => {
@@ -70,8 +71,15 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
 function scopeLine(o: Observed, lang: Lang): string {
   const s = o.scope
   return lang === 'pt'
-    ? `${nf(o.deliveries, lang, 0)} entregas consideradas: ${nf(s.published, lang, 0)} publicadas e ${nf(s.open, lang, 0)} em andamento; ${nf(s.withPhaseHistory, lang, 0)} têm histórico de fases. Tarefas sem início, ideias adiadas e trabalho abandonado não contam como entrega${s.abandonedWithSessions ? ` (${nf(s.abandonedWithSessions, lang, 0)} abandonadas só entram no custo desperdiçado)` : ''}.`
-    : `${nf(o.deliveries, lang, 0)} deliveries considered: ${nf(s.published, lang, 0)} published and ${nf(s.open, lang, 0)} in progress; ${nf(s.withPhaseHistory, lang, 0)} have a phase history. Unstarted tasks, deferred ideas and abandoned work are not deliveries${s.abandonedWithSessions ? ` (${nf(s.abandonedWithSessions, lang, 0)} abandoned only feed wasted cost)` : ''}.`
+    ? `${nf(o.deliveries, lang, 0)} entregas consideradas: ${nf(s.published, lang, 0)} publicadas e ${nf(s.open, lang, 0)} em andamento; ${nf(s.withPhaseHistory, lang, 0)} têm histórico de fases.`
+    : `${nf(o.deliveries, lang, 0)} deliveries considered: ${nf(s.published, lang, 0)} published and ${nf(s.open, lang, 0)} in progress; ${nf(s.withPhaseHistory, lang, 0)} have a phase history.`
+}
+
+function scopeExclusions(o: Observed, lang: Lang): string {
+  const a = o.scope.abandonedWithSessions
+  return lang === 'pt'
+    ? `Tarefas sem início, ideias adiadas e trabalho abandonado não contam como entrega${a ? ` (${nf(a, lang, 0)} abandonadas só entram no custo desperdiçado)` : ''}.`
+    : `Unstarted tasks, deferred ideas and abandoned work are not deliveries${a ? ` (${nf(a, lang, 0)} abandoned only feed wasted cost)` : ''}.`
 }
 
 function Metric({ k, observed, lang }: { k: MetricKey; observed: Observed; lang: Lang }) {
@@ -81,8 +89,8 @@ function Metric({ k, observed, lang }: { k: MetricKey; observed: Observed; lang:
   const label = METRIC_LABEL[k][pt ? 0 : 1]
   return <article data-testid={`metric-${k}`} data-measured={head.measured ? 'yes' : 'no'} style={metricCard}>
     <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</div>
-    <div style={{ fontSize: 22, fontWeight: 750, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{head.value}</div>
-    <div style={{ ...muted, minHeight: 15 }} data-testid={`metric-${k}-sub`}>{cardSubline(k, observed, lang)}</div>
+    <div style={{ fontSize: 19, fontWeight: 750, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{head.value}</div>
+    <div style={{ ...muted, fontSize: 11, minHeight: 15 }} data-testid={`metric-${k}-sub`}>{cardSubline(k, observed, lang)}</div>
     <div style={muted}>{cardCoverage(k, observed, lang)}</div>
     <details style={{ marginTop: 4, fontSize: 11 }}>
       <summary style={{ cursor: 'pointer' }}><Info size={12} /> {pt ? 'origem do número' : 'where this number comes from'}</summary>
@@ -103,10 +111,10 @@ export function BenchmarkHowItWorksPage() {
   return <main style={{ maxWidth: 760, margin: '0 auto', display: 'grid', gap: 14 }}><Link to="/benchmark" style={link}>← {pt ? 'Voltar ao Benchmark' : 'Back to Benchmark'}</Link><section style={card}><h1 style={{ marginTop: 0 }}>{pt ? 'Como funciona o Benchmark' : 'How the Benchmark works'}</h1><p style={muted}>{pt ? 'O benchmark compara braços com as mesmas tarefas, começa do mesmo código e só produz um veredito quando a amostra e a cobertura são suficientes.' : 'The benchmark compares arms on the same tasks, from the same code, and only produces a verdict when sample and coverage are sufficient.'}</p><p style={muted}>{pt ? 'O histórico observado é separado dos experimentos: ele é útil para contexto, mas não diz que um método compensa.' : 'Observed history is kept separate from experiments: it provides context, but does not say a method pays off.'}</p><p style={muted}>{pt ? 'Custo é tokens por turno vezes a tabela de preços. Quando falta preço ou tokens, mostramos “—” e o motivo.' : 'Cost is per-turn tokens times the price table. When price or tokens are missing, we show “—” and the reason.'}</p></section></main>
 }
 
-const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 12 }
-const metricCard: React.CSSProperties = { ...card, padding: 10, minWidth: 0 }
-const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 8 }
-const coverage: React.CSSProperties = { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 10, fontSize: 12 }
+const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 10 }
+const metricCard: React.CSSProperties = { ...card, padding: 8, minWidth: 0, borderRadius: 10 }
+const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(158px,1fr))', gap: 8 }
+const coverage: React.CSSProperties = { display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', marginTop: 8, fontSize: 11 }
 const sectionTitle: React.CSSProperties = { display: 'flex', gap: 7, alignItems: 'center', fontWeight: 700, fontSize: 15, flexWrap: 'wrap' }
 const muted: React.CSSProperties = { color: 'var(--text-tertiary)', fontSize: 12, lineHeight: 1.45 }
 const empty: React.CSSProperties = { padding: '16px 4px', color: 'var(--text-secondary)', fontSize: 13 }
