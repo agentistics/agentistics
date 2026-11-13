@@ -1082,3 +1082,92 @@ on D1 (owner order 07/11) frames items D1.x and V.
 | N9 | LOW | `classification_required` can stall honest work forever | **Accepted.** Leader/custodian `flow classify` declaration naming the repository and commit (never the category), re-classified by the server, logged and counted; workers cannot declare. | §3.2, S1b |
 
 No r2 finding was rejected.
+
+## S0d — hardening after the live security QA of S0a + S0b (13/11, `leader/qa/qa-eg-seguranca.md`, REPROVADO)
+
+Binding design for slice S0d. It amends §2.3, §2.3.1, §2.6, §2.6.1 and §2.7; anything not named here is unchanged.
+
+### S0d.1 (F1) The `ownerProof` mode is a sealed record, and reads fail closed
+
+- **The record.** `<vault dir>/delivery-owner-mode.json` = `{ v: 1, kid, mode, atMs, mac }`, `mac =
+  HMAC-SHA256(HKDF-SHA256(DEK, salt = kid, info = "agentistics/delivery-owner-mode/v1"), kid ∖0 mode ∖0 atMs)`
+  — the `unlock-window.json` pattern. It is written ONLY by `setOwnerProofMode`, i.e. right after
+  `requireDeliveryOwner` proved the owner with the vault open. `preferences.json`'s `delivery.ownerProof` stays as a
+  display mirror for older readers and is never trusted to mean `legacy`.
+- **Reading** is the pure `resolveOwnerMode({ record, prefs, latch })`:
+  - `required` when ANY source says `required`, when the record exists but is unreadable or its MAC does not verify,
+    or when the record vanished while this process had seen one (the latch);
+  - `legacy` only when the record says `legacy` AND its MAC verifies under the open vault, or when there has never been
+    a record (no file, no latch) and the preference does not say `required` — so a machine that never chose `required`
+    behaves exactly as before;
+  - a `legacy` record that cannot be verified right now (vault locked, or a CLI process that is a vault client) reads
+    `required`. Cost, accepted: an owner who once chose `required` and went back to `legacy` is asked for the vault
+    proof until the vault is unlocked.
+- **Latch.** The process keeps the last effective mode; only `setOwnerProofMode` moves it to `legacy`. Editing,
+  dropping or garbling any file while the server runs therefore changes nothing.
+- **Health.** WARN `delivery-owner-mode-tampered` naming the reason (`unreadable` / `forged` / `replayed` / `vanished` /
+  `disagree`), alongside the existing `delivery-owner-unproven` (English, like every other health item). The same
+  state is read by `GET /api/deliveries/integrity` and the MCP `agentistics_vault_status` (`delivery` block).
+- **Stated limit.** Every file a same-uid process can read it can also delete. Deleting the record AND the preference
+  AND restarting the server reads as "never chosen" (`legacy`, with its permanent WARN). Only a secret can stop a
+  rollback, and the vault's secret is not available while it is locked; a restart is visible (it kills the fleet).
+
+### S0d.2 (F2) `guards.json` and `guarantees.json` are MACed; tampering fails closed
+
+- **Key.** `<dataDir>/guard-integrity.key` (0600, not a `.json`): 32 random bytes plus the list of documents ever
+  sealed with it, created on the first sealed write. It is excluded from backups by the existing `.key` secret rule
+  (guards/guarantees are not backed up either). Each document carries `integrity: { v: 1, mac }`, `mac =
+  HMAC-SHA256(key, "<document name>" ∖0 canonical-JSON(document without integrity))`, so one file cannot be swapped for
+  the other.
+- **Verdicts** (pure `checkIntegrity`): `ok`; `fresh` (no key, no document); `tampered` with a reason —
+  `unsealed` (no/garbled `integrity`), `forged` (MAC mismatch), `missing` (key says the document was sealed, it is gone),
+  `key-missing` (a document exists, the key does not). S0b never shipped, so there is no unsealed legacy file to migrate:
+  an unsealed file IS tampering.
+- **guards.json tampered** → `GuardsUnreadable` (every guarded write refused, nothing replaces the bytes; the
+  existing fail-closed path) + WARN `guards-tampered: <reason>`.
+- **guarantees.json tampered** → the rules come from the authenticated mirror in `guards.json` (`rules`, written in
+  the same guards-locked section as every guarantee move); with no authenticated mirror every rule reads `on` —
+  the guard binds rather than disappear. Never `off` for a tampered file. WARN `guarantees-tampered: <reason>`. An
+  owner move (`setState`, owner check first) re-seals from the effective state; that is the repair.
+- **"Rule was shadow/on and vanished"** is the `missing` verdict; deleting the key too is `key-missing` while either
+  document remains.
+- **Stated limit.** A same-uid process that reads `guard-integrity.key` can forge a MAC. This closes the §1.1
+  `*.json`-edit capability and every deletion/edit that does not also read a key file; moving the key under the
+  machine key (`vault/machine-secrets.ts`, silent OS wrapper) is a follow-up, not S0d.
+
+### S0d.3 (F3) The `/api/tasks*` principal screen runs on every write
+
+Every non-GET/HEAD/OPTIONS request under `/api/tasks` is screened whatever its `content-type` (or none): the body is
+read as text and parsed as JSON; a non-empty body that is not JSON is refused 415 `json_required` (EN/PT) — the
+handlers parse JSON regardless of the header, so a lying header was the bypass.
+
+### S0d.4 (F4) `file-lock` never steals a live lock
+
+The lock directory holds an `owner` file `{ pid, host, token }` written before the lock counts as held, and the holder
+refreshes the directory's mtime every `STALE_MS / 3` (heartbeat, unref'd timer). A blocked acquirer steals only when
+the lock is older than `STALE_MS` AND its owner is not alive (same host and `kill(pid, 0)` says ESRCH, or no readable
+owner after `2 × STALE_MS`). `release` removes the directory only when the `owner` token is its own. `withGuardLocks`
+inherits this; a holder paused past 15 s is no longer joined by a second writer.
+
+### S0d.5 (F5) Every MCP task write carries the proof, DELETE included
+
+`withTaskWriteProof` covers bodiless writes: a `DELETE` under `/api/tasks*` sends the proof as a JSON body; the
+server reads a DELETE body like any other write (§S0d.3). Tests drive EVERY MCP task-write tool through `apiSend` and
+assert `session` in the payload (kills mutants M1 "proof removed from apiSend", M2 "task_claim with session: null",
+M10 "task_delete without proof").
+
+### S0d.6 (F6) A comment with `role: owner` needs the owner principal
+
+Creating a comment with `owner: true`, and editing or removing a comment whose `role` is `owner`, resolves the REST
+principal exactly as `/api/deliveries` does (grant → session → legacy browser → unattributed) with scope
+`{ pieceKey: <task ref or comment id>, move: comment:create | comment:edit | comment:remove }`. Not the owner → 403
+`owner_proof_required` (required) / `so_o_dono` (legacy); the web retries through `postWithOwnerProof`, so the owner
+gets the vault dialog in `required` and nothing changes for `legacy`. Ordinary comments are untouched.
+
+### S0d.7 (F7) Refusal words
+
+`so_o_dono`, `so_o_lider`, `reserved_actor`, `grant_scope`, `owner_proof_local_only`, `guard_busy`, `lock_order`,
+`json_required`, `unverified_sender` get EN + PT sentences on the web; the server's `owner-proof-local-only` (vault)
+and the delivery route's `owner_proof_local_only` are both mapped (the delivery route normalises `-` to `_`).
+
+Out of scope, recorded: the crash-recovery tick that consumes `planRecovery` (S2b).
