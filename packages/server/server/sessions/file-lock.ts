@@ -100,9 +100,9 @@ async function inspectLock(dir: string, nowMs: number): Promise<Blocked> {
  * The lock is `<file>.lock`, a directory. The pid is written inside it purely so a person looking
  * at a stuck machine can see who to blame; nothing reads it.
  */
-export async function lockFile(file: string, nowMs = () => Date.now()): Promise<LockHandle> {
+export async function lockFile(file: string, nowMs = () => Date.now(), waitMs = WAIT_MS): Promise<LockHandle> {
   const dir = `${file}.lock`
-  const deadline = nowMs() + WAIT_MS
+  const deadline = nowMs() + waitMs
   // The PARENT must exist for the atomic, non-recursive `mkdir` below to mean anything — see the
   // header's last rule. Best effort: if it cannot be created, the loop's non-EEXIST branch decides.
   await mkdir(dirname(dir), { recursive: true }).catch(() => undefined)
