@@ -13,23 +13,28 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.213.0': {
     features: [
       {
-        pt: 'Benchmark refeito no desenho aprovado: lista de benchmarks, resultado grande com a barra de 0 a 100, "Partes" por tipo (qualidade, custo, tempo, confiabilidade, retrabalho), "Por tarefa" e "Por número de sessões".',
-        en: 'Benchmark rebuilt to the approved design: a list of benchmarks, a large result with the 0–100 bar, "Parts" by type (quality, cost, time, reliability, rework), "By task" and "By number of sessions".',
+        pt: 'Benchmark refeito no desenho aprovado, com "Por tarefa" em páginas e "Como funciona?" explicando o método passo a passo.',
+        en: 'Benchmark rebuilt to the approved design, with "By task" in pages and a "How it works" explaining the method step by step.',
       },
       {
-        pt: 'Benchmark: filtre por tarefa e por tamanho, abra uma tarefa para ver o motivo e filtrar as subtarefas; no celular cada tarefa vira um cartão.',
-        en: 'Benchmark: filter by task and size, open a task to see the reason and filter its subtasks; on phones each task becomes a card.',
+        pt: 'Benchmark: com o histórico real, compara peças com 1 rodada de QA contra 2 ou mais, e 1 sessão contra 5 ou mais, dentro do mesmo tamanho — como indício observado ("Indício, não prova"). Ainda não há nota de 0 a 100, porque nenhum experimento controlado rodou.',
+        en: 'Benchmark: with the real history it compares pieces with 1 QA round against 2 or more, and 1 session against 5 or more, within the same size — as observed evidence ("Evidence, not proof"). There is no 0–100 score yet, because no controlled experiment has run.',
       },
       {
-        pt: 'Benchmark: com o histórico real, compara peças de 1 rodada de QA com as de 2+ rodadas e peças de 1 sessão com as de 4+ — como indício observado, nunca como prova — e diz o que falta para um veredito.',
-        en: 'Benchmark: with the real history it compares pieces with 1 QA round against 2+ rounds and 1 session against 4+ — as observed evidence, never as proof — and says what is missing for a verdict.',
+        pt: 'Ao vivo: o status da peça no quadro sempre vale — abandonada ou concluída saem das colunas ativas e bloqueada aparece como bloqueada.',
+        en: 'Live: a piece\'s status on the board always wins — abandoned or done pieces leave the active columns and a blocked one shows as blocked.',
       },
       {
-        pt: '"Como funciona?" explica a nota passo a passo, com a versão e a data do método.',
-        en: '"How it works" explains the score step by step, with the method version and date.',
+        pt: 'Ao vivo: o trabalho entregue cuja versão já foi publicada passa sozinho para Publicado, e peças antigas sem líder ganham um único aviso com um botão para resolver.',
+        en: 'Live: delivered work whose version is already published moves to Published on its own, and old pieces without a leader get a single notice with a one-click action.',
       },
     ],
-    fixes: [],
+    fixes: [
+      {
+        pt: 'Proteção do dono: renomear e outras edições continuam como antes; uma edição recusada agora mostra um erro em vez de falhar em silêncio, e aprovar entregas no modo protegido exige a prova do dono.',
+        en: 'Owner protection: renaming and other edits work as before; a refused edit now shows an error instead of failing quietly, and approving deliveries in protected mode needs the owner\'s proof.',
+      },
+    ],
   },
   '2.212.0': {
     features: [
