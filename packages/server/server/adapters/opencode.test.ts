@@ -189,3 +189,40 @@ test('tool parts in the SQLite store reach the session (the loader used to selec
     expect(s!.tool_errors).toBe(1)
   } finally { db.close() }
 })
+
+test('gateway session (custom provider, cost 0): commits, files and lines come from the tool inputs', () => {
+  const part = (id: string, data: object) => ({ id, message_id: 'msg_a', session_id: session.id, time_created: at + 1500, data: JSON.stringify(data) })
+  const s = parseOpencodeSession(session, [user, response('msg_a', { providerID: 'upx', modelID: 'fable-5.1', cost: 0 })], [
+    part('p1', { type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'cd app && git add -A && git commit -m "feat: x"' } } }),
+    part('p2', { type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'git push origin main' } } }),
+    part('p3', { type: 'tool', tool: 'edit', state: { status: 'completed', input: { filePath: '/w/a.ts', oldString: 'a\nb', newString: 'a\nb\nc\nd' } } }),
+    part('p4', { type: 'tool', tool: 'write', state: { status: 'completed', input: { filePath: '/w/b.ts', content: 'x\ny\nz\n' } } }),
+    part('p5', { type: 'tool', tool: 'edit', state: { status: 'completed', input: { filePath: '/w/a.ts', oldString: 'q', newString: 'r' } } }),
+  ])!
+  expect(s.git_commits).toBe(1)
+  expect(s.git_pushes).toBe(1)
+  expect(s.files_modified).toBe(2)
+  expect(s.lines_added).toBe(4 + 3 + 1)
+  expect(s.lines_removed).toBe(2 + 1)
+  expect(sessionCostUSD(s)).toBeGreaterThan(0) // priced by the model name behind the gateway
+})
+
+test('SQLite read keeps the bash command and edit inputs the parser counts', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'oc-gw-')); dirs.push(dir)
+  const path = join(dir, 'opencode.db')
+  const db = new Database(path)
+  db.run('CREATE TABLE session (id text, directory text, title text, time_created integer, time_updated integer)')
+  db.run('CREATE TABLE message (id text, session_id text, time_created integer, time_updated integer, data text)')
+  db.run('CREATE TABLE part (id text, message_id text, session_id text, time_created integer, time_updated integer, data text)')
+  db.run('INSERT INTO session VALUES (?,?,?,?,?)', [session.id, session.directory, 't', at, at + 1000])
+  for (const m of [user, response('msg_a', { providerID: 'upx', modelID: 'fable-5.1', cost: 0 })]) db.run('INSERT INTO message VALUES (?,?,?,?,?)', [m.id, m.session_id, m.time_created, m.time_updated, m.data])
+  db.run('INSERT INTO part VALUES (?,?,?,?,?,?)', ['p1', 'msg_a', session.id, at + 1500, at + 1500, JSON.stringify({ type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'git commit -m x' }, output: 'x'.repeat(5000) } })])
+  db.run('INSERT INTO part VALUES (?,?,?,?,?,?)', ['p2', 'msg_a', session.id, at + 1600, at + 1600, JSON.stringify({ type: 'tool', tool: 'edit', state: { status: 'completed', input: { filePath: '/w/a.ts', oldString: 'a\nb', newString: 'a\nb\nc\nd' } } })])
+  db.run('INSERT INTO part VALUES (?,?,?,?,?,?)', ['p3', 'msg_a', session.id, at + 1700, at + 1700, JSON.stringify({ type: 'tool', tool: 'write', state: { status: 'completed', input: { filePath: '/w/b.ts', content: 'x\ny\nz\n' } } })])
+  db.close()
+  const [s] = loadOpencodeDb(path)
+  expect(s!.git_commits).toBe(1)
+  expect(s!.files_modified).toBe(2)
+  expect(s!.lines_added).toBe(4 + 3)
+  expect(s!.lines_removed).toBe(2)
+})

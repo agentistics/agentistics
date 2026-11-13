@@ -74,16 +74,23 @@ export type Fetch = (url: string, init: { headers: Record<string, string>; signa
 
 export class OpencodeServiceError extends Error {}
 
-export interface V2Session { id: string; directory: string; title: string; created: number; updated: number }
+/** The session list entry also carries the session's own aggregates (MEASURED on 1.19.5 `serve`): model, cost, tokens. */
+export interface V2Session {
+  id: string; directory: string; title: string; created: number; updated: number
+  model?: { id: string; providerID: string }; tokens?: Record<string, unknown>; cost?: number
+}
 export type V2Message = Record<string, unknown> & { id: string; type: string }
 
 export function parseV2Session(v: unknown): V2Session | null {
   if (!isObj(v) || typeof v.id !== 'string') return null
   const time = isObj(v.time) ? v.time : {}, loc = isObj(v.location) ? v.location : {}
   const created = numOr(time.created, 0)
+  const model = isObj(v.model) && typeof v.model.id === 'string' ? { id: v.model.id, providerID: typeof v.model.providerID === 'string' ? v.model.providerID : '' } : undefined
   return {
     id: v.id, directory: typeof loc.directory === 'string' ? loc.directory : '',
     title: typeof v.title === 'string' ? v.title : '', created, updated: numOr(time.updated, created),
+    ...(model ? { model } : {}), ...(isObj(v.tokens) ? { tokens: v.tokens } : {}),
+    ...(typeof v.cost === 'number' && Number.isFinite(v.cost) ? { cost: v.cost } : {}),
   }
 }
 
@@ -160,6 +167,16 @@ export function rowsOfV2Messages(sessionId: string, msgs: readonly V2Message[]):
         ...(err || m.finish === 'error' ? { error: { name: 'error' } } : {}),
       }),
     })
+    // 2.x folds the 1.x parts into the message (header). A block shaped like a 1.x tool part is read exactly as
+    // the 1.x reader reads it — its name, status and the few inputs the parser counts, never its output.
+    if (Array.isArray(m.content)) m.content.forEach((b, i) => {
+      if (!isObj(b) || b.type !== 'tool' || typeof b.tool !== 'string' || !b.tool) return
+      const st = isObj(b.state) ? b.state : {}, input = isObj(st.input) ? st.input : {}
+      const keep: Record<string, unknown> = {}
+      for (const k of ['command', 'filePath', 'path', 'oldString', 'newString', 'content', 'oldLines', 'newLines']) if (k in input) keep[k] = input[k]
+      parts.push({ id: `${m.id}:t${i}`, message_id: m.id, session_id: sessionId, time_created: created,
+        data: JSON.stringify({ type: 'tool', tool: b.tool, state: { status: st.status, input: keep } }) })
+    })
   }
   return { messages, parts }
 }
@@ -184,8 +201,15 @@ export async function loadOpencodeV2(service: OpencodeService, models: OpencodeM
   await client.info()
   const list = await client.sessions()
   const metas = await pool(list, 6, s => sessionMemo.get(`${service.url}#${s.id}`, `${s.updated}|${modelsVersion}`, async () => {
-    const { messages, parts } = rowsOfV2Messages(s.id, await client.messages(s.id))
+    let { messages, parts } = rowsOfV2Messages(s.id, await client.messages(s.id))
     const row: OpencodeSessionRow = { id: s.id, directory: s.directory, title: s.title, time_created: s.created, time_updated: s.updated }
+    // The message list can be empty while the session's own aggregates are not (1.19.5 never writes
+    // `session_message`): measure from the aggregates as ONE settled assistant turn rather than dropping the session.
+    if (messages.length === 0 && s.model && s.tokens) {
+      ;({ messages, parts } = rowsOfV2Messages(s.id, [
+        { id: `${s.id}:summary`, type: 'assistant', time: { created: s.created, completed: s.updated }, model: s.model, finish: 'stop', tokens: s.tokens, cost: s.cost },
+      ] as V2Message[]))
+    }
     return parseOpencodeSession(row, messages, parts, models)
   }))
   return metas.filter((m): m is SessionMeta => m !== null)

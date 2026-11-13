@@ -29,6 +29,8 @@ type Common = {
   /** Opens a piece placed by its start alone (no version, no estimate). */
   onOpenPiece?: (key: string, e: React.MouseEvent) => void
   selected: string | null
+  /** Whatever sizes the month (the fitted height): a change re-measures the week rows in the SAME commit, before paint. */
+  fitKey?: unknown
 }
 
 export function MonthView({ anchor, ...rest }: Common & { anchor: string }) {
@@ -49,7 +51,7 @@ export function MonthView({ anchor, ...rest }: Common & { anchor: string }) {
   )
 }
 
-function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, selected, onPickDay, onOpenVersion, onOpenMark, onOpenPiece }: Common & {
+function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, selected, fitKey, onPickDay, onOpenVersion, onOpenMark, onOpenPiece }: Common & {
   week: { day: string; inMonth: boolean }[]; last: boolean; today: string
 }) {
   const rowRef = useRef<HTMLDivElement | null>(null)
@@ -64,7 +66,7 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [fitKey])
   const days = week.map(c => c.day)
   const allRibbons = weekRibbons(days, versions, pieces, today)
   const lanes = allRibbons.reduce((m, r) => Math.max(m, r.lane + 1), 0)
@@ -110,7 +112,9 @@ function WeekRow({ week, last, today, nowMs, versions, pieces, marks, pt, select
           }} />
         ))}
       </div>
-      <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridAutoRows: `${RIBBON_H}px`, rowGap: 2, padding: '0 0 2px', minWidth: 0 }}>
+      {/* Out of flow: the row's height comes from the grid track alone, never from the chips inside it (the cap measured
+          an inflated, content-driven height on the first frames and walked down to the real one — the "collapse" animation). */}
+      <div data-cal-week-body style={{ position: 'absolute', inset: 0, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridAutoRows: `${RIBBON_H}px`, rowGap: 2, padding: '0 0 2px', minWidth: 0 }}>
         {week.map((c, i) => {
           const resets = marksOfDay(c.day, marks).filter(m => m.kind === 'account-reset')
           return (
@@ -194,7 +198,7 @@ function RibbonBar({ r, pt, selected, onOpen }: { r: Ribbon; pt: boolean; select
   const color = published ? PUBLISHED_COLOR : EXPECTED_COLOR
   return (
     <button type="button" data-cal-ribbon={r.version} data-cal-state={r.state} onClick={onOpen}
-      title={`${r.version} · ${r.note === 'published' ? pick(TEXT.published, pt) : r.note === 'none' ? pick(TEXT.noEstimate, pt) : pick(TEXT.expected, pt)}`}
+      title={`${r.versions.join(' · ')} · ${r.note === 'published' ? pick(TEXT.published, pt) : r.note === 'none' ? pick(TEXT.noEstimate, pt) : pick(TEXT.expected, pt)}`}
       style={{
         gridColumn: `${r.startCol + 1} / ${r.endCol + 2}`, gridRow: 2 + r.lane, margin: `0 ${r.contRight ? 0 : 4}px 0 ${r.contLeft ? 0 : 4}px`, height: RIBBON_H,
         display: 'flex', alignItems: 'center', gap: 4, padding: '0 6px', minWidth: 0, cursor: 'pointer', font: 'inherit', fontSize: 10.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden',
@@ -205,9 +209,12 @@ function RibbonBar({ r, pt, selected, onOpen }: { r: Ribbon; pt: boolean; select
       }}>
       <VersionGlyph published={published} size={10} />
       <span>{r.version}</span>
-      <span style={{ marginLeft: 'auto', color: 'var(--text-secondary)', fontWeight: 400 }}>
-        {r.note === 'published' ? pick(TEXT.published, pt) : r.note === 'none' ? pick(TEXT.noEstimate, pt) : pick(TEXT.expected, pt)}
-      </span>
+      {r.versions.length > 1
+        // Several releases of one day: the newest, and how many more share the ribbon (the title lists them all).
+        ? <span data-cal-ribbon-more style={{ marginLeft: 'auto', fontWeight: 600 }}>+{r.versions.length - 1}</span>
+        : <span style={{ marginLeft: 'auto', color: 'var(--text-secondary)', fontWeight: 400 }}>
+            {r.note === 'published' ? pick(TEXT.published, pt) : r.note === 'none' ? pick(TEXT.noEstimate, pt) : pick(TEXT.expected, pt)}
+          </span>}
     </button>
   )
 }

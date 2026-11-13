@@ -22,6 +22,8 @@ export interface CalendarSources {
   tasks: CalTaskInput[]
   subtasks: CalSubtaskInput[]
   resets: CalResetInput[]
+  /** Piece key → version PROVEN by a release tag containing the commit it delivered (see `pieceVersionsFromTags`). */
+  inferredVersions?: Record<string, string>
 }
 
 export async function readCalendarSources(): Promise<CalendarSources> {
@@ -29,7 +31,10 @@ export async function readCalendarSources(): Promise<CalendarSources> {
   const [{ liveDeliveries }, { deliveryService }, { loadTaskWorld }, { getVersionInfo }] = await Promise.all([
     import('../sessions/task-web'), import('./host'), import('../sessions/task-source'), import('../version'),
   ])
-  const [view, records, world, versionInfo] = await Promise.all([liveDeliveries(), deliveryService().list(), loadTaskWorld(), getVersionInfo()])
+  const [view, records, world, versionInfo, inferredVersions] = await Promise.all([
+    liveDeliveries(), deliveryService().list(), loadTaskWorld(), getVersionInfo(),
+    import('../sessions/task-web').then(m => m.pieceVersionsFromTags()).catch(() => ({} as Record<string, string>)),
+  ])
   const lives: CalLiveInput[] = view.deliveries.map(d => ({
     key: d.key, taskId: d.taskId, taskTitle: d.taskTitle, subtaskId: d.subtaskId, title: d.title, ...(d.kind ? { kind: d.kind } : {}), ...(d.leaderAvailabilityReasonCode ? { leaderAvailabilityReasonCode: d.leaderAvailabilityReasonCode } : {}),
     stage: d.stage as CalStage, startedAtMs: d.startedAtMs, stageSinceMs: d.stageSinceMs,
@@ -42,7 +47,7 @@ export async function readCalendarSources(): Promise<CalendarSources> {
     deliveredAtMs: d.deliveredAtMs,
   }))
   return {
-    nowMs, lives,
+    nowMs, lives, inferredVersions,
     records: records.map(r => ({
       subtaskId: r.subtaskId, taskId: r.taskId, phase: r.phase,
       ...(r.versionTarget ? { versionTarget: r.versionTarget } : {}),

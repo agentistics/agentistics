@@ -5,7 +5,7 @@
  * agent is told and what this shows can never differ. Default filter: the tasks being worked on now. It offers no
  * action on a delivery (the card, its session and its verbs live on the Live line; a detail panel leads there).
  */
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { CalendarDays, ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import { brtDay, brtDayStartMs, filterCalendar, HARNESS_LABELS, type CalMark } from '@agentistics/core'
@@ -45,12 +45,36 @@ export function icsQuery(f: UiFilters, win: { fromMs: number; toMs: number }): s
   return q.toString()
 }
 
-export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
+/** An embedded calendar (side/bottom panel) uses the desktop layout only when its panel is this wide; narrower is the phone layout. */
+export const EMBEDDED_WIDE_PX = 900
+export const embeddedIsWide = (widthPx: number): boolean => widthPx >= EMBEDDED_WIDE_PX
+
+/** `embedded`: drawn inside a side/bottom panel, sized to the panel and never to the page; the layout follows the panel's REAL width. */
+export function DeliveryCalendar({ lang, embedded = false }: { lang: 'pt' | 'en'; embedded?: boolean }) {
+  const frame = useRef<HTMLDivElement | null>(null)
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    const el = frame.current
+    if (!embedded || !el) return
+    const measure = () => setWidth(el.getBoundingClientRect().width || el.clientWidth)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [embedded])
+  if (!embedded) return <DeliveryCalendarBody lang={lang} embedded={false} wide={false} />
+  return <div ref={frame} style={{ flex: 1, height: '100%', width: '100%', minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+    {width > 0 && <DeliveryCalendarBody lang={lang} embedded wide={embeddedIsWide(width)} />}
+  </div>
+}
+
+function DeliveryCalendarBody({ lang, embedded, wide }: { lang: 'pt' | 'en'; embedded: boolean; wide: boolean }) {
   const pt = lang === 'pt'
-  const isMobile = useIsMobile()
+  const isMobile = useIsMobile() || (embedded && !wide)
   const { reply, error, slow, nowMs, reload } = useDeliveryCalendar()
   const [query, setQuery] = useSearchParams()
-  const phoneView = (['day', 'three', 'week', 'month', 'schedule', 'agenda'].includes(query.get('calView') ?? '') ? query.get('calView') : 'day') as PhoneView
+  const phoneView = (['day', 'three', 'week', 'month', 'schedule', 'agenda'].includes(query.get('calView') ?? '') ? query.get('calView') : embedded ? 'agenda' : 'day') as PhoneView
   const [desktopView, setView] = useState<CalView>('month')
   const view: CalView = isMobile ? phoneView === 'three' ? 'day' : phoneView : desktopView
   const dateParam = query.get('calDay') ?? ''
@@ -60,7 +84,9 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
   const setFilters = (f: UiFilters) => setQuery(q => { q.set('calFilters', JSON.stringify(f)); return q }, { replace: true })
   const [sel, setSel] = useState<CalSelection | null>(null)
   const [point, setPoint] = useState<Anchor | null>(null)
-  const { ref, height } = useFitHeight<HTMLDivElement>(isMobile ? 0 : 520, `${isMobile}:${!reply}`)
+  const fit = useFitHeight<HTMLDivElement>(isMobile ? 0 : 520, `${isMobile}:${!reply}`, !embedded)
+  const { ref } = fit
+  const height = embedded ? ('100%' as const) : fit.height
   const today = brtDay(nowMs)
 
   const shown = useMemo(() => (reply ? filterCalendar(reply, toCalFilters(filters)) : null), [reply, filters])
@@ -111,7 +137,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
     )
     const common = { nowMs, versions: shown.versions, pieces: shown.pieces, marks: shown.marks, pt, selected: selectedId }
     switch (activeView) {
-      case 'month': return <MonthView {...common} anchor={anchor} onPickDay={d => { setAnchor(d); setView(isMobile ? 'agenda' : 'day'); setSel(null) }} onOpenVersion={handlers.onOpenVersion} onOpenMark={handlers.onOpenMark} onOpenPiece={handlers.onOpenPiece} />
+      case 'month': return <MonthView {...common} fitKey={height} anchor={anchor} onPickDay={d => { setAnchor(d); setView(isMobile ? 'agenda' : 'day'); setSel(null) }} onOpenVersion={handlers.onOpenVersion} onOpenMark={handlers.onOpenMark} onOpenPiece={handlers.onOpenPiece} />
       case 'schedule': return <ScheduleView {...common} anchor={anchor} {...handlers} mobile={isMobile} />
       case 'day': return <DayView {...common} day={anchor} {...handlers} />
       case 'week': return isMobile
@@ -141,7 +167,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
   </div>
 
   return (
-    <div ref={ref} data-cal-root style={{ height: height ?? '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+    <div ref={ref} data-cal-root style={{ height: height ?? '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0, /* unmeasured = unpainted: the first frame must already be the fitted one */ visibility: height === null ? 'hidden' : undefined, overflowY: embedded ? 'auto' : undefined }}>
       {/* Desktop is exactly TWO rows, the same in every engine: this one (title, views, navigation, export — never
           wrapping, the date range gives way with an ellipsis) and the filters row below it. */}
       <div data-cal-nav style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', paddingBottom: 8, flexShrink: 0, minWidth: 0 }}>
@@ -176,7 +202,8 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
         <>
           <CalendarFilters value={filters} onChange={f => { setFilters(f); setSel(null) }} pieces={reply.pieces} harnessOf={harnessOf} versionList={versionList} showVersions={realVersions} pt={pt} mobile={isMobile} shown={caption} />
           {realVersions && !isMobile && (activeView === 'month' || activeView === 'week') && <VersionCards versions={shown.versions} nowMs={nowMs} pt={pt} selected={sel?.kind === 'version' ? sel.version : null} onOpen={(v, e) => open({ kind: 'version', version: v.version }, e)} />}
-          {body}
+          {/* A short bottom band cannot fit six week rows: the month keeps a readable minimum and the panel scrolls. */}
+          {embedded ? <div style={{ flex: 1, minHeight: 300, display: 'flex', flexDirection: 'column' }}>{body}</div> : body}
           {!isMobile && (
             <div data-cal-legend style={{ display: 'flex', flexWrap: 'wrap', columnGap: 14, rowGap: 2, alignItems: 'center', minHeight: 30, padding: '4px 0', flexShrink: 0, color: 'var(--text-secondary)', fontSize: 11 }}>
               {(['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published'] as const).map(s => (

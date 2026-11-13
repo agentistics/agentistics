@@ -10,6 +10,40 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.212.0': {
+    features: [
+      {
+        pt: 'Benchmark com números reais: entregas por semana, tempo até publicar, tempo ativo e custo, cada um com a fórmula e o que não entra na conta.',
+        en: 'Benchmark with real numbers: deliveries per week, time to publish, active time and cost, each with its formula and what is left out.',
+      },
+      {
+        pt: 'Benchmark: o período aparece no seu fuso e em "Tudo" mostra desde quando há histórico; a tela, a API e o MCP dão os mesmos números.',
+        en: 'Benchmark: the period shows in your time zone, and "All" says since when there is history; the screen, the API and MCP give the same numbers.',
+      },
+      {
+        pt: 'Calendário e Live abrem dentro da barra (de baixo ou da direita), como os outros painéis, em vez de trocar de página — também no celular.',
+        en: 'Calendar and Live open inside the panel bar (bottom or right) like the other panels, instead of leaving the page — on phones too.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Calendário: cada versão publicada mostra o que de fato entregou; uma peça só citada em outra não conta mais como entrega.',
+        en: 'Calendar: each published version shows what it really delivered; a piece only mentioned by another no longer counts as delivered.',
+      },
+      {
+        pt: 'Calendário: abre já no formato certo, sem a animação que encolhia a tela até se ajeitar.',
+        en: 'Calendar: opens in the right layout straight away, without the animation that shrank the screen until it settled.',
+      },
+      {
+        pt: 'Sessões do OpenCode por gateway voltam a mostrar as métricas da sessão (tokens, custo, commits).',
+        en: 'OpenCode sessions behind a gateway show their session metrics again (tokens, cost, commits).',
+      },
+      {
+        pt: 'O agentistics não espera mais 10 minutos por um "servidor" que, na verdade, é outro programa qualquer com o mesmo número.',
+        en: 'agentistics no longer waits 10 minutes for a "server" that is actually some other program with the same number.',
+      },
+    ],
+  },
   '2.211.0': {
     features: [
       {

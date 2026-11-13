@@ -2,7 +2,7 @@
  * step-finish parts repeat it. Reasoning is additive (OpenCode 1.17.9 session.getUsage).
  * https://github.com/anomalyco/opencode/blob/v1.17.9/packages/opencode/src/session/session.ts
  */
-import { canonicalTool } from '../harness-activity'
+import { canonicalTool, countGitCommands } from '../harness-activity'
 import { activeMinutesOf, emptyModelUsage, isLocalModelId, type ModelUsage, type SessionMeta, type TurnEvent } from '@agentistics/core'
 
 export interface OpencodeSessionRow {
@@ -22,6 +22,11 @@ function object(value: unknown): Record<string, any> {
 function json(value: string): Record<string, any> { try { return object(JSON.parse(value)) } catch { return {} } }
 const num = (v: unknown): number => typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0
 const str = (v: unknown): string => typeof v === 'string' ? v : ''
+function lineCount(counted: unknown, text: unknown): number {
+  if (typeof counted === 'number' && Number.isFinite(counted) && counted >= 0) return counted
+  if (typeof text !== 'string' || text === '') return 0
+  return text.replace(/\n+$/, '').split('\n').length // same rule as agy's countLines (the engine replay shares it)
+}
 const iso = (v: number): string => v > 0 && Number.isFinite(v) && !Number.isNaN(new Date(v).getTime()) ? new Date(v).toISOString() : ''
 
 /** Preserve unknown routes: a custom provider naming a known model is NOT a known price.
@@ -49,7 +54,8 @@ export function parseOpencodeSession(
   let latest = -1, latestContext = -1, firstPrompt = ''
   const text = new Map<string, string>()
   const toolCounts: Record<string, number> = {}
-  let toolErrors = 0
+  let toolErrors = 0, commits = 0, pushes = 0, added = 0, removed = 0
+  const edited = new Set<string>()
   for (const p of [...parts].sort((a, b) => a.time_created - b.time_created || a.id.localeCompare(b.id))) {
     const d = json(p.data)
     // One `tool` part is one request, whatever state it ended in (completed / error / still running).
@@ -57,6 +63,19 @@ export function parseOpencodeSession(
       const name = canonicalTool('opencode', d.tool)
       toolCounts[name] = (toolCounts[name] ?? 0) + 1
       if (object(d.state).status === 'error') toolErrors++
+      const input = object(object(d.state).input)
+      if (name === 'Bash' && typeof input.command === 'string') {
+        const g = countGitCommands(input.command)
+        commits += g.commits; pushes += g.pushes
+      }
+      // Edit deltas, never `git diff` (same convention as agy). The store reader sends line COUNTS
+      // (`oldLines`/`newLines`) so a megabyte of file content never crosses the query; raw strings work too.
+      const file = str(input.filePath) || str(input.path)
+      if (file && (name === 'Edit' || name === 'Write' || name === 'MultiEdit')) {
+        edited.add(file)
+        added += lineCount(input.newLines, input.newString ?? input.content)
+        removed += lineCount(input.oldLines, input.oldString)
+      }
     }
     if (d.type === 'text' && typeof d.text === 'string' && !d.synthetic && !d.ignored) {
       text.set(p.message_id, (text.get(p.message_id) ?? '') + d.text)
@@ -118,10 +137,10 @@ export function parseOpencodeSession(
     input_tokens: input, output_tokens: output, cache_read_input_tokens: read, cache_creation_input_tokens: write,
     ...(sawUsage ? { model_usage: usage } : { tokens_unavailable: true as const }),
     model, context_tokens: context, context_window: window,
-    tool_counts: toolCounts, tool_output_tokens: {}, agent_file_reads: {}, languages: [], git_commits: 0, git_pushes: 0,
+    tool_counts: toolCounts, tool_output_tokens: {}, agent_file_reads: {}, languages: [], git_commits: commits, git_pushes: pushes,
     first_prompt: firstPrompt, user_interruptions: 0, user_response_times: [], tool_errors: toolErrors,
     tool_error_categories: {}, uses_task_agent: false, uses_mcp: false, uses_web_search: false, uses_web_fetch: false,
-    lines_added: 0, lines_removed: 0, files_modified: 0, message_hours: hours, user_message_timestamps: timestamps,
+    lines_added: added, lines_removed: removed, files_modified: edited.size, message_hours: hours, user_message_timestamps: timestamps,
     harness: 'opencode', _source: 'jsonl',
   }
 }

@@ -366,7 +366,7 @@ describe('LEGACY_FALSE_NOTES — the classification of every legacy false', () =
     'kimi.compaction': 'not_supported', 'kimi.skills': 'unknown',
     // The local SQLite adapter now exposes tokens, cost, model, active time and context.
     // Activity that it does not parse remains a legacy false, classified below.
-    'opencode.agents': 'not_supported', 'opencode.gitLines': 'not_supported',
+    'opencode.agents': 'not_supported',
     'opencode.dynamicWorkflows': 'not_supported', 'opencode.mcpServers': 'not_supported',
     'opencode.compaction': 'unknown',
     'opencode.skills': 'unknown',

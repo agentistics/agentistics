@@ -77,14 +77,14 @@ test('month: an open piece is present on its expected publication day', async ()
 
 test('month: expected pieces are capped and overflow is counted in the day chip', async () => {
   const original = HTMLElement.prototype.getBoundingClientRect
-  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
   try {
     const many = Array.from({ length: 30 }, (_, i) => ({ ...view.pieces[0]!, key: `many/${i}`, version: null, publishEta: { kind: 'estimate' as const, atMs: NOW + H, confidence: 'low' as const } }))
     await mount(createElement(Month, { ...common, pieces: many, anchor: '2026-11-07', onPickDay: noop, onOpenVersion: noop, onOpenMark: noop, onOpenPiece: noop }))
     expect(document.querySelectorAll('[data-cal-expected-piece]').length).toBeLessThanOrEqual(3)
     expect(document.querySelector('[data-cal-more="2026-11-07"]')).not.toBeNull()
   } finally {
-    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: original })
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: original })
   }
 })
 
@@ -97,7 +97,7 @@ test('month: overdue pieces are one grouped chip on today', async () => {
 
 test('month: with a day holding >= cap "started" pieces, today still gets exactly one overdue chip and "+N" excludes the overdue pieces', async () => {
   const original = HTMLElement.prototype.getBoundingClientRect
-  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
   try {
     const base = { ...view.pieces[1]!, version: null, publishedAtMs: null, publishEta: { kind: 'none' as const, reason: 'no-history' } }
     const started = Array.from({ length: 4 }, (_, i) => ({ ...base, key: `st/${i}`, stage: 'running' as const, startedAtMs: NOW - H, stageSinceMs: NOW - H }))
@@ -111,13 +111,13 @@ test('month: with a day holding >= cap "started" pieces, today still gets exactl
     const more = document.querySelector('[data-cal-more="2026-11-07"]')
     expect(Number(more?.textContent?.replace('+', '') ?? 0)).toBe(4 - shownStarted)
   } finally {
-    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: original })
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: original })
   }
 })
 
 test('month: room is per day — a quiet future day shows its predicted chips even when another day is full and today has overdue', async () => {
   const original = HTMLElement.prototype.getBoundingClientRect
-  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
   try {
     const base = { ...view.pieces[1]!, version: null, publishedAtMs: null }
     const dayMs = (d: string) => brtDayStartMs(d) + 12 * H
@@ -131,19 +131,19 @@ test('month: room is per day — a quiet future day shows its predicted chips ev
     expect(row.querySelectorAll('[data-cal-expected-piece]').length).toBe(2)
     expect(row.querySelector('[data-cal-more="2026-11-13"]')).toBeNull()
   } finally {
-    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: original })
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: original })
   }
 })
 
 test('month: the "+N" title names what is hidden', async () => {
   const original = HTMLElement.prototype.getBoundingClientRect
-  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
   try {
     const many = Array.from({ length: 30 }, (_, i) => ({ ...view.pieces[0]!, key: `many/${i}`, version: null, publishEta: { kind: 'estimate' as const, atMs: NOW + H, confidence: 'low' as const } }))
     await mount(createElement(Month, { ...common, pieces: many, anchor: '2026-11-07', onPickDay: noop, onOpenVersion: noop, onOpenMark: noop, onOpenPiece: noop }))
     expect(document.querySelector('[data-cal-more="2026-11-07"]')!.getAttribute('title')).toMatch(/mais: \d+ previstas/)
   } finally {
-    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: original })
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: original })
   }
 })
 
@@ -395,4 +395,19 @@ test('the phone filters sheet is built in sheet mode and its CSS no longer style
   expect(readFileSync(new URL('./DeliveryCalendar.tsx', dir), 'utf8')).toMatch(/mobile sheet shown=/)
   const css = readFileSync(new URL('./mobileCalendar.css', dir), 'utf8')
   expect(css).not.toMatch(/\[data-cal-filters\] button/)
+})
+
+test('month: the first committed render is already clamped (+N), and no transition animates the cells', async () => {
+  const original = HTMLElement.prototype.getBoundingClientRect
+  Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: () => ({ width: 900, height: 100, top: 0, left: 0, right: 900, bottom: 100 }) })
+  try {
+    const many = Array.from({ length: 30 }, (_, i) => ({ ...view.pieces[0]!, key: `first/${i}`, version: null, publishEta: { kind: 'estimate' as const, atMs: NOW + H, confidence: 'low' as const } }))
+    await mount(createElement(Month, { ...common, pieces: many, anchor: '2026-11-07', fitKey: 520, onPickDay: noop, onOpenVersion: noop, onOpenMark: noop, onOpenPiece: noop }))
+    expect(document.querySelectorAll('[data-cal-expected-piece]').length).toBeLessThanOrEqual(3)
+    expect(document.querySelector('[data-cal-more="2026-11-07"]')).not.toBeNull()
+    const all = Array.from(document.querySelectorAll<HTMLElement>('[data-cal-month], [data-cal-month] *'))
+    expect(all.filter(el => /transition|animation/.test(el.getAttribute('style') ?? ''))).toEqual([])
+  } finally {
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, writable: true, value: original })
+  }
 })

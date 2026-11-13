@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
 import { __resetVaultForTests, __setVaultClockForTests, sealToFile, vaultDir } from './service'
 import { __resetGateForTests } from './gate'
+import { __resetGrantsForTests } from './grants'
 import { __resetPersonalForTests, personalRoot } from './personal'
 import { handleVaultHttp } from './http'
 
@@ -82,7 +83,7 @@ async function presenceOn(): Promise<void> {
 const login = { kind: 'login', name: 'Banco Exemplo', tags: ['pessoal'], notes: 'conta corrente', url: 'https://banco.example', fields: { login: 'eu@example.com', password: 'MARKER-hunter2-Δ' } }
 
 afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdir(), 'agentistics-personal-done-')), 'vault') }) })
-beforeEach(async () => { await fresh() })
+beforeEach(async () => { __resetGrantsForTests(); await fresh() })
 
 describe('gate rows (spec §3)', () => {
   test('list and create ask nothing more of an OPEN vault (owner 2026-10-04); the list carries metadata only', async () => {

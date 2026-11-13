@@ -27,6 +27,8 @@ const TagDetailPage = lazy(() => import('./pages/TagDetailPage'))
 const ToolsPage = lazy(() => import('./pages/ToolsPage'))
 const CustomPage = lazy(() => import('./pages/CustomPage'))
 const ComparePage = lazy(() => import('./pages/ComparePage'))
+const BenchmarkPage = lazy(() => import('./pages/BenchmarkPage'))
+const BenchmarkHowItWorksPage = lazy(() => import('./pages/BenchmarkPage').then(m => ({ default: m.BenchmarkHowItWorksPage })))
 const ExportPage = lazy(() => import('./pages/ExportPage'))
 // Every /sessions route renders through `SessionRoute`: ONE shell for every harness, native included
 // (UI.UNIFY) — `SessionsPage` at all three, one component type, so the
@@ -117,6 +119,8 @@ export default function AppRouter() {
               lands somewhere rather than on a blank screen: this router has no catch-all. */}
           <Route path="hardware" element={<Navigate to="/" replace />} />
           <Route path="compare" element={<Suspense fallback={<PageFallback />}><ComparePage /></Suspense>} />
+          <Route path="benchmark" element={<Suspense fallback={<PageFallback />}><BenchmarkPage /></Suspense>} />
+          <Route path="benchmark/como-funciona" element={<Suspense fallback={<PageFallback />}><BenchmarkHowItWorksPage /></Suspense>} />
           <Route path="export" element={<Suspense fallback={<PageFallback />}><ExportPage /></Suspense>} />
           {/* An engine surface announced for the `rail` placement, mounted as a page (engine-api 1.18). */}
           <Route path="x/:surfaceId" element={<Suspense fallback={<PageFallback />}><EngineSurfacePageRoute /></Suspense>} />
