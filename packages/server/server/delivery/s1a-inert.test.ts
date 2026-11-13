@@ -19,9 +19,9 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 describe('S1a is inert', () => {
-  test('STRUCTURE: no non-test product file imports delivery/evidence', () => {
+  test('STRUCTURE: no product file outside the S1b classification modules imports delivery/evidence (the doors arrive in S1c)', () => {
     const offenders = walk(SERVER)
-      .filter((f) => !/\.test\.ts$/.test(f) && !f.endsWith('delivery/evidence.ts'))
+      .filter((f) => !/\.test\.ts$/.test(f) && !f.endsWith('delivery/evidence.ts') && !/delivery\/classify[^/]*\.ts$/.test(f))
       .filter((f) => /from\s+['"][^'"]*\/evidence['"]|['"]\.\/evidence['"]/.test(readFileSync(f, 'utf8')) && /delivery\/evidence|\.\/evidence/.test(readFileSync(f, 'utf8')))
       .map((f) => relative(SERVER, f))
     expect(offenders).toEqual([])

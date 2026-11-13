@@ -27,6 +27,7 @@ import { AUTO_RUN_GH_BUDGET, ENGINE_REPO, MANUAL_RUN_GH_BUDGET, PROOF_REFRESH_MS
 import { antigaComment, inReconcileScope, isAntiga, type AntigaAction } from './antigas'
 import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
 import { sharedQueueArea } from './queue-fit'
+import type { ClassifyDeps } from './classify-host'
 import { ownerIntent } from '../flows/owner-intent'
 import { requestReminderText } from './request-reminder'
 import {
@@ -62,6 +63,8 @@ export interface DeliveryDeps {
   notify: DeliveryNotify
   /** The owner's autonomous mode now (global away, or the delivery leader's own `away`). */
   autonomous(leaderSessionId?: string): Promise<boolean>
+  /** S1b: the classification host (sessions + git); absent = `classify` answers 501. */
+  classify?: ClassifyDeps
   /** Into the engine's flows bus and the SSE channel. Best effort. */
   emit(type: string, payload: Record<string, unknown>): Promise<void>
   /** Starts the staged session (`agentop flow stage run`). Returns the managed id. */
@@ -147,7 +150,7 @@ export type ReleaseReply =
   | Extract<DeliveryReply, { ok: false }>
 
 export type DeliveryReply =
-  | { ok: true; status: 200; record: DeliveryRecord; warnings: string[]; skipped?: unknown; gate?: GateVerdict }
+  | { ok: true; status: 200; record: DeliveryRecord; warnings: string[]; skipped?: unknown; gate?: GateVerdict; classification?: { category: string; headSha: string } }
   | { ok: false; status: number; code: string; sentence: string; missing: string[]; record?: DeliveryRecord; gate?: GateVerdict }
 
 /** The answer of a step report on a piece with no delivery record: the event is all that was written. */
@@ -481,6 +484,30 @@ export function createDeliveryService(d: DeliveryDeps) {
     })
     await d.board.comment(after.taskId, subtaskId, `[fluxo entrega] configuração por ${actor}: ${Object.keys(patch).join(', ')}.`).catch(() => undefined)
     return { ok: true, status: 200, record: after, warnings: [] }
+  }
+
+  /**
+   * S1b — a leader's classification declaration (§3.2, review r2 N9). It names WHERE to look (`repo`, `head`); the server
+   * re-runs the classification host there and derives the category itself. Filed leader (or owner) only: a worker is refused.
+   * Logged on the piece, commented on the board and counted in health; a refused declaration writes nothing.
+   */
+  const classify = async (subtaskId: string, input: { repo?: unknown; head?: unknown }, actor: string): Promise<DeliveryReply> => {
+    if (!d.classify) return fail(501, 'classify_unavailable', 'this host has no classification support')
+    const got = await ensure(subtaskId)
+    if (isReply(got)) return got
+    if (!(await leads(got, actor))) return fail(403, 'classify_leader_only', 'only the leader of the task (or the owner) declares where a piece\'s checkout is; a worker cannot', [], got)
+    const { declareClassification } = await import('./classify-declare')
+    const res = await declareClassification(d.classify, { piece: { taskId: got.taskId, ...(got.subtaskId !== got.taskId ? { subtaskId: got.subtaskId } : {}) }, repo: String(input.repo ?? ''), head: String(input.head ?? '') })
+    if (!res.ok) return fail(422, res.code, res.message, [], got)
+    const entry = { by: actor, repo: res.declaration.repo, head: res.declaration.head, category: res.declaration.category, at: iso(d) }
+    const after = await d.store.update(doc => {
+      const cur = doc.deliveries[subtaskId]!
+      cur.classificationDeclared = [...(cur.classificationDeclared ?? []), entry]
+      cur.updatedAt = iso(d)
+      return structuredClone(cur)
+    })
+    await d.board.comment(after.taskId, subtaskId, `[fluxo entrega] classificação declarada por ${actor}: ${res.declaration.category} em ${res.declaration.head.slice(0, 7)} (${res.declaration.repo}).`).catch(() => undefined)
+    return { ok: true, status: 200, record: after, warnings: [], classification: { category: res.declaration.category, headSha: res.declaration.head } }
   }
 
   /** A worker reports which step of its current phase it is on (the Live's per-phase %). */
@@ -1953,7 +1980,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     ensure,
     // An unreadable store REFUSES the write (and keeps a copy of the file) instead of letting any verb replace it with an empty book.
     transition: safe((id: string, to: unknown, input: TransitionInput, actor: string) => transition(id, to, input, actor)),
-    gate: safe(gate), block: safe(block), unblock: safe(unblock), approve: safe(approve), configure: safe(configure), step: safe(step),
+    gate: safe(gate), block: safe(block), unblock: safe(unblock), approve: safe(approve), configure: safe(configure), classify: safe(classify), step: safe(step),
     stepEvent: async (id: string, n: unknown, actor: string): Promise<StepEventReply> => { try { return await stepEvent(id, n, actor) } catch (e) { return fail(500, 'step_erro', `the step could not be recorded (${e instanceof Error ? e.message.split('\n')[0] : String(e)})`) } },
     // An I/O error on the batch write is a clean, structured refusal (the single store write landed entirely or not at all), never an uncaught throw.
     release: async (o: { version: unknown; mergeSha: unknown; subtaskIds: unknown; repo?: unknown }, actor: string): Promise<ReleaseReply> => {

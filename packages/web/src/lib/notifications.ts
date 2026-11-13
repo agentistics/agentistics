@@ -116,6 +116,31 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Recusas sem explicação', message: 'O modo sombra registrou recusas ainda não explicadas; revise antes de ativar.' },
     en: { title: 'Unexplained refusals', message: 'Shadow mode recorded refusals nobody has explained yet; review them before activating.' },
   },
+  // ENTREGA.GARANTIDA S1b — classification and the evidence requirement (refusals returned to the calling door).
+  classification_required: {
+    pt: { title: 'Checkout não resolvido', message: 'Não foi possível saber onde esta peça foi feita. Arquive a sessão que fez o trabalho ou declare um resultado fora de código.' },
+    en: { title: 'Checkout not resolved', message: 'We could not tell where this piece was built. File the session that did the work, or declare a non-code outcome.' },
+  },
+  uncommitted_changes: {
+    pt: { title: 'Alterações não commitadas', message: 'O checkout tem alterações não commitadas. Faça o commit antes de enviar para revisão.' },
+    en: { title: 'Uncommitted changes', message: 'The checkout has uncommitted changes. Commit them before moving to review.' },
+  },
+  evidence_required: {
+    pt: { title: 'Falta evidência', message: 'Esta peça ainda não pode ir para revisão: faltam {missing}.' },
+    en: { title: 'Evidence required', message: 'This piece cannot move to review yet: {missing} is missing.' },
+  },
+  evidence_stale: {
+    pt: { title: 'Evidência desatualizada', message: 'A evidência foi tirada em outro commit. Capture de novo no commit atual.' },
+    en: { title: 'Evidence out of date', message: 'The evidence was taken at another commit. Capture it again at the current one.' },
+  },
+  declaration_invalid: {
+    pt: { title: 'Declaração inválida', message: 'Informe o repositório e um commit (de 7 a 40 caracteres) para declarar a classificação.' },
+    en: { title: 'Invalid declaration', message: 'Give a repository and a commit (7–40 characters) to declare the classification.' },
+  },
+  declaration_unclassifiable: {
+    pt: { title: 'Não foi possível classificar', message: 'O servidor não conseguiu classificar a peça a partir desse commit.' },
+    en: { title: 'Could not classify', message: 'The server could not classify the piece from that commit.' },
+  },
   'retire.done': {
     pt: { title: 'Sessão encerrada', message: 'A sessão {label} ({id}) foi encerrada.' },
     en: { title: 'Session retired', message: 'Session {label} ({id}) was retired.' },

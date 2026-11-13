@@ -138,6 +138,8 @@ export interface DeliveryRecord {
   /** Release batch this piece ships in (`2.200.8`, …); `next` after a deferral. */
   versionTarget?: string
   leaderSessionId?: string
+  /** S1b: leader declarations of where to look for this piece's checkout (spec §3.2); each re-ran the classification host. */
+  classificationDeclared?: Array<{ by: string; repo: string; head: string; category: string; at: string }>
   /**
    * `board` = this record was created by the vigia's ADOPTION of a piece the board already held in `blocked` (BLOQUEIO.ORFAO),
    * not by a flow transition. Only such a record is reconciled against the board's own status each tick: the board is the

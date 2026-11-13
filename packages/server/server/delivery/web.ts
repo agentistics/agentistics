@@ -25,8 +25,8 @@ export interface DeliveryWebDeps {
 export interface WebReply { status: number; body: unknown }
 
 const out = (r: DeliveryReply): WebReply => (r.ok
-  ? { status: 200, body: { ok: true, record: r.record, warnings: r.warnings, ...(r.skipped ? { skipped: r.skipped } : {}), ...(r.gate ? { gate: r.gate } : {}) } }
-  : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing, ...(r.record ? { record: r.record } : {}), ...(r.gate ? { gate: r.gate } : {}) } })
+  ? { status: 200, body: { ok: true, record: r.record, warnings: r.warnings, ...(r.skipped ? { skipped: r.skipped } : {}), ...(r.gate ? { gate: r.gate } : {}), ...(r.classification ? { classification: r.classification } : {}) } }
+  : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing, ...(r.record ? { record: r.record } : {}), ...(r.gate ? { gate: r.gate } : {})} })
 
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
 
@@ -90,6 +90,8 @@ export async function deliveryRequest(method: string, path: string, body: Record
     // The leader's (or owner's) answer to the queue's question, or the tab's "iniciar agora" (`sim`) / "agendar".
     case 'queue-answer': return out(await d.service.answerQueue(subtaskId, body.answer ?? { decision: body.decision, reason: body.reason, at: body.at }, actor))
     case 'approve': return out(await d.service.approve(subtaskId, body.phase, body.decision, str(body.note), session === null))
+    // S1b: the leader names WHERE to look (`repo`, `head`); the server derives the category. A body `category` is never read.
+    case 'classify': return out(await d.service.classify(subtaskId, { repo: body.repo, head: body.head }, actor))
     case 'configure': return out(await d.service.configure(subtaskId, (body.patch ?? {}) as Record<string, unknown>, actor))
     case 'step': {
       // A piece the flow never adopted has no record to hold the step: only the board's `step` event is written.

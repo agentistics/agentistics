@@ -42,6 +42,8 @@ export interface PieceCheckpoint {
   by: { kind: string; [k: string]: unknown }
   at: string
   transitionId: string
+  /** How the piece was classified when it was authorized (S1b, §3.2); `declared` when a leader named where to look. */
+  classification?: { category: string; headSha: string; declared?: { by: string; repo: string; head: string; at: string } }
 }
 
 export interface GuardIntent { transitionId: string; target: PieceCheckpoint; at: string }

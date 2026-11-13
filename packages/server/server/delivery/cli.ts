@@ -44,6 +44,7 @@ export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subt
   agentop flow release --version <x.y.z> --merge-sha <main sha> [--repo <owner/name>] --subtask S1 --subtask S2 …   declare what the release contains (→ ci, → publicado when release.yml is green and the tag exists)
   agentop flow reconcile --release [--apply] [--json]  backfill: every piece in revisao_lider/pr_merge/ci matched to its merged PR and the first release tag containing it (dry-run unless --apply)
   agentop flow antigas publish|archive (--subtask S[,S…] | --all [--expect N]) [--version x.y.z] [--reason …]   the "Antigas sem registro" group: mark published / archive (abandoned) — never deletes; --expect refuses if the group is not that size
+  agentop flow classify <piece> --repo <path|remote> --head <sha>   a LEADER names where to look for a piece whose checkout cannot be resolved; the server derives the category from that commit (pushed commits only)
   agentop flow tick                                   the minute watch (blocks, merged PR → ci, ci → publicado, reminders to the leader)
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
 
@@ -51,7 +52,7 @@ Exit codes: 0 passed/moved, 1 refused (the sentence says what is missing), 2 usa
 Every gate reads the machine (git, gh, the session registry); nothing here accepts a sha, a session id or a "green" from the caller.
 `
 
-export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'reconcile', 'antigas', 'tick', 'calendario'] as const
+export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'reconcile', 'antigas', 'classify', 'tick', 'calendario'] as const
 
 /** PURE: is `agentop flow <args>` one of the delivery verbs (handled here, not by the engine)? */
 export function isDeliveryFlowVerb(args: readonly string[]): boolean {
@@ -140,6 +141,14 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
       if (!needSub()) return 2
       if (flags.batch) await svc.configure(sub!, { versionTarget: flags.batch }, actor)
       return report(await svc.merge(sub!, actor), io)
+    }
+    case 'classify': {
+      // S1b — a LEADER names where to look; the server derives the category. `agentop flow classify <piece> --repo <path|remote> --head <sha>`.
+      const piece = sub ?? pos[1]
+      if (!piece || !flags.repo || !flags.head) { io.err('usage: agentop flow classify <piece> --repo <path|remote> --head <sha>'); return 2 }
+      const r = await svc.classify(piece, { repo: flags.repo, head: flags.head }, actor)
+      if (r.ok && r.classification) { io.out(JSON.stringify({ ok: true, classification: r.classification, warnings: r.warnings }, null, 2)); return 0 }
+      return report(r, io)
     }
     case 'block': if (!needSub()) return 2; return report(await svc.block(sub!, flags.reason, flags.text ?? '', actor), io)
     case 'unblock': if (!needSub()) return 2; return report(await svc.unblock(sub!, actor, flags.detail), io)

@@ -193,6 +193,14 @@ export const READONLY_CLI_VERBS: readonly (readonly string[])[] = [
 const CLI_ARG_RE = /^[A-Za-z0-9._\/=:@,-]+$/
 const HTTP_PATH_RE = /^\/api\/[A-Za-z0-9._~\/%:,=&?-]*$/
 
+/** The closed field set of each probe shape (`validateProbe` refuses anything else: `probe-extra-field`). */
+const PROBE_KEYS: Record<Probe['kind'], { top: string[]; expect: string[] }> = {
+  http: { top: ['kind', 'path', 'expect'], expect: ['status', 'pointer', 'equals', 'matches', 'exists'] },
+  bundle: { top: ['kind', 'literal'], expect: [] },
+  cli: { top: ['kind', 'argv', 'expect'], expect: ['exit', 'stdoutMatches'] },
+  structural: { top: ['kind', 'reason', 'testLogId'], expect: [] },
+}
+
 export interface ProbeContext { headSha: string | null; items: readonly EvidenceItem[] }
 
 function regexOk(src: string): boolean { try { new RegExp(src); return true } catch { return false } }
@@ -200,6 +208,15 @@ const isInt = (n: unknown): n is number => typeof n === 'number' && Number.isInt
 
 export function validateProbe(probe: Probe, ctx: ProbeContext): Verdict {
   if (!probe || typeof probe !== 'object') return fail('probe-not-an-object', 'a probe must be an object')
+  // Canonical objects only (Codex QA, S1b): an unknown field on the probe or on its `expect` is how a stored probe
+  // could carry something the verifier never sees, or hash differently from what was validated.
+  const keys = PROBE_KEYS[probe.kind as Probe['kind']]
+  if (keys) {
+    const extra = Object.keys(probe).filter(k => !keys.top.includes(k))
+    const exp = (probe as { expect?: unknown }).expect
+    const extraExpect = exp && typeof exp === 'object' ? Object.keys(exp).filter(k => !keys.expect.includes(k)) : []
+    if (extra.length > 0 || extraExpect.length > 0) return fail('probe-extra-field', `a ${probe.kind} probe may not carry the field(s) ${[...extra, ...extraExpect.map(k => `expect.${k}`)].join(', ')}`)
+  }
   switch (probe.kind) {
     case 'http': {
       if (typeof probe.path !== 'string' || !HTTP_PATH_RE.test(probe.path) || probe.path.split(/[/?]/).includes('..')) {

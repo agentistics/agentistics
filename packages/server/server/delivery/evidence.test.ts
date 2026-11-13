@@ -188,6 +188,16 @@ describe('§4.5 Probe shapes — attach-time validation, no runtime', () => {
     expect(validateProbe({ kind: 'http', path: '/api/x', expect: { status: 200, matches: '(' } }, c).ok).toBe(false)
     expect(validateProbe({ kind: 'http', path: '/api/x', expect: { status: 200, pointer: 'nope' } }, c).ok).toBe(false)
   })
+  test('S1b gap (Codex QA): non-canonical probe objects — an extra field on the probe or on `expect` — are refused', () => {
+    const c = { headSha: 'h', items: noItems }
+    for (const p of [
+      { ...http, sneaky: 1 }, { ...http, expect: { status: 200, extra: true } },
+      { kind: 'bundle', literal: 'a-literal-of-12+', also: 'x' }, { kind: 'cli', argv: [...READONLY_CLI_VERBS[0]!], expect: { exit: 0, more: 1 } },
+    ] as unknown as Probe[]) {
+      const r = validateProbe(p, c)
+      expect(r.ok, JSON.stringify(p)).toBe(false); if (!r.ok) expect(r.rule).toBe('probe-extra-field')
+    }
+  })
   test('NEG bundle: literal under 12 chars', () => {
     const r = validateProbe({ kind: 'bundle', literal: 'short' }, { headSha: 'h', items: noItems })
     expect(r.ok).toBe(false); if (!r.ok) expect(r.rule).toBe('probe-bundle-literal-short')
