@@ -12,6 +12,9 @@ export interface TurnTokens {
   output: number
   cacheRead: number
   cacheWrite: number
+  /** The TTL split of `cacheWrite`. Used only when BOTH halves are stated (calcCost's own rule). */
+  cacheWrite1h?: number
+  cacheWrite5m?: number
 }
 
 export interface SessionTurn {
@@ -41,6 +44,8 @@ export function sessionCost(turns: readonly SessionTurn[]): Priced {
         outputTokens: t.tokens.output,
         cacheReadInputTokens: t.tokens.cacheRead,
         cacheCreationInputTokens: t.tokens.cacheWrite,
+        ...(t.tokens.cacheWrite1h !== undefined && t.tokens.cacheWrite5m !== undefined
+          ? { cacheCreation1hInputTokens: t.tokens.cacheWrite1h, cacheCreation5mInputTokens: t.tokens.cacheWrite5m } : {}),
         webSearchRequests: 0,
         costUSD: 0,
       },

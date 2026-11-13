@@ -55,6 +55,9 @@ const ms = (iso: string | undefined): number | null => {
   return Number.isFinite(t) ? t : null
 }
 
+/** The flow words its own adoption of a piece already under way in the first move's detail ("adotada: …"). */
+const ADOPTION = /^\s*adotad/i
+
 interface Statement { conversationId: string | null; id: string; harness: string; subtaskId: string | null; at: number; ids: string[]; leader: boolean }
 
 /** PURE: one session per conversation, filed where its NEWEST filing statement says (a row with an empty `taskId` un-files it). */
@@ -100,7 +103,12 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
     if (meta && hasUsage) {
       // model_usage (several models) wins; otherwise the meta's own model, then the registry row's
       const turns = sessionModelUsage(meta, rowModel).map(([model, u]) => ({
-        model, tokens: { input: u.inputTokens, output: u.outputTokens, cacheRead: u.cacheReadInputTokens, cacheWrite: u.cacheCreationInputTokens },
+        model, tokens: {
+          input: u.inputTokens, output: u.outputTokens, cacheRead: u.cacheReadInputTokens, cacheWrite: u.cacheCreationInputTokens,
+          // the 1 h / 5 min split, exactly as the Costs page prices it
+          ...(u.cacheCreation1hInputTokens !== undefined ? { cacheWrite1h: u.cacheCreation1hInputTokens } : {}),
+          ...(u.cacheCreation5mInputTokens !== undefined ? { cacheWrite5m: u.cacheCreation5mInputTokens } : {}),
+        },
       }))
       cost = turns.length
         ? sessionCost(turns)
@@ -119,6 +127,8 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
 
   const abandoned = new Set(s.book.subtasks.filter(x => x.status === 'abandoned').map(x => x.id))
   const historyKnown = new Set<string>()
+  const historyComplete = new Set<string>()
+  const requestStart = new Set<string>()
   const inputs: MetricInput[] = []
   for (const sub of s.book.subtasks) {
     const rec = s.deliveries[sub.id]
@@ -130,19 +140,26 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
       return at === null ? [] : [{ from: m.from, to: m.to, atMs: at, detail: m.detail ?? '' }]
     })
     if (rec && history.length > 0) historyKnown.add(sub.id)
+    // A record the flow ADOPTED (its first move says so, or it recorded no move at all) starts mid-way: its
+    // creation is a bookkeeping event, not the start of the work. Lead time then starts at the request (the
+    // subtask's creation) and active time is not measured for it.
+    const first = [...history].sort((a, b) => a.atMs - b.atMs)[0]
+    const adopted = !!rec && (history.length === 0 || ADOPTION.test(first?.detail ?? ''))
+    if (rec && history.length > 0 && !adopted) historyComplete.add(sub.id)
+    if (adopted) requestStart.add(sub.id)
     const published = history.find(m => m.to === 'publicado')?.atMs ?? ms(sub.deliveredAt)
     const sessions = bySubtask.get(sub.id) ?? []
     inputs.push({
       subtaskId: sub.id, taskId: sub.taskId, taskTitle: taskTitle.get(sub.taskId) ?? '', title: sub.title,
       priority: null, version: null, phase: rec?.phase ?? (published !== null ? 'publicado' : 'fila'),
       createdAtMs: ms(rec?.createdAt) ?? ms(sub.createdAt) ?? 0,
-      requestedAtMs: null, publishedAtMs: published, authorModel: null, qaModel: null, harness: sessions[0]?.harness ?? null,
+      requestedAtMs: adopted ? ms(sub.createdAt) : null, publishedAtMs: published, authorModel: null, qaModel: null, harness: sessions[0]?.harness ?? null,
       history, costUSD: null, tokens: null,
     })
   }
   const items = buildMetricItems(inputs, s.nowMs)
   const observedSessions = [...bySubtask.values()].flat()
-  return buildObserved({ items, sessions: observedSessions, historyKnown, abandoned, filters: observedFilters })
+  return buildObserved({ items, sessions: observedSessions, historyKnown, historyComplete, requestStart, abandoned, filters: observedFilters })
 }
 
 let cache: { at: number; sources: Promise<BenchmarkSources> } | null = null

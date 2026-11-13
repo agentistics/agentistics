@@ -4,32 +4,49 @@ import { FlaskConical, Info, Scale } from 'lucide-react'
 import type { Observed } from '@agentistics/core/benchmark'
 import type { AppContext } from '../lib/app-context'
 import {
-  METRIC_LABEL, METRIC_ORDER, METRIC_PLAIN, SOURCE_LABEL, cardCoverage, cardHeadline, cardSubline, fmtInterval, gapText,
-  harnessReason, harnessState, intervalMethod, nf, type Lang, type MetricKey,
+  METRIC_LABEL, METRIC_ORDER, METRIC_PLAIN, SOURCE_LABEL, benchmarkQuery, cardCoverage, cardHeadline, cardSubline, fmtInterval, formulaText, gapText,
+  harnessReason, harnessState, intervalMethod, nf, type Lang, type MetricKey, type Money,
 } from '../lib/benchmarkFormat'
 
 type Status = 'loading' | 'error' | 'ready'
 
 export default function BenchmarkPage() {
-  const { lang } = useOutletContext<AppContext>()
+  const { lang, filters, currency, brlRate, costBasis } = useOutletContext<AppContext>()
   const [observed, setObserved] = useState<Observed | null>(null)
   const [status, setStatus] = useState<Status>('loading')
   const [experiments, setExperiments] = useState<unknown[] | null>(null)
+  const query = benchmarkQuery(filters)
+  const qs = new URLSearchParams(query)
+  const period = qs.has('from') || qs.has('to')
+    ? { fromMs: qs.has('from') ? Number(qs.get('from')) : null, toMs: qs.has('to') ? Number(qs.get('to')) : null } : undefined
   useEffect(() => {
     let live = true
-    fetch('/api/benchmark/observed').then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+    fetch(`/api/benchmark/observed${query}`).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
       .then(x => { if (live) { setObserved(x); setStatus('ready') } }).catch(() => { if (live) setStatus('error') })
     fetch('/api/benchmark/experiments').then(r => r.ok ? r.json() : null).then(x => { if (live && Array.isArray(x)) setExperiments(x) }).catch(() => {})
     return () => { live = false }
-  }, [])
-  return <BenchmarkContent lang={lang} observed={observed} status={status} experiments={experiments} />
+  }, [query])
+  return <BenchmarkContent lang={lang} observed={observed} status={status} experiments={experiments}
+    currency={currency} brlRate={brlRate} costBasis={costBasis} period={period} />
 }
 
-export function BenchmarkContent({ lang, observed, status = observed ? 'ready' : 'loading', experiments = [] }: {
+export function BenchmarkContent({ lang, observed, status = observed ? 'ready' : 'loading', experiments = [], currency = 'USD', brlRate, costBasis = 'api', period }: {
   lang: AppContext['lang']; observed: Observed | null; status?: Status; experiments?: unknown[] | null
+  currency?: 'USD' | 'BRL'; brlRate?: number; costBasis?: AppContext['costBasis']
+  period?: { fromMs: number | null; toMs: number | null }
 }) {
   const pt = lang === 'pt'
   const L = lang as Lang
+  const money: Money = { currency, brlRate }
+  const day = (ms: number) => {
+    const d = new Date(ms), p = (n: number) => String(n).padStart(2, '0')
+    const y = d.getUTCFullYear(), m = p(d.getUTCMonth() + 1), dd = p(d.getUTCDate())
+    return pt ? `${dd}/${m}/${y}` : `${y}-${m}-${dd}`
+  }
+  const periodText = period ? `${pt ? 'Período' : 'Period'}: ${period.fromMs && period.fromMs > 0 ? day(period.fromMs) : (pt ? 'início' : 'start')} – ${period.toMs ? day(period.toMs) : (pt ? 'hoje' : 'today')}. ` : ''
+  const basisText = costBasis === 'plan'
+    ? (pt ? 'O custo aqui é sempre o equivalente à API (tokens × tabela de preços), não o valor do plano. ' : 'Cost here is always the API-equivalent figure (tokens × price table), not the plan price. ')
+    : ''
   return <main data-testid="benchmark-page" style={{ maxWidth: 1180, margin: '0 auto', display: 'grid', gap: 8 }}>
     <header style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
@@ -44,9 +61,9 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
       {status === 'loading' && <div data-testid="benchmark-loading" style={empty}>{pt ? 'Carregando dados reais…' : 'Loading real data…'}</div>}
       {status === 'error' && <div data-testid="benchmark-error" style={empty}>{pt ? 'Não foi possível ler os dados reais agora. Nenhum número é mostrado no lugar.' : 'The real data could not be read right now. No number is shown in its place.'}</div>}
       {status === 'ready' && observed && <>
-        <p data-testid="benchmark-scope" style={{ ...muted, margin: '4px 0 6px' }}>{scopeLine(observed, L)}
+        <p data-testid="benchmark-scope" style={{ ...muted, margin: '4px 0 6px' }}>{periodText}{basisText}{scopeLine(observed, L)}{' '}
           <details style={{ display: 'inline', marginLeft: 6 }}><summary style={{ display: 'inline', cursor: 'pointer' }}>{pt ? 'o que não conta' : 'what does not count'}</summary> {scopeExclusions(observed, L)}</details></p>
-        <div style={grid}>{METRIC_ORDER.map(k => <Metric key={k} k={k} observed={observed} lang={L} />)}</div>
+        <div style={grid}>{METRIC_ORDER.map(k => <Metric key={k} k={k} observed={observed} lang={L} money={money} />)}</div>
         <div style={coverage} data-testid="benchmark-coverage"><strong>{pt ? 'Cobertura por harness' : 'Coverage by harness'}</strong>
           {Object.entries(observed.coverage).map(([h, c]) => {
             const state = harnessState(c), why = harnessReason(c, L)
@@ -82,25 +99,25 @@ function scopeExclusions(o: Observed, lang: Lang): string {
     : `Unstarted tasks, deferred ideas and abandoned work are not deliveries${a ? ` (${nf(a, lang, 0)} abandoned only feed wasted cost)` : ''}.`
 }
 
-function Metric({ k, observed, lang }: { k: MetricKey; observed: Observed; lang: Lang }) {
+function Metric({ k, observed, lang, money }: { k: MetricKey; observed: Observed; lang: Lang; money: Money }) {
   const pt = lang === 'pt'
   const m = observed.metrics[k]
-  const head = cardHeadline(k, observed, lang)
+  const head = cardHeadline(k, observed, lang, money)
   const label = METRIC_LABEL[k][pt ? 0 : 1]
   return <article data-testid={`metric-${k}`} data-measured={head.measured ? 'yes' : 'no'} style={metricCard}>
     <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</div>
     <div style={{ fontSize: 19, fontWeight: 750, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{head.value}</div>
-    <div style={{ ...muted, fontSize: 11, minHeight: 15 }} data-testid={`metric-${k}-sub`}>{cardSubline(k, observed, lang)}</div>
+    <div style={{ ...muted, fontSize: 11, minHeight: 15 }} data-testid={`metric-${k}-sub`}>{cardSubline(k, observed, lang, money)}</div>
     <div style={muted}>{cardCoverage(k, observed, lang)}</div>
     <details style={{ marginTop: 4, fontSize: 11 }}>
       <summary style={{ cursor: 'pointer' }}><Info size={12} /> {pt ? 'origem do número' : 'where this number comes from'}</summary>
       <div style={{ ...muted, display: 'grid', gap: 3, marginTop: 4 }}>
         <p style={{ margin: 0 }}>{METRIC_PLAIN[k][pt ? 0 : 1]}</p>
         <p style={{ margin: 0 }}><strong>{pt ? 'Amostra' : 'Sample'}:</strong> {cardCoverage(k, observed, lang)}.
-          {m.interval && <> {fmtInterval(k, m.interval, lang)} — {intervalMethod(m.interval, lang)}.</>}</p>
+          {m.interval && <> {fmtInterval(k, m.interval, lang, money)} — {intervalMethod(m.interval, lang)}.</>}</p>
         {m.gaps.length > 0 && <p style={{ margin: 0 }}><strong>{pt ? 'Ficou de fora' : 'Left out'}:</strong> {m.gaps.map(g => gapText(g, lang)).join('; ')}.</p>}
         <p style={{ margin: 0 }}><strong>{pt ? 'Fontes' : 'Sources'}:</strong> {m.origin.records.map(r => SOURCE_LABEL[r]?.[pt ? 0 : 1] ?? r).join('; ')}.</p>
-        <p style={{ margin: 0, opacity: 0.8 }}><strong>{pt ? 'Fórmula (técnica)' : 'Formula (technical)'}:</strong> {m.origin.formula}</p>
+        <p style={{ margin: 0, opacity: 0.8 }}><strong>{pt ? 'Fórmula (técnica)' : 'Formula (technical)'}:</strong> {formulaText(k, m.origin.formula, lang)}</p>
       </div>
     </details>
   </article>

@@ -33,6 +33,11 @@ export interface ObservedInput {
   sessions: readonly ObservedSession[]
   /** Subtask ids whose phase history exists. Required: "all of them" is not a safe default. */
   historyKnown: ReadonlySet<string>
+  /** Subtask ids whose phase history covers the WHOLE working span (born in the flow, or otherwise shown complete).
+   *  A history that starts mid-way (an adopted piece) is not complete: active time is a named gap for it. Absent = same as `historyKnown`. */
+  historyComplete?: ReadonlySet<string>
+  /** Subtask ids whose lead time starts at the request (subtask creation) because the record was only adopted later. */
+  requestStart?: ReadonlySet<string>
   /** Subtask ids the board marks abandoned. Absent = nobody says which work was abandoned (wasted cost is then not measured). */
   abandoned?: ReadonlySet<string>
   filters?: MetricFilters
@@ -111,9 +116,13 @@ export function buildObserved(input: ObservedInput): Observed {
   const leads = published.map(i => i.leadMs).filter((x): x is number => x !== null)
   const wallMedian = cov(median(leads), bootstrapInterval(leads, median), leads.length, published.length,
     published.filter(i => i.leadMs === null).map(i => i.subtaskId), [],
-    'median of lead time (request or queue entry → published), published deliveries')
+    'median of lead time, published deliveries: from queue entry for records born in the flow; from the subtask creation (the request) for records the flow only adopted later')
+  const adoptedLeads = published.filter(i => input.requestStart?.has(i.subtaskId) && i.leadMs !== null).length
+  wallMedian.origin.coverage = `${wallMedian.n} of ${wallMedian.total} records measured · ${adoptedLeads} adopted records start at the subtask creation`
 
-  const publishedWithHistory = published.filter(i => input.historyKnown.has(i.subtaskId))
+  const completeIds = input.historyComplete ?? input.historyKnown
+  const publishedWithHistory = published.filter(i => completeIds.has(i.subtaskId))
+  const publishedIncomplete = published.filter(i => input.historyKnown.has(i.subtaskId) && !completeIds.has(i.subtaskId)).length
   // A history that shows no time in any working stage (a piece adopted already finished, a release declared the
   // instant it was adopted) did not measure the work: its zero is "not looked at", not "took no time".
   const activeOf = (i: MetricItem) => ACTIVE_BUCKETS.reduce((a, b) => a + i.stageMs[b], 0)
@@ -121,8 +130,8 @@ export function buildObserved(input: ObservedInput): Observed {
   const actives = activeItems.map(activeOf)
   const activeMedian = cov(median(actives), bootstrapInterval(actives, median), actives.length, published.length,
     published.filter(i => !activeItems.includes(i)).map(i => i.subtaskId),
-    [...gap('no_phase_history', published.length - publishedWithHistory.length), ...gap('no_active_stage', publishedWithHistory.length - activeItems.length)],
-    'median of time in running + qa + adjust + leader + merge + ci, published deliveries whose recorded phase history shows time in a working stage')
+    [...gap('no_phase_history', published.length - publishedWithHistory.length - publishedIncomplete), ...gap('incomplete_history', publishedIncomplete), ...gap('no_active_stage', publishedWithHistory.length - activeItems.length)],
+    'median of time in running + qa + adjust + leader + merge + ci, published deliveries whose phase history is complete (born in the flow) and shows time in a working stage; adopted pieces are a named gap')
 
   // coordination share: a RANGE. lo = leader sessions only; hi = leader + sessions with no role.
   const pricedLinked = linked.filter(s => s.cost.costUSD !== null)

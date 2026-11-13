@@ -3,8 +3,35 @@
  * gap codes; every sentence, unit and locale rule lives here, in both languages.
  */
 import type { Gap, GapCode, Interval, Observed } from '@agentistics/core/benchmark'
+import type { Filters } from '@agentistics/core'
+import { getDateRangeFilter } from '../hooks/useData'
 
 export type Lang = 'pt' | 'en'
+
+/** Currency for cost figures: the page's own (`BRL` needs the rate; without one it stays in dollars, never a guessed conversion). */
+export interface Money { currency: 'USD' | 'BRL'; brlRate?: number }
+
+/** The query string for the GLOBAL period: `?from=<ms>&to=<ms>`, or '' when the period is unbounded ("all"). */
+export function benchmarkQuery(f: Pick<Filters, 'dateRange' | 'customStart' | 'customEnd'>): string {
+  const { start, end } = getDateRangeFilter(f.dateRange, f.customStart, f.customEnd)
+  const from = start.getTime(), to = end.getTime()
+  const q = new URLSearchParams()
+  if (from > 0) q.set('from', String(from))
+  if (f.dateRange !== 'all' || f.customEnd) q.set('to', String(to))
+  const s = q.toString()
+  return s ? `?${s}` : ''
+}
+
+/** The server's formulas are English technical text; in pt each metric's formula is shown in Portuguese. */
+const FORMULA_PT: Partial<Record<string, string>> = {
+  costPerDelivery: 'média entre as entregas da soma do custo das sessões (tabela × tokens); entregas com alguma sessão sem preço ou ausente ficam de fora',
+  wallMedian: 'mediana do tempo até publicar, nas entregas publicadas: da entrada na fila nas entregas nascidas no fluxo; da criação da subtarefa (o pedido) nas entregas que o fluxo só adotou depois',
+  activeMedian: 'mediana do tempo em execução + QA + ajuste + líder + merge + CI, nas entregas publicadas com histórico completo (nascidas no fluxo) e tempo em etapa de trabalho; as adotadas são lacuna nomeada',
+  throughputPerWeek: 'entregas publicadas ÷ semanas do período',
+}
+export function formulaText(key: string, formula: string, lang: Lang): string {
+  return lang === 'en' ? formula : FORMULA_PT[key] ?? formula
+}
 export type MetricKey = keyof Observed['metrics']
 type Unit = 'usd' | 'duration' | 'percent' | 'rounds' | 'perWeek'
 
@@ -29,8 +56,8 @@ export const METRIC_LABEL: Record<MetricKey, [string, string]> = {
 /** What the figure is, in one plain sentence — what the origin drawer opens with. */
 export const METRIC_PLAIN: Record<MetricKey, [string, string]> = {
   costPerDelivery: ['Média, entre as entregas, da soma do custo das sessões de cada uma (tokens de cada turno × tabela de preços). Entregas com alguma sessão sem preço ou sem tokens ficam de fora.', 'Average, across deliveries, of the summed cost of each one\'s sessions (per-turn tokens × price table). Deliveries with any session lacking a price or tokens are left out.'],
-  wallMedian: ['Mediana do tempo entre a entrada na fila (ou o pedido) e a publicação, nas entregas publicadas.', 'Median time from queue entry (or the request) to publication, over published deliveries.'],
-  activeMedian: ['Mediana do tempo em execução, QA, ajuste, revisão do líder, merge e CI, só nas entregas publicadas cujo histórico de fases mostra tempo em etapa de trabalho.', 'Median time spent running, in QA, adjusting, leader review, merge and CI, only for published deliveries whose phase history shows time in a working stage.'],
+  wallMedian: ['Mediana do tempo até a publicação, nas entregas publicadas. Conta da entrada na fila quando a entrega nasceu no fluxo, e da criação da subtarefa (o pedido) quando o fluxo só a adotou depois.', 'Median time to publication, over published deliveries. Counted from queue entry when the delivery was born in the flow, and from the subtask creation (the request) when the flow only adopted it later.'],
+  activeMedian: ['Mediana do tempo em execução, QA, ajuste, revisão do líder, merge e CI, só nas entregas publicadas com histórico de fases completo (nascidas no fluxo). Entregas adotadas já em andamento são uma lacuna nomeada, nunca um número truncado.', 'Median time spent running, in QA, adjusting, leader review, merge and CI, only for published deliveries with a complete phase history (born in the flow). Pieces adopted already under way are a named gap, never a truncated number.'],
   coordinationShare: ['Quanto do custo foi de sessões líderes: o início da faixa conta só líderes confirmados; o fim soma também as sessões sem papel registrado.', 'How much of the cost was leader sessions: the low end counts confirmed leaders only; the high end also adds sessions with no recorded role.'],
   qaFirstRoundRejection: ['Entregas que a QA devolveu ao menos uma vez ÷ entregas em que o histórico de fases mostra a QA decidindo.', 'Deliveries QA sent back at least once ÷ deliveries whose phase history shows QA deciding.'],
   qaRoundsMedian: ['Mediana de (devoluções da QA + 1) nas entregas em que o histórico mostra a QA decidindo.', 'Median of (QA send-backs + 1) over deliveries whose history shows QA deciding.'],
@@ -48,6 +75,7 @@ export const SOURCE_LABEL: Record<string, [string, string]> = {
 
 const GAP_TEXT: Record<GapCode, [string, string]> = {
   no_phase_history: ['sem histórico de fases registrado', 'no recorded phase history'],
+  incomplete_history: ['histórico incompleto', 'incomplete history'],
   no_active_stage: ['histórico sem tempo em etapa de trabalho', 'history shows no time in a working stage'],
   role_range_too_wide: ['sessões sem papel registrado — faixa larga demais para dizer algo', 'sessions with no recorded role — range too wide to say anything'],
   no_qa_stage: ['histórico sem etapa de QA', 'history shows no QA stage'],
@@ -75,9 +103,11 @@ function duration(ms: number, lang: Lang): string {
   return `${nf(h / 24, lang, 1)} ${lang === 'pt' ? 'd' : 'd'}`
 }
 
-export function fmtValue(key: MetricKey, v: number, lang: Lang): string {
+export function fmtValue(key: MetricKey, v: number, lang: Lang, money?: Money): string {
   switch (UNIT[key]) {
-    case 'usd': return lang === 'pt' ? `US$ ${nf(v, lang, 2)}` : `$${nf(v, lang, 2)}`
+    case 'usd':
+      if (money?.currency === 'BRL' && money.brlRate && money.brlRate > 0) return `R$${lang === 'pt' ? ' ' : ''}${nf(v * money.brlRate, lang, 2)}`
+      return lang === 'pt' ? `US$ ${nf(v, lang, 2)}` : `$${nf(v, lang, 2)}`
     case 'duration': return duration(v, lang)
     case 'percent': return `${nf(v * 100, lang, 0)}%`
     case 'rounds': return `${nf(v, lang, 1)} ${lang === 'pt' ? (v === 1 ? 'rodada' : 'rodadas') : (v === 1 ? 'round' : 'rounds')}`
@@ -85,8 +115,8 @@ export function fmtValue(key: MetricKey, v: number, lang: Lang): string {
   }
 }
 
-export function fmtInterval(key: MetricKey, i: Interval, lang: Lang): string {
-  const a = fmtValue(key, i.lo, lang), b = fmtValue(key, i.hi, lang)
+export function fmtInterval(key: MetricKey, i: Interval, lang: Lang, money?: Money): string {
+  const a = fmtValue(key, i.lo, lang, money), b = fmtValue(key, i.hi, lang, money)
   return `${lang === 'pt' ? 'IC 95%' : '95% CI'}: ${a} – ${b}`
 }
 
@@ -101,26 +131,26 @@ export function intervalMethod(i: Interval, lang: Lang): string {
 }
 
 /** The headline of a card: the value, a range, or "—" with the reason. */
-export function cardHeadline(key: MetricKey, o: Observed, lang: Lang): { value: string; measured: boolean } {
+export function cardHeadline(key: MetricKey, o: Observed, lang: Lang, money?: Money): { value: string; measured: boolean } {
   const m = o.metrics[key]
   if (key === 'coordinationShare') {
     const r = o.coordinationShareRange
     return r.lo === null || r.hi === null ? { value: '—', measured: false }
       : { value: `${fmtValue(key, r.lo, lang)} – ${fmtValue(key, r.hi, lang)}`, measured: true }
   }
-  return m.value === null ? { value: '—', measured: false } : { value: fmtValue(key, m.value, lang), measured: true }
+  return m.value === null ? { value: '—', measured: false } : { value: fmtValue(key, m.value, lang, money), measured: true }
 }
 
 /** One short line under the value: the interval, or why there is no figure. */
-export function cardSubline(key: MetricKey, o: Observed, lang: Lang): string {
+export function cardSubline(key: MetricKey, o: Observed, lang: Lang, money?: Money): string {
   const m = o.metrics[key]
-  const head = cardHeadline(key, o, lang)
+  const head = cardHeadline(key, o, lang, money)
   if (!head.measured) {
     const top = [...m.gaps].sort((a, b) => b.count - a.count)[0]
     return `${lang === 'pt' ? 'sem medição' : 'not measured'}${top ? ` · ${gapText(top, lang)}` : ''}`
   }
   if (key === 'coordinationShare') return lang === 'pt' ? 'faixa, nunca um ponto' : 'a range, never a point'
-  return m.interval ? fmtInterval(key, m.interval, lang) : (lang === 'pt' ? 'amostra pequena demais para um intervalo' : 'sample too small for an interval')
+  return m.interval ? fmtInterval(key, m.interval, lang, money) : (lang === 'pt' ? 'amostra pequena demais para um intervalo' : 'sample too small for an interval')
 }
 
 export function cardCoverage(key: MetricKey, o: Observed, lang: Lang): string {

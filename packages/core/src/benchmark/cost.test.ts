@@ -17,6 +17,23 @@ describe('sessionCost', () => {
     expect(c.missing).toBeUndefined()
   })
 
+  test('B4: the 1-hour / 5-minute cache-write split is priced, not collapsed to the 5-minute rate', () => {
+    const model = 'claude-sonnet-5'
+    const usage = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 1_000_000, cacheCreation1hInputTokens: 1_000_000, cacheCreation5mInputTokens: 0, webSearchRequests: 0, costUSD: 0 }
+    const expected = calcCost(usage, model)
+    const flat = calcCost({ ...usage, cacheCreation1hInputTokens: undefined, cacheCreation5mInputTokens: undefined }, model)
+    expect(expected).toBeGreaterThan(flat)
+    const c = sessionCost([{ model, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 1_000_000, cacheWrite1h: 1_000_000, cacheWrite5m: 0 } }])
+    expect(c.costUSD).toBeCloseTo(expected, 10)
+  })
+
+  test('B4: a split with only one half stated is not used (both or neither)', () => {
+    const model = 'claude-sonnet-5'
+    const half = sessionCost([{ model, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 1_000_000, cacheWrite1h: 1_000_000 } }])
+    const none = sessionCost([{ model, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 1_000_000 } }])
+    expect(half.costUSD).toBeCloseTo(none.costUSD!, 10)
+  })
+
   test('a model without a price is missing: price, never a fallback rate', () => {
     const c = sessionCost([{ model: 'no-such-model-xyz', tokens: tok }])
     expect(c.costUSD).toBeNull()

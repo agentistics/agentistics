@@ -232,3 +232,123 @@ describe('benchmark HTTP figures are recomputable from fixture records', () => {
     const o = await fixtureRoute(); expect(o.metrics.throughputPerWeek.value).toBeCloseTo(2 / (29 / 7), 10)
   })
 })
+
+// ------------------------------------------------------------------------------- r3: the QA r2 blockers
+
+/** A one-subtask store: a delivery record `rec` and the registry rows given. */
+function mini(subs: Record<string, unknown>[], deliveries: Record<string, unknown>, registry: unknown[] = [], metas: [string, unknown][] = []): BenchmarkSources {
+  return {
+    nowMs: T0 + 30 * 24 * H,
+    book: { tasks: [{ id: 'T1', title: 'Task one' }], subtasks: subs as never, historicalSessions: [] },
+    registry: registry as never,
+    metas: new Map(metas) as never,
+    deliveries: deliveries as never,
+  }
+}
+const ADOPTED = 'adotada: a subtarefa já estava em executando no quadro quando o fluxo a recebeu'
+const rec = (subtaskId: string, createdAt: number, history: ReturnType<typeof mv>[], detail0 = '') => ({
+  subtaskId, taskId: 'T1', phase: 'publicado', revision: 1, createdAt: iso(createdAt),
+  history: history.map((m, k) => (k === 0 && detail0 ? { ...m, detail: detail0 } : m)),
+})
+
+describe('B4: the cache-write TTL split reaches the price', () => {
+  test('a session with 1 h cache writes costs what calcCost says with the split', () => {
+    const u = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 1_000_000, cacheCreation1hInputTokens: 1_000_000, cacheCreation5mInputTokens: 0, webSearchRequests: 0, costUSD: 0 }
+    const withSplit = calcCost(u, 'claude-sonnet-5')
+    const flat = calcCost({ ...u, cacheCreation1hInputTokens: undefined, cacheCreation5mInputTokens: undefined }, 'claude-sonnet-5')
+    expect(withSplit).toBeGreaterThan(flat)
+    const s = mini([sub('A', 'done', { deliveredAt: iso(T0 + H) })], { A: rec('A', T0, [mv('fila', 'executando', T0), mv('executando', 'publicado', T0 + H)]) },
+      [row('m1', 'A', { conversationId: 'c1' })],
+      [['c1', meta('c1', { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 1_000_000, cache_creation_1h_input_tokens: 1_000_000, cache_creation_5m_input_tokens: 0 })]])
+    expect(buildObservedFromSources(s).metrics.costPerDelivery.value).toBeCloseTo(withSplit, 8)
+  })
+})
+
+describe('B2: time to publish starts at the request for an adopted record', () => {
+  const s = mini(
+    [sub('G', 'done', { deliveredAt: iso(T0 + 60 * H) }), sub('N', 'done', { createdAt: iso(T0), deliveredAt: iso(T0 + 15 * H) })],
+    {
+      G: rec('G', T0 + 50 * H, [mv('executando', 'ci', T0 + 55 * H), mv('ci', 'publicado', T0 + 60 * H)], ADOPTED),
+      N: rec('N', T0 + 5 * H, [mv('fila', 'executando', T0 + 5 * H), mv('executando', 'ci', T0 + 12 * H), mv('ci', 'publicado', T0 + 15 * H)], 'sessão x aberta pelo pré-dispatch'),
+    },
+  )
+  const o = buildObservedFromSources(s)
+  test('adopted: from the subtask creation (60 h), born in the flow: from the record (10 h)', () => {
+    // sorted lead times: 10 h (N) and 60 h (G) -> median 35 h
+    expect(o.metrics.wallMedian.n).toBe(2)
+    expect(o.metrics.wallMedian.value).toBe(35 * H)
+  })
+  test('the formula text states which start is used', () => {
+    expect(o.metrics.wallMedian.formula).toMatch(/adopted/i)
+    expect(o.metrics.wallMedian.formula).toMatch(/subtask creation|request/i)
+  })
+  test('how many records used the request start is reported', () => {
+    expect(o.metrics.wallMedian.gaps).toEqual([])
+    expect(o.metrics.wallMedian.origin.coverage).toContain('1 adopted')
+  })
+})
+
+describe('B3: active time counts only complete histories', () => {
+  const s = mini(
+    [sub('G', 'done', { deliveredAt: iso(T0 + 60 * H) }), sub('N', 'done', { deliveredAt: iso(T0 + 15 * H) })],
+    {
+      G: rec('G', T0 + 50 * H, [mv('executando', 'ci', T0 + 55 * H), mv('ci', 'publicado', T0 + 60 * H)], ADOPTED),
+      N: rec('N', T0 + 5 * H, [mv('fila', 'executando', T0 + 5 * H), mv('executando', 'ci', T0 + 12 * H), mv('ci', 'publicado', T0 + 15 * H)], 'sessão x aberta pelo pré-dispatch'),
+    },
+  )
+  const a = buildObservedFromSources(s).metrics.activeMedian
+  test('the adopted record is a NAMED gap, never a truncated number', () => {
+    expect(a.n).toBe(1)
+    expect(a.value).toBe(10 * H)                    // N alone: executando 7 h + ci 3 h
+    expect(a.gaps).toContainEqual({ code: 'incomplete_history', count: 1 })
+  })
+  test('with only adopted records the figure is not measured', () => {
+    const only = buildObservedFromSources(mini([sub('G', 'done', { deliveredAt: iso(T0 + 60 * H) })],
+      { G: rec('G', T0 + 50 * H, [mv('executando', 'ci', T0 + 55 * H), mv('ci', 'publicado', T0 + 60 * H)], ADOPTED) })).metrics.activeMedian
+    expect(only.value).toBeNull()
+    expect(only.n).toBe(0)
+    expect(only.gaps).toContainEqual({ code: 'incomplete_history', count: 1 })
+  })
+})
+
+describe('F16: a conversation belongs to the subtask of its NEWEST filing statement', () => {
+  const subs = [sub('A', 'done', { deliveredAt: iso(T0 + H) }), sub('B', 'done', { deliveredAt: iso(T0 + H) })]
+  const recs = { A: rec('A', T0, [mv('fila', 'executando', T0), mv('executando', 'publicado', T0 + H)]), B: rec('B', T0, [mv('fila', 'executando', T0), mv('executando', 'publicado', T0 + H)]) }
+  const metas: [string, unknown][] = [['c1', meta('c1')]]
+  const filedOn = (o: ReturnType<typeof buildObservedFromSources>) => o.metrics.costPerDelivery
+
+  test('filed twice: the newest wins, whatever the order of the rows', () => {
+    const older = row('m-old', 'A', { conversationId: 'c1', createdAt: iso(T0) })
+    const newer = row('m-new', 'B', { conversationId: 'c1', createdAt: iso(T0 + 2 * H) })
+    for (const registry of [[older, newer], [newer, older]]) {
+      const c = filedOn(buildObservedFromSources(mini(subs, recs, registry, metas)))
+      expect(c.n).toBe(1)
+      expect(c.missing).toEqual([])
+      expect(c.gaps).toContainEqual({ code: 'no_sessions', count: 1 })
+      expect(c.value).toBeCloseTo(sonnetCost, 8)
+      // and it is B, not A, that holds the session
+      const onlyB = buildObservedFromSources(mini([subs[1]!], { B: recs.B }, registry, metas))
+      expect(onlyB.metrics.costPerDelivery.n).toBe(1)
+      const onlyA = buildObservedFromSources(mini([subs[0]!], { A: recs.A }, registry, metas))
+      expect(onlyA.metrics.costPerDelivery.n).toBe(0)
+    }
+  })
+
+  test('an explicit un-file (taskId "") later than the filing leaves the conversation in no delivery', () => {
+    const filed = row('m-1', 'A', { conversationId: 'c1', createdAt: iso(T0) })
+    const unfiled = { id: 'm-2', harness: 'claude', cwd: '/x', createdAt: iso(T0 + 2 * H), conversationId: 'c1', taskId: '' }
+    for (const registry of [[filed, unfiled], [unfiled, filed]]) {
+      const o = buildObservedFromSources(mini(subs, recs, registry, metas))
+      expect(o.metrics.costPerDelivery.n).toBe(0)
+      expect(o.metrics.costPerDelivery.gaps).toContainEqual({ code: 'no_sessions', count: 2 })
+      expect(Object.keys(o.coverage)).toEqual([])
+    }
+  })
+
+  test('an un-file OLDER than the filing does not undo it', () => {
+    const unfiled = { id: 'm-2', harness: 'claude', cwd: '/x', createdAt: iso(T0), conversationId: 'c1', taskId: '' }
+    const filed = row('m-1', 'A', { conversationId: 'c1', createdAt: iso(T0 + 2 * H) })
+    const o = buildObservedFromSources(mini(subs, recs, [unfiled, filed], metas))
+    expect(o.metrics.costPerDelivery.n).toBe(1)
+  })
+})

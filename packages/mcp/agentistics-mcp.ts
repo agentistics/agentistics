@@ -27,6 +27,7 @@ import { taskCommentRequest } from "./task-comment-args.js";
 import { sessionProof } from "./session-proof.js";
 import { HARNESS_CAPABILITIES, contextReading, nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
 import { planLimitsTool } from "./plan-limits-tool.js";
+import { benchmarkObservedTool, benchmarkQueryFromArgs } from "./benchmark-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
 import { vaultStatusTool } from "./vault-tool.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
@@ -885,6 +886,19 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_benchmark_observed",
+    description:
+      "The Benchmark's observed history, read-only and identical to the Benchmark page: cost per delivery, time to publish, active time, deliveries per week, coordination range, QA rejection and rounds, escaped defects and wasted cost, each with n, a 95% interval, the named gaps that kept records out and its origin. Observed and biased, never a verdict; a null value is not measured, not zero. Optional from/to (epoch ms or ISO date) restrict the period by publication/reference date.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: ["string", "number"], description: "Start of the period (ISO date or epoch ms)" },
+        to: { type: ["string", "number"], description: "End of the period (ISO date or epoch ms)" },
+      },
+      required: [],
+    },
+  },
+  {
     name: "agentistics_projects",
     description:
       "List projects with session counts, message counts, token usage, estimated cost, and last active date. Optionally scope to a single harness. Rows tagged source \"projections\" (read from the journal) carry personTurns (the person's turns); there `messages` is a deprecated alias of personTurns, and subagent spend is reported apart (subagentTokens, subagentCostUSD).",
@@ -1605,6 +1619,11 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
 
       case "agentistics_plan_limits": {
         return text(planLimitsTool((args ?? {}) as { kind?: RouteKind; authorHarness?: string }, await apiGet("/api/plan-limits") as { budgets?: any[]; now?: number }));
+      }
+
+      case "agentistics_benchmark_observed": {
+        const body = await apiGet(`/api/benchmark/observed${benchmarkQueryFromArgs(args as { from?: unknown; to?: unknown } | undefined)}`);
+        return text(benchmarkObservedTool(body));
       }
 
       case "agentistics_projects": {

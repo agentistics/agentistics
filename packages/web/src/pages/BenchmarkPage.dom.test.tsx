@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import type { Covered, Gap, Interval, Observed } from '@agentistics/core/benchmark'
 import { BenchmarkContent } from './BenchmarkPage'
-import { cardHeadline, fmtValue, harnessState } from '../lib/benchmarkFormat'
+import { benchmarkQuery, cardHeadline, fmtValue, harnessState } from '../lib/benchmarkFormat'
 
 const H = 3_600_000
 const SOURCES = ['tasks.json (subtasks)', 'deliveries.json (phase history)', 'managed-sessions.json (sessions)', 'sessions store (tokens)']
@@ -128,6 +128,56 @@ describe('benchmark page — real figures, honest gaps', () => {
   test('a recorded experiment is counted, not drawn as a result', () => {
     expect(render('en', observed, { experiments: [{ id: 'x' }] })).toContain('1 experiment(s) recorded')
     expect(en).not.toContain('experiment(s) recorded')
+  })
+})
+
+describe('r3: language, period and currency of the page', () => {
+  const pt = render('pt'), en = render('en')
+
+  test('F7: the formula in the drawer is in the page language, not the server English', () => {
+    const withFormula: Observed = { ...observed, metrics: { ...observed.metrics, costPerDelivery: { ...observed.metrics.costPerDelivery, origin: { ...observed.metrics.costPerDelivery.origin, formula: 'mean over deliveries of Σ session cost (table×tokens); deliveries with an unpriced or absent session are left out' } } } }
+    const html = render('pt', withFormula)
+    expect(html).toContain('Fórmula (técnica)')
+    expect(html).not.toContain('mean over deliveries')
+    expect(html).toContain('média entre as entregas')
+    expect(render('en', withFormula)).toContain('mean over deliveries')
+  })
+
+  test('F7: a space separates the scope line from "what does not count"', () => {
+    expect(pt).toMatch(/fases\.(<!-- -->)? <details/)
+    expect(en).toMatch(/phase history\.(<!-- -->)? <details/)
+  })
+
+  test('F15: cost follows the chosen currency and the rate', () => {
+    expect(render('pt', observed, { currency: 'BRL', brlRate: 2 })).toContain('R$ 24,69')
+    expect(render('en', observed, { currency: 'BRL', brlRate: 2 })).toContain('R$24.69')
+    expect(render('pt', observed, { currency: 'BRL', brlRate: 2 })).not.toContain('US$ 12,35')
+    expect(render('pt', observed, { currency: 'USD' })).toContain('US$ 12,35')
+  })
+
+  test('F15: the chosen period is stated on the page; an unbounded one says nothing', () => {
+    const range = { fromMs: Date.parse('2026-11-06T00:00:00Z'), toMs: Date.parse('2026-11-13T00:00:00Z') }
+    expect(render('pt', observed, { period: range })).toContain('06/11/2026')
+    expect(render('en', observed, { period: range })).toContain('2026-11-06')
+    expect(pt).not.toContain('Período')
+  })
+
+  test('F15: the request carries the period; "all" carries none', () => {
+    const f = { dateRange: '7d' as const, customStart: '', customEnd: '', projects: [], models: [] }
+    expect(benchmarkQuery(f)).toMatch(/^\?from=\d+&to=\d+$/)
+    expect(benchmarkQuery({ ...f, dateRange: 'all' as const })).toBe('')
+  })
+
+  test('F15: in plan basis the page says its cost is the API-equivalent figure', () => {
+    expect(render('pt', observed, { costBasis: 'plan' })).toContain('equivalente à API')
+    expect(render('en', observed, { costBasis: 'plan' })).toContain('API-equivalent')
+    expect(pt).not.toContain('equivalente à API')
+  })
+
+  test('the incomplete-history gap has plain words in both languages', () => {
+    const o: Observed = { ...observed, metrics: { ...observed.metrics, activeMedian: cov(null, 0, 900, null, [{ code: 'incomplete_history', count: 800 }]) } }
+    expect(render('pt', o)).toContain('800 histórico incompleto')
+    expect(render('en', o)).toContain('800 incomplete history')
   })
 })
 

@@ -31,7 +31,7 @@ export interface Interval {
 
 /** Why part of a figure could not be measured. Language-neutral: every surface words it itself. */
 export type GapCode =
-  | 'no_phase_history' | 'no_active_stage' | 'role_range_too_wide' | 'no_qa_stage' | 'not_published' | 'no_price' | 'no_tokens'
+  | 'no_phase_history' | 'incomplete_history' | 'no_active_stage' | 'role_range_too_wide' | 'no_qa_stage' | 'not_published' | 'no_price' | 'no_tokens'
   | 'no_sessions' | 'waste_not_tracked' | 'escape_links_not_recorded' | 'role_unknown'
 export interface Gap { code: GapCode; count: number }
 

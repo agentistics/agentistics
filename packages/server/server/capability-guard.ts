@@ -102,6 +102,10 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // the fleet — and a prefix for the same reason: the next task route must be guarded by having
   // been added at all, never by having remembered a second table.
   ['/api/tasks', 'localShell'],
+  // The Benchmark's read model (`benchmark/routes.ts`): it joins the task board, the session registry, the delivery
+  // flow's records and the stored token counts, and its response lists subtask and session ids. Same material as
+  // `/api/tasks` and `/api/fleet`, so the same capability; a PREFIX so the experiment routes are guarded by being added.
+  ['/api/benchmark', 'localShell'],
   // FLUXO.ENTREGA-DSL: the delivery records move board statuses, run git/gh in the delivery's worktree and can
   // start the staged session — host power, the same capability as the task board, and a prefix for the same reason.
   ['/api/deliveries', 'localShell'],
