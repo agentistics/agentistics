@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.213.0': {
+    features: [
+      {
+        pt: 'Benchmark refeito no desenho aprovado: lista de benchmarks, resultado grande com a barra de 0 a 100, "Partes" por tipo (qualidade, custo, tempo, confiabilidade, retrabalho), "Por tarefa" e "Por número de sessões".',
+        en: 'Benchmark rebuilt to the approved design: a list of benchmarks, a large result with the 0–100 bar, "Parts" by type (quality, cost, time, reliability, rework), "By task" and "By number of sessions".',
+      },
+      {
+        pt: 'Benchmark: filtre por tarefa e por tamanho, abra uma tarefa para ver o motivo e filtrar as subtarefas; no celular cada tarefa vira um cartão.',
+        en: 'Benchmark: filter by task and size, open a task to see the reason and filter its subtasks; on phones each task becomes a card.',
+      },
+      {
+        pt: 'Benchmark: com o histórico real, compara peças de 1 rodada de QA com as de 2+ rodadas e peças de 1 sessão com as de 4+ — como indício observado, nunca como prova — e diz o que falta para um veredito.',
+        en: 'Benchmark: with the real history it compares pieces with 1 QA round against 2+ rounds and 1 session against 4+ — as observed evidence, never as proof — and says what is missing for a verdict.',
+      },
+      {
+        pt: '"Como funciona?" explica a nota passo a passo, com a versão e a data do método.',
+        en: '"How it works" explains the score step by step, with the method version and date.',
+      },
+    ],
+    fixes: [],
+  },
   '2.212.0': {
     features: [
       {

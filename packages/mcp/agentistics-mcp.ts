@@ -918,7 +918,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_benchmark_observed",
     description:
-      "The Benchmark's observed history, read-only and identical to the Benchmark page: cost per delivery, time to publish, active time, deliveries per week, coordination range, QA rejection and rounds, escaped defects and wasted cost, each with n, a 95% interval, the named gaps that kept records out and its origin. Observed and biased, never a verdict; a null value is not measured, not zero. Optional from/to (epoch ms or ISO date) restrict the period by publication/reference date.",
+      "The Benchmark's observed history, read-only and identical to the Benchmark page: cost per delivery, time to publish, active time, deliveries per week, coordination range, QA rejection and rounds, escaped defects and wasted cost, each with n, a 95% interval, the named gaps that kept records out and its origin. Also `history`: per task (with subtasks) and per sessions-per-piece bucket — cost (tokens × price), wall time, active time, sessions, QA rounds, rework, size by lines — with coverage. Observed and biased, never a verdict; a null value is not measured, not zero. Optional from/to (epoch ms or ISO date) restrict the period by publication/reference date.",
     inputSchema: {
       type: "object",
       properties: {

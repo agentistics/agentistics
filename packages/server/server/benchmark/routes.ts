@@ -1,6 +1,6 @@
 import type { MetricInput, MetricFilters, MetricMove, SessionMeta } from '@agentistics/core'
 import { buildMetricItems, sessionModelUsage } from '@agentistics/core'
-import { buildObserved, sessionCost, type ObservedSession } from '@agentistics/core/benchmark'
+import { buildHistory, buildObserved, qaRoundsFromLabels, sessionCost, type HistoryPieceInput, type ObservedSession } from '@agentistics/core/benchmark'
 import type { SessionRole } from '@agentistics/core/benchmark'
 import { TASKS_FILE } from '../config'
 import { createTaskStore } from '../sessions/task-store'
@@ -17,13 +17,13 @@ export interface BenchmarkRouteDeps {
 export interface BenchmarkSources {
   nowMs: number
   book: {
-    tasks: readonly { id: string; title: string }[]
-    subtasks: readonly { id: string; taskId: string; title: string; status: string; createdAt: string; deliveredAt?: string }[]
+    tasks: readonly { id: string; title: string; status?: string }[]
+    subtasks: readonly { id: string; taskId: string; title: string; status: string; createdAt: string; updatedAt?: string; startedAt?: string; deliveredAt?: string }[]
     historicalSessions: readonly { conversationId: string; harness: string; subtaskId?: string; linkedAt: string }[]
   }
   /** `managed-sessions.json` rows (a subset of ManagedSession). */
   registry: readonly {
-    id: string; harness: string; createdAt: string; conversationId?: string; subtaskId?: string; taskId?: string; model?: string; leader?: boolean
+    id: string; harness: string; createdAt: string; conversationId?: string; subtaskId?: string; taskId?: string; model?: string; leader?: boolean; label?: string
   }[]
   /** The consolidated session store, keyed by the CONVERSATION id (`session_id`). */
   metas: ReadonlyMap<string, SessionMeta>
@@ -91,6 +91,7 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
   const taskTitle = new Map(s.book.tasks.map(t => [t.id, t.title]))
   const statements = sessionStatements(s)
   const bySubtask = new Map<string, ObservedSession[]>()
+  const pieceFacts = new Map<string, { lines: number | null; startMs: number | null; labels: string[] }>()
 
   for (const st of statements) {
     const meta = st.conversationId ? s.metas.get(st.conversationId) : undefined
@@ -123,6 +124,11 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
       : 'unknown'
     const session: ObservedSession = { id: st.id, subtaskId: st.subtaskId, harness: st.harness, role, cost, hasTokens: hasUsage }
     bySubtask.set(st.subtaskId!, [...(bySubtask.get(st.subtaskId!) ?? []), session])
+    // what the piece's sessions changed (size) and when the first one started (wall-clock start)
+    const acc = pieceFacts.get(st.subtaskId!) ?? { lines: null, startMs: null, labels: [] as string[] }
+    if (meta && (meta.lines_added !== undefined || meta.lines_removed !== undefined)) acc.lines = (acc.lines ?? 0) + (meta.lines_added ?? 0) + (meta.lines_removed ?? 0)
+    for (const r of s.registry) if (st.ids.includes(r.id)) { if (r.label) acc.labels.push(r.label); const t = ms(r.createdAt); if (t !== null && (acc.startMs === null || t < acc.startMs)) acc.startMs = t }
+    pieceFacts.set(st.subtaskId!, acc)
   }
 
   const abandoned = new Set(s.book.subtasks.filter(x => x.status === 'abandoned').map(x => x.id))
@@ -160,10 +166,28 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
   const items = buildMetricItems(inputs, s.nowMs)
   const observedSessions = [...bySubtask.values()].flat()
   const iso = (v: number | undefined) => (v !== undefined && Number.isFinite(v) ? new Date(v).toISOString() : null)
-  return buildObserved({
+  const observed = buildObserved({
     items, sessions: observedSessions, historyKnown, historyComplete, requestStart, abandoned, filters: observedFilters,
     period: { from: iso(observedFilters?.fromMs), to: iso(observedFilters?.toMs) },
   })
+  // Per-piece history (ANALISE.md method): every done / in_review subtask with a linked session, from the board.
+  const itemOf = new Map(items.map(i => [i.subtaskId, i]))
+  const ACTIVE = ['running', 'qa', 'adjust', 'leader', 'merge', 'ci'] as const
+  const pieces: HistoryPieceInput[] = s.book.subtasks.filter(sub => sub.status === 'done' || sub.status === 'in_review').map(sub => {
+    const facts = pieceFacts.get(sub.id)
+    const it = itemOf.get(sub.id)
+    const sessions = (bySubtask.get(sub.id) ?? []).map(x => ({ id: x.id, harness: x.harness, costUSD: x.cost.costUSD }))
+    const active = it && historyComplete.has(sub.id) ? ACTIVE.reduce((a, b) => a + it.stageMs[b], 0) : 0
+    return {
+      id: sub.id, taskId: sub.taskId, title: sub.title, status: sub.status, sessions, lines: facts?.lines ?? null,
+      startMs: ms(sub.startedAt) ?? facts?.startMs ?? ms(sub.createdAt),
+      endMs: ms(sub.deliveredAt) ?? (sub.status === 'done' ? ms(sub.updatedAt) : null),
+      qaRounds: it && historyKnown.has(sub.id) && it.qaResult !== 'pending' ? it.qaRejections + 1 : qaRoundsFromLabels(facts?.labels ?? []),
+      activeMs: active > 0 ? active : null,
+    }
+  })
+  const history = buildHistory({ pieces, tasks: s.book.tasks, filters: observedFilters })
+  return { ...observed, history }
 }
 
 let cache: { at: number; sources: Promise<BenchmarkSources> } | null = null
