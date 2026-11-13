@@ -55,7 +55,7 @@ describe('planStatusMigration', () => {
   it('seeds an entirely unrecognised in-use status id too, labelled with itself', () => {
     const plan = planStatusMigration({ existing: undefined, usedStatusIds: ['todo', 'triage'] })
     const triage = plan?.find(s => s.id === 'triage')
-    expect(triage).toEqual({ id: 'triage', label: 'triage', color: '#94a3b8', protected: false, order: 5 })
+    expect(triage).toEqual({ id: 'triage', label: 'triage', color: '#94a3b8', protected: false, order: 5, stage: 'none' })
   })
 
   it('does nothing once a list already exists — idempotent by construction', () => {

@@ -13,11 +13,12 @@ import { dirsForShas } from './release-repos'
 import { firstTagContaining, publishedAmong } from './release-tags'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
 import { stat } from 'node:fs/promises'
-import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
+import type { StagedSessionDraft, StatusStage, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
 import {
-  canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
+  canChangeStatusStage, classifyStatusStage, canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
 } from '@agentistics/core'
 import { loadTaskWorld } from './task-source'
+import { writeStatusStageMirror } from './status-stage-sync'
 import { conversationOwners } from './task-conversations'
 import { historicalLinkId, nativeLinkId, type HistoricalSession, type NativeSessionLink, type NativeSessionUsage } from './task-model'
 import { sanitizeNativeUsage } from './task-native'
@@ -44,6 +45,7 @@ import { noteThreadComment, openThread } from './task-threads'
 import type { CommentKind, ThreadKind } from '@agentistics/core'
 import { chatAttachmentRef, compareBy, repoShortName, sanitizeCommentAttachments, sessionLabel, type ChatAttachmentRef } from '@agentistics/core'
 import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './task-files'
+import { withEvidenceDeletion } from '../delivery/evidence-delete'
 import type { TaskDetail, TaskListRow } from './task-report'
 import { onBookWrite } from './task-store'
 import { JOURNAL_STAMPS_PATH, MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
@@ -136,6 +138,8 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
       files: [],
     }))
     const labels = new Map(w.book.statuses.map(s => [s.id, s.label]))
+    // S0c: the Live reads the STORED stage of each status; a label never classifies a card.
+    const stageById = new Map(w.book.statuses.flatMap(s => (s.stage !== undefined ? [[s.id, s.stage] as const] : [])))
     // FLUXO.ENTREGA-DSL: the delivery records are the state machine; the Live is their projection.
     const deliveries = await (async () => {
       try {
@@ -175,11 +179,11 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
     const forecastKey = `${key}|${Math.floor(nowMs / FORECAST_BUCKET_MS)}`
     if (forecastHistoryCache?.key !== forecastKey) {
       forecastHistoryCache = { key: forecastKey, history: prepareForecastHistory({
-        details, events: w.book.events, nowMs, deliveries, statusLabel: id => labels.get(id),
+        details, events: w.book.events, nowMs, deliveries, statusLabel: id => labels.get(id), statusStage: id => stageById.get(id),
       }) }
     }
     const overrunAnchors = await readForecastAnchors()
-    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas,
+    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), statusStage: id => stageById.get(id), deliveries, publishedShas,
       forecastHistory: forecastHistoryCache.history, overrunAnchors, ...(roleOf ? { roleOf } : {}), ...proof })
     const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result
@@ -650,10 +654,13 @@ export async function deleteTask(ref: string): Promise<boolean> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return false
-  const ok = await w.store.removeTask(task.id)
+  const ok = await w.store.removeTask(task.id, (remove, held) => withEvidenceDeletion({ taskId: task.id }, async () => {
+    const removed = await remove()
+    if (removed) await deleteTaskFiles(task.id)
+    return removed
+  }, held))
   if (!ok) return false
   // The bytes go with the record. The SESSIONS do not — see `TaskStore.removeTask`.
-  await deleteTaskFiles(task.id)
   // And the NAME leaves `preferences.finishedTasks`, which is the other place the migration reads
   // from: a tombstone alone would stop the re-mint while the cockpit went on listing it as finished.
   const prefs = await readPreferences().catch(() => null)
@@ -743,6 +750,14 @@ export async function editComment(commentId: string, body: string): Promise<bool
   if (!text) return false
   const w = await loadTaskWorld()
   return await w.store.editComment(commentId, text)
+}
+
+/** S0d.6: who a comment speaks as — `undefined` when no comment carries that id. A plain book read, no world. */
+export async function commentRole(commentId: string): Promise<'owner' | 'session' | null | undefined> {
+  const { createTaskStore } = await import('./task-store')
+  const { TASKS_FILE } = await import('../config')
+  const c = (await createTaskStore(TASKS_FILE).read()).comments.find(x => x.id === commentId)
+  return c ? (c.role ?? null) : undefined
 }
 
 export async function removeComment(commentId: string): Promise<boolean> {
@@ -1099,12 +1114,16 @@ export async function attachFile(
   } catch {
     return null
   }
-  await w.store.addFile({
+  try { await w.store.addFile({
     id, taskId: task.id, name, size,
     ...(o.kind ? { kind: o.kind } : {}),
     ...(o.author ? { author: o.author } : {}),
     createdAt: new Date().toISOString(),
-  })
+  }) } catch (error) {
+    try { await deleteTaskFile(task.id, id, true) }
+    catch (cleanup) { throw new AggregateError([error, cleanup], `TaskFile upload rollback failed for ${id}`) }
+    throw error
+  }
   return id
 }
 
@@ -1118,12 +1137,24 @@ export async function fetchFile(fileId: string): Promise<{ name: string; bytes: 
   return bytes ? { name: rec.name, bytes } : null
 }
 
+/** Like `fetchFile`, plus the task the file hangs off — evidence may only name a file of ITS OWN task. */
+export async function fetchFileWithTask(fileId: string): Promise<{ taskId: string; name: string; bytes: Uint8Array } | null> {
+  const w = await loadTaskWorld()
+  const rec = w.book.files.find(f => f.id === fileId)
+  if (!rec) return null
+  const bytes = await readTaskFile(rec.taskId, rec.id)
+  return bytes ? { taskId: rec.taskId, name: rec.name, bytes } : null
+}
+
 export async function removeFile(fileId: string): Promise<boolean> {
   const w = await loadTaskWorld()
   const rec = w.book.files.find(f => f.id === fileId)
   if (!rec) return false
-  await deleteTaskFile(rec.taskId, rec.id)
-  return await w.store.removeFile(fileId)
+  return await w.store.removeFile(fileId, (remove, held) => withEvidenceDeletion({ fileId }, async () => {
+    const removed = await remove()
+    if (removed) await deleteTaskFile(rec.taskId, rec.id, true)
+    return removed
+  }, held))
 }
 
 /**
@@ -1781,8 +1812,11 @@ export async function createStatus(o: { label: string; color: string }): Promise
   const w = await loadTaskWorld()
   const id = nextStatusId(label, w.book.statuses.map(s => s.id))
   const order = w.book.statuses.reduce((max, s) => Math.max(max, s.order), -1) + 1
-  const def: TaskStatusDef = { id, label, color: o.color, protected: false, order }
+  // The stage is classified ONCE, here, from what the person just typed; it is stored and never re-derived (S0c).
+  // Creating a status whose stage is guarded is allowed — the guard binds the stage, not the id.
+  const def: TaskStatusDef = { id, label, color: o.color, protected: false, order, stage: classifyStatusStage({ id, label }) }
   await w.store.upsertStatus(def)
+  await writeStatusStageMirror(TASKS_FILE, [...w.book.statuses, def])
   return { ok: true, status: def }
 }
 
@@ -1790,8 +1824,8 @@ export async function createStatus(o: { label: string; color: string }): Promise
  * Edit a status's label and/or color. Works on a PROTECTED status exactly like any other — only its
  * `id` can never change, and this never offers a way to change it (there is no `id` in the patch).
  */
-export async function editStatus(id: string, patch: { label?: string; color?: string }): Promise<
-  { ok: true } | { ok: false; message: 'no_such_status' | 'bad_color' }
+export async function editStatus(id: string, patch: { label?: string; color?: string; stage?: string }): Promise<
+  { ok: true } | { ok: false; message: 'no_such_status' | 'bad_color' | 'bad_stage' } | { ok: false; message: 'status_stage_in_use'; usageCount: number }
 > {
   const w = await loadTaskWorld()
   const found = w.book.statuses.find(s => s.id === id)
@@ -1799,12 +1833,24 @@ export async function editStatus(id: string, patch: { label?: string; color?: st
   if (patch.color !== undefined && !isValidStatusColor(patch.color)) {
     return { ok: false, message: 'bad_color' }
   }
+  // A label edit NEVER touches the stored stage. Changing the stage itself is refused while anything points at the
+  // status: a card would silently change rank without a transition (spec §2.2).
+  let stage = found.stage
+  if (patch.stage !== undefined) {
+    const usageCount = w.book.tasks.filter(t => t.status === id).length + w.book.subtasks.filter(s => s.status === id).length
+    const check = canChangeStatusStage({ current: found.stage, next: patch.stage, usageCount })
+    if (!check.ok) return check.reason === 'bad_stage' ? { ok: false, message: 'bad_stage' } : { ok: false, message: 'status_stage_in_use', usageCount: check.usageCount }
+    stage = patch.stage as StatusStage
+  }
   const label = patch.label?.trim()
-  await w.store.upsertStatus({
+  const next: TaskStatusDef = {
     ...found,
     ...(label ? { label } : {}),
     ...(patch.color !== undefined ? { color: patch.color } : {}),
-  })
+    ...(stage !== undefined ? { stage } : {}),
+  }
+  await w.store.upsertStatus(next)
+  if (stage !== found.stage) await writeStatusStageMirror(TASKS_FILE, w.book.statuses.map(s => (s.id === id ? next : s)))
   return { ok: true }
 }
 

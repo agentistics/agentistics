@@ -20,7 +20,7 @@
 
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
+import { isStatusStage, isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import { withFileLock } from './file-lock'
 import { historicalLinkId, migratePriority, migrateStatus, nativeLinkId, subtaskDone } from './task-model'
 import { heldByOther } from './task-next'
@@ -108,14 +108,14 @@ export interface TaskStore {
   removeSubtask(id: string): Promise<boolean>
   addFile(f: TaskFile): Promise<void>
   /** Removes the RECORD. The bytes on disk are the caller's to unlink — see `task-files.ts`. */
-  removeFile(id: string): Promise<boolean>
+  removeFile(id: string, deletion?: TaskDeletionPort): Promise<boolean>
   /**
    * Delete a task and everything hanging off it.
    *
    * Sessions are NOT touched: a row's `taskId` becomes a dangling reference, which reads as
    * "no attempt named" rather than vanishing. Deleting a board entry must never delete work.
    */
-  removeTask(id: string): Promise<boolean>
+  removeTask(id: string, deletion?: TaskDeletionPort): Promise<boolean>
   /** Forget a tombstone, so a name the user deleted can be created again. */
   clearTombstone(id: string): Promise<void>
   /**
@@ -157,6 +157,12 @@ export interface TaskStore {
    *  create mints a fresh entry, edit finds the existing one by `id` and replaces label/color only. */
   upsertStatus(def: TaskStatusDef): Promise<void>
   reorderStatuses(ids: readonly string[]): Promise<void>
+  /**
+   * Fill the stored stage of every status that has NONE (S0c load-time backfill/restore). Re-checked under the
+   * lock against the freshest read: a status that already has a valid stage is never overwritten here — changing
+   * a stage is `upsertStatus`, gated by `status_stage_in_use` in `task-web.ts`.
+   */
+  setStatusStages(stages: Readonly<Record<string, string>>): Promise<void>
   /** False when no status carries that id — never a silent success. The caller (`task-web.ts`) is
    *  the one that checks `canDeleteStatus` BEFORE calling this; this method trusts that call. */
   removeStatus(id: string): Promise<boolean>
@@ -490,6 +496,8 @@ function sanitizeStatusDef(raw: unknown): TaskStatusDef | null {
     id, label, color: s.color,
     protected: s.protected === true,
     order: typeof s.order === 'number' && Number.isFinite(s.order) ? s.order : 0,
+    // The stored stage (S0c). An invalid value reads as absent: the load-time pass restores it from the mirror.
+    ...(isStatusStage(s.stage) ? { stage: s.stage } : {}),
   }
 }
 
@@ -571,6 +579,14 @@ function deepFreeze<T>(v: T): T {
   }
   return v
 }
+
+/**
+ * Optional deletion composition, invoked inside `enqueue` before any read/mutation. It owns later locks and byte cleanup.
+ * `held.tasks` says whether the cross-process tasks lock is REALLY held: `withFileLock` proceeds without it after its
+ * wait (`contended`), and a port that takes later locks must not claim tasks as already held then (QA S1c r2 R2).
+ */
+export type TaskDeletionPort = (remove: () => Promise<boolean>, held: { tasks: boolean }) => Promise<boolean>
+const directDeletion: TaskDeletionPort = remove => remove()
 
 export function createTaskStore(file: string): TaskStore {
   // One in-process writer. Each mutation appends to this chain, so read-modify-write sequences run
@@ -670,15 +686,15 @@ export function createTaskStore(file: string): TaskStore {
   }
 
   /** One mutation, under the cross-process lock, re-run once when the lock was contended. */
-  function enqueue<T>(fn: () => Promise<T>): Promise<T> {
+  function enqueue<T>(fn: (held: { contended: boolean }) => Promise<T>): Promise<T> {
     const run = async (): Promise<T> => {
       let contended = false
       const first = await withFileLock(file, async held => {
         contended = held.contended
-        return fn()
+        return fn(held)
       })
       if (!contended) return first
-      return await withFileLock(file, () => fn())
+      return await withFileLock(file, held => fn(held))
     }
     const next = queue.then(run)
     queue = next.catch(() => undefined)
@@ -847,16 +863,16 @@ export function createTaskStore(file: string): TaskStore {
         await write({ ...book, files: [...book.files, f] })
       })
     },
-    removeFile(id) {
-      return enqueue(async () => {
+    removeFile(id, deletion = directDeletion) {
+      return enqueue(held => deletion(async () => {
         const book = await read()
         if (!book.files.some(f => f.id === id)) return false
         await write({ ...book, files: book.files.filter(f => f.id !== id) })
         return true
-      })
+      }, { tasks: !held.contended }))
     },
-    removeTask(id) {
-      return enqueue(async () => {
+    removeTask(id, deletion = directDeletion) {
+      return enqueue(held => deletion(async () => {
         const book = await read()
         if (!book.tasks.some(t => t.id === id)) return false
         await write({
@@ -883,7 +899,7 @@ export function createTaskStore(file: string): TaskStore {
           tombstones: [...new Set([...book.tombstones, id])],
         })
         return true
-      })
+      }, { tasks: !held.contended }))
     },
     clearTombstone(id) {
       return enqueue(async () => {
@@ -986,6 +1002,19 @@ export function createTaskStore(file: string): TaskStore {
           ...book,
           statuses: [...book.statuses.filter(s => s.id !== def.id), def],
         })
+      })
+    },
+    setStatusStages(stages) {
+      return enqueue(async () => {
+        const book = await read()
+        let changed = false
+        const next = book.statuses.map(s => {
+          const st = stages[s.id]
+          if (isStatusStage(s.stage) || !isStatusStage(st)) return s
+          changed = true
+          return { ...s, stage: st }
+        })
+        if (changed) await write({ ...book, statuses: next })
       })
     },
     reorderStatuses(ids) {

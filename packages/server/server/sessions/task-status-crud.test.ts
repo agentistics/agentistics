@@ -124,7 +124,7 @@ test('createStatus mints a fresh, non-protected entry with an id derived from th
   `)
   expect(out).toEqual({
     ok: true,
-    status: { id: 'waiting_on_client', label: 'Waiting on client', color: '#3b82f6', protected: false, order: 5 },
+    status: { id: 'waiting_on_client', label: 'Waiting on client', color: '#3b82f6', protected: false, order: 5, stage: 'none' },
   })
 })
 

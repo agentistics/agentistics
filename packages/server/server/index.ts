@@ -1046,6 +1046,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/preferences' && req.method === 'PUT') {
       try {
         let body = await req.json() as Preferences
+        // ENTREGA.GARANTIDA: `delivery.ownerProof` moves only through the owner's fresh proof (vault door), so a
+        // whole-document PUT (the page echoes the document it read) can neither flip the mode nor erase it.
+        delete body.delivery
         if (body.handoffConfig !== undefined) {
           const { normalizeHandoffConfig } = await import('@agentistics/core')
           body.handoffConfig = normalizeHandoffConfig(body.handoffConfig)
@@ -1186,12 +1189,24 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
       return json(filtered)
     }
+    // S0d: the owner-proof mode and the guard files' seal, as one read (the MCP's `agentistics_vault_status` shows it).
+    if (url.pathname === '/api/deliveries/integrity' && req.method === 'GET') {
+      const { deliveryIntegrity } = await import('./delivery/integrity-status')
+      return json(await deliveryIntegrity())
+    }
     if (url.pathname === '/api/deliveries' || url.pathname.startsWith('/api/deliveries/')) {
-      const [{ deliveryRequest }, { deliveryService }, { verifySessionIdentity }] = await Promise.all([
+      const [{ deliveryRequest }, { deliveryService }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
         import('./delivery/web'), import('./delivery/host'), import('./sessions/session-identity'),
+        import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
       ])
       const body = req.method === 'POST' ? await req.json().catch(() => ({})) as Record<string, unknown> : {}
-      const out = await deliveryRequest(req.method, url.pathname, body, { service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token) }, req.signal)
+      const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+      const out = await deliveryRequest(req.method, url.pathname, body, {
+        service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token),
+        mode: readOwnerProofMode, browser,
+        // The vault's session for the page is the constant `http:local` (vault/http.ts) — the same one the proof was minted under.
+        consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+      }, req.signal)
       return json(out.body, out.status)
     }
 
@@ -2174,6 +2189,21 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(out, groupStatus(out))
     }
 
+    // ENTREGA.GARANTIDA §2.3: a task WRITE may not claim the engine or the owner in `actor`, nor a session it cannot prove.
+    // S0d.3: EVERY write, whatever its content-type — the handlers parse JSON regardless of the header.
+    if ((url.pathname === '/api/tasks' || url.pathname.startsWith('/api/tasks/')) && req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+      const [{ screenTaskRequest }, { taskRequestDeps }, { browserFactsOf }] = await Promise.all([
+        import('./delivery/principal-http'), import('./delivery/request-deps'), import('./delivery/browser-facts'),
+      ])
+      // r3 B1: the owner's own UI sends `actor: 'you'` (Rename) — legacy keeps it, required asks the owner's proof. The deps
+      // (and the mode) come from `request-deps.ts`, the factory the HTTP test drives.
+      const principalDeps = await taskRequestDeps(() => browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC }))
+      const screened = await screenTaskRequest(
+        { path: url.pathname, method: req.method, contentType: req.headers.get('content-type'), text: () => req.clone().text() },
+        principalDeps.verify, principalDeps,
+      )
+      if (screened) return json(screened.body, screened.status)
+    }
     if (url.pathname === '/api/tasks' && req.method === 'GET') {
       const { listTasks } = await import('./sessions/task-web')
       const { listOptionsOf } = await import('./sessions/task-list-window')
@@ -2257,13 +2287,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
     if (url.pathname.startsWith('/api/tasks/statuses/') && req.method === 'POST') {
       const id = decodeURIComponent(url.pathname.slice('/api/tasks/statuses/'.length))
-      const body = await req.json().catch(() => ({})) as { label?: string; color?: string }
+      const body = await req.json().catch(() => ({})) as { label?: string; color?: string; stage?: string }
       const { editStatus } = await import('./sessions/task-web')
       const out = await editStatus(id, {
         ...(typeof body.label === 'string' ? { label: body.label } : {}),
         ...(typeof body.color === 'string' ? { color: body.color } : {}),
+        ...(typeof body.stage === 'string' ? { stage: body.stage } : {}),
       })
-      return json(out, out.ok ? 200 : (out.message === 'no_such_status' ? 404 : 400))
+      // `status_stage_in_use` is 422 like `in_use`: the request is understood, the status is just not free to change.
+      return json(out, out.ok ? 200 : (out.message === 'no_such_status' ? 404 : out.message === 'status_stage_in_use' ? 422 : 400))
     }
     if (url.pathname.startsWith('/api/tasks/statuses/') && req.method === 'DELETE') {
       const id = decodeURIComponent(url.pathname.slice('/api/tasks/statuses/'.length))
@@ -2323,6 +2355,30 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await registerComposerTask({ ...body, action: 'prompt' }, url.searchParams.get('lang') === 'pt' ? 'pt' : 'en')
       return json(out, out.ok ? 200 : 422)
     }
+    // ENTREGA.GARANTIDA S1c — evidence for a piece of a task: `POST|GET|DELETE /api/tasks/<ref>/evidence`. Matched BEFORE the
+    // generic `<ref>` routes below (or `<ref>/evidence` would resolve as a task reference and 404). Authenticated like every
+    // /api/tasks route; WHO asks is the S0d principal (proven session → owner grant → legacy browser) — no proof is
+    // `unattributed`, never the owner. A failure is a structured refusal or a `safeError`, never Bun's error page (QA R1).
+    const evidenceRoute = /^\/api\/tasks\/([^/]+)\/evidence$/.exec(url.pathname)
+    if (evidenceRoute && (req.method === 'POST' || req.method === 'GET' || req.method === 'DELETE')) {
+      try {
+        const [{ evidenceRequest }, { verifySessionIdentity }, { deliveryService }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
+          import('./delivery/evidence-web'), import('./sessions/session-identity'), import('./delivery/host'),
+          import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
+        ])
+        const body = req.method === 'GET' ? {} : await req.json().catch(() => ({})) as Record<string, unknown>
+        const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+        const out = await evidenceRequest(req.method, decodeURIComponent(evidenceRoute[1]!), Object.fromEntries(url.searchParams), body, {
+          service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token), mode: readOwnerProofMode, browser,
+          consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+        })
+        return json(out.body, out.status)
+      } catch (err) {
+        const safe = safeError(err, { verbose: false })
+        console.error(safe.logLine)
+        return json(safe.body, 500)
+      }
+    }
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'GET') {
       const ref = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
       const { showTask } = await import('./sessions/task-web')
@@ -2351,7 +2407,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const fileId = decodeURIComponent(url.pathname.slice('/api/task-files/'.length))
       const mod = await import('./sessions/task-web')
       if (req.method === 'DELETE') {
-        return json({ ok: await mod.removeFile(fileId) }, 200)
+        const { evidenceDeleteRequest } = await import('./delivery/evidence-delete')
+        const result = await evidenceDeleteRequest(() => mod.removeFile(fileId))
+        return json(result.body, result.status)
       }
       const got = await mod.fetchFile(fileId)
       if (!got) return json({ error: 'no_such_file' }, 404)
@@ -2390,7 +2448,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'DELETE') {
       const ref = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
       const { deleteTask } = await import('./sessions/task-web')
-      return json({ ok: await deleteTask(ref) })
+      const { evidenceDeleteRequest } = await import('./delivery/evidence-delete')
+      const result = await evidenceDeleteRequest(() => deleteTask(ref))
+      return json(result.body, result.status)
     }
 
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'POST') {
@@ -2403,24 +2463,73 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         || verb === 'links' || verb === 'sessions' || verb === 'claim' || verb === 'move' || verb === 'threads'
       const ref = known ? rest.slice(0, slash) : rest
       const mod = await import('./sessions/task-web')
+      // S0d re-QA N3: WHO this request is (grant → proven session → legacy browser → unattributed), for the fields that may
+      // carry a reserved name outside `actor`. Resolved only when such a name is present.
+      const requestPrincipal = async (b: Record<string, unknown>, move: string) => {
+        const [{ resolveRequestPrincipal }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
+          import('./delivery/web'), import('./sessions/session-identity'), import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
+        ])
+        const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+        return resolveRequestPrincipal(b, { pieceKey: ref, move }, {
+          verify: (id, token) => verifySessionIdentity(id, token), mode: readOwnerProofMode, browser,
+          consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+        })
+      }
+      const { reservedNameAs } = await import('./delivery/principal-http')
+      const { isReservedActor } = await import('./delivery/principal')
 
       if (verb === 'files') {
         const form = await req.formData().catch(() => null)
         const file = form?.get('file')
         if (!(file instanceof File)) return json({ error: 'file_required' }, 400)
+        let author: string | undefined
+        if (typeof form?.get('author') === 'string') {
+          const who = isReservedActor(form.get('author')) ? await requestPrincipal({}, 'file:upload') : { ok: true as const, principal: { kind: 'unattributed' as const } }
+          if (!who.ok) return json(who.reply.body, who.reply.status)
+          const named = reservedNameAs(form?.get('author'), who.principal, 'record')
+          if (!named.ok) return json(named.body, named.status)
+          author = named.value
+        }
         const fileId = await mod.attachFile(ref, {
           name: file.name,
           bytes: new Uint8Array(await file.arrayBuffer()),
           ...(typeof form?.get('kind') === 'string' ? { kind: String(form.get('kind')) } : {}),
-          ...(typeof form?.get('author') === 'string' ? { author: String(form.get('author')) } : {}),
+          ...(author !== undefined ? { author } : {}),
         })
         return json({ ok: fileId !== null, id: fileId }, fileId !== null ? 200 : 400)
       }
 
       const body = await req.json().catch(() => ({})) as Record<string, unknown>
+      // S0d.6 (QA F6): a write that SPEAKS AS THE OWNER (an owner comment created/edited/removed, a thread sent "as the
+      // person") needs the owner principal — the same resolution as `/api/deliveries` (grant → session → legacy browser).
+      const ownerGate = async (pieceKey: string, move: string) => {
+        const [{ ownerCommentGate }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
+          import('./delivery/web'), import('./sessions/session-identity'), import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
+        ])
+        const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+        return ownerCommentGate(body, { pieceKey, move }, {
+          verify: (id, token) => verifySessionIdentity(id, token), mode: readOwnerProofMode, browser,
+          consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+        })
+      }
+      // QA eg-integ W3: the free-text author of a comment / thread. A reserved name in it ("owner", "you", "dono") is the real
+      // principal when owner proof is REQUIRED (`keep` = the owner gate already ran for this request); legacy keeps the text.
+      const principalDepsOf = async () => {
+        const [{ taskRequestDeps }, { browserFactsOf }] = await Promise.all([import('./delivery/request-deps'), import('./delivery/browser-facts')])
+        return taskRequestDeps(() => browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC }))
+      }
+      const authorField = async (raw: unknown, move: string, known?: 'keep' | { kind: 'session'; id: string; via: 'token' }) => {
+        // legacy (and `keep`) never touch the principal machinery: the deps are built only when a reserved name needs them.
+        const { taskAuthorField } = await import('./delivery/request-deps')
+        return taskAuthorField(raw, move, ref, known, body, principalDepsOf)
+      }
       if (verb === 'comments') {
         // `id` present means an EDIT or a DELETE of that comment; absent means a new one.
         if (typeof body.id === 'string') {
+          if (await mod.commentRole(body.id) === 'owner') {
+            const denied = await ownerGate(body.id, body.remove === true ? 'comment:remove' : 'comment:edit')
+            if (denied) return json(denied.body, denied.status)
+          }
           const ok = body.remove === true
             ? await mod.removeComment(body.id)
             : await mod.editComment(body.id, String(body.body ?? ''))
@@ -2435,10 +2544,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         const claimed = body.session as { id?: unknown; token?: unknown } | undefined
         const session = claimed ? await verifySessionIdentity(claimed.id, claimed.token) : null
+        if (!session && body.owner === true) {
+          const denied = await ownerGate(ref, 'comment:create')
+          if (denied) return json(denied.body, denied.status)
+        }
+        const commentAuthor = await authorField(body.author ?? 'unknown', 'comment:create',
+          session ? { kind: 'session', id: session, via: 'token' } : body.owner === true ? 'keep' : undefined)
+        if (!commentAuthor.ok) return json(commentAuthor.reply.body, commentAuthor.reply.status)
         const nt = body.newThread as { title?: unknown; kind?: unknown } | undefined
         const { isCommentKind } = await import('@agentistics/core')
         const res = await mod.addComment(ref, {
-          author: String(body.author ?? 'unknown'),
+          author: commentAuthor.value,
           body: String(body.body ?? ''),
           ...(typeof body.subtaskId === 'string' && body.subtaskId ? { subtaskId: body.subtaskId } : {}),
           ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
@@ -2463,8 +2579,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const threadId = typeof body.threadId === 'string' ? body.threadId : ''
         if (action === 'open') {
           const kind = body.kind === 'handback' || body.kind === 'block' || body.kind === 'topic' ? body.kind : undefined
+          // r3 W3a: a proven session that opens a thread is recorded as ITSELF. W3b: the owner's web UI sends `owner: true`
+          // (like an owner comment) — in REQUIRED mode that asks the owner's proof (the web repeats with the grant) and the
+          // opener keeps the owner's name; legacy is untouched (no gate, the typed name).
+          const { threadOpenKnown } = await import('./delivery/request-deps')
+          const opened = await threadOpenKnown(body, ref, (pieceKey, move) => ownerGate(pieceKey, move))
+          if (opened.denied) return json(opened.denied.body, opened.denied.status)
+          const openKnown = opened.known
+          const threadAuthor = await authorField(body.author ?? 'owner', 'thread:open', openKnown)
+          if (!threadAuthor.ok) return json(threadAuthor.reply.body, threadAuthor.reply.status)
           const res = await th.openThread(ref, {
-            title: String(body.title ?? ''), openedBy: String(body.author ?? 'owner'),
+            title: String(body.title ?? ''), openedBy: threadAuthor.value,
             ...(kind ? { kind } : {}),
             ...(typeof body.subtaskId === 'string' && body.subtaskId ? { subtaskId: body.subtaskId } : {}),
           })
@@ -2472,13 +2597,21 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           return json({ ok: false, reason: res.reason, message: res.message }, res.reason === 'no_such_task' ? 404 : 422)
         }
         if (action === 'send') {
+          // The send records an owner-role comment (`task-threads.ts`): only the owner principal may speak as the person.
+          // A request carrying a session is refused below (`session_fanout`) whatever this answers.
+          if (body.session === undefined) {
+            const denied = await ownerGate(ref, 'thread:send')
+            if (denied) return json(denied.body, denied.status)
+          }
           const { fleetLang } = await import('./sessions/fleet-web')
           const { sanitizeCommentAttachments } = await import('@agentistics/core')
           const { resolveAttachmentRead } = await import('./sessions/attachment-web')
           const attachments = sanitizeCommentAttachments(body.attachments, resolveAttachmentRead)
           const { isCommentKind } = await import('@agentistics/core')
+          const sendAuthor = await authorField(body.author ?? 'owner', 'thread:send', 'keep') // the owner gate above already ran
+          if (!sendAuthor.ok) return json(sendAuthor.reply.body, sendAuthor.reply.status)
           const res = await th.sendFromThread(ref, threadId, {
-            body: String(body.body ?? ''), author: String(body.author ?? 'owner'),
+            body: String(body.body ?? ''), author: sendAuthor.value,
             ...(isCommentKind(body.kind) ? { kind: body.kind } : {}),
             ...(attachments.length ? { attachments } : {}),
             fromSession: body.session !== undefined,
@@ -2637,15 +2770,20 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       if (verb === 'claim') {
         // `release: true` gives it back; anything else takes it. One verb, because a caller holding
         // a task reference thinks in terms of "mine / not mine", not two endpoints.
+        // S0d re-QA N3: `by` may not CLAIM the owner or the engine — it is the real principal or refused.
+        const who = isReservedActor(body.by) ? await requestPrincipal(body, 'claim') : { ok: true as const, principal: { kind: 'unattributed' as const } }
+        if (!who.ok) return json(who.reply.body, who.reply.status)
+        const holder = reservedNameAs(body.by, who.principal, 'refuse')
+        if (!holder.ok) return json(holder.body, holder.status)
         if (body.release === true) {
           const out = await mod.releaseTask({
-            ref, by: String(body.by ?? ''), ...(body.force === true ? { force: true } : {}),
+            ref, by: holder.value, ...(body.force === true ? { force: true } : {}),
           })
           return json(out, out.ok ? 200 : 409)
         }
         const out = await mod.claimTask({
           ref,
-          by: String(body.by ?? ''),
+          by: holder.value,
           ...(typeof body.leaseMs === 'number' ? { leaseMs: body.leaseMs } : {}),
           ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
           ...(typeof body.note === 'string' ? { note: body.note } : {}),

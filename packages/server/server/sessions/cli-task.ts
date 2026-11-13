@@ -114,7 +114,13 @@ function attemptBlock(v: AttemptView): string[] {
 }
 
 async function runMark(ref: string, to: TaskStatus, json: boolean): Promise<number> {
-  const out = await markTask(ref, to)
+  // ENTREGA.GARANTIDA §2.3: the move is recorded against the principal this process PROVES (a session by its process
+  // tree, else `unattributed`) — never the old implicit "you". The CLI gets the owner only through `--owner` on a
+  // verb that needs it (`agentop flow approve`), never here.
+  const { resolveCliPrincipal, realCliAuth } = await import('../delivery/cli-principal')
+  const { actorOf } = await import('../delivery/principal')
+  const who = await resolveCliPrincipal(process.env, false, { pieceKey: ref, move: `mark:${to}` }, await realCliAuth())
+  const out = await markTask(ref, to, actorOf(who.principal))
   if (!out.ok) {
     // `unknown_status` is new: the status vocabulary is an editable list now
     // (`@agentistics/core`'s `taskStatus.ts`), and `abandoned` in particular is no longer seeded by
@@ -156,6 +162,8 @@ function printHelp(): void {
   agentop task show <id|name>  one task, its attempts side by side
   agentop task deliver <ref>   mark it done, and attach the git evidence
   agentop task abandon <ref>   mark it given up on (no evidence attached)
+  agentop task evidence add|ls|rm --subtask S …   the proof a piece needs before review (see: agentop task evidence help)
+  agentop evidence capture <url> [--out f]            capture an API response in the shape api-capture evidence accepts
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
                                the pre-dispatch: stage the session a subtask starts with (Na fila)
 
@@ -167,6 +175,8 @@ A task is started by filing sessions under one:
 
 export async function runTask(argv: string[]): Promise<number> {
   // FLUXO.ENTREGA-DSL P4: the pre-dispatch (staged session) of a subtask.
+  // ENTREGA.GARANTIDA S1c: the evidence a piece needs before review (`add|ls|rm`).
+  if (argv[0] === 'evidence') return (await import('../delivery/cli')).runDeliveryCli(['task-evidence', ...argv.slice(1)])
   if (argv[0] === 'stage') return (await import('../delivery/cli')).runDeliveryCli(['task-stage', ...argv.slice(1)])
   const cmd: TaskCommand = parseTaskArgs(argv)
   switch (cmd.kind) {

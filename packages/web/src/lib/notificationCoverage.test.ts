@@ -25,7 +25,8 @@ const PLAN_CODES = new Set([
   'gate_failed', 'gate_refused',
 ])
 
-const FIXTURES = new Set(['a', 'b', 'c', 'x', 'custom', 'ambiguous', 'missing_field', 'some.new_code_nobody_scoped'])
+// 'owner_proof_required' / 'reserved_actor' / 'so_o_dono' are HTTP refusal codes of the request principal (delivery/principal.ts), not notifications.
+const FIXTURES = new Set(['a', 'b', 'c', 'x', 'custom', 'ambiguous', 'missing_field', 'some.new_code_nobody_scoped', 'owner_proof_required', 'reserved_actor', 'so_o_dono'])
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -64,6 +65,30 @@ describe('notification coverage', () => {
     }
   })
 
+  // QA r2 F6: the delivery guard's refusals are returned by helpers (`fail(422, 'code', …)`, `bad('code', …)`) and typed in unions,
+  // forms the `code: '…'` scanner above cannot see. They are enumerated here AND scanned out of the guard's own modules.
+  const DELIVERY_REFUSALS = [
+    'classification_required', 'uncommitted_changes', 'evidence_required', 'evidence_stale', 'evidence_invalid', 'evidence_reused',
+    'declaration_invalid', 'declaration_unclassifiable', 'declaration_repo_unresolved', 'declaration_commit_missing', 'declaration_unpushed',
+    'classify_unavailable', 'classify_leader_only',
+    // S1c: the evidence doors
+    'evidence_too_large', 'evidence_forbidden', 'evidence_in_use', 'no_such_evidence', 'evidence_store_failed', 'evidence_id_required', 'wrong_task',
+  ]
+  it('every delivery-guard refusal has EN and PT text, whatever syntax emits it', () => {
+    const missing = DELIVERY_REFUSALS.filter(c => !NOTIFICATION_TEXT[c]?.en?.title || !NOTIFICATION_TEXT[c]?.pt?.title || !NOTIFICATION_TEXT[c]?.en?.message || !NOTIFICATION_TEXT[c]?.pt?.message)
+    expect(missing).toEqual([])
+  })
+  it('...and every refusal literal in the guard\'s modules is in that list (a new code cannot be added silently)', () => {
+    const dir = join(SERVER, 'delivery')
+    const found = new Set<string>()
+    for (const name of readdirSync(dir)) {
+      if (!/^(classify|evidence)[a-z-]*\.ts$/.test(name) || name.endsWith('.test.ts') || name.endsWith('.testing.ts')) continue
+      const src = readFileSync(join(dir, name), 'utf8')
+      for (const m of src.matchAll(/'((?:classification|declaration|evidence|classify)_[a-z_]+|uncommitted_changes)'/g)) found.add(m[1]!)
+    }
+    expect([...found].filter(c => !DELIVERY_REFUSALS.includes(c) && !NOTIFICATION_TEXT[c])).toEqual([])
+  })
+
   it('every code the server emits has EN and PT text', () => {
     const missing: string[] = []
     for (const code of [...emitted()].sort()) {
@@ -89,6 +114,19 @@ describe('notification coverage', () => {
     )
     expect(out.title).toContain('something.nobody.mapped')
     expect(out.title.trim()).not.toBe('')
+  })
+})
+
+describe('ENTREGA.GARANTIDA integration (QA S1c r2 R7)', () => {
+  // `guard_busy` is raised as `readonly code = 'guard_busy'` (a class field), which the emitter grep above does not read.
+  it('guard_busy and the delete-door evidence codes have text in both languages', () => {
+    for (const code of ['guard_busy', 'evidence_in_use', 'evidence_stale']) {
+      const t = NOTIFICATION_TEXT[code]
+      expect(t?.en?.message, code).toBeTruthy(); expect(t?.pt?.message, code).toBeTruthy()
+    }
+    // evidence_in_use is also the answer when the index cannot be read or an authorization is pending — the PT says so too.
+    expect(NOTIFICATION_TEXT.evidence_in_use!.pt.message).toContain('não pôde ser lido')
+    expect(NOTIFICATION_TEXT.evidence_stale!.pt.message).toContain('mudou durante o envio')
   })
 })
 

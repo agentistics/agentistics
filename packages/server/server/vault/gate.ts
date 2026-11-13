@@ -76,8 +76,11 @@ export type VaultAction =
   | 'set-auth-policy'
   // VAULT.V4: confirm each use of a sensitive secret. Same row as the auto-lock: a setting, code once, 5-min read grant.
   | 'set-confirm-each-use'
+  // ENTREGA.GARANTIDA §2.3.1: the owner's fresh proof for a delivery move. Decided ONLY by `requireDeliveryOwner`;
+  // the row exists so the Record compiles and the vault screen can draw it. Never in ACTION_KIND_OF / REMOTE_ROWS.
+  | 'delivery-owner'
 
-export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | null }
+export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | 'delivery' | null }
 
 /** §2.4, exactly. A `Record` so a new action does not compile until its row is chosen. */
 export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
@@ -140,6 +143,8 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   // Changing what the vault asks is itself a security setting: by default code AND gesture, fresh — and,
   // once chosen, whatever the 'settings' kind says (never nothing: it is critical).
   'set-auth-policy': { code: true, gesture: true, grant: null },
+  // Dedicated gate, never generic: a fresh gesture/password proof against the open vault, every time.
+  'delivery-owner': { code: false, gesture: true, grant: null },
 }
 
 /**
@@ -270,8 +275,9 @@ export function mintGrant(session: string, cls: 'read', nowMs = _now()): string 
   return `${payload}.${createHmac('sha256', _grantKey).update(`${GRANT_DOMAIN}.${payload}`).digest('hex')}`
 }
 
-export function grantValid(token: string | null | undefined, session: string, cls: 'read', nowMs = _now()): boolean {
-  if (!token) return false
+export function grantValid(token: string | null | undefined, session: string, cls: 'read' | 'delivery', nowMs = _now()): boolean {
+  // A `delivery` grant is single-use and scoped: it is spent ONLY by `consumeDeliveryGrant`, never "valid" here.
+  if (!token || cls !== 'read') return false
   const dot = token.lastIndexOf('.')
   if (dot === -1) return false
   const payload = token.slice(0, dot)
@@ -438,6 +444,8 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
   if (!VAULT_ACTION_ROWS[action]) return refused('bad-request', 'unknown vault action')
   let row = rowFor(action, ctx)
   if (action === 'unlock') return refused('bad-request', 'unlock is the two-phase flow (completeUnlock)')
+  // The generic tail passes any row that is not a no-proof one; this one must never ride it (§2.3.1 item 1).
+  if (action === 'delivery-owner') return refused('bad-request', 'use requireDeliveryOwner')
   if (action === 'personal-grant-open' && !row.code && !row.gesture) {
     // No proof — but the vault must BE open (a locked one is the composer's one inline unlock, not a grant).
     if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
@@ -476,11 +484,11 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
   // so a 'read' grant still stands for it within five minutes. A row that asked the gesture keeps asking
   // it FRESH (a grant never stood for a gesture, and still does not).
   if (row.code && !row.gesture && hasPresence(o.vault)) {
-    if (!(row.grant && grantValid(ctx.grant, ctx.session, row.grant))) {
+    if (!(row.grant === 'read' && grantValid(ctx.grant, ctx.session, 'read'))) {
       const g = await gestureFor(action, ctx, o)
       if (!g.ok) return g
       noteVaultActivity()
-      return row.grant ? { ok: true, grant: mintGrant(ctx.session, row.grant) } : { ok: true }
+      return row.grant === 'read' ? { ok: true, grant: mintGrant(ctx.session, 'read') } : { ok: true }
     }
   }
   if (row.gesture && hasPresence(o.vault)) {
@@ -629,6 +637,105 @@ async function gestureFor(action: VaultAction, ctx: GateContext, o: { dek: Uint8
   // an empty desk: it is done at the computer (or rides the 'read' grant a phone's unlock already holds).
   if (!ctx.loopback && !fromSocket(ctx) && !(currentVaultPassword() !== undefined && o.vault.wrappers.some(w => w.type === 'password'))) return phoneGestureRefusal()
   return proveGesture(o)
+}
+
+// ── the owner's proof for a delivery move (ENTREGA.GARANTIDA §2.3.1) ─────────────────────────────
+
+/** A `delivery` grant: scoped to ONE piece + move, bound to the browser session on loopback, ≤ 5 min, single-use. */
+export interface DeliveryScope { pieceKey: string; move: string }
+const _liveDeliveryGrants = new Map<string, number>() // nonce → expiry (ms)
+
+function scopeTag(s: DeliveryScope): string { return createHash('sha256').update(`${s.pieceKey}\u0000${s.move}`).digest('hex').slice(0, 32) }
+/** What the audit log and the REST principal carry instead of the token: a hash, never the grant itself. */
+export function deliveryGrantHash(token: string): string { return createHash('sha256').update(token).digest('hex').slice(0, 16) }
+
+function mintDeliveryGrant(session: string, scope: DeliveryScope, nowMs = _now()): string {
+  const nonce = randomBytes(12).toString('hex')
+  const exp = nowMs + GRANT_TTL_MS
+  for (const [n, e] of _liveDeliveryGrants) if (e <= nowMs) _liveDeliveryGrants.delete(n)
+  _liveDeliveryGrants.set(nonce, exp)
+  const payload = `${exp}.delivery.${sessionTag(session)}.${scopeTag(scope)}.${nonce}`
+  return `${payload}.${createHmac('sha256', _grantKey).update(`${GRANT_DOMAIN}.${payload}`).digest('hex')}`
+}
+
+export type DeliveryGrantUse = { ok: true; grantId: string } | { ok: false; code: 'grant-invalid' | 'grant-scope' | 'owner-proof-local-only' }
+
+/**
+ * Spend a `delivery` grant for ONE move. Single-use: a success deletes it. A grant minted for another piece or
+ * move is `grant-scope` and is NOT spent (it was not used); an expired, forged, unknown, other-session or
+ * already-spent one is `grant-invalid`. A `read` grant never reaches here (its class differs) and this one never stands for a `read`.
+ */
+export function consumeDeliveryGrant(token: string | null | undefined, ctx: { session: string; loopback?: boolean }, scope: DeliveryScope, nowMs = _now()): DeliveryGrantUse {
+  if (!ctx.loopback && !fromSocket(ctx)) return { ok: false, code: 'owner-proof-local-only' }
+  if (!token) return { ok: false, code: 'grant-invalid' }
+  const dot = token.lastIndexOf('.')
+  if (dot === -1) return { ok: false, code: 'grant-invalid' }
+  const payload = token.slice(0, dot)
+  const mac = Buffer.from(token.slice(dot + 1))
+  const want = Buffer.from(createHmac('sha256', _grantKey).update(`${GRANT_DOMAIN}.${payload}`).digest('hex'))
+  if (mac.length !== want.length || !timingSafeEqual(mac, want)) return { ok: false, code: 'grant-invalid' }
+  const [exp, cls, stag, ctag, nonce] = payload.split('.')
+  if (cls !== 'delivery' || stag !== sessionTag(ctx.session) || !nonce || Number(exp) <= nowMs || (_liveDeliveryGrants.get(nonce) ?? 0) <= nowMs) return { ok: false, code: 'grant-invalid' }
+  if (ctag !== scopeTag(scope)) return { ok: false, code: 'grant-scope' }
+  _liveDeliveryGrants.delete(nonce)
+  return { ok: true, grantId: deliveryGrantHash(token) }
+}
+
+function ownerProofUnavailable(): Refusal {
+  return refused('owner-proof-unavailable', vaultLang() === 'pt'
+    ? 'Este cofre só tem proteção silenciosa (qualquer programa seu poderia pedir). Adicione uma senha ou o Windows Hello / Touch ID ao cofre para provar que é você.'
+    : 'This vault has silent protection only (any program of yours could ask it). Add a password or Windows Hello / Touch ID to the vault to prove it is you.')
+}
+function ownerProofLocalOnly(): Refusal {
+  return refused('owner-proof-local-only', vaultLang() === 'pt'
+    ? 'Esta confirmação só pode ser feita neste computador.'
+    : 'This confirmation can only be given on this computer.')
+}
+
+/**
+ * THE owner's proof for a delivery move. Always a FRESH `proveGesture` against the open vault's DEK (the
+ * typed vault password first, else the gesture of the vault's own presence wrapper) — "the vault is open" is
+ * never sufficient, and nothing earlier (`fresh` token, `read` grant, policy `none`) stands for it. A vault
+ * with silent wrappers only has no human to ask: `owner-proof-unavailable`. Off this computer: `owner-proof-local-only`.
+ * Success mints a single-use `delivery` grant scoped to `scope`.
+ */
+export async function requireDeliveryOwner(ctx: GateContext, scope: DeliveryScope): Promise<GateResult> {
+  if (!ctx.loopback && !fromSocket(ctx)) return ownerProofLocalOnly()
+  if (!scope.pieceKey || !scope.move) return refused('bad-request', 'a delivery proof names the piece and the move')
+  if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
+  const state = await loadState()
+  if (state.frozen) return refused('stepup-frozen', sentence('stepup-frozen'))
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  if (!o) return refused('locked', sentence('locked'))
+  if (!hasPresence(o.vault)) return ownerProofUnavailable()
+  const g = await proveGesture(o)
+  if (!g.ok) return g
+  noteVaultActivity()
+  const grant = mintDeliveryGrant(ctx.session, scope)
+  vaultAudit({ type: 'delivery.owner-proof', purpose: deliveryGrantHash(grant), name: `${scope.pieceKey}|${scope.move}`.slice(0, 200) })
+  return { ok: true, grant }
+}
+
+/**
+ * Switch `delivery.ownerProof`. Owner-only in BOTH directions: a fresh vault proof (so a worker cannot flip it).
+ * `required` is offered only where the vault has a human wrapper (`owner-proof-unavailable` otherwise — the proof
+ * itself refuses a silent-only vault). The proof's grant is spent here; nothing leaks to the caller.
+ */
+export async function setOwnerProofMode(mode: unknown, ctx: GateContext): Promise<GateResult> {
+  if (mode !== 'legacy' && mode !== 'required') return refused('bad-request', 'mode must be legacy or required')
+  const r = await requireDeliveryOwner(ctx, { pieceKey: '*', move: `mode:${mode}` })
+  if (!r.ok) return r
+  const { writeOwnerProofMode } = await import('../delivery/owner-mode')
+  await writeOwnerProofMode(mode)
+  return { ok: true }
+}
+
+/** True when this vault can give an owner proof at all (a human wrapper). `false` for silent-only; `null` when the vault is not open to ask. */
+export async function ownerProofAvailable(): Promise<boolean | null> {
+  const s = await vaultStatus()
+  if (s.state === 'uninitialized') return false
+  const o = await ensureVaultOpen({ create: false, migrate: false })
+  return o ? hasPresence(o.vault) : null
 }
 
 /** HTTP `POST /api/vault/stepup`: a code in, a 'read' grant out (5 min, this session only). */
@@ -1580,6 +1687,7 @@ export function __resetGateForTests(now?: () => number): void {
   _mem = { ...FRESH_STEPUP }
   _now = now ?? (() => Date.now())
   _grantKey = randomBytes(32)
+  _liveDeliveryGrants.clear()
   dropEnrolSeed()
   dropRecovery()
   _flow = null

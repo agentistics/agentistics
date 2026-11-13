@@ -74,6 +74,8 @@ export const AGENT_TOOL_NAMES = [
   // FLUXO.ENTREGA-DSL (2)
   'agentistics_task_phase',
   'agentistics_task_stage',
+  // ENTREGA.GARANTIDA S1c
+  'agentistics_task_evidence',
   // FILA.PRIORIDADE (2)
   'agentistics_task_queue',
   'agentistics_task_queue_answer',
@@ -200,6 +202,10 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
     ...TASKS, risk: 'W', routes: ['POST /api/deliveries/:subtask'],
     reason: 'writes the pre-dispatch (staged session draft) on a subtask and opens its delivery in the queue; nothing starts until stage-run passes the predispatch and vaga gates',
   },
+  agentistics_task_evidence: {
+    ...TASKS, risk: 'W', routes: ['GET /api/tasks/:task/evidence', 'POST /api/tasks/:task/evidence', 'DELETE /api/tasks/:task/evidence'],
+    reason: 'attaches, lists or removes the evidence a piece needs before review; the server validates the bytes, computes the hash and binds it to the verified HEAD (the caller supplies neither); only the piece\'s own session, the task leader or the owner may attach, and evidence a checkpoint relies on cannot be removed',
+  },
   agentistics_task_queue: {
     ...TASKS, risk: 'R', routes: ['GET /api/deliveries/queue/:task'],
     reason: 'reads the delivery queue in leaving order with every fact the Fila tab shows (priority, pre-dispatch, slot verdict, hold, open question, notes); read only',
@@ -258,8 +264,8 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_tag_detail: { ...DATA, risk: 'R', routes: ['GET /api/tags', 'GET /api/tags/:id'], reason: 'reads one tag aggregate (counts and sums only)' },
   // ------------------------------------------------------------------ Vault (COFRE.DESBLOQUEIO)
   agentistics_vault_status: {
-    ...TASKS, risk: 'R', routes: ['GET /api/vault'],
-    reason: 'reads how the vault is protected (state, ways to confirm in use and offered, password rules) through an allowlist; never an item, a key id or a secret',
+    ...TASKS, risk: 'R', routes: ['GET /api/vault', 'GET /api/deliveries/integrity'],
+    reason: 'reads how the vault is protected (state, ways to confirm in use and offered, password rules) through an allowlist, plus the delivery owner-proof mode and whether the guard files carry their seal; never an item, a key id or a secret',
   },
   // ------------------------------------------------------------------ Experimental flows (read-only host operations)
   agentistics_flow_run: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['POST /api/flows/run'], reason: 'runs only the built-in deterministic flow gates; it deletes nothing' },
