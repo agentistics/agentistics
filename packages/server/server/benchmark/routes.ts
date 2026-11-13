@@ -159,7 +159,11 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
   }
   const items = buildMetricItems(inputs, s.nowMs)
   const observedSessions = [...bySubtask.values()].flat()
-  return buildObserved({ items, sessions: observedSessions, historyKnown, historyComplete, requestStart, abandoned, filters: observedFilters })
+  const iso = (v: number | undefined) => (v !== undefined && Number.isFinite(v) ? new Date(v).toISOString() : null)
+  return buildObserved({
+    items, sessions: observedSessions, historyKnown, historyComplete, requestStart, abandoned, filters: observedFilters,
+    period: { from: iso(observedFilters?.fromMs), to: iso(observedFilters?.toMs) },
+  })
 }
 
 let cache: { at: number; sources: Promise<BenchmarkSources> } | null = null

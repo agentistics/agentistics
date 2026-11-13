@@ -169,6 +169,22 @@ describe('live read model over a synthetic store', () => {
     expect(f.deliveries).toBe(2)
   })
 
+  test('r4 F19: the answer states the period it was asked for, over the route too', async () => {
+    const fromMs = T0 + 15 * H, toMs = T0 + 40 * H
+    const url = new URL(`http://localhost/api/benchmark/observed?from=${fromMs}&to=${toMs}`)
+    const res = await handleBenchmarkRequest(new Request(url), url, { observed: async f => buildObservedFromSources(sources(), f), experiments: () => [] })
+    const body = await res.json() as Observed
+    expect(body.period).toEqual({ from: iso(fromMs), to: iso(toMs) })
+    const open = new URL('http://localhost/api/benchmark/observed')
+    const all = await (await handleBenchmarkRequest(new Request(open), open, { observed: async f => buildObservedFromSources(sources(), f), experiments: () => [] })).json() as Observed
+    expect(all.period).toEqual({ from: null, to: null })
+  })
+
+  test('r4 F21: the answer says since when the history goes', () => {
+    const o = buildObservedFromSources(sources())
+    expect(o.scope.sinceMs).toBeGreaterThan(0)
+  })
+
   test('over HTTP the same figures are served', async () => {
     const url = new URL('http://localhost/api/benchmark/observed')
     const res = await handleBenchmarkRequest(new Request(url), url, { observed: async f => buildObservedFromSources(sources(), f), experiments: () => [] })

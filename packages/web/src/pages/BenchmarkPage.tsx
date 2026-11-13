@@ -4,7 +4,7 @@ import { FlaskConical, Info, Scale } from 'lucide-react'
 import type { Observed } from '@agentistics/core/benchmark'
 import type { AppContext } from '../lib/app-context'
 import {
-  METRIC_LABEL, METRIC_ORDER, METRIC_PLAIN, SOURCE_LABEL, benchmarkQuery, cardCoverage, cardHeadline, cardSubline, fmtInterval, formulaText, gapText,
+  METRIC_LABEL, METRIC_ORDER, METRIC_PLAIN, SOURCE_LABEL, benchmarkQuery, cardCoverage, cardHeadline, cardSubline, dayLabel, fmtInterval, formulaText, gapText,
   harnessReason, harnessState, intervalMethod, nf, type Lang, type MetricKey, type Money,
 } from '../lib/benchmarkFormat'
 
@@ -38,12 +38,10 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
   const pt = lang === 'pt'
   const L = lang as Lang
   const money: Money = { currency, brlRate }
-  const day = (ms: number) => {
-    const d = new Date(ms), p = (n: number) => String(n).padStart(2, '0')
-    const y = d.getUTCFullYear(), m = p(d.getUTCMonth() + 1), dd = p(d.getUTCDate())
-    return pt ? `${dd}/${m}/${y}` : `${y}-${m}-${dd}`
-  }
-  const periodText = period ? `${pt ? 'Período' : 'Period'}: ${period.fromMs && period.fromMs > 0 ? day(period.fromMs) : (pt ? 'início' : 'start')} – ${period.toMs ? day(period.toMs) : (pt ? 'hoje' : 'today')}. ` : ''
+  const day = (ms: number) => dayLabel(ms, L)
+  const since = observed?.scope.sinceMs
+  const periodText = period ? `${pt ? 'Período' : 'Period'}: ${period.fromMs && period.fromMs > 0 ? day(period.fromMs) : (pt ? 'início' : 'start')} – ${period.toMs ? day(period.toMs) : (pt ? 'hoje' : 'today')}. `
+    : status === 'ready' && observed ? `${pt ? 'Período: todo o histórico' : 'Period: whole history'}${since ? `${pt ? ', desde ' : ', since '}${day(since)}` : ''}. ` : ''
   const basisText = costBasis === 'plan'
     ? (pt ? 'O custo aqui é sempre o equivalente à API (tokens × tabela de preços), não o valor do plano. ' : 'Cost here is always the API-equivalent figure (tokens × price table), not the plan price. ')
     : ''
@@ -62,7 +60,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
       {status === 'error' && <div data-testid="benchmark-error" style={empty}>{pt ? 'Não foi possível ler os dados reais agora. Nenhum número é mostrado no lugar.' : 'The real data could not be read right now. No number is shown in its place.'}</div>}
       {status === 'ready' && observed && <>
         <p data-testid="benchmark-scope" style={{ ...muted, margin: '4px 0 6px' }}>{periodText}{basisText}{scopeLine(observed, L)}{' '}
-          <details style={{ display: 'inline', marginLeft: 6 }}><summary style={{ display: 'inline', cursor: 'pointer' }}>{pt ? 'o que não conta' : 'what does not count'}</summary> {scopeExclusions(observed, L)}</details></p>
+          <details style={{ display: 'inline', marginLeft: 6 }}><summary style={{ display: 'inline', cursor: 'pointer' }}>{pt ? 'o que não conta' : 'what does not count'}</summary> <div style={{ marginTop: 2 }}>{scopeExclusions(observed, L)}</div></details></p>
         <div style={grid}>{METRIC_ORDER.map(k => <Metric key={k} k={k} observed={observed} lang={L} money={money} />)}</div>
         <div style={coverage} data-testid="benchmark-coverage"><strong>{pt ? 'Cobertura por harness' : 'Coverage by harness'}</strong>
           {Object.entries(observed.coverage).map(([h, c]) => {

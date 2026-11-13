@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import type { Covered, Gap, Interval, Observed } from '@agentistics/core/benchmark'
 import { BenchmarkContent } from './BenchmarkPage'
-import { benchmarkQuery, cardHeadline, fmtValue, harnessState } from '../lib/benchmarkFormat'
+import { benchmarkQuery, cardHeadline, dayLabel, formulaText, fmtValue, harnessState, METRIC_ORDER } from '../lib/benchmarkFormat'
 
 const H = 3_600_000
 const SOURCES = ['tasks.json (subtasks)', 'deliveries.json (phase history)', 'managed-sessions.json (sessions)', 'sessions store (tokens)']
@@ -155,11 +155,11 @@ describe('r3: language, period and currency of the page', () => {
     expect(render('pt', observed, { currency: 'USD' })).toContain('US$ 12,35')
   })
 
-  test('F15: the chosen period is stated on the page; an unbounded one says nothing', () => {
-    const range = { fromMs: Date.parse('2026-11-06T00:00:00Z'), toMs: Date.parse('2026-11-13T00:00:00Z') }
+  test('F15: the chosen period is stated on the page; an unbounded one says whole history', () => {
+    const range = { fromMs: new Date(2026, 10, 6, 12).getTime(), toMs: new Date(2026, 10, 13, 12).getTime() }
     expect(render('pt', observed, { period: range })).toContain('06/11/2026')
     expect(render('en', observed, { period: range })).toContain('2026-11-06')
-    expect(pt).not.toContain('Período')
+    expect(pt).toContain('Período: todo o histórico')
   })
 
   test('F15: the request carries the period; "all" carries none', () => {
@@ -197,5 +197,51 @@ describe('benchmarkFormat', () => {
     expect(harnessState(observed.coverage.claude!)).toBe('measured')
     expect(harnessState(observed.coverage.codex!)).toBe('partial')
     expect(harnessState(observed.coverage.kimi!)).toBe('none')
+  })
+})
+
+
+describe('r4: period day, whole history, formulas in pt', () => {
+  test('F20: the day is the LOCAL one — 23:59:59 local of the 13th is the 13th, not the 14th', () => {
+    const prev = process.env.TZ
+    process.env.TZ = 'America/Sao_Paulo'
+    try {
+      const end = new Date(2026, 10, 13, 23, 59, 59, 999).getTime()   // 13/11 local = 14/11 02:59 UTC
+      expect(new Date(end).getUTCDate()).toBe(14)
+      expect(dayLabel(end, 'pt')).toBe('13/11/2026')
+      expect(dayLabel(end, 'en')).toBe('2026-11-13')
+      const html = render('pt', observed, { period: { fromMs: new Date(2026, 10, 7).getTime(), toMs: end } })
+      expect(html).toContain('07/11/2026 – 13/11/2026')
+    } finally { if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev }
+  })
+
+  test('F21: with the whole history the scope line names the first day', () => {
+    const since = new Date(2026, 5, 3, 12).getTime()
+    const o = { ...observed, scope: { ...observed.scope, sinceMs: since } }
+    expect(render('pt', o, { period: undefined })).toContain('todo o histórico, desde 03/06/2026')
+    expect(render('en', o, { period: undefined })).toContain('whole history, since 2026-06-03')
+    expect(render('pt', observed, { period: undefined })).toContain('todo o histórico')
+  })
+
+  test('F7: every one of the nine formulas is Portuguese in pt', () => {
+    const real: Record<string, string> = {
+      coordinationShare: 'a range, never a point: leader cost ÷ total cost (lower end) up to (leader + role-unknown) ÷ total (upper end); withheld when wider than 50 points',
+      qaFirstRoundRejection: 'deliveries sent back by QA at least once ÷ deliveries whose phase history shows QA decided',
+      qaRoundsMedian: 'median of (QA rejections + 1) over deliveries whose phase history shows QA decided',
+      escapedDefectRate: 'published deliveries that a later fix, revert or reopen links back to ÷ published deliveries',
+      wastedCostShare: 'cost of sessions filed under abandoned work ÷ total cost, priced sessions only',
+      costPerDelivery: 'x', wallMedian: 'x', activeMedian: 'x', throughputPerWeek: 'x',
+    }
+    for (const k of METRIC_ORDER) {
+      const t = formulaText(k, real[k]!, 'pt')
+      expect(t).not.toBe(real[k]!)
+      expect(t).not.toMatch(/\b(deliveries|median|cost of|published|sent back|range, never)\b/)
+    }
+    expect(formulaText('escapedDefectRate', 'escape links are not recorded', 'pt')).not.toContain('escape links')
+    expect(formulaText('wastedCostShare', 'which work was abandoned is not recorded', 'pt')).not.toContain('abandoned')
+  })
+
+  test('F7: the open "what does not count" text is a block of its own, not run into the summary', () => {
+    expect(render('pt')).toMatch(/<\/summary> ?<div[^>]*>Tarefas sem/)
   })
 })

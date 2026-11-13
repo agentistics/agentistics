@@ -199,6 +199,7 @@ export function buildObserved(input: ObservedInput): Observed {
     scope: {
       published: published.length, open: items.length - published.length, withPhaseHistory: withHistory.length,
       abandonedWithSessions: new Set(linked.filter(s => abandonedIds.has(s.subtaskId!)).map(s => s.subtaskId)).size,
+      sinceMs: (() => { const t = items.map(i => i.refMs).filter(v => v > 0); return t.length ? Math.min(...t) : null })(),
     },
     metrics: { costPerDelivery, wallMedian, activeMedian, coordinationShare, qaFirstRoundRejection, qaRoundsMedian, escapedDefectRate, wastedCostShare, throughputPerWeek },
     coordinationShareRange,

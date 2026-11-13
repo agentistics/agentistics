@@ -34,6 +34,13 @@ describe('agentistics_benchmark_observed', () => {
     expect(mcp.coverage).toEqual(JSON.parse(JSON.stringify(direct.coverage)))
   })
 
+  test('r4 F19: the tool answer carries the period the route was asked for', async () => {
+    const fromMs = T0, toMs = T0 + 10 * H
+    const url = new URL(`http://localhost/api/benchmark/observed?from=${fromMs}&to=${toMs}`)
+    const http = await (await handleBenchmarkRequest(new Request(url), url, { observed: async f => buildObservedFromSources(store(), f), experiments: () => [] })).json()
+    expect(benchmarkObservedTool(http as never).period).toEqual({ from: iso(fromMs), to: iso(toMs) })
+  })
+
   test('carries no session or subtask id (ids stay behind the guarded route)', () => {
     const out = JSON.stringify(benchmarkObservedTool(buildObservedFromSources(store()) as never))
     expect(out).not.toContain('"missing"')

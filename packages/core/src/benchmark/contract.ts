@@ -196,7 +196,7 @@ export interface Observed {
   /** Real deliveries in scope (abandoned work is not a delivery; its sessions only feed wasted cost). */
   deliveries: number
   /** What `deliveries` is made of, so no denominator has to be guessed. */
-  scope: { published: number; open: number; withPhaseHistory: number; abandonedWithSessions: number }
+  scope: { published: number; open: number; withPhaseHistory: number; abandonedWithSessions: number; /** Reference time of the oldest delivery in scope (epoch ms); null when there is none. */ sinceMs?: number | null }
   metrics: Record<
     | 'costPerDelivery'
     | 'wallMedian'

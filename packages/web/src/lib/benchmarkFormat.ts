@@ -28,9 +28,26 @@ const FORMULA_PT: Partial<Record<string, string>> = {
   wallMedian: 'mediana do tempo até publicar, nas entregas publicadas: da entrada na fila nas entregas nascidas no fluxo; da criação da subtarefa (o pedido) nas entregas que o fluxo só adotou depois',
   activeMedian: 'mediana do tempo em execução + QA + ajuste + líder + merge + CI, nas entregas publicadas com histórico completo (nascidas no fluxo) e tempo em etapa de trabalho; as adotadas são lacuna nomeada',
   throughputPerWeek: 'entregas publicadas ÷ semanas do período',
+  coordinationShare: 'uma faixa, nunca um ponto: custo dos líderes ÷ custo total (extremo inferior) até (líderes + sessões sem papel registrado) ÷ total (extremo superior); retida quando a faixa passa de 50 pontos',
+  qaFirstRoundRejection: 'entregas devolvidas pela QA ao menos uma vez ÷ entregas cujo histórico de fases mostra a QA decidindo',
+  qaRoundsMedian: 'mediana de (devoluções da QA + 1) nas entregas cujo histórico de fases mostra a QA decidindo',
+  escapedDefectRate: 'entregas publicadas que uma correção, reversão ou reabertura posterior aponta de volta ÷ entregas publicadas',
+  wastedCostShare: 'custo das sessões ligadas a trabalho abandonado ÷ custo total, só sessões com preço',
+}
+/** The server states a different formula when the fact behind a metric is not recorded at all. */
+const FORMULA_PT_BY_TEXT: Record<string, string> = {
+  'escape links are not recorded': 'os vínculos de defeito escapado não são registrados',
+  'which work was abandoned is not recorded': 'não se registra qual trabalho foi abandonado',
 }
 export function formulaText(key: string, formula: string, lang: Lang): string {
-  return lang === 'en' ? formula : FORMULA_PT[key] ?? formula
+  return lang === 'en' ? formula : FORMULA_PT_BY_TEXT[formula] ?? FORMULA_PT[key] ?? formula
+}
+
+/** A timestamp as the reader's LOCAL calendar day (the period the page asks for is local); pt `dd/mm/yyyy`, en ISO. */
+export function dayLabel(ms: number, lang: Lang): string {
+  const d = new Date(ms), p = (n: number) => String(n).padStart(2, '0')
+  const y = d.getFullYear(), m = p(d.getMonth() + 1), dd = p(d.getDate())
+  return lang === 'pt' ? `${dd}/${m}/${y}` : `${y}-${m}-${dd}`
 }
 export type MetricKey = keyof Observed['metrics']
 type Unit = 'usd' | 'duration' | 'percent' | 'rounds' | 'perWeek'
