@@ -6,6 +6,7 @@
  * controlled experiment (`Run[]` → `VerdictResult`, the only place a verdict exists).
  * A figure that could not be measured is `null`, never 0.
  */
+import type { ObservedHistory } from './history'
 
 export type Verdict = 'pays' | 'does_not_pay' | 'tie' | 'insufficient'
 export type Severity = 'P0' | 'P1' | 'P2' | 'P3'
@@ -219,6 +220,8 @@ export interface Observed {
   >
   /** Counts of items whose data is still free text. */
   notStructured: { qaVerdict: number; escapedLink: number }
+  /** Per-piece history (rows by task with subtasks, buckets by sessions per piece, coverage). Added by the route layer, which reads the board. */
+  history?: ObservedHistory
 }
 
 /** One run reduced to what the verdict needs: a cost per accepted delivery sample. */

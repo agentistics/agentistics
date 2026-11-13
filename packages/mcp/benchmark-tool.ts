@@ -9,6 +9,7 @@ interface Observed {
   roleUnknownSessions: number;
   coverage: unknown;
   notStructured: unknown;
+  history?: { tasks: unknown[]; [k: string]: unknown };
 }
 
 /** `from` / `to` as the route takes them: epoch milliseconds, or an ISO date. Anything else is dropped, never guessed. */
@@ -24,6 +25,20 @@ export function benchmarkQueryFromArgs(args: { from?: unknown; to?: unknown } | 
   if (to !== null) q.set("to", String(to));
   const s = q.toString();
   return s ? `?${s}` : "";
+}
+
+/** Rows kept in the tool answer (most expensive first, as the page orders them); `tasksTotal` says how many exist. */
+const TOOL_TASK_ROWS = 100;
+
+/** The page's per-piece history, same numbers, with the ids dropped (they identify work) and the task list capped. */
+function historyForTool(h: NonNullable<Observed["history"]>) {
+  const noId = (v: unknown): unknown => Array.isArray(v) ? v.map(noId)
+    : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== "id").map(([k, x]) => [k, noId(x)])) : v;
+  return {
+    note: "Pieces are subtasks done or in review with a linked session; size is by lines changed (<100 S, <500 M, else L); cost is tokens × price per session, never an allocation, and only priced sessions count (costPartial = some sessions have no price); null = not measured. Observed and biased: it says what happened, not that a method pays off.",
+    ...(noId({ ...h, tasks: h.tasks.slice(0, TOOL_TASK_ROWS) }) as object),
+    tasksTotal: h.tasks.length,
+  };
 }
 
 /**
@@ -48,5 +63,6 @@ export function benchmarkObservedTool(body: Observed) {
     roleUnknownSessions: body.roleUnknownSessions,
     coverage: body.coverage,
     notStructured: body.notStructured,
+    ...(body.history ? { history: historyForTool(body.history) } : {}),
   };
 }

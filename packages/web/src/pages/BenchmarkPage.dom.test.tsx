@@ -179,7 +179,7 @@ describe('the Benchmark screen follows the approved D3 layout', () => {
   })
 
   test('hero in the "none" state names what is missing and never draws a score or bar', () => {
-    for (const [lang, word, miss] of [['pt', 'Sem dados ainda', 'Falta rodar um experimento controlado'], ['en', 'No data yet', 'A controlled experiment still has to run']] as const) {
+    for (const [lang, word, miss] of [['pt', 'Não dá para provar ainda', 'Falta rodar um experimento controlado'], ['en', 'Cannot be proven yet', 'A controlled experiment still has to run']] as const) {
       const html = render(lang, observed)
       const hero = html.split('data-testid="benchmark-hero"')[1]!.split('</details>')[0]!
       expect(hero).toContain(word)
@@ -381,5 +381,72 @@ describe('r4: period day, whole history, formulas in pt', () => {
 
   test('F7: the open "what does not count" text is a block of its own, not run into the summary', () => {
     expect(render('pt')).toMatch(/<\/summary> ?<div[^>]*>Tarefas sem/)
+  })
+})
+
+describe('per-piece history from the server fills the blocks with real rows', () => {
+  const sub = (id: string, title: string, o: Record<string, unknown> = {}) => ({ id, title, status: 'done', size: 'M', sessions: 2, costUSD: 4.5, costPartial: false, wallMs: 2 * H, activeMs: null, qaRounds: 1, reworked: false, lines: 200, ...o })
+  const history = {
+    pieces: 3,
+    tasks: [
+      { id: 'T1', title: 'Parser de limites', status: 'done', size: 'L', pieces: 2, sessions: 5, costUSD: 9, costPartial: true, wallMs: 5 * H, activeMs: null, qaRounds: 4, reworkedPieces: 1, lines: 700, subtasks: [sub('a', 'Parser: testes'), sub('b', 'Parser: limites', { costPartial: true, qaRounds: 3, reworked: true })] },
+      { id: 'T2', title: 'Aba do celular', status: 'in_review', size: null, pieces: 1, sessions: 1, costUSD: null, costPartial: false, wallMs: null, activeMs: null, qaRounds: null, reworkedPieces: null, lines: null, subtasks: [sub('c', 'Corte', { costUSD: null, size: null, wallMs: null, qaRounds: null, reworked: null })] },
+    ],
+    buckets: [
+      { label: '1', pieces: 1, costMedianUSD: 1.5, nCost: 1, wallMedianMs: H, nWall: 1, reworkRate: null, nRework: 0 },
+      { label: '2-3', pieces: 2, costMedianUSD: 4.5, nCost: 2, wallMedianMs: 2 * H, nWall: 2, reworkRate: 0.5, nRework: 2 },
+      { label: '4-6', pieces: 0, costMedianUSD: null, nCost: 0, wallMedianMs: null, nWall: 0, reworkRate: null, nRework: 0 },
+      { label: '7+', pieces: 0, costMedianUSD: null, nCost: 0, wallMedianMs: null, nWall: 0, reworkRate: null, nRework: 0 },
+    ],
+    coverage: { pieces: 3, withCost: 2, withWall: 2, withQa: 2, withSize: 2, withActive: 0, pctWithCost: 66.7, harnessesWithoutCost: ['codex'], harnessesPartialCost: [] },
+  }
+  const withHistory = { ...observed, history } as unknown as Observed
+
+  test('Por tarefa lists every task with its measured figures, "—" for the unmeasured, and the cost caveat', () => {
+    const html = render('pt', withHistory, { initialOpenTask: 'T1' })
+    expect(html.match(/data-testid="benchmark-task-row"/g)!.length).toBe(2)
+    expect(html).toContain('Parser de limites')
+    expect(html).toContain('US$ 9*')
+    expect(html).toContain('1/2')
+    const second = html.split('data-task="T2"')[1]!.split('</tr>')[0]!
+    expect(second).toContain('—')
+    expect(second).not.toContain('US$ 0')
+    expect(html.match(/data-testid="benchmark-subtask-row"/g)!.length).toBe(2)
+    expect(html).toContain('Filtrar subtarefa')
+    expect(html).toContain('custo em 2 de 3 peças')
+    expect(html).not.toContain('benchmark-tasks-empty')
+  })
+
+  test('Por número de sessões shows the four buckets with median cost, time and rework rate, each with its n', () => {
+    const html = render('pt', withHistory)
+    const b = html.split('data-testid="benchmark-buckets"')[1]!
+    for (const t of ['1 sessão', '2–3 sessões', '4–6 sessões', '7 ou mais']) expect(b).toContain(t)
+    expect(b).toContain('US$ 4,5')
+    expect(b).toContain('50%')
+    expect(b).toContain('(n=2)')
+  })
+
+  test('the hero states what history shows, with no "paid off X%"', () => {
+    const html = render('pt', withHistory)
+    const hero = html.split('data-testid="benchmark-hero"')[1]!.split('</details>')[0]!
+    expect(hero).toContain('Não dá para provar ainda')
+    expect(hero).toContain('benchmark-facts')
+    expect(hero).toContain('3 peças entregues')
+    expect(hero).toContain('sem custo: codex')
+    expect(hero).not.toMatch(/Compensou \d|Custou \d/)
+    expect(render('en', withHistory)).toContain('3 delivered pieces')
+  })
+})
+
+describe('Retrabalho tile from the observed history', () => {
+  test('states the share of pieces with 2+ QA rounds and the median, flagged as read from labels', () => {
+    const h = { pieces: 2, tasks: [{ id: 'T', title: 'T', status: 'done', size: 'M', pieces: 2, sessions: 4, costUSD: 1, costPartial: false, wallMs: H, activeMs: null, qaRounds: 4, reworkedPieces: 1, lines: 10,
+      subtasks: [{ id: 'a', title: 'a', status: 'done', size: 'M', sessions: 2, costUSD: 1, costPartial: false, wallMs: H, activeMs: null, qaRounds: 1, reworked: false, lines: 5 }, { id: 'b', title: 'b', status: 'done', size: 'M', sessions: 2, costUSD: 1, costPartial: false, wallMs: H, activeMs: null, qaRounds: 3, reworked: true, lines: 5 }] }],
+      buckets: [], coverage: { pieces: 2, withCost: 2, withWall: 2, withQa: 2, withSize: 2, withActive: 0, pctWithCost: 100, harnessesWithoutCost: [], harnessesPartialCost: [] } }
+    const html = render('pt', { ...observed, history: h } as unknown as Observed)
+    const tile = html.split('data-testid="part-rework"')[1]!.split('data-testid="benchmark-tasks"')[0]!
+    expect(tile).toContain('Peças com 2+ rodadas de QA')
+    expect(tile).toContain('50%')
+    expect(tile).toContain('indicativo')
   })
 })

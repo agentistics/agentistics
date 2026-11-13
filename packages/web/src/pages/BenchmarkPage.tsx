@@ -14,6 +14,7 @@ import { BetaTag } from '../components/BetaTag'
 import { Pill } from '../components/Pill'
 import { Bar, BenchStyle, TONE_VAR } from '../components/benchmark/BenchStyle'
 import { BenchBuckets, BenchTasks } from '../components/benchmark/BenchTasks'
+import { BenchHistoryBuckets, BenchHistoryTasks } from '../components/benchmark/BenchHistory'
 
 export { BenchmarkHowItWorksPage } from './BenchmarkHowItWorks'
 
@@ -62,7 +63,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
   const [picked, setPicked] = useState(initialSelected ?? 'observed')
   const [nums, setNums] = useState(initialNumbers)
   const cur = entries.find(e => e.id === picked) ?? entries[0]!
-  const hero = heroOf(cur, observed, L)
+  const hero = heroOf(cur, observed, L, money)
   const parts = partsOf(cur, observed, L, money)
   const exp = cur.experiment
   const noTasks = pt ? 'Sem tarefas comparadas neste benchmark: o servidor só mede por tarefa quando um experimento controlado roda — nenhum rodou ainda.' : 'No compared tasks in this benchmark: the server only measures per task when a controlled experiment runs — none has yet.'
@@ -102,8 +103,11 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
         <div className="bm-types">{parts.map(p => <PartTile key={p.type} p={p} nums={nums} lang={L} observed={observed} />)}</div>
       </section>
 
-      <BenchTasks key={`t-${cur.id}`} tasks={exp?.tasks ?? []} lang={L} money={money} emptyReason={noTasks} initialOpen={initialOpenTask} />
-      <BenchBuckets key={`b-${cur.id}`} buckets={exp?.buckets ?? []} lang={L} money={money} emptyReason={noBuckets} />
+      {cur.kind === 'history' && observed.history
+        ? <><BenchHistoryTasks key="ht" tasks={observed.history.tasks} coverage={observed.history.coverage} lang={L} money={money} initialOpen={initialOpenTask} />
+          <BenchHistoryBuckets key="hb" buckets={observed.history.buckets} lang={L} money={money} /></>
+        : <><BenchTasks key={`t-${cur.id}`} tasks={exp?.tasks ?? []} lang={L} money={money} emptyReason={noTasks} initialOpen={initialOpenTask} />
+          <BenchBuckets key={`b-${cur.id}`} buckets={exp?.buckets ?? []} lang={L} money={money} emptyReason={noBuckets} /></>}
 
       <footer data-testid="benchmark-coverage" style={{ ...muted, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
         <span><strong>{pt ? 'Cobertura por harness' : 'Coverage by harness'}:</strong>{' '}
@@ -146,6 +150,7 @@ function Hero({ hero, lang, entryId }: { hero: ReturnType<typeof heroOf>; lang: 
     </div>
     {hero.delta && <div data-testid="benchmark-delta" style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>{hero.delta}</div>}
     <p style={{ fontSize: 14.5, lineHeight: 1.45, margin: '8px 0 0', maxWidth: 900 }}>{hero.say}</p>
+    {hero.facts && hero.facts.length > 0 && <ul data-testid="benchmark-facts" style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13.5, lineHeight: 1.5, maxWidth: 900 }}>{hero.facts.map((f, i) => <li key={i}>{f}</li>)}</ul>}
     {hero.score !== null && <>
       <Bar value={hero.score} tone={hero.tone} big />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 6 }}>

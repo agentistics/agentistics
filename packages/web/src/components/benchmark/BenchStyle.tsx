@@ -23,6 +23,7 @@ const CSS = `
 .bm-tasks tr.bm-t{cursor:pointer}.bm-tasks tr.bm-t:hover td{background:rgba(127,127,127,.05)}
 .bm-tasks th button{all:unset;cursor:pointer}
 .bm-tasks td.bm-d{white-space:normal;color:var(--text-secondary);font-size:12px;background:rgba(127,127,127,.04);padding:10px}
+.bm-buckets.bm-h5{grid-template-columns:130px repeat(4,minmax(0,1fr))}
 @media (max-width:1100px){.bm-types{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:700px){
  .bm-top{grid-template-columns:minmax(0,1fr)}
@@ -39,6 +40,8 @@ const CSS = `
  .bm-tasks tr.bm-d,.bm-tasks tr.bm-d td{display:block}
  .bm-buckets{grid-template-columns:repeat(3,minmax(0,1fr))}
  .bm-buckets>.bm-h{display:none}
+ .bm-buckets.bm-h5{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .bm-buckets.bm-h5>div.bm-k{grid-column:1/3}
  .bm-buckets>div{border:0;padding:2px 0}
  .bm-buckets>div.bm-k{grid-column:1/4;border-top:1px solid var(--border);padding-top:8px;font-weight:600}
  .bm-buckets>div[data-l]::before{content:attr(data-l) ": ";color:var(--text-tertiary);font-size:11px}

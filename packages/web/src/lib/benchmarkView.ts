@@ -8,7 +8,8 @@
  *  - one per CONTROLLED EXPERIMENT the server lists (`/api/benchmark/experiments`; none runs today).
  *    An experiment carries a core `VerdictResult` and may carry per-task rows and session buckets.
  */
-import type { Observed, ScoreType, Verdict, VerdictResult } from '@agentistics/core/benchmark'
+import type { HistorySubtaskRow, HistoryTaskRow, Observed, ObservedHistory, ScoreType, Verdict, VerdictResult } from '@agentistics/core/benchmark'
+import { percentile } from '@agentistics/core'
 import { METRIC_LABEL, fmtInterval, fmtValue, nf, cardCoverage, cardHeadline, cardSubline, type Lang, type MetricKey, type Money } from './benchmarkFormat'
 
 export type Tone = 'good' | 'bad' | 'tie' | 'none'
@@ -111,6 +112,8 @@ export interface Hero {
   /** Interval of the 0–100 score. */
   range: { lo: number; hi: number } | null
   why: string[]
+  /** What the observed history lets us say (history entry only). */
+  facts?: string[]
 }
 
 /** The "none" state: what is missing, in plain words, never a fake number. */
@@ -118,17 +121,24 @@ function noneHero(lang: Lang, say: string, why: string[]): Hero {
   return { tone: 'none', word: lang === 'pt' ? 'Sem dados ainda' : 'No data yet', delta: null, score: null, say, firm: null, range: null, why }
 }
 
-export function heroOf(entry: Entry, observed: Observed | null, lang: Lang): Hero {
+export function heroOf(entry: Entry, observed: Observed | null, lang: Lang, money: Money = { currency: 'USD' }): Hero {
   const pt = lang === 'pt'
   const min = pt
     ? `O mínimo para um veredito é ${MIN_SAMPLE.tasks} tarefas, cada uma feita ${MIN_SAMPLE.repsPerTask} vezes por lado, com ${MIN_SAMPLE.acceptedPerArm} entregas aceitas em cada lado e custo medido em todas as execuções.`
     : `The minimum for a verdict is ${MIN_SAMPLE.tasks} tasks, each run ${MIN_SAMPLE.repsPerTask} times per side, with ${MIN_SAMPLE.acceptedPerArm} accepted deliveries on each side and cost measured in every run.`
   if (entry.kind === 'history') {
-    return noneHero(lang,
-      pt ? 'Isto é o passado do trabalho real: não compara dois jeitos de trabalhar, então não dá para dizer quanto compensou. Os números reais estão em "Partes", logo abaixo.'
-        : 'This is the history of real work: it does not compare two ways of working, so it cannot say how much paid off. The real figures are in "Parts" below.',
-      [min, pt ? 'Falta rodar um experimento controlado: nenhum rodou ainda.' : 'A controlled experiment still has to run: none has yet.',
-        ...(observed ? [pt ? 'Trabalho difícil tende a seguir o caminho pesado, por isso o histórico é viesado e nunca vira veredito.' : 'Hard work tends to take the heavier path, so history is biased and never becomes a verdict.'] : [])])
+    const h = observed?.history
+    return {
+      tone: 'none', word: pt ? 'Não dá para provar ainda' : 'Cannot be proven yet', delta: null, score: null, firm: null, range: null,
+      say: pt ? 'Peças difíceis vão para o método pesado, então comparar custo cru engana: o histórico descreve o que aconteceu, não prova que o método compensa. O que se vê:'
+        : 'Hard pieces go to the heavy method, so comparing raw cost misleads: history describes what happened, it does not prove the method pays off. What is seen:',
+      facts: h ? observedFacts(h, observed, lang, money) : [],
+      why: [
+        min, pt ? 'Falta rodar um experimento controlado: nenhum rodou ainda.' : 'A controlled experiment still has to run: none has yet.',
+        pt ? 'Qualidade final não é medida: defeito escapado depois do release e peça reaberta não são registrados, e o QA reprovar não diz que o defeito escaparia.' : 'Final quality is not measured: defects escaped after release and reopened pieces are not recorded, and a QA rejection does not mean the defect would have escaped.',
+        ...(h ? [] : [pt ? 'O histórico por peça não veio do servidor: sem ele não há o que mostrar por tarefa.' : 'The per-piece history did not come from the server: without it there is nothing to show per task.']),
+      ],
+    }
   }
   const r = entry.experiment?.result ?? null
   const final = r?.score?.final
@@ -191,6 +201,16 @@ export function partsOf(entry: Entry, observed: Observed | null, lang: Lang, mon
   return TYPE_ORDER.map((type): Part => {
     const meta = TYPE_META[type], name = pt ? meta.pt : meta.en, question = pt ? meta.qpt : meta.qen
     if (entry.kind === 'history') {
+      if (type === 'rework' && observed?.history && observed.history.coverage.withQa > 0) {
+        const subs = observed.history.tasks.flatMap(t => t.subtasks).filter(s => s.qaRounds !== null)
+        const reworked = subs.filter(s => s.reworked).length, rounds = percentile(subs.map(s => s.qaRounds!), 0.5)
+        const cov = pt ? `${subs.length} de ${observed.history.pieces} peças com QA` : `${subs.length} of ${observed.history.pieces} pieces with QA`
+        const extra: PartRow[] = [
+          { key: 'rework-rate', label: pt ? 'Peças com 2+ rodadas de QA' : 'Pieces with 2+ QA rounds', value: `${nf(reworked / subs.length * 100, lang, 0)}%`, sub: `${reworked} ${pt ? 'de' : 'of'} ${subs.length} · ${cov}`, measured: true },
+          { key: 'rework-rounds', label: pt ? 'Rodadas de QA, mediana' : 'QA rounds, median', value: rounds === null ? '—' : nf(rounds, lang, 1), sub: pt ? 'lido do rótulo das sessões de QA (indicativo)' : 'read from the QA sessions\' labels (indicative)', measured: rounds !== null },
+        ]
+        return { type, name, question, pct: null, points: null, max: null, tone: 'none', state: 'history', word: pt ? 'só histórico' : 'history only', rows: extra }
+      }
       const rows = observed ? OBSERVED_BY_TYPE[type].map((k): PartRow => {
         const head = cardHeadline(k, observed, lang, money), m = observed.metrics[k]
         const sub = head.measured
@@ -256,3 +276,53 @@ export function acceptedText(v: readonly [boolean | null, boolean | null], lang:
 
 export const moneyText = (n: number, lang: Lang, money: Money): string => fmtValue('costPerDelivery', n, lang, money)
 export const durationText = (ms: number, lang: Lang): string => fmtValue('wallMedian', ms, lang)
+
+// ---- observed history: facts and rows ------------------------------------------------------------------
+
+const sizeWord = (s: 'S' | 'M' | 'L', lang: Lang) => (lang === 'pt' ? (s === 'S' ? 'P' : s === 'M' ? 'M' : 'G') : s)
+export const sizeLabel = sizeWord
+const MIN_GROUP = 3
+const med = (v: number[]) => percentile(v, 0.5)
+
+/** What the observed history lets us state (ANALISE.md): counts, medians by size, QA first-round rejection, and the cost of extra QA rounds — only where each side has enough pieces. */
+export function observedFacts(h: ObservedHistory, observed: Observed | null, lang: Lang, money: Money): string[] {
+  const pt = lang === 'pt'
+  const subs: HistorySubtaskRow[] = h.tasks.flatMap(t => t.subtasks)
+  const out: string[] = []
+  out.push(pt ? `${nf(h.pieces, lang, 0)} peças entregues com sessão vinculada, em ${nf(h.tasks.length, lang, 0)} tarefas.` : `${nf(h.pieces, lang, 0)} delivered pieces with a linked session, in ${nf(h.tasks.length, lang, 0)} tasks.`)
+  const sizes = (['S', 'M', 'L'] as const).flatMap(sz => {
+    const c = subs.filter(s => s.size === sz && s.costUSD !== null).map(s => s.costUSD!)
+    return c.length >= MIN_GROUP ? [`${sizeWord(sz, lang)} ${moneyText(med(c)!, lang, money)} (n=${c.length})`] : []
+  })
+  if (sizes.length) out.push(`${pt ? 'Custo mediano por peça' : 'Median cost per piece'}: ${sizes.join(' · ')}.`)
+  const q = observed?.metrics?.qaFirstRoundRejection
+  if (q && q.value !== null && q.value !== undefined) out.push(pt ? `A QA devolve ${nf(q.value * 100, lang, 1)}% das peças na primeira rodada (n=${nf(q.n, lang, 0)}).` : `QA sends back ${nf(q.value * 100, lang, 1)}% of the pieces in the first round (n=${nf(q.n, lang, 0)}).`)
+  for (const sz of ['S', 'M', 'L'] as const) {
+    const one = subs.filter(s => s.size === sz && s.qaRounds === 1), many = subs.filter(s => s.size === sz && s.qaRounds !== null && s.qaRounds >= 2)
+    const c1 = one.map(s => s.costUSD).filter((v): v is number => v !== null), c2 = many.map(s => s.costUSD).filter((v): v is number => v !== null)
+    const w1 = one.map(s => s.wallMs).filter((v): v is number => v !== null), w2 = many.map(s => s.wallMs).filter((v): v is number => v !== null)
+    if (c1.length < MIN_GROUP || c2.length < MIN_GROUP || w1.length < MIN_GROUP || w2.length < MIN_GROUP) continue
+    const cr = med(c2)! / med(c1)!, wr = med(w2)! / med(w1)!
+    out.push(pt ? `Peças ${sizeWord(sz, lang)} com 2+ rodadas de QA custam ${nf(cr, lang, 1)}× e levam ${nf(wr, lang, 1)}× o tempo das de 1 rodada (n=${c1.length} e ${c2.length}).`
+      : `${sizeWord(sz, lang)} pieces with 2+ QA rounds cost ${nf(cr, lang, 1)}× and take ${nf(wr, lang, 1)}× the time of 1-round ones (n=${c1.length} and ${c2.length}).`)
+  }
+  const c = h.coverage
+  out.push(pt ? `Custo medido em ${nf(c.withCost, lang, 0)} de ${nf(c.pieces, lang, 0)} peças${c.pctWithCost === null ? '' : ` (${nf(c.pctWithCost, lang, 0)}%)`}${c.harnessesWithoutCost.length ? `; sem custo: ${c.harnessesWithoutCost.join(', ')}` : ''}${c.harnessesPartialCost.length ? `; custo parcial: ${c.harnessesPartialCost.join(', ')}` : ''}.`
+    : `Cost measured in ${nf(c.withCost, lang, 0)} of ${nf(c.pieces, lang, 0)} pieces${c.pctWithCost === null ? '' : ` (${nf(c.pctWithCost, lang, 0)}%)`}${c.harnessesWithoutCost.length ? `; no cost: ${c.harnessesWithoutCost.join(', ')}` : ''}${c.harnessesPartialCost.length ? `; partial cost: ${c.harnessesPartialCost.join(', ')}` : ''}.`)
+  return out
+}
+
+export type HistorySortKey = 'title' | 'cost' | 'wall' | 'qa' | 'sessions'
+const hv = (t: HistoryTaskRow, k: HistorySortKey): number | string | null =>
+  k === 'title' ? t.title.toLowerCase() : k === 'cost' ? t.costUSD : k === 'wall' ? t.wallMs : k === 'qa' ? t.qaRounds : t.sessions
+
+/** Filtered and sorted history rows; a row with no value for the key goes LAST in both directions. */
+export function historyTaskRows(rows: readonly HistoryTaskRow[], o: { size: SizeFilter; needle: string; key: HistorySortKey; dir: 1 | -1 }): HistoryTaskRow[] {
+  return rows.filter(t => (o.size === 'all' || t.size === o.size) && matches(t.title, o.needle)).sort((a, b) => {
+    const x = hv(a, o.key), y = hv(b, o.key)
+    if (x === null && y === null) return 0
+    if (x === null) return 1
+    if (y === null) return -1
+    return (x < y ? -1 : x > y ? 1 : 0) * o.dir
+  })
+}

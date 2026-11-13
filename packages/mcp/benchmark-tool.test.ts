@@ -54,3 +54,60 @@ describe('agentistics_benchmark_observed', () => {
     expect(JSON.stringify(rest)).not.toMatch(/verdict/i)
   })
 })
+
+describe('agentistics_benchmark_observed — per-piece history (same source as the page)', () => {
+  const histStore = () => {
+    const s = store() as unknown as { book: { subtasks: unknown[]; tasks: unknown[] }; registry: unknown[]; metas: Map<string, unknown> }
+    s.book.tasks = [{ id: 'T1', title: 'Task one' }]
+    s.book.subtasks = [{ id: 'A', taskId: 'T1', title: 'A', status: 'done', createdAt: iso(T0), startedAt: iso(T0), deliveredAt: iso(T0 + 4 * H) }]
+    s.metas = new Map([['c1', { session_id: 'c1', harness: 'claude', model: 'claude-sonnet-5', input_tokens: 1000, output_tokens: 1000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, lines_added: 80, lines_removed: 40 }]])
+    return s as never
+  }
+  const strip = (v: unknown): unknown => JSON.parse(JSON.stringify(v, (k, x) => (k === 'id' ? undefined : x)))
+
+  test('HTTP and MCP carry the same rows, buckets and coverage; the tool drops only the ids', async () => {
+    const url = new URL('http://localhost/api/benchmark/observed')
+    const http = await (await handleBenchmarkRequest(new Request(url), url, { observed: async f => buildObservedFromSources(histStore(), f), experiments: () => [] })).json() as { history: { tasks: unknown[]; buckets: unknown[]; coverage: unknown; pieces: number } }
+    const mcp = benchmarkObservedTool(http as never) as unknown as { history: { tasks: unknown[]; buckets: unknown[]; coverage: unknown; pieces: number; tasksTotal: number } }
+    expect(http.history.pieces).toBe(1)
+    expect(mcp.history.pieces).toBe(1)
+    expect(mcp.history.buckets).toEqual(http.history.buckets)
+    expect(mcp.history.coverage).toEqual(http.history.coverage)
+    expect(mcp.history.tasks).toEqual(strip(http.history.tasks) as unknown[])
+    expect(mcp.history.tasksTotal).toBe(http.history.tasks.length)
+  })
+
+  test('the piece is measured from the board: lines give the size, cost is tokens × price, wall time is start → delivery', () => {
+    const h = buildObservedFromSources(histStore()).history!
+    const t = h.tasks[0]!
+    expect([t.title, t.pieces, t.sessions, t.size, t.lines]).toEqual(['Task one', 1, 1, 'M', 120])
+    expect(t.costUSD).toBeGreaterThan(0)
+    expect(t.wallMs).toBe(4 * H)
+    expect(h.buckets.find(b => b.label === '1')!.pieces).toBe(1)
+    expect(h.coverage.pctWithCost).toBe(100)
+  })
+
+  test('without a recorded QA the rework figure is absent, not zero', () => {
+    const h = buildObservedFromSources(histStore()).history!
+    expect(h.tasks[0]!.qaRounds).toBeNull()
+    expect(h.buckets.find(b => b.label === '1')!.reworkRate).toBeNull()
+  })
+})
+
+describe('history: QA rounds from QA session labels', () => {
+  test('a piece with a QA-labelled session reports a round count; one without stays unknown', () => {
+    const s = store() as unknown as { book: { subtasks: unknown[] }; registry: { id: string; harness: string; createdAt: string; conversationId: string; subtaskId: string; taskId: string; label?: string }[]; metas: Map<string, unknown> }
+    s.book.subtasks = [{ id: 'A', taskId: 'T1', title: 'A', status: 'done', createdAt: iso(T0), deliveredAt: iso(T0 + 4 * H) }, { id: 'B', taskId: 'T1', title: 'B', status: 'done', createdAt: iso(T0), deliveredAt: iso(T0 + 4 * H) }]
+    s.registry = [
+      { id: 'm1', harness: 'claude', createdAt: iso(T0), conversationId: 'c1', subtaskId: 'A', taskId: 'T1', label: 'Implementar A' },
+      { id: 'm2', harness: 'codex', createdAt: iso(T0), conversationId: 'c2', subtaskId: 'A', taskId: 'T1', label: 'QA · A (Codex)' },
+      { id: 'm3', harness: 'codex', createdAt: iso(T0), conversationId: 'c3', subtaskId: 'A', taskId: 'T1', label: 'QA · A rodada 2 (Codex)' },
+      { id: 'm4', harness: 'claude', createdAt: iso(T0), conversationId: 'c4', subtaskId: 'B', taskId: 'T1', label: 'Implementar B' },
+    ]
+    const h = buildObservedFromSources(s as never).history!
+    const rows = h.tasks[0]!.subtasks
+    expect(rows.find(r => r.title === 'A')!.qaRounds).toBe(2)
+    expect(rows.find(r => r.title === 'A')!.reworked).toBe(true)
+    expect(rows.find(r => r.title === 'B')!.qaRounds).toBeNull()
+  })
+})
