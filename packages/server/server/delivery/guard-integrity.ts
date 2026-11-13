@@ -52,12 +52,14 @@ export interface IntegrityKey {
    * Absent on a key file written before W1 (nothing to compare; the next sealed write starts recording).
    */
   gens?: Partial<Record<IntegrityDocName, number>>
+  /** r3 W1′: the key file carried a `mac=` line over its sealed list + gens line and it verified. False for a pre-r3 file. */
+  macVerified?: boolean
 }
 export type TamperReason = 'unsealed' | 'forged' | 'missing' | 'key-missing' | 'key-unreadable' | 'rolled-back' | 'witness-missing' | 'witness-forged'
 export type IntegrityVerdict = { state: 'ok'; gen?: number } | { state: 'fresh' } | { state: 'tampered'; reason: TamperReason }
 
 /** The witness as read: `null` absent; `bad` unparseable or (with a key) a wrong MAC; else its facts and whether the MAC was checked. */
-export type WitnessView = null | 'bad' | { sealed: ReadonlySet<IntegrityDocName>; gens: Partial<Record<IntegrityDocName, number>>; verified: boolean }
+export type WitnessView = null | 'bad' | { sealed: ReadonlySet<IntegrityDocName>; gens: Partial<Record<IntegrityDocName, number>>; verified: boolean; keyMac?: boolean }
 
 /** What else the verdict for ONE document may look at (N1/N2). All optional: absent = the pre-integration behaviour. */
 export interface IntegrityContext {
@@ -91,15 +93,15 @@ export function sealDoc<T extends object>(key: Buffer, name: IntegrityDocName, d
 }
 
 /** PURE. The witness MAC (same key; the label keeps it from ever verifying as a document). */
-export function witnessMac(key: Buffer, sealed: Iterable<IntegrityDocName>, gens: Partial<Record<IntegrityDocName, number>>): string {
-  const body = { sealed: [...new Set(sealed)].sort(), gens: Object.fromEntries(DOC_NAMES.filter(n => gens[n] !== undefined).map(n => [n, gens[n]])) }
+export function witnessMac(key: Buffer, sealed: Iterable<IntegrityDocName>, gens: Partial<Record<IntegrityDocName, number>>, keyMac = false): string {
+  const body = { sealed: [...new Set(sealed)].sort(), gens: Object.fromEntries(DOC_NAMES.filter(n => gens[n] !== undefined).map(n => [n, gens[n]])), ...(keyMac ? { keyMac: true } : {}) }
   return createHmac('sha256', key).update(`witness\0${canonicalJson(body)}`).digest('base64url')
 }
 
 /** PURE. The witness file's text. */
-export function formatWitness(key: Buffer, sealed: Iterable<IntegrityDocName>, gens: Partial<Record<IntegrityDocName, number>>): string {
+export function formatWitness(key: Buffer, sealed: Iterable<IntegrityDocName>, gens: Partial<Record<IntegrityDocName, number>>, keyMac = false): string {
   const s = [...new Set(sealed)].sort()
-  return JSON.stringify({ v: 1, sealed: s, gens, mac: witnessMac(key, s, gens) }, null, 2) + '\n'
+  return JSON.stringify({ v: 1, sealed: s, gens, ...(keyMac ? { keyMac: true } : {}), mac: witnessMac(key, s, gens, keyMac) }, null, 2) + '\n'
 }
 
 /** PURE. The witness, verified against `key` when there is one. */
@@ -115,9 +117,10 @@ export function parseWitness(text: string | null, key: IntegrityKey | null): Wit
     if (!DOC_NAMES.includes(k as IntegrityDocName) || !Number.isInteger(v) || (v as number) < 0) return 'bad'
     gens[k as IntegrityDocName] = v as number
   }
-  if (!key) return { sealed, gens, verified: false }
-  const want = Buffer.from(witnessMac(key.key, sealed, gens)), got = Buffer.from(raw.mac)
-  return want.length === got.length && timingSafeEqual(want, got) ? { sealed, gens, verified: true } : 'bad'
+  const keyMac = raw.keyMac === true
+  if (!key) return { sealed, gens, verified: false, keyMac }
+  const want = Buffer.from(witnessMac(key.key, sealed, gens, keyMac)), got = Buffer.from(raw.mac)
+  return want.length === got.length && timingSafeEqual(want, got) ? { sealed, gens, verified: true, keyMac } : 'bad'
 }
 
 /** PURE. Does this text claim a seal (an `integrity` object)? */
@@ -164,6 +167,8 @@ export function checkIntegrity(key: IntegrityKey | null, name: IntegrityDocName,
     if (w === 'bad') return { state: 'tampered', reason: 'witness-forged' }
     if (w === null && key.sealed.size > 0) return { state: 'tampered', reason: 'witness-missing' }
     if (w && g < (w.gens[name] ?? 0)) return { state: 'tampered', reason: 'rolled-back' }
+    // r3 W1′: a MAC'd witness says the key file was MAC'd; a key file with no valid mac line is a downgrade (the mac line deleted).
+    if (w && w.verified && w.keyMac && !key.macVerified) return { state: 'tampered', reason: 'rolled-back' }
   }
   if (ctx.seenGen !== undefined && g < ctx.seenGen) return { state: 'tampered', reason: 'rolled-back' }
   if (g < (key.gens?.[name] ?? 0)) return { state: 'tampered', reason: 'rolled-back' } // W1: the key file's own record
@@ -173,12 +178,18 @@ export function checkIntegrity(key: IntegrityKey | null, name: IntegrityDocName,
 /** PURE. The key file's text. */
 export function formatKeyFile(k: IntegrityKey): string {
   const gens = DOC_NAMES.filter(n => k.gens?.[n] !== undefined).map(n => `${n}=${k.gens![n]}`).join(',')
-  return `${KEY_HEADER}\n${k.key.toString('base64')}\n${DOC_NAMES.filter(n => k.sealed.has(n)).join(',')}\n${gens}${gens ? '\n' : ''}`
+  const list = DOC_NAMES.filter(n => k.sealed.has(n)).join(',')
+  return `${KEY_HEADER}\n${k.key.toString('base64')}\n${list}\n${gens}\nmac=${keyFileMac(k.key, list, gens)}\n`
+}
+
+/** PURE. r3 W1′ — the key file's own MAC, over the sealed list and the generation marks (the key authenticates itself). */
+function keyFileMac(key: Buffer, list: string, gens: string): string {
+  return createHmac('sha256', key).update(`keyfile\0${list}\0${gens}`).digest('base64url')
 }
 
 /** PURE. `null` for anything that is not exactly a key file. */
 export function parseKeyFile(text: string): IntegrityKey | null {
-  const [head, b64, list = '', genLine = ''] = text.split('\n')
+  const [head, b64, list = '', genLine = '', macLine = ''] = text.split('\n')
   if (head !== KEY_HEADER || !b64) return null
   const key = Buffer.from(b64, 'base64')
   if (key.length !== 32) return null
@@ -191,7 +202,15 @@ export function parseKeyFile(text: string): IntegrityKey | null {
     if (!DOC_NAMES.includes(n as IntegrityDocName) || !Number.isInteger(num) || num < 0) return null
     gens[n as IntegrityDocName] = num
   }
-  return Object.keys(gens).length ? { key, sealed, gens } : { key, sealed }
+  // r3 W1′: a `mac=` line must verify over exactly the sealed list + gens line as written; none = a key file from before r3.
+  let macVerified = false
+  if (macLine !== '') {
+    if (!macLine.startsWith('mac=')) return null
+    const want = Buffer.from(keyFileMac(key, list, genLine)), got = Buffer.from(macLine.slice(4))
+    if (!(want.length === got.length && timingSafeEqual(want, got))) return null
+    macVerified = true
+  }
+  return { key, sealed, ...(Object.keys(gens).length ? { gens } : {}), ...(macVerified ? { macVerified } : {}) }
 }
 
 export const keyPathFor = (docPath: string): string => join(dirname(docPath), GUARD_KEY_FILE)
@@ -254,7 +273,7 @@ export async function writeSealed(docPath: string, name: IntegrityDocName, doc: 
   const found = await loadIntegrityKey(docPath)
   if (found === 'unreadable') throw new Error(`${GUARD_KEY_FILE} is unreadable; ${name}.json was not written`)
   let key = found
-  if (!key || !key.sealed.has(name)) {
+  if (!key || !key.sealed.has(name) || !key.macVerified) { // a pre-r3 key file is upgraded (MAC'd) BEFORE the witness says it is
     key = { key: key?.key ?? randomBytes(32), sealed: new Set([...(key?.sealed ?? []), name]), ...(key?.gens ? { gens: key.gens } : {}) }
     await writePrivate(keyPathFor(docPath), formatKeyFile(key))
   }
@@ -265,9 +284,9 @@ export async function writeSealed(docPath: string, name: IntegrityDocName, doc: 
   const gens: Partial<Record<IntegrityDocName, number>> = prior && prior !== 'bad' ? { ...prior.gens } : {}
   const cur = await readOrNull(docPath)
   const gen = Math.max(gens[name] ?? 0, key.gens?.[name] ?? 0, seen(docPath, name) ?? 0, docGen(typeof cur === 'string' ? cur : null)) + 1
-  await writePrivate(wPath, formatWitness(key.key, key.sealed, gens))
+  await writePrivate(wPath, formatWitness(key.key, key.sealed, gens, true))
   await writePrivate(docPath, JSON.stringify(sealDoc(key.key, name, doc, gen), null, 2) + '\n')
-  await writePrivate(wPath, formatWitness(key.key, key.sealed, { ...gens, [name]: gen }))
+  await writePrivate(wPath, formatWitness(key.key, key.sealed, { ...gens, [name]: gen }, true))
   // W1: the third anchor, written LAST (a crash before it leaves a document newer than the record, which is accepted).
   await writePrivate(keyPathFor(docPath), formatKeyFile({ ...key, gens: { ...key.gens, [name]: gen } }))
   remember(docPath, name, gen)

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GUARD_KEY_FILE, WITNESS_DIR, WITNESS_FILE, __resetGuardLatchForTests, canonicalJson, checkIntegrity, parseKeyFile, sealDoc, formatKeyFile } from './guard-integrity'
+import { GUARD_KEY_FILE, WITNESS_DIR, WITNESS_FILE, __resetGuardLatchForTests, canonicalJson, checkIntegrity, parseKeyFile, sealDoc, formatKeyFile, formatWitness } from './guard-integrity'
 import { createGuaranteesStore, guaranteeWarnings, ruleState, rulesWhenTampered, type ActivationFacts, type OwnerCheck } from './activation'
 import { GuardsUnreadable, applyGuardedWrite, createGuardsStore, type PieceCheckpoint } from './guards-store'
 import { analyzeGuardIntegrity } from './owner-health'
@@ -49,7 +49,7 @@ describe('the seal (pure)', () => {
     expect(checkIntegrity(null, 'guards', '{}')).toEqual({ state: 'tampered', reason: 'key-missing' })
   })
   test('the key file round-trips and refuses junk', () => {
-    expect(parseKeyFile(formatKeyFile(key))).toEqual(key)
+    expect(parseKeyFile(formatKeyFile(key))).toEqual({ ...key, macVerified: true })
     expect(parseKeyFile('nope')).toBeNull()
     expect(parseKeyFile(formatKeyFile(key).replace('guards,', 'gards,'))).toBeNull()
   })
@@ -240,12 +240,62 @@ describe('QA s0b-tamper.ts against the real stores', () => {
       analyzeGuardIntegrity({ guaranteesWarn: r.warn, offWarnings: [] }, issues)
       expect(issues.map(i => i.id)).toContain('guarantees-tampered')
     })
-    test('W1d: an OLD key file (no generation line) still verifies; the next write starts recording', async () => {
+    test('W1d: an OLD key file (no generation line, no mac) with an old witness still verifies; the next write upgrades it', async () => {
       await ownerShadowsA()
       const k = parseKeyFile(readFileSync(kp(), 'utf8'))!
-      writeFileSync(kp(), formatKeyFile({ key: k.key, sealed: k.sealed }))
+      writeFileSync(kp(), `agentistics-guard-integrity v1\n${k.key.toString('base64')}\n${[...k.sealed].join(',')}\n`)
+      const w = JSON.parse(readFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), 'utf8')) as { sealed: string[]; gens: Record<string, number> }
+      writeFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), formatWitness(k.key, w.sealed as never, w.gens as never)) // no marker: written before r3
       __resetGuardLatchForTests()
       expect((await createGuaranteesStore(gp()).read()).tampered).toBeUndefined()
+      await createGuaranteesStore(gp()).setState('b', 'shadow', { check: owner, facts })
+      expect(readFileSync(kp(), 'utf8')).toMatch(/\nmac=/)
+    })
+    // r3 W1′: the 4th line (the generation marks) was outside any MAC, so restoring the 3 documents from a backup and then
+    // deleting or lowering that line with a text editor passed silently. The key file now carries a MAC over its sealed list +
+    // gens line, and the witness records that the key is MAC'd (so deleting the mac line is a downgrade, not an "old file").
+    describe('W1′ the generation line is bound', () => {
+      async function backupRestored() {
+        const { old } = await toOn()
+        writeFileSync(gp(), old.g); writeFileSync(join(dir, 'guards.json'), old.d); writeFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), old.w)
+        return old
+      }
+      const verdict = async () => { __resetGuardLatchForTests(); return (await createGuaranteesStore(gp()).read()).tampered }
+      test('baseline: the key file carries a mac line over the gens', async () => {
+        await toOn()
+        expect(readFileSync(kp(), 'utf8')).toMatch(/guarantees=\d+.*\nmac=\S+\n$/s)
+      })
+      test('K1: the gens line deleted (mac line kept) → the key is refused', async () => {
+        await backupRestored()
+        writeFileSync(kp(), readFileSync(kp(), 'utf8').split('\n').filter((l, i) => i !== 3).join('\n'))
+        expect(await verdict()).toBe('key-unreadable')
+      })
+      test('K2: the gens LOWERED to the backup\'s values (mac kept) → refused', async () => {
+        const old = await backupRestored()
+        const lines = readFileSync(kp(), 'utf8').split('\n')
+        const oldG = JSON.parse(old.g).integrity.gen as number, oldD = JSON.parse(old.d).integrity.gen as number
+        lines[3] = `guards=${oldD},guarantees=${oldG}`
+        writeFileSync(kp(), lines.join('\n'))
+        expect(await verdict()).toBe('key-unreadable')
+      })
+      test('K3: gens line AND mac line deleted (the "old format" downgrade) → rolled-back, via the witness marker', async () => {
+        await backupRestored()
+        const lines = readFileSync(kp(), 'utf8').split('\n')
+        writeFileSync(kp(), `${lines[0]}\n${lines[1]}\n${lines[2]}\n`)
+        // the restored witness is the BACKUP's (taken after the first r3 write, so it carries the marker)
+        expect(await verdict()).toBe('rolled-back')
+      })
+      test('K4: lowering the gens and recomputing nothing else keeps the mac wrong even when only the sealed list is touched', async () => {
+        await toOn()
+        const lines = readFileSync(kp(), 'utf8').split('\n')
+        lines[2] = 'guarantees'
+        writeFileSync(kp(), lines.join('\n'))
+        expect(await verdict()).toBe('key-unreadable')
+      })
+      test('an honest restart and ordinary writes still read clean', async () => {
+        await toOn()
+        expect(await verdict()).toBeUndefined()
+      })
     })
     test('a forged witness (edited generation) is tampered', async () => {
       await toOn()

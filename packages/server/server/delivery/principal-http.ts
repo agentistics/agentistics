@@ -4,7 +4,8 @@
  * `session` that claims an identity it cannot prove (`unverified_sender`). The guards that USE the principal arrive
  * with the store guard (S2a); this slice makes sure the display string can no longer impersonate anybody.
  */
-import { actorOf, isReservedActor, type OwnerProofMode, type RequestPrincipal } from './principal'
+import { actorOf, isReservedActor, ownerRefusal, type OwnerProofMode, type RequestPrincipal } from './principal'
+import { resolveRequestPrincipal, type PrincipalDeps, type WebReply } from './web'
 
 /**
  * S0d security re-QA N3 — a reserved name (`owner`, `you`, `dono`, `flow:*`) in a field the actor screen does not read
@@ -51,6 +52,7 @@ const isTasksPath = (p: string) => p === '/api/tasks' || p.startsWith('/api/task
 export async function screenTaskRequest(
   r: { path: string; method: string; contentType: string | null; text: () => Promise<string> },
   verify: (id: unknown, token: unknown) => Promise<string | null>,
+  ctx?: PrincipalDeps,
 ): Promise<PrincipalScreen> {
   const m = r.method.toUpperCase()
   if (!isTasksPath(r.path) || m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return null
@@ -61,16 +63,69 @@ export async function screenTaskRequest(
   try { body = JSON.parse(text) } catch {
     return { status: 415, body: { error: 'json_required', sentence: 'a task write must send a JSON body' } }
   }
-  return screenTaskWrite(body, verify)
+  return screenTaskWrite(body, verify, ctx, taskRefOfPath(r.path))
 }
 
+/** The task ref of `/api/tasks/<ref>[/<verb>]` — the same reading index.ts makes (the verb tail is dropped). */
+export function taskRefOfPath(path: string): string {
+  let rest = path.replace(/^\/api\/tasks\/?/, '')
+  try { rest = decodeURIComponent(rest) } catch { /* keep as is */ }
+  const slash = rest.lastIndexOf('/')
+  const verb = slash === -1 ? '' : rest.slice(slash + 1)
+  const known = ['comments', 'subtasks', 'files', 'links', 'sessions', 'claim', 'move', 'threads'].includes(verb)
+  return known ? rest.slice(0, slash) : rest
+}
+
+/**
+ * The actor screen. WITHOUT `ctx` (the pure form) every reserved name is refused. WITH `ctx` (what index.ts passes) the
+ * owner's names ("owner" / "you" / "dono") are the OWNER's own UI: the web's Rename sends `actor: 'you'` and 2.212.0
+ * answered 200 — LEGACY mode keeps that (kept as typed, for every caller); REQUIRED mode asks the owner's proof (a grant
+ * scoped `<ref>|task:write`; no grant → 403 `owner_proof_required`, which the web answers by asking the vault and repeating),
+ * and anything but the proven owner is refused. `flow:*` is the engine's and is refused in every mode.
+ */
 export async function screenTaskWrite(
-  body: unknown, verify: (id: unknown, token: unknown) => Promise<string | null>,
+  body: unknown, verify: (id: unknown, token: unknown) => Promise<string | null>, ctx?: PrincipalDeps, pieceKey = '',
 ): Promise<PrincipalScreen> {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null
   const b = body as Record<string, unknown>
-  if (isReservedActor(b.actor)) return { status: 400, body: { error: 'reserved_actor', sentence: 'actor may not be "owner", "you", "dono" or "flow:*" — those names are decided by the server, not claimed in a request' } }
   const s = b.session as { id?: unknown; token?: unknown } | undefined | null
+  if (isReservedActor(b.actor)) {
+    const flow = typeof b.actor === 'string' && b.actor.trim().toLowerCase().startsWith('flow:')
+    const refused = { status: 400 as const, body: { error: 'reserved_actor', sentence: 'actor may not be "owner", "you", "dono" or "flow:*" — those names are decided by the server, not claimed in a request' } }
+    if (!ctx || flow) return refused
+    if (s && typeof s === 'object' && !(await verify(s.id, s.token))) return { status: 403, body: { error: 'unverified_sender', sentence: 'the session identity could not be verified' } }
+    if (!ctx.mode || await ctx.mode() !== 'required') return null
+    const who = await resolveRequestPrincipal({ ...b, actor: undefined }, { pieceKey, move: 'task:write' }, ctx)
+    if (!who.ok) return { status: who.reply.status as 400 | 403, body: who.reply.body as { error: string; sentence: string } }
+    const denied = ownerRefusal(who.principal, 'required')
+    if (denied) return { status: denied.status, body: { error: denied.code, sentence: denied.sentence } }
+    return null
+  }
   if (s && typeof s === 'object' && !(await verify(s.id, s.token))) return { status: 403, body: { error: 'unverified_sender', sentence: 'the session identity could not be verified' } }
   return null
+}
+
+/**
+ * The free-text author of a comment / thread opener / thread message, as index.ts reads it (QA eg-integ W3, r3 W3a/W3b).
+ * LEGACY: the typed text, byte for byte, before any principal is resolved (no grant consumed). REQUIRED: a reserved name is
+ * the real principal — `known` (the owner gate already ran, or a session already proven), else resolved from `body`
+ * (a session proof, or the grant header). `body.actor` is never read here: the actor screen has already ruled on it.
+ */
+export async function authorFieldAs(
+  raw: unknown, move: string, pieceKey: string,
+  known: 'keep' | { kind: 'session'; id: string; via: 'token' } | undefined,
+  body: Record<string, unknown>, d: PrincipalDeps,
+): Promise<{ ok: true; value: string } | { ok: false; reply: WebReply }> {
+  const text = typeof raw === 'string' ? raw : raw === undefined || raw === null ? '' : String(raw)
+  if (!isReservedActor(text) || known === 'keep') return { ok: true, value: text }
+  if ((d.mode ? await d.mode() : 'legacy') === 'legacy') return { ok: true, value: text }
+  let principal: RequestPrincipal
+  if (known) principal = known
+  else {
+    const who = await resolveRequestPrincipal({ ...body, actor: undefined }, { pieceKey, move }, d)
+    if (!who.ok) return { ok: false, reply: who.reply }
+    principal = who.principal
+  }
+  const named = freeTextAuthorAs(text, principal, 'required')
+  return named.ok ? named : { ok: false, reply: { status: named.status, body: named.body } }
 }

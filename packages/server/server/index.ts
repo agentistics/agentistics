@@ -2187,10 +2187,20 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // ENTREGA.GARANTIDA §2.3: a task WRITE may not claim the engine or the owner in `actor`, nor a session it cannot prove.
     // S0d.3: EVERY write, whatever its content-type — the handlers parse JSON regardless of the header.
     if ((url.pathname === '/api/tasks' || url.pathname.startsWith('/api/tasks/')) && req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
-      const [{ screenTaskRequest }, { verifySessionIdentity }] = await Promise.all([import('./delivery/principal-http'), import('./sessions/session-identity')])
+      const [{ screenTaskRequest }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
+        import('./delivery/principal-http'), import('./sessions/session-identity'), import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
+      ])
+      // r3 B1: the owner's own UI sends `actor: 'you'` (Rename) — legacy keeps it, required asks the owner's proof. The deps
+      // are read lazily — only a reserved actor needs them.
+      const principalDeps = {
+        verify: (id: unknown, token: unknown) => verifySessionIdentity(id, token), mode: readOwnerProofMode,
+        get browser() { return browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC }) },
+        consumeGrant: (token: string, scope: { pieceKey: string; move: string }) =>
+          gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC }).loopbackPeer }, scope),
+      }
       const screened = await screenTaskRequest(
         { path: url.pathname, method: req.method, contentType: req.headers.get('content-type'), text: () => req.clone().text() },
-        (id, token) => verifySessionIdentity(id, token),
+        (id, token) => verifySessionIdentity(id, token), principalDeps,
       )
       if (screened) return json(screened.body, screened.status)
     }
@@ -2504,16 +2514,21 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
       // QA eg-integ W3: the free-text author of a comment / thread. A reserved name in it ("owner", "you", "dono") is the real
       // principal when owner proof is REQUIRED (`keep` = the owner gate already ran for this request); legacy keeps the text.
+      const principalDepsOf = async () => {
+        const [{ verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
+          import('./sessions/session-identity'), import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
+        ])
+        const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+        return {
+          verify: (id: unknown, token: unknown) => verifySessionIdentity(id, token), mode: readOwnerProofMode, browser,
+          consumeGrant: (token: string, scope: { pieceKey: string; move: string }) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+        }
+      }
       const authorField = async (raw: unknown, move: string, known?: 'keep' | { kind: 'session'; id: string; via: 'token' }) => {
+        const { authorFieldAs } = await import('./delivery/principal-http')
         const text = String(raw ?? '')
-        if (!isReservedActor(text) || known === 'keep') return { ok: true as const, value: text }
-        const { readOwnerProofMode } = await import('./delivery/owner-mode')
-        if (await readOwnerProofMode() === 'legacy') return { ok: true as const, value: text }
-        const who = known ? { ok: true as const, principal: known } : await requestPrincipal({}, move)
-        if (!who.ok) return { ok: false as const, reply: who.reply }
-        const { freeTextAuthorAs } = await import('./delivery/principal-http')
-        const named = freeTextAuthorAs(text, who.principal, 'required')
-        return named.ok ? named : { ok: false as const, reply: { status: named.status, body: named.body } }
+        // legacy (and `keep`) never touch the principal machinery: build the deps only when a reserved name needs them.
+        return authorFieldAs(raw, move, ref, known, body, text && isReservedActor(text) && known !== 'keep' ? await principalDepsOf() : { verify: async () => null, mode: async () => 'legacy' as const })
       }
       if (verb === 'comments') {
         // `id` present means an EDIT or a DELETE of that comment; absent means a new one.
@@ -2571,7 +2586,19 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const threadId = typeof body.threadId === 'string' ? body.threadId : ''
         if (action === 'open') {
           const kind = body.kind === 'handback' || body.kind === 'block' || body.kind === 'topic' ? body.kind : undefined
-          const threadAuthor = await authorField(body.author ?? 'owner', 'thread:open')
+          // r3 W3a: a proven session that opens a thread is recorded as ITSELF. W3b: the owner's web UI sends `owner: true`
+          // (like an owner comment) — in REQUIRED mode that asks the owner's proof (the web repeats with the grant) and the
+          // opener keeps the owner's name; legacy is untouched (no gate, the typed name).
+          const { verifySessionIdentity } = await import('./sessions/session-identity')
+          const openClaim = body.session as { id?: unknown; token?: unknown } | undefined
+          const openSession = openClaim ? await verifySessionIdentity(openClaim.id, openClaim.token) : null
+          let openKnown: 'keep' | { kind: 'session'; id: string; via: 'token' } | undefined = openSession ? { kind: 'session', id: openSession, via: 'token' } : undefined
+          if (!openSession && body.owner === true && await (await import('./delivery/owner-mode')).readOwnerProofMode() === 'required') {
+            const denied = await ownerGate(ref, 'thread:open')
+            if (denied) return json(denied.body, denied.status)
+            openKnown = 'keep'
+          }
+          const threadAuthor = await authorField(body.author ?? 'owner', 'thread:open', openKnown)
           if (!threadAuthor.ok) return json(threadAuthor.reply.body, threadAuthor.reply.status)
           const res = await th.openThread(ref, {
             title: String(body.title ?? ''), openedBy: threadAuthor.value,
