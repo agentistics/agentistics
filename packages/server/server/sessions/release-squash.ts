@@ -28,6 +28,8 @@ const MAX_DIFF = 2 << 20
 /** The reverse-apply proof is tried on this many of the newest releases. */
 const REVERSE_APPLY_TAGS = 3
 const MAX_TAGS = 12
+/** `squashTagOf` walks every release newer than the commit; this only bounds a pathological history. */
+const MAX_WALK_TAGS = 600
 const MAX_BRANCHES_PER_SHA = 3
 const MAX_BUFFER = 48 << 20
 const HEX = /^[0-9a-f]{7,40}$/
@@ -55,7 +57,7 @@ function patchIds(dir: string, patch: string): Promise<{ id: string; commit: str
 
 /** tag → the patch-ids of the non-merge commits it added over the previous tag. A tag is immutable: kept for the process. */
 const tagIds = new Map<string, Set<string>>()
-const MAX_TAG_CACHE = 200
+const MAX_TAG_CACHE = 2000
 
 async function idsOfTag(dir: string, repoKey: string, tag: string, prev: string | null): Promise<Set<string>> {
   const key = `${repoKey}\0${tag}`
@@ -93,6 +95,16 @@ async function candidates(dir: string, sha: string, release: string): Promise<{ 
   const diffs: string[] = []
   const own = await run(dir, ['show', '--format=commit %H', '--no-color', sha])
   if (own.ok) { for (const x of await patchIds(dir, own.out)) ids.push(x.id); if (own.out.length <= MAX_DIFF) diffs.push(own.out) }
+  // The pull request as it stood at this commit (its fork point from the release line up to it): a squash of a PR whose
+  // head IS the delivered commit has exactly this diff, even once the branch itself is deleted.
+  const fork = await run(dir, ['merge-base', release, sha])
+  if (fork.ok && fork.out.trim() && fork.out.trim() !== sha) {
+    const upTo = await run(dir, ['diff', '--no-color', `${fork.out.trim()}..${sha}`])
+    if (upTo.ok && upTo.out.trim() && upTo.out.length <= MAX_DIFF) {
+      const id = (await patchIds(dir, `commit ${sha}\n\n${upTo.out}`))[0]?.id
+      if (id) ids.push(id)
+    }
+  }
   const br = await run(dir, ['branch', '-a', '--contains', sha, '--format=%(refname:short)'])
   const branches = br.ok
     ? br.out.split('\n').map(s => s.trim()).filter(b => b && !/(^|\/)(HEAD|main|dev|master)$/.test(b) && !b.includes(' ')).slice(0, MAX_BRANCHES_PER_SHA)
@@ -132,7 +144,58 @@ async function treeHoldsDiff(dir: string, tag: string, diff: string): Promise<bo
   } finally { rmSync(tmp, { recursive: true, force: true }) }
 }
 
-/** Is the work of `sha` inside a release tag of this repository, though the commit itself is not? Any failure is "no". */
+/** Every `v<x.y.z>` tag, newest version first, with the tag's own date (seconds). Kept for a few minutes. */
+interface DatedTags { at: number; tags: { tag: string; atSec: number }[] }
+const datedTagLists = new Map<string, DatedTags>()
+
+async function allTagsDated(dir: string, repoKey: string, nowMs: number): Promise<{ tag: string; atSec: number }[]> {
+  const hit = datedTagLists.get(repoKey)
+  if (hit && nowMs - hit.at < TAG_LIST_TTL_MS) return hit.tags
+  const r = await run(dir, ['for-each-ref', '--sort=-version:refname', '--format=%(refname:short) %(creatordate:unix)', 'refs/tags/v*'])
+  const tags = r.ok
+    ? r.out.split('\n').flatMap(l => { const [tag, at] = l.trim().split(' '); return tag && /^v\d+\.\d+\.\d+$/.test(tag) ? [{ tag, atSec: Number(at) || 0 }] : [] })
+    : []
+  if (datedTagLists.size >= 50) datedTagLists.clear()
+  datedTagLists.set(repoKey, { at: nowMs, tags })
+  return tags
+}
+
+/**
+ * The version (`x.y.z`) of the release whose OWN range (previous version tag..this tag) carries the WORK of `sha`,
+ * though the commit itself is in no tag — the squash-merge case ("fix: … (#N)" on main). PROVEN ONLY: one of the
+ * commit's patch-ids (its own diff, its branch up to it, or the whole branch holding it — see `candidates`) must be
+ * EQUAL to the patch-id of a commit inside that range. Ranges are disjoint, so the match names exactly the release
+ * that added the change. Tags are walked newest to oldest, every one of them, until a tag older than the commit
+ * itself (the release cannot predate the work). Everything else — a squash that folded several branches, cherry-picks,
+ * a branch since deleted — is null: the version is unknown, never guessed. The reverse-apply "the tree holds it"
+ * proof is deliberately NOT used here: it says "it is in the code", never which release put it there (it answered
+ * "the 3rd-newest tag" for any old change and labelled 2.165.3 work as "published in 2.210.0").
+ */
+export async function squashTagOf(sha: string, dir: string, repoKey: string, nowMs = Date.now()): Promise<string | null> {
+  if (!HEX.test(sha)) return null
+  const at = await run(dir, ['log', '-1', '--format=%ct', `${sha}^{commit}`])
+  if (!at.ok) return null
+  const commitSec = Number(at.out.trim()) || 0
+  const tags = await allTagsDated(dir, repoKey, nowMs)
+  if (tags.length === 0) return null
+  const cand = await candidates(dir, sha, tags[0]!.tag)
+  if (cand.ids.length === 0) return null
+  const want = new Set(cand.ids)
+  for (let i = 0; i < Math.min(tags.length, MAX_WALK_TAGS); i++) {
+    const t = tags[i]!
+    // a release published before the commit existed cannot carry it (walk newest → oldest, so nothing older can either)
+    if (t.atSec > 0 && commitSec > 0 && t.atSec < commitSec) break
+    const ids = await idsOfTag(dir, repoKey, t.tag, tags[i + 1]?.tag ?? null)
+    for (const id of ids) if (want.has(id)) return t.tag.slice(1)
+  }
+  return null
+}
+
+/**
+ * Is the work of `sha` inside a release tag of this repository, though the commit itself is not? Any failure is "no".
+ * This is the Live's yes/no (unchanged since 2.200): a patch-id match on the newest releases, or — for several branches
+ * squashed together — the newest releases' trees still holding the change. It never names a version.
+ */
 export async function squashPublishedIn(sha: string, dir: string, repoKey: string, nowMs = Date.now()): Promise<boolean> {
   if (!HEX.test(sha)) return false
   if (!(await run(dir, ['cat-file', '-e', `${sha}^{commit}`])).ok) return false
@@ -145,9 +208,8 @@ export async function squashPublishedIn(sha: string, dir: string, repoKey: strin
       if (cand.ids.some(c => ids.has(c))) return true
     }
   }
-  // several branches squashed together, or an edit after the release: the newest releases' trees still hold the change
   for (const diff of cand.diffs) for (const tag of tags.slice(0, REVERSE_APPLY_TAGS)) if (await treeHoldsDiff(dir, tag, diff)) return true
   return false
 }
 
-export function resetReleaseSquashForTest(): void { tagIds.clear(); tagLists.clear() }
+export function resetReleaseSquashForTest(): void { tagIds.clear(); tagLists.clear(); datedTagLists.clear() }

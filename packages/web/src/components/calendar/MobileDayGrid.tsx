@@ -10,7 +10,7 @@ export interface MobileGridProps {
   anchor: string; nowMs: number; versions: readonly CalVersion[]; pieces: readonly CalPiece[]; marks: readonly CalMark[]; pt: boolean
   span: 1 | 3 | 7; onDay: (day: string) => void; /** Opens a day in the Day view; defaults to selecting it. */ onOpenDay?: (day: string) => void; onOpen: (selection: CalSelection, e: React.MouseEvent) => void
 }
-export interface PhoneEvent { id: string; title: string; color: string; fromMs: number; toMs: number; expected: boolean; selection: CalSelection }
+export interface PhoneEvent { id: string; title: string; color: string; fromMs: number; toMs: number; expected: boolean; selection: CalSelection; /** Covers the whole day: it has no hour, so it goes to the all-day band, never a full-height block. */ allDay?: boolean }
 
 /** One card per piece, plus each version and account reset, on its actual BRT day. */
 export function phoneEvents(day: string, p: Pick<MobileGridProps, 'nowMs' | 'pieces' | 'versions' | 'marks'>): PhoneEvent[] {
@@ -20,7 +20,7 @@ export function phoneEvents(day: string, p: Pick<MobileGridProps, 'nowMs' | 'pie
     const blocks = pieceDayPresence(piece, day, p.nowMs) // the same rule as the API's window and the desktop Day
     if (blocks.length === 0) continue
     const fromMs = Math.min(...blocks.map(b => b.fromMs)), toMs = Math.max(...blocks.map(b => b.toMs))
-    events.push({ id: piece.key, title: piece.title, color: stageColor(piece.stage), fromMs, toMs: Math.max(toMs, Math.min(end, fromMs + 30 * 60_000)), expected: blocks.every(b => b.expected), selection: { kind: 'piece', key: piece.key } })
+    events.push({ id: piece.key, title: piece.title, color: stageColor(piece.stage), fromMs, toMs: Math.max(toMs, Math.min(end, fromMs + 30 * 60_000)), expected: blocks.every(b => b.expected), allDay: fromMs <= d0 && toMs >= end, selection: { kind: 'piece', key: piece.key } })
   }
   for (const v of p.versions) if (v.atMs !== null && brtDay(v.atMs) === day) events.push({ id: `version:${v.version}`, title: v.version, color: v.state === 'published' ? PUBLISHED_COLOR : EXPECTED_COLOR, fromMs: v.atMs, toMs: v.atMs + 30 * 60_000, expected: v.state !== 'published', selection: { kind: 'version', version: v.version } })
   for (const m of p.marks) if (m.kind === 'account-reset' && brtDay(m.atMs) === day) events.push({ id: `reset:${m.account}:${m.window}`, title: m.label, color: 'var(--accent-cyan)', fromMs: m.atMs, toMs: m.atMs + 30 * 60_000, expected: true, selection: { kind: 'mark', mark: m } })
@@ -33,6 +33,8 @@ export function MobileDayGrid(p: MobileGridProps) {
   const days = span === 7 ? weekDays(anchor) : Array.from({ length: span }, (_, i) => addDays(anchor, i))
   const [expanded, setExpanded] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  // Day only: when the overlapping pieces do not fit side by side, the column stacks them (card + "+N"); the chip spreads them out.
+  const [spread, setSpread] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
   const start = useRef<{ x: number; y: number } | null>(null)
   // A column narrower than 44px cannot hold a tap target per piece: the whole column opens its Day instead (0 = not measured).
@@ -50,13 +52,16 @@ export function MobileDayGrid(p: MobileGridProps) {
   }, [span])
   const narrow = span > 1 && colW > 0 && colW < 44
   // Day: lanes thinner than 44px are not targets either, so the column grows to 44px per lane and the grid scrolls sideways.
-  const lanes = span === 1 ? Math.max(1, ...packIntervals(phoneEvents(anchor, p).map(e => ({ ...e, toMs: Math.max(e.toMs, e.fromMs + 44 * 60_000) }))).map(e => e.lanes)) : 1
-  const wideDay = span === 1 && colW > 0 && lanes * 44 > colW
-  const untimed = days.flatMap(day => [
+  const timedOf = (day: string) => phoneEvents(day, p).filter(e => !e.allDay)
+  const lanes = span === 1 ? Math.max(1, ...packIntervals(timedOf(anchor).map(e => ({ ...e, toMs: Math.max(e.toMs, e.fromMs + 44 * 60_000) }))).map(e => e.lanes)) : 1
+  const overflowDay = span === 1 && colW > 0 && lanes * 44 > colW
+  const wideDay = overflowDay && spread
+  const stackDay = overflowDay && !spread
+  const untimed = [...days.flatMap(day => phoneEvents(day, p).filter(e => e.allDay).map(e => ({ id: `${day}:${e.id}`, day, title: e.title, selection: e.selection }))), ...days.flatMap(day => [
     ...p.marks.flatMap(m => m.kind === 'task-due' && m.day === day ? [{ id: `${day}:${m.taskId}`, day, title: `${pick(TEXT.due, pt)} · ${m.label}`, selection: { kind: 'mark', mark: m } as CalSelection }] : []),
     // A version with no date is not happening on any day, today included, so it is never listed here (the API's
     // date window omits it too). It stays reachable in the Schedule view, which labels it "sem estimativa".
-  ])
+  ])]
   // A day with nothing on it says so (the hour grid alone reads as a screen that failed to load).
   const emptyDay = span === 1 && untimed.length === 0 && phoneEvents(anchor, p).length === 0
   useEffect(() => {
@@ -80,18 +85,19 @@ export function MobileDayGrid(p: MobileGridProps) {
       onTouchStart={e => { const t = e.touches[0]; if (t) start.current = { x: t.clientX, y: t.clientY } }}
       onTouchEnd={e => { const t = e.changedTouches[0]; if (t && start.current && !wideDay) p.onDay(swipeDay(anchor, t.clientX - start.current.x, t.clientY - start.current.y, 1)); start.current = null }}>
       {/* 24h of grid plus room so 23:00 scrolls fully above the bottom navigation and the chat button. */}
+      {wideDay && <button type="button" data-cal-spread-collapse className="cal-phone-button" onClick={() => setSpread(false)} style={{ position: 'sticky', top: 0, left: 0, zIndex: 4, height: 28, minHeight: 28, padding: '0 8px', fontSize: 11 }}>{pick(TEXT.collapse, pt)}</button>}
       {emptyDay && <div data-cal-empty-day role="status" style={{ position: 'sticky', top: 0, zIndex: 3, height: 0, overflow: 'visible', pointerEvents: 'none' }}><div style={{ margin: '12px auto 0', width: 'fit-content', maxWidth: '85%', padding: '8px 12px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12.5, textAlign: 'center' }}>{pick(TEXT.emptyDay, pt)}</div></div>}
       <div ref={body} data-cal-grid-body data-cal-narrow={narrow ? '' : undefined} data-cal-lanes={wideDay ? lanes : undefined} style={{ ...(wideDay ? { width: 44 + lanes * 44 } : {}), height: 'calc(1440px + 148px + env(safe-area-inset-bottom, 0px))', display: 'flex', position: 'relative' }}>
         {/* Thin views give the gutter up to the columns (hour number only): at 360px the page content is ~328px wide, and seven columns of 44px leave ~20px. */}
         <div style={{ width: span === 1 ? 44 : 14, flexShrink: 0, position: 'relative' }}>{Array.from({ length: 24 }, (_, h) => <span key={h} style={{ position: 'absolute', top: h * 60, left: 0, fontSize: span === 1 ? 10 : 9, color: 'var(--text-tertiary)' }}>{String(h).padStart(2, '0')}{span === 1 ? ':00' : ''}</span>)}</div>
         {days.map(day => {
           const d0 = brtDayStartMs(day)
-          const raw = phoneEvents(day, p)
-          const openDay = () => (p.onOpenDay ?? p.onDay)(day)
+          const raw = timedOf(day)
+          const openDay = () => (span === 1 ? setSpread(true) : (p.onOpenDay ?? p.onDay)(day))
           const cardStyle = (e: PhoneEvent): React.CSSProperties => ({ position: 'absolute', padding: '4px 3px', textAlign: 'left', font: 'inherit', fontSize: span === 1 ? 11 : 10, lineHeight: 1.2, color: 'var(--text-primary)', border: `1px ${e.expected ? 'dashed' : 'solid'} ${e.color}`, borderLeftWidth: 3, borderRadius: 4, background: `color-mix(in srgb, ${e.color} 24%, var(--bg-card))`, cursor: 'pointer', boxSizing: 'border-box' })
           const label = (e: PhoneEvent) => <span style={{ display: 'block', height: '100%', overflow: 'hidden', overflowWrap: 'anywhere' }}><b>{e.title}</b><br /><small>{clock(e.fromMs)}</small></span>
           let cards: React.ReactNode
-          if (span === 1) {
+          if (span === 1 && !stackDay) {
             // A full-width Day column can afford lanes; pack the visible minimum height too, so short cards cannot cover each other.
             cards = packIntervals(raw.map(e => ({ ...e, toMs: Math.min(d0 + DAY_MS, Math.max(e.toMs, e.fromMs + 44 * 60_000)) }))).map(e => <button type="button" className="cal-phone-event" data-cal-phone-event={e.id} key={e.id} title={`${e.title} · ${clock(e.fromMs)}`} aria-label={`${e.title} · ${clock(e.fromMs)}`} onClick={ev => p.onOpen(e.selection, ev)} style={{ ...cardStyle(e), top: (e.fromMs - d0) / 60_000, left: `${e.lane / e.lanes * 100}%`, width: `${100 / e.lanes}%`, height: Math.max(44, (e.toMs - e.fromMs) / 60_000) }}>{label(e)}</button>)
           } else {

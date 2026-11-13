@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { buildLive, legacyReviewShaPieces, prepareForecastHistory, FORECAST_BUCKET_MS, FORECAST_METHOD_VERSION, type ForecastHistory } from './task-live'
 import { readForecastAnchors, saveForecastAnchors } from './task-forecast-cache'
 import { dirsForShas } from './release-repos'
-import { publishedAmong } from './release-tags'
+import { firstTagContaining, publishedAmong } from './release-tags'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
 import { stat } from 'node:fs/promises'
 import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
@@ -189,6 +189,78 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
   try { return (await promise).reply } finally {
     if (liveBuildInFlight?.promise === promise) liveBuildInFlight = null
   }
+}
+
+/**
+ * The version each piece with NO delivery-record version shipped in, PROVEN by the repository: the first release tag
+ * that contains a commit the piece delivered (its handback/`legacyReviewShas`). Key = the Live piece key. The Delivery
+ * calendar links these to versions; a piece nothing proves anything about is simply absent. Never waits for git (40 commits per
+ * background pass, each git call has its own timeout), so a calendar read never waits on a whole history.
+ */
+const SHA_BATCH = 40
+const SHA_MISS_TTL_MS = 10 * 60_000
+/** sha → the version a release tag (or the squash that carried it) proved. A positive answer is permanent. */
+const shaVersion = new Map<string, string>()
+const shaMissAt = new Map<string, number>()
+let shaRefill: Promise<void> | null = null
+/** Test seam: wait for the background pass, or forget everything. */
+export const pieceVersionsIdle = (): Promise<void> => shaRefill ?? Promise.resolve()
+export function resetPieceVersionsForTest(): void { shaVersion.clear(); shaMissAt.clear(); shaPiecesMemo = null }
+
+/** See the block above the memo: answers from the memo, resolves the rest in the background (40 commits per pass). */
+/**
+ * Which commits each piece delivered, and the clones to ask about each — a whole task-detail build, so it is kept per
+ * SOURCE VERSION (the same stat key the Live build uses): a calendar read with nothing changed reuses it instead of
+ * rebuilding every task's detail (that rebuild made a warm calendar read ~10x slower in QA r2).
+ */
+let shaPiecesMemo: { key: string; pieces: ReturnType<typeof legacyReviewShaPieces>; dirsFor: (sha: string) => readonly string[] } | null = null
+onBookWrite(() => { shaPiecesMemo = null })
+
+async function shaPiecesOfBook(): Promise<NonNullable<typeof shaPiecesMemo>> {
+  const key = await liveSourceVersion()
+  if (shaPiecesMemo?.key === key) return shaPiecesMemo
+  const w = await loadTaskWorld()
+  const owners = conversationOwners(w.rollupRows)
+  const commentsOfTask = new Map<string, typeof w.book.comments>()
+  for (const c of w.book.comments) { const l = commentsOfTask.get(c.taskId); if (l) l.push(c); else commentsOfTask.set(c.taskId, [c]) }
+  const details = w.book.tasks.map(task => buildTaskDetail({
+    owners, task, attempts: w.book.attempts, rows: w.rollupRows, metas: w.metas, costOf: w.costOf,
+    comments: commentsOfTask.get(task.id) ?? [], threads: [], subtasks: w.book.subtasks.filter(t => t.taskId === task.id), files: [],
+  }))
+  const pieces = legacyReviewShaPieces(details, w.book.events)
+  const taskById = new Map(w.book.tasks.map(t => [t.id, t]))
+  const dirsFor = dirsForShas({
+    pieces, rowsOf: id => { const t = taskById.get(id); return t ? rowsOfTask(t, w.rollupRows, owners) : [] }, metas: w.metas.values(),
+  })
+  shaPiecesMemo = { key, pieces, dirsFor }
+  return shaPiecesMemo
+}
+
+export async function pieceVersionsFromTags(): Promise<Record<string, string>> {
+  const { pieces, dirsFor } = await shaPiecesOfBook()
+  // Never wait for git: what is known NOW is answered, the rest (newest commits first, a bounded batch per pass, one
+  // pass at a time) is resolved in the background and the next read — the calendar is rebuilt every few seconds — has it.
+  const now = Date.now()
+  const todo = [...pieces.keys()].reverse().filter(sha => !shaVersion.has(sha) && (shaMissAt.get(sha) ?? 0) < now - SHA_MISS_TTL_MS)
+  if (todo.length > 0 && !shaRefill) {
+    shaRefill = (async () => {
+      for (const sha of todo.slice(0, SHA_BATCH)) {
+        const version = await firstTagContaining(sha, dirsFor(sha)).catch(() => null)
+        if (version) shaVersion.set(sha, version); else shaMissAt.set(sha, Date.now())
+      }
+    })().finally(() => { shaRefill = null })
+  }
+  const out: Record<string, string> = {}
+  for (const [sha, version] of shaVersion) {
+    if (!pieces.has(sha)) continue
+    for (const p of pieces.get(sha) ?? []) {
+      const key = p.subtaskId ? `${p.taskId}/${p.subtaskId}` : p.taskId
+      // A piece naming several commits ships with the LAST of them.
+      const cur = out[key]
+      if (!cur || version.localeCompare(cur, undefined, { numeric: true }) > 0) out[key] = version
+    }
+  }
+  return out
 }
 
 /** The pieces the Live lists as "antigas" (same cached build the screen reads): the ONE set every antigas surface acts on. */

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 import {
   DEFAULT_PLACEMENT, EMPTY_SLOT_LAYOUT, PANEL_IDS, allowed, bottomPanels, closePanel,
   getPanelLayout, hidePanel, hiddenPanels, hidePanelPlacement, isPanelId, isPanelPinned,
-  isPanelShown, movePanel, openPanel, overlayOutsideAction, planPanelDrop, railClickAction,
+  isPanelShown, movePanel, openPanel, openPanelOnPhone, overlayOutsideAction, parseLayout, planPanelDrop, railClickAction,
   railPanels, readLayout, relocatePanel, reorderPlacement, resetPanelSlots, resolveForGates,
   resolveForViewport, restorePanelPlacement, rightSlotShowing, setBandOpen, setBottomOpen,
   setPanelPinned, setPlacement, setRightOpen, setSlotRightOpen, showPanel, subscribePanelLayout,
@@ -31,9 +31,9 @@ function memory(): Storage {
 // ---------------------------------------------------------------------------------------------
 
 describe('PANEL_IDS', () => {
-  test('is exactly the fifteen panels — the ten former Contents tabs, search, plus studio/hardware/cli/shell', () => {
+  test('is exactly the seventeen panels — the former Contents tabs, search, calendar, livedelivery, plus studio/hardware/cli/shell', () => {
     expect(PANEL_IDS.slice().sort()).toEqual([
-      'agents', 'cli', 'forks', 'gallery', 'hardware', 'live', 'mcps', 'metrics', 'prs', 'search',
+      'agents', 'calendar', 'cli', 'forks', 'gallery', 'hardware', 'live', 'livedelivery', 'mcps', 'metrics', 'prs', 'search',
       'shell', 'skills', 'studio', 'tasks', 'workflows',
     ])
   })
@@ -146,6 +146,26 @@ describe('setPlacement', () => {
       const restoreTo: string = EMPTY_SLOT_LAYOUT.restoreTo[id]
       expect(restoreTo).toBe(EMPTY_SLOT_LAYOUT.placement[id])
     }
+  })
+})
+
+describe('openPanelOnPhone', () => {
+  test('a panel placed on the bottom band opens as the right sheet when another panel holds the right', () => {
+    let l = setPlacement(EMPTY_SLOT_LAYOUT, 'livedelivery', 'bottom')
+    l = openPanel(l, 'live') // the session feed already holds the right slot
+    // the plain open leaves the feed on top — what the phone showed under a selected Live tab
+    expect(resolveForViewport(openPanel(l, 'livedelivery'), true).right).toBe('live')
+    const raw = openPanelOnPhone(l, 'livedelivery')
+    expect(parseLayout(JSON.parse(JSON.stringify(raw))).bottom).toBe('livedelivery') // survives the stored round trip
+    const next = resolveForViewport(parseLayout(JSON.parse(JSON.stringify(raw))), true)
+    expect(next.right).toBe('livedelivery')
+    expect(next.bottom).toBeNull()
+    expect(next.placement.livedelivery).toBe('bottom') // a desktop still finds it on the band
+  })
+
+  test('a rail-placed panel opens exactly as openPanel does', () => {
+    const l = openPanel(EMPTY_SLOT_LAYOUT, 'live')
+    expect(openPanelOnPhone(l, 'calendar')).toEqual(openPanel(l, 'calendar'))
   })
 })
 

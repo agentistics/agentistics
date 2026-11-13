@@ -65,8 +65,10 @@ export interface CalPiece {
   overdueSinceMs?: number | null
   /** The real publication instant (the release's own) — null until it shipped. */
   publishedAtMs: number | null
-  /** `yyyy-MM-dd` — the task's due day. */
+  /** `yyyy-MM-dd` — the piece's OWN due day (its subtask's; a task-level piece's is the task's). Never inherited. */
   dueDate: string | null
+  /** The parent task's due day, shown only as a mark of the parent — it never makes the piece late. */
+  parentDueDate?: string
   /** Published, or an estimate with at least medium confidence. "só confirmadas" keeps exactly these. */
   confirmed: boolean
   /** Past its due day, or past its publish ETA, and not published. */
@@ -168,81 +170,18 @@ export function buildCalendar(o: {
   tasks: readonly CalTaskInput[]
   subtasks: readonly CalSubtaskInput[]
   resets: readonly CalResetInput[]
+  /**
+   * Versions the host PROVED for pieces that carry none on their delivery record (key → `x.y.z`): the first release
+   * tag that contains the commit the piece delivered. Absent for a piece nothing proves anything about.
+   */
+  inferredVersions?: Readonly<Record<string, string>>
 }): CalendarReply {
   const taskById = new Map(o.tasks.map(t => [t.id, t]))
   const subById = new Map(o.subtasks.map(s => [s.id, s]))
   const recBySub = new Map(o.records.map(r => [r.subtaskId, r]))
   const today = brtDay(o.nowMs)
 
-  const pieces: CalPiece[] = []
-  const seen = new Set<string>()
-  for (const l of o.lives) {
-    const rec = l.subtaskId ? recBySub.get(l.subtaskId) : undefined
-    const task = taskById.get(l.taskId)
-    const publishedAtMs = parseMs(rec?.publishedAt) ?? (l.stage === 'published' ? l.deliveredAtMs : null)
-    const confidence = l.eta.kind === 'estimate' ? l.eta.confidence : null
-    const overdueSinceMs = l.overdueSinceMs ?? null
-    const publishEta = l.stage === 'published' ? ({ kind: 'none', reason: 'final' } as CalEta) : overdueSinceMs !== null ? ({ kind: 'none', reason: 'overdue' } as CalEta) : eta(l.publishEta, confidence)
-    const sub = l.subtaskId ? subById.get(l.subtaskId) : undefined
-    const dueDate = sub?.dueDate ?? task?.dueDate ?? null
-    const published = l.stage === 'published'
-    pieces.push({
-      key: l.key, taskId: l.taskId, taskTitle: l.taskTitle, subtaskId: l.subtaskId, title: l.title, ...(l.kind ? { kind: l.kind } : {}), ...(l.leaderAvailabilityReasonCode ? { leaderAvailabilityReasonCode: l.leaderAvailabilityReasonCode } : {}), stage: l.stage,
-      version: pickVersion(rec?.versionTarget),
-      harness: l.harnesses[0] ?? null, model: l.models[0] ?? null,
-      priority: toPriority(sub?.priority ?? task?.priority),
-      active: !published,
-      startedAtMs: l.startedAtMs, stageSinceMs: l.stageSinceMs, trail: l.trail ? l.trail.map(v => ({ ...v })) : [],
-      stageEta: published ? { kind: 'none', reason: 'final' } : eta(l.stageEta, confidence),
-      publishEta, overdueSinceMs, publishedAtMs, dueDate,
-      confirmed: published || (publishEta.kind === 'estimate' && publishEta.confidence !== null && RANK[publishEta.confidence] >= RANK.medium),
-      late: !published && (overdueSinceMs !== null || deadlinePassed(dueDate, o.nowMs, today) || (publishEta.kind === 'estimate' && publishEta.atMs < o.nowMs)),
-    })
-    seen.add(l.key)
-  }
-  // Pieces that shipped long enough ago to have left the Live line: the delivery record still states when and in
-  // which version, which is what the calendar's history needs.
-  for (const r of o.records) {
-    const key = `${r.taskId}/${r.subtaskId}`
-    if (seen.has(key)) continue
-    const publishedAtMs = parseMs(r.publishedAt)
-    const task = taskById.get(r.taskId)
-    const sub = subById.get(r.subtaskId)
-    const dueDate = sub?.dueDate ?? task?.dueDate ?? null
-    const stage = PHASE_STAGE[r.phase]
-    if (stage && stage !== 'published') {
-      // A piece the delivery flow tracks (it has a phase, maybe a version) that the Live line does not draw — planned
-      // work with no session yet. It belongs on a calendar, but with NO estimate: the Live model produced none.
-      seen.add(key)
-      pieces.push({
-        key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,
-        title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage, version: pickVersion(r.versionTarget),
-        harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: task?.status === 'in_progress',
-        startedAtMs: parseMs(r.firstAt), stageSinceMs: parseMs(r.lastAt), trail: [],
-        stageEta: { kind: 'none', reason: 'not-started' }, publishEta: { kind: 'none', reason: 'not-started' },
-        publishedAtMs: null, dueDate, confirmed: false, overdueSinceMs: null,
-        late: deadlinePassed(dueDate, o.nowMs, today),
-      })
-      continue
-    }
-    if (r.phase !== 'publicado' || publishedAtMs === null) continue
-    pieces.push({
-      key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,
-      title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage: 'published', version: pickVersion(r.versionTarget),
-      harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: false,
-      startedAtMs: null, stageSinceMs: null, trail: [],
-      stageEta: { kind: 'none', reason: 'final' }, publishEta: { kind: 'none', reason: 'final' },
-      publishedAtMs, dueDate, confirmed: true, late: false, overdueSinceMs: null,
-    })
-  }
-
-  // ---- versions: the pieces that ride one release, and when it ships (or shipped).
-  const byVersion = new Map<string, CalPiece[]>()
-  for (const p of pieces) if (p.version) { const l = byVersion.get(p.version); if (l) l.push(p); else byVersion.set(p.version, [p]) }
-  // A release is a version-level fact. One release record can carry the tag and the
-  // green release run's completion even while sibling pieces still have stale phases.
-  // Keep this separate from piece publication so a partial record cannot turn a real
-  // release into a planned version with "no estimate".
+  // Which versions really went out, and when: the repository's releases, then a delivery record's own tagged release.
   const releasePublishedAt = new Map<string, number>()
   for (const r of o.releases ?? []) {
     const version = pickVersion(r.version)
@@ -258,6 +197,116 @@ export function buildCalendar(o: {
     const previous = releasePublishedAt.get(version)
     if (previous === undefined || publishedAt > previous) releasePublishedAt.set(version, publishedAt)
   }
+
+  // A version the HOST proved (a release tag carries the delivered commit) counts only when it is a release this calendar
+  // shows (an older real tag outside the list became a fake "planned · no estimate" version drawn on today) and only for a
+  // piece that is, or by it becomes, published: an open piece (queue, a new round) is never put under a shipped release.
+  const FLIPS: ReadonlySet<CalStage> = new Set<CalStage>(['leader', 'merge', 'ci'])
+  // r4: and never a release that went out BEFORE the piece started (a commit it only cited sits in an older tag): that
+  // link is dropped, not moved — the piece stays where its own record puts it.
+  const provenVersion = (key: string, stage: CalStage, startedAtMs: number | null): string | null => {
+    const v = pickVersion(o.inferredVersions?.[key])
+    if (!v || !(stage === 'published' || FLIPS.has(stage))) return null
+    const at = releasePublishedAt.get(v)
+    if (at === undefined) return null
+    return startedAtMs !== null && at < startedAtMs ? null : v
+  }
+
+  const pieces: CalPiece[] = []
+  const seen = new Set<string>()
+  for (const l of o.lives) {
+    const rec = l.subtaskId ? recBySub.get(l.subtaskId) : undefined
+    const task = taskById.get(l.taskId)
+    const version = pickVersion(rec?.versionTarget) ?? provenVersion(l.key, l.stage, l.startedAtMs)
+    // A piece waiting on the leader/merge/CI whose version already went out IS published: the board keeps it
+    // in_review until the OWNER validates, so the calendar must not read that as still being reviewed.
+    const releasedAt = version ? releasePublishedAt.get(version) ?? null : null
+    const shipped = releasedAt !== null && FLIPS.has(l.stage)
+    const stage: CalStage = shipped ? 'published' : l.stage
+    const publishedAtMs = parseMs(rec?.publishedAt) ?? (shipped ? releasedAt : l.stage === 'published' ? l.deliveredAtMs : null)
+    const confidence = l.eta.kind === 'estimate' ? l.eta.confidence : null
+    const overdueSinceMs = shipped ? null : l.overdueSinceMs ?? null
+    const publishEta = stage === 'published' ? ({ kind: 'none', reason: 'final' } as CalEta) : overdueSinceMs !== null ? ({ kind: 'none', reason: 'overdue' } as CalEta) : eta(l.publishEta, confidence)
+    const sub = l.subtaskId ? subById.get(l.subtaskId) : undefined
+    // The piece's OWN deadline. The parent task's day is context (`parentDueDate`), never copied onto every piece;
+    // a task-level piece (no subtask) IS the task, so its deadline is the task's.
+    const dueDate = l.subtaskId ? sub?.dueDate ?? null : task?.dueDate ?? null
+    const parentDueDate = l.subtaskId ? task?.dueDate ?? null : null
+    const published = stage === 'published'
+    pieces.push({
+      key: l.key, taskId: l.taskId, taskTitle: l.taskTitle, subtaskId: l.subtaskId, title: l.title, ...(l.kind ? { kind: l.kind } : {}), ...(l.leaderAvailabilityReasonCode ? { leaderAvailabilityReasonCode: l.leaderAvailabilityReasonCode } : {}), stage,
+      version,
+      harness: l.harnesses[0] ?? null, model: l.models[0] ?? null,
+      priority: toPriority(sub?.priority ?? task?.priority),
+      active: !published,
+      startedAtMs: l.startedAtMs, stageSinceMs: l.stageSinceMs, trail: l.trail ? l.trail.map(v => ({ ...v })) : [],
+      stageEta: published ? { kind: 'none', reason: 'final' } : eta(l.stageEta, confidence),
+      publishEta, overdueSinceMs, publishedAtMs, dueDate, ...(parentDueDate ? { parentDueDate } : {}),
+      confirmed: published || (publishEta.kind === 'estimate' && publishEta.confidence !== null && RANK[publishEta.confidence] >= RANK.medium),
+      late: !published && (overdueSinceMs !== null || deadlinePassed(dueDate, o.nowMs, today) || (publishEta.kind === 'estimate' && publishEta.atMs < o.nowMs)),
+    })
+    seen.add(l.key)
+  }
+  // Pieces that shipped long enough ago to have left the Live line: the delivery record still states when and in
+  // which version, which is what the calendar's history needs.
+  for (const r of o.records) {
+    const key = `${r.taskId}/${r.subtaskId}`
+    if (seen.has(key)) continue
+    const publishedAtMs = parseMs(r.publishedAt)
+    const task = taskById.get(r.taskId)
+    const sub = subById.get(r.subtaskId)
+    const dueDate = sub?.dueDate ?? null
+    const parentDueDate = task?.dueDate ?? null
+    const phaseStage = PHASE_STAGE[r.phase]
+    // Waiting on the leader/merge/CI with a version that already went out: published, exactly as for a Live piece.
+    const openVersion = phaseStage && phaseStage !== 'published' ? pickVersion(r.versionTarget) ?? provenVersion(key, phaseStage, parseMs(r.firstAt)) : null
+    const flippedAt = openVersion && phaseStage && FLIPS.has(phaseStage) ? releasePublishedAt.get(openVersion) ?? null : null
+    if (flippedAt !== null) {
+      seen.add(key)
+      pieces.push({
+        key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,
+        title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage: 'published', version: openVersion,
+        harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: false,
+        startedAtMs: parseMs(r.firstAt), stageSinceMs: null, trail: [],
+        stageEta: { kind: 'none', reason: 'final' }, publishEta: { kind: 'none', reason: 'final' },
+        publishedAtMs: publishedAtMs ?? flippedAt, dueDate, ...(parentDueDate ? { parentDueDate } : {}), confirmed: true, late: false, overdueSinceMs: null,
+      })
+      continue
+    }
+    const stage = phaseStage
+    if (stage && stage !== 'published') {
+      // A piece the delivery flow tracks (it has a phase, maybe a version) that the Live line does not draw — planned
+      // work with no session yet. It belongs on a calendar, but with NO estimate: the Live model produced none.
+      seen.add(key)
+      pieces.push({
+        key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,
+        title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage, version: openVersion,
+        harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: task?.status === 'in_progress',
+        startedAtMs: parseMs(r.firstAt), stageSinceMs: parseMs(r.lastAt), trail: [],
+        stageEta: { kind: 'none', reason: 'not-started' }, publishEta: { kind: 'none', reason: 'not-started' },
+        publishedAtMs: null, dueDate, ...(parentDueDate ? { parentDueDate } : {}), confirmed: false, overdueSinceMs: null,
+        late: deadlinePassed(dueDate, o.nowMs, today),
+      })
+      continue
+    }
+    if (r.phase !== 'publicado' || publishedAtMs === null) continue
+    pieces.push({
+      key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,
+      title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage: 'published', version: pickVersion(r.versionTarget) ?? provenVersion(key, 'published', null),
+      harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: false,
+      startedAtMs: null, stageSinceMs: null, trail: [],
+      stageEta: { kind: 'none', reason: 'final' }, publishEta: { kind: 'none', reason: 'final' },
+      publishedAtMs, dueDate, ...(parentDueDate ? { parentDueDate } : {}), confirmed: true, late: false, overdueSinceMs: null,
+    })
+  }
+
+  // ---- versions: the pieces that ride one release, and when it ships (or shipped).
+  const byVersion = new Map<string, CalPiece[]>()
+  for (const p of pieces) if (p.version) { const l = byVersion.get(p.version); if (l) l.push(p); else byVersion.set(p.version, [p]) }
+  // A release is a version-level fact. One release record can carry the tag and the
+  // green release run's completion even while sibling pieces still have stale phases.
+  // Keep this separate from piece publication so a partial record cannot turn a real
+  // release into a planned version with "no estimate".
   const versions: CalVersion[] = []
   for (const [version, ps] of byVersion) {
     const stageCounts: Partial<Record<CalStage, number>> = {}
@@ -267,7 +316,10 @@ export function buildCalendar(o: {
     const lowest = confs.length ? confs.reduce((a, b) => (RANK[b] < RANK[a] ? b : a)) : null
     const releaseAtMs = releasePublishedAt.get(version)
     if (releaseAtMs !== undefined) {
-      versions.push({ version, state: 'published', atMs: releaseAtMs, basis: 'published', taggedRelease: true, confidence: null, pieceKeys: ps.map(p => p.key), stageCounts })
+      // A release that went out holds what was PUBLISHED in it; a piece still open under that number (a new round
+      // declared against it) is not part of what shipped and is not counted on its card.
+      const shippedPs = ps.filter(p => p.stage === 'published')
+      versions.push({ version, state: 'published', atMs: releaseAtMs, basis: 'published', taggedRelease: true, confidence: null, pieceKeys: shippedPs.map(p => p.key), stageCounts: shippedPs.length ? { published: shippedPs.length } : {} })
       continue
     }
     if (allPublished) {
@@ -412,7 +464,9 @@ export function filterCalendar(reply: CalendarReply, f: CalFilters = {}): Calend
   const versions = reply.versions.filter(v => {
     if (f.versions?.length && !f.versions.includes(v.version)) return false
     if (v.pieceKeys.some(k => keep.has(k))) return true
-    const hasActive = reply.pieces.some(p => p.version === v.version && p.active)
+    // only the version's OWN pieces: an open piece declared against a release that already went out is not on its card,
+    // and must not hide the real release (2.205.1 vanished in r3 before this)
+    const hasActive = reply.pieces.some(p => p.version === v.version && p.active && v.pieceKeys.includes(p.key))
     if (hasActive || narrowsPieces) return false
     if (f.confirmedOnly && v.basis !== 'published') return false
     const at = v.atMs

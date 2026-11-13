@@ -57,7 +57,10 @@ test('streak / last active come from the latest OpenCode day', () => {
 })
 
 test('Files is "not reported" when no selected harness reports edits', () => {
-  expect(gitLinesReported({ harnesses: ['opencode'] })).toBe(false)
-  expect(gitLinesReported({ harnesses: ['opencode', 'claude'] })).toBe(true)
+  // OpenCode reports edit line counts since the gateway fix (capabilities: gitLines partial);
+  // Gemini and Kimi still do not.
+  expect(gitLinesReported({ harnesses: ['gemini', 'kimi'] })).toBe(false)
+  expect(gitLinesReported({ harnesses: ['opencode'] })).toBe(true)
+  expect(gitLinesReported({ harnesses: ['gemini', 'claude'] })).toBe(true)
   expect(gitLinesReported({})).toBe(true)
 })

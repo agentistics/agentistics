@@ -3,6 +3,7 @@ export const TOOL_LABELS: Record<string, string> = {
   agentistics_projects:          'Fetching projects',
   agentistics_sessions:          'Loading sessions',
   agentistics_costs:             'Analyzing costs',
+  agentistics_benchmark_observed: 'Reading the Benchmark',
   agentistics_get_layouts:       'Reading layouts',
   agentistics_create_layout:     'Creating layout',
   agentistics_add_component:     'Adding component',
