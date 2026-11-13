@@ -21,11 +21,11 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Benchmark: with the real history it compares pieces with 1 QA round against 2 or more, and 1 session against 5 or more, within the same size — as observed evidence ("Evidence, not proof"). There is no 0–100 score yet, because no controlled experiment has run.',
       },
       {
-        pt: 'Ao vivo: o status da peça no quadro sempre vale — abandonada ou concluída saem das colunas ativas e bloqueada aparece como bloqueada.',
+        pt: 'Live: o status da peça no quadro sempre vale — abandonada ou concluída saem das colunas ativas e bloqueada aparece como bloqueada.',
         en: 'Live: a piece\'s status on the board always wins — abandoned or done pieces leave the active columns and a blocked one shows as blocked.',
       },
       {
-        pt: 'Ao vivo: o trabalho entregue cuja versão já foi publicada passa sozinho para Publicado, e peças antigas sem líder ganham um único aviso com um botão para resolver.',
+        pt: 'Live: o trabalho entregue cuja versão já foi publicada passa sozinho para Publicado, e peças antigas sem líder ganham um único aviso com um botão para resolver.',
         en: 'Live: delivered work whose version is already published moves to Published on its own, and old pieces without a leader get a single notice with a one-click action.',
       },
     ],
