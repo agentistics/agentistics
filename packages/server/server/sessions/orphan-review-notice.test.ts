@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ORPHAN_INDIVIDUAL_CAP, orphanHours, planOrphanNotices, sweepOrphanReviews, type OrphanCard } from './orphan-review-notice'
+import { ORPHAN_INDIVIDUAL_CAP, leaderLiveOf, orphanHours, planOrphanNotices, sweepOrphanReviews, type OrphanCard } from './orphan-review-notice'
 
 const NOW = Date.parse('2026-11-13T15:00:00.000Z')
 const H = 3600_000
@@ -18,6 +18,15 @@ test('a card without a leader for over 24 h gets ONE notice carrying its title a
 
 test('the notice goes to the live leader when one exists, else to the user', () => {
   expect(planOrphanNotices({ cards: [card('t/a')], nowMs: NOW, said: new Set(), leaderLive: true }).notices[0]!.meta).toMatchObject({ to: 'leader' })
+})
+
+test('leaderLiveOf: only a leader in a LIVE state counts; a lost/ended one sends the notice to the user', () => {
+  expect(leaderLiveOf([])).toBe(false)
+  expect(leaderLiveOf([{ state: 'lost' }])).toBe(false)
+  expect(leaderLiveOf([{ state: 'exited' }, { state: 'lost' }])).toBe(false)
+  expect(leaderLiveOf([{ state: 'lost' }, { state: 'working' }])).toBe(true)
+  const leaderLive = leaderLiveOf([{ state: 'lost' }])
+  expect(planOrphanNotices({ cards: [card('t/a')], nowMs: NOW, said: new Set(), leaderLive }).notices[0]!.meta).toMatchObject({ to: 'user' })
 })
 
 test('under the threshold, with a leader, or in another stage: silent', () => {

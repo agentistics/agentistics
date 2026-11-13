@@ -970,7 +970,9 @@ export function legacyReviewShaPieces(details: readonly TaskDetail[], events: re
     // it is in review (or done) and a release may already hold the commit (buildLive turns that into Publicado). Only
     // a `publicado` record, or an early phase (fila/executando…), has nothing to ask git.
     const rec = deliveries?.get(p.sub ? p.sub.id : p.task.id)
-    if (rec && !(['revisao_lider', 'pr_merge', 'ci'].includes(rec.phase) || (p.status === 'done' && rec.phase !== 'publicado'))) continue
+    // buildLive promotes only `revisao_lider` (in_review) and any non-publicado record on a done piece; pr_merge/ci on an
+    // in_review piece stay in their column whatever git says, so asking git for them would be a cost with no effect.
+    if (rec && !((p.status === 'in_review' && rec.phase === 'revisao_lider') || (p.status === 'done' && rec.phase !== 'publicado'))) continue
     const piece: ShaPiece = { taskId: p.task.id, subtaskId: p.sub?.id ?? null, ...(p.task.repo ? { repo: p.task.repo } : {}) }
     for (const g of legacyShaGroups(p, eventsBySubject.get(p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id))) for (const sha of g) {
       const l = out.get(sha)

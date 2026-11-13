@@ -12,6 +12,7 @@
  */
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { isLiveState } from '@agentistics/core'
 import type { NotificationInput } from '../notifications-store'
 
 export const ORPHAN_HOURS_DEFAULT = 24
@@ -29,6 +30,11 @@ export interface OrphanPlan { notices: NotificationInput[]; mark: string[] }
 export function orphanHours(env: string | undefined): number {
   const n = Number(env)
   return Number.isFinite(n) && n > 0 ? n : ORPHAN_HOURS_DEFAULT
+}
+
+/** PURE: is some leader in a LIVE state? A lost/ended leader reads no notice, so it goes to the user. */
+export function leaderLiveOf(leaders: readonly { state?: string }[]): boolean {
+  return leaders.some(l => isLiveState(l.state))
 }
 
 const ledgerKey = (key: string) => `${key}|leader`

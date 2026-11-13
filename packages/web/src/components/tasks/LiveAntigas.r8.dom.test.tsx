@@ -47,3 +47,17 @@ test('one click: the dialog previews "N concluídas, M arquivadas" and a single 
   expect(sent).toHaveLength(2)
   expect(document.querySelectorAll('[data-live-archived]')).toHaveLength(0)
 })
+
+for (const pt of [true, false]) {
+  test(`R4: with ONE piece the action is labelled for that piece, never "all" (${pt ? 'pt' : 'en'})`, async () => {
+    globalThis.fetch = ((async () => Response.json({ ok: true, action: 'conclude', done: [], preview: { conclude: 1, archive: 0 } })) as unknown) as typeof fetch
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    await act(async () => root!.render(createElement(Antigas, {
+      open: true, pt, mobile: false, onClose() {}, onOpen() {},
+      items: [{ key: 't-e1dea7cd6f/s-a7e7d9df9f', taskId: 't-e1dea7cd6f', subtaskId: 's-a7e7d9df9f', title: 'REFS.1' }],
+    })))
+    const label = document.querySelector('[data-live-antigas-all]')?.textContent ?? ''
+    expect(label).toBe(pt ? 'Concluir esta peça' : 'Conclude this piece')
+    expect(label).not.toMatch(/Todas|All|\(1\)/)
+  })
+}
