@@ -43,6 +43,7 @@ export interface ObservedInput {
   escaped?: ReadonlySet<string> | null
 }
 
+const MAX_RANGE_WIDTH = 0.5
 const WEEK_MS = 7 * 24 * 3600 * 1000
 const ACTIVE_BUCKETS = ['running', 'qa', 'adjust', 'leader', 'merge', 'ci'] as const
 const SOURCES = ['tasks.json (subtasks)', 'deliveries.json (phase history)', 'managed-sessions.json (sessions)', 'sessions store (tokens)']
@@ -113,26 +114,33 @@ export function buildObserved(input: ObservedInput): Observed {
     'median of lead time (request or queue entry → published), published deliveries')
 
   const publishedWithHistory = published.filter(i => input.historyKnown.has(i.subtaskId))
-  const actives = publishedWithHistory.map(i => ACTIVE_BUCKETS.reduce((a, b) => a + i.stageMs[b], 0))
+  // A history that shows no time in any working stage (a piece adopted already finished, a release declared the
+  // instant it was adopted) did not measure the work: its zero is "not looked at", not "took no time".
+  const activeOf = (i: MetricItem) => ACTIVE_BUCKETS.reduce((a, b) => a + i.stageMs[b], 0)
+  const activeItems = publishedWithHistory.filter(i => activeOf(i) > 0)
+  const actives = activeItems.map(activeOf)
   const activeMedian = cov(median(actives), bootstrapInterval(actives, median), actives.length, published.length,
-    published.filter(i => !input.historyKnown.has(i.subtaskId)).map(i => i.subtaskId),
-    gap('no_phase_history', published.length - publishedWithHistory.length),
-    'median of time in running + qa + adjust + leader + merge + ci, published deliveries with a recorded phase history')
+    published.filter(i => !activeItems.includes(i)).map(i => i.subtaskId),
+    [...gap('no_phase_history', published.length - publishedWithHistory.length), ...gap('no_active_stage', publishedWithHistory.length - activeItems.length)],
+    'median of time in running + qa + adjust + leader + merge + ci, published deliveries whose recorded phase history shows time in a working stage')
 
   // coordination share: a RANGE. lo = leader sessions only; hi = leader + sessions with no role.
   const pricedLinked = linked.filter(s => s.cost.costUSD !== null)
   const sum = (f: (s: ObservedSession) => boolean) => pricedLinked.filter(f).reduce((a, s) => a + s.cost.costUSD!, 0)
   const allCost = sum(() => true)
-  const coordinationShareRange = allCost > 0
+  const rawRange = allCost > 0
     ? { lo: sum(s => s.role === 'leader') / allCost, hi: sum(s => s.role === 'leader' || s.role === 'unknown') / allCost }
     : { lo: null, hi: null }
+  // A range wider than half the scale says nothing (most cost has no recorded role): it is withheld, not drawn.
+  const tooWide = rawRange.lo !== null && rawRange.hi !== null && rawRange.hi - rawRange.lo > MAX_RANGE_WIDTH
+  const coordinationShareRange = tooWide ? { lo: null, hi: null } : rawRange
   const unpricedIds = linked.filter(s => s.cost.costUSD === null).map(s => s.id)
   const roleUnknownSessions = linked.filter(s => s.role === 'unknown').length
   const coordinationShare = cov<number>(null,
     coordinationShareRange.lo !== null && coordinationShareRange.hi !== null ? { lo: coordinationShareRange.lo, hi: coordinationShareRange.hi, level: 0.95, method: 'range' } : null,
     pricedLinked.length, linked.length, unpricedIds,
-    [...gap('no_price', linked.filter(s => s.cost.costUSD === null && s.cost.missing === 'price').length), ...gap('no_tokens', linked.filter(s => s.cost.costUSD === null && s.cost.missing !== 'price').length), ...gap('role_unknown', roleUnknownSessions)],
-    'a range, never a point: leader cost ÷ total cost (lower end) up to (leader + role-unknown) ÷ total (upper end)')
+    [...gap('no_price', linked.filter(s => s.cost.costUSD === null && s.cost.missing === 'price').length), ...gap('no_tokens', linked.filter(s => s.cost.costUSD === null && s.cost.missing !== 'price').length), ...gap(tooWide ? 'role_range_too_wide' : 'role_unknown', roleUnknownSessions)],
+    'a range, never a point: leader cost ÷ total cost (lower end) up to (leader + role-unknown) ÷ total (upper end); withheld when wider than 50 points')
 
   // QA: only deliveries with a recorded phase history can have an outcome; "never left QA" is not a rejection.
   const decided = withHistory.filter(i => i.qaResult !== 'pending')

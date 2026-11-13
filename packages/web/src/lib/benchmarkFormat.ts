@@ -30,7 +30,7 @@ export const METRIC_LABEL: Record<MetricKey, [string, string]> = {
 export const METRIC_PLAIN: Record<MetricKey, [string, string]> = {
   costPerDelivery: ['Média, entre as entregas, da soma do custo das sessões de cada uma (tokens de cada turno × tabela de preços). Entregas com alguma sessão sem preço ou sem tokens ficam de fora.', 'Average, across deliveries, of the summed cost of each one\'s sessions (per-turn tokens × price table). Deliveries with any session lacking a price or tokens are left out.'],
   wallMedian: ['Mediana do tempo entre a entrada na fila (ou o pedido) e a publicação, nas entregas publicadas.', 'Median time from queue entry (or the request) to publication, over published deliveries.'],
-  activeMedian: ['Mediana do tempo em execução, QA, ajuste, revisão do líder, merge e CI, só nas entregas publicadas com histórico de fases registrado.', 'Median time spent running, in QA, adjusting, leader review, merge and CI, only for published deliveries with a recorded phase history.'],
+  activeMedian: ['Mediana do tempo em execução, QA, ajuste, revisão do líder, merge e CI, só nas entregas publicadas cujo histórico de fases mostra tempo em etapa de trabalho.', 'Median time spent running, in QA, adjusting, leader review, merge and CI, only for published deliveries whose phase history shows time in a working stage.'],
   coordinationShare: ['Quanto do custo foi de sessões líderes: o início da faixa conta só líderes confirmados; o fim soma também as sessões sem papel registrado.', 'How much of the cost was leader sessions: the low end counts confirmed leaders only; the high end also adds sessions with no recorded role.'],
   qaFirstRoundRejection: ['Entregas que a QA devolveu ao menos uma vez ÷ entregas em que o histórico de fases mostra a QA decidindo.', 'Deliveries QA sent back at least once ÷ deliveries whose phase history shows QA deciding.'],
   qaRoundsMedian: ['Mediana de (devoluções da QA + 1) nas entregas em que o histórico mostra a QA decidindo.', 'Median of (QA send-backs + 1) over deliveries whose history shows QA deciding.'],
@@ -48,6 +48,8 @@ export const SOURCE_LABEL: Record<string, [string, string]> = {
 
 const GAP_TEXT: Record<GapCode, [string, string]> = {
   no_phase_history: ['sem histórico de fases registrado', 'no recorded phase history'],
+  no_active_stage: ['histórico sem tempo em etapa de trabalho', 'history shows no time in a working stage'],
+  role_range_too_wide: ['sessões sem papel registrado — faixa larga demais para dizer algo', 'sessions with no recorded role — range too wide to say anything'],
   no_qa_stage: ['histórico sem etapa de QA', 'history shows no QA stage'],
   not_published: ['ainda não publicadas', 'not published yet'],
   no_price: ['modelo sem preço na tabela', 'model has no price in the table'],

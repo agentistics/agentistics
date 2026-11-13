@@ -102,6 +102,15 @@ describe('buildObserved — a delivery whose phase history was never recorded', 
     expect(o.scope.withPhaseHistory).toBe(2)
   })
 
+  test('a history showing no time in a working stage is a gap (no_active_stage), never a zero', () => {
+    const z = buildObserved({ items: [item('z1', { stageMs: stage(0) }), item('z2', { stageMs: stage(0) }), item('z3', { stageMs: stage(3600_000) })], sessions: [], historyKnown: new Set(['z1', 'z2', 'z3']) })
+    expect(z.metrics.activeMedian.value).toBe(3600_000)
+    expect([z.metrics.activeMedian.n, z.metrics.activeMedian.total]).toEqual([1, 3])
+    expect(z.metrics.activeMedian.gaps).toContainEqual({ code: 'no_active_stage', count: 2 })
+    const none = buildObserved({ items: [item('z1', { stageMs: stage(0) })], sessions: [], historyKnown: new Set(['z1']) })
+    expect(none.metrics.activeMedian.value).toBeNull()
+  })
+
   test('with no history at all the figure is null with the reason', () => {
     const none = buildObserved({ items, sessions: [], historyKnown: new Set() })
     expect(none.metrics.activeMedian.value).toBeNull()
@@ -115,6 +124,17 @@ describe('buildObserved — a delivery whose phase history was never recorded', 
     expect(none.metrics.qaFirstRoundRejection.value).toBeNull()
     expect(none.metrics.qaFirstRoundRejection.gaps).toContainEqual({ code: 'no_qa_stage', count: 1 })
     expect(none.metrics.qaRoundsMedian.value).toBeNull()
+  })
+})
+
+describe('buildObserved — a coordination range that says nothing is withheld', () => {
+  test('mostly role-unknown cost gives no range', () => {
+    const items = [item('r1')]
+    const sessions = [sess('a', 'r1', 'leader', 1), sess('b', 'r1', 'unknown', 9)]
+    const o = buildObserved({ items, sessions, historyKnown: new Set(), abandoned: new Set() })
+    expect(o.coordinationShareRange).toEqual({ lo: null, hi: null })
+    expect(o.metrics.coordinationShare.interval).toBeNull()
+    expect(o.metrics.coordinationShare.gaps).toContainEqual({ code: 'role_range_too_wide', count: 1 })
   })
 })
 

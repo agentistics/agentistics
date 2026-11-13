@@ -62,6 +62,10 @@ describe('benchmark page — real figures, honest gaps', () => {
     expect(pt).toContain('IC 95%: 25 h – 31 h')
     expect(en).toContain('95% CI: 25 h – 31 h')
     expect(pt).toContain('IC 95%: 91 / semana – 103 / semana')
+    const sub = (html: string, k: string) => html.split(`data-testid="metric-${k}-sub"`)[1]!.split('</div>')[0]!
+    expect(sub(pt, 'wallMedian')).toContain('IC 95%: 25 h – 31 h')
+    expect(sub(en, 'costPerDelivery')).toContain('95% CI: $10.1 – $14.9')
+    expect(sub(pt, 'throughputPerWeek')).toContain('IC 95%')
     expect(pt).toContain('700 de 1.000 medidas')
     expect(en).toContain('700 of 1,000 measured')
   })
