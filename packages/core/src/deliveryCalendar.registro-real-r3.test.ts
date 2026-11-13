@@ -42,7 +42,7 @@ test('an inferred version the release list does not know (an old real tag) is dr
 })
 
 test('an inferred version in the release list publishes the piece waiting on the leader', () => {
-  const reply = buildCalendar({ ...base, lives: [live({ key: 't1/a', taskId: 't1', stage: 'leader' })], inferredVersions: { 't1/a': '2.204.4' } })
+  const reply = buildCalendar({ ...base, lives: [live({ key: 't1/a', taskId: 't1', stage: 'leader', startedAtMs: Date.parse('2026-11-09T00:00:00Z') })], inferredVersions: { 't1/a': '2.204.4' } })
   expect(reply.pieces[0]).toMatchObject({ stage: 'published', version: '2.204.4' })
   expect(reply.versions.find(v => v.version === '2.204.4')!.pieceKeys).toEqual(['t1/a'])
 })
@@ -105,4 +105,23 @@ test('a record-only piece in a new round keeps its stage and is not counted unde
     inferredVersions: { 't1/c': '2.204.4' },
   })
   expect(reply.pieces[0]).toMatchObject({ stage: 'running', version: null })
+})
+
+// r4 — a proven release older than the piece's own start is not the piece's release (HERMES.ACP: started 11/11, "published" 10/11).
+test('r4: an inferred release published BEFORE the piece started is dropped, not moved', () => {
+  const reply = buildCalendar({
+    ...base,
+    lives: [live({ key: 't1/a', taskId: 't1', stage: 'leader', startedAtMs: Date.parse('2026-11-11T03:48:00Z') })],
+    inferredVersions: { 't1/a': '2.204.4' },
+  })
+  expect(reply.pieces[0]).toMatchObject({ stage: 'leader', version: null })
+  expect(reply.versions.find(v => v.version === '2.204.4')!.pieceKeys).toEqual([])
+})
+test('r4: a release published AFTER the piece started still publishes it', () => {
+  const reply = buildCalendar({
+    ...base,
+    lives: [live({ key: 't1/a', taskId: 't1', stage: 'leader', startedAtMs: Date.parse('2026-11-09T03:48:00Z') })],
+    inferredVersions: { 't1/a': '2.204.4' },
+  })
+  expect(reply.pieces[0]).toMatchObject({ stage: 'published', version: '2.204.4' })
 })

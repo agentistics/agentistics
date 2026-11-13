@@ -202,9 +202,14 @@ export function buildCalendar(o: {
   // shows (an older real tag outside the list became a fake "planned · no estimate" version drawn on today) and only for a
   // piece that is, or by it becomes, published: an open piece (queue, a new round) is never put under a shipped release.
   const FLIPS: ReadonlySet<CalStage> = new Set<CalStage>(['leader', 'merge', 'ci'])
-  const provenVersion = (key: string, stage: CalStage): string | null => {
+  // r4: and never a release that went out BEFORE the piece started (a commit it only cited sits in an older tag): that
+  // link is dropped, not moved — the piece stays where its own record puts it.
+  const provenVersion = (key: string, stage: CalStage, startedAtMs: number | null): string | null => {
     const v = pickVersion(o.inferredVersions?.[key])
-    return v && releasePublishedAt.has(v) && (stage === 'published' || FLIPS.has(stage)) ? v : null
+    if (!v || !(stage === 'published' || FLIPS.has(stage))) return null
+    const at = releasePublishedAt.get(v)
+    if (at === undefined) return null
+    return startedAtMs !== null && at < startedAtMs ? null : v
   }
 
   const pieces: CalPiece[] = []
@@ -212,7 +217,7 @@ export function buildCalendar(o: {
   for (const l of o.lives) {
     const rec = l.subtaskId ? recBySub.get(l.subtaskId) : undefined
     const task = taskById.get(l.taskId)
-    const version = pickVersion(rec?.versionTarget) ?? provenVersion(l.key, l.stage)
+    const version = pickVersion(rec?.versionTarget) ?? provenVersion(l.key, l.stage, l.startedAtMs)
     // A piece waiting on the leader/merge/CI whose version already went out IS published: the board keeps it
     // in_review until the OWNER validates, so the calendar must not read that as still being reviewed.
     const releasedAt = version ? releasePublishedAt.get(version) ?? null : null
@@ -254,7 +259,7 @@ export function buildCalendar(o: {
     const parentDueDate = task?.dueDate ?? null
     const phaseStage = PHASE_STAGE[r.phase]
     // Waiting on the leader/merge/CI with a version that already went out: published, exactly as for a Live piece.
-    const openVersion = phaseStage && phaseStage !== 'published' ? pickVersion(r.versionTarget) ?? provenVersion(key, phaseStage) : null
+    const openVersion = phaseStage && phaseStage !== 'published' ? pickVersion(r.versionTarget) ?? provenVersion(key, phaseStage, parseMs(r.firstAt)) : null
     const flippedAt = openVersion && phaseStage && FLIPS.has(phaseStage) ? releasePublishedAt.get(openVersion) ?? null : null
     if (flippedAt !== null) {
       seen.add(key)
@@ -287,7 +292,7 @@ export function buildCalendar(o: {
     if (r.phase !== 'publicado' || publishedAtMs === null) continue
     pieces.push({
       key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,
-      title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage: 'published', version: pickVersion(r.versionTarget) ?? provenVersion(key, 'published'),
+      title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage: 'published', version: pickVersion(r.versionTarget) ?? provenVersion(key, 'published', null),
       harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: false,
       startedAtMs: null, stageSinceMs: null, trail: [],
       stageEta: { kind: 'none', reason: 'final' }, publishEta: { kind: 'none', reason: 'final' },

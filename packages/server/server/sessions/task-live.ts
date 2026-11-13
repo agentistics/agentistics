@@ -840,6 +840,20 @@ export function shasIn(text: string | null | undefined): string[] {
   return [...out]
 }
 
+/**
+ * r4 — the commit ids a COMMENT declares as the piece's OWN delivery. A handback also cites commits it merely depends on
+ * ("Public 2.205.1 commit e0a499f00 is deliberate", "rebased on commit X"); taking any hex word as delivered published
+ * HERMES.ACP in a release from before it started. A sha counts only when the label opens a clause (line start, or after
+ * `. ; , ( : — –`) or reads "delivered in / committed as / entregue em <sha>"; a label in the middle of a sentence is a citation.
+ */
+const DELIVERED_SHA = /(?:^|[.;,(:—–]\s*|\s-\s)(?:commit|sha|head)\b\s*[:=]?\s*`?([0-9a-f]{7,40})\b|(?:delivered\s+(?:in|as)|committed\s+(?:as|in)|entregue\s+em)\s+(?:commit\s+)?`?([0-9a-f]{7,40})\b/gim
+export function deliveredShasIn(text: string | null | undefined): string[] {
+  if (!text) return []
+  const out = new Set<string>()
+  for (const m of text.matchAll(DELIVERED_SHA)) { const s = m[1] ?? m[2]; if (s && /\d/.test(s)) out.add(s.toLowerCase()) }
+  return [...out]
+}
+
 /** The most hidden rows a reply carries — a bound, not a policy: the newest are the ones that just left. */
 export const HIDDEN_CAP = 300
 /** A legacy `in_review` piece (no delivery record) with no live session older than this is a candidate for "Antigas sem registro" (owner 08/11: 24 h; ONE constant with the reconcile, `delivery/antigas.ts`). */
@@ -926,7 +940,7 @@ function legacyShaGroups(p: Piece, events: readonly TaskEvent[] | undefined): st
   let newest: { at: string; shas: string[] } | null = null
   for (const c of p.comments) {
     if ((c.subtaskId ?? null) !== (p.sub?.id ?? null)) continue
-    const shas = shasIn(c.body)
+    const shas = deliveredShasIn(c.body)
     if (shas.length > 0 && (!newest || c.createdAt >= newest.at)) newest = { at: c.createdAt, shas }
   }
   if (newest) groups.push(newest.shas)
