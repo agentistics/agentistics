@@ -205,10 +205,20 @@ const shaMissAt = new Map<string, number>()
 let shaRefill: Promise<void> | null = null
 /** Test seam: wait for the background pass, or forget everything. */
 export const pieceVersionsIdle = (): Promise<void> => shaRefill ?? Promise.resolve()
-export function resetPieceVersionsForTest(): void { shaVersion.clear(); shaMissAt.clear() }
+export function resetPieceVersionsForTest(): void { shaVersion.clear(); shaMissAt.clear(); shaPiecesMemo = null }
 
 /** See the block above the memo: answers from the memo, resolves the rest in the background (40 commits per pass). */
-export async function pieceVersionsFromTags(): Promise<Record<string, string>> {
+/**
+ * Which commits each piece delivered, and the clones to ask about each — a whole task-detail build, so it is kept per
+ * SOURCE VERSION (the same stat key the Live build uses): a calendar read with nothing changed reuses it instead of
+ * rebuilding every task's detail (that rebuild made a warm calendar read ~10x slower in QA r2).
+ */
+let shaPiecesMemo: { key: string; pieces: ReturnType<typeof legacyReviewShaPieces>; dirsFor: (sha: string) => readonly string[] } | null = null
+onBookWrite(() => { shaPiecesMemo = null })
+
+async function shaPiecesOfBook(): Promise<NonNullable<typeof shaPiecesMemo>> {
+  const key = await liveSourceVersion()
+  if (shaPiecesMemo?.key === key) return shaPiecesMemo
   const w = await loadTaskWorld()
   const owners = conversationOwners(w.rollupRows)
   const commentsOfTask = new Map<string, typeof w.book.comments>()
@@ -222,6 +232,12 @@ export async function pieceVersionsFromTags(): Promise<Record<string, string>> {
   const dirsFor = dirsForShas({
     pieces, rowsOf: id => { const t = taskById.get(id); return t ? rowsOfTask(t, w.rollupRows, owners) : [] }, metas: w.metas.values(),
   })
+  shaPiecesMemo = { key, pieces, dirsFor }
+  return shaPiecesMemo
+}
+
+export async function pieceVersionsFromTags(): Promise<Record<string, string>> {
+  const { pieces, dirsFor } = await shaPiecesOfBook()
   // Never wait for git: what is known NOW is answered, the rest (newest commits first, a bounded batch per pass, one
   // pass at a time) is resolved in the background and the next read — the calendar is rebuilt every few seconds — has it.
   const now = Date.now()

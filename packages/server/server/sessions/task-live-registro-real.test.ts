@@ -90,13 +90,14 @@ describe('item 3 — measured history replaces the flat ceilings', () => {
     nowMs: NOW, startedAtMs: NOW - 5 * H, stage: 'leader', sinceMs: NOW - H, origin: null,
     harness: 'codex', model: 'luna', samples, typicals: {}, ...extra,
   })
-  test('with ≥3 measured publications and no stage history the publish ETA is the cohort median, not +3d ceiling', () => {
-    const e = run().publishEta
-    expect(e.kind).toBe('estimate')
-    if (e.kind !== 'estimate') return
-    expect(e.source).not.toBe('stages')
-    expect(e.basis?.n).toBe(4)
-    expect(e.atMs).toBeLessThan(NOW + 24 * H) // median 13h from start 5h ago ⇒ well inside a day, never +6d
+  // r3: round 1 asserted the opposite (cohort instead of ceiling once publications exist). With no measured visits of
+  // THIS stage the cohort projected days-old review pieces onto "now", and the calendar's future went empty; the stage
+  // keeps its declared ceiling until its own visits are measured (see task-live-registro-real-r3.test.ts).
+  test('with measured publications but NO history of this stage, the stage ceiling still answers in the future', () => {
+    const r = run()
+    expect(r.stageEta).toMatchObject({ kind: 'estimate', confidence: 'low', atMs: NOW - H + 3 * 24 * H })
+    expect(r.publishEta.kind).toBe('estimate')
+    if (r.publishEta.kind === 'estimate') expect(r.publishEta.atMs).toBeGreaterThan(NOW)
   })
   test('with NO history at all the declared ceilings still answer (low confidence)', () => {
     const e = resolvePieceForecast({ nowMs: NOW, startedAtMs: NOW - H, stage: 'leader', sinceMs: NOW - H, origin: null, harness: 'codex', model: 'luna', samples: [], typicals: {} }).publishEta

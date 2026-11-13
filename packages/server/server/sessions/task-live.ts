@@ -532,23 +532,43 @@ export function trailOf(
   return visits
 }
 
-/** PURE: the stage visits a delivery record's phase history states (oldest first); the last runs to `endMs`. */
-export function recordTrailOf(history: readonly { to: string; at: string }[] | undefined, endMs: number): StageVisit[] {
+/**
+ * A record's history entry that is BOOKKEEPING, not an observation of the moment a stage began or ended: the flow
+ * adopting a piece that was already in that stage, a release declared after the fact (by a leader or by the
+ * reconcile), a reconciliation, a dequeue/restage. Measured on the real store: 106 adoptions, 107 declarations and
+ * 75 reconcile moves against 4 live dispatches — timing those gave a "leader" median of 1.3 h and a "ci" of 12 min
+ * (the seconds between an adoption and a declaration), which made every open piece overdue.
+ */
+const BOOKKEEPING_DETAIL = /^(adotada|adiada|dequeue|restaged|reconcilia)|declarada por/i
+const isBookkeeping = (h: { from?: string; to: string; actor?: string; detail?: string }): boolean =>
+  h.actor === 'flow:reconcile' || (h.from !== undefined && h.from === h.to) || BOOKKEEPING_DETAIL.test(h.detail ?? '')
+
+/**
+ * PURE: the stage visits a delivery record's phase history states (oldest first); the last runs to `endMs`.
+ * A visit is a MEASUREMENT only when both its start and its end were observed live; one entered or left through a
+ * bookkeeping entry (`isBookkeeping`) keeps its place in the trail with `ms = NaN`, which `stageTypicals` skips.
+ */
+export function recordTrailOf(history: readonly { from?: string; to: string; at: string; actor?: string; detail?: string }[] | undefined, endMs: number): StageVisit[] {
   const moves = (history ?? [])
-    .map(h => ({ at: ms(h.at), stage: PHASE_STAGE[h.to] ?? null }))
-    .filter((m): m is { at: number; stage: LiveStage } => m.at !== null && m.stage !== null)
+    .map(h => ({ at: ms(h.at), stage: PHASE_STAGE[h.to] ?? null, observed: !isBookkeeping(h) }))
+    .filter((m): m is { at: number; stage: LiveStage; observed: boolean } => m.at !== null && m.stage !== null)
     .sort((a, b) => a.at - b.at)
   const visits: StageVisit[] = []
+  let enteredObserved = false
   for (const m of moves) {
     const last = visits[visits.length - 1]
     if (last && last.stage === m.stage) continue
-    if (last) last.ms = Math.max(0, m.at - last.enteredMs)
+    if (last) last.ms = enteredObserved && m.observed ? Math.max(0, m.at - last.enteredMs) : NaN
     visits.push({ stage: m.stage, enteredMs: m.at, ms: 0 })
+    enteredObserved = m.observed
   }
   const tail = visits[visits.length - 1]
   if (tail) tail.ms = Math.max(0, endMs - tail.enteredMs)
   return visits
 }
+
+/** How many CLOSED visits of a trail are real measurements (a finite, positive duration). */
+const measuredVisits = (t: readonly StageVisit[]): number => t.slice(0, -1).filter(v => Number.isFinite(v.ms) && v.ms > 0).length
 
 export interface StageTypical { medianMs: number; p25Ms?: number; p75Ms: number; n: number }
 
@@ -668,7 +688,7 @@ export function resolvePieceForecast(o: EstimateOptions & {
     if (stageOverdueSinceMs(o.stage, o.sinceMs, o.nowMs, o.typicals) !== null) {
       return { eta: total, stageEta: { kind: 'none', reason: 'beyond-range' }, publishEta: { kind: 'none', reason: 'beyond-range' } }
     }
-    const fallback = (o.cohorts?.sampleCount ?? o.samples?.length ?? 0) >= MIN_SAMPLES ? null : stageCeilingForecast(o)
+    const fallback = stageCeilingForecast(o)
     return fallback ?? { eta: total, stageEta: { kind: 'none', reason: 'not-started' }, publishEta: totalOnly(total) }
   }
   const result = estimateStages({ ...o, totalEta: total })
@@ -676,11 +696,11 @@ export function resolvePieceForecast(o: EstimateOptions & {
   if (overdueSinceMs !== null) {
     return { eta: total, stageEta: result.stageEta, publishEta: { kind: 'none', reason: 'beyond-range' } }
   }
-  // The flat stage ceilings are the answer for a machine with NO history. Once measured publications exist the
-  // whole-piece estimate (cohort median by type/harness, else the overall mean, confidence by sample count) is
-  // the honest one — a fixed +2d/+3d offset is not learned from anything.
-  const measured = (o.cohorts?.sampleCount ?? o.samples?.length ?? 0) >= MIN_SAMPLES
-  if (!o.typicals[o.stage] && o.sinceMs !== null && !measured) {
+  // A stage with no MEASURED visits (record trails count only live-observed transitions, see `recordTrailOf`) keeps
+  // its declared ceiling: a future, low-confidence bound for the stage and the stages ahead. Round 1 switched this
+  // off whenever whole-piece publications existed, and with the record trails timing bookkeeping (adoption → declared
+  // release, seconds apart) every stage typical collapsed to minutes and the calendar's future went empty.
+  if (!o.typicals[o.stage] && o.sinceMs !== null) {
     const fallback = stageCeilingForecast(o)
     if (fallback) return fallback
   }
@@ -986,7 +1006,7 @@ export function prepareForecastHistory(o: {
     // status events only know three of them. Whichever tells more is the measurement.
     const rec = o.deliveries?.get(s.key!.includes('/') ? s.key!.split('/')[1]! : s.key!)
     const byRecord = rec ? recordTrailOf(rec.history, s.completedAtMs ?? o.nowMs) : []
-    return byRecord.length > byEvents.length ? byRecord : byEvents
+    return measuredVisits(byRecord) > measuredVisits(byEvents) ? byRecord : byEvents
   }))
   return { cohorts, typicals }
 }
