@@ -156,6 +156,8 @@ function printHelp(): void {
   agentop task show <id|name>  one task, its attempts side by side
   agentop task deliver <ref>   mark it done, and attach the git evidence
   agentop task abandon <ref>   mark it given up on (no evidence attached)
+  agentop task evidence add|ls|rm --subtask S …   the proof a piece needs before review (see: agentop task evidence help)
+  agentop evidence capture <url> [--out f]            capture an API response in the shape api-capture evidence accepts
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
                                the pre-dispatch: stage the session a subtask starts with (Na fila)
 
@@ -167,6 +169,8 @@ A task is started by filing sessions under one:
 
 export async function runTask(argv: string[]): Promise<number> {
   // FLUXO.ENTREGA-DSL P4: the pre-dispatch (staged session) of a subtask.
+  // ENTREGA.GARANTIDA S1c: the evidence a piece needs before review (`add|ls|rm`).
+  if (argv[0] === 'evidence') return (await import('../delivery/cli')).runDeliveryCli(['task-evidence', ...argv.slice(1)])
   if (argv[0] === 'stage') return (await import('../delivery/cli')).runDeliveryCli(['task-stage', ...argv.slice(1)])
   const cmd: TaskCommand = parseTaskArgs(argv)
   switch (cmd.kind) {

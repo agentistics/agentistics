@@ -2320,6 +2320,18 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await registerComposerTask({ ...body, action: 'prompt' }, url.searchParams.get('lang') === 'pt' ? 'pt' : 'en')
       return json(out, out.ok ? 200 : 422)
     }
+    // ENTREGA.GARANTIDA S1c — evidence for a piece of a task: `POST|GET|DELETE /api/tasks/<ref>/evidence`. Matched BEFORE the
+    // generic `<ref>` routes below (or `<ref>/evidence` would resolve as a task reference and 404). Authenticated like every
+    // /api/tasks route; the body's `session` is verified by the service door, no session = the owner.
+    const evidenceRoute = /^\/api\/tasks\/([^/]+)\/evidence$/.exec(url.pathname)
+    if (evidenceRoute && (req.method === 'POST' || req.method === 'GET' || req.method === 'DELETE')) {
+      const { evidenceRequest } = await import('./delivery/evidence-web')
+      const { verifySessionIdentity } = await import('./sessions/session-identity')
+      const { deliveryService } = await import('./delivery/host')
+      const body = req.method === 'GET' ? {} : await req.json().catch(() => ({})) as Record<string, unknown>
+      const out = await evidenceRequest(req.method, decodeURIComponent(evidenceRoute[1]!), Object.fromEntries(url.searchParams), body, { service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token) })
+      return json(out.body, out.status)
+    }
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'GET') {
       const ref = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
       const { showTask } = await import('./sessions/task-web')
@@ -2348,6 +2360,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const fileId = decodeURIComponent(url.pathname.slice('/api/task-files/'.length))
       const mod = await import('./sessions/task-web')
       if (req.method === 'DELETE') {
+        // S1c: a file that backs evidence a checkpoint names cannot be deleted (409), and neither can any file while the
+        // checkpoints are unreadable — authorization must not lose its evidence.
+        const { deliveryService } = await import('./delivery/host')
+        if (await deliveryService().evidenceFileInUse(fileId)) return json({ ok: false, error: 'evidence_in_use', sentence: 'this file backs evidence that authorizes a piece; it cannot be deleted' }, 409)
         return json({ ok: await mod.removeFile(fileId) }, 200)
       }
       const got = await mod.fetchFile(fileId)

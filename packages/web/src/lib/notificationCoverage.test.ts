@@ -70,6 +70,8 @@ describe('notification coverage', () => {
     'classification_required', 'uncommitted_changes', 'evidence_required', 'evidence_stale', 'evidence_invalid', 'evidence_reused',
     'declaration_invalid', 'declaration_unclassifiable', 'declaration_repo_unresolved', 'declaration_commit_missing', 'declaration_unpushed',
     'classify_unavailable', 'classify_leader_only',
+    // S1c: the evidence doors
+    'evidence_too_large', 'evidence_forbidden', 'evidence_in_use', 'no_such_evidence', 'evidence_store_failed', 'evidence_id_required', 'wrong_task',
   ]
   it('every delivery-guard refusal has EN and PT text, whatever syntax emits it', () => {
     const missing = DELIVERY_REFUSALS.filter(c => !NOTIFICATION_TEXT[c]?.en?.title || !NOTIFICATION_TEXT[c]?.pt?.title || !NOTIFICATION_TEXT[c]?.en?.message || !NOTIFICATION_TEXT[c]?.pt?.message)

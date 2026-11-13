@@ -42,9 +42,13 @@ describe('no guarantees.json → today\'s behaviour', () => {
 
   test('STRUCTURE: the two stores and the task/delivery doors do not import the new modules in this slice', () => {
     const SERVER = join(import.meta.dir, '..')
-    for (const f of ['delivery/store.ts', 'sessions/task-store.ts', 'delivery/service.ts', 'delivery/web.ts', 'delivery/host.ts', 'index.ts']) {
+    for (const f of ['delivery/store.ts', 'sessions/task-store.ts', 'delivery/web.ts', 'delivery/host.ts', 'index.ts']) {
       const src = readFileSync(join(SERVER, f), 'utf8')
       expect(src, f).not.toMatch(/guard-locks|guards-store|['"]\.\/activation['"]|delivery\/activation/)
     }
+    // S1c: the service door READS checkpoints (to refuse deleting evidence they rely on) and nothing more: no lock, no guarded write, no activation.
+    const svc = readFileSync(join(SERVER, 'delivery/service.ts'), 'utf8')
+    expect(svc).not.toMatch(/guard-locks|applyGuardedWrite|withGuardLocks|['"]\.\/activation['"]|beginIntent|commitIntent/)
+    expect(svc).toMatch(/import \{ createGuardsStore, defaultGuardsPath \} from '\.\/guards-store'/)
   })
 })

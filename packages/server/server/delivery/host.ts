@@ -291,6 +291,12 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
     // S1b: the classification host — the registered sessions' checkouts + a GIT_*-free git. Without it every real door
     // (CLI, HTTP, MCP) answered 501 `classify_unavailable`.
     classify: { sessions: () => facts.sessions(), git: execGit },
+    // S1c: evidence uploads become TaskFiles of the piece's task (kind `evidence`); a `fileId` may only name one of THAT task.
+    evidenceFiles: {
+      read: async fileId => (await import('../sessions/task-web')).fetchFileWithTask(fileId),
+      create: async o => (await import('../sessions/task-web')).attachFile(o.taskId, { name: o.name, bytes: o.bytes, kind: o.kind, author: o.author }),
+      remove: async fileId => (await import('../sessions/task-web')).removeFile(fileId),
+    },
     autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, accountName: accountNameOf, now: () => Date.now(),
     reviewPieces: boardReviewPieces, closeLegacy: closeLegacyPiece, hasSession: pieceHasSession, hasSessions: piecesWithSession,
     oldPieces: async () => (await import('../sessions/task-web')).liveAntigaPieces(),

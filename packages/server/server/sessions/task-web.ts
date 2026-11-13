@@ -1049,6 +1049,15 @@ export async function fetchFile(fileId: string): Promise<{ name: string; bytes: 
   return bytes ? { name: rec.name, bytes } : null
 }
 
+/** Like `fetchFile`, plus the task the file hangs off — evidence may only name a file of ITS OWN task. */
+export async function fetchFileWithTask(fileId: string): Promise<{ taskId: string; name: string; bytes: Uint8Array } | null> {
+  const w = await loadTaskWorld()
+  const rec = w.book.files.find(f => f.id === fileId)
+  if (!rec) return null
+  const bytes = await readTaskFile(rec.taskId, rec.id)
+  return bytes ? { taskId: rec.taskId, name: rec.name, bytes } : null
+}
+
 export async function removeFile(fileId: string): Promise<boolean> {
   const w = await loadTaskWorld()
   const rec = w.book.files.find(f => f.id === fileId)

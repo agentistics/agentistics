@@ -406,6 +406,12 @@ if (command === 'task') {
   process.exit(code)
 }
 
+// ENTREGA.GARANTIDA S1c: `agentop evidence capture <url> [--out f]` — an API response in the exact shape `api-capture` accepts.
+if (command === 'evidence') {
+  const { runEvidenceCapture } = await import('../server/delivery/capture.ts')
+  process.exit(await runEvidenceCapture(args, { out: s => console.log(s), err: s => console.error(s) }))
+}
+
 if (command === 'tasks') {
   if (args[0] !== 'limpar-revisao') { console.error('Usage: agentop tasks limpar-revisao [--json|--out <file>] [--apply <plan.json>]'); process.exit(2) }
   const { runReviewClean } = await import('../server/sessions/review-clean.ts')

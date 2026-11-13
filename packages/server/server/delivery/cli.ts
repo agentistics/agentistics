@@ -95,6 +95,11 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
   if (argv[0] === 'help' || argv[0] === '--help' || argv[0] === '-h') { io.out(DELIVERY_FLOW_HELP.trimEnd()); return 0 }
   const svc = service ?? (await import('./host')).deliveryService()
   const actor = env.AGENTOP_MANAGED_ID || 'owner'
+  // S1c: `agentop task evidence add|ls|rm` (routed here by cli-task.ts) — the same service the REST route and the MCP tool reach.
+  if (argv[0] === 'task-evidence') {
+    const { pos: p, flags: f } = parseFlags(argv.slice(1))
+    return (await import('./evidence-cli')).runEvidenceCli(svc, p, f, io, actor)
+  }
   const isTaskStage = argv[0] === 'task-stage'
   const { pos, flags } = parseFlags(isTaskStage ? argv.slice(1) : argv)
   const sub = flags.subtask ?? (isTaskStage ? pos[0] : undefined)

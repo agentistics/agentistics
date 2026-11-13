@@ -74,6 +74,8 @@ export const AGENT_TOOL_NAMES = [
   // FLUXO.ENTREGA-DSL (2)
   'agentistics_task_phase',
   'agentistics_task_stage',
+  // ENTREGA.GARANTIDA S1c
+  'agentistics_task_evidence',
   // FILA.PRIORIDADE (2)
   'agentistics_task_queue',
   'agentistics_task_queue_answer',
@@ -198,6 +200,10 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_task_stage: {
     ...TASKS, risk: 'W', routes: ['POST /api/deliveries/:subtask'],
     reason: 'writes the pre-dispatch (staged session draft) on a subtask and opens its delivery in the queue; nothing starts until stage-run passes the predispatch and vaga gates',
+  },
+  agentistics_task_evidence: {
+    ...TASKS, risk: 'W', routes: ['GET /api/tasks/:task/evidence', 'POST /api/tasks/:task/evidence', 'DELETE /api/tasks/:task/evidence'],
+    reason: 'attaches, lists or removes the evidence a piece needs before review; the server validates the bytes, computes the hash and binds it to the verified HEAD (the caller supplies neither); only the piece\'s own session, the task leader or the owner may attach, and evidence a checkpoint relies on cannot be removed',
   },
   agentistics_task_queue: {
     ...TASKS, risk: 'R', routes: ['GET /api/deliveries/queue/:task'],

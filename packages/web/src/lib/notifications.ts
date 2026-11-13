@@ -157,6 +157,35 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Só o líder declara', message: 'Apenas o líder da tarefa (ou o dono) pode dizer onde está o checkout de uma peça.' },
     en: { title: 'Leader only', message: 'Only the task leader (or the owner) can say where a piece\'s checkout is.' },
   },
+  // ENTREGA.GARANTIDA S1c — the evidence doors.
+  evidence_too_large: {
+    pt: { title: 'Arquivo grande demais', message: 'Um anexo de evidência pode ter no máximo 8 MB.' },
+    en: { title: 'File too large', message: 'An evidence upload can be at most 8 MB.' },
+  },
+  evidence_forbidden: {
+    pt: { title: 'Sem permissão para anexar', message: 'Só a sessão da própria peça, o líder da tarefa ou o dono mexem na evidência.' },
+    en: { title: 'Not allowed to attach', message: 'Only the piece\'s own session, the task leader or the owner can change its evidence.' },
+  },
+  evidence_in_use: {
+    pt: { title: 'Evidência em uso', message: 'Esta evidência sustenta uma autorização de revisão; ela (e o arquivo dela) não pode ser apagada.' },
+    en: { title: 'Evidence in use', message: 'This evidence backs a review authorization; it (and its file) cannot be deleted.' },
+  },
+  no_such_evidence: {
+    pt: { title: 'Evidência não encontrada', message: 'Não há essa evidência nesta peça.' },
+    en: { title: 'Evidence not found', message: 'There is no such evidence on this piece.' },
+  },
+  evidence_store_failed: {
+    pt: { title: 'Falha ao guardar o anexo', message: 'O arquivo não pôde ser guardado. Tente de novo.' },
+    en: { title: 'Could not store the upload', message: 'The file could not be stored. Try again.' },
+  },
+  evidence_id_required: {
+    pt: { title: 'Falta o id da evidência', message: 'Informe qual evidência remover.' },
+    en: { title: 'Evidence id required', message: 'Say which evidence to remove.' },
+  },
+  wrong_task: {
+    pt: { title: 'Peça de outra tarefa', message: 'Essa peça pertence a outra tarefa.' },
+    en: { title: 'Piece of another task', message: 'That piece belongs to a different task.' },
+  },
   declaration_unclassifiable: {
     pt: { title: 'Não foi possível classificar', message: 'O servidor não conseguiu classificar a peça a partir desse commit.' },
     en: { title: 'Could not classify', message: 'The server could not classify the piece from that commit.' },
