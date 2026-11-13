@@ -57,9 +57,11 @@ export async function readTaskFile(taskId: string, fileId: string): Promise<Uint
   }
 }
 
-/** Never throws: a delete whose bytes are already gone has achieved its purpose. */
-export async function deleteTaskFile(taskId: string, fileId: string): Promise<void> {
-  await rm(pathFor(taskId, fileId), { force: true }).catch(() => undefined)
+/** Missing bytes count as deleted. Transaction rollback opts into surfacing other unlink failures. */
+export async function deleteTaskFile(taskId: string, fileId: string, strict = false): Promise<void> {
+  const removal = rm(pathFor(taskId, fileId), { force: true })
+  if (strict) await removal
+  else await removal.catch(() => undefined)
 }
 
 export async function deleteTaskFiles(taskId: string): Promise<void> {

@@ -42,9 +42,14 @@ describe('no guarantees.json → today\'s behaviour', () => {
 
   test('STRUCTURE: the two stores and the task/delivery doors do not import the new modules in this slice', () => {
     const SERVER = join(import.meta.dir, '..')
-    for (const f of ['delivery/store.ts', 'sessions/task-store.ts', 'delivery/service.ts', 'delivery/web.ts', 'delivery/host.ts', 'index.ts']) {
+    for (const f of ['delivery/web.ts', 'delivery/host.ts', 'index.ts']) {
       const src = readFileSync(join(SERVER, f), 'utf8')
       expect(src, f).not.toMatch(/guard-locks|guards-store|['"]\.\/activation['"]|delivery\/activation/)
     }
+    // S1c: stores now lock evidence deletes; no activation, checkpoint or intent writes are introduced.
+    for (const f of ['delivery/store.ts', 'sessions/task-store.ts']) expect(readFileSync(join(SERVER, f), 'utf8')).not.toMatch(/applyGuardedWrite|beginIntent|commitIntent|delivery\/activation/)
+    const svc = readFileSync(join(SERVER, 'delivery/service.ts'), 'utf8')
+    expect(svc).not.toMatch(/applyGuardedWrite|withGuardLocks|['"]\.\/activation['"]|beginIntent|commitIntent/)
+    expect(svc).toMatch(/import \{ createGuardsStore, defaultGuardsPath \} from '\.\/guards-store'/)
   })
 })

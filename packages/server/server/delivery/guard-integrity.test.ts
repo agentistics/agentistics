@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GUARD_KEY_FILE, canonicalJson, checkIntegrity, parseKeyFile, sealDoc, formatKeyFile } from './guard-integrity'
+import { GUARD_KEY_FILE, WITNESS_DIR, WITNESS_FILE, __resetGuardLatchForTests, canonicalJson, checkIntegrity, parseKeyFile, sealDoc, formatKeyFile } from './guard-integrity'
 import { createGuaranteesStore, guaranteeWarnings, ruleState, rulesWhenTampered, type ActivationFacts, type OwnerCheck } from './activation'
 import { GuardsUnreadable, applyGuardedWrite, createGuardsStore, type PieceCheckpoint } from './guards-store'
 import { analyzeGuardIntegrity } from './owner-health'
@@ -36,7 +36,7 @@ describe('the seal (pure)', () => {
   test('canonical JSON ignores key order', () => expect(canonicalJson({ b: 1, a: [{ d: 1, c: 2 }] })).toBe(canonicalJson({ a: [{ c: 2, d: 1 }], b: 1 })))
   test('a sealed doc verifies; one changed byte, a doc without its seal, or the other file\'s seal do not', () => {
     const doc = sealDoc(key.key, 'guarantees', { rules: { a: { state: 'shadow', build: 'x' } } })
-    expect(checkIntegrity(key, 'guarantees', JSON.stringify(doc))).toEqual({ state: 'ok' })
+    expect(checkIntegrity(key, 'guarantees', JSON.stringify(doc))).toEqual({ state: 'ok', gen: 1 })
     expect(checkIntegrity(key, 'guarantees', JSON.stringify({ ...doc, rules: { a: { state: 'on', build: 'x' } } }))).toEqual({ state: 'tampered', reason: 'forged' })
     expect(checkIntegrity(key, 'guarantees', JSON.stringify({ rules: {} }))).toEqual({ state: 'tampered', reason: 'unsealed' })
     expect(checkIntegrity(key, 'guarantees', 'not json')).toEqual({ state: 'tampered', reason: 'unsealed' })
@@ -113,13 +113,127 @@ describe('QA s0b-tamper.ts against the real stores', () => {
     unlinkSync(join(dir, 'guards.json'))
     expect(((await createGuardsStore(join(dir, 'guards.json')).read().catch(e => e)) as GuardsUnreadable).tampered).toBe('missing')
   })
-  test('deleting the KEY while a document remains is key-missing; deleting key + both documents is a fresh machine (stated limit)', async () => {
+  test('deleting the KEY while a document remains is key-missing', async () => {
     await ownerShadowsA()
     unlinkSync(kp())
     expect((await createGuaranteesStore(gp()).read()).tampered).toBe('key-missing')
-    unlinkSync(gp()); unlinkSync(join(dir, 'guards.json'))
-    const r = await createGuaranteesStore(gp()).read()
-    expect(r.tampered).toBeUndefined(); expect(ruleState(r.doc, 'a')).toBe('off')
+  })
+  // QA S0d security re-QA N1 (HIGH): deleting files WITHOUT reading the key must never turn the rules off in silence.
+  describe('N1 deletions fail CLOSED with a WARN', () => {
+    const wp = () => join(dir, WITNESS_DIR, WITNESS_FILE)
+    test('K6: rm guarantees.json guards.json guard-integrity.key → tampered + WARN, every rule ON', async () => {
+      await ownerShadowsA()
+      unlinkSync(gp()); unlinkSync(join(dir, 'guards.json')); unlinkSync(kp())
+      __resetGuardLatchForTests() // as after a restart: the witness alone says the set was sealed
+      const r = await createGuaranteesStore(gp()).read()
+      expect(r.tampered).toBe('key-missing'); expect(r.warn).toMatch(/guarantees-tampered/)
+      expect(ruleState(r.doc, 'a')).toBe('on'); expect(ruleState(r.doc, 'b')).toBe('on')
+    })
+    test('K7: rm guarantees.json + key (guards.json stays) → guarantees tampered too, not "fresh"', async () => {
+      await ownerShadowsA()
+      unlinkSync(gp()); unlinkSync(kp())
+      const r = await createGuaranteesStore(gp()).read()
+      expect(r.tampered).toBe('key-missing'); expect(r.warn).toBeTruthy(); expect(ruleState(r.doc, 'a')).toBe('on')
+    })
+    test('K7 without the witness either: a sealed sibling with no key still proves a key existed', async () => {
+      await ownerShadowsA()
+      unlinkSync(gp()); unlinkSync(kp()); unlinkSync(wp())
+      __resetGuardLatchForTests()
+      const r = await createGuaranteesStore(gp()).read()
+      expect(r.tampered).toBe('key-missing'); expect(ruleState(r.doc, 'a')).toBe('on')
+    })
+    test('K3b: the key\'s "sealed" line stripped + both documents deleted → the witness still says they were sealed', async () => {
+      await ownerShadowsA()
+      const k = parseKeyFile(readFileSync(kp(), 'utf8'))!
+      writeFileSync(kp(), formatKeyFile({ key: k.key, sealed: new Set() }))
+      unlinkSync(gp()); unlinkSync(join(dir, 'guards.json'))
+      __resetGuardLatchForTests()
+      const r = await createGuaranteesStore(gp()).read()
+      expect(r.tampered).toBe('missing'); expect(ruleState(r.doc, 'a')).toBe('on')
+    })
+    test('deleting only the witness is tampered (witness-missing) for both documents', async () => {
+      await ownerShadowsA()
+      unlinkSync(wp())
+      expect((await createGuaranteesStore(gp()).read()).tampered).toBe('witness-missing')
+      expect(((await createGuardsStore(join(dir, 'guards.json')).read().catch(e => e)) as GuardsUnreadable).tampered).toBe('witness-missing')
+    })
+    test('all four deleted: the running process still remembers (latch) → missing; only a restart reads a fresh machine (stated limit)', async () => {
+      await ownerShadowsA()
+      await createGuaranteesStore(gp()).read()
+      for (const f of [gp(), join(dir, 'guards.json'), kp(), wp()]) unlinkSync(f)
+      const live = await createGuaranteesStore(gp()).read()
+      expect(live.tampered).toBe('key-missing'); expect(ruleState(live.doc, 'a')).toBe('on')
+      __resetGuardLatchForTests()
+      const restarted = await createGuaranteesStore(gp()).read()
+      expect(restarted.tampered).toBeUndefined(); expect(ruleState(restarted.doc, 'a')).toBe('off')
+    })
+    test('health WARNs the deletion', async () => {
+      await ownerShadowsA()
+      unlinkSync(gp()); unlinkSync(join(dir, 'guards.json')); unlinkSync(kp())
+      __resetGuardLatchForTests()
+      const issues: HealthIssue[] = []
+      analyzeGuardIntegrity({ guaranteesWarn: (await createGuaranteesStore(gp()).read()).warn, offWarnings: [] }, issues)
+      expect(issues.map(i => i.id)).toContain('guarantees-tampered')
+    })
+  })
+  // QA S0d security re-QA N2 (MEDIUM): restoring an OLDER sealed copy (a valid MAC) is a rollback, detected and WARNed.
+  describe('N2 rollback to an older sealed copy is detected', () => {
+    async function toOn() {
+      const store = await ownerShadowsA()
+      const old = { g: readFileSync(gp(), 'utf8'), d: readFileSync(join(dir, 'guards.json'), 'utf8'), w: readFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), 'utf8') }
+      expect(await store.setState('b', 'shadow', { check: owner, facts })).toEqual({ ok: true })
+      return { store, old }
+    }
+    test('R1: BOTH documents back to the older sealed copy → rolled-back (after a restart too), rules not weakened', async () => {
+      const { old } = await toOn()
+      writeFileSync(gp(), old.g); writeFileSync(join(dir, 'guards.json'), old.d)
+      __resetGuardLatchForTests()
+      const r = await createGuaranteesStore(gp()).read()
+      expect(r.tampered).toBe('rolled-back'); expect(r.warn).toMatch(/guarantees-tampered: rolled-back/)
+      expect(ruleState(r.doc, 'b')).toBe('on') // guards is rolled back too → no trusted mirror → fail closed
+      expect(((await createGuardsStore(join(dir, 'guards.json')).read().catch(e => e)) as GuardsUnreadable).tampered).toBe('rolled-back')
+    })
+    test('R2: only guarantees.json rolled back → rolled-back; the rules come from the newer sealed mirror', async () => {
+      const { old } = await toOn()
+      writeFileSync(gp(), old.g)
+      __resetGuardLatchForTests()
+      const r = await createGuaranteesStore(gp()).read()
+      expect(r.tampered).toBe('rolled-back'); expect(ruleState(r.doc, 'b')).toBe('shadow')
+    })
+    test('R3/R4: only guards.json rolled back → guards refused (rolled-back)', async () => {
+      const { old } = await toOn()
+      writeFileSync(join(dir, 'guards.json'), old.d)
+      __resetGuardLatchForTests()
+      expect(((await createGuardsStore(join(dir, 'guards.json')).read().catch(e => e)) as GuardsUnreadable).tampered).toBe('rolled-back')
+    })
+    test('rolling back the witness too is still caught by the running process (latch); after a restart it is the stated limit', async () => {
+      const { old } = await toOn()
+      await createGuaranteesStore(gp()).read()
+      writeFileSync(gp(), old.g); writeFileSync(join(dir, 'guards.json'), old.d); writeFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), old.w)
+      expect((await createGuaranteesStore(gp()).read()).tampered).toBe('rolled-back')
+    })
+    test('a forged witness (edited generation) is tampered', async () => {
+      await toOn()
+      const w = JSON.parse(readFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), 'utf8')); w.gens.guarantees = 0
+      writeFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), JSON.stringify(w))
+      __resetGuardLatchForTests()
+      expect((await createGuaranteesStore(gp()).read()).tampered).toBe('witness-forged')
+    })
+    test('stripping the generation from a sealed doc breaks its MAC (forged, not an old v1 doc)', async () => {
+      await toOn()
+      const g = JSON.parse(readFileSync(gp(), 'utf8')); delete g.integrity.gen
+      writeFileSync(gp(), JSON.stringify(g))
+      expect((await createGuaranteesStore(gp()).read()).tampered).toBe('forged')
+    })
+    test('ordinary writes keep reading clean (no false rollback) and the generation only grows', async () => {
+      const { store } = await toOn()
+      expect(await store.setState('a', 'off', { check: owner, facts })).toEqual({ ok: true })
+      __resetGuardLatchForTests()
+      const r = await store.read(); expect(r.tampered).toBeUndefined(); expect(ruleState(r.doc, 'a')).toBe('off')
+      const gen = (f: string) => JSON.parse(readFileSync(f, 'utf8')).integrity.gen
+      expect(gen(gp())).toBe(3); expect(JSON.parse(readFileSync(join(dir, WITNESS_DIR, WITNESS_FILE), 'utf8')).gens.guarantees).toBe(3)
+      expect(statSync(join(dir, WITNESS_DIR, WITNESS_FILE)).mode & 0o777).toBe(0o600)
+    })
   })
   test('the OWNER repairs a tampered guarantees.json by moving a rule: re-sealed from the effective state', async () => {
     const store = await ownerShadowsA()

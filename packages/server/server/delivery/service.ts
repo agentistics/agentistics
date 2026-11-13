@@ -27,7 +27,12 @@ import { AUTO_RUN_GH_BUDGET, ENGINE_REPO, MANUAL_RUN_GH_BUDGET, PROOF_REFRESH_MS
 import { antigaComment, inReconcileScope, isAntiga, type AntigaAction } from './antigas'
 import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
 import { sharedQueueArea } from './queue-fit'
-import type { ClassifyDeps } from './classify-host'
+import { gatherFacts, type ClassifyDeps } from './classify-host'
+import { isDocPath } from './classify'
+import { repoRefFacts } from './classify-declare'
+import { buildEvidenceItem, checkReuse, type EvidenceItem, type EvidenceKind, type Probe, type RepoRef, type ReuseEntry } from './evidence'
+import { createGuardsStore, defaultGuardsPath } from './guards-store'
+import { GuardBusy } from './guard-locks'
 import { ownerIntent } from '../flows/owner-intent'
 import { requestReminderText } from './request-reminder'
 import {
@@ -65,6 +70,14 @@ export interface DeliveryDeps {
   autonomous(leaderSessionId?: string): Promise<boolean>
   /** S1b: the classification host (sessions + git); absent = `classify` answers 501. */
   classify?: ClassifyDeps
+  /** S1c: TaskFile access for evidence uploads (`task-web`'s attachFile / fetchFile / removeFile). Absent = uploads and fileId are refused. */
+  evidenceFiles?: {
+    read(fileId: string): Promise<{ taskId: string; name: string; bytes: Uint8Array } | null>
+    create(o: { taskId: string; name: string; bytes: Uint8Array; kind: string; author: string }): Promise<string | null>
+    remove(fileId: string): Promise<boolean>
+  }
+  /** S1c: where checkpoints live (tests). Default: `<dataDir>/guards.json`. */
+  guardsPath?: string
   /** Into the engine's flows bus and the SSE channel. Best effort. */
   emit(type: string, payload: Record<string, unknown>): Promise<void>
   /** Starts the staged session (`agentop flow stage run`). Returns the managed id. */
@@ -149,6 +162,10 @@ export type ReleaseReply =
   | { ok: true; status: 200; version: string; tag: string; mergeSha: string; pieces: ReleasePiece[]; publishedAt?: string; warnings: string[] }
   | Extract<DeliveryReply, { ok: false }>
 
+type Fail = Extract<DeliveryReply, { ok: false }>
+export type EvidenceAddReply = { ok: true; status: 200; record: DeliveryRecord; warnings: string[]; evidence: EvidenceItem } | Fail
+export type EvidenceListReply = { ok: true; status: 200; record: DeliveryRecord; warnings: string[]; evidence: EvidenceItem[]; binding: { headSha: string | null; treeClean: boolean } } | Fail
+
 export type DeliveryReply =
   | { ok: true; status: 200; record: DeliveryRecord; warnings: string[]; skipped?: unknown; gate?: GateVerdict; classification?: { category: string; headSha: string } }
   | { ok: false; status: number; code: string; sentence: string; missing: string[]; record?: DeliveryRecord; gate?: GateVerdict }
@@ -186,7 +203,20 @@ const RELEASE_POLL_MAX_MS = 10 * 60_000
 const QUEUE_SLOT_REFRESH_MS = 5 * 60_000
 
 const safe = <A extends unknown[]>(fn: (...a: A) => Promise<DeliveryReply>) => async (...a: A): Promise<DeliveryReply> => {
-  try { return await fn(...a) } catch (e) { if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message); throw e }
+  try { return await fn(...a) } catch (e) {
+    if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message)
+    if (e instanceof GuardBusy) return fail(e.status, e.code, e.message)
+    throw e
+  }
+}
+
+/** `safe` for `ensure`, whose success value is the record itself rather than a reply. */
+const safeEnsure = <A extends unknown[]>(fn: (...a: A) => Promise<DeliveryRecord | DeliveryReply>) => async (...a: A): Promise<DeliveryRecord | DeliveryReply> => {
+  try { return await fn(...a) } catch (e) {
+    if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message)
+    if (e instanceof GuardBusy) return fail(e.status, e.code, e.message)
+    throw e
+  }
 }
 
 /** The repositories this product ships from: a card whose host cannot say its repository is read against these. */
@@ -486,6 +516,150 @@ export function createDeliveryService(d: DeliveryDeps) {
       return structuredClone(cur)
     })
     await d.board.comment(after.taskId, subtaskId, `[fluxo entrega] configuração por ${actor}: ${Object.keys(patch).join(', ')}.`).catch(() => undefined)
+    return { ok: true, status: 200, record: after, warnings: [] }
+  }
+
+  // ── S1c: evidence (spec §3.1, §3.3, §3.4). Every door (REST, MCP, CLI) lands here; nothing is trusted from the caller. ──
+  const EVIDENCE_MAX_BYTES = 8 * 1024 * 1024
+  const evidenceCodeStatus = (c: string) => (c === 'evidence_reused' ? 409 : 422)
+
+  /** The facts an item is bound to: the piece's verified HEAD and whether the checkout has uncommitted NON-DOC changes. */
+  const evidenceBinding = async (r: DeliveryRecord): Promise<{ headSha: string | null; treeClean: boolean }> => {
+    if (!d.classify) return { headSha: null, treeClean: false }
+    const f = await gatherFacts(d.classify, { taskId: r.taskId, ...(r.subtaskId !== r.taskId ? { subtaskId: r.subtaskId } : {}) })
+    if (f.checkout !== 'resolved') return { headSha: null, treeClean: false }
+    return { headSha: f.headSha, treeClean: f.dirtyPaths.every(isDocPath) }
+  }
+  /** The piece's own filed sessions, its task's leader, and the owner may attach; nobody else. */
+  const mayAttach = async (r: DeliveryRecord, actor: string): Promise<boolean> => {
+    if (await leads(r, actor)) return true
+    const sessions = await d.facts.sessions().catch(() => [])
+    return sessions.some(x => x.id === actor && x.taskId === r.taskId && (r.subtaskId === r.taskId ? !x.subtaskId : x.subtaskId === r.subtaskId))
+  }
+  const globalReuseIndex = async (): Promise<ReuseEntry[]> => Object.values((await d.store.read()).deliveries).flatMap(rec => rec.evidenceHistory ?? [])
+  /** Evidence ids named by any checkpoint. Unreadable guards.json fails CLOSED (everything counts as in use). */
+  const checkpointEvidenceIds = async (): Promise<Set<string> | 'unreadable'> => {
+    try {
+      const doc = await createGuardsStore(d.guardsPath ?? defaultGuardsPath()).read()
+      const ids = new Set<string>()
+      for (const cp of [...Object.values(doc.checkpoints), ...Object.values(doc.intents).map(i => i.target)]) for (const a of cp.auth) if (a.kind === 'evidence') for (const id of a.ids) ids.add(id)
+      return ids
+    } catch { return 'unreadable' }
+  }
+
+  const evidenceAdd = async (subtaskId: string, input: Record<string, unknown>, actor: string): Promise<EvidenceAddReply> => {
+    const got = await ensure(subtaskId)
+    if (isReply(got)) return got as Fail
+    if (!(await mayAttach(got, actor))) return fail(403, 'evidence_forbidden', 'only the piece\'s own session, the task leader or the owner attaches evidence', [], got)
+    const kind = input.kind as EvidenceKind
+    // The payload: an uploaded blob, or a TaskFile of THIS task. Bytes are decoded only after the size is known to be allowed.
+    let bytes: Uint8Array | undefined; let fileId: string | undefined; let upload: { name: string } | undefined
+    if (typeof input.bytesBase64 === 'string') {
+      if (Math.ceil((input.bytesBase64.length * 3) / 4) > EVIDENCE_MAX_BYTES + 3) return fail(413, 'evidence_too_large', `an upload is limited to ${EVIDENCE_MAX_BYTES / 1024 / 1024} MB`, [], got)
+      bytes = new Uint8Array(Buffer.from(input.bytesBase64, 'base64'))
+      if (bytes.length > EVIDENCE_MAX_BYTES) return fail(413, 'evidence_too_large', `an upload is limited to ${EVIDENCE_MAX_BYTES / 1024 / 1024} MB`, [], got)
+      upload = { name: typeof input.name === 'string' && input.name.trim() ? input.name.trim().slice(0, 120) : `${kind}-evidence` }
+    } else if (typeof input.fileId === 'string' && input.fileId) {
+      const f = await d.evidenceFiles?.read(input.fileId)
+      if (!f) return fail(422, 'evidence_invalid', 'evidence_invalid (file-missing): that TaskFile does not exist', [], got)
+      if (f.taskId !== got.taskId) return fail(422, 'evidence_invalid', 'evidence_invalid (file-other-task): that TaskFile belongs to another task', [], got)
+      if (f.bytes.length > EVIDENCE_MAX_BYTES) return fail(413, 'evidence_too_large', `a file is limited to ${EVIDENCE_MAX_BYTES / 1024 / 1024} MB`, [], got)
+      bytes = f.bytes; fileId = input.fileId
+    }
+    const piece = { taskId: got.taskId, ...(got.subtaskId !== got.taskId ? { subtaskId: got.subtaskId } : {}) }
+    const repoRef = input.repoRef as RepoRef | undefined
+    const facts = kind === 'report' && repoRef && d.classify ? await repoRefFacts(d.classify, piece, repoRef) : undefined
+    const binding = await evidenceBinding(got)
+    // `sha256`, `at`, `headSha`, `revision`, `width`… in `input` are never read: only the named fields reach the builder.
+    const built = buildEvidenceItem(
+      { kind, ...(bytes ? { bytes } : {}), ...(fileId ? { fileId } : {}), ...(repoRef ? { repoRef } : {}), ...(facts ? { facts } : {}), ...(input.probe ? { probe: input.probe as Probe } : {}) },
+      { revision: got.revision, headSha: binding.headSha, treeClean: binding.treeClean, by: actor, at: iso(d), items: got.evidence ?? [], pieceKey: subtaskId, reuseIndex: await globalReuseIndex() },
+    )
+    if (!built.ok) return fail(evidenceCodeStatus(built.code), built.code, `${built.code} (${built.rule}): ${built.message}`, [], got)
+    if (built.duplicate) {
+      const existing = (got.evidence ?? []).find(i => i.sha256 === built.item.sha256 && i.revision === built.item.revision)
+      if (existing) return { ok: true, status: 200, record: got, warnings: ['the same evidence was already attached; nothing changed'], evidence: existing }
+    }
+    // The upload becomes a TaskFile only after the bytes passed every validator (a refused upload leaves nothing behind).
+    let item = built.item
+    const rollbackUpload = async (cause?: unknown) => {
+      if (!item.fileId || !upload) return
+      try {
+        if (!(await d.evidenceFiles?.remove(item.fileId))) throw new Error('TaskFile removal was refused')
+      } catch (cleanup) {
+        throw new AggregateError(cause ? [cause, cleanup] : [cleanup], `evidence upload rollback failed for ${item.fileId}`)
+      }
+    }
+    if (upload && bytes) {
+      const id = await d.evidenceFiles?.create({ taskId: got.taskId, name: upload.name, bytes, kind: 'evidence', author: actor })
+      if (!id) return fail(500, 'evidence_store_failed', 'the upload could not be stored', [], got)
+      item = { ...item, fileId: id }
+    }
+    let stored
+    try { stored = await d.store.update(doc => {
+      const cur = doc.deliveries[subtaskId]!
+      // The revision used to build/bind this item must still be current under the lock.
+      // QA R6: a revision race is STALE evidence (retry), not reuse of another piece's bytes.
+      if (!cur || cur.revision !== item.revision) return { stale: 'the delivery revision changed during the upload; retry with fresh evidence' }
+      // Re-checked UNDER the store lock against the freshest history: two attaches racing for the same bytes cannot both win.
+      const fresh = checkReuse(Object.values(doc.deliveries).flatMap(r => r.evidenceHistory ?? []), { sha256: item.sha256, pieceKey: subtaskId, revision: cur.revision })
+      if (!fresh.ok) return { refused: fresh.message }
+      if (fresh.duplicate) {
+        const existing = (cur.evidence ?? []).find(i => i.sha256 === item.sha256 && i.revision === item.revision)
+        if (existing) return { record: structuredClone(cur), existing }
+      }
+      cur.evidence = [...(cur.evidence ?? []), item]
+      cur.evidenceHistory = [...(cur.evidenceHistory ?? []), { sha256: item.sha256, pieceKey: subtaskId, revision: item.revision }]
+      cur.updatedAt = iso(d)
+      return { record: structuredClone(cur) }
+    }, { evidence: true }) } catch (error) {
+      await rollbackUpload(error)
+      if (error instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', error.message)
+      if (error instanceof GuardBusy) return fail(error.status, error.code, error.message)
+      throw error
+    }
+    if ('stale' in stored) {
+      await rollbackUpload()
+      return fail(409, 'evidence_stale', `evidence_stale: ${stored.stale}`, [], got)
+    }
+    if ('refused' in stored) {
+      await rollbackUpload()
+      return fail(409, 'evidence_reused', `evidence_reused: ${stored.refused}`, [], got)
+    }
+    if ('existing' in stored && stored.existing) {
+      await rollbackUpload()
+      return { ok: true, status: 200, record: stored.record, warnings: ['the same evidence was already attached; nothing changed'], evidence: stored.existing }
+    }
+    return { ok: true, status: 200, record: stored.record, warnings: [], evidence: item }
+  }
+
+  const evidenceList = async (subtaskId: string): Promise<EvidenceListReply> => {
+    let got = await d.store.get(subtaskId)
+    if (!got) {
+      // A read creates nothing: a piece with no record yet lists as empty, from an in-memory record that is never stored.
+      const sub = SUB_ID.test(subtaskId) ? await d.facts.subtask(subtaskId) : null
+      if (!sub) return fail(404, 'no_such_subtask', `subtask ${subtaskId} does not exist on the board`)
+      got = newDelivery({ subtaskId, taskId: sub.taskId, at: iso(d), phase: adoptPhase(sub.status) })
+    }
+    return { ok: true, status: 200, record: got, warnings: [], evidence: got.evidence ?? [], binding: await evidenceBinding(got) }
+  }
+
+  const evidenceRemove = async (subtaskId: string, evidenceId: string, actor: string): Promise<DeliveryReply> => {
+    const got = await d.store.get(subtaskId)
+    if (!got) return fail(404, 'no_delivery', `no delivery record for ${subtaskId}`)
+    const item = (got.evidence ?? []).find(i => i.id === evidenceId)
+    if (!item) return fail(404, 'no_such_evidence', `no evidence ${evidenceId} on ${subtaskId}`, [], got)
+    if (!(item.by === actor || (await leads(got, actor)))) return fail(403, 'evidence_forbidden', 'only the item\'s author, the task leader or the owner removes evidence', [], got)
+    const after = await d.store.update(async doc => {
+      const cur = doc.deliveries[subtaskId]!
+      const used = await checkpointEvidenceIds()
+      if (used === 'unreadable' || used.has(evidenceId)) return null
+      cur.evidence = (cur.evidence ?? []).filter(i => i.id !== evidenceId)   // evidenceHistory is NOT pruned: a removal frees nothing
+      cur.updatedAt = iso(d)
+      return structuredClone(cur)
+    }, { evidence: true, guardsPath: d.guardsPath ?? defaultGuardsPath() })
+    if (!after) return fail(409, 'evidence_in_use', 'this evidence backs a checkpoint or pending intent (or the checkpoints cannot be read): it cannot be removed', [], got)
+    if (item.fileId) await d.evidenceFiles?.remove(item.fileId).catch(() => false)
     return { ok: true, status: 200, record: after, warnings: [] }
   }
 
@@ -1980,10 +2154,12 @@ export function createDeliveryService(d: DeliveryDeps) {
   return {
     get: (id: string) => d.store.get(id),
     list: async () => Object.values((await d.store.read()).deliveries),
-    ensure,
+    // QA S1c r2 R1: `ensure` and `evidenceAdd` are reached from the evidence doors; an unreadable book is a 503, never a throw.
+    ensure: safeEnsure(ensure),
     // An unreadable store REFUSES the write (and keeps a copy of the file) instead of letting any verb replace it with an empty book.
     transition: safe((id: string, to: unknown, input: TransitionInput, actor: string) => transition(id, to, input, actor)),
     gate: safe(gate), block: safe(block), unblock: safe(unblock), approve: safe(approve), configure: safe(configure), classify: safe(classify), step: safe(step),
+    evidenceAdd: safe(evidenceAdd) as typeof evidenceAdd, evidenceList, evidenceRemove: safe(evidenceRemove),
     stepEvent: async (id: string, n: unknown, actor: string): Promise<StepEventReply> => { try { return await stepEvent(id, n, actor) } catch (e) { return fail(500, 'step_erro', `the step could not be recorded (${e instanceof Error ? e.message.split('\n')[0] : String(e)})`) } },
     // An I/O error on the batch write is a clean, structured refusal (the single store write landed entirely or not at all), never an uncaught throw.
     release: async (o: { version: unknown; mergeSha: unknown; subtaskIds: unknown; repo?: unknown }, actor: string): Promise<ReleaseReply> => {

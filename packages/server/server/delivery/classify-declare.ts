@@ -23,7 +23,7 @@ const bad = (code: Extract<DeclareResult, { ok: false }>['code'], message: strin
 async function isDir(p: string): Promise<boolean> { try { return (await stat(p)).isDirectory() } catch { return false } }
 
 /** A local directory as given, else the piece's own known checkouts whose `origin` is the named remote. */
-async function resolveRepoPath(deps: ClassifyDeps, input: DeclarationInput): Promise<string | null> {
+export async function resolveRepoPath(deps: ClassifyDeps, input: DeclarationInput): Promise<string | null> {
   if (await isDir(input.repo)) {
     try { return (await deps.git(input.repo, ['rev-parse', '--show-toplevel'])).trim() } catch { return null }
   }
@@ -61,6 +61,21 @@ export async function declareClassification(deps: ClassifyDeps, input: Declarati
   const classification = classifyPiece({ checkout: 'resolved', everHadRepoCwd: true, headSha: head, dirtyPaths: [], diffPaths })
   if (!classification.ok) return { ok: false, code: 'declaration_unclassifiable', message: classification.message, classification }
   return { ok: true, classification, declaration: { repo: input.repo.trim(), head, category: classification.category } }
+}
+
+/**
+ * The git facts `validateReport` needs for a `repoRef`: does `sha:path` exist, and is `sha` reachable from a remote branch?
+ * The repository is found like a declaration's (a checkout path, or a remote one of the piece's checkouts uses).
+ */
+export async function repoRefFacts(deps: ClassifyDeps, piece: { taskId: string; subtaskId?: string }, ref: { repo: string; sha: string; path: string }): Promise<{ exists: boolean; reachableFromRemote: boolean }> {
+  const repo = await resolveRepoPath(deps, { piece, repo: ref.repo, head: ref.sha })
+  if (!repo) return { exists: false, reachableFromRemote: false }
+  let exists = false
+  try { await deps.git(repo, ['cat-file', '-e', `${ref.sha}:${ref.path}`]); exists = true } catch { /* missing */ }
+  if (!exists) return { exists: false, reachableFromRemote: false }
+  let remotes = ''
+  try { remotes = await deps.git(repo, ['branch', '-r', '--contains', ref.sha]) } catch { /* unreachable */ }
+  return { exists, reachableFromRemote: remotes.trim() !== '' }
 }
 
 /** Health: how many declarations exist, and by whom (`classification-declared`, by leader). */

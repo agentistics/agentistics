@@ -25,6 +25,7 @@ import {
 import { createAgentAuditSink } from "./agent-audit.js";
 import { taskCommentRequest } from "./task-comment-args.js";
 import { sessionProof, withTaskWriteProof } from "./session-proof.js";
+import { evidenceRequestOf } from "./evidence-args.js";
 import { bookTakeoverPayload } from "./book-takeover-payload.js";
 import { HARNESS_CAPABILITIES, contextReading, nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
 import { planLimitsTool } from "./plan-limits-tool.js";
@@ -684,6 +685,32 @@ const TOOLS: Tool[] = [
         pedidoId: { type: "string" },
       },
       required: ["subtaskId"],
+    },
+  },
+  {
+    name: "agentistics_task_evidence",
+    description:
+      "ENTREGA.GARANTIDA — attach, list or remove the EVIDENCE a piece needs before it can move to review (the server decides what is enough; you never supply a hash, a time or a commit — it computes them). " +
+      "`ref` = the TASK id; `subtaskId` = the piece (omit for a task-level piece). `action`: `add` (default) | `list` | `remove`. " +
+      "`add` needs `kind` = screenshot | api-capture | test-log | report | probe and ONE payload: `filePath` (a file in your worktree, uploaded — 8 MB cap), `fileId` (a TaskFile of this task), `repoRef` {repo, sha, path} (a `report` pushed to a remote branch) or `probe` (http | bundle | cli | structural; closed set, no extra fields). " +
+      "Validators: screenshot = real PNG/JPEG/WebP header ≥ 320×200 and ≥ 4 KB; api-capture = UTF-8 ≤ 1 MB with a request/status line and a body; test-log = runner summary with 0 failures and ≥ 1 pass (or an `agentop run` footer `exit 0`); report = markdown ≥ 300 B with a `Verdict:`/`Veredito:`/`Result:`/`Resultado:` line. " +
+      "The same bytes can back evidence on ONE piece and ONE revision, forever (`evidence_reused`). Evidence is bound to the piece's verified HEAD: a new commit or an uncommitted change makes it stale — recapture. " +
+      "`list` returns the items and the binding (HEAD, tree clean) they are judged against. `remove` (`evidenceId`) is refused (409 `evidence_in_use`) when a checkpoint relies on the item. Only the piece's own session, the task leader or the owner may attach.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "The task id the piece belongs to." },
+        action: { type: "string", enum: ["add", "list", "remove"] },
+        subtaskId: { type: "string", description: "The piece (a subtask of the task). Omit for a task-level piece." },
+        kind: { type: "string", enum: ["screenshot", "api-capture", "test-log", "report", "probe"] },
+        filePath: { type: "string", description: "A file in your worktree to upload (max 8 MB)." },
+        name: { type: "string", description: "Optional display name for an uploaded file." },
+        fileId: { type: "string", description: "An existing TaskFile of this task." },
+        repoRef: { type: "object", description: "report only: { repo: path|remote, sha: 40-hex, path } — the file must exist at that commit, which must be on a remote branch.", properties: { repo: { type: "string" }, sha: { type: "string" }, path: { type: "string" } } },
+        probe: { type: "object", description: "probe only: { kind: http|bundle|cli|structural, … } — the closed shapes of the spec; no extra fields." },
+        evidenceId: { type: "string", description: "remove: the evidence item id (ev-…)." },
+      },
+      required: ["ref"],
     },
   },
   {
@@ -1470,6 +1497,14 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         // Every call carries the session proof. `approve` is the OWNER's answer to a human gate and a session is never
         // the owner: the server refuses it (`so_o_dono`); the owner answers on the Live card or `agentop flow approve --owner`.
         const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(subtaskId)}`, { ...rest, action, session: sessionProof(process.env) });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_evidence": {
+        const req = evidenceRequestOf((args ?? {}) as Record<string, unknown>, sessionProof(process.env));
+        // Three literal calls (one per verb) so the route table and the lint see exactly what this tool reaches.
+        const body = req.action === "list" ? await apiGet(`/api/tasks/${encodeURIComponent(req.ref)}/evidence${req.query}`)
+          : req.action === "remove" ? await apiSend("DELETE", `/api/tasks/${encodeURIComponent(req.ref)}/evidence`, req.body)
+          : await apiSend("POST", `/api/tasks/${encodeURIComponent(req.ref)}/evidence`, req.body);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_stage": {

@@ -4,7 +4,26 @@
  * `session` that claims an identity it cannot prove (`unverified_sender`). The guards that USE the principal arrive
  * with the store guard (S2a); this slice makes sure the display string can no longer impersonate anybody.
  */
-import { isReservedActor } from './principal'
+import { actorOf, isReservedActor, type RequestPrincipal } from './principal'
+
+/**
+ * S0d security re-QA N3 — a reserved name (`owner`, `you`, `dono`, `flow:*`) in a field the actor screen does not read
+ * (a claim's `by`, an upload's `author`) is decided by the PRINCIPAL, never taken from the request: the proven owner may
+ * name itself; a proven session is recorded as ITSELF; `flow:*` is the engine's and is always refused. With no proof,
+ * `refuse` answers 403 (a claim is an identity statement) and `record` stores `unattributed` (an upload's author is a label).
+ * PURE.
+ */
+export function reservedNameAs(
+  value: unknown, principal: RequestPrincipal, unproven: 'refuse' | 'record',
+): { ok: true; value: string } | { ok: false; status: 400 | 403; body: { error: 'reserved_actor'; sentence: string } } {
+  const v = typeof value === 'string' ? value : value === undefined || value === null ? '' : String(value)
+  if (!isReservedActor(v)) return { ok: true, value: v }
+  if (v.trim().toLowerCase().startsWith('flow:')) return { ok: false, status: 400, body: { error: 'reserved_actor', sentence: '"flow:*" names the engine, decided by the server — never claimed in a request' } }
+  if (principal.kind === 'owner') return { ok: true, value: v }
+  if (principal.kind === 'session') return { ok: true, value: principal.id }
+  if (unproven === 'record') return { ok: true, value: actorOf({ kind: 'unattributed' }) }
+  return { ok: false, status: 403, body: { error: 'reserved_actor', sentence: '"owner", "you" and "dono" are the owner\'s names — only a request carrying the owner\'s proof may use them' } }
+}
 
 export type PrincipalScreen = { status: 400 | 403 | 415; body: { error: string; sentence: string } } | null
 

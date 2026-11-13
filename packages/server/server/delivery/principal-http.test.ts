@@ -3,7 +3,7 @@
  * T1/T3/T4: `actor: "flow:entrega"` and a forged session passed with `text/plain`, no header or `Application/Json`.
  */
 import { describe, expect, test } from 'bun:test'
-import { screenTaskRequest } from './principal-http'
+import { reservedNameAs, screenTaskRequest } from './principal-http'
 
 const verify = async (id: unknown, token: unknown) => (id === 'leader' && token === 'good' ? 'leader' : null)
 const req = (body: string, contentType: string | null, path = '/api/tasks/t-1', method = 'POST') =>
@@ -42,5 +42,36 @@ describe('the screen ignores the content-type header', () => {
     expect(await req(form, 'Multipart/Form-Data; boundary=x', '/api/tasks/t-1/files')).toBeNull()
     expect(await req(form, 'multipart/form-data; boundary=x', '/api/tasks/t-1/comments')).toMatchObject({ status: 415 })
     expect(await req(JSON.stringify({ actor: 'flow:x' }), 'text/plain', '/api/tasks/t-1/files')).toMatchObject({ status: 400 })
+  })
+})
+
+// S0d security re-QA N3: reserved names in fields the actor screen did not look at — a claim's `by`, an upload's `author`.
+describe('N3 a reserved name outside `actor` is the REAL principal, never a claim', () => {
+  const owner = { kind: 'owner', via: 'legacy-browser' } as const
+  const session = { kind: 'session', id: 's-worker', via: 'token' } as const
+  const nobody = { kind: 'unattributed' } as const
+  test('an ordinary name passes unchanged, whoever asks', () => {
+    for (const p of [owner, session, nobody]) expect(reservedNameAs('worker-7', p, 'refuse')).toEqual({ ok: true, value: 'worker-7' })
+  })
+  test('the proven owner may name itself; nobody may name the engine', () => {
+    for (const v of ['owner', 'you', ' Dono ']) expect(reservedNameAs(v, owner, 'refuse')).toEqual({ ok: true, value: v })
+    expect(reservedNameAs('flow:entrega', owner, 'refuse')).toMatchObject({ ok: false, status: 400, body: { error: 'reserved_actor' } })
+    expect(reservedNameAs('flow:entrega', owner, 'record')).toMatchObject({ ok: false, status: 400 })
+  })
+  test('a proven session claiming the owner is recorded as ITSELF', () => {
+    expect(reservedNameAs('owner', session, 'refuse')).toEqual({ ok: true, value: 's-worker' })
+    expect(reservedNameAs('you', session, 'record')).toEqual({ ok: true, value: 's-worker' })
+  })
+  test('no proof: a claim is refused; an upload is recorded as unattributed', () => {
+    expect(reservedNameAs('owner', nobody, 'refuse')).toMatchObject({ ok: false, status: 403, body: { error: 'reserved_actor' } })
+    expect(reservedNameAs('owner', nobody, 'record')).toEqual({ ok: true, value: 'unattributed' })
+  })
+  test('index.ts applies it to the claim\'s `by` (take AND release) and the upload\'s `author`', async () => {
+    const src = await Bun.file(new URL('../index.ts', import.meta.url)).text()
+    const claim = src.slice(src.indexOf("if (verb === 'claim') {"), src.indexOf("if (verb === 'move') {"))
+    expect(claim).toMatch(/reservedNameAs\(body\.by, [^)]*'refuse'\)/)
+    expect(claim).not.toMatch(/by: String\(body\.by/)
+    const files = src.slice(src.indexOf("if (verb === 'files') {"), src.indexOf("const body = await req.json()", src.indexOf("if (verb === 'files') {")))
+    expect(files).toMatch(/reservedNameAs\(form\?\.get\('author'\), [^)]*'record'\)/)
   })
 })

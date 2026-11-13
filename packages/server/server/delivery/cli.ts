@@ -100,17 +100,24 @@ export async function runDeliveryCli(
   if (argv[0] === 'help' || argv[0] === '--help' || argv[0] === '-h') { io.out(DELIVERY_FLOW_HELP.trimEnd()); return 0 }
   const svc = service ?? (await import('./host')).deliveryService()
   const isTaskStage = argv[0] === 'task-stage'
-  const { pos, flags } = parseFlags(isTaskStage ? argv.slice(1) : argv)
+  // S1c: `agentop task evidence add|ls|rm` (routed here by cli-task.ts) — the same service the REST route and the MCP tool reach.
+  const isEvidence = argv[0] === 'task-evidence'
+  const { pos, flags } = parseFlags(isTaskStage || isEvidence ? argv.slice(1) : argv)
   const sub = flags.subtask ?? (isTaskStage ? pos[0] : undefined)
   // ENTREGA.GARANTIDA §2.3: WHO this is is what the process PROVES — an ancestor session (`session`), or `--owner` on a
   // terminal after the vault's fresh proof — never "no AGENTOP_MANAGED_ID, so the owner". A read needs no principal.
-  const readOnly = argv[0] === 'help' || argv[0] === 'entrega' || argv[0] === 'get' || (argv[0] === 'fila' && !argv[1]?.match(/^(responder|proximo)$/))
+  // Integration S0d+S1c (F5): the evidence verbs resolve the SAME principal — an unproven caller is `unattributed`, never the owner.
+  const readOnly = isEvidence
+    ? (pos[0] === 'ls' || !pos[0] || pos[0] === 'help' || pos[0] === '--help')
+    : argv[0] === 'help' || argv[0] === 'entrega' || argv[0] === 'get' || (argv[0] === 'fila' && !argv[1]?.match(/^(responder|proximo)$/))
+  const move = isEvidence ? ownerMove('evidence', pos[0]) : ownerMove(isTaskStage ? 'stage' : argv[0], flags.phase ?? pos[0])
   const resolved = readOnly
     ? { principal: { kind: 'unattributed' } as RequestPrincipal }
-    : await resolveCliPrincipal(env, flags.owner === 'true', { pieceKey: sub ?? '*', move: ownerMove(isTaskStage ? 'stage' : argv[0], flags.phase ?? pos[0]) }, await auth())
+    : await resolveCliPrincipal(env, flags.owner === 'true', { pieceKey: sub ?? '*', move }, await auth())
   if (resolved.note) io.err(resolved.note)
   const principal = resolved.principal
   const actor = actorOf(principal)
+  if (isEvidence) return (await import('./evidence-cli')).runEvidenceCli(svc, pos, flags, io, actor)
   const needSub = () => { if (!sub) { io.err('--subtask <id> is required'); return false } return true }
   if (isTaskStage) {
     if (!needSub()) return 2

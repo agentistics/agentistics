@@ -71,6 +71,8 @@ describe('notification coverage', () => {
     'classification_required', 'uncommitted_changes', 'evidence_required', 'evidence_stale', 'evidence_invalid', 'evidence_reused',
     'declaration_invalid', 'declaration_unclassifiable', 'declaration_repo_unresolved', 'declaration_commit_missing', 'declaration_unpushed',
     'classify_unavailable', 'classify_leader_only',
+    // S1c: the evidence doors
+    'evidence_too_large', 'evidence_forbidden', 'evidence_in_use', 'no_such_evidence', 'evidence_store_failed', 'evidence_id_required', 'wrong_task',
   ]
   it('every delivery-guard refusal has EN and PT text, whatever syntax emits it', () => {
     const missing = DELIVERY_REFUSALS.filter(c => !NOTIFICATION_TEXT[c]?.en?.title || !NOTIFICATION_TEXT[c]?.pt?.title || !NOTIFICATION_TEXT[c]?.en?.message || !NOTIFICATION_TEXT[c]?.pt?.message)
@@ -112,6 +114,19 @@ describe('notification coverage', () => {
     )
     expect(out.title).toContain('something.nobody.mapped')
     expect(out.title.trim()).not.toBe('')
+  })
+})
+
+describe('ENTREGA.GARANTIDA integration (QA S1c r2 R7)', () => {
+  // `guard_busy` is raised as `readonly code = 'guard_busy'` (a class field), which the emitter grep above does not read.
+  it('guard_busy and the delete-door evidence codes have text in both languages', () => {
+    for (const code of ['guard_busy', 'evidence_in_use', 'evidence_stale']) {
+      const t = NOTIFICATION_TEXT[code]
+      expect(t?.en?.message, code).toBeTruthy(); expect(t?.pt?.message, code).toBeTruthy()
+    }
+    // evidence_in_use is also the answer when the index cannot be read or an authorization is pending — the PT says so too.
+    expect(NOTIFICATION_TEXT.evidence_in_use!.pt.message).toContain('não pôde ser lido')
+    expect(NOTIFICATION_TEXT.evidence_stale!.pt.message).toContain('mudou durante o envio')
   })
 })
 

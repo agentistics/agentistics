@@ -2345,6 +2345,30 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await registerComposerTask({ ...body, action: 'prompt' }, url.searchParams.get('lang') === 'pt' ? 'pt' : 'en')
       return json(out, out.ok ? 200 : 422)
     }
+    // ENTREGA.GARANTIDA S1c — evidence for a piece of a task: `POST|GET|DELETE /api/tasks/<ref>/evidence`. Matched BEFORE the
+    // generic `<ref>` routes below (or `<ref>/evidence` would resolve as a task reference and 404). Authenticated like every
+    // /api/tasks route; WHO asks is the S0d principal (proven session → owner grant → legacy browser) — no proof is
+    // `unattributed`, never the owner. A failure is a structured refusal or a `safeError`, never Bun's error page (QA R1).
+    const evidenceRoute = /^\/api\/tasks\/([^/]+)\/evidence$/.exec(url.pathname)
+    if (evidenceRoute && (req.method === 'POST' || req.method === 'GET' || req.method === 'DELETE')) {
+      try {
+        const [{ evidenceRequest }, { verifySessionIdentity }, { deliveryService }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
+          import('./delivery/evidence-web'), import('./sessions/session-identity'), import('./delivery/host'),
+          import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
+        ])
+        const body = req.method === 'GET' ? {} : await req.json().catch(() => ({})) as Record<string, unknown>
+        const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+        const out = await evidenceRequest(req.method, decodeURIComponent(evidenceRoute[1]!), Object.fromEntries(url.searchParams), body, {
+          service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token), mode: readOwnerProofMode, browser,
+          consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+        })
+        return json(out.body, out.status)
+      } catch (err) {
+        const safe = safeError(err, { verbose: false })
+        console.error(safe.logLine)
+        return json(safe.body, 500)
+      }
+    }
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'GET') {
       const ref = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
       const { showTask } = await import('./sessions/task-web')
@@ -2373,7 +2397,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const fileId = decodeURIComponent(url.pathname.slice('/api/task-files/'.length))
       const mod = await import('./sessions/task-web')
       if (req.method === 'DELETE') {
-        return json({ ok: await mod.removeFile(fileId) }, 200)
+        const { evidenceDeleteRequest } = await import('./delivery/evidence-delete')
+        const result = await evidenceDeleteRequest(() => mod.removeFile(fileId))
+        return json(result.body, result.status)
       }
       const got = await mod.fetchFile(fileId)
       if (!got) return json({ error: 'no_such_file' }, 404)
@@ -2412,7 +2438,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'DELETE') {
       const ref = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
       const { deleteTask } = await import('./sessions/task-web')
-      return json({ ok: await deleteTask(ref) })
+      const { evidenceDeleteRequest } = await import('./delivery/evidence-delete')
+      const result = await evidenceDeleteRequest(() => deleteTask(ref))
+      return json(result.body, result.status)
     }
 
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'POST') {
@@ -2425,16 +2453,38 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         || verb === 'links' || verb === 'sessions' || verb === 'claim' || verb === 'move' || verb === 'threads'
       const ref = known ? rest.slice(0, slash) : rest
       const mod = await import('./sessions/task-web')
+      // S0d re-QA N3: WHO this request is (grant → proven session → legacy browser → unattributed), for the fields that may
+      // carry a reserved name outside `actor`. Resolved only when such a name is present.
+      const requestPrincipal = async (b: Record<string, unknown>, move: string) => {
+        const [{ resolveRequestPrincipal }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
+          import('./delivery/web'), import('./sessions/session-identity'), import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
+        ])
+        const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+        return resolveRequestPrincipal(b, { pieceKey: ref, move }, {
+          verify: (id, token) => verifySessionIdentity(id, token), mode: readOwnerProofMode, browser,
+          consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+        })
+      }
+      const { reservedNameAs } = await import('./delivery/principal-http')
+      const { isReservedActor } = await import('./delivery/principal')
 
       if (verb === 'files') {
         const form = await req.formData().catch(() => null)
         const file = form?.get('file')
         if (!(file instanceof File)) return json({ error: 'file_required' }, 400)
+        let author: string | undefined
+        if (typeof form?.get('author') === 'string') {
+          const who = isReservedActor(form.get('author')) ? await requestPrincipal({}, 'file:upload') : { ok: true as const, principal: { kind: 'unattributed' as const } }
+          if (!who.ok) return json(who.reply.body, who.reply.status)
+          const named = reservedNameAs(form?.get('author'), who.principal, 'record')
+          if (!named.ok) return json(named.body, named.status)
+          author = named.value
+        }
         const fileId = await mod.attachFile(ref, {
           name: file.name,
           bytes: new Uint8Array(await file.arrayBuffer()),
           ...(typeof form?.get('kind') === 'string' ? { kind: String(form.get('kind')) } : {}),
-          ...(typeof form?.get('author') === 'string' ? { author: String(form.get('author')) } : {}),
+          ...(author !== undefined ? { author } : {}),
         })
         return json({ ok: fileId !== null, id: fileId }, fileId !== null ? 200 : 400)
       }
@@ -2685,15 +2735,20 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       if (verb === 'claim') {
         // `release: true` gives it back; anything else takes it. One verb, because a caller holding
         // a task reference thinks in terms of "mine / not mine", not two endpoints.
+        // S0d re-QA N3: `by` may not CLAIM the owner or the engine — it is the real principal or refused.
+        const who = isReservedActor(body.by) ? await requestPrincipal(body, 'claim') : { ok: true as const, principal: { kind: 'unattributed' as const } }
+        if (!who.ok) return json(who.reply.body, who.reply.status)
+        const holder = reservedNameAs(body.by, who.principal, 'refuse')
+        if (!holder.ok) return json(holder.body, holder.status)
         if (body.release === true) {
           const out = await mod.releaseTask({
-            ref, by: String(body.by ?? ''), ...(body.force === true ? { force: true } : {}),
+            ref, by: holder.value, ...(body.force === true ? { force: true } : {}),
           })
           return json(out, out.ok ? 200 : 409)
         }
         const out = await mod.claimTask({
           ref,
-          by: String(body.by ?? ''),
+          by: holder.value,
           ...(typeof body.leaseMs === 'number' ? { leaseMs: body.leaseMs } : {}),
           ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
           ...(typeof body.note === 'string' ? { note: body.note } : {}),

@@ -16,6 +16,7 @@
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { withFileLock } from '../sessions/file-lock'
+import { defaultGuardLockPaths, withGuardLocks } from './guard-locks'
 import { isPhase, type DeliveryRecord } from './machine'
 
 export interface DeliveryDoc {
@@ -79,9 +80,11 @@ export function serializeDeliveryDoc(doc: DeliveryDoc): string {
 export interface DeliveryStore {
   readonly path: string
   read(): Promise<DeliveryDoc>
+  /** Safety decisions must distinguish an absent book from an unreadable one. */
+  readStrict(): Promise<DeliveryDoc>
   get(subtaskId: string): Promise<DeliveryRecord | null>
   /** Read-modify-write under the lock. `fn` returns the value to hand back; mutations to `doc` are persisted. Throws `DeliveryStoreUnreadable` when the file cannot be read. */
-  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>): Promise<T>
+  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>, options?: { evidence?: boolean; guardsPath?: string }): Promise<T>
 }
 
 export function defaultDeliveriesPath(): string {
@@ -93,13 +96,19 @@ export function defaultDeliveriesPath(): string {
 
 export function createDeliveryStore(path = defaultDeliveriesPath()): DeliveryStore {
   /** `missing` (no file yet) is an empty book; `unreadable` is NOT an empty book. */
-  const readState = async (): Promise<{ kind: 'ok'; doc: DeliveryDoc } | { kind: 'missing' } | { kind: 'unreadable'; why: string }> => {
+  const readState = async (strict = false): Promise<{ kind: 'ok'; doc: DeliveryDoc } | { kind: 'missing' } | { kind: 'unreadable'; why: string }> => {
     let text: string
     try { text = await readFile(path, 'utf8') } catch (e) {
       return (e as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'missing' } : { kind: 'unreadable', why: e instanceof Error ? e.message.split('\n')[0]! : String(e) }
     }
     if (!text.trim()) return { kind: 'unreadable', why: 'the file is empty' }
-    try { return { kind: 'ok', doc: parseDeliveryDocStrict(text) } } catch (e) { return { kind: 'unreadable', why: e instanceof Error ? e.message.split('\n')[0]! : String(e) } }
+    try {
+      if (strict) {
+        const raw = JSON.parse(text)
+        if (!isRec(raw) || raw.version !== 1 || !isRec(raw.deliveries)) throw new Error('not a version 1 delivery book')
+      }
+      return { kind: 'ok', doc: parseDeliveryDocStrict(text) }
+    } catch (e) { return { kind: 'unreadable', why: e instanceof Error ? e.message.split('\n')[0]! : String(e) } }
   }
   const read = async (): Promise<DeliveryDoc> => {
     const s = await readState()
@@ -108,11 +117,16 @@ export function createDeliveryStore(path = defaultDeliveriesPath()): DeliverySto
   return {
     path,
     read,
+    async readStrict() {
+      const s = await readState(true)
+      if (s.kind === 'unreadable') throw new DeliveryStoreUnreadable(path, null, s.why)
+      return s.kind === 'ok' ? s.doc : { version: 1, deliveries: {} }
+    },
     async get(id) { return (await read()).deliveries[id] ?? null },
-    async update(fn) {
+    async update(fn, options) {
       await mkdir(dirname(path), { recursive: true })
-      return withFileLock(path, async () => {
-        const s = await readState()
+      const write = async () => {
+        const s = await readState(!!options?.evidence)
         if (s.kind === 'unreadable') {
           // Keep the bytes (once per distinct file state) and refuse: an empty document must never replace them.
           const backup = `${path}.unreadable.bak`
@@ -126,7 +140,11 @@ export function createDeliveryStore(path = defaultDeliveriesPath()): DeliverySto
         await writeFile(tmp, serializeDeliveryDoc(doc), { mode: 0o600 })
         await rename(tmp, path)
         return value
-      })
+      }
+      // Evidence mutations may never proceed without a contended lock.
+      return options?.evidence
+        ? withGuardLocks(options.guardsPath ? ['deliveries', 'guards'] : ['deliveries'], write, { paths: { ...defaultGuardLockPaths(), deliveries: path, ...(options.guardsPath ? { guards: options.guardsPath } : {}) } })
+        : withFileLock(path, write)
     },
   }
 }

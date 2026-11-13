@@ -140,6 +140,10 @@ export interface DeliveryRecord {
   leaderSessionId?: string
   /** S1b: leader declarations of where to look for this piece's checkout (spec §3.2); each re-ran the classification host. */
   classificationDeclared?: Array<{ by: string; repo: string; head: string; category: string; at: string }>
+  /** S1c: the evidence attached to this piece (spec §3.1); every item was built by `buildEvidenceItem` (server hash, trusted binding). */
+  evidence?: import('./evidence').EvidenceItem[]
+  /** S1c: append-only (sha256, piece, revision) history — a removed item frees nothing ("unique forever"). Record-level, so it survives older writers. */
+  evidenceHistory?: Array<{ sha256: string; pieceKey: string; revision: number }>
   /**
    * `board` = this record was created by the vigia's ADOPTION of a piece the board already held in `blocked` (BLOQUEIO.ORFAO),
    * not by a flow transition. Only such a record is reconciled against the board's own status each tick: the board is the

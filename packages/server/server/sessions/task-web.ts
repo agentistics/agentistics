@@ -45,6 +45,7 @@ import { noteThreadComment, openThread } from './task-threads'
 import type { CommentKind, ThreadKind } from '@agentistics/core'
 import { chatAttachmentRef, compareBy, repoShortName, sanitizeCommentAttachments, sessionLabel, type ChatAttachmentRef } from '@agentistics/core'
 import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './task-files'
+import { withEvidenceDeletion } from '../delivery/evidence-delete'
 import type { TaskDetail, TaskListRow } from './task-report'
 import { onBookWrite } from './task-store'
 import { JOURNAL_STAMPS_PATH, MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
@@ -581,10 +582,13 @@ export async function deleteTask(ref: string): Promise<boolean> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return false
-  const ok = await w.store.removeTask(task.id)
+  const ok = await w.store.removeTask(task.id, (remove, held) => withEvidenceDeletion({ taskId: task.id }, async () => {
+    const removed = await remove()
+    if (removed) await deleteTaskFiles(task.id)
+    return removed
+  }, held))
   if (!ok) return false
   // The bytes go with the record. The SESSIONS do not — see `TaskStore.removeTask`.
-  await deleteTaskFiles(task.id)
   // And the NAME leaves `preferences.finishedTasks`, which is the other place the migration reads
   // from: a tombstone alone would stop the re-mint while the cockpit went on listing it as finished.
   const prefs = await readPreferences().catch(() => null)
@@ -1038,12 +1042,16 @@ export async function attachFile(
   } catch {
     return null
   }
-  await w.store.addFile({
+  try { await w.store.addFile({
     id, taskId: task.id, name, size,
     ...(o.kind ? { kind: o.kind } : {}),
     ...(o.author ? { author: o.author } : {}),
     createdAt: new Date().toISOString(),
-  })
+  }) } catch (error) {
+    try { await deleteTaskFile(task.id, id, true) }
+    catch (cleanup) { throw new AggregateError([error, cleanup], `TaskFile upload rollback failed for ${id}`) }
+    throw error
+  }
   return id
 }
 
@@ -1057,12 +1065,24 @@ export async function fetchFile(fileId: string): Promise<{ name: string; bytes: 
   return bytes ? { name: rec.name, bytes } : null
 }
 
+/** Like `fetchFile`, plus the task the file hangs off — evidence may only name a file of ITS OWN task. */
+export async function fetchFileWithTask(fileId: string): Promise<{ taskId: string; name: string; bytes: Uint8Array } | null> {
+  const w = await loadTaskWorld()
+  const rec = w.book.files.find(f => f.id === fileId)
+  if (!rec) return null
+  const bytes = await readTaskFile(rec.taskId, rec.id)
+  return bytes ? { taskId: rec.taskId, name: rec.name, bytes } : null
+}
+
 export async function removeFile(fileId: string): Promise<boolean> {
   const w = await loadTaskWorld()
   const rec = w.book.files.find(f => f.id === fileId)
   if (!rec) return false
-  await deleteTaskFile(rec.taskId, rec.id)
-  return await w.store.removeFile(fileId)
+  return await w.store.removeFile(fileId, (remove, held) => withEvidenceDeletion({ fileId }, async () => {
+    const removed = await remove()
+    if (removed) await deleteTaskFile(rec.taskId, rec.id, true)
+    return removed
+  }, held))
 }
 
 /**
