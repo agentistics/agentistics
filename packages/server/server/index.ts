@@ -1159,6 +1159,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    if (url.pathname.startsWith('/api/benchmark/')) {
+      const { handleBenchmarkRequest } = await import('./benchmark/routes')
+      return handleBenchmarkRequest(req, url)
+    }
+
     // FLUXO.ENTREGA-DSL — the delivery state machine (`delivery/`). Not behind the flows flag: refusing a skipped
     // phase is the point, so the door exists on every build; the engine's timer and flows are what the flag adds.
     // CALENDARIO.ENTREGAS — the Delivery calendar's read (`delivery/calendar.ts`): the screen, the MCP tool and
