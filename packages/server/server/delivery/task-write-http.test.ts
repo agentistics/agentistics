@@ -87,8 +87,9 @@ describe('index.ts uses the seams (not inline copies)', () => {
   test('screen and author field go through principal-http', async () => {
     const src = await Bun.file(new URL('../index.ts', import.meta.url)).text()
     expect(src).toMatch(/screenTaskRequest\([\s\S]{0,400}principalDeps/)
-    expect(src).toContain('authorFieldAs(')
+    expect(src).toContain('taskAuthorField(') // request-deps.ts wraps authorFieldAs (r4); its HTTP test drives it
     expect(src).not.toContain('freeTextAuthorAs(text')
-    expect(src).toContain("ownerGate(ref, 'thread:open')")
+    expect(src).toContain('threadOpenKnown(') // the owner gate for a topic open lives in request-deps.ts (r4), driven by its HTTP test
+    expect(await Bun.file(new URL('./request-deps.ts', import.meta.url)).text()).toContain("ownerGate(ref, 'thread:open')")
   })
 })

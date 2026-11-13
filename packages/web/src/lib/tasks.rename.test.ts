@@ -5,6 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { editRefusalNotice, editTask, openThread } from './tasks'
+import { readNotifications } from './notifications'
 
 type Call = { url: string; body: Record<string, unknown>; grant: string | null }
 let calls: Call[] = []
@@ -40,6 +41,15 @@ describe('Rename (editTask with actor "you")', () => {
     expect(await editTask('t-1', { title: 'New', actor: 'you' } as never)).toBe(false)
     globalThis.fetch = (async () => { throw new Error('down') }) as unknown as typeof fetch
     expect(await editTask('t-1', { title: 'New' })).toBe(false)
+  })
+  test('r4 Q4: a refused editTask shows the error toast through the real notification store (never silent)', async () => {
+    serve(() => ({ status: 403, body: { error: 'so_o_dono', sentence: 'only the owner may do this' } }))
+    const before = readNotifications().length
+    expect(await editTask('t-1', { title: 'New', actor: 'you' } as never)).toBe(false)
+    const shown = readNotifications()
+    expect(shown.length).toBe(before + 1)
+    expect(shown[0]).toMatchObject({ type: 'error' })
+    expect(shown[0]!.title).toMatch(/could not be saved|Não foi possível salvar/)
   })
   test('the refusal toast says what happened, in both languages', () => {
     expect(editRefusalNotice({ status: 403, body: { error: 'reserved_actor' } }, false)).toMatchObject({ type: 'error', title: 'The change could not be saved' })
