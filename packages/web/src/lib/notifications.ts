@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { liveDeepLink } from './liveDeepLink'
 import { idleSessionNoun } from './idleExecution'
 import { notificationMuted } from './notificationCategories'
 import { limitNoticeMeta, limitNoticeText, segmentNoticeText } from './planLimits'
@@ -447,6 +448,12 @@ export function notificationLink(n: Pick<AppNotification, 'code' | 'meta'>): str
     const sid = String(n.meta?.sessionId ?? '').trim()
     return sid ? `/sessions/${encodeURIComponent(sid)}` : null
   }
+  // A delivery waiting for review with no leader leads to its card on the Live (the one-click action lives there).
+  if (n.code === 'delivery.orphan-review') {
+    const key = String(n.meta?.key ?? '').trim()
+    return key ? liveDeepLink({ card: key }) : null
+  }
+  if (n.code === 'delivery.orphan-review-many') return liveDeepLink({ orphans: true })
   return null
 }
 

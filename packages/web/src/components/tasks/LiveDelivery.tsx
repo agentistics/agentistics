@@ -16,7 +16,8 @@
  */
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { parseLiveDeepLink } from '../../lib/liveDeepLink'
 import { Check, ChevronDown, ExternalLink } from 'lucide-react'
 import { LIVE_PERIODS, liveCapOmitted, plainLeaderName, type LivePeriod, type LiveTab } from '@agentistics/core'
 import { CenteredLoader } from '../CenteredLoader'
@@ -144,6 +145,18 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, slow, onRetr
   const [gone, setGone] = useState<Gone[]>([])
   const [showGone, setShowGone] = useState(false)
   const [showAntigas, setShowAntigas] = useState(false)
+  // A notification's click (`lib/liveDeepLink.ts`): ONE card (the group dialog opened on just that piece, with the same
+  // per-piece actions) or the orphan pieces (filtered, and the group dialog with its count preview). The tab/stage change is
+  // for this visit only: it is not written to the saved view preferences.
+  const { search } = useLocation()
+  const deep = useMemo(() => parseLiveDeepLink(search), [search])
+  const [onlyCard, setOnlyCard] = useState<string | null>(null)
+  useEffect(() => {
+    if (!deep) return
+    setView(v => ({ ...v, tab: 'all' }))
+    if (deep.kind === 'card') { setTaskIds([deep.taskId]); setOnlyCard(deep.key) } else { setStageFilter('no-leader'); setOnlyCard(null) }
+    setShowAntigas(true)
+  }, [deep])
   const [clock, setClock] = useState(() => Date.now())
 
   // ONE set of cards feeds both the tab counts and the columns. The server already answered for the chosen period
@@ -505,8 +518,8 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, slow, onRetr
       {periodLoading && !error && <CenteredLoader size={40} label={L.loading} testId="agentask-live-period-loading" />}
       {capNote && <span role="status" data-live-capped style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{capNote}</span>}
       <LiveAntigas
-        open={showAntigas} pt={pt} mobile={isMobile} onClose={() => setShowAntigas(false)}
-        items={oldCards.map(c => ({ key: c.d.key, taskId: c.d.taskId, subtaskId: c.d.subtaskId, title: c.d.title, ...(c.d.suggestion ? { suggestion: c.d.suggestion } : {}) }))}
+        open={showAntigas} pt={pt} mobile={isMobile} onClose={() => { setShowAntigas(false); setOnlyCard(null) }}
+        items={(onlyCard ? cards.filter(c => c.d.key === onlyCard) : oldCards).map(c => ({ key: c.d.key, taskId: c.d.taskId, subtaskId: c.d.subtaskId, title: c.d.title, ...(c.d.suggestion ? { suggestion: c.d.suggestion } : {}) }))}
         onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}
       />
       {showGone && (
