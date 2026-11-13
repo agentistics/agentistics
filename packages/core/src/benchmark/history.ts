@@ -6,15 +6,16 @@
  * and the coverage says how much of the pieces carry each figure. Observed and biased: no verdict here.
  */
 import { percentile } from '../deliveryMetrics'
+import { buildComparisons, type HistoryComparison } from './comparisons'
 
 export type PieceSize = 'S' | 'M' | 'L'
 export const SIZE_LINES = { mediumFrom: 100, largeFrom: 500 } as const
 export const sizeOfLines = (lines: number | null): PieceSize | null =>
   lines === null ? null : lines >= SIZE_LINES.largeFrom ? 'L' : lines >= SIZE_LINES.mediumFrom ? 'M' : 'S'
 
-/** Sessions per piece, in the buckets the owner asked for. */
+/** Sessions per piece, in the buckets of the approved prototype (1, 2, 3–4, 5+). */
 export const BUCKETS = [
-  { label: '1', min: 1, max: 1 }, { label: '2-3', min: 2, max: 3 }, { label: '4-6', min: 4, max: 6 }, { label: '7+', min: 7, max: null },
+  { label: '1', min: 1, max: 1 }, { label: '2', min: 2, max: 2 }, { label: '3-4', min: 3, max: 4 }, { label: '5+', min: 5, max: null },
 ] as const
 
 export interface HistorySession { id: string; harness: string; costUSD: number | null }
@@ -45,7 +46,10 @@ export interface HistoryBucket {
   costMedianUSD: number | null; nCost: number; wallMedianMs: number | null; nWall: number; reworkRate: number | null; nRework: number
 }
 export interface HistoryCoverage {
-  pieces: number; withCost: number; withWall: number; withQa: number; withSize: number; withActive: number
+  pieces: number; withCost: number; withWall: number
+  /** Pieces delivered with no real duration (start equals delivery, stamped at bulk close): out of every time median. A piece not delivered yet has no wall time either, but that is "not finished", not this. */
+  withoutDuration: number
+  withQa: number; withSize: number; withActive: number
   /** Share of pieces with a measured cost, 0–100; null with no pieces. */
   pctWithCost: number | null
   /** Harnesses none of whose linked sessions has a cost. */
@@ -58,17 +62,22 @@ export interface ObservedHistory {
   tasks: HistoryTaskRow[]
   buckets: HistoryBucket[]
   coverage: HistoryCoverage
+  /** The observed comparisons (1 QA round × 2+, 1 session × 5+), built here once: HTTP, MCP and the screen read THIS. */
+  comparisons: HistoryComparison[]
 }
 
 const sum = (v: number[]) => v.reduce((a, b) => a + b, 0)
 const DONE = new Set(['done', 'in_review'])
+
+/** Start → delivery in ms, or null when there is no real duration (a bulk-closed piece stamps both at once: that is not "0 min"). */
+const realSpan = (p: HistoryPieceInput): number | null => p.startMs !== null && p.endMs !== null && p.endMs > p.startMs ? p.endMs - p.startMs : null
 
 function subtaskRow(p: HistoryPieceInput): HistorySubtaskRow {
   const priced = p.sessions.filter(s => s.costUSD !== null)
   return {
     id: p.id, title: p.title, status: p.status, size: sizeOfLines(p.lines), sessions: p.sessions.length,
     costUSD: priced.length ? sum(priced.map(s => s.costUSD!)) : null, costPartial: priced.length > 0 && priced.length < p.sessions.length,
-    wallMs: p.startMs !== null && p.endMs !== null ? Math.max(0, p.endMs - p.startMs) : null, activeMs: p.activeMs,
+    wallMs: realSpan(p), activeMs: p.activeMs,
     qaRounds: p.qaRounds, reworked: p.qaRounds === null ? null : p.qaRounds >= 2, lines: p.lines,
   }
 }
@@ -86,7 +95,8 @@ export function buildHistory(input: { pieces: readonly HistoryPieceInput[]; task
     const rs = xs.map(x => x.r), ps = xs.map(x => x.p)
     const priced = rs.filter(r => r.costUSD !== null)
     const lines = ps.filter(p => p.lines !== null)
-    const starts = ps.map(p => p.startMs).filter((v): v is number => v !== null), ends = ps.map(p => p.endMs).filter((v): v is number => v !== null)
+    const timed = ps.filter(p => realSpan(p) !== null)
+    const starts = timed.map(p => p.startMs!), ends = timed.map(p => p.endMs!)
     const actives = rs.map(r => r.activeMs).filter((v): v is number => v !== null)
     const qa = rs.filter(r => r.qaRounds !== null)
     const info = taskInfo.get(id)
@@ -94,7 +104,7 @@ export function buildHistory(input: { pieces: readonly HistoryPieceInput[]; task
       id, title: info?.title ?? id, status: info?.status ?? (rs.every(r => r.status === 'done') ? 'done' : 'in_review'),
       size: sizeOfLines(lines.length ? sum(lines.map(p => p.lines!)) : null), pieces: rs.length, sessions: sum(rs.map(r => r.sessions)),
       costUSD: priced.length ? sum(priced.map(r => r.costUSD!)) : null, costPartial: priced.length > 0 && (priced.length < rs.length || rs.some(r => r.costPartial)),
-      wallMs: starts.length && ends.length ? Math.max(0, Math.max(...ends) - Math.min(...starts)) : null,
+      wallMs: starts.length && ends.length ? Math.max(...ends) - Math.min(...starts) : null,
       activeMs: actives.length ? sum(actives) : null,
       qaRounds: qa.length ? sum(qa.map(r => r.qaRounds!)) : null, reworkedPieces: qa.length ? qa.filter(r => r.reworked).length : null,
       lines: lines.length ? sum(lines.map(p => p.lines!)) : null,
@@ -122,13 +132,13 @@ export function buildHistory(input: { pieces: readonly HistoryPieceInput[]; task
   }
   const withCost = rows.filter(x => x.r.costUSD !== null).length
   const coverage: HistoryCoverage = {
-    pieces: rows.length, withCost, withWall: rows.filter(x => x.r.wallMs !== null).length, withQa: rows.filter(x => x.r.qaRounds !== null).length,
+    pieces: rows.length, withCost, withWall: rows.filter(x => x.r.wallMs !== null).length, withoutDuration: rows.filter(x => x.p.startMs !== null && x.p.endMs !== null && x.r.wallMs === null).length, withQa: rows.filter(x => x.r.qaRounds !== null).length,
     withSize: rows.filter(x => x.r.size !== null).length, withActive: rows.filter(x => x.r.activeMs !== null).length,
     pctWithCost: rows.length ? withCost / rows.length * 100 : null,
     harnessesWithoutCost: [...harness].filter(([, h]) => h.priced === 0).map(([k]) => k).sort(),
     harnessesPartialCost: [...harness].filter(([, h]) => h.priced > 0 && h.priced < h.n).map(([k]) => k).sort(),
   }
-  return { pieces: rows.length, tasks, buckets, coverage }
+  return { pieces: rows.length, tasks, buckets, coverage, comparisons: buildComparisons(rows.map(x => x.r)) }
 }
 
 const QA_LABEL = /^\s*(re-?)?QA(?![A-Za-z])|\bre-?QA\b/i

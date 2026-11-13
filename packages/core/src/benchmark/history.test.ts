@@ -53,25 +53,47 @@ describe('buildHistory — pieces, tasks, buckets, coverage', () => {
     expect(h.tasks.find(t => t.id === 'T2')!.costUSD).toBeNull()
   })
 
-  test('buckets by sessions per piece: 1, 2–3, 4–6, 7+, with median cost, median time and rework rate', () => {
-    expect(BUCKETS.map(b => b.label)).toEqual(['1', '2-3', '4-6', '7+'])
+  test('buckets by sessions per piece, as in the approved prototype: 1, 2, 3–4, 5+ (median cost, median time, rework rate)', () => {
+    expect(BUCKETS.map(b => b.label)).toEqual(['1', '2', '3-4', '5+'])
+    const ss = (p: string, n: number, c: number) => Array.from({ length: n }, (_, i) => ({ id: `${p}${i}`, harness: 'claude', costUSD: c }))
     const many = [
       ...pieces,
-      piece('f', 'T3', { sessions: Array.from({ length: 5 }, (_, i) => ({ id: `f${i}`, harness: 'claude', costUSD: 1 })), qaRounds: 1, endMs: 10 * H }),
-      piece('g', 'T3', { sessions: Array.from({ length: 8 }, (_, i) => ({ id: `g${i}`, harness: 'claude', costUSD: 3 })), qaRounds: 2, endMs: 20 * H }),
+      piece('f', 'T3', { sessions: ss('f', 4, 1), qaRounds: 1, endMs: 10 * H }),
+      piece('f3', 'T3', { sessions: ss('h', 3, 1), qaRounds: 1, endMs: 6 * H }),
+      piece('g', 'T3', { sessions: ss('g', 5, 3), qaRounds: 2, endMs: 20 * H }),
     ]
     const r = buildHistory({ pieces: many, tasks: [...tasks, { id: 'T3', title: 'T3' }] })
     const by = Object.fromEntries(r.buckets.map(b => [b.label, b]))
     expect(by['1']!.pieces).toBe(2)                         // a, c
     expect(by['1']!.costMedianUSD).toBe(2)                  // only a is priced
     expect(by['1']!.nCost).toBe(1)
-    expect(by['2-3']!.pieces).toBe(1)                       // b
-    expect(by['2-3']!.reworkRate).toBe(1)                   // b has 3 QA rounds
-    expect(by['4-6']!.pieces).toBe(1)
-    expect(by['4-6']!.wallMedianMs).toBe(10 * H)
-    expect(by['4-6']!.reworkRate).toBe(0)
-    expect(by['7+']!.reworkRate).toBe(1)
+    expect(by['2']!.pieces).toBe(1)                         // b
+    expect(by['2']!.reworkRate).toBe(1)                     // b has 3 QA rounds
+    expect(by['3-4']!.pieces).toBe(2)                       // 3 and 4 sessions
+    expect(by['3-4']!.wallMedianMs).toBe(8 * H)
+    expect(by['3-4']!.reworkRate).toBe(0)
+    expect(by['5+']!.pieces).toBe(1)                        // exactly 5 sessions is already "5+"
+    expect(by['5+']!.reworkRate).toBe(1)
     expect(by['1']!.nRework).toBe(1)                        // c has no QA record
+  })
+
+  test('a piece whose start equals its delivery has NO duration: null, out of every time median, counted in the coverage', () => {
+    const z = piece('z', 'T1', { startMs: 5 * H, endMs: 5 * H })
+    const real = [piece('r1', 'T1'), piece('r2', 'T1'), piece('r3', 'T1')]
+    const r = buildHistory({ pieces: [...real, z], tasks })
+    expect(r.tasks[0]!.subtasks.find(s => s.id === 'z')!.wallMs).toBeNull()
+    expect(r.buckets.find(b => b.label === '1')!.wallMedianMs).toBe(2 * H)    // would be 2h either way with 3 reals; n tells it
+    expect(r.buckets.find(b => b.label === '1')!.nWall).toBe(3)
+    expect(r.coverage.withWall).toBe(3)
+    expect(r.coverage.withoutDuration).toBe(1)
+    // a piece with no delivery instant yet is "not finished", a different fact: it is not counted as "no duration"
+    const open = buildHistory({ pieces: [...real, piece('u', 'T1', { status: 'in_review', endMs: null })], tasks })
+    expect(open.coverage.withoutDuration).toBe(0)
+    expect(open.coverage.withWall).toBe(3)
+    // a task made only of such pieces has no wall time at all, not "0 min"
+    expect(buildHistory({ pieces: [z], tasks }).tasks[0]!.wallMs).toBeNull()
+    // and a task's span ignores the zero-length piece's instants
+    expect(r.tasks[0]!.wallMs).toBe(2 * H)
   })
 
   test('coverage says how much of the pieces carry data and which harnesses have no cost', () => {

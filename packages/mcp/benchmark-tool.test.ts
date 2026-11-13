@@ -94,6 +94,51 @@ describe('agentistics_benchmark_observed — per-piece history (same source as t
   })
 })
 
+describe('agentistics_benchmark_observed — the comparisons are built on the server (parity)', () => {
+  // 8 pieces of one size: 4 with one QA session (1 round), 4 with two (2 rounds); a 9th has no duration (start = delivery)
+  const cmpStore = () => {
+    const s = store() as unknown as { book: { subtasks: unknown[]; tasks: unknown[] }; registry: unknown[]; metas: Map<string, unknown> }
+    const registry: unknown[] = [], metas = new Map<string, unknown>(), subtasks: unknown[] = []
+    for (let i = 0; i < 9; i++) {
+      const id = `P${i}`, again = i >= 4 && i < 8, zero = i === 8
+      subtasks.push({ id, taskId: 'T1', title: id, status: 'done', createdAt: iso(T0), startedAt: iso(T0), deliveredAt: iso(zero ? T0 : T0 + (again ? 8 : 2) * H) })
+      const labels = ['Implementar', 'QA · ' + id, ...(again ? ['QA · ' + id + ' rodada 2'] : [])]
+      labels.forEach((label, j) => {
+        const cid = `c${i}-${j}`
+        registry.push({ id: `m${i}-${j}`, harness: 'claude', createdAt: iso(T0), conversationId: cid, subtaskId: id, taskId: 'T1', model: 'claude-sonnet-5', label })
+        metas.set(cid, { session_id: cid, harness: 'claude', model: 'claude-sonnet-5', input_tokens: 1000, output_tokens: 1000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, lines_added: j === 0 ? 200 : 0, lines_removed: 0 })
+      })
+    }
+    s.book.tasks = [{ id: 'T1', title: 'Task one' }]; s.book.subtasks = subtasks; s.registry = registry; s.metas = metas
+    return s as never
+  }
+
+  test('HTTP and the MCP tool carry the SAME comparisons (key, n, ratios, per-size pairs), computed once in core', async () => {
+    const url = new URL('http://localhost/api/benchmark/observed')
+    const http = await (await handleBenchmarkRequest(new Request(url), url, { observed: async f => buildObservedFromSources(cmpStore(), f), experiments: () => [] })).json() as { history: { comparisons: { key: string; nA: number; nB: number; wall: { ratio: number; sizes: unknown[] } | null }[] } }
+    const mcp = benchmarkObservedTool(http as never) as unknown as { history: { comparisons: unknown[] } }
+    expect(http.history.comparisons.map(c => c.key)).toContain('qa')
+    expect(mcp.history.comparisons).toEqual(http.history.comparisons)    // the `key` survives the id-stripping
+    const qa = http.history.comparisons.find(c => c.key === 'qa')!
+    expect(qa.wall!.ratio).toBe(4)                                        // 8 h against 2 h; the zero-length piece is out
+    expect(qa.wall!.sizes).toEqual([{ size: 'M', medA: 2 * H, medB: 8 * H, nA: 4, nB: 4 }])
+  })
+
+  test('the piece with no duration is a count in the coverage, not a "0 min"', () => {
+    const h = buildObservedFromSources(cmpStore()).history!
+    expect(h.coverage.withoutDuration).toBe(1)
+    expect(h.tasks[0]!.subtasks.find(s => s.title === 'P8')!.wallMs).toBeNull()
+  })
+
+  test('the tool answer is not capped like the task list: comparisons stay whole when tasks are cut', () => {
+    const body = JSON.parse(JSON.stringify(buildObservedFromSources(cmpStore())))
+    body.history.tasks = Array.from({ length: 150 }, (_, i) => ({ ...body.history.tasks[0], id: `t${i}` }))
+    const mcp = benchmarkObservedTool(body) as unknown as { history: { comparisons: unknown[]; tasks: unknown[]; tasksTotal: number } }
+    expect(mcp.history.tasks.length).toBe(100)
+    expect(mcp.history.comparisons).toEqual(body.history.comparisons)
+  })
+})
+
 describe('history: QA rounds from QA session labels', () => {
   test('a piece with a QA-labelled session reports a round count; one without stays unknown', () => {
     const s = store() as unknown as { book: { subtasks: unknown[] }; registry: { id: string; harness: string; createdAt: string; conversationId: string; subtaskId: string; taskId: string; label?: string }[]; metas: Map<string, unknown> }

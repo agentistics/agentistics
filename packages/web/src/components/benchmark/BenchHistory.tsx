@@ -5,6 +5,8 @@ import { TabStrip } from '../sessions/formBits'
 import { nf, type Lang, type Money } from '../../lib/benchmarkFormat'
 import { durationText, historyTaskRows, matches, moneyText, sizeLabel, type HistorySortKey, type SizeFilter } from '../../lib/benchmarkView'
 import { Bar } from './BenchStyle'
+import { BoardPager } from '../tasks/BoardPager'
+import { BOARD_PAGE_SIZES, DEFAULT_BOARD_PAGE_SIZE, resolveBoardPage } from '../tasks/boardPaging'
 import { statusLabel } from '../tasks/copy'
 import { useTaskStatuses } from '../../lib/tasks'
 
@@ -26,21 +28,25 @@ export function BenchHistoryTasks({ tasks, coverage, lang, money, initialOpen = 
   const [sort, setSort] = useState<{ key: HistorySortKey; dir: 1 | -1 }>({ key: 'cost', dir: -1 })
   const [open, setOpen] = useState<string | null>(initialOpen)
   const [subNeedle, setSubNeedle] = useState('')
-  const rows = historyTaskRows(tasks, { size, needle, key: sort.key, dir: sort.dir })
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_BOARD_PAGE_SIZE)
+  const [pageAt, setPageAt] = useState(0)
+  const all = historyTaskRows(tasks, { size, needle, key: sort.key, dir: sort.dir })
+  const pg = resolveBoardPage(all.length, pageSize, pageAt)
+  const rows = all.slice(pg.start, pg.end)
   const cost = (v: number | null, partial: boolean) => v === null ? dash : `${moneyText(v, lang, money)}${partial ? '*' : ''}`
   const ms = (v: number | null) => v === null ? dash : durationText(v, lang)
   const q = (v: number | null) => v === null ? dash : nf(v, lang, 0)
   const sz = (s: 'S' | 'M' | 'L' | null) => s === null ? dash : sizeLabel(s, lang)
   const head = (key: HistorySortKey, label: string, num = false) =>
     <th className={num ? 'bm-num' : undefined} aria-sort={sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
-      <button type="button" onClick={() => setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : (key === 'title' ? 1 : -1) }))}>{label}{sort.key === key ? (sort.dir === 1 ? ' ↑' : ' ↓') : ''}</button></th>
+      <button type="button" onClick={() => { setPageAt(0); setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : (key === 'title' ? 1 : -1) })) }}>{label}{sort.key === key ? (sort.dir === 1 ? ' ↑' : ' ↓') : ''}</button></th>
   return <section style={card} data-testid="benchmark-tasks" aria-label={pt ? 'Por tarefa' : 'By task'}>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
       <h3 style={h3}><Flag size={15} /> {pt ? 'Por tarefa' : 'By task'}</h3>
-      {tasks.length > 0 && <span style={muted}>{rows.length} {pt ? (rows.length === 1 ? 'tarefa' : 'tarefas') : (rows.length === 1 ? 'task' : 'tasks')}</span>}
+      {tasks.length > 0 && <span style={muted}>{all.length} {pt ? (all.length === 1 ? 'tarefa' : 'tarefas') : (all.length === 1 ? 'task' : 'tasks')}</span>}
       {tasks.length > 0 && <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input type="search" value={needle} onChange={e => setNeedle(e.target.value)} placeholder={pt ? 'Filtrar tarefa…' : 'Filter task…'} aria-label={pt ? 'Filtrar tarefa' : 'Filter task'} style={{ ...field, width: 170 }} />
-        <TabStrip tabs={SIZES} value={size} onPick={setSize} label={s => s === 'all' ? (pt ? 'Todas' : 'All') : sizeLabel(s, lang)} ariaLabel={pt ? 'Tamanho' : 'Size'} natural />
+        <input type="search" value={needle} onChange={e => { setNeedle(e.target.value); setPageAt(0) }} placeholder={pt ? 'Filtrar tarefa…' : 'Filter task…'} aria-label={pt ? 'Filtrar tarefa' : 'Filter task'} style={{ ...field, width: 170 }} />
+        <TabStrip tabs={SIZES} value={size} onPick={v => { setSize(v); setPageAt(0) }} label={s => s === 'all' ? (pt ? 'Todas' : 'All') : sizeLabel(s, lang)} ariaLabel={pt ? 'Tamanho' : 'Size'} natural />
       </div>}
     </div>
     {tasks.length === 0
@@ -83,10 +89,11 @@ export function BenchHistoryTasks({ tasks, coverage, lang, money, initialOpen = 
             })}
           </tbody></table>
         </div>
+        {all.length > BOARD_PAGE_SIZES[0] && <BoardPager info={pg} pageSize={pageSize} lang={lang} onPage={setPageAt} onPageSize={n => { setPageSize(n); setPageAt(0) }} />}
         <div style={{ ...muted, fontSize: 11, marginTop: 6 }}>
           {pt ? 'Peça = subtarefa entregue com sessão vinculada. Tamanho pelas linhas alteradas (P < 100, G ≥ 500). Custo = tokens × tabela de preços das sessões com preço; * = há sessões sem preço (harness sem custo). — = não medido. Clique na linha para ver as subtarefas.'
             : 'Piece = delivered subtask with a linked session. Size by lines changed (S < 100, L ≥ 500). Cost = tokens × price table of the priced sessions; * = some sessions have no price (harness without cost). — = not measured. Click a row for its subtasks.'}
-          {' '}{pt ? `Cobertura: custo em ${coverage.withCost} de ${coverage.pieces} peças, tamanho em ${coverage.withSize}, QA em ${coverage.withQa}, tempo ativo em ${coverage.withActive}.` : `Coverage: cost in ${coverage.withCost} of ${coverage.pieces} pieces, size in ${coverage.withSize}, QA in ${coverage.withQa}, active time in ${coverage.withActive}.`}
+          {' '}{pt ? `Cobertura: custo em ${coverage.withCost} de ${coverage.pieces} peças, tamanho em ${coverage.withSize}, QA em ${coverage.withQa}, tempo ativo em ${coverage.withActive}${coverage.withoutDuration > 0 ? `; ${coverage.withoutDuration} ${coverage.withoutDuration === 1 ? 'peça sem duração' : 'peças sem duração'} (início = entrega, fora das medianas de tempo)` : ''}.` : `Coverage: cost in ${coverage.withCost} of ${coverage.pieces} pieces, size in ${coverage.withSize}, QA in ${coverage.withQa}, active time in ${coverage.withActive}${coverage.withoutDuration > 0 ? `; ${coverage.withoutDuration} ${coverage.withoutDuration === 1 ? 'piece' : 'pieces'} with no duration (start = delivery, left out of the time medians)` : ''}.`}
         </div>
       </>}
   </section>
@@ -96,7 +103,7 @@ export function BenchHistoryTasks({ tasks, coverage, lang, money, initialOpen = 
 export function BenchHistoryBuckets({ buckets, lang, money }: { buckets: HistoryBucket[]; lang: Lang; money: Money }) {
   const pt = lang === 'pt'
   const heads = pt ? ['Sessões por peça', 'Peças', 'Custo mediano', 'Tempo mediano', 'Retrabalho (2+ rodadas de QA)'] : ['Sessions per piece', 'Pieces', 'Median cost', 'Median time', 'Rework (2+ QA rounds)']
-  const label = (b: HistoryBucket) => b.label === '1' ? (pt ? '1 sessão' : '1 session') : b.label === '7+' ? (pt ? '7 ou mais' : '7 or more') : `${b.label.replace('-', '–')} ${pt ? 'sessões' : 'sessions'}`
+  const label = (b: HistoryBucket) => b.label === '1' ? (pt ? '1 sessão' : '1 session') : b.label === '5+' ? (pt ? '5 ou mais' : '5 or more') : `${b.label.replace('-', '–')} ${pt ? 'sessões' : 'sessions'}`
   const n = (v: number) => <span style={muted}> (n={v})</span>
   return <section style={card} data-testid="benchmark-buckets" aria-label={pt ? 'Por número de sessões' : 'By number of sessions'}>
     <h3 style={{ ...h3, marginBottom: 4 }}><Users size={15} /> {pt ? 'Por número de sessões' : 'By number of sessions'}</h3>

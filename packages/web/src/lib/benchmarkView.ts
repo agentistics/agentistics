@@ -8,7 +8,7 @@
  *  - one per CONTROLLED EXPERIMENT the server lists (`/api/benchmark/experiments`; none runs today).
  *    An experiment carries a core `VerdictResult` and may carry per-task rows and session buckets.
  */
-import type { HistorySubtaskRow, HistoryTaskRow, Observed, ObservedHistory, ScoreType, Verdict, VerdictResult } from '@agentistics/core/benchmark'
+import type { Compared, HistoryComparison, HistorySubtaskRow, HistoryTaskRow, Observed, ObservedHistory, ScoreType, Verdict, VerdictResult } from '@agentistics/core/benchmark'
 import { percentile } from '@agentistics/core'
 import { METRIC_LABEL, fmtInterval, fmtValue, nf, cardCoverage, cardHeadline, cardSubline, type Lang, type MetricKey, type Money } from './benchmarkFormat'
 
@@ -208,7 +208,7 @@ const idLabel = (id: string) => id.replace(/[_-]+/g, ' ')
 
 export function partsOf(entry: Entry, observed: Observed | null, lang: Lang, money: Money): Part[] {
   const pt = lang === 'pt'
-  if (entry.kind === 'comparison' && entry.comparison) return partsOfComparison(entry.comparison, lang, money)
+  if (entry.kind === 'comparison' && entry.comparison) return partsOfComparison(entry.comparison, lang, money, observed?.history?.coverage.withoutDuration ?? 0)
   return TYPE_ORDER.map((type): Part => {
     const meta = TYPE_META[type], name = pt ? meta.pt : meta.en, question = pt ? meta.qpt : meta.qen
     if (entry.kind === 'history') {
@@ -347,72 +347,46 @@ function experimentEntry(e: ExperimentView, lang: Lang): Entry {
 
 // ---- observed comparisons: what the history alone lets two groups of pieces be set against ---------------
 
-export interface Compared { ratio: number; medA: number; medB: number }
+export type { Compared }
 export interface Comparison {
   id: 'qa' | 'sessions'; name: string; aShort: string; bShort: string; sample: string
   nA: number; nB: number
   cost: Compared | null; wall: Compared | null
   /** QA comparison: how many more sessions; sessions comparison: the rework rate of each side. */
-  third: { kind: 'sessions'; sessions: Compared | null } | { kind: 'rework'; rateA: number | null; rateB: number | null }
+  third: HistoryComparison['third']
 }
 
-/** Ratio of medians B / A, matched by size: only sizes where BOTH sides have ≥ MIN_GROUP pieces count, weighted by n. Null when none qualifies. */
-function matchedRatio(subs: readonly HistorySubtaskRow[], inA: (s: HistorySubtaskRow) => boolean, inB: (s: HistorySubtaskRow) => boolean, val: (s: HistorySubtaskRow) => number | null): Compared | null {
-  const per: { r: number; w: number }[] = [], as: number[] = [], bs: number[] = []
-  for (const sz of ['S', 'M', 'L'] as const) {
-    const a = subs.filter(s => s.size === sz && inA(s)).map(val).filter((v): v is number => v !== null)
-    const b = subs.filter(s => s.size === sz && inB(s)).map(val).filter((v): v is number => v !== null)
-    if (a.length < MIN_GROUP || b.length < MIN_GROUP) continue
-    const ma = med(a)!, mb = med(b)!
-    if (!(ma > 0) || !(mb > 0)) continue
-    per.push({ r: mb / ma, w: a.length + b.length }); as.push(...a); bs.push(...b)
-  }
-  if (!per.length) return null
-  const w = per.reduce((x, p) => x + p.w, 0)
-  const ratio = per.length === 1 ? per[0]!.r : Math.exp(per.reduce((x, p) => x + p.w * Math.log(p.r), 0) / w)
-  return { ratio, medA: med(as)!, medB: med(bs)! }
-}
-
-const rate = (g: readonly HistorySubtaskRow[]): number | null => {
-  const known = g.filter(s => s.reworked !== null)
-  return known.length >= MIN_GROUP ? known.filter(s => s.reworked).length / known.length : null
-}
-
-/** The comparisons the observed history supports (none when no pair has enough pieces of one size on both sides). */
+/**
+ * The comparisons the observed history supports. They are BUILT ON THE SERVER (core `buildComparisons`, carried
+ * by HTTP and the MCP tool alike); this only gives each one its words. An older server that sends none shows none.
+ */
 export function comparisonsOf(h: ObservedHistory, lang: Lang): Comparison[] {
   const pt = lang === 'pt'
-  const subs = h.tasks.flatMap(t => t.subtasks)
-  const mk = (id: 'qa' | 'sessions', inA: (s: HistorySubtaskRow) => boolean, inB: (s: HistorySubtaskRow) => boolean, name: string, aShort: string, bShort: string): Comparison | null => {
-    const A = subs.filter(inA), B = subs.filter(inB)
-    const cost = matchedRatio(subs, inA, inB, s => s.costUSD), wall = matchedRatio(subs, inA, inB, s => s.wallMs)
-    if (!cost && !wall) return null
-    const third: Comparison['third'] = id === 'qa'
-      ? { kind: 'sessions', sessions: matchedRatio(subs, inA, inB, s => s.sessions) }
-      : { kind: 'rework', rateA: rate(A), rateB: rate(B) }
-    return { id, name, aShort, bShort, sample: pt ? `${A.length} × ${B.length} peças` : `${A.length} × ${B.length} pieces`, nA: A.length, nB: B.length, cost, wall, third }
+  const words: Record<HistoryComparison['key'], { name: string; a: string; b: string }> = {
+    qa: { name: pt ? '1 rodada de QA × 2+ rodadas' : '1 QA round × 2+ rounds', a: pt ? '1 rodada de QA' : '1 QA round', b: pt ? '2+ rodadas de QA' : '2+ QA rounds' },
+    sessions: { name: pt ? '1 sessão × 5+ sessões' : '1 session × 5+ sessions', a: pt ? '1 sessão' : '1 session', b: pt ? '5+ sessões' : '5+ sessions' },
   }
-  return [
-    mk('qa', s => s.qaRounds === 1, s => s.qaRounds !== null && s.qaRounds >= 2,
-      pt ? '1 rodada de QA × 2+ rodadas' : '1 QA round × 2+ rounds', pt ? '1 rodada de QA' : '1 QA round', pt ? '2+ rodadas' : '2+ rounds'),
-    mk('sessions', s => s.sessions === 1, s => s.sessions >= 4,
-      pt ? '1 sessão × 4+ sessões' : '1 session × 4+ sessions', pt ? '1 sessão' : '1 session', pt ? '4+ sessões' : '4+ sessions'),
-  ].filter((c): c is Comparison => c !== null)
+  return (h.comparisons ?? []).map(c => ({
+    id: c.key, name: words[c.key].name, aShort: words[c.key].a, bShort: words[c.key].b,
+    sample: pt ? `${c.nA} × ${c.nB} peças` : `${c.nA} × ${c.nB} pieces`, nA: c.nA, nB: c.nB, cost: c.cost, wall: c.wall, third: c.third,
+  }))
 }
 
 const times = (r: number, lang: Lang) => `${nf(r >= 1 ? r : 1 / r, lang, 1)}×`
+/** B ÷ A as it is (0,6× is cheaper, 1,7× is dearer): a tile or a pair never hides the direction behind an inversion. */
+const ratioText = (r: number, lang: Lang) => `${nf(r, lang, 1)}×`
 const pct0 = (v: number, lang: Lang) => `${nf(v * 100, lang, 0)}%`
 
+/** One sentence in the prototype's mould, short enough for three lines: what the B-side pieces cost, took and used. */
 function comparisonSentence(c: Comparison, lang: Lang): string {
   const pt = lang === 'pt'
   const parts: string[] = []
-  if (c.cost) parts.push(pt ? `custaram ${times(c.cost.ratio, lang)} ${c.cost.ratio >= 1 ? 'mais' : 'menos'}` : `cost ${times(c.cost.ratio, lang)} ${c.cost.ratio >= 1 ? 'more' : 'less'}`)
-  if (c.wall) parts.push(pt ? `levaram ${times(c.wall.ratio, lang)} ${c.wall.ratio >= 1 ? 'mais' : 'menos'} tempo` : `took ${times(c.wall.ratio, lang)} ${c.wall.ratio >= 1 ? 'more' : 'less'} time`)
-  const head = pt ? `Em comparação com as peças de ${c.aShort}, as de ${c.bShort} ` : `Compared with pieces with ${c.aShort}, those with ${c.bShort} `
-  const body = parts.join(pt ? ' e ' : ' and ')
-  let third = ''
-  if (c.third.kind === 'sessions' && c.third.sessions) third = pt ? `usaram ${times(c.third.sessions.ratio, lang)} ${c.third.sessions.ratio >= 1 ? 'mais' : 'menos'} sessões` : `used ${times(c.third.sessions.ratio, lang)} ${c.third.sessions.ratio >= 1 ? 'more' : 'fewer'} sessions`
-  if (c.third.kind === 'rework' && c.third.rateA !== null && c.third.rateB !== null) third = `${pt ? 'retrabalho' : 'rework'} ${pct0(c.third.rateB, lang)} × ${pct0(c.third.rateA, lang)}`
-  return `${head}${body}${third ? `; ${third}` : ''}.`
+  const more = (r: number, noun: string, nounLess = noun) => pt ? `${times(r, lang)} ${r >= 1 ? 'mais' : 'menos'} ${noun}` : `${times(r, lang)} ${r >= 1 ? 'more' : 'less'} ${nounLess}`
+  if (c.cost) parts.push(more(c.cost.ratio, pt ? 'custo' : 'cost'))
+  if (c.wall) parts.push(more(c.wall.ratio, pt ? 'tempo' : 'time'))
+  if (c.third.kind === 'sessions' && c.third.sessions) parts.push(more(c.third.sessions.ratio, pt ? 'sessões' : 'sessions'))
+  if (c.third.kind === 'rework' && c.third.rateA !== null && c.third.rateB !== null) parts.push(`${pt ? 'retrabalho' : 'rework'} ${pct0(c.third.rateA, lang)} → ${pct0(c.third.rateB, lang)}`)
+  return `${pt ? 'Com' : 'With'} ${c.bShort}: ${parts.join(', ')}.`
 }
 
 function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Money): Hero {
@@ -421,7 +395,7 @@ function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Mo
   return {
     tone: 'none', word: pt ? 'Indício, não prova' : 'Evidence, not proof', delta: null, score: null, firm: null, range: null,
     say: comparisonSentence(c, lang),
-    caption: pt ? `observado no histórico · ${c.nA} × ${c.nB} peças, comparadas dentro do mesmo tamanho` : `observed in the history · ${c.nA} × ${c.nB} pieces, compared within the same size`,
+    caption: pt ? `contra ${c.aShort} · ${c.nA} × ${c.nB} peças · mesmo tamanho` : `against ${c.aShort} · ${c.nA} × ${c.nB} pieces · same size`,
     disclosure: pt ? 'Por que não é prova?' : 'Why is this not proof?',
     why: [
       pt ? 'Peças difíceis vão para o método pesado e tendem a ter mais rodadas e mais sessões: a diferença pode ser a dificuldade, não o método. Comparar dentro do mesmo tamanho (linhas) é um controle fraco.' : 'Hard pieces go to the heavy method and tend to have more rounds and sessions: the difference may be the difficulty, not the method. Matching by size (lines) is a weak control.',
@@ -435,25 +409,32 @@ function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Mo
 
 const sessionsWord = (n: number, lang: Lang) => lang === 'pt' ? `${nf(n, lang, 1)} ${n === 1 ? 'sessão' : 'sessões'}` : `${nf(n, lang, 1)} ${n === 1 ? 'session' : 'sessions'}`
 
-function partsOfComparison(c: Comparison, lang: Lang, money: Money): Part[] {
+function partsOfComparison(c: Comparison, lang: Lang, money: Money, withoutDuration = 0): Part[] {
   const pt = lang === 'pt'
   const seal = pt ? 'observado' : 'observed'
-  const pair = (k: Compared, f: (n: number) => string, label: string): PartRow[] => [{ key: label, label, value: `${f(k.medA)} → ${f(k.medB)}`, sub: pt ? `mediana por peça · ${c.nA} × ${c.nB} peças` : `median per piece · ${c.nA} × ${c.nB} pieces`, measured: true }]
+  const sameSize = pt ? 'comparado dentro do mesmo tamanho' : 'compared within the same size'
+  // The headline is the size-matched ratio, so the figures behind it are the per-size pairs: each one gives ITS ratio.
+  const pair = (k: Compared, f: (n: number) => string, label: string): PartRow[] => k.sizes.map(p => ({
+    key: `${label}-${p.size}`, label: `${label} · ${sizeWord(p.size, lang)}`, value: `${f(p.medA)} → ${f(p.medB)}`,
+    sub: `${ratioText(p.medB / p.medA, lang)} · ${pt ? 'peças' : 'pieces'} ${p.nA} × ${p.nB}`, measured: true,
+  }))
   const none = (type: TypeKey, why: string): Part => ({ type, name: pt ? TYPE_META[type].pt : TYPE_META[type].en, question: pt ? TYPE_META[type].qpt : TYPE_META[type].qen, pct: null, points: null, max: null, tone: 'none', state: 'none', word: pt ? 'sem dados' : 'no data', hint: why, rows: [] })
   const tile = (type: TypeKey, k: Compared | null, f: (n: number) => string, rowLabel: string): Part => k
-    ? { type, name: pt ? TYPE_META[type].pt : TYPE_META[type].en, question: pt ? TYPE_META[type].qpt : TYPE_META[type].qen, pct: null, points: null, max: null, tone: 'none', state: 'history', big: times(k.ratio, lang), word: seal, rows: pair(k, f, rowLabel) }
+    ? { type, name: pt ? TYPE_META[type].pt : TYPE_META[type].en, question: pt ? TYPE_META[type].qpt : TYPE_META[type].qen, pct: null, points: null, max: null, tone: 'none', state: 'history', big: ratioText(k.ratio, lang), word: sameSize, rows: pair(k, f, rowLabel) }
     : none(type, pt ? 'sem dados suficientes' : 'not enough data')
   const third = c.third
   const rework: Part = third.kind === 'sessions'
     ? { ...tile('rework', third.sessions, n => sessionsWord(n, lang), pt ? 'Sessões por peça' : 'Sessions per piece'), name: pt ? 'Sessões por peça' : 'Sessions per piece', question: pt ? 'Quantas sessões gastou?' : 'How many sessions did it take?' }
     : third.rateA !== null && third.rateB !== null
       ? { type: 'rework', name: pt ? TYPE_META.rework.pt : TYPE_META.rework.en, question: pt ? TYPE_META.rework.qpt : TYPE_META.rework.qen, pct: null, points: null, max: null, tone: 'none', state: 'history',
-        big: `${pct0(third.rateB, lang)} × ${pct0(third.rateA, lang)}`, word: seal, rows: [{ key: 'rate', label: pt ? '2+ rodadas de QA' : '2+ QA rounds', value: `${pct0(third.rateA, lang)} → ${pct0(third.rateB, lang)}`, sub: pt ? 'entre as peças com QA (lido do rótulo das sessões, indicativo)' : 'among pieces with QA (read from session labels, indicative)', measured: true }] }
+        big: `${pct0(third.rateA, lang)} → ${pct0(third.rateB, lang)}`, word: seal, rows: [{ key: 'rate', label: pt ? '2+ rodadas de QA' : '2+ QA rounds', value: `${pct0(third.rateA, lang)} → ${pct0(third.rateB, lang)}`, sub: pt ? 'entre as peças com QA (lido do rótulo das sessões, indicativo)' : 'among pieces with QA (read from session labels, indicative)', measured: true }] }
       : none('rework', pt ? 'sem dados suficientes' : 'not enough data')
   return [
     none('quality', pt ? 'defeito escapado e peça reaberta não são registrados' : 'escaped defects and reopened pieces are not recorded'),
     tile('cost', c.cost, n => moneyText(n, lang, money), pt ? 'Custo mediano' : 'Median cost'),
-    tile('time', c.wall, n => durationText(n, lang), pt ? 'Tempo mediano' : 'Median time'),
+    ((t: Part): Part => withoutDuration > 0 && t.state === 'history'
+      ? { ...t, rows: [...t.rows, { key: 'no-duration', label: pt ? 'Sem duração' : 'No duration', value: `${withoutDuration} ${pt ? (withoutDuration === 1 ? 'peça' : 'peças') : (withoutDuration === 1 ? 'piece' : 'pieces')}`, sub: pt ? 'início = entrega: fora das medianas de tempo' : 'start = delivery: left out of the time medians', measured: false }] } : t
+    )(tile('time', c.wall, n => durationText(n, lang), pt ? 'Tempo mediano' : 'Median time')),
     none('reliability', pt ? 'nenhuma tarefa foi repetida' : 'no task was repeated'),
     rework,
   ]
