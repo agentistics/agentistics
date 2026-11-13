@@ -244,6 +244,8 @@ export interface LiveReply {
 // ---------------------------------------------------------------------------------- stage
 
 const words = (s: string) => s.toLowerCase()
+// A closing word in a status id or label: the board has no closing concept for a custom status, so the word is the evidence.
+const CLOSED_WORD = /abandon|cancel|closed|encerr|descart|arquiv|won'?t|wont/i
 
 /** PURE: the stage a status names, by id then label; null when it names none of them. */
 export function stageOfStatus(status: string, label?: string): LiveStage | null {
@@ -1073,7 +1075,7 @@ export function buildLive(o: {
     // A task-level piece (a task with no subtasks) is keyed by its TASK id in the delivery book, exactly as a subtask is by its own.
     const stored = o.deliveries?.get(p.sub ? p.sub.id : p.task.id)
     // A stale queue record must never override work the board already sent for review or closed.
-    const rec = stored?.dequeued || (stored?.phase === 'fila' && ['in_review', 'done', 'abandoned'].includes(p.status)) ? undefined : stored
+    let rec = stored?.dequeued || (stored?.phase === 'fila' && ['in_review', 'done', 'abandoned'].includes(p.status)) ? undefined : stored
     let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfStatus(p.status, o.statusLabel?.(p.status))
     const id = p.sub?.id ?? p.task.id
     // Board completion is not evidence of a public release. Preserve the card in Tudo, outside the queue.
@@ -1082,6 +1084,28 @@ export function buildLive(o: {
       const released = o.uncheckedWhy?.get(id) !== 'no-repos' && legacyShaGroups(p, eventsBySubject.get(subject)).some(g => g.every(sha => o.publishedShas?.has(sha)))
       stage = released ? 'published' : 'completed'
     }
+    // THE BOARD STATUS OUTRANKS A STALE REVIEW RECORD (LIVE.STATUS-IGNORADO). A record parked in `revisao_lider` says
+    // "waiting on the leader"; the board says whether that is still true. `abandoned` is closed (no active column),
+    // `in_progress`/`todo` is a rework (the card follows the status: running with a live session, queued otherwise,
+    // hidden when neither), `blocked` is blocked with its reason. Derived on read: nothing is written. A review that
+    // the board still calls `in_review` and whose commit a published release holds is Publicado, with a record too.
+    if (rec && rec.phase !== 'publicado') {
+      const boardStage = stageOfStatus(p.status, o.statusLabel?.(p.status))
+      const closedNow = p.status === 'abandoned' || CLOSED_WORD.test(`${p.status} ${o.statusLabel?.(p.status) ?? ''}`)
+      const lateOpen = rec.phase === 'revisao_lider' || rec.phase === 'pr_merge' || rec.phase === 'ci'
+      if (closedNow) { rec = undefined; stage = null }
+      else if (boardStage === 'blocked' && lateOpen) { rec = undefined; stage = 'blocked' }
+      else if (lateOpen && (boardStage === 'running' || boardStage === 'queue')) { rec = undefined; stage = boardStage }
+      else if (rec.phase === 'revisao_lider' && boardStage === 'leader') {
+        const subj = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
+        if (o.uncheckedWhy?.get(id) !== 'no-repos' && legacyShaGroups(p, eventsBySubject.get(subj)).some(g => g.every(sha => o.publishedShas?.has(sha)))) { rec = undefined; stage = 'published' }
+      }
+    }
+    // WAITING ON THE USER IS NOT WAITING ON THE LEADER. A piece in review whose open human gate or open queue question is
+    // the owner's to answer shows in the EXISTING blocked state with the owner-decision reason (unlocker: owner), not in
+    // "Revisão do líder" / "Sem líder", which are about a leader who has nothing to do until the owner answers.
+    const userWait = stage === 'leader' && !!rec && (awaitingApprovalOf(rec) !== null || Boolean(rec.queueAsk && !rec.queueAsk.approved))
+    if (userWait) stage = 'blocked'
     if (stored?.dequeued && stage === 'queue') { hide(p, stage, 'queue-idle'); continue }
     const liveSessions = p.sessions.filter(s => s.live)
     let isOld = false
@@ -1090,7 +1114,7 @@ export function buildLive(o: {
     // recorded its end) must not put it back on the board as running.
     // The same holds for a custom terminal status the vocabulary cannot map ("cancelado"): the board has no closing
     // concept, so a closing word in the id or label is the evidence.
-    const closedWord = /abandon|cancel|closed|encerr|descart|arquiv|won'?t|wont/i
+    const closedWord = CLOSED_WORD
     const closed = p.status === 'abandoned' || closedWord.test(`${p.status} ${o.statusLabel?.(p.status) ?? ''}`)
     if (stage === null) stage = liveSessions.length > 0 && !closed ? 'running' : null
     // A NEW ROUND on a piece already in review: a live session created AFTER the piece entered review (the book's
@@ -1154,7 +1178,7 @@ export function buildLive(o: {
       number: currentSession ? roundSessions.filter(s => s.id === currentSession.id || (s.startMs !== null && currentSession.startMs !== null && s.startMs < currentSession.startMs)).length : Math.max(1, visits.length),
       startedAtMs: roundStart,
     }
-    const originStage = stage === 'blocked'
+    const originStage = userWait ? 'leader' as LiveStage : stage === 'blocked'
       ? (rec?.origin ? PHASE_STAGE[rec.origin] ?? null : ([...trail].reverse().find(v => v.stage !== 'blocked')?.stage ?? null))
       : null
     // THE REAL WORK OF THIS PIECE: its sessions' active time. Never the task's age (a 52-day-old task
@@ -1202,7 +1226,7 @@ export function buildLive(o: {
       eta, workMs, trail, stageEta, publishEta,
       ...(stageOverdueSinceMs(stage, stageSinceMs, o.nowMs, typicals) !== null
         ? { overdueSinceMs: stageOverdueSinceMs(stage, stageSinceMs, o.nowMs, typicals) } : {}),
-      block: stage === 'blocked' ? blockOf({ text: rec?.block ? `${rec.block.reason}: ${rec.block.text}` : p.blockedReason, dependsOn: p.dependsOn, originStage }) : null,
+      block: stage === 'blocked' ? blockOf({ text: userWait ? 'decisao_do_dono: aguardando você' : rec?.block ? `${rec.block.reason}: ${rec.block.text}` : p.blockedReason, dependsOn: p.dependsOn, originStage }) : null,
       ci: stage === 'ci' ? (ciSignalOf(rec?.ci ?? ((p.sub ?? p.task) as { ci?: unknown }).ci) ?? { mergedMain: true, releaseGreen: false, tagPublished: false, tag: null, pr: null }) : null,
       step: stepInfo?.step ?? null,
       stepSource: stepInfo?.source ?? null,
