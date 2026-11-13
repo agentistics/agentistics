@@ -491,21 +491,43 @@ test('R1/R4: the REAL readHolderCommand on this process and on a spawned sleep',
 
 test('R1: a REAL process whose executable path contains a space reads back whole and is agentop', async () => {
   if (process.platform !== 'linux') return
-  const { mkdtempSync, copyFileSync, chmodSync } = await import('fs')
+  const { mkdtempSync, symlinkSync } = await import('fs')
   const dir = join(mkdtempSync(join(tmpdir(), 'r1 ')), 'Agent Tools')
   require('fs').mkdirSync(dir)
   const exe = join(dir, 'agentop')
-  copyFileSync('/bin/sleep', exe)
-  chmodSync(exe, 0o755)
-  const child = spawn(exe, ['999'], { stdio: 'ignore' })
+  // A SYMLINK, not a copy: /proc/<pid>/cmdline carries argv[0] as invoked (all readHolderCommand reads), and a symlink
+  // has no write handle that could leave the target "text file busy" (ETXTBSY) at exec time.
+  symlinkSync(require('fs').realpathSync('/bin/sleep'), exe)
+  // Belt and braces: should exec still see a busy file (a handle another fork inherited)
+  // (another test's fork inherited the fd) → ETXTBSY from spawn. Wait for the child's own 'spawn' /
+  // 'error' event, retry on ETXTBSY, and name the cause instead of timing out on a null read.
+  let child: ReturnType<typeof spawn> | undefined
+  let lastError = ''
+  for (let attempt = 0; attempt < 8 && !child; attempt++) {
+    const candidate = spawn(exe, ['999'], { stdio: 'ignore' })
+    const outcome = await new Promise<string>(resolve => {
+      candidate.once('spawn', () => resolve(''))
+      candidate.once('error', e => resolve(`${(e as NodeJS.ErrnoException).code ?? 'error'}: ${e.message}`))
+    })
+    if (outcome === '') child = candidate
+    else {
+      lastError = outcome
+      if (!/ETXTBSY|EBUSY|EAGAIN/.test(outcome)) break
+      await Bun.sleep(50 * (attempt + 1))
+    }
+  }
+  if (!child) throw new Error(`could not spawn the copied executable ${exe}: ${lastError}`)
+  let exited = ''
+  child.once('exit', (code, signal) => { exited = `exited early (code ${code}, signal ${signal})` })
   try {
     // spawn() returns before exec: until then /proc/<pid>/cmdline still shows the parent's argv.
-    const deadline = Date.now() + 2000
-    let c = readHolderCommand(child.pid!) as { exe: string; args: string[] }
-    while (c?.exe !== exe && Date.now() < deadline) {
+    const deadline = Date.now() + 5000
+    let c = readHolderCommand(child.pid!) as { exe: string; args: string[] } | null
+    while (c?.exe !== exe && !exited && Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 10))
-      c = readHolderCommand(child.pid!) as { exe: string; args: string[] }
+      c = readHolderCommand(child.pid!) as { exe: string; args: string[] } | null
     }
+    if (!c) throw new Error(`readHolderCommand returned nothing for pid ${child.pid}${exited ? `: the child ${exited}` : ' within 5 s'}`)
     expect(c.exe).toBe(exe)
     expect(isAgentopServerCommand(c)).toBe(true)
   } finally {
