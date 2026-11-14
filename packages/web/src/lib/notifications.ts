@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { refusalSentence } from './ownerProof'
 import { liveDeepLink } from './liveDeepLink'
 import { idleSessionNoun } from './idleExecution'
 import { notificationMuted } from './notificationCategories'
@@ -495,6 +496,14 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
   }
   if (n.code === 'plan.segment' && typeof n.meta?.harness === 'string') return segmentNoticeText(n.meta.harness, lang)
   const loc = n.code ? NOTIFICATION_TEXT[n.code]?.[lang] : undefined
+  // A refused/unanswered board write names WHY: the server's own refusal, or that it could not be reached.
+  if (n.code === 'tasks.status_failed' && loc && typeof n.meta?.reason === 'string' && n.meta.reason !== 'write_failed') {
+    const pt = lang === 'pt'
+    const reason = n.meta.reason
+    return { title: loc.title, message: reason === 'network_error'
+      ? (pt ? 'O servidor não pôde ser alcançado. A alteração não foi salva.' : 'The server could not be reached. The change was not saved.')
+      : (refusalSentence(reason, pt) ?? (pt ? 'O servidor recusou a alteração. Confira os requisitos do status e tente de novo.' : 'The server refused the change. Check the status requirements and try again.')) }
+  }
   // A CODE WITH NO TEXT MUST NOT RENDER AS A BLANK CARD.
   //
   // Only `code` + `meta` are stored, so a code this table has not met resolves to empty strings —
@@ -677,9 +686,25 @@ export function pushNotification(n: {
   })
 }
 
-/** Feedback that must reach the existing toast even when the server is unreachable. */
+/**
+ * Feedback that must reach the existing toast even when the server is unreachable.
+ *
+ * It is PERSISTED first (the server is the bell's source of truth: every refresh replaces the
+ * in-memory list with the server's, so a purely local entry vanished from the bell — and could
+ * lose the race against that refresh before the toast saw it). The toast then comes from the
+ * server's answer, once. Only when the server cannot take it does the entry live locally.
+ */
 export function pushLocalNotification(n: Parameters<typeof pushNotification>[0]): void {
-  apply([{ ...n, id: crypto.randomUUID(), ts: Date.now(), read: false }, ...items])
+  const local = () => apply([{ ...n, id: crypto.randomUUID(), ts: Date.now(), read: false }, ...items])
+  void (async () => {
+    try {
+      const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n) })
+      if (!r.ok) return local()
+      const list: unknown = await r.json()
+      if (!Array.isArray(list)) return local()
+      apply(list)
+    } catch { local() }
+  })()
 }
 
 export function markAllRead(): void {
