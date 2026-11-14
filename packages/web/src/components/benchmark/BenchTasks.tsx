@@ -17,8 +17,10 @@ const SIZES: readonly SizeFilter[] = ['all', 'S', 'M', 'L']
 const sizeLabel = (s: SizeFilter, lang: Lang) => s === 'all' ? (lang === 'pt' ? 'Todas' : 'All') : s === 'L' ? (lang === 'pt' ? 'G' : 'L') : s
 
 /** "Por tarefa": one row per task, sortable, filterable by size and by name; a row opens its subtasks (also filterable). */
-export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null }: {
+export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null, keepHead = false }: {
   tasks: TaskRow[]; lang: Lang; money: Money; emptyReason: string; initialOpen?: string | null
+  /** The prototype's empty state keeps the column heads and says the reason in one line of the table. */
+  keepHead?: boolean
 }) {
   const pt = lang === 'pt'
   const [size, setSize] = useState<SizeFilter>('all')
@@ -41,7 +43,7 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
         <TabStrip tabs={SIZES} value={size} onPick={setSize} label={s => sizeLabel(s, lang)} ariaLabel={pt ? 'Tamanho' : 'Size'} natural />
       </div>}
     </div>
-    {tasks.length === 0
+    {tasks.length === 0 && !keepHead
       ? <div data-testid="benchmark-tasks-empty" style={{ ...muted, padding: '6px 0' }}>{emptyReason}</div>
       : <>
         <div style={{ overflowX: 'auto' }}>
@@ -79,9 +81,10 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
                 </td></tr>}
               </React.Fragment>
             })}
+            {tasks.length === 0 && <tr><td colSpan={8} data-testid="benchmark-tasks-empty" style={{ ...muted, padding: '8px 0' }}>{emptyReason}</td></tr>}
           </tbody></table>
         </div>
-        <div style={{ ...muted, fontSize: 11, marginTop: 6 }}>{pt ? 'Cada coluna mostra os dois lados: "um → outro". Clique na linha para ver o motivo e as subtarefas.' : 'Each column shows both sides: "one → other". Click a row for the reason and its subtasks.'}</div>
+        {tasks.length > 0 && <div style={{ ...muted, fontSize: 11, marginTop: 6 }}>{pt ? 'Cada coluna mostra os dois lados: "um → outro". Clique na linha para ver o motivo e as subtarefas.' : 'Each column shows both sides: "one → other". Click a row for the reason and its subtasks.'}</div>}
       </>}
   </section>
 }
@@ -92,7 +95,8 @@ export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: {
   const heads = pt ? ['Sessões', 'Tarefas', 'Custo mediano', 'Tempo mediano', 'Defeitos escapados', 'Aceitas de primeira', 'Não reabertas']
     : ['Sessions', 'Tasks', 'Median cost', 'Median time', 'Escaped defects', 'Accepted first try', 'Not reopened']
   const noData = <span style={muted}>— {pt ? 'sem dados' : 'no data'}</span>
-  const rate = (n: number | null) => n === null ? noData : <div style={{ maxWidth: 150 }}>{nf(n * 100, lang, 0)}%<Bar value={n * 100} tone="rate" mark={false} /></div>
+  const nw = (x: string) => <span className="bm-nw">{x}</span>
+  const rate = (n: number | null) => n === null ? noData : <div style={{ maxWidth: 150 }}>{nw(`${nf(n * 100, lang, 0)}%`)}<Bar value={n * 100} tone="rate" mark={false} /></div>
   return <section style={card} data-testid="benchmark-buckets" aria-label={pt ? 'Por número de sessões' : 'By number of sessions'}>
     <h3 style={{ ...h3, marginBottom: 4 }}><Users size={15} /> {pt ? 'Por número de sessões' : 'By number of sessions'}</h3>
     <p style={{ ...muted, margin: '0 0 8px' }}>{pt ? 'Do histórico. Não diz se compensou, porque tarefa difícil já costuma usar mais sessões.' : 'From history. It does not say whether it paid off, because hard tasks already tend to use more sessions.'}{note ? ` ${note}` : ''}</p>
@@ -100,10 +104,10 @@ export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: {
       : <div className="bm-buckets">
         {heads.map(h => <div key={h} className="bm-h">{h}</div>)}
         {buckets.map(b => <React.Fragment key={b.label}>
-          <div className="bm-k">{b.label}</div><div data-l={heads[1]}>{nf(b.tasks, lang, 0)}</div>
-          <div data-l={heads[2]}>{b.costMedianUSD === null ? noData : moneyText(b.costMedianUSD, lang, money)}</div>
-          <div data-l={heads[3]}>{b.wallMedianMs === null ? noData : durationText(b.wallMedianMs, lang)}</div>
-          <div data-l={heads[4]}>{b.escapedDefects === null ? noData : nf(b.escapedDefects, lang, 1)}</div>
+          <div className="bm-k">{b.label}</div><div data-l={heads[1]}>{nw(nf(b.tasks, lang, 0))}</div>
+          <div data-l={heads[2]}>{b.costMedianUSD === null ? noData : nw(moneyText(b.costMedianUSD, lang, money))}</div>
+          <div data-l={heads[3]}>{b.wallMedianMs === null ? noData : nw(durationText(b.wallMedianMs, lang))}</div>
+          <div data-l={heads[4]}>{b.escapedDefects === null ? noData : nw(nf(b.escapedDefects, lang, 1))}</div>
           <div data-l={heads[5]}>{rate(b.firstTryRate)}</div><div data-l={heads[6]}>{rate(b.notReopenedRate)}</div>
         </React.Fragment>)}
       </div>}

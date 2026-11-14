@@ -37,7 +37,8 @@ export function BenchHistoryTasks({ tasks, coverage, lang, money, sides = 'qa', 
   const q = (v: number | null) => v === null ? dash : nf(v, lang, 0)
   const words = comparisonWords(lang)[sides]
   /** The prototype's "um → outro": side A, then side B, "—" for a side with nothing measured. */
-  const pair = (v: readonly [number | null, number | null], f: (n: number | null, side: 0 | 1) => string) => `${f(v[0], 0)} → ${f(v[1], 1)}`
+  const noData = <span style={muted}>{dash} {pt ? 'sem dados' : 'no data'}</span>
+  const pair = (v: readonly [number | null, number | null], f: (n: number | null, side: 0 | 1) => string) => v[0] === null && v[1] === null ? noData : `${f(v[0], 0)} → ${f(v[1], 1)}`
   const sz = (s: 'S' | 'M' | 'L' | null) => s === null ? dash : sizeLabel(s, lang)
   const head = (key: HistorySortKey, label: string, num = false) =>
     <th className={num ? 'bm-num' : undefined} aria-sort={sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>

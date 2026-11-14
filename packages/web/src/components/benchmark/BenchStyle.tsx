@@ -16,6 +16,7 @@ const CSS = `
 .bm-buckets{display:grid;grid-template-columns:110px repeat(6,minmax(0,1fr));font-size:12.5px}
 .bm-buckets>div{padding:6px 8px 6px 0;border-top:1px solid var(--border);min-width:0}
 .bm-buckets>.bm-h{border:0;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);font-weight:600}
+.bm-nw{white-space:nowrap;font-variant-numeric:tabular-nums}
 .bm-tasks{width:100%;border-collapse:collapse;font-size:12.5px}
 .bm-tasks th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);font-weight:600;padding:6px 10px 6px 0;white-space:nowrap}
 .bm-tasks td{padding:8px 10px 8px 0;border-top:1px solid var(--border);vertical-align:top}

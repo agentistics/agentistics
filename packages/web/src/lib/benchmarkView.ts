@@ -160,7 +160,7 @@ export function heroOf(entry: Entry, observed: Observed | null, lang: Lang, mone
     return noneHero(lang, entry.id === 'harnesses'
       ? (pt ? 'Nenhum harness é comparado ainda: as métricas de cada harness não foram conferidas contra a fonte de cada provedor.' : 'No harness is compared yet: each harness\'s metrics have not been checked against each provider\'s source.')
       : (pt ? 'Ainda não há comparação por modelo: o histórico por peça não é separado por modelo.' : 'There is no comparison by model yet: the per-piece history is not split by model.'),
-    [pt ? 'Nenhum número é mostrado no lugar: sem medição não há o que comparar.' : 'No number is shown in its place: without a measurement there is nothing to compare.'])
+    [])
   }
   if (entry.kind === 'comparison' && entry.comparison && observed?.history) return comparisonHero(entry.comparison, observed, lang, money)
   const min = pt

@@ -49,7 +49,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
   const L = lang as Lang
   const money: Money = { currency, brlRate }
   const basisText = costBasis === 'plan'
-    ? (pt ? 'O custo aqui é sempre o equivalente à API (tokens × tabela de preços), não o valor do plano. ' : 'Cost here is always the API-equivalent figure (tokens × price table), not the plan price. ')
+    ? (pt ? 'O custo aqui é sempre o equivalente à API (tokens × tabela de preços), não o valor do plano.' : 'Cost here is always the API-equivalent figure (tokens × price table), not the plan price.')
     : ''
   const entries = entriesOf(observed, parseExperiments(experiments), L)
   const [picked, setPicked] = useState(initialSelected ?? 'observed')
@@ -60,7 +60,9 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
   // The prototype has FOUR cards; rework is evidence without points, so it is one line under them, never a card.
   const parts = allParts.filter(p => p.type !== 'rework')
   const reworkLine = allParts.find(p => p.type === 'rework' && p.name === (pt ? 'Retrabalho' : 'Rework') && p.rows.length > 0) ?? null
-  const history = cur.kind !== 'experiment' && cur.kind !== 'unmeasured' ? observed?.history ?? null : null
+  const unmeasured = cur.kind === 'unmeasured'
+  // An unmeasured card has no comparison of its own, but "Por número de sessões" is the history and does not depend on it.
+  const history = cur.kind !== 'experiment' ? observed?.history ?? null : null
   const exp = cur.experiment
   const noTasks = pt ? 'Sem tarefas comparadas neste benchmark: o servidor só mede por tarefa quando um experimento controlado roda — nenhum rodou ainda.' : 'No compared tasks in this benchmark: the server only measures per task when a controlled experiment runs — none has yet.'
   const noBuckets = pt ? 'Sem agrupamento por número de sessões: o servidor ainda não calcula esta divisão a partir do histórico.' : 'No grouping by number of sessions: the server does not compute this split from history yet.'
@@ -78,8 +80,6 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
     {status === 'error' && <div data-testid="benchmark-error" style={empty}>{pt ? 'Não foi possível ler os dados reais agora. Nenhum número é mostrado no lugar.' : 'The real data could not be read right now. No number is shown in its place.'}</div>}
 
     {status === 'ready' && observed && <>
-      {basisText && <p data-testid="benchmark-basis" style={{ ...muted, margin: 0 }}>{basisText}</p>}
-
       <div className="bm-top">
         <nav className="bm-list" data-testid="benchmark-list" aria-label={pt ? 'Benchmarks' : 'Benchmarks'}>
           {entries.map(e => <BenchItem key={e.id} e={e} on={e.id === cur.id} onPick={() => setPicked(e.id)} />)}
@@ -88,8 +88,8 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
             style={{ ...newBtn }}><FlaskConical size={15} />{pt ? 'Novo benchmark' : 'New benchmark'}</button>
         </nav>
         <div style={{ minWidth: 0 }}>
-          <Hero hero={hero} lang={L} entryId={cur.id} />
-          <section aria-label={pt ? 'Partes' : 'Parts'} data-testid="benchmark-parts">
+          <Hero hero={hero} lang={L} entryId={cur.id} basis={basisText} />
+          {!unmeasured && <section aria-label={pt ? 'Partes' : 'Parts'} data-testid="benchmark-parts">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 8px' }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{pt ? 'Partes' : 'Parts'}</h3>
               <span style={{ ...muted, fontSize: 12.5 }}>{pt ? 'Cada tipo de métrica, com os números que o compõem.' : 'Each metric type, with the figures inside it.'}</span>
@@ -97,12 +97,16 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
             </div>
             <div className="bm-types">{parts.map(p => <PartTile key={p.type} p={p} nums={nums} lang={L} observed={observed} />)}</div>
             {nums && reworkLine && <div data-testid="benchmark-extra" style={{ ...muted, marginTop: 8 }}>{pt ? 'Retrabalho, que não soma pontos' : 'Rework, which adds no points'}: {reworkLine.rows.map(r => `${r.label} ${r.value} (${r.sub})`).join('; ')}.</div>}
-          </section>
+          </section>}
         </div>
       </div>
 
 
-      {history
+      {unmeasured
+        ? <><BenchTasks key={`t-${cur.id}`} tasks={[]} keepHead lang={L} money={money} emptyReason={pt ? 'Sem tarefas suficientes neste benchmark.' : 'Not enough tasks in this benchmark yet.'} initialOpen={null} />
+          <BenchBuckets key="hb" buckets={bucketsOfHistory(history?.buckets ?? [], L)} lang={L} money={money} emptyReason={noBuckets}
+            note={pt ? 'Cada peça entregue (subtarefa) conta como uma tarefa.' : 'Each delivered piece (subtask) counts as one task.'} /></>
+        : history
         ? <><BenchHistoryTasks key={`ht-${cur.id}`} tasks={history.tasks} coverage={history.coverage} lang={L} money={money} sides={comparisonLabel(cur)} initialOpen={initialOpenTask} />
           <BenchBuckets key="hb" buckets={bucketsOfHistory(history.buckets, L)} lang={L} money={money} emptyReason={noBuckets}
             note={pt ? 'Cada peça entregue (subtarefa) conta como uma tarefa.' : 'Each delivered piece (subtask) counts as one task.'} /></>
@@ -131,7 +135,7 @@ function BenchItem({ e, on, onPick }: { e: Entry; on: boolean; onPick: () => voi
   </button>
 }
 
-function Hero({ hero, lang, entryId }: { hero: ReturnType<typeof heroOf>; lang: Lang; entryId: string }) {
+function Hero({ hero, lang, entryId, basis = '' }: { hero: ReturnType<typeof heroOf>; lang: Lang; entryId: string; basis?: string }) {
   const pt = lang === 'pt'
   const c = TONE_VAR[hero.tone]
   const tinted = hero.tone !== 'none'
@@ -154,11 +158,12 @@ function Hero({ hero, lang, entryId }: { hero: ReturnType<typeof heroOf>; lang: 
     </>}
     {hero.firm && <div style={{ marginTop: 10 }}><Pill tone={hero.firm.ok ? 'ok' : 'warn'}>{hero.firm.ok ? <Check size={12} /> : <TriangleAlert size={12} />}{hero.firm.text}</Pill></div>}
     {hero.caption && <div data-testid="benchmark-caption" style={{ marginTop: 6, fontSize: 12, color: 'var(--text-tertiary)' }}>{hero.caption}</div>}
-    <details open={hero.tone === 'none' && !hero.disclosure} style={{ marginTop: 10, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+    {(hero.why.length > 0 || basis) && <details open={hero.tone === 'none' && !hero.disclosure && hero.why.length > 0} style={{ marginTop: 10, fontSize: 12.5, color: 'var(--text-secondary)' }}>
       <summary style={{ cursor: 'pointer', color: 'var(--text-primary)', fontWeight: 600 }}>{hero.disclosure ?? (hero.tone === 'none' ? (pt ? 'O que falta' : 'What is missing') : (pt ? 'Por que esse resultado?' : 'Why this result?'))}</summary>
       {hero.why.map((w, i) => <p key={i} style={{ margin: '6px 0 0', maxWidth: 880 }}>{w}</p>)}
+      {basis && <p data-testid="benchmark-basis" style={{ margin: '6px 0 0', maxWidth: 880 }}>{basis}</p>}
       {hero.disclosure && hero.facts && hero.facts.length > 0 && <ul data-testid="benchmark-facts" style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.5, maxWidth: 880 }}>{hero.facts.map((f, i) => <li key={i}>{f}</li>)}</ul>}
-    </details>
+    </details>}
   </div>
 }
 

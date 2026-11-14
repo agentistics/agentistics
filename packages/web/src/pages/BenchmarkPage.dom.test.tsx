@@ -306,6 +306,14 @@ describe('r3: language, period and currency of the page', () => {
   test('F15: in plan basis the page says its cost is the API-equivalent figure', () => {
     expect(render('pt', observed, { costBasis: 'plan' })).toContain('equivalente à API')
     expect(render('en', observed, { costBasis: 'plan' })).toContain('API-equivalent')
+    // not in the main flow (the prototype has no such line): it lives inside the hero's disclosure
+    for (const lang of ['pt', 'en'] as const) {
+      const html = render(lang, observed, { costBasis: 'plan' })
+      const before = html.split('data-testid="benchmark-hero"')[0]!
+      expect(before).not.toMatch(/equivalente à API|API-equivalent/)
+      const disclosure = html.split('data-testid="benchmark-hero"')[1]!.split('</details>')[0]!
+      expect(disclosure).toMatch(/equivalente à API|API-equivalent/)
+    }
     expect(pt).not.toContain('equivalente à API')
   })
 
@@ -409,9 +417,11 @@ describe('per-piece history from the server fills the blocks with real rows', ()
     expect(first).toContain('2 → 2')                       // sessions, 1 QA round → 2+ rounds
     expect(first).toContain('US$ 4,50 → US$ 4,50*')        // * = a session of that side had no price
     expect(first).toContain('1 → 3')                       // QA rounds
-    expect(first.match(/— → —/g)!.length).toBe(2)          // defects and acceptance are not recorded yet
+    expect(first).not.toContain('— → —')                   // nothing on both sides is "sem dados", not a pair of dashes
+    expect(first.match(/sem dados/g)!.length).toBe(2)      // defects and acceptance are not recorded yet
     const second = html.split('data-task="T2"')[1]!.split('</tr>')[0]!
-    expect(second.match(/— → —/g)!.length).toBe(6)         // a task whose pieces fall on neither side
+    expect(second).not.toContain('— → —')
+    expect(second.match(/sem dados/g)!.length).toBe(6)     // a task whose pieces fall on neither side
     expect(second).not.toContain('US$ 0')
     expect(html.match(/data-testid="benchmark-subtask-row"/g)!.length).toBe(2)
     expect(html).toContain('Filtrar tarefa')
@@ -420,6 +430,27 @@ describe('per-piece history from the server fills the blocks with real rows', ()
     expect(html).toContain('custo em 2 de 3 peças')
     expect(html).not.toContain('benchmark-tasks-empty')
     expect(taskHead(render('en', withHistory))).toContain('>QA rounds')
+  })
+
+  test('M5: selecting "1 sessão × 5+" makes Por tarefa read the SESSIONS sides, and the QA comparison reads the QA sides', () => {
+    const sent = (key: 'qa' | 'sessions', sess: [number, number], qa: [number, number]) => ({ key, nA: 1, nB: 1, sessions: sess, costUSD: [1, 2], wallMs: [H, 2 * H], qaRounds: qa, costPartial: [false, false], defects: [null, null], accepted: [null, null] })
+    const h = { ...history, comparisons: buildComparisons([...Array.from({ length: 4 }, (_, i) => sub(`o${i}`, 'o', { sessions: 1 })), ...Array.from({ length: 4 }, (_, i) => sub(`m${i}`, 'm', { qaRounds: 3, reworked: true, sessions: 5 }))] as never), tasks: [{ ...history.tasks[0]!, sides: { qa: sent('qa', [11, 12], [21, 22]), sessions: sent('sessions', [31, 32], [41, 42]) } }] }
+    const o = { ...observed, history: h } as unknown as Observed
+    const row = (id: string) => render('pt', o, { initialSelected: id }).split('data-task="T1"')[1]!.split('</tr>')[0]!
+    const sessions = row('sessions'), qa = row('qa')
+    expect(sessions).toContain('31 → 32')
+    expect(sessions).toContain('41 → 42')
+    expect(sessions).not.toMatch(/11 → 12|21 → 22/)
+    expect(qa).toContain('11 → 12')
+    expect(qa).toContain('21 → 22')
+    expect(qa).not.toMatch(/31 → 32|41 → 42/)
+  })
+
+  test('Por número de sessões: values never break mid-value (nowrap, tabular), the label may wrap', () => {
+    const html = render('pt', withHistory)
+    const b = html.split('data-testid="benchmark-buckets"')[1]!
+    expect(b).toContain('<span class="bm-nw">US$ 4,50</span>')
+    expect(html).toMatch(/\.bm-nw\{[^}]*white-space:nowrap[^}]*font-variant-numeric:tabular-nums/)
   })
 
   test('Por número de sessões: the prototype\'s seven columns; what no record carries is "—" + "sem dados", and there is no per-cell n=', () => {
@@ -508,14 +539,33 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     expect(en).toContain('not measured')
   })
 
-  test('picking an unmeasured card: the hero says nothing is measured and why, never a number; the blocks below stay empty with their reason', () => {
-    const h = render('pt', { ...observed, history } as unknown as Observed, { initialSelected: 'harnesses' })
-    const hero = h.split('data-testid="benchmark-hero"')[1]!.split('data-testid="benchmark-parts"')[0]!
-    expect(hero).toContain('Sem dados ainda')
-    expect(hero).toContain('não foram conferidas contra a fonte de cada provedor')
-    expect(hero).not.toContain('role="img"')
-    expect(h.match(/data-testid="part-/g)!.length).toBe(4)
-    expect(h).toContain('benchmark-tasks-empty')
+  test('picking an unmeasured card renders the prototype\'s "Sem dados ainda" state: hero alone, no Partes, task table with its heads and the empty line, buckets from history', () => {
+    for (const id of ['harnesses', 'models']) {
+      const h = render('pt', { ...observed, history } as unknown as Observed, { initialSelected: id })
+      const hero = h.split('data-testid="benchmark-hero"')[1]!.split('data-testid="benchmark-tasks"')[0]!
+      expect(hero).toContain('Sem dados ainda')
+      expect(hero).not.toContain('role="img"')
+      expect(h).not.toContain('data-testid="benchmark-parts"')
+      expect(h).not.toContain('data-testid="part-')
+      expect(h).not.toContain('Ver os números')
+      const tasks = h.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!
+      for (const c of ['Tarefa', 'Tamanho', 'Sessões', 'Custo', 'Tempo', 'Rodadas QA', 'Defeitos', 'Aceita']) expect(tasks).toContain(`>${c}`)
+      expect(tasks).toContain('Sem tarefas suficientes neste benchmark.')
+      expect(tasks).not.toContain('data-testid="benchmark-task-row"')
+      const b = h.split('data-testid="benchmark-buckets"')[1]!
+      for (const t of ['1 sessão', '2 sessões', '3–4 sessões', '5 ou mais']) expect(b).toContain(t)
+      expect(b).toContain('US$ 2,00')
+      expect(h).not.toContain('o servidor ainda não calcula')
+      expect(h).not.toContain('benchmark-buckets-empty')
+    }
+    const hh = render('pt', { ...observed, history } as unknown as Observed, { initialSelected: 'harnesses' })
+    expect(hh).toContain('não foram conferidas contra a fonte de cada provedor')
+    const en = render('en', { ...observed, history } as unknown as Observed, { initialSelected: 'models' })
+    expect(en).toContain('No data yet')
+    expect(en).toContain('Not enough tasks in this benchmark yet.')
+    expect(en).not.toContain('data-testid="benchmark-parts"')
+    expect(en.split('data-testid="benchmark-buckets"')[1]).toContain('1 session')
+    expect(en).not.toContain('does not compute this split')
   })
 
   test('hero: short title, ONE sentence, a caption, no bar, and the reasons folded in a closed disclosure', () => {
