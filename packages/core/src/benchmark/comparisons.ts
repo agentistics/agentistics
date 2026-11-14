@@ -12,7 +12,12 @@ import type { HistorySubtaskRow, PieceSize } from './history'
 /** A size counts for a comparison only when BOTH sides have at least this many measured pieces of it. */
 export const GROUP_MIN = 3
 
-export interface SizePair { size: PieceSize; medA: number; medB: number; nA: number; nB: number }
+export interface SizePair {
+  size: PieceSize; medA: number; medB: number
+  /** medB ÷ medA, computed here once: HTTP, MCP and the screen read it, nobody divides again. */
+  ratio: number
+  nA: number; nB: number
+}
 export interface Compared {
   /** Weighted geometric mean over the sizes of (median B / median A). */
   ratio: number
@@ -30,6 +35,38 @@ export interface HistoryComparison {
 
 const med = (v: number[]) => percentile(v, 0.5)
 
+export type ComparisonKey = HistoryComparison['key']
+/** Who is on side A and side B of each comparison: the ONE definition, read by `buildComparisons` and by the per-task pairs. */
+export const COMPARISON_SIDES: Record<ComparisonKey, { a: (s: HistorySubtaskRow) => boolean; b: (s: HistorySubtaskRow) => boolean }> = {
+  qa: { a: s => s.qaRounds === 1, b: s => s.qaRounds !== null && s.qaRounds >= 2 },
+  sessions: { a: s => s.sessions === 1, b: s => s.sessions >= 5 },
+}
+
+export type Pair = [number | null, number | null]
+/** One task seen as the prototype's "um → outro": per column, the median piece of side A and of side B (null = that side has no measured piece). */
+export interface TaskSides {
+  key: ComparisonKey; nA: number; nB: number
+  sessions: Pair; costUSD: Pair; wallMs: Pair; qaRounds: Pair
+  /** Some priced piece of that side had a session with no price. */
+  costPartial: [boolean, boolean]
+  /** Not recorded anywhere yet: always `[null, null]`, never a zero. */
+  defects: Pair; accepted: [boolean | null, boolean | null]
+}
+
+/** The two sides of one task under a comparison. Medians per piece, so a side with more pieces does not look bigger. */
+export function taskSides(subs: readonly HistorySubtaskRow[], key: ComparisonKey): TaskSides {
+  const { a, b } = COMPARISON_SIDES[key]
+  const A = subs.filter(a), B = subs.filter(b)
+  const side = (g: readonly HistorySubtaskRow[], val: (s: HistorySubtaskRow) => number | null) => med(g.map(val).filter((v): v is number => v !== null))
+  const pair = (val: (s: HistorySubtaskRow) => number | null): Pair => [side(A, val), side(B, val)]
+  return {
+    key, nA: A.length, nB: B.length,
+    sessions: pair(s => s.sessions), costUSD: pair(s => s.costUSD), wallMs: pair(s => s.wallMs), qaRounds: pair(s => s.qaRounds),
+    costPartial: [A.some(s => s.costPartial), B.some(s => s.costPartial)],
+    defects: [null, null], accepted: [null, null],
+  }
+}
+
 function matched(subs: readonly HistorySubtaskRow[], inA: (s: HistorySubtaskRow) => boolean, inB: (s: HistorySubtaskRow) => boolean, val: (s: HistorySubtaskRow) => number | null): Compared | null {
   const sizes: SizePair[] = [], per: { r: number; w: number }[] = []
   for (const size of ['S', 'M', 'L'] as const) {
@@ -38,7 +75,7 @@ function matched(subs: readonly HistorySubtaskRow[], inA: (s: HistorySubtaskRow)
     if (a.length < GROUP_MIN || b.length < GROUP_MIN) continue
     const medA = med(a)!, medB = med(b)!
     if (!(medA > 0) || !(medB > 0)) continue
-    sizes.push({ size, medA, medB, nA: a.length, nB: b.length })
+    sizes.push({ size, medA, medB, ratio: medB / medA, nA: a.length, nB: b.length })
     per.push({ r: medB / medA, w: a.length + b.length })
   }
   if (!sizes.length) return null
@@ -64,7 +101,7 @@ export function buildComparisons(subs: readonly HistorySubtaskRow[]): HistoryCom
     return { key, nA: A.length, nB: B.length, cost, wall, third }
   }
   return [
-    mk('qa', s => s.qaRounds === 1, s => s.qaRounds !== null && s.qaRounds >= 2),
-    mk('sessions', s => s.sessions === 1, s => s.sessions >= 5),
+    mk('qa', COMPARISON_SIDES.qa.a, COMPARISON_SIDES.qa.b),
+    mk('sessions', COMPARISON_SIDES.sessions.a, COMPARISON_SIDES.sessions.b),
   ].filter((c): c is HistoryComparison => c !== null)
 }

@@ -35,7 +35,7 @@ function historyForTool(h: NonNullable<Observed["history"]>) {
   const noId = (v: unknown): unknown => Array.isArray(v) ? v.map(noId)
     : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== "id").map(([k, x]) => [k, noId(x)])) : v;
   return {
-    note: "Pieces are subtasks done or in review with a linked session; size is by lines changed (<100 S, <500 M, else L); cost is tokens × price per session, never an allocation, and only priced sessions count (costPartial = some sessions have no price); null = not measured. Observed and biased: it says what happened, not that a method pays off.",
+    note: "Pieces are subtasks done or in review with a linked session; size is by lines changed (<100 S, <500 M, else L); cost is tokens × price per session, never an allocation, and only priced sessions count (costPartial = some sessions have no price); null = not measured. Each task carries `sides` (keys qa and sessions): the two sides of that comparison per column, [A, B] medians per piece, null = nothing measured on that side (defects and accepted are never recorded yet); each comparison's per-size pair carries its `ratio` (B ÷ A). Observed and biased: it says what happened, not that a method pays off.",
     ...(noId({ ...h, tasks: h.tasks.slice(0, TOOL_TASK_ROWS) }) as object),
     tasksTotal: h.tasks.length,
   };
