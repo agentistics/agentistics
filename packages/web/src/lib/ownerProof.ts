@@ -64,6 +64,18 @@ const REFUSALS: Record<string, { en: string; pt: string }> = {
   owner_proof_local_only: { en: 'This confirmation can only be given on this computer.', pt: 'Esta confirmação só pode ser feita neste computador.' },
   guard_busy: { en: 'Another agentistics process is writing the board right now. Try again in a moment.', pt: 'Outro processo do agentistics está gravando o quadro agora. Tente de novo em instantes.' },
   lock_order: { en: 'An internal ordering rule refused this write; nothing was changed. Please report it.', pt: 'Uma regra interna de ordem recusou esta gravação; nada foi alterado. Por favor, avise.' },
+  // The board's own refusals (task-web.ts / task-attach.ts), in words a person can act on.
+  done_needs_session: { en: 'Nothing is filed yet: the task needs a session before it can be completed.', pt: 'Nada filiado ainda: a tarefa precisa de uma sessão para ser concluída.' },
+  blocked_needs_reason: { en: 'To block a task, say why or name the task that blocks it.', pt: 'Para bloquear, diga o motivo ou qual tarefa bloqueia.' },
+  open_subtasks: { en: 'This task still has open subtasks.', pt: 'Esta tarefa ainda tem subtarefas em aberto.' },
+  no_such_task: { en: 'That task no longer exists (was it deleted?).', pt: 'Essa tarefa não existe mais (foi apagada?).' },
+  not_found: { en: 'That task no longer exists (was it deleted?).', pt: 'Essa tarefa não existe mais (foi apagada?).' },
+  no_such_subtask: { en: 'That subtask no longer exists (was it deleted?).', pt: 'Essa subtarefa não existe mais (foi apagada?).' },
+  no_such_status: { en: 'That status no longer exists.', pt: 'Esse status não existe mais.' },
+  no_such_type: { en: 'That type no longer exists.', pt: 'Esse tipo não existe mais.' },
+  invalid_group: { en: 'That group no longer exists, or belongs to another task.', pt: 'Esse grupo não existe mais, ou pertence a outra tarefa.' },
+  subtask_has_sessions: { en: 'That subtask already has a session filed under it — unfile it before grouping.', pt: 'Essa subtarefa já tem uma sessão filiada — desfilie antes de agrupar.' },
+  group_field_conflict: { en: 'Conflicts with a legacy grouping already on this subtask.', pt: 'Conflito com um agrupamento antigo desta subtarefa.' },
   json_required: { en: 'This change was sent in a format the board does not accept. Nothing was changed.', pt: 'Esta alteração foi enviada num formato que o quadro não aceita. Nada foi alterado.' },
 }
 
@@ -78,6 +90,23 @@ export function refusalSentence(code: unknown, pt: boolean): string | null {
 export function refusalText(body: { error?: unknown; sentence?: unknown; message?: unknown } | null | undefined, pt: boolean, status?: number): string {
   return refusalSentence(body?.error, pt)
     ?? (typeof body?.sentence === 'string' ? body.sentence : typeof body?.message === 'string' ? body.message : typeof body?.error === 'string' ? body.error : String(status ?? ''))
+}
+
+/** A server string worth showing as it is: a sentence (has spaces), not a bare machine code. */
+const isSentence = (t: unknown): t is string => typeof t === 'string' && /\s/.test(t.trim())
+
+/**
+ * The reason for a refused request, for a person who is not technical: our words for a known code (in `error`,
+ * `message` or `sentence`), "no longer exists" for a bare 404, the server's own text when it IS a sentence, else
+ * `null` — the caller then says its generic line. Never a raw code and never a bare status number.
+ */
+export function readableRefusal(body: { error?: unknown; sentence?: unknown; message?: unknown } | null | undefined, pt: boolean, status?: number): string | null {
+  for (const c of [body?.error, body?.message, body?.sentence]) { const k = refusalSentence(c, pt); if (k) return k }
+  if (status === 404) return refusalSentence('not_found', pt)
+  // `sentence` is the server's own words for a person; `message`/`error` only count when they read as a sentence.
+  if (typeof body?.sentence === 'string' && body.sentence.trim()) return body.sentence
+  for (const t of [body?.message, body?.error]) if (isSentence(t)) return t
+  return null
 }
 
 /** Plain words for the refusals of the owner's proof. */

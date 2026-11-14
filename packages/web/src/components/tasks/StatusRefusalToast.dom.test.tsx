@@ -114,7 +114,8 @@ async function withAway<T>(run: (host: HTMLElement) => Promise<T>): Promise<T> {
 }
 
 for (const [name, answer, expected] of [
-  ['422 refusal', () => Response.json({ ok: false, message: 'done_needs_session' }, { status: 422 }), 'done_needs_session'],
+  ['422 refusal', () => Response.json({ ok: false, message: 'done_needs_session' }, { status: 422 }), 'needs a session'],
+  ['404 (task deleted)', () => Response.json({ ok: false, error: 'no_such_task' }, { status: 404 }), 'no longer exists'],
   ['network abort', () => { throw new TypeError('aborted') }, 'could not be reached'],
 ] as const) {
   test(`autonomous mode ON: a ${name} still toasts and the bell line names the reason`, async () => {
@@ -124,6 +125,7 @@ for (const [name, answer, expected] of [
       await act(async () => { await store.refreshNotifications() })
       expect(toasts(host)).toHaveLength(1)
       expect(toasts(host)[0]!.textContent).toContain(expected)
+      expect(toasts(host)[0]!.textContent).not.toMatch(/done_needs_session|no_such_task|\b404\b/)
       expect(store.readNotifications().some(n => n.code === 'tasks.status_failed')).toBe(true)
     })
   })
@@ -160,3 +162,33 @@ test('a HIDDEN tab never toasts, even for a local action', async () => {
     await close()
   }
 })
+
+// ROUND 3 — the rename/edit path: refused while autonomous mode is ON still toasts, in plain words.
+for (const [name, answer, expected] of [
+  ['404 (task deleted)', () => Response.json({ ok: false, error: 'no_such_task' }, { status: 404 }), 'no longer exists'],
+  ['bare 404', () => new Response('', { status: 404 }), 'no longer exists'],
+  ['code in message', () => Response.json({ ok: false, message: 'blocked_needs_reason' }, { status: 422 }), 'say why'],
+] as const) {
+  test(`autonomous mode ON: a refused edit (${name}) toasts and the bell line is readable`, async () => {
+    fakeServer(answer)
+    await withAway(async host => {
+      await act(async () => { await tasks.editTask('t1', { title: 'new' }) })
+      await act(async () => { await store.refreshNotifications() })
+      expect(toasts(host)).toHaveLength(1)
+      const text = toasts(host)[0]!.textContent ?? ''
+      expect(text).toContain(expected)
+      expect(text).not.toMatch(/no_such_task|blocked_needs_reason|\b404\b/)
+      const bell = store.readNotifications().find(n => n.title === 'The change could not be saved' || n.message?.includes(expected))
+      expect(bell).toBeDefined()
+      expect(bell!.meta?.localAction).toBe(true)
+    })
+  })
+}
+
+test('an unknown refusal code is never shown raw: a sentence is kept, a bare code becomes the generic line', () => {
+  const n = (body: Record<string, unknown>, status: number) => tasks.editRefusalNotice({ status, body }, false).message
+  expect(n({ message: 'Title is too long for this board.' }, 422)).toBe('Title is too long for this board.')
+  expect(n({ message: 'some_new_code' }, 422)).not.toContain('some_new_code')
+  expect(n({}, 500)).not.toMatch(/500/)
+})
+

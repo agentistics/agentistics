@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { refusalSentence } from './ownerProof'
 import { liveDeepLink } from './liveDeepLink'
 import { idleSessionNoun } from './idleExecution'
 import { notificationMuted } from './notificationCategories'
@@ -501,7 +502,7 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
     const reason = n.meta.reason
     return { title: loc.title, message: reason === 'network_error'
       ? (pt ? 'O servidor não pôde ser alcançado. A alteração não foi salva.' : 'The server could not be reached. The change was not saved.')
-      : (pt ? `O servidor recusou a alteração: ${reason}.` : `The server refused the change: ${reason}.`) }
+      : (refusalSentence(reason, pt) ?? (pt ? 'O servidor recusou a alteração. Confira os requisitos do status e tente de novo.' : 'The server refused the change. Check the status requirements and try again.')) }
   }
   // A CODE WITH NO TEXT MUST NOT RENDER AS A BLANK CARD.
   //

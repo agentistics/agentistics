@@ -19,7 +19,7 @@ import {
 import { getDateRangeFilter } from '../hooks/useData'
 import { filingUrl } from './nativeSession'
 import { isNativeSessionId } from './sessionRoute'
-import { postWithOwnerProof, refusalText, type OwnerCall } from './ownerProof'
+import { postWithOwnerProof, readableRefusal, refusalText, type OwnerCall } from './ownerProof'
 import type { ChatAttachmentRef, CommentKind, CommentTarget, TaskThreadRecord, ThreadDelivery } from '@agentistics/core'
 export type { ThreadDelivery } from '@agentistics/core'
 
@@ -638,7 +638,7 @@ async function postStatus(path: string, body: unknown): Promise<StatusWriteResul
         return { ok: false, reason: refused.message as StatusRefusalReason }
       }
     }
-    fail('write_failed')
+    fail(res.status === 404 ? 'not_found' : 'write_failed')
     return { ok: false }
   } catch {
     fail('network_error')
@@ -718,7 +718,9 @@ export function editRefusalNotice(res: { status: number; body: Record<string, un
   return {
     type: 'error',
     title: pt ? 'Não foi possível salvar a alteração' : 'The change could not be saved',
-    message: res ? refusalText(res.body, pt, res.status) : pt ? 'Sem resposta do servidor.' : 'The server did not answer.',
+    message: res
+      ? readableRefusal(res.body, pt, res.status) ?? (pt ? 'O servidor recusou a alteração. Confira os requisitos e tente de novo.' : 'The server refused the change. Check the requirements and try again.')
+      : pt ? 'Sem resposta do servidor.' : 'The server did not answer.',
   }
 }
 
