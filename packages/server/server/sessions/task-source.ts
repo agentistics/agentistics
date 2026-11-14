@@ -6,6 +6,7 @@
  */
 
 import { TASKS_FILE } from '../config'
+import { ensureStatusStages } from './status-stage-sync'
 import { loadConsolidated } from '../consolidate'
 import { readPreferences } from '../preferences'
 import { readRegistry } from './registry'
@@ -163,6 +164,7 @@ async function readSeededBook(store: TaskStore, registryRows: readonly ManagedSe
   const passes: Array<(b: TaskBook) => Promise<boolean>> = [
     b => ensureLegacyTasks(store, registryRows, b),
     b => ensureStatusesSeeded(store, b),
+    b => ensureStatusStages(store, b, TASKS_FILE),
     b => ensureInReview(store, b),
     b => ensureTypesSeeded(store, b),
   ]

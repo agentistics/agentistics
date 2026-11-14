@@ -259,6 +259,18 @@ async function handleVaultHttpInner(req: Request, url: URL, env: VaultHttpEnv): 
     const b = await body()
     return reply(await gate.setAuthPolicy(b.policy, { grant, session, loopback, code: codeOf(b) }))
   }
+  if (path === '/api/vault/delivery-owner' && req.method === 'POST') {
+    // ENTREGA.GARANTIDA §2.3.1: the owner's fresh proof for ONE delivery move. The reply carries a single-use
+    // `delivery` grant the page sends back in `X-Agentop-Owner-Grant` on the delivery request — never in a URL.
+    const b = await body()
+    if (!str(b.pieceKey, 200) || !str(b.move, 200)) return bad()
+    const r = await gate.requireDeliveryOwner({ session, loopback }, { pieceKey: b.pieceKey, move: b.move })
+    return reply(r.ok ? { ok: true, ownerGrant: r.grant } : r)
+  }
+  if (path === '/api/vault/delivery-owner-mode' && req.method === 'POST') {
+    const b = await body()
+    return reply(await gate.setOwnerProofMode(b.mode, { session, loopback }))
+  }
   if (path === '/api/vault/activity' && req.method === 'POST') {
     // The dashboard's input heartbeat (§5.1): human interaction resets the idle clock.
     if (!loopback) {

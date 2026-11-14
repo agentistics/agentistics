@@ -75,7 +75,7 @@ describe('popovers are not clipped by a scrolling ancestor', () => {
   // window. The stub is only what that hook reads; nothing here depends on the value.
   const withWindow = (fn: () => string): string => {
     const g = globalThis as { window?: unknown }
-    const had = 'window' in g
+    const had = g.window !== undefined
     if (!had) g.window = { innerWidth: 1440, innerHeight: 900, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {} }
     try { return fn() } finally { if (!had) delete g.window }
   }
@@ -91,7 +91,7 @@ describe('popovers are not clipped by a scrolling ancestor', () => {
 
   const triggerStyle = (width: number, extra: Record<string, unknown> = {}): string => {
     const g = globalThis as { window?: unknown }
-    const had = 'window' in g
+    const had = g.window !== undefined
     if (!had) g.window = { innerWidth: width, innerHeight: 900, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {} }
     const win = g.window as { innerWidth: number }
     const prevWidth = win.innerWidth
@@ -180,7 +180,12 @@ describe('Select trigger touch target', () => {
 
 describe('popoverPosition', () => {
   test('shared lists size to content with a viewport cap and a trigger-width floor', () => {
-    const style = popoverStyle({ left: 8, top: 40, width: 116 })
+    // popoverStyle reads window.innerWidth: pin it, never inherit whatever an earlier file left on globalThis.
+    const g = globalThis as { window?: unknown }
+    const had = Object.prototype.hasOwnProperty.call(g, 'window'), prev = g.window
+    g.window = { innerWidth: 1440, innerHeight: 900 }
+    let style: ReturnType<typeof popoverStyle>
+    try { style = popoverStyle({ left: 8, top: 40, width: 116 }) } finally { if (had) g.window = prev; else delete g.window }
     expect(style.width).toBe('max-content')
     expect(style.minWidth).toBe(116)
     expect(style.maxWidth).toBe('calc(100vw / var(--ui-zoom, 1) - 16px)')
@@ -234,7 +239,7 @@ describe('popoverRoom', () => {
 describe('MultiPicker panel scroll containment', () => {
   test('the open panel keeps wheel/touch scrolling inside itself', () => {
     const g = globalThis as { window?: unknown }
-    const had = 'window' in g
+    const had = g.window !== undefined
     if (!had) g.window = { innerWidth: 320, innerHeight: 568, matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {} }
     let html = ''
     try { html = renderToStaticMarkup(<MultiPicker defaultOpenForTest options={[{ value: 'a', label: 'A' }]} onCommit={() => {}} placeholder="p" searchPlaceholder="s" confirmLabel={n => `Add ${n}`} selectAllLabel="all" emptyLabel="none" />) } finally { if (!had) delete g.window }

@@ -86,7 +86,7 @@ const TOOL_GROUPS = {
     'agentistics_task_types', 'agentistics_task_type_edit', 'agentistics_task_status_edit', 'agentistics_task_comment',
     'agentistics_task_subtask', 'agentistics_task_link', 'agentistics_task_blocked_by', 'agentistics_task_next',
     'agentistics_task_claim', 'agentistics_task_activity', 'agentistics_task_edit', 'agentistics_task_session', 'agentistics_task_delete',
-    'agentistics_task_phase', 'agentistics_task_stage', 'agentistics_task_queue', 'agentistics_task_queue_answer',
+    'agentistics_task_phase', 'agentistics_task_stage', 'agentistics_task_evidence', 'agentistics_task_queue', 'agentistics_task_queue_answer',
   ],
   Sessions: ['agentistics_sessions', 'agentistics_session_groups', 'agentistics_session_group_create', 'agentistics_session_group_edit', 'agentistics_session_notify', 'agentistics_session_message', 'agentistics_session_role', 'agentistics_session_away', 'agentistics_session_switch_account', 'agentistics_checkin_report'],
   Metrics: ['agentistics_live_delivery', 'agentistics_delivery_calendar', 'agentistics_benchmark_observed', 'agentistics_summary', 'agentistics_costs', 'agentistics_projects', 'agentistics_repos', 'agentistics_harnesses', 'agentistics_plan_limits', 'agentistics_tags', 'agentistics_tag_detail', 'agentistics_flow_run', 'agentistics_flow_status', 'agentistics_wait'],
@@ -157,6 +157,7 @@ export function contextText(i: ContextInput): string {
       `This session belongs to Agentask task ${i.taskId}${i.taskTitle ? ` "${i.taskTitle}"` : ''}${sub}. Record progress there: comment on the subtask (or the task) at each milestone and move its status; never mark it done before the user validates.`,
       'Board lifecycle: you are filed on this task/subtask (in_progress); a handback (kind=handback via agentistics_session_message) moves your subtask to in_review (if the board has that status); it becomes done only after approval.',
     )
+    if (worker && i.subtaskId) lines.push(`Evidence: before your piece can move to review the server needs proof it can check, bound to your current commit: agentistics_task_evidence { ref: "${i.taskId}", subtaskId: "${i.subtaskId}", kind: screenshot|api-capture|test-log|report|probe, filePath|fileId|repoRef|probe } (CLI: agentop task evidence add; agentop evidence capture <url> captures an API response). You never supply a hash or a time; a new commit makes earlier evidence stale.`)
     if (worker && i.subtaskId) lines.push(`Live step: the Live card derives your step by itself from real signals (session open, first edit, a test run, a commit, your handback). When you know better, report it: agentistics_task_phase { subtaskId: "${i.subtaskId}", action: "step", step: <1..5> } — running: 1 reading, 2 implementing, 3 testing, 4 saving (commit), 5 handing over.`)
   } else {
     lines.push('This session is not linked to a task. Follow flow step "Task" above unless this is a quick question.')

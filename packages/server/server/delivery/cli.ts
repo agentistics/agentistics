@@ -23,6 +23,8 @@
  * else the owner at their own terminal.
  */
 import type { DeliveryReply, DeliveryService } from './service'
+import { actorOf, isOwner, ownerMove, ownerRefusal, type RequestPrincipal } from './principal'
+import { realCliAuth, resolveCliPrincipal, type CliAuth } from './cli-principal'
 
 /** What `agentop flow --help` prints about the delivery verbs (they live here, not in the engine, so the engine's help never lists them). */
 export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subtask walks fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado; any skipped phase is refused)
@@ -44,6 +46,7 @@ export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subt
   agentop flow release --version <x.y.z> --merge-sha <main sha> [--repo <owner/name>] --subtask S1 --subtask S2 …   declare what the release contains (→ ci, → publicado when release.yml is green and the tag exists)
   agentop flow reconcile --release [--apply] [--json]  backfill: every piece in revisao_lider/pr_merge/ci matched to its merged PR and the first release tag containing it (dry-run unless --apply)
   agentop flow antigas publish|archive (--subtask S[,S…] | --all [--expect N]) [--version x.y.z] [--reason …]   the "Antigas sem registro" group: mark published / archive (abandoned) — never deletes; --expect refuses if the group is not that size
+  agentop flow classify <piece> --repo <path|remote> --head <sha>   a LEADER names where to look for a piece whose checkout cannot be resolved; the server derives the category from that commit (pushed commits only)
   agentop flow tick                                   the minute watch (blocks, merged PR → ci, ci → publicado, reminders to the leader)
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
 
@@ -51,7 +54,7 @@ Exit codes: 0 passed/moved, 1 refused (the sentence says what is missing), 2 usa
 Every gate reads the machine (git, gh, the session registry); nothing here accepts a sha, a session id or a "green" from the caller.
 `
 
-export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'reconcile', 'antigas', 'tick', 'calendario'] as const
+export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'reconcile', 'antigas', 'classify', 'tick', 'calendario'] as const
 
 /** PURE: is `agentop flow <args>` one of the delivery verbs (handled here, not by the engine)? */
 export function isDeliveryFlowVerb(args: readonly string[]): boolean {
@@ -90,13 +93,31 @@ function report(r: DeliveryReply, io: Io): number {
   return r.status === 400 ? 2 : 1
 }
 
-export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env: Record<string, string | undefined> = process.env, service?: DeliveryService): Promise<number> {
+export async function runDeliveryCli(
+  argv: readonly string[], io: Io = STD, env: Record<string, string | undefined> = process.env, service?: DeliveryService,
+  auth: () => Promise<CliAuth> = realCliAuth,
+): Promise<number> {
   if (argv[0] === 'help' || argv[0] === '--help' || argv[0] === '-h') { io.out(DELIVERY_FLOW_HELP.trimEnd()); return 0 }
   const svc = service ?? (await import('./host')).deliveryService()
-  const actor = env.AGENTOP_MANAGED_ID || 'owner'
   const isTaskStage = argv[0] === 'task-stage'
-  const { pos, flags } = parseFlags(isTaskStage ? argv.slice(1) : argv)
+  // S1c: `agentop task evidence add|ls|rm` (routed here by cli-task.ts) — the same service the REST route and the MCP tool reach.
+  const isEvidence = argv[0] === 'task-evidence'
+  const { pos, flags } = parseFlags(isTaskStage || isEvidence ? argv.slice(1) : argv)
   const sub = flags.subtask ?? (isTaskStage ? pos[0] : undefined)
+  // ENTREGA.GARANTIDA §2.3: WHO this is is what the process PROVES — an ancestor session (`session`), or `--owner` on a
+  // terminal after the vault's fresh proof — never "no AGENTOP_MANAGED_ID, so the owner". A read needs no principal.
+  // Integration S0d+S1c (F5): the evidence verbs resolve the SAME principal — an unproven caller is `unattributed`, never the owner.
+  const readOnly = isEvidence
+    ? (pos[0] === 'ls' || !pos[0] || pos[0] === 'help' || pos[0] === '--help')
+    : argv[0] === 'help' || argv[0] === 'entrega' || argv[0] === 'get' || (argv[0] === 'fila' && !argv[1]?.match(/^(responder|proximo)$/))
+  const move = isEvidence ? ownerMove('evidence', pos[0]) : ownerMove(isTaskStage ? 'stage' : argv[0], flags.phase ?? pos[0])
+  const resolved = readOnly
+    ? { principal: { kind: 'unattributed' } as RequestPrincipal }
+    : await resolveCliPrincipal(env, flags.owner === 'true', { pieceKey: sub ?? '*', move }, await auth())
+  if (resolved.note) io.err(resolved.note)
+  const principal = resolved.principal
+  const actor = actorOf(principal)
+  if (isEvidence) return (await import('./evidence-cli')).runEvidenceCli(svc, pos, flags, io, actor)
   const needSub = () => { if (!sub) { io.err('--subtask <id> is required'); return false } return true }
   if (isTaskStage) {
     if (!needSub()) return 2
@@ -141,10 +162,23 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
       if (flags.batch) await svc.configure(sub!, { versionTarget: flags.batch }, actor)
       return report(await svc.merge(sub!, actor), io)
     }
+    case 'classify': {
+      // S1b — a LEADER names where to look; the server derives the category. `agentop flow classify <piece> --repo <path|remote> --head <sha>`.
+      const piece = sub ?? pos[1]
+      if (!piece || !flags.repo || !flags.head) { io.err('usage: agentop flow classify <piece> --repo <path|remote> --head <sha>'); return 2 }
+      const r = await svc.classify(piece, { repo: flags.repo, head: flags.head }, actor)
+      if (r.ok && r.classification) { io.out(JSON.stringify({ ok: true, classification: r.classification, warnings: r.warnings }, null, 2)); return 0 }
+      return report(r, io)
+    }
     case 'block': if (!needSub()) return 2; return report(await svc.block(sub!, flags.reason, flags.text ?? '', actor), io)
     case 'unblock': if (!needSub()) return 2; return report(await svc.unblock(sub!, actor, flags.detail), io)
     case 'dequeue': if (!needSub()) return 2; return report(await svc.dequeue(sub!, flags.reason, actor), io)
-    case 'approve': if (!needSub()) return 2; return report(await svc.approve(sub!, flags.phase, flags.decision, flags.note, !env.AGENTOP_MANAGED_ID), io)
+    case 'approve': {
+      if (!needSub()) return 2
+      const denied = ownerRefusal(principal, 'legacy')
+      if (denied || !isOwner(principal)) { io.err(`${denied?.code ?? 'so_o_dono'}: only the owner approves a human gate — run \`agentop flow approve … --owner\` in a terminal and confirm with the vault`); return 1 }
+      return report(await svc.approve(sub!, flags.phase, flags.decision, flags.note, true), io)
+    }
     case 'release': {
       const subs = argv.flatMap((a, i) => (a === '--subtask' && argv[i + 1] && !argv[i + 1]!.startsWith('--') ? [argv[i + 1]!] : []))
       const r = await svc.release({ version: flags.version, mergeSha: flags.mergeSha, ...(flags.repo ? { repo: flags.repo } : {}), subtaskIds: subs }, actor)

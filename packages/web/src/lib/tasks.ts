@@ -19,6 +19,7 @@ import {
 import { getDateRangeFilter } from '../hooks/useData'
 import { filingUrl } from './nativeSession'
 import { isNativeSessionId } from './sessionRoute'
+import { postWithOwnerProof, refusalText, type OwnerCall } from './ownerProof'
 import type { ChatAttachmentRef, CommentKind, CommentTarget, TaskThreadRecord, ThreadDelivery } from '@agentistics/core'
 export type { ThreadDelivery } from '@agentistics/core'
 
@@ -702,8 +703,24 @@ export interface TaskFieldPatch {
 }
 
 /** An absent field is left alone; an EMPTY STRING clears it. Same rule as the server's. */
-export const editTask = (ref: string, patch: TaskFieldPatch) =>
-  post(`/api/tasks/${encodeURIComponent(ref)}`, patch)
+export async function editTask(ref: string, patch: TaskFieldPatch): Promise<boolean> {
+  // r3 B1: the Rename sends `actor: 'you'` (the owner's own UI). `legacy` answers 200 as in 2.212.0; in `required` the
+  // server asks for the owner's proof (`<ref>|task:write`) and `postAsOwner` repeats the SAME request with the grant.
+  const res = await postAsOwner(`/api/tasks/${encodeURIComponent(ref)}`, patch, { pieceKey: ref, move: 'task:write' })
+  if (res && res.status < 400) return true
+  // A refused write is never silent: the old title must not just reappear with no word.
+  pushLocalNotification(editRefusalNotice(res, pagePt()))
+  return false
+}
+
+/** PURE. The error toast for a refused (or unanswered) task edit — the words, in the page's language. */
+export function editRefusalNotice(res: { status: number; body: Record<string, unknown> } | null, pt: boolean): { type: 'error'; title: string; message: string } {
+  return {
+    type: 'error',
+    title: pt ? 'Não foi possível salvar a alteração' : 'The change could not be saved',
+    message: res ? refusalText(res.body, pt, res.status) : pt ? 'Sem resposta do servidor.' : 'The server did not answer.',
+  }
+}
 
 /**
  * Leave a comment on the task, or — with `subtaskId` — on one of its subtasks or GROUPS. A refusal
@@ -715,25 +732,23 @@ export async function addComment(
   attachments?: readonly ChatAttachmentRef[],
   o: { threadId?: string; kind?: CommentKind } = {},
 ): Promise<{ ok: true } | { ok: false; message: string | null }> {
-  try {
-    const res = await fetch(`/api/tasks/${encodeURIComponent(ref)}/comments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        author, body,
-        // The board is the PERSON's surface — a session comments through the MCP, with its identity.
-        owner: true,
-        ...(o.threadId ? { threadId: o.threadId } : subtaskId ? { subtaskId } : {}),
-        ...(o.kind && o.kind !== 'note' ? { kind: o.kind } : {}),
-        ...(attachments && attachments.length > 0 ? { attachments } : {}),
-      }),
-    })
-    if (res.ok) return { ok: true }
-    const refused = await res.json().catch(() => null) as { message?: string } | null
-    return { ok: false, message: typeof refused?.message === 'string' ? refused.message : null }
-  } catch {
-    return { ok: false, message: null }
-  }
+  // The board is the PERSON's surface — a session comments through the MCP, with its identity. Speaking as the owner
+  // needs the owner principal (S0d.6): `postAsOwner` asks the vault's proof when the server says so.
+  const res = await postAsOwner(`/api/tasks/${encodeURIComponent(ref)}/comments`, {
+    author, body,
+    owner: true,
+    ...(o.threadId ? { threadId: o.threadId } : subtaskId ? { subtaskId } : {}),
+    ...(o.kind && o.kind !== 'note' ? { kind: o.kind } : {}),
+    ...(attachments && attachments.length > 0 ? { attachments } : {}),
+  }, { pieceKey: ref, move: 'comment:create' })
+  if (!res) return { ok: false, message: null }
+  if (res.status === 200) return { ok: true }
+  return { ok: false, message: refusalText(res.body, pagePt()) || null }
+}
+
+/** The page's language for a refusal sentence (this module has no React context). */
+const pagePt = (): boolean => {
+  try { return !(document.documentElement.lang || navigator.language || 'pt').toLowerCase().startsWith('en') } catch { return true }
 }
 
 async function threadPost<T>(ref: string, body: Record<string, unknown>, lang?: string): Promise<
@@ -754,22 +769,38 @@ async function threadPost<T>(ref: string, body: Record<string, unknown>, lang?: 
 }
 
 /** Open a topic thread on the task, or on one of its subtasks/groups. */
-export const openThread = (ref: string, title: string, subtaskId?: string | null) =>
-  threadPost<{ thread: TaskThread }>(ref, { action: 'open', title, author: 'you', ...(subtaskId ? { subtaskId } : {}) })
+export async function openThread(ref: string, title: string, subtaskId?: string | null): Promise<
+  ({ ok: true } & { thread: TaskThread }) | { ok: false; message: string | null }
+> {
+  // r3 W3b: the owner opens a topic as the person (`owner: true`): in `required` that asks the owner's proof so the opener is
+  // recorded as the owner, not `unattributed`; `legacy` is unchanged.
+  const res = await postAsOwner(`/api/tasks/${encodeURIComponent(ref)}/threads`, {
+    action: 'open', title, author: 'you', owner: true, ...(subtaskId ? { subtaskId } : {}),
+  }, { pieceKey: ref, move: 'thread:open' })
+  const out = res?.body as ({ ok?: boolean; thread?: TaskThread; message?: unknown; sentence?: unknown; error?: unknown }) | undefined
+  if (res && res.status === 200 && out?.ok && out.thread) return { ok: true, thread: out.thread }
+  return { ok: false, message: out ? refusalText(out, pagePt(), res?.status) || null : null }
+}
 
 /**
  * The person's EXPLICIT send: the text is recorded in the thread AND delivered into every
  * participant's own chat. The answer says what happened to each delivery. (An ordinary comment —
  * `addComment` with `threadId` — reaches no session.)
  */
-export const sendThread = (
+export const sendThread = async (
   ref: string, threadId: string, body: string, lang: string,
   o: { kind?: CommentKind; attachments?: readonly ChatAttachmentRef[] } = {},
-) => threadPost<{ id: string; deliveries: ThreadDelivery[] }>(ref, {
-  action: 'send', threadId, body, author: 'you',
-  ...(o.kind && o.kind !== 'note' ? { kind: o.kind } : {}),
-  ...(o.attachments && o.attachments.length > 0 ? { attachments: o.attachments } : {}),
-}, lang)
+): Promise<({ ok: true } & { id: string; deliveries: ThreadDelivery[] }) | { ok: false; message: string | null }> => {
+  // S0d.6: the send records a comment AS THE PERSON — the owner principal, asked through the vault in `required`.
+  const res = await postAsOwner(`/api/tasks/${encodeURIComponent(ref)}/threads${lang ? `?lang=${lang}` : ''}`, {
+    action: 'send', threadId, body, author: 'you',
+    ...(o.kind && o.kind !== 'note' ? { kind: o.kind } : {}),
+    ...(o.attachments && o.attachments.length > 0 ? { attachments: o.attachments } : {}),
+  }, { pieceKey: ref, move: 'thread:send' })
+  const out = res?.body as ({ ok?: boolean; message?: unknown; sentence?: unknown; id: string; deliveries: ThreadDelivery[] }) | undefined
+  if (res && res.status === 200 && out?.ok) return { ...out, ok: true }
+  return { ok: false, message: out ? refusalText(out, pagePt()) || null : null }
+}
 
 export const threadVerb = (
   ref: string, threadId: string, action: 'resolve' | 'reopen' | 'mute' | 'unmute' | 'rename',
@@ -965,11 +996,20 @@ export async function fetchNativeFiling(sessionId: string): Promise<{ taskId: st
 export const detachSession = (ref: string, detach: string) =>
   post(`/api/tasks/${encodeURIComponent(ref)}/sessions`, { detach })
 
-export const editComment = (ref: string, id: string, body: string) =>
-  post(`/api/tasks/${encodeURIComponent(ref)}/comments`, { id, body })
+/**
+ * S0d.6: a write that speaks as the OWNER (an owner comment created / edited / removed, a thread sent as the person).
+ * Sent plain first — `legacy` mode answers the browser as itself; in `required` the server asks the vault's fresh proof
+ * and the SAME request is repeated with the single-use grant for exactly this scope.
+ */
+async function postAsOwner(path: string, body: unknown, scope: { pieceKey: string; move: string }): Promise<OwnerCall | null> {
+  try { return await postWithOwnerProof(path, body, scope) } catch { return null }
+}
 
-export const removeComment = (ref: string, id: string) =>
-  post(`/api/tasks/${encodeURIComponent(ref)}/comments`, { id, remove: true })
+export const editComment = async (ref: string, id: string, body: string) =>
+  (await postAsOwner(`/api/tasks/${encodeURIComponent(ref)}/comments`, { id, body }, { pieceKey: id, move: 'comment:edit' }))?.status === 200
+
+export const removeComment = async (ref: string, id: string) =>
+  (await postAsOwner(`/api/tasks/${encodeURIComponent(ref)}/comments`, { id, remove: true }, { pieceKey: id, move: 'comment:remove' }))?.status === 200
 
 /**
  * A subtask patch, plus the one field `Partial<Subtask>` cannot express: `parentGroupId` is

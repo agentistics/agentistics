@@ -24,13 +24,14 @@ import {
 } from "./session-tokens.js";
 import { createAgentAuditSink } from "./agent-audit.js";
 import { taskCommentRequest } from "./task-comment-args.js";
-import { sessionProof } from "./session-proof.js";
+import { sessionProof, withTaskWriteProof } from "./session-proof.js";
+import { evidenceRequestOf } from "./evidence-args.js";
 import { bookTakeoverPayload } from "./book-takeover-payload.js";
 import { HARNESS_CAPABILITIES, contextReading, nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
 import { planLimitsTool } from "./plan-limits-tool.js";
 import { benchmarkObservedTool, benchmarkQueryFromArgs } from "./benchmark-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
-import { vaultStatusTool } from "./vault-tool.js";
+import { deliveryIntegrityOf, vaultStatusTool } from "./vault-tool.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
 
@@ -170,11 +171,12 @@ async function getPrefs() {
 }
 
 async function apiSend(method: string, path: string, body?: unknown) {
+  const payload = withTaskWriteProof(method, path, body, sessionProof(process.env));
   const res = await fetch(`${API}${path}`, {
     method,
-    ...(body === undefined ? {} : {
+    ...(payload === undefined ? {} : {
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     }),
   });
   if (!res.ok) {
@@ -632,11 +634,11 @@ const TOOLS: Tool[] = [
       "FLUXO.CICLO-COMPLETO — the minute `tick` also moves a piece in revisao_lider or pr_merge to ci BY ITSELF once its PR is merged (found from the piece's PR number, branch, the PR containing the sha QA approved, or its author worktree's branch; the merge gates `delecoes` + `mergeado` still run, and a refusal leaves the piece where it is with the reason), publishes ci pieces from the FIRST tag that contains the merge, and reminds the LIVE leader of the task (never the owner) of a piece waiting on them for 30 min, then every 2 h, at most 3 times. `get` with a `subtaskId` returns `tickReason`: why the tick has not moved it. `reconcile` (no `subtaskId`; `apply` true to write) is the one-shot BACKFILL: every piece in revisao_lider/pr_merge/ci matched to its merged PR and the first release tag containing it — a report of what moves and what cannot be proven, with the reason. " +
       "`tick` also enables the mandatory owner-request/placement flows through the official engine switches and reads canonical pedidos; after 10 minutes without any attended link it wakes the current live task leader at most once per pedido, across handoffs and restarts, and never asks the owner. Complete predispatch, a running/closed delivery or a deliberate hold/dequeue counts as attended; failed sends retry after 30 minutes. " +
       "Queue actions: `dequeue` withdraws a queued piece with a required free-text `reason` (task leader or owner only), keeps the draft/history, and refuses dispatch until explicitly restaged; `tick` reconciles stale queued pieces against board review/done/abandoned and records a comment. Vacancy counts live backend processes; lost/exited/closed sessions reserve no slots. " +
-      "FLUXO.ENTREGA-DSL — read or move a DELIVERY (one subtask) through its fixed phases: fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado, plus bloqueado (from any phase, back to the stored origin only). Any transition outside that table is REFUSED (422 `fase_pulada`) with a sentence naming what is missing — executando → revisao_lider, ajuste → revisao_lider and every other skip included. The gates each edge needs are run BY THE SERVER from evidence (predispatch, vaga, salvo = sha on origin per ls-remote, qa-modelo = QA model ≠ author model from the registry and never Sonnet over Sonnet, cabeca = the pushed branch is still at the sha QA tested, delecoes = no file deleted outright by the PR, mergeado = gh says the PR is MERGED, the merge commit is on origin/main and the PR head is the sha QA approved — the merge sha is READ FROM THE PR, never from you, release = the batch's version tag exists AND the release.yml run that produced it is green, read in the repository the release recorded); salvo needs every check run on the pushed head to have concluded green (pending or absent refuse); you never pass proof. `action`: `get` (default; omit `subtaskId` to list every delivery) | `phase` (`to` + what that edge reads: `verdict` APROVADO/REPROVADO + `findings` from qa, `reviewedSha` = the sha QA approved for revisao_lider → pr_merge, `detail` for a request for change or a failure reason) | `gate` (`name`: run ONE gate and record its evidence) | `block` (`reason` one of dependencia, pedido_de_bloqueio, limite, maquina, externo, fora_das_autorizacoes; `text`) | `unblock` (`detail`; the leader of the task or the owner — an owner-decision block only the owner) | `step` (`step` 1..9: the step of the current phase, for the Live %. The Live already DERIVES the step from real signals — a session open, a file edit, a test run, a commit, the gates, the PR — so report only when you know better; the card shows the larger of the two and says which it is. Works for a legacy piece with no delivery record too: only the board's `step` event is written, nothing is adopted into the flow) | `configure` (the LEADER of the task or the owner only; `patch`: versionTarget, humanGates [phases needing the owner's approval — skipped and recorded as 'pulado: modo autônomo' while autonomous mode is on], leaderSessionId, pr, tag, allowDeletions {paths, reason}; the QA and author sessions are never settable — the host records them from the sessions it opened and the registry) | `approve` (`phase`, `decision` approve|reject, `note`: answers a human gate the owner was ASKED about; a session identity is deliberately not sent, the owner answers through this same door as the Live card button and `agentop flow approve`) | `stage-run` (predispatch + vaga gates, then start the staged session and move to executando) | `merge` (delecoes gate, squash-merge the PR, move to ci; a failure goes back to revisao_lider) | `release` (the LEADER of the task or the owner DECLARES what a release contains: `version` x.y.z, `mergeSha` = the commit on main carrying it (information only; 40 characters, or a short sha the server resolves), optional `repo` = owner/name (default agentistics/agentistics), `subtaskIds` = every piece in it; no `subtaskId`. Each piece gets its record (a legacy one is adopted), versionTarget/mergeSha/tag/repo, goes to ci and then to publicado as soon as the tag `v<version>` exists and the release.yml run that produced it is green — read by the server from the TAG, not from the sha — with the release's own publish time; a declared piece is never sent back to revisao_lider by the tick (a red tag run keeps it in ci and wakes the leader once); done/abandoned/blocked/unknown/other-task pieces refuse the whole batch, which is written in ONE store write; a second run changes nothing). In autonomous mode nothing here ever asks or waits for the owner.",
+      "FLUXO.ENTREGA-DSL — read or move a DELIVERY (one subtask) through its fixed phases: fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado, plus bloqueado (from any phase, back to the stored origin only). Any transition outside that table is REFUSED (422 `fase_pulada`) with a sentence naming what is missing — executando → revisao_lider, ajuste → revisao_lider and every other skip included. The gates each edge needs are run BY THE SERVER from evidence (predispatch, vaga, salvo = sha on origin per ls-remote, qa-modelo = QA model ≠ author model from the registry and never Sonnet over Sonnet, cabeca = the pushed branch is still at the sha QA tested, delecoes = no file deleted outright by the PR, mergeado = gh says the PR is MERGED, the merge commit is on origin/main and the PR head is the sha QA approved — the merge sha is READ FROM THE PR, never from you, release = the batch's version tag exists AND the release.yml run that produced it is green, read in the repository the release recorded); salvo needs every check run on the pushed head to have concluded green (pending or absent refuse); you never pass proof. `action`: `get` (default; omit `subtaskId` to list every delivery) | `phase` (`to` + what that edge reads: `verdict` APROVADO/REPROVADO + `findings` from qa, `reviewedSha` = the sha QA approved for revisao_lider → pr_merge, `detail` for a request for change or a failure reason) | `gate` (`name`: run ONE gate and record its evidence) | `block` (`reason` one of dependencia, pedido_de_bloqueio, limite, maquina, externo, fora_das_autorizacoes; `text`) | `unblock` (`detail`; the leader of the task or the owner — an owner-decision block only the owner) | `step` (`step` 1..9: the step of the current phase, for the Live %. The Live already DERIVES the step from real signals — a session open, a file edit, a test run, a commit, the gates, the PR — so report only when you know better; the card shows the larger of the two and says which it is. Works for a legacy piece with no delivery record too: only the board's `step` event is written, nothing is adopted into the flow) | `configure` (the LEADER of the task or the owner only; `patch`: versionTarget, humanGates [phases needing the owner's approval — skipped and recorded as 'pulado: modo autônomo' while autonomous mode is on], leaderSessionId, pr, tag, allowDeletions {paths, reason}; the QA and author sessions are never settable — the host records them from the sessions it opened and the registry) | `approve` (`phase`, `decision` approve|reject, `note`: answers a human gate the owner was ASKED about; a session identity is deliberately not sent, the owner answers through this same door as the Live card button and `agentop flow approve`) | `stage-run` (predispatch + vaga gates, then start the staged session and move to executando) | `merge` (delecoes gate, squash-merge the PR, move to ci; a failure goes back to revisao_lider) | `release` (the LEADER of the task or the owner DECLARES what a release contains: `version` x.y.z, `mergeSha` = the commit on main carrying it (information only; 40 characters, or a short sha the server resolves), optional `repo` = owner/name (default agentistics/agentistics), `subtaskIds` = every piece in it; no `subtaskId`. Each piece gets its record (a legacy one is adopted), versionTarget/mergeSha/tag/repo, goes to ci and then to publicado as soon as the tag `v<version>` exists and the release.yml run that produced it is green — read by the server from the TAG, not from the sha — with the release's own publish time; a declared piece is never sent back to revisao_lider by the tick (a red tag run keeps it in ci and wakes the leader once); done/abandoned/blocked/unknown/other-task pieces refuse the whole batch, which is written in ONE store write; a second run changes nothing). | `classify` (the filed LEADER of the task or the owner only; a worker is refused: `repo` = a checkout path or a remote one of the piece's checkouts uses, `head` = a pushed commit. You name WHERE to look, never the category: the server re-runs the classification there and records it on the piece and its checkpoint). In autonomous mode nothing here ever asks or waits for the owner.",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "dequeue", "tick", "step", "configure", "approve", "stage-run", "merge", "release", "reconcile", "antigas"] },
+        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "dequeue", "tick", "step", "configure", "approve", "stage-run", "merge", "release", "reconcile", "antigas", "classify"] },
         antigasAction: { type: "string", enum: ["publish", "archive", "conclude"], description: "antigas: 'conclude' (the screen's one click) completes the pieces with a session and archives the ones without; add `preview` to read the counts without changing anything. 'publish' marks the old record-less pieces published (optional `version`), 'archive' abandons them with an optional `reason`. Targets: `subtaskIds`, or `all` = every piece the reconcile classifies as antiga. Never deletes; a leader or the owner" },
         preview: { type: "boolean", description: "antigas conclude: only count what the click would do (concluded vs archived); changes nothing" },
         all: { type: "boolean", description: "antigas: act on every old piece in the group \"Antigas sem registro\" (answers from the board at once; a piece the last reconcile proved is left out)" },
@@ -645,12 +647,13 @@ const TOOLS: Tool[] = [
         subtaskId: { type: "string" },
         version: { type: "string", description: "release: the version the pieces shipped in, x.y.z" },
         mergeSha: { type: "string", description: "release: the commit on main that carries the release (information only: stored on the record; a short sha is resolved to 40 characters or refused). The publication evidence is the version tag's own green release.yml run" },
-        repo: { type: "string", description: "release: the repository owner/name the release belongs to (default agentistics/agentistics); recorded on every piece, the release gate reads it there" },
+        repo: { type: "string", description: "classify: the repository (path or remote) to look in. release: the repository owner/name the release belongs to (default agentistics/agentistics); recorded on every piece, the release gate reads it there" },
         subtaskIds: { type: "array", items: { type: "string" }, description: "release: every subtask in the release" },
         to: { type: "string", enum: ["executando", "qa", "ajuste", "revisao_lider", "pr_merge", "ci", "publicado"] },
         verdict: { type: "string", enum: ["APROVADO", "REPROVADO"] },
         findings: { type: "string" },
         reviewedSha: { type: "string" },
+        head: { type: "string", description: "classify: the commit (7–40 hex) the LEADER names as where to look; it must exist and be reachable from a remote branch. The server derives the category from its diff — you never supply it" },
         detail: { type: "string" },
         name: { type: "string", enum: ["predispatch", "vaga", "salvo", "qa-modelo", "cabeca", "delecoes", "mergeado", "release"] },
         phase: { type: "string", description: "approve: the phase whose human gate is answered" },
@@ -683,6 +686,32 @@ const TOOLS: Tool[] = [
         pedidoId: { type: "string" },
       },
       required: ["subtaskId"],
+    },
+  },
+  {
+    name: "agentistics_task_evidence",
+    description:
+      "ENTREGA.GARANTIDA — attach, list or remove the EVIDENCE a piece needs before it can move to review (the server decides what is enough; you never supply a hash, a time or a commit — it computes them). " +
+      "`ref` = the TASK id; `subtaskId` = the piece (omit for a task-level piece). `action`: `add` (default) | `list` | `remove`. " +
+      "`add` needs `kind` = screenshot | api-capture | test-log | report | probe and ONE payload: `filePath` (a file in your worktree, uploaded — 8 MB cap), `fileId` (a TaskFile of this task), `repoRef` {repo, sha, path} (a `report` pushed to a remote branch) or `probe` (http | bundle | cli | structural; closed set, no extra fields). " +
+      "Validators: screenshot = real PNG/JPEG/WebP header ≥ 320×200 and ≥ 4 KB; api-capture = UTF-8 ≤ 1 MB with a request/status line and a body; test-log = runner summary with 0 failures and ≥ 1 pass (or an `agentop run` footer `exit 0`); report = markdown ≥ 300 B with a `Verdict:`/`Veredito:`/`Result:`/`Resultado:` line. " +
+      "The same bytes can back evidence on ONE piece and ONE revision, forever (`evidence_reused`). Evidence is bound to the piece's verified HEAD: a new commit or an uncommitted change makes it stale — recapture. " +
+      "`list` returns the items and the binding (HEAD, tree clean) they are judged against. `remove` (`evidenceId`) is refused (409 `evidence_in_use`) when a checkpoint relies on the item. Only the piece's own session, the task leader or the owner may attach.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "The task id the piece belongs to." },
+        action: { type: "string", enum: ["add", "list", "remove"] },
+        subtaskId: { type: "string", description: "The piece (a subtask of the task). Omit for a task-level piece." },
+        kind: { type: "string", enum: ["screenshot", "api-capture", "test-log", "report", "probe"] },
+        filePath: { type: "string", description: "A file in your worktree to upload (max 8 MB)." },
+        name: { type: "string", description: "Optional display name for an uploaded file." },
+        fileId: { type: "string", description: "An existing TaskFile of this task." },
+        repoRef: { type: "object", description: "report only: { repo: path|remote, sha: 40-hex, path } — the file must exist at that commit, which must be on a remote branch.", properties: { repo: { type: "string" }, sha: { type: "string" }, path: { type: "string" } } },
+        probe: { type: "object", description: "probe only: { kind: http|bundle|cli|structural, … } — the closed shapes of the spec; no extra fields." },
+        evidenceId: { type: "string", description: "remove: the evidence item id (ev-…)." },
+      },
+      required: ["ref"],
     },
   },
   {
@@ -889,7 +918,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_benchmark_observed",
     description:
-      "The Benchmark's observed history, read-only and identical to the Benchmark page: cost per delivery, time to publish, active time, deliveries per week, coordination range, QA rejection and rounds, escaped defects and wasted cost, each with n, a 95% interval, the named gaps that kept records out and its origin. Observed and biased, never a verdict; a null value is not measured, not zero. Optional from/to (epoch ms or ISO date) restrict the period by publication/reference date.",
+      "The Benchmark's observed history, read-only and identical to the Benchmark page: cost per delivery, time to publish, active time, deliveries per week, coordination range, QA rejection and rounds, escaped defects and wasted cost, each with n, a 95% interval, the named gaps that kept records out and its origin. Also `history`: per task (with subtasks) and per sessions-per-piece bucket — cost (tokens × price), wall time, active time, sessions, QA rounds, rework, size by lines — with coverage. Observed and biased, never a verdict; a null value is not measured, not zero. Optional from/to (epoch ms or ISO date) restrict the period by publication/reference date.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1479,8 +1508,17 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         if (action !== "tick" && (typeof a.subtaskId !== "string" || !a.subtaskId)) throw new Error("subtaskId is required");
         const { subtaskId: _s, action: _a, ...rest } = a;
         const subtaskId = action === "tick" ? "tick" : a.subtaskId;
-        // `approve` is the OWNER's answer to a human gate: no session identity travels with it (the server reads "no session proof" as the owner).
-        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(subtaskId)}`, { ...rest, action, ...(action === "approve" ? {} : { session: sessionProof(process.env) }) });
+        // Every call carries the session proof. `approve` is the OWNER's answer to a human gate and a session is never
+        // the owner: the server refuses it (`so_o_dono`); the owner answers on the Live card or `agentop flow approve --owner`.
+        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(subtaskId)}`, { ...rest, action, session: sessionProof(process.env) });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_evidence": {
+        const req = evidenceRequestOf((args ?? {}) as Record<string, unknown>, sessionProof(process.env));
+        // Three literal calls (one per verb) so the route table and the lint see exactly what this tool reaches.
+        const body = req.action === "list" ? await apiGet(`/api/tasks/${encodeURIComponent(req.ref)}/evidence${req.query}`)
+          : req.action === "remove" ? await apiSend("DELETE", `/api/tasks/${encodeURIComponent(req.ref)}/evidence`, req.body)
+          : await apiSend("POST", `/api/tasks/${encodeURIComponent(req.ref)}/evidence`, req.body);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_stage": {
@@ -1958,7 +1996,9 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const res = await fetch(`${API}/api/vault`);
         const body = await res.json().catch(() => ({})) as any;
         if (!res.ok && !(body && typeof body === "object" && body.view)) throw new Error(`GET /api/vault → HTTP ${res.status}`);
-        return text(vaultStatusTool(body));
+        // S0d: the delivery owner-proof mode and the guard files' seal ride along (absent when the server cannot say).
+        const delivery = deliveryIntegrityOf(await apiGet("/api/deliveries/integrity").catch(() => null));
+        return text({ ...vaultStatusTool(body), ...(delivery ? { delivery } : {}) });
       }
 
       case "agentistics_tag_detail": {

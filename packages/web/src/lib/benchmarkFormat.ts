@@ -110,8 +110,8 @@ export function gapText(g: Gap, lang: Lang): string {
 }
 
 const loc = (lang: Lang) => (lang === 'pt' ? 'pt-BR' : 'en-US')
-export const nf = (v: number, lang: Lang, digits = 1): string =>
-  v.toLocaleString(loc(lang), { minimumFractionDigits: 0, maximumFractionDigits: digits })
+export const nf = (v: number, lang: Lang, digits = 1, fixed = false): string =>
+  v.toLocaleString(loc(lang), { minimumFractionDigits: fixed ? digits : 0, maximumFractionDigits: digits })
 
 function duration(ms: number, lang: Lang): string {
   const h = ms / 3_600_000
@@ -123,8 +123,9 @@ function duration(ms: number, lang: Lang): string {
 export function fmtValue(key: MetricKey, v: number, lang: Lang, money?: Money): string {
   switch (UNIT[key]) {
     case 'usd':
-      if (money?.currency === 'BRL' && money.brlRate && money.brlRate > 0) return `R$${lang === 'pt' ? ' ' : ''}${nf(v * money.brlRate, lang, 2)}`
-      return lang === 'pt' ? `US$ ${nf(v, lang, 2)}` : `$${nf(v, lang, 2)}`
+      // money always keeps its two decimals (R$ 3.802,90, never R$ 3.802,9)
+      if (money?.currency === 'BRL' && money.brlRate && money.brlRate > 0) return `R$${lang === 'pt' ? ' ' : ''}${nf(v * money.brlRate, lang, 2, true)}`
+      return lang === 'pt' ? `US$ ${nf(v, lang, 2, true)}` : `$${nf(v, lang, 2, true)}`
     case 'duration': return duration(v, lang)
     case 'percent': return `${nf(v * 100, lang, 0)}%`
     case 'rounds': return `${nf(v, lang, 1)} ${lang === 'pt' ? (v === 1 ? 'rodada' : 'rodadas') : (v === 1 ? 'round' : 'rounds')}`

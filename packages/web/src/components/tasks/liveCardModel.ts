@@ -328,7 +328,8 @@ export const BLOCK_WORD: Record<LiveBlock['reason'], { pt: string; en: string }>
   maquina: { pt: 'máquina sem recursos', en: 'machine out of resources' },
   externo: { pt: 'serviço externo (CI / infra)', en: 'external service (CI / infra)' },
   fora_das_autorizacoes: { pt: 'fora das autorizações — o líder adiou (caminho seguro)', en: 'outside the authorisations — deferred by the leader (safe path)' },
-  decisao_do_dono: { pt: 'decisão do dono', en: 'owner decision' },
+  // The Live is the owner's own screen: the reason is said to the person it waits on ("waiting on you"), not about them.
+  decisao_do_dono: { pt: 'aguardando você', en: 'waiting on you' },
 }
 
 /**

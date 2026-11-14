@@ -5,6 +5,7 @@
  */
 import { createDeliveryService, type DeliveryBoard, type DeliveryDeps, type DeliveryNotify, type DeliveryService } from './service'
 import { defaultGateFacts } from './gates'
+import { execGit } from './classify-host'
 import { createDeliveryStore } from './store'
 import { PHASE_STATUS, type DeliveryRecord, type Phase } from './machine'
 import { boardReviewTargets } from './review-board'
@@ -35,10 +36,11 @@ export function defaultDeliveryBoard(): DeliveryBoard {
   return {
     async setPhaseStatus(subtaskId, phase) {
       const m = await web()
-      const { stageOfStatus } = await import('../sessions/task-live')
+      const { storedStageOf } = await import('@agentistics/core')
       const want = PHASE_STATUS[phase]
       const statuses = await m.listStatuses()
-      let id = statuses.find(s => s.id === want.id)?.id ?? statuses.find(s => stageOfStatus(s.id, s.label) === LIVE_STAGE[phase])?.id
+      // The phase's status is found by its STORED stage (S0c) — a relabelled status is never mistaken for another stage.
+      let id = statuses.find(s => s.id === want.id)?.id ?? statuses.find(s => storedStageOf(s) === LIVE_STAGE[phase])?.id
       if (!id) {
         const made = await m.createStatus({ label: want.label, color: want.color })
         if (!made.ok) return { ok: false, message: made.message }
@@ -283,8 +285,18 @@ let cached: DeliveryService | null = null
 export function deliveryService(overrides: Partial<DeliveryDeps> = {}): DeliveryService {
   if (cached && Object.keys(overrides).length === 0) return cached
   const store = overrides.store ?? createDeliveryStore()
+  const facts = overrides.facts ?? defaultGateFacts()
   const svc = createDeliveryService({
-    store, facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
+    store, facts, board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
+    // S1b: the classification host — the registered sessions' checkouts + a GIT_*-free git. Without it every real door
+    // (CLI, HTTP, MCP) answered 501 `classify_unavailable`.
+    classify: { sessions: () => facts.sessions(), git: execGit },
+    // S1c: evidence uploads become TaskFiles of the piece's task (kind `evidence`); a `fileId` may only name one of THAT task.
+    evidenceFiles: {
+      read: async fileId => (await import('../sessions/task-web')).fetchFileWithTask(fileId),
+      create: async o => (await import('../sessions/task-web')).attachFile(o.taskId, { name: o.name, bytes: o.bytes, kind: o.kind, author: o.author }),
+      remove: async fileId => (await import('../sessions/task-web')).removeFile(fileId),
+    },
     autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, accountName: accountNameOf, now: () => Date.now(),
     reviewPieces: boardReviewPieces, closeLegacy: closeLegacyPiece, hasSession: pieceHasSession, hasSessions: piecesWithSession,
     oldPieces: async () => (await import('../sessions/task-web')).liveAntigaPieces(),

@@ -30,6 +30,91 @@ export interface TaskStatusDef {
   protected: boolean
   /** Left-to-right / column order. Lower sorts first; ties break on `id` (`sortTaskStatuses`). */
   order: number
+  /**
+   * The Live stage this status names — STORED, classified once (`classifyStatusStage`) and never re-derived from
+   * the label (ENTREGA.GARANTIDA §2.2): a relabel cannot reclassify a card. `'none'` is an explicit "names no
+   * stage". Optional in the TYPE only because a book written by an older binary drops it; every loader
+   * (`planStatusStages`) fills it, and consumers read it through `storedStageOf`.
+   */
+  stage?: StatusStage
+}
+
+// ---------------------------------------------------------------------------------- stage
+
+/** The Live's stage vocabulary (moved here from `task-live.ts`, which re-exports it; `no-leader` is a display state, not a stage). */
+export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'completed' | 'published'
+export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'completed', 'published']
+/** What a status may store: a Live stage, or `none` when it names none. */
+export type StatusStage = LiveStage | 'none'
+export const STATUS_STAGES: readonly StatusStage[] = [...LIVE_STAGES, 'none']
+
+export function isStatusStage(v: unknown): v is StatusStage {
+  return typeof v === 'string' && (STATUS_STAGES as readonly string[]).includes(v)
+}
+
+/**
+ * PURE: the stage a status NAMES, by id then label; null when it names none of them. This is the CLASSIFIER — it
+ * runs once when a status is created or backfilled. Nothing downstream calls it on a stored status.
+ */
+export function stageOfStatus(status: string, label?: string): LiveStage | null {
+  switch (status) {
+    case 'todo': return 'queue'
+    case 'in_progress': return 'running'
+    case 'blocked': return 'blocked'
+    case 'in_review': return 'leader'
+    case 'done': return 'published'
+    default: break
+  }
+  const t = `${status.toLowerCase()} ${(label ?? '').toLowerCase()}`
+  if (/\bqa\b|\btest/.test(t)) return 'qa'
+  if (/ajust|adjust|\bfix|rework|retrab/.test(t)) return 'adjust'
+  if (/review|revis/.test(t)) return 'leader'
+  if (/\bci\b|publicando|publishing/.test(t)) return 'ci'
+  if (/merge|\bpr\b|pull.?request/.test(t)) return 'merge'
+  if (/publish|publicad|releas|shipped/.test(t)) return 'published'
+  if (/progress|andamento|doing|executando|running/.test(t)) return 'running'
+  if (/todo|backlog|queue|fila/.test(t)) return 'queue'
+  return null
+}
+
+/** The stage to STORE for a status that has none: the classifier's answer, or the explicit `none`. */
+export function classifyStatusStage(def: Pick<TaskStatusDef, 'id' | 'label'>): StatusStage {
+  return stageOfStatus(def.id, def.label) ?? 'none'
+}
+
+/** The stored stage as a Live stage; `null` for `none` AND for a status that has not been loaded through `planStatusStages`. */
+export function storedStageOf(def: Pick<TaskStatusDef, 'stage'> | undefined | null): LiveStage | null {
+  const s = def?.stage
+  return s !== undefined && s !== 'none' && isStatusStage(s) ? s : null
+}
+
+/**
+ * PURE load-time reconciliation. A status whose `stage` is missing or invalid takes, in order: the mirror's entry
+ * (`guarantees.json` `statusStages`, which an older binary never opens) — never the label — and, absent from both
+ * (a status an older binary created after the migration), a single classification by `stageOfStatus`. A status
+ * that already has a valid stage is returned untouched, whatever its label now says.
+ */
+export function planStatusStages<S extends TaskStatusDef>(
+  statuses: readonly S[], mirror: Readonly<Record<string, string>> | undefined,
+): { statuses: S[]; restored: string[]; classified: string[] } {
+  const restored: string[] = []; const classified: string[] = []
+  const out = statuses.map(s => {
+    if (isStatusStage(s.stage)) return s
+    const m = mirror?.[s.id]
+    if (isStatusStage(m)) { restored.push(s.id); return { ...s, stage: m } }
+    classified.push(s.id)
+    return { ...s, stage: classifyStatusStage(s) }
+  })
+  return { statuses: out, restored, classified }
+}
+
+/** May this status take a different stage? Never while anything points at it (`status_stage_in_use`, 422). */
+export function canChangeStatusStage(o: { current: StatusStage | undefined; next: string; usageCount: number }):
+  { ok: true } | { ok: false; reason: 'bad_stage' } | { ok: false; reason: 'status_stage_in_use'; usageCount: number } {
+  if (!isStatusStage(o.next)) return { ok: false, reason: 'bad_stage' }
+  if (o.next === o.current) return { ok: true }
+  if (o.usageCount > 0) return { ok: false, reason: 'status_stage_in_use', usageCount: o.usageCount }
+  return { ok: true }
 }
 
 /**
@@ -58,11 +143,11 @@ export function isProtectedStatusId(id: string): id is ProtectedStatusId {
  * CSS variables, and a status's colour is a stored fact a user can repaint, not a design token.
  */
 export const DEFAULT_TASK_STATUSES: readonly TaskStatusDef[] = [
-  { id: 'todo', label: 'To do', color: '#3b82f6', protected: true, order: 0 },
-  { id: 'in_progress', label: 'In progress', color: '#e8703a', protected: true, order: 1 },
-  { id: 'blocked', label: 'Blocked', color: '#ef4444', protected: true, order: 2 },
-  { id: 'in_review', label: 'In review', color: '#8b5cf6', protected: false, order: 3 },
-  { id: 'done', label: 'Done', color: '#22c55e', protected: true, order: 4 },
+  { id: 'todo', label: 'To do', color: '#3b82f6', protected: true, order: 0, stage: 'queue' },
+  { id: 'in_progress', label: 'In progress', color: '#e8703a', protected: true, order: 1, stage: 'running' },
+  { id: 'blocked', label: 'Blocked', color: '#ef4444', protected: true, order: 2, stage: 'blocked' },
+  { id: 'in_review', label: 'In review', color: '#8b5cf6', protected: false, order: 3, stage: 'leader' },
+  { id: 'done', label: 'Done', color: '#22c55e', protected: true, order: 4, stage: 'published' },
 ]
 
 /**
@@ -132,12 +217,14 @@ export function planStatusMigration(o: {
     if (!o.usedStatusIds.includes(id)) continue // only seed what is ACTUALLY in use
     seenExtra.add(id)
     const hint = LEGACY_STATUS_HINTS[id]
+    const label = hint?.label ?? id
     extra.push({
       id,
-      label: hint?.label ?? id,
+      label,
       color: hint?.color ?? '#94a3b8',
       protected: false,
       order: order++,
+      stage: classifyStatusStage({ id, label }),
     })
   }
   return [...seeded, ...extra]
