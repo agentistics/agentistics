@@ -578,6 +578,47 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     }
   })
 
+  test('R5: the pt size CELL reads "P" for S and "G" for L (experiment rows and history rows); in en it stays S / L', () => {
+    const ptX = render('pt', observed, { ...experimentsOf(exp), initialSelected: 'exp-a' })
+    expect(ptX).toContain('data-l="Tamanho">P</td>')
+    expect(ptX).toContain('data-l="Tamanho">G</td>')
+    expect(ptX).not.toContain('data-l="Tamanho">S</td>')
+    const enX = render('en', observed, { ...experimentsOf(exp), initialSelected: 'exp-a' })
+    expect(enX).toContain('data-l="Size">S</td>')
+    expect(enX).toContain('data-l="Size">L</td>')
+    const mkT = (id: string, size: 'S' | 'L') => ({ ...history.tasks[0]!, id, title: `T-${id}`, size })
+    const h2 = { ...history, tasks: [mkT('a', 'S'), mkT('b', 'L')] }
+    const ptH = render('pt', { ...observed, history: h2 } as unknown as Observed)
+    expect(ptH).toContain('data-l="Tamanho">P</td>')
+    expect(ptH).toContain('data-l="Tamanho">G</td>')
+    expect(ptH).not.toContain('data-l="Tamanho">S</td>')
+  })
+
+  test('R6: unmeasured "Por tarefa" has NO search field (the prototype has only the size filters)', () => {
+    for (const lang of ['pt', 'en'] as const) {
+      const h = render(lang, { ...observed, history } as unknown as Observed, { initialSelected: 'harnesses' })
+      const tasks = h.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!
+      expect(tasks).not.toContain('type="search"')
+      expect(tasks).not.toContain(lang === 'pt' ? 'Filtrar tarefa' : 'Filter task')
+      // the measured state still has it
+      const m = render(lang, { ...observed, history } as unknown as Observed)
+      expect(m.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!).toContain('type="search"')
+    }
+  })
+
+  test('R7: the unmeasured footer is exactly the prototype line, ending in "para ver o motivo."', () => {
+    const exact = {
+      pt: 'Cada coluna mostra os dois lados: &quot;um → outro&quot;. Clique na linha para ver o motivo.</div>',
+      en: 'Each column shows both sides: &quot;one → other&quot;. Click a row for the reason.</div>',
+    }
+    for (const lang of ['pt', 'en'] as const) {
+      const h = render(lang, { ...observed, history } as unknown as Observed, { initialSelected: 'harnesses' })
+      const tasks = h.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!
+      expect(tasks).toContain(exact[lang])
+      expect(tasks).not.toContain(lang === 'pt' ? 'e as subtarefas' : 'and its subtasks')
+    }
+  })
+
   test('the hero of an unmeasured card has no disclosure at all, even on the plan basis', () => {
     for (const lang of ['pt', 'en'] as const) for (const id of ['harnesses', 'models']) {
       const h = render(lang, { ...observed, history } as unknown as Observed, { initialSelected: id, costBasis: 'plan' })
