@@ -94,7 +94,9 @@ export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: {
   const pt = lang === 'pt'
   const heads = pt ? ['Sessões', 'Tarefas', 'Custo mediano', 'Tempo mediano', 'Defeitos escapados', 'Aceitas de primeira', 'Não reabertas']
     : ['Sessions', 'Tasks', 'Median cost', 'Median time', 'Escaped defects', 'Accepted first try', 'Not reopened']
-  const noData = <span style={muted}>— {pt ? 'sem dados' : 'no data'}</span>
+  // the prototype's short labels for the stacked (phone) facts; the desktop heads stay whole
+  const sl = pt ? ['', 'Tarefas', 'Custo', 'Tempo', 'Defeitos', 'De primeira', 'Não reabertas'] : ['', 'Tasks', 'Cost', 'Time', 'Defects', 'First try', 'Not reopened']
+  const noData = <span className="bm-nw" style={muted}>— {pt ? 'sem dados' : 'no data'}</span>
   const nw = (x: string) => <span className="bm-nw">{x}</span>
   const rate = (n: number | null) => n === null ? noData : <div style={{ maxWidth: 150 }}>{nw(`${nf(n * 100, lang, 0)}%`)}<Bar value={n * 100} tone="rate" mark={false} /></div>
   return <section style={card} data-testid="benchmark-buckets" aria-label={pt ? 'Por número de sessões' : 'By number of sessions'}>
@@ -104,11 +106,11 @@ export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: {
       : <div className="bm-buckets">
         {heads.map(h => <div key={h} className="bm-h">{h}</div>)}
         {buckets.map(b => <React.Fragment key={b.label}>
-          <div className="bm-k">{b.label}</div><div data-l={heads[1]}>{nw(nf(b.tasks, lang, 0))}</div>
-          <div data-l={heads[2]}>{b.costMedianUSD === null ? noData : nw(moneyText(b.costMedianUSD, lang, money))}</div>
-          <div data-l={heads[3]}>{b.wallMedianMs === null ? noData : nw(durationText(b.wallMedianMs, lang))}</div>
-          <div data-l={heads[4]}>{b.escapedDefects === null ? noData : nw(nf(b.escapedDefects, lang, 1))}</div>
-          <div data-l={heads[5]}>{rate(b.firstTryRate)}</div><div data-l={heads[6]}>{rate(b.notReopenedRate)}</div>
+          <div className="bm-k">{b.label}</div><div data-l={sl[1]}>{nw(nf(b.tasks, lang, 0))}</div>
+          <div data-l={sl[2]}>{b.costMedianUSD === null ? noData : nw(moneyText(b.costMedianUSD, lang, money))}</div>
+          <div data-l={sl[3]}>{b.wallMedianMs === null ? noData : nw(durationText(b.wallMedianMs, lang))}</div>
+          <div data-l={sl[4]}>{b.escapedDefects === null ? noData : nw(nf(b.escapedDefects, lang, 1))}</div>
+          <div data-l={sl[5]}>{rate(b.firstTryRate)}</div><div data-l={sl[6]}>{rate(b.notReopenedRate)}</div>
         </React.Fragment>)}
       </div>}
   </section>
