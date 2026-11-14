@@ -52,6 +52,7 @@ describe('sha collector cleans the record like buildLive', () => {
   test('cleanDeliveryRecord: dequeued or stale fila on a closed piece is no record', () => {
     expect(cleanDeliveryRecord({ phase: 'pr_merge', dequeued: true } as { phase: string; dequeued?: boolean }, 'in_review')).toBeUndefined()
     expect(cleanDeliveryRecord({ phase: 'fila' } as { phase: string; dequeued?: boolean }, 'done')).toBeUndefined()
+    expect(cleanDeliveryRecord({ phase: 'fila' } as { phase: string; dequeued?: boolean }, 'abandoned')).toBeUndefined()
     expect(cleanDeliveryRecord({ phase: 'fila' } as { phase: string; dequeued?: boolean }, 'in_progress')?.phase).toBe('fila')
     expect(cleanDeliveryRecord(undefined, 'done')).toBeUndefined()
   })

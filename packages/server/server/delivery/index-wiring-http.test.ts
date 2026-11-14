@@ -56,11 +56,14 @@ async function bootOnce(mode: 'legacy' | 'required', forcedPort?: number): Promi
     if (proc.exitCode !== null) {
       await Bun.sleep(50)
       if (proc.exitCode === EX_TEMPFAIL) { rmSync(root, { recursive: true, force: true }); return { collision: errTail } }
+      rmSync(root, { recursive: true, force: true })
       throw new Error(`server (${mode}) exited early (code ${proc.exitCode}); stderr tail:\n${errTail}`)
     }
     await Bun.sleep(200)
   }
   proc.kill()
+  await proc.exited
+  rmSync(root, { recursive: true, force: true })
   throw new Error(`server (${mode}) did not come up in 40 s; stderr tail:\n${errTail}`)
 }
 
