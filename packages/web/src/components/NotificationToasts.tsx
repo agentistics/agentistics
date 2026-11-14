@@ -69,7 +69,7 @@ export function NotificationToasts({ lang }: Props) {
     if (quiet) setQueue(q => enqueueToasts(q, q.items, Date.now(), true))
   }, [quiet])
   const [leaving, setLeaving] = useState<Set<string>>(new Set())
-  const seen = useRef<Map<string, NotificationType>>(new Map())
+  const seen = useRef<Map<string, { type: NotificationType; ts: number }>>(new Map())
   const initialized = useRef(false)
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const autoTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -100,16 +100,20 @@ export function NotificationToasts({ lang }: Props) {
     // replay historical notifications as toasts on mount.
     if (!initialized.current) {
       initialized.current = true
-      for (const n of notes) seen.current.set(n.id, n.type)
+      for (const n of notes) seen.current.set(n.id, { type: n.type, ts: n.ts })
       return
     }
     const incoming: AppNotification[] = []
     for (const n of notes) {
-      const previousType = seen.current.get(n.id)
-      seen.current.set(n.id, n.type)
+      const previous = seen.current.get(n.id)
+      const previousType = previous?.type
+      seen.current.set(n.id, { type: n.type, ts: n.ts })
       const isNew = previousType === undefined
       const severityChanged = previousType !== undefined && previousType !== n.type
-      if (!isNew && !severityChanged) continue
+      // The server keeps ONE row per event (same code+meta): a repeat comes back with the SAME id and a fresh time.
+      // Only a REFUSAL repeats this way; a keyed notice (loading progress) also moves its time and must not re-toast.
+      const resurfaced = previous !== undefined && n.type === 'error' && !n.read && n.ts > previous.ts && typeof n.meta?.notificationKey !== 'string'
+      if (!isNew && !severityChanged && !resurfaced) continue
       // A session card is the Nay button's to show, and do-not-disturb keeps every session event
       // quiet. Both stay in the bell; only the popup is skipped.
       // The update's bell entry is the RECORD of the popup the Nay window already showed — never a toast too.
@@ -117,7 +121,7 @@ export function NotificationToasts({ lang }: Props) {
       // A plan-limit notice is Nay's card when the card can take it; otherwise it is a toast.
       if (pushLimitAlert(n)) continue
       if (n.code && (NAY_CARD_CODES.has(n.code) || (n.code.startsWith('session.') && n.code !== SESSION_MUTED_CODE && getNotificationSettings().doNotDisturb))) continue
-      if (severityChanged) {
+      if (severityChanged || resurfaced) {
         if (timers.current[n.id]) clearTimeout(timers.current[n.id])
         if (autoTimers.current[n.id]) clearTimeout(autoTimers.current[n.id])
         delete timers.current[n.id]

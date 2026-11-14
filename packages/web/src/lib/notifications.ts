@@ -677,9 +677,25 @@ export function pushNotification(n: {
   })
 }
 
-/** Feedback that must reach the existing toast even when the server is unreachable. */
+/**
+ * Feedback that must reach the existing toast even when the server is unreachable.
+ *
+ * It is PERSISTED first (the server is the bell's source of truth: every refresh replaces the
+ * in-memory list with the server's, so a purely local entry vanished from the bell — and could
+ * lose the race against that refresh before the toast saw it). The toast then comes from the
+ * server's answer, once. Only when the server cannot take it does the entry live locally.
+ */
 export function pushLocalNotification(n: Parameters<typeof pushNotification>[0]): void {
-  apply([{ ...n, id: crypto.randomUUID(), ts: Date.now(), read: false }, ...items])
+  const local = () => apply([{ ...n, id: crypto.randomUUID(), ts: Date.now(), read: false }, ...items])
+  void (async () => {
+    try {
+      const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n) })
+      if (!r.ok) return local()
+      const list: unknown = await r.json()
+      if (!Array.isArray(list)) return local()
+      apply(list)
+    } catch { local() }
+  })()
 }
 
 export function markAllRead(): void {
