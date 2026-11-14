@@ -12,7 +12,7 @@ export const TONE_VAR: Record<'good' | 'bad' | 'tie' | 'none', string> = {
 const CSS = `
 .bm-top{display:grid;grid-template-columns:240px minmax(0,1fr);gap:12px;align-items:start}
 .bm-list{display:flex;flex-direction:column;gap:6px;min-width:0}
-.bm-types{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.bm-types{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .bm-buckets{display:grid;grid-template-columns:110px repeat(6,minmax(0,1fr));font-size:12.5px}
 .bm-buckets>div{padding:6px 8px 6px 0;border-top:1px solid var(--border);min-width:0}
 .bm-buckets>.bm-h{border:0;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);font-weight:600}
@@ -24,7 +24,6 @@ const CSS = `
 .bm-tasks th button{all:unset;cursor:pointer}
 .bm-tasks td.bm-d{white-space:normal;color:var(--text-secondary);font-size:12px;background:rgba(127,127,127,.04);padding:10px}
 .bm-buckets.bm-h5{grid-template-columns:130px repeat(4,minmax(0,1fr))}
-@media (max-width:1100px){.bm-types{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:700px){
  .bm-top{grid-template-columns:minmax(0,1fr)}
  .bm-types{grid-template-columns:repeat(2,minmax(0,1fr))}

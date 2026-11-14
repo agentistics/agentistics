@@ -8,9 +8,10 @@
  *  - one per CONTROLLED EXPERIMENT the server lists (`/api/benchmark/experiments`; none runs today).
  *    An experiment carries a core `VerdictResult` and may carry per-task rows and session buckets.
  */
-import type { Compared, HistoryComparison, HistorySubtaskRow, HistoryTaskRow, Observed, ObservedHistory, ScoreType, Verdict, VerdictResult } from '@agentistics/core/benchmark'
+import type { Compared, HistoryBucket, HistoryComparison, HistorySubtaskRow, HistoryTaskRow, Observed, ObservedHistory, ScoreType, Verdict, VerdictResult } from '@agentistics/core/benchmark'
 import { percentile } from '@agentistics/core'
-import { METRIC_LABEL, fmtInterval, fmtValue, nf, cardCoverage, cardHeadline, cardSubline, type Lang, type MetricKey, type Money } from './benchmarkFormat'
+import type { ComparisonKey, TaskSides } from '@agentistics/core/benchmark'
+import { METRIC_LABEL, fmtInterval, fmtValue, harnessState, nf, cardCoverage, cardHeadline, cardSubline, type Lang, type MetricKey, type Money } from './benchmarkFormat'
 
 export type Tone = 'good' | 'bad' | 'tie' | 'none'
 export type TypeKey = ScoreType | 'rework'
@@ -72,7 +73,9 @@ export const wordOf = (t: Tone, lang: Lang): string => {
 }
 
 export interface Entry {
-  id: string; kind: 'history' | 'comparison' | 'experiment'; name: string; sample: string
+  id: string; kind: 'history' | 'comparison' | 'experiment' | 'unmeasured'; name: string; sample: string
+  /** An `unmeasured` slot (a card the approved prototype has and the product has no data for yet): why, in one sentence. */
+  reason?: string
   /** 0–100 score, only for an experiment that has one. */
   score: number | null; tone: Tone; word: string
   experiment: ExperimentView | null
@@ -90,7 +93,7 @@ export function entriesOf(observed: Observed | null, experiments: readonly Exper
   const cmp = observed?.history ? comparisonsOf(observed.history, lang) : []
   if (cmp.length) {
     const seals: Entry[] = cmp.map(c => ({ id: c.id, kind: 'comparison', name: c.name, sample: c.sample, score: null, tone: 'none', word: pt ? 'observado' : 'observed', experiment: null, comparison: c }))
-    return [...seals, ...experiments.map(e => experimentEntry(e, lang))]
+    return [...seals, ...experiments.map(e => experimentEntry(e, lang)), ...unmeasuredEntries(lang)]
   }
   const list: Entry[] = [{
     id: 'observed', kind: 'history', name: pt ? 'Histórico observado' : 'Observed history',
@@ -99,6 +102,31 @@ export function entriesOf(observed: Observed | null, experiments: readonly Exper
   }]
   for (const e of experiments) list.push(experimentEntry(e, lang))
   return list
+}
+
+/**
+ * The approved prototype's list has two more cards than the history can fill today: a model comparison and "between
+ * harnesses". They are shown as what they are — not measured, with the reason — and never with a number.
+ */
+export function unmeasuredEntries(lang: Lang): Entry[] {
+  const pt = lang === 'pt'
+  const mk = (id: string, name: string, reason: string): Entry => ({ id, kind: 'unmeasured', name, sample: reason, reason, score: null, tone: 'none', word: pt ? 'sem medição' : 'not measured', experiment: null })
+  return [
+    mk('models', 'Sonnet × Opus', pt ? 'o histórico por peça ainda não é separado por modelo' : 'the per-piece history is not split by model yet'),
+    mk('harnesses', pt ? 'Entre harnesses' : 'Between harnesses', pt ? 'as métricas de cada harness ainda não foram conferidas contra a fonte de cada provedor' : 'each harness\'s metrics have not been checked against each provider\'s source yet'),
+  ]
+}
+
+/** Per-harness coverage as counts only (sessions with a measured cost); null when no session was recorded. */
+export function harnessCoverageLine(observed: Observed | null, lang: Lang): string | null {
+  const pt = lang === 'pt'
+  const entries = Object.entries(observed?.coverage ?? {})
+  if (!entries.length) return null
+  const list = entries.map(([h, c]) => {
+    const st = harnessState(c)
+    return `${h} ${c.withCost}/${c.sessions}${st === 'none' ? (pt ? ' sem medição' : ' not measured') : st === 'partial' ? (pt ? ' parcial' : ' partial') : ''}`
+  }).join(' · ')
+  return pt ? `Cobertura por harness (sessões com custo medido): ${list}.` : `Coverage by harness (sessions with measured cost): ${list}.`
 }
 
 export interface Hero {
@@ -128,6 +156,12 @@ function noneHero(lang: Lang, say: string, why: string[]): Hero {
 
 export function heroOf(entry: Entry, observed: Observed | null, lang: Lang, money: Money = { currency: 'USD' }): Hero {
   const pt = lang === 'pt'
+  if (entry.kind === 'unmeasured') {
+    return noneHero(lang, entry.id === 'harnesses'
+      ? (pt ? 'Nenhum harness é comparado ainda: as métricas de cada harness não foram conferidas contra a fonte de cada provedor.' : 'No harness is compared yet: each harness\'s metrics have not been checked against each provider\'s source.')
+      : (pt ? 'Ainda não há comparação por modelo: o histórico por peça não é separado por modelo.' : 'There is no comparison by model yet: the per-piece history is not split by model.'),
+    [pt ? 'Nenhum número é mostrado no lugar: sem medição não há o que comparar.' : 'No number is shown in its place: without a measurement there is nothing to compare.'])
+  }
   if (entry.kind === 'comparison' && entry.comparison && observed?.history) return comparisonHero(entry.comparison, observed, lang, money)
   const min = pt
     ? `O mínimo para um veredito é ${MIN_SAMPLE.tasks} tarefas, cada uma feita ${MIN_SAMPLE.repsPerTask} vezes por lado, com ${MIN_SAMPLE.acceptedPerArm} entregas aceitas em cada lado e custo medido em todas as execuções.`
@@ -143,6 +177,7 @@ export function heroOf(entry: Entry, observed: Observed | null, lang: Lang, mone
         min, pt ? 'Falta rodar um experimento controlado: nenhum rodou ainda.' : 'A controlled experiment still has to run: none has yet.',
         pt ? 'Qualidade final não é medida: defeito escapado depois do release e peça reaberta não são registrados, e o QA reprovar não diz que o defeito escaparia.' : 'Final quality is not measured: defects escaped after release and reopened pieces are not recorded, and a QA rejection does not mean the defect would have escaped.',
         ...(h ? [] : [pt ? 'O histórico por peça não veio do servidor: sem ele não há o que mostrar por tarefa.' : 'The per-piece history did not come from the server: without it there is nothing to show per task.']),
+        ...(harnessCoverageLine(observed, lang) ? [harnessCoverageLine(observed, lang)!] : []),
       ],
     }
   }
@@ -182,11 +217,11 @@ export const TYPE_META: Record<TypeKey, { pt: string; en: string; qpt: string; q
 
 /** Which observed metrics belong to which type. Reliability has none: nothing in the real history repeats a task. */
 export const OBSERVED_BY_TYPE: Record<TypeKey, MetricKey[]> = {
-  quality: ['qaFirstRoundRejection', 'escapedDefectRate'],
+  quality: ['qaFirstRoundRejection', 'escapedDefectRate', 'qaRoundsMedian'],
   cost: ['costPerDelivery', 'wastedCostShare', 'coordinationShare'],
   time: ['wallMedian', 'activeMedian', 'throughputPerWeek'],
   reliability: [],
-  rework: ['qaRoundsMedian'],
+  rework: [],
 }
 
 export interface PartRow { key: string; label: string; value: string; sub: string; measured: boolean; metric?: MetricKey }
@@ -208,6 +243,7 @@ const idLabel = (id: string) => id.replace(/[_-]+/g, ' ')
 
 export function partsOf(entry: Entry, observed: Observed | null, lang: Lang, money: Money): Part[] {
   const pt = lang === 'pt'
+  if (entry.kind === 'unmeasured') return TYPE_ORDER.map((type): Part => ({ type, name: pt ? TYPE_META[type].pt : TYPE_META[type].en, question: pt ? TYPE_META[type].qpt : TYPE_META[type].qen, pct: null, points: null, max: null, tone: 'none', state: 'none', word: pt ? 'sem dados' : 'no data', hint: entry.reason, rows: [] }))
   if (entry.kind === 'comparison' && entry.comparison) return partsOfComparison(entry.comparison, lang, money, observed?.history?.coverage.withoutDuration ?? 0)
   return TYPE_ORDER.map((type): Part => {
     const meta = TYPE_META[type], name = pt ? meta.pt : meta.en, question = pt ? meta.qpt : meta.qen
@@ -314,7 +350,7 @@ function oppositeSizes(c: Comparison): { metric: 'cost' | 'wall'; size: 'S' | 'M
     const k = c[metric]
     if (!k || Math.abs(k.ratio - 1) < 0.05) continue
     for (const p of k.sizes) {
-      const r = p.medB / p.medA
+      const r = p.ratio
       if ((k.ratio > 1 && r < 0.9) || (k.ratio < 1 && r > 1.1)) out.push({ metric, size: p.size })
     }
   }
@@ -337,12 +373,16 @@ function oppositeNote(c: Comparison, lang: Lang): string {
 }
 
 export type HistorySortKey = 'title' | 'cost' | 'wall' | 'qa' | 'sessions'
-const hv = (t: HistoryTaskRow, k: HistorySortKey): number | string | null =>
-  k === 'title' ? t.title.toLowerCase() : k === 'cost' ? t.costUSD : k === 'wall' ? t.wallMs : k === 'qa' ? t.qaRounds : t.sessions
+/** A task row of the history with its two sides, as the SERVER sent them (an older server sent none: every cell is then "—"). */
+export interface HistoryPairRow { task: HistoryTaskRow; sides: TaskSides }
+const NO_SIDES = (key: ComparisonKey): TaskSides => ({ key, nA: 0, nB: 0, sessions: [null, null], costUSD: [null, null], wallMs: [null, null], qaRounds: [null, null], costPartial: [false, false], defects: [null, null], accepted: [null, null] })
+const hv = (r: HistoryPairRow, k: HistorySortKey): number | string | null =>
+  k === 'title' ? r.task.title.toLowerCase() : k === 'cost' ? r.sides.costUSD[1] : k === 'wall' ? r.sides.wallMs[1] : k === 'qa' ? r.sides.qaRounds[1] : r.sides.sessions[1]
 
-/** Filtered and sorted history rows; a row with no value for the key goes LAST in both directions. */
-export function historyTaskRows(rows: readonly HistoryTaskRow[], o: { size: SizeFilter; needle: string; key: HistorySortKey; dir: 1 | -1 }): HistoryTaskRow[] {
-  return rows.filter(t => (o.size === 'all' || t.size === o.size) && matches(t.title, o.needle)).sort((a, b) => {
+/** Filtered and sorted history rows, each with its two sides under one comparison; a row with no value for the key (the B side) goes LAST in both directions. */
+export function historyTaskRows(rows: readonly HistoryTaskRow[], o: { size: SizeFilter; needle: string; key: HistorySortKey; dir: 1 | -1; sides?: ComparisonKey }): HistoryPairRow[] {
+  const key = o.sides ?? 'qa'
+  return rows.filter(t => (o.size === 'all' || t.size === o.size) && matches(t.title, o.needle)).map(task => ({ task, sides: task.sides?.[key] ?? NO_SIDES(key) })).sort((a, b) => {
     const x = hv(a, o.key), y = hv(b, o.key)
     if (x === null && y === null) return 0
     if (x === null) return 1
@@ -373,12 +413,16 @@ export interface Comparison {
  * The comparisons the observed history supports. They are BUILT ON THE SERVER (core `buildComparisons`, carried
  * by HTTP and the MCP tool alike); this only gives each one its words. An older server that sends none shows none.
  */
-export function comparisonsOf(h: ObservedHistory, lang: Lang): Comparison[] {
+export function comparisonWords(lang: Lang): Record<HistoryComparison['key'], { name: string; a: string; b: string }> {
   const pt = lang === 'pt'
-  const words: Record<HistoryComparison['key'], { name: string; a: string; b: string }> = {
+  return {
     qa: { name: pt ? '1 rodada de QA × 2+ rodadas' : '1 QA round × 2+ rounds', a: pt ? '1 rodada de QA' : '1 QA round', b: pt ? '2+ rodadas de QA' : '2+ QA rounds' },
     sessions: { name: pt ? '1 sessão × 5+ sessões' : '1 session × 5+ sessions', a: pt ? '1 sessão' : '1 session', b: pt ? '5+ sessões' : '5+ sessions' },
   }
+}
+export function comparisonsOf(h: ObservedHistory, lang: Lang): Comparison[] {
+  const pt = lang === 'pt'
+  const words = comparisonWords(lang)
   return (h.comparisons ?? []).map(c => ({
     id: c.key, name: words[c.key].name, aShort: words[c.key].a, bShort: words[c.key].b,
     sample: pt ? `${c.nA} × ${c.nB} peças` : `${c.nA} × ${c.nB} pieces`, nA: c.nA, nB: c.nB, cost: c.cost, wall: c.wall, third: c.third,
@@ -414,6 +458,7 @@ function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Mo
       pt ? 'Peças difíceis vão para o método pesado e tendem a ter mais rodadas e mais sessões: a diferença pode ser a dificuldade, não o método. Comparar dentro do mesmo tamanho (linhas) é um controle fraco.' : 'Hard pieces go to the heavy method and tend to have more rounds and sessions: the difference may be the difficulty, not the method. Matching by size (lines) is a weak control.',
       pt ? `Para um veredito falta um experimento controlado (mínimo ${MIN_SAMPLE.tasks} tarefas × ${MIN_SAMPLE.repsPerTask} repetições, ${MIN_SAMPLE.acceptedPerArm} aceitas por lado); nenhum rodou ainda.` : `A verdict needs a controlled experiment (minimum ${MIN_SAMPLE.tasks} tasks × ${MIN_SAMPLE.repsPerTask} repetitions, ${MIN_SAMPLE.acceptedPerArm} accepted per side); none has run yet.`,
       pt ? 'Qualidade final não é medida: defeito escapado depois do release e peça reaberta não são registrados.' : 'Final quality is not measured: defects escaped after release and reopened pieces are not recorded.',
+      ...(harnessCoverageLine(observed, lang) ? [harnessCoverageLine(observed, lang)!] : []),
       ...(c.id === 'qa' ? [pt ? 'As rodadas de QA vêm do rótulo das sessões de QA: indicativo, o fluxo ainda não registra veredito estruturado.' : 'QA rounds come from the QA sessions\' labels: indicative, the flow does not record a structured verdict yet.'] : []),
     ],
     facts: coverageFacts(h, lang, false),
@@ -429,7 +474,7 @@ function partsOfComparison(c: Comparison, lang: Lang, money: Money, withoutDurat
   // The headline is the size-matched ratio, so the figures behind it are the per-size pairs: each one gives ITS ratio.
   const pair = (k: Compared, f: (n: number) => string, label: string): PartRow[] => k.sizes.map(p => ({
     key: `${label}-${p.size}`, label: `${label} · ${sizeWord(p.size, lang)}`, value: `${f(p.medA)} → ${f(p.medB)}`,
-    sub: `${ratioText(p.medB / p.medA, lang)} · ${pt ? 'peças' : 'pieces'} ${p.nA} × ${p.nB}`, measured: true,
+    sub: `${ratioText(p.ratio, lang)} · ${pt ? 'peças' : 'pieces'} ${p.nA} × ${p.nB}`, measured: true,
   }))
   const none = (type: TypeKey, why: string): Part => ({ type, name: pt ? TYPE_META[type].pt : TYPE_META[type].en, question: pt ? TYPE_META[type].qpt : TYPE_META[type].qen, pct: null, points: null, max: null, tone: 'none', state: 'none', word: pt ? 'sem dados' : 'no data', hint: why, rows: [] })
   const tile = (type: TypeKey, k: Compared | null, f: (n: number) => string, rowLabel: string): Part => k
@@ -451,4 +496,14 @@ function partsOfComparison(c: Comparison, lang: Lang, money: Money, withoutDurat
     none('reliability', pt ? 'nenhuma tarefa foi repetida' : 'no task was repeated'),
     rework,
   ]
+}
+
+/** Which comparison's sides the per-task pairs read: the selected comparison, else the QA one (the history entry of an older server). */
+export const comparisonLabel = (e: Entry): ComparisonKey => e.kind === 'comparison' && (e.id === 'qa' || e.id === 'sessions') ? e.id : 'qa'
+
+/** The history's session buckets in the prototype's seven columns: what no record carries yet (escaped defects, accepted first try, not reopened) stays null. */
+export function bucketsOfHistory(buckets: readonly HistoryBucket[], lang: Lang): BucketRow[] {
+  const pt = lang === 'pt'
+  const label = (b: HistoryBucket) => b.label === '1' ? (pt ? '1 sessão' : '1 session') : b.label === '5+' ? (pt ? '5 ou mais' : '5 or more') : `${b.label.replace('-', '–')} ${pt ? 'sessões' : 'sessions'}`
+  return buckets.map(b => ({ label: label(b), tasks: b.pieces, costMedianUSD: b.costMedianUSD, wallMedianMs: b.wallMedianMs, escapedDefects: null, firstTryRate: null, notReopenedRate: null }))
 }

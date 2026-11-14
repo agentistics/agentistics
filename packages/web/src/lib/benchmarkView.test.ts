@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildComparisons, type HistorySubtaskRow, type Observed, type ObservedHistory } from '@agentistics/core/benchmark'
+import { buildComparisons, taskSides, type HistorySubtaskRow, type Observed, type ObservedHistory } from '@agentistics/core/benchmark'
 import { entriesOf, heroOf, historyTaskRows } from './benchmarkView'
 
 const H = 3_600_000
@@ -8,7 +8,7 @@ const sub = (id: string, o: Partial<HistorySubtaskRow> = {}): HistorySubtaskRow 
 })
 const history = (subs: HistorySubtaskRow[]): ObservedHistory => ({
   pieces: subs.length,
-  tasks: [{ id: 'T', title: 'Task', status: 'done', size: 'M', pieces: subs.length, sessions: subs.length * 2, costUSD: 40, costPartial: false, wallMs: 5 * H, activeMs: null, qaRounds: 4, reworkedPieces: 3, lines: 800, subtasks: subs }],
+  tasks: [{ id: 'T', title: 'Task', status: 'done', size: 'M', pieces: subs.length, sessions: subs.length * 2, costUSD: 40, costPartial: false, wallMs: 5 * H, activeMs: null, qaRounds: 4, reworkedPieces: 3, lines: 800, subtasks: subs, sides: { qa: taskSides(subs, 'qa'), sessions: taskSides(subs, 'sessions') } }],
   buckets: [], comparisons: buildComparisons(subs), coverage: { pieces: subs.length, withCost: subs.length, withWall: subs.length, withoutDuration: 0, withQa: subs.length, withSize: subs.length, withActive: 0, pctWithCost: 100, harnessesWithoutCost: ['codex'], harnessesPartialCost: [] },
 })
 const obs = (h: ObservedHistory | undefined): Observed => ({ deliveries: 5, metrics: { qaFirstRoundRejection: { value: 0.365, n: 192 } }, coverage: {}, history: h }) as unknown as Observed
@@ -83,8 +83,9 @@ describe('observed comparisons the history already allows', () => {
 
   test('the list holds the comparisons, each stamped "observado" and without any score', () => {
     const es = entriesOf(obs(h), [], 'pt')
-    expect(es.map(e => e.id)).toEqual(['qa', 'sessions'])
-    expect(es.every(e => e.kind === 'comparison' && e.score === null && e.word === 'observado')).toBe(true)
+    expect(es.map(e => e.id)).toEqual(['qa', 'sessions', 'models', 'harnesses'])
+    expect(es.slice(0, 2).every(e => e.kind === 'comparison' && e.score === null && e.word === 'observado')).toBe(true)
+    expect(es.slice(2).every(e => e.kind === 'unmeasured' && e.score === null && e.word === 'sem medição' && !!e.reason)).toBe(true)
     expect(entriesOf(obs(h), [], 'en')[0]!.word).toBe('observed')
     expect(entriesOf(obs(undefined), [], 'pt')[0]!.id).toBe('observed')       // an older server: the single history entry
   })

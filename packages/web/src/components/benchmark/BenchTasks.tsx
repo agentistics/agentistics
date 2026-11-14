@@ -3,10 +3,10 @@ import { Flag, Info, Users } from 'lucide-react'
 import { TabStrip } from '../sessions/formBits'
 import { nf, type Lang, type Money } from '../../lib/benchmarkFormat'
 import {
-  acceptedText, durationText, matches, moneyText, pairText, taskRows, toneOfScore, wordOf,
+  acceptedText, durationText, matches, moneyText, pairText, taskRows,
   type BucketRow, type SizeFilter, type TaskRow, type TaskSortKey,
 } from '../../lib/benchmarkView'
-import { Bar, TONE_VAR } from './BenchStyle'
+import { Bar } from './BenchStyle'
 
 const muted: React.CSSProperties = { color: 'var(--text-tertiary)', fontSize: 12, lineHeight: 1.45 }
 const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 14, minWidth: 0 }
@@ -23,7 +23,7 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
   const pt = lang === 'pt'
   const [size, setSize] = useState<SizeFilter>('all')
   const [needle, setNeedle] = useState('')
-  const [sort, setSort] = useState<{ key: TaskSortKey; dir: 1 | -1 }>({ key: 'score', dir: -1 })
+  const [sort, setSort] = useState<{ key: TaskSortKey; dir: 1 | -1 }>({ key: 'cost', dir: -1 })
   const [open, setOpen] = useState<string | null>(initialOpen)
   const [subNeedle, setSubNeedle] = useState('')
   const rows = taskRows(tasks, { size, needle, key: sort.key, dir: sort.dir })
@@ -48,10 +48,9 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
           <table className="bm-tasks"><thead><tr>
             {head('title', pt ? 'Tarefa' : 'Task')}<th>{pt ? 'Tamanho' : 'Size'}</th><th>{pt ? 'Sessões' : 'Sessions'}</th>
             {head('cost', pt ? 'Custo' : 'Cost', true)}{head('time', pt ? 'Tempo' : 'Time', true)}{head('qa', pt ? 'Rodadas QA' : 'QA rounds', true)}
-            <th className="bm-num">{pt ? 'Defeitos' : 'Defects'}</th><th>{pt ? 'Aceita' : 'Accepted'}</th>{head('score', pt ? 'Compensou?' : 'Paid off?')}
+            <th className="bm-num">{pt ? 'Defeitos' : 'Defects'}</th><th>{pt ? 'Aceita' : 'Accepted'}</th>
           </tr></thead><tbody>
             {rows.map(t => {
-              const tone = t.score === null ? 'none' : toneOfScore(t.score)
               const subs = (t.subtasks ?? []).filter(s => matches(s.title, subNeedle))
               return <React.Fragment key={t.id}>
                 <tr className="bm-t" data-testid="benchmark-task-row" data-task={t.id} onClick={() => { setOpen(open === t.id ? null : t.id); setSubNeedle('') }} aria-expanded={open === t.id}>
@@ -62,13 +61,8 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
                   <td className="bm-num" data-l="QA">{pairText(t.qaRounds, n => nf(n, lang, 0))}</td>
                   <td className="bm-num" data-l={pt ? 'Defeitos' : 'Defects'}>{pairText(t.defects, n => nf(n, lang, 0))}</td>
                   <td data-l={pt ? 'Aceita' : 'Accepted'}>{acceptedText(t.accepted, lang)}</td>
-                  <td className="bm-cp" style={{ minWidth: 124 }}>
-                    {t.score === null ? <span style={muted}>{pt ? 'sem nota' : 'no score'}</span>
-                      : <><div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5, fontWeight: 700 }}><span style={{ color: TONE_VAR[tone] }}>{wordOf(tone, lang)}</span><span>{Math.round(t.score)}</span></div>
-                        <Bar value={t.score} tone={tone} /></>}
-                  </td>
                 </tr>
-                {open === t.id && <tr className="bm-d" data-testid="benchmark-task-detail"><td className="bm-d" colSpan={9}>
+                {open === t.id && <tr className="bm-d" data-testid="benchmark-task-detail"><td className="bm-d" colSpan={8}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Info size={13} /> {t.note || (pt ? 'Sem observação registrada para esta tarefa.' : 'No note recorded for this task.')}</div>
                   {(t.subtasks?.length ?? 0) > 0 ? <div style={{ marginTop: 8 }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
@@ -93,22 +87,23 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
 }
 
 /** "Por número de sessões": the history by how many sessions a task took. Says nothing about paying off. */
-export function BenchBuckets({ buckets, lang, money, emptyReason }: { buckets: BucketRow[]; lang: Lang; money: Money; emptyReason: string }) {
+export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: { buckets: BucketRow[]; lang: Lang; money: Money; emptyReason: string; note?: string }) {
   const pt = lang === 'pt'
   const heads = pt ? ['Sessões', 'Tarefas', 'Custo mediano', 'Tempo mediano', 'Defeitos escapados', 'Aceitas de primeira', 'Não reabertas']
     : ['Sessions', 'Tasks', 'Median cost', 'Median time', 'Escaped defects', 'Accepted first try', 'Not reopened']
-  const rate = (n: number | null) => n === null ? <span style={muted}>—</span> : <div style={{ maxWidth: 150 }}>{nf(n * 100, lang, 0)}%<Bar value={n * 100} tone="rate" mark={false} /></div>
+  const noData = <span style={muted}>— {pt ? 'sem dados' : 'no data'}</span>
+  const rate = (n: number | null) => n === null ? noData : <div style={{ maxWidth: 150 }}>{nf(n * 100, lang, 0)}%<Bar value={n * 100} tone="rate" mark={false} /></div>
   return <section style={card} data-testid="benchmark-buckets" aria-label={pt ? 'Por número de sessões' : 'By number of sessions'}>
     <h3 style={{ ...h3, marginBottom: 4 }}><Users size={15} /> {pt ? 'Por número de sessões' : 'By number of sessions'}</h3>
-    <p style={{ ...muted, margin: '0 0 8px' }}>{pt ? 'Do histórico. Não diz se compensou, porque tarefa difícil já costuma usar mais sessões.' : 'From history. It does not say whether it paid off, because hard tasks already tend to use more sessions.'}</p>
+    <p style={{ ...muted, margin: '0 0 8px' }}>{pt ? 'Do histórico. Não diz se compensou, porque tarefa difícil já costuma usar mais sessões.' : 'From history. It does not say whether it paid off, because hard tasks already tend to use more sessions.'}{note ? ` ${note}` : ''}</p>
     {buckets.length === 0 ? <div data-testid="benchmark-buckets-empty" style={muted}>{emptyReason}</div>
       : <div className="bm-buckets">
         {heads.map(h => <div key={h} className="bm-h">{h}</div>)}
         {buckets.map(b => <React.Fragment key={b.label}>
           <div className="bm-k">{b.label}</div><div data-l={heads[1]}>{nf(b.tasks, lang, 0)}</div>
-          <div data-l={heads[2]}>{b.costMedianUSD === null ? '—' : moneyText(b.costMedianUSD, lang, money)}</div>
-          <div data-l={heads[3]}>{b.wallMedianMs === null ? '—' : durationText(b.wallMedianMs, lang)}</div>
-          <div data-l={heads[4]}>{b.escapedDefects === null ? '—' : nf(b.escapedDefects, lang, 1)}</div>
+          <div data-l={heads[2]}>{b.costMedianUSD === null ? noData : moneyText(b.costMedianUSD, lang, money)}</div>
+          <div data-l={heads[3]}>{b.wallMedianMs === null ? noData : durationText(b.wallMedianMs, lang)}</div>
+          <div data-l={heads[4]}>{b.escapedDefects === null ? noData : nf(b.escapedDefects, lang, 1)}</div>
           <div data-l={heads[5]}>{rate(b.firstTryRate)}</div><div data-l={heads[6]}>{rate(b.notReopenedRate)}</div>
         </React.Fragment>)}
       </div>}

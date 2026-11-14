@@ -1,20 +1,20 @@
 import React, { useEffect, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
-import { Check, CircleHelp, Coins, Clock, Gauge, Info, RotateCcw, ShieldCheck, TriangleAlert } from 'lucide-react'
+import { Check, CircleHelp, Coins, Clock, FlaskConical, Gauge, Info, RotateCcw, ShieldCheck, TriangleAlert } from 'lucide-react'
 import type { Observed } from '@agentistics/core/benchmark'
 import type { AppContext } from '../lib/app-context'
 import {
-  METRIC_PLAIN, SOURCE_LABEL, benchmarkQuery, formulaText, gapText, harnessReason, harnessState, intervalMethod, fmtInterval,
+  METRIC_PLAIN, SOURCE_LABEL, benchmarkQuery, formulaText, gapText, intervalMethod, fmtInterval,
   type Lang, type Money,
 } from '../lib/benchmarkFormat'
 import {
-  entriesOf, heroOf, parseExperiments, partsOf, type Entry, type Part, type PartRow, type TypeKey,
+  bucketsOfHistory, comparisonLabel, entriesOf, heroOf, parseExperiments, partsOf, type Entry, type Part, type PartRow, type TypeKey,
 } from '../lib/benchmarkView'
 import { BetaTag } from '../components/BetaTag'
 import { Pill } from '../components/Pill'
 import { Bar, BenchStyle, TONE_VAR } from '../components/benchmark/BenchStyle'
 import { BenchBuckets, BenchTasks } from '../components/benchmark/BenchTasks'
-import { BenchHistoryBuckets, BenchHistoryTasks } from '../components/benchmark/BenchHistory'
+import { BenchHistoryTasks } from '../components/benchmark/BenchHistory'
 
 export { BenchmarkHowItWorksPage } from './BenchmarkHowItWorks'
 
@@ -56,7 +56,11 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
   const [nums, setNums] = useState(initialNumbers)
   const cur = entries.find(e => e.id === picked) ?? entries[0]!
   const hero = heroOf(cur, observed, L, money)
-  const parts = partsOf(cur, observed, L, money)
+  const allParts = partsOf(cur, observed, L, money)
+  // The prototype has FOUR cards; rework is evidence without points, so it is one line under them, never a card.
+  const parts = allParts.filter(p => p.type !== 'rework')
+  const reworkLine = allParts.find(p => p.type === 'rework' && p.name === (pt ? 'Retrabalho' : 'Rework') && p.rows.length > 0) ?? null
+  const history = cur.kind !== 'experiment' && cur.kind !== 'unmeasured' ? observed?.history ?? null : null
   const exp = cur.experiment
   const noTasks = pt ? 'Sem tarefas comparadas neste benchmark: o servidor só mede por tarefa quando um experimento controlado roda — nenhum rodou ainda.' : 'No compared tasks in this benchmark: the server only measures per task when a controlled experiment runs — none has yet.'
   const noBuckets = pt ? 'Sem agrupamento por número de sessões: o servidor ainda não calcula esta divisão a partir do histórico.' : 'No grouping by number of sessions: the server does not compute this split from history yet.'
@@ -79,36 +83,32 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
       <div className="bm-top">
         <nav className="bm-list" data-testid="benchmark-list" aria-label={pt ? 'Benchmarks' : 'Benchmarks'}>
           {entries.map(e => <BenchItem key={e.id} e={e} on={e.id === cur.id} onPick={() => setPicked(e.id)} />)}
+          <button type="button" className="bm-btn" data-testid="benchmark-new" disabled aria-disabled="true"
+            title={pt ? 'Chega com o teste controlado: ainda não dá para criar um benchmark novo.' : 'Arrives with the controlled test: a new benchmark cannot be created yet.'}
+            style={{ ...newBtn }}><FlaskConical size={15} />{pt ? 'Novo benchmark' : 'New benchmark'}</button>
         </nav>
         <div style={{ minWidth: 0 }}>
           <Hero hero={hero} lang={L} entryId={cur.id} />
+          <section aria-label={pt ? 'Partes' : 'Parts'} data-testid="benchmark-parts">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 8px' }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{pt ? 'Partes' : 'Parts'}</h3>
+              <span style={{ ...muted, fontSize: 12.5 }}>{pt ? 'Cada tipo de métrica, com os números que o compõem.' : 'Each metric type, with the figures inside it.'}</span>
+              <button type="button" className="bm-btn" data-testid="benchmark-numbers-toggle" aria-pressed={nums} onClick={() => setNums(!nums)} style={toggle}>{nums ? (pt ? 'Esconder os números' : 'Hide the figures') : (pt ? 'Ver os números' : 'Show the figures')}</button>
+            </div>
+            <div className="bm-types">{parts.map(p => <PartTile key={p.type} p={p} nums={nums} lang={L} observed={observed} />)}</div>
+            {nums && reworkLine && <div data-testid="benchmark-extra" style={{ ...muted, marginTop: 8 }}>{pt ? 'Retrabalho, que não soma pontos' : 'Rework, which adds no points'}: {reworkLine.rows.map(r => `${r.label} ${r.value} (${r.sub})`).join('; ')}.</div>}
+          </section>
         </div>
       </div>
 
-      <section aria-label={pt ? 'Partes' : 'Parts'} data-testid="benchmark-parts">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 8px' }}>
-          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{pt ? 'Partes' : 'Parts'}</h3>
-          <span style={{ ...muted, fontSize: 12.5 }}>{pt ? 'Cada tipo de métrica, com os números que o compõem.' : 'Each metric type, with the figures inside it.'}</span>
-          <button type="button" className="bm-btn" data-testid="benchmark-numbers-toggle" aria-pressed={nums} onClick={() => setNums(!nums)} style={toggle}>{nums ? (pt ? 'Esconder os números' : 'Hide the figures') : (pt ? 'Ver os números' : 'Show the figures')}</button>
-        </div>
-        <div className="bm-types">{parts.map(p => <PartTile key={p.type} p={p} nums={nums} lang={L} observed={observed} />)}</div>
-      </section>
 
-      {cur.kind !== 'experiment' && observed.history
-        ? <><BenchHistoryTasks key="ht" tasks={observed.history.tasks} coverage={observed.history.coverage} lang={L} money={money} initialOpen={initialOpenTask} />
-          <BenchHistoryBuckets key="hb" buckets={observed.history.buckets} lang={L} money={money} /></>
+      {history
+        ? <><BenchHistoryTasks key={`ht-${cur.id}`} tasks={history.tasks} coverage={history.coverage} lang={L} money={money} sides={comparisonLabel(cur)} initialOpen={initialOpenTask} />
+          <BenchBuckets key="hb" buckets={bucketsOfHistory(history.buckets, L)} lang={L} money={money} emptyReason={noBuckets}
+            note={pt ? 'Cada peça entregue (subtarefa) conta como uma tarefa.' : 'Each delivered piece (subtask) counts as one task.'} /></>
         : <><BenchTasks key={`t-${cur.id}`} tasks={exp?.tasks ?? []} lang={L} money={money} emptyReason={noTasks} initialOpen={initialOpenTask} />
           <BenchBuckets key={`b-${cur.id}`} buckets={exp?.buckets ?? []} lang={L} money={money} emptyReason={noBuckets} /></>}
 
-      <footer data-testid="benchmark-coverage" style={{ ...muted, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span><strong>{pt ? 'Cobertura por harness' : 'Coverage by harness'}:</strong>{' '}
-          {Object.entries(observed.coverage).map(([h, c], i) => {
-            const state = harnessState(c), why = harnessReason(c, L)
-            return <span key={h} data-state={state} title={why}>{i > 0 ? ' · ' : ''}{h} {c.withCost}/{c.sessions}{state === 'none' ? (pt ? ' sem medição' : ' not measured') : state === 'partial' ? (pt ? ' parcial' : ' partial') : ''}</span>
-          })}
-          {Object.keys(observed.coverage).length === 0 && <span>{pt ? 'sem sessões registradas' : 'no sessions recorded'}</span>}
-          {Object.keys(observed.coverage).length > 0 && <span> {pt ? '(sessões com custo medido)' : '(sessions with measured cost)'}</span>}</span>
-      </footer>
       <div data-testid="benchmark-foot" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
         <span style={{ ...muted, fontSize: 12.5 }}>{pt ? 'Quer entender de onde vêm esses números?' : 'Want to understand where these numbers come from?'}</span>
         <Link to="/benchmark/como-funciona" className="bm-btn" data-testid="benchmark-how-foot" style={how}><CircleHelp size={15} style={{ color: 'var(--accent-cyan, var(--accent-blue))' }} />{pt ? 'Como funciona o Benchmark' : 'How the Benchmark works'}</Link>
@@ -118,15 +118,15 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
 }
 
 function BenchItem({ e, on, onPick }: { e: Entry; on: boolean; onPick: () => void }) {
-  return <button type="button" data-testid="benchmark-item" data-bench={e.id} aria-pressed={on} onClick={onPick} style={{
+  return <button type="button" data-testid="benchmark-item" data-bench={e.id} data-unmeasured={e.kind === 'unmeasured' ? 'yes' : undefined} aria-pressed={on} onClick={onPick} style={{
     appearance: 'none', textAlign: 'left', color: 'var(--text-primary)', font: 'inherit', cursor: 'pointer', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: '3px 8px',
     border: `1px solid ${on ? 'var(--text-tertiary)' : 'var(--border)'}`, borderRadius: 10, background: on ? 'var(--bg-elevated)' : 'var(--bg-card)', padding: '9px 11px',
   }}>
     <span style={{ fontSize: 12.5, fontWeight: 600 }}>{e.name}</span>
-    {e.kind !== 'comparison' && <span style={{ fontWeight: 800, fontSize: 15, fontVariantNumeric: 'tabular-nums', color: TONE_VAR[e.tone] }}>{e.score === null ? '—' : Math.round(e.score)}</span>}
+    {e.kind !== 'comparison' && e.kind !== 'unmeasured' && <span style={{ fontWeight: 800, fontSize: 15, fontVariantNumeric: 'tabular-nums', color: TONE_VAR[e.tone] }}>{e.score === null ? '—' : Math.round(e.score)}</span>}
     <small style={{ gridColumn: '1/3', color: 'var(--text-tertiary)', fontSize: 11 }}>{e.sample}</small>
     {e.score !== null && <div style={{ gridColumn: '1/3' }}><Bar value={e.score} tone={e.tone} /></div>}
-    {e.kind === 'comparison' ? <span data-testid="benchmark-seal" style={{ gridColumn: '1/3', justifySelf: 'start', fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 9px' }}>{e.word}</span>
+    {e.kind === 'comparison' || e.kind === 'unmeasured' ? <span data-testid="benchmark-seal" style={{ gridColumn: '1/3', justifySelf: 'start', fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 9px' }}>{e.word}</span>
       : <span style={{ gridColumn: '1/3', fontSize: 11.5, fontWeight: 700, color: e.tone === 'none' ? 'var(--text-tertiary)' : TONE_VAR[e.tone] }}>{e.word}</span>}
   </button>
 }
@@ -207,5 +207,9 @@ const empty: React.CSSProperties = { padding: '16px 4px', color: 'var(--text-sec
 const how: React.CSSProperties = {
   display: 'inline-flex', gap: 7, alignItems: 'center', color: 'var(--text-primary)', textDecoration: 'none', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
   background: 'color-mix(in srgb, var(--accent-cyan, var(--accent-blue)) 12%, transparent)', border: '1px solid var(--accent-cyan, var(--accent-blue))', borderRadius: 8, padding: '7px 12px',
+}
+const newBtn: React.CSSProperties = {
+  appearance: 'none', display: 'inline-flex', gap: 7, alignItems: 'center', justifyContent: 'center', font: 'inherit', fontSize: 13, fontWeight: 600,
+  background: 'var(--bg-card)', color: 'var(--text-tertiary)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 12px', cursor: 'not-allowed', opacity: 0.75,
 }
 const toggle: React.CSSProperties = { appearance: 'none', marginLeft: 'auto', background: 'none', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: 999, font: 'inherit', fontSize: 11.5, padding: '3px 11px', cursor: 'pointer' }

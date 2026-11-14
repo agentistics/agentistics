@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildComparisons, GROUP_MIN } from './comparisons'
+import { buildComparisons, COMPARISON_SIDES, GROUP_MIN, taskSides } from './comparisons'
 import type { HistorySubtaskRow } from './history'
 
 const H = 3_600_000
@@ -20,7 +20,7 @@ describe('server-side comparisons (one source for HTTP, MCP and the screen)', ()
     expect(c.map(x => x.key)).toEqual(['qa', 'sessions'])
     const qa = c[0]!
     expect([qa.nA, qa.nB, qa.cost!.ratio, qa.wall!.ratio]).toEqual([4, 4, 2.5, 4])
-    expect(qa.cost!.sizes).toEqual([{ size: 'M', medA: 2, medB: 5, nA: 4, nB: 4 }])
+    expect(qa.cost!.sizes).toEqual([{ size: 'M', medA: 2, medB: 5, ratio: 2.5, nA: 4, nB: 4 }])
     expect(qa.third).toMatchObject({ kind: 'sessions' })
     expect(c[1]!.third).toMatchObject({ kind: 'rework', rateA: 0, rateB: 1 })
   })
@@ -28,7 +28,7 @@ describe('server-side comparisons (one source for HTTP, MCP and the screen)', ()
   test('every per-size pair gives its own ratio, and with one size that is the headline multiplier', () => {
     const qa = buildComparisons(subs)[0]!
     const p = qa.cost!.sizes[0]!
-    expect(p.medB / p.medA).toBe(qa.cost!.ratio)
+    expect(p.ratio).toBe(qa.cost!.ratio)
   })
 
   test('the second comparison is 1 session x 5+: a 4-session piece is NOT in the "5+" side', () => {
@@ -52,5 +52,28 @@ describe('server-side comparisons (one source for HTTP, MCP and the screen)', ()
     expect(qa.wall!.sizes[0]!.nA).toBe(4)          // the 5 unmeasured ones are not counted as 0 min
     expect(qa.wall!.ratio).toBe(4)
     expect(qa.cost!.sizes[0]!.nA).toBe(9)          // but they do have a cost
+  })
+})
+
+describe('taskSides: one task as the prototype\'s "um → outro"', () => {
+  test('the QA sides: median piece of 1 round against 2+ rounds, per column; defects and acceptance are not recorded', () => {
+    const t = taskSides([
+      sub('a', { qaRounds: 1, costUSD: 2, sessions: 1, wallMs: H }), sub('b', { qaRounds: 1, costUSD: 4, sessions: 3, wallMs: 3 * H }),
+      sub('c', { qaRounds: 3, costUSD: 9, sessions: 6, wallMs: null, costPartial: true }),
+    ], 'qa')
+    expect(t.nA).toBe(2); expect(t.nB).toBe(1)
+    expect(t.sessions).toEqual([2, 6]); expect(t.costUSD).toEqual([3, 9]); expect(t.qaRounds).toEqual([1, 3])
+    expect(t.wallMs).toEqual([2 * H, null])            // a side with nothing measured is null, never 0
+    expect(t.costPartial).toEqual([false, true])
+    expect(t.defects).toEqual([null, null]); expect(t.accepted).toEqual([null, null])
+  })
+  test('a side with no piece is null on every column; the sessions sides are 1 and 5+', () => {
+    const t = taskSides([sub('a', { sessions: 1 }), sub('b', { sessions: 2 })], 'sessions')
+    expect(t.nA).toBe(1); expect(t.nB).toBe(0)
+    expect(t.sessions).toEqual([1, null]); expect(t.costUSD[1]).toBeNull()
+  })
+  test('buildComparisons and taskSides share one definition of the sides', () => {
+    expect(COMPARISON_SIDES.qa.b(sub('x', { qaRounds: 2 }))).toBe(true)
+    expect(COMPARISON_SIDES.qa.a(sub('x', { qaRounds: null }))).toBe(false)
   })
 })

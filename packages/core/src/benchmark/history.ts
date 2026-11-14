@@ -6,7 +6,7 @@
  * and the coverage says how much of the pieces carry each figure. Observed and biased: no verdict here.
  */
 import { percentile } from '../deliveryMetrics'
-import { buildComparisons, type HistoryComparison } from './comparisons'
+import { buildComparisons, taskSides, type ComparisonKey, type HistoryComparison, type TaskSides } from './comparisons'
 
 export type PieceSize = 'S' | 'M' | 'L'
 export const SIZE_LINES = { mediumFrom: 100, largeFrom: 500 } as const
@@ -40,6 +40,8 @@ export interface HistoryTaskRow {
   costUSD: number | null; costPartial: boolean; wallMs: number | null; activeMs: number | null
   qaRounds: number | null; reworkedPieces: number | null; lines: number | null
   subtasks: HistorySubtaskRow[]
+  /** The task as the prototype's "um → outro", once per comparison (side A, side B): HTTP, MCP and the screen read THIS. */
+  sides: Record<ComparisonKey, TaskSides>
 }
 export interface HistoryBucket {
   label: string; pieces: number
@@ -109,6 +111,7 @@ export function buildHistory(input: { pieces: readonly HistoryPieceInput[]; task
       qaRounds: qa.length ? sum(qa.map(r => r.qaRounds!)) : null, reworkedPieces: qa.length ? qa.filter(r => r.reworked).length : null,
       lines: lines.length ? sum(lines.map(p => p.lines!)) : null,
       subtasks: rs,
+      sides: { qa: taskSides(rs, 'qa'), sessions: taskSides(rs, 'sessions') },
     }
   }).sort((a, b) => (b.costUSD ?? -1) - (a.costUSD ?? -1) || a.title.localeCompare(b.title))
 
