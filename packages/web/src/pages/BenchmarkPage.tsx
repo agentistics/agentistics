@@ -88,7 +88,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
             style={{ ...newBtn }}><FlaskConical size={15} />{pt ? 'Novo benchmark' : 'New benchmark'}</button>
         </nav>
         <div style={{ minWidth: 0 }}>
-          <Hero hero={hero} lang={L} entryId={cur.id} basis={basisText} />
+          <Hero hero={hero} lang={L} entryId={cur.id} basis={unmeasured ? '' : basisText} />
           {!unmeasured && <section aria-label={pt ? 'Partes' : 'Parts'} data-testid="benchmark-parts">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 8px' }}>
               <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{pt ? 'Partes' : 'Parts'}</h3>

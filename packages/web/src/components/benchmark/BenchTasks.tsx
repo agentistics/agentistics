@@ -14,7 +14,7 @@ const h3: React.CSSProperties = { margin: 0, fontSize: 14, fontWeight: 700, disp
 const field: React.CSSProperties = { background: 'var(--bg-input, var(--bg-elevated))', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', padding: '5px 10px', fontSize: 13, minWidth: 0 }
 
 const SIZES: readonly SizeFilter[] = ['all', 'S', 'M', 'L']
-const sizeLabel = (s: SizeFilter, lang: Lang) => s === 'all' ? (lang === 'pt' ? 'Todas' : 'All') : s === 'L' ? (lang === 'pt' ? 'G' : 'L') : s
+const sizeLabel = (s: SizeFilter, lang: Lang) => s === 'all' ? (lang === 'pt' ? 'Todas' : 'All') : s === 'L' ? (lang === 'pt' ? 'G' : 'L') : s === 'S' ? (lang === 'pt' ? 'P' : 'S') : s
 
 /** "Por tarefa": one row per task, sortable, filterable by size and by name; a row opens its subtasks (also filterable). */
 export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null, keepHead = false }: {
@@ -38,8 +38,8 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
       <h3 style={h3}><Flag size={15} /> {pt ? 'Por tarefa' : 'By task'}</h3>
       {tasks.length > 0 && <span style={muted}>{rows.length} {pt ? (rows.length === 1 ? 'tarefa' : 'tarefas') : (rows.length === 1 ? 'task' : 'tasks')}</span>}
-      {tasks.length > 0 && <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input type="search" value={needle} onChange={e => setNeedle(e.target.value)} placeholder={pt ? 'Filtrar tarefa…' : 'Filter task…'} aria-label={pt ? 'Filtrar tarefa' : 'Filter task'} style={{ ...field, width: 170 }} />
+      {(tasks.length > 0 || keepHead) && <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {tasks.length > 0 && <input type="search" value={needle} onChange={e => setNeedle(e.target.value)} placeholder={pt ? 'Filtrar tarefa…' : 'Filter task…'} aria-label={pt ? 'Filtrar tarefa' : 'Filter task'} style={{ ...field, width: 170 }} />}
         <TabStrip tabs={SIZES} value={size} onPick={setSize} label={s => sizeLabel(s, lang)} ariaLabel={pt ? 'Tamanho' : 'Size'} natural />
       </div>}
     </div>
@@ -56,7 +56,7 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
               const subs = (t.subtasks ?? []).filter(s => matches(s.title, subNeedle))
               return <React.Fragment key={t.id}>
                 <tr className="bm-t" data-testid="benchmark-task-row" data-task={t.id} onClick={() => { setOpen(open === t.id ? null : t.id); setSubNeedle('') }} aria-expanded={open === t.id}>
-                  <td>{t.title}</td><td data-l={pt ? 'Tamanho' : 'Size'}>{t.size === 'L' && pt ? 'G' : t.size}</td>
+                  <td>{t.title}</td><td data-l={pt ? 'Tamanho' : 'Size'}>{pt ? (t.size === 'L' ? 'G' : t.size === 'S' ? 'P' : t.size) : t.size}</td>
                   <td data-l={pt ? 'Sessões' : 'Sessions'}>{t.sessions[0]} → {t.sessions[1]}</td>
                   <td className="bm-num" data-l={pt ? 'Custo' : 'Cost'}>{pairText(t.costUSD, money_)}</td>
                   <td className="bm-num" data-l={pt ? 'Tempo' : 'Time'}>{pairText(t.wallMs, dur)}</td>
@@ -84,7 +84,7 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
             {tasks.length === 0 && <tr><td colSpan={8} data-testid="benchmark-tasks-empty" style={{ ...muted, padding: '8px 0' }}>{emptyReason}</td></tr>}
           </tbody></table>
         </div>
-        {tasks.length > 0 && <div style={{ ...muted, fontSize: 11, marginTop: 6 }}>{pt ? 'Cada coluna mostra os dois lados: "um → outro". Clique na linha para ver o motivo e as subtarefas.' : 'Each column shows both sides: "one → other". Click a row for the reason and its subtasks.'}</div>}
+        {(tasks.length > 0 || keepHead) && <div style={{ ...muted, fontSize: 11, marginTop: 6 }}>{tasks.length === 0 ? (pt ? 'Cada coluna mostra os dois lados: "um → outro". Clique na linha para ver o motivo.' : 'Each column shows both sides: "one → other". Click a row for the reason.') : pt ? 'Cada coluna mostra os dois lados: "um → outro". Clique na linha para ver o motivo e as subtarefas.' : 'Each column shows both sides: "one → other". Click a row for the reason and its subtasks.'}</div>}
       </>}
   </section>
 }

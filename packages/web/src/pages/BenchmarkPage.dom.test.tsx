@@ -568,6 +568,27 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     expect(en).not.toContain('does not compute this split')
   })
 
+  test('unmeasured "Por tarefa" keeps the size filters and the footer line, as the prototype\'s no-data state does', () => {
+    for (const lang of ['pt', 'en'] as const) {
+      const h = render(lang, { ...observed, history } as unknown as Observed, { initialSelected: 'harnesses' })
+      const tasks = h.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!
+      const sizes = lang === 'pt' ? ['Todas', 'P', 'M', 'G'] : ['All', 'S', 'M', 'L']
+      for (const s of sizes) expect(tasks).toContain(`>${s}</span>`)
+      expect(tasks).toContain(lang === 'pt' ? 'Cada coluna mostra os dois lados' : 'Each column shows both sides')
+    }
+  })
+
+  test('the hero of an unmeasured card has no disclosure at all, even on the plan basis', () => {
+    for (const lang of ['pt', 'en'] as const) for (const id of ['harnesses', 'models']) {
+      const h = render(lang, { ...observed, history } as unknown as Observed, { initialSelected: id, costBasis: 'plan' })
+      const hero = h.split('data-testid="benchmark-hero"')[1]!.split('data-testid="benchmark-tasks"')[0]!
+      expect(hero).not.toContain('<details')
+      expect(hero).not.toContain('O que falta')
+      expect(hero).not.toContain('What is missing')
+      expect(hero).not.toContain('benchmark-basis')
+    }
+  })
+
   test('hero: short title, ONE sentence, a caption, no bar, and the reasons folded in a closed disclosure', () => {
     const hero = html.split('data-testid="benchmark-hero"')[1]!.split('data-testid="benchmark-parts"')[0]!
     expect(hero).toContain('Indício, não prova')
