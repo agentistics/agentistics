@@ -495,6 +495,14 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
   }
   if (n.code === 'plan.segment' && typeof n.meta?.harness === 'string') return segmentNoticeText(n.meta.harness, lang)
   const loc = n.code ? NOTIFICATION_TEXT[n.code]?.[lang] : undefined
+  // A refused/unanswered board write names WHY: the server's own refusal, or that it could not be reached.
+  if (n.code === 'tasks.status_failed' && loc && typeof n.meta?.reason === 'string' && n.meta.reason !== 'write_failed') {
+    const pt = lang === 'pt'
+    const reason = n.meta.reason
+    return { title: loc.title, message: reason === 'network_error'
+      ? (pt ? 'O servidor não pôde ser alcançado. A alteração não foi salva.' : 'The server could not be reached. The change was not saved.')
+      : (pt ? `O servidor recusou a alteração: ${reason}.` : `The server refused the change: ${reason}.`) }
+  }
   // A CODE WITH NO TEXT MUST NOT RENDER AS A BLANK CARD.
   //
   // Only `code` + `meta` are stored, so a code this table has not met resolves to empty strings —

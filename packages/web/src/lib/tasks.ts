@@ -617,7 +617,7 @@ export type StatusWriteResult = { ok: true } | { ok: false; reason?: StatusRefus
 async function postStatus(path: string, body: unknown): Promise<StatusWriteResult> {
   const subtaskId = (body as { id?: unknown })?.id
   const end = beginStatusWrite(typeof subtaskId === 'string' ? `${path}#${subtaskId}` : path)
-  const fail = (reason: string) => pushLocalNotification({ type: 'error', code: 'tasks.status_failed', meta: { reason } })
+  const fail = (reason: string) => pushLocalNotification({ type: 'error', code: 'tasks.status_failed', meta: { reason, localAction: true } })
   try {
     const res = await fetch(path, {
       method: 'POST',
@@ -709,7 +709,7 @@ export async function editTask(ref: string, patch: TaskFieldPatch): Promise<bool
   const res = await postAsOwner(`/api/tasks/${encodeURIComponent(ref)}`, patch, { pieceKey: ref, move: 'task:write' })
   if (res && res.status < 400) return true
   // A refused write is never silent: the old title must not just reappear with no word.
-  pushLocalNotification(editRefusalNotice(res, pagePt()))
+  pushLocalNotification({ ...editRefusalNotice(res, pagePt()), meta: { localAction: true } })
   return false
 }
 
