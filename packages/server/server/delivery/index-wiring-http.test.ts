@@ -20,7 +20,20 @@ const PROOF = { id: 'w1', token: sessionToken(KEY, 'w1') }
 
 interface Booted { port: number; dir: string; root: string; proc: Subprocess }
 
-async function boot(mode: 'legacy' | 'required'): Promise<Booted> {
+const EX_TEMPFAIL = 75 // index.ts exits with this when its port is already in use
+
+/** Boots on a random port; a collision (child exits 75) retries on a new port, up to 3 attempts. Any other early exit fails fast. */
+async function boot(mode: 'legacy' | 'required', firstPort?: number): Promise<Booted> {
+  let last = ''
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await bootOnce(mode, attempt === 0 ? firstPort : undefined)
+    if (!('collision' in r)) return r
+    last = r.collision
+  }
+  throw new Error(`server (${mode}) found its port in use 3 times; last stderr tail:\n${last}`)
+}
+
+async function bootOnce(mode: 'legacy' | 'required', forcedPort?: number): Promise<Booted | { collision: string }> {
   const root = mkdtempSync(join(tmpdir(), `eg-r5-${mode}-`))
   const home = join(root, 'home')
   const dir = join(home, '.agentistics')
@@ -28,18 +41,27 @@ async function boot(mode: 'legacy' | 'required'): Promise<Booted> {
   mkdirSync(join(home, '.claude'), { recursive: true })
   writeFileSync(join(dir, 'preferences.json'), JSON.stringify({ archiveMode: 'off', ...(mode === 'required' ? { delivery: { ownerProof: 'required' } } : {}) }))
   writeFileSync(join(dir, 'session-identity.key'), KEY.toString('hex'), { mode: 0o600 })
-  const port = 20000 + Math.floor(Math.random() * 20000)
+  const port = forcedPort ?? 20000 + Math.floor(Math.random() * 20000)
   const proc = Bun.spawn([process.execPath, SERVER_INDEX], {
     env: { ...process.env, HOME: home, AGENTISTICS_DIR: dir, AGENTISTICS_ENGINE: '0', AGENTISTICS_EXPOSURE: 'local', SERVE_STATIC: '', PORT: String(port) },
-    stdout: 'ignore', stderr: 'ignore',
+    stdout: 'ignore', stderr: 'pipe',
   })
+  // Drain stderr as it comes (a full pipe would stall the child) and keep the tail for a boot failure message.
+  let errTail = ''
+  void (async () => { try { const rd = (proc.stderr as ReadableStream<Uint8Array>).getReader(); for (;;) { const { done, value } = await rd.read(); if (done) break; errTail = (errTail + new TextDecoder().decode(value)).slice(-4000) } } catch { /* closed */ } })()
   const deadline = Date.now() + 40_000
   while (Date.now() < deadline) {
     try { if ((await fetch(`http://127.0.0.1:${port}/api/health`)).ok) return { port, dir, root, proc } } catch { /* not up yet */ }
+    // The child died before answering (a missing engine slot, a bad import): no reason to wait out the deadline.
+    if (proc.exitCode !== null) {
+      await Bun.sleep(50)
+      if (proc.exitCode === EX_TEMPFAIL) { rmSync(root, { recursive: true, force: true }); return { collision: errTail } }
+      throw new Error(`server (${mode}) exited early (code ${proc.exitCode}); stderr tail:\n${errTail}`)
+    }
     await Bun.sleep(200)
   }
   proc.kill()
-  throw new Error(`server (${mode}) did not come up`)
+  throw new Error(`server (${mode}) did not come up in 40 s; stderr tail:\n${errTail}`)
 }
 
 const stop = async (b: Booted | undefined) => { if (!b) return; b.proc.kill(); await b.proc.exited; rmSync(b.root, { recursive: true, force: true }) }
@@ -71,6 +93,18 @@ async function newTask(post: ReturnType<typeof api>, title = `Wiring ${Date.now(
   expect(created.status).toBe(200)
   return String((created.json.task ?? created.json).id)
 }
+
+describe('boot retries a port collision', () => {
+  test('a port already bound makes the child exit 75 and boot() retries on a new port', async () => {
+    const squatter = Bun.serve({ port: 0, fetch: () => new Response('not agentistics', { status: 404 }) })
+    let b: Booted | undefined
+    try {
+      b = await boot('legacy', squatter.port)
+      expect(b.port).not.toBe(squatter.port)
+      expect((await fetch(`http://127.0.0.1:${b.port}/api/health`)).ok).toBe(true)
+    } finally { await stop(b); squatter.stop(true) }
+  }, 50_000)
+})
 
 describe('legacy mode, through the real index.ts', () => {
   let b: Booted

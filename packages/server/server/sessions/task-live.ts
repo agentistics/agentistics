@@ -953,6 +953,15 @@ export function legacyReviewShas(details: readonly TaskDetail[], events: readonl
   return [...legacyReviewShaPieces(details, events, deliveries).keys()]
 }
 
+/**
+ * PURE: the delivery record as buildLive reads it. A dequeued record, or a stale `fila` on a piece the board already sent
+ * for review / closed, is NO record. The sha collector uses this same function, so what it asks git about is exactly what
+ * buildLive can turn into Publicado.
+ */
+export function cleanDeliveryRecord<T extends { phase: string; dequeued?: unknown }>(stored: T | undefined, status: string): T | undefined {
+  return stored?.dequeued || (stored?.phase === 'fila' && ['in_review', 'done', 'abandoned'].includes(status)) ? undefined : stored
+}
+
 /** Where a commit id was named: the piece (task, or one of its subtasks) whose own words carry it. */
 export interface ShaPiece { taskId: string; subtaskId: string | null; repo?: string }
 
@@ -965,7 +974,7 @@ export function legacyReviewShaPieces(details: readonly TaskDetail[], events: re
     // A piece with a delivery record is asked about too when its record is still open in a late phase: the board says
     // it is in review (or done) and a release may already hold the commit (buildLive turns that into Publicado). Only
     // a `publicado` record, or an early phase (fila/executando…), has nothing to ask git.
-    const rec = deliveries?.get(p.sub ? p.sub.id : p.task.id)
+    const rec = cleanDeliveryRecord(deliveries?.get(p.sub ? p.sub.id : p.task.id), p.status)
     // buildLive promotes only `revisao_lider` (in_review) and any non-publicado record on a done piece; pr_merge/ci on an
     // in_review piece stay in their column whatever git says, so asking git for them would be a cost with no effect.
     if (rec && !((p.status === 'in_review' && rec.phase === 'revisao_lider') || (p.status === 'done' && rec.phase !== 'publicado'))) continue
@@ -1083,7 +1092,7 @@ export function buildLive(o: {
     const stored = o.deliveries?.get(p.sub ? p.sub.id : p.task.id)
     // A stale queue record must never override work the board already sent for review or closed.
     let fromReview = false
-    let rec = stored?.dequeued || (stored?.phase === 'fila' && ['in_review', 'done', 'abandoned'].includes(p.status)) ? undefined : stored
+    let rec = cleanDeliveryRecord(stored, p.status)
     let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfPieceStatus(p.status, o.statusLabel, o.statusStage)
     const id = p.sub?.id ?? p.task.id
     // Board completion is not evidence of a public release. Preserve the card in Tudo, outside the queue.

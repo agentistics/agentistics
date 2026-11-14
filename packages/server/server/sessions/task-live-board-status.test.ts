@@ -86,12 +86,13 @@ test('a record piece whose commit a published tag holds becomes Publicado THROUG
   await resetReleaseTagsForTest()
 })
 
-test('a record already published or still queued asks git nothing', async () => {
+test('a record already published asks git nothing; a stale fila on a piece in review is no record, so it IS asked (same cleaning as buildLive)', async () => {
   const { legacyReviewShaPieces } = await import('./task-live')
   const sha = '2cad21b582268546dcede622845cd4612b49a15c'
   const sh = [sub('s-p', { notes: `entrega commit ${sha}` }), sub('s-q', { notes: `entrega commit ${sha}` })]
   const dl = new Map([['s-p', rec({ phase: 'publicado' })], ['s-q', rec({ phase: 'fila' })]])
-  expect(legacyReviewShaPieces([detail(sh)], [], dl as never).size).toBe(0)
+  const got = legacyReviewShaPieces([detail(sh)], [], dl as never)
+  expect(got.get(sha)?.map(x => x.subtaskId)).toEqual(['s-q'])
 })
 
 test('R2: an in_review piece whose record is pr_merge/ci is NOT collected for git (buildLive never promotes it); done + non-publicado still is', async () => {
