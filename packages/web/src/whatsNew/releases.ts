@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.214.0': {
+    features: [
+      {
+        pt: 'Benchmark: agora igual ao desenho aprovado, inclusive nas comparações que ainda não têm medição.',
+        en: 'Benchmark: now matches the approved design, including comparisons that have no measurement yet.',
+      },
+      {
+        pt: 'Live: o trabalho entregue que já saiu da fila também é publicado por conta própria.',
+        en: 'Live: delivered work that already left the queue is also published on its own.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Uma edição ou troca de status recusada agora mostra uma mensagem com o motivo em palavras simples, também no modo autônomo.',
+        en: 'A refused edit or status change now shows a message with the reason in plain words, even in autonomous mode.',
+      },
+    ],
+  },
   '2.213.0': {
     features: [
       {

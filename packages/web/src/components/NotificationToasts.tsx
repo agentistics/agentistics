@@ -10,7 +10,7 @@ import { useNotificationPanelOpen } from '../lib/notificationPanel'
 import { NotificationBell } from './NotificationBell'
 import { SESSION_MUTED_CODE } from '../lib/notifyMenu'
 import { useAway } from '../lib/awayMode'
-import { emptyToastQueue, enqueueToasts, removeToast, summaryToast, SUMMARY_ID } from '../lib/toastQueue'
+import { emptyToastQueue, enqueueToasts, removeToast, summaryToast, SUMMARY_ID, type ToastQueue } from '../lib/toastQueue'
 
 // How long a toast lingers before it auto-dismisses (ms). Errors/warnings stay longer
 // so they're readable; info/success clear a bit faster.
@@ -28,6 +28,26 @@ const STYLE: Record<NotificationType, { color: string; Icon: typeof AlertCircle 
   warning: { color: '#f59e0b', Icon: AlertTriangle },
   info:    { color: '#3b82f6', Icon: Info },
   success: { color: '#22c55e', Icon: CheckCircle2 },
+}
+
+/** An error caused by something the person just did in THIS window — a direct reply to their click, not a fleet notice. */
+const isLocalAction = (n: AppNotification) => n.meta?.localAction === true
+
+/**
+ * Quiet = the tab is hidden or autonomous mode is on: everything is backlog (bell + summary). The ONE exception is a
+ * local-action error while the tab is visible — it answers a click, so it still toasts in autonomous mode.
+ */
+function enqueueQuiet(q: ToastQueue, incoming: AppNotification[], now: number, hidden: boolean): ToastQueue {
+  if (hidden) return enqueueToasts(q, incoming, now, true)
+  const local = incoming.filter(isLocalAction)
+  const rest = incoming.filter(n => !isLocalAction(n))
+  return enqueueToasts(enqueueToasts(q, rest, now, true), local, now, false)
+}
+
+function visibleToasts(q: ToastQueue, o: { hidden: boolean; away: boolean; panelOpen: boolean; lang: 'pt' | 'en' }): AppNotification[] {
+  if (o.hidden) return []
+  if (o.away) return q.items.filter(isLocalAction)
+  return [...q.items, ...(q.summary && !o.panelOpen ? [summaryToast(q.summary, o.lang, q.items.length > 0)] : [])]
 }
 
 interface Props {
@@ -50,7 +70,7 @@ export function NotificationToasts({ lang }: Props) {
   const wasQuiet = useRef(quiet)
   const quietSince = useRef(quiet ? Date.now() : Infinity)
   const returnedAt = useRef(0)
-  const toasts = quiet ? [] : [...queue.items, ...(queue.summary && !panelOpen ? [summaryToast(queue.summary, lang, queue.items.length > 0)] : [])]
+  const toasts = visibleToasts(queue, { hidden, away, panelOpen, lang })
 
   useEffect(() => {
     const changed = () => {
@@ -66,10 +86,10 @@ export function NotificationToasts({ lang }: Props) {
     if (quiet && !wasQuiet.current) quietSince.current = Date.now()
     if (!quiet && wasQuiet.current) returnedAt.current = Date.now()
     wasQuiet.current = quiet
-    if (quiet) setQueue(q => enqueueToasts(q, q.items, Date.now(), true))
+    if (quiet) setQueue(q => enqueueQuiet(q, q.items, Date.now(), hidden))
   }, [quiet])
   const [leaving, setLeaving] = useState<Set<string>>(new Set())
-  const seen = useRef<Map<string, NotificationType>>(new Map())
+  const seen = useRef<Map<string, { type: NotificationType; ts: number }>>(new Map())
   const initialized = useRef(false)
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const autoTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -100,16 +120,20 @@ export function NotificationToasts({ lang }: Props) {
     // replay historical notifications as toasts on mount.
     if (!initialized.current) {
       initialized.current = true
-      for (const n of notes) seen.current.set(n.id, n.type)
+      for (const n of notes) seen.current.set(n.id, { type: n.type, ts: n.ts })
       return
     }
     const incoming: AppNotification[] = []
     for (const n of notes) {
-      const previousType = seen.current.get(n.id)
-      seen.current.set(n.id, n.type)
+      const previous = seen.current.get(n.id)
+      const previousType = previous?.type
+      seen.current.set(n.id, { type: n.type, ts: n.ts })
       const isNew = previousType === undefined
       const severityChanged = previousType !== undefined && previousType !== n.type
-      if (!isNew && !severityChanged) continue
+      // The server keeps ONE row per event (same code+meta): a repeat comes back with the SAME id and a fresh time.
+      // Only a REFUSAL repeats this way; a keyed notice (loading progress) also moves its time and must not re-toast.
+      const resurfaced = previous !== undefined && n.type === 'error' && !n.read && n.ts > previous.ts && typeof n.meta?.notificationKey !== 'string'
+      if (!isNew && !severityChanged && !resurfaced) continue
       // A session card is the Nay button's to show, and do-not-disturb keeps every session event
       // quiet. Both stay in the bell; only the popup is skipped.
       // The update's bell entry is the RECORD of the popup the Nay window already showed — never a toast too.
@@ -117,7 +141,7 @@ export function NotificationToasts({ lang }: Props) {
       // A plan-limit notice is Nay's card when the card can take it; otherwise it is a toast.
       if (pushLimitAlert(n)) continue
       if (n.code && (NAY_CARD_CODES.has(n.code) || (n.code.startsWith('session.') && n.code !== SESSION_MUTED_CODE && getNotificationSettings().doNotDisturb))) continue
-      if (severityChanged) {
+      if (severityChanged || resurfaced) {
         if (timers.current[n.id]) clearTimeout(timers.current[n.id])
         if (autoTimers.current[n.id]) clearTimeout(autoTimers.current[n.id])
         delete timers.current[n.id]
@@ -128,14 +152,14 @@ export function NotificationToasts({ lang }: Props) {
     }
     if (incoming.length) {
       const backlog = quiet || document.visibilityState === 'hidden' || incoming.some(n => n.ts >= quietSince.current && n.ts <= returnedAt.current)
-      setQueue(q => enqueueToasts(q, incoming, Date.now(), backlog))
+      setQueue(q => backlog ? enqueueQuiet(q, incoming, Date.now(), document.visibilityState === 'hidden' || hidden) : enqueueToasts(q, incoming, Date.now(), false))
     }
-  }, [notes, startLeave, quiet])
+  }, [notes, startLeave, quiet, hidden])
 
   // Reconcile timers against the bounded presentation. Hidden/away summaries get their full
   // reading time on return; grouped cards cannot retain timers that later dismiss new content.
   useEffect(() => {
-    const cards = quiet ? [] : [...queue.items, ...(queue.summary && !panelOpen ? [summaryToast(queue.summary, lang, queue.items.length > 0)] : [])]
+    const cards = visibleToasts(queue, { hidden, away, panelOpen, lang })
     const active = new Set(cards.map(n => n.id))
     for (const id of Object.keys(autoTimers.current)) {
       if (!active.has(id) || id === SUMMARY_ID) { clearTimeout(autoTimers.current[id]); delete autoTimers.current[id] }
@@ -153,7 +177,7 @@ export function NotificationToasts({ lang }: Props) {
         startLeave(n.id)
       }, AUTO_MS[n.type])
     }
-  }, [queue, quiet, lang, startLeave, panelOpen])
+  }, [queue, hidden, away, lang, startLeave, panelOpen])
 
   // Clear any pending timers on unmount.
   useEffect(() => () => {

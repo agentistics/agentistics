@@ -121,7 +121,18 @@ describe('agentistics_benchmark_observed — the comparisons are built on the se
     expect(mcp.history.comparisons).toEqual(http.history.comparisons)    // the `key` survives the id-stripping
     const qa = http.history.comparisons.find(c => c.key === 'qa')!
     expect(qa.wall!.ratio).toBe(4)                                        // 8 h against 2 h; the zero-length piece is out
-    expect(qa.wall!.sizes).toEqual([{ size: 'M', medA: 2 * H, medB: 8 * H, nA: 4, nB: 4 }])
+    expect(qa.wall!.sizes).toEqual([{ size: 'M', medA: 2 * H, medB: 8 * H, ratio: 4, nA: 4, nB: 4 }])   // the pair's own ratio travels: no division in the browser
+  })
+
+  test('HTTP and the MCP tool carry the SAME per-task pairs (the prototype\'s "um → outro"), computed once in core', async () => {
+    const url = new URL('http://localhost/api/benchmark/observed')
+    const http = await (await handleBenchmarkRequest(new Request(url), url, { observed: async f => buildObservedFromSources(cmpStore(), f), experiments: () => [] })).json() as { history: { tasks: { sides: Record<string, { nA: number; nB: number; wallMs: [number | null, number | null]; defects: unknown[] }> }[] } }
+    const mcp = benchmarkObservedTool(http as never) as unknown as { history: { tasks: { sides: unknown }[] } }
+    const sides = http.history.tasks[0]!.sides
+    expect(Object.keys(sides).sort()).toEqual(['qa', 'sessions'])
+    expect(sides.qa!.wallMs).toEqual([2 * H, 8 * H])
+    expect(sides.qa!.defects).toEqual([null, null])
+    expect(mcp.history.tasks[0]!.sides).toEqual(sides)
   })
 
   test('the piece with no duration is a count in the coverage, not a "0 min"', () => {
