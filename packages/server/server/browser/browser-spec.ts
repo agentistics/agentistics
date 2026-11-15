@@ -182,9 +182,53 @@ export function isIpLiteral(hostname: string): boolean {
   return h.includes(':') || /^\d+(\.\d+){0,3}$/.test(h) || /^0x[0-9a-f]+$/.test(h)
 }
 
+/** Expand an IPv6 literal (no brackets; dotted tail allowed) to its 8 groups, or `null` when it is not one. */
+function ipv6Groups(h: string): number[] | null {
+  if (!h.includes(':')) return null
+  let s = h
+  const dotted = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s)
+  if (dotted) {
+    const o = dotted.slice(1, 5).map(Number)
+    if (o.some(n => n > 255)) return null
+    s = s.slice(0, dotted.index) + ((o[0]! << 8) | o[1]!).toString(16) + ':' + ((o[2]! << 8) | o[3]!).toString(16)
+  }
+  const halves = s.split('::')
+  if (halves.length > 2) return null
+  const part = (x: string) => (x === '' ? [] : x.split(':'))
+  const head = part(halves[0]!)
+  const tail = halves.length === 2 ? part(halves[1]!) : []
+  if (halves.length === 1 && head.length !== 8) return null
+  if (halves.length === 2 && head.length + tail.length > 7) return null
+  const all = halves.length === 2 ? [...head, ...Array(8 - head.length - tail.length).fill('0'), ...tail] : head
+  const out = all.map(g => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN))
+  return out.some(Number.isNaN) ? null : out
+}
+
+/**
+ * The IPv4 address an IPv6 literal CARRIES, or `null`: IPv4-mapped (`::ffff:a.b.c.d` / `::ffff:XXXX:XXXX`),
+ * IPv4-compatible (`::a.b.c.d`), SIIT (`::ffff:0:a.b.c.d`), NAT64 (`64:ff9b::/96`) and 6to4 (`2002:XXXX:XXXX::`).
+ * The URL parser rewrites every spelling to hex groups, so a rule that matches only the dotted form misses
+ * them all: `[::ffff:ac17:ffa5]` IS 172.23.255.165 and `[::ffff:0:0]` IS 0.0.0.0, and both reach this machine.
+ */
+export function embeddedIpv4(hostname: string): string | null {
+  const g = ipv6Groups(hostname.toLowerCase().replace(/^\[|\]$/g, ''))
+  if (!g) return null
+  const v4 = (a: number, b: number) => `${a >> 8}.${a & 255}.${b >> 8}.${b & 255}`
+  const zeros = (from: number, to: number) => g.slice(from, to).every(x => x === 0)
+  if (zeros(0, 5) && g[5] === 0xffff) return v4(g[6]!, g[7]!) // mapped
+  if (zeros(0, 6) && (g[6]! !== 0 || g[7]! > 1)) return v4(g[6]!, g[7]!) // compatible (::1 and :: are not)
+  if (zeros(0, 4) && g[4] === 0xffff && g[5] === 0) return v4(g[6]!, g[7]!) // SIIT
+  if (g[0] === 0x64 && g[1] === 0xff9b && zeros(2, 6)) return v4(g[6]!, g[7]!) // NAT64
+  if (g[0] === 0x2002) return v4(g[1]!, g[2]!) // 6to4
+  return null
+}
+
 function hostIsThisMachine(hostname: string, ctx: BlockContext): boolean {
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
-  return isLoopbackHost(h) || (ctx.selfAddresses ?? []).includes(h)
+  const self = ctx.selfAddresses ?? []
+  if (isLoopbackHost(h) || self.includes(h)) return true
+  const v4 = embeddedIpv4(h)
+  return v4 !== null && (isLoopbackHost(v4) || self.includes(v4))
 }
 
 function portOf(u: URL): number | undefined {
@@ -223,8 +267,8 @@ export function isLoopbackHost(hostname: string): boolean {
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
   if (h === 'localhost' || h.endsWith('.localhost')) return true
   if (h === '::1' || h === '::' || h === '0.0.0.0' || h === '0') return true
-  if (/^::ffff:(127\.|0\.0\.0\.0)/.test(h)) return true
-  if (/^::ffff:7f[0-9a-f]{2}:/.test(h)) return true
+  const v4 = embeddedIpv4(h)
+  if (v4 !== null) return isLoopbackHost(v4)
   if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true
   // Decimal / hex single-number forms of 127/8 (`2130706433`, `0x7f000001`) — browsers accept them.
   if (/^\d+$/.test(h)) { const n = Number(h); return n >= 0x7f000000 && n <= 0x7fffffff }
@@ -321,6 +365,13 @@ export function memoryVerdict(r: MemoryReading): MemoryVerdict {
     return { action, basis: 'rss', bytes: r.rss }
   }
   return { action: 'ok', basis: 'none', bytes: null }
+}
+
+/** A page target the PAGE itself created (`window.open`, a link with target=_blank) is not asked for by
+ *  `tab_new`, so the ceiling is enforced where it appears: a NEW page target when the owner is already at
+ *  its ceiling is closed. A target already counted (an info update) never is. */
+export function mustCloseNewTarget(alreadyKnown: boolean, tabCount: number, maxTabs: number): boolean {
+  return !alreadyKnown && tabCount >= maxTabs
 }
 
 export interface TabAge { targetId: string; lastActiveMs: number }

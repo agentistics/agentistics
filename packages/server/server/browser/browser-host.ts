@@ -40,7 +40,7 @@ import {
   KILL_GRACE_MS, MAX_LIVE_BROWSERS, MAX_PERSONAL_BROWSERS, MAX_SESSION_BROWSERS, MAX_TABS_PERSONAL, MAX_TABS_SESSION,
   MIN_AVAILABLE_BYTES, START_TIMEOUT_MS, WATCH_INTERVAL_MS, browserArgv, descendants, idleExpired, memoryVerdict,
   ownerKey, parseSmapsRollup, planOrphanSweep, planUnrecordedOrphans, ppidFromStat, profileDirFor, scopeUnitName,
-  scopeWrap, statusTitle, statusUrl, tabToTrim, urlBlockReason, validManagedId, needsResolve, resolvedBlockReason,
+  mustCloseNewTarget, scopeWrap, statusTitle, statusUrl, tabToTrim, urlBlockReason, validManagedId, needsResolve, resolvedBlockReason,
   startTimeFromStat,
   type BlockContext, type BlockReason, type BrowserOwner, type MemoryVerdict, type PidRecord, type SweepPlan,
 } from './browser-spec'
@@ -348,7 +348,15 @@ export class BrowserHost {
 
   private onEvent(entry: Entry, ev: CdpEvent): void {
     if (ev.method === 'Target.targetCreated' || ev.method === 'Target.targetInfoChanged') {
-      if (ev.params?.targetInfo?.type === 'page') this.upsertTab(entry, ev.params.targetInfo)
+      const info = ev.params?.targetInfo
+      if (info?.type === 'page') {
+        const max = entry.owner.kind === 'personal' ? MAX_TABS_PERSONAL : MAX_TABS_SESSION
+        if (mustCloseNewTarget(entry.tabs.has(info.targetId), entry.tabs.size, max)) {
+          // A tab the page opened itself (window.open) past the ceiling: close it and say so.
+          this.log(`${entry.key} page opened a tab past the ceiling of ${max}; closing ${info.targetId} (${statusUrl(info.url ?? '')})`)
+          void entry.cdp?.send('Target.closeTarget', { targetId: info.targetId }).catch(() => {})
+        } else this.upsertTab(entry, info)
+      }
     } else if (ev.method === 'Target.targetDestroyed') {
       entry.tabs.delete(ev.params?.targetId)
       entry.tabSessions.delete(ev.params?.targetId)

@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import {
-  hostStillOwns, isIpLiteral, isReaper, looksLikeAgentopHost, needsResolve, planOrphanSweep, planUnrecordedOrphans,
+  embeddedIpv4, mustCloseNewTarget, hostStillOwns, isIpLiteral, isLoopbackHost, isReaper, looksLikeAgentopHost, needsResolve, planOrphanSweep, planUnrecordedOrphans,
   profileDirInCmdline, resolvedBlockReason, startTimeFromStat, statusTitle, statusUrl, urlBlockReason,
   type PidRecord,
 } from './browser-spec'
@@ -28,6 +28,55 @@ describe('block rules — this machine, by any name', () => {
     }
     expect(urlBlockReason('ws://127.0.0.1:47291/api/fleet/input', ctx)).toBe('agentistics-port')
     expect(urlBlockReason('file:///etc/passwd', ctx)).toBe('scheme')
+  })
+
+  test('IPv4 spelled as IPv6 is the IPv4 (QA S2 blocker): mapped, compatible, SIIT, NAT64, 6to4', () => {
+    const forms: Array<[string, string]> = [
+      ['[::ffff:192.168.1.20]', 'mapped dotted of the LAN ip'],
+      ['[::ffff:c0a8:114]', 'mapped hex of the LAN ip'],
+      ['[::ffff:C0A8:0114]', 'mapped hex, upper case, padded'],
+      ['[0:0:0:0:0:ffff:c0a8:114]', 'mapped, fully expanded'],
+      ['[::ffff:0:0]', 'mapped 0.0.0.0'],
+      ['[::ffff:0.0.0.0]', 'mapped 0.0.0.0 dotted'],
+      ['[::ffff:7f00:1]', 'mapped loopback'],
+      ['[::ffff:127.0.0.1]', 'mapped loopback dotted'],
+      ['[::ffff:7f12:3456]', 'mapped loopback 127/8'],
+      ['[::7f00:1]', 'IPv4-compatible loopback'],
+      ['[::127.0.0.1]', 'IPv4-compatible loopback dotted'],
+      ['[::c0a8:114]', 'IPv4-compatible LAN ip'],
+      ['[::ffff:0:7f00:1]', 'SIIT loopback'],
+      ['[::ffff:0:c0a8:114]', 'SIIT LAN ip'],
+      ['[64:ff9b::7f00:1]', 'NAT64 loopback'],
+      ['[64:ff9b::c0a8:114]', 'NAT64 LAN ip'],
+      ['[2002:7f00:1::]', '6to4 loopback'],
+      ['[2002:c0a8:114::1]', '6to4 LAN ip'],
+    ]
+    for (const [h, why] of forms) {
+      expect(urlBlockReason(`http://${h}:47291/`, ctx), why).toBe('agentistics-port')
+      expect(urlBlockReason(`ws://${h}:9333/x`, ctx), why).toBe('debug-port')
+      expect(urlBlockReason(`http://${h}:5173/`, ctx), why).toBeNull()
+    }
+    // a mapped address that is NOT this machine stays allowed
+    expect(urlBlockReason('http://[::ffff:c0a8:115]:47291/', ctx)).toBeNull()
+    expect(urlBlockReason('http://[::ffff:808:808]:47291/', ctx)).toBeNull()
+    expect(urlBlockReason('http://[2606:4700::1111]:47291/', ctx)).toBeNull()
+    expect(needsResolve('http://[::ffff:c0a8:114]:47291/', ctx)).toBe(false)
+    expect(resolvedBlockReason('http://x.test:47291/', ['::ffff:c0a8:114'], ctx)).toBe('agentistics-port')
+    expect(resolvedBlockReason('http://x.test:47291/', ['::ffff:7f00:1'], ctx)).toBe('agentistics-port')
+    expect(isLoopbackHost('[::ffff:0:0]')).toBe(true)
+    expect(isLoopbackHost('[::ffff:7f00:1]')).toBe(true)
+    expect(isLoopbackHost('[::ffff:808:808]')).toBe(false)
+  })
+
+  test('embeddedIpv4', () => {
+    expect(embeddedIpv4('[::ffff:c0a8:114]')).toBe('192.168.1.20')
+    expect(embeddedIpv4('::ffff:0:0')).toBe('0.0.0.0')
+    expect(embeddedIpv4('64:ff9b::7f00:1')).toBe('127.0.0.1')
+    expect(embeddedIpv4('2002:c0a8:114::')).toBe('192.168.1.20')
+    expect(embeddedIpv4('::1')).toBeNull()
+    expect(embeddedIpv4('::')).toBeNull()
+    expect(embeddedIpv4('fe80::1')).toBeNull()
+    expect(embeddedIpv4('example.com')).toBeNull()
   })
 
   test('a NAME on a guarded port must be resolved; anything else is decided without DNS', () => {
@@ -156,5 +205,14 @@ describe('orphans no record names (QA reservation b)', () => {
     expect(isReaper(1, null)).toBe(true)
     expect(isReaper(77, '/lib/systemd/systemd\x00--user')).toBe(true)
     expect(isReaper(77, 'bun\x00index.ts')).toBe(false)
+  })
+})
+
+describe('the tab ceiling holds against the page itself (QA S2 reservation 1)', () => {
+  test('a new page target at the ceiling is closed; a known one or one under it is not', () => {
+    expect(mustCloseNewTarget(false, 4, 4)).toBe(true)
+    expect(mustCloseNewTarget(false, 17, 4)).toBe(true)
+    expect(mustCloseNewTarget(false, 3, 4)).toBe(false)
+    expect(mustCloseNewTarget(true, 4, 4)).toBe(false)
   })
 })

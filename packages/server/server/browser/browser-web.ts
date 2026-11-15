@@ -137,6 +137,10 @@ export async function browserRoute(method: string, pathname: string, body: unkno
   }
   let h = deps.host.actionHost(key)
   if (!h && action === 'tabs') return { status: 200, body: { ok: true, live: false, tabs: [] } }
+  // A READ never starts a Chromium: there is nothing to read, and "this changes nothing" must be true.
+  if (!h && ACTION_KIND[action] === 'read') {
+    return { status: 200, body: { ok: false, error: 'no_browser', sentence: 'This session has no browser open yet, so there is nothing to read. Open a page first with agentistics_browser_navigate.' } }
+  }
   if (!h) {
     const started = await deps.host.start(owner)
     if (!started.ok) {

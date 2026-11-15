@@ -115,9 +115,24 @@ describe('browserRoute', () => {
   test('a refused start is a 503/501 with the host sentence', async () => {
     const f = fakeDeps()
     f.deps.host.start = async () => ({ ok: false, reason: 'session-ceiling', sentence: 'busy' })
-    expect(await browserRoute('POST', '/api/browser/session/snapshot', { session: proof('a') }, f.deps)).toEqual({ status: 503, body: { ok: false, error: 'session-ceiling', sentence: 'busy' } })
+    const nav = { session: proof('a'), url: 'http://x/' }
+    expect(await browserRoute('POST', '/api/browser/session/navigate', nav, f.deps)).toEqual({ status: 503, body: { ok: false, error: 'session-ceiling', sentence: 'busy' } })
     f.deps.host.start = async () => ({ ok: false, reason: 'no-executable', sentence: 'none' })
-    expect((await browserRoute('POST', '/api/browser/session/snapshot', { session: proof('a') }, f.deps))?.status).toBe(501)
+    expect((await browserRoute('POST', '/api/browser/session/navigate', nav, f.deps))?.status).toBe(501)
+  })
+
+  test('a READ with no browser open refuses in words and never starts one (QA S2 reservation 2)', async () => {
+    const f = fakeDeps()
+    for (const verb of ['snapshot', 'screenshot', 'wait_for']) {
+      const r = await browserRoute('POST', `/api/browser/session/${verb}`, { session: proof('a'), ...(verb === 'wait_for' ? { text: 'x' } : {}) }, f.deps)
+      expect(r?.status).toBe(200)
+      expect(r?.body).toMatchObject({ ok: false, error: 'no_browser' })
+    }
+    expect(f.started).toEqual([])
+    expect(f.ran).toEqual([])
+    // with a browser open the same read runs
+    await browserRoute('POST', '/api/browser/session/navigate', { session: proof('a'), url: 'http://x/' }, f.deps)
+    expect((await browserRoute('POST', '/api/browser/session/snapshot', { session: proof('a') }, f.deps))?.body).toMatchObject({ ok: true })
   })
 
   test('the S3 hook: the gate sees every ACTION and no READ, and can answer instead', async () => {
