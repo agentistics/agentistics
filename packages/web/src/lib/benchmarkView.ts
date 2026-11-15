@@ -147,8 +147,6 @@ export interface Hero {
   why: string[]
   /** What the observed history lets us say (history entry only). */
   facts?: string[]
-  /** One quiet line under the sentence (comparisons): what it is made of. */
-  caption?: string
   /** Title of the disclosure holding `why` and `facts`; when set they are folded away. */
   disclosure?: string
 }
@@ -469,13 +467,14 @@ function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Mo
   const fm = firmness(comparisonRatios(c))
   const alt = { equal: pt ? 'pesos iguais' : 'equal weights', quality: pt ? 'Qualidade valendo mais' : 'Quality weighted higher', costTime: pt ? 'Custo e Tempo valendo mais' : 'Cost and Time weighted higher' }
   return {
-    tone, word: sc === null ? (pt ? 'Indício, não prova' : 'Evidence, not proof') : wordOf(tone, lang), delta: null, score: sc,
+    tone, word: sc === null ? (pt ? 'Sem dados ainda' : 'No data yet') : wordOf(tone, lang), delta: null, score: sc,
     firm: sc === null ? null : fm.changes.length === 0 ? { ok: true, text: pt ? 'Resultado firme' : 'Firm result' } : { ok: false, text: pt ? 'Depende do que você valoriza' : 'Depends on what you value' },
     range: null,
     say: comparisonSentence(c, lang),
-    caption: (pt ? 'Indício, não prova · ' : 'Evidence, not proof · ') + (pt ? `contra ${c.aShort} · ${c.nA} × ${c.nB} peças · mesmo tamanho` : `against ${c.aShort} · ${c.nA} × ${c.nB} pieces · same size`) + (oppositeNote(c, lang) ? ` · ${oppositeNote(c, lang)}` : ''),
-    disclosure: pt ? 'Por que não é prova?' : 'Why is this not proof?',
+    disclosure: pt ? 'Por que esse resultado?' : 'Why this result?',
     why: [
+      pt ? `Baseado em indício observado, não em experimento: contra ${c.aShort} · ${c.nA} × ${c.nB} peças · comparado dentro do mesmo tamanho.` : `Based on observed evidence, not an experiment: against ${c.aShort} · ${c.nA} × ${c.nB} pieces · compared within the same size.`,
+      ...(oppositeNote(c, lang) ? [oppositeNote(c, lang)!] : []),
       ...(sc === null ? [] : [pt ? 'A nota usa só o que foi medido (custo e tempo); qualidade e confiabilidade ainda não têm dados e não entram na conta.' : 'The score uses only what was measured (cost and time); quality and reliability have no data yet and are left out.']),
       ...(fm.changes.length ? [fm.changes.map(x => `${alt[x.weights]}: ${wordOf(x.tone, lang)}`).join('; ')] : []),
       pt ? 'Peças difíceis vão para o método pesado e tendem a ter mais rodadas e mais sessões: a diferença pode ser a dificuldade, não o método. Comparar dentro do mesmo tamanho (linhas) é um controle fraco.' : 'Hard pieces go to the heavy method and tend to have more rounds and sessions: the difference may be the difficulty, not the method. Matching by size (lines) is a weak control.',

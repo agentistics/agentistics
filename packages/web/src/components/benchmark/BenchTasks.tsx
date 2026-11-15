@@ -101,7 +101,7 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
   </section>
 }
 
-/** "Por número de sessões": the history by how many sessions a task took. Says nothing about paying off. */
+/** "Por quantidade de sessões": the history by how many sessions a task took. Says nothing about paying off. */
 export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: { buckets: BucketRow[]; lang: Lang; money: Money; emptyReason: string; note?: string }) {
   const pt = lang === 'pt'
   const heads = pt ? ['Sessões', 'Tarefas', 'Custo mediano', 'Tempo mediano', 'Defeitos escapados', 'Aceitas de primeira', 'Não reabertas']
@@ -111,8 +111,8 @@ export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: {
   const noData = <span className="bm-nw" style={muted}>— {pt ? 'sem dados' : 'no data'}</span>
   const nw = (x: string) => <span className="bm-nw">{x}</span>
   const rate = (n: number | null) => n === null ? noData : <div style={{ maxWidth: 150 }}>{nw(`${nf(n * 100, lang, 0)}%`)}<Bar value={n * 100} tone="rate" mark={false} /></div>
-  return <section style={card} data-testid="benchmark-buckets" aria-label={pt ? 'Por número de sessões' : 'By number of sessions'}>
-    <h3 style={{ ...h3, marginBottom: 4 }}><Users size={15} /> {pt ? 'Por número de sessões' : 'By number of sessions'}</h3>
+  return <section style={card} data-testid="benchmark-buckets" aria-label={pt ? 'Por quantidade de sessões' : 'By number of sessions'}>
+    <h3 style={{ ...h3, marginBottom: 4 }}><Users size={15} /> {pt ? 'Por quantidade de sessões' : 'By number of sessions'}</h3>
     <p style={{ ...muted, margin: '0 0 8px' }}>{pt ? 'Do histórico. Não diz se compensou, porque tarefa difícil já costuma usar mais sessões.' : 'From history. It does not say whether it paid off, because hard tasks already tend to use more sessions.'}{note ? ` ${note}` : ''}</p>
     {buckets.length === 0 ? <div data-testid="benchmark-buckets-empty" style={muted}>{emptyReason}</div>
       : <div className="bm-buckets">

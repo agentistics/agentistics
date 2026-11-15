@@ -118,15 +118,17 @@ describe('observed comparisons the history already allows', () => {
     expect(entriesOf(obs(undefined), [], 'pt')[0]!.id).toBe('observed')       // an older server: the single history entry
   })
 
-  test('hero: the verdict word and N de 100, ONE sentence in the prototype mould, an "Indício, não prova" caption, the rest behind a disclosure', () => {
+  test('hero: the verdict word and N de 100, ONE sentence in the prototype mould, no caption, the rest behind a disclosure', () => {
     const e = entriesOf(obs(h), [], 'pt')[0]!
     const hero = heroOf(e, obs(h), 'pt', { currency: 'USD' })
     expect(hero).toMatchObject({ word: 'Não compensou', tone: 'bad' })
     expect(hero.say).toBe('Com 2+ rodadas de QA: 2,5× mais custo, 4× mais tempo, 5× mais sessões.')
     expect(hero.score).toBeCloseTo(25.1, 0)
     expect(hero.delta).toBeNull()
-    expect(hero.caption).toBe('Indício, não prova · contra 1 rodada de QA · 4 × 4 peças · mesmo tamanho')
-    expect(hero.disclosure).toBe('Por que não é prova?')
+    expect(hero).not.toHaveProperty('caption')
+    expect(hero.word).not.toContain('Indício')
+    expect(hero.disclosure).toBe('Por que esse resultado?')
+    expect(hero.why.join('\n')).toContain('contra 1 rodada de QA · 4 × 4 peças')
     expect(hero.why.join('\n')).toContain('experimento')
     expect(hero.facts!.length).toBeGreaterThan(0)
     // L1: the disclosure speaks of THIS comparison only, repeats no Partes row and carries no ratio of its own
@@ -135,9 +137,9 @@ describe('observed comparisons the history already allows', () => {
     expect(s.say).toContain('retrabalho 0% → 100%')
     const en = heroOf(entriesOf(obs(h), [], 'en')[0]!, obs(h), 'en', { currency: 'USD' })
     expect(en.word).toBe('Did not pay off')
-    expect(en.caption).toContain('Evidence, not proof')
+    expect(en).not.toHaveProperty('caption')
     expect(en.say).toBe('With 2+ QA rounds: 2.5× more cost, 4× more time, 5× more sessions.')
-    expect(en.disclosure).toBe('Why is this not proof?')
+    expect(en.disclosure).toBe('Why this result?')
   })
 
   test('L1: the sessions comparison carries no QA lines in its disclosure', () => {
@@ -152,9 +154,9 @@ describe('observed comparisons the history already allows', () => {
     ]
     const hh = history(rows)
     const hero = heroOf(entriesOf(obs(hh), [], 'pt')[0]!, obs(hh), 'pt', { currency: 'USD' })
-    expect(hero.caption).toContain('nas peças G foi o contrário')
-    expect(heroOf(entriesOf(obs(hh), [], 'en')[0]!, obs(hh), 'en', { currency: 'USD' }).caption).toContain('the opposite for L pieces')
-    expect(heroOf(entriesOf(obs(h), [], 'pt')[0]!, obs(h), 'pt', { currency: 'USD' }).caption).not.toContain('contrário')
+    expect(hero.why.join('\n')).toContain('nas peças G foi o contrário')
+    expect(heroOf(entriesOf(obs(hh), [], 'en')[0]!, obs(hh), 'en', { currency: 'USD' }).why.join('\n')).toContain('the opposite for L pieces')
+    expect(heroOf(entriesOf(obs(h), [], 'pt')[0]!, obs(h), 'pt', { currency: 'USD' }).why.join('\n')).not.toContain('contrário')
   })
 
   test('R5-1: opposite sizes are grouped PER METRIC, never as a cross product', () => {
@@ -167,9 +169,9 @@ describe('observed comparisons the history already allows', () => {
       ...grp('aL', 3, { size: 'L', wallMs: H, costUSD: 8 }), ...grp('bL', 3, { size: 'L', wallMs: 5 * H, costUSD: 2 }),
     ]
     const hh = history(rows)
-    const pt = heroOf(entriesOf(obs(hh), [], 'pt')[0]!, obs(hh), 'pt', { currency: 'USD' }).caption
+    const pt = heroOf(entriesOf(obs(hh), [], 'pt')[0]!, obs(hh), 'pt', { currency: 'USD' }).why.join('\n')
     expect(pt).toContain('no tempo, nas peças P foi o contrário; no custo, nas G')
-    const en = heroOf(entriesOf(obs(hh), [], 'en')[0]!, obs(hh), 'en', { currency: 'USD' }).caption
+    const en = heroOf(entriesOf(obs(hh), [], 'en')[0]!, obs(hh), 'en', { currency: 'USD' }).why.join('\n')
     expect(en).toContain('in time, the opposite for S pieces; in cost, for L')
   })
 
@@ -187,7 +189,7 @@ describe('observed comparisons the history already allows', () => {
     expect(k.wall!.ratio - 1).toBeLessThan(0.05)
     expect(k.cost!.ratio).toBeGreaterThan(1)
     expect(k.cost!.ratio - 1).toBeLessThan(0.05)
-    expect(heroOf(entriesOf(obs(hh), [], 'pt')[0]!, obs(hh), 'pt', { currency: 'USD' }).caption).not.toContain('contrário')
+    expect(heroOf(entriesOf(obs(hh), [], 'pt')[0]!, obs(hh), 'pt', { currency: 'USD' }).why.join('\n')).not.toContain('contrário')
   })
 
   test('parts: the observed multiplier per type with the "observado" label; no data only where there really is none', () => {

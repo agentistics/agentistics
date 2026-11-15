@@ -74,8 +74,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Benchmark rebuilt to the approved design, with "By task" in pages and a "How it works" explaining the method step by step.',
       },
       {
-        pt: 'Benchmark: com o histórico real, compara peças com 1 rodada de QA contra 2 ou mais, e 1 sessão contra 5 ou mais, dentro do mesmo tamanho — como indício observado ("Indício, não prova"). Ainda não há nota de 0 a 100, porque nenhum experimento controlado rodou.',
-        en: 'Benchmark: with the real history it compares pieces with 1 QA round against 2 or more, and 1 session against 5 or more, within the same size — as observed evidence ("Evidence, not proof"). There is no 0–100 score yet, because no controlled experiment has run.',
+        pt: 'Benchmark: com o histórico real, compara peças com 1 rodada de QA contra 2 ou mais, e 1 sessão contra 5 ou mais, dentro do mesmo tamanho — como indício observado, não como prova. Ainda não há nota de 0 a 100, porque nenhum experimento controlado rodou.',
+        en: 'Benchmark: with the real history it compares pieces with 1 QA round against 2 or more, and 1 session against 5 or more, within the same size — as observed evidence, not proof. There is no 0–100 score yet, because no controlled experiment has run.',
       },
       {
         pt: 'Live: o status da peça no quadro sempre vale — abandonada ou concluída saem das colunas ativas e bloqueada aparece como bloqueada.',

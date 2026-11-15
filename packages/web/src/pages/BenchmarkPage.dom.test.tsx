@@ -155,7 +155,7 @@ describe('the Benchmark screen follows the approved D3 layout', () => {
     expect([...order].sort((a, b) => at(a) - at(b))).toEqual(order)
     expect(html).toContain('Como funciona?')
     expect(html).toContain('Por tarefa')
-    expect(html).toContain('Por número de sessões')
+    expect(html).toContain('Por quantidade de sessões')
     // the footer is the prototype's: the question and the button, nothing else (no "Cobertura por harness" line)
     expect(html).not.toContain('benchmark-coverage')
     expect(html.split('data-testid="benchmark-buckets"')[1]).not.toContain('Cobertura por harness')
@@ -453,14 +453,14 @@ describe('per-piece history from the server fills the blocks with real rows', ()
     expect(qa).not.toMatch(/31 → 32|41 → 42/)
   })
 
-  test('Por número de sessões: values never break mid-value (nowrap, tabular), the label may wrap', () => {
+  test('Por quantidade de sessões: values never break mid-value (nowrap, tabular), the label may wrap', () => {
     const html = render('pt', withHistory)
     const b = html.split('data-testid="benchmark-buckets"')[1]!
     expect(b).toContain('<span class="bm-nw">US$ 4,50</span>')
     expect(html).toMatch(/\.bm-nw\{[^}]*white-space:nowrap[^}]*font-variant-numeric:tabular-nums/)
   })
 
-  test('Por número de sessões: the prototype\'s seven columns; what no record carries is "—" + "sem dados", and there is no per-cell n=', () => {
+  test('Por quantidade de sessões: the prototype\'s seven columns; what no record carries is "—" + "sem dados", and there is no per-cell n=', () => {
     const html = render('pt', withHistory)
     const b = html.split('data-testid="benchmark-buckets"')[1]!
     for (const h of ['Sessões', 'Tarefas', 'Custo mediano', 'Tempo mediano', 'Defeitos escapados', 'Aceitas de primeira', 'Não reabertas']) expect(b).toContain(`>${h}<`)
@@ -696,15 +696,15 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
 
   test('hero: short title, ONE sentence, a caption, no bar, and the reasons folded in a closed disclosure', () => {
     const hero = html.split('data-testid="benchmark-hero"')[1]!.split('data-testid="benchmark-parts"')[0]!
-    expect(hero).toContain('Indício, não prova')           // the honesty line stays, in the caption under the sentence
+    expect(hero).not.toContain('Indício, não prova')       // the prototype has no honesty caption under the sentence
     expect(hero).toContain('2,5× mais custo, 4× mais tempo')
-    expect(hero).toContain('benchmark-caption')
+    expect(hero).not.toContain('benchmark-caption')
     expect(hero).toContain('role="img"')
     expect(hero).toContain('25<small')
-    expect(hero).toContain('Por que não é prova?')
+    expect(hero).toContain('Por que esse resultado?')
     expect(hero).not.toMatch(/<details[^>]* open/)
     // the facts list lives INSIDE the disclosure, not beside the sentence
-    expect(hero.indexOf('benchmark-facts')).toBeGreaterThan(hero.indexOf('Por que não é prova?'))
+    expect(hero.indexOf('benchmark-facts')).toBeGreaterThan(hero.indexOf('Por que esse resultado?'))
     expect(hero.match(/<p /g)!.length).toBeGreaterThanOrEqual(3)
   })
 
@@ -713,7 +713,7 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     expect(tile('cost')).toContain('2,5× pior')
     expect(tile('cost')).toContain('Não compensou · 2,5× pior')
     expect(tile('time')).toContain('4×')
-    expect(html.match(/data-testid="part-/g)!.length).toBe(4)       // "Sessões por peça" left Partes: "Por número de sessões" already holds it
+    expect(html.match(/data-testid="part-/g)!.length).toBe(4)       // "Sessões por peça" left Partes: "Por quantidade de sessões" already holds it
     expect(html).not.toContain('data-testid="part-rework"')
     expect(html.split('data-testid="benchmark-parts"')[1]!.split('data-testid="benchmark-tasks"')[0]).not.toContain('Sessões por peça')
     expect(tile('quality')).toContain('>sem dados<')

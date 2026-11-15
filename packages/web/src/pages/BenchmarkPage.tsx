@@ -64,7 +64,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
   const scored = parts.filter(p => p.state === 'scored')
   const sumLine = hero.score !== null && scored.length > 0 ? { n: Math.round(hero.score), parts: scored.map(p => String(p.points)), partial: scored.length < 4 } : null
   const unmeasured = cur.kind === 'unmeasured'
-  // An unmeasured card has no comparison of its own, but "Por número de sessões" is the history and does not depend on it.
+  // An unmeasured card has no comparison of its own, but "Por quantidade de sessões" is the history and does not depend on it.
   const history = cur.kind !== 'experiment' ? observed?.history ?? null : null
   const exp = cur.experiment
   const noTasks = pt ? 'Sem tarefas comparadas neste benchmark: o servidor só mede por tarefa quando um experimento controlado roda — nenhum rodou ainda.' : 'No compared tasks in this benchmark: the server only measures per task when a controlled experiment runs — none has yet.'
@@ -163,7 +163,6 @@ function Hero({ hero, lang, entryId, basis = '' }: { hero: ReturnType<typeof her
       </div>
     </>}
     {hero.firm && <div style={{ marginTop: 10 }}><Pill tone={hero.firm.ok ? 'ok' : 'warn'}>{hero.firm.ok ? <Check size={12} /> : <TriangleAlert size={12} />}{hero.firm.text}</Pill></div>}
-    {hero.caption && <div data-testid="benchmark-caption" style={{ marginTop: 6, fontSize: 12, color: 'var(--text-tertiary)' }}>{hero.caption}</div>}
     {(hero.why.length > 0 || basis) && <details open={hero.tone === 'none' && !hero.disclosure && hero.why.length > 0} style={{ marginTop: 10, fontSize: 12.5, color: 'var(--text-secondary)' }}>
       <summary style={{ cursor: 'pointer', color: 'var(--text-primary)', fontWeight: 600 }}>{hero.disclosure ?? (hero.tone === 'none' ? (pt ? 'O que falta' : 'What is missing') : (pt ? 'Por que esse resultado?' : 'Why this result?'))}</summary>
       {hero.why.map((w, i) => <p key={i} style={{ margin: '6px 0 0', maxWidth: 880 }}>{w}</p>)}
