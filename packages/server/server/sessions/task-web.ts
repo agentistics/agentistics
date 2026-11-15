@@ -18,6 +18,7 @@ import {
   canChangeStatusStage, classifyStatusStage, canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
 } from '@agentistics/core'
 import { loadTaskWorld, type TaskWorld } from './task-source'
+import { planLiveReplyRead } from './live-fleet-plan'
 import { writeStatusStageMirror } from './status-stage-sync'
 import { conversationOwners } from './task-conversations'
 import { historicalLinkId, nativeLinkId, type HistoricalSession, type NativeSessionLink, type NativeSessionUsage } from './task-model'
@@ -116,8 +117,23 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
   // Capture the source version BEFORE loading the world. A write during the build must not be
   // stored under the newer version and then served as though it contained that write.
   const key = await liveSourceVersion()
-  if (liveBuildCache?.key === key && Date.now() - liveBuildCache.builtAtMs < LIVE_REPLY_MAX_AGE_MS) return liveBuildCache.reply
-  if (liveBuildInFlight?.key === key) return (await liveBuildInFlight.promise).reply
+  // LIVE.12S r2: a reply that only EXPIRED BY AGE (same source files, no book write) answers at once while one
+  // rebuild runs behind it — the rebuild is ~0.55 s on a 3.6k-session store and every 5 s someone paid it.
+  const plan = planLiveReplyRead({
+    keyMatches: liveBuildCache?.key === key, hasCache: liveBuildCache !== null,
+    ageMs: liveBuildCache ? Date.now() - liveBuildCache.builtAtMs : 0, freshMs: LIVE_REPLY_MAX_AGE_MS,
+    inFlightSameKey: liveBuildInFlight?.key === key, inFlightAny: liveBuildInFlight !== null,
+  })
+  if (plan.kind === 'fresh') return liveBuildCache!.reply
+  if (plan.kind === 'stale') {
+    if (plan.refresh) void buildLiveReply(key).catch(() => { /* the next read retries */ })
+    return liveBuildCache!.reply
+  }
+  if (plan.kind === 'join') return (await liveBuildInFlight!.promise).reply
+  return buildLiveReply(key)
+}
+
+async function buildLiveReply(key: string): Promise<LiveBuildCache['reply']> {
   const promise = (async () => {
     const w = await loadTaskWorld()
     const nowMs = Date.now()
