@@ -1,0 +1,378 @@
+/**
+ * browser-spec.ts — PURE: everything about the browsers agentistics runs that can be decided without
+ * touching the machine. The Chromium argv, the URL block rules, the ceilings, the thresholds, the
+ * profile folder names, the memory and idle verdicts and the orphan-sweep plan.
+ *
+ * NAVEGADOR S1 (spec `leader/navegador/SPEC.md` §1.3–§1.4, revised after the S0 probes):
+ *
+ * - **The pipe, not a port.** `--remote-debugging-pipe` puts CDP on fds 3/4 of the child, so there is
+ *   no TCP listener a page (or another user) could reach. The spawn that carries those fds is
+ *   `node:child_process.spawn` — `Bun.spawn` accepts five stdio entries and then hands back bare fd
+ *   NUMBERS with no stream (probe P1), which is unusable. Works in the compiled binary (P1).
+ * - **`--headless` for the headless shell, `--headless=new` only for full Chrome.** The shell refuses
+ *   the new flag (P1).
+ * - **Memory is PSS, not RSS.** RSS counts every shared page once per process: four heavy tabs read
+ *   1045 MB RSS against 475 MB PSS (P2). The thresholds below are PSS; where `smaps_rollup` cannot be
+ *   read the watcher falls back to RSS with thresholds scaled by `RSS_FALLBACK_FACTOR` and SAYS so.
+ * - **`MemoryMax` only bites with `MemorySwapMax=0`** — without it the 8 GB WSL swap absorbed a 1.9 GB
+ *   hog under a 200 MB cap (P6).
+ * - **Never `--remote-allow-origins`.** And `--no-sandbox` only when asked for, with `status` saying so.
+ *
+ * Nothing in here reads a file, a clock or the environment: every input is a parameter, so every rule
+ * is a test.
+ */
+
+// ---------------------------------------------------------------------------------------------------
+// Owners
+
+/** Whose browser it is: one managed session (A1) or the person (B1, one per server). */
+export type BrowserOwner = { kind: 'session'; managedId: string } | { kind: 'personal' }
+
+/** The one string an owner is keyed by — in the host's map, in `pids.json`, in the profile folder. */
+export function ownerKey(owner: BrowserOwner): string {
+  return owner.kind === 'personal' ? 'personal' : `s-${owner.managedId}`
+}
+
+/** A managed id is used as a folder name, so it is held to the shape agentop mints and nothing else:
+ *  a traversal (`../x`) or a separator would let a caller choose where a profile is created and,
+ *  worse, what the sweep deletes. */
+export function validManagedId(id: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id)
+}
+
+/** Parse a key back into an owner; `null` for anything that is not one we mint. */
+export function ownerFromKey(key: string): BrowserOwner | null {
+  if (key === 'personal') return { kind: 'personal' }
+  if (key.startsWith('s-') && validManagedId(key.slice(2))) return { kind: 'session', managedId: key.slice(2) }
+  return null
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Ceilings and thresholds (spec §1.4, numbers measured in P2)
+
+export const MAX_LIVE_BROWSERS = 3
+export const MAX_SESSION_BROWSERS = 2
+export const MAX_PERSONAL_BROWSERS = 1
+export const MAX_TABS_SESSION = 4
+export const MAX_TABS_PERSONAL = 8
+/** Admission refuses a new Chromium below this much `MemAvailable`. */
+export const MIN_AVAILABLE_BYTES = 1.5 * 1024 ** 3
+/** A session browser nobody watches and idle longer than this may be closed to make room (LRU). */
+export const EVICT_IDLE_MS = 2 * 60_000
+/** Idle shutdown: session browser after 10 min without an action AND without a viewer; personal 20. */
+export const IDLE_SESSION_MS = 10 * 60_000
+export const IDLE_PERSONAL_MS = 20 * 60_000
+export const WATCH_INTERVAL_MS = 10_000
+/** PSS per browser: above TRIM the oldest inactive tab is closed; above KILL the browser is stopped. */
+export const PSS_TRIM_BYTES = 900 * 1024 ** 2
+export const PSS_KILL_BYTES = 1200 * 1024 ** 2
+/** When only RSS can be read, the same verdicts at ×1.6 (P2: RSS ≈ 2.2× PSS on heavy pages; 1.6 keeps
+ *  the fallback on the SAFE side of that ratio while not firing on four idle tabs). */
+export const RSS_FALLBACK_FACTOR = 1.6
+/** SIGTERM, then SIGKILL after this — always by the saved PID. */
+export const KILL_GRACE_MS = 3_000
+/** How long a spawn may take to answer `Browser.getVersion` before it is counted as failed. */
+export const START_TIMEOUT_MS = 15_000
+/** The second memory layer, `systemd-run --user --scope` (P6). */
+export const SCOPE_MEMORY_MAX = '1200M'
+
+// ---------------------------------------------------------------------------------------------------
+// Executable kinds and argv
+
+export type BrowserKind = 'headless-shell' | 'chromium' | 'chrome'
+
+export interface ArgvInput {
+  kind: BrowserKind
+  profileDir: string
+  /** Only when the sandbox demonstrably cannot start; `status` reports it. */
+  noSandbox?: boolean
+  width?: number
+  height?: number
+}
+
+/** Flags every browser we start carries. Order is stable so the argv is a snapshot test. */
+export function browserArgv(input: ArgvInput): string[] {
+  const w = input.width ?? 1280
+  const h = input.height ?? 800
+  const argv = [
+    input.kind === 'headless-shell' ? '--headless' : '--headless=new',
+    '--remote-debugging-pipe',
+    `--user-data-dir=${input.profileDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-sync',
+    '--disable-extensions',
+    '--disable-background-networking',
+    '--disable-component-update',
+    '--password-store=basic',
+    '--use-mock-keychain',
+    '--mute-audio',
+    `--window-size=${w},${h}`,
+    '--js-flags=--max-old-space-size=384',
+    '--renderer-process-limit=4',
+  ]
+  if (input.noSandbox) argv.push('--no-sandbox')
+  argv.push('about:blank')
+  return argv
+}
+
+/** Flags that must never appear — asserted by the tests against every argv this module builds. */
+export const FORBIDDEN_FLAGS = ['--remote-allow-origins', '--remote-debugging-port', '--remote-debugging-address'] as const
+
+/** Wrap a command in a transient systemd user scope with a hard memory ceiling (P6). The scope runs the
+ *  command in place (same PID), so the saved PID stays the browser's. */
+export function scopeWrap(bin: string, argv: string[], unitName: string): { bin: string; argv: string[] } {
+  return {
+    bin: 'systemd-run',
+    argv: [
+      '--user', '--scope', '--quiet', '--collect',
+      `--unit=${unitName}`,
+      '-p', `MemoryMax=${SCOPE_MEMORY_MAX}`,
+      '-p', 'MemorySwapMax=0',
+      '--', bin, ...argv,
+    ],
+  }
+}
+
+/** A systemd unit name for an owner, unique per spawn (systemd refuses a duplicate live unit). */
+export function scopeUnitName(key: string, nonce: string): string {
+  return `agentop-browser-${key.replace(/[^A-Za-z0-9_-]/g, '_')}-${nonce.replace(/[^A-Za-z0-9]/g, '')}`
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Profile folders
+
+/** `<root>/sessions/<managedId>` or `<root>/personal`. `root` is `<data dir>/browser`. */
+export function profileDirFor(root: string, owner: BrowserOwner): string {
+  const r = root.replace(/\/+$/, '')
+  if (owner.kind === 'personal') return `${r}/personal`
+  if (!validManagedId(owner.managedId)) throw new Error('invalid managed id')
+  return `${r}/sessions/${owner.managedId}`
+}
+
+/** Does `dir` sit exactly where `profileDirFor` would put a profile under `root`? The sweep deletes ONLY
+ *  such folders — never something a symlink or a typo put elsewhere. */
+export function isProfileDir(root: string, dir: string): boolean {
+  const r = root.replace(/\/+$/, '')
+  if (dir === `${r}/personal`) return true
+  const prefix = `${r}/sessions/`
+  return dir.startsWith(prefix) && validManagedId(dir.slice(prefix.length))
+}
+
+// ---------------------------------------------------------------------------------------------------
+// URL block rules (spec §4) — enforced through Fetch interception from S2; the rule lives here.
+
+export const BLOCKED_SCHEMES = ['file:', 'chrome:', 'chrome-extension:', 'devtools:', 'view-source:', 'chrome-untrusted:'] as const
+
+export type BlockReason = 'scheme' | 'agentistics-port' | 'debug-port' | 'invalid'
+
+export interface BlockContext {
+  /** The ports agentistics itself serves on (the REAL `PORT`/`WEB_PORT`, not only the defaults). */
+  agentisticsPorts: readonly number[]
+  /** Debugging ports of our other browsers (port mode only; empty in pipe mode). */
+  debugPorts?: readonly number[]
+}
+
+/** True for any name that resolves to this machine without DNS. */
+export function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
+  if (h === 'localhost' || h.endsWith('.localhost')) return true
+  if (h === '::1' || h === '::' || h === '0.0.0.0' || h === '0') return true
+  if (/^::ffff:(127\.|0\.0\.0\.0)/.test(h)) return true
+  if (/^::ffff:7f[0-9a-f]{2}:/.test(h)) return true
+  if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true
+  // Decimal / hex single-number forms of 127/8 (`2130706433`, `0x7f000001`) — browsers accept them.
+  if (/^\d+$/.test(h)) { const n = Number(h); return n >= 0x7f000000 && n <= 0x7fffffff }
+  if (/^0x[0-9a-f]+$/.test(h)) { const n = parseInt(h, 16); return n >= 0x7f000000 && n <= 0x7fffffff }
+  return false
+}
+
+const DEFAULT_PORT: Record<string, number> = { 'http:': 80, 'https:': 443, 'ws:': 80, 'wss:': 443 }
+
+/** Why a URL may not be loaded, or `null` when it may. `localhost:<any other port>` is ALLOWED: testing
+ *  the person's own dev server is the main use case. */
+export function urlBlockReason(raw: string, ctx: BlockContext): BlockReason | null {
+  let u: URL
+  try { u = new URL(raw) } catch { return 'invalid' }
+  const scheme = u.protocol.toLowerCase()
+  if ((BLOCKED_SCHEMES as readonly string[]).includes(scheme)) return 'scheme'
+  if (!isLoopbackHost(u.hostname)) return null
+  const port = u.port ? Number(u.port) : DEFAULT_PORT[scheme]
+  if (port === undefined) return null
+  if (ctx.agentisticsPorts.includes(port)) return 'agentistics-port'
+  if ((ctx.debugPorts ?? []).includes(port)) return 'debug-port'
+  return null
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Idle verdict
+
+export interface IdleInput {
+  owner: BrowserOwner
+  viewers: number
+  /** Last model action, person interaction, or the moment the last viewer left — whichever is latest. */
+  lastActivityMs: number
+  now: number
+}
+
+/** Should this browser be shut down for idleness? Never while somebody watches. */
+export function idleExpired(i: IdleInput): boolean {
+  if (i.viewers > 0) return false
+  const limit = i.owner.kind === 'personal' ? IDLE_PERSONAL_MS : IDLE_SESSION_MS
+  return i.now - i.lastActivityMs >= limit
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Memory verdict
+
+export interface MemoryReading {
+  /** PSS of the whole process tree in bytes, or `null` when `smaps_rollup` could not be read. */
+  pss: number | null
+  /** RSS of the tree in bytes (always readable on Linux for our own processes). */
+  rss: number | null
+}
+
+export type MemoryVerdict = { action: 'ok' | 'trim' | 'kill'; basis: 'pss' | 'rss' | 'none'; bytes: number | null }
+
+export function memoryVerdict(r: MemoryReading): MemoryVerdict {
+  if (r.pss !== null) {
+    const action = r.pss >= PSS_KILL_BYTES ? 'kill' : r.pss >= PSS_TRIM_BYTES ? 'trim' : 'ok'
+    return { action, basis: 'pss', bytes: r.pss }
+  }
+  if (r.rss !== null) {
+    const action = r.rss >= PSS_KILL_BYTES * RSS_FALLBACK_FACTOR ? 'kill'
+      : r.rss >= PSS_TRIM_BYTES * RSS_FALLBACK_FACTOR ? 'trim' : 'ok'
+    return { action, basis: 'rss', bytes: r.rss }
+  }
+  return { action: 'ok', basis: 'none', bytes: null }
+}
+
+export interface TabAge { targetId: string; lastActiveMs: number }
+
+/** The tab a `trim` closes: the least recently active one that is NOT the active tab. `null` when the
+ *  active tab is the only one — trimming never closes what somebody is looking at. */
+export function tabToTrim(tabs: readonly TabAge[], activeTargetId: string | null): string | null {
+  const candidates = tabs.filter(t => t.targetId !== activeTargetId)
+  if (candidates.length === 0) return null
+  return [...candidates].sort((a, b) => a.lastActiveMs - b.lastActiveMs || a.targetId.localeCompare(b.targetId))[0]!.targetId
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Process tree arithmetic (pure over /proc text)
+
+/** ppid from the text of `/proc/<pid>/stat` (the comm field may contain spaces and parentheses). */
+export function ppidFromStat(stat: string): number | null {
+  const close = stat.lastIndexOf(')')
+  if (close < 0) return null
+  const rest = stat.slice(close + 2).split(' ')
+  const ppid = Number(rest[1])
+  return Number.isFinite(ppid) ? ppid : null
+}
+
+/** Root plus every descendant, from a pid → ppid map. Cycle-safe. */
+export function descendants(root: number, ppidOf: ReadonlyMap<number, number>): number[] {
+  const kids = new Map<number, number[]>()
+  for (const [pid, ppid] of ppidOf) {
+    const list = kids.get(ppid) ?? []
+    list.push(pid)
+    kids.set(ppid, list)
+  }
+  const out: number[] = []
+  const seen = new Set<number>()
+  const stack = [root]
+  while (stack.length) {
+    const p = stack.pop()!
+    if (seen.has(p)) continue
+    seen.add(p)
+    out.push(p)
+    for (const k of kids.get(p) ?? []) stack.push(k)
+  }
+  return out
+}
+
+/** `Pss:` and `Rss:` (bytes) out of `/proc/<pid>/smaps_rollup`. */
+export function parseSmapsRollup(text: string): { pss: number | null; rss: number | null } {
+  const kb = (k: string) => { const m = new RegExp(`^${k}:\\s+(\\d+) kB`, 'm').exec(text); return m ? Number(m[1]) * 1024 : null }
+  return { pss: kb('Pss'), rss: kb('Rss') }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The PID record (`<data dir>/browser/pids.json`) and the orphan sweep
+
+export interface PidRecord {
+  key: string
+  pid: number
+  profileDir: string
+  /** The agentop process that started it — a record of a host that is still alive is not ours to sweep. */
+  hostPid: number
+  startedAt: number
+}
+
+export interface SweepInput {
+  root: string
+  records: readonly PidRecord[]
+  /** Every entry found under `<root>/sessions/` plus `<root>/personal` when present (absolute paths). */
+  dirs: readonly string[]
+  selfPid: number
+  /** Profile folders THIS host is running a browser in right now — never swept, whatever the records say. */
+  ownLiveDirs?: ReadonlySet<string>
+  /** Is this pid alive? */
+  alive: (pid: number) => boolean
+  /** The NUL-joined cmdline of a live pid, or null. Identity check: a recycled pid will not carry our
+   *  `--user-data-dir`. */
+  cmdline: (pid: number) => string | null
+}
+
+export interface SweepPlan {
+  /** Saved PIDs to stop (proved ours by their own cmdline). */
+  kill: { pid: number; key: string }[]
+  /** Profile folders to delete. */
+  removeDirs: string[]
+  /** Records to drop from `pids.json`. */
+  dropKeys: string[]
+  /** Records left alone because another live agentop owns them. */
+  keptForOtherHost: string[]
+}
+
+/** Is this live process really the browser we recorded? Its argv must name the recorded profile as a
+ *  whole argument. Chrome REWRITES its own process title, so its `/proc/<pid>/cmdline` is one
+ *  space-joined string rather than NUL-separated argv (measured on google-chrome 146) — the flag is
+ *  therefore matched with a NUL or space boundary on both sides, never as a bare substring (which
+ *  would let `/sessions/a` match `/sessions/ab`). */
+export function cmdlineMatches(cmdline: string | null, profileDir: string): boolean {
+  if (!cmdline) return false
+  const flag = `--user-data-dir=${profileDir}`
+  let i = cmdline.indexOf(flag)
+  while (i >= 0) {
+    const before = i === 0 ? '\0' : cmdline[i - 1]!
+    const after = cmdline[i + flag.length] ?? '\0'
+    if ((before === '\0' || before === ' ') && (after === '\0' || after === ' ')) return true
+    i = cmdline.indexOf(flag, i + 1)
+  }
+  return false
+}
+
+export function planOrphanSweep(input: SweepInput): SweepPlan {
+  const plan: SweepPlan = { kill: [], removeDirs: [], dropKeys: [], keptForOtherHost: [] }
+  const protectedDirs = new Set<string>(input.ownLiveDirs ?? [])
+  for (const rec of input.records) {
+    if (protectedDirs.has(rec.profileDir) && rec.hostPid === input.selfPid) continue
+    const hostAlive = rec.hostPid !== input.selfPid && input.alive(rec.hostPid)
+      && (input.cmdline(rec.hostPid) ?? '').length > 0
+    if (hostAlive) {
+      plan.keptForOtherHost.push(rec.key)
+      protectedDirs.add(rec.profileDir)
+      continue
+    }
+    if (input.alive(rec.pid) && cmdlineMatches(input.cmdline(rec.pid), rec.profileDir)) {
+      plan.kill.push({ pid: rec.pid, key: rec.key })
+    }
+    plan.dropKeys.push(rec.key)
+    if (isProfileDir(input.root, rec.profileDir)) plan.removeDirs.push(rec.profileDir)
+  }
+  for (const d of input.dirs) {
+    if (!isProfileDir(input.root, d) || protectedDirs.has(d) || plan.removeDirs.includes(d)) continue
+    plan.removeDirs.push(d)
+  }
+  return plan
+}

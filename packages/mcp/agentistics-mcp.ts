@@ -32,6 +32,7 @@ import { planLimitsTool } from "./plan-limits-tool.js";
 import { benchmarkObservedTool, benchmarkQueryFromArgs } from "./benchmark-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
 import { deliveryIntegrityOf, vaultStatusTool } from "./vault-tool.js";
+import { browserStatusTool } from "./browser-tool.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
 
@@ -1134,6 +1135,12 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "agentistics_browser_status",
+    description:
+      "Read-only state of agentistics' built-in browser host on this machine: which browser executable it uses (or, in words, why there is none), the browsers running now (whose — a session or the person's own —, pid, open tabs as origin+path and title, PSS memory in MB, idle seconds, whether the systemd memory ceiling holds it and whether the sandbox is on), the ceilings (2 session browsers + 1 personal, tabs per browser), available memory against the 1.5 GB admission floor, why recent browsers stopped (idle, memory, session ended, evicted…) and the last orphan sweep. Starts nothing; the browser actions arrive in a later release. / Estado só-leitura do navegador do agentistics: executável, navegadores vivos, tetos, memória, paradas recentes e a última varredura de órfãos.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "agentistics_tag_detail",
     description:
       "Get full detail for one tag by name or id: aggregate totals plus per-source breakdown and distributions (top projects, models, harnesses, repos), daily activity series, and the active date window. Call agentistics_tags first to find the id/name.",
@@ -1999,6 +2006,11 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         // S0d: the delivery owner-proof mode and the guard files' seal ride along (absent when the server cannot say).
         const delivery = deliveryIntegrityOf(await apiGet("/api/deliveries/integrity").catch(() => null));
         return text({ ...vaultStatusTool(body), ...(delivery ? { delivery } : {}) });
+      }
+
+      case "agentistics_browser_status": {
+        // The browser host's own snapshot (the one source the web reads too), reduced to an allowlist.
+        return text(browserStatusTool(await apiGet("/api/browser/status")));
       }
 
       case "agentistics_tag_detail": {

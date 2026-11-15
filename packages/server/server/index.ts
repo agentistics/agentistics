@@ -3890,6 +3890,20 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       })
     }
 
+    // NAVEGADOR S1 — the browser host's read-only status (the MCP's `agentistics_browser_status` reads
+    // it). `/api/browser` is a `localShell` prefix in capability-guard.ts; the actions arrive in S2.
+    if (url.pathname === '/api/browser' || url.pathname.startsWith('/api/browser/')) {
+      if (url.pathname === '/api/browser/status' && req.method === 'GET') {
+        const { browserStatusBody } = await import('./browser/browser-web')
+        return new Response(JSON.stringify(await browserStatusBody({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT] })), {
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ error: 'not_found' }), {
+        status: 404, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      })
+    }
+
     // THE PER-SESSION UTILITY SHELL. Two gates and a refusal, all of them enforced HERE and not
     // only in the UI: a hidden button is not a closed door, and this endpoint is what actually
     // spawns `$SHELL` on the host.
@@ -4431,6 +4445,10 @@ telemetryTick()
 setInterval(telemetryTick, 6 * 60 * 60 * 1000).unref?.()
 // Which ports this data dir's server listens on, beside its lock — so a CLI bounce from this data dir
 // restarts THIS server on its own ports, never whatever answers on the default one (`server-ports.ts`).
+// NAVEGADOR S1: clean up browsers/profiles a previous server left behind (by saved PID, identity
+// checked). Off the startup path, and a no-op where no browser ever ran.
+void import('./browser/browser-web').then(m => m.scheduleBrowserSweep({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT] }))
+  .catch(() => {})
 void import('./server-ports').then(m => m.recordServerPorts(AGENTISTICS_DATA_DIR, { pid: process.pid, port: PORT, webPort: WEB_PORT }))
   .catch(err => console.error('[boot] could not record the server ports:', err instanceof Error ? err.message : String(err)))
 

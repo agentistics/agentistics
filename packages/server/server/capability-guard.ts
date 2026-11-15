@@ -97,6 +97,10 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // and a PREFIX for the same reason: the next shell route must be guarded by having been added at
   // all. The user's own opt-in switch is enforced separately, in index.ts — see shell-gate.ts.
   ['/api/shell', 'localShell'],
+  // NAVEGADOR: the browser host. It starts Chromium processes on this machine, reads their pages and
+  // (from S2) drives them — host power, the strictest capability, and a PREFIX so every browser route
+  // is guarded by having been added at all. S1 serves only the read-only `status`.
+  ['/api/browser', 'localShell'],
   // The task board reads the session registry and the local store, and its DELIVER verb runs git in
   // the directories those sessions ran in. That is host power, so it rides the same capability as
   // the fleet — and a prefix for the same reason: the next task route must be guarded by having

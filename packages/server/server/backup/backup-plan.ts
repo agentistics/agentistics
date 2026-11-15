@@ -241,6 +241,13 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     why: 'The vault\'s unlock socket (`run/vault.sock`), live only while an agentop service runs.',
   },
   {
+    pattern: '.agentistics/browser', match: 'prefix', reason: 'runtime',
+    restoreWith: 'nothing — the browser host recreates it on first use',
+    why: 'Throwaway Chromium profiles (`browser/sessions/<id>`, `browser/personal`) and `pids.json`, which '
+      + 'names processes of THIS machine. A profile can hold logged-in cookies, so it never travels; '
+      + 'the folders are deleted when each browser stops and swept on boot (NAVEGADOR S1).',
+  },
+  {
     pattern: '.agentistics/backups', match: 'prefix', reason: 'runtime',
     restoreWith: 'nothing — these ARE the backups',
     why: 'The archives themselves, and `backups.jsonl`, whose records name local paths that will '

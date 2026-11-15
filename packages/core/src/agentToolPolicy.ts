@@ -123,6 +123,8 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_book_takeover',
   // Vault (1) — COFRE.DESBLOQUEIO
   'agentistics_vault_status',
+  // Browser (1) — NAVEGADOR S1 (read-only; actions in S2/S3)
+  'agentistics_browser_status',
 ] as const
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]
@@ -266,6 +268,11 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_vault_status: {
     ...TASKS, risk: 'R', routes: ['GET /api/vault', 'GET /api/deliveries/integrity'],
     reason: 'reads how the vault is protected (state, ways to confirm in use and offered, password rules) through an allowlist, plus the delivery owner-proof mode and whether the guard files carry their seal; never an item, a key id or a secret',
+  },
+  // ------------------------------------------------------------------ Browser (NAVEGADOR S1)
+  agentistics_browser_status: {
+    ...TASKS, risk: 'R', routes: ['GET /api/browser/status'],
+    reason: 'reads the browser host state (executable, live browsers, ceilings, memory, recent stops) through an allowlist; starts nothing',
   },
   // ------------------------------------------------------------------ Experimental flows (read-only host operations)
   agentistics_flow_run: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['POST /api/flows/run'], reason: 'runs only the built-in deterministic flow gates; it deletes nothing' },
