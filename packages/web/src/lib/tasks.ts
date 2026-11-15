@@ -614,10 +614,11 @@ const STATUS_REFUSAL_REASONS: readonly StatusRefusalReason[] =
   ['done_needs_session', 'invalid_group', 'subtask_has_sessions', 'group_field_conflict', 'open_subtasks']
 export type StatusWriteResult = { ok: true } | { ok: false; reason?: StatusRefusalReason }
 
-async function postStatus(path: string, body: unknown): Promise<StatusWriteResult> {
+/** `quiet`: an AUTOMATIC follow-up write the page makes on its own (FILIACAO.TOAST) — its refusal is the caller's to report, never a toast. */
+async function postStatus(path: string, body: unknown, o: { quiet?: boolean } = {}): Promise<StatusWriteResult> {
   const subtaskId = (body as { id?: unknown })?.id
   const end = beginStatusWrite(typeof subtaskId === 'string' ? `${path}#${subtaskId}` : path)
-  const fail = (reason: string) => pushLocalNotification({ type: 'error', code: 'tasks.status_failed', meta: { reason, localAction: true } })
+  const fail = (reason: string) => { if (!o.quiet) pushLocalNotification({ type: 'error', code: 'tasks.status_failed', meta: { reason, localAction: true } }) }
   try {
     const res = await fetch(path, {
       method: 'POST',
@@ -631,7 +632,7 @@ async function postStatus(path: string, body: unknown): Promise<StatusWriteResul
     if (res.status === 422) {
       const refused = await res.json().catch(() => null) as { message?: string; openSubtaskIds?: string[] } | null
       if (refused?.message === 'open_subtasks' && await requestReviewOverride(refused.openSubtaskIds?.length ?? 0)) {
-        return await postStatus(path, { ...(body as Record<string, unknown>), allowOpenSubtasks: true })
+        return await postStatus(path, { ...(body as Record<string, unknown>), allowOpenSubtasks: true }, o)
       }
       if (refused?.message && (STATUS_REFUSAL_REASONS as readonly string[]).includes(refused.message)) {
         if (refused.message !== 'open_subtasks') fail(refused.message)
@@ -651,7 +652,7 @@ async function postStatus(path: string, body: unknown): Promise<StatusWriteResul
 export function markTask(
   ref: string,
   status: TaskStatus,
-  o: { reason?: string; blockedBy?: string[]; actor?: string; allowOpenSubtasks?: boolean } = {},
+  o: { reason?: string; blockedBy?: string[]; actor?: string; allowOpenSubtasks?: boolean; quiet?: boolean } = {},
 ): Promise<StatusWriteResult> {
   return postStatus(`/api/tasks/${encodeURIComponent(ref)}`, {
     status,
@@ -659,7 +660,7 @@ export function markTask(
     ...(o.blockedBy ? { blockedBy: o.blockedBy } : {}),
     ...(o.actor ? { actor: o.actor } : {}),
     ...(o.allowOpenSubtasks === true ? { allowOpenSubtasks: true } : {}),
-  })
+  }, o.quiet ? { quiet: true } : {})
 }
 
 async function post(path: string, body: unknown): Promise<boolean> {

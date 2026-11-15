@@ -318,7 +318,8 @@ export function createDeliveryService(d: DeliveryDeps) {
   /** The effects of a stored transition. Never throws; failures become warnings. */
   const effects = async (before: DeliveryRecord, after: DeliveryRecord, actor: string, warnings: string[]) => {
     const guard = async (what: string, fn: () => Promise<unknown>) => { try { await fn() } catch (e) { warnings.push(`${what}: ${e instanceof Error ? e.message : String(e)}`) } }
-    await guard('board status', async () => { const out = await d.board.setPhaseStatus(after.subtaskId, after.phase); if (!out.ok) warnings.push(`board status refused: ${out.message ?? '?'}`) })
+    let boardRefusal: string | undefined
+    await guard('board status', async () => { const out = await d.board.setPhaseStatus(after.subtaskId, after.phase); if (!out.ok) { boardRefusal = out.message ?? '?'; warnings.push(`board status refused: ${boardRefusal}`) } })
     if (before.ci !== after.ci) await guard('ci signal', () => d.board.setCi(after.subtaskId, after.ci ?? null))
     const step = STEP_ON_ENTER[after.phase]
     if (step) await guard('step', () => d.board.logStep(after.taskId, after.subtaskId, step, actor))
@@ -343,7 +344,12 @@ export function createDeliveryService(d: DeliveryDeps) {
     }
     if (t === 'pr_merge>revisao_lider' || t === 'ci>revisao_lider') await wake(after, `${t === 'ci>revisao_lider' ? 'a publicação falhou' : 'o merge falhou'}: ${last?.detail ?? ''}. Revise e mande para ajuste → QA → revisão → PR/merge.`, warnings)
     if (after.phase === 'publicado') {
-      await wake(after, `publicado (${after.tag ?? after.ci?.tag ?? 'tag ?'}).`, warnings)
+      // FILIACAO.TOAST: an automatic move the board refuses must reach the LEADER with the way out — never
+      // the owner, and never only a warning nobody reads (the piece then sat in "CI · publicando" forever).
+      const unfiled = boardRefusal !== undefined && /done_needs_session/.test(boardRefusal)
+        ? ' Mas o quadro não fechou a peça: nenhuma sessão está filiada nela. Filie a conversa que a entregou (agentistics_task_session com subtaskId, ou conversationId se a sessão já foi encerrada) e marque done; se a peça foi coberta por outra, arquive-a.'
+        : ''
+      await wake(after, `publicado (${after.tag ?? after.ci?.tag ?? 'tag ?'}).${unfiled}`, warnings)
       // Informational only — the owner is never asked anything by this flow in autonomous mode.
       await guard('owner notice', () => d.notify.owner(`Publicado: ${after.subtaskId} (${after.tag ?? after.ci?.tag ?? after.versionTarget ?? ''}).`, 'aviso'))
     }
