@@ -50,11 +50,11 @@ button.crono-bar{cursor:pointer}
 .crono-bar .crono-pc{font-weight:600;font-variant-numeric:tabular-nums;font-size:11px}
 .crono-cb{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--border);flex:none;display:grid;place-items:center;font-size:9px;line-height:1}
 .crono-cb[data-on]{background:#3b5bdb;border-color:#3b5bdb;color:#fff}
-.crono-ph{font-size:10px;font-weight:600;border-radius:999px;padding:1px 7px;border:1px solid color-mix(in srgb,var(--c) 60%,transparent);color:color-mix(in srgb,var(--c) 70%,var(--text-primary));background:color-mix(in srgb,var(--c) 14%,transparent);letter-spacing:.02em}
+.crono-ph{font-size:10px;font-weight:600;border-radius:999px;padding:1px 7px;border:1px solid color-mix(in srgb,var(--c) 60%,transparent);color:color-mix(in srgb,var(--c) 10%,var(--text-primary));background:color-mix(in srgb,var(--c) 14%,transparent);letter-spacing:.02em}
 .crono-hint{margin-left:auto;font-size:10.5px;color:var(--text-tertiary)}
-.crono-bar[data-kind="sub"] .crono-hint{color:color-mix(in srgb,var(--text-primary) 72%,transparent)}
+.crono-bar[data-kind="sub"] .crono-hint{color:var(--text-primary);background:color-mix(in srgb,var(--bg-card) 85%,transparent);border-radius:999px;padding:0 6px}
 .crono-semw{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;pointer-events:none}
-.crono-sem{position:sticky;left:calc(var(--LW) + 8px);flex:none;height:22px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:var(--text-secondary);border:1px dashed var(--border);border-radius:999px;padding:0 9px;white-space:nowrap;background:var(--bg-card)}
+.crono-sem{position:sticky;left:calc(var(--LW) + 8px);flex:none;height:22px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:color-mix(in srgb,var(--text-primary) 80%,var(--bg-card));border:1px dashed var(--border);border-radius:999px;padding:0 9px;white-space:nowrap;background:var(--bg-card)}
 .crono-bar .crono-prev{position:absolute;top:0;bottom:0;right:0;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--text-primary) 9%,transparent) 0 4px,transparent 4px 8px);border-left:1px dashed var(--border)}
 .crono-foot{flex:none;color:var(--text-tertiary);font-size:11px;padding:0 2px}
 .crono-ring{display:inline-flex;flex:none}
