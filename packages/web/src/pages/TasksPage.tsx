@@ -25,6 +25,7 @@ import { PRIORITY_ORDER, sortTaskTypes, type SortSpec, type TaskPriorityId } fro
 import { ChevronDown } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { CenteredLoader } from '../components/CenteredLoader'
+import { waitsForTaskList } from '../lib/taskListGate'
 import type { AppContext } from '../lib/app-context'
 import { useFleet } from '../lib/fleet'
 import { sessionPath } from '../lib/sessionRoute'
@@ -311,7 +312,9 @@ function TaskList() {
 
   // First data not here yet: the shared screen loader and NOTHING else — no toolbar, no empty or
   // "every group is hidden" state, which would claim something about data that has not arrived.
-  if (rows === null) {
+  // The Live line reads its OWN endpoint and draws nothing from this list (everything below already
+  // guards `rows !== null`), so it does not wait for the board's first answer (LIVE.12S).
+  if (waitsForTaskList(rows, view)) {
     return <CenteredLoader size={40} label={lang === 'pt' ? 'Carregando' : 'Loading'} testId="agentask-loading" placement="fill" />
   }
 

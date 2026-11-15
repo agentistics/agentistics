@@ -6,6 +6,7 @@ import { RootErrorBoundary } from './components/RootErrorBoundary'
 import { installHistoryPopGuard } from './lib/historyPopGuard'
 import { applyTextScale, readLocalTextScale } from './lib/textScale'
 import { applyGlass } from './lib/glass'
+import { isLivePath, startBootLivePrefetch } from './lib/liveBootPrefetch'
 import './index.css'
 import './styles/cursors.css'
 
@@ -13,6 +14,10 @@ import './styles/cursors.css'
 // 100% and then jumps. App re-applies it once the personal preference arrives.
 applyTextScale(document.documentElement, readLocalTextScale())
 applyGlass()
+// Opening /tasks/live is itself the Live request: start it before React runs (LIVE.12S).
+try { startBootLivePrefetch(location.pathname, localStorage) } catch { /* storage blocked: the screen asks for itself */ }
+// …and so is its route chunk: the router's lazy import used to start only once the shell had its data.
+if (isLivePath(location.pathname)) void import('./pages/TasksPage').catch(() => { /* the router's own import retries */ })
 
 /**
  * IN DEV, EVICT ANY SERVICE WORKER THAT IS STILL CONTROLLING THIS PAGE.
