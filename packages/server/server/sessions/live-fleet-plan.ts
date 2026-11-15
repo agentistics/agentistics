@@ -44,7 +44,23 @@ export function planLiveReplyRead(o: {
   return o.inFlightSameKey ? { kind: 'join' } : { kind: 'build' }
 }
 
-export interface LiveFleetCacheFacts { lang: string; snapshot: unknown; atMs: number }
+/**
+ * LIVE.12S r3 — what a Live row's STATE is made of: `id:status:activity:background` of every row that is not a
+ * closed conversation (those never change state and are the bulk of a 3.5k fleet). Cheap to read off the hub's
+ * snapshot, and it is the ONLY thing the stale path may not hide: a session that just changed state must show on
+ * the next read, not at the next heartbeat. `null` = no snapshot to read, which can never match anything.
+ */
+export function liveRowsSignature(snapshot: { sessions: ReadonlyArray<{ id: string; status: string; activity?: string; background?: boolean }> } | null | undefined): string | null {
+  if (!snapshot) return null
+  const parts: string[] = []
+  for (const s of snapshot.sessions) {
+    if (s.status === 'closed') continue
+    parts.push(`${s.id}:${s.status}:${s.activity ?? ''}:${s.background ? 1 : 0}`)
+  }
+  return parts.join('|')
+}
+
+export interface LiveFleetCacheFacts { lang: string; snapshot: unknown; atMs: number; signature: string | null }
 export interface LiveFleetFlightFacts { lang: string; snapshot: unknown }
 
 export type LiveFleetPlan =
@@ -60,6 +76,8 @@ export function planLiveFleetRead(o: {
   lang: string
   snapshot: unknown
   nowMs: number
+  /** `liveRowsSignature` of the hub's CURRENT snapshot. */
+  signature: string | null
   cache: LiveFleetCacheFacts | null
   inFlight: LiveFleetFlightFacts | null
   maxStaleMs?: number
@@ -69,7 +87,8 @@ export function planLiveFleetRead(o: {
   if (cache && cache.lang === o.lang) {
     if (cache.snapshot === o.snapshot) return { kind: 'fresh' }
     const age = o.nowMs - cache.atMs
-    if (age >= 0 && age <= maxStale) return { kind: 'stale', refresh: !(inFlight && inFlight.lang === o.lang) }
+    // Stale ONLY while no session changed state since the cached rows were built (r3).
+    if (age >= 0 && age <= maxStale && cache.signature !== null && cache.signature === o.signature) return { kind: 'stale', refresh: !(inFlight && inFlight.lang === o.lang) }
   }
   if (inFlight && inFlight.lang === o.lang && inFlight.snapshot === o.snapshot) return { kind: 'join' }
   return { kind: 'build' }
