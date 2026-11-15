@@ -24,11 +24,10 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
 }) {
   const pt = lang === 'pt'
   const [size, setSize] = useState<SizeFilter>('all')
-  const [needle, setNeedle] = useState('')
   const [sort, setSort] = useState<{ key: TaskSortKey; dir: 1 | -1 }>({ key: 'cost', dir: -1 })
   const [open, setOpen] = useState<string | null>(initialOpen)
   const [subNeedle, setSubNeedle] = useState('')
-  const rows = taskRows(tasks, { size, needle, key: sort.key, dir: sort.dir })
+  const rows = taskRows(tasks, { size, needle: '', key: sort.key, dir: sort.dir })
   const head = (key: TaskSortKey, label: string, num = false) =>
     <th className={num ? 'bm-num' : undefined} aria-sort={sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
       <button type="button" onClick={() => setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : 1 }))}>{label}{sort.key === key ? (sort.dir === 1 ? ' ↑' : ' ↓') : ''}</button></th>
@@ -39,7 +38,6 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
       <h3 style={h3}><Flag size={15} /> {pt ? 'Por tarefa' : 'By task'}</h3>
       {tasks.length > 0 && <span style={muted}>{rows.length} {pt ? (rows.length === 1 ? 'tarefa' : 'tarefas') : (rows.length === 1 ? 'task' : 'tasks')}</span>}
       {(tasks.length > 0 || keepHead) && <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        {tasks.length > 0 && <input type="search" value={needle} onChange={e => setNeedle(e.target.value)} placeholder={pt ? 'Filtrar tarefa…' : 'Filter task…'} aria-label={pt ? 'Filtrar tarefa' : 'Filter task'} style={{ ...field, width: 170 }} />}
         <TabStrip tabs={SIZES} value={size} onPick={setSize} label={s => sizeLabel(s, lang)} ariaLabel={pt ? 'Tamanho' : 'Size'} natural />
       </div>}
     </div>
@@ -94,7 +92,9 @@ export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: {
   const pt = lang === 'pt'
   const heads = pt ? ['Sessões', 'Tarefas', 'Custo mediano', 'Tempo mediano', 'Defeitos escapados', 'Aceitas de primeira', 'Não reabertas']
     : ['Sessions', 'Tasks', 'Median cost', 'Median time', 'Escaped defects', 'Accepted first try', 'Not reopened']
-  const noData = <span style={muted}>— {pt ? 'sem dados' : 'no data'}</span>
+  // the prototype's short labels for the stacked (phone) facts; the desktop heads stay whole
+  const sl = pt ? ['', 'Tarefas', 'Custo', 'Tempo', 'Defeitos', 'De primeira', 'Não reabertas'] : ['', 'Tasks', 'Cost', 'Time', 'Defects', 'First try', 'Not reopened']
+  const noData = <span className="bm-nw" style={muted}>— {pt ? 'sem dados' : 'no data'}</span>
   const nw = (x: string) => <span className="bm-nw">{x}</span>
   const rate = (n: number | null) => n === null ? noData : <div style={{ maxWidth: 150 }}>{nw(`${nf(n * 100, lang, 0)}%`)}<Bar value={n * 100} tone="rate" mark={false} /></div>
   return <section style={card} data-testid="benchmark-buckets" aria-label={pt ? 'Por número de sessões' : 'By number of sessions'}>
@@ -104,11 +104,11 @@ export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: {
       : <div className="bm-buckets">
         {heads.map(h => <div key={h} className="bm-h">{h}</div>)}
         {buckets.map(b => <React.Fragment key={b.label}>
-          <div className="bm-k">{b.label}</div><div data-l={heads[1]}>{nw(nf(b.tasks, lang, 0))}</div>
-          <div data-l={heads[2]}>{b.costMedianUSD === null ? noData : nw(moneyText(b.costMedianUSD, lang, money))}</div>
-          <div data-l={heads[3]}>{b.wallMedianMs === null ? noData : nw(durationText(b.wallMedianMs, lang))}</div>
-          <div data-l={heads[4]}>{b.escapedDefects === null ? noData : nw(nf(b.escapedDefects, lang, 1))}</div>
-          <div data-l={heads[5]}>{rate(b.firstTryRate)}</div><div data-l={heads[6]}>{rate(b.notReopenedRate)}</div>
+          <div className="bm-k">{b.label}</div><div data-l={sl[1]}>{nw(nf(b.tasks, lang, 0))}</div>
+          <div data-l={sl[2]}>{b.costMedianUSD === null ? noData : nw(moneyText(b.costMedianUSD, lang, money))}</div>
+          <div data-l={sl[3]}>{b.wallMedianMs === null ? noData : nw(durationText(b.wallMedianMs, lang))}</div>
+          <div data-l={sl[4]}>{b.escapedDefects === null ? noData : nw(nf(b.escapedDefects, lang, 1))}</div>
+          <div data-l={sl[5]}>{rate(b.firstTryRate)}</div><div data-l={sl[6]}>{rate(b.notReopenedRate)}</div>
         </React.Fragment>)}
       </div>}
   </section>

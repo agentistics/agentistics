@@ -37,6 +37,8 @@ interface World {
   finished?: string[]
   /** true = every board status write is refused. */
   boardWriteFails?: boolean
+  /** The board refuses this phase's status with this message (FILIACAO.TOAST: publicado → done_needs_session). */
+  boardRefuses?: { phase: Phase; message: string }
   /** Model the host's board projection, including publicado → done. */
   projectPhaseStatus?: boolean
   /** false = the leader cannot be reached. */
@@ -132,7 +134,7 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
     store: createDeliveryStore(join(dir, 'deliveries.json')),
     facts,
     board: {
-      setPhaseStatus: async (id, phase) => { calls.status.push({ id, phase }); if (w.projectPhaseStatus) statuses.set(id, PHASE_STATUS[phase].id); return w.boardWriteFails ? { ok: false, message: 'board write failed' } : { ok: true } },
+      setPhaseStatus: async (id, phase) => { calls.status.push({ id, phase }); if (w.boardRefuses?.phase === phase) return { ok: false, message: w.boardRefuses.message }; if (w.projectPhaseStatus) statuses.set(id, PHASE_STATUS[phase].id); return w.boardWriteFails ? { ok: false, message: 'board write failed' } : { ok: true } },
       setCi: async (_id, ci) => { calls.ci.push(ci) },
       logStep: async (_t, _s, n) => { calls.steps.push(n) },
       comment: async (_t, _s, body) => { calls.comments.push(body) },
@@ -2925,5 +2927,31 @@ describe('QA pins: reconcile never moves real work, and does not spend the quota
       { subtaskId: noSession.id, ok: true, how: 'archived' },
     ])
     expect(calls).toEqual([`${withSession.id}:done`, `${noSession.id}:done`, `${noSession.id}:abandoned`])
+  })
+})
+
+describe('FILIACAO.TOAST — an automatic publish the board refuses goes to the LEADER, with the action', () => {
+  // Measured 2026-11-15: 4 pieces sat at "CI · publicando" on the board while the flow said publicado —
+  // a leader-declared release of pieces with no session filed (duplicate owner requests, a piece covered
+  // by another). The refusal was a warning nobody read; the piece never closed.
+  const RELEASE = { version: '2.201.0', mergeSha: 'a201a201a201a201a201a201a201a201a201a201' }
+  const GREEN = { databaseId: 9, status: 'completed', conclusion: 'success', headSha: 'a201a201a201a201a201a201a201a201a201a201', updatedAt: '2026-11-07T00:10:00Z' }
+  test('publicado refused with done_needs_session wakes the leader once, naming how to close it; never the owner', async () => {
+    const h = harness({ status: 'in_review', boardRefuses: { phase: 'publicado', message: 'done_needs_session' } })
+    await h.svc.configure('s1', { leaderSessionId: 'leader' }, 'leader')
+    await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    h.advance(61_000)
+    h.w.releaseRuns = [GREEN]
+    h.w.tags = [{ name: 'v2.201.0', commit: { sha: 'tag201' } }]
+    await h.svc.tick()
+    expect((await h.svc.get('s1'))!.phase).toBe('publicado')
+    const wakes = h.calls.session.filter(s => s.id === 'leader' && s.text.includes('nenhuma sessão'))
+    expect(wakes).toHaveLength(1)
+    expect(wakes[0]!.text).toContain('agentistics_task_session')
+    // A second tick does not repeat it (effects run on the transition only).
+    h.advance(61_000)
+    await h.svc.tick()
+    expect(h.calls.session.filter(s => s.id === 'leader' && s.text.includes('nenhuma sessão'))).toHaveLength(1)
+    expect(h.calls.owner.some(o => o.text.includes('nenhuma sessão'))).toBe(false)
   })
 })

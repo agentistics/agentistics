@@ -132,7 +132,7 @@ export interface SubtaskTableProps {
    *  group menu needs it the same way for `invalid_group`/`subtask_has_sessions`/
    *  `group_field_conflict` (§F.1). Generic over id, so the group menu can patch a SIBLING (the one
    *  being joined) as well as this row. */
-  onPatch: (id: string, patch: SubtaskPatch) => Promise<StatusWriteResult>
+  onPatch: (id: string, patch: SubtaskPatch, o?: { dialog?: boolean }) => Promise<StatusWriteResult>
   onRemove: (id: string) => void | Promise<void>
   /** Mint a new GROUP subtask (§F.1) and return its id, or `null` on failure — the first step of
    *  "create a group with…", which then joins both the picked sibling and the row it started from
@@ -270,7 +270,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
   const colCount = 3 + shownCols.length
 
   const pickStatus = async (t: Subtask, status: TaskStatus) => {
-    const result = await p.onPatch(t.id, { status })
+    const result = await p.onPatch(t.id, { status }, { dialog: true })
     if (!result.ok && result.reason === 'done_needs_session') {
       setDoneRefusal({ id: t.id, title: t.title })
     }

@@ -53,6 +53,7 @@ import { RailSection } from '../components/tasks/RailSection'
 import { ConfirmModal, Select } from './settings/primitives'
 import { DatePicker } from '../components/DatePicker'
 import { BlockedDialog } from '../components/tasks/BlockedDialog'
+import { DoneNeedsSessionDialog } from '../components/tasks/DoneNeedsSessionDialog'
 import { TaskProgressBar } from '../components/tasks/TaskProgressBar'
 import { StatusChip } from '../components/tasks/StatusChip'
 import { boardCopy, statusLabel, type Lang } from '../components/tasks/copy'
@@ -77,12 +78,15 @@ import {
   type TaskListRow, type TaskRecord, type TasksError, type TaskStatus,
 } from '../lib/tasks'
 
-function EmptyNotice({ error }: { error: TasksError }) {
+export function EmptyNotice({ error, lang, filtered }: { error: TasksError; lang?: string; filtered?: boolean }) {
+  const pt = lang === 'pt'
   const text = error === 'refused'
-    ? 'The task board is a local store, and this instance does not host one.'
+    ? (pt ? 'O quadro de tarefas é um armazenamento local, e esta instância não hospeda um.' : 'The task board is a local store, and this instance does not host one.')
     : error === 'down'
-      ? 'The server did not answer. Nothing is claimed about your tasks either way.'
-      : 'No tasks yet. Create one above, or file sessions under one with agentop session batch.'
+      ? (pt ? 'O servidor não respondeu. Nada é afirmado sobre as suas tarefas.' : 'The server did not answer. Nothing is claimed about your tasks either way.')
+      : filtered
+        ? (pt ? 'Nenhuma tarefa corresponde à busca ou aos filtros.' : 'No task matches the search or filters.')
+        : (pt ? 'Ainda não há tarefas. Crie a primeira no campo acima.' : 'No tasks yet. Create your first one in the field above.')
   return (
     <div style={{ ...surface, padding: 16, color: 'var(--text-tertiary)', display: 'flex', gap: 10, alignItems: 'center', fontSize: 12.5 }}>
       <ClipboardList size={16} /> {text}
@@ -90,6 +94,11 @@ function EmptyNotice({ error }: { error: TasksError }) {
   )
 }
 
+
+/** The list's empty state: a board that HAS tasks but shows none is a filter/search miss, never "no tasks yet". */
+export function ListEmpty({ rows, error, lang }: { rows: readonly unknown[]; error: TasksError; lang?: string }) {
+  return <EmptyNotice error={rows.length > 0 ? null : error} filtered={rows.length > 0} lang={lang} />
+}
 
 // ------------------------------------------------------------------------------- list
 
@@ -203,12 +212,19 @@ function TaskList() {
   /** The ONE way a status is set from this page. `blocked` asks its question first. */
   const toStatus = async (ids: string[], status: TaskStatus) => {
     if (status === 'blocked') { setBlocking(ids); return }
+    const unfiled: string[] = []
     for (const id of ids) {
-      const out = await markTask(id, status)
+      const out = await markTask(id, status, { dialog: true })
       if (out.ok && details.has(id)) await refreshDetail(id)
+      if (!out.ok && out.reason === 'done_needs_session') unfiled.push(id)
     }
+    // FILIACAO.TOAST: a `done` refused for having nothing filed offers the ONE action that resolves it, the
+    // same dialog the task's own status chip opens — a toast alone named the rule and left no way forward.
+    if (unfiled.length > 0) setDoneRefused(unfiled)
     await reload()
   }
+  /** Tasks whose move to `done` was refused with nothing filed — see `toStatus`. */
+  const [doneRefused, setDoneRefused] = useState<string[] | null>(null)
 
   const refreshDetail = async (id: string) => {
     await loadExpandedDetail(id)
@@ -465,7 +481,7 @@ function TaskList() {
       {view === 'live' && <div data-route-panel="live" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><LiveDelivery lang={lang} /></div>}
 
       {view !== 'overview' && view !== 'live' && rows !== null && shown.length === 0 && !searchPending && (
-        <EmptyNotice error={rows.length > 0 ? null : error} />
+        <ListEmpty rows={rows} error={error} lang={lang} />
       )}
       {rows !== null && view === 'board' && shown.length > 0 && (
         <>
@@ -522,11 +538,11 @@ function TaskList() {
           onRefreshDetail={refreshDetail}
           onCommentsChanged={async ref => { await reload(); await refreshDetail(ref) }}
           onAddSubtask={async (ref, title) => { await addSubtask(ref, title); await refreshDetail(ref) }}
-          onPatchSubtask={async (ref, sid, patch) => {
+          onPatchSubtask={async (ref, sid, patch, o) => {
             // The RESULT reaches the caller — the group-forming gestures (§F.1) need it to show
             // `invalid_group`/`subtask_has_sessions`/`group_field_conflict` instead of a swallowed
             // refusal.
-            const result = await patchSubtask(ref, sid, patch)
+            const result = await patchSubtask(ref, sid, patch, o)
             await refreshDetail(ref)
             return result
           }}
@@ -571,6 +587,17 @@ function TaskList() {
             for (const id of ids) await markTask(id, 'blocked', { reason, blockedBy })
             await reload()
           }}
+        />
+      )}
+
+      {doneRefused && doneRefused.length > 0 && (
+        <DoneNeedsSessionDialog
+          title={doneRefused.map(id => rows?.find(r => r.task.id === id)?.task.title ?? id).join(', ')}
+          scope="task"
+          lang={lang}
+          onCancel={() => setDoneRefused(null)}
+          // Filing lives on the task's Subtasks tab (the same place the status chip's dialog sends you).
+          onFile={() => { const id = doneRefused[0]!; setDoneRefused(null); navigate(`/tasks/${encodeURIComponent(id)}?tab=subtasks`) }}
         />
       )}
 
