@@ -65,8 +65,8 @@ test('day (en): the same footer clause in English', async () => {
 test('week: the "sem data" chip sits on TODAY\'s column (Mon 9 → Sat 14 is the 6th, index 5), not at column 0', async () => {
   await mount(createElement(Week, { anchor: '2026-11-14', nowMs: NOW, pieces, pt: true, selected: null, onOpenPiece: noop }))
   const chip = document.querySelector<HTMLElement>('[data-cal-row="t/r3"] [data-cal-chip="no-date"]')!
-  expect(chip.style.left).toContain('* 5')
-  expect(chip.style.left).not.toBe('6px')
+  expect(chip.style.marginLeft).toContain('* 5')
+  expect(chip.style.marginLeft).not.toBe('6px')
 })
 
 test('week: the % and ring of a task bar are in the pinned wrapper (sticky beside the title column)', async () => {

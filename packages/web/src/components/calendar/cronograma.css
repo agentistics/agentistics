@@ -42,6 +42,8 @@ button.crono-bar{cursor:pointer}
 .crono-bar .crono-fill{position:absolute;left:0;top:0;bottom:0;background:color-mix(in srgb,var(--c) 38%,transparent);pointer-events:none}
 .crono-bar[data-kind="task"]{background:var(--navy);--c:#5b6fd6;border-color:rgba(120,140,255,.28)}
 .crono-bar[data-kind="group"]{background:var(--navy2);--c:#6b7ee0;border-color:rgba(120,140,255,.2)}
+/* The parent bars are navy in BOTH themes, so their text/ring tokens are fixed light: the theme's near-black would be 1.17:1 on navy. */
+.crono-bar[data-kind="task"],.crono-bar[data-kind="group"]{color:#e6e9ff;--text-primary:#e6e9ff;--text-secondary:rgba(230,233,255,.78);--text-tertiary:rgba(230,233,255,.78);--ag-tint-3:rgba(255,255,255,.18)}
 .crono-bar[data-done]{background:color-mix(in srgb,var(--accent-green) 12%,var(--bg-card));color:var(--text-secondary)}
 .crono-bar[data-plan]{background:transparent;border:1.5px dashed var(--border);color:var(--text-secondary)}
 .crono-bar[data-plan] .crono-fill{display:none}
@@ -50,7 +52,9 @@ button.crono-bar{cursor:pointer}
 .crono-cb[data-on]{background:#3b5bdb;border-color:#3b5bdb;color:#fff}
 .crono-ph{font-size:10px;font-weight:600;border-radius:999px;padding:1px 7px;border:1px solid color-mix(in srgb,var(--c) 60%,transparent);color:color-mix(in srgb,var(--c) 70%,var(--text-primary));background:color-mix(in srgb,var(--c) 14%,transparent);letter-spacing:.02em}
 .crono-hint{margin-left:auto;font-size:10.5px;color:var(--text-tertiary)}
-.crono-sem{position:absolute;top:9px;height:22px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:var(--text-secondary);border:1px dashed var(--border);border-radius:999px;padding:0 9px;white-space:nowrap;background:var(--bg-card)}
+.crono-bar[data-kind="sub"] .crono-hint{color:color-mix(in srgb,var(--text-primary) 72%,transparent)}
+.crono-semw{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;pointer-events:none}
+.crono-sem{position:sticky;left:calc(var(--LW) + 8px);flex:none;height:22px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:var(--text-secondary);border:1px dashed var(--border);border-radius:999px;padding:0 9px;white-space:nowrap;background:var(--bg-card)}
 .crono-bar .crono-prev{position:absolute;top:0;bottom:0;right:0;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--text-primary) 9%,transparent) 0 4px,transparent 4px 8px);border-left:1px dashed var(--border)}
 .crono-foot{flex:none;color:var(--text-tertiary);font-size:11px;padding:0 2px}
 .crono-ring{display:inline-flex;flex:none}

@@ -166,7 +166,7 @@ function Row({ r, axis, nowMs, pt, folded, onFold, selected, onOpenPiece, todayI
         {weekend.map(i => <div key={i} className="crono-wk" style={{ left: calc(i), width: calc(1) }} />)}
         {span ? <BarFor r={r} span={span} axis={axis} nowMs={nowMs} pt={pt} prog={prog} selected={selected} onOpenPiece={onOpenPiece} />
           : n.kind === 'sub' && p && !isDelivered(p) ? (
-            <span className="crono-sem" data-cal-chip="no-date" style={{ left: W ? (todayIn ? calc(todayUnits, ' + 6px') : '6px') : '8px' }}>{pick(W ? CRONO_TEXT.noDate : TEXT.noTime, pt)}</span>
+            <span className="crono-semw" data-cal-semw><span className="crono-sem" data-cal-chip="no-date" style={{ marginLeft: W ? (todayIn ? calc(todayUnits, ' + 6px') : '6px') : '8px' }}>{pick(W ? CRONO_TEXT.noDate : TEXT.noTime, pt)}</span></span>
           ) : null}
       </div>
     </div>
