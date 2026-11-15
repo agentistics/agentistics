@@ -1167,20 +1167,20 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_browser_snapshot",
     description:
-      "Read the page as accessible text with refs (e12...) for click/type/select. Capped (default 20 KB); mode viewport returns only what is on screen. / Lê a página como texto acessível com refs.",
+      "Read the page as accessible text with refs (e12@g3 ...) for click/type/select. A ref is bound to this snapshot and this page: after navigate, back, forward, reload or a tab switch every older ref answers stale_ref and nothing is clicked — snapshot again. Capped (default 20 KB); mode viewport returns only what is on screen. / Lê a página como texto acessível com refs.",
     inputSchema: { type: "object", properties: { mode: { type: "string", enum: ["full", "viewport"], description: "full (default) or viewport (only what is visible)" }, maxBytes: { type: "number", description: "2000 to 60000, default 20000" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
   },
   {
     name: "agentistics_browser_click",
     description:
       "Click an element by ref (from snapshot), or at x,y viewport pixels. / Clica num elemento pelo ref ou em x,y.",
-    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12" }, x: { type: "number" }, y: { type: "number" }, button: { type: "string", enum: ["left", "right", "middle"] }, double: { type: "boolean" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
+    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12@g3 (copy it whole; it dies when the page navigates, reloads or you switch tab)" }, x: { type: "number" }, y: { type: "number" }, button: { type: "string", enum: ["left", "right", "middle"] }, double: { type: "boolean" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
   },
   {
     name: "agentistics_browser_type",
     description:
       "Replace the text of a field (by ref) with text; submit presses Enter after. / Digita num campo (substitui o conteúdo).",
-    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12" }, text: { type: "string" }, submit: { type: "boolean" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: ["ref", "text"] },
+    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12@g3 (copy it whole; it dies when the page navigates, reloads or you switch tab)" }, text: { type: "string" }, submit: { type: "boolean" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: ["ref", "text"] },
   },
   {
     name: "agentistics_browser_press",
@@ -1192,13 +1192,13 @@ const TOOLS: Tool[] = [
     name: "agentistics_browser_select",
     description:
       "Choose option(s) of a <select> by value or label. / Escolhe opções de um <select>.",
-    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12" }, values: { type: "array", items: { type: "string" } }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: ["ref", "values"] },
+    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12@g3 (copy it whole; it dies when the page navigates, reloads or you switch tab)" }, values: { type: "array", items: { type: "string" } }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: ["ref", "values"] },
   },
   {
     name: "agentistics_browser_scroll",
     description:
       "Scroll an element into view (ref) or the page by dy/dx pixels. / Rola a página ou traz um elemento à vista.",
-    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12" }, dy: { type: "number" }, dx: { type: "number" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
+    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12@g3 (copy it whole; it dies when the page navigates, reloads or you switch tab)" }, dy: { type: "number" }, dx: { type: "number" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
   },
   {
     name: "agentistics_browser_screenshot",
@@ -1210,7 +1210,7 @@ const TOOLS: Tool[] = [
     name: "agentistics_browser_wait_for",
     description:
       "Wait (at most 10 s) for text to appear, for a ref to exist, or for ms milliseconds. Exactly one of text, ref, ms. / Espera um texto, um ref ou um tempo.",
-    inputSchema: { type: "object", properties: { text: { type: "string" }, ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12" }, ms: { type: "number" }, timeoutMs: { type: "number", description: "at most 10000, default 5000" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
+    inputSchema: { type: "object", properties: { text: { type: "string" }, ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12@g3 (copy it whole; it dies when the page navigates, reloads or you switch tab)" }, ms: { type: "number" }, timeoutMs: { type: "number", description: "at most 10000, default 5000" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
   },
   {
     name: "agentistics_browser_evaluate",

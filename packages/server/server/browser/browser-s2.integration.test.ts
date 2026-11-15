@@ -101,9 +101,9 @@ d('S2 verbs on a real headless shell', () => {
     expect(nav).toMatchObject({ ok: true, title: 'Form page' })
     const snap = await act('snapshot')
     expect(snap.ok).toBe(true)
-    expect(snap.snapshot).toMatch(/- textbox "Name" \[ref=e\d+\]/)
+    expect(snap.snapshot).toMatch(/- textbox "Name" \[ref=e\d+@g\d+\]/)
     expect(snap.snapshot).toMatch(/- combobox "Color"/)
-    expect(snap.snapshot).toMatch(/- button "Go" \[ref=e\d+\]/)
+    expect(snap.snapshot).toMatch(/- button "Go" \[ref=e\d+@g\d+\]/)
     expect(snap.snapshot).toContain('- text "Use your work e-mail."')
     if (process.env.CAPTURE_FIXTURE === '1') {
       const h = host!.actionHost(KEY)!
@@ -118,9 +118,9 @@ d('S2 verbs on a real headless shell', () => {
   test('type, select and click by ref; the page sees all three', async () => {
     const snap = (await act('snapshot')).snapshot as string
     const ref = (re: RegExp) => re.exec(snap)![1]!
-    const name = ref(/textbox "Name" \[ref=(e\d+)\]/)
-    const color = ref(/combobox "Color"[^\n]*\[ref=(e\d+)\]/)
-    const go = ref(/button "Go" \[ref=(e\d+)\]/)
+    const name = ref(/textbox "Name" \[ref=(e\d+@g\d+)\]/)
+    const color = ref(/combobox "Color"[^\n]*\[ref=(e\d+@g\d+)\]/)
+    const go = ref(/button "Go" \[ref=(e\d+@g\d+)\]/)
     expect((await act('type', { ref: name, text: 'alice' })).ok).toBe(true)
     expect((await act('type', { ref: name, text: 'bob' })).ok).toBe(true) // replaces, never appends
     expect((await act('select', { ref: color, values: ['Green'] })).selected).toBe(1)
@@ -132,7 +132,7 @@ d('S2 verbs on a real headless shell', () => {
 
   test('click a button 3000 px below the fold by ref; viewport snapshot shows only the visible part', async () => {
     const full = (await act('snapshot')).snapshot as string
-    const far = /button "Far" \[ref=(e\d+)\]/.exec(full)![1]!
+    const far = /button "Far" \[ref=(e\d+@g\d+)\]/.exec(full)![1]!
     const vp = (await act('snapshot', { mode: 'viewport' })).snapshot as string
     expect(vp).not.toContain('"Far"')
     await act('click', { ref: far })

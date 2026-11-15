@@ -11,7 +11,7 @@
  * action; S2's gate always proceeds.
  */
 
-import { MAX_SNAPSHOT_BYTES, MIN_SNAPSHOT_BYTES, parseRef } from './ax-snapshot'
+import { MAX_SNAPSHOT_BYTES, MIN_SNAPSHOT_BYTES, parseBoundRef } from './ax-snapshot'
 
 export const SESSION_ACTIONS = [
   'navigate', 'back', 'forward', 'reload', 'click', 'type', 'press', 'select', 'scroll', 'evaluate',
@@ -84,7 +84,7 @@ export function parseActionArgs(action: BrowserAction, body: unknown): Parsed {
     tab = b.tab
   }
   const withTab = <T extends object>(o: T) => (tab ? { ...o, tab } : o)
-  const refOk = (r: unknown) => typeof r === 'string' && parseRef(r) !== null
+  const refOk = (r: unknown) => typeof r === 'string' && parseBoundRef(r) !== null
   switch (action) {
     case 'navigate': {
       const url = str(b.url, URL_MAX)
@@ -273,4 +273,30 @@ export function blockSentence(reason: string, url: string, via?: 'redirect' | 's
     : 'an address that does not parse'
   const how = via === 'redirect' ? ' (the page redirected there)' : via === 'popup' ? ' (a popup opened it)' : ''
   return `Refused: ${url} points at ${what}${how}. Other localhost ports (your dev server) are allowed.`
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Refs bound to their document (S2 fix 2)
+
+/**
+ * What a tab remembers about its last snapshot. A ref is `e<backendNodeId>@g<generation>`; the backend node
+ * id alone is only unique inside one document, so a ref taken on page A could name an unrelated element of
+ * page B. `gen` is the generation of the snapshot whose refs may still be acted on (null = none: the page
+ * navigated, reloaded or the tab was switched), `loaderId` the document that snapshot was taken on.
+ */
+export interface TabRefState { gen: number | null; loaderId: string | null }
+
+export type RefCheck = { ok: true; id: number } | { ok: false; error: 'stale_ref'; sentence: string }
+
+const STALE = (why: string): RefCheck => ({ ok: false, error: 'stale_ref', sentence: `${why} Nothing was done. Take a new agentistics_browser_snapshot and use its refs.` })
+
+/** Is `ref` still the one its snapshot minted, on the document that snapshot read? Pure. */
+export function checkRef(ref: string, state: TabRefState | undefined, currentLoaderId: string | null): RefCheck {
+  const p = parseBoundRef(ref)
+  if (!p) return STALE('That is not a ref from a snapshot.')
+  if (p.gen === null) return STALE('That ref has no snapshot mark (refs look like e12@g3).')
+  if (!state || state.gen === null) return STALE('The page changed since that snapshot (navigation, reload or tab switch), so its refs are void.')
+  if (p.gen !== state.gen) return STALE('That ref comes from an older snapshot.')
+  if (currentLoaderId === null || currentLoaderId !== state.loaderId) return STALE('The page is not the one that snapshot was taken on.')
+  return { ok: true, id: p.id }
 }

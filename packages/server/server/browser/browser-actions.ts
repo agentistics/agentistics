@@ -12,10 +12,10 @@
  * A ref the page no longer has is `stale_ref`, never a crash.
  */
 
-import { axSnapshot, boxesFromDomSnapshot, cleanText, parseRef, viewportRect } from './ax-snapshot'
+import { axSnapshot, boxesFromDomSnapshot, cleanText, viewportRect } from './ax-snapshot'
 import {
-  FULLPAGE_MAX_HEIGHT, WAIT_MAX_MS, blockSentence, evaluateResult, keyDef, ownUrl, truncateUtf8,
-  type ActionArgs,
+  FULLPAGE_MAX_HEIGHT, WAIT_MAX_MS, blockSentence, checkRef, evaluateResult, keyDef, ownUrl, truncateUtf8,
+  type ActionArgs, type TabRefState,
 } from './browser-action-spec'
 import type { BlockReason } from './browser-spec'
 import { statusTitle } from './browser-spec'
@@ -76,7 +76,9 @@ export async function runAction(h: ActionHost, args: ActionArgs): Promise<Action
     const tab = await resolveTab(h, 'tab' in args ? args.tab : undefined)
     if (!tab.ok) return tab.result
     const targetId = tab.targetId
-    const sid = await h.sessionFor(targetId)
+    let sid: string
+    try { sid = await h.sessionFor(targetId) } catch (e) { return tabGoneOr(h, targetId, e) }
+    try {
     switch (args.action) {
       case 'navigate': return await navigate(h, targetId, sid, args.url)
       case 'back': case 'forward': return await history(h, targetId, sid, args.action)
@@ -91,9 +93,59 @@ export async function runAction(h: ActionHost, args: ActionArgs): Promise<Action
       case 'screenshot': return await screenshot(h, targetId, sid, args.fullPage, args.format)
       case 'wait_for': return await waitFor(h, targetId, sid, args)
     }
+    } catch (e) { return tabGoneOr(h, targetId, e) }
   } catch (e) {
     return fromCdpError(e)
   }
+}
+
+/**
+ * A CDP failure on a tab: when the tab itself is gone (closed by the tab ceiling or by the page) say so in
+ * a sentence and move to a surviving tab, instead of the generic timeout every later action would get.
+ */
+function tabGoneOr(h: ActionHost, targetId: string, e: unknown): ActionResult {
+  const msg = e instanceof Error ? e.message : String(e)
+  if (/timed out|connection closed|No target with given id|Session with given id not found|Target closed/i.test(msg) && !h.tabs().some(t => t.targetId === targetId)) {
+    const next = h.tabs()[0]?.targetId ?? null
+    if (next) h.setActive(next)
+    forgetTab(h, targetId)
+    return fail('no_such_tab', `That tab no longer exists (it was closed by the tab limit or by the page).${next ? ` The active tab is now ${next}.` : ' There is no tab open; navigate to open one.'} agentistics_browser_tabs lists them.`)
+  }
+  return fromCdpError(e)
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Refs bound to their document (S2 fix 2): `e<node>@g<generation>`, valid for one snapshot of one document.
+
+interface TabRefs { counter: number; state: TabRefState }
+const refBooks = new WeakMap<object, Map<string, TabRefs>>()
+
+function refsOf(h: ActionHost, targetId: string): TabRefs {
+  let book = refBooks.get(h.cdp)
+  if (!book) { book = new Map(); refBooks.set(h.cdp, book) }
+  let t = book.get(targetId)
+  if (!t) { t = { counter: 0, state: { gen: null, loaderId: null } }; book.set(targetId, t) }
+  return t
+}
+
+/** Every ref of this tab dies (navigation, reload, history, tab switch). The counter keeps growing. */
+function invalidateRefs(h: ActionHost, targetId: string): void { refsOf(h, targetId).state = { gen: null, loaderId: null } }
+function forgetTab(h: ActionHost, targetId: string): void { refBooks.get(h.cdp)?.delete(targetId) }
+
+async function loaderIdOf(h: ActionHost, targetId: string, sid: string): Promise<string | null> {
+  try {
+    const r = await h.cdp.send<{ frameTree?: { frame?: { loaderId?: string } } }>('Page.getFrameTree', {}, sid, 5_000)
+    return r.frameTree?.frame?.loaderId ?? null
+  } catch (e) {
+    if (!h.tabs().some(t => t.targetId === targetId)) throw e // the tab is gone: say so, not "stale"
+    return null
+  }
+}
+
+/** The node a ref names, or the refusal. Checked BEFORE anything is dispatched. */
+async function boundRef(h: ActionHost, targetId: string, sid: string, ref: string): Promise<{ ok: true; id: number } | { ok: false; result: ActionResult }> {
+  const c = checkRef(ref, refsOf(h, targetId).state, await loaderIdOf(h, targetId, sid))
+  return c.ok ? c : { ok: false, result: fail(c.error, c.sentence) }
 }
 
 /** A CDP failure in words. A missing node is a stale ref — the page changed since the snapshot. */
@@ -159,6 +211,7 @@ async function navigate(h: ActionHost, targetId: string, sid: string, url: strin
   const reason = await h.blockReason(url)
   if (reason) return fail('blocked', blockSentence(reason, ownUrl(url)), { reason, url: ownUrl(url) })
   const since = h.now()
+  invalidateRefs(h, targetId)
   const loaded = nextLoad(h, sid, NAV_TIMEOUT_MS)
   const nav = await h.cdp.send<{ errorText?: string; loaderId?: string }>('Page.navigate', { url }, sid, NAV_TIMEOUT_MS)
   if (nav.errorText) {
@@ -179,6 +232,7 @@ async function history(h: ActionHost, targetId: string, sid: string, dir: 'back'
   if (!entry) return fail('no_history', dir === 'back' ? 'There is no page to go back to.' : 'There is no page to go forward to.')
   const reason = await h.blockReason(entry.url)
   if (reason) return fail('blocked', blockSentence(reason, ownUrl(entry.url)), { reason })
+  invalidateRefs(h, targetId)
   const loaded = nextLoad(h, sid, NAV_TIMEOUT_MS)
   await h.cdp.send('Page.navigateToHistoryEntry', { entryId: entry.id }, sid)
   await loaded
@@ -188,6 +242,7 @@ async function history(h: ActionHost, targetId: string, sid: string, dir: 'back'
 }
 
 async function reload(h: ActionHost, targetId: string, sid: string): Promise<ActionResult> {
+  invalidateRefs(h, targetId)
   const loaded = nextLoad(h, sid, NAV_TIMEOUT_MS)
   await h.cdp.send('Page.reload', {}, sid)
   await loaded
@@ -223,9 +278,10 @@ async function pointOf(h: ActionHost, sid: string, backendNodeId: number): Promi
 async function click(h: ActionHost, targetId: string, sid: string, a: Extract<ActionArgs, { action: 'click' }>): Promise<ActionResult> {
   let x: number, y: number, label = ''
   if (a.ref) {
-    const id = parseRef(a.ref)!
-    ;({ x, y } = await pointOf(h, sid, id))
-    label = await nodeLabel(h, sid, id)
+    const b = await boundRef(h, targetId, sid, a.ref)
+    if (!b.ok) return b.result
+    ;({ x, y } = await pointOf(h, sid, b.id))
+    label = await nodeLabel(h, sid, b.id)
   } else { x = a.x!; y = a.y! }
   const since = h.now()
   const send = (type: string, clickCount: number) => h.cdp.send('Input.dispatchMouseEvent', { type, x, y, button: a.button, clickCount, buttons: type === 'mousePressed' ? 1 : 0 }, sid)
@@ -239,8 +295,8 @@ async function click(h: ActionHost, targetId: string, sid: string, a: Extract<Ac
   return { ok: true, tab: targetId, clicked: label, x: Math.round(x), y: Math.round(y), ...info, ...(b && !b.ok ? { refused: b.sentence } : {}) }
 }
 
-async function objectOf(h: ActionHost, sid: string, ref: string): Promise<string> {
-  const { object } = await h.cdp.send<{ object: { objectId: string } }>('DOM.resolveNode', { backendNodeId: parseRef(ref)! }, sid)
+async function objectOf(h: ActionHost, sid: string, id: number): Promise<string> {
+  const { object } = await h.cdp.send<{ object: { objectId: string } }>('DOM.resolveNode', { backendNodeId: id }, sid)
   return object.objectId
 }
 
@@ -252,10 +308,12 @@ async function pressKey(h: ActionHost, sid: string, key: string): Promise<void> 
 }
 
 async function typeInto(h: ActionHost, targetId: string, sid: string, ref: string, text: string, submit: boolean): Promise<ActionResult> {
-  const id = parseRef(ref)!
+  const b = await boundRef(h, targetId, sid, ref)
+  if (!b.ok) return b.result
+  const id = b.id
   await h.cdp.send('DOM.scrollIntoViewIfNeeded', { backendNodeId: id }, sid).catch(() => {})
   await h.cdp.send('DOM.focus', { backendNodeId: id }, sid)
-  const objectId = await objectOf(h, sid, ref)
+  const objectId = await objectOf(h, sid, id)
   // Fill semantics: what was in the field is replaced (a model re-typing must not append).
   await h.cdp.send('Runtime.callFunctionOn', {
     objectId, returnByValue: true,
@@ -282,7 +340,9 @@ async function press(h: ActionHost, targetId: string, sid: string, key: string):
 }
 
 async function selectIn(h: ActionHost, targetId: string, sid: string, ref: string, values: string[]): Promise<ActionResult> {
-  const objectId = await objectOf(h, sid, ref)
+  const b = await boundRef(h, targetId, sid, ref)
+  if (!b.ok) return b.result
+  const objectId = await objectOf(h, sid, b.id)
   const r = await h.cdp.send<{ result: { value?: number | string }; exceptionDetails?: unknown }>('Runtime.callFunctionOn', {
     objectId, returnByValue: true, arguments: [{ value: values }],
     functionDeclaration: 'function(vals){ if (this.tagName !== "SELECT") return "not-select"; const want = new Set(vals); let n = 0; for (const o of this.options) { const on = want.has(o.value) || want.has(o.label) || want.has(o.text); if (on && !this.multiple && n > 0) continue; o.selected = on; if (on) n++; } this.dispatchEvent(new Event("input", {bubbles: true})); this.dispatchEvent(new Event("change", {bubbles: true})); return n; }',
@@ -290,14 +350,16 @@ async function selectIn(h: ActionHost, targetId: string, sid: string, ref: strin
   const v = r.result?.value
   if (v === 'not-select') return fail('not_select', 'That ref is not a <select>. For a custom dropdown, click it and then click the option.')
   if (v === 0) return fail('no_option', 'No option of that <select> matches those values or labels.')
-  const label = await nodeLabel(h, sid, parseRef(ref)!)
+  const label = await nodeLabel(h, sid, b.id)
   h.noteAction({ kind: 'select', label, at: h.now() })
   return { ok: true, tab: targetId, selected: v, ...(await pageInfo(h, targetId, sid)) }
 }
 
 async function scroll(h: ActionHost, targetId: string, sid: string, a: Extract<ActionArgs, { action: 'scroll' }>): Promise<ActionResult> {
   if (a.ref) {
-    await h.cdp.send('DOM.scrollIntoViewIfNeeded', { backendNodeId: parseRef(a.ref)! }, sid)
+    const b = await boundRef(h, targetId, sid, a.ref)
+    if (!b.ok) return b.result
+    await h.cdp.send('DOM.scrollIntoViewIfNeeded', { backendNodeId: b.id }, sid)
   } else {
     const m = await h.cdp.send<unknown>('Page.getLayoutMetrics', {}, sid)
     const vp = viewportRect(m)
@@ -326,6 +388,10 @@ async function evaluate(h: ActionHost, targetId: string, sid: string, expression
 
 async function snapshot(h: ActionHost, targetId: string, sid: string, mode: 'full' | 'viewport', maxBytes?: number): Promise<ActionResult> {
   const info = await pageInfo(h, targetId, sid)
+  const tr = refsOf(h, targetId)
+  const gen = ++tr.counter
+  const loaderBefore = await loaderIdOf(h, targetId, sid)
+  tr.state = { gen: null, loaderId: null }
   const { nodes } = await h.cdp.send<{ nodes: any[] }>('Accessibility.getFullAXTree', {}, sid, 20_000)
   let viewport: { rect: { x: number; y: number; w: number; h: number }; boxes: Map<number, any> } | null = null
   if (mode === 'viewport') {
@@ -337,9 +403,11 @@ async function snapshot(h: ActionHost, targetId: string, sid: string, mode: 'ful
     if (rect) viewport = { rect, boxes: boxesFromDomSnapshot(snap) }
   }
   const s = axSnapshot(nodes ?? [], {
-    maxBytes, viewport,
+    maxBytes, viewport, gen,
     header: [`url: ${info.url}`, `title: ${info.title}`, `tab: ${targetId}${mode === 'viewport' ? ' (viewport only)' : ''}`],
   })
+  // The refs are live only if the document did not change while the tree was being read.
+  if (loaderBefore !== null && (await loaderIdOf(h, targetId, sid)) === loaderBefore) tr.state = { gen, loaderId: loaderBefore }
   return { ok: true, tab: targetId, ...info, mode, snapshot: s.text, truncated: s.truncated, refs: Object.keys(s.refs).length, omittedRefs: s.omittedRefs, bytes: s.bytes }
 }
 
@@ -378,7 +446,9 @@ async function waitFor(h: ActionHost, targetId: string, sid: string, a: Extract<
       }, sid).catch(() => ({ result: { value: false } }))
       found = r.result?.value === true
     } else {
-      found = await h.cdp.send('DOM.describeNode', { backendNodeId: parseRef(a.ref!)! }, sid).then(() => true, () => false)
+      const b = await boundRef(h, targetId, sid, a.ref!)
+      if (!b.ok) return b.result
+      found = await h.cdp.send('DOM.describeNode', { backendNodeId: b.id }, sid).then(() => true, () => false)
     }
     if (found) return { ok: true, tab: targetId, found: true, waitedMs: Date.now() - started }
     if (Date.now() - started >= limit) return { ok: true, tab: targetId, found: false, waitedMs: Date.now() - started }
@@ -403,6 +473,7 @@ async function tabNew(h: ActionHost, url: string | undefined): Promise<ActionRes
 async function tabSelect(h: ActionHost, tab: string): Promise<ActionResult> {
   if (!h.tabs().some(t => t.targetId === tab)) return fail('no_such_tab', `No tab ${tab} in this browser. agentistics_browser_tabs lists them.`)
   await h.cdp.send('Target.activateTarget', { targetId: tab }).catch(() => {})
+  invalidateRefs(h, tab)
   h.setActive(tab)
   h.noteAction({ kind: 'tab_select', label: tab, at: h.now() })
   return { ok: true, tab, tabs: tabList(h) }
@@ -411,6 +482,7 @@ async function tabSelect(h: ActionHost, tab: string): Promise<ActionResult> {
 async function tabClose(h: ActionHost, tab: string): Promise<ActionResult> {
   if (!h.tabs().some(t => t.targetId === tab)) return fail('no_such_tab', `No tab ${tab} in this browser. agentistics_browser_tabs lists them.`)
   await h.cdp.send('Target.closeTarget', { targetId: tab })
+  forgetTab(h, tab)
   // The destroyed event updates the host's map; wait for it briefly so the list returned is the new one.
   const started = Date.now()
   while (h.tabs().some(t => t.targetId === tab) && Date.now() - started < 1_000) await new Promise(r => setTimeout(r, 25))

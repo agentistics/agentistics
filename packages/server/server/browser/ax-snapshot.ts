@@ -46,6 +46,8 @@ export interface SnapshotOptions {
   maxBytes?: number
   /** Viewport mode: only nodes whose box meets `rect` (document CSS pixels), or that contain one. */
   viewport?: { rect: Box; boxes: ReadonlyMap<number, Box> } | null
+  /** The snapshot generation every ref is bound to (`e12@g3`); absent = bare `e12`. */
+  gen?: number
   /** Lines put first (URL, title) — counted against the ceiling. */
   header?: readonly string[]
 }
@@ -88,7 +90,17 @@ export function parseRef(ref: unknown): number | null {
   return Number.isSafeInteger(n) ? n : null
 }
 
-export function refOf(backendId: number): string { return `e${backendId}` }
+/** `e123` (a bare id, as the pure snapshot tests build it) or `e123@g4` (bound to snapshot generation 4). */
+export function refOf(backendId: number, gen?: number): string { return gen === undefined ? `e${backendId}` : `e${backendId}@g${gen}` }
+
+/** Parse `e123@g4` into its node id and snapshot generation; `gen` is null for a bare `e123`. */
+export function parseBoundRef(ref: unknown): { id: number; gen: number | null } | null {
+  if (typeof ref !== 'string') return null
+  const m = /^e([1-9]\d{0,9})(?:@g([1-9]\d{0,9}))?$/.exec(ref)
+  if (!m) return null
+  const id = Number(m[1]), gen = m[2] === undefined ? null : Number(m[2])
+  return Number.isSafeInteger(id) && (gen === null || Number.isSafeInteger(gen)) ? { id, gen } : null
+}
 
 /** A page-chosen string, made safe to put on one line. */
 export function cleanText(v: unknown, cap: number): string {
@@ -179,7 +191,7 @@ export function axSnapshot(nodes: readonly AXNode[], opts: SnapshotOptions = {})
       const transparent = n.ignored === true || role === 'RootWebArea' || role === 'WebArea'
         || (TRANSPARENT_ROLES.has(role) && !name && !interactive)
       if (!transparent) {
-        const ref = interactive && typeof n.backendDOMNodeId === 'number' && n.backendDOMNodeId > 0 ? refOf(n.backendDOMNodeId) : null
+        const ref = interactive && typeof n.backendDOMNodeId === 'number' && n.backendDOMNodeId > 0 ? refOf(n.backendDOMNodeId, opts.gen) : null
         lines.push({ text: `${'  '.repeat(depth)}- ${describe(n, role, name)}${ref ? ` [ref=${ref}]` : ''}`, ref, backend: ref ? n.backendDOMNodeId! : null })
         childDepth = depth + 1
         childParentName = name
