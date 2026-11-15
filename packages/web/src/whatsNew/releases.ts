@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.216.0': {
+    features: [
+      {
+        pt: 'Benchmark: as barras de pontuação e as partes coloridas do desenho aprovado voltaram; a tabela de tarefas abre pelas comparações que menos compensaram.',
+        en: 'Benchmark: the score bars and coloured parts of the approved design are back; the task table opens with the comparisons that paid off least first.',
+      },
+      {
+        pt: 'Ao vivo: abre mais rápido.',
+        en: 'Live: opens faster.',
+      },
+      {
+        pt: 'Tarefas: a página inteira agora fala português quando o aplicativo está em português.',
+        en: 'Tasks: the whole page now speaks Portuguese when the app is in Portuguese.',
+      },
+    ],
+    fixes: [],
+  },
   '2.215.0': {
     features: [
       {
