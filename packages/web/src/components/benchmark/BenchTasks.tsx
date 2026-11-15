@@ -7,6 +7,8 @@ import {
   type BucketRow, type SizeFilter, type TaskRow, type TaskSortKey,
 } from '../../lib/benchmarkView'
 import { Bar } from './BenchStyle'
+import { scoreTone } from '../../lib/benchmarkScore'
+import { wordOf } from '../../lib/benchmarkView'
 
 const muted: React.CSSProperties = { color: 'var(--text-tertiary)', fontSize: 12, lineHeight: 1.45 }
 const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 14, minWidth: 0 }
@@ -15,6 +17,17 @@ const field: React.CSSProperties = { background: 'var(--bg-input, var(--bg-eleva
 
 const SIZES: readonly SizeFilter[] = ['all', 'S', 'M', 'L']
 const sizeLabel = (s: SizeFilter, lang: Lang) => s === 'all' ? (lang === 'pt' ? 'Todas' : 'All') : s === 'L' ? (lang === 'pt' ? 'G' : 'L') : s === 'S' ? (lang === 'pt' ? 'P' : 'S') : s
+
+/** The prototype's "Compensou?" cell: the word, the task's own 0–100 score and a small bar in the tone; no score = a plain "sem nota". */
+export function TaskVerdictCell({ score, lang }: { score: number | null; lang: Lang }) {
+  const pt = lang === 'pt'
+  if (score === null) return <td className="bm-cp" data-testid="benchmark-task-verdict" data-tone="none"><span className="bm-nw" style={muted}>— {pt ? 'sem dados' : 'no data'}</span></td>
+  const n = Math.round(score), tone = scoreTone(score), c = tone === 'good' ? 'var(--accent-green)' : tone === 'bad' ? 'var(--accent-red)' : 'var(--accent-amber, #fbbf24)'
+  return <td className="bm-cp" data-testid="benchmark-task-verdict" data-tone={tone}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5, fontWeight: 700, marginBottom: 4 }}><span className="bm-nw" style={{ color: c }}>{wordOf(tone, lang)}</span><span>{n}</span></div>
+    <Bar value={n} tone={tone} />
+  </td>
+}
 
 /** "Por tarefa": one row per task, sortable, filterable by size and by name; a row opens its subtasks (also filterable). */
 export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null, keepHead = false }: {
@@ -48,21 +61,22 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
           <table className="bm-tasks"><thead><tr>
             {head('title', pt ? 'Tarefa' : 'Task')}<th>{pt ? 'Tamanho' : 'Size'}</th><th>{pt ? 'Sessões' : 'Sessions'}</th>
             {head('cost', pt ? 'Custo' : 'Cost', true)}{head('time', pt ? 'Tempo' : 'Time', true)}{head('qa', pt ? 'Rodadas QA' : 'QA rounds', true)}
-            <th className="bm-num">{pt ? 'Defeitos' : 'Defects'}</th><th>{pt ? 'Aceita' : 'Accepted'}</th>
+            <th className="bm-num">{pt ? 'Defeitos' : 'Defects'}</th><th>{pt ? 'Aceita' : 'Accepted'}</th>{head('score', pt ? 'Compensou?' : 'Paid off?')}
           </tr></thead><tbody>
             {rows.map(t => {
               const subs = (t.subtasks ?? []).filter(s => matches(s.title, subNeedle))
               return <React.Fragment key={t.id}>
                 <tr className="bm-t" data-testid="benchmark-task-row" data-task={t.id} onClick={() => { setOpen(open === t.id ? null : t.id); setSubNeedle('') }} aria-expanded={open === t.id}>
-                  <td>{t.title}</td><td data-l={pt ? 'Tamanho' : 'Size'}>{pt ? (t.size === 'L' ? 'G' : t.size === 'S' ? 'P' : t.size) : t.size}</td>
+                  <td><div className="bm-clamp" title={t.title}>{t.title}</div></td><td data-l={pt ? 'Tamanho' : 'Size'}>{pt ? (t.size === 'L' ? 'G' : t.size === 'S' ? 'P' : t.size) : t.size}</td>
                   <td data-l={pt ? 'Sessões' : 'Sessions'}>{t.sessions[0]} → {t.sessions[1]}</td>
                   <td className="bm-num" data-l={pt ? 'Custo' : 'Cost'}>{pairText(t.costUSD, money_)}</td>
                   <td className="bm-num" data-l={pt ? 'Tempo' : 'Time'}>{pairText(t.wallMs, dur)}</td>
                   <td className="bm-num" data-l="QA">{pairText(t.qaRounds, n => nf(n, lang, 0))}</td>
                   <td className="bm-num" data-l={pt ? 'Defeitos' : 'Defects'}>{pairText(t.defects, n => nf(n, lang, 0))}</td>
                   <td data-l={pt ? 'Aceita' : 'Accepted'}>{acceptedText(t.accepted, lang)}</td>
+                  <TaskVerdictCell score={t.score} lang={lang} />
                 </tr>
-                {open === t.id && <tr className="bm-d" data-testid="benchmark-task-detail"><td className="bm-d" colSpan={8}>
+                {open === t.id && <tr className="bm-d" data-testid="benchmark-task-detail"><td className="bm-d" colSpan={9}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Info size={13} /> {t.note || (pt ? 'Sem observação registrada para esta tarefa.' : 'No note recorded for this task.')}</div>
                   {(t.subtasks?.length ?? 0) > 0 ? <div style={{ marginTop: 8 }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
@@ -79,7 +93,7 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
                 </td></tr>}
               </React.Fragment>
             })}
-            {tasks.length === 0 && <tr><td colSpan={8} data-testid="benchmark-tasks-empty" style={{ ...muted, padding: '8px 0' }}>{emptyReason}</td></tr>}
+            {tasks.length === 0 && <tr><td colSpan={9} data-testid="benchmark-tasks-empty" style={{ ...muted, padding: '8px 0' }}>{emptyReason}</td></tr>}
           </tbody></table>
         </div>
         {(tasks.length > 0 || keepHead) && <div style={{ ...muted, fontSize: 11, marginTop: 6 }}>{tasks.length === 0 ? (pt ? 'Cada coluna mostra os dois lados: "um → outro". Clique na linha para ver o motivo.' : 'Each column shows both sides: "one → other". Click a row for the reason.') : pt ? 'Cada coluna mostra os dois lados: "um → outro". Clique na linha para ver o motivo e as subtarefas.' : 'Each column shows both sides: "one → other". Click a row for the reason and its subtasks.'}</div>}
