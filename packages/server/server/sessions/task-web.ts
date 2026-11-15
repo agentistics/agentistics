@@ -17,7 +17,7 @@ import type { StagedSessionDraft, StatusStage, TaskStatusDef, TaskTypeDef } from
 import {
   canChangeStatusStage, classifyStatusStage, canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
 } from '@agentistics/core'
-import { loadTaskWorld } from './task-source'
+import { loadTaskWorld, type TaskWorld } from './task-source'
 import { writeStatusStageMirror } from './status-stage-sync'
 import { conversationOwners } from './task-conversations'
 import { historicalLinkId, nativeLinkId, type HistoricalSession, type NativeSessionLink, type NativeSessionUsage } from './task-model'
@@ -758,7 +758,47 @@ export async function addComment(
   })
   if (threadId) await noteThreadComment(threadId, o.session)
   await w.store.logEvents([event(task.id, author, 'comment', { detail: o.message && o.session ? JSON.stringify({ message: { ...o.message, from: o.session } }) : commentTargetPhrase(plan.target) })])
+  // FILIACAO.TOAST: a verified WORKER filed on this task with no subtask that reports on a piece of it
+  // is filed on that piece (`task-worker-filing.ts`), so the piece it delivered can reach `done`.
+  // Best effort: the comment is already durable and a refused filing (a blocked piece) changes nothing.
+  if (o.session && plan.subtaskId) await fileReportingWorker(task.id, plan.subtaskId, o.session, w).catch(() => undefined)
   return { ok: true, id, ...(threadId ? { threadId } : {}) }
+}
+
+/** See `addComment`: the forward half of `task-worker-filing.ts`. */
+async function fileReportingWorker(taskId: string, subtaskId: string, sessionId: string, w: TaskWorld): Promise<void> {
+  const row = w.registryRows.find(r => r.id === sessionId)
+  if (!row || row.taskId !== taskId || row.subtaskId) return
+  const { effectiveRole } = await import('./session-roles')
+  const { workerFilingTarget } = await import('./task-worker-filing')
+  const target = workerFilingTarget({ row, role: await effectiveRole(row), commentTaskId: taskId, commentSubtaskId: subtaskId, subtasks: w.book.subtasks })
+  if (target) await attachSession(taskId, sessionId, { subtaskId: target })
+}
+
+/**
+ * FILIACAO.TOAST — the one-shot repair of an existing store: every worker conversation filed on a
+ * task with no subtask whose verified comments name exactly one piece of it is filed there
+ * (`planWorkerFilingBackfill`). Idempotent; `apply: false` is the dry run. `agentop task refile`.
+ */
+export async function backfillWorkerFiling(o: { apply: boolean }): Promise<{
+  planned: { sessionId: string; taskId: string; subtaskId: string }[]
+  filed: { sessionId: string; taskId: string; subtaskId: string }[]
+  refused: { sessionId: string; taskId: string; subtaskId: string; reason: string }[]
+  ambiguous: { sessionId: string; taskId: string; subtaskIds: string[] }[]
+}> {
+  const w = await loadTaskWorld()
+  const { effectiveRole } = await import('./session-roles')
+  const { planWorkerFilingBackfill } = await import('./task-worker-filing')
+  const roles = new Map<string, 'leader' | 'worker' | undefined>()
+  for (const r of w.registryRows) if (r.taskId && !r.subtaskId) roles.set(r.id, await effectiveRole(r))
+  const plan = planWorkerFilingBackfill({ rows: w.registryRows, comments: w.book.comments, subtasks: w.book.subtasks, roleOf: r => roles.get(r.id) })
+  const filed: typeof plan.file = []
+  const refused: { sessionId: string; taskId: string; subtaskId: string; reason: string }[] = []
+  if (o.apply) for (const f of plan.file) {
+    const out = await attachSession(f.taskId, f.sessionId, { subtaskId: f.subtaskId })
+    if (out.ok) filed.push(f); else refused.push({ ...f, reason: out.reason })
+  }
+  return { planned: plan.file, filed, refused, ambiguous: plan.ambiguous }
 }
 
 /** An empty body is a DELETE by another name, so it is refused rather than silently blanking a row. */
@@ -978,7 +1018,18 @@ export async function patchSubtask(subtaskId: string, patch: {
   // unreachable for it by construction and is skipped rather than left to refuse forever. Judged on
   // `nextParentGroupId` (the post-patch value), not `found` — see above.
   if (status === 'done' && found.status !== 'done' && !isGroupMember({ parentGroupId: nextParentGroupId })) {
-    if (!hasSession) return { ok: false, message: 'done_needs_session' }
+    // FILIACAO.TOAST: a verified session of THIS task that reported on the piece is evidence too (a leader
+    // that closed it, filed on the task because a conversation lives in one place) — `reportedByTaskSession`.
+    // Only this gate reads it; the group-join rule above still asks about FILED sessions alone.
+    if (!hasSession) {
+      const pieceTaskId = found.taskId
+      const pieceId = found.id
+      const { reportedByTaskSession } = await import('./task-worker-filing')
+      const { conversationOwners } = await import('./task-conversations')
+      if (!reportedByTaskSession(pieceTaskId, pieceId, w.book.comments, w.registryRows, conversationOwners(w.rollupRows), w.book.subtasks)) {
+        return { ok: false, message: 'done_needs_session' }
+      }
+    }
   }
 
   // SETTING a staged draft on a group member is refused for the exact reason `planAttach` refuses

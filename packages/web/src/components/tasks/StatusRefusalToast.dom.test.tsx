@@ -131,6 +131,21 @@ for (const [name, answer, expected] of [
   })
 }
 
+// FILIACAO.TOAST — an AUTOMATIC follow-up write (the delivery closing after its last part, done by the
+// page, not by the person) is never a toast: the caller reports it in its own words, once.
+test('a quiet (automatic) status write refused with done_needs_session does not toast nor ring the bell', async () => {
+  fakeServer(() => Response.json({ ok: false, message: 'done_needs_session' }, { status: 422 }))
+  const { host, close } = await mount()
+  try {
+    let out: unknown
+    await act(async () => { out = await tasks.markTask('t1', 'done', { quiet: true }) })
+    await act(async () => { await store.refreshNotifications() })
+    expect(out).toEqual({ ok: false, reason: 'done_needs_session' })
+    expect(toasts(host)).toHaveLength(0)
+    expect(store.readNotifications().some(n => n.code === 'tasks.status_failed')).toBe(false)
+  } finally { await close() }
+})
+
 test('the 422 and the abort lines are different sentences', () => {
   const line = (reason: string) => store.resolveNotification({ id: 'x', ts: 1, read: false, type: 'error', code: 'tasks.status_failed', meta: { reason, localAction: true } }, 'en').message
   expect(line('done_needs_session')).not.toBe(line('network_error'))

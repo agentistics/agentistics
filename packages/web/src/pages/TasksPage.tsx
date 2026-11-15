@@ -53,6 +53,7 @@ import { RailSection } from '../components/tasks/RailSection'
 import { ConfirmModal, Select } from './settings/primitives'
 import { DatePicker } from '../components/DatePicker'
 import { BlockedDialog } from '../components/tasks/BlockedDialog'
+import { DoneNeedsSessionDialog } from '../components/tasks/DoneNeedsSessionDialog'
 import { TaskProgressBar } from '../components/tasks/TaskProgressBar'
 import { StatusChip } from '../components/tasks/StatusChip'
 import { boardCopy, statusLabel, type Lang } from '../components/tasks/copy'
@@ -211,12 +212,19 @@ function TaskList() {
   /** The ONE way a status is set from this page. `blocked` asks its question first. */
   const toStatus = async (ids: string[], status: TaskStatus) => {
     if (status === 'blocked') { setBlocking(ids); return }
+    const unfiled: string[] = []
     for (const id of ids) {
       const out = await markTask(id, status)
       if (out.ok && details.has(id)) await refreshDetail(id)
+      if (!out.ok && out.reason === 'done_needs_session') unfiled.push(id)
     }
+    // FILIACAO.TOAST: a `done` refused for having nothing filed offers the ONE action that resolves it, the
+    // same dialog the task's own status chip opens — a toast alone named the rule and left no way forward.
+    if (unfiled.length > 0) setDoneRefused(unfiled)
     await reload()
   }
+  /** Tasks whose move to `done` was refused with nothing filed — see `toStatus`. */
+  const [doneRefused, setDoneRefused] = useState<string[] | null>(null)
 
   const refreshDetail = async (id: string) => {
     await loadExpandedDetail(id)
@@ -579,6 +587,17 @@ function TaskList() {
             for (const id of ids) await markTask(id, 'blocked', { reason, blockedBy })
             await reload()
           }}
+        />
+      )}
+
+      {doneRefused && doneRefused.length > 0 && (
+        <DoneNeedsSessionDialog
+          title={doneRefused.map(id => rows?.find(r => r.task.id === id)?.task.title ?? id).join(', ')}
+          scope="task"
+          lang={lang}
+          onCancel={() => setDoneRefused(null)}
+          // Filing lives on the task's Subtasks tab (the same place the status chip's dialog sends you).
+          onFile={() => { const id = doneRefused[0]!; setDoneRefused(null); navigate(`/tasks/${encodeURIComponent(id)}?tab=subtasks`) }}
         />
       )}
 
