@@ -19,7 +19,8 @@
  */
 import { dirname } from 'node:path'
 import { contextOfActor, flowContext, GuardRefused } from './guard'
-import { reviewOutcome, ruleAState } from './guard-host'
+import { reviewOutcome, ruleAState, guardPathsOf } from './guard-host'
+import { withGuardTransaction } from './guard-transaction'
 import {
   EDGES, GATES, adoptPhase, gatesFor, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
   refusalStatus, unlockerOf, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
@@ -242,6 +243,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
   // (`transition`, from the principal it resolved) wins. The allowlist lint (`guard-context.lint.test.ts`) tracks what is left.
   const rawStore = deps.store
   const d: DeliveryDeps = { ...deps, store: { ...rawStore, update: (fn, options) => rawStore.update(fn, { guard: flowContext(), ...options }) } }
+  const transaction = <A extends unknown[], R>(fn: (...args: A) => Promise<R>) => (...args: A): Promise<R> =>
+    withGuardTransaction(guardPathsOf({ deliveriesFile: d.store.path }).paths, () => fn(...args))
   let proofCache: ProofCache | null = null
   /** The store's fingerprint when this process last read or wrote it: a different one means ANOTHER process (the CLI's reconcile) wrote it. */
   let proofStamp: string | null = null
@@ -367,6 +370,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
   }
 
   const transition = async (subtaskId: string, to: unknown, input: TransitionInput, actor: string, known?: ReadonlyMap<GateName, GateVerdict>): Promise<DeliveryReply> => {
+    return withGuardTransaction(guardPathsOf({ deliveriesFile: d.store.path }).paths, async () => {
     const got = await ensure(subtaskId)
     if (isReply(got)) return got
     if (got.dequeued) return fail(422, 'fora_da_fila', 'this piece was dequeued; stage it explicitly before starting it again', [], got)
@@ -390,8 +394,9 @@ export function createDeliveryService(deps: DeliveryDeps) {
         const cur = doc.deliveries[subtaskId]
         if (!cur) return { kind: 'gone' as const }
         if (cur.revision !== got.revision) return { kind: 'moved' as const, cur }
-        for (const [g, v] of verdicts) absorb(cur, g, v)
-        const plan = planTransition(cur, to, input, { at: iso(d), actor, autonomous, requireEvidence })
+        const candidate = requireEvidence ? structuredClone(cur) : cur
+        for (const [g, v] of verdicts) absorb(candidate, g, v)
+        const plan = planTransition(candidate, to, input, { at: iso(d), actor, autonomous, requireEvidence })
         if (!plan.ok) return { kind: 'refused' as const, plan, cur: structuredClone(cur) }
         doc.deliveries[subtaskId] = plan.next
         return { kind: 'moved-ok' as const, before: got, after: plan.next, skipped: plan.skipped }
@@ -423,6 +428,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
     }
     await effects(out.before, out.after, actor, warnings)
     return { ok: true, status: 200, record: out.after, warnings, ...(out.skipped ? { skipped: out.skipped } : {}) }
+    })
   }
 
   /**
@@ -995,6 +1001,9 @@ export function createDeliveryService(deps: DeliveryDeps) {
         for (const x of waiting) x.after.releaseFailNotice = { at, reason: v.reason ?? 'release.yml failed' }
       } else warnings.push(`not published yet: ${v.reason ?? 'release evidence missing'} — the minute tick moves ci → publicado when it is`)
     }
+    // External release probes above may run concurrently. Re-read/CAS and the entire write + board effects
+    // share the full envelope; no network barrier holds a board lock while waiting for another caller.
+    return withGuardTransaction(guardPathsOf({ deliveriesFile: d.store.path }).paths, async () => {
     const batch = await d.store.update(doc => {
       for (const p of plan) {
         const cur = doc.deliveries[p.id]
@@ -1021,6 +1030,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
     }
     const publishedAt = drafts.find(x => x.after.phase === 'publicado')?.after.publishedAt
     return { ok: true, status: 200, version, tag, mergeSha, pieces, ...(publishedAt ? { publishedAt } : {}), warnings }
+    })
   }
 
   /**
@@ -1030,7 +1040,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
    */
   let tickChain: Promise<unknown> = Promise.resolve()
   const tick = (): Promise<{ actions: string[] }> => {
-    const guarded = async () => { try { return await tickOnce() } catch (e) { if (e instanceof DeliveryStoreUnreadable) return { actions: [`store-unreadable: ${e.message}`] }; throw e } }
+    const guarded = async () => { try { return await transaction(tickOnce)() } catch (e) { if (e instanceof DeliveryStoreUnreadable) return { actions: [`store-unreadable: ${e.message}`] }; if (e instanceof GuardBusy) return { actions: ['guard_busy: tick skipped'] }; throw e } }
     const run = tickChain.then(guarded, guarded)
     tickChain = run.catch(() => undefined)
     return run
@@ -1710,7 +1720,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
    */
   const reconcile = async (o: { apply?: unknown }, actor: string, opts: { budget?: number } = {}): Promise<ReconcileReply> => {
     proofRuns++
-    try { return await reconcileRun(o, actor, opts) } finally { proofRuns-- }
+    try { return await transaction(reconcileRun)(o, actor, opts) } finally { proofRuns-- }
   }
   const reconcileRun = async (o: { apply?: unknown }, actor: string, opts: { budget?: number } = {}): Promise<ReconcileReply> => {
     const apply = o.apply === true || o.apply === 'true'
@@ -2197,13 +2207,14 @@ export function createDeliveryService(deps: DeliveryDeps) {
     ensure: safeEnsure(ensure),
     // An unreadable store REFUSES the write (and keeps a copy of the file) instead of letting any verb replace it with an empty book.
     transition: safe((id: string, to: unknown, input: TransitionInput, actor: string) => transition(id, to, input, actor)),
-    gate: safe(gate), block: safe(block), unblock: safe(unblock), approve: safe(approve), configure: safe(configure), classify: safe(classify), step: safe(step),
+    gate: safe(transaction(gate)), block: safe(transaction(block)), unblock: safe(transaction(unblock)), approve: safe(approve), configure: safe(configure), classify: safe(classify), step: safe(step),
     evidenceAdd: safe(evidenceAdd) as typeof evidenceAdd, evidenceList, evidenceRemove: safe(evidenceRemove),
     stepEvent: async (id: string, n: unknown, actor: string): Promise<StepEventReply> => { try { return await stepEvent(id, n, actor) } catch (e) { return fail(500, 'step_erro', `the step could not be recorded (${e instanceof Error ? e.message.split('\n')[0] : String(e)})`) } },
     // An I/O error on the batch write is a clean, structured refusal (the single store write landed entirely or not at all), never an uncaught throw.
     release: async (o: { version: unknown; mergeSha: unknown; subtaskIds: unknown; repo?: unknown }, actor: string): Promise<ReleaseReply> => {
       try { return await release(o, actor) } catch (e) {
         if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
+        if (e instanceof GuardBusy || e instanceof GuardRefused) return fail(e.status, e.code, e.message) as Extract<DeliveryReply, { ok: false }>
         return fail(500, 'store_erro', `the release could not be written (${e instanceof Error ? e.message.split('\n')[0] : String(e)}); the batch write is all-or-nothing and the verb is idempotent — run it again`) as Extract<DeliveryReply, { ok: false }>
       }
     },
@@ -2235,13 +2246,13 @@ export function createDeliveryService(deps: DeliveryDeps) {
       if (antigasRunning !== null && d.now() - antigasRunning < ANTIGAS_LOCK_MS) return fail(409, 'antigas_running', 'another run on the old pieces is already going: wait for it to finish, then look again')
       const mine = d.now()
       antigasRunning = mine
-      try { return await antigas(o, actor, signal) } catch (e) {
+      try { return await transaction(antigas)(o, actor, signal) } catch (e) {
         if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
         throw e
       } finally { if (antigasRunning === mine) antigasRunning = null }
     },
     queueNext, answerQueue: safe(answerQueue), queueView,
-    stage: safe(stage), stageRun: safe(stageRun), dequeue: safe(dequeue), foldGroupMember, qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,
+    stage: safe(transaction(stage)), stageRun: safe(stageRun), dequeue: safe(transaction(dequeue)), foldGroupMember, qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,
   }
 }
 

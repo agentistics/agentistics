@@ -64,8 +64,8 @@ export function productionSources(dir: string, base: string): string[] {
     for (const name of readdirSync(d)) {
       const p = join(d, name)
       const st = statSync(p)
-      if (st.isDirectory()) { if (name !== 'node_modules') walk(p); continue }
-      if (!name.endsWith('.ts') || /\.(test|testing|fixture)\.ts$|\.worker\.ts$|\.generated\.ts$/.test(name)) continue
+      if (st.isDirectory()) { if (!['node_modules', 'dist', 'target', '.git', 'build'].includes(name)) walk(p); continue }
+      if (!/\.[cm]?[jt]sx?$/.test(name) || /\.(test|testing|fixture)\.[cm]?[jt]sx?$|\.generated\.[cm]?[jt]sx?$/.test(name)) continue
       out.push(relative(base, p))
     }
   }

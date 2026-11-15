@@ -71,24 +71,25 @@ const subRank = (b: BoardSlice, s: BoardSlice['subtasks'][number]): number => {
   return Math.max(byStatus, bySignal)
 }
 
-/** PURE. The pieces whose rank went UP between two books, entity by entity (a task that merely lost its subtasks did not move). */
+/** PURE. Rank increases, newly exposed pieces, and changes to an already protected piece's binding. */
 export function boardRaises(before: BoardSlice, after: BoardSlice): Raised[] {
   const out: Raised[] = []
   // Maps, not `find`: this runs on every write of a book that can hold thousands of subtasks.
   const subsBefore = new Map(before.subtasks.map(s => [s.id, s] as const))
   const tasksBefore = new Map(before.tasks.map(t => [t.id, t] as const))
   const taskWithSubs = new Set(after.subtasks.map(s => s.taskId))
+  const taskWithSubsBefore = new Set(before.subtasks.map(s => s.taskId))
   for (const s of after.subtasks) {
     if (s.parentGroupId) continue // a group member inherits its group's rules
     const was = subsBefore.get(s.id)
-    const from = was ? subRank(before, was) : 0
+    const from = was && !was.parentGroupId ? subRank(before, was) : 0
     const to = subRank(after, s)
-    if (to > from) out.push({ key: s.id, taskId: s.taskId, subtaskId: s.id, rank: to })
+    if (to > from || (to >= 1 && was && (was.taskId !== s.taskId || was.parentGroupId !== s.parentGroupId || JSON.stringify(was.ci) !== JSON.stringify(s.ci)))) out.push({ key: s.id, taskId: s.taskId, subtaskId: s.id, rank: to })
   }
   for (const t of after.tasks) {
     if (taskWithSubs.has(t.id)) continue // a task with subtasks is not a piece
     const was = tasksBefore.get(t.id)
-    const from = was ? statusRank(before.statuses, was.status) : 0
+    const from = was && !taskWithSubsBefore.has(t.id) ? statusRank(before.statuses, was.status) : 0
     const to = statusRank(after.statuses, t.status)
     if (to > from) out.push({ key: t.id, taskId: t.id, rank: to })
   }
@@ -97,14 +98,15 @@ export function boardRaises(before: BoardSlice, after: BoardSlice): Raised[] {
 
 // ── deliveries ───────────────────────────────────────────────────────────────
 
-/** PURE. Records whose phase rank rose. A record that did not exist before is an ADOPTION (it mirrors the board) and is not a raise. */
-export function deliveryRaises(before: Readonly<Record<string, { phase: string }>>, after: Readonly<Record<string, { phase: string; taskId?: string }>>): Raised[] {
+/** The protected identity of a delivery. Advanced adoption is checked just like another protected write. */
+type DeliveryBinding = { phase: string; taskId?: string; subtaskId?: string; revision?: number; headSha?: string; qaSha?: string; evidence?: readonly { id: string; sha256: string; revision?: number }[] }
+const binding = (r: DeliveryBinding) => JSON.stringify([r.taskId, r.subtaskId, r.revision, r.headSha, r.qaSha, r.evidence?.map(i => [i.id, i.sha256, i.revision]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))])
+export function deliveryRaises(before: Readonly<Record<string, DeliveryBinding>>, after: Readonly<Record<string, DeliveryBinding>>): Raised[] {
   const out: Raised[] = []
   for (const [id, r] of Object.entries(after)) {
     const was = before[id]
-    if (!was) continue
     const to = phaseRank(r.phase)
-    if (to > phaseRank(was.phase)) out.push({ key: id, taskId: r.taskId ?? '', subtaskId: id, rank: to })
+    if (to > phaseRank(was?.phase) || (to >= 1 && was && binding(was) !== binding(r))) out.push({ key: id, taskId: r.taskId ?? '', subtaskId: id, rank: to })
   }
   return out
 }

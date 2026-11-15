@@ -10,6 +10,7 @@ import { readManifestOf, restoreMetrics, restoreRepos, verifyArchive, verifyStag
 import { createBundle } from './repo-probe'
 import type { BackupManifest } from './manifest'
 import type { RepoEntry } from './repo-manifest'
+import { createGuaranteesStore } from '../delivery/activation'
 
 let oldHome = ''
 let newHome = ''
@@ -66,6 +67,32 @@ test('an intact archive verifies', async () => {
   if (!m.ok) return
   const v = await verifyArchive(archive, m.manifest)
   expect(v.ok).toBe(true)
+})
+
+test('F1: restore refuses archived advanced tasks under rule A and preserves both books (OFF control)', async () => {
+  const src = mkdtempSync(join(tmpdir(), 'restore-guard-src-'))
+  const dst = mkdtempSync(join(tmpdir(), 'restore-guard-dst-'))
+  try {
+    const dir = join(dst, '.agentistics')
+    mkdirSync(join(src, '.agentistics'), { recursive: true }); mkdirSync(dir, { recursive: true })
+    const archived = JSON.stringify({ tasks: [{ id: 't', status: 'done' }], subtasks: [] })
+    writeFileSync(join(src, '.agentistics/tasks.json'), archived)
+    const made = await runBackup({ homeDir: src, destDir: dest, layers: ['metrics'], harnesses: ['claude'], repos: [], agentopVersion: 'test', hostname: 'guard', recordFile: records })
+    expect(made.ok).toBe(true); if (!made.ok) return
+    const g = createGuaranteesStore(join(dir, 'guarantees.json'))
+    await g.setState('a', 'shadow', { check: async () => ({ ok: true, via: 'legacy-browser' }), facts: { now: '2026-11-13T00:00:00Z', build: 'test', capabilities: ['S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'], migrated: ['a'], unexplainedWouldRefuse: 0 } })
+    await g.setState('a', 'on', { check: async () => ({ ok: true, via: 'legacy-browser' }), facts: { now: '2026-11-15T00:00:00Z', build: 'test', capabilities: ['S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'], migrated: ['a'], unexplainedWouldRefuse: 0 } })
+    writeFileSync(join(dir, 'tasks.json'), '{"local":true}')
+    writeFileSync(join(dir, 'deliveries.json'), '{"version":1,"deliveries":{}}')
+    utimesSync(join(dir, 'tasks.json'), new Date(0), new Date(0))
+    const result = await restoreMetrics({ archive: made.record.path, homeDir: dst })
+    expect(result.ok).toBe(false)
+    expect(readFileSync(join(dir, 'tasks.json'), 'utf8')).toBe('{"local":true}')
+    expect(readFileSync(join(dir, 'deliveries.json'), 'utf8')).toBe('{"version":1,"deliveries":{}}')
+    await g.setState('a', 'off', { check: async () => ({ ok: true, via: 'legacy-browser' }), facts: { now: '2026-11-15T00:00:00Z', build: 'test', capabilities: [], migrated: [], unexplainedWouldRefuse: 0 } })
+    expect((await restoreMetrics({ archive: made.record.path, homeDir: dst })).ok).toBe(true)
+    expect(readFileSync(join(dir, 'tasks.json'), 'utf8')).toBe(archived)
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(dst, { recursive: true, force: true }) }
 })
 
 test('metrics land in the new home and the old $HOME prefix is rewritten', async () => {

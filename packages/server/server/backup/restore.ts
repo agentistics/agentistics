@@ -26,7 +26,9 @@ import { promisify } from 'util'
 import { createHash } from 'crypto'
 import { createReadStream, existsSync } from 'fs'
 import { mkdir, readdir, readFile, rm, stat, writeFile, copyFile } from 'fs/promises'
-import { dirname, join, relative } from 'path'
+import { basename, dirname, join, relative } from 'path'
+import { guardPathsOf, ruleAState } from '../delivery/guard-host'
+import { withGuardTransaction } from '../delivery/guard-transaction'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { safeReadJson } from '../utils'
 import { decodeManifest, MANIFEST_NAME, type BackupManifest, type DecodedManifest } from './manifest'
@@ -38,6 +40,19 @@ import {
 } from './restore-plan'
 
 const run = promisify(execFile)
+
+/** Restore cannot fabricate evidence/checkpoints. Refuse replacement of either guarded document while A is on.
+ * The decision and the bytes share the full lock set, including on a fresh/OFF machine.
+ */
+async function restoreBytes(target: string, write: () => Promise<void>): Promise<void> {
+  const name = basename(target)
+  if (name !== 'tasks.json' && name !== 'deliveries.json') return write()
+  const anchor = guardPathsOf(name === 'tasks.json' ? { tasksFile: target } : { deliveriesFile: target })
+  return withGuardTransaction(anchor.paths, async () => {
+    if (await ruleAState(anchor.dir) === 'on') throw new Error('guard_restore_refused: rule A is on; restore cannot replace tasks.json or deliveries.json without their authorization')
+    await write()
+  })
+}
 
 /**
  * Where the resume bookkeeping lives — derived from the `$HOME` being restored INTO, not from this
@@ -248,12 +263,14 @@ export async function restoreMetrics(opts: RestoreMetricsOptions): Promise<Resto
 
       // Only JSON documents can carry an absolute path that needs rewriting; everything else is
       // copied byte for byte. Rewriting an arbitrary file would corrupt binaries.
+      await restoreBytes(to, async () => {
       if (a.rel.endsWith('.json') && manifest.homeDir !== opts.homeDir) {
         const text = await readFile(from, 'utf8')
         await writeFile(to, rewriteHome(text, manifest.homeDir, opts.homeDir))
       } else {
         await copyFile(from, to)
       }
+      })
       written++
     }
 

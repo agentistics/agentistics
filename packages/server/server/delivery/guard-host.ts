@@ -2,22 +2,19 @@
  * delivery/guard-host.ts — the IO half of the store guard (ENTREGA.GARANTIDA §2.5, §2.6, §2.6.1). Used by the two hooks:
  * `sessions/task-store.ts` `write()` and `delivery/store.ts` `update()`.
  *
- *   ruleAState   which state rule A is in — ABSENT FILES = `off` and nothing else is read, so a machine that never turned the
- *                guarantee on pays three `stat`s per raising write and changes NO behaviour (spec §2.7).
+ *   ruleAState   resolves authenticated activation, including the witness and generation latch; only a fresh machine is OFF.
  *   guardedWrite the §2.6 sequence for one write: take the locks (global order, 5 s, fail closed), gather each raised piece's
  *                facts (checkout, evidence), DECIDE (`decideGuard`), and only then intent → documents → checkpoint. A refusal
  *                throws `GuardRefused` before a byte of either document is written and before guards.json exists.
  *
  * The sweep (S2b) is not here: a checkpoint is committed, never revisited by this module.
  */
-import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createGuaranteesStore, ruleState } from './activation'
 import { classifyPiece, evaluateEvidence } from './classify'
 import { declareClassification } from './classify-declare'
 import { execGit, gatherFacts, type ClassifyDeps } from './classify-host'
 import type { DeliveryRecord } from './machine'
-import { GUARD_KEY_FILE } from './guard-integrity'
 import { defaultGuardLockPaths, withGuardLocks, type GuardLockName, type GuardLockPaths } from './guard-locks'
 import { beginIntent, commitIntent, createGuardsStore, GuardsUnreadable, type GuardAuth, type PieceCheckpoint } from './guards-store'
 import { decideGuard, GuardRefused, type GuardContext, type Raised, type ReviewOutcome, type RuleState } from './guard'
@@ -42,10 +39,8 @@ export function guardPathsOf(anchor: { tasksFile?: string; deliveriesFile?: stri
   }
 }
 
-/** Rule A's state. Nothing on disk that belongs to the guarantee = `off`, with no read at all. */
+/** Authenticated rule A state. Missing documents alone never establish a fresh machine. */
 export async function ruleAState(dir: string): Promise<RuleState> {
-  const files = ['guarantees.json', 'guards.json', GUARD_KEY_FILE].map(f => join(dir, f))
-  if (!files.some(f => existsSync(f))) return 'off'
   const { doc } = await createGuaranteesStore(join(dir, 'guarantees.json')).read()
   return ruleState(doc, 'a')
 }
@@ -64,17 +59,11 @@ export async function registryClassifyDeps(): Promise<ClassifyDeps> {
   }
 }
 
-/** Ranks up to this one are covered by a grandfathered checkpoint (the migration's promise: nothing in flight is stopped). */
-const GRANDFATHER_CEILING = 3
-
 /** Guard A for ONE raised piece, at this instant: the piece's checkout, its evidence, the checkpoint it already has. */
 export async function reviewOutcome(o: {
-  deps: ClassifyDeps; raised: Raised; record: Pick<DeliveryRecord, 'evidence'> | null; checkpoint: PieceCheckpoint | undefined
+  deps: ClassifyDeps; raised: Raised; record: Pick<DeliveryRecord, 'evidence'> & Partial<Pick<DeliveryRecord, 'revision' | 'history'>> | null; checkpoint: PieceCheckpoint | undefined
 }): Promise<ReviewOutcome> {
   const { raised, checkpoint } = o
-  if (checkpoint?.auth.some(a => a.kind === 'grandfathered') && raised.rank <= GRANDFATHER_CEILING) {
-    return { ok: true, ids: [], sha256: [], headSha: checkpoint.headSha, category: checkpoint.classification?.category ?? 'grandfathered', grandfathered: true }
-  }
   const piece = { taskId: raised.taskId, ...(raised.subtaskId ? { subtaskId: raised.subtaskId } : {}) }
   let c = classifyPiece(await gatherFacts(o.deps, piece))
   let declared: { by: string; repo: string; head: string; at: string } | undefined
@@ -84,24 +73,28 @@ export async function reviewOutcome(o: {
     if (again.ok) { c = again.classification; declared = prior }
   }
   if (!c.ok) return { ok: false, code: c.code, message: c.message, messagePt: c.messagePt, ...(c.paths ? { paths: c.paths } : {}), missing: [] }
-  const items = o.record?.evidence ?? []
+  // A revision increments at every normal phase move. Only an adjustment starts a new capture round.
+  // Its durable history entry is the lower revision bound; normal advances keep using that round's captures.
+  const round = Math.max(0, ...(o.record?.history ?? []).filter(h => h.to === 'ajuste').map(h => h.revision))
+  const items = (o.record?.evidence ?? []).filter(i => i.revision >= round && i.revision <= (o.record?.revision ?? Infinity))
   const ev = evaluateEvidence(c, items)
   if (!ev.ok) return { ok: false, code: ev.code, message: ev.message, messagePt: ev.messagePt, missing: ev.missing, ...(ev.code === 'evidence_invalid' ? { rule: ev.rule } : {}) }
   return { ok: true, ids: ev.ids, sha256: items.filter(i => ev.ids.includes(i.id)).map(i => i.sha256), headSha: c.headSha, category: c.category, ...(declared ? { declared } : {}) }
 }
 
 export interface GuardedWriteOptions {
-  rule: RuleState
+  /** Deprecated input: the policy is always resolved again under the held guards lock. */
+  rule?: RuleState
   raised: readonly Raised[]
   ctx: GuardContext | undefined
   paths: GuardLockPaths
-  /** The locks THIS document's writer takes (the tasks hook: tasks → deliveries → guards; the deliveries hook: guards only). */
+  /** Locks still needed by the caller; empty when its store/transaction already holds the complete set. */
   locks: readonly GuardLockName[]
   /** Locks the caller already holds (the store's own file lock). */
   alreadyHeld: readonly GuardLockName[]
   wiring?: GuardWiring
   /** The delivery record of a raised piece, read while the locks are held. */
-  recordOf: (key: string) => Promise<Pick<DeliveryRecord, 'evidence' | 'revision' | 'phase'> | null>
+  recordOf: (key: string) => Promise<Pick<DeliveryRecord, 'evidence' | 'revision' | 'phase'> & Partial<Pick<DeliveryRecord, 'history'>> | null>
   /** What the checkpoint says about the board/phase at the target. */
   stateOf: (r: Raised) => { boardStatus: string; boardStage: string; phase: string | null }
   /** The document write — runs after the intent is durable. */
@@ -119,19 +112,21 @@ export async function guardedWrite(o: GuardedWriteOptions): Promise<void> {
   const now = (o.wiring?.now ?? Date.now)()
   const at = new Date(now).toISOString()
   const run = async () => {
+    const rule = await ruleAState(dirname(o.paths.guards))
+    if (rule === 'off') { await o.writeDocuments(); return }
     const store = createGuardsStore(o.paths.guards)
     let doc
     try { doc = await store.read() } catch (e) {
       if (!(e instanceof GuardsUnreadable)) throw e
-      if (o.rule === 'on') throw new GuardRefused({ code: 'guards_unreadable', piece: o.raised[0]!.key, missing: [], message: `${e.message} — guarded moves are refused until it is repaired`, messagePt: 'guards.json está ilegível ou adulterado — movimentos guardados ficam recusados até ser reparado' })
+      if (rule === 'on') throw new GuardRefused({ code: 'guards_unreadable', piece: o.raised[0]!.key, missing: [], message: `${e.message} — guarded moves are refused until it is repaired`, messagePt: 'guards.json está ilegível ou adulterado — movimentos guardados ficam recusados até ser reparado' })
       await o.writeDocuments(); return
     }
     const deps = o.wiring?.deps ?? await registryClassifyDeps()
     const outcomes: Record<string, ReviewOutcome> = {}
     if (o.ctx) for (const r of o.raised) outcomes[r.key] = await reviewOutcome({ deps, raised: r, record: await o.recordOf(r.key), checkpoint: doc.checkpoints[r.key] })
-    const decision = decideGuard({ rule: o.rule, raised: o.raised, ctx: o.ctx, outcomes })
+    const decision = decideGuard({ rule, raised: o.raised, ctx: o.ctx, outcomes })
     if (decision.verdict === 'refuse') throw new GuardRefused(decision.refusal)
-    reportWouldRefuse(o.rule, decision.wouldRefuse ?? [])
+    reportWouldRefuse(rule, decision.wouldRefuse ?? [])
     const passed = decision.passed ?? []
     if (passed.length === 0) { await o.writeDocuments(); return }
     const targets: PieceCheckpoint[] = []

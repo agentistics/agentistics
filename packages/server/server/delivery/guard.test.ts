@@ -50,21 +50,22 @@ describe('boardRaises — entity by entity', () => {
     const lone = (status: string) => slice([], [{ id: 't1', status }])
     expect(boardRaises(lone('in_progress'), lone('in_review')).map(r => [r.key, r.subtaskId])).toEqual([['t1', undefined]])
   })
-  test('a NEW subtask created straight into review is a raise from nothing; a task that merely LOST its subtasks is not', () => {
+  test('a NEW subtask or newly exposed task in review needs authorization', () => {
     expect(boardRaises(slice([]), slice([{ id: 'n', status: 'in_review' }])).map(r => r.key)).toEqual(['n'])
     const withSub = slice([{ id: 's1', status: 'in_progress' }], [{ id: 't1', status: 'in_review' }])
     const without = slice([], [{ id: 't1', status: 'in_review' }])
-    expect(boardRaises(withSub, without)).toEqual([])
+    expect(boardRaises(withSub, without).map(r => r.key)).toEqual(['t1'])
+    expect(boardRaises(slice([{ id: 'm', status: 'in_review', parentGroupId: 'g' }]), slice([{ id: 'm', status: 'in_review' }])).map(r => r.key)).toEqual(['m'])
   })
 })
 
 describe('deliveryRaises', () => {
   const rec = (phase: string) => ({ phase })
-  test('revisao_lider / pr_merge / ci / publicado raise; a NEW record (adoption mirrors the board) does not', () => {
+  test('revisao_lider / pr_merge / ci / publicado and advanced adoption need authorization', () => {
     expect(deliveryRaises({ p: rec('qa') }, { p: rec('revisao_lider') }).map(r => [r.key, r.rank])).toEqual([['p', 1]])
     expect(deliveryRaises({ p: rec('revisao_lider') }, { p: rec('ci') }).map(r => r.rank)).toEqual([3])
     expect(deliveryRaises({ p: rec('ci') }, { p: rec('revisao_lider') })).toEqual([])
-    expect(deliveryRaises({}, { p: rec('revisao_lider') })).toEqual([])
+    expect(deliveryRaises({}, { p: rec('revisao_lider') }).map(r => r.key)).toEqual(['p'])
   })
 })
 

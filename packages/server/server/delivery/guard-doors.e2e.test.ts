@@ -215,15 +215,19 @@ describe('§3.5.6 flow phase qa → revisao_lider (APROVADO) needs the evidencia
     // the piece sits in qa at the verified head (the record's own fields; a rank-0 move, so the store lets it through)
     const store = (await import('./store')).createDeliveryStore(join(e.root, 'deliveries.json'))
     await store.update(doc => { const r = doc.deliveries.p4!; r.phase = 'qa'; r.headSha = head; r.branch = 'feat/x' })
+    const author = e.world.sessions.find(s => s.id === 'worker4')!
+    Object.assign(author, { model: 'claude-sonnet-4' })
+    e.world.sessions.push({ ...author, id: 'qa-p4', harness: 'codex', model: 'gpt-6', label: 'QA' } as never)
   }
 
   test('without evidence: refused code portao, the missing list names the evidencia gate, deliveries.json byte-identical', async () => {
     await toQa()
+    const before = bytes(e.root)
     const r = await (e.world.svc as any).transition('p4', 'revisao_lider', { verdict: 'APROVADO', findings: 'looks right' }, 'worker4')
-    // The public `transition` runs every gate fresh; the QA-model gate (no QA session) refuses too, so the assertion is on what
-    // THIS slice adds: the missing list names `evidencia`.
     expect(r).toMatchObject({ ok: false, code: 'portao' })
     expect(r.missing.join(' ')).toMatch(/evidencia/)
+    expect(r.missing.join(' ')).not.toMatch(/qa-modelo/)
+    expect(bytes(e.root)).toEqual(before)
     expect((await e.world.svc.get('p4'))!.phase).toBe('qa') // the phase did not move (gate verdicts are recorded, as they always were)
   })
 

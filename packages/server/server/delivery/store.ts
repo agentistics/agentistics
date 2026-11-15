@@ -2,7 +2,7 @@
  * delivery/store.ts — the delivery records (one per subtask), `<dataDir>/deliveries.json`.
  *
  * Several processes write it (the server, a `agentop flow gate` in a CLI, an engine timer), so every
- * write is read-modify-write UNDER the cross-process `withFileLock` and lands by an atomic rename — a
+ * write is read-modify-write UNDER the cross-process ordered guard locks and lands by an atomic rename — a
  * reader never sees half a file.
  *
  * The file is NEVER "repaired" by overwriting it. Two ways a read can come back short, and a write must not turn
@@ -14,11 +14,11 @@
  *     `preserved` and written back with the rest.
  */
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { withFileLock } from '../sessions/file-lock'
-import { defaultGuardLockPaths, GuardBusy, withGuardLocks } from './guard-locks'
+import { dirname, join, resolve } from 'node:path'
+import { GuardBusy, GuardLockOrderError, withGuardLocks } from './guard-locks'
+import { inGuardTransaction, serializeGuardWrite } from './guard-transaction'
 import { deliveryRaises, type GuardContext } from './guard'
-import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from './guard-host'
+import { guardedWrite, guardPathsOf, type GuardWiring } from './guard-host'
 import { isPhase, type DeliveryRecord } from './machine'
 
 export interface DeliveryDoc {
@@ -131,6 +131,7 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guar
     },
     async get(id) { return (await read()).deliveries[id] ?? null },
     async update(fn, options) {
+      if (options?.guardsPath && resolve(options.guardsPath) !== resolve(anchor.paths.guards)) throw new GuardLockOrderError('guardsPath must be the guard file beside this delivery store')
       await mkdir(dirname(path), { recursive: true })
       const write = async (held?: { contended: boolean }) => {
         const s = await readState(!!options?.evidence)
@@ -142,32 +143,30 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guar
           throw new DeliveryStoreUnreadable(path, kept, s.why)
         }
         const doc = s.kind === 'ok' ? s.doc : { version: 1 as const, deliveries: {} }
-        // S2a (§2.5): the phase rank of every record BEFORE `fn` runs, so the write can be diffed. Evidence mutations never move a phase.
-        const phasesBefore = options?.evidence ? null : Object.fromEntries(Object.entries(doc.deliveries).map(([id, r]) => [id, { phase: r.phase }]))
+        // Snapshot every protected binding before the callback; the evidence option cannot disable detection.
+        const phasesBefore = structuredClone(doc.deliveries)
         const value = await fn(doc)
         const commit = async () => {
           const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
           await writeFile(tmp, serializeDeliveryDoc(doc), { mode: 0o600 })
           await rename(tmp, path)
         }
-        const raised = phasesBefore ? deliveryRaises(phasesBefore, doc.deliveries) : []
-        const rule = raised.length ? await ruleAState(anchor.dir) : 'off'
-        if (rule === 'off') { await commit(); return value }
+        const raised = deliveryRaises(phasesBefore, doc.deliveries)
+        if (!raised.length) { await commit(); return value }
         // `withFileLock` goes ahead WITHOUT the lock after its wait; a guard never does (§2.6.1).
         if (held?.contended) throw new GuardBusy('deliveries')
         await guardedWrite({
-          rule, raised, ctx: options?.guard, paths: anchor.paths, wiring: opts.guard,
-          locks: ['guards'], alreadyHeld: ['deliveries'],
+          raised, ctx: options?.guard, paths: anchor.paths, wiring: opts.guard,
+          locks: [], alreadyHeld: ['deliveries', 'guards'],
           recordOf: async key => doc.deliveries[key] ?? null,
           stateOf: r => ({ boardStatus: '', boardStage: '', phase: doc.deliveries[r.key]?.phase ?? null }),
           writeDocuments: commit,
         })
         return value
       }
-      // Evidence mutations may never proceed without a contended lock.
-      return options?.evidence
-        ? withGuardLocks(options.guardsPath ? ['deliveries', 'guards'] : ['deliveries'], write, { paths: { ...defaultGuardLockPaths(), deliveries: path, ...(options.guardsPath ? { guards: options.guardsPath } : {}) } })
-        : withFileLock(path, write)
+      // Both policy and records are read only after deliveries and guards are held.
+      const paths = anchor.paths
+      return inGuardTransaction(paths) ? serializeGuardWrite(paths, 'deliveries', write) : withGuardLocks(['deliveries', 'guards'], write, { paths })
     },
   }
 }
