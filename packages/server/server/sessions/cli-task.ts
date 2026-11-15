@@ -164,6 +164,8 @@ function printHelp(): void {
   agentop task abandon <ref>   mark it given up on (no evidence attached)
   agentop task evidence add|ls|rm --subtask S …   the proof a piece needs before review (see: agentop task evidence help)
   agentop evidence capture <url> [--out f]            capture an API response in the shape api-capture evidence accepts
+  agentop task refile [--apply]  file workers that were filed on a task alone on the piece they
+                               reported on (dry run without --apply; safe to run again)
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
                                the pre-dispatch: stage the session a subtask starts with (Na fila)
 
@@ -173,11 +175,26 @@ A task is started by filing sessions under one:
   agentop session batch --task "landing page" --attempt "opus, prompt only" --session "claude: …"`)
 }
 
+/** FILIACAO.TOAST: the backfill of `task-worker-filing.ts`. Dry run unless `--apply`. */
+async function runRefile(apply: boolean, json: boolean): Promise<number> {
+  const { backfillWorkerFiling } = await import('./task-web')
+  const out = await backfillWorkerFiling({ apply })
+  if (json) { console.log(JSON.stringify(out, null, 2)); return 0 }
+  const line = (f: { sessionId: string; subtaskId: string }) => `  ${f.sessionId} -> ${f.subtaskId}`
+  console.log(apply ? `${out.filed.length} session(s) filed on the piece they reported on.` : `${out.planned.length} session(s) would be filed (dry run; add --apply).`)
+  for (const f of apply ? out.filed : out.planned) console.log(line(f))
+  for (const r of out.refused) console.log(`  refused ${r.sessionId} -> ${r.subtaskId}: ${r.reason}`)
+  if (out.ambiguous.length) console.log(`${out.ambiguous.length} reported on more than one piece and were left alone:`)
+  for (const a of out.ambiguous) console.log(`  ${a.sessionId}: ${a.subtaskIds.join(', ')}`)
+  return 0
+}
+
 export async function runTask(argv: string[]): Promise<number> {
   // FLUXO.ENTREGA-DSL P4: the pre-dispatch (staged session) of a subtask.
   // ENTREGA.GARANTIDA S1c: the evidence a piece needs before review (`add|ls|rm`).
   if (argv[0] === 'evidence') return (await import('../delivery/cli')).runDeliveryCli(['task-evidence', ...argv.slice(1)])
   if (argv[0] === 'stage') return (await import('../delivery/cli')).runDeliveryCli(['task-stage', ...argv.slice(1)])
+  if (argv[0] === 'refile') return await runRefile(argv.includes('--apply'), argv.includes('--json'))
   const cmd: TaskCommand = parseTaskArgs(argv)
   switch (cmd.kind) {
     case 'help': printHelp(); return 0

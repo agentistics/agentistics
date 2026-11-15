@@ -131,6 +131,21 @@ for (const [name, answer, expected] of [
   })
 }
 
+// FILIACAO.TOAST — an AUTOMATIC follow-up write (the delivery closing after its last part, done by the
+// page, not by the person) is never a toast: the caller reports it in its own words, once.
+test('a quiet (automatic) status write refused with done_needs_session does not toast nor ring the bell', async () => {
+  fakeServer(() => Response.json({ ok: false, message: 'done_needs_session' }, { status: 422 }))
+  const { host, close } = await mount()
+  try {
+    let out: unknown
+    await act(async () => { out = await tasks.markTask('t1', 'done', { quiet: true }) })
+    await act(async () => { await store.refreshNotifications() })
+    expect(out).toEqual({ ok: false, reason: 'done_needs_session' })
+    expect(toasts(host)).toHaveLength(0)
+    expect(store.readNotifications().some(n => n.code === 'tasks.status_failed')).toBe(false)
+  } finally { await close() }
+})
+
 test('the 422 and the abort lines are different sentences', () => {
   const line = (reason: string) => store.resolveNotification({ id: 'x', ts: 1, read: false, type: 'error', code: 'tasks.status_failed', meta: { reason, localAction: true } }, 'en').message
   expect(line('done_needs_session')).not.toBe(line('network_error'))
@@ -192,3 +207,46 @@ test('an unknown refusal code is never shown raw: a sentence is kept, a bare cod
   expect(n({}, 500)).not.toMatch(/500/)
 })
 
+
+// TOAST.390 — when the caller opens the "File a session" dialog for the refusal, the dialog IS the message:
+// no toast (and no bell line) beside it. Any other refusal keeps its toast, in both languages.
+async function mountLang(lang: 'en' | 'pt') {
+  store.clearNotifications()
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host)
+  await act(async () => root.render(<MemoryRouter><NotificationToasts lang={lang} /></MemoryRouter>))
+  return { host, close: async () => { await act(async () => root.unmount()); host.remove() } }
+}
+for (const lang of ['en', 'pt'] as const) {
+  for (const [what, write] of [
+    ['markTask', () => tasks.markTask('t1', 'done', { dialog: true })],
+    ['patchSubtask', () => tasks.patchSubtask('t1', 's1', { status: 'done' }, { dialog: true })],
+  ] as const) {
+    test(`[${lang}] ${what}: done_needs_session with a dialog opening shows NO toast and no bell line`, async () => {
+      fakeServer(() => Response.json({ ok: false, message: 'done_needs_session' }, { status: 422 }))
+      const { host, close } = await mountLang(lang)
+      try {
+        let out: unknown
+        await act(async () => { out = await write() })
+        await act(async () => { await store.refreshNotifications() })
+        expect(out).toEqual({ ok: false, reason: 'done_needs_session' })
+        expect(toasts(host)).toHaveLength(0)
+        expect(store.readNotifications().some(n => n.code === 'tasks.status_failed')).toBe(false)
+      } finally { await close() }
+    })
+    test(`[${lang}] ${what}: a refusal that opens no dialog (another reason, or no dialog flag) still toasts`, async () => {
+      for (const [message, opts] of [['group_field_conflict', true], ['done_needs_session', false]] as const) {
+        fakeServer(() => Response.json({ ok: false, message }, { status: 422 }))
+        const { host, close } = await mountLang(lang)
+        try {
+          await act(async () => {
+            if (what === 'markTask') await tasks.markTask('t1', 'done', opts ? { dialog: true } : {})
+            else await tasks.patchSubtask('t1', 's1', { status: 'done' }, opts ? { dialog: true } : {})
+          })
+          await act(async () => { await store.refreshNotifications() })
+          expect(toasts(host)).toHaveLength(1)
+          expect(store.readNotifications().some(n => n.code === 'tasks.status_failed')).toBe(true)
+        } finally { await close() }
+      }
+    })
+  }
+}

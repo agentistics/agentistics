@@ -91,7 +91,9 @@ export function StopSessionConfirm(p: StopSessionConfirmProps) {
       // reported and does NOT hold up the stop: the part is already closed, and leaving the
       // session running over a delivery status would be the wrong thing to protect.
       if (part.last) {
-        const closed = await markTask(filed.task.id, 'done')
+        // An AUTOMATIC follow-up (the server already closes a delivery whose last part closed): quiet,
+        // so a refusal is said once, in this card's own words, never as a second toast (FILIACAO.TOAST).
+        const closed = await markTask(filed.task.id, 'done', { quiet: true })
         if (!closed.ok) p.onNotice(copy.couldNotMarkDelivered)
       }
     }
