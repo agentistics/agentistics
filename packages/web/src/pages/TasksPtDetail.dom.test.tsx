@@ -35,6 +35,13 @@ const DETAIL = {
   sessions: [], comments: [], subtasks: [], files: [], subtaskRollups: [],
 }
 
+const ev = (id: string, kind: string, extra: Record<string, string> = {}) => ({ id, taskId: 't-detail', at: '2026-11-15T12:00:00Z', actor: 'agente-x', kind, ...extra })
+const ACTIVITY = [
+  ev('e1', 'status', { from: 'todo', to: 'in_progress' }), ev('e2', 'claim'), ev('e3', 'claim', { detail: 'takeover' }),
+  ev('e4', 'release'), ev('e5', 'priority', { from: 'low', to: 'high' }), ev('e6', 'assign', { to: 'ana' }),
+  ev('e7', 'assign', { to: '' }), ev('e8', 'session', { detail: 'codex' }), ev('e9', 'move'), ev('e10', 'comment'),
+]
+
 beforeAll(async () => {
   GlobalRegistrator.register({ width: 1280, height: 900 })
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -50,6 +57,7 @@ beforeAll(async () => {
     const url = String(input)
     if (url.includes('/api/tasks/statuses')) return Response.json({ statuses: fixture.statuses.statuses.map(s => ({ ...s, usageCount: 0 })) })
     if (url.includes('/api/tasks/types')) return Response.json({ types: [] })
+    if (url.includes('/api/tasks/activity')) return Response.json({ events: ACTIVITY })
     if (/\/api\/tasks\/t-detail/.test(url)) return Response.json({ task: DETAIL })
     return new Response('{}', { status: 503 })
   }) as unknown as typeof fetch
@@ -131,4 +139,40 @@ test('ManageStatusesModal: pt carries no hard-coded English', async () => {
 test('ManageStatusesModal: en still reads English', async () => {
   const text = await modalText('en')
   for (const lit of ['Close', 'Custom colour', 'Search', 'Create', 'New status']) expect({ lit, found: has(text, lit) }).toEqual({ lit, found: true })
+}, 30000)
+
+test('Activity tab: pt translates every sentence, data stays as is', async () => {
+  const text = await detailText('activity', 'pt')
+  for (const lit of ['moved', 'claimed it', 'took over', 'released it', 'set priority', 'set the owner to', 'nobody', 'filed a', 'reordered it', 'comment'])
+    expect({ lit, found: has(text, lit) }).toEqual({ lit, found: false })
+  for (const lit of ['agente-x', 'codex', 'ana']) expect({ lit, found: text.includes(lit) }).toEqual({ lit, found: true })
+  expect(text).toContain('reservou')
+  expect(text).toContain('comentou')
+}, 30000)
+test('Activity tab: en keeps the English sentences', async () => {
+  const text = await detailText('activity', 'en')
+  for (const lit of ['claimed it', 'took over', 'released it', 'reordered it', 'comment']) expect({ lit, found: has(text, lit) }).toEqual({ lit, found: true })
+}, 30000)
+
+test('ManageStatusesModal: a default protected status shows its pt name, a renamed one its stored name', async () => {
+  const stored = fixture.statuses.statuses
+  const renamed = stored.map(s => (s.id === 'blocked' ? { ...s, label: 'Travado' } : s))
+  const saved = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    if (String(input).includes('/api/tasks/statuses')) return Response.json({ statuses: renamed.map(s => ({ ...s, usageCount: 0 })) })
+    return Response.json({ types: [] })
+  }) as unknown as typeof fetch
+  try {
+    await modalText('pt')
+    const values = Array.from(document.querySelectorAll<HTMLInputElement>('input')).map(i => i.value)
+    expect(values).toContain('A fazer')
+    expect(values).toContain('Travado')
+    expect(values).not.toContain('To do')
+    expect(values).not.toContain('Blocked')
+  } finally { globalThis.fetch = saved }
+}, 30000)
+test('ManageStatusesModal: en shows the stored names', async () => {
+  await modalText('en')
+  const values = Array.from(document.querySelectorAll<HTMLInputElement>('input')).map(i => i.value)
+  expect(values).toContain('To do')
 }, 30000)

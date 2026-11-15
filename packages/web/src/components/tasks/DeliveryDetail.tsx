@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import { commentThread, type ChatAttachmentRef } from '@agentistics/core'
 import { CommentAttachments, CommentComposer } from './CommentComposer'
+import { activitySentence } from './activityText'
 import { commentAnchor, commentCandidates, sessionCandidateForMention, sessionCandidates } from './commentMention'
 import { sessionMentionTokens } from '../../lib/sessionMention'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -137,7 +138,7 @@ function ActivityTab({ id, lang }: { id: string; lang: Lang }) {
         {run && children.map(child => <div key={child.id} style={{ ...microLabel, paddingLeft: 52 }}>{time(child.at)} · {child.summary ?? (pt ? 'sem novidade' : 'no news')}</div>)}
       </div>
     }
-    return <div key={e.id} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>{' '}{e.kind === 'status' ? `moved ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'claim' ? (e.detail === 'takeover' ? 'took over' : 'claimed it') : e.kind === 'release' ? 'released it' : e.kind === 'priority' ? `set priority ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'assign' ? `set the owner to ${e.to || 'nobody'}` : e.kind === 'session' ? `filed a ${e.detail ?? ''} session`.trim() : e.kind === 'move' ? 'reordered it' : e.kind}</span></div>
+    return <div key={e.id} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>{' '}{activitySentence(e, lang)}</span></div>
   }
   if (loading) {
     return <div style={{ ...surface, padding: 14, fontSize: 12.5, color: 'var(--text-tertiary)' }}>Loading…</div>

@@ -126,3 +126,18 @@ test('/tasks/table: the claim pill and its remaining time never wrap', async () 
     await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = ''
   }
 })
+
+/** r2: the column went back near its old width — the pill shows only the time, the sentence lives in the title. */
+test('/tasks/table: the claim column stays narrow and the cell shows the short time', async () => {
+  const { COLUMNS } = await import('../components/tasks/TaskTable')
+  expect(COLUMNS.find(c => c.id === 'claim')!.width).toBeLessThanOrEqual(122)
+  await visibleText('/tasks/table', 'pt')
+  const cells = Array.from(document.querySelectorAll<HTMLElement>('[data-claim-cell]'))
+  const texts = cells.map(c => c.querySelector('[data-claim-left]')!.textContent)
+  expect(texts).toContain('expirou')
+  expect(texts.some(t => /^\d+ h$/.test(t ?? ''))).toBe(true)
+  for (const c of cells) {
+    expect(c.textContent).not.toMatch(/faltam|reserva/)
+    expect(c.getAttribute('title')).toMatch(/faltam|reserva expirada/)
+  }
+})

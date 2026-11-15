@@ -28,7 +28,7 @@ import {
   fetchTaskStatuses, fetchTaskTypes, reorderTaskStatuses, reorderTaskTypes, type TaskStatusRow, type TaskTypeRow,
 } from '../../lib/tasks'
 import { button, field, microLabel, surface } from './board'
-import { boardCopy, type Lang } from './copy'
+import { boardCopy, statusLabel, type Lang } from './copy'
 
 /**
  * The modal edits ONE vocabulary, chosen by `kind` — the status list or the task-type list. The two
@@ -152,24 +152,27 @@ function StatusRow({
   onDrop: () => void
 }) {
   const isMobile = useIsMobile()
-  const [label, setLabel] = useState(row.label)
+  // pt shows the pt name of a protected status only while its stored name is the untouched English
+  // default (`statusLabel`); stored data is never rewritten, and a save of an unchanged field is a no-op.
+  const shown = kind === 'status' ? statusLabel(row.id, lang, [row]) : row.label
+  const [label, setLabel] = useState(shown)
   const [color, setColor] = useState(row.color)
   const [pickingColor, setPickingColor] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const dirty = label.trim() !== row.label || color.toLowerCase() !== row.color.toLowerCase()
+  const dirty = label.trim() !== shown || color.toLowerCase() !== row.color.toLowerCase()
   const refusal = deleteReason(row, lang, kind)
   const api = API[kind]
 
   const save = async () => {
     const nextLabel = label.trim()
-    if (!nextLabel) { setLabel(row.label); return }
+    if (!nextLabel) { setLabel(shown); return }
     if (!dirty) return
     setBusy(true)
     const ok = await api.edit(row.id, { label: nextLabel, color })
     setBusy(false)
     if (ok) onSaved({ ...row, label: nextLabel, color })
-    else { setLabel(row.label); setColor(row.color) }
+    else { setLabel(shown); setColor(row.color) }
   }
 
   return (
@@ -299,8 +302,8 @@ export function ManageStatusesModal({ lang, onClose, kind = 'status' }: ManageSt
   const [dragged, setDragged] = useState<string | null>(null)
   const filteredRows = useMemo(() => {
     const needle = search.trim().toLowerCase()
-    return (rows ?? []).filter(row => !needle || row.label.toLowerCase().includes(needle))
-  }, [rows, search])
+    return (rows ?? []).filter(row => !needle || (tab === 'status' ? statusLabel(row.id, lang, [row]) : row.label).toLowerCase().includes(needle))
+  }, [rows, search, tab, lang])
 
   const reload = async () => setRows(await api.fetch())
   useEffect(() => { void reload() }, [tab])
