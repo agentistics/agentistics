@@ -26,6 +26,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'O aviso "nada arquivado ainda" não aparece mais para trabalho realmente entregue nem para movimentos automáticos; só aparece quando você mesmo tenta concluir algo em que ninguém trabalhou.',
         en: 'The "nothing filed yet" warning no longer shows up for work that was really delivered, nor for automatic moves; it only shows when you yourself try to finish something nobody worked on.',
       },
+      {
+        pt: 'Quando concluir algo é recusado, aparece uma mensagem só, sem um aviso repetido por cima da janela.',
+        en: 'When finishing is refused, you see one message only, not a repeated warning on top of the window.',
+      },
     ],
   },
   '2.214.0': {
