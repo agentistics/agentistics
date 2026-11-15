@@ -12,7 +12,6 @@ import { useTaskStatuses } from '../../lib/tasks'
 
 const muted: React.CSSProperties = { color: 'var(--text-tertiary)', fontSize: 12, lineHeight: 1.45 }
 const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 14, minWidth: 0 }
-const h3: React.CSSProperties = { margin: 0, fontSize: 14, fontWeight: 700, display: 'flex', gap: 7, alignItems: 'center' }
 const field: React.CSSProperties = { background: 'var(--bg-input, var(--bg-elevated))', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', padding: '5px 10px', fontSize: 13, minWidth: 0 }
 const SIZES: readonly SizeFilter[] = ['all', 'S', 'M', 'L']
 
@@ -44,7 +43,7 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
       <button type="button" onClick={() => { setPageAt(0); setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : (key === 'title' ? 1 : -1) })) }}>{label}{sort.key === key ? (sort.dir === 1 ? ' ↑' : ' ↓') : ''}</button></th>
   return <section style={card} data-testid="benchmark-tasks" aria-label={pt ? 'Por tarefa' : 'By task'}>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-      <h3 style={h3}><Flag size={15} /> {pt ? 'Por tarefa' : 'By task'}</h3>
+      <h3 className="bm-sec"><Flag size={15} /> {pt ? 'Por tarefa' : 'By task'}</h3>
       {tasks.length > 0 && <span style={muted}>{all.length} {pt ? (all.length === 1 ? 'tarefa' : 'tarefas') : (all.length === 1 ? 'task' : 'tasks')}</span>}
       {tasks.length > 0 && <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <TabStrip tabs={SIZES} value={size} onPick={v => { setSize(v); setPageAt(0) }} label={s => s === 'all' ? (pt ? 'Todas' : 'All') : sizeLabel(s, lang)} ariaLabel={pt ? 'Tamanho' : 'Size'} natural />

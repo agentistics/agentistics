@@ -6,13 +6,12 @@ import {
   acceptedText, durationText, matches, moneyText, pairText, taskRows,
   type BucketRow, type SizeFilter, type TaskRow, type TaskSortKey,
 } from '../../lib/benchmarkView'
-import { Bar } from './BenchStyle'
+import { Bar, UnmeasuredPill } from './BenchStyle'
 import { scoreTone } from '../../lib/benchmarkScore'
 import { wordOf } from '../../lib/benchmarkView'
 
 const muted: React.CSSProperties = { color: 'var(--text-tertiary)', fontSize: 12, lineHeight: 1.45 }
 const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 14, minWidth: 0 }
-const h3: React.CSSProperties = { margin: 0, fontSize: 14, fontWeight: 700, display: 'flex', gap: 7, alignItems: 'center' }
 const field: React.CSSProperties = { background: 'var(--bg-input, var(--bg-elevated))', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', padding: '5px 10px', fontSize: 13, minWidth: 0 }
 
 const SIZES: readonly SizeFilter[] = ['all', 'S', 'M', 'L']
@@ -48,7 +47,7 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
   const dur = (n: number) => durationText(n, lang)
   return <section style={card} data-testid="benchmark-tasks" aria-label={pt ? 'Por tarefa' : 'By task'}>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-      <h3 style={h3}><Flag size={15} /> {pt ? 'Por tarefa' : 'By task'}</h3>
+      <h3 className="bm-sec"><Flag size={15} /> {pt ? 'Por tarefa' : 'By task'}</h3>
       {tasks.length > 0 && <span style={muted}>{rows.length} {pt ? (rows.length === 1 ? 'tarefa' : 'tarefas') : (rows.length === 1 ? 'task' : 'tasks')}</span>}
       {(tasks.length > 0 || keepHead) && <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <TabStrip tabs={SIZES} value={size} onPick={setSize} label={s => sizeLabel(s, lang)} ariaLabel={pt ? 'Tamanho' : 'Size'} natural />
@@ -110,9 +109,10 @@ export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: {
   const sl = pt ? ['', 'Tarefas', 'Custo', 'Tempo', 'Defeitos', 'De primeira', 'Não reabertas'] : ['', 'Tasks', 'Cost', 'Time', 'Defects', 'First try', 'Not reopened']
   const noData = <span className="bm-nw" style={muted}>— {pt ? 'sem dados' : 'no data'}</span>
   const nw = (x: string) => <span className="bm-nw">{x}</span>
-  const rate = (n: number | null) => n === null ? noData : <div style={{ maxWidth: 150 }}>{nw(`${nf(n * 100, lang, 0)}%`)}<Bar value={n * 100} tone="rate" mark={false} /></div>
+  const unm = <UnmeasuredPill lang={lang} testId="benchmark-bucket-unmeasured" />
+  const rate = (n: number | null) => n === null ? unm : <div style={{ maxWidth: 150 }}>{nw(`${nf(n * 100, lang, 0)}%`)}<Bar value={n * 100} tone="rate" mark={false} /></div>
   return <section style={card} data-testid="benchmark-buckets" aria-label={pt ? 'Por quantidade de sessões' : 'By number of sessions'}>
-    <h3 style={{ ...h3, marginBottom: 4 }}><Users size={15} /> {pt ? 'Por quantidade de sessões' : 'By number of sessions'}</h3>
+    <h3 className="bm-sec" style={{ marginBottom: 4 }}><Users size={15} /> {pt ? 'Por quantidade de sessões' : 'By number of sessions'}</h3>
     <p style={{ ...muted, margin: '0 0 8px' }}>{pt ? 'Do histórico. Não diz se compensou, porque tarefa difícil já costuma usar mais sessões.' : 'From history. It does not say whether it paid off, because hard tasks already tend to use more sessions.'}{note ? ` ${note}` : ''}</p>
     {buckets.length === 0 ? <div data-testid="benchmark-buckets-empty" style={muted}>{emptyReason}</div>
       : <div className="bm-buckets">
@@ -121,7 +121,7 @@ export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: {
           <div className="bm-k">{b.label}</div><div data-l={sl[1]}>{nw(nf(b.tasks, lang, 0))}</div>
           <div data-l={sl[2]}>{b.costMedianUSD === null ? noData : nw(moneyText(b.costMedianUSD, lang, money))}</div>
           <div data-l={sl[3]}>{b.wallMedianMs === null ? noData : nw(durationText(b.wallMedianMs, lang))}</div>
-          <div data-l={sl[4]}>{b.escapedDefects === null ? noData : nw(nf(b.escapedDefects, lang, 1))}</div>
+          <div data-l={sl[4]}>{b.escapedDefects === null ? unm : nw(nf(b.escapedDefects, lang, 1))}</div>
           <div data-l={sl[5]}>{rate(b.firstTryRate)}</div><div data-l={sl[6]}>{rate(b.notReopenedRate)}</div>
         </React.Fragment>)}
       </div>}

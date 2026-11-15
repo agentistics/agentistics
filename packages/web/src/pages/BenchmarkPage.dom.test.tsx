@@ -459,8 +459,11 @@ describe('per-piece history from the server fills the blocks with real rows', ()
     expect(b).toContain('US$ 4,50')
     expect(b).not.toContain('(n=')
     const row = b.split('2 sessões')[1]!.split('3–4 sessões')[0]!
-    expect(row.match(/sem dados/g)!.length).toBe(3)
-    expect(render('en', withHistory).split('data-testid="benchmark-buckets"')[1]).toContain('no data')
+    expect(row).not.toContain('sem dados')
+    expect(row.match(/data-testid="benchmark-bucket-unmeasured"[^>]*>sem medição</g)!.length).toBe(3)
+    expect(render('en', withHistory).split('data-testid="benchmark-buckets"')[1]).toContain('>not measured<')
+    // card titles wear the prototype's small uppercase grey label (one class, no inline 14px/700)
+    expect(b.split('<h3')[1]!.split('>')[0]).toContain('class="bm-sec"')
   })
 
   test('the hero states what history shows, with no "paid off X%"', () => {

@@ -17,6 +17,7 @@ const CSS = `
 .bm-buckets>div{padding:6px 8px 6px 0;border-top:1px solid var(--border);min-width:0}
 .bm-buckets>.bm-h{border:0;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);font-weight:600}
 .bm-clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;overflow-wrap:anywhere}
+.bm-sec{margin:0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);display:flex;gap:7px;align-items:center}
 .bm-nw{white-space:nowrap;font-variant-numeric:tabular-nums}
 .bm-tasks{width:100%;border-collapse:collapse;font-size:12.5px}
 .bm-tasks th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);font-weight:600;padding:6px 6px 6px 0;white-space:nowrap}
@@ -49,6 +50,11 @@ const CSS = `
  .bm-buckets>div[data-l]::before{content:attr(data-l) ": ";color:var(--text-tertiary);font-size:11px}
  .bm-btn{min-height:44px}
 }`
+
+/** The "not measured" seal the list's unmeasured slots wear — one component, so a column without data says it the same way. */
+export function UnmeasuredPill({ lang, testId = 'benchmark-seal', style }: { lang: 'pt' | 'en'; testId?: string; style?: React.CSSProperties }) {
+  return <span data-testid={testId} className="bm-nw" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 9px', ...style }}>{lang === 'pt' ? 'sem medição' : 'not measured'}</span>
+}
 
 export function BenchStyle() { return <style>{CSS}</style> }
 
