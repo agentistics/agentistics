@@ -67,7 +67,7 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
               const subs = (t.subtasks ?? []).filter(s => matches(s.title, subNeedle))
               return <React.Fragment key={t.id}>
                 <tr className="bm-t" data-testid="benchmark-task-row" data-task={t.id} onClick={() => { setOpen(open === t.id ? null : t.id); setSubNeedle('') }} aria-expanded={open === t.id}>
-                  <td>{t.title}</td><td data-l={pt ? 'Tamanho' : 'Size'}>{pt ? (t.size === 'L' ? 'G' : t.size === 'S' ? 'P' : t.size) : t.size}</td>
+                  <td><div className="bm-clamp" title={t.title}>{t.title}</div></td><td data-l={pt ? 'Tamanho' : 'Size'}>{pt ? (t.size === 'L' ? 'G' : t.size === 'S' ? 'P' : t.size) : t.size}</td>
                   <td data-l={pt ? 'Sessões' : 'Sessions'}>{t.sessions[0]} → {t.sessions[1]}</td>
                   <td className="bm-num" data-l={pt ? 'Custo' : 'Cost'}>{pairText(t.costUSD, money_)}</td>
                   <td className="bm-num" data-l={pt ? 'Tempo' : 'Time'}>{pairText(t.wallMs, dur)}</td>

@@ -70,6 +70,6 @@ export function vezes(r: number, lang: 'pt' | 'en'): string {
 export function firmness(ratios: Ratios): { changes: { weights: 'equal' | 'quality' | 'costTime'; tone: ScoreTone }[] } {
   const base = scoreOf(ratios).score
   if (base === null) return { changes: [] }
-  const t = scoreTone(base)
-  return { changes: ALT_WEIGHTS.flatMap(a => { const s = scoreOf(ratios, a.weights).score; return s !== null && scoreTone(s) !== t ? [{ weights: a.id, tone: scoreTone(s) }] : [] }) }
+  const t = pointTone(base)
+  return { changes: ALT_WEIGHTS.flatMap(a => { const s = scoreOf(ratios, a.weights).score; return s !== null && pointTone(s) !== t ? [{ weights: a.id, tone: pointTone(s) }] : [] }) }
 }

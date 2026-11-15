@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { pointTone, WEIGHTS, firmness, nr, scoreOf, scoreTone, taskScore, vezes } from './benchmarkScore'
+import { ALT_WEIGHTS, pointTone, WEIGHTS, firmness, nr, scoreOf, scoreTone, taskScore, vezes } from './benchmarkScore'
 
 describe('the prototype\'s score maths (opcao-d3: nr, fin, pontos, tomTipo)', () => {
   test('nr maps a ratio to 0–100 through 100/(1+1/r): 1 is 50, and swapping the sides mirrors it exactly', () => {
@@ -74,5 +74,20 @@ describe('the prototype\'s score maths (opcao-d3: nr, fin, pontos, tomTipo)', ()
     const f = firmness({ quality: 3, cost: 0.2, time: 0.25, reliability: 1 })
     expect(f.changes.length).toBeGreaterThan(0)
     expect(f.changes.every(c => ['equal', 'quality', 'costTime'].includes(c.weights))).toBe(true)
+  })
+
+  test('firmness follows the prototype\'s `ponto` rule (52/48), not the 55,55/44,45 band', () => {
+    // base 52,84 → pays (> 52); equal weights give 51,65 → tie; so "equal" must be named.
+    const r = { quality: 1.5, cost: 0.7637 }
+    expect(scoreOf(r).score).toBeGreaterThan(52)
+    expect(scoreOf(r, ALT_WEIGHTS[0]!.weights).score).toBeLessThan(52)
+    const f = firmness(r)
+    expect(f.changes.map(c => c.weights)).toContain('equal')
+    expect(f.changes.find(c => c.weights === 'equal')!.tone).toBe('tie')
+    // edges: exactly 52 / 48 are ties on both sides, so no change between two scores that both sit on them
+    expect(pointTone(52)).toBe('tie'); expect(pointTone(52.01)).toBe('good')
+    expect(pointTone(48)).toBe('tie'); expect(pointTone(47.99)).toBe('bad')
+    // a score in 52–55,55 with every alternative also above 52 is firm
+    expect(firmness({ quality: 1.2, cost: 1.2 }).changes).toEqual([])
   })
 })

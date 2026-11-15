@@ -63,7 +63,7 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
               const subs = t.subtasks.filter(s => matches(s.title, subNeedle))
               return <React.Fragment key={t.id}>
                 <tr className="bm-t" data-testid="benchmark-task-row" data-task={t.id} onClick={() => { setOpen(open === t.id ? null : t.id); setSubNeedle('') }} aria-expanded={open === t.id}>
-                  <td>{t.title}</td><td data-l={pt ? 'Tamanho' : 'Size'}>{sz(t.size)}</td>
+                  <td><div className="bm-clamp" title={t.title}>{t.title}</div></td><td data-l={pt ? 'Tamanho' : 'Size'}>{sz(t.size)}</td>
                   <td className="bm-num" data-l={pt ? 'Sessões' : 'Sessions'}>{pair(sd.sessions, q)}</td>
                   <td className="bm-num" data-l={pt ? 'Custo' : 'Cost'}>{pair(sd.costUSD, (v, i) => cost(v, sd.costPartial[i]))}</td>
                   <td className="bm-num" data-l={pt ? 'Tempo' : 'Time'}>{pair(sd.wallMs, ms)}</td>

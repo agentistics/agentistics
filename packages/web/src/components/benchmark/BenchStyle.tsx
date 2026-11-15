@@ -16,12 +16,11 @@ const CSS = `
 .bm-buckets{display:grid;grid-template-columns:110px repeat(6,minmax(0,1fr));font-size:12.5px}
 .bm-buckets>div{padding:6px 8px 6px 0;border-top:1px solid var(--border);min-width:0}
 .bm-buckets>.bm-h{border:0;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);font-weight:600}
-.bm-tasks td.bm-cp{min-width:124px}
-.bm-tasks td{padding-right:8px}
+.bm-clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;overflow-wrap:anywhere}
 .bm-nw{white-space:nowrap;font-variant-numeric:tabular-nums}
 .bm-tasks{width:100%;border-collapse:collapse;font-size:12.5px}
-.bm-tasks th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);font-weight:600;padding:6px 10px 6px 0;white-space:nowrap}
-.bm-tasks td{padding:8px 10px 8px 0;border-top:1px solid var(--border);vertical-align:top}
+.bm-tasks th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-tertiary);font-weight:600;padding:6px 6px 6px 0;white-space:nowrap}
+.bm-tasks td{padding:8px 6px 8px 0;border-top:1px solid var(--border);vertical-align:top}
 .bm-tasks td.bm-num,.bm-tasks th.bm-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .bm-tasks tr.bm-t{cursor:pointer}.bm-tasks tr.bm-t:hover td{background:rgba(127,127,127,.05)}
 .bm-tasks th button{all:unset;cursor:pointer}
@@ -31,6 +30,7 @@ const CSS = `
  .bm-top{grid-template-columns:minmax(0,1fr)}
  .bm-types{grid-template-columns:repeat(2,minmax(0,1fr))}
  .bm-word,.bm-score{font-size:27px!important}
+ .bm-clamp{-webkit-line-clamp:unset;display:block}
  .bm-tasks thead{display:none}
  .bm-tasks,.bm-tasks tbody{display:block}
  .bm-tasks tr.bm-t{display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;padding:9px 0;border-top:1px solid var(--border)}
