@@ -138,17 +138,21 @@ function BoardActivity({ daily, isMobile }: { daily: BoardOverview['daily']; isM
   const ctx = useOutletContext<AppContext | null>()
   const theme = ctx?.theme === 'light' ? 'light' : 'dark'
   const chartData = useMemo(() => toBoardChartData(daily), [daily])
-  const labels = { value: 'Sessions started', sessions: 'Delivered', tools: 'Created' }
+  const pt = ctx?.lang === 'pt'
+  const labels = pt
+    ? { value: 'Sessões iniciadas', sessions: 'Entregues', tools: 'Criadas' }
+    : { value: 'Sessions started', sessions: 'Delivered', tools: 'Created' }
 
   return (
     <div style={{ ...surface, padding: 14, display: 'grid', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <Activity size={13} style={{ color: 'var(--anthropic-orange)' }} />
-        <span style={sectionLabel}>Board activity over time</span>
+        <span style={sectionLabel}>{pt ? 'Atividade do quadro ao longo do tempo' : 'Board activity over time'}</span>
       </div>
       <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
-        Sessions started, tasks delivered and tasks created, by day, across every task on the board.
-        A day with no board activity is left out of the chart rather than drawn as a false zero.
+        {pt
+          ? 'Sessões iniciadas, tarefas entregues e tarefas criadas, por dia, em todas as tarefas do quadro. Um dia sem atividade fica fora do gráfico, em vez de aparecer como um falso zero.'
+          : 'Sessions started, tasks delivered and tasks created, by day, across every task on the board. A day with no board activity is left out of the chart rather than drawn as a false zero.'}
       </div>
       {isMobile ? (
         <ActivityChart data={chartData} theme={theme} height={160} forcedOverlay hideControls metricLabels={labels} />
@@ -245,10 +249,11 @@ export function BoardOverviewView({ o, statuses }: {
       </Section>
 
       <div style={{ ...surface, padding: 14, display: 'grid', gap: 8 }}>
-        <div style={microLabel}>Where the work stands</div>
+        <div style={microLabel}>{ctxLang === 'pt' ? 'Onde o trabalho está' : 'Where the work stands'}</div>
         <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
-          How many tasks currently sit in each column. A column at zero is shown, dimmed, rather than
-          left off the row.
+          {ctxLang === 'pt'
+            ? 'Quantas tarefas estão em cada coluna agora. Uma coluna zerada aparece esmaecida, em vez de ficar de fora.'
+            : 'How many tasks currently sit in each column. A column at zero is shown, dimmed, rather than left off the row.'}
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {/*

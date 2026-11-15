@@ -1477,7 +1477,7 @@ export function TaskTable(p: TaskTableProps) {
                       <td colSpan={cols.length + 1} style={{ ...cellBox }}>
                         {adding === g.key && !p.onRequestCreate ? (
                           <input
-                            autoFocus value={draft} placeholder="Task name, then Enter"
+                            autoFocus value={draft} placeholder={p.lang === 'pt' ? 'Nome da tarefa e Enter' : 'Task name, then Enter'}
                             onChange={e => setDraft(e.target.value)}
                             onBlur={() => { setAdding(null); setDraft('') }}
                             onKeyDown={e => {
@@ -1589,7 +1589,7 @@ export function TaskTable(p: TaskTableProps) {
             <ChipSelect
               value="__none__"
               options={[
-                { value: '__none__', label: 'Move to…', color: 'var(--text-secondary)', dim: 'var(--bg-elevated)' },
+                { value: '__none__', label: p.lang === 'pt' ? 'Mover para…' : 'Move to…', color: 'var(--text-secondary)', dim: 'var(--bg-elevated)' },
                 ...statusOptions(liveStatusMap(p.statuses), liveStatusOrder(p.statuses)),
               ]}
               onPick={v => {
@@ -1605,7 +1605,7 @@ export function TaskTable(p: TaskTableProps) {
           ><Trash2 size={13} /></button>
           <button
             onClick={() => setSel(clearTicks)}
-            aria-label="Clear the selection" title="Clear the selection"
+            aria-label={p.lang === 'pt' ? 'Limpar a seleção' : 'Clear the selection'} title={p.lang === 'pt' ? 'Limpar a seleção' : 'Clear the selection'}
             style={{
               background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer',
               display: 'inline-flex', ...tap(isMobile),
