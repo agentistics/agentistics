@@ -345,35 +345,6 @@ export function coverageFacts(h: ObservedHistory, lang: Lang, withCount = true):
   return out
 }
 
-/** Sizes whose own ratio runs against the headline's direction (clearly: more than 10% on the other side of 1). */
-function oppositeSizes(c: Comparison): { metric: 'cost' | 'wall'; size: 'S' | 'M' | 'L' }[] {
-  const out: { metric: 'cost' | 'wall'; size: 'S' | 'M' | 'L' }[] = []
-  for (const metric of ['wall', 'cost'] as const) {
-    const k = c[metric]
-    if (!k || Math.abs(k.ratio - 1) < 0.05) continue
-    for (const p of k.sizes) {
-      const r = p.ratio
-      if ((k.ratio > 1 && r < 0.9) || (k.ratio < 1 && r > 1.1)) out.push({ metric, size: p.size })
-    }
-  }
-  return out
-}
-
-function oppositeNote(c: Comparison, lang: Lang): string {
-  const pt = lang === 'pt'
-  const o = oppositeSizes(c)
-  if (!o.length) return ''
-  // Per METRIC: "in time, S; in cost, L" never "in time and cost, S and L" (that would say S was opposite in cost too).
-  const metrics = [...new Set(o.map(x => x.metric))]
-  const parts = metrics.map((m, i) => {
-    const list = o.filter(x => x.metric === m).map(x => sizeWord(x.size, lang)).join(pt ? ' e ' : ' and ')
-    const what = m === 'wall' ? (pt ? 'tempo' : 'time') : (pt ? 'custo' : 'cost')
-    if (pt) return i === 0 ? `no ${what}, nas peças ${list} foi o contrário` : `no ${what}, nas ${list}`
-    return i === 0 ? `in ${what}, the opposite for ${list} pieces` : `in ${what}, for ${list}`
-  })
-  return parts.join('; ')
-}
-
 export type HistorySortKey = 'title' | 'cost' | 'wall' | 'qa' | 'sessions' | 'score'
 /** A task row of the history with its two sides, as the SERVER sent them (an older server sent none: every cell is then "—"). */
 export interface HistoryPairRow { task: HistoryTaskRow; sides: TaskSides }
@@ -472,18 +443,18 @@ function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Mo
     range: null,
     say: comparisonSentence(c, lang),
     disclosure: pt ? 'Por que esse resultado?' : 'Why this result?',
+    // The approved prototype's disclosure: why the verdict, the firmness sentence, then "Baseado em". Nothing else.
     why: [
+      ...(sc === null ? [] : [
+        tone === 'good' ? (pt ? 'A nota fica acima do empate.' : 'The score is above the tie.')
+          : tone === 'bad' ? (pt ? 'A nota fica abaixo do empate.' : 'The score is below the tie.')
+          : (pt ? 'A nota ficou perto de 50: não dá para dizer quem ganhou.' : 'The score is too close to 50: it cannot say who won.'),
+        fm.changes.length === 0
+          ? (pt ? 'Com outros pesos razoáveis, o resultado é o mesmo.' : 'With other reasonable weights, the result is the same.')
+          : fm.changes.map(x => `${alt[x.weights]}: ${wordOf(x.tone, lang)}`).join('; '),
+      ]),
       pt ? `Baseado em indício observado, não em experimento: contra ${c.aShort} · ${c.nA} × ${c.nB} peças · comparado dentro do mesmo tamanho.` : `Based on observed evidence, not an experiment: against ${c.aShort} · ${c.nA} × ${c.nB} pieces · compared within the same size.`,
-      ...(oppositeNote(c, lang) ? [oppositeNote(c, lang)!] : []),
-      ...(sc === null ? [] : [pt ? 'A nota usa só o que foi medido (custo e tempo); qualidade e confiabilidade ainda não têm dados e não entram na conta.' : 'The score uses only what was measured (cost and time); quality and reliability have no data yet and are left out.']),
-      ...(fm.changes.length ? [fm.changes.map(x => `${alt[x.weights]}: ${wordOf(x.tone, lang)}`).join('; ')] : []),
-      pt ? 'Peças difíceis vão para o método pesado e tendem a ter mais rodadas e mais sessões: a diferença pode ser a dificuldade, não o método. Comparar dentro do mesmo tamanho (linhas) é um controle fraco.' : 'Hard pieces go to the heavy method and tend to have more rounds and sessions: the difference may be the difficulty, not the method. Matching by size (lines) is a weak control.',
-      pt ? `Para um veredito falta um experimento controlado (mínimo ${MIN_SAMPLE.tasks} tarefas × ${MIN_SAMPLE.repsPerTask} repetições, ${MIN_SAMPLE.acceptedPerArm} aceitas por lado); nenhum rodou ainda.` : `A verdict needs a controlled experiment (minimum ${MIN_SAMPLE.tasks} tasks × ${MIN_SAMPLE.repsPerTask} repetitions, ${MIN_SAMPLE.acceptedPerArm} accepted per side); none has run yet.`,
-      pt ? 'Qualidade final não é medida: defeito escapado depois do release e peça reaberta não são registrados.' : 'Final quality is not measured: defects escaped after release and reopened pieces are not recorded.',
-      ...(harnessCoverageLine(observed, lang) ? [harnessCoverageLine(observed, lang)!] : []),
-      ...(c.id === 'qa' ? [pt ? 'As rodadas de QA vêm do rótulo das sessões de QA: indicativo, o fluxo ainda não registra veredito estruturado.' : 'QA rounds come from the QA sessions\' labels: indicative, the flow does not record a structured verdict yet.'] : []),
     ],
-    facts: coverageFacts(h, lang, false),
   }
 }
 

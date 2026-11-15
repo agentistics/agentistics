@@ -128,11 +128,15 @@ describe('observed comparisons the history already allows', () => {
     expect(hero).not.toHaveProperty('caption')
     expect(hero.word).not.toContain('Indício')
     expect(hero.disclosure).toBe('Por que esse resultado?')
-    expect(hero.why.join('\n')).toContain('contra 1 rodada de QA · 4 × 4 peças')
-    expect(hero.why.join('\n')).toContain('experimento')
-    expect(hero.facts!.length).toBeGreaterThan(0)
-    // L1: the disclosure speaks of THIS comparison only, repeats no Partes row and carries no ratio of its own
-    expect(hero.facts!.join('\n')).not.toMatch(/×|rodadas de QA custam|US\$/)
+    // the approved prototype's disclosure: why the verdict, the firmness sentence, then "Baseado em" — exactly three, in this order
+    expect(hero.why).toHaveLength(3)
+    expect(hero.why[0]).toBe('A nota fica abaixo do empate.')
+    expect(hero.why[1]).toMatch(/pesos|Com outros pesos/)
+    expect(hero.why[2]).toContain('Baseado em indício observado, não em experimento: contra 1 rodada de QA · 4 × 4 peças')
+    expect(hero.why.join('\n')).not.toMatch(/experimento controlado|Qualidade final|Cobertura por harness|rótulo das sessões/)
+    expect(hero.facts).toBeUndefined()
+    // L1: the disclosure carries no ratio of its own beyond the piece counts
+    expect(hero.why.join('\n')).not.toMatch(/rodadas de QA custam|US\$/)
     const s = heroOf(entriesOf(obs(h), [], 'pt')[1]!, obs(h), 'pt', { currency: 'USD' })
     expect(s.say).toContain('retrabalho 0% → 100%')
     const en = heroOf(entriesOf(obs(h), [], 'en')[0]!, obs(h), 'en', { currency: 'USD' })
@@ -140,56 +144,14 @@ describe('observed comparisons the history already allows', () => {
     expect(en).not.toHaveProperty('caption')
     expect(en.say).toBe('With 2+ QA rounds: 2.5× more cost, 4× more time, 5× more sessions.')
     expect(en.disclosure).toBe('Why this result?')
+    expect(en.why).toHaveLength(3)
+    expect(en.why[0]).toBe('The score is below the tie.')
+    expect(en.why[2]).toMatch(/^Based on observed evidence, not an experiment: against /)
   })
 
   test('L1: the sessions comparison carries no QA lines in its disclosure', () => {
     const s = heroOf(entriesOf(obs(h), [], 'pt')[1]!, obs(h), 'pt', { currency: 'USD' })
     expect(JSON.stringify([s.why, s.facts])).not.toMatch(/rodadas de QA custam|primeira rodada/)
-  })
-
-  test('L2: a size that goes the opposite way of the headline is said in plain words; none when all agree', () => {
-    const rows = [
-      ...Array.from({ length: 3 }, (_, i) => sub(`a${i}`, { size: 'M', qaRounds: 1, wallMs: H })), ...Array.from({ length: 3 }, (_, i) => sub(`b${i}`, { size: 'M', qaRounds: 3, wallMs: 5 * H })),
-      ...Array.from({ length: 3 }, (_, i) => sub(`c${i}`, { size: 'L', qaRounds: 1, wallMs: 10 * H })), ...Array.from({ length: 3 }, (_, i) => sub(`d${i}`, { size: 'L', qaRounds: 3, wallMs: 5 * H })),
-    ]
-    const hh = history(rows)
-    const hero = heroOf(entriesOf(obs(hh), [], 'pt')[0]!, obs(hh), 'pt', { currency: 'USD' })
-    expect(hero.why.join('\n')).toContain('nas peças G foi o contrário')
-    expect(heroOf(entriesOf(obs(hh), [], 'en')[0]!, obs(hh), 'en', { currency: 'USD' }).why.join('\n')).toContain('the opposite for L pieces')
-    expect(heroOf(entriesOf(obs(h), [], 'pt')[0]!, obs(h), 'pt', { currency: 'USD' }).why.join('\n')).not.toContain('contrário')
-  })
-
-  test('R5-1: opposite sizes are grouped PER METRIC, never as a cross product', () => {
-    const grp = (p: string, n: number, o: Partial<HistorySubtaskRow>) => Array.from({ length: n }, (_, i) => sub(`${p}${i}`, { qaRounds: p.startsWith('a') ? 1 : 3, ...o }))
-    const rows = [
-      ...grp('aM', 5, { size: 'M', wallMs: H, costUSD: 1 }), ...grp('bM', 5, { size: 'M', wallMs: 5 * H, costUSD: 5 }),
-      // S: opposite in TIME only (B faster), cost agrees
-      ...grp('aS', 3, { size: 'S', wallMs: 10 * H, costUSD: 1 }), ...grp('bS', 3, { size: 'S', wallMs: 5 * H, costUSD: 5 }),
-      // L: opposite in COST only (B cheaper), time agrees
-      ...grp('aL', 3, { size: 'L', wallMs: H, costUSD: 8 }), ...grp('bL', 3, { size: 'L', wallMs: 5 * H, costUSD: 2 }),
-    ]
-    const hh = history(rows)
-    const pt = heroOf(entriesOf(obs(hh), [], 'pt')[0]!, obs(hh), 'pt', { currency: 'USD' }).why.join('\n')
-    expect(pt).toContain('no tempo, nas peças P foi o contrário; no custo, nas G')
-    const en = heroOf(entriesOf(obs(hh), [], 'en')[0]!, obs(hh), 'en', { currency: 'USD' }).why.join('\n')
-    expect(en).toContain('in time, the opposite for S pieces; in cost, for L')
-  })
-
-  test('R5-2: a headline within ±5% of 1 says nothing about opposite sizes', () => {
-    const grp = (p: string, n: number, o: Partial<HistorySubtaskRow>) => Array.from({ length: n }, (_, i) => sub(`${p}${i}`, { qaRounds: p.startsWith('a') ? 1 : 3, ...o }))
-    // overall medians within 3% (headline flat), but S and L go opposite ways
-    const rows = [
-      ...grp('aM', 5, { size: 'M', wallMs: 2 * H, costUSD: 4 }), ...grp('bM', 5, { size: 'M', wallMs: 2.06 * H, costUSD: 4.12 }),
-      ...grp('aS', 3, { size: 'S', wallMs: H, costUSD: 1 }), ...grp('bS', 3, { size: 'S', wallMs: 3 * H, costUSD: 8 }),
-      ...grp('aL', 3, { size: 'L', wallMs: 3 * H, costUSD: 8 }), ...grp('bL', 3, { size: 'L', wallMs: H, costUSD: 1 }),
-    ]
-    const hh = history(rows)
-    const k = hh.comparisons![0]!
-    expect(k.wall!.ratio).toBeGreaterThan(1)
-    expect(k.wall!.ratio - 1).toBeLessThan(0.05)
-    expect(k.cost!.ratio).toBeGreaterThan(1)
-    expect(k.cost!.ratio - 1).toBeLessThan(0.05)
-    expect(heroOf(entriesOf(obs(hh), [], 'pt')[0]!, obs(hh), 'pt', { currency: 'USD' }).why.join('\n')).not.toContain('contrário')
   })
 
   test('parts: the observed multiplier per type with the "observado" label; no data only where there really is none', () => {

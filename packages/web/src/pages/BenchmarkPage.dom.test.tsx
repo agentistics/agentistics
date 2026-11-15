@@ -93,17 +93,6 @@ describe('benchmark page — real figures, honest gaps', () => {
     expect(pt).not.toContain('origin<')
   })
 
-  test('coverage per harness lives in the "why" disclosure as counts only: measured, partial and not measured stay three different things', () => {
-    const why = (html: string) => html.split('data-testid="benchmark-hero"')[1]!.split('</details>')[0]!
-    expect(why(pt)).toContain('Cobertura por harness')
-    expect(why(pt)).toContain('claude 10/10')
-    expect(why(pt)).toContain('codex 3/6 parcial')
-    expect(why(pt)).toContain('kimi 0/5 sem medição')
-    expect(why(pt)).not.toContain('sem tokens guardados')            // counts, not the cause paragraph
-    expect(why(en)).toContain('Coverage by harness')
-    expect(why(en)).toContain('kimi 0/5 not measured')
-  })
-
   test('loading and failing reads show no number at all', () => {
     const loading = render('pt', null)
     expect(loading).toContain('benchmark-loading')
@@ -703,9 +692,12 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     expect(hero).toContain('25<small')
     expect(hero).toContain('Por que esse resultado?')
     expect(hero).not.toMatch(/<details[^>]* open/)
-    // the facts list lives INSIDE the disclosure, not beside the sentence
-    expect(hero.indexOf('benchmark-facts')).toBeGreaterThan(hero.indexOf('Por que esse resultado?'))
-    expect(hero.match(/<p /g)!.length).toBeGreaterThanOrEqual(3)
+    // the prototype's disclosure: exactly three paragraphs, no facts list, "Baseado em" last
+    const open = hero.split('Por que esse resultado?')[1]!.split('</details>')[0]!
+    expect(open).not.toContain('benchmark-facts')
+    expect(open.match(/<p[ >]/g)).toHaveLength(3)
+    expect(open.lastIndexOf('Baseado em')).toBeGreaterThan(open.indexOf('A nota fica'))
+    expect(open).not.toMatch(/Cobertura por harness|experimento controlado|Qualidade final/)
   })
 
   test('Partes show the observed multiplier per type; "sem dados" only for quality and reliability, in one line each', () => {
