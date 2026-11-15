@@ -3,7 +3,8 @@ import { Flag, Info } from 'lucide-react'
 import type { ComparisonKey, HistoryTaskRow } from '@agentistics/core/benchmark'
 import { TabStrip } from '../sessions/formBits'
 import { nf, type Lang, type Money } from '../../lib/benchmarkFormat'
-import { durationText, historyTaskRows, matches, moneyText, sizeLabel, type HistorySortKey, type SizeFilter } from '../../lib/benchmarkView'
+import { durationText, historyRowScore, historyTaskRows, matches, moneyText, sizeLabel, type HistorySortKey, type SizeFilter } from '../../lib/benchmarkView'
+import { TaskVerdictCell } from './BenchTasks'
 import { BoardPager } from '../tasks/BoardPager'
 import { BOARD_PAGE_SIZES, DEFAULT_BOARD_PAGE_SIZE, resolveBoardPage } from '../tasks/boardPaging'
 import { statusLabel } from '../tasks/copy'
@@ -56,7 +57,7 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
           <table className="bm-tasks"><thead><tr>
             {head('title', pt ? 'Tarefa' : 'Task')}<th>{pt ? 'Tamanho' : 'Size'}</th>{head('sessions', pt ? 'Sessões' : 'Sessions', true)}
             {head('cost', pt ? 'Custo' : 'Cost', true)}{head('wall', pt ? 'Tempo' : 'Time', true)}{head('qa', pt ? 'Rodadas QA' : 'QA rounds', true)}
-            <th className="bm-num">{pt ? 'Defeitos' : 'Defects'}</th><th>{pt ? 'Aceita' : 'Accepted'}</th>
+            <th className="bm-num">{pt ? 'Defeitos' : 'Defects'}</th><th>{pt ? 'Aceita' : 'Accepted'}</th>{head('score', pt ? 'Compensou?' : 'Paid off?')}
           </tr></thead><tbody>
             {rows.map(({ task: t, sides: sd }) => {
               const subs = t.subtasks.filter(s => matches(s.title, subNeedle))
@@ -69,8 +70,9 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
                   <td className="bm-num" data-l="QA">{pair(sd.qaRounds, q)}</td>
                   <td className="bm-num" data-l={pt ? 'Defeitos' : 'Defects'}>{pair(sd.defects, q)}</td>
                   <td data-l={pt ? 'Aceita' : 'Accepted'} style={{ whiteSpace: 'nowrap' }}>{pair([null, null], q)}</td>
+                  <TaskVerdictCell score={historyRowScore(sd)} lang={lang} />
                 </tr>
-                {open === t.id && <tr className="bm-d" data-testid="benchmark-task-detail"><td className="bm-d" colSpan={8}>
+                {open === t.id && <tr className="bm-d" data-testid="benchmark-task-detail"><td className="bm-d" colSpan={9}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Info size={13} /> {pt ? `${t.pieces} peças, ${t.sessions} sessões${t.lines === null ? '' : `, ${nf(t.lines, lang, 0)} linhas alteradas`}; ${sd.nA} no lado A e ${sd.nB} no lado B.` : `${t.pieces} pieces, ${t.sessions} sessions${t.lines === null ? '' : `, ${nf(t.lines, lang, 0)} lines changed`}; ${sd.nA} on side A and ${sd.nB} on side B.`}</div>
                   <div style={{ marginTop: 8, maxHeight: 340, overflowY: 'auto' }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>

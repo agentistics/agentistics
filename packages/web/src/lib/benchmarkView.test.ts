@@ -81,23 +81,26 @@ describe('observed comparisons the history already allows', () => {
     expect(comparisonsOf(history([one(0), one(1), many(0), many(1)]), 'pt')).toEqual([])
   })
 
-  test('the list holds the comparisons, each stamped "observado" and without any score', () => {
+  test('the list holds the comparisons, each with the prototype\'s 0–100 score, tone and verdict word (cost and time measured)', () => {
     const es = entriesOf(obs(h), [], 'pt')
     expect(es.map(e => e.id)).toEqual(['qa', 'sessions', 'models', 'harnesses'])
-    expect(es.slice(0, 2).every(e => e.kind === 'comparison' && e.score === null && e.word === 'observado')).toBe(true)
+    // 2.5× the cost and 4× the time on side B → ratios 0.4 and 0.25 → (30·nr(.4) + 20·nr(.25)) / 50
+    expect(es[0]!.score).toBeCloseTo((30 * (100 / 3.5) + 20 * 20) / 50, 5)
+    expect(es[0]).toMatchObject({ kind: 'comparison', tone: 'bad', word: 'Não compensou' })
     expect(es.slice(2).every(e => e.kind === 'unmeasured' && e.score === null && e.word === 'sem medição' && !!e.reason)).toBe(true)
-    expect(entriesOf(obs(h), [], 'en')[0]!.word).toBe('observed')
+    expect(es.slice(2).every(e => e.kind === 'unmeasured' && e.score === null && e.word === 'sem medição' && !!e.reason)).toBe(true)
+    expect(entriesOf(obs(h), [], 'en')[0]!.word).toBe('Did not pay off')
     expect(entriesOf(obs(undefined), [], 'pt')[0]!.id).toBe('observed')       // an older server: the single history entry
   })
 
-  test('hero: "Indício, não prova", ONE sentence in the prototype mould, a caption, the rest behind a disclosure', () => {
+  test('hero: the verdict word and N de 100, ONE sentence in the prototype mould, an "Indício, não prova" caption, the rest behind a disclosure', () => {
     const e = entriesOf(obs(h), [], 'pt')[0]!
     const hero = heroOf(e, obs(h), 'pt', { currency: 'USD' })
-    expect(hero.word).toBe('Indício, não prova')
+    expect(hero).toMatchObject({ word: 'Não compensou', tone: 'bad' })
     expect(hero.say).toBe('Com 2+ rodadas de QA: 2,5× mais custo, 4× mais tempo, 5× mais sessões.')
-    expect(hero.score).toBeNull()
+    expect(hero.score).toBeCloseTo(25.1, 0)
     expect(hero.delta).toBeNull()
-    expect(hero.caption).toBe('contra 1 rodada de QA · 4 × 4 peças · mesmo tamanho')
+    expect(hero.caption).toBe('Indício, não prova · contra 1 rodada de QA · 4 × 4 peças · mesmo tamanho')
     expect(hero.disclosure).toBe('Por que não é prova?')
     expect(hero.why.join('\n')).toContain('experimento')
     expect(hero.facts!.length).toBeGreaterThan(0)
@@ -106,7 +109,8 @@ describe('observed comparisons the history already allows', () => {
     const s = heroOf(entriesOf(obs(h), [], 'pt')[1]!, obs(h), 'pt', { currency: 'USD' })
     expect(s.say).toContain('retrabalho 0% → 100%')
     const en = heroOf(entriesOf(obs(h), [], 'en')[0]!, obs(h), 'en', { currency: 'USD' })
-    expect(en.word).toBe('Evidence, not proof')
+    expect(en.word).toBe('Did not pay off')
+    expect(en.caption).toContain('Evidence, not proof')
     expect(en.say).toBe('With 2+ QA rounds: 2.5× more cost, 4× more time, 5× more sessions.')
     expect(en.disclosure).toBe('Why is this not proof?')
   })
@@ -165,8 +169,8 @@ describe('observed comparisons the history already allows', () => {
     const p = partsOf(entriesOf(obs(h), [], 'pt')[0]!, obs(h), 'pt', { currency: 'USD' })
     const by = Object.fromEntries(p.map(x => [x.type, x]))
     expect([by.cost!.big, by.time!.big, by.rework!.big]).toEqual(['2,5×', '4×', '5×'])
-    expect(by.cost!.word).toBe('comparado dentro do mesmo tamanho')
-    expect(by.cost!.state).toBe('history')
+    expect(by.cost!.word).toBe('Não compensou · 2,5× pior')
+    expect(by.cost!.state).toBe('scored')
     expect(by.quality!.state).toBe('none')
     expect(by.reliability!.state).toBe('none')
     expect(by.quality!.word).toBe('sem dados')
@@ -193,7 +197,7 @@ describe('observed comparisons the history already allows', () => {
       ['Custo mediano · G', 'US$ 100,00 → US$ 400,00', '4× · peças 3 × 3'],
     ])
     expect(cost.rows.some(r => r.value.includes('→') && !/(P|G)$/.test(r.label))).toBe(false)   // no row without its size
-    expect(cost.word).toBe('comparado dentro do mesmo tamanho')
+    expect(cost.word).toBe('Não compensou · 2,8× pior')
   })
 
   test('a pair that got CHEAPER shows its real ratio (0,5×), never an inverted "2×" beside a falling pair', () => {
