@@ -43,6 +43,9 @@ export interface CalPiece {
   taskTitle: string
   subtaskId: string | null
   title: string
+  /** The GROUP subtask this piece is a member of (`Subtask.parentGroupId`), and its title — the middle level of the Cronograma tree. Absent: the piece hangs straight off its task. */
+  groupId?: string | null
+  groupTitle?: string | null
   kind?: 'owner-request'
   leaderAvailabilityReasonCode?: 'fleet-unreadable' | 'no-live-leader'
   stage: CalStage
@@ -138,7 +141,7 @@ const PHASE_STAGE: Record<string, CalStage> = {
   fila: 'queue', executando: 'running', qa: 'qa', ajuste: 'adjust', revisao_lider: 'leader', pr_merge: 'merge', ci: 'ci', publicado: 'published', bloqueado: 'blocked',
 }
 export interface CalTaskInput { id: string; title: string; status: string; priority?: string; dueDate?: string }
-export interface CalSubtaskInput { id: string; taskId: string; title: string; status?: string; priority?: string; dueDate?: string }
+export interface CalSubtaskInput { id: string; taskId: string; title: string; status?: string; priority?: string; dueDate?: string; parentGroupId?: string }
 export interface CalResetInput { harness: string; account: string; label: string; window: '5h' | 'week'; resetsAt: number }
 
 const toPriority = (p: string | undefined): CalPriority | null => (p === 'urgent' || p === 'high' || p === 'medium' || p === 'low' ? p : null)
@@ -309,6 +312,13 @@ export function buildCalendar(o: {
     })
   }
 
+  // The group each member piece sits under (the Cronograma tree's middle level) — read off the board, never inferred.
+  for (const p of pieces) {
+    const parent = p.subtaskId ? subById.get(p.subtaskId)?.parentGroupId : undefined
+    const g = parent ? subById.get(parent) : undefined
+    if (parent && g) { p.groupId = parent; p.groupTitle = g.title }
+  }
+
   // ---- versions: the pieces that ride one release, and when it ships (or shipped).
   const byVersion = new Map<string, CalPiece[]>()
   for (const p of pieces) if (p.version) { const l = byVersion.get(p.version); if (l) l.push(p); else byVersion.set(p.version, [p]) }
@@ -398,7 +408,17 @@ export function pieceSpan(p: CalPiece): { startMs: number; endMs: number } | nul
 export const RECENT_ACTIVITY_MS = 24 * 3600_000
 const BLIP_MS = 15 * 60_000
 
-export interface CalPresence { fromMs: number; toMs: number; expected: boolean }
+export interface CalPresence {
+  fromMs: number; toMs: number; expected: boolean
+  /** The block's REAL start, before any clipping to a day. A day view must label with this, never with the clipped 00:00. */
+  realFromMs?: number
+  /** True when a day clip cut the block at midnight: the piece began on an earlier day (a continuation, not a 00:00 start). */
+  continued?: boolean
+  /** The PIECE's real start when this block does not itself begin there (an expected block begins at "now"). Absent when unknown. */
+  startMs?: number
+  /** True when a day clip cut the block at the END of the day: the work goes on, it did not stop at 00h00. */
+  continues?: boolean
+}
 
 /**
  * THE one rule for "what is on a day" — the Day and phone Week views draw from it and the API's date window filters
@@ -419,7 +439,7 @@ export function piecePresence(p: CalPiece, nowMs: number): CalPresence[] {
   if (eta !== null && eta >= nowMs) {
     const out: CalPresence[] = []
     if (start !== null && start < nowMs) out.push({ fromMs: start, toMs: nowMs, expected: false })
-    out.push({ fromMs: Math.max(nowMs, start ?? nowMs), toMs: Math.max(eta, nowMs + BLIP_MS), expected: true })
+    out.push({ fromMs: Math.max(nowMs, start ?? nowMs), toMs: Math.max(eta, nowMs + BLIP_MS), expected: true, ...(start !== null ? { startMs: start } : {}) })
     return out
   }
   const at = [p.startedAtMs, p.stageSinceMs, ...p.trail.map(v => v.enteredMs)].filter((x): x is number => x !== null && Number.isFinite(x))
@@ -435,7 +455,8 @@ export function pieceDayPresence(p: CalPiece, day: string, nowMs: number): CalPr
   const d0 = brtDayStartMs(day), d1 = d0 + 86_400_000
   return piecePresence(p, nowMs).flatMap(b => {
     const from = Math.max(b.fromMs, d0), to = Math.min(b.toMs, d1)
-    return to > from ? [{ fromMs: from, toMs: to, expected: b.expected }] : []
+    const real = b.startMs ?? (b.expected ? undefined : b.fromMs)
+    return to > from ? [{ fromMs: from, toMs: to, expected: b.expected, ...(real !== undefined ? { realFromMs: real } : {}), continued: b.fromMs < d0, continues: b.toMs > d1 }] : []
   })
 }
 

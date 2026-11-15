@@ -1,0 +1,81 @@
+/* Cronograma em árvore (semana e dia). Tokens do produto; a geometria vem do protótipo aprovado. */
+.crono{--LW:280px;--DW:66px;--RH:36px;--navy:#1b2447;--navy2:#222c55;flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;gap:6px}
+.crono[data-mode="day"]{--DW:52px}
+.crono-tl{flex:1;min-height:0;overflow:auto;position:relative;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-card)}
+.crono-in{position:relative;width:max-content;min-width:100%}
+.crono-hrow{display:flex;position:sticky;top:0;z-index:6;height:44px;background:var(--bg-card);border-bottom:1px solid var(--border)}
+.crono-lc{position:sticky;left:0;z-index:5;width:var(--LW);flex:none;background:var(--bg-card);display:flex;align-items:center;min-width:0;border-right:1px solid var(--border)}
+.crono-hrow .crono-lc{z-index:7;padding:0 12px;color:var(--text-tertiary);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.crono-cols{display:flex;flex:none}
+.crono-col{width:var(--DW);flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--text-secondary);font-size:11.5px}
+.crono-col b{font-weight:600;color:var(--text-primary);font-size:12.5px;min-width:24px;height:24px;display:grid;place-items:center;border-radius:12px;padding:0 6px}
+.crono-col[data-today] b{background:var(--accent-red);color:#fff}
+.crono-col[data-we]{color:var(--text-tertiary)}
+.crono-col[data-hr]{align-items:flex-start;padding-left:6px}
+.crono-row{display:flex;height:var(--RH);align-items:center}
+.crono-row:hover .crono-lc,.crono-row:hover .crono-track{background-color:color-mix(in srgb,var(--text-primary) 3%,var(--bg-card))}
+.crono-row .crono-lc{height:100%;padding-right:8px}
+.crono-track{position:relative;height:100%;flex:none;background-image:linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:var(--DW) 100%}
+.crono-wk{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--text-primary) 3%,transparent);pointer-events:none}
+.crono-now{position:absolute;top:44px;bottom:0;width:1.5px;background:var(--accent-red);z-index:4;pointer-events:none}
+.crono-now::before{content:"";position:absolute;top:-4px;left:-3px;width:7px;height:7px;border-radius:50%;background:var(--accent-red)}
+/* árvore */
+.crono-g{width:18px;flex:none;height:100%;position:relative}
+.crono-g[data-g="line"]::before,.crono-g[data-g="tee"]::before{content:"";position:absolute;left:8px;top:0;bottom:0;border-left:1.5px solid var(--border)}
+.crono-g[data-g="elb"]::after{content:"";position:absolute;left:8px;top:0;width:10px;height:50%;border-left:1.5px solid var(--border);border-bottom:1.5px solid var(--border);border-bottom-left-radius:7px}
+.crono-g[data-g="tee"]::after{content:"";position:absolute;left:8px;top:50%;width:10px;border-top:1.5px solid var(--border)}
+.crono-chev{width:20px;height:20px;flex:none;display:grid;place-items:center;color:var(--text-secondary);font-size:9px;border-radius:5px;cursor:pointer;background:none;border:0;padding:0}
+.crono-chev:hover{background:var(--bg-elevated)}
+.crono-chev[data-nil]{visibility:hidden}
+.crono-ttl{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--text-primary);padding-left:2px;background:none;border:0;text-align:left;font:inherit;font-size:12.5px;cursor:default}
+.crono-ttl[data-open]{cursor:pointer}
+.crono-row[data-kind="task"] .crono-ttl{font-weight:700}
+.crono-row[data-kind="group"] .crono-ttl{font-weight:600}
+.crono-row[data-kind="sub"][data-done] .crono-ttl{color:var(--text-secondary)}
+.crono-lc .crono-n{flex:none;font-size:10.5px;color:var(--text-tertiary);margin-left:6px;white-space:nowrap;font-variant-numeric:tabular-nums}
+/* barras */
+.crono-bar{position:absolute;top:5px;height:26px;border-radius:7px;display:flex;align-items:center;gap:7px;padding:0 8px;overflow:hidden;white-space:nowrap;font-size:11.5px;color:var(--text-primary);border:1px solid color-mix(in srgb,var(--text-primary) 10%,transparent);background:color-mix(in srgb,var(--c) 26%,var(--bg-card));font-family:inherit;text-align:left}
+button.crono-bar{cursor:pointer}
+.crono-bar>*{position:relative}
+.crono-bar>.crono-clip{position:absolute;inset:0;overflow:hidden;border-radius:inherit;pointer-events:none}
+.crono-bar>.crono-clip>*{position:absolute}
+.crono-bar .crono-fill{position:absolute;left:0;top:0;bottom:0;background:color-mix(in srgb,var(--c) 38%,transparent);pointer-events:none}
+.crono-bar[data-kind="task"]{background:var(--navy);--c:#5b6fd6;border-color:rgba(120,140,255,.28)}
+.crono-bar[data-kind="group"]{background:var(--navy2);--c:#6b7ee0;border-color:rgba(120,140,255,.2)}
+.crono-bar[data-done]{background:color-mix(in srgb,var(--accent-green) 12%,var(--bg-card));color:var(--text-secondary)}
+.crono-bar[data-plan]{background:transparent;border:1.5px dashed var(--border);color:var(--text-secondary)}
+.crono-bar[data-plan] .crono-fill{display:none}
+.crono-bar .crono-pc{font-weight:600;font-variant-numeric:tabular-nums;font-size:11px}
+.crono-cb{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--border);flex:none;display:grid;place-items:center;font-size:9px;line-height:1}
+.crono-cb[data-on]{background:#3b5bdb;border-color:#3b5bdb;color:#fff}
+.crono-ph{font-size:10px;font-weight:600;border-radius:999px;padding:1px 7px;border:1px solid color-mix(in srgb,var(--c) 60%,transparent);color:color-mix(in srgb,var(--c) 70%,var(--text-primary));background:color-mix(in srgb,var(--c) 14%,transparent);letter-spacing:.02em}
+.crono-hint{margin-left:auto;font-size:10.5px;color:var(--text-tertiary)}
+.crono-sem{position:absolute;top:9px;height:22px;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:var(--text-secondary);border:1px dashed var(--border);border-radius:999px;padding:0 9px;white-space:nowrap;background:var(--bg-card)}
+.crono-bar .crono-prev{position:absolute;top:0;bottom:0;right:0;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--text-primary) 9%,transparent) 0 4px,transparent 4px 8px);border-left:1px dashed var(--border)}
+.crono-foot{flex:none;color:var(--text-tertiary);font-size:11px;padding:0 2px}
+.crono-ring{display:inline-flex;flex:none}
+/* A bar that starts before the visible window keeps its phase chip WHOLE at the visible start (just right of the title column); a bar too narrow lets the chip overflow to the right, never cut. */
+.crono-bar[data-kind="sub"]{overflow:visible}
+.crono-bar>.crono-phs{visibility:hidden;flex:none}
+.crono-bar>.crono-phw{position:absolute;left:8px;right:0;top:0;bottom:0;display:flex;align-items:center;pointer-events:none;z-index:5}
+.crono-bar>.crono-phw>.crono-stk{position:sticky;left:calc(var(--LW) + 8px);flex:none;display:inline-flex;align-items:center;gap:6px;margin-right:calc(var(--cw) * -1)}
+.crono-bar>.crono-phw>.crono-stk>.crono-ph{background-color:color-mix(in srgb,var(--c) 30%,var(--bg-card))}
+.crono-bar>.crono-phw>.crono-stk>.crono-cb{background-color:var(--bg-card)}
+.crono-bar>.crono-phw>.crono-stk>.crono-cb[data-on]{background-color:#3b5bdb}
+/* A task/group bar keeps its % and ring pinned just right of the title column while the days scroll under it. */
+.crono-bar[data-kind="task"],.crono-bar[data-kind="group"]{overflow:visible}
+.crono-bar>.crono-pw{position:absolute;left:8px;right:0;top:0;bottom:0;display:flex;align-items:center;pointer-events:none;z-index:5}
+.crono-bar>.crono-pw>.crono-pin{position:sticky;left:calc(var(--LW) + 8px);flex:none;display:inline-flex;align-items:center;gap:7px;margin-right:calc(var(--cw) * -1);border-radius:999px;background:var(--navy);padding:0 4px}
+/* An overlay leaves WITH its bar: once the bar has slid under the title column (data-gone, set on scroll) nothing of it floats over empty timeline. */
+.crono-bar[data-gone] .crono-stk,.crono-bar[data-gone] .crono-pin{visibility:hidden}
+@media (max-width:700px){
+  .crono{--LW:172px;--DW:64px}
+  /* The grid scrolls inside itself, so the footer sits right under it, above the bottom navigation (~72px) instead of at the end of a 2000px page. */
+  .crono-tl{max-height:calc(100dvh / var(--ui-zoom, 1) - 290px);min-height:260px}
+  .crono[data-mode="day"]{--DW:56px}
+  .crono-ttl{font-size:12px}
+  .crono-lc .crono-n{display:none}
+  .crono-g{width:12px}
+  .crono-g[data-g="line"]::before,.crono-g[data-g="tee"]::before,.crono-g[data-g="tee"]::after,.crono-g[data-g="elb"]::after{left:5px}
+  .crono-chev{width:28px;height:28px}
+}

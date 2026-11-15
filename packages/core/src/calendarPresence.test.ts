@@ -59,3 +59,23 @@ describe('one rule for "what is on this day"', () => {
     }
   })
 })
+
+describe('a day block never invents a 00:00 start', () => {
+  const started = NOW - 2 * D - 3 * H
+  const p = piece({ key: 'a', startedAtMs: started, stageSinceMs: started, publishEta: { kind: 'estimate', atMs: NOW + 2 * D, confidence: 'low' } })
+  test('the day the piece started keeps its real instant and is not a continuation', () => {
+    const b = pieceDayPresence(p, brtDay(started), NOW)[0]!
+    expect(b.fromMs).toBe(started)
+    expect(b.realFromMs).toBe(started)
+    expect(b.continued).toBe(false)
+  })
+  test('a later day is clipped at midnight but says it is a continuation and carries the REAL start', () => {
+    const b = pieceDayPresence(p, brtDay(NOW), NOW)[0]!
+    expect(b.fromMs).toBe(brtDayStartMs(brtDay(NOW)))
+    expect(b.continued).toBe(true)
+    expect(b.realFromMs).toBe(started)
+  })
+  test('a piece with no real start has no block at all (no time), never a midnight one', () => {
+    expect(pieceDayPresence(piece({ key: 'b' }), brtDay(NOW), NOW)).toEqual([])
+  })
+})
