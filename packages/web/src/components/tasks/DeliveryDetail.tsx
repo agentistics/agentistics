@@ -1098,12 +1098,12 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
               lang={lang}
               statuses={statuses}
               onAdd={title => run(() => addSubtask(id, title))}
-              onPatch={async (sid, patch) => {
+              onPatch={async (sid, patch, o) => {
                 // Same shape as `run()`, but the RESULT reaches the caller — `SubtaskTable` needs
                 // it to catch `done_needs_session`/`invalid_group`/`subtask_has_sessions`/
                 // `group_field_conflict` and act on it instead of swallowing the refusal.
                 setBusy(true)
-                const result = await patchSubtask(id, sid, patch)
+                const result = await patchSubtask(id, sid, patch, o)
                 await reload()
                 setBusy(false)
                 return result

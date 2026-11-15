@@ -206,7 +206,7 @@ function TaskList() {
     if (status === 'blocked') { setBlocking(ids); return }
     const unfiled: string[] = []
     for (const id of ids) {
-      const out = await markTask(id, status)
+      const out = await markTask(id, status, { dialog: true })
       if (out.ok && details.has(id)) await refreshDetail(id)
       if (!out.ok && out.reason === 'done_needs_session') unfiled.push(id)
     }
@@ -530,11 +530,11 @@ function TaskList() {
           onRefreshDetail={refreshDetail}
           onCommentsChanged={async ref => { await reload(); await refreshDetail(ref) }}
           onAddSubtask={async (ref, title) => { await addSubtask(ref, title); await refreshDetail(ref) }}
-          onPatchSubtask={async (ref, sid, patch) => {
+          onPatchSubtask={async (ref, sid, patch, o) => {
             // The RESULT reaches the caller — the group-forming gestures (§F.1) need it to show
             // `invalid_group`/`subtask_has_sessions`/`group_field_conflict` instead of a swallowed
             // refusal.
-            const result = await patchSubtask(ref, sid, patch)
+            const result = await patchSubtask(ref, sid, patch, o)
             await refreshDetail(ref)
             return result
           }}

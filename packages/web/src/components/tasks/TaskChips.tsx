@@ -210,7 +210,7 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
   const onStatus = async (st: TaskStatus) => {
     if (st === 'blocked') { setBlocking(true); return }
     setBusy(true)
-    const result = await markTask(id, st)
+    const result = await markTask(id, st, { dialog: true })
     setBusy(false)
     if (!result.ok && result.reason === 'done_needs_session') { setDoneRefusal(true); return }
     await reload()

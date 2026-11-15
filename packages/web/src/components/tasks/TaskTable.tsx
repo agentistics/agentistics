@@ -388,7 +388,7 @@ function SubtaskRows({
   nowMs: number
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
   statuses: readonly TaskStatusDef[] | null
-  onPatch: (id: string, patch: SubtaskPatch) => Promise<StatusWriteResult>
+  onPatch: (id: string, patch: SubtaskPatch, o?: { dialog?: boolean }) => Promise<StatusWriteResult>
   onRemove: (id: string) => void
   onCreateGroup: (title: string) => Promise<string | null>
   onLinkSession: (subtaskId: string) => void
@@ -677,7 +677,7 @@ export interface TaskTableProps {
   /** Returns the write's outcome — the group-forming gestures (§F.1) need it to show
    *  `invalid_group`/`subtask_has_sessions`/`group_field_conflict` instead of swallowing a refusal,
    *  the same standard `SubtaskTable`'s own `onPatch` already holds this board to. */
-  onPatchSubtask: (ref: string, id: string, patch: SubtaskPatch) => Promise<StatusWriteResult>
+  onPatchSubtask: (ref: string, id: string, patch: SubtaskPatch, o?: { dialog?: boolean }) => Promise<StatusWriteResult>
   onRemoveSubtask: (ref: string, id: string) => void
   /** Mint a new GROUP subtask (§F.1) and return its id, or `null` on failure — see
    *  `SubtaskTable`'s own `onCreateGroup`. */
@@ -1269,7 +1269,7 @@ export function TaskTable(p: TaskTableProps) {
                             lang={p.lang ?? 'en'}
                             nowMs={nowMs}
                             statuses={p.statuses}
-                            onPatch={(id, patch) => p.onPatchSubtask(row.task.id, id, patch)}
+                            onPatch={(id, patch, o) => p.onPatchSubtask(row.task.id, id, patch, o)}
                             onRemove={id => p.onRemoveSubtask(row.task.id, id)}
                             onCreateGroup={title => p.onCreateGroupSubtask(row.task.id, title)}
                             onLinkSession={sub => setLinkingSub({ task: row.task.id, sub })}
