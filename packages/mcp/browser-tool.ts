@@ -109,3 +109,36 @@ export function browserStatusTool(body: unknown, now: number = Date.now()): Brow
     note: "Read-only. Memory is PSS (shared pages counted once). At most 2 session browsers + 1 personal; a new one needs 1.5 GB available. The browser actions arrive in a later release.",
   };
 }
+
+// ---------------------------------------------------------------------------------------------------
+// NAVEGADOR S2 — the session's browser verbs. Each tool is ONE call to `POST /api/browser/session/<verb>`;
+// every rule (validation, block list, who may drive which browser, the lock in S3) is the server's.
+
+/** The body a session verb sends: the tool's arguments plus the pane's HMAC proof. A `session` field
+ *  the caller put in the arguments is dropped — the proof is never the model's to choose. */
+export function browserSessionBody(args: unknown, proof: { id: string; token: string } | undefined): Record<string, unknown> {
+  const a: Record<string, unknown> = args && typeof args === "object" && !Array.isArray(args) ? { ...(args as Record<string, unknown>) } : {};
+  delete a.session;
+  return { ...a, session: proof ?? null };
+}
+
+type McpContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+
+/** What the model reads back. A screenshot is an IMAGE (plus its facts as text); a snapshot is its text
+ *  as is; a refusal is the server's sentence, marked as an error. */
+export function browserReply(body: unknown): { content: McpContent[]; isError?: boolean } {
+  const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  if (b.ok === false) {
+    const sentence = typeof b.sentence === "string" ? b.sentence : "The browser refused the action.";
+    return { content: [{ type: "text", text: `${sentence}${typeof b.error === "string" ? ` (${b.error})` : ""}` }], isError: true };
+  }
+  if (typeof b.data === "string" && typeof b.mime === "string" && b.mime.startsWith("image/")) {
+    const { data, ...rest } = b;
+    return { content: [{ type: "image", data, mimeType: b.mime }, { type: "text", text: JSON.stringify(rest) }] };
+  }
+  if (typeof b.snapshot === "string") {
+    const foot = `\n\n(refs: ${b.refs ?? 0}${b.truncated ? `, truncated — ${b.omittedRefs ?? 0} ref(s) left out` : ""}; ${b.bytes ?? 0} bytes)`;
+    return { content: [{ type: "text", text: `${b.snapshot}${foot}` }] };
+  }
+  return { content: [{ type: "text", text: JSON.stringify(b, null, 2) }] };
+}

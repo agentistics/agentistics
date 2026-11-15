@@ -3890,18 +3890,42 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       })
     }
 
-    // NAVEGADOR S1 — the browser host's read-only status (the MCP's `agentistics_browser_status` reads
-    // it). `/api/browser` is a `localShell` prefix in capability-guard.ts; the actions arrive in S2.
+    // NAVEGADOR S1+S2 — the browser host: status, the session's verbs and the person's own browser.
+    // `/api/browser` is a `localShell` prefix in capability-guard.ts (refused before auth on an exposed
+    // profile); `browserAllowed` applies the person's switch HERE, before any route — a hidden button is
+    // not a closed door. Who may drive which browser is `browser-gate.ts`'s `decideDriver`.
     if (url.pathname === '/api/browser' || url.pathname.startsWith('/api/browser/')) {
-      if (url.pathname === '/api/browser/status' && req.method === 'GET') {
-        const { browserStatusBody } = await import('./browser/browser-web')
-        return new Response(JSON.stringify(await browserStatusBody({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT] })), {
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-      return new Response(JSON.stringify({ error: 'not_found' }), {
-        status: 404, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      const jsonOut = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+        status, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
+      const { browserAllowed } = await import('./browser/browser-gate')
+      if (!browserAllowed(CAPS.localShell, (await readPreferences()).browserEnabled)) {
+        return jsonOut({ ok: false, error: 'browser_disabled', sentence: 'The built-in browser is turned off on this machine (Settings).' }, 403)
+      }
+      try {
+        const [{ browserRoute, browserRouteDeps }, { verifySessionIdentity }, { processSessionHub }] = await Promise.all([
+          import('./browser/browser-web'), import('./sessions/session-identity'), import('./sessions/session-hub'),
+        ])
+        let body: unknown = undefined
+        if (req.method === 'POST') {
+          const parsed = await readJsonLimited<unknown>(req, LIMITS.bodyBytes)
+          if (!parsed.ok) return jsonOut({ ok: false, error: parsed.error }, parsed.error === 'too_large' ? 413 : 400)
+          body = parsed.value
+        }
+        const sessionLive = (id: string): boolean | undefined => {
+          const row = processSessionHub()?.last()?.sessions.find(r => r.id === id)
+          if (!row) return undefined
+          return row.status === 'running' ? true : row.status === 'exited' || row.status === 'lost' ? false : undefined
+        }
+        const deps = browserRouteDeps({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT], sessionLive }, verifySessionIdentity)
+        const answer = await browserRoute(req.method, url.pathname, body, deps)
+        if (!answer) return jsonOut({ error: 'not_found' }, 404)
+        return jsonOut(answer.body, answer.status)
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return jsonOut(safe.body, 500)
+      }
     }
 
     // THE PER-SESSION UTILITY SHELL. Two gates and a refusal, all of them enforced HERE and not

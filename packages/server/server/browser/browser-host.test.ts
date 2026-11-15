@@ -364,3 +364,59 @@ describe('navigate refuses blocked URLs before touching the browser', () => {
     await h.stopAll()
   })
 })
+
+describe('S2: the S1 QA reservations, on the host', () => {
+  test('(b) a live browser no record names (pids.json deleted) and whose host is gone is killed by the sweep', async () => {
+    env = makeEnv()
+    const first = env.host()
+    await first.start(S('lost'))
+    const pid = env.fakes[0]!.pid
+    rmSync(join(env.root, 'pids.json'))
+    const next = env.host() // a new server: no entries, no records
+    const plan = await next.sweep()
+    expect(plan.kill.map(k => k.pid)).toEqual([pid])
+    expect(env.fakes[0]!.exited).toBe(true)
+    expect(existsSync(join(env.root, 'sessions', 'lost'))).toBe(false)
+  })
+
+  test('(b) the sweep never kills a browser THIS host is running, records or not', async () => {
+    env = makeEnv()
+    const h = env.host()
+    await h.start(S('mine'))
+    rmSync(join(env.root, 'pids.json'))
+    const plan = await h.sweep()
+    expect(plan.kill).toEqual([])
+    expect(env.fakes[0]!.exited).toBe(false)
+    await h.stopAll()
+  })
+
+  test('(a) a record whose host pid was recycled by a `sleep` is swept; one held by a live agentop is kept', async () => {
+    env = makeEnv()
+    const dirA = join(env.root, 'sessions', 'recycled')
+    const dirB = join(env.root, 'sessions', 'kept')
+    mkdirSync(dirA, { recursive: true }); mkdirSync(dirB, { recursive: true })
+    env.foreignAlive.add(777); env.foreign.set(777, 'sleep\x00600')
+    env.foreignAlive.add(888); env.foreign.set(888, '/usr/local/bin/agentop\x00server')
+    writeFileSync(join(env.root, 'pids.json'), JSON.stringify([
+      { key: 's-recycled', pid: 990001, profileDir: dirA, hostPid: 777, startedAt: 1 },
+      { key: 's-kept', pid: 990002, profileDir: dirB, hostPid: 888, startedAt: 1 },
+    ]))
+    const plan = await env.host().sweep()
+    expect(plan.keptForOtherHost).toEqual(['s-kept'])
+    expect(existsSync(dirA)).toBe(false)
+    expect(existsSync(dirB)).toBe(true)
+    expect(env.foreignAlive.has(777)).toBe(true) // the recycled pid itself is never touched
+  })
+
+  test('(c) status reports tab URLs as origin+path and a clean, capped title', async () => {
+    env = makeEnv()
+    const h = env.host()
+    await h.start(S('st'))
+    await h.openTab('s-st', `data:text/html,${'x'.repeat(10_000)}`)
+    const st = await h.status()
+    const urls = st.live[0]!.tabs.map(t => t.url)
+    expect(urls).toContain('data:text/html')
+    for (const u of urls) expect(u.length).toBeLessThanOrEqual(300)
+    await h.stopAll()
+  })
+})

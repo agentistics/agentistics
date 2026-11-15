@@ -32,7 +32,7 @@ import { planLimitsTool } from "./plan-limits-tool.js";
 import { benchmarkObservedTool, benchmarkQueryFromArgs } from "./benchmark-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
 import { deliveryIntegrityOf, vaultStatusTool } from "./vault-tool.js";
-import { browserStatusTool } from "./browser-tool.js";
+import { browserReply, browserSessionBody, browserStatusTool } from "./browser-tool.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
 
@@ -1137,7 +1137,115 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_browser_status",
     description:
-      "Read-only state of agentistics' built-in browser host on this machine: which browser executable it uses (or, in words, why there is none), the browsers running now (whose — a session or the person's own —, pid, open tabs as origin+path and title, PSS memory in MB, idle seconds, whether the systemd memory ceiling holds it and whether the sandbox is on), the ceilings (2 session browsers + 1 personal, tabs per browser), available memory against the 1.5 GB admission floor, why recent browsers stopped (idle, memory, session ended, evicted…) and the last orphan sweep. Starts nothing; the browser actions arrive in a later release. / Estado só-leitura do navegador do agentistics: executável, navegadores vivos, tetos, memória, paradas recentes e a última varredura de órfãos.",
+      "Read-only state of agentistics' built-in browser host on this machine: which browser executable it uses (or, in words, why there is none), the browsers running now (whose — a session or the person's own —, pid, open tabs as origin+path and title, PSS memory in MB, idle seconds, whether the systemd memory ceiling holds it and whether the sandbox is on), the ceilings (2 session browsers + 1 personal, tabs per browser), available memory against the 1.5 GB admission floor, why recent browsers stopped (idle, memory, session ended, evicted…) and the last orphan sweep. Starts nothing; the agentistics_browser_* tools drive a session's own browser. / Estado só-leitura do navegador do agentistics: executável, navegadores vivos, tetos, memória, paradas recentes e a última varredura de órfãos.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "agentistics_browser_navigate",
+    description:
+      "Drives THIS session's own built-in browser (a throwaway headless Chromium agentistics starts on the first call; the person can watch it). Open a URL in this session's browser and wait for it to load. file:, chrome: and agentistics' own ports are refused (redirects too); other localhost ports (your dev server) are allowed. / Abre uma URL no navegador desta sessão.",
+    inputSchema: { type: "object", properties: { url: { type: "string", description: "http(s) URL" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: ["url"] },
+  },
+  {
+    name: "agentistics_browser_back",
+    description:
+      "Go back one page in this session's browser. / Volta uma página.",
+    inputSchema: { type: "object", properties: { tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
+  },
+  {
+    name: "agentistics_browser_forward",
+    description:
+      "Go forward one page in this session's browser. / Avança uma página.",
+    inputSchema: { type: "object", properties: { tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
+  },
+  {
+    name: "agentistics_browser_reload",
+    description:
+      "Reload the page in this session's browser. / Recarrega a página.",
+    inputSchema: { type: "object", properties: { tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
+  },
+  {
+    name: "agentistics_browser_snapshot",
+    description:
+      "Read the page as accessible text with refs (e12...) for click/type/select. Capped (default 20 KB); mode viewport returns only what is on screen. / Lê a página como texto acessível com refs.",
+    inputSchema: { type: "object", properties: { mode: { type: "string", enum: ["full", "viewport"], description: "full (default) or viewport (only what is visible)" }, maxBytes: { type: "number", description: "2000 to 60000, default 20000" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
+  },
+  {
+    name: "agentistics_browser_click",
+    description:
+      "Click an element by ref (from snapshot), or at x,y viewport pixels. / Clica num elemento pelo ref ou em x,y.",
+    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12" }, x: { type: "number" }, y: { type: "number" }, button: { type: "string", enum: ["left", "right", "middle"] }, double: { type: "boolean" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
+  },
+  {
+    name: "agentistics_browser_type",
+    description:
+      "Replace the text of a field (by ref) with text; submit presses Enter after. / Digita num campo (substitui o conteúdo).",
+    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12" }, text: { type: "string" }, submit: { type: "boolean" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: ["ref", "text"] },
+  },
+  {
+    name: "agentistics_browser_press",
+    description:
+      "Press one key (Enter, Tab, Escape, Backspace, ArrowDown, PageDown... or one character) on the focused element. / Pressiona uma tecla.",
+    inputSchema: { type: "object", properties: { key: { type: "string" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: ["key"] },
+  },
+  {
+    name: "agentistics_browser_select",
+    description:
+      "Choose option(s) of a <select> by value or label. / Escolhe opções de um <select>.",
+    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12" }, values: { type: "array", items: { type: "string" } }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: ["ref", "values"] },
+  },
+  {
+    name: "agentistics_browser_scroll",
+    description:
+      "Scroll an element into view (ref) or the page by dy/dx pixels. / Rola a página ou traz um elemento à vista.",
+    inputSchema: { type: "object", properties: { ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12" }, dy: { type: "number" }, dx: { type: "number" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
+  },
+  {
+    name: "agentistics_browser_screenshot",
+    description:
+      "A picture of the page (the viewport, or fullPage up to 6000 px tall). / Captura da tela.",
+    inputSchema: { type: "object", properties: { fullPage: { type: "boolean" }, format: { type: "string", enum: ["png", "jpeg"] }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
+  },
+  {
+    name: "agentistics_browser_wait_for",
+    description:
+      "Wait (at most 10 s) for text to appear, for a ref to exist, or for ms milliseconds. Exactly one of text, ref, ms. / Espera um texto, um ref ou um tempo.",
+    inputSchema: { type: "object", properties: { text: { type: "string" }, ref: { type: "string", description: "A ref from agentistics_browser_snapshot, like e12" }, ms: { type: "number" }, timeoutMs: { type: "number", description: "at most 10000, default 5000" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
+  },
+  {
+    name: "agentistics_browser_evaluate",
+    description:
+      "Run a JavaScript expression in the page and return its JSON value (at most 20 KB; promises are awaited). / Avalia JavaScript na página (retorno de até 20 KB).",
+    inputSchema: { type: "object", properties: { expression: { type: "string" }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: ["expression"] },
+  },
+  {
+    name: "agentistics_browser_tabs",
+    description:
+      "List this session's browser tabs (id, URL, title, which is active). / Lista as abas.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "agentistics_browser_tab_new",
+    description:
+      "Open a new tab (at most 4), optionally at a URL; it becomes the active one. / Abre uma aba.",
+    inputSchema: { type: "object", properties: { url: { type: "string" } }, required: [] },
+  },
+  {
+    name: "agentistics_browser_tab_select",
+    description:
+      "Make a tab the active one. / Ativa uma aba.",
+    inputSchema: { type: "object", properties: { tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: ["tab"] },
+  },
+  {
+    name: "agentistics_browser_tab_close",
+    description:
+      "Close a tab. / Fecha uma aba.",
+    inputSchema: { type: "object", properties: { tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: ["tab"] },
+  },
+  {
+    name: "agentistics_browser_close",
+    description:
+      "Close this session's browser (its throwaway profile is deleted). / Fecha o navegador desta sessão.",
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
@@ -2008,6 +2116,42 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         return text({ ...vaultStatusTool(body), ...(delivery ? { delivery } : {}) });
       }
 
+      case "agentistics_browser_navigate":
+        return browserReply(await apiSend("POST", "/api/browser/session/navigate", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_back":
+        return browserReply(await apiSend("POST", "/api/browser/session/back", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_forward":
+        return browserReply(await apiSend("POST", "/api/browser/session/forward", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_reload":
+        return browserReply(await apiSend("POST", "/api/browser/session/reload", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_snapshot":
+        return browserReply(await apiSend("POST", "/api/browser/session/snapshot", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_click":
+        return browserReply(await apiSend("POST", "/api/browser/session/click", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_type":
+        return browserReply(await apiSend("POST", "/api/browser/session/type", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_press":
+        return browserReply(await apiSend("POST", "/api/browser/session/press", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_select":
+        return browserReply(await apiSend("POST", "/api/browser/session/select", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_scroll":
+        return browserReply(await apiSend("POST", "/api/browser/session/scroll", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_screenshot":
+        return browserReply(await apiSend("POST", "/api/browser/session/screenshot", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_wait_for":
+        return browserReply(await apiSend("POST", "/api/browser/session/wait_for", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_evaluate":
+        return browserReply(await apiSend("POST", "/api/browser/session/evaluate", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_tabs":
+        return browserReply(await apiSend("POST", "/api/browser/session/tabs", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_tab_new":
+        return browserReply(await apiSend("POST", "/api/browser/session/tab_new", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_tab_select":
+        return browserReply(await apiSend("POST", "/api/browser/session/tab_select", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_tab_close":
+        return browserReply(await apiSend("POST", "/api/browser/session/tab_close", browserSessionBody(args, sessionProof(process.env))));
+      case "agentistics_browser_close":
+        return browserReply(await apiSend("POST", "/api/browser/session/close", browserSessionBody(args, sessionProof(process.env))));
       case "agentistics_browser_status": {
         // The browser host's own snapshot (the one source the web reads too), reduced to an allowlist.
         return text(browserStatusTool(await apiGet("/api/browser/status")));

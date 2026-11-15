@@ -171,6 +171,51 @@ export interface BlockContext {
   agentisticsPorts: readonly number[]
   /** Debugging ports of our other browsers (port mode only; empty in pipe mode). */
   debugPorts?: readonly number[]
+  /** This machine's own interface addresses (a LAN IP reaches a server bound to 0.0.0.0 exactly as
+   *  127.0.0.1 does). Lowercased, no brackets. */
+  selfAddresses?: readonly string[]
+}
+
+/** Is `host` a bare IP literal (v4 dotted, single-number, hex, or v6)? Such a host is never resolved. */
+export function isIpLiteral(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  return h.includes(':') || /^\d+(\.\d+){0,3}$/.test(h) || /^0x[0-9a-f]+$/.test(h)
+}
+
+function hostIsThisMachine(hostname: string, ctx: BlockContext): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
+  return isLoopbackHost(h) || (ctx.selfAddresses ?? []).includes(h)
+}
+
+function portOf(u: URL): number | undefined {
+  return u.port ? Number(u.port) : DEFAULT_PORT[u.protocol.toLowerCase()]
+}
+
+function guardedPortReason(port: number | undefined, ctx: BlockContext): BlockReason | null {
+  if (port === undefined) return null
+  if (ctx.agentisticsPorts.includes(port)) return 'agentistics-port'
+  if ((ctx.debugPorts ?? []).includes(port)) return 'debug-port'
+  return null
+}
+
+/**
+ * A NAME (not an IP literal, not loopback) on a guarded port must be RESOLVED before it may load:
+ * `localtest.me` / `127.0.0.1.nip.io` resolve to 127.0.0.1 and would otherwise walk past the hostname
+ * rule. Only guarded ports pay a lookup — every other URL is decided by `urlBlockReason` alone.
+ */
+export function needsResolve(raw: string, ctx: BlockContext): boolean {
+  let u: URL
+  try { u = new URL(raw) } catch { return false }
+  if (!u.hostname || isIpLiteral(u.hostname) || hostIsThisMachine(u.hostname, ctx)) return false
+  return guardedPortReason(portOf(u), ctx) !== null
+}
+
+/** After resolving `needsResolve`'s name: block when ANY address is this machine. */
+export function resolvedBlockReason(raw: string, addresses: readonly string[], ctx: BlockContext): BlockReason | null {
+  let u: URL
+  try { u = new URL(raw) } catch { return 'invalid' }
+  if (!addresses.some(a => hostIsThisMachine(a, ctx))) return null
+  return guardedPortReason(portOf(u), ctx)
 }
 
 /** True for any name that resolves to this machine without DNS. */
@@ -196,12 +241,43 @@ export function urlBlockReason(raw: string, ctx: BlockContext): BlockReason | nu
   try { u = new URL(raw) } catch { return 'invalid' }
   const scheme = u.protocol.toLowerCase()
   if ((BLOCKED_SCHEMES as readonly string[]).includes(scheme)) return 'scheme'
-  if (!isLoopbackHost(u.hostname)) return null
-  const port = u.port ? Number(u.port) : DEFAULT_PORT[scheme]
-  if (port === undefined) return null
-  if (ctx.agentisticsPorts.includes(port)) return 'agentistics-port'
-  if ((ctx.debugPorts ?? []).includes(port)) return 'debug-port'
-  return null
+  if (!hostIsThisMachine(u.hostname, ctx)) return null
+  return guardedPortReason(portOf(u), ctx)
+}
+
+// ---------------------------------------------------------------------------------------------------
+// What `status` may say about a page (S1 QA reservation c)
+
+/**
+ * A tab URL as `status` reports it: `protocol//host/path` (no credentials, query or fragment — a URL can
+ * carry a token), a `data:` URL reduced to its media type (a data URL can be megabytes and IS content),
+ * `blob:` to its origin, any other scheme to the scheme alone. Capped at 300.
+ */
+export function statusUrl(raw: string): string {
+  if (typeof raw !== 'string' || raw === '') return ''
+  const lower = raw.slice(0, 16).toLowerCase()
+  if (lower.startsWith('data:')) {
+    const mime = /^data:([a-z0-9.+-]{1,40}\/[a-z0-9.+-]{1,60})/i.exec(raw)?.[1]
+    return mime ? `data:${mime.toLowerCase()}` : 'data:'
+  }
+  if (lower === 'about:blank' || lower.startsWith('about:blank')) return 'about:blank'
+  let u: URL
+  try { u = new URL(raw) } catch { return '' }
+  if (u.protocol === 'blob:') {
+    try { return `blob:${new URL(u.pathname).origin}` } catch { return 'blob:' }
+  }
+  if (u.protocol === 'http:' || u.protocol === 'https:') return `${u.protocol}//${u.host}${u.pathname}`.slice(0, 300)
+  return u.protocol
+}
+
+/** A page title as `status` reports it: control and bidi-override characters removed, whitespace
+ *  collapsed, capped at 120 (a page chooses its own title; it must not be able to forge lines or
+ *  reorder what is drawn around it). */
+export function statusTitle(raw: string): string {
+  if (typeof raw !== 'string') return ''
+  // eslint-disable-next-line no-control-regex
+  const clean = raw.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, ' ').replace(/\s+/g, ' ').trim()
+  return clean.length > 120 ? `${clean.slice(0, 119)}…` : clean
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -290,6 +366,15 @@ export function descendants(root: number, ppidOf: ReadonlyMap<number, number>): 
   return out
 }
 
+/** Field 22 (`starttime`, clock ticks since boot) of `/proc/<pid>/stat` — with the pid, an identity a
+ *  recycled pid cannot share. */
+export function startTimeFromStat(stat: string): number | null {
+  const close = stat.lastIndexOf(')')
+  if (close < 0) return null
+  const v = Number(stat.slice(close + 2).split(' ')[19])
+  return Number.isFinite(v) && v >= 0 ? v : null
+}
+
 /** `Pss:` and `Rss:` (bytes) out of `/proc/<pid>/smaps_rollup`. */
 export function parseSmapsRollup(text: string): { pss: number | null; rss: number | null } {
   const kb = (k: string) => { const m = new RegExp(`^${k}:\\s+(\\d+) kB`, 'm').exec(text); return m ? Number(m[1]) * 1024 : null }
@@ -305,7 +390,17 @@ export interface PidRecord {
   profileDir: string
   /** The agentop process that started it — a record of a host that is still alive is not ours to sweep. */
   hostPid: number
+  /** The host's own `starttime` (`startTimeFromStat`) when the record was written. With it, a live
+   *  process that merely REUSED the host's pid is told apart from the host (S1 QA reservation a). */
+  hostStart?: number
   startedAt: number
+}
+
+/** For a record written before `hostStart` existed: does this live pid's cmdline look like an agentop
+ *  server at all? A `sleep` that recycled the pid does not. */
+export function looksLikeAgentopHost(cmdline: string | null): boolean {
+  if (!cmdline) return false
+  return /(^|[\0 /])(agentop|bun)([\0 ]|$)/.test(cmdline) || /agentistics/.test(cmdline)
 }
 
 export interface SweepInput {
@@ -321,6 +416,8 @@ export interface SweepInput {
   /** The NUL-joined cmdline of a live pid, or null. Identity check: a recycled pid will not carry our
    *  `--user-data-dir`. */
   cmdline: (pid: number) => string | null
+  /** `starttime` of a live pid (`startTimeFromStat`), or null when unreadable. */
+  startTime?: (pid: number) => number | null
 }
 
 export interface SweepPlan {
@@ -352,14 +449,77 @@ export function cmdlineMatches(cmdline: string | null, profileDir: string): bool
   return false
 }
 
+/**
+ * Is the agentop that wrote this record still the one alive at `hostPid`? A live pid is not enough —
+ * pids are recycled, and a `sleep` holding the old host's pid used to keep an orphan folder (and, in
+ * port mode, a loose Chromium) forever. With `hostStart` the identity is exact (pid + start time);
+ * an older record without it needs a cmdline that looks like an agentop host.
+ */
+export function hostStillOwns(rec: PidRecord, input: Pick<SweepInput, 'selfPid' | 'alive' | 'cmdline' | 'startTime'>): boolean {
+  if (rec.hostPid === input.selfPid || !input.alive(rec.hostPid)) return false
+  if (rec.hostStart !== undefined) {
+    const now = input.startTime?.(rec.hostPid) ?? null
+    return now !== null && now === rec.hostStart
+  }
+  return looksLikeAgentopHost(input.cmdline(rec.hostPid))
+}
+
+/** The profile folder a cmdline names (`--user-data-dir=<dir>` as a whole argument, NUL or space
+ *  boundary), when that folder is one of OURS under `root`; otherwise null. */
+export function profileDirInCmdline(cmdline: string | null, root: string): string | null {
+  if (!cmdline) return null
+  const re = /(?:^|[\0 ])--user-data-dir=([^\0 ]+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(cmdline))) if (isProfileDir(root, m[1]!)) return m[1]!
+  return null
+}
+
+/** A process that reaps orphans (what a browser is re-parented to when its host died). */
+export function isReaper(pid: number, cmdline: string | null): boolean {
+  if (pid === 1) return true
+  const argv0 = (cmdline ?? '').split(/[\0 ]/)[0] ?? ''
+  const base = argv0.slice(argv0.lastIndexOf('/') + 1)
+  return ['systemd', 'init', 'tini', 'dumb-init', 'catatonit', 'docker-init', 'Relay'].includes(base) || argv0 === '/init'
+}
+
+export interface UnrecordedProc { pid: number; ppid: number; cmd: string | null }
+
+/**
+ * S1 QA reservation b — orphans that `pids.json` does not name (the file was deleted or corrupted):
+ * every live MAIN browser process whose own argv names one of our profile folders and whose parent is
+ * gone or is a reaper (its host died). A process whose parent also names that folder is a helper of
+ * it (renderer, GPU, zygote) and dies with it. Protected folders (this host's live ones, another live
+ * host's records) and our own children are never touched. The cmdline IS the identity here: a process
+ * that does not carry our `--user-data-dir` is never considered.
+ */
+export function planUnrecordedOrphans(input: {
+  root: string
+  procs: readonly UnrecordedProc[]
+  selfPid: number
+  protectedDirs: ReadonlySet<string>
+  /** Pids already planned for a kill by the record path. */
+  alreadyKilling?: ReadonlySet<number>
+}): { kill: { pid: number; dir: string }[] } {
+  const byPid = new Map(input.procs.map(p => [p.pid, p]))
+  const kill: { pid: number; dir: string }[] = []
+  for (const p of input.procs) {
+    const dir = profileDirInCmdline(p.cmd, input.root)
+    if (!dir || input.protectedDirs.has(dir) || input.alreadyKilling?.has(p.pid)) continue
+    if (p.ppid === input.selfPid) continue
+    const parent = byPid.get(p.ppid)
+    if (parent && profileDirInCmdline(parent.cmd, input.root) === dir) continue // a helper
+    const orphaned = !parent || isReaper(parent.pid, parent.cmd)
+    if (orphaned) kill.push({ pid: p.pid, dir })
+  }
+  return { kill }
+}
+
 export function planOrphanSweep(input: SweepInput): SweepPlan {
   const plan: SweepPlan = { kill: [], removeDirs: [], dropKeys: [], keptForOtherHost: [] }
   const protectedDirs = new Set<string>(input.ownLiveDirs ?? [])
   for (const rec of input.records) {
     if (protectedDirs.has(rec.profileDir) && rec.hostPid === input.selfPid) continue
-    const hostAlive = rec.hostPid !== input.selfPid && input.alive(rec.hostPid)
-      && (input.cmdline(rec.hostPid) ?? '').length > 0
-    if (hostAlive) {
+    if (hostStillOwns(rec, input)) {
       plan.keptForOtherHost.push(rec.key)
       protectedDirs.add(rec.profileDir)
       continue

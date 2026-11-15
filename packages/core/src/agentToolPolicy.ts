@@ -123,8 +123,26 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_book_takeover',
   // Vault (1) — COFRE.DESBLOQUEIO
   'agentistics_vault_status',
-  // Browser (1) — NAVEGADOR S1 (read-only; actions in S2/S3)
+  // Browser — NAVEGADOR S1 (status) + S2 (the session's own browser; the lock is S3)
   'agentistics_browser_status',
+  'agentistics_browser_navigate',
+  'agentistics_browser_back',
+  'agentistics_browser_forward',
+  'agentistics_browser_reload',
+  'agentistics_browser_snapshot',
+  'agentistics_browser_click',
+  'agentistics_browser_type',
+  'agentistics_browser_press',
+  'agentistics_browser_select',
+  'agentistics_browser_scroll',
+  'agentistics_browser_screenshot',
+  'agentistics_browser_wait_for',
+  'agentistics_browser_evaluate',
+  'agentistics_browser_tabs',
+  'agentistics_browser_tab_new',
+  'agentistics_browser_tab_select',
+  'agentistics_browser_tab_close',
+  'agentistics_browser_close',
 ] as const
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]
@@ -274,6 +292,78 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
     ...TASKS, risk: 'R', routes: ['GET /api/browser/status'],
     reason: 'reads the browser host state (executable, live browsers, ceilings, memory, recent stops) through an allowlist; starts nothing',
   },
+  agentistics_browser_navigate: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/navigate'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_back: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/back'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_forward: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/forward'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_reload: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/reload'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_snapshot: {
+    ...TASKS, risk: 'R', routes: ['POST /api/browser/session/snapshot'],
+    reason: "reads the session's OWN throwaway browser (page text, picture, tabs or a bounded wait); changes nothing",
+  },
+  agentistics_browser_click: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/click'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_type: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/type'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_press: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/press'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_select: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/select'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_scroll: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/scroll'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_screenshot: {
+    ...TASKS, risk: 'R', routes: ['POST /api/browser/session/screenshot'],
+    reason: "reads the session's OWN throwaway browser (page text, picture, tabs or a bounded wait); changes nothing",
+  },
+  agentistics_browser_wait_for: {
+    ...TASKS, risk: 'R', routes: ['POST /api/browser/session/wait_for'],
+    reason: "reads the session's OWN throwaway browser (page text, picture, tabs or a bounded wait); changes nothing",
+  },
+  agentistics_browser_evaluate: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/evaluate'],
+    reason: "runs a script inside the session's OWN throwaway browser page (result capped at 20 KB); the page reaches nothing the block rules refuse and nothing the harness could not already fetch",
+  },
+  agentistics_browser_tabs: {
+    ...TASKS, risk: 'R', routes: ['POST /api/browser/session/tabs'],
+    reason: "reads the session's OWN throwaway browser (page text, picture, tabs or a bounded wait); changes nothing",
+  },
+  agentistics_browser_tab_new: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/tab_new'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_tab_select: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/tab_select'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_tab_close: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/tab_close'],
+    reason: "drives the session's OWN throwaway browser (profile deleted on close); agentistics' ports, file: and chrome: stay refused, and it reaches nothing the harness could not already fetch",
+  },
+  agentistics_browser_close: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/session/close'],
+    reason: "closes the session's OWN throwaway browser; the next browser call starts a fresh one",
+  },
   // ------------------------------------------------------------------ Experimental flows (read-only host operations)
   agentistics_flow_run: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['POST /api/flows/run'], reason: 'runs only the built-in deterministic flow gates; it deletes nothing' },
   agentistics_flow_status: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['GET /api/flows/status/:runId'], reason: 'reads a durable deterministic flow run' },
@@ -325,7 +415,7 @@ export const NEVER_ROUTES: readonly NeverRoute[] = [
  * of them in the MCP source. The spec's phone-pairing and voice-approval switches join this list the
  * day they exist.
  */
-export const NEVER_PREFERENCE_KEYS: readonly string[] = ['shellEnabled', 'chatEnabled', 'editorEnabled']
+export const NEVER_PREFERENCE_KEYS: readonly string[] = ['shellEnabled', 'chatEnabled', 'editorEnabled', 'browserEnabled']
 
 /** True when `METHOD path` hits a NEVER route. Pure; the lint and (from P2) the gate share it. */
 export function neverRouteFor(method: string, path: string): NeverRoute | null {

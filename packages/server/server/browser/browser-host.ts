@@ -30,6 +30,8 @@
 import { spawn as nodeSpawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { lookup as dnsLookup } from 'node:dns/promises'
+import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import { admissionSentence, decideAdmission, type AdmissionRefusal, type LiveBrowserView } from './browser-admission'
@@ -37,11 +39,13 @@ import { browserBinSentence, findBrowserBin, type BrowserBin } from './browser-b
 import {
   KILL_GRACE_MS, MAX_LIVE_BROWSERS, MAX_PERSONAL_BROWSERS, MAX_SESSION_BROWSERS, MAX_TABS_PERSONAL, MAX_TABS_SESSION,
   MIN_AVAILABLE_BYTES, START_TIMEOUT_MS, WATCH_INTERVAL_MS, browserArgv, descendants, idleExpired, memoryVerdict,
-  ownerKey, parseSmapsRollup, planOrphanSweep, ppidFromStat, profileDirFor, scopeUnitName, scopeWrap, tabToTrim,
-  urlBlockReason, validManagedId,
-  type BrowserOwner, type MemoryVerdict, type PidRecord, type SweepPlan,
+  ownerKey, parseSmapsRollup, planOrphanSweep, planUnrecordedOrphans, ppidFromStat, profileDirFor, scopeUnitName,
+  scopeWrap, statusTitle, statusUrl, tabToTrim, urlBlockReason, validManagedId, needsResolve, resolvedBlockReason,
+  startTimeFromStat,
+  type BlockContext, type BlockReason, type BrowserOwner, type MemoryVerdict, type PidRecord, type SweepPlan,
 } from './browser-spec'
-import { CdpClient } from './cdp-client'
+import { CdpClient, type CdpEvent } from './cdp-client'
+import type { ActionHost, BlockedHit, LastAction } from './browser-actions'
 
 // ---------------------------------------------------------------------------------------------------
 // Dependencies
@@ -75,6 +79,13 @@ export interface BrowserHostDeps {
   selfPid: number
   /** Explicit opt-out of the sandbox (`AGENTISTICS_BROWSER_NO_SANDBOX=1`). */
   forceNoSandbox?: boolean
+  /** DNS for the block rules (a name on a guarded port is resolved before it may load). */
+  resolve?: (hostname: string) => Promise<string[]>
+  /** This machine's interface addresses (a LAN IP reaches a 0.0.0.0-bound server). */
+  selfAddresses?: () => string[]
+  /** Debugging ports of browsers this machine runs in PORT mode (none in pipe mode, the default): a page
+   *  may never reach one — it would drive another browser. */
+  debugPorts?: () => readonly number[]
   log?: (line: string) => void
 }
 
@@ -88,6 +99,8 @@ export interface ProcReader {
   cgroup?: (pid: number) => string | null
   /** Is this pid gone (absent, or a zombie)? */
   gone?: (pid: number) => boolean
+  /** `starttime` of a pid (the identity a recycled pid cannot share), or null. */
+  startTime?: (pid: number) => number | null
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -113,6 +126,13 @@ interface Entry {
   sandbox: boolean
   memory: MemoryVerdict | null
   stopping: Promise<void> | null
+  /** page targetId → its flat CDP session (auto-attached, Fetch-intercepted). */
+  tabSessions: Map<string, string>
+  /** Every attached CDP session (pages, iframes, workers) → the page target it belongs to. */
+  sessionPage: Map<string, string>
+  /** What the block rules refused lately (newest first) — an action explains its own refusals from it. */
+  blocked: BlockedHit[]
+  lastAction: LastAction | null
 }
 
 export type StopReason = 'requested' | 'idle' | 'memory' | 'session-ended' | 'evicted' | 'server-stop' | 'crashed' | 'start-failed'
@@ -132,6 +152,9 @@ export interface BrowserSummary {
   /** Started in our scope and moved itself out (full Google Chrome does). */
   scopeEscaped: boolean
   sandbox: boolean
+  /** The last few URLs the block rules refused (origin+path), redirects marked. */
+  blocked: { url: string; reason: BlockReason; resourceType: string; redirect: boolean; at: number }[]
+  lastAction: { kind: string; label: string; at: number } | null
 }
 
 export interface BrowserStatus {
@@ -200,6 +223,7 @@ export class BrowserHost {
       key, owner, phase: 'starting', pid: null, profileDir: profileDirFor(this.d.root, owner),
       startedAt: this.d.now(), lastActivityMs: this.d.now(), viewers: 0, cdp: null, child: null,
       tabs: new Map(), activeTab: null, scope: false, scopeEscaped: false, sandbox: true, memory: null, stopping: null,
+      tabSessions: new Map(), sessionPage: new Map(), blocked: [], lastAction: null,
     }
     this.entries.set(key, entry)
     if (decision.evict) await this.stop(decision.evict, 'evicted')
@@ -272,9 +296,16 @@ export class BrowserHost {
     this.writeRecords()
     const cdp = new CdpClient(child.cdpOut, child.cdpIn)
     entry.cdp = cdp
+    // Events first: auto-attach announces every page (the first one included) the moment it is on.
+    cdp.on((ev) => this.onEvent(entry, ev))
     try {
       await cdp.send('Browser.getVersion', {}, undefined, START_TIMEOUT_MS)
       await cdp.send('Target.setDiscoverTargets', { discover: true })
+      // Every target (existing and new: tabs, popups, then — per session — iframes and workers) is
+      // attached PAUSED, gets `Fetch` interception, and only then runs. A popup or an iframe cannot load
+      // a byte before the block rules see its requests, redirects included (measured S2: a 302 to a
+      // blocked port is a second `Fetch.requestPaused` and is refused).
+      await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true })
       const { targetInfos } = await cdp.send<{ targetInfos: any[] }>('Target.getTargets')
       for (const t of targetInfos) if (t.type === 'page') this.upsertTab(entry, t)
       entry.activeTab = [...entry.tabs.keys()][0] ?? null
@@ -303,7 +334,6 @@ export class BrowserHost {
       entry.scopeEscaped = !entry.scope
       if (entry.scopeEscaped) this.log(`${entry.key} left the memory scope (cgroup: ${cg?.trim() ?? 'unreadable'})`)
     }
-    cdp.on((ev) => this.onEvent(entry, ev))
     cdp.onClose(() => {
       // The pipe closed without us asking: the browser crashed or was killed from outside.
       if (entry.phase === 'live') void this.stop(entry.key, 'crashed')
@@ -316,13 +346,112 @@ export class BrowserHost {
     return true
   }
 
-  private onEvent(entry: Entry, ev: { method: string; params: any }): void {
+  private onEvent(entry: Entry, ev: CdpEvent): void {
     if (ev.method === 'Target.targetCreated' || ev.method === 'Target.targetInfoChanged') {
       if (ev.params?.targetInfo?.type === 'page') this.upsertTab(entry, ev.params.targetInfo)
     } else if (ev.method === 'Target.targetDestroyed') {
       entry.tabs.delete(ev.params?.targetId)
+      entry.tabSessions.delete(ev.params?.targetId)
       if (entry.activeTab === ev.params?.targetId) entry.activeTab = [...entry.tabs.keys()][0] ?? null
+    } else if (ev.method === 'Target.attachedToTarget') {
+      void this.setupAttached(entry, ev)
+    } else if (ev.method === 'Target.detachedFromTarget') {
+      const sid = ev.params?.sessionId
+      entry.sessionPage.delete(sid)
+      for (const [t, s] of entry.tabSessions) if (s === sid) entry.tabSessions.delete(t)
+    } else if (ev.method === 'Fetch.requestPaused' && ev.sessionId) {
+      void this.onPaused(entry, ev)
+    } else if (ev.method === 'Network.webSocketCreated' && ev.sessionId) {
+      void this.onWebSocket(entry, ev)
     }
+  }
+
+  /** A target was attached (paused when auto-attached): intercept, then let it run. Every step may fail
+   *  for a target type that lacks the domain (a worker has no `Page`); the run always happens, or the
+   *  target would hang forever. */
+  private async setupAttached(entry: Entry, ev: CdpEvent): Promise<void> {
+    const cdp = entry.cdp
+    const sid: string | undefined = ev.params?.sessionId
+    const info = ev.params?.targetInfo
+    if (!cdp || !sid || !info) return
+    const page = info.type === 'page' ? info.targetId : (ev.sessionId ? entry.sessionPage.get(ev.sessionId) : undefined)
+    if (page) entry.sessionPage.set(sid, page)
+    if (info.type === 'page') { entry.tabSessions.set(info.targetId, sid); this.upsertTab(entry, info) }
+    const steps: Promise<unknown>[] = [
+      cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] }, sid),
+      cdp.send('Network.enable', { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }, sid),
+      cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, sid),
+    ]
+    if (info.type === 'page') steps.push(cdp.send('Page.enable', {}, sid))
+    await Promise.allSettled(steps)
+    if (ev.params?.waitingForDebugger) await cdp.send('Runtime.runIfWaitingForDebugger', {}, sid).catch(() => {})
+  }
+
+  private blockCtx(): BlockContext {
+    return { agentisticsPorts: this.d.agentisticsPorts, debugPorts: this.d.debugPorts?.() ?? [], selfAddresses: this.selfAddrs() }
+  }
+
+  private selfAddrMemo: { at: number; list: string[] } | null = null
+  private selfAddrs(): string[] {
+    const now = Date.now()
+    if (!this.selfAddrMemo || now - this.selfAddrMemo.at > 60_000) {
+      let list: string[] = []
+      try { list = (this.d.selfAddresses?.() ?? []).map(a => a.toLowerCase()) } catch { list = [] }
+      this.selfAddrMemo = { at: now, list }
+    }
+    return this.selfAddrMemo.list
+  }
+
+  /** The block rules for one URL, DNS included (a name on a guarded port that resolves to this machine). */
+  async blockReasonFor(url: string): Promise<BlockReason | null> {
+    const ctx = this.blockCtx()
+    const direct = urlBlockReason(url, ctx)
+    if (direct) return direct
+    if (!needsResolve(url, ctx) || !this.d.resolve) return null
+    try {
+      const host = new URL(url).hostname
+      const addrs = await Promise.race([
+        this.d.resolve(host),
+        new Promise<string[]>((r) => setTimeout(() => r([]), 2_000)),
+      ])
+      return resolvedBlockReason(url, addrs, ctx)
+    } catch { return null }
+  }
+
+  private async onPaused(entry: Entry, ev: CdpEvent): Promise<void> {
+    const cdp = entry.cdp
+    const p = ev.params ?? {}
+    const url: string = p.request?.url ?? ''
+    if (!cdp) return
+    const reason = await this.blockReasonFor(url)
+    if (reason) {
+      entry.blocked.unshift({
+        url: statusUrl(url), reason, resourceType: String(p.resourceType ?? ''), redirect: Boolean(p.redirectedRequestId),
+        page: entry.sessionPage.get(ev.sessionId!) ?? null, at: this.d.now(),
+      })
+      entry.blocked.length = Math.min(entry.blocked.length, 20)
+      await cdp.send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'BlockedByClient' }, ev.sessionId).catch(() => {})
+    } else {
+      await cdp.send('Fetch.continueRequest', { requestId: p.requestId }, ev.sessionId).catch(() => {})
+    }
+  }
+
+  /**
+   * A WebSocket is NOT interceptable by CDP — measured S2: neither `Fetch` nor `Network.setBlockedURLs`
+   * stops the handshake. The real guard is the target's own Origin check (agentistics' WS routes refuse a
+   * foreign Origin; Chromium's debug endpoint refuses any page Origin without `--remote-allow-origins`,
+   * which we never pass). On top of that, a page that tries one to a blocked address is CLOSED here and
+   * the attempt recorded — a reaction, not a prevention: the handshake may already be on the wire.
+   */
+  private async onWebSocket(entry: Entry, ev: CdpEvent): Promise<void> {
+    const url: string = ev.params?.url ?? ''
+    const reason = await this.blockReasonFor(url)
+    if (!reason) return
+    const page = entry.sessionPage.get(ev.sessionId!) ?? null
+    entry.blocked.unshift({ url: statusUrl(url.replace(/^ws/i, 'http')), reason, resourceType: 'WebSocket', redirect: false, page, at: this.d.now() })
+    entry.blocked.length = Math.min(entry.blocked.length, 20)
+    this.log(`${entry.key}: a page opened a WebSocket to a blocked address (${reason}); closing its tab`)
+    if (page) await entry.cdp?.send('Target.closeTarget', { targetId: page }).catch(() => {})
   }
 
   private upsertTab(entry: Entry, t: { targetId: string; url?: string; title?: string }): void {
@@ -405,10 +534,21 @@ export class BrowserHost {
   /** For `process.on('exit')`, where nothing async runs: SIGKILL every saved PID and drop the profiles.
    *  (In pipe mode the browsers die with our pipe anyway; this is the belt to that brace.) */
   killAllSync(): void {
-    for (const e of this.entries.values()) {
+    // The whole tree, captured with each member's cmdline BEFORE any kill (a helper keeps writing the
+    // profile after the main process dies — measured S2: the folder survived a server SIGTERM because the
+    // rm ran while a helper still wrote). A member is killed only while it still carries that cmdline.
+    const trees = [...this.entries.values()].map(e => ({ e, tree: e.child ? this.treeOf(e.child.pid) : [] }))
+    for (const { e, tree } of trees) {
       if (e.child && !e.child.hasExited()) { try { this.d.kill(e.child.pid, 'SIGKILL') } catch { /* gone */ } }
-      this.removeProfile(e.profileDir)
+      for (const t of tree) {
+        if (t.pid === e.child?.pid || t.cmd === null || this.d.proc?.cmdline(t.pid) !== t.cmd) continue
+        try { this.d.kill(t.pid, 'SIGKILL') } catch { /* gone */ }
+      }
     }
+    // Nothing async runs in an exit handler: a short, bounded busy wait for the trees to go.
+    const until = Date.now() + 500
+    while (Date.now() < until && trees.some(({ tree }) => tree.some(t => !this.isGone(t.pid)))) { /* spin */ }
+    for (const { e } of trees) this.removeProfile(e.profileDir)
     this.entries.clear()
     this.writeRecords()
   }
@@ -447,39 +587,19 @@ export class BrowserHost {
   }
 
   /**
-   * Navigate the active tab (or a new one) — the one action S1 carries, enough to prove the host end to
-   * end. Refuses a URL the block rules refuse (spec §4).
+   * Navigate the active tab (or a new one). Refuses a URL the block rules refuse (spec §4) before the
+   * browser is touched; a redirect to one is refused by the interception. Kept for S1 callers; the
+   * routes go through `runAction`.
    */
   async navigate(key: string, url: string): Promise<{ ok: true; targetId: string; url: string; title: string } | { ok: false; reason: string }> {
-    const e = this.entries.get(key)
-    if (!e || e.phase !== 'live' || !e.cdp) return { ok: false, reason: 'no-browser' }
-    const blocked = urlBlockReason(url, { agentisticsPorts: this.d.agentisticsPorts })
+    const h = this.actionHost(key)
+    if (!h) return { ok: false, reason: 'no-browser' }
+    const blocked = await this.blockReasonFor(url)
     if (blocked) return { ok: false, reason: `blocked:${blocked}` }
-    e.lastActivityMs = this.d.now()
-    let targetId = e.activeTab
-    if (!targetId) {
-      const r = await e.cdp.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' })
-      targetId = r.targetId
-    }
-    const { sessionId } = await e.cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true })
-    try {
-      await e.cdp.send('Page.enable', {}, sessionId)
-      const loaded = new Promise<void>((res) => {
-        const off = e.cdp!.on((ev) => { if (ev.sessionId === sessionId && ev.method === 'Page.loadEventFired') { off(); res() } })
-        setTimeout(() => { off(); res() }, 15_000)
-      })
-      const nav = await e.cdp.send<{ errorText?: string }>('Page.navigate', { url }, sessionId)
-      if (nav.errorText) return { ok: false, reason: `navigation:${nav.errorText}` }
-      await loaded
-      const { result } = await e.cdp.send<{ result: { value: { url: string; title: string } } }>(
-        'Runtime.evaluate', { expression: '({url: location.href, title: document.title})', returnByValue: true }, sessionId)
-      const tab = e.tabs.get(targetId)
-      if (tab) { tab.url = result.value.url; tab.title = result.value.title; tab.lastActiveMs = this.d.now() }
-      e.activeTab = targetId
-      return { ok: true, targetId, url: result.value.url, title: result.value.title }
-    } finally {
-      await e.cdp.send('Target.detachFromTarget', { sessionId }).catch(() => {})
-    }
+    const { runAction } = await import('./browser-actions')
+    const r = await runAction(h, { action: 'navigate', url })
+    if (!r.ok) return { ok: false, reason: r.error === 'blocked' ? `blocked:${(r as any).reason}` : `navigation:${r.sentence}` }
+    return { ok: true, targetId: String(r.tab), url: String(r.url), title: String(r.title) }
   }
 
   /** Open another tab, within the per-owner tab ceiling. */
@@ -488,13 +608,57 @@ export class BrowserHost {
     if (!e || e.phase !== 'live' || !e.cdp) return { ok: false, reason: 'no-browser' }
     const max = e.owner.kind === 'personal' ? MAX_TABS_PERSONAL : MAX_TABS_SESSION
     if (e.tabs.size >= max) return { ok: false, reason: 'tab-ceiling' }
-    const blocked = urlBlockReason(url, { agentisticsPorts: this.d.agentisticsPorts })
+    const blocked = await this.blockReasonFor(url)
     if (blocked) return { ok: false, reason: `blocked:${blocked}` }
     const { targetId } = await e.cdp.send<{ targetId: string }>('Target.createTarget', { url })
     this.upsertTab(e, { targetId, url })
     e.activeTab = targetId
     e.lastActivityMs = this.d.now()
     return { ok: true, targetId }
+  }
+
+  /** What `runAction` drives: one live browser, seen through a narrow interface. Null when not live. */
+  actionHost(key: string): ActionHost | null {
+    const e = this.entries.get(key)
+    if (!e || e.phase !== 'live' || !e.cdp) return null
+    const cdp = e.cdp
+    const host = this
+    return {
+      cdp,
+      ownerKind: e.owner.kind,
+      maxTabs: e.owner.kind === 'personal' ? MAX_TABS_PERSONAL : MAX_TABS_SESSION,
+      tabs: () => [...e.tabs.values()].map(t => ({ targetId: t.targetId, url: t.url, title: t.title, active: t.targetId === e.activeTab })),
+      activeTab: () => (e.activeTab && e.tabs.has(e.activeTab) ? e.activeTab : null),
+      setActive: (targetId) => {
+        if (!e.tabs.has(targetId)) return
+        e.activeTab = targetId
+        const t = e.tabs.get(targetId)!
+        t.lastActiveMs = host.d.now()
+      },
+      noteTab: (targetId, url, title) => {
+        const t = e.tabs.get(targetId)
+        if (t) { t.url = url; t.title = title; t.lastActiveMs = host.d.now() }
+      },
+      sessionFor: async (targetId) => {
+        const known = e.tabSessions.get(targetId)
+        if (known) return known
+        // Not auto-attached (yet): attach explicitly and intercept before anything else is sent.
+        const { sessionId } = await cdp.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true })
+        if (!e.tabSessions.has(targetId)) {
+          await host.setupAttached(e, { method: 'Target.attachedToTarget', params: { sessionId, targetInfo: { targetId, type: 'page' }, waitingForDebugger: false } })
+        }
+        return e.tabSessions.get(targetId) ?? sessionId
+      },
+      waitTab: async (targetId, ms) => {
+        const started = Date.now()
+        while (!e.tabSessions.has(targetId) && Date.now() - started < ms) await new Promise(r => setTimeout(r, 25))
+      },
+      blockedSince: (ms) => e.blocked.filter(b => b.at >= ms),
+      blockReason: (url) => host.blockReasonFor(url),
+      noteAction: (a) => { e.lastAction = a },
+      touch: () => { e.lastActivityMs = host.d.now() },
+      now: () => host.d.now(),
+    }
   }
 
   // ----------------------------------------------------------------------------------- the watcher
@@ -571,7 +735,23 @@ export class BrowserHost {
       ownLiveDirs: new Set([...this.entries.values()].map(e => e.profileDir)),
       alive: (pid) => { try { this.d.kill(pid, 0); return true } catch (e: any) { return e?.code === 'EPERM' } },
       cmdline: (pid) => this.d.proc?.cmdline(pid) ?? null,
+      startTime: (pid) => this.d.proc?.startTime?.(pid) ?? null,
     })
+    // S1 QA reservation b: a live browser of ours that NO record names (pids.json deleted/corrupt) and
+    // whose host is gone. Its own argv naming our profile folder is the identity.
+    if (this.d.proc) {
+      const protectedDirs = new Set<string>([...this.entries.values()].map(e => e.profileDir))
+      for (const r of records) if (plan.keptForOtherHost.includes(r.key)) protectedDirs.add(r.profileDir)
+      const ppids = this.d.proc.ppids()
+      const procs = [...ppids].map(([pid, ppid]) => ({ pid, ppid, cmd: this.d.proc!.cmdline(pid) }))
+      const extra = planUnrecordedOrphans({
+        root: this.d.root, procs, selfPid: this.d.selfPid, protectedDirs, alreadyKilling: new Set(plan.kill.map(k => k.pid)),
+      })
+      for (const k of extra.kill) {
+        plan.kill.push({ pid: k.pid, key: `unrecorded:${k.dir.slice(this.d.root.length + 1)}` })
+        if (!plan.removeDirs.includes(k.dir) && !protectedDirs.has(k.dir)) plan.removeDirs.push(k.dir)
+      }
+    }
     const trees = plan.kill.map(k => this.treeOf(k.pid))
     for (const k of plan.kill) {
       try { this.d.kill(k.pid, 'SIGKILL') } catch { /* already gone */ }
@@ -607,7 +787,10 @@ export class BrowserHost {
     return {
       key: e.key, owner: e.owner, phase: e.phase, pid: e.pid, startedAt: e.startedAt,
       lastActivityMs: e.lastActivityMs, viewers: e.viewers,
-      tabs: [...e.tabs.values()].map(t => ({ targetId: t.targetId, url: t.url, title: t.title, active: t.targetId === e.activeTab })),
+      // S1 QA reservation c: status is a summary — origin+path, `data:` reduced to its type, a clean title.
+      tabs: [...e.tabs.values()].map(t => ({ targetId: t.targetId, url: statusUrl(t.url), title: statusTitle(t.title), active: t.targetId === e.activeTab })),
+      blocked: e.blocked.slice(0, 5).map(b => ({ url: b.url, reason: b.reason, resourceType: b.resourceType, redirect: b.redirect, at: b.at })),
+      lastAction: e.lastAction ? { kind: e.lastAction.kind, label: statusTitle(e.lastAction.label), at: e.lastAction.at } : null,
       memory: e.memory ? { basis: e.memory.basis, bytes: e.memory.bytes, action: e.memory.action } : null,
       scope: e.scope, scopeEscaped: e.scopeEscaped, sandbox: e.sandbox,
     }
@@ -639,12 +822,23 @@ export class BrowserHost {
 
   private recordsPath(): string { return join(this.d.root, 'pids.json') }
 
+  private selfStartMemo: { hostStart?: number } | null = null
+  /** This host's own start time, written into every record so a recycled host pid is told apart. */
+  private selfStart(): { hostStart?: number } {
+    if (!this.selfStartMemo) {
+      const v = this.d.proc?.startTime?.(this.d.selfPid) ?? null
+      this.selfStartMemo = v === null ? {} : { hostStart: v }
+    }
+    return this.selfStartMemo
+  }
+
   private readRecords(): PidRecord[] {
     try {
       const raw = JSON.parse(readFileSync(this.recordsPath(), 'utf8'))
       if (!Array.isArray(raw)) return []
       return raw.filter((r: any) => r && typeof r.key === 'string' && Number.isInteger(r.pid) && r.pid > 1
-        && typeof r.profileDir === 'string' && Number.isInteger(r.hostPid))
+        && typeof r.profileDir === 'string' && Number.isInteger(r.hostPid)
+        && (r.hostStart === undefined || Number.isInteger(r.hostStart)))
     } catch { return [] }
   }
 
@@ -652,7 +846,7 @@ export class BrowserHost {
   private writeRecords(): void {
     const mine: PidRecord[] = [...this.entries.values()]
       .filter(e => e.pid !== null && e.phase !== 'stopping')
-      .map(e => ({ key: e.key, pid: e.pid!, profileDir: e.profileDir, hostPid: this.d.selfPid, startedAt: e.startedAt }))
+      .map(e => ({ key: e.key, pid: e.pid!, profileDir: e.profileDir, hostPid: this.d.selfPid, ...this.selfStart(), startedAt: e.startedAt }))
     const others = this.readRecords().filter(r => r.hostPid !== this.d.selfPid)
     this.writeRecordList([...others, ...mine])
   }
@@ -687,6 +881,7 @@ export const linuxProc: ProcReader = {
   smapsRollup: (pid) => { try { return readFileSync(`/proc/${pid}/smaps_rollup`, 'utf8') } catch { return null } },
   cmdline: (pid) => { try { return readFileSync(`/proc/${pid}/cmdline`, 'utf8') } catch { return null } },
   cgroup: (pid) => { try { return readFileSync(`/proc/${pid}/cgroup`, 'utf8') } catch { return null } },
+  startTime: (pid) => { try { return startTimeFromStat(readFileSync(`/proc/${pid}/stat`, 'utf8')) } catch { return null } },
   gone: (pid) => {
     try {
       const st = readFileSync(`/proc/${pid}/stat`, 'utf8')
@@ -729,6 +924,9 @@ export function createBrowserHost(opts: {
   agentisticsPorts: readonly number[]
   memAvailable: () => Promise<number | null>
   sessionLive?: (managedId: string) => boolean | undefined
+  /** Overrides for tests: the neighbour debug ports and the DNS the block rules use. */
+  debugPorts?: () => readonly number[]
+  resolve?: (hostname: string) => Promise<string[]>
   log?: (line: string) => void
 }): BrowserHost {
   return new BrowserHost({
@@ -744,6 +942,9 @@ export function createBrowserHost(opts: {
     sessionLive: opts.sessionLive,
     selfPid: process.pid,
     forceNoSandbox: process.env.AGENTISTICS_BROWSER_NO_SANDBOX === '1',
+    resolve: opts.resolve ?? (async (hostname) => (await dnsLookup(hostname, { all: true })).map(a => a.address)),
+    debugPorts: opts.debugPorts,
+    selfAddresses: () => Object.values(networkInterfaces()).flat().filter(Boolean).map(a => a!.address),
     log: opts.log,
   })
 }
