@@ -208,9 +208,9 @@ function DueCell({ date, closed, nowMs }: { date: string; closed: boolean; nowMs
  * An expired lease is said out loud ("lease expired") rather than blanked: the task is available
  * again, and a cell that simply stopped naming a holder would read as one nobody ever took.
  */
-function ClaimCell({ claim, nowMs }: { claim?: TaskClaim; nowMs: number }) {
+function ClaimCell({ claim, nowMs, lang }: { claim?: TaskClaim; nowMs: number; lang: 'pt' | 'en' }) {
   if (!claim) return <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
-  const left = claimLeft(claim.expiresAt, nowMs)
+  const left = claimLeft(claim.expiresAt, nowMs, lang)
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
       <span style={pill(left.expired ? 'var(--text-tertiary)' : 'var(--accent-green)')}>
@@ -280,7 +280,7 @@ function cellFor(
     case 'due': return row.task.dueDate
       ? <DueCell date={row.task.dueDate} closed={row.task.status === 'done' || row.task.status === 'abandoned'} nowMs={nowMs} />
       : <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
-    case 'claim': return <ClaimCell claim={row.task.claim} nowMs={nowMs} />
+    case 'claim': return <ClaimCell claim={row.task.claim} nowMs={nowMs} lang={lang} />
     case 'progress': return row.counts.subtasks === 0
       // Nothing to be a fraction of. An empty bar here would say "0% done" about a task nobody
       // broke up, which is a claim about the work rather than about the board.

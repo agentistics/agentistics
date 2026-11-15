@@ -102,7 +102,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
 
         <div
           style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--text-secondary)' }}
-          title={`${fmtInt(r.rounds)} prompts · ${r.sessionsUsed} ${lang === 'pt' ? 'sessões' : 'sessions'} · ${fmtTokens(r.tokens)} tokens${r.credits ? ` · ${copilotCreditsTooltip(r.credits.premiumRequests, lang)}` : ''}`}
+          title={`${fmtInt(r.rounds)} ${lang === 'pt' ? 'seus prompts' : 'prompts'} · ${r.sessionsUsed} ${lang === 'pt' ? 'sessões' : 'sessions'} · ${fmtTokens(r.tokens)} tokens${r.credits ? ` · ${copilotCreditsTooltip(r.credits.premiumRequests, lang)}` : ''}`}
         >
           {counts && pct !== null && (
             <span style={{ fontVariantNumeric: 'tabular-nums' }}>{pct}% · {counts.subtasksDone}/{counts.subtasks}</span>
@@ -178,7 +178,7 @@ function Agents({ row, live, nowMs, lang }: {
   nowMs: number
 }) {
   const claim = row.task.claim
-  const lease = claim ? claimLeft(claim.expiresAt, nowMs) : null
+  const lease = claim ? claimLeft(claim.expiresAt, nowMs, lang) : null
   const counts = row.counts
   const sessionsOn = live.filter(s => isLiveState(s.state)).length
   const hasSubtasks = counts && counts.subtasks > 0

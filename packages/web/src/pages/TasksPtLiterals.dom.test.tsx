@@ -19,6 +19,14 @@ let Page: typeof import('./TasksPage').default
 let realFetch: typeof fetch
 let boardPrefs: typeof import('../components/tasks/boardPrefs')
 
+/** Alpha's claim in the fixture is long expired; a clone of it (same status, so same visible group) holds a LIVE one. */
+function liveClaim(tasks: typeof fixture.tasks) {
+  const at = new Date().toISOString()
+  const alpha = tasks[0]!
+  const live = { ...alpha, task: { ...alpha.task, id: 't-live-claim', title: 'Task delta', claim: { by: 'claude:live', at, expiresAt: new Date(Date.now() + 2 * 3600_000 + 60_000).toISOString(), sessionId: 'live', note: '' } } }
+  return [...tasks, live]
+}
+
 beforeAll(async () => {
   GlobalRegistrator.register({ width: 1280, height: 900 })
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -33,7 +41,7 @@ beforeAll(async () => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input)
     if (url.includes('/api/tasks/statuses')) return Response.json({ statuses: fixture.statuses })
-    if (/\/api\/tasks(\?|$)/.test(url)) return Response.json({ tasks: fixture.tasks, overview: fixture.overview, excludedByFilter: 0, total: fixture.tasks.length })
+    if (/\/api\/tasks(\?|$)/.test(url)) return Response.json({ tasks: liveClaim(fixture.tasks), overview: fixture.overview, excludedByFilter: 0, total: fixture.tasks.length })
     return new Response('{}', { status: 503 })
   }) as unknown as typeof fetch
 })
@@ -81,15 +89,15 @@ const OLD_ENGLISH: Record<string, string[]> = {
     'Sessions / task', 'Sessions filed', 'Top models across tasks', 'Open work', 'Tasks marked done',
     'Mean spend', 'Overlay All', 'Axes', 'Legend', 'on the board', 'Ranked by tokens',
   ],
-  '/tasks/board': ['Urgent', 'High', 'Medium', 'attempts', 'cost covers', 'over WIP', 'subtasks', 'live right now'],
-  '/tasks/table': ['Urgent', 'High', 'Medium', 'Drag to reorder column', 'Clear the selection', 'Move to…'],
+  '/tasks/board': ['Urgent', 'High', 'Medium', 'attempts', 'cost covers', 'over WIP', 'subtasks', 'live right now', 'lease expired', 'left'],
+  '/tasks/table': ['Urgent', 'High', 'Medium', 'Drag to reorder column', 'Clear the selection', 'Move to…', 'lease expired', 'left'],
   '/tasks/live': ['Could not read the deliveries right now', 'Loading…'],
 }
 /** What en must still say, so a guard that "passes" because the page rendered empty cannot go unnoticed. */
 const KEEP_ENGLISH: Record<string, string[]> = {
   '/tasks/metrics': ['In flight', 'Overlay All', 'Total spent'],
-  '/tasks/board': ['Urgent'],
-  '/tasks/table': ['Urgent'],
+  '/tasks/board': ['Urgent', 'lapsed'],
+  '/tasks/table': ['Urgent', 'lease expired', 'left'],
   '/tasks/live': ['Could not read the deliveries'],
 }
 
