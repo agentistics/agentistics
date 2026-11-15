@@ -120,7 +120,12 @@ async function runMark(ref: string, to: TaskStatus, json: boolean): Promise<numb
   const { resolveCliPrincipal, realCliAuth } = await import('../delivery/cli-principal')
   const { actorOf } = await import('../delivery/principal')
   const who = await resolveCliPrincipal(process.env, false, { pieceKey: ref, move: `mark:${to}` }, await realCliAuth())
-  const out = await markTask(ref, to, actorOf(who.principal))
+  const out = await markTask(ref, to, actorOf(who.principal), { guard: { principal: who.principal } })
+  if (!out.ok && out.guard) {
+    // ENTREGA.GARANTIDA S2a: the STORE's guard refused the move (nothing was written). Same sentence as REST and MCP; exit 2.
+    console.error(json ? JSON.stringify({ ok: false, error: out.guard.code, sentence: out.guard.message, sentencePt: out.guard.messagePt, missing: out.guard.missing }, null, 2) : out.guard.message)
+    return 2
+  }
   if (!out.ok) {
     // `unknown_status` is new: the status vocabulary is an editable list now
     // (`@agentistics/core`'s `taskStatus.ts`), and `abandoned` in particular is no longer seeded by

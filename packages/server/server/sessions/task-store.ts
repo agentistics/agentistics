@@ -31,6 +31,10 @@ import type {
   TaskEvent, TaskFile, TaskLink, TaskPriority, TaskStatus, TaskThread,
 } from './task-model'
 import { isCommentKind, type ThreadDelivery, type ThreadParticipant } from '@agentistics/core'
+import { boardRaises, type BoardSlice, type GuardContext } from '../delivery/guard'
+import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from '../delivery/guard-host'
+import { GuardBusy } from '../delivery/guard-locks'
+import { createDeliveryStore } from '../delivery/store'
 
 export interface TaskPatch {
   title?: string
@@ -80,10 +84,11 @@ export const MAX_EVENTS = 2000
 
 export interface TaskStore {
   read(): Promise<TaskBook>
-  upsertTask(task: Task): Promise<void>
+  /** `guard` (S2a, optional): who is asking — a write that RAISES a piece's rank without one is refused when the guarantee is on. */
+  upsertTask(task: Task, guard?: GuardContext): Promise<void>
   upsertAttempt(attempt: Attempt): Promise<void>
   /** False when no record carries that id — never a silent success. */
-  patchTask(id: string, patch: TaskPatch, o?: { allowOpenSubtasks?: boolean }): Promise<boolean>
+  patchTask(id: string, patch: TaskPatch, o?: { allowOpenSubtasks?: boolean; guard?: GuardContext }): Promise<boolean>
   patchAttempt(id: string, patch: AttemptPatch): Promise<boolean>
   addComment(c: TaskComment): Promise<void>
   /**
@@ -102,9 +107,9 @@ export interface TaskStore {
   upsertThread(t: TaskThread): Promise<void>
   updateThread(id: string, fn: (t: TaskThread) => TaskThread): Promise<boolean>
   updateComment(id: string, fn: (c: TaskComment) => TaskComment): Promise<boolean>
-  upsertSubtask(t: Subtask): Promise<void>
+  upsertSubtask(t: Subtask, guard?: GuardContext): Promise<void>
   /** Atomic insert/adopt by message id; retries and adoption never overwrite progress. */
-  registerComposerSubtask(t: Subtask): Promise<Subtask | null>
+  registerComposerSubtask(t: Subtask, guard?: GuardContext): Promise<Subtask | null>
   removeSubtask(id: string): Promise<boolean>
   addFile(f: TaskFile): Promise<void>
   /** Removes the RECORD. The bytes on disk are the caller's to unlink — see `task-files.ts`. */
@@ -588,7 +593,7 @@ function deepFreeze<T>(v: T): T {
 export type TaskDeletionPort = (remove: () => Promise<boolean>, held: { tasks: boolean }) => Promise<boolean>
 const directDeletion: TaskDeletionPort = remove => remove()
 
-export function createTaskStore(file: string): TaskStore {
+export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}): TaskStore {
   // One in-process writer. Each mutation appends to this chain, so read-modify-write sequences run
   // strictly one after another even when several land at once.
   let queue: Promise<unknown> = Promise.resolve()
@@ -672,7 +677,41 @@ export function createTaskStore(file: string): TaskStore {
     }
   }
 
+  // S2a (§2.5): the context and the lock state of the mutation being run — set by `enqueue`, read by `write`. One writer per
+  // store instance runs at a time (the queue), so one pair of slots is enough.
+  let currentGuard: GuardContext | undefined
+  let currentContended = false
+  const anchor = guardPathsOf({ tasksFile: file })
+  const sliceOf = (b: TaskBook): BoardSlice => ({ tasks: b.tasks, subtasks: b.subtasks, statuses: b.statuses })
+
+  /**
+   * THE CHOKE POINT. Every task-board writer ends here. When the guarantee is on (rule A), a write that raises any piece's
+   * ladder rank is decided by `guardedWrite` BEFORE a byte lands; with the rule `off` (the default, and every machine that
+   * never turned it on) this is one diff of references and three `stat`s, and the write is exactly what it always was.
+   */
   async function write(book: TaskBook): Promise<void> {
+    const before = await read()
+    // Cheap exits first: the guard only cares about three collections.
+    if (before === book || (before.tasks === book.tasks && before.subtasks === book.subtasks && before.statuses === book.statuses)) return writeRaw(book)
+    const raised = boardRaises(sliceOf(before), sliceOf(book))
+    if (raised.length === 0) return writeRaw(book)
+    const rule = await ruleAState(anchor.dir)
+    if (rule === 'off') return writeRaw(book)
+    // `withFileLock` goes ahead WITHOUT the lock after its wait; a guard never does (§2.6.1).
+    if (currentContended) throw new GuardBusy('tasks')
+    const subs = new Map(book.subtasks.map(s => [s.id, s] as const))
+    const tasks = new Map(book.tasks.map(t => [t.id, t] as const))
+    const stageOf = (status: string) => book.statuses.find(d => d.id === status)?.stage ?? 'none'
+    await guardedWrite({
+      rule, raised, ctx: currentGuard, paths: anchor.paths, wiring: opts.guard,
+      locks: ['tasks', 'deliveries', 'guards'], alreadyHeld: ['tasks'],
+      recordOf: async key => (await createDeliveryStore(anchor.paths.deliveries).read()).deliveries[key] ?? null,
+      stateOf: r => { const status = (r.subtaskId ? subs.get(r.key)?.status : tasks.get(r.key)?.status) ?? ''; return { boardStatus: status, boardStage: stageOf(status), phase: null } },
+      writeDocuments: () => writeRaw(book),
+    })
+  }
+
+  async function writeRaw(book: TaskBook): Promise<void> {
     bookMemo.delete(file)
     await mkdir(dirname(file), { recursive: true })
     if (corrupt) {
@@ -686,15 +725,19 @@ export function createTaskStore(file: string): TaskStore {
   }
 
   /** One mutation, under the cross-process lock, re-run once when the lock was contended. */
-  function enqueue<T>(fn: (held: { contended: boolean }) => Promise<T>): Promise<T> {
+  function enqueue<T>(fn: (held: { contended: boolean }) => Promise<T>, guard?: GuardContext): Promise<T> {
     const run = async (): Promise<T> => {
       let contended = false
       const first = await withFileLock(file, async held => {
         contended = held.contended
-        return fn(held)
+        currentGuard = guard; currentContended = held.contended
+        try { return await fn(held) } finally { currentGuard = undefined; currentContended = false }
       })
       if (!contended) return first
-      return await withFileLock(file, held => fn(held))
+      return await withFileLock(file, async held => {
+        currentGuard = guard; currentContended = held.contended
+        try { return await fn(held) } finally { currentGuard = undefined; currentContended = false }
+      })
     }
     const next = queue.then(run)
     queue = next.catch(() => undefined)
@@ -703,7 +746,7 @@ export function createTaskStore(file: string): TaskStore {
 
   return {
     read,
-    registerComposerSubtask(subtask) {
+    registerComposerSubtask(subtask, guard) {
       return enqueue(async () => {
         const book = await read()
         const request = subtask.ownerRequest
@@ -722,13 +765,13 @@ export function createTaskStore(file: string): TaskStore {
           tasks: book.tasks.map(t => t.id === subtask.taskId ? { ...t, updatedAt: request.at } : t),
           events: [...book.events, registered].slice(-MAX_EVENTS) })
         return saved
-      })
+      }, guard)
     },
-    upsertTask(task) {
+    upsertTask(task, guard) {
       return enqueue(async () => {
         const book = await read()
         await write({ ...book, tasks: [...book.tasks.filter(t => t.id !== task.id), task] })
-      })
+      }, guard)
     },
     upsertAttempt(attempt) {
       return enqueue(async () => {
@@ -750,7 +793,7 @@ export function createTaskStore(file: string): TaskStore {
         const next = { ...target, ...patch }
         await write({ ...book, tasks: book.tasks.map(t => (t.id === id ? next : t)) })
         return true
-      })
+      }, o?.guard)
     },
     addComment(c) {
       return enqueue(async () => {
@@ -802,11 +845,11 @@ export function createTaskStore(file: string): TaskStore {
         return true
       })
     },
-    upsertSubtask(t) {
+    upsertSubtask(t, guard) {
       return enqueue(async () => {
         const book = await read()
         await write({ ...book, subtasks: [...book.subtasks.filter(x => x.id !== t.id), t] })
-      })
+      }, guard)
     },
     removeSubtask(id) {
       return enqueue(async () => {

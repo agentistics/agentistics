@@ -48,6 +48,8 @@ import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './
 import { withEvidenceDeletion } from '../delivery/evidence-delete'
 import type { TaskDetail, TaskListRow } from './task-report'
 import { onBookWrite } from './task-store'
+import { GuardRefused, type GuardContext } from '../delivery/guard'
+import { GuardBusy } from '../delivery/guard-locks'
 import { JOURNAL_STAMPS_PATH, MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
 
 export interface TaskListReply {
@@ -916,7 +918,33 @@ export async function addSubtask(
  * it always passes here, because every top-level item that just reached `done` already needed a
  * session filed on IT to get there).
  */
-export async function patchSubtask(subtaskId: string, patch: {
+/**
+ * ENTREGA.GARANTIDA S2a — what a door answers when the STORE's guard refuses a write (`GuardRefused`, before a byte of either
+ * document landed) or cannot take its locks (`GuardBusy`). One shape for REST, MCP and CLI, so all three say the same sentence.
+ */
+export interface GuardInfo { code: string; message: string; messagePt: string; missing: string[]; piece: string; status: 422 | 409 }
+export type GuardReply = { ok: false; message: string; guard: GuardInfo }
+
+export function guardInfoOf(e: unknown): GuardInfo | null {
+  if (e instanceof GuardRefused) return { code: e.code, message: e.message, messagePt: e.messagePt, missing: e.missing, piece: e.piece, status: 422 }
+  if (e instanceof GuardBusy) return { code: e.code, message: e.message, messagePt: 'outro processo do agentop está escrevendo no quadro; tente de novo', missing: [], piece: '', status: 409 }
+  return null
+}
+
+async function guardedDoor<R>(run: () => Promise<R>): Promise<R | GuardReply> {
+  try { return await run() } catch (e) {
+    const info = guardInfoOf(e)
+    if (!info) throw e
+    return { ok: false, message: info.code, guard: info }
+  }
+}
+
+/** Every door's write goes through here so a refusal by the store is an ANSWER, never a thrown 500. */
+export async function patchSubtask(subtaskId: string, patch: Parameters<typeof patchSubtaskInner>[2], guard?: GuardContext) {
+  return guardedDoor(() => patchSubtaskInner(subtaskId, guard, patch))
+}
+
+async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefined, patch: {
   title?: string
   status?: TaskStatus
   dueDate?: string
@@ -1083,7 +1111,7 @@ export async function patchSubtask(subtaskId: string, patch: {
       ? { stagedSession: patch.stagedSession ?? undefined }
       : {}),
     updatedAt: now,
-  })
+  }, guard)
 
   const parent = w.book.tasks.find(t => t.id === found.taskId)
   if (parent) {
@@ -1107,7 +1135,7 @@ export async function patchSubtask(subtaskId: string, patch: {
     // before this subtask's own write landed.
     if (patch.status !== undefined && status !== found.status) {
       const advanced = statusAfterSubtaskProgress(parent.status, status)
-      if (advanced) await markTask(parent.id, advanced, found.title || found.id)
+      if (advanced) await markTaskInner(parent.id, advanced, found.title || found.id, { guard })
     }
 
     // ALL of the task's TOP-LEVEL subtasks (loose subtasks and groups; a group's own MEMBERS never
@@ -1122,7 +1150,7 @@ export async function patchSubtask(subtaskId: string, patch: {
         .map(s => (s.id === found.id ? { ...s, status, parentGroupId: nextParentGroupId } : s))
         .filter(s => s.taskId === found.taskId && !isGroupMember(s))
       const allDone = statusAfterAllSubtasksDone(parent.status, topLevel)
-      if (allDone) await markTask(parent.id, allDone, found.title || found.id)
+      if (allDone) await markTaskInner(parent.id, allDone, found.title || found.id, { guard })
     }
   }
 
@@ -1143,7 +1171,7 @@ export async function removeSubtask(subtaskId: string): Promise<boolean> {
 }
 
 /** The tick, expressed as what it means: a move to `done`, or back to `todo`. */
-export async function setSubtaskDone(subtaskId: string, done: boolean): Promise<
+export async function setSubtaskDone(subtaskId: string, done: boolean, guard?: GuardContext): Promise<
   {
     ok: true
   } | {
@@ -1151,11 +1179,11 @@ export async function setSubtaskDone(subtaskId: string, done: boolean): Promise<
     message:
       | 'no_such_subtask' | 'done_needs_session' | 'invalid_group' | 'subtask_has_sessions'
       | 'group_field_conflict' | 'subtask_in_group' | 'unknown_status'
-  }
+  } | GuardReply
 > {
   // Only ever passes `status`, so `group_field_conflict`/`subtask_in_group` cannot actually fire
   // through this path — the union member exists to match `patchSubtask`'s own return type exactly.
-  return await patchSubtask(subtaskId, { status: done ? 'done' : 'todo' })
+  return await patchSubtask(subtaskId, { status: done ? 'done' : 'todo' }, guard)
 }
 
 /** The bytes land FIRST. A failed write must leave no record claiming the file exists. */
@@ -1697,19 +1725,28 @@ export async function reportNativeSessionUsage(sessionId: string, raw: NativeSes
   return w.store.reportNativeUsage(sessionId, usage)
 }
 
-export async function markTask(
+export type MarkOptions = {
+  /** Why, in the blocker's own words. Required by `blocked` unless a blocking TASK is named. */
+  reason?: string
+  /** Explicit caller decision after seeing the still-open top-level pieces. */
+  allowOpenSubtasks?: boolean
+  /** Blocking task ids to set as part of the same move — the other way to answer "why". */
+  blockedBy?: readonly string[]
+  /** ENTREGA.GARANTIDA S2a: who is asking. Optional; without it a move that raises a piece's rank is refused when the guarantee is on. */
+  guard?: GuardContext
+}
+export type MarkResult = { ok: boolean; evidence?: DeliveryEvidence; message?: string; openSubtaskIds?: string[]; guard?: GuardInfo }
+
+export async function markTask(ref: string, to: TaskStatus, actor?: string, o: MarkOptions = {}): Promise<MarkResult> {
+  return guardedDoor(() => markTaskInner(ref, to, actor, o))
+}
+
+async function markTaskInner(
   ref: string,
   to: TaskStatus,
   actor?: string,
-  o: {
-    /** Why, in the blocker's own words. Required by `blocked` unless a blocking TASK is named. */
-    reason?: string
-    /** Explicit caller decision after seeing the still-open top-level pieces. */
-    allowOpenSubtasks?: boolean
-    /** Blocking task ids to set as part of the same move — the other way to answer "why". */
-    blockedBy?: readonly string[]
-  } = {},
-): Promise<{ ok: boolean; evidence?: DeliveryEvidence; message?: string; openSubtaskIds?: string[] }> {
+  o: MarkOptions = {},
+): Promise<MarkResult> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return { ok: false, message: 'no_such_task' }
@@ -1784,7 +1821,7 @@ export async function markTask(
     // The reason belongs to THIS block. Leaving `blocked` clears it: a sentence that outlived its
     // block reads as current, which is worse than none.
     ...(to === 'blocked' ? { blockedReason: reason } : { blockedReason: '' }),
-  }, { allowOpenSubtasks: o.allowOpenSubtasks })
+  }, { allowOpenSubtasks: o.allowOpenSubtasks, ...(o.guard ? { guard: o.guard } : {}) })
   if (!moved) return { ok: false, message: to === 'in_review' ? 'open_subtasks' : 'no_such_task' }
   // Attempts only ever settle when the TASK settles. An in-progress task leaves them running.
   if (done || to === 'abandoned') {
@@ -2019,14 +2056,14 @@ export async function deleteType(id: string): Promise<
  * FLUXO.ENTREGA-DSL — the delivery flow writes the CI · publicando signal onto the subtask (`null` clears it).
  * Flow-only: no route lets a person set it, because the Live moves a card to Publicado on it.
  */
-export async function setSubtaskCi(subtaskId: string, ci: Subtask['ci'] | null): Promise<boolean> {
+export async function setSubtaskCi(subtaskId: string, ci: Subtask['ci'] | null, guard?: GuardContext): Promise<boolean> {
   const w = await loadTaskWorld()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
   if (!found) return false
   const next: Subtask = { ...found, updatedAt: found.updatedAt }
   if (ci) next.ci = ci
   else delete next.ci
-  await w.store.upsertSubtask(next)
+  await w.store.upsertSubtask(next, guard)
   return true
 }
 

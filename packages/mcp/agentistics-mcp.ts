@@ -183,8 +183,15 @@ async function apiSend(method: string, path: string, body?: unknown) {
     // The BODY, not just the status. A refusal here is usually actionable — "this move needs a
     // reason", "somebody else holds this claim" — and a bare `HTTP 422` teaches the caller nothing
     // it can act on, which turns one refusal into a retry loop.
-    const detail = await res.text().catch(() => "");
-    throw new Error(`${method} ${path} → HTTP ${res.status}${detail ? ` ${detail.slice(0, 400)}` : ""}`);
+    const raw = await res.text().catch(() => "");
+    // ENTREGA.GARANTIDA S2a: a refusal by the store's guard carries its own sentence (`guard.message`, the same one REST and the
+    // CLI print) — shown whole, never cut at 400 characters in the middle of what is missing.
+    let detail = raw.slice(0, 400);
+    try {
+      const g = JSON.parse(raw)?.guard;
+      if (g && typeof g.message === "string") detail = `${g.code ?? "refused"}: ${g.message}`;
+    } catch { /* not JSON: keep the raw text */ }
+    throw new Error(`${method} ${path} → HTTP ${res.status}${detail ? ` ${detail}` : ""}`);
   }
   return res.json().catch(() => ({}));
 }
@@ -310,7 +317,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_status",
     description:
-      "Move a task to a status. The status VOCABULARY is an editable list now, not a fixed set — call agentistics_task_statuses first if you are unsure what this board currently has; a fresh board starts with exactly `todo`, `in_progress`, `blocked` and `done`. Only `done` stamps a task and closes rounds-to-delivery; `abandoned` (when the board has it) records that the work was given up on, which is a real outcome and not a failure to report — but it is NOT created by default, so use agentistics_task_status_edit to add it (or any other status) first if it is missing. **`blocked` REQUIRES a `reason` or a `blockedBy` list** and is refused (422) without one: it is the status that names a problem somebody has to go and solve, and a blocked card that does not say what it is waiting on cannot be unblocked by anyone but you. **`done` REQUIRES the task to have at least one session filed under it** and is refused (422, `done_needs_session`) without one. A `status` naming nothing this board currently has is refused (400, `unknown_status`). Pass `actor` (who you are) so the move is recorded against you in the activity log.",
+      "Move a task to a status. The status VOCABULARY is an editable list now, not a fixed set — call agentistics_task_statuses first if you are unsure what this board currently has; a fresh board starts with exactly `todo`, `in_progress`, `blocked` and `done`. Only `done` stamps a task and closes rounds-to-delivery; `abandoned` (when the board has it) records that the work was given up on, which is a real outcome and not a failure to report — but it is NOT created by default, so use agentistics_task_status_edit to add it (or any other status) first if it is missing. **`blocked` REQUIRES a `reason` or a `blockedBy` list** and is refused (422) without one: it is the status that names a problem somebody has to go and solve, and a blocked card that does not say what it is waiting on cannot be unblocked by anyone but you. **`done` REQUIRES the task to have at least one session filed under it** and is refused (422, `done_needs_session`) without one. A `status` naming nothing this board currently has is refused (400, `unknown_status`). When the owner has turned the delivery guarantee on, a move that advances a piece (review, merge, CI, published, done) is refused (422, `evidence_required` / `evidence_stale` / `uncommitted_changes` / `classification_required`) until the piece carries the evidence its change needs — the answer's `guard.message` says what is missing; attach it with agentistics_task_evidence. Pass `actor` (who you are) so the move is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {

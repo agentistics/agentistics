@@ -30,7 +30,12 @@ export const isPhase = (v: unknown): v is Phase => (PHASES as readonly unknown[]
  * sha QA tested) and `mergeado` (the PR is MERGED on the host and the merge commit is on origin/main) read the machine
  * themselves — a sha the caller states is never proof.
  */
-export const GATES = ['predispatch', 'vaga', 'salvo', 'qa-modelo', 'cabeca', 'delecoes', 'mergeado', 'release'] as const
+/**
+ * `evidencia` (ENTREGA.GARANTIDA S2a, spec §3.3): the piece carries the evidence its change needs, at its current HEAD. It
+ * is NOT in `EDGES`: it is added to `qa>revisao_lider` only while the guarantee's rule A is on (`TransitionCtx.requireEvidence`),
+ * so a machine that never turned the guarantee on walks exactly the edges it always walked.
+ */
+export const GATES = ['predispatch', 'vaga', 'salvo', 'qa-modelo', 'cabeca', 'delecoes', 'mergeado', 'release', 'evidencia'] as const
 export type GateName = (typeof GATES)[number]
 export const isGate = (v: unknown): v is GateName => (GATES as readonly unknown[]).includes(v)
 
@@ -253,7 +258,7 @@ export interface TransitionInput {
   mergeSha?: string
 }
 
-interface Edge {
+export interface Edge {
   gates: readonly GateName[]
   /** Checks on the record + input; each returns the missing piece's sentence, or null. */
   needs: ReadonlyArray<(r: DeliveryRecord, i: TransitionInput) => string | null>
@@ -334,7 +339,12 @@ export function gateFresh(r: DeliveryRecord, g: GateName): GateResult | null {
  * PURE. Plan one phase transition. `autonomous` is the owner's autonomous mode at this instant.
  * Never mutates `r`; the returned `next` carries the new phase, revision, history and recorded evidence.
  */
-export function planTransition(r: DeliveryRecord, to: unknown, input: TransitionInput, ctx: { at: string; actor: string; autonomous: boolean }): TransitionPlan {
+/** The gates a transition must have fresh: the edge's own, plus `evidencia` on entry to review while rule A is on. */
+export function gatesFor(edgeKey: string, edge: Edge, requireEvidence: boolean | undefined): readonly GateName[] {
+  return requireEvidence && edgeKey === 'qa>revisao_lider' ? [...edge.gates, 'evidencia'] : edge.gates
+}
+
+export function planTransition(r: DeliveryRecord, to: unknown, input: TransitionInput, ctx: { at: string; actor: string; autonomous: boolean; requireEvidence?: boolean }): TransitionPlan {
   if (!isPhase(to)) return refuse('fase_desconhecida', `fase desconhecida: ${String(to)}. Fases: ${PHASES.join(', ')}.`, ['fase válida'])
   if (to === 'bloqueado' || r.phase === 'bloqueado') {
     return refuse('bloqueio_invalido', r.phase === 'bloqueado'
@@ -349,7 +359,7 @@ export function planTransition(r: DeliveryRecord, to: unknown, input: Transition
     return refuse('fase_pulada', `transição ${r.phase} → ${to} pula fase: de ${r.phase} só se vai para ${allowed.join(' ou ') || '(nada — fase final)'}.${extra}`, allowed.map(p => `${r.phase} → ${p}`))
   }
   const missing: string[] = []
-  for (const g of edge.gates) {
+  for (const g of gatesFor(`${r.phase}>${to}`, edge, ctx.requireEvidence)) {
     const res = gateFresh(r, g)
     if (!res) missing.push(`portão ${g}${r.gates[g] && !r.gates[g]!.ok ? ` (recusado: ${r.gates[g]!.reason ?? 'sem evidência'})` : r.gates[g] ? ' (resultado antigo — rode de novo)' : ' (não rodado)'}`)
   }

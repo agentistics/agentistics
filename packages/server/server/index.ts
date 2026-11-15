@@ -2500,6 +2500,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
 
       const body = await req.json().catch(() => ({})) as Record<string, unknown>
+      // ENTREGA.GARANTIDA S2a: who is asking, for the STORE's guard. Guard A binds every principal alike, so the context needs
+      // the principal's KIND and never a vault grant (a status move must not burn a single-use grant): a session the screen
+      // above already verified (a forged one was refused 403 before this line), else `unattributed`.
+      const sessionClaim = body.session as { id?: unknown } | undefined | null
+      const guardCtx: import('./delivery/guard').GuardContext = {
+        principal: sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string'
+          ? { kind: 'session', id: sessionClaim.id, via: 'token' }
+          : { kind: 'unattributed' },
+      }
       // S0d.6 (QA F6): a write that SPEAKS AS THE OWNER (an owner comment created/edited/removed, a thread sent "as the
       // person") needs the owner principal — the same resolution as `/api/deliveries` (grant → session → legacy browser).
       const ownerGate = async (pieceKey: string, move: string) => {
@@ -2700,8 +2709,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           // work this request cannot do, not a resource that is missing. `no_such_subtask` stays
           // 404: the id named nothing.
           if (typeof body.done === 'boolean' && Object.keys(body).length === 2) {
-            const result = await mod.setSubtaskDone(body.id, body.done)
-            return json(result, result.ok ? 200 : (result.message === 'done_needs_session' ? 422 : 404))
+            const result = await mod.setSubtaskDone(body.id, body.done, guardCtx)
+            return json(result, result.ok ? 200 : 'guard' in result ? result.guard.status : (result.message === 'done_needs_session' ? 422 : 404))
           }
           // A staged session draft (t-918cc82233): `null` clears, an object is validated HERE before
           // the write — a malformed one (no prompt, a relative cwd) is refused outright (400) rather
@@ -2739,11 +2748,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
               ? { parentGroupId: body.parentGroupId }
               : body.parentGroupId === null ? { parentGroupId: null } : {}),
             ...(stagedSessionPatch !== undefined ? { stagedSession: stagedSessionPatch } : {}),
-          })
+          }, guardCtx)
           return json(
             result,
             result.ok
               ? 200
+              // ENTREGA.GARANTIDA S2a: the store's guard refused (or could not take its locks) — its own status (422 / 409).
+              : 'guard' in result ? result.guard.status
               // `unknown_status` is 400, the same class `bad_status` is at the task level above —
               // the request never named a real status. Everything else here names a piece of work
               // the request cannot do, not a resource that is missing, hence 422; `no_such_subtask`
@@ -2834,6 +2845,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           ...(Array.isArray(body.blockedBy)
             ? { blockedBy: body.blockedBy.filter((v): v is string => typeof v === 'string') }
             : {}),
+          guard: guardCtx,
         },
       )
       // 400, not 404: `unknown_status` is the same class of error `bad_status` above already is —
@@ -2843,6 +2855,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // understood — it is missing the one thing that status cannot be recorded without. A 4xx a
       // caller can act on, with a code that says so.
       return json(out, out.ok ? 200
+        : out.guard ? out.guard.status
         : out.message === 'unknown_status' ? 400
         : (out.message === 'blocked_needs_reason' || out.message === 'done_needs_session' || out.message === 'open_subtasks') ? 422 : 404)
     }

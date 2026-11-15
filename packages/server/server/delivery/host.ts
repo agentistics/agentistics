@@ -9,6 +9,7 @@ import { execGit } from './classify-host'
 import { createDeliveryStore } from './store'
 import { PHASE_STATUS, type DeliveryRecord, type Phase } from './machine'
 import { boardReviewTargets } from './review-board'
+import { flowContext } from './guard'
 
 /** Uses the same pedidos view as the leader briefing and the existing MCP flow reader. */
 export async function readOwnerRequests(): Promise<import('./service').OwnerRequestFact[] | null> {
@@ -48,13 +49,13 @@ export function defaultDeliveryBoard(): DeliveryBoard {
       }
       // A TASK-level piece (BLOQUEIO.ORFAO: a blocked task with no subtasks) is keyed by the task id and moves the task itself.
       if (await isTaskPiece(subtaskId)) {
-        const moved = await m.markTask(subtaskId, id as never, 'flow:entrega')
+        const moved = await m.markTask(subtaskId, id as never, 'flow:entrega', { guard: flowContext() })
         return moved.ok ? { ok: true } : { ok: false, message: moved.message }
       }
-      const out = await m.patchSubtask(subtaskId, { status: id as never })
+      const out = await m.patchSubtask(subtaskId, { status: id as never }, flowContext())
       return out.ok ? { ok: true } : { ok: false, message: out.message }
     },
-    async setCi(subtaskId, ci) { await (await web()).setSubtaskCi(subtaskId, ci) },
+    async setCi(subtaskId, ci) { await (await web()).setSubtaskCi(subtaskId, ci, flowContext()) },
     async logStep(taskId, subtaskId, step, actor) { await (await web()).logSubtaskStep(taskId, subtaskId, step, actor) },
     async comment(taskId, subtaskId, body) { await (await web()).addComment(taskId, { author: 'flow:entrega', body, ...(subtaskId === taskId ? {} : { subtaskId }) }) },
     async subtaskFinished(subtaskId) {
@@ -275,9 +276,9 @@ async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Pr
   const task = book.tasks.find(t => t.id === subtaskId)
   if (book.subtasks.some(s => (task ? s.taskId === task.id : s.parentGroupId === subtaskId) && !subtaskDone(s.status))) return { ok: false, message: 'this piece has open subtasks; decide them first' }
   const out = task
-    ? await m.markTask(subtaskId, to, 'flow:antigas')
-    : await m.patchSubtask(subtaskId, { status: to as never })
-  return out.ok ? { ok: true } : { ok: false, message: out.message ?? 'board refused the change' }
+    ? await m.markTask(subtaskId, to, 'flow:antigas', { guard: flowContext() })
+    : await m.patchSubtask(subtaskId, { status: to as never }, flowContext())
+  return out.ok ? { ok: true } : { ok: false, message: ('guard' in out && out.guard ? out.guard.message : out.message) ?? 'board refused the change' }
 }
 
 let cached: DeliveryService | null = null

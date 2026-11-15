@@ -443,6 +443,8 @@ const RELEASE_SEARCH_COMPARES = 150
 export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): Promise<GateVerdict> {
   try {
     switch (name) {
+      // S2a: `evidencia` needs the classification host (checkout + git), which the SERVICE holds; it never reaches here.
+      case 'evidencia': return no('the evidencia gate is decided by the delivery service (it reads the piece\'s checkout and evidence)', ['evidência anexada'])
       case 'predispatch': return judgePredispatch(await f.subtask(r.subtaskId))
       case 'vaga': {
         const sub = await f.subtask(r.subtaskId)

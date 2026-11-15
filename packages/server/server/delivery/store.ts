@@ -16,7 +16,9 @@
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { withFileLock } from '../sessions/file-lock'
-import { defaultGuardLockPaths, withGuardLocks } from './guard-locks'
+import { defaultGuardLockPaths, GuardBusy, withGuardLocks } from './guard-locks'
+import { deliveryRaises, type GuardContext } from './guard'
+import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from './guard-host'
 import { isPhase, type DeliveryRecord } from './machine'
 
 export interface DeliveryDoc {
@@ -84,7 +86,11 @@ export interface DeliveryStore {
   readStrict(): Promise<DeliveryDoc>
   get(subtaskId: string): Promise<DeliveryRecord | null>
   /** Read-modify-write under the lock. `fn` returns the value to hand back; mutations to `doc` are persisted. Throws `DeliveryStoreUnreadable` when the file cannot be read. */
-  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>, options?: { evidence?: boolean; guardsPath?: string }): Promise<T>
+  /**
+   * `guard` (S2a, optional): who is asking. A write that RAISES a record's phase rank (revisao_lider and beyond) without one is
+   * refused by the store when the guarantee is on (`GuardRefused`, before a byte lands).
+   */
+  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>, options?: { evidence?: boolean; guardsPath?: string; guard?: GuardContext }): Promise<T>
 }
 
 export function defaultDeliveriesPath(): string {
@@ -94,7 +100,8 @@ export function defaultDeliveriesPath(): string {
   return join(dir, 'deliveries.json')
 }
 
-export function createDeliveryStore(path = defaultDeliveriesPath()): DeliveryStore {
+export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guard?: GuardWiring } = {}): DeliveryStore {
+  const anchor = guardPathsOf({ deliveriesFile: path })
   /** `missing` (no file yet) is an empty book; `unreadable` is NOT an empty book. */
   const readState = async (strict = false): Promise<{ kind: 'ok'; doc: DeliveryDoc } | { kind: 'missing' } | { kind: 'unreadable'; why: string }> => {
     let text: string
@@ -125,7 +132,7 @@ export function createDeliveryStore(path = defaultDeliveriesPath()): DeliverySto
     async get(id) { return (await read()).deliveries[id] ?? null },
     async update(fn, options) {
       await mkdir(dirname(path), { recursive: true })
-      const write = async () => {
+      const write = async (held?: { contended: boolean }) => {
         const s = await readState(!!options?.evidence)
         if (s.kind === 'unreadable') {
           // Keep the bytes (once per distinct file state) and refuse: an empty document must never replace them.
@@ -135,10 +142,26 @@ export function createDeliveryStore(path = defaultDeliveriesPath()): DeliverySto
           throw new DeliveryStoreUnreadable(path, kept, s.why)
         }
         const doc = s.kind === 'ok' ? s.doc : { version: 1 as const, deliveries: {} }
+        // S2a (§2.5): the phase rank of every record BEFORE `fn` runs, so the write can be diffed. Evidence mutations never move a phase.
+        const phasesBefore = options?.evidence ? null : Object.fromEntries(Object.entries(doc.deliveries).map(([id, r]) => [id, { phase: r.phase }]))
         const value = await fn(doc)
-        const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
-        await writeFile(tmp, serializeDeliveryDoc(doc), { mode: 0o600 })
-        await rename(tmp, path)
+        const commit = async () => {
+          const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
+          await writeFile(tmp, serializeDeliveryDoc(doc), { mode: 0o600 })
+          await rename(tmp, path)
+        }
+        const raised = phasesBefore ? deliveryRaises(phasesBefore, doc.deliveries) : []
+        const rule = raised.length ? await ruleAState(anchor.dir) : 'off'
+        if (rule === 'off') { await commit(); return value }
+        // `withFileLock` goes ahead WITHOUT the lock after its wait; a guard never does (§2.6.1).
+        if (held?.contended) throw new GuardBusy('deliveries')
+        await guardedWrite({
+          rule, raised, ctx: options?.guard, paths: anchor.paths, wiring: opts.guard,
+          locks: ['guards'], alreadyHeld: ['deliveries'],
+          recordOf: async key => doc.deliveries[key] ?? null,
+          stateOf: r => ({ boardStatus: '', boardStage: '', phase: doc.deliveries[r.key]?.phase ?? null }),
+          writeDocuments: commit,
+        })
         return value
       }
       // Evidence mutations may never proceed without a contended lock.

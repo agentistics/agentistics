@@ -17,8 +17,11 @@
  * AUTONOMOUS MODE never calls or waits for the owner: a human gate is skipped and recorded, reason 6 is
  * deferred by the leader, and the only owner-facing output is the INFORMATIONAL "publicado" notice.
  */
+import { dirname } from 'node:path'
+import { contextOfActor, flowContext, GuardRefused } from './guard'
+import { reviewOutcome, ruleAState } from './guard-host'
 import {
-  EDGES, GATES, adoptPhase, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
+  EDGES, GATES, adoptPhase, gatesFor, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
   refusalStatus, unlockerOf, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
 } from './machine'
 import { DEFAULT_RELEASE_REPO, findMergedPr, judgePredispatch, releaseFailed, releaseUnknown, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
@@ -206,6 +209,8 @@ const safe = <A extends unknown[]>(fn: (...a: A) => Promise<DeliveryReply>) => a
   try { return await fn(...a) } catch (e) {
     if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message)
     if (e instanceof GuardBusy) return fail(e.status, e.code, e.message)
+    // S2a: the store's guard refused a phase raise this verb made (nothing was written) — an answer, never a thrown 500.
+    if (e instanceof GuardRefused) return fail(e.status, e.code, e.message, e.missing)
     throw e
   }
 }
@@ -215,6 +220,7 @@ const safeEnsure = <A extends unknown[]>(fn: (...a: A) => Promise<DeliveryRecord
   try { return await fn(...a) } catch (e) {
     if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message)
     if (e instanceof GuardBusy) return fail(e.status, e.code, e.message)
+    if (e instanceof GuardRefused) return fail(e.status, e.code, e.message, e.missing)
     throw e
   }
 }
@@ -230,7 +236,12 @@ const AUTO_BACKOFF_MAX_MS = 6 * 3600_000
 const AUTO_MIN_QUOTA_ROOM = 1 / 3
 const msOf = (iso: string | undefined): number | null => (iso ? Date.parse(iso) || null : null)
 
-export function createDeliveryService(d: DeliveryDeps) {
+export function createDeliveryService(deps: DeliveryDeps) {
+  // ENTREGA.GARANTIDA S2a: an update this service makes without naming who is asking is the FLOW's own (the tick, the
+  // reconcile, adoption) — it still has to pass guard A, it just has a context to be judged under. A caller that names one
+  // (`transition`, from the principal it resolved) wins. The allowlist lint (`guard-context.lint.test.ts`) tracks what is left.
+  const rawStore = deps.store
+  const d: DeliveryDeps = { ...deps, store: { ...rawStore, update: (fn, options) => rawStore.update(fn, { guard: flowContext(), ...options }) } }
   let proofCache: ProofCache | null = null
   /** The store's fingerprint when this process last read or wrote it: a different one means ANOTHER process (the CLI's reconcile) wrote it. */
   let proofStamp: string | null = null
@@ -367,20 +378,30 @@ export function createDeliveryService(d: DeliveryDeps) {
     const edge = EDGES[`${got.phase}>${to}`]
     // Gates are run fresh by the transition itself (outside the lock), so a caller never brings proof. `known` is the tick's
     // own verdict from the same instant (the `release` gate it already ran), never anything a caller states.
+    // ENTREGA.GARANTIDA S2a: with rule A ON the entry to review also needs the `evidencia` gate (fresh, like the others).
+    const requireEvidence = (await ruleAState(dirname(d.store.path))) === 'on'
     const verdicts = new Map<GateName, GateVerdict>()
-    if (edge) for (const g of edge.gates) verdicts.set(g, known?.get(g) ?? await runGate(g, got, d.facts))
+    if (edge) for (const g of gatesFor(`${got.phase}>${to}`, edge, requireEvidence)) verdicts.set(g, known?.get(g) ?? (g === 'evidencia' ? await evidenciaVerdict(got) : await runGate(g, got, d.facts)))
     const warnings: string[] = []
     const autonomous = await autonomousNow(got.leaderSessionId, warnings)
-    const out = await d.store.update(doc => {
-      const cur = doc.deliveries[subtaskId]
-      if (!cur) return { kind: 'gone' as const }
-      if (cur.revision !== got.revision) return { kind: 'moved' as const, cur }
-      for (const [g, v] of verdicts) absorb(cur, g, v)
-      const plan = planTransition(cur, to, input, { at: iso(d), actor, autonomous })
-      if (!plan.ok) return { kind: 'refused' as const, plan, cur: structuredClone(cur) }
-      doc.deliveries[subtaskId] = plan.next
-      return { kind: 'moved-ok' as const, before: got, after: plan.next, skipped: plan.skipped }
-    })
+    let out
+    try {
+      out = await d.store.update(doc => {
+        const cur = doc.deliveries[subtaskId]
+        if (!cur) return { kind: 'gone' as const }
+        if (cur.revision !== got.revision) return { kind: 'moved' as const, cur }
+        for (const [g, v] of verdicts) absorb(cur, g, v)
+        const plan = planTransition(cur, to, input, { at: iso(d), actor, autonomous, requireEvidence })
+        if (!plan.ok) return { kind: 'refused' as const, plan, cur: structuredClone(cur) }
+        doc.deliveries[subtaskId] = plan.next
+        return { kind: 'moved-ok' as const, before: got, after: plan.next, skipped: plan.skipped }
+      }, { guard: contextOfActor(actor) })
+    } catch (e) {
+      // The STORE's guard refused the phase move (nothing was written), or could not take its locks (§2.6.1).
+      if (e instanceof GuardRefused) return fail(422, e.code, e.message, e.missing, got)
+      if (e instanceof GuardBusy) return fail(409, e.code, e.message, [], got)
+      throw e
+    }
     if (out.kind === 'gone') return fail(404, 'no_delivery', 'the delivery record vanished')
     if (out.kind === 'moved') return fail(409, 'revisao_obsoleta', `the delivery moved meanwhile (now ${out.cur.phase}, rev ${out.cur.revision}); read it again`, [], out.cur)
     if (out.kind === 'refused') {
@@ -404,11 +425,23 @@ export function createDeliveryService(d: DeliveryDeps) {
     return { ok: true, status: 200, record: out.after, warnings, ...(out.skipped ? { skipped: out.skipped } : {}) }
   }
 
+  /**
+   * ENTREGA.GARANTIDA S2a — the `evidencia` gate (§3.3): the piece's checkout, classified NOW, against the evidence on its
+   * record at the current HEAD. Same verdict the store's guard A reaches at the write, so the gate and the guard agree.
+   */
+  const evidenciaVerdict = async (rec: DeliveryRecord): Promise<GateVerdict> => {
+    if (!d.classify) return { ok: false, reason: 'the classification host is unavailable, so the evidence cannot be judged', missing: ['classificação'] }
+    const out = await reviewOutcome({ deps: d.classify, raised: { key: rec.subtaskId, taskId: rec.taskId, subtaskId: rec.subtaskId, rank: 1 }, record: rec, checkpoint: undefined })
+    return out.ok
+      ? { ok: true, evidence: { ids: out.ids, headSha: out.headSha, category: out.category } }
+      : { ok: false, reason: out.message, missing: out.missing ?? [] }
+  }
+
   const gate = async (subtaskId: string, name: unknown, actor: string): Promise<DeliveryReply> => {
     if (!isGate(name)) return fail(400, 'portao_desconhecido', `unknown gate ${String(name)}; gates: ${GATES.join(', ')}`)
     const got = await ensure(subtaskId)
     if (isReply(got)) return got
-    const v = await runGate(name, got, d.facts)
+    const v = name === 'evidencia' ? await evidenciaVerdict(got) : await runGate(name, got, d.facts)
     const after = await d.store.update(doc => {
       const cur = doc.deliveries[subtaskId]
       if (!cur) return null
