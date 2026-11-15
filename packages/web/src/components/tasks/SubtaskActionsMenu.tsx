@@ -52,7 +52,7 @@ export interface SubtaskActionsMenuProps {
   statuses: readonly TaskStatusDef[] | null
   /** Patch ANY subtask of this delivery by id — used for this row and, while forming a group, for
    *  the sibling being joined to it. */
-  onPatch: (id: string, patch: SubtaskPatch) => Promise<StatusWriteResult>
+  onPatch: (id: string, patch: SubtaskPatch, o?: { dialog?: boolean }) => Promise<StatusWriteResult>
   onRemove: (id: string) => void | Promise<void>
   /** Mint a new GROUP subtask (§F.1) and return its id, or `null` on failure. */
   onCreateGroup: (title: string) => Promise<string | null>
