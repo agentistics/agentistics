@@ -44,7 +44,7 @@ import {
   DEFAULT_PREFS, useBoardPref, type BoardView as BoardViewId,
 } from '../components/tasks/boardPrefs'
 import { pathOfView, viewOfPath } from '../lib/tasksViewRoute'
-import { AgentaskToolbar, ViewPanel, type ViewActions, type ViewState } from '../components/tasks/AgentaskToolbar'
+import { AgentaskToolbar, ViewPanel, viewNames, type ViewActions, type ViewState } from '../components/tasks/AgentaskToolbar'
 import { isDefaultVisible, visibleStatuses, uniqueStatusLabels } from '../components/tasks/statusDefaults'
 import { DELIVERY_TABS, DeliveryDetail, type DeliveryTab } from '../components/tasks/DeliveryDetail'
 import { TaskHero } from '../components/tasks/TaskHero'
@@ -138,6 +138,7 @@ function TaskList() {
     return () => window.removeEventListener('keydown', onKey)
   }, [sheet])
   const MB = mobileBoardCopy(lang)
+  const VN = viewNames(lang)
   // The kanban's arrangement, persisted with everything else the board remembers. The SORT is
   // shared with the table on purpose: a board that ranks its cards one way in the grid and another
   // in the columns is two boards, and the reader has to hold both.
@@ -376,10 +377,10 @@ function TaskList() {
             <div style={{ display: 'grid', gap: 6 }}>
               <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{MB.view}</span>
               <div style={{ ...surface, display: 'flex', padding: 3, gap: 2 }}>
-                <button style={{ ...seg(view === 'overview'), flex: 1 }} onClick={() => setView('overview')}><BarChart3 size={14} /> Metrics</button>
-                <button style={{ ...seg(view === 'board'), flex: 1 }} onClick={() => setView('board')}><LayoutGrid size={14} /> Board</button>
-                <button style={{ ...seg(view === 'table'), flex: 1 }} onClick={() => setView('table')}><Rows3 size={14} /> Table</button>
-                <button style={{ ...seg(view === 'live'), flex: 1 }} onClick={() => { setView('live'); setSheet(false) }}><LiveDot /> Live</button>
+                <button style={{ ...seg(view === 'overview'), flex: '1 1 0', minWidth: 0, padding: '0 6px', whiteSpace: 'normal', lineHeight: 1.15, textAlign: 'center' }} onClick={() => setView('overview')}><BarChart3 size={14} /> {VN.metrics}</button>
+                <button style={{ ...seg(view === 'board'), flex: '1 1 0', minWidth: 0, padding: '0 6px', whiteSpace: 'normal', lineHeight: 1.15, textAlign: 'center' }} onClick={() => setView('board')}><LayoutGrid size={14} /> {VN.board}</button>
+                <button style={{ ...seg(view === 'table'), flex: '1 1 0', minWidth: 0, padding: '0 6px', whiteSpace: 'normal', lineHeight: 1.15, textAlign: 'center' }} onClick={() => setView('table')}><Rows3 size={14} /> {VN.table}</button>
+                <button style={{ ...seg(view === 'live'), flex: '1 1 0', minWidth: 0, padding: '0 6px', whiteSpace: 'normal', lineHeight: 1.15, textAlign: 'center' }} onClick={() => { setView('live'); setSheet(false) }}><LiveDot /> {VN.live}</button>
               </div>
             </div>
             <ViewPanel lang={lang} state={viewState} actions={viewActions} statuses={statuses} />
@@ -394,7 +395,7 @@ function TaskList() {
               Agentask
               </h1>
             <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--text-tertiary)' }}>
-              What each piece of work cost, in how many rounds and across how many sessions.
+              {MB.subtitle}
             </p>
           </div>
           {toolbar}
@@ -578,6 +579,7 @@ function TaskList() {
 
       {blocking && rows && (
         <BlockedDialog
+          lang={lang}
           titles={blocking.map(id => rows.find(r => r.task.id === id)?.task.title ?? id)}
           rows={rows}
           already={blocking.length === 1
@@ -630,7 +632,7 @@ function TaskDetailView({ id }: { id: string }) {
 
   if (error === 'missing') return <div style={{ padding: 18 }}><EmptyNotice error={null} /></div>
   if (error) return <div style={{ padding: 18 }}><EmptyNotice error={error} /></div>
-  if (!detail) return <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12.5 }}>Loading…</div>
+  if (!detail) return <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12.5 }}>{lang === 'pt' ? 'Carregando…' : 'Loading…'}</div>
 
   const live = fleetLoading ? null : liveSessionsOf(detail.sessions, fleet.sessions).length
 

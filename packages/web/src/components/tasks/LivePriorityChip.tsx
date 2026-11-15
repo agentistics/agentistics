@@ -8,12 +8,8 @@
  */
 
 import { priorityRank, PRIORITY_ORDER, type TaskPriorityId } from '@agentistics/core'
-import { PRIORITY } from './board'
+import { PRIORITY, priorityLabel } from './board'
 import { chipStyle } from './ChipSelect'
-
-const WORD: Record<string, { pt: string; en: string }> = {
-  urgent: { pt: 'Urgente', en: 'Urgent' }, high: { pt: 'Alta', en: 'High' }, medium: { pt: 'Média', en: 'Medium' }, low: { pt: 'Baixa', en: 'Low' },
-}
 
 /** PURE: the canonical id a chip shows for any stored value. */
 export function priorityIdOf(p: string | null | undefined): Exclude<TaskPriorityId, 'none'> {
@@ -21,7 +17,7 @@ export function priorityIdOf(p: string | null | undefined): Exclude<TaskPriority
 }
 
 export function priorityWord(p: string | null | undefined, pt: boolean): string {
-  return WORD[priorityIdOf(p)]![pt ? 'pt' : 'en']
+  return priorityLabel(priorityIdOf(p), pt ? 'pt' : 'en')
 }
 
 export function LivePriorityChip({ priority, pt }: { priority: string | null | undefined; pt: boolean }) {

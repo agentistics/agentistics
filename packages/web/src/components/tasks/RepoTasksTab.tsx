@@ -21,7 +21,7 @@ import {
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useTaskStatuses, type TaskListRow } from '../../lib/tasks'
 import {
-  NA, PRIORITY, fmtInt, fmtTokens, liveStatusOrder, microLabel, numeric, pill, statusStyle, surface,
+  NA, PRIORITY, priorityLabel, fmtInt, fmtTokens, liveStatusOrder, microLabel, numeric, pill, statusStyle, surface,
 } from './board'
 import { SortTh } from './SortHeader'
 import { SortControl } from './SortControl'
@@ -137,7 +137,7 @@ export function RepoTasksTab(p: RepoTasksTabProps) {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <StatusPill status={r.task.status} statuses={statuses} />
                 {r.task.priority && r.task.priority !== 'none' && (
-                  <span style={{ ...pill(prio.color), background: prio.dim, fontSize: 10 }}>{prio.label}</span>
+                  <span style={{ ...pill(prio.color), background: prio.dim, fontSize: 10 }}>{priorityLabel(r.task.priority ?? 'none', p.lang)}</span>
                 )}
               </div>
               <span style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.35 }}>{r.task.title}</span>

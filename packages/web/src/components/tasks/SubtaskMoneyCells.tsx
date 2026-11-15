@@ -30,7 +30,7 @@ export function CostCellView({ r, cost, money, lang }: { r: AttemptRollup | unde
   return (
     <span
       style={{ ...numeric, fontSize: 12, color: cost.usd === null ? 'var(--text-tertiary)' : 'var(--anthropic-orange)' }}
-      title={costCaveat(r)}
+      title={costCaveat(r, lang)}
     >{money(cost.usd, r?.costByHarness)}</span>
   )
 }

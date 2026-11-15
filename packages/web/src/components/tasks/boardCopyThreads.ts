@@ -20,10 +20,12 @@ export function mobileBoardCopy(lang: ThreadsLang) {
       adjust: 'Ajustes', adjustTitle: 'Ajustes do quadro', close: 'Fechar', search: 'Buscar',
       view: 'Visualização', manage: 'Gerenciar', emptyLane: 'Nada neste status.',
       statuses: 'Status', types: 'Tipos', chips: 'Status do quadro',
+      subtitle: 'Quanto custou cada trabalho, em quantas rodadas e em quantas sessões.',
     }
     : {
       adjust: 'Adjust', adjustTitle: 'Board settings', close: 'Close', search: 'Search',
       view: 'View', manage: 'Manage', emptyLane: 'Nothing in this status.',
       statuses: 'Statuses', types: 'Types', chips: 'Board statuses',
+      subtitle: 'What each piece of work cost, in how many rounds and across how many sessions.',
     }
 }

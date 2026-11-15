@@ -450,7 +450,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
                   dataCol={`subtask-${id}`}
                   handle={subtaskResizeHandle(id)}
                   align={def.numeric ? 'right' : 'left'}
-                  reorder={{ scope: 'subtask-columns', id, onMove: (d, t) => setColumns(moveColumn(shownCols, d as SubtaskColumnId, t as SubtaskColumnId)) }}
+                  reorder={{ label: p.lang === 'pt' ? 'Arrastar para reordenar a coluna' : undefined, scope: 'subtask-columns', id, onMove: (d, t) => setColumns(moveColumn(shownCols, d as SubtaskColumnId, t as SubtaskColumnId)) }}
                   style={{
                     ...microLabel, padding: '6px 9px', fontWeight: 600, whiteSpace: 'nowrap',
                     textAlign: def.numeric ? 'right' : 'left', ...stickyHead,

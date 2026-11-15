@@ -20,7 +20,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { Select, ConfirmModal } from '../../pages/settings/primitives'
 import { DatePicker } from '../DatePicker'
 import {
-  PRIORITY, button, field, fmtDateTime, fmtStamp, pill, statusStyle,
+  PRIORITY, priorityLabel, button, field, fmtDateTime, fmtStamp, pill, statusStyle,
 } from './board'
 import { BlockedDialog } from './BlockedDialog'
 import { boardCopy, statusLabel, type Lang } from './copy'
@@ -246,7 +246,7 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
           compact block={false}
           disabled={busy}
           options={PRIORITY_ORDER.map(pid => ({
-            value: pid, label: PRIORITY[pid]!.label, color: PRIORITY[pid]!.color, dim: PRIORITY[pid]!.dim,
+            value: pid, label: priorityLabel(pid, lang), color: PRIORITY[pid]!.color, dim: PRIORITY[pid]!.dim,
           }))}
           onPick={v => void run(() => editTask(id, { priority: v as TaskPriorityId }))}
         />
@@ -335,6 +335,7 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
 
       {blocking && (
         <BlockedDialog
+          lang={lang}
           titles={[task.title]}
           rows={(boardRows ?? []).filter(r => r.task.id !== id)}
           already={task.blockedBy ?? []}

@@ -32,12 +32,15 @@ export interface BlockedDialogProps {
   rows: TaskListRow[]
   /** Ids already blocking these — pre-selected, so an existing dependency answers the question. */
   already?: readonly string[]
+  /** The reader's language; English when absent. */
+  lang?: 'pt' | 'en'
   onCancel: () => void
   onConfirm: (o: { reason: string; blockedBy: string[] }) => void
 }
 
 export function BlockedDialog(p: BlockedDialogProps) {
   const isMobile = useIsMobile()
+  const pt = p.lang === 'pt'
   const dismiss = useDismissOverlay(() => p.onCancel())
   const { statuses } = useTaskStatuses()
   const blockedStyle = statusStyle(statuses, 'blocked')
@@ -88,11 +91,13 @@ export function BlockedDialog(p: BlockedDialogProps) {
             background: 'var(--accent-red-dim)', color: 'var(--accent-red)',
           }}><AlertTriangle size={17} /></span>
           <span style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>
-            {p.titles.length === 1 ? 'What is it waiting on?' : `What are these ${p.titles.length} waiting on?`}
+            {p.titles.length === 1
+              ? (pt ? 'Está esperando o quê?' : 'What is it waiting on?')
+              : (pt ? `Estas ${p.titles.length} estão esperando o quê?` : `What are these ${p.titles.length} waiting on?`)}
           </span>
           <button
             onClick={p.onCancel}
-            aria-label="Close"
+            aria-label={pt ? 'Fechar' : 'Close'}
             style={{
               background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -104,36 +109,41 @@ export function BlockedDialog(p: BlockedDialogProps) {
 
         <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
           {p.titles.length === 1
-            ? <>Moving <strong style={{ color: 'var(--text-primary)' }}>{p.titles[0]}</strong> to <span style={pill(blockedStyle.color)}>Blocked</span>.</>
-            : <>Moving {p.titles.length} tasks to <span style={pill(blockedStyle.color)}>Blocked</span>.</>}
-          {' '}Name a task it is waiting on, or say what in a sentence. Either is enough — the point
-          is that somebody reading the board later knows what to go and unblock.
+            ? (pt
+              ? <>Movendo <strong style={{ color: 'var(--text-primary)' }}>{p.titles[0]}</strong> para <span style={pill(blockedStyle.color)}>{blockedStyle.label}</span>.</>
+              : <>Moving <strong style={{ color: 'var(--text-primary)' }}>{p.titles[0]}</strong> to <span style={pill(blockedStyle.color)}>{blockedStyle.label}</span>.</>)
+            : (pt
+              ? <>Movendo {p.titles.length} tarefas para <span style={pill(blockedStyle.color)}>{blockedStyle.label}</span>.</>
+              : <>Moving {p.titles.length} tasks to <span style={pill(blockedStyle.color)}>{blockedStyle.label}</span>.</>)}
+          {' '}{pt
+            ? 'Indique uma tarefa de que ela depende ou diga o motivo em uma frase. Qualquer uma basta — a ideia é que quem olhar o quadro depois saiba o que desbloquear.'
+            : 'Name a task it is waiting on, or say what in a sentence. Either is enough — the point is that somebody reading the board later knows what to go and unblock.'}
         </p>
 
         <div style={{ display: 'grid', gap: 6 }}>
-          <span style={{ ...microLabel, fontSize: 9 }}>Waiting on — in your words</span>
+          <span style={{ ...microLabel, fontSize: 9 }}>{pt ? 'Esperando — com suas palavras' : 'Waiting on — in your words'}</span>
           <textarea
             autoFocus={!isMobile}
             value={reason}
             onChange={e => setReason(e.target.value)}
-            placeholder="e.g. waiting on the API key from ops"
+            placeholder={pt ? 'ex.: esperando a chave da API do time de infra' : 'e.g. waiting on the API key from ops'}
             style={{ ...field(isMobile), minHeight: 68, resize: 'vertical', lineHeight: 1.5 }}
           />
         </div>
 
         <div style={{ display: 'grid', gap: 6 }}>
-          <span style={{ ...microLabel, fontSize: 9 }}>…or a task that has to finish first</span>
+          <span style={{ ...microLabel, fontSize: 9 }}>{pt ? '…ou uma tarefa que precisa terminar antes' : '…or a task that has to finish first'}</span>
           <div style={{ position: 'relative' }}>
             <Search size={13} style={{ position: 'absolute', left: 9, top: isMobile ? 15 : 9, color: 'var(--text-tertiary)' }} />
             <input
-              value={q} onChange={e => setQ(e.target.value)} placeholder="Search the board"
+              value={q} onChange={e => setQ(e.target.value)} placeholder={pt ? 'Buscar no quadro' : 'Search the board'}
               style={{ ...field(isMobile), paddingLeft: 29 }}
             />
           </div>
           <div style={{ display: 'grid', gap: 3, maxHeight: 190, overflowY: 'auto' }}>
             {candidates.length === 0 && (
               <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 2px' }}>
-                Nothing open to point at. A sentence above is the answer then.
+                {pt ? 'Nenhuma tarefa aberta para indicar. Então a resposta é a frase acima.' : 'Nothing open to point at. A sentence above is the answer then.'}
               </span>
             )}
             {candidates.map(r => {
@@ -167,7 +177,7 @@ export function BlockedDialog(p: BlockedDialogProps) {
         </div>
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-          <button style={button(isMobile)} onClick={p.onCancel}>Cancel</button>
+          <button style={button(isMobile)} onClick={p.onCancel}>{pt ? 'Cancelar' : 'Cancel'}</button>
           <button
             style={{
               ...button(isMobile, armed ? 'primary' : 'ghost'),
@@ -176,9 +186,9 @@ export function BlockedDialog(p: BlockedDialogProps) {
             disabled={!armed}
             // Disabled rather than refused-after-the-fact: the server enforces the same rule, and
             // meeting it as an error after pressing a button is how a rule reads as a bug.
-            title={armed ? 'Record the block' : 'Say what it is waiting on, or pick a task'}
+            title={armed ? (pt ? 'Registrar o bloqueio' : 'Record the block') : (pt ? 'Diga o que está esperando ou escolha uma tarefa' : 'Say what it is waiting on, or pick a task')}
             onClick={() => p.onConfirm({ reason: reason.trim(), blockedBy: [...picked] })}
-          >Mark blocked</button>
+          >{pt ? 'Marcar como bloqueada' : 'Mark blocked'}</button>
         </div>
       </div>
     </div>,

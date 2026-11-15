@@ -39,6 +39,55 @@ const sectionLabel = {
   letterSpacing: '0.04em',
 }
 
+type Lang = 'pt' | 'en'
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
+
+/** Every word this screen prints, in both languages — one table, so a pt reader never meets a fixed English label. */
+function copyOf(lang: Lang) {
+  const pt = lang === 'pt'
+  return {
+    sections: { task: pt ? 'Tarefa' : 'Task', cost: pt ? 'Custo' : 'Cost', volume: pt ? 'Volume' : 'Volume' },
+    inFlight: pt ? 'Em andamento' : 'In flight',
+    inFlightHelp: pt ? 'Trabalho aberto — ainda não entregue nem abandonado.' : 'Open work — not yet delivered or abandoned.',
+    outOf: (n: number) => pt ? `De ${n} ${plural(n, 'tarefa', 'tarefas')} no quadro.` : `Out of ${n} task${n === 1 ? '' : 's'} on the board.`,
+    delivered: pt ? 'Entregues' : 'Delivered',
+    deliveredHelp: pt ? 'Tarefas concluídas.' : 'Tasks marked done.',
+    abandoned: (n: number) => pt
+      ? `Mais ${n} ${plural(n, 'tarefa abandonada', 'tarefas abandonadas')} — não contam como entregues.`
+      : `${n} more task${n === 1 ? '' : 's'} abandoned — not counted as delivered.`,
+    avgTime: pt ? 'Tempo médio de entrega' : 'Avg delivery time',
+    avgTimeHelp: pt ? 'Tempo médio, no relógio, da criação da tarefa até ela ser entregue.' : "Mean wall-clock time from a task's creation to its task.",
+    avgTimeNone: pt ? 'Nada entregue ainda — uma tarefa aberta não tem duração.' : 'Nothing delivered yet — an open task has no duration.',
+    avgCost: pt ? 'Custo médio / tarefa' : 'Avg cost / task',
+    avgCostDeliveredHelp: pt ? 'Gasto médio das tarefas entregues que puderam ser precificadas.' : 'Mean spend across delivered tasks that could be priced.',
+    avgCostAllHelp: pt ? 'Gasto médio de todas as tarefas precificadas, abertas ou entregues.' : 'Mean spend across every priced task, open or delivered.',
+    nothingDelivered: pt ? 'Nada entregue ainda.' : 'Nothing delivered yet.',
+    noneDeliveredPriced: pt ? 'Nenhuma tarefa entregue pôde ser precificada.' : 'None of the delivered tasks could be priced.',
+    total: pt ? 'Total gasto' : 'Total spent',
+    totalHelp: (tokens: string) => pt ? `Soma de todas as tarefas precificadas — ${tokens} tokens no total.` : `Sum across every priced task — ${tokens} tokens in total.`,
+    rounds: pt ? 'Rodadas / tarefa' : 'Rounds / task',
+    roundsHelp: pt ? 'Média de turnos do usuário por tarefa, só nas sessões vinculadas que informaram turnos.' : 'Mean user turns per task, counting only linked sessions that reported a turn count.',
+    roundsNone: pt ? 'Nenhuma sessão vinculada informou turnos ainda.' : 'No linked session has reported a turn count yet.',
+    sessionsPer: pt ? 'Sessões / tarefa' : 'Sessions / task',
+    sessionsPerHelp: pt ? 'Média de conversas distintas por tarefa — acima de 1 significa que o trabalho passou de uma conversa.' : 'Mean distinct conversations per task — above 1 means the work outgrew one conversation.',
+    sessionsPerNone: pt ? 'Ainda não há tarefas no quadro.' : 'No task on the board yet.',
+    filed: pt ? 'Sessões vinculadas' : 'Sessions filed',
+    filedHelp: pt ? 'Conversas distintas vinculadas a todas as tarefas do quadro; reaberturas contam uma vez.' : 'Distinct conversations filed across every task on the board, reopens counted once.',
+    boardGap: (n: number, t: number) => pt
+      ? `${n} de ${t} ${plural(t, 'tarefa', 'tarefas')} ${plural(n, 'não tem', 'não têm')} sessões precificadas e ${plural(n, 'ficou', 'ficaram')} de fora.`
+      : `${n} of ${t} task${t === 1 ? '' : 's'} have no priced sessions and are excluded.`,
+    deliveredGap: (n: number, d: number) => pt
+      ? `${n} de ${d} ${plural(d, 'tarefa entregue', 'tarefas entregues')} não ${plural(n, 'pôde', 'puderam')} ser precificada${n === 1 ? '' : 's'}.`
+      : `${n} of ${d} delivered task${d === 1 ? '' : 's'} could not be priced.`,
+    topModels: pt ? 'Modelos mais usados nas tarefas' : 'Top models across tasks',
+    topModelsHelp: pt ? 'Ordenados por tokens em todas as sessões vinculadas. Só contam sessões que informaram o modelo.' : 'Ranked by tokens across every linked session. Only sessions that reported a model are counted.',
+    harnesses: 'Harnesses',
+    harnessesHelp: pt ? 'Ordenados por tokens em todas as sessões vinculadas, agrupados por harness.' : 'Ranked by tokens across every linked session, grouped by harness.',
+    nothingReported: pt ? 'Nenhuma sessão informou.' : 'Nothing reported one.',
+    chart: { overlay: pt ? 'Sobrepor tudo' : 'Overlay All', axes: pt ? 'Eixos' : 'Axes', legend: pt ? 'Legenda' : 'Legend', max: pt ? 'máx.' : 'max', empty: pt ? 'Sem dados neste período' : 'No data for this period' },
+  }
+}
+
 function Big({ label, value, help, gap, icon, accent }: {
   label: string
   value: string
@@ -80,7 +129,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function Ranked({ title, help, items, color }: {
+function Ranked({ title, help, items, color, empty }: {
+  empty: string
   title: string
   help: string
   items: Bucket[]
@@ -94,7 +144,7 @@ function Ranked({ title, help, items, color }: {
         <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>{help}</div>
       </div>
       {items.length === 0
-        ? <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>Nothing reported one.</div>
+        ? <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{empty}</div>
         : items.slice(0, 6).map(i => {
           const pct = i.tokens === null ? 0 : Math.round((i.tokens / top) * 100)
           return (
@@ -138,22 +188,27 @@ function BoardActivity({ daily, isMobile }: { daily: BoardOverview['daily']; isM
   const ctx = useOutletContext<AppContext | null>()
   const theme = ctx?.theme === 'light' ? 'light' : 'dark'
   const chartData = useMemo(() => toBoardChartData(daily), [daily])
-  const labels = { value: 'Sessions started', sessions: 'Delivered', tools: 'Created' }
+  const pt = ctx?.lang === 'pt'
+  const chartCopy = copyOf(pt ? 'pt' : 'en').chart
+  const labels = pt
+    ? { value: 'Sessões iniciadas', sessions: 'Entregues', tools: 'Criadas' }
+    : { value: 'Sessions started', sessions: 'Delivered', tools: 'Created' }
 
   return (
     <div style={{ ...surface, padding: 14, display: 'grid', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <Activity size={13} style={{ color: 'var(--anthropic-orange)' }} />
-        <span style={sectionLabel}>Board activity over time</span>
+        <span style={sectionLabel}>{pt ? 'Atividade do quadro ao longo do tempo' : 'Board activity over time'}</span>
       </div>
       <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
-        Sessions started, tasks delivered and tasks created, by day, across every task on the board.
-        A day with no board activity is left out of the chart rather than drawn as a false zero.
+        {pt
+          ? 'Sessões iniciadas, tarefas entregues e tarefas criadas, por dia, em todas as tarefas do quadro. Um dia sem atividade fica fora do gráfico, em vez de aparecer como um falso zero.'
+          : 'Sessions started, tasks delivered and tasks created, by day, across every task on the board. A day with no board activity is left out of the chart rather than drawn as a false zero.'}
       </div>
       {isMobile ? (
-        <ActivityChart data={chartData} theme={theme} height={160} forcedOverlay hideControls metricLabels={labels} />
+        <ActivityChart data={chartData} theme={theme} height={160} forcedOverlay hideControls metricLabels={labels} copy={chartCopy} />
       ) : (
-        <ActivityChart data={chartData} theme={theme} height={220} metricLabels={labels} />
+        <ActivityChart data={chartData} theme={theme} height={220} metricLabels={labels} copy={chartCopy} />
       )}
     </div>
   )
@@ -168,87 +223,83 @@ export function BoardOverviewView({ o, statuses }: {
   const isMobile = useIsMobile()
   const ctxLang = useOutletContext<AppContext | null>()?.lang
 
+  const c = copyOf(ctxLang === 'pt' ? 'pt' : 'en')
   // The population behind "avg cost / task" and "total spent" is every task on the board; the
   // population behind "avg cost / delivery" is delivered tasks only. Conflating the two used to
   // caption both cards with the same board-wide count, which overstated the gap on the delivered
   // figure whenever an OPEN task (never priced because it never had sessions filed yet) was mixed in.
-  const boardGap = o.tasksWithoutCost > 0
-    ? `${o.tasksWithoutCost} of ${o.tasks} task${o.tasks === 1 ? '' : 's'} have no priced sessions and are excluded.`
-    : undefined
-  const deliveredGap = o.deliveredWithoutCost > 0
-    ? `${o.deliveredWithoutCost} of ${o.delivered} delivered task${o.delivered === 1 ? '' : 's'} could not be priced.`
-    : undefined
+  const boardGap = o.tasksWithoutCost > 0 ? c.boardGap(o.tasksWithoutCost, o.tasks) : undefined
+  const deliveredGap = o.deliveredWithoutCost > 0 ? c.deliveredGap(o.deliveredWithoutCost, o.delivered) : undefined
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
-      <Section title="Task">
+      <Section title={c.sections.task}>
         <Big
-          label="In flight" value={String(o.inFlight)}
+          label={c.inFlight} value={String(o.inFlight)}
           icon={<CircleDashed size={13} style={{ color: 'var(--anthropic-orange)' }} />}
-          help="Open work — not yet delivered or abandoned."
-          gap={`Out of ${o.tasks} task${o.tasks === 1 ? '' : 's'} on the board.`}
+          help={c.inFlightHelp}
+          gap={c.outOf(o.tasks)}
         />
         <Big
-          label="Delivered" value={String(o.delivered)}
+          label={c.delivered} value={String(o.delivered)}
           icon={<CircleCheck size={13} style={{ color: 'var(--accent-green)' }} />}
-          help="Tasks marked done."
-          gap={o.abandoned > 0
-            ? `${o.abandoned} more task${o.abandoned === 1 ? '' : 's'} abandoned — not counted as delivered.`
-            : undefined}
+          help={c.deliveredHelp}
+          gap={o.abandoned > 0 ? c.abandoned(o.abandoned) : undefined}
         />
         <Big
-          label="Avg delivery time" value={fmtDuration(o.avgDeliveryMs) ?? NA}
+          label={c.avgTime} value={fmtDuration(o.avgDeliveryMs) ?? NA}
           icon={<Timer size={13} style={{ color: 'var(--accent-blue)' }} />}
-          help="Mean wall-clock time from a task's creation to its task."
-          gap={o.avgDeliveryMs === null ? 'Nothing delivered yet — an open task has no duration.' : undefined}
+          help={c.avgTimeHelp}
+          gap={o.avgDeliveryMs === null ? c.avgTimeNone : undefined}
         />
       </Section>
 
-      <Section title="Cost">
+      <Section title={c.sections.cost}>
         <Big
-          label="Avg cost / task" value={money(o.avgCostPerDelivered, o.deliveredCostByHarness)} accent
+          label={c.avgCost} value={money(o.avgCostPerDelivered, o.deliveredCostByHarness)} accent
           icon={<Coins size={13} style={{ color: 'var(--anthropic-orange)' }} />}
-          help="Mean spend across delivered tasks that could be priced."
+          help={c.avgCostDeliveredHelp}
           gap={o.avgCostPerDelivered === null
-            ? (o.delivered === 0 ? 'Nothing delivered yet.' : 'None of the delivered tasks could be priced.')
+            ? (o.delivered === 0 ? c.nothingDelivered : c.noneDeliveredPriced)
             : deliveredGap}
         />
         <Big
-          label="Avg cost / task" value={money(o.avgCostPerTask, o.costByHarness)}
+          label={c.avgCost} value={money(o.avgCostPerTask, o.costByHarness)}
           icon={<Coins size={13} style={{ color: 'var(--text-tertiary)' }} />}
-          help="Mean spend across every priced task, open or delivered."
+          help={c.avgCostAllHelp}
           gap={boardGap}
         />
         <Big
-          label="Total spent" value={money(o.totalCostUSD, o.costByHarness)}
+          label={c.total} value={money(o.totalCostUSD, o.costByHarness)}
           icon={<Coins size={13} style={{ color: 'var(--text-tertiary)' }} />}
-          help={`Sum across every priced task — ${fmtTokens(o.totalTokens)} tokens in total.`}
+          help={c.totalHelp(fmtTokens(o.totalTokens))}
           gap={boardGap}
         />
       </Section>
 
-      <Section title="Volume">
+      <Section title={c.sections.volume}>
         <Big
-          label="Rounds / task" value={o.avgRoundsPerTask === null ? NA : o.avgRoundsPerTask.toFixed(1)}
-          help="Mean user turns per task, counting only linked sessions that reported a turn count."
-          gap={o.avgRoundsPerTask === null ? 'No linked session has reported a turn count yet.' : undefined}
+          label={c.rounds} value={o.avgRoundsPerTask === null ? NA : o.avgRoundsPerTask.toFixed(1)}
+          help={c.roundsHelp}
+          gap={o.avgRoundsPerTask === null ? c.roundsNone : undefined}
         />
         <Big
-          label="Sessions / task" value={o.avgSessionsPerTask === null ? NA : o.avgSessionsPerTask.toFixed(1)}
-          help="Mean distinct conversations per task — above 1 means the work outgrew one conversation."
-          gap={o.avgSessionsPerTask === null ? 'No task on the board yet.' : undefined}
+          label={c.sessionsPer} value={o.avgSessionsPerTask === null ? NA : o.avgSessionsPerTask.toFixed(1)}
+          help={c.sessionsPerHelp}
+          gap={o.avgSessionsPerTask === null ? c.sessionsPerNone : undefined}
         />
         <Big
-          label="Sessions filed" value={fmtInt(o.totalSessions)}
-          help="Distinct conversations filed across every task on the board, reopens counted once."
+          label={c.filed} value={fmtInt(o.totalSessions)}
+          help={c.filedHelp}
         />
       </Section>
 
       <div style={{ ...surface, padding: 14, display: 'grid', gap: 8 }}>
-        <div style={microLabel}>Where the work stands</div>
+        <div style={microLabel}>{ctxLang === 'pt' ? 'Onde o trabalho está' : 'Where the work stands'}</div>
         <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
-          How many tasks currently sit in each column. A column at zero is shown, dimmed, rather than
-          left off the row.
+          {ctxLang === 'pt'
+            ? 'Quantas tarefas estão em cada coluna agora. Uma coluna zerada aparece esmaecida, em vez de ficar de fora.'
+            : 'How many tasks currently sit in each column. A column at zero is shown, dimmed, rather than left off the row.'}
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {/*
@@ -282,13 +333,11 @@ export function BoardOverviewView({ o, statuses }: {
 
       <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
         <Ranked
-          title="Top models across tasks"
-          help="Ranked by tokens across every linked session. Only sessions that reported a model are counted."
+          title={c.topModels} help={c.topModelsHelp} empty={c.nothingReported}
           items={o.topModels}
         />
         <Ranked
-          title="Harnesses"
-          help="Ranked by tokens across every linked session, grouped by harness."
+          title={c.harnesses} help={c.harnessesHelp} empty={c.nothingReported}
           items={o.topHarnesses} color={harnessColor}
         />
       </div>
