@@ -112,3 +112,17 @@ for (const path of Object.keys(OLD_ENGLISH)) {
     for (const lit of KEEP_ENGLISH[path]!) expect({ path, lit, found: has(text, lit) }).toEqual({ path, lit, found: true })
   })
 }
+
+/** The claim cell sits in the narrow Trabalhando column: a wrapped "faltam 1 h" doubled the row's height (QA r3). */
+test('/tasks/table: the claim pill and its remaining time never wrap', async () => {
+  for (const lang of ['pt', 'en'] as const) {
+    await visibleText('/tasks/table', lang)
+    const cells = Array.from(document.querySelectorAll<HTMLElement>('[data-claim-cell]'))
+    expect(cells.length).toBeGreaterThan(1)
+    for (const cell of cells) {
+      expect(cell.style.whiteSpace).toBe('nowrap')
+      for (const part of Array.from(cell.querySelectorAll<HTMLElement>('[data-claim-pill],[data-claim-left]'))) expect(part.style.whiteSpace).toBe('nowrap')
+    }
+    await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = ''
+  }
+})

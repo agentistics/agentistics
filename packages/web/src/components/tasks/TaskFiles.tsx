@@ -21,13 +21,15 @@ import {
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { button, fmtBytes, microLabel, pill, surface } from './board'
 import { fileUrl, type TaskFile } from '../../lib/tasks'
+import type { Lang } from './copy'
 
 /** Extensions a browser paints inline. Kept small and explicit — a guess here draws a broken icon. */
 const IMAGE = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i
 
 const isImage = (f: TaskFile) => IMAGE.test(f.name)
 
-function Lightbox({ files, index, onIndex, onClose }: {
+function Lightbox({ files, index, onIndex, onClose, lang }: {
+  lang: Lang
   files: TaskFile[]
   index: number
   onIndex: (i: number) => void
@@ -66,7 +68,7 @@ function Lightbox({ files, index, onIndex, onClose }: {
         </span>
         <span style={{ ...microLabel }}>{index + 1} / {files.length}</span>
         <span style={{ flex: 1 }} />
-        <a href={fileUrl(f.id)} download={f.name} style={{ color: 'var(--text-secondary)', display: 'flex' }} title="Download">
+        <a href={fileUrl(f.id)} download={f.name} style={{ color: 'var(--text-secondary)', display: 'flex' }} title={lang === 'pt' ? 'Baixar' : 'Download'}>
           <Download size={17} />
         </a>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex' }}>
@@ -90,18 +92,20 @@ function Lightbox({ files, index, onIndex, onClose }: {
         ><ChevronRight size={30} /></button>
       </div>
 
-      <div style={{ ...microLabel, textAlign: 'center' }}>← → to walk · Esc to close</div>
+      <div style={{ ...microLabel, textAlign: 'center' }}>{lang === 'pt' ? '← → para navegar · Esc para fechar' : '← → to walk · Esc to close'}</div>
     </div>,
     document.body,
   )
 }
 
-export function TaskFiles({ files, onUpload, onRemove }: {
+export function TaskFiles({ files, onUpload, onRemove, lang = 'en' }: {
+  lang?: Lang
   files: TaskFile[]
   onUpload: (f: File) => void | Promise<void>
   onRemove: (id: string) => void | Promise<void>
 }) {
   const isMobile = useIsMobile()
+  const pt = lang === 'pt'
   const [view, setView] = useState<'list' | 'grid'>('grid')
   const [lightbox, setLightbox] = useState<number | null>(null)
   const [dropping, setDropping] = useState(false)
@@ -134,14 +138,14 @@ export function TaskFiles({ files, onUpload, onRemove }: {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={microLabel}>{files.length} file{files.length === 1 ? '' : 's'}</span>
+        <span style={microLabel}>{pt ? `${files.length} ${files.length === 1 ? 'arquivo' : 'arquivos'}` : `${files.length} file${files.length === 1 ? '' : 's'}`}</span>
         <span style={{ flex: 1 }} />
         <div style={{ ...surface, display: 'flex', padding: 3, gap: 2 }}>
-          <button style={seg(view === 'grid')} onClick={() => setView('grid')} title="Grid" aria-label="Grid"><Grid3x3 size={13} /></button>
-          <button style={seg(view === 'list')} onClick={() => setView('list')} title="List" aria-label="List"><List size={13} /></button>
+          <button style={seg(view === 'grid')} onClick={() => setView('grid')} title={pt ? 'Grade' : 'Grid'} aria-label={pt ? 'Grade' : 'Grid'}><Grid3x3 size={13} /></button>
+          <button style={seg(view === 'list')} onClick={() => setView('list')} title={pt ? 'Lista' : 'List'} aria-label={pt ? 'Lista' : 'List'}><List size={13} /></button>
         </div>
         <label style={{ ...button(isMobile), cursor: 'pointer' }}>
-          <Paperclip size={13} /> Attach
+          <Paperclip size={13} /> {pt ? 'Anexar' : 'Attach'}
           <input
             type="file" multiple style={{ display: 'none' }}
             onChange={e => { for (const f of Array.from(e.target.files ?? [])) void onUpload(f) }}
@@ -151,8 +155,9 @@ export function TaskFiles({ files, onUpload, onRemove }: {
 
       {files.length === 0 && (
         <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)' }}>
-          No files yet. Paste or drop one here — specs, plans and screenshots an assistant writes
-          belong on the task.
+          {pt
+            ? 'Nenhum arquivo ainda. Cole ou solte um aqui — specs, planos e capturas de tela que um assistente escreve ficam na tarefa.'
+            : 'No files yet. Paste or drop one here — specs, plans and screenshots an assistant writes belong on the task.'}
         </div>
       )}
 
@@ -184,11 +189,11 @@ export function TaskFiles({ files, onUpload, onRemove }: {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ ...microLabel, fontSize: 10 }}>{fmtBytes(f.size)}</span>
                     <span style={{ flex: 1 }} />
-                    <a href={fileUrl(f.id)} download={f.name} style={{ color: 'var(--text-tertiary)', display: 'flex' }} title="Download">
+                    <a href={fileUrl(f.id)} download={f.name} style={{ color: 'var(--text-tertiary)', display: 'flex' }} title={pt ? 'Baixar' : 'Download'}>
                       <Download size={12} />
                     </a>
                     <button
-                      onClick={() => void onRemove(f.id)} title="Remove"
+                      onClick={() => void onRemove(f.id)} title={pt ? 'Remover' : 'Remove'}
                       style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'flex' }}
                     ><Trash2 size={12} /></button>
                   </div>
@@ -219,11 +224,11 @@ export function TaskFiles({ files, onUpload, onRemove }: {
                 >{f.name}</button>
                 {f.author && <span style={pill('var(--accent-blue)')}>{f.author}</span>}
                 <span style={{ ...microLabel, fontSize: 10.5 }}>{fmtBytes(f.size)}</span>
-                <a href={fileUrl(f.id)} download={f.name} style={{ color: 'var(--text-tertiary)', display: 'flex' }} title="Download">
+                <a href={fileUrl(f.id)} download={f.name} style={{ color: 'var(--text-tertiary)', display: 'flex' }} title={pt ? 'Baixar' : 'Download'}>
                   <Download size={13} />
                 </a>
                 <button
-                  onClick={() => void onRemove(f.id)} title="Remove"
+                  onClick={() => void onRemove(f.id)} title={pt ? 'Remover' : 'Remove'}
                   style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'flex' }}
                 ><Trash2 size={13} /></button>
               </div>
@@ -233,7 +238,7 @@ export function TaskFiles({ files, onUpload, onRemove }: {
       )}
 
       {lightbox !== null && images.length > 0 && (
-        <Lightbox files={images} index={lightbox} onIndex={setLightbox} onClose={() => setLightbox(null)} />
+        <Lightbox lang={lang} files={images} index={lightbox} onIndex={setLightbox} onClose={() => setLightbox(null)} />
       )}
     </div>
   )

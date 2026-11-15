@@ -136,7 +136,7 @@ export const COLUMNS: ColumnDef[] = [
   // Sortable, unlike Status: the table is only grouped by type when the person asks for it.
   { id: 'type', width: 104, sort: 'type' },
   { id: 'priority', width: 96, sort: 'priority' },
-  { id: 'claim', width: 132 },
+  { id: 'claim', width: 236 },
   { id: 'progress', width: 132, sort: 'progress' },
   { id: 'due', width: 96, sort: 'due' },
   { id: 'sessions', numeric: true, width: 84, sort: 'sessions' },
@@ -212,11 +212,11 @@ function ClaimCell({ claim, nowMs, lang }: { claim?: TaskClaim; nowMs: number; l
   if (!claim) return <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
   const left = claimLeft(claim.expiresAt, nowMs, lang)
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
-      <span style={pill(left.expired ? 'var(--text-tertiary)' : 'var(--accent-green)')}>
+    <span data-claim-cell style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0, whiteSpace: 'nowrap' }}>
+      <span data-claim-pill style={{ ...pill(left.expired ? 'var(--text-tertiary)' : 'var(--accent-green)'), whiteSpace: 'nowrap' }}>
         <Bot size={10} /> {claim.by}
       </span>
-      <span style={{ fontSize: 10, color: left.expired ? 'var(--text-tertiary)' : 'var(--text-secondary)' }}>
+      <span data-claim-left style={{ fontSize: 10, whiteSpace: 'nowrap', color: left.expired ? 'var(--text-tertiary)' : 'var(--text-secondary)' }}>
         {left.text}
       </span>
     </span>
