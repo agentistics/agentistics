@@ -24,7 +24,7 @@ export function TaskVerdictCell({ score, lang }: { score: number | null; lang: L
   if (score === null) return <td className="bm-cp" data-testid="benchmark-task-verdict" data-tone="none"><span className="bm-nw" style={muted}>— {pt ? 'sem dados' : 'no data'}</span></td>
   const n = Math.round(score), tone = scoreTone(score), c = tone === 'good' ? 'var(--accent-green)' : tone === 'bad' ? 'var(--accent-red)' : 'var(--accent-amber, #fbbf24)'
   return <td className="bm-cp" data-testid="benchmark-task-verdict" data-tone={tone}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5, fontWeight: 700, marginBottom: 4 }}><span style={{ color: c }}>{wordOf(tone, lang)}</span><span>{n}</span></div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5, fontWeight: 700, marginBottom: 4 }}><span className="bm-nw" style={{ color: c }}>{wordOf(tone, lang)}</span><span>{n}</span></div>
     <Bar value={n} tone={tone} />
   </td>
 }

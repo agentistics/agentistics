@@ -11,7 +11,7 @@
 import type { Compared, HistoryBucket, HistoryComparison, HistorySubtaskRow, HistoryTaskRow, Observed, ObservedHistory, ScoreType, Verdict, VerdictResult } from '@agentistics/core/benchmark'
 import { percentile } from '@agentistics/core'
 import type { ComparisonKey, TaskSides } from '@agentistics/core/benchmark'
-import { scoreOf, scoreTone, taskScore, vezes, firmness, type Ratios } from './benchmarkScore'
+import { pointTone, scoreOf, scoreTone, taskScore, vezes, firmness, type Ratios } from './benchmarkScore'
 import { METRIC_LABEL, fmtInterval, fmtValue, harnessState, nf, cardCoverage, cardHeadline, cardSubline, type Lang, type MetricKey, type Money } from './benchmarkFormat'
 
 export type Tone = 'good' | 'bad' | 'tie' | 'none'
@@ -94,7 +94,7 @@ export function entriesOf(observed: Observed | null, experiments: readonly Exper
   const cmp = observed?.history ? comparisonsOf(observed.history, lang) : []
   if (cmp.length) {
     const seals: Entry[] = cmp.map(c => {
-      const score = comparisonScore(c).score, tone: Tone = score === null ? 'none' : toneOfScore(score)
+      const score = comparisonScore(c).score, tone: Tone = score === null ? 'none' : pointTone(score)
       return { id: c.id, kind: 'comparison', name: c.name, sample: c.sample, score, tone, word: score === null ? (pt ? 'observado' : 'observed') : wordOf(tone, lang), experiment: null, comparison: c }
     })
     return [...seals, ...experiments.map(e => experimentEntry(e, lang)), ...unmeasuredEntries(lang)]
@@ -465,7 +465,7 @@ function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Mo
   const pt = lang === 'pt'
   const h = observed.history!
   const sc = comparisonScore(c).score
-  const tone: Tone = sc === null ? 'none' : toneOfScore(sc)
+  const tone: Tone = sc === null ? 'none' : pointTone(sc)
   const fm = firmness(comparisonRatios(c))
   const alt = { equal: pt ? 'pesos iguais' : 'equal weights', quality: pt ? 'Qualidade valendo mais' : 'Quality weighted higher', costTime: pt ? 'Custo e Tempo valendo mais' : 'Cost and Time weighted higher' }
   return {

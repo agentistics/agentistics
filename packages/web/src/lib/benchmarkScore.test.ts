@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { WEIGHTS, firmness, nr, scoreOf, scoreTone, taskScore, vezes } from './benchmarkScore'
+import { pointTone, WEIGHTS, firmness, nr, scoreOf, scoreTone, taskScore, vezes } from './benchmarkScore'
 
 describe('the prototype\'s score maths (opcao-d3: nr, fin, pontos, tomTipo)', () => {
   test('nr maps a ratio to 0–100 through 100/(1+1/r): 1 is 50, and swapping the sides mirrors it exactly', () => {
@@ -48,6 +48,11 @@ describe('the prototype\'s score maths (opcao-d3: nr, fin, pontos, tomTipo)', ()
     expect(scoreTone(55.54)).toBe('tie')
     expect(scoreTone(44.45)).toBe('bad')
     expect(scoreTone(44.46)).toBe('tie')
+  })
+
+  test('pointTone (observed comparison, margin 0): above 52 pays, below 48 does not, 48 and 52 themselves tie', () => {
+    for (const [n, tone] of [[47.9, 'bad'], [48, 'tie'], [50, 'tie'], [52, 'tie'], [52.1, 'good'], [54, 'good'], [0, 'bad'], [100, 'good']] as const) expect(pointTone(n)).toBe(tone)
+    expect(scoreTone(54)).toBe('tie')   // the type band is untouched
   })
 
   test('vezes: "igual" under 1.03×, otherwise the multiplier and its direction', () => {

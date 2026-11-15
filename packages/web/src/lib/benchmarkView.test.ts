@@ -48,11 +48,36 @@ describe('the observed hero — what ANALISE.md lets us say, never a "paid off X
   })
 })
 
+describe('an observed comparison is read with the prototype\'s point rule (margin 0), not the type band', () => {
+  // cost 100 → 80 (ratio 1,25 → 55,6) and equal time (50): score 53,3 — above 52 pays, yet inside the 44,45–55,55 tie band.
+  const subs = [...Array.from({ length: 4 }, (_, i) => sub(`o${i}`, { qaRounds: 1, costUSD: 100, wallMs: H, sessions: 1 })), ...Array.from({ length: 4 }, (_, i) => sub(`m${i}`, { qaRounds: 3, costUSD: 80, wallMs: H, sessions: 5 }))]
+  const o = { history: history(subs) } as unknown as Observed
+  const e = entriesOf(o, [], 'pt')[0]!
+  test('the hero and the list card say Compensou at 53,3', () => {
+    expect(e.score).toBeCloseTo(53.3, 0)
+    expect(e.tone).toBe('good')
+    const hero = heroOf(e, o, 'pt', { currency: 'USD' })
+    expect(hero.tone).toBe('good')
+    expect(hero.word).toBe('Compensou')
+  })
+})
+
 describe('history rows for the table', () => {
   const h = history([sub('a', { title: 'Parser' }), sub('b', { title: 'Filtro', size: 'S', costUSD: null })])
   test('filter by size and by name, sorted with unmeasured last', () => {
     expect(historyTaskRows(h.tasks, { size: 'all', needle: 'tas', key: 'cost', dir: -1 }).length).toBe(1)
     expect(historyTaskRows(h.tasks, { size: 'S', needle: '', key: 'cost', dir: 1 }).length).toBe(0)
+  })
+})
+
+describe('history rows sorted by "Compensou?" (the task\'s own score)', () => {
+  const side = (a: number, b: number) => ({ key: 'qa', nA: 1, nB: 1, sessions: [null, null], costUSD: [a, b], wallMs: [null, null], qaRounds: [null, null], costPartial: [false, false], defects: [null, null], accepted: [null, null] })
+  const task = (id: string, sides: unknown) => ({ id, title: id, status: 'done', size: 'M', pieces: 1, sessions: 1, costUSD: 1, costPartial: false, wallMs: null, activeMs: null, qaRounds: 0, reworkedPieces: 0, lines: 1, subtasks: [], sides: sides ? { qa: sides } : undefined })
+  const rows = [task('good', side(10, 2)), task('none', undefined), task('bad', side(2, 10)), task('tie', side(5, 5))] as never
+  const ids = (dir: 1 | -1) => historyTaskRows(rows, { size: 'all', needle: '', key: 'score', dir }).map(r => r.task.id)
+  test('ascending reads worst to best and a task with no score goes last either way', () => {
+    expect(ids(1)).toEqual(['bad', 'tie', 'good', 'none'])
+    expect(ids(-1)).toEqual(['good', 'tie', 'bad', 'none'])
   })
 })
 

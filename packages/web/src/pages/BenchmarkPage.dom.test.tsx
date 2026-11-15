@@ -433,6 +433,12 @@ describe('per-piece history from the server fills the blocks with real rows', ()
     expect(taskHead(render('en', withHistory))).toContain('>QA rounds')
   })
 
+  test('Por tarefa opens sorted by "Compensou?" ascending, as the prototype does', () => {
+    const head = taskHead(render('pt', withHistory))
+    expect(head).toMatch(/aria-sort="ascending"[^>]*><button[^>]*>Compensou\? ↑/)
+    expect(head.match(/aria-sort="(ascending|descending)"/g)!.length).toBe(1)
+  })
+
   test('M5: selecting "1 sessão × 5+" makes Por tarefa read the SESSIONS sides, and the QA comparison reads the QA sides', () => {
     const sent = (key: 'qa' | 'sessions', sess: [number, number], qa: [number, number]) => ({ key, nA: 1, nB: 1, sessions: sess, costUSD: [1, 2], wallMs: [H, 2 * H], qaRounds: qa, costPartial: [false, false], defects: [null, null], accepted: [null, null] })
     const h = { ...history, comparisons: buildComparisons([...Array.from({ length: 4 }, (_, i) => sub(`o${i}`, 'o', { sessions: 1 })), ...Array.from({ length: 4 }, (_, i) => sub(`m${i}`, 'm', { qaRounds: 3, reworked: true, sessions: 5 }))] as never), tasks: [{ ...history.tasks[0]!, sides: { qa: sent('qa', [11, 12], [21, 22]), sessions: sent('sessions', [31, 32], [41, 42]) } }] }
@@ -526,6 +532,10 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     expect(items[0]).toContain('Não compensou')
     expect(items[0]).toContain('data-testid="benchmark-item-bar" data-tone="bad"')
     expect(items[0]).toContain('background:var(--accent-red)')
+    const at = (needle: string) => items[0]!.indexOf(needle)
+    expect(at('benchmark-item-bar')).toBeGreaterThan(0)
+    expect(at('benchmark-item-bar')).toBeLessThan(at('>Não compensou<'))     // the prototype's order: name + score, bar, word, sample
+    expect(at('>Não compensou<')).toBeLessThan(at('<small'))
     for (const un of items.slice(2)) { expect(un).not.toContain('role="img"'); expect(un).toContain('sem medição') }
   })
 

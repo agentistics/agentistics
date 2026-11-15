@@ -134,10 +134,10 @@ function BenchItem({ e, on, onPick }: { e: Entry; on: boolean; onPick: () => voi
   }}>
     <span style={{ fontSize: 12.5, fontWeight: 600 }}>{e.name}</span>
     {e.kind !== 'unmeasured' && e.score !== null && <span data-testid="benchmark-item-score" style={{ fontWeight: 800, fontSize: 15, fontVariantNumeric: 'tabular-nums', color: TONE_VAR[e.tone] }}>{e.score === null ? '—' : Math.round(e.score)}</span>}
-    <small style={{ gridColumn: '1/3', color: 'var(--text-tertiary)', fontSize: 11 }}>{e.sample}</small>
     {e.score !== null && <div data-testid="benchmark-item-bar" data-tone={e.tone} style={{ gridColumn: '1/3' }}><Bar value={e.score} tone={e.tone} /></div>}
     {e.kind === 'unmeasured' || (e.kind === 'comparison' && e.score === null) ? <span data-testid="benchmark-seal" style={{ gridColumn: '1/3', justifySelf: 'start', fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 9px' }}>{e.word}</span>
       : <span style={{ gridColumn: '1/3', fontSize: 11.5, fontWeight: 700, color: e.tone === 'none' ? 'var(--text-tertiary)' : TONE_VAR[e.tone] }}>{e.word}</span>}
+    <small style={{ gridColumn: '1/3', color: 'var(--text-tertiary)', fontSize: 11 }}>{e.sample}</small>
   </button>
 }
 

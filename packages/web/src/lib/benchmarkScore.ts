@@ -31,6 +31,13 @@ export const nr = (r: number): number => 100 / (1 + 1 / r)
 export const scoreTone = (n: number): ScoreTone => n >= 55.55 ? 'good' : n <= 44.45 ? 'bad' : 'tie'
 
 export interface TypeScore { ratio: number; /** 0–100 */ nr: number; /** the type's maximum AFTER renormalising over the measured types */ max: number; points: number }
+/**
+ * The verdict word of a whole OBSERVED comparison: the prototype's point rule (`vd(v, 0)` / `ponto`) with margin 0, because an
+ * observed comparison carries no margin of error. Above 52 pays, below 48 does not, otherwise a tie (52 and 48 themselves tie).
+ * The type cards and the task rows keep the 55,55 / 44,45 band of `scoreTone` (`tomTipo`).
+ */
+export const pointTone = (n: number, margin = 0): ScoreTone => n - margin > 52 ? 'good' : n + margin < 48 ? 'bad' : 'tie'
+
 export interface Scored { score: number | null; types: Partial<Record<ScoreTypeKey, TypeScore>> }
 
 export function scoreOf(ratios: Ratios, weights: Record<ScoreTypeKey, number> = WEIGHTS): Scored {

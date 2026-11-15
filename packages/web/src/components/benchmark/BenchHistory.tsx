@@ -24,7 +24,7 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
   const { statuses } = useTaskStatuses()
   const st = (s: string) => statusLabel(s, lang, statuses)
   const [size, setSize] = useState<SizeFilter>('all')
-  const [sort, setSort] = useState<{ key: HistorySortKey; dir: 1 | -1 }>({ key: 'cost', dir: -1 })
+  const [sort, setSort] = useState<{ key: HistorySortKey; dir: 1 | -1 }>({ key: 'score', dir: 1 })
   const [open, setOpen] = useState<string | null>(initialOpen)
   const [subNeedle, setSubNeedle] = useState('')
   const [pageSize, setPageSize] = useState<number>(DEFAULT_BOARD_PAGE_SIZE)
