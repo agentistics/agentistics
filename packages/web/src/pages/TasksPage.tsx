@@ -576,6 +576,7 @@ function TaskList() {
 
       {blocking && rows && (
         <BlockedDialog
+          lang={lang}
           titles={blocking.map(id => rows.find(r => r.task.id === id)?.task.title ?? id)}
           rows={rows}
           already={blocking.length === 1
@@ -628,7 +629,7 @@ function TaskDetailView({ id }: { id: string }) {
 
   if (error === 'missing') return <div style={{ padding: 18 }}><EmptyNotice error={null} /></div>
   if (error) return <div style={{ padding: 18 }}><EmptyNotice error={error} /></div>
-  if (!detail) return <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12.5 }}>Loading…</div>
+  if (!detail) return <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12.5 }}>{lang === 'pt' ? 'Carregando…' : 'Loading…'}</div>
 
   const live = fleetLoading ? null : liveSessionsOf(detail.sessions, fleet.sessions).length
 

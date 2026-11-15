@@ -74,7 +74,7 @@ export function SortTh<K extends string>({ label, sortKey, current, onSort, styl
    * the SAME array the "Columns" dropdown writes. The dropdown stays the keyboard/touch way: HTML5 drag
    * does not exist on a touch screen, and this adds nothing a keyboard needs.
    */
-  reorder?: { scope: string; id: string; onMove: (dragId: string, dropId: string) => void }
+  reorder?: { scope: string; id: string; onMove: (dragId: string, dropId: string) => void; /** Tooltip, in the reader's language. */ label?: string }
 }) {
   const [dragging, setDragging] = useState(false)
   const [over, setOver] = useState(false)
@@ -114,8 +114,8 @@ export function SortTh<K extends string>({ label, sortKey, current, onSort, styl
         <span
           draggable
           role="button"
-          aria-label="Drag to reorder column"
-          title="Drag to reorder column"
+          aria-label={reorder.label ?? 'Drag to reorder column'}
+          title={reorder.label ?? 'Drag to reorder column'}
           onDragStart={e => {
             e.stopPropagation()
             e.dataTransfer.effectAllowed = 'move'

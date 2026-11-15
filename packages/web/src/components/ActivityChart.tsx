@@ -28,7 +28,12 @@ interface Props {
    * its own words rather than mislabeling counts that were never messages or tool calls.
    */
   metricLabels?: Partial<Record<Metric, string>>
+  /** The chart's own words (toggles, empty state, legend max) — English when omitted, so every existing caller is unchanged. */
+  copy?: Partial<ChartCopy>
 }
+
+export interface ChartCopy { overlay: string; axes: string; legend: string; max: string; empty: string }
+const EN_COPY: ChartCopy = { overlay: 'Overlay All', axes: 'Axes', legend: 'Legend', max: 'max', empty: 'No data for this period' }
 
 type Metric = 'value' | 'sessions' | 'tools'
 
@@ -99,8 +104,9 @@ function ToggleBtn({ active, onClick, children }: { active: boolean; onClick: ()
 }
 
 export function ActivityChart({
-  data, height = 180, theme, forcedMetric, forcedOverlay, hideControls, metricLabels,
+  data, height = 180, theme, forcedMetric, forcedOverlay, hideControls, metricLabels, copy,
 }: Props) {
+  const C = { ...EN_COPY, ...copy }
   const [metric, setMetric] = useState<Metric>(forcedMetric ?? 'value')
   const [overlayAll, setOverlayAll] = useState(forcedOverlay ?? false)
   const [showAxes, setShowAxes] = useState(true)
@@ -171,11 +177,11 @@ export function ActivityChart({
             fontFamily: 'inherit',
           }}
         >
-          Overlay All
+          {C.overlay}
         </button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
-          <ToggleBtn active={showAxes} onClick={() => setShowAxes(v => !v)}>Axes</ToggleBtn>
-          <ToggleBtn active={showLegend} onClick={() => setShowLegend(v => !v)}>Legend</ToggleBtn>
+          <ToggleBtn active={showAxes} onClick={() => setShowAxes(v => !v)}>{C.axes}</ToggleBtn>
+          <ToggleBtn active={showLegend} onClick={() => setShowLegend(v => !v)}>{C.legend}</ToggleBtn>
         </div>
       </div>
       )}
@@ -189,7 +195,7 @@ export function ActivityChart({
               <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{m.label}</span>
               {isOverlay && (
                 <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
-                  (max {m.key === 'value' ? maxValues.value : m.key === 'sessions' ? maxValues.sessions : maxValues.tools})
+                  ({C.max} {m.key === 'value' ? maxValues.value : m.key === 'sessions' ? maxValues.sessions : maxValues.tools})
                 </span>
               )}
             </div>
@@ -199,7 +205,7 @@ export function ActivityChart({
 
       {data.length === 0 ? (
         <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
-          No data for this period
+          {C.empty}
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={height}>
