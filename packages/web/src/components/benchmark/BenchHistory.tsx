@@ -1,9 +1,11 @@
 import React, { useState } from 'react'
+import { UnmeasuredPill } from './BenchStyle'
 import { Flag, Info } from 'lucide-react'
 import type { ComparisonKey, HistoryTaskRow } from '@agentistics/core/benchmark'
 import { TabStrip } from '../sessions/formBits'
 import { nf, type Lang, type Money } from '../../lib/benchmarkFormat'
-import { durationText, historyTaskRows, matches, moneyText, sizeLabel, type HistorySortKey, type SizeFilter } from '../../lib/benchmarkView'
+import { durationText, historyRowScore, historyTaskRows, matches, moneyText, sizeLabel, type HistorySortKey, type SizeFilter } from '../../lib/benchmarkView'
+import { TaskVerdictCell } from './BenchTasks'
 import { BoardPager } from '../tasks/BoardPager'
 import { BOARD_PAGE_SIZES, DEFAULT_BOARD_PAGE_SIZE, resolveBoardPage } from '../tasks/boardPaging'
 import { statusLabel } from '../tasks/copy'
@@ -11,7 +13,6 @@ import { useTaskStatuses } from '../../lib/tasks'
 
 const muted: React.CSSProperties = { color: 'var(--text-tertiary)', fontSize: 12, lineHeight: 1.45 }
 const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 14, minWidth: 0 }
-const h3: React.CSSProperties = { margin: 0, fontSize: 14, fontWeight: 700, display: 'flex', gap: 7, alignItems: 'center' }
 const field: React.CSSProperties = { background: 'var(--bg-input, var(--bg-elevated))', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', padding: '5px 10px', fontSize: 13, minWidth: 0 }
 const SIZES: readonly SizeFilter[] = ['all', 'S', 'M', 'L']
 
@@ -23,7 +24,7 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
   const { statuses } = useTaskStatuses()
   const st = (s: string) => statusLabel(s, lang, statuses)
   const [size, setSize] = useState<SizeFilter>('all')
-  const [sort, setSort] = useState<{ key: HistorySortKey; dir: 1 | -1 }>({ key: 'cost', dir: -1 })
+  const [sort, setSort] = useState<{ key: HistorySortKey; dir: 1 | -1 }>({ key: 'score', dir: 1 })
   const [open, setOpen] = useState<string | null>(initialOpen)
   const [subNeedle, setSubNeedle] = useState('')
   const [pageSize, setPageSize] = useState<number>(DEFAULT_BOARD_PAGE_SIZE)
@@ -35,7 +36,7 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
   const ms = (v: number | null) => v === null ? dash : durationText(v, lang)
   const q = (v: number | null) => v === null ? dash : nf(v, lang, 0)
   /** The prototype's "um → outro": side A, then side B, "—" for a side with nothing measured. */
-  const noData = <span className="bm-nw" style={muted}>{dash} {pt ? 'sem dados' : 'no data'}</span>
+  const noData = <UnmeasuredPill lang={lang} testId="benchmark-task-unmeasured" />
   const pair = (v: readonly [number | null, number | null], f: (n: number | null, side: 0 | 1) => string) => v[0] === null && v[1] === null ? noData : `${f(v[0], 0)} → ${f(v[1], 1)}`
   const sz = (s: 'S' | 'M' | 'L' | null) => s === null ? dash : sizeLabel(s, lang)
   const head = (key: HistorySortKey, label: string, num = false) =>
@@ -43,7 +44,7 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
       <button type="button" onClick={() => { setPageAt(0); setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : (key === 'title' ? 1 : -1) })) }}>{label}{sort.key === key ? (sort.dir === 1 ? ' ↑' : ' ↓') : ''}</button></th>
   return <section style={card} data-testid="benchmark-tasks" aria-label={pt ? 'Por tarefa' : 'By task'}>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-      <h3 style={h3}><Flag size={15} /> {pt ? 'Por tarefa' : 'By task'}</h3>
+      <h3 className="bm-sec"><Flag size={15} /> {pt ? 'Por tarefa' : 'By task'}</h3>
       {tasks.length > 0 && <span style={muted}>{all.length} {pt ? (all.length === 1 ? 'tarefa' : 'tarefas') : (all.length === 1 ? 'task' : 'tasks')}</span>}
       {tasks.length > 0 && <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <TabStrip tabs={SIZES} value={size} onPick={v => { setSize(v); setPageAt(0) }} label={s => s === 'all' ? (pt ? 'Todas' : 'All') : sizeLabel(s, lang)} ariaLabel={pt ? 'Tamanho' : 'Size'} natural />
@@ -56,21 +57,22 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
           <table className="bm-tasks"><thead><tr>
             {head('title', pt ? 'Tarefa' : 'Task')}<th>{pt ? 'Tamanho' : 'Size'}</th>{head('sessions', pt ? 'Sessões' : 'Sessions', true)}
             {head('cost', pt ? 'Custo' : 'Cost', true)}{head('wall', pt ? 'Tempo' : 'Time', true)}{head('qa', pt ? 'Rodadas QA' : 'QA rounds', true)}
-            <th className="bm-num">{pt ? 'Defeitos' : 'Defects'}</th><th>{pt ? 'Aceita' : 'Accepted'}</th>
+            <th className="bm-num">{pt ? 'Defeitos' : 'Defects'}</th><th>{pt ? 'Aceita' : 'Accepted'}</th>{head('score', pt ? 'Compensou?' : 'Paid off?')}
           </tr></thead><tbody>
             {rows.map(({ task: t, sides: sd }) => {
               const subs = t.subtasks.filter(s => matches(s.title, subNeedle))
               return <React.Fragment key={t.id}>
                 <tr className="bm-t" data-testid="benchmark-task-row" data-task={t.id} onClick={() => { setOpen(open === t.id ? null : t.id); setSubNeedle('') }} aria-expanded={open === t.id}>
-                  <td>{t.title}</td><td data-l={pt ? 'Tamanho' : 'Size'}>{sz(t.size)}</td>
+                  <td><div className="bm-clamp" title={t.title}>{t.title}</div></td><td data-l={pt ? 'Tamanho' : 'Size'}>{sz(t.size)}</td>
                   <td className="bm-num" data-l={pt ? 'Sessões' : 'Sessions'}>{pair(sd.sessions, q)}</td>
                   <td className="bm-num" data-l={pt ? 'Custo' : 'Cost'}>{pair(sd.costUSD, (v, i) => cost(v, sd.costPartial[i]))}</td>
                   <td className="bm-num" data-l={pt ? 'Tempo' : 'Time'}>{pair(sd.wallMs, ms)}</td>
                   <td className="bm-num" data-l="QA">{pair(sd.qaRounds, q)}</td>
                   <td className="bm-num" data-l={pt ? 'Defeitos' : 'Defects'}>{pair(sd.defects, q)}</td>
                   <td data-l={pt ? 'Aceita' : 'Accepted'} style={{ whiteSpace: 'nowrap' }}>{pair([null, null], q)}</td>
+                  <TaskVerdictCell score={historyRowScore(sd)} lang={lang} />
                 </tr>
-                {open === t.id && <tr className="bm-d" data-testid="benchmark-task-detail"><td className="bm-d" colSpan={8}>
+                {open === t.id && <tr className="bm-d" data-testid="benchmark-task-detail"><td className="bm-d" colSpan={9}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Info size={13} /> {pt ? `${t.pieces} peças, ${t.sessions} sessões${t.lines === null ? '' : `, ${nf(t.lines, lang, 0)} linhas alteradas`}; ${sd.nA} no lado A e ${sd.nB} no lado B.` : `${t.pieces} pieces, ${t.sessions} sessions${t.lines === null ? '' : `, ${nf(t.lines, lang, 0)} lines changed`}; ${sd.nA} on side A and ${sd.nB} on side B.`}</div>
                   <div style={{ marginTop: 8, maxHeight: 340, overflowY: 'auto' }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>

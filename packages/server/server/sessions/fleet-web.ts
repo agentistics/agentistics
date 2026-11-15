@@ -42,6 +42,7 @@ import type { AdmissionRefusal } from './spawn-admission'
 import { arrangeFleet, type FleetArrangement, type FleetViewRequest } from './fleet-arrange'
 import { markFleetPhase, timeFleetPhase } from './fleet-profile'
 import { processSessionHub, type SessionHub } from './session-hub'
+import { liveRowsSignature, planLiveFleetRead } from './live-fleet-plan'
 import { forceRowScreen } from './adapter-state-host'
 import {
   buildFleetFrame, closedPage, compactFleetRows, compactFleetSession, compactGetBody, fleetEventsResponse, type FleetFrame,
@@ -193,14 +194,31 @@ export async function hostForFleet(lang: CliLang): Promise<StartHost> {
 export async function readLiveFleet(lang: CliLang): Promise<ControlSession[]> {
   const hub = await fleetSessionHub()
   const snapshot = hub.last()
-  if (liveFleetCache?.lang === lang && liveFleetCache.snapshot === snapshot) return liveFleetCache.rows
-  if (liveFleetInFlight?.lang === lang && liveFleetInFlight.snapshot === snapshot) return liveFleetInFlight.promise
+  // LIVE.12S r2: rows younger than `LIVE_FLEET_MAX_STALE_MS` answer at once while ONE refresh runs behind
+  // them (`live-fleet-plan.ts`) — the hub snapshot changes every poll, so keying the cache on it alone made
+  // almost every Live read pay a full `host.sessions()` rebuild. Only this door is stale-tolerant.
+  const plan = planLiveFleetRead({ lang, snapshot, nowMs: Date.now(), signature: liveRowsSignature(snapshot as SessionSnapshot | null), cache: liveFleetCache, inFlight: liveFleetInFlight })
+  if (plan.kind === 'fresh') return liveFleetCache!.rows
+  if (plan.kind === 'stale') {
+    if (plan.refresh) void startLiveFleetBuild(lang, hub, snapshot).catch(() => { /* the next read retries */ })
+    return liveFleetCache!.rows
+  }
+  if (plan.kind === 'join') return liveFleetInFlight!.promise
+  return startLiveFleetBuild(lang, hub, snapshot)
+}
+
+async function startLiveFleetBuild(lang: CliLang, hub: SessionHub, snapshot: unknown): Promise<ControlSession[]> {
+  const startSig = liveRowsSignature(snapshot as SessionSnapshot | null)
   const host = await hostForFleet(lang)
   const promise = (async () => {
     const frame = host.sessions ? await host.sessions() : null
     const rows = frame?.sessions ?? []
-    const result = { lang, snapshot: hub.last(), rows }
-    liveFleetCache = result
+    const end = hub.last()
+    // The rows are as new as a hub read somewhere between start and end: if the states moved in between, no
+    // signature can vouch for them, so the next read rebuilds (r3).
+    const endSig = liveRowsSignature(end)
+    const signature = endSig === startSig ? endSig : null
+    liveFleetCache = { lang, snapshot: end, rows, atMs: Date.now(), signature }
     return rows
   })()
   liveFleetInFlight = { lang, snapshot, promise }
@@ -209,7 +227,7 @@ export async function readLiveFleet(lang: CliLang): Promise<ControlSession[]> {
   }
 }
 
-let liveFleetCache: { lang: CliLang; snapshot: unknown; rows: ControlSession[] } | null = null
+let liveFleetCache: { lang: CliLang; snapshot: unknown; rows: ControlSession[]; atMs: number; signature: string | null } | null = null
 let liveFleetInFlight: { lang: CliLang; snapshot: unknown; promise: Promise<ControlSession[]> } | null = null
 
 /** How long one fleet snapshot serves every route that only needs to find a row in it. */

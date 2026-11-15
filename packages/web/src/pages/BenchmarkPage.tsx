@@ -12,7 +12,7 @@ import {
 } from '../lib/benchmarkView'
 import { BetaTag } from '../components/BetaTag'
 import { Pill } from '../components/Pill'
-import { Bar, BenchStyle, TONE_VAR } from '../components/benchmark/BenchStyle'
+import { Bar, BenchStyle, TONE_VAR, UnmeasuredPill } from '../components/benchmark/BenchStyle'
 import { BenchBuckets, BenchTasks } from '../components/benchmark/BenchTasks'
 import { BenchHistoryTasks } from '../components/benchmark/BenchHistory'
 
@@ -61,8 +61,10 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
   // The prototype has FOUR cards; rework is evidence without points, so it is one line under them, never a card.
   const parts = allParts.filter(p => p.type !== 'rework')
   const reworkLine = allParts.find(p => p.type === 'rework' && p.name === (pt ? 'Retrabalho' : 'Rework') && p.rows.length > 0) ?? null
+  const scored = parts.filter(p => p.state === 'scored')
+  const sumLine = hero.score !== null && scored.length > 0 ? { n: Math.round(hero.score), parts: scored.map(p => String(p.points)), partial: scored.length < 4 } : null
   const unmeasured = cur.kind === 'unmeasured'
-  // An unmeasured card has no comparison of its own, but "Por número de sessões" is the history and does not depend on it.
+  // An unmeasured card has no comparison of its own, but "Por quantidade de sessões" is the history and does not depend on it.
   const history = cur.kind !== 'experiment' ? observed?.history ?? null : null
   const exp = cur.experiment
   const noTasks = pt ? 'Sem tarefas comparadas neste benchmark: o servidor só mede por tarefa quando um experimento controlado roda — nenhum rodou ainda.' : 'No compared tasks in this benchmark: the server only measures per task when a controlled experiment runs — none has yet.'
@@ -83,7 +85,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
     {status === 'ready' && observed && <>
       <div className="bm-top">
         <nav className="bm-list" data-testid="benchmark-list" aria-label={pt ? 'Benchmarks' : 'Benchmarks'}>
-          {entries.map(e => <BenchItem key={e.id} e={e} on={e.id === cur.id} onPick={() => setPicked(e.id)} />)}
+          {entries.map(e => <BenchItem key={e.id} e={e} on={e.id === cur.id} onPick={() => setPicked(e.id)} lang={L} />)}
           <button type="button" className="bm-btn" data-testid="benchmark-new" aria-expanded={newInfo} onClick={() => setNewInfo(v => !v)}
             style={{ ...newBtn }}><FlaskConical size={15} />{pt ? 'Novo benchmark' : 'New benchmark'}</button>
           {newInfo && <div role="status" data-testid="benchmark-new-note" style={{ ...muted, fontSize: 11.5 }}>{pt ? 'Chega com o teste controlado: ainda não dá para criar um benchmark novo.' : 'Arrives with the controlled test: a new benchmark cannot be created yet.'}</div>}
@@ -92,8 +94,11 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
           <Hero hero={hero} lang={L} entryId={cur.id} basis={unmeasured ? '' : basisText} />
           {!unmeasured && <section aria-label={pt ? 'Partes' : 'Parts'} data-testid="benchmark-parts">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 8px' }}>
-              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{pt ? 'Partes' : 'Parts'}</h3>
-              <span style={{ ...muted, fontSize: 12.5 }}>{pt ? 'Cada tipo de métrica, com os números que o compõem.' : 'Each metric type, with the figures inside it.'}</span>
+              {sumLine
+                ? <><h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }} data-testid="benchmark-parts-title">{pt ? `De onde vêm os ${sumLine.n} pontos` : `Where the ${sumLine.n} points come from`}</h3>
+                  <span data-testid="benchmark-parts-sum" style={{ ...muted, fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>{sumLine.parts.join(' + ')} = {sumLine.n}{sumLine.partial ? (pt ? ' · conta só o que foi medido' : ' · counts only what was measured') : ''}</span></>
+                : <><h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{pt ? 'Partes' : 'Parts'}</h3>
+                  <span style={{ ...muted, fontSize: 12.5 }}>{pt ? 'Cada tipo de métrica, com os números que o compõem.' : 'Each metric type, with the figures inside it.'}</span></>}
               <button type="button" className="bm-btn" data-testid="benchmark-numbers-toggle" aria-pressed={nums} onClick={() => setNums(!nums)} style={toggle}>{nums ? (pt ? 'Esconder os números' : 'Hide the figures') : (pt ? 'Ver os números' : 'Show the figures')}</button>
             </div>
             <div className="bm-types">{parts.map(p => <PartTile key={p.type} p={p} nums={nums} lang={L} observed={observed} />)}</div>
@@ -122,17 +127,17 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
   </main>
 }
 
-function BenchItem({ e, on, onPick }: { e: Entry; on: boolean; onPick: () => void }) {
+function BenchItem({ e, on, onPick, lang }: { e: Entry; on: boolean; onPick: () => void; lang: Lang }) {
   return <button type="button" data-testid="benchmark-item" data-bench={e.id} data-unmeasured={e.kind === 'unmeasured' ? 'yes' : undefined} aria-pressed={on} onClick={onPick} style={{
     appearance: 'none', textAlign: 'left', color: 'var(--text-primary)', font: 'inherit', cursor: 'pointer', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: '3px 8px',
     border: `1px solid ${on ? 'var(--text-tertiary)' : 'var(--border)'}`, borderRadius: 10, background: on ? 'var(--bg-elevated)' : 'var(--bg-card)', padding: '9px 11px',
   }}>
     <span style={{ fontSize: 12.5, fontWeight: 600 }}>{e.name}</span>
-    {e.kind !== 'comparison' && e.kind !== 'unmeasured' && <span style={{ fontWeight: 800, fontSize: 15, fontVariantNumeric: 'tabular-nums', color: TONE_VAR[e.tone] }}>{e.score === null ? '—' : Math.round(e.score)}</span>}
-    <small style={{ gridColumn: '1/3', color: 'var(--text-tertiary)', fontSize: 11 }}>{e.sample}</small>
-    {e.score !== null && <div style={{ gridColumn: '1/3' }}><Bar value={e.score} tone={e.tone} /></div>}
-    {e.kind === 'comparison' || e.kind === 'unmeasured' ? <span data-testid="benchmark-seal" style={{ gridColumn: '1/3', justifySelf: 'start', fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 9px' }}>{e.word}</span>
+    {e.kind !== 'unmeasured' && e.score !== null && <span data-testid="benchmark-item-score" style={{ fontWeight: 800, fontSize: 15, fontVariantNumeric: 'tabular-nums', color: TONE_VAR[e.tone] }}>{e.score === null ? '—' : Math.round(e.score)}</span>}
+    {e.score !== null && <div data-testid="benchmark-item-bar" data-tone={e.tone} style={{ gridColumn: '1/3' }}><Bar value={e.score} tone={e.tone} /></div>}
+    {e.kind === 'unmeasured' || (e.kind === 'comparison' && e.score === null) ? <UnmeasuredPill lang={lang} label={e.word} style={{ gridColumn: '1/3', justifySelf: 'start' }} />
       : <span style={{ gridColumn: '1/3', fontSize: 11.5, fontWeight: 700, color: e.tone === 'none' ? 'var(--text-tertiary)' : TONE_VAR[e.tone] }}>{e.word}</span>}
+    <small style={{ gridColumn: '1/3', color: 'var(--text-tertiary)', fontSize: 11 }}>{e.sample}</small>
   </button>
 }
 
@@ -158,7 +163,6 @@ function Hero({ hero, lang, entryId, basis = '' }: { hero: ReturnType<typeof her
       </div>
     </>}
     {hero.firm && <div style={{ marginTop: 10 }}><Pill tone={hero.firm.ok ? 'ok' : 'warn'}>{hero.firm.ok ? <Check size={12} /> : <TriangleAlert size={12} />}{hero.firm.text}</Pill></div>}
-    {hero.caption && <div data-testid="benchmark-caption" style={{ marginTop: 6, fontSize: 12, color: 'var(--text-tertiary)' }}>{hero.caption}</div>}
     {(hero.why.length > 0 || basis) && <details open={hero.tone === 'none' && !hero.disclosure && hero.why.length > 0} style={{ marginTop: 10, fontSize: 12.5, color: 'var(--text-secondary)' }}>
       <summary style={{ cursor: 'pointer', color: 'var(--text-primary)', fontWeight: 600 }}>{hero.disclosure ?? (hero.tone === 'none' ? (pt ? 'O que falta' : 'What is missing') : (pt ? 'Por que esse resultado?' : 'Why this result?'))}</summary>
       {hero.why.map((w, i) => <p key={i} style={{ margin: '6px 0 0', maxWidth: 880 }}>{w}</p>)}
@@ -175,11 +179,11 @@ function PartTile({ p, nums, lang, observed }: { p: Part; nums: boolean; lang: L
   return <div data-testid={`part-${p.type}`} data-state={p.state} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', background: 'var(--bg-card)', minWidth: 0 }}>
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5, fontWeight: 600 }}><Icon size={14} />{p.name}</div>
     <div style={{ ...muted, fontSize: 11.5, margin: '1px 0 6px' }}>{p.question}</div>
-    {p.state === 'none' && <div style={{ fontSize: 13, color: 'var(--text-secondary)', padding: '6px 0', display: 'flex', gap: 5, alignItems: 'center' }}>{p.word}{p.hint && <span title={p.hint} aria-label={p.hint} role="img" style={{ display: 'inline-flex', cursor: 'help' }}><Info size={12} /></span>}</div>}
+    {p.state === 'none' && <><div style={{ fontSize: 13, color: 'var(--text-secondary)', padding: '6px 0 2px', display: 'flex', gap: 5, alignItems: 'center' }}>{p.word}{p.hint && <span title={p.hint} aria-label={p.hint} role="img" style={{ display: 'inline-flex', cursor: 'help' }}><Info size={12} /></span>}</div><div data-testid={`bar-${p.type}`}><Bar value={0} tone="none" mark={false} /></div></>}
     {p.state === 'history' && <>{p.big && <div data-testid={`big-${p.type}`} style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{p.big}</div>}<div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{p.word}</div></>}
     {p.state === 'scored' && <>
-      <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c }}>{p.pct}%<small style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)' }}>{p.points} {pt ? 'de' : 'of'} {p.max} {pt ? 'pontos' : 'points'}</small></div>
-      <Bar value={p.pct ?? 0} tone={p.tone} />
+      <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: c, marginBottom: 5 }}>{p.points}<small style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginLeft: 4 }}>{pt ? 'de' : 'of'} {p.max} {pt ? 'pontos' : 'points'}</small></div>
+      <div data-testid={`bar-${p.type}`} data-tone={p.tone}><Bar value={p.pct ?? 0} tone={p.tone} /></div>
       <div style={{ fontSize: 12, fontWeight: 700, marginTop: 7, color: c }}>{p.word}</div>
     </>}
     {nums && p.rows.length > 0 && <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: '7px 0 0', borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 5 }}>

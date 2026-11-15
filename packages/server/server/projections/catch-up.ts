@@ -226,6 +226,11 @@ export async function catchUpProjections(opts: CatchUpOptions): Promise<CatchUpR
       pages++
       eventsRead += events.length
       progress()
+      // Every await above resolves as a MICROTASK (a cached read, a synchronous SQLite transaction), so
+      // without this turn a whole pass — 50 pages, ~3 s on a rebuilding machine — ran with no timer,
+      // socket or HTTP request getting the loop: the first `/api/runtime/metrics` the app makes at boot
+      // froze the server, and the Live page queued behind it (LIVE.12S).
+      await new Promise<void>(resolve => setImmediate(resolve))
     }
 
     await store.markCaughtUp(defs.map(d => d.id), cursor)

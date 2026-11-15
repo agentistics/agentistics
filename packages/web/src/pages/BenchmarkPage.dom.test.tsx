@@ -93,17 +93,6 @@ describe('benchmark page — real figures, honest gaps', () => {
     expect(pt).not.toContain('origin<')
   })
 
-  test('coverage per harness lives in the "why" disclosure as counts only: measured, partial and not measured stay three different things', () => {
-    const why = (html: string) => html.split('data-testid="benchmark-hero"')[1]!.split('</details>')[0]!
-    expect(why(pt)).toContain('Cobertura por harness')
-    expect(why(pt)).toContain('claude 10/10')
-    expect(why(pt)).toContain('codex 3/6 parcial')
-    expect(why(pt)).toContain('kimi 0/5 sem medição')
-    expect(why(pt)).not.toContain('sem tokens guardados')            // counts, not the cause paragraph
-    expect(why(en)).toContain('Coverage by harness')
-    expect(why(en)).toContain('kimi 0/5 not measured')
-  })
-
   test('loading and failing reads show no number at all', () => {
     const loading = render('pt', null)
     expect(loading).toContain('benchmark-loading')
@@ -155,7 +144,7 @@ describe('the Benchmark screen follows the approved D3 layout', () => {
     expect([...order].sort((a, b) => at(a) - at(b))).toEqual(order)
     expect(html).toContain('Como funciona?')
     expect(html).toContain('Por tarefa')
-    expect(html).toContain('Por número de sessões')
+    expect(html).toContain('Por quantidade de sessões')
     // the footer is the prototype's: the question and the button, nothing else (no "Cobertura por harness" line)
     expect(html).not.toContain('benchmark-coverage')
     expect(html.split('data-testid="benchmark-buckets"')[1]).not.toContain('Cobertura por harness')
@@ -215,8 +204,9 @@ describe('the Benchmark screen follows the approved D3 layout', () => {
   test('"Partes" of an experiment: points of the type, a status word, "sem dados" for an unmeasured type', () => {
     const html = render('pt', observed, { ...experimentsOf(exp), initialSelected: 'exp-a' })
     const tile = (t: string) => html.split(`data-testid="part-${t}"`)[1]!.split('data-testid="part-')[0]!
-    expect(tile('quality')).toContain('78%')
-    expect(tile('quality')).toContain('31 de 40 pontos')
+    expect(tile('quality')).toContain('31<')
+    expect(tile('quality')).toContain('de 40 pontos')
+    expect(tile('quality')).toContain('data-testid="bar-quality" data-tone="good"')
     expect(tile('quality')).toContain('Compensou · 2,4× melhor')
     expect(tile('cost')).toContain('Não compensou')
     expect(tile('reliability')).toContain('sem dados suficientes')
@@ -235,8 +225,8 @@ describe('the Benchmark screen follows the approved D3 layout', () => {
     expect(html).toContain('sim → sim')
     expect(html).toContain('nota de Corrigir parser')
     const tasks = html.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!
-    expect(tasks).not.toContain('Compensou?')           // the approved removal: no per-task verdict column
-    expect(tasks).not.toContain('sem nota')
+    expect(tasks).toContain('Compensou?')               // the prototype's per-task verdict column is back (owner 15/11)
+    expect(tasks.match(/data-testid="benchmark-task-verdict"/g)!.length).toBe(3)
     expect(html.match(/data-testid="benchmark-subtask-row"/g)!.length).toBe(2)
     expect(html).toContain('Filtrar subtarefa')
     expect(html).not.toContain('Filtrar tarefa')   // (a) the prototype has no task search
@@ -411,17 +401,22 @@ describe('per-piece history from the server fills the blocks with real rows', ()
     const html = render('pt', withHistory, { initialOpenTask: 'T1' })
     expect(html.match(/data-testid="benchmark-task-row"/g)!.length).toBe(2)
     const head = taskHead(html)
-    for (const c of ['Tarefa', 'Tamanho', 'Sessões', 'Custo', 'Tempo', 'Rodadas QA', 'Defeitos', 'Aceita']) expect(head).toContain(`>${c}`)
-    for (const gone of ['Compensou?', 'Peças', 'Ativo', 'Retrabalho', 'Status']) expect(head).not.toContain(gone)
+    for (const c of ['Tarefa', 'Tamanho', 'Sessões', 'Custo', 'Tempo', 'Rodadas QA', 'Defeitos', 'Aceita', 'Compensou?']) expect(head).toContain(`>${c}`)
+    for (const gone of ['Peças', 'Ativo', 'Retrabalho', 'Status']) expect(head).not.toContain(gone)
     const first = html.split('data-task="T1"')[1]!.split('</tr>')[0]!
     expect(first).toContain('2 → 2')                       // sessions, 1 QA round → 2+ rounds
     expect(first).toContain('US$ 4,50 → US$ 4,50*')        // * = a session of that side had no price
     expect(first).toContain('1 → 3')                       // QA rounds
     expect(first).not.toContain('— → —')                   // nothing on both sides is "sem dados", not a pair of dashes
-    expect(first.match(/sem dados/g)!.length).toBe(2)      // defects and acceptance are not recorded yet
+    expect(first).not.toContain('sem dados')
+    expect(first.match(/data-testid="benchmark-task-unmeasured"[^>]*>sem medição</g)!.length).toBe(2)      // defects and acceptance are not recorded yet: the pill
     const second = html.split('data-task="T2"')[1]!.split('</tr>')[0]!
     expect(second).not.toContain('— → —')
-    expect(second.match(/sem dados/g)!.length).toBe(6)     // a task whose pieces fall on neither side
+    expect(second).not.toContain('sem dados')
+    expect(second.match(/data-testid="benchmark-task-unmeasured"[^>]*>sem medição</g)!.length).toBe(6)     // a task whose pieces fall on neither side: Custo and Tempo too
+    expect(second.match(/data-testid="benchmark-task-verdict-unmeasured"[^>]*>sem medição</g)!.length).toBe(1)   // + its verdict cell
+    expect(second.split('data-l="Custo"')[1]!.split('</td>')[0]).toContain('benchmark-task-unmeasured')
+    expect(second.split('data-l="Tempo"')[1]!.split('</td>')[0]).toContain('benchmark-task-unmeasured')
     expect(second).not.toContain('US$ 0')
     expect(html.match(/data-testid="benchmark-subtask-row"/g)!.length).toBe(2)
     expect(html).not.toContain('Filtrar tarefa')   // (a) the prototype has no task search
@@ -430,6 +425,12 @@ describe('per-piece history from the server fills the blocks with real rows', ()
     expect(html).not.toContain('custo em 2 de 3 peças')   // (b) coverage is no longer on the screen
     expect(html).not.toContain('benchmark-tasks-empty')
     expect(taskHead(render('en', withHistory))).toContain('>QA rounds')
+  })
+
+  test('Por tarefa opens sorted by "Compensou?" ascending, as the prototype does', () => {
+    const head = taskHead(render('pt', withHistory))
+    expect(head).toMatch(/aria-sort="ascending"[^>]*><button[^>]*>Compensou\? ↑/)
+    expect(head.match(/aria-sort="(ascending|descending)"/g)!.length).toBe(1)
   })
 
   test('M5: selecting "1 sessão × 5+" makes Por tarefa read the SESSIONS sides, and the QA comparison reads the QA sides', () => {
@@ -446,14 +447,14 @@ describe('per-piece history from the server fills the blocks with real rows', ()
     expect(qa).not.toMatch(/31 → 32|41 → 42/)
   })
 
-  test('Por número de sessões: values never break mid-value (nowrap, tabular), the label may wrap', () => {
+  test('Por quantidade de sessões: values never break mid-value (nowrap, tabular), the label may wrap', () => {
     const html = render('pt', withHistory)
     const b = html.split('data-testid="benchmark-buckets"')[1]!
     expect(b).toContain('<span class="bm-nw">US$ 4,50</span>')
     expect(html).toMatch(/\.bm-nw\{[^}]*white-space:nowrap[^}]*font-variant-numeric:tabular-nums/)
   })
 
-  test('Por número de sessões: the prototype\'s seven columns; what no record carries is "—" + "sem dados", and there is no per-cell n=', () => {
+  test('Por quantidade de sessões: the prototype\'s seven columns; what no record carries is "—" + "sem dados", and there is no per-cell n=', () => {
     const html = render('pt', withHistory)
     const b = html.split('data-testid="benchmark-buckets"')[1]!
     for (const h of ['Sessões', 'Tarefas', 'Custo mediano', 'Tempo mediano', 'Defeitos escapados', 'Aceitas de primeira', 'Não reabertas']) expect(b).toContain(`>${h}<`)
@@ -463,8 +464,11 @@ describe('per-piece history from the server fills the blocks with real rows', ()
     expect(b).toContain('US$ 4,50')
     expect(b).not.toContain('(n=')
     const row = b.split('2 sessões')[1]!.split('3–4 sessões')[0]!
-    expect(row.match(/sem dados/g)!.length).toBe(3)
-    expect(render('en', withHistory).split('data-testid="benchmark-buckets"')[1]).toContain('no data')
+    expect(row).not.toContain('sem dados')
+    expect(row.match(/data-testid="benchmark-bucket-unmeasured"[^>]*>sem medição</g)!.length).toBe(3)
+    expect(render('en', withHistory).split('data-testid="benchmark-buckets"')[1]).toContain('>not measured<')
+    // card titles wear the prototype's small uppercase grey label (one class, no inline 14px/700)
+    expect(b.split('<h3')[1]!.split('>')[0]).toContain('class="bm-sec"')
   })
 
   test('the hero states what history shows, with no "paid off X%"', () => {
@@ -507,19 +511,62 @@ describe('Retrabalho is one line under the cards, not a card', () => {
 describe('phase 3: the list holds observed comparisons, the hero is one sentence', () => {
   const mk = (id: string, o: Record<string, unknown>) => ({ id, title: id, status: 'done', size: 'M', sessions: 1, costUSD: 2, costPartial: false, wallMs: H, activeMs: null, qaRounds: 1, reworked: false, lines: 200, ...o })
   const subs = [...Array.from({ length: 4 }, (_, i) => mk(`o${i}`, {})), ...Array.from({ length: 4 }, (_, i) => mk(`m${i}`, { qaRounds: 3, reworked: true, costUSD: 5, wallMs: 4 * H, sessions: 5 }))]
-  const history = { pieces: 8, comparisons: buildComparisons(subs as never), tasks: [{ id: 'T', title: 'Tarefa real', status: 'done', size: 'M', pieces: 8, sessions: 24, costUSD: 28, costPartial: false, wallMs: H, activeMs: null, qaRounds: 16, reworkedPieces: 4, lines: 1600, subtasks: subs }],
+  const history = { pieces: 8, comparisons: buildComparisons(subs as never), tasks: [{ id: 'T', title: 'Tarefa real', status: 'done', size: 'M', pieces: 8, sessions: 24, costUSD: 28, costPartial: false, wallMs: H, activeMs: null, qaRounds: 16, reworkedPieces: 4, lines: 1600, subtasks: subs, sides: { qa: taskSides(subs as never, 'qa'), sessions: taskSides(subs as never, 'sessions') } }],
     buckets: [{ label: '1', pieces: 4, costMedianUSD: 2, nCost: 4, wallMedianMs: H, nWall: 4, reworkRate: 0, nRework: 4 }, { label: '2', pieces: 0, costMedianUSD: null, nCost: 0, wallMedianMs: null, nWall: 0, reworkRate: null, nRework: 0 }, { label: '3-4', pieces: 4, costMedianUSD: 5, nCost: 4, wallMedianMs: 4 * H, nWall: 4, reworkRate: 1, nRework: 4 }, { label: '5+', pieces: 0, costMedianUSD: null, nCost: 0, wallMedianMs: null, nWall: 0, reworkRate: null, nRework: 0 }],
     coverage: { pieces: 8, withCost: 8, withWall: 8, withQa: 8, withSize: 8, withoutDuration: 0, withActive: 0, pctWithCost: 100, harnessesWithoutCost: [], harnessesPartialCost: [] } }
   const html = render('pt', { ...observed, history } as unknown as Observed)
 
-  test('items are the comparisons, stamped "observado", with no score and no verdict word', () => {
+  test('items are the comparisons with their score, a coloured bar and the verdict word; only the two unmeasured ones keep the seal and have no bar', () => {
     expect(html.match(/data-testid="benchmark-item"/g)!.length).toBe(4)       // the prototype's four cards
-    expect(html.match(/data-testid="benchmark-seal"/g)!.length).toBe(4)
+    expect(html.match(/data-testid="benchmark-seal"/g)!.length).toBe(2)
+    expect(html.match(/data-testid="benchmark-item-bar"/g)!.length).toBe(2)
+    expect(html.match(/data-testid="benchmark-item-score"/g)!.length).toBe(2)
     expect(html.match(/data-unmeasured="yes"/g)!.length).toBe(2)
     expect(html).toContain('1 rodada de QA × 2+ rodadas')
     expect(html).toContain('1 sessão × 5+ sessões')
     const list = html.split('data-testid="benchmark-list"')[1]!.split('</nav>')[0]!
-    expect(list).not.toMatch(/Compensou|Empate|>—<|role="img"/)
+    const items = list.split('data-testid="benchmark-item"').slice(1)
+    expect(items[0]).toContain('Não compensou')
+    expect(items[0]).toContain('data-testid="benchmark-item-bar" data-tone="bad"')
+    expect(items[0]).toContain('background:var(--accent-red)')
+    const at = (needle: string) => items[0]!.indexOf(needle)
+    expect(at('benchmark-item-bar')).toBeGreaterThan(0)
+    expect(at('benchmark-item-bar')).toBeLessThan(at('>Não compensou<'))     // the prototype's order: name + score, bar, word, sample
+    expect(at('>Não compensou<')).toBeLessThan(at('<small'))
+    for (const un of items.slice(2)) { expect(un).not.toContain('role="img"'); expect(un).toContain('sem medição') }
+  })
+
+  test('the bars are back, in each state, with the colour of their result', () => {
+    const hero = html.split('data-testid="benchmark-hero"')[1]!.split('data-testid="benchmark-parts"')[0]!
+    expect(hero).toContain('data-tone="bad"')
+    expect(hero).toContain('>Não compensou<')
+    expect(hero).toContain('de 100')
+    expect(hero).toContain('0 · não compensou')
+    expect(hero).toContain('50 · empate')
+    expect(hero).toContain('100 · compensou')
+    expect(hero).toContain('height:16px')                  // the big bar
+    expect(hero).toContain('background:var(--accent-red)')
+    const parts = html.split('data-testid="benchmark-parts"')[1]!.split('data-testid="benchmark-tasks"')[0]!
+    expect(parts).toContain('De onde vêm os 25 pontos')
+    expect(parts).toContain('conta só o que foi medido')
+    for (const t of ['cost', 'time']) {
+      const tile = html.split(`data-testid="part-${t}"`)[1]!.split('data-testid="part-')[0]!
+      expect(tile).toContain(`data-testid="bar-${t}" data-tone="bad"`)
+      expect(tile).toContain('background:var(--accent-red)')
+      expect(tile).toContain('Não compensou ·')
+      expect(tile).toMatch(/pontos/)
+    }
+    for (const t of ['quality', 'reliability']) {            // no data: a grey empty bar and no points, outside the sum
+      const tile = html.split(`data-testid="part-${t}"`)[1]!.split('data-testid="part-')[0]!
+      expect(tile).toContain(`data-testid="bar-${t}"`)
+      expect(tile).toContain('width:0%')
+      expect(tile).not.toContain('pontos')
+    }
+    const tasks = html.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!
+    expect(tasks).toContain('Compensou?')
+    expect(tasks).toContain('class="bm-cp" data-testid="benchmark-task-verdict" data-tone="bad"')
+    expect(tasks).toContain('background:var(--accent-red)')
+    expect(render('en', { ...observed, history } as unknown as Observed)).toContain('Did not pay off')
   })
 
   test('list: the two slots with no data yet say "sem medição" and why; "Novo benchmark" sits where the prototype has it, active; clicking says why nothing is created yet', () => {
@@ -646,24 +693,27 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
 
   test('hero: short title, ONE sentence, a caption, no bar, and the reasons folded in a closed disclosure', () => {
     const hero = html.split('data-testid="benchmark-hero"')[1]!.split('data-testid="benchmark-parts"')[0]!
-    expect(hero).toContain('Indício, não prova')
+    expect(hero).not.toContain('Indício, não prova')       // the prototype has no honesty caption under the sentence
     expect(hero).toContain('2,5× mais custo, 4× mais tempo')
-    expect(hero).toContain('benchmark-caption')
-    expect(hero).not.toContain('role="img"')
-    expect(hero).not.toContain('de 100')
-    expect(hero).toContain('Por que não é prova?')
+    expect(hero).not.toContain('benchmark-caption')
+    expect(hero).toContain('role="img"')
+    expect(hero).toContain('25<small')
+    expect(hero).toContain('Por que esse resultado?')
     expect(hero).not.toMatch(/<details[^>]* open/)
-    // the facts list lives INSIDE the disclosure, not beside the sentence
-    expect(hero.indexOf('benchmark-facts')).toBeGreaterThan(hero.indexOf('Por que não é prova?'))
-    expect(hero.match(/<p /g)!.length).toBeGreaterThanOrEqual(3)
+    // the prototype's disclosure: exactly three paragraphs, no facts list, "Baseado em" last
+    const open = hero.split('Por que esse resultado?')[1]!.split('</details>')[0]!
+    expect(open).not.toContain('benchmark-facts')
+    expect(open.match(/<p[ >]/g)).toHaveLength(3)
+    expect(open.lastIndexOf('Baseado em')).toBeGreaterThan(open.indexOf('A nota fica'))
+    expect(open).not.toMatch(/Cobertura por harness|experimento controlado|Qualidade final/)
   })
 
   test('Partes show the observed multiplier per type; "sem dados" only for quality and reliability, in one line each', () => {
     const tile = (t: string) => html.split(`data-testid="part-${t}"`)[1]!.split('data-testid="part-')[0]!
-    expect(tile('cost')).toContain('2,5×')
-    expect(tile('cost')).toContain('comparado dentro do mesmo tamanho')
+    expect(tile('cost')).toContain('2,5× pior')
+    expect(tile('cost')).toContain('Não compensou · 2,5× pior')
     expect(tile('time')).toContain('4×')
-    expect(html.match(/data-testid="part-/g)!.length).toBe(4)       // "Sessões por peça" left Partes: "Por número de sessões" already holds it
+    expect(html.match(/data-testid="part-/g)!.length).toBe(4)       // "Sessões por peça" left Partes: "Por quantidade de sessões" already holds it
     expect(html).not.toContain('data-testid="part-rework"')
     expect(html.split('data-testid="benchmark-parts"')[1]!.split('data-testid="benchmark-tasks"')[0]).not.toContain('Sessões por peça')
     expect(tile('quality')).toContain('>sem dados<')

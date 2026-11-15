@@ -108,9 +108,11 @@ export function tokensCellFor(r: AttemptRollup | undefined): TokensCell {
 }
 
 /** Whether the cost cell should carry the "N of M sessions priced" caveat as a tooltip. */
-export function costCaveat(r: AttemptRollup | undefined): string | undefined {
+export function costCaveat(r: AttemptRollup | undefined, lang: 'pt' | 'en' = 'en'): string | undefined {
   if (!r || r.sessionsLinked >= r.sessionsUsed) return undefined
-  return `cost covers ${r.sessionsLinked} of ${r.sessionsUsed} sessions`
+  return lang === 'pt'
+    ? `o custo cobre ${r.sessionsLinked} de ${r.sessionsUsed} sessões`
+    : `cost covers ${r.sessionsLinked} of ${r.sessionsUsed} sessions`
 }
 
 /** What the Started / Completed / Duration cells show for one subtask. */

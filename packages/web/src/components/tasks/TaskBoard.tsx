@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Activity, Bot, CalendarClock, CircleCheck, ListChecks, MessageSquare, Paperclip, Terminal } from 'lucide-react'
 import { canReorderBy, DEFAULT_SORT, isLiveState, sortRows, taskProgress, type SortSpec, type TaskStatusDef } from '@agentistics/core'
 import {
-  PRIORITY, cardStyle, claimLeft, fmtInt, fmtTokens, liveStatusOrder, microLabel,
+  PRIORITY, priorityLabel, cardStyle, claimLeft, fmtInt, fmtTokens, liveStatusOrder, microLabel,
   numeric, pill, statusStyle, surface, type BoardStatus,
 } from './board'
 import { useBoardPref, type LaneKey } from './boardPrefs'
@@ -31,6 +31,7 @@ import {
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { copilotCreditsTooltip, formatTaskCost, useMoney } from './money'
 import type { TaskListRow } from '../../lib/tasks'
+import { costCaveat } from './subtaskRollup'
 import { threadsCountText, mobileBoardCopy } from './boardCopyThreads'
 
 function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
@@ -73,7 +74,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
                 padding: '1px 7px', borderRadius: 4, fontSize: 10, fontWeight: 700,
                 background: priority.dim, color: priority.color,
                 border: `1px solid ${priority.color}`,
-              }}>{priority.label}</span>
+              }}>{priorityLabel(row.task.priority!, lang)}</span>
             )}
             {row.task.dueDate && (
               <span
@@ -83,7 +84,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
                   color: late ? 'var(--accent-red)' : 'var(--text-tertiary)',
                   fontWeight: late ? 700 : 400,
                 }}
-                title={late ? 'past its due date' : 'due'}
+                title={lang === 'pt' ? (late ? 'passou do prazo' : 'prazo') : (late ? 'past its due date' : 'due')}
               ><CalendarClock size={10} /> {row.task.dueDate}</span>
             )}
           </div>
@@ -101,7 +102,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
 
         <div
           style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--text-secondary)' }}
-          title={`${fmtInt(r.rounds)} prompts · ${r.sessionsUsed} sessions · ${fmtTokens(r.tokens)} tokens${r.credits ? ` · ${copilotCreditsTooltip(r.credits.premiumRequests, lang)}` : ''}`}
+          title={`${fmtInt(r.rounds)} ${lang === 'pt' ? 'seus prompts' : 'prompts'} · ${r.sessionsUsed} ${lang === 'pt' ? 'sessões' : 'sessions'} · ${fmtTokens(r.tokens)} tokens${r.credits ? ` · ${copilotCreditsTooltip(r.credits.premiumRequests, lang)}` : ''}`}
         >
           {counts && pct !== null && (
             <span style={{ fontVariantNumeric: 'tabular-nums' }}>{pct}% · {counts.subtasksDone}/{counts.subtasks}</span>
@@ -120,12 +121,12 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
           }}>{threadCount}</span>
         )}
 
-        <Agents row={row} live={live} nowMs={nowMs} />
+        <Agents row={row} live={live} nowMs={nowMs} lang={lang} />
 
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {row.harnesses.length > 0 && <HarnessBadges harnesses={row.harnesses} max={3} />}
           {row.attempts > 0 && (
-            <span style={pill()}>{row.attempts} attempt{row.attempts === 1 ? '' : 's'}</span>
+            <span style={pill()}>{lang === 'pt' ? `${row.attempts} ${row.attempts === 1 ? 'tentativa' : 'tentativas'}` : `${row.attempts} attempt${row.attempts === 1 ? '' : 's'}`}</span>
           )}
           <span style={{ flex: 1 }} />
           {counts && counts.comments > 0 && (
@@ -148,7 +149,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
         {/* The one caveat that must never be implied by a missing number. */}
         {row.rollup.sessionsLinked < row.rollup.sessionsUsed && (
           <div style={{ ...microLabel, textTransform: 'none', fontSize: 10.5, letterSpacing: 0 }}>
-            cost covers {row.rollup.sessionsLinked} of {row.rollup.sessionsUsed} sessions
+            {costCaveat(row.rollup, lang)}
           </div>
         )}
       </div>
@@ -170,13 +171,14 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
  * CLAIM is still drawn as its own pill — it is a statement somebody made ("this is mine until
  * 14:20"), one fact and one pill, unlike the live fleet which is a count.
  */
-function Agents({ row, live, nowMs }: {
+function Agents({ row, live, nowMs, lang }: {
+  lang: 'pt' | 'en'
   row: TaskListRow
   live: readonly { id: string; state: string; harness: string; title: string }[]
   nowMs: number
 }) {
   const claim = row.task.claim
-  const lease = claim ? claimLeft(claim.expiresAt, nowMs) : null
+  const lease = claim ? claimLeft(claim.expiresAt, nowMs, lang) : null
   const counts = row.counts
   const sessionsOn = live.filter(s => isLiveState(s.state)).length
   const hasSubtasks = counts && counts.subtasks > 0
@@ -188,16 +190,16 @@ function Agents({ row, live, nowMs }: {
         <span
           style={pill(lease!.expired ? 'var(--text-tertiary)' : 'var(--accent-green)')}
           title={lease!.expired
-            ? `${claim.by} claimed this, and the lease has run out — it is available again`
-            : `${claim.by} is on it · ${lease!.text}`}
+            ? (lang === 'pt' ? `${claim.by} assumiu esta tarefa e o prazo da reserva acabou — ela está disponível de novo` : `${claim.by} claimed this, and the lease has run out — it is available again`)
+            : (lang === 'pt' ? `${claim.by} está nela · ${lease!.text}` : `${claim.by} is on it · ${lease!.text}`)}
         >
-          <Bot size={10} /> {claim.by}{lease!.expired ? ' · lapsed' : ''}
+          <Bot size={10} /> {claim.by}{lease!.expired ? (lang === 'pt' ? ' · expirada' : ' · lapsed') : ''}
         </span>
       )}
       {hasSubtasks && (
         <span
           style={{ ...microLabel, display: 'inline-flex', alignItems: 'center', gap: 3 }}
-          title={`${counts.subtasks} subtask${counts.subtasks === 1 ? '' : 's'}`}
+          title={lang === 'pt' ? `${counts.subtasks} ${counts.subtasks === 1 ? 'subtarefa' : 'subtarefas'}` : `${counts.subtasks} subtask${counts.subtasks === 1 ? '' : 's'}`}
         >
           <ListChecks size={11} /> {counts.subtasks}
         </span>
@@ -205,7 +207,7 @@ function Agents({ row, live, nowMs }: {
       {sessionsOn > 0 && (
         <span
           style={{ ...microLabel, display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--anthropic-orange)' }}
-          title={`${sessionsOn} session${sessionsOn === 1 ? '' : 's'} live right now`}
+          title={lang === 'pt' ? `${sessionsOn} ${sessionsOn === 1 ? 'sessão' : 'sessões'} ao vivo agora` : `${sessionsOn} session${sessionsOn === 1 ? '' : 's'} live right now`}
         >
           <Activity size={11} /> {sessionsOn}
         </span>
@@ -213,7 +215,7 @@ function Agents({ row, live, nowMs }: {
       {hasDone && (
         <span
           style={{ ...microLabel, display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--accent-green)' }}
-          title={`${counts.subtasksDone} subtask${counts.subtasksDone === 1 ? '' : 's'} done, with a session linked`}
+          title={lang === 'pt' ? `${counts.subtasksDone} ${counts.subtasksDone === 1 ? 'subtarefa concluída' : 'subtarefas concluídas'}, com sessão vinculada` : `${counts.subtasksDone} subtask${counts.subtasksDone === 1 ? '' : 's'} done, with a session linked`}
         >
           <CircleCheck size={11} /> {counts.subtasksDone}
         </span>
@@ -452,8 +454,8 @@ export function BoardView(p: BoardViewProps) {
                       // it rather than to look at it.
                       <span
                         style={pill('var(--accent-red)')}
-                        title={`${col.rows.length} in this column, over the limit of ${limit}`}
-                      >over WIP</span>
+                        title={p.lang === 'pt' ? `${col.rows.length} nesta coluna, acima do limite de ${limit}` : `${col.rows.length} in this column, over the limit of ${limit}`}
+                      >{p.lang === 'pt' ? 'acima do limite' : 'over WIP'}</span>
                     )}
                   </header>
                   {showRefusal && (

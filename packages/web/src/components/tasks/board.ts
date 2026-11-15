@@ -76,21 +76,34 @@ export const PRIORITY: Record<string, { label: string; short: string; color: str
   none: { label: 'Unset', short: '—', color: 'var(--text-tertiary)', dim: 'transparent' },
 }
 
+/** The priority WORDS in both languages — the one table every surface reads, so `PRIORITY.label` (English, kept
+ *  as the stored-value fallback) is never what a pt reader sees. */
+const PRIORITY_WORD: Record<string, { pt: string; en: string }> = {
+  urgent: { pt: 'Urgente', en: 'Urgent' }, high: { pt: 'Alta', en: 'High' }, medium: { pt: 'Média', en: 'Medium' },
+  low: { pt: 'Baixa', en: 'Low' }, none: { pt: 'Sem prioridade', en: 'Unset' },
+}
+
+/** The priority's word in the reader's language. Unknown ids fall back to the id itself. */
+export function priorityLabel(id: string, lang: 'pt' | 'en'): string {
+  return PRIORITY_WORD[id]?.[lang] ?? id
+}
+
 /**
  * How long a claim has left, in words — or that it has run out.
  *
  * An EXPIRED lease is said out loud rather than hidden: the task is available again, and a card
  * that simply stopped showing a holder would read as one nobody ever took.
  */
-export function claimLeft(expiresAt: string, nowMs: number): { text: string; expired: boolean } {
+export function claimLeft(expiresAt: string, nowMs: number, lang: 'pt' | 'en' = 'en'): { text: string; expired: boolean } {
+  const pt = lang === 'pt'
   const ms = Date.parse(expiresAt) - nowMs
   // An unparseable expiry reads as expired, matching `claimState` on the server: a claim nobody can
   // date is a claim nobody can revoke.
-  if (!Number.isFinite(ms)) return { text: 'lease unknown', expired: true }
-  if (ms <= 0) return { text: 'lease expired', expired: true }
+  if (!Number.isFinite(ms)) return { text: pt ? 'reserva desconhecida' : 'lease unknown', expired: true }
+  if (ms <= 0) return { text: pt ? 'reserva expirada' : 'lease expired', expired: true }
   const mins = Math.round(ms / 60000)
-  if (mins < 60) return { text: `${Math.max(1, mins)}m left`, expired: false }
-  return { text: `${Math.round(mins / 60)}h left`, expired: false }
+  if (mins < 60) return { text: pt ? `faltam ${Math.max(1, mins)} min` : `${Math.max(1, mins)}m left`, expired: false }
+  return { text: pt ? `faltam ${Math.round(mins / 60)} h` : `${Math.round(mins / 60)}h left`, expired: false }
 }
 
 /** Left to right, the way work moves — the LOADING-STATE fallback order; see `STATUS`'s own note.

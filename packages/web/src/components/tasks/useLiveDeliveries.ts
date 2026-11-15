@@ -5,6 +5,7 @@ import type { FleetRow } from '../../lib/fleet'
 import type { LivePeriod } from '@agentistics/core'
 import type { LiveReply } from './liveDeliveryModel'
 import { readViewPrefs } from './liveCardModel'
+import { takeBootLivePrefetch } from '../../lib/liveBootPrefetch'
 import { fetchRouteJson, type RouteError, retryBackoffMs } from '../../lib/routeTransport'
 
 /**
@@ -80,7 +81,10 @@ export function useLiveDeliveries(fleet: readonly FleetRow[], period: LivePeriod
     setSlow(false)
     try {
       const asked = periodRef.current
-      const fresh = await fetchRouteJson<LiveReply>(liveUrl(asked), { signal: controller.signal, onSlow: () => { if (mine === generation.current) setSlow(true) } })
+      // The read `main.tsx` started with the page (LIVE.12S), once; null/absent → the screen's own fetch.
+      const early = takeBootLivePrefetch(asked) as Promise<LiveReply | null> | null
+      const fresh = (early ? await early : null)
+        ?? await fetchRouteJson<LiveReply>(liveUrl(asked), { signal: controller.signal, onSlow: () => { if (mine === generation.current) setSlow(true) } })
       if (mine !== generation.current) return
       lastReply = { reply: fresh, atMs: Date.now(), period: asked }
       // A slow answer for a period the person already left must not overwrite the one they chose.
