@@ -85,7 +85,9 @@ export function planLiveFleetRead(o: {
   const { cache, inFlight } = o
   const maxStale = o.maxStaleMs ?? LIVE_FLEET_MAX_STALE_MS
   if (cache && cache.lang === o.lang) {
-    if (cache.snapshot === o.snapshot) return { kind: 'fresh' }
+    // r4: a build that straddled a state change caches `signature: null` — its rows may predate the change, so
+    // even the same snapshot must rebuild instead of answering fresh.
+    if (cache.snapshot === o.snapshot && cache.signature !== null) return { kind: 'fresh' }
     const age = o.nowMs - cache.atMs
     // Stale ONLY while no session changed state since the cached rows were built (r3).
     if (age >= 0 && age <= maxStale && cache.signature !== null && cache.signature === o.signature) return { kind: 'stale', refresh: !(inFlight && inFlight.lang === o.lang) }

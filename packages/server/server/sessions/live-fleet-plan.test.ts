@@ -74,6 +74,15 @@ describe('LIVE.12S r3 — stale only when no session changed state', () => {
   })
 })
 
+describe('LIVE.12S r4 — a build that straddled a change is never fresh', () => {
+  test('same snapshot but signature null (build straddled a change): rebuild', () => {
+    expect(planLiveFleetRead({ lang: 'en', snapshot: A, nowMs: 1e6, signature: 'x', cache: cache(A, 0, 'en', null), inFlight: null }).kind).toBe('build')
+  })
+  test('same snapshot with a vouching signature stays fresh', () => {
+    expect(planLiveFleetRead({ lang: 'en', snapshot: A, nowMs: 1e6, signature: 'x', cache: cache(A, 0, 'en', 'x'), inFlight: null }).kind).toBe('fresh')
+  })
+})
+
 describe('liveRowsSignature', () => {
   const v = (id: string, status: string, activity?: string, background?: boolean) => ({ id, status, activity, background })
   test('reads id, status, activity and background; skips closed conversations', () => {
