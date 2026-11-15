@@ -24,11 +24,10 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
 }) {
   const pt = lang === 'pt'
   const [size, setSize] = useState<SizeFilter>('all')
-  const [needle, setNeedle] = useState('')
   const [sort, setSort] = useState<{ key: TaskSortKey; dir: 1 | -1 }>({ key: 'cost', dir: -1 })
   const [open, setOpen] = useState<string | null>(initialOpen)
   const [subNeedle, setSubNeedle] = useState('')
-  const rows = taskRows(tasks, { size, needle, key: sort.key, dir: sort.dir })
+  const rows = taskRows(tasks, { size, needle: '', key: sort.key, dir: sort.dir })
   const head = (key: TaskSortKey, label: string, num = false) =>
     <th className={num ? 'bm-num' : undefined} aria-sort={sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
       <button type="button" onClick={() => setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : 1 }))}>{label}{sort.key === key ? (sort.dir === 1 ? ' ↑' : ' ↓') : ''}</button></th>
@@ -39,7 +38,6 @@ export function BenchTasks({ tasks, lang, money, emptyReason, initialOpen = null
       <h3 style={h3}><Flag size={15} /> {pt ? 'Por tarefa' : 'By task'}</h3>
       {tasks.length > 0 && <span style={muted}>{rows.length} {pt ? (rows.length === 1 ? 'tarefa' : 'tarefas') : (rows.length === 1 ? 'task' : 'tasks')}</span>}
       {(tasks.length > 0 || keepHead) && <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        {tasks.length > 0 && <input type="search" value={needle} onChange={e => setNeedle(e.target.value)} placeholder={pt ? 'Filtrar tarefa…' : 'Filter task…'} aria-label={pt ? 'Filtrar tarefa' : 'Filter task'} style={{ ...field, width: 170 }} />}
         <TabStrip tabs={SIZES} value={size} onPick={setSize} label={s => sizeLabel(s, lang)} ariaLabel={pt ? 'Tamanho' : 'Size'} natural />
       </div>}
     </div>

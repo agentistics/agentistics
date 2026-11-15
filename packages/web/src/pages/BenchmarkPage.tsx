@@ -53,6 +53,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
     : ''
   const entries = entriesOf(observed, parseExperiments(experiments), L)
   const [picked, setPicked] = useState(initialSelected ?? 'observed')
+  const [newInfo, setNewInfo] = useState(false)
   const [nums, setNums] = useState(initialNumbers)
   const cur = entries.find(e => e.id === picked) ?? entries[0]!
   const hero = heroOf(cur, observed, L, money)
@@ -83,9 +84,9 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
       <div className="bm-top">
         <nav className="bm-list" data-testid="benchmark-list" aria-label={pt ? 'Benchmarks' : 'Benchmarks'}>
           {entries.map(e => <BenchItem key={e.id} e={e} on={e.id === cur.id} onPick={() => setPicked(e.id)} />)}
-          <button type="button" className="bm-btn" data-testid="benchmark-new" disabled aria-disabled="true"
-            title={pt ? 'Chega com o teste controlado: ainda não dá para criar um benchmark novo.' : 'Arrives with the controlled test: a new benchmark cannot be created yet.'}
+          <button type="button" className="bm-btn" data-testid="benchmark-new" aria-expanded={newInfo} onClick={() => setNewInfo(v => !v)}
             style={{ ...newBtn }}><FlaskConical size={15} />{pt ? 'Novo benchmark' : 'New benchmark'}</button>
+          {newInfo && <div role="status" data-testid="benchmark-new-note" style={{ ...muted, fontSize: 11.5 }}>{pt ? 'Chega com o teste controlado: ainda não dá para criar um benchmark novo.' : 'Arrives with the controlled test: a new benchmark cannot be created yet.'}</div>}
         </nav>
         <div style={{ minWidth: 0 }}>
           <Hero hero={hero} lang={L} entryId={cur.id} basis={unmeasured ? '' : basisText} />
@@ -107,7 +108,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
           <BenchBuckets key="hb" buckets={bucketsOfHistory(history?.buckets ?? [], L)} lang={L} money={money} emptyReason={noBuckets}
             note={pt ? 'Cada peça entregue (subtarefa) conta como uma tarefa.' : 'Each delivered piece (subtask) counts as one task.'} /></>
         : history
-        ? <><BenchHistoryTasks key={`ht-${cur.id}`} tasks={history.tasks} coverage={history.coverage} lang={L} money={money} sides={comparisonLabel(cur)} initialOpen={initialOpenTask} />
+        ? <><BenchHistoryTasks key={`ht-${cur.id}`} tasks={history.tasks} lang={L} money={money} sides={comparisonLabel(cur)} initialOpen={initialOpenTask} />
           <BenchBuckets key="hb" buckets={bucketsOfHistory(history.buckets, L)} lang={L} money={money} emptyReason={noBuckets}
             note={pt ? 'Cada peça entregue (subtarefa) conta como uma tarefa.' : 'Each delivered piece (subtask) counts as one task.'} /></>
         : <><BenchTasks key={`t-${cur.id}`} tasks={exp?.tasks ?? []} lang={L} money={money} emptyReason={noTasks} initialOpen={initialOpenTask} />
@@ -215,6 +216,6 @@ const how: React.CSSProperties = {
 }
 const newBtn: React.CSSProperties = {
   appearance: 'none', display: 'inline-flex', gap: 7, alignItems: 'center', justifyContent: 'center', font: 'inherit', fontSize: 13, fontWeight: 600,
-  background: 'var(--bg-card)', color: 'var(--text-tertiary)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 12px', cursor: 'not-allowed', opacity: 0.75,
+  background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 12px', cursor: 'pointer',
 }
 const toggle: React.CSSProperties = { appearance: 'none', marginLeft: 'auto', background: 'none', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: 999, font: 'inherit', fontSize: 11.5, padding: '3px 11px', cursor: 'pointer' }

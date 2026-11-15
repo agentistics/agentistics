@@ -239,7 +239,7 @@ describe('the Benchmark screen follows the approved D3 layout', () => {
     expect(tasks).not.toContain('sem nota')
     expect(html.match(/data-testid="benchmark-subtask-row"/g)!.length).toBe(2)
     expect(html).toContain('Filtrar subtarefa')
-    expect(html).toContain('Filtrar tarefa')
+    expect(html).not.toContain('Filtrar tarefa')   // (a) the prototype has no task search
   })
 
   test('mobile: the task rows are labelled cards and the buckets stack, by the same @media rules as the prototype', () => {
@@ -424,10 +424,10 @@ describe('per-piece history from the server fills the blocks with real rows', ()
     expect(second.match(/sem dados/g)!.length).toBe(6)     // a task whose pieces fall on neither side
     expect(second).not.toContain('US$ 0')
     expect(html.match(/data-testid="benchmark-subtask-row"/g)!.length).toBe(2)
-    expect(html).toContain('Filtrar tarefa')
+    expect(html).not.toContain('Filtrar tarefa')   // (a) the prototype has no task search
     expect(html).toContain('Filtrar subtarefa')
-    expect(html).toContain('Lados: 1 rodada de QA → 2+ rodadas de QA')
-    expect(html).toContain('custo em 2 de 3 peças')
+    expect(html).not.toContain('Lados:')
+    expect(html).not.toContain('custo em 2 de 3 peças')   // (b) coverage is no longer on the screen
     expect(html).not.toContain('benchmark-tasks-empty')
     expect(taskHead(render('en', withHistory))).toContain('>QA rounds')
   })
@@ -522,16 +522,17 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     expect(list).not.toMatch(/Compensou|Empate|>—<|role="img"/)
   })
 
-  test('list: the two slots with no data yet say "sem medição" and why; "Novo benchmark" sits where the prototype has it, disabled, with its tooltip', () => {
+  test('list: the two slots with no data yet say "sem medição" and why; "Novo benchmark" sits where the prototype has it, active; clicking says why nothing is created yet', () => {
     const list = html.split('data-testid="benchmark-list"')[1]!.split('</nav>')[0]!
     expect(list).toContain('Sonnet × Opus')
     expect(list).toContain('Entre harnesses')
     expect(list.match(/sem medição/g)!.length).toBe(2)
     expect(list).toContain('não foram conferidas contra a fonte de cada provedor')
     const btn = list.split('data-testid="benchmark-new"')[1]!.split('</button>')[0]!
-    expect(btn).toContain('disabled')
+    expect(btn).not.toContain('disabled')
+    expect(btn).not.toContain('cursor:not-allowed')
     expect(btn).toContain('Novo benchmark')
-    expect(btn).toContain('title="Chega com o teste controlado')
+    expect(list).not.toContain('benchmark-new-note')   // the explanation appears only after a click
     expect(list.indexOf('Entre harnesses')).toBeLessThan(list.indexOf('benchmark-new'))
     const en = render('en', { ...observed, history } as unknown as Observed).split('data-testid="benchmark-list"')[1]!
     expect(en).toContain('New benchmark')
@@ -600,9 +601,22 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
       const tasks = h.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!
       expect(tasks).not.toContain('type="search"')
       expect(tasks).not.toContain(lang === 'pt' ? 'Filtrar tarefa' : 'Filter task')
-      // the measured state still has it
+      // (a) the measured state has none either
       const m = render(lang, { ...observed, history } as unknown as Observed)
-      expect(m.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!).toContain('type="search"')
+      expect(m.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!).not.toContain('type="search"')
+    }
+  })
+
+  test('(b) the measured "Por tarefa" ends in ONE line: no "Lados", no definitions, no coverage', () => {
+    const exact = {
+      pt: 'Cada coluna mostra os dois lados: &quot;um → outro&quot;. Clique na linha para ver as subtarefas.</div>',
+      en: 'Each column shows both sides: &quot;one → other&quot;. Click a row for its subtasks.</div>',
+    }
+    for (const lang of ['pt', 'en'] as const) {
+      const m = render(lang, { ...observed, history } as unknown as Observed)
+      const tasks = m.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!
+      expect(tasks).toContain(exact[lang])
+      for (const gone of ['Lados:', 'Sides:', 'Cobertura', 'Coverage', 'Peça = ', 'Piece = ']) expect(tasks).not.toContain(gone)
     }
   })
 
@@ -669,7 +683,8 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     expect(second).toContain('retrabalho 0% → 100%')
     expect(second).toContain('data-bench="sessions"')
     expect(second.split('data-testid="benchmark-tasks"')[1]!.split('</thead>')[0]).toContain('Sessões')
-    expect(second).toContain('Lados: 1 sessão → 5+ sessões')
+    expect(second).not.toContain('Lados:')   // (b) one footer line, the prototype's
+    expect(second).not.toContain('Cobertura: custo em')
   })
 })
 

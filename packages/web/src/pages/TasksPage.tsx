@@ -77,13 +77,15 @@ import {
   type TaskListRow, type TaskRecord, type TasksError, type TaskStatus,
 } from '../lib/tasks'
 
-function EmptyNotice({ error, lang }: { error: TasksError; lang?: string }) {
+export function EmptyNotice({ error, lang, filtered }: { error: TasksError; lang?: string; filtered?: boolean }) {
   const pt = lang === 'pt'
   const text = error === 'refused'
     ? (pt ? 'O quadro de tarefas é um armazenamento local, e esta instância não hospeda um.' : 'The task board is a local store, and this instance does not host one.')
     : error === 'down'
       ? (pt ? 'O servidor não respondeu. Nada é afirmado sobre as suas tarefas.' : 'The server did not answer. Nothing is claimed about your tasks either way.')
-      : (pt ? 'Ainda não há tarefas. Crie uma acima, ou vincule sessões a uma com agentop session batch.' : 'No tasks yet. Create one above, or file sessions under one with agentop session batch.')
+      : filtered
+        ? (pt ? 'Nenhuma tarefa corresponde à busca ou aos filtros.' : 'No task matches the search or filters.')
+        : (pt ? 'Ainda não há tarefas. Crie a primeira no campo acima.' : 'No tasks yet. Create your first one in the field above.')
   return (
     <div style={{ ...surface, padding: 16, color: 'var(--text-tertiary)', display: 'flex', gap: 10, alignItems: 'center', fontSize: 12.5 }}>
       <ClipboardList size={16} /> {text}
@@ -91,6 +93,11 @@ function EmptyNotice({ error, lang }: { error: TasksError; lang?: string }) {
   )
 }
 
+
+/** The list's empty state: a board that HAS tasks but shows none is a filter/search miss, never "no tasks yet". */
+export function ListEmpty({ rows, error, lang }: { rows: readonly unknown[]; error: TasksError; lang?: string }) {
+  return <EmptyNotice error={rows.length > 0 ? null : error} filtered={rows.length > 0} lang={lang} />
+}
 
 // ------------------------------------------------------------------------------- list
 
@@ -466,7 +473,7 @@ function TaskList() {
       {view === 'live' && <div data-route-panel="live" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}><LiveDelivery lang={lang} /></div>}
 
       {view !== 'overview' && view !== 'live' && rows !== null && shown.length === 0 && !searchPending && (
-        <EmptyNotice error={rows.length > 0 ? null : error} lang={lang} />
+        <ListEmpty rows={rows} error={error} lang={lang} />
       )}
       {rows !== null && view === 'board' && shown.length > 0 && (
         <>

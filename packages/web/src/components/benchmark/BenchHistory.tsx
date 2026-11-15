@@ -1,9 +1,9 @@
 import React, { useState } from 'react'
 import { Flag, Info } from 'lucide-react'
-import type { ComparisonKey, HistoryCoverage, HistoryTaskRow } from '@agentistics/core/benchmark'
+import type { ComparisonKey, HistoryTaskRow } from '@agentistics/core/benchmark'
 import { TabStrip } from '../sessions/formBits'
 import { nf, type Lang, type Money } from '../../lib/benchmarkFormat'
-import { comparisonWords, durationText, historyTaskRows, matches, moneyText, sizeLabel, type HistorySortKey, type SizeFilter } from '../../lib/benchmarkView'
+import { durationText, historyTaskRows, matches, moneyText, sizeLabel, type HistorySortKey, type SizeFilter } from '../../lib/benchmarkView'
 import { BoardPager } from '../tasks/BoardPager'
 import { BOARD_PAGE_SIZES, DEFAULT_BOARD_PAGE_SIZE, resolveBoardPage } from '../tasks/boardPaging'
 import { statusLabel } from '../tasks/copy'
@@ -18,24 +18,22 @@ const SIZES: readonly SizeFilter[] = ['all', 'S', 'M', 'L']
 const dash = '—'
 
 /** "Por tarefa" over the OBSERVED history: one row per task, a row opens its subtasks. Cost is tokens × price of priced sessions; `*` = some session had no price. */
-export function BenchHistoryTasks({ tasks, coverage, lang, money, sides = 'qa', initialOpen = null }: { tasks: HistoryTaskRow[]; coverage: HistoryCoverage; lang: Lang; money: Money; sides?: ComparisonKey; initialOpen?: string | null }) {
+export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpen = null }: { tasks: HistoryTaskRow[]; lang: Lang; money: Money; sides?: ComparisonKey; initialOpen?: string | null }) {
   const pt = lang === 'pt'
   const { statuses } = useTaskStatuses()
   const st = (s: string) => statusLabel(s, lang, statuses)
   const [size, setSize] = useState<SizeFilter>('all')
-  const [needle, setNeedle] = useState('')
   const [sort, setSort] = useState<{ key: HistorySortKey; dir: 1 | -1 }>({ key: 'cost', dir: -1 })
   const [open, setOpen] = useState<string | null>(initialOpen)
   const [subNeedle, setSubNeedle] = useState('')
   const [pageSize, setPageSize] = useState<number>(DEFAULT_BOARD_PAGE_SIZE)
   const [pageAt, setPageAt] = useState(0)
-  const all = historyTaskRows(tasks, { size, needle, key: sort.key, dir: sort.dir, sides })
+  const all = historyTaskRows(tasks, { size, needle: '', key: sort.key, dir: sort.dir, sides })
   const pg = resolveBoardPage(all.length, pageSize, pageAt)
   const rows = all.slice(pg.start, pg.end)
   const cost = (v: number | null, partial: boolean) => v === null ? dash : `${moneyText(v, lang, money)}${partial ? '*' : ''}`
   const ms = (v: number | null) => v === null ? dash : durationText(v, lang)
   const q = (v: number | null) => v === null ? dash : nf(v, lang, 0)
-  const words = comparisonWords(lang)[sides]
   /** The prototype's "um → outro": side A, then side B, "—" for a side with nothing measured. */
   const noData = <span className="bm-nw" style={muted}>{dash} {pt ? 'sem dados' : 'no data'}</span>
   const pair = (v: readonly [number | null, number | null], f: (n: number | null, side: 0 | 1) => string) => v[0] === null && v[1] === null ? noData : `${f(v[0], 0)} → ${f(v[1], 1)}`
@@ -48,7 +46,6 @@ export function BenchHistoryTasks({ tasks, coverage, lang, money, sides = 'qa', 
       <h3 style={h3}><Flag size={15} /> {pt ? 'Por tarefa' : 'By task'}</h3>
       {tasks.length > 0 && <span style={muted}>{all.length} {pt ? (all.length === 1 ? 'tarefa' : 'tarefas') : (all.length === 1 ? 'task' : 'tasks')}</span>}
       {tasks.length > 0 && <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input type="search" value={needle} onChange={e => { setNeedle(e.target.value); setPageAt(0) }} placeholder={pt ? 'Filtrar tarefa…' : 'Filter task…'} aria-label={pt ? 'Filtrar tarefa' : 'Filter task'} style={{ ...field, width: 170 }} />
         <TabStrip tabs={SIZES} value={size} onPick={v => { setSize(v); setPageAt(0) }} label={s => s === 'all' ? (pt ? 'Todas' : 'All') : sizeLabel(s, lang)} ariaLabel={pt ? 'Tamanho' : 'Size'} natural />
       </div>}
     </div>
@@ -94,12 +91,7 @@ export function BenchHistoryTasks({ tasks, coverage, lang, money, sides = 'qa', 
         </div>
         {all.length > BOARD_PAGE_SIZES[0] && <BoardPager info={pg} pageSize={pageSize} lang={lang} onPage={setPageAt} onPageSize={n => { setPageSize(n); setPageAt(0) }} />}
         <div data-testid="benchmark-sides" style={{ ...muted, fontSize: 11, marginTop: 6 }}>
-          {pt ? `Lados: ${words.a} → ${words.b} (mediana por peça de cada lado). Cada coluna mostra os dois lados: "um → outro". Defeitos e aceitação ainda não são registrados.` : `Sides: ${words.a} → ${words.b} (median per piece of each side). Each column shows both sides: "one → other". Defects and acceptance are not recorded yet.`}
-        </div>
-        <div style={{ ...muted, fontSize: 11, marginTop: 4 }}>
-          {pt ? 'Peça = subtarefa entregue com sessão vinculada. Tamanho pelas linhas alteradas (P < 100, G ≥ 500). Custo = tokens × tabela de preços das sessões com preço; * = há sessões sem preço (harness sem custo). — = não medido. Clique na linha para ver as subtarefas.'
-            : 'Piece = delivered subtask with a linked session. Size by lines changed (S < 100, L ≥ 500). Cost = tokens × price table of the priced sessions; * = some sessions have no price (harness without cost). — = not measured. Click a row for its subtasks.'}
-          {' '}{pt ? `Cobertura: custo em ${coverage.withCost} de ${coverage.pieces} peças, tamanho em ${coverage.withSize}, QA em ${coverage.withQa}, tempo ativo em ${coverage.withActive}${coverage.withoutDuration > 0 ? `; ${coverage.withoutDuration} ${coverage.withoutDuration === 1 ? 'peça sem duração' : 'peças sem duração'} (início = entrega, fora das medianas de tempo)` : ''}.` : `Coverage: cost in ${coverage.withCost} of ${coverage.pieces} pieces, size in ${coverage.withSize}, QA in ${coverage.withQa}, active time in ${coverage.withActive}${coverage.withoutDuration > 0 ? `; ${coverage.withoutDuration} ${coverage.withoutDuration === 1 ? 'piece' : 'pieces'} with no duration (start = delivery, left out of the time medians)` : ''}.`}
+          {pt ? 'Cada coluna mostra os dois lados: "um → outro". Clique na linha para ver as subtarefas.' : 'Each column shows both sides: "one → other". Click a row for its subtasks.'}
         </div>
       </>}
   </section>
