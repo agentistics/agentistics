@@ -166,6 +166,7 @@ export function BoardOverviewView({ o, statuses }: {
 }) {
   const money = useMoney()
   const isMobile = useIsMobile()
+  const ctxLang = useOutletContext<AppContext | null>()?.lang
 
   // The population behind "avg cost / task" and "total spent" is every task on the board; the
   // population behind "avg cost / delivery" is delivered tasks only. Conflating the two used to
@@ -294,8 +295,9 @@ export function BoardOverviewView({ o, statuses }: {
 
       {o.tasks === 0 && (
         <div style={{ ...surface, padding: 16, fontSize: 12.5, color: 'var(--text-tertiary)', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <CircleSlash size={15} /> No tasks yet — the numbers above are empty because there is
-          nothing to measure, not because the measuring failed.
+          <CircleSlash size={15} /> {ctxLang === 'pt'
+            ? 'Ainda não há tarefas — os números acima estão vazios porque não há nada para medir, não porque a medição falhou.'
+            : 'No tasks yet — the numbers above are empty because there is nothing to measure, not because the measuring failed.'}
         </div>
       )}
     </div>
