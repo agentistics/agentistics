@@ -408,10 +408,15 @@ describe('per-piece history from the server fills the blocks with real rows', ()
     expect(first).toContain('US$ 4,50 → US$ 4,50*')        // * = a session of that side had no price
     expect(first).toContain('1 → 3')                       // QA rounds
     expect(first).not.toContain('— → —')                   // nothing on both sides is "sem dados", not a pair of dashes
-    expect(first.match(/sem dados/g)!.length).toBe(2)      // defects and acceptance are not recorded yet
+    expect(first).not.toContain('sem dados')
+    expect(first.match(/data-testid="benchmark-task-unmeasured"[^>]*>sem medição</g)!.length).toBe(2)      // defects and acceptance are not recorded yet: the pill
     const second = html.split('data-task="T2"')[1]!.split('</tr>')[0]!
     expect(second).not.toContain('— → —')
-    expect(second.match(/sem dados/g)!.length).toBe(7)     // a task whose pieces fall on neither side (+ its verdict cell)
+    expect(second).not.toContain('sem dados')
+    expect(second.match(/data-testid="benchmark-task-unmeasured"[^>]*>sem medição</g)!.length).toBe(6)     // a task whose pieces fall on neither side: Custo and Tempo too
+    expect(second.match(/data-testid="benchmark-task-verdict-unmeasured"[^>]*>sem medição</g)!.length).toBe(1)   // + its verdict cell
+    expect(second.split('data-l="Custo"')[1]!.split('</td>')[0]).toContain('benchmark-task-unmeasured')
+    expect(second.split('data-l="Tempo"')[1]!.split('</td>')[0]).toContain('benchmark-task-unmeasured')
     expect(second).not.toContain('US$ 0')
     expect(html.match(/data-testid="benchmark-subtask-row"/g)!.length).toBe(2)
     expect(html).not.toContain('Filtrar tarefa')   // (a) the prototype has no task search

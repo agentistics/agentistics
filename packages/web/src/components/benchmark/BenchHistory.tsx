@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { UnmeasuredPill } from './BenchStyle'
 import { Flag, Info } from 'lucide-react'
 import type { ComparisonKey, HistoryTaskRow } from '@agentistics/core/benchmark'
 import { TabStrip } from '../sessions/formBits'
@@ -35,7 +36,7 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
   const ms = (v: number | null) => v === null ? dash : durationText(v, lang)
   const q = (v: number | null) => v === null ? dash : nf(v, lang, 0)
   /** The prototype's "um → outro": side A, then side B, "—" for a side with nothing measured. */
-  const noData = <span className="bm-nw" style={muted}>{dash} {pt ? 'sem dados' : 'no data'}</span>
+  const noData = <UnmeasuredPill lang={lang} testId="benchmark-task-unmeasured" />
   const pair = (v: readonly [number | null, number | null], f: (n: number | null, side: 0 | 1) => string) => v[0] === null && v[1] === null ? noData : `${f(v[0], 0)} → ${f(v[1], 1)}`
   const sz = (s: 'S' | 'M' | 'L' | null) => s === null ? dash : sizeLabel(s, lang)
   const head = (key: HistorySortKey, label: string, num = false) =>

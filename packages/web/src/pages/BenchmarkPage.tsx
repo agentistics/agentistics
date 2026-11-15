@@ -12,7 +12,7 @@ import {
 } from '../lib/benchmarkView'
 import { BetaTag } from '../components/BetaTag'
 import { Pill } from '../components/Pill'
-import { Bar, BenchStyle, TONE_VAR } from '../components/benchmark/BenchStyle'
+import { Bar, BenchStyle, TONE_VAR, UnmeasuredPill } from '../components/benchmark/BenchStyle'
 import { BenchBuckets, BenchTasks } from '../components/benchmark/BenchTasks'
 import { BenchHistoryTasks } from '../components/benchmark/BenchHistory'
 
@@ -85,7 +85,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
     {status === 'ready' && observed && <>
       <div className="bm-top">
         <nav className="bm-list" data-testid="benchmark-list" aria-label={pt ? 'Benchmarks' : 'Benchmarks'}>
-          {entries.map(e => <BenchItem key={e.id} e={e} on={e.id === cur.id} onPick={() => setPicked(e.id)} />)}
+          {entries.map(e => <BenchItem key={e.id} e={e} on={e.id === cur.id} onPick={() => setPicked(e.id)} lang={L} />)}
           <button type="button" className="bm-btn" data-testid="benchmark-new" aria-expanded={newInfo} onClick={() => setNewInfo(v => !v)}
             style={{ ...newBtn }}><FlaskConical size={15} />{pt ? 'Novo benchmark' : 'New benchmark'}</button>
           {newInfo && <div role="status" data-testid="benchmark-new-note" style={{ ...muted, fontSize: 11.5 }}>{pt ? 'Chega com o teste controlado: ainda não dá para criar um benchmark novo.' : 'Arrives with the controlled test: a new benchmark cannot be created yet.'}</div>}
@@ -127,7 +127,7 @@ export function BenchmarkContent({ lang, observed, status = observed ? 'ready' :
   </main>
 }
 
-function BenchItem({ e, on, onPick }: { e: Entry; on: boolean; onPick: () => void }) {
+function BenchItem({ e, on, onPick, lang }: { e: Entry; on: boolean; onPick: () => void; lang: Lang }) {
   return <button type="button" data-testid="benchmark-item" data-bench={e.id} data-unmeasured={e.kind === 'unmeasured' ? 'yes' : undefined} aria-pressed={on} onClick={onPick} style={{
     appearance: 'none', textAlign: 'left', color: 'var(--text-primary)', font: 'inherit', cursor: 'pointer', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: '3px 8px',
     border: `1px solid ${on ? 'var(--text-tertiary)' : 'var(--border)'}`, borderRadius: 10, background: on ? 'var(--bg-elevated)' : 'var(--bg-card)', padding: '9px 11px',
@@ -135,7 +135,7 @@ function BenchItem({ e, on, onPick }: { e: Entry; on: boolean; onPick: () => voi
     <span style={{ fontSize: 12.5, fontWeight: 600 }}>{e.name}</span>
     {e.kind !== 'unmeasured' && e.score !== null && <span data-testid="benchmark-item-score" style={{ fontWeight: 800, fontSize: 15, fontVariantNumeric: 'tabular-nums', color: TONE_VAR[e.tone] }}>{e.score === null ? '—' : Math.round(e.score)}</span>}
     {e.score !== null && <div data-testid="benchmark-item-bar" data-tone={e.tone} style={{ gridColumn: '1/3' }}><Bar value={e.score} tone={e.tone} /></div>}
-    {e.kind === 'unmeasured' || (e.kind === 'comparison' && e.score === null) ? <span data-testid="benchmark-seal" style={{ gridColumn: '1/3', justifySelf: 'start', fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 9px' }}>{e.word}</span>
+    {e.kind === 'unmeasured' || (e.kind === 'comparison' && e.score === null) ? <UnmeasuredPill lang={lang} label={e.word} style={{ gridColumn: '1/3', justifySelf: 'start' }} />
       : <span style={{ gridColumn: '1/3', fontSize: 11.5, fontWeight: 700, color: e.tone === 'none' ? 'var(--text-tertiary)' : TONE_VAR[e.tone] }}>{e.word}</span>}
     <small style={{ gridColumn: '1/3', color: 'var(--text-tertiary)', fontSize: 11 }}>{e.sample}</small>
   </button>

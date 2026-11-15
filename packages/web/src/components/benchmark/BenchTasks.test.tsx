@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import React from 'react'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { TaskVerdictCell } from './BenchTasks'
 import { BenchStyle } from './BenchStyle'
@@ -28,5 +30,27 @@ describe('the Compensou? column may not force the table past its wrapper', () =>
   test('a long task title is clamped to 3 lines (full text kept in the title attribute); phones unclamp it', () => {
     expect(css).toMatch(/\.bm-clamp\{[^}]*-webkit-line-clamp:3/)
     expect(css).toMatch(/@media[\s\S]*\.bm-clamp\{[^}]*-webkit-line-clamp:unset/)
+  })
+})
+
+describe('card titles and the one "sem medição" pill', () => {
+  const css = renderToStaticMarkup(<BenchStyle />)
+  test('.bm-sec is the prototype label: 12px, 700, 0.48px tracking, uppercase', () => {
+    const rule = /\.bm-sec\{([^}]*)\}/.exec(css)![1]!
+    for (const d of ['font-size:12px', 'font-weight:700', 'letter-spacing:.48px', 'text-transform:uppercase']) expect(rule).toContain(d)
+  })
+  test('no benchmark component draws its own "sem medição"/"sem dados" markup outside UnmeasuredPill', () => {
+    const dirs = [join(import.meta.dir), join(import.meta.dir, '../../pages')]
+    for (const d of dirs) for (const f of readdirSync(d)) {
+      if (!/Bench.*\.tsx$/.test(f) || /\.test\./.test(f) || f === 'BenchStyle.tsx') continue
+      const src = readFileSync(join(d, f), 'utf8')
+      expect(src, f).not.toMatch(/sem medição|not measured|sem dados|'no data'/)
+    }
+  })
+  test('an unmeasured verdict cell renders the pill', () => {
+    const html = renderToStaticMarkup(<TaskVerdictCell score={null} lang="pt" />)
+    expect(html).toContain('data-testid="benchmark-task-verdict-unmeasured"')
+    expect(html).toContain('>sem medição<')
+    expect(html).not.toContain('sem dados')
   })
 })

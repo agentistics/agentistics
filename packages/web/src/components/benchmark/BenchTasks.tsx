@@ -20,7 +20,7 @@ const sizeLabel = (s: SizeFilter, lang: Lang) => s === 'all' ? (lang === 'pt' ? 
 /** The prototype's "Compensou?" cell: the word, the task's own 0–100 score and a small bar in the tone; no score = a plain "sem nota". */
 export function TaskVerdictCell({ score, lang }: { score: number | null; lang: Lang }) {
   const pt = lang === 'pt'
-  if (score === null) return <td className="bm-cp" data-testid="benchmark-task-verdict" data-tone="none"><span className="bm-nw" style={muted}>— {pt ? 'sem dados' : 'no data'}</span></td>
+  if (score === null) return <td className="bm-cp" data-testid="benchmark-task-verdict" data-tone="none"><UnmeasuredPill lang={lang} testId="benchmark-task-verdict-unmeasured" /></td>
   const n = Math.round(score), tone = scoreTone(score), c = tone === 'good' ? 'var(--accent-green)' : tone === 'bad' ? 'var(--accent-red)' : 'var(--accent-amber, #fbbf24)'
   return <td className="bm-cp" data-testid="benchmark-task-verdict" data-tone={tone}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11.5, fontWeight: 700, marginBottom: 4 }}><span className="bm-nw" style={{ color: c }}>{wordOf(tone, lang)}</span><span>{n}</span></div>
@@ -107,7 +107,6 @@ export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: {
     : ['Sessions', 'Tasks', 'Median cost', 'Median time', 'Escaped defects', 'Accepted first try', 'Not reopened']
   // the prototype's short labels for the stacked (phone) facts; the desktop heads stay whole
   const sl = pt ? ['', 'Tarefas', 'Custo', 'Tempo', 'Defeitos', 'De primeira', 'Não reabertas'] : ['', 'Tasks', 'Cost', 'Time', 'Defects', 'First try', 'Not reopened']
-  const noData = <span className="bm-nw" style={muted}>— {pt ? 'sem dados' : 'no data'}</span>
   const nw = (x: string) => <span className="bm-nw">{x}</span>
   const unm = <UnmeasuredPill lang={lang} testId="benchmark-bucket-unmeasured" />
   const rate = (n: number | null) => n === null ? unm : <div style={{ maxWidth: 150 }}>{nw(`${nf(n * 100, lang, 0)}%`)}<Bar value={n * 100} tone="rate" mark={false} /></div>
@@ -119,8 +118,8 @@ export function BenchBuckets({ buckets, lang, money, emptyReason, note = '' }: {
         {heads.map(h => <div key={h} className="bm-h">{h}</div>)}
         {buckets.map(b => <React.Fragment key={b.label}>
           <div className="bm-k">{b.label}</div><div data-l={sl[1]}>{nw(nf(b.tasks, lang, 0))}</div>
-          <div data-l={sl[2]}>{b.costMedianUSD === null ? noData : nw(moneyText(b.costMedianUSD, lang, money))}</div>
-          <div data-l={sl[3]}>{b.wallMedianMs === null ? noData : nw(durationText(b.wallMedianMs, lang))}</div>
+          <div data-l={sl[2]}>{b.costMedianUSD === null ? unm : nw(moneyText(b.costMedianUSD, lang, money))}</div>
+          <div data-l={sl[3]}>{b.wallMedianMs === null ? unm : nw(durationText(b.wallMedianMs, lang))}</div>
           <div data-l={sl[4]}>{b.escapedDefects === null ? unm : nw(nf(b.escapedDefects, lang, 1))}</div>
           <div data-l={sl[5]}>{rate(b.firstTryRate)}</div><div data-l={sl[6]}>{rate(b.notReopenedRate)}</div>
         </React.Fragment>)}
