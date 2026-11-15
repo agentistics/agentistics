@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.215.0': {
+    features: [
+      {
+        pt: 'Benchmark: a tela agora segue o desenho aprovado até os últimos detalhes.',
+        en: 'Benchmark: the screen now follows the approved design down to the last details.',
+      },
+      {
+        pt: 'Tarefas: mensagem mais clara quando o quadro está vazio ou quando uma busca não encontra nada.',
+        en: 'Tasks: a clearer message when the board is empty or when a search finds nothing.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'O aviso "nada arquivado ainda" não aparece mais para trabalho realmente entregue nem para movimentos automáticos; só aparece quando você mesmo tenta concluir algo em que ninguém trabalhou.',
+        en: 'The "nothing filed yet" warning no longer shows up for work that was really delivered, nor for automatic moves; it only shows when you yourself try to finish something nobody worked on.',
+      },
+    ],
+  },
   '2.214.0': {
     features: [
       {
