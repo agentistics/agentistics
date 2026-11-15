@@ -20,10 +20,6 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Live: o trabalho entregue que já saiu da fila também é publicado por conta própria.',
         en: 'Live: delivered work that already left the queue is also published on its own.',
       },
-      {
-        pt: 'OpenCode pelo gateway: as sessões agora contam commits, arquivos e linhas.',
-        en: 'OpenCode through the gateway: sessions now count commits, files and lines.',
-      },
     ],
     fixes: [
       {
