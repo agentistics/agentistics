@@ -27,7 +27,7 @@ const app = RUN ? Bun.serve({
     return new Response('nf', { status: 404 })
   },
 }) : null
-const host = RUN ? createBrowserHost({ dataDir, agentisticsPorts: [], debugPorts: () => [], resolve: async () => [], memAvailable: async () => null, log: () => {} }) : null
+const host = RUN ? createBrowserHost({ dataDir, agentisticsPorts: [], debugPorts: () => [], resolve: async () => [], memAvailable: async () => null, log: (m: string) => { if (process.env.DIAG_LOG) console.log('HOSTLOG', m) } }) : null
 const KEY = 's-s2refs'
 const URL_ = (p: string) => `http://localhost:${app!.port}${p}`
 
@@ -97,6 +97,26 @@ d('refs bound to their document', () => {
     expect(await act('evaluate', { expression: 'document.title', tab: second })).toMatchObject({ value: '"B"' })
     await act('tab_close', { tab: second })
   }, 60_000)
+
+  for (const round of [1, 2, 3]) {
+    test(`evaluate storm, round ${round}: 20x window.open then 5 actions on the active tab all answer`, async () => {
+      await act('navigate', { url: URL_('/a') })
+      const storm: Record<string, unknown>[] = []
+      for (let i = 0; i < 20; i++) { storm.push(await act('evaluate', { expression: 'window.open("about:blank") ? "opened" : "blocked"' })) }
+      expect(storm.every(r => r.ok)).toBe(true)
+      await Bun.sleep(2000)
+      const seen: string[] = []
+      for (let i = 0; i < 5; i++) {
+        const r = await act('evaluate', { expression: '1+1' })
+        seen.push(r.ok ? 'ok' : `${r.error}`)
+      }
+      const tabs = (await act('tabs')).tabs
+      console.log(`storm round ${round}:`, seen.join(','), 'tabs:', tabs.length, tabs.map((t: any) => `${t.tab.slice(0, 6)}${t.active ? '*' : ''}`).join(' '))
+      expect(seen).toEqual(['ok', 'ok', 'ok', 'ok', 'ok'])
+      expect(tabs.length).toBeLessThanOrEqual(4)
+      expect(tabs.filter((t: any) => t.active).length).toBe(1)
+    }, 90_000)
+  }
 
   test('after a popup storm hits the tab ceiling, later actions never time out', async () => {
     await act('navigate', { url: URL_('/pop') })

@@ -131,11 +131,15 @@ d('S2 verbs on a real headless shell', () => {
   }, 60_000)
 
   test('click a button 3000 px below the fold by ref; viewport snapshot shows only the visible part', async () => {
+    // Contract (S2 fix 2): ANY new snapshot voids the refs of the one before, so the ref used is from the LAST one.
+    const before = (await act('snapshot')).snapshot as string
+    const old = /button "Far" \[ref=(e\d+@g\d+)\]/.exec(before)![1]!
+    const vp = (await act('snapshot', { mode: 'viewport' })).snapshot as string
+    expect(await act('click', { ref: old })).toMatchObject({ ok: false, error: 'stale_ref' })
+    expect(vp).not.toContain('"Far"')
     const full = (await act('snapshot')).snapshot as string
     const far = /button "Far" \[ref=(e\d+@g\d+)\]/.exec(full)![1]!
-    const vp = (await act('snapshot', { mode: 'viewport' })).snapshot as string
-    expect(vp).not.toContain('"Far"')
-    await act('click', { ref: far })
+    expect(await act('click', { ref: far })).toMatchObject({ ok: true, clicked: 'Far' })
     expect((await act('evaluate', { expression: "document.getElementById('far').textContent" })).value).toBe('"far clicked"')
     const vp2 = (await act('snapshot', { mode: 'viewport' })).snapshot as string
     expect(vp2).toContain('far clicked')

@@ -13,7 +13,7 @@ import { IDLE_SESSION_MS, PSS_KILL_BYTES, PSS_TRIM_BYTES } from './browser-spec'
 
 const GB = 1024 ** 3
 
-interface Fake { pid: number; argv: string[]; signals: string[]; exited: boolean; exit: () => void; closed: string[] }
+interface Fake { pid: number; argv: string[]; signals: string[]; exited: boolean; exit: () => void; closed: string[]; methods: string[]; emit: (ev: object) => void }
 
 function makeEnv(opts: { mem?: number | null; dead?: (n: number) => boolean; sandboxFails?: boolean; scope?: boolean; escapeScope?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'browser-host-test-'))
@@ -51,7 +51,7 @@ function makeEnv(opts: { mem?: number | null; dead?: (n: number) => boolean; san
       let resolveExit!: () => void
       const exited = new Promise<void>((r) => { resolveExit = r })
       const fake: Fake = {
-        pid: nextPid++, argv, signals: [], exited: false, closed: [],
+        pid: nextPid++, argv, signals: [], exited: false, closed: [], methods: [], emit: (ev) => { inp.write(JSON.stringify(ev) + '\0') },
         exit: () => { if (fake.exited) return; fake.exited = true; inp.end(); resolveExit() },
       }
       fakes.push(fake)
@@ -65,6 +65,7 @@ function makeEnv(opts: { mem?: number | null; dead?: (n: number) => boolean; san
         while ((i = buf.indexOf('\0')) >= 0) {
           const msg = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1)
           if (dead) continue
+          fake.methods.push(msg.method + (msg.sessionId ? `@${msg.sessionId}` : ''))
           let result: any = {}
           if (msg.method === 'Target.getTargets') result = { targetInfos: targets }
           if (msg.method === 'Target.createTarget') { const t = { targetId: `T${targets.length}`, type: 'page', url: msg.params.url, title: '' }; targets = [...targets, t]; result = { targetId: t.targetId } }
@@ -361,6 +362,40 @@ describe('navigate refuses blocked URLs before touching the browser', () => {
     await h.start(S('a'))
     for (let i = 0; i < 3; i++) expect((await h.openTab('s-a')).ok).toBe(true)
     expect(await h.openTab('s-a')).toEqual({ ok: false, reason: 'tab-ceiling' })
+    await h.stopAll()
+  })
+})
+
+describe('S2 fix 3: a popup past the tab ceiling is RESUMED before it is closed', () => {
+  // Measured on a real Chromium (S2fix3-diag-1.log): a target auto-attached PAUSED (waitForDebuggerOnStart)
+  // and closed before it ran left its opener's window.open waiting on it, so every later action on the
+  // opener timed out. The popup must run once (nothing intercepted can load: Fetch is on) and only then go.
+  test('runIfWaitingForDebugger on the popup session comes before closeTarget', async () => {
+    env = makeEnv()
+    const h = env.host()
+    await h.start(S('a'))
+    for (let i = 0; i < 3; i++) await h.openTab('s-a') // T0..T3 = 4 tabs, the session ceiling
+    const f = env.fakes[0]!
+    f.emit({ method: 'Target.targetCreated', params: { targetInfo: { targetId: 'POP', type: 'page', url: '' } } })
+    f.emit({ method: 'Target.attachedToTarget', params: { sessionId: 'S-POP', waitingForDebugger: true, targetInfo: { targetId: 'POP', type: 'page', url: '' } } })
+    await new Promise(r => setTimeout(r, 150))
+    const resume = f.methods.indexOf('Runtime.runIfWaitingForDebugger@S-POP')
+    const close = f.closed.includes('POP') ? f.methods.findIndex(m => m === 'Target.closeTarget') : -1
+    expect(resume).toBeGreaterThanOrEqual(0)
+    expect(f.closed).toContain('POP')
+    // The close that happened was the one after the resume (the only closeTarget of this test).
+    expect(close).toBeGreaterThan(resume)
+    await h.stopAll()
+  })
+  test('a popup that never attaches is still closed (safety timer)', async () => {
+    env = makeEnv()
+    const h = env.host()
+    await h.start(S('a'))
+    for (let i = 0; i < 3; i++) await h.openTab('s-a')
+    const f = env.fakes[0]!
+    f.emit({ method: 'Target.targetCreated', params: { targetInfo: { targetId: 'GHOST', type: 'page', url: '' } } })
+    await new Promise(r => setTimeout(r, 1800))
+    expect(f.closed).toContain('GHOST')
     await h.stopAll()
   })
 })

@@ -55,6 +55,8 @@ export interface SpawnedBrowser {
   /** Resolves with the exit code/signal once the process is gone. */
   exited: Promise<void>
   hasExited: () => boolean
+  /** How it ended (`code=… signal=…`), for the log of a crash. */
+  exitInfo?: () => string
   cdpOut: Writable
   cdpIn: Readable
 }
@@ -106,6 +108,8 @@ export interface ProcReader {
 // ---------------------------------------------------------------------------------------------------
 // State
 
+const DOOMED_CLOSE_FALLBACK_MS = 1_500
+
 interface TabState { targetId: string; url: string; title: string; lastActiveMs: number }
 
 interface Entry {
@@ -128,6 +132,8 @@ interface Entry {
   stopping: Promise<void> | null
   /** page targetId → its flat CDP session (auto-attached, Fetch-intercepted). */
   tabSessions: Map<string, string>
+  /** Popups past the tab ceiling, waiting to be resumed and then closed (never closed while paused). */
+  doomed: Set<string>
   /** Every attached CDP session (pages, iframes, workers) → the page target it belongs to. */
   sessionPage: Map<string, string>
   /** What the block rules refused lately (newest first) — an action explains its own refusals from it. */
@@ -223,7 +229,7 @@ export class BrowserHost {
       key, owner, phase: 'starting', pid: null, profileDir: profileDirFor(this.d.root, owner),
       startedAt: this.d.now(), lastActivityMs: this.d.now(), viewers: 0, cdp: null, child: null,
       tabs: new Map(), activeTab: null, scope: false, scopeEscaped: false, sandbox: true, memory: null, stopping: null,
-      tabSessions: new Map(), sessionPage: new Map(), blocked: [], lastAction: null,
+      tabSessions: new Map(), doomed: new Set(), sessionPage: new Map(), blocked: [], lastAction: null,
     }
     this.entries.set(key, entry)
     if (decision.evict) await this.stop(decision.evict, 'evicted')
@@ -334,11 +340,13 @@ export class BrowserHost {
       entry.scopeEscaped = !entry.scope
       if (entry.scopeEscaped) this.log(`${entry.key} left the memory scope (cgroup: ${cg?.trim() ?? 'unreadable'})`)
     }
-    cdp.onClose(() => {
+    cdp.onClose((why) => {
       // The pipe closed without us asking: the browser crashed or was killed from outside.
+      if (entry.phase === 'live') this.log(`${entry.key}: the CDP pipe closed (${why})`)
       if (entry.phase === 'live') void this.stop(entry.key, 'crashed')
     })
     void child.exited.then(() => {
+      if (entry.phase === 'live') this.log(`${entry.key}: the browser process ended on its own (${child.exitInfo?.() ?? "unknown"}); tabs=${[...entry.tabs.keys()].map(t => t.slice(0, 5)).join(",")} doomed=${entry.doomed.size}`)
       if (entry.phase === 'live' && this.entries.get(entry.key) === entry) void this.stop(entry.key, 'crashed')
     })
     entry.phase = 'live'
@@ -353,12 +361,21 @@ export class BrowserHost {
         const max = entry.owner.kind === 'personal' ? MAX_TABS_PERSONAL : MAX_TABS_SESSION
         if (mustCloseNewTarget(entry.tabs.has(info.targetId), entry.tabs.size, max)) {
           // A tab the page opened itself (window.open) past the ceiling: close it and say so.
-          this.log(`${entry.key} page opened a tab past the ceiling of ${max}; closing ${info.targetId} (${statusUrl(info.url ?? '')})`)
-          void entry.cdp?.send('Target.closeTarget', { targetId: info.targetId }).catch(() => {})
-        } else this.upsertTab(entry, info)
+          // NOT closed here: a target auto-attached PAUSED and closed before it runs leaves its opener
+          // waiting on the window it asked for, and every later action on the opener times out (measured,
+          // S2fix3-diag-1.log). `setupAttached` resumes it (Fetch is on, so nothing loads) and then closes it;
+          // the timer covers a popup that never reaches us attached.
+          if (!entry.doomed.has(info.targetId)) {
+            this.log(`${entry.key} page opened a tab past the ceiling of ${max}; closing ${info.targetId} (${statusUrl(info.url ?? '')})`)
+            entry.doomed.add(info.targetId)
+            const t = setTimeout(() => this.closeDoomed(entry, info.targetId), DOOMED_CLOSE_FALLBACK_MS)
+            ;(t as any).unref?.()
+          }
+        } else if (!entry.doomed.has(info.targetId)) this.upsertTab(entry, info)
       }
     } else if (ev.method === 'Target.targetDestroyed') {
       entry.tabs.delete(ev.params?.targetId)
+      entry.doomed.delete(ev.params?.targetId)
       entry.tabSessions.delete(ev.params?.targetId)
       if (entry.activeTab === ev.params?.targetId) entry.activeTab = [...entry.tabs.keys()][0] ?? null
     } else if (ev.method === 'Target.attachedToTarget') {
@@ -374,6 +391,11 @@ export class BrowserHost {
     }
   }
 
+  private closeDoomed(entry: Entry, targetId: string): void {
+    if (!entry.doomed.delete(targetId)) return
+    void entry.cdp?.send('Target.closeTarget', { targetId }).catch(() => {})
+  }
+
   /** A target was attached (paused when auto-attached): intercept, then let it run. Every step may fail
    *  for a target type that lacks the domain (a worker has no `Page`); the run always happens, or the
    *  target would hang forever. */
@@ -384,6 +406,13 @@ export class BrowserHost {
     if (!cdp || !sid || !info) return
     const page = info.type === 'page' ? info.targetId : (ev.sessionId ? entry.sessionPage.get(ev.sessionId) : undefined)
     if (page) entry.sessionPage.set(sid, page)
+    if (info.type === 'page' && entry.doomed.has(info.targetId)) {
+      // A popup past the tab ceiling: intercept, let it run once so its opener is not left waiting, close it.
+      await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] }, sid).catch(() => {})
+      if (ev.params?.waitingForDebugger) await cdp.send('Runtime.runIfWaitingForDebugger', {}, sid).catch(() => {})
+      this.closeDoomed(entry, info.targetId)
+      return
+    }
     if (info.type === 'page') { entry.tabSessions.set(info.targetId, sid); this.upsertTab(entry, info) }
     const steps: Promise<unknown>[] = [
       cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] }, sid),
@@ -903,14 +932,19 @@ export function spawnWithPipe(bin: string, argv: string[]): SpawnedBrowser {
   const cp: ChildProcess = nodeSpawn(bin, argv, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], detached: false })
   if (typeof cp.pid !== 'number') throw new Error('spawn returned no pid')
   let exited = false
+  let info = ''
   const exitedP = new Promise<void>((res) => {
-    cp.once('exit', () => { exited = true; res() })
+    cp.once('exit', (code, signal) => {
+      info = `code=${code} signal=${signal}`; exited = true
+      res()
+    })
     cp.once('error', () => { exited = true; res() })
   })
   return {
     pid: cp.pid,
     exited: exitedP,
     hasExited: () => exited,
+    exitInfo: () => info,
     cdpOut: cp.stdio[3] as Writable,
     cdpIn: cp.stdio[4] as Readable,
   }
