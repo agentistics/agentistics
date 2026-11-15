@@ -15,7 +15,9 @@
  * Action-level refusals (a blocked URL, a stale ref, a full tab list) are `200 {ok:false, error,
  * sentence}` — an answer the model reads; auth / validation / a browser that could not start are 4xx/5xx.
  *
- * S3 puts the lock in front of every `action` through `ActionGate` (S2: always proceeds).
+ * S3 — the padlock (`browser-lock.ts`): every verb passes the gate; a session's ACTION is held while the
+ * person drives (never executed). `POST /api/browser/lock {owner, lock}` is the person's (any session
+ * identity ⇒ 403 `session_cannot_unlock`); `POST /api/browser/session/wait_unlock` waits for the person.
  *
  * The host is created lazily (no browser is ever started by the server's boot). The boot only SWEEPS.
  */
@@ -27,7 +29,10 @@ import { ACTION_KIND, ALWAYS_PROCEED, PERSONAL_ACTIONS, isBrowserAction, parseAc
 import type { ActionHost } from './browser-actions'
 import { decideDriver } from './browser-gate'
 import { createBrowserHost, type BrowserHost, type StartResult, type StopReason } from './browser-host'
-import { ownerKey, type BrowserOwner } from './browser-spec'
+import { ownerKey, statusTitle, statusUrl, type BrowserOwner } from './browser-spec'
+import type { HarnessId } from '@agentistics/core'
+import { decideLockRequest, holdMsFor, type PageFacts } from './browser-lock'
+import { BrowserLocks } from './browser-lock-host'
 
 let host: BrowserHost | null = null
 let exitHooked = false
@@ -87,18 +92,82 @@ export interface RouteDeps {
   host: RouteHost
   verify: (id: unknown, token: unknown) => Promise<string | null>
   run: (h: ActionHost, args: import('./browser-action-spec').ActionArgs) => Promise<Record<string, unknown>>
+  /** A padlock-less gate (tests; the personal browser). `locks` wins for a session's browser. */
   gate?: ActionGate
+  /** S3: the padlock of every session browser. Absent = no padlock (every verb proceeds). */
+  locks?: BrowserLocks
+  /** S3: the harness of a managed session — its measured tool timeout bounds how long a call is held. */
+  harnessOf?: (managedId: string) => HarnessId | undefined
+  /** S3: `browser.lock` / `browser.unlock` audit (who, when, which session — never content). */
+  audit?: (ev: { action: 'browser.lock' | 'browser.unlock'; managedId: string }) => void
   /** A session that has ended gets no browser (the watcher would stop it on its next tick anyway). */
   sessionLive?: (managedId: string) => boolean | undefined
 }
 
 export interface RouteAnswer { status: number; body: unknown }
 
+function holdFor(deps: RouteDeps, managedId: string): number {
+  return holdMsFor(deps.harnessOf?.(managedId))
+}
+
+/** The gate a verb goes through: the padlock for a session's browser, else the padlock-less one. */
+function gateFor(deps: RouteDeps, owner: BrowserOwner): ActionGate {
+  const locks = deps.locks
+  if (owner.kind === 'session' && locks) {
+    const holdMs = holdFor(deps, owner.managedId)
+    return (key, action, ctx) => locks.gate(key, action, { isRead: ctx?.isRead ?? false, holdMs })
+  }
+  return deps.gate ?? ALWAYS_PROCEED
+}
+
+/** What is on the active tab now — the sentence a returned action carries. */
+function pageOf(deps: RouteDeps, key: string): PageFacts | undefined {
+  const h = deps.host.actionHost(key)
+  if (!h) return undefined
+  const t = h.tabs().find(x => x.active) ?? h.tabs()[0]
+  return t ? { title: statusTitle(t.title), url: statusUrl(t.url) } : undefined
+}
+
+/** Each live SESSION browser in the status carries its padlock (`personal` has none). */
+function withLocks(status: unknown, deps: RouteDeps): unknown {
+  const locks = deps.locks
+  if (!locks || !status || typeof status !== 'object' || !Array.isArray((status as { live?: unknown }).live)) return status
+  const s = status as { live: Array<Record<string, unknown>> }
+  return {
+    ...s,
+    live: s.live.map((e) => {
+      const o = e.owner as BrowserOwner | undefined
+      if (!o || o.kind !== 'session') return e
+      return { ...e, lock: locks.view(ownerKey(o)) }
+    }),
+  }
+}
+
+/** `POST /api/browser/lock {owner, lock}` — the person's padlock. */
+async function lockRoute(body: unknown, deps: RouteDeps): Promise<RouteAnswer> {
+  const b = (body && typeof body === 'object' && !Array.isArray(body) ? body : {}) as Record<string, unknown>
+  const d = decideLockRequest({ carriesSession: b.session !== undefined && b.session !== null, owner: b.owner, lock: b.lock })
+  if (!d.ok) return { status: d.status, body: { ok: false, error: d.error, sentence: d.sentence } }
+  if (!deps.locks) return { status: 501, body: { ok: false, error: 'no_padlock', sentence: 'This build has no browser padlock.' } }
+  const key = ownerKey({ kind: 'session', managedId: d.managedId })
+  // Unlocking a browser that is not open hands the person nothing; locking is always allowed (and idempotent).
+  if (d.mode === 'unlocked' && !deps.host.actionHost(key)) {
+    return { status: 409, body: { ok: false, error: 'no_browser', sentence: 'This session has no browser open, so there is nothing to unlock.' } }
+  }
+  const r = deps.locks.setLock(key, d.mode, 'person', pageOf(deps, key))
+  if (r.changed) deps.audit?.({ action: d.mode === 'locked' ? 'browser.lock' : 'browser.unlock', managedId: d.managedId })
+  return { status: 200, body: { ok: true, lock: r.view.mode, changed: r.changed, since: r.view.since } }
+}
+
 /** `null` = not a browser route this module serves (the caller answers 404). */
 export async function browserRoute(method: string, pathname: string, body: unknown, deps: RouteDeps): Promise<RouteAnswer | null> {
   if (pathname === '/api/browser/status') {
     if (method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } }
-    return { status: 200, body: await deps.host.status() }
+    return { status: 200, body: withLocks(await deps.host.status(), deps) }
+  }
+  if (pathname === '/api/browser/lock') {
+    if (method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } }
+    return lockRoute(body, deps)
   }
   const m = /^\/api\/browser\/(session|personal)\/([a-z_]+)$/.exec(pathname)
   if (!m) return null
@@ -109,6 +178,20 @@ export async function browserRoute(method: string, pathname: string, body: unkno
 
   const s = b.session as { id?: unknown; token?: unknown } | undefined
   const carriesSession = s !== undefined && s !== null
+
+  // `wait_unlock` is not a browser verb: it reads the padlock, needs no browser and never starts one.
+  if (route === 'session' && action === 'wait_unlock') {
+    const verifiedId = s && typeof s === 'object' ? await deps.verify(s.id, s.token) : null
+    const who = decideDriver({ route, carriesSession, verifiedId })
+    if (!who.ok) return { status: who.status, body: { ok: false, error: who.error, sentence: who.sentence } }
+    if (who.owner.kind !== 'session') return null
+    if (deps.sessionLive?.(who.owner.managedId) === false) {
+      return { status: 403, body: { ok: false, error: 'session_not_running', sentence: 'This session is not running, so it cannot use a browser.' } }
+    }
+    if (!deps.locks) return { status: 200, body: { ok: true, locked: true, waitedMs: 0, sentence: 'The browser is yours (the padlock is locked; the person is not using it).' } }
+    const answer = await deps.locks.waitUnlock(ownerKey(who.owner), b.maxMs, holdFor(deps, who.owner.managedId))
+    return { status: 200, body: answer }
+  }
   const verifiedId = route === 'session' && s && typeof s === 'object' ? await deps.verify(s.id, s.token) : null
   const who = decideDriver({ route, carriesSession, verifiedId })
   if (!who.ok) return { status: who.status, body: { ok: false, error: who.error, sentence: who.sentence } }
@@ -124,11 +207,10 @@ export async function browserRoute(method: string, pathname: string, body: unkno
     return { status: 403, body: { ok: false, error: 'session_not_running', sentence: 'This session is not running, so it cannot use a browser.' } }
   }
   const key = ownerKey(owner)
-  if (ACTION_KIND[action] === 'action') {
-    // S3: the lock decides here (held / refused / proceed). S2 always proceeds.
-    const g = await (deps.gate ?? ALWAYS_PROCEED)(key, action)
-    if (!g.proceed) return { status: 200, body: g.result }
-  }
+  // S3: the padlock sees EVERY verb and decides (a read always proceeds; an action is held while the
+  // person drives). A held action is never run: its answer is the padlock's.
+  const g = await gateFor(deps, owner)(key, action, { isRead: ACTION_KIND[action] === 'read' })
+  if (!g.proceed) return { status: 200, body: g.result }
 
   if (action === 'close') {
     const live = deps.host.actionHost(key) !== null
@@ -153,13 +235,52 @@ export async function browserRoute(method: string, pathname: string, body: unkno
   return { status: 200, body: await deps.run(h, parsed.args) }
 }
 
+// ---------------------------------------------------------------------------------------------------
+// The padlock singleton (S3): one per server, beside the one host.
+
+let locks: BrowserLocks | null = null
+let autoLockTimer: ReturnType<typeof setInterval> | null = null
+const AUTO_LOCK_TICK_MS = 30_000
+
+export function browserLocks(opts: BrowserWebOpts): BrowserLocks {
+  if (locks) return locks
+  const h = browserHost(opts)
+  const l = new BrowserLocks({
+    now: () => Date.now(),
+    setTimer: (fn, ms) => { const t = setTimeout(fn, ms); (t as any).unref?.(); return t },
+    clearTimer: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+  })
+  locks = l
+  h.onStopped((key, reason) => l.browserStopped(key, reason))
+  // Unlocked and forgotten: 15 min without the person's input and nobody watching closes it by itself.
+  autoLockTimer = setInterval(() => {
+    if (l.unlockedKeys().length === 0) return
+    void h.status().then((st) => {
+      const viewers = (key: string) => st.live.find(e => e.key === key)?.viewers ?? 0
+      const page = (key: string) => {
+        const t = st.live.find(e => e.key === key)?.tabs.find(x => x.active)
+        return t ? { title: statusTitle(t.title), url: statusUrl(t.url) } : undefined
+      }
+      for (const key of l.autoLock(viewers, page)) console.log(`[browser] ${key}: unlocked and unattended for 15 min — locked again`)
+    }).catch(() => {})
+  }, AUTO_LOCK_TICK_MS)
+  ;(autoLockTimer as any).unref?.()
+  return l
+}
+
 /** Wire the dispatcher to the real host. */
-export function browserRouteDeps(opts: BrowserWebOpts, verify: RouteDeps['verify'], gate?: ActionGate): RouteDeps {
+export function browserRouteDeps(
+  opts: BrowserWebOpts,
+  verify: RouteDeps['verify'],
+  extra: { harnessOf?: RouteDeps['harnessOf']; audit?: RouteDeps['audit'] } = {},
+): RouteDeps {
   const h = browserHost(opts)
   return {
     host: h,
     verify,
-    gate,
+    locks: browserLocks(opts),
+    harnessOf: extra.harnessOf,
+    audit: extra.audit,
     sessionLive: opts.sessionLive,
     run: async (ah, args) => {
       const { runAction } = await import('./browser-actions')

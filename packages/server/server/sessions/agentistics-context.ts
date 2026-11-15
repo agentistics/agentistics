@@ -92,14 +92,15 @@ const TOOL_GROUPS = {
   Metrics: ['agentistics_live_delivery', 'agentistics_delivery_calendar', 'agentistics_benchmark_observed', 'agentistics_summary', 'agentistics_costs', 'agentistics_projects', 'agentistics_repos', 'agentistics_harnesses', 'agentistics_plan_limits', 'agentistics_tags', 'agentistics_tag_detail', 'agentistics_flow_run', 'agentistics_flow_status', 'agentistics_wait'],
   // COFRE.DESBLOQUEIO: how the vault is protected (never what it holds) — read-only, not listed in the briefing.
   Vault: ['agentistics_vault_status'],
-  // NAVEGADOR S1+S2: status + the session's own browser verbs — not listed in the briefing until the lock (S3)
-  // and the visible card (S5) arrive; the tools stay discoverable through the MCP.
+  // NAVEGADOR S1-S3: status, the session's own browser verbs and the padlock — not listed in the briefing until
+  // the visible card (S5) arrives; the tools stay discoverable through the MCP.
   Browser: [
     'agentistics_browser_status', 'agentistics_browser_navigate', 'agentistics_browser_back', 'agentistics_browser_forward',
     'agentistics_browser_reload', 'agentistics_browser_snapshot', 'agentistics_browser_click', 'agentistics_browser_type',
     'agentistics_browser_press', 'agentistics_browser_select', 'agentistics_browser_scroll', 'agentistics_browser_screenshot',
     'agentistics_browser_wait_for', 'agentistics_browser_evaluate', 'agentistics_browser_tabs', 'agentistics_browser_tab_new',
     'agentistics_browser_tab_select', 'agentistics_browser_tab_close', 'agentistics_browser_close',
+    'agentistics_browser_wait_unlock', 'agentistics_browser_lock',
   ],
   // LIVRO.SEAMS: a hand-off successor's confirmation — not listed in the briefing; the successor's own spawn prompt names it.
   Handoff: ['agentistics_book_takeover'],

@@ -33,6 +33,7 @@ import { benchmarkObservedTool, benchmarkQueryFromArgs } from "./benchmark-tool.
 import { harnessesTool } from "./harnesses-tool.js";
 import { deliveryIntegrityOf, vaultStatusTool } from "./vault-tool.js";
 import { browserReply, browserSessionBody, browserStatusTool } from "./browser-tool.js";
+import { HOLDABLE_BROWSER_TOOLS, browserLockBody, progressTokenOf, withProgress } from "./browser-tools.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
 
@@ -1249,6 +1250,18 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "agentistics_browser_wait_unlock",
+    description:
+      "Wait until the person hands this session's browser back (locks the padlock), at most your tool time limit. While the person drives, your actions are held and not done; reads still work. / Espera a pessoa devolver o navegador desta sessão.",
+    inputSchema: { type: "object", properties: { maxMs: { type: "number", description: "How long to wait at most (clamped to this harness's limit)" } }, required: [] },
+  },
+  {
+    name: "agentistics_browser_lock",
+    description:
+      "The PERSON's padlock on a session's browser: unlocked = the person drives and the model's actions wait; locked = the model drives. Refused from inside a session (a session cannot change its own padlock). / Cadeado do navegador de uma sessão (só a pessoa).",
+    inputSchema: { type: "object", properties: { session: { type: "string", description: "The session's managed id" }, lock: { type: "string", enum: ["locked", "unlocked"] } }, required: ["session", "lock"] },
+  },
+  {
     name: "agentistics_tag_detail",
     description:
       "Get full detail for one tag by name or id: aggregate totals plus per-source breakdown and distributions (top projects, models, harnesses, repos), daily activity series, and the active date window. Call agentistics_tags first to find the id/name.",
@@ -1320,8 +1333,8 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => { audit.flush(); process.exit(0); });
 }
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const result = await callTool(req);
+server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
+  const result = await callTool(req, extra);
   const first = result.content?.[0];
   audit.recordCall({
     name: req.params.name,
@@ -1336,8 +1349,16 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   return result;
 });
 
-async function callTool(req: { params: { name: string; arguments?: Record<string, unknown> } }) {
+async function callTool(
+  req: { params: { name: string; arguments?: Record<string, unknown>; _meta?: { progressToken?: unknown } } },
+  extra?: { sendNotification?: (n: any) => Promise<void> },
+) {
   const { name, arguments: args } = req.params;
+  // NAVEGADOR S3: a browser call the padlock may hold keeps its client alive with progress (browser-tools.ts).
+  const held = <T>(work: Promise<T>): Promise<T> =>
+    HOLDABLE_BROWSER_TOOLS.has(name) && extra?.sendNotification
+      ? withProgress(progressTokenOf(req), work, { send: (n) => extra.sendNotification!(n) })
+      : work;
 
   try {
     switch (name) {
@@ -2117,41 +2138,45 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       }
 
       case "agentistics_browser_navigate":
-        return browserReply(await apiSend("POST", "/api/browser/session/navigate", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/navigate", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_back":
-        return browserReply(await apiSend("POST", "/api/browser/session/back", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/back", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_forward":
-        return browserReply(await apiSend("POST", "/api/browser/session/forward", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/forward", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_reload":
-        return browserReply(await apiSend("POST", "/api/browser/session/reload", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/reload", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_snapshot":
-        return browserReply(await apiSend("POST", "/api/browser/session/snapshot", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/snapshot", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_click":
-        return browserReply(await apiSend("POST", "/api/browser/session/click", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/click", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_type":
-        return browserReply(await apiSend("POST", "/api/browser/session/type", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/type", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_press":
-        return browserReply(await apiSend("POST", "/api/browser/session/press", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/press", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_select":
-        return browserReply(await apiSend("POST", "/api/browser/session/select", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/select", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_scroll":
-        return browserReply(await apiSend("POST", "/api/browser/session/scroll", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/scroll", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_screenshot":
-        return browserReply(await apiSend("POST", "/api/browser/session/screenshot", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/screenshot", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_wait_for":
-        return browserReply(await apiSend("POST", "/api/browser/session/wait_for", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/wait_for", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_evaluate":
-        return browserReply(await apiSend("POST", "/api/browser/session/evaluate", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/evaluate", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_tabs":
-        return browserReply(await apiSend("POST", "/api/browser/session/tabs", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/tabs", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_tab_new":
-        return browserReply(await apiSend("POST", "/api/browser/session/tab_new", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/tab_new", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_tab_select":
-        return browserReply(await apiSend("POST", "/api/browser/session/tab_select", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/tab_select", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_tab_close":
-        return browserReply(await apiSend("POST", "/api/browser/session/tab_close", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/tab_close", browserSessionBody(args, sessionProof(process.env)))));
       case "agentistics_browser_close":
-        return browserReply(await apiSend("POST", "/api/browser/session/close", browserSessionBody(args, sessionProof(process.env))));
+        return browserReply(await held(apiSend("POST", "/api/browser/session/close", browserSessionBody(args, sessionProof(process.env)))));
+      case "agentistics_browser_wait_unlock":
+        return browserReply(await held(apiSend("POST", "/api/browser/session/wait_unlock", browserSessionBody(args, sessionProof(process.env)))));
+      case "agentistics_browser_lock":
+        return browserReply(await apiSend("POST", "/api/browser/lock", browserLockBody(args, sessionProof(process.env), process.env)));
       case "agentistics_browser_status": {
         // The browser host's own snapshot (the one source the web reads too), reduced to an allowlist.
         return text(browserStatusTool(await apiGet("/api/browser/status")));

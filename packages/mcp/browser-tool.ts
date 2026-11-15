@@ -132,6 +132,11 @@ export function browserReply(body: unknown): { content: McpContent[]; isError?: 
     const sentence = typeof b.sentence === "string" ? b.sentence : "The browser refused the action.";
     return { content: [{ type: "text", text: `${sentence}${typeof b.error === "string" ? ` (${b.error})` : ""}` }], isError: true };
   }
+  // S3: the padlock's own answers (an action held and handed back, a wait that ended) are a SENTENCE the
+  // model acts on — not a JSON dump in which "ok: true" could read as "it was done".
+  if (typeof b.sentence === "string" && (b.performed === false || typeof b.locked === "boolean")) {
+    return { content: [{ type: "text", text: b.sentence }] };
+  }
   if (typeof b.data === "string" && typeof b.mime === "string" && b.mime.startsWith("image/")) {
     const { data, ...rest } = b;
     return { content: [{ type: "image", data, mimeType: b.mime }, { type: "text", text: JSON.stringify(rest) }] };

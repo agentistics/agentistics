@@ -3917,7 +3917,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           if (!row) return undefined
           return row.status === 'running' ? true : row.status === 'exited' || row.status === 'lost' ? false : undefined
         }
-        const deps = browserRouteDeps({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT], sessionLive }, verifySessionIdentity)
+        // S3: a session's call may be HELD by the padlock (up to its harness's measured tool timeout − 5 s,
+        // at most 10 min) — past the server's 60 s idle timeout, which would cut it with no answer.
+        if (req.method === 'POST' && url.pathname.startsWith('/api/browser/session/')) (server as { timeout?: (r: Request, s: number) => void }).timeout?.(req, 11 * 60)
+        const harnessOf = (id: string) => {
+          const h = processSessionHub()?.last()?.sessions.find(r => r.id === id)?.harness
+          return typeof h === 'string' ? (h as import('@agentistics/core').HarnessId) : undefined
+        }
+        const audit = (ev: { action: 'browser.lock' | 'browser.unlock'; managedId: string }) =>
+          void writeAudit({ action: ev.action, ip: clientIp, targetId: ev.managedId })
+        const deps = browserRouteDeps({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT], sessionLive }, verifySessionIdentity, { harnessOf, audit })
         const answer = await browserRoute(req.method, url.pathname, body, deps)
         if (!answer) return jsonOut({ error: 'not_found' }, 404)
         return jsonOut(answer.body, answer.status)

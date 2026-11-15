@@ -597,6 +597,16 @@ export class BrowserHost {
   private noteStop(key: string, reason: StopReason): void {
     this.recentStops.unshift({ key, reason, at: this.d.now() })
     this.recentStops.length = Math.min(this.recentStops.length, 20)
+    for (const fn of this.stopListeners) {
+      try { fn(key, reason) } catch { /* a listener never breaks a stop */ }
+    }
+  }
+
+  private stopListeners = new Set<(key: string, reason: StopReason) => void>()
+  /** S3: the padlock releases the actions it holds when the browser they wait on stops. */
+  onStopped(fn: (key: string, reason: StopReason) => void): () => void {
+    this.stopListeners.add(fn)
+    return () => { this.stopListeners.delete(fn) }
   }
 
   // ------------------------------------------------------------------------------------- activity

@@ -143,6 +143,9 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_browser_tab_select',
   'agentistics_browser_tab_close',
   'agentistics_browser_close',
+  // NAVEGADOR S3 — the padlock
+  'agentistics_browser_wait_unlock',
+  'agentistics_browser_lock',
 ] as const
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]
@@ -363,6 +366,14 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_browser_close: {
     ...TASKS, risk: 'W', routes: ['POST /api/browser/session/close'],
     reason: "closes the session's OWN throwaway browser; the next browser call starts a fresh one",
+  },
+  agentistics_browser_wait_unlock: {
+    ...TASKS, risk: 'R', routes: ['POST /api/browser/session/wait_unlock'],
+    reason: "waits for the person to hand the session's OWN browser back; reads the padlock, changes nothing and starts no browser",
+  },
+  agentistics_browser_lock: {
+    ...TASKS, risk: 'W', routes: ['POST /api/browser/lock'],
+    reason: "the PERSON's padlock on a session's browser; the server refuses it from inside any session (session_cannot_unlock), so a session can never free or take back its own browser",
   },
   // ------------------------------------------------------------------ Experimental flows (read-only host operations)
   agentistics_flow_run: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['POST /api/flows/run'], reason: 'runs only the built-in deterministic flow gates; it deletes nothing' },

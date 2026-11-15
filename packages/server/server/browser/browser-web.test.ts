@@ -135,14 +135,14 @@ describe('browserRoute', () => {
     expect((await browserRoute('POST', '/api/browser/session/snapshot', { session: proof('a') }, f.deps))?.body).toMatchObject({ ok: true })
   })
 
-  test('the S3 hook: the gate sees every ACTION and no READ, and can answer instead', async () => {
+  test('the S3 hook: the gate sees EVERY verb with its kind, and can answer instead', async () => {
     const seen: string[] = []
-    const f = fakeDeps({ gate: async (_k, a) => { seen.push(a); return a === 'click' ? { proceed: false, result: { ok: false, error: 'held' } } : { proceed: true } } })
+    const f = fakeDeps({ gate: async (_k, a, ctx) => { seen.push(`${a}:${ctx?.isRead ? 'read' : 'action'}`); return a === 'click' ? { proceed: false, result: { ok: false, error: 'held' } } : { proceed: true } } })
     await browserRoute('POST', '/api/browser/session/navigate', { session: proof('a'), url: 'http://x/' }, f.deps)
     await browserRoute('POST', '/api/browser/session/snapshot', { session: proof('a') }, f.deps)
     await browserRoute('POST', '/api/browser/session/tabs', { session: proof('a') }, f.deps)
     const held = await browserRoute('POST', '/api/browser/session/click', { session: proof('a'), ref: 'e1' }, f.deps)
-    expect(seen).toEqual(['navigate', 'click'])
+    expect(seen).toEqual(['navigate:action', 'snapshot:read', 'tabs:read', 'click:action'])
     expect(held?.body).toEqual({ ok: false, error: 'held' })
     expect(f.ran.map(r => r.args.action)).toEqual(['navigate', 'snapshot', 'tabs'])
   })

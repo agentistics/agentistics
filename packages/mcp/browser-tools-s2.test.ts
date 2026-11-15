@@ -10,10 +10,11 @@ describe("NAVEGADOR S2 MCP tools", () => {
   test("every verb is a tool that calls ITS OWN session route with the pane proof — and no personal/lock route", () => {
     for (const v of VERBS) {
       expect(SRC).toContain(`name: "agentistics_browser_${v}"`);
-      expect(SRC).toContain(`case "agentistics_browser_${v}":\n        return browserReply(await apiSend("POST", "/api/browser/session/${v}", browserSessionBody(args, sessionProof(process.env))));`);
+      expect(SRC).toContain(`case "agentistics_browser_${v}":\n        return browserReply(await held(apiSend("POST", "/api/browser/session/${v}", browserSessionBody(args, sessionProof(process.env)))));`);
     }
     expect(SRC).not.toContain("/api/browser/personal/");
-    expect(SRC).not.toContain("/api/browser/lock");
+    // S3: the padlock route is reached by ONE tool only, the person's (refused from inside a session).
+    expect(SRC.split('"/api/browser/lock"').length - 1).toBe(1);
   });
 
   test("descriptions are short and bilingual", () => {

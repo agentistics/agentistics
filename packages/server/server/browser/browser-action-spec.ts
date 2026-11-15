@@ -35,8 +35,9 @@ export function isBrowserAction(s: string): s is BrowserAction {
   return (SESSION_ACTIONS as readonly string[]).includes(s)
 }
 
-/** S3's hook: called before every `action` (never a `read`). S2 always proceeds. */
-export type ActionGate = (ownerKey: string, action: BrowserAction) => Promise<{ proceed: true } | { proceed: false; result: unknown }>
+/** The padlock's hook (S3): called before EVERY verb — `isRead` says which kind, and the gate (not the
+ *  route) decides that a read is never held. `ALWAYS_PROCEED` is a browser without a padlock. */
+export type ActionGate = (ownerKey: string, action: BrowserAction, ctx?: { isRead: boolean }) => Promise<{ proceed: true } | { proceed: false; result: unknown }>
 export const ALWAYS_PROCEED: ActionGate = async () => ({ proceed: true })
 
 export const EVALUATE_MAX_BYTES = 20 * 1024
