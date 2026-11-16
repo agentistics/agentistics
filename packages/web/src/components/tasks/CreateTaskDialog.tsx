@@ -118,7 +118,7 @@ export function CreateTaskDialog(p: {
             <span style={{ ...microLabel, fontSize: 9 }}>{t('status')}</span>
             <ChipSelect
               value={status}
-              options={statusOptions(liveStatusMap(p.statuses), liveStatusOrder(p.statuses))}
+              options={statusOptions(liveStatusMap(p.statuses, p.lang), liveStatusOrder(p.statuses))}
               onPick={setStatus}
             />
           </div>

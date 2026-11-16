@@ -95,6 +95,7 @@ export const USER_UI_PREF_REGISTRY = {
   vaultKinds: { machine: 'ui', maxBytes: SMALL },
   areaOpen: { machine: 'ui', maxBytes: SMALL },
   signedOutHidden: { machine: 'ui', maxBytes: SMALL },
+  cronogramaCollapsed: { machine: 'ui', maxBytes: MEDIUM },
 } as const satisfies Record<string, KeySpec>
 
 export type UserUiPrefKey = keyof typeof USER_UI_PREF_REGISTRY

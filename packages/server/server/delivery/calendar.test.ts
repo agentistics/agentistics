@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { buildCalendar } from '@agentistics/core'
-import { answerCalendar, calendarFiltersOf } from './calendar'
+import { answerCalendar, calendarFiltersOf, subtaskInputs } from './calendar'
 
 describe('calendarFiltersOf', () => {
   test('no query = the default: tasks being worked on', () => {
@@ -35,6 +35,26 @@ describe('answerCalendar', () => {
     expect(a.counts).toEqual({ pieces: 1, versions: 1, marks: 0 })
     expect(a.pieces[0]!.publishEta.kind).toBe('none')
     expect(a.versions[0]).toMatchObject({ version: '2.202.0', basis: 'none', atMs: null })
+  })
+})
+
+describe('the Cronograma group level (parentGroupId)', () => {
+  const NOW = Date.parse('2026-11-14T18:00:00.000Z')
+  test('the board\'s parentGroupId reaches the calendar and fills groupId/groupTitle on the piece', () => {
+    const subs = subtaskInputs([{ id: 'g', taskId: 't', title: 'Adaptadores' }, { id: 's', taskId: 't', title: 'Leitura', parentGroupId: 'g' }])
+    expect(subs.find(s => s.id === 's')!.parentGroupId).toBe('g')
+    expect(subs.find(s => s.id === 'g')!.parentGroupId).toBeUndefined()
+    const reply = buildCalendar({
+      nowMs: NOW,
+      lives: [{
+        key: 't/s', taskId: 't', taskTitle: 'Engine', subtaskId: 's', title: 'Leitura', stage: 'qa', startedAtMs: NOW - 3600_000, stageSinceMs: NOW - 1800_000,
+        harnesses: [], models: [], eta: { kind: 'none' }, stageEta: { kind: 'none' }, publishEta: { kind: 'none', reason: 'no-history' }, deliveredAtMs: null,
+      }],
+      records: [], tasks: [{ id: 't', title: 'Engine', status: 'in_progress' }], subtasks: subs, resets: [],
+    })
+    const p = answerCalendar(reply, { tasks: 'active' }).pieces[0]!
+    expect(p.groupId).toBe('g')
+    expect(p.groupTitle).toBe('Adaptadores')
   })
 })
 

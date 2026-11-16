@@ -69,8 +69,8 @@ function fmtDay(iso: string | undefined, lang: 'pt' | 'en'): string | null {
   })
 }
 
-function StatusPill({ status, statuses }: { status: string; statuses: readonly TaskStatusDef[] | null }) {
-  const s = statusStyle(statuses, status)
+function StatusPill({ status, statuses, lang }: { status: string; statuses: readonly TaskStatusDef[] | null; lang: 'pt' | 'en' }) {
+  const s = statusStyle(statuses, status, lang)
   return <span style={{ ...pill(s.color), background: s.dim }}>{s.label}</span>
 }
 
@@ -135,7 +135,7 @@ export function RepoTasksTab(p: RepoTasksTabProps) {
               }}
             >
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <StatusPill status={r.task.status} statuses={statuses} />
+                <StatusPill status={r.task.status} statuses={statuses} lang={p.lang} />
                 {r.task.priority && r.task.priority !== 'none' && (
                   <span style={{ ...pill(prio.color), background: prio.dim, fontSize: 10 }}>{priorityLabel(r.task.priority ?? 'none', p.lang)}</span>
                 )}
@@ -206,7 +206,7 @@ export function RepoTasksTab(p: RepoTasksTabProps) {
                     <SquareArrowOutUpRight size={11} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                   </span>
                 </td>
-                <td style={td}><StatusPill status={r.task.status} statuses={statuses} /></td>
+                <td style={td}><StatusPill status={r.task.status} statuses={statuses} lang={p.lang} /></td>
                 <td style={{ ...td, minWidth: 120 }}>
                   {r.counts.subtasks > 0
                     ? <TaskProgressBar done={r.counts.subtasksDone} inProgress={r.counts.subtasksInProgress} statusCounts={r.counts.subtasksByStatus} total={r.counts.subtasks} statuses={statuses} />

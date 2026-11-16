@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { brtDay, brtDayStartMs, pieceDayPresence, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
-import { addDays, clock, DAY_MS, packIntervals, placeColumn, swipeDay, weekDays } from '../../lib/calendarModel'
+import { addDays, clock, stamp, DAY_MS, packIntervals, placeColumn, swipeDay, weekDays } from '../../lib/calendarModel'
 import { stageColor, EXPECTED_COLOR, PUBLISHED_COLOR } from './calendarUi'
 import { TEXT, pick } from './calendarText'
 import type { CalSelection } from './CalendarDetail'
@@ -10,7 +10,7 @@ export interface MobileGridProps {
   anchor: string; nowMs: number; versions: readonly CalVersion[]; pieces: readonly CalPiece[]; marks: readonly CalMark[]; pt: boolean
   span: 1 | 3 | 7; onDay: (day: string) => void; /** Opens a day in the Day view; defaults to selecting it. */ onOpenDay?: (day: string) => void; onOpen: (selection: CalSelection, e: React.MouseEvent) => void
 }
-export interface PhoneEvent { id: string; title: string; color: string; fromMs: number; toMs: number; expected: boolean; selection: CalSelection; /** Covers the whole day: it has no hour, so it goes to the all-day band, never a full-height block. */ allDay?: boolean }
+export interface PhoneEvent { id: string; title: string; color: string; fromMs: number; toMs: number; expected: boolean; selection: CalSelection; /** The real start when the day clip cut the card at midnight (a continuation): the label says it, never "00h00". */ continuedFromMs?: number | null; /** Covers the whole day: it has no hour, so it goes to the all-day band, never a full-height block. */ allDay?: boolean }
 
 /** One card per piece, plus each version and account reset, on its actual BRT day. */
 export function phoneEvents(day: string, p: Pick<MobileGridProps, 'nowMs' | 'pieces' | 'versions' | 'marks'>): PhoneEvent[] {
@@ -20,7 +20,7 @@ export function phoneEvents(day: string, p: Pick<MobileGridProps, 'nowMs' | 'pie
     const blocks = pieceDayPresence(piece, day, p.nowMs) // the same rule as the API's window and the desktop Day
     if (blocks.length === 0) continue
     const fromMs = Math.min(...blocks.map(b => b.fromMs)), toMs = Math.max(...blocks.map(b => b.toMs))
-    events.push({ id: piece.key, title: piece.title, color: stageColor(piece.stage), fromMs, toMs: Math.max(toMs, Math.min(end, fromMs + 30 * 60_000)), expected: blocks.every(b => b.expected), allDay: fromMs <= d0 && toMs >= end, selection: { kind: 'piece', key: piece.key } })
+    events.push({ id: piece.key, title: piece.title, color: stageColor(piece.stage), fromMs, toMs: Math.max(toMs, Math.min(end, fromMs + 30 * 60_000)), expected: blocks.every(b => b.expected), ...(blocks[0]?.continued ? { continuedFromMs: blocks[0].realFromMs ?? null } : {}), allDay: fromMs <= d0 && toMs >= end, selection: { kind: 'piece', key: piece.key } })
   }
   for (const v of p.versions) if (v.atMs !== null && brtDay(v.atMs) === day) events.push({ id: `version:${v.version}`, title: v.version, color: v.state === 'published' ? PUBLISHED_COLOR : EXPECTED_COLOR, fromMs: v.atMs, toMs: v.atMs + 30 * 60_000, expected: v.state !== 'published', selection: { kind: 'version', version: v.version } })
   for (const m of p.marks) if (m.kind === 'account-reset' && brtDay(m.atMs) === day) events.push({ id: `reset:${m.account}:${m.window}`, title: m.label, color: 'var(--accent-cyan)', fromMs: m.atMs, toMs: m.atMs + 30 * 60_000, expected: true, selection: { kind: 'mark', mark: m } })
@@ -95,11 +95,12 @@ export function MobileDayGrid(p: MobileGridProps) {
           const raw = timedOf(day)
           const openDay = () => (span === 1 ? setSpread(true) : (p.onOpenDay ?? p.onDay)(day))
           const cardStyle = (e: PhoneEvent): React.CSSProperties => ({ position: 'absolute', padding: '4px 3px', textAlign: 'left', font: 'inherit', fontSize: span === 1 ? 11 : 10, lineHeight: 1.2, color: 'var(--text-primary)', border: `1px ${e.expected ? 'dashed' : 'solid'} ${e.color}`, borderLeftWidth: 3, borderRadius: 4, background: `color-mix(in srgb, ${e.color} 24%, var(--bg-card))`, cursor: 'pointer', boxSizing: 'border-box' })
-          const label = (e: PhoneEvent) => <span style={{ display: 'block', height: '100%', overflow: 'hidden', overflowWrap: 'anywhere' }}><b>{e.title}</b><br /><small>{clock(e.fromMs)}</small></span>
+          const startLabel = (e: PhoneEvent) => (e.continuedFromMs === undefined ? clock(e.fromMs) : e.continuedFromMs === null ? '' : `${pick(TEXT.since, pt)} ${stamp(e.continuedFromMs, pt)}`)
+          const label = (e: PhoneEvent) => <span style={{ display: 'block', height: '100%', overflow: 'hidden', overflowWrap: 'anywhere' }}><b>{e.title}</b><br /><small>{startLabel(e)}</small></span>
           let cards: React.ReactNode
           if (span === 1 && !stackDay) {
             // A full-width Day column can afford lanes; pack the visible minimum height too, so short cards cannot cover each other.
-            cards = packIntervals(raw.map(e => ({ ...e, toMs: Math.min(d0 + DAY_MS, Math.max(e.toMs, e.fromMs + 44 * 60_000)) }))).map(e => <button type="button" className="cal-phone-event" data-cal-phone-event={e.id} key={e.id} title={`${e.title} · ${clock(e.fromMs)}`} aria-label={`${e.title} · ${clock(e.fromMs)}`} onClick={ev => p.onOpen(e.selection, ev)} style={{ ...cardStyle(e), top: (e.fromMs - d0) / 60_000, left: `${e.lane / e.lanes * 100}%`, width: `${100 / e.lanes}%`, height: Math.max(44, (e.toMs - e.fromMs) / 60_000) }}>{label(e)}</button>)
+            cards = packIntervals(raw.map(e => ({ ...e, toMs: Math.min(d0 + DAY_MS, Math.max(e.toMs, e.fromMs + 44 * 60_000)) }))).map(e => <button type="button" className="cal-phone-event" data-cal-phone-event={e.id} key={e.id} title={`${e.title} · ${startLabel(e)}`} aria-label={`${e.title} · ${startLabel(e)}`} onClick={ev => p.onOpen(e.selection, ev)} style={{ ...cardStyle(e), top: (e.fromMs - d0) / 60_000, left: `${e.lane / e.lanes * 100}%`, width: `${100 / e.lanes}%`, height: Math.max(44, (e.toMs - e.fromMs) / 60_000) }}>{label(e)}</button>)
           } else {
             // Thin columns (Week, 3 days): one full-width card per stretch of time, the rest counted in a "+N" chip. Both open the day.
             const byId = new Map(raw.map(e => [e.id, e]))
@@ -111,7 +112,7 @@ export function MobileDayGrid(p: MobileGridProps) {
               }
               if (item.kind === 'chip') return <button type="button" className="cal-phone-button" data-cal-phone-more={item.count} data-cal-phone-more-day={day} key={`more:${item.top}`} aria-label={`+${item.count} · ${day}`} onClick={openDay} style={{ position: 'absolute', top: item.top, left: 0, width: '100%', height: item.height, minWidth: 0, padding: 0, fontWeight: 700, border: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>+{item.count}</button>
               const e = byId.get(item.id)!
-              return <button type="button" className="cal-phone-event" data-cal-phone-event={e.id} key={e.id} title={`${e.title} · ${clock(e.fromMs)}`} aria-label={`${e.title} · ${clock(e.fromMs)}`} onClick={ev => (item.hidden > 0 ? openDay() : p.onOpen(e.selection, ev))} style={{ ...cardStyle(e), top: item.top, left: 0, width: '100%', height: item.height }}>{label(e)}</button>
+              return <button type="button" className="cal-phone-event" data-cal-phone-event={e.id} key={e.id} title={`${e.title} · ${startLabel(e)}`} aria-label={`${e.title} · ${startLabel(e)}`} onClick={ev => (item.hidden > 0 ? openDay() : p.onOpen(e.selection, ev))} style={{ ...cardStyle(e), top: item.top, left: 0, width: '100%', height: item.height }}>{label(e)}</button>
             })
           }
           return <div key={day} data-cal-grid-day={day} style={{ flex: 1, minWidth: 0, height: 1440, position: 'relative', boxShadow: 'inset 1px 0 var(--border)', background: 'repeating-linear-gradient(to bottom, var(--border-subtle) 0 1px, transparent 1px 60px)' }}>

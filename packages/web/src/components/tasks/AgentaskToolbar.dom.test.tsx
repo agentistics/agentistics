@@ -98,3 +98,17 @@ test('toolbar on a phone is a single line with a 44px filters button that asks f
   expect(host.querySelectorAll('[data-view]').length).toBe(0)
   await unmount()
 })
+
+test('sort chip and sort buttons speak the app language, hand order included', async () => {
+  const { activeChips, ViewPanel: Panel } = await import('./AgentaskToolbar')
+  const chipOf = (lang: 'pt' | 'en', key: string) =>
+    activeChips(mkState(['todo'], { sort: { key, dir: 'desc' } }) as never, lang).find(c => c.id === 'sort')?.label
+  expect(chipOf('pt', 'manual')).toBe('Ordenar: Ordem manual ↓')
+  expect(chipOf('pt', 'priority')).toBe('Ordenar: Prioridade ↓')
+  expect(chipOf('en', 'manual')).toBe('Sort: Hand order ↓')
+  const m = await mount(<Panel lang="pt" state={mkState(['todo']) as never} actions={mkActions([]) as never} statuses={LIST} />)
+  const btn = (k: string) => m.host.querySelector(`[data-sort="${k}"]`)?.textContent
+  expect(btn('manual')).toBe('Ordem manual')
+  expect(btn('priority')).toBe('Prioridade')
+  await m.unmount()
+})

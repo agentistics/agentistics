@@ -136,7 +136,7 @@ export const COLUMNS: ColumnDef[] = [
   // Sortable, unlike Status: the table is only grouped by type when the person asks for it.
   { id: 'type', width: 104, sort: 'type' },
   { id: 'priority', width: 96, sort: 'priority' },
-  { id: 'claim', width: 132 },
+  { id: 'claim', width: 120 },
   { id: 'progress', width: 132, sort: 'progress' },
   { id: 'due', width: 96, sort: 'due' },
   { id: 'sessions', numeric: true, width: 84, sort: 'sessions' },
@@ -212,12 +212,12 @@ function ClaimCell({ claim, nowMs, lang }: { claim?: TaskClaim; nowMs: number; l
   if (!claim) return <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
   const left = claimLeft(claim.expiresAt, nowMs, lang)
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
-      <span style={pill(left.expired ? 'var(--text-tertiary)' : 'var(--accent-green)')}>
+    <span data-claim-cell title={`${claim.by} · ${left.text}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0, maxWidth: '100%', whiteSpace: 'nowrap' }}>
+      <span data-claim-pill style={{ ...pill(left.expired ? 'var(--text-tertiary)' : 'var(--accent-green)'), whiteSpace: 'nowrap', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
         <Bot size={10} /> {claim.by}
       </span>
-      <span style={{ fontSize: 10, color: left.expired ? 'var(--text-tertiary)' : 'var(--text-secondary)' }}>
-        {left.text}
+      <span data-claim-left style={{ fontSize: 10, whiteSpace: 'nowrap', flexShrink: 0, color: left.expired ? 'var(--text-tertiary)' : 'var(--text-secondary)' }}>
+        {left.short}
       </span>
     </span>
   )
@@ -912,7 +912,7 @@ export function TaskTable(p: TaskTableProps) {
     return liveStatusOrder(p.statuses).map(status => ({
       key: status,
       label: statusLabel(status, p.lang ?? 'en', p.statuses),
-      color: statusStyle(p.statuses, status).color,
+      color: statusStyle(p.statuses, status, p.lang).color,
       createStatus: status as TaskStatus,
       createType: undefined as string | undefined,
       rows: sortRows(p.rows.filter(r => (r.task.status as BoardStatus) === status), sort, sortCtx),
@@ -1590,7 +1590,7 @@ export function TaskTable(p: TaskTableProps) {
               value="__none__"
               options={[
                 { value: '__none__', label: p.lang === 'pt' ? 'Mover para…' : 'Move to…', color: 'var(--text-secondary)', dim: 'var(--bg-elevated)' },
-                ...statusOptions(liveStatusMap(p.statuses), liveStatusOrder(p.statuses)),
+                ...statusOptions(liveStatusMap(p.statuses, p.lang), liveStatusOrder(p.statuses)),
               ]}
               onPick={v => {
                 if (v === '__none__') return

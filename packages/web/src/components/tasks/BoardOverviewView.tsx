@@ -312,7 +312,7 @@ export function BoardOverviewView({ o, statuses }: {
           {[...liveStatusOrder(statuses), ...Object.keys(o.statusCounts).filter(
             id => !liveStatusOrder(statuses).includes(id),
           )].map(st => {
-            const c = statusStyle(statuses, st)
+            const c = statusStyle(statuses, st, ctxLang === 'pt' ? 'pt' : 'en')
             const n = o.statusCounts[st] ?? 0
             return (
               <div key={st} style={{
