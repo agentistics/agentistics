@@ -775,6 +775,30 @@ export async function requireBrowserUnlockOwner(ctx: GateContext, managedId: str
   return { ok: true, grant }
 }
 
+function personalProofNoVault(): Refusal {
+  return refused('owner-proof-unavailable', vaultLang() === 'pt'
+    ? 'Para usar o navegador pessoal, o agentistics precisa confirmar que é você. Abra o Cofre e crie uma senha (ou ative o Windows Hello / Touch ID); depois tente de novo.'
+    : 'To use your own browser, agentistics needs to confirm it is you. Open the Vault and set a password (or turn on Windows Hello / Touch ID), then try again.')
+}
+
+/**
+ * NAVEGADOR S10 r3 — the owner's proof for the person's OWN browser. The socket cannot prove "this is the person"
+ * (a detached child, a `--network host` container, `systemd-run` all pass it), so the same fresh vault proof the
+ * padlock unlock owes mints a SHORT-LIVED grant (≤ 12 h, random, in memory, revocable — `browser/personal-grant.ts`)
+ * that the person's UI sends on every personal door. Unlike a padlock grant it is not single-use: it stands for
+ * the whole sitting. Off this computer: `owner-proof-local-only`; a vault that cannot ask a person: the Vault action.
+ */
+export async function mintPersonalBrowserGrant(ctx: GateContext): Promise<{ ok: true; grant: string; expiresAt: number } | Refusal> {
+  if (!ctx.loopback && !fromSocket(ctx)) return ownerProofLocalOnly()
+  if ((await vaultStatus()).state === 'uninitialized') return personalProofNoVault()
+  const proven = await proveOwnerFresh()
+  if (!proven.ok) return proven.code === 'owner-proof-unavailable' ? personalProofNoVault() : proven
+  const { personalGrants } = await import('../browser/personal-grant')
+  const minted = personalGrants().mint(ctx.session)
+  vaultAudit({ type: 'browser.owner-proof', purpose: deliveryGrantHash(minted.token), name: 'personal' })
+  return { ok: true, grant: minted.token, expiresAt: minted.expiresAt }
+}
+
 /**
  * Switch `delivery.ownerProof`. Owner-only in BOTH directions: a fresh vault proof (so a worker cannot flip it).
  * `required` is offered only where the vault has a human wrapper (`owner-proof-unavailable` otherwise — the proof

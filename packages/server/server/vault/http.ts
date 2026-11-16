@@ -278,6 +278,18 @@ async function handleVaultHttpInner(req: Request, url: URL, env: VaultHttpEnv): 
     const r = await gate.requireBrowserUnlockOwner({ session, loopback }, b.managedId)
     return reply(r.ok ? { ok: true, ownerGrant: r.grant } : r)
   }
+  if (path === '/api/vault/personal-browser' && req.method === 'POST') {
+    // NAVEGADOR S10 r3: the person's fresh proof for their OWN browser. Returns a short-lived grant the UI keeps in
+    // memory and sends in `X-Agentop-Personal-Grant` (never a URL, never a cookie). `{revoke:true, grant}` ends it.
+    const b = await body()
+    if (b.revoke === true) {
+      const { personalGrants } = await import('../browser/personal-grant')
+      personalGrants().revoke(b.grant)
+      return reply({ ok: true })
+    }
+    const r = await gate.mintPersonalBrowserGrant({ session, loopback })
+    return reply(r.ok ? { ok: true, personalGrant: r.grant, expiresAt: r.expiresAt } : r)
+  }
   if (path === '/api/vault/delivery-owner-mode' && req.method === 'POST') {
     const b = await body()
     return reply(await gate.setOwnerProofMode(b.mode, { session, loopback }))

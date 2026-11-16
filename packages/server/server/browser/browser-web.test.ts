@@ -74,7 +74,7 @@ describe('browserRoute', () => {
   })
 
   test('the personal browser refuses a request carrying a session identity — even a valid one', async () => {
-    const f = fakeDeps({ caller: () => ({ kind: 'person', via: 'process', pid: 1 }) })
+    const f = fakeDeps({ personalGrant: () => true, caller: () => ({ kind: 'person', via: 'process', pid: 1 }) })
     const r = await browserRoute('POST', '/api/browser/personal/navigate', { session: proof('aaa'), url: 'http://a/' }, f.deps)
     expect(r).toMatchObject({ status: 403, body: { error: 'session_cannot_drive_personal' } })
     const ok = await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://a/' }, f.deps)
@@ -85,7 +85,7 @@ describe('browserRoute', () => {
 
   test('F2: a managed session WITHOUT `session` in the body is refused on every personal route, by the socket', async () => {
     const caller = { kind: 'session' as const, pid: 9, managedId: 'aaa' }
-    const f = fakeDeps({ caller: () => caller })
+    const f = fakeDeps({ personalGrant: () => true, caller: () => caller })
     for (const action of ['navigate', 'snapshot', 'screenshot', 'click', 'tab_new']) {
       const r = await browserRoute('POST', `/api/browser/personal/${action}`, { url: 'http://a/', ref: 'e1' }, f.deps)
       expect(r).toMatchObject({ status: 403, body: { ok: false, error: 'session_cannot_drive_personal' } })
@@ -95,14 +95,44 @@ describe('browserRoute', () => {
     expect(f.ran).toEqual([])
   })
 
-  test('F2: an unidentified caller fails closed, an absent identifier too; the person still works', async () => {
-    const f1 = fakeDeps({ caller: () => ({ kind: 'unknown', reason: 'no-proc' }) })
-    expect(await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://a/' }, f1.deps)).toMatchObject({ status: 403, body: { error: 'caller_unidentified' } })
-    const f2 = fakeDeps()
-    expect(await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://a/' }, f2.deps)).toMatchObject({ status: 403, body: { error: 'caller_unidentified' } })
-    const f3 = fakeDeps({ caller: () => ({ kind: 'person', via: 'process', pid: 1 }) })
+  test('r3: the owner grant is THE proof — no grant is refused with the vault action, whatever the socket says', async () => {
+    const person = { kind: 'person' as const, via: 'process' as const, pid: 1 }
+    for (const caller of [person, { kind: 'person' as const, via: 'wsl-relay' as const }, { kind: 'unknown' as const, reason: 'no-proc' as const }]) {
+      const f = fakeDeps({ caller: () => caller, personalGrant: () => false })
+      for (const action of ['navigate', 'snapshot', 'screenshot', 'tabs', 'tab_new']) {
+        const r = await browserRoute('POST', `/api/browser/personal/${action}`, { url: 'http://a/' }, f.deps)
+        expect(r).toMatchObject({ status: 403, body: { ok: false, error: 'personal_proof_required', action: { kind: 'open-vault' } } })
+        expect(typeof (r!.body as any).sentence).toBe('string')
+      }
+      expect(f.started).toEqual([])
+      expect(f.ran).toEqual([])
+    }
+    const f2 = fakeDeps({ caller: () => person })
+    expect(await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://a/' }, f2.deps)).toMatchObject({ status: 403, body: { error: 'personal_proof_required' } })
+  })
+
+  test('r3: with the grant the person works; an unidentifiable socket does not lock them out; a known session is still refused', async () => {
+    const f1 = fakeDeps({ personalGrant: () => true, caller: () => ({ kind: 'unknown', reason: 'no-proc' }) })
+    expect((await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://a/' }, f1.deps))?.status).toBe(200)
+    const f3 = fakeDeps({ personalGrant: () => true, caller: () => ({ kind: 'person', via: 'process', pid: 1 }) })
     expect((await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://a/' }, f3.deps))?.status).toBe(200)
     expect(f3.ran.map(x => x.key)).toEqual(['personal'])
+  })
+
+  test('r3 F2b: the status omits the personal browser (tabs, urls, last action) without the grant, and shows it with', async () => {
+    const live = [
+      { key: 'personal', owner: { kind: 'personal' }, tabs: [{ url: 'https://bank.example/x', title: 'Inbox (3) you@mail' }], lastAction: { kind: 'navigate', label: 'https://bank.example/x' } },
+      { key: 's-aaa', owner: { kind: 'session', managedId: 'aaa' }, tabs: [] },
+    ]
+    const mk = (grant: boolean) => fakeDeps({ personalGrant: () => grant, host: { start: async () => ({ ok: false, reason: 'x', sentence: 'x' }) as any, stop: async () => {}, actionHost: () => null, status: async () => ({ live, recentStops: [{ key: 'personal', owner: { kind: 'personal' }, reason: 'idle' }] }) } })
+    const without = (await browserRoute('GET', '/api/browser/status', null, mk(false).deps))!.body as any
+    expect(without.live.map((e: any) => e.key)).toEqual(['s-aaa'])
+    expect(JSON.stringify(without)).not.toContain('bank.example')
+    expect(without.recentStops).toEqual([])
+    expect(without.personalAccess).toBe(false)
+    const withIt = (await browserRoute('GET', '/api/browser/status', null, mk(true).deps))!.body as any
+    expect(withIt.live.map((e: any) => e.key)).toEqual(['personal', 's-aaa'])
+    expect(withIt.personalAccess).toBe(true)
   })
 
   test('a session that ended gets no browser', async () => {
@@ -171,7 +201,7 @@ describe('browserRoute', () => {
 
   test('status is a GET', async () => {
     const f = fakeDeps()
-    expect(await browserRoute('GET', '/api/browser/status', undefined, f.deps)).toEqual({ status: 200, body: { live: [] } })
+    expect(await browserRoute('GET', '/api/browser/status', undefined, f.deps)).toEqual({ status: 200, body: { live: [], personalAccess: false } })
     expect((await browserRoute('POST', '/api/browser/status', {}, f.deps))?.status).toBe(405)
   })
 })

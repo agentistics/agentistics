@@ -11,13 +11,14 @@ type Listener = (e: MessageEvent) => void
 class FakeStream {
   static all: FakeStream[] = []
   url: string
+  grant: string | undefined
   readyState = 1
   onopen = null
   onmessage = null
   onerror: ((e: Event) => void) | null = null
   closed = false
   listeners = new Map<string, Set<Listener>>()
-  constructor(url: string) { this.url = url; FakeStream.all.push(this) }
+  constructor(url: string, grant?: string) { this.url = url; this.grant = grant; FakeStream.all.push(this) }
   addEventListener(t: string, fn: Listener) { (this.listeners.get(t) ?? this.listeners.set(t, new Set()).get(t)!).add(fn) }
   removeEventListener(t: string, fn: Listener) { this.listeners.get(t)?.delete(fn) }
   close() { this.closed = true }
@@ -26,23 +27,25 @@ class FakeStream {
 class FakeWs {
   static all: FakeWs[] = []
   url: string
+  protocols: string | string[] | undefined
   readyState = 0
   sent: unknown[] = []
   onopen: (() => void) | null = null
   onmessage: ((e: MessageEvent) => void) | null = null
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
-  constructor(url: string) { this.url = url; FakeWs.all.push(this) }
+  constructor(url: string, protocols?: string | string[]) { this.url = url; this.protocols = protocols; FakeWs.all.push(this) }
   send(s: string) { this.sent.push(JSON.parse(s)) }
   close() { this.readyState = 3 }
   open() { this.readyState = 1; this.onopen?.() }
 }
-const openStream = (url: string) => new FakeStream(url)
+const openStream = (url: string, grant?: string) => new FakeStream(url, grant)
 
 let createRoot: typeof import('react-dom/client').createRoot
 let Panel: typeof import('./BrowserPanel').BrowserPanel
 let Drawer: typeof import('./BrowserDrawer').BrowserDrawer
 let drawerStore: typeof import('../../lib/browserDrawer')
+let grantStore: typeof import('../../lib/personalGrant')
 let originalWs: typeof globalThis.WebSocket
 let originalFetch: typeof globalThis.fetch
 let originalAct: boolean | undefined
@@ -60,6 +63,7 @@ beforeAll(async () => {
   Panel = (await import('./BrowserPanel')).BrowserPanel
   Drawer = (await import('./BrowserDrawer')).BrowserDrawer
   drawerStore = await import('../../lib/browserDrawer')
+  grantStore = await import('../../lib/personalGrant')
 })
 afterAll(async () => {
   await new Promise(r => setTimeout(r, 50))
@@ -74,16 +78,18 @@ let root: Root
 let posts: Array<[string, unknown]>
 beforeEach(() => {
   FakeStream.all = []; FakeWs.all = []; posts = []
+  // S10 r3: the panel is the person's only with the owner's proof — most tests are about the person who HAS it.
+  grantStore.setPersonalGrant('grant-aaaaaaaaaaaaaaaaaaaaaaaa', Date.now() + 3_600_000)
   ;(globalThis as { fetch?: unknown }).fetch = async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
 })
-afterEach(() => { act(() => root.unmount()); host.remove(); drawerStore.setBrowserDrawerOpen(false) })
+afterEach(() => { act(() => root.unmount()); host.remove(); drawerStore.setBrowserDrawerOpen(false); grantStore.clearPersonalGrant() })
 
 const JPEG = '/9j/4AAQSkZJRg=='
 const q = (sel: string) => host.querySelector(sel) as HTMLElement | null
 const post = (answer: { status: number; body: unknown } = { status: 200, body: { ok: true } }) => async (u: string, b: unknown) => { posts.push([u, b]); return answer }
-const render = (o: { live: boolean; post?: ReturnType<typeof post>; hideCloseButton?: boolean; onClose?: () => void }) => act(() => {
-  root.render(createElement(Panel, { lang: 'pt', onClose: o.onClose ?? (() => {}), openStream, liveOverride: o.live, post: o.post ?? post(), ...(o.hideCloseButton ? { hideCloseButton: true } : {}) }))
+const render = (o: { live: boolean; post?: ReturnType<typeof post>; hideCloseButton?: boolean; onClose?: () => void; tabsOverride?: { tabs: Array<{ id: string; active: boolean }>; asOf: number } }) => act(() => {
+  root.render(createElement(Panel, { lang: 'pt', onClose: o.onClose ?? (() => {}), openStream, liveOverride: o.live, post: o.post ?? post(), ...(o.hideCloseButton ? { hideCloseButton: true } : {}), ...(o.tabsOverride ? { tabsOverride: o.tabsOverride } : {}) }))
 })
 const state = (extra: Record<string, unknown> = {}) => ({
   tab: 'T1', activeTab: 'T1', lock: 'none', url: 'https://exemplo.com/docs/comecar', title: 'Documentação', loading: false,
@@ -149,6 +155,8 @@ describe('open (b1-open)', () => {
   test('watches the PERSONAL browser; the address and the page show; there is no padlock and no "só olhando" pill', () => {
     render({ live: true }); feed()
     expect(stream().url).toBe('/api/browser/stream?owner=personal')
+    expect(stream().grant).toBe('grant-aaaaaaaaaaaaaaaaaaaaaaaa')
+    expect(stream().url).not.toContain('grant')
     expect((q('[data-browser-url-input]') as HTMLInputElement).value).toBe('exemplo.com/docs/comecar')
     expect(q('[data-browser-screen] img')?.getAttribute('src')).toBe(`data:image/jpeg;base64,${JPEG}`)
     expect(q('[data-browser-pill]')).toBeNull()
@@ -159,6 +167,9 @@ describe('open (b1-open)', () => {
     render({ live: true }); feed()
     expect(FakeWs.all.length).toBe(1)
     expect(FakeWs.all[0]!.url).toBe(`ws://${window.location.host}/api/browser/input?owner=personal`)
+    // the grant rides the sub-protocol, never the URL
+    expect(FakeWs.all[0]!.protocols).toEqual(['agentop-personal', 'grant-aaaaaaaaaaaaaaaaaaaaaaaa'])
+    expect(FakeWs.all[0]!.url).not.toContain('grant')
     expect(q('[data-browser-input]')).not.toBeNull()
   })
 
@@ -238,20 +249,68 @@ describe('F1 — switching tab switches the screen AND the address (S10 QA)', ()
     expect(posts.at(-1)).toEqual(['/api/browser/personal/back', { tab: 'T2' }])
   })
 
-  test('"+" follows the new tab the server makes active (the stream re-opens with no tab pinned)', async () => {
-    render({ live: true }); feed()
-    await act(async () => { tabEls()[1]!.click() })
-    expect(stream().url).toContain('tab=T2')
+  test('F1-r2a: "+" pins the tab tab_new ANSWERED, so the stream, the socket and the address open on it (also when a tab was pinned)', async () => {
+    render({ live: true, post: post({ status: 200, body: { ok: true, tab: 'T9', url: 'about:blank' } }) }); feed()
     await act(async () => { (q('[data-browser-tabs] button[aria-label="Nova aba"]') as HTMLButtonElement).click() })
     expect(posts.at(-1)).toEqual(['/api/browser/personal/tab_new', {}])
+    expect(stream().url).toBe('/api/browser/stream?owner=personal&tab=T9')
+    expect(FakeWs.all.at(-1)!.url).toBe(`ws://${window.location.host}/api/browser/input?owner=personal&tab=T9`)
+    // …and with an OLD tab pinned first
+    await act(async () => { tabEls()[0]!.click() })
+    expect(stream().url).toContain('tab=')
+    await act(async () => { (q('[data-browser-tabs] button[aria-label="Nova aba"]') as HTMLButtonElement).click() })
+    expect(stream().url).toBe('/api/browser/stream?owner=personal&tab=T9')
+    feedFor('T9', 'about:blank', '')
+    expect((q('[data-browser-url-input]') as HTMLInputElement).value).toBe('about:blank')
+  })
+
+  test('F1-r2b: a pinned tab closed by someone else (the stream says gone: tab_closed) lets go and RE-SUBSCRIBES on the survivor', async () => {
+    render({ live: true }); feed()
+    await act(async () => { tabEls()[1]!.click() })
+    const dead = stream()
+    expect(dead.url).toContain('tab=T2')
+    act(() => { dead.emit('gone', { reason: 'tab_closed' }) })
+    expect(dead.closed).toBe(true)
+    expect(stream().url).toBe('/api/browser/stream?owner=personal')
+    expect(FakeStream.all.filter(x => !x.closed).length).toBe(1)
+  })
+
+  test('F1-r2b: …and when the stream is silent, the status poll says the pinned tab is gone (only a poll that started AFTER the pin counts)', async () => {
+    render({ live: true, tabsOverride: { tabs: [{ id: 'T1', active: true }, { id: 'T3', active: false }], asOf: Date.now() - 60_000 } }); feed()
+    await act(async () => { tabEls()[1]!.click() })
+    expect(stream().url).toContain('tab=T2') // an old poll that never heard of T2 must not undo a fresh pin
+    act(() => { root.render(createElement(Panel, { lang: 'pt', onClose: () => {}, openStream, liveOverride: true, post: post(), tabsOverride: { tabs: [{ id: 'T1', active: true }, { id: 'T3', active: false }], asOf: Date.now() + 1000 } })) })
     expect(stream().url).toBe('/api/browser/stream?owner=personal')
   })
 
-  test('a chosen tab that no longer exists (closed elsewhere) lets the panel follow the server again', async () => {
-    render({ live: true }); feed()
+  test('F1-r2b: also when the panel FOLLOWS the active tab (nothing pinned): its resolved tab missing from a fresh poll re-subscribes', async () => {
+    render({ live: true, tabsOverride: { tabs: [{ id: 'T1', active: true }, { id: 'T2', active: false }], asOf: Date.now() - 60_000 } }); feed()
+    const first = stream()
+    expect(first.url).toBe('/api/browser/stream?owner=personal')
+    act(() => { root.render(createElement(Panel, { lang: 'pt', onClose: () => {}, openStream, liveOverride: true, post: post(), tabsOverride: { tabs: [{ id: 'T2', active: true }, { id: 'T3', active: false }], asOf: Date.now() + 1000 } })) })
+    expect(first.closed).toBe(true)
+    expect(FakeStream.all.filter(x => !x.closed).length).toBe(1)
+  })
+
+  test('closing the tab on screen: the close goes FIRST, the stream re-subscribes only after it (else it would pick the tab being closed)', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    const slow = async (u: string, b: unknown) => { posts.push([u, b]); if (u.endsWith('tab_close')) await gate; return { status: 200, body: { ok: true } } }
+    render({ live: true, post: slow }); feed()
+    const before = stream()
+    const x = tabEls()[0]!.querySelector('[data-tab-close]') as HTMLElement
+    await act(async () => { x.click() })
+    expect(posts.at(-1)).toEqual(['/api/browser/personal/tab_close', { tab: 'T1' }])
+    expect(before.closed).toBe(false) // the close has not finished: the stream is untouched
+    await act(async () => { release(); await gate })
+    expect(before.closed).toBe(true)
+    expect(FakeStream.all.filter(s => !s.closed).length).toBe(1)
+  })
+
+  test('a chosen tab that is still listed stays chosen', async () => {
+    render({ live: true, tabsOverride: { tabs: [{ id: 'T1', active: true }, { id: 'T2', active: false }], asOf: Date.now() + 1000 } }); feed()
     await act(async () => { tabEls()[1]!.click() })
-    act(() => { stream().emit('state', state({ tab: 'T2', activeTab: 'T1', tabs: [{ id: 'T1', title: 'Documentação', active: true }, { id: 'T3', title: 'Busca', active: false }] })) })
-    expect(stream().url).toBe('/api/browser/stream?owner=personal')
+    expect(stream().url).toContain('tab=T2')
   })
 
   test('closing the chosen tab frees the choice', async () => {
@@ -286,6 +345,89 @@ describe('F3 — the phone\'s close button is a 44px target', () => {
       render({ live: false })
       const phone = host.querySelector('button[aria-label="Fechar o navegador"]') as HTMLElement
       expect([phone.style.width, phone.style.height]).toEqual(['44px', '44px'])
+    } finally { Object.defineProperty(window, 'innerWidth', { value: w, configurable: true }) }
+  })
+})
+
+describe('r3 — the owner\'s proof', () => {
+  const ask = (answer: Awaited<ReturnType<NonNullable<Parameters<typeof grantStore.requestPersonalGrant>[0]>>>) => async () => answer
+  test('no grant: a clear "Desbloquear com o Cofre" state — no address bar, no tabs, no stream, no socket, no status poll, no dead control', () => {
+    grantStore.clearPersonalGrant()
+    render({ live: true })
+    expect(q('[data-browser-locked]')?.textContent).toContain('Cofre')
+    expect((q('[data-browser-unlock]') as HTMLButtonElement).textContent).toContain('Desbloquear com o Cofre')
+    expect(q('[data-browser-address]')).toBeNull()
+    expect(q('[data-browser-tabs]')).toBeNull()
+    expect(q('[data-browser-empty]')).toBeNull()
+    expect(FakeStream.all.length).toBe(0)
+    expect(FakeWs.all.length).toBe(0)
+  })
+  test('the unlock button asks the vault; with the proof the panel opens at once', async () => {
+    grantStore.clearPersonalGrant()
+    let asked = 0
+    const askGrant = async () => { asked++; return { ok: true as const, personalGrant: 'granted-bbbbbbbbbbbbbbbbbbbbbb', expiresAt: Date.now() + 60_000 } }
+    act(() => { root.render(createElement(Panel, { lang: 'pt', onClose: () => {}, openStream, liveOverride: true, post: post(), askGrant })) })
+    await act(async () => { (q('[data-browser-unlock]') as HTMLButtonElement).click() })
+    expect(asked).toBe(1)
+    expect(q('[data-browser-locked]')).toBeNull()
+    expect(q('[data-browser-address]')).not.toBeNull()
+    act(() => { stream().emit('state', state()); stream().emit('frame', frame) })
+    expect(stream().grant).toBe('granted-bbbbbbbbbbbbbbbbbbbbbb')
+  })
+  test('a vault that cannot ask a person says so in words and offers the Vault', async () => {
+    grantStore.clearPersonalGrant()
+    let opened = 0
+    const askGrant = ask({ ok: false, code: 'owner-proof-unavailable', sentence: 'x' })
+    act(() => { root.render(createElement(Panel, { lang: 'pt', onClose: () => {}, openStream, liveOverride: true, post: post(), askGrant, onOpenVault: () => { opened++ } })) })
+    await act(async () => { (q('[data-browser-unlock]') as HTMLButtonElement).click() })
+    expect(q('[data-browser-locked] [role="alert"]')?.textContent).toContain('Abrir o Cofre')
+    await act(async () => { (q('[data-browser-open-vault]') as HTMLButtonElement).click() })
+    expect(opened).toBe(1)
+    expect(q('[data-browser-locked]')).not.toBeNull()
+  })
+  test('a cancelled gesture leaves the panel locked, with no Vault button', async () => {
+    grantStore.clearPersonalGrant()
+    const askGrant = ask({ ok: false, code: 'presence-cancelled', sentence: '' })
+    act(() => { root.render(createElement(Panel, { lang: 'pt', onClose: () => {}, openStream, liveOverride: true, post: post(), askGrant })) })
+    await act(async () => { (q('[data-browser-unlock]') as HTMLButtonElement).click() })
+    expect(q('[data-browser-locked] [role="alert"]')).not.toBeNull()
+    expect(q('[data-browser-open-vault]')).toBeNull()
+  })
+  test('the status poll sends the grant in a header, and `personalAccess: false` (a restart) clears it', async () => {
+    const seen: Array<Record<string, string>> = []
+    ;(globalThis as { fetch?: unknown }).fetch = async (_u: string, init?: { headers?: Record<string, string> }) => {
+      seen.push(init?.headers ?? {})
+      return new Response(JSON.stringify({ live: [], personalAccess: false }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    act(() => { root.render(createElement(Panel, { lang: 'pt', onClose: () => {}, openStream, post: post() })) })
+    await act(async () => { await new Promise(r => setTimeout(r, 30)) })
+    expect(seen[0]).toEqual({ 'X-Agentop-Personal-Grant': 'grant-aaaaaaaaaaaaaaaaaaaaaaaa' })
+    expect(grantStore.getPersonalGrant()).toBeNull()
+    expect(q('[data-browser-locked]')).not.toBeNull()
+  })
+  test('a verb the server refuses for want of the grant sends the panel back to the unlock state (a restart forgets every grant)', async () => {
+    render({ live: false, post: post({ status: 403, body: { ok: false, error: 'personal_proof_required', sentence: 'x' } }) })
+    type(q('[data-browser-url-input]') as HTMLInputElement, 'exemplo.com')
+    await act(async () => { submit() })
+    expect(grantStore.getPersonalGrant()).toBeNull()
+    expect(q('[data-browser-locked]')).not.toBeNull()
+  })
+})
+
+describe('F8 — a long tab title ends in an ellipsis on ONE line on the phone', () => {
+  test('on a phone the tab title is nowrap + ellipsis; on a desktop the strip is unchanged', () => {
+    render({ live: true }); feed()
+    const title = () => tabEls()[0]!.querySelector('span:not([data-tab-close])') as HTMLElement
+    const spans = Array.from(tabEls()[0]!.querySelectorAll('span')) as HTMLElement[]
+    expect(spans.some(sp => sp.style.textOverflow === 'ellipsis')).toBe(false)
+    act(() => root.unmount()); root = createRoot(host)
+    const w = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true })
+    try {
+      render({ live: true }); feed()
+      const t = (Array.from(tabEls()[0]!.querySelectorAll('span')) as HTMLElement[]).find(sp => sp.textContent === 'Documentação')!
+      expect([t.style.whiteSpace, t.style.textOverflow, t.style.overflow]).toEqual(['nowrap', 'ellipsis', 'hidden'])
+      void title
     } finally { Object.defineProperty(window, 'innerWidth', { value: w, configurable: true }) }
   })
 })

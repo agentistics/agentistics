@@ -4,7 +4,7 @@
  * refused (fail-closed); the person's browser keeps working.
  */
 import { describe, expect, test } from 'bun:test'
-import { classifyCaller, callerRefusal, personalCallerRefusal, streamOwnerRefusal, browserUnlockEarlyRefusal, parseProcNetTcp, type CallerInput, type ProcLink } from './browser-caller'
+import { classifyCaller, callerRefusal, personalCallerRefusal, browserUnlockEarlyRefusal, parseProcNetTcp, type CallerInput, type ProcLink } from './browser-caller'
 
 // /proc/net/tcp lines as the kernel prints them (127.0.0.1:41000 → 127.0.0.1:47291, uid 1000, inode 777).
 const TCP = [
@@ -156,11 +156,6 @@ describe('personalCallerRefusal (F2 of the S10 QA: the own browser of the person
     expect(personalCallerRefusal({ kind: 'unknown', reason: 'no-proc' }, 'pt')!.sentence).toContain('pessoa')
     expect(personalCallerRefusal({ kind: 'person', via: 'process', pid: 1 })).toBeNull()
     expect(personalCallerRefusal({ kind: 'person', via: 'wsl-relay' })).toBeNull()
-  })
-  test('only the personal owner needs it: a session owner stream is not this door\'s business', () => {
-    expect(streamOwnerRefusal({ kind: 'session', managedId: 'a' }, { kind: 'session', pid: 1, managedId: 'x' })).toBeNull()
-    expect(streamOwnerRefusal({ kind: 'personal' }, { kind: 'session', pid: 1, managedId: 'x' })).toMatchObject({ error: 'session_cannot_drive_personal' })
-    expect(streamOwnerRefusal({ kind: 'personal' }, { kind: 'person', via: 'remote' })).toBeNull()
   })
 })
 

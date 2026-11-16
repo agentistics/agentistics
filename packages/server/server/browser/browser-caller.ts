@@ -193,11 +193,6 @@ export function personalCallerRefusal(v: CallerVerdict, lang: 'en' | 'pt' = 'en'
   }
 }
 
-/** The stream door: only the personal owner needs the caller check (a session's own stream is read as before). */
-export function streamOwnerRefusal(owner: { kind: 'personal' } | { kind: 'session'; managedId: string }, v: CallerVerdict, lang: 'en' | 'pt' = 'en'): PersonalRefusal | null {
-  return owner.kind === 'personal' ? personalCallerRefusal(v, lang) : null
-}
-
 /**
  * S4b/S4c: the early door on `POST /api/vault/browser-unlock`. A KNOWN session may not even ASK for the
  * proof — it would raise a Hello / Touch ID dialog on the person's desk. Returns the 403 to send (body

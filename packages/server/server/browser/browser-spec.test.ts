@@ -3,8 +3,24 @@ import {
   FORBIDDEN_FLAGS, IDLE_PERSONAL_MS, IDLE_SESSION_MS, PSS_KILL_BYTES, PSS_TRIM_BYTES, RSS_FALLBACK_FACTOR,
   browserArgv, cmdlineMatches, descendants, idleExpired, isLoopbackHost, isProfileDir, memoryVerdict, ownerFromKey,
   ownerKey, parseSmapsRollup, planOrphanSweep, ppidFromStat, profileDirFor, scopeUnitName, scopeWrap, tabToTrim,
-  urlBlockReason, validManagedId, type PidRecord,
+  urlBlockReason, validManagedId, statusLabel, type PidRecord,
 } from './browser-spec'
+
+describe('statusLabel — what an action label may say (S10 r3 F2b)', () => {
+  test('a URL label loses its query, fragment and credentials, for every caller', () => {
+    expect(statusLabel('https://shop.example/cart?token=abc#access_token=zzz')).toBe('https://shop.example/cart')
+    expect(statusLabel('http://u:p@127.0.0.1:3000/a/b?x=1')).toBe('http://127.0.0.1:3000/a/b')
+  })
+  test('a URL inside a longer label is cut the same way; plain labels are untouched', () => {
+    expect(statusLabel('go to https://a.example/p?q=secret now')).toBe('go to https://a.example/p now')
+    expect(statusLabel('Buy now')).toBe('Buy now')
+    expect(statusLabel('120,45')).toBe('120,45')
+  })
+  test('a label stays a clean, capped title', () => {
+    expect(statusLabel('a\u0000b‮C')).toBe('a b C')
+    expect(statusLabel('x'.repeat(500)).length).toBeLessThanOrEqual(120)
+  })
+})
 
 const MB = 1024 ** 2
 

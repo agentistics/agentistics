@@ -324,6 +324,16 @@ export function statusTitle(raw: string): string {
   return clean.length > 120 ? `${clean.slice(0, 119)}…` : clean
 }
 
+/**
+ * An action label as `status` / the stream report it (S10 r3 F2b): `navigate`/`back`/`forward`/`reload` record
+ * the page URL as their label, and a URL can carry a token (`?token=…`, `#access_token=…`). Every http(s) URL
+ * inside the label is reduced to `protocol//host/path` (`statusUrl`) and the rest is cleaned like a title.
+ */
+export function statusLabel(raw: string): string {
+  if (typeof raw !== 'string') return ''
+  return statusTitle(raw.replace(/https?:\/\/[^\s"'<>]+/gi, (u) => statusUrl(u) || ''))
+}
+
 // ---------------------------------------------------------------------------------------------------
 // Idle verdict
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { normalizeAddress, personalAct, personalBrowserOf, personalFailure } from './browserPersonal'
+import { clearPersonalGrant, getPersonalGrant, setPersonalGrant } from './personalGrant'
 
 describe('personalBrowserOf', () => {
   test('finds the personal browser, ignores sessions', () => {
@@ -67,5 +68,32 @@ describe('personalAct', () => {
     expect(personalFailure(403, null, true)).toContain('não está disponível')
     const r = await personalAct('reload', {}, false, async () => { throw new Error('x') })
     expect(r).toEqual({ ok: false, sentence: 'The server did not answer.' })
+  })
+})
+
+describe('personalAct — the owner grant (S10 r3)', () => {
+  test('tab_new answers the new tab id, so the panel can follow it', async () => {
+    const r = await personalAct('tab_new', {}, true, async () => ({ status: 200, body: { ok: true, tab: 'T7', url: 'about:blank' } }))
+    expect(r).toEqual({ ok: true, tab: 'T7' })
+  })
+  test('personal_proof_required forgets the grant and says unlock, in the interface language', async () => {
+    setPersonalGrant('stale-token', Date.now() + 60_000)
+    const body = { ok: false, error: 'personal_proof_required', sentence: 'English.' }
+    const pt = await personalAct('navigate', { url: 'https://a.b' }, true, async () => ({ status: 403, body }))
+    expect(pt).toMatchObject({ ok: false, needsUnlock: true })
+    expect((pt as { sentence: string }).sentence).toMatch(/Cofre/)
+    expect(getPersonalGrant()).toBeNull()
+    const en = await personalAct('navigate', { url: 'https://a.b' }, false, async () => ({ status: 403, body }))
+    expect((en as { sentence: string }).sentence).toMatch(/Vault/)
+  })
+  test('the default post sends the grant as a header and nowhere else', async () => {
+    setPersonalGrant('tok-123', Date.now() + 60_000)
+    const real = globalThis.fetch
+    let seen: { url: string; init: RequestInit } | null = null
+    ;(globalThis as { fetch: unknown }).fetch = async (url: string, init: RequestInit) => { seen = { url, init }; return new Response('{"ok":true}', { status: 200 }) }
+    try { await personalAct('reload', {}, false) } finally { (globalThis as { fetch: unknown }).fetch = real; clearPersonalGrant() }
+    expect(seen!.url).toBe('/api/browser/personal/reload')
+    expect((seen!.init.headers as Record<string, string>)['X-Agentop-Personal-Grant']).toBe('tok-123')
+    expect(String(seen!.init.body)).not.toContain('tok-123')
   })
 })

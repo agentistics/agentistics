@@ -19,7 +19,7 @@ export function BrowserDrawer({ lang }: { lang: 'pt' | 'en' }) {
       position: 'fixed', inset: 0, zIndex: 660, display: 'flex', flexDirection: 'column', background: 'var(--bg-card)',
       paddingTop: 'var(--safe-top, 0px)', paddingBottom: 'var(--safe-bottom, 0px)', boxSizing: 'border-box',
     }}>
-      <BrowserPanel lang={lang} onClose={() => setBrowserDrawerOpen(false)} />
+      <BrowserPanel lang={lang} onClose={() => setBrowserDrawerOpen(false)} onOpenVault={() => { setBrowserDrawerOpen(false); window.history.pushState({}, '', '/vault'); window.dispatchEvent(new PopStateEvent('popstate')) }} />
     </div>
   )
 }

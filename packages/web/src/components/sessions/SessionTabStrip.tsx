@@ -188,7 +188,9 @@ function Tab({ item, tabAttr, active, mobile, touch, pt, mobileWidth, onFocused,
       style={style}
     >
       {item.leading}
-      <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', flex: 1, minWidth: 0, lineHeight: 1.35, opacity: ended && !active ? 0.7 : 1 }}>{title}</span>
+      {/* A strip that sets `mobileWidth` (the browser's, 62 %) shows ONE line with an ellipsis — as the prototype does;
+          the session tabs keep wrapping. */}
+      <span style={{ ...(mobile && mobileWidth ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } : { whiteSpace: 'normal', overflowWrap: 'anywhere' }), flex: 1, minWidth: 0, lineHeight: 1.35, opacity: ended && !active ? 0.7 : 1 }}>{title}</span>
       {!closable && !pinned ? null : pinned
         ? (
           <button

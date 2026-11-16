@@ -40,7 +40,7 @@ export function muxPathAllowed(url: string): boolean {
 }
 
 export type MuxClientMessage =
-  | { op: 'sub'; sid: number; url: string; lastEventId?: string }
+  | { op: 'sub'; sid: number; url: string; lastEventId?: string; grant?: string }
   | { op: 'unsub'; sid: number }
 
 /** PURE: one client message, validated — or null. */
@@ -53,7 +53,9 @@ export function parseMuxMessage(raw: string): MuxClientMessage | null {
   if (o.op === 'unsub') return { op: 'unsub', sid: o.sid }
   if (o.op !== 'sub' || typeof o.url !== 'string' || !muxPathAllowed(o.url)) return null
   const lastEventId = typeof o.lastEventId === 'string' && o.lastEventId.length <= 256 && !/[\r\n\0]/.test(o.lastEventId) ? o.lastEventId : undefined
-  return { op: 'sub', sid: o.sid, url: o.url, ...(lastEventId ? { lastEventId } : {}) }
+  // S10 r3: the person's personal-browser grant rides the subscription FRAME (never the URL) and is replayed as a header.
+  const grant = typeof o.grant === 'string' && /^[A-Za-z0-9_-]{16,200}$/.test(o.grant) ? o.grant : undefined
+  return { op: 'sub', sid: o.sid, url: o.url, ...(lastEventId ? { lastEventId } : {}), ...(grant ? { grant } : {}) }
 }
 
 export interface SseFrame { event: string; data: string; id?: string; retry?: number }
@@ -141,9 +143,12 @@ function emit(ws: Sink, m: MuxServerMessage) { try { ws.send(JSON.stringify(m)) 
 /** Requests the mux replays itself (an in-process GET) — a handler may tell them from a direct client's. */
 export const muxReplayed = new WeakSet<Request>()
 
-async function runSub(st: MuxState, ws: Sink, sid: number, url: string, lastEventId: string | undefined, ac: AbortController) {
+async function runSub(st: MuxState, ws: Sink, sid: number, url: string, lastEventId: string | undefined, ac: AbortController, grant?: string) {
   const headers = new Headers(st.headers)
   if (lastEventId) headers.set('last-event-id', lastEventId)
+  // Whatever the upgrade carried, a grant header is ONLY what this subscription's own frame said.
+  headers.delete('x-agentop-personal-grant')
+  if (grant) headers.set('x-agentop-personal-grant', grant)
   let res: Response | undefined
   try {
     const replay = new Request(st.origin + url, { method: 'GET', headers, signal: ac.signal })
@@ -193,7 +198,7 @@ export function onMuxMessage(st: MuxState, ws: Sink, raw: string | Buffer): void
   if (st.subs.size >= MUX_MAX_SUBS) { emit(ws, { sid: m.sid, t: 'fail', status: 503 }); return }
   const ac = new AbortController()
   st.subs.set(m.sid, ac)
-  void runSub(st, ws, m.sid, m.url, m.lastEventId, ac)
+  void runSub(st, ws, m.sid, m.url, m.lastEventId, ac, m.grant)
 }
 
 export function closeMux(st: MuxState): void {

@@ -33,7 +33,8 @@ import { ownerKey, statusTitle, statusUrl, type BrowserOwner } from './browser-s
 import type { HarnessId } from '@agentistics/core'
 import { decideLockRequest, holdMsFor, ownerProofRefusal, type OwnerProofVerdict, type PageFacts } from './browser-lock'
 import { BrowserLocks } from './browser-lock-host'
-import { callerRefusal, personalCallerRefusal, type CallerVerdict } from './browser-caller'
+import { callerRefusal, type CallerVerdict } from './browser-caller'
+import { personalDoorRefusal, personalRefusalBody } from './personal-grant'
 
 let host: BrowserHost | null = null
 let exitHooked = false
@@ -115,6 +116,13 @@ export interface RouteDeps {
    * (a session that drops its inheritance looks like the person). ABSENT = no proof possible = refused.
    */
   ownerProof?: (managedId: string) => Promise<OwnerProofVerdict>
+  /**
+   * S10 r3: does THIS request carry the owner's valid personal-browser grant (`X-Agentop-Personal-Grant`,
+   * minted by the vault proof)? The person's own browser answers only to it; ABSENT = no proof = refused.
+   */
+  personalGrant?: () => boolean
+  /** The language of the refusal sentences (the vault's, so one setting speaks everywhere). */
+  lang?: () => 'en' | 'pt'
 }
 
 export interface RouteAnswer { status: number; body: unknown }
@@ -154,6 +162,22 @@ function withLocks(status: unknown, deps: RouteDeps): unknown {
       return { ...e, lock: locks.view(ownerKey(o)) }
     }),
   }
+}
+
+/**
+ * S10 r3 F2b: the person's own browser — its tabs (urls, titles) and last action — is shown in the status only
+ * to a caller holding the owner's grant. Without it the personal part is omitted (the entry is dropped, so a
+ * session cannot even tell whether the person has a browser open).
+ */
+function withoutPersonal(status: unknown, grantOk: boolean): unknown {
+  if (!status || typeof status !== 'object' || !Array.isArray((status as { live?: unknown }).live)) return status
+  // `personalAccess` tells the page whether the grant it holds is still good (a restart forgets every grant).
+  if (grantOk) return { ...(status as object), personalAccess: true }
+  const s = status as { live: Array<Record<string, unknown>>; recentStops?: unknown }
+  const isPersonal = (o: unknown) => !!o && typeof o === 'object' && (o as { kind?: unknown }).kind === 'personal'
+  const out: Record<string, unknown> = { ...s, personalAccess: false, live: s.live.filter(e => !isPersonal(e.owner)) }
+  if (Array.isArray(s.recentStops)) out.recentStops = s.recentStops.filter(e => !isPersonal((e as { owner?: unknown } | null)?.owner) && (e as { key?: unknown } | null)?.key !== 'personal')
+  return out
 }
 
 /** `POST /api/browser/lock {owner, lock}` — the person's padlock. */
@@ -200,7 +224,7 @@ async function lockRoute(body: unknown, deps: RouteDeps): Promise<RouteAnswer> {
 export async function browserRoute(method: string, pathname: string, body: unknown, deps: RouteDeps): Promise<RouteAnswer | null> {
   if (pathname === '/api/browser/status') {
     if (method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } }
-    return { status: 200, body: withLocks(await deps.host.status(), deps) }
+    return { status: 200, body: withoutPersonal(withLocks(await deps.host.status(), deps), deps.personalGrant?.() === true) }
   }
   if (pathname === '/api/browser/lock') {
     if (method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } }
@@ -216,8 +240,8 @@ export async function browserRoute(method: string, pathname: string, body: unkno
   // S10/F2: the person's own browser is decided by the SOCKET, never by the body (`session` omitted is still a
   // session). Absent `caller` = cannot identify = refused (fail-closed). Before anything else: not even a 404.
   if (route === 'personal') {
-    const refused = personalCallerRefusal(deps.caller ? deps.caller() : { kind: 'unknown', reason: 'no-peer' })
-    if (refused) return { status: refused.status, body: { ok: false, error: refused.error, sentence: refused.sentence, ...(refused.why ? { why: refused.why } : {}) } }
+    const refused = personalDoorRefusal({ grantOk: deps.personalGrant?.() === true, caller: deps.caller ? deps.caller() : { kind: 'unknown', reason: 'no-peer' }, lang: deps.lang?.() ?? 'en' })
+    if (refused) return { status: refused.status, body: personalRefusalBody(refused) }
   }
 
   const s = b.session as { id?: unknown; token?: unknown } | undefined
@@ -316,7 +340,7 @@ export function browserLocks(opts: BrowserWebOpts): BrowserLocks {
 export function browserRouteDeps(
   opts: BrowserWebOpts,
   verify: RouteDeps['verify'],
-  extra: { harnessOf?: RouteDeps['harnessOf']; audit?: RouteDeps['audit']; caller?: RouteDeps['caller']; ownerProof?: RouteDeps['ownerProof'] } = {},
+  extra: { harnessOf?: RouteDeps['harnessOf']; audit?: RouteDeps['audit']; caller?: RouteDeps['caller']; ownerProof?: RouteDeps['ownerProof']; personalGrant?: RouteDeps['personalGrant']; lang?: RouteDeps['lang'] } = {},
 ): RouteDeps {
   const h = browserHost(opts)
   return {
@@ -327,6 +351,8 @@ export function browserRouteDeps(
     audit: extra.audit,
     caller: extra.caller,
     ownerProof: extra.ownerProof,
+    personalGrant: extra.personalGrant,
+    lang: extra.lang,
     sessionLive: opts.sessionLive,
     run: async (ah, args) => {
       const { runAction } = await import('./browser-actions')
