@@ -140,6 +140,25 @@ test('when the viewer who sized the page leaves, the one who stays takes over at
   void n
 })
 
+test('a second tab opened and switched to while watching: its page takes the watcher\'s size', async () => {
+  const starts: Array<[string, unknown]> = []
+  let active = 'T1'
+  const hub = createScreencastHub({
+    ...clock(),
+    activeTab: () => active, viewer: () => {},
+    state: (_k, tab) => ({ tab, activeTab: active, lock: 'locked', url: '', title: '', loading: false, tabs: [], lastAction: null }),
+    start: async (_key, tab, _onFrame, size) => {
+      starts.push([tab, size])
+      return { ok: true, ack: () => {}, stop: async () => {} }
+    },
+  })
+  const first = await hub.subscribe('k', null, sink().s, { width: 818, height: 249, deviceScaleFactor: 1 })
+  active = 'T2' // the model opened a tab; the card re-opens its stream for the new area (the strip took 44 px)
+  first.close()
+  await hub.subscribe('k', null, sink().s, { width: 818, height: 205, deviceScaleFactor: 1 })
+  expect(starts.at(-1)).toEqual(['T2', { width: 818, height: 205, deviceScaleFactor: 1 }])
+})
+
 describe('nobody watching = no screencast', () => {
   test('no subscriber: start is never called', () => {
     const f = fixture()

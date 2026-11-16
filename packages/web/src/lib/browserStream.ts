@@ -63,6 +63,8 @@ export interface BrowserScreenState {
   goneReason: string | null
   /** false = this surface is not watching (scrolled away, tab hidden, panel closed): no frames come. */
   watching: boolean
+  /** A new connection was opened and has not delivered yet: its sequence restarts, so its first frame is always shown. */
+  fresh?: boolean
 }
 
 export const INITIAL_BROWSER_SCREEN: BrowserScreenState = { phase: 'idle', frame: null, state: null, goneReason: null, watching: true }
@@ -78,11 +80,11 @@ export type BrowserScreenAction =
 export function browserScreenReducer(s: BrowserScreenState, a: BrowserScreenAction): BrowserScreenState {
   switch (a.type) {
     // A new connection drops nothing it may still show honestly: the picture stays until a new one comes.
-    case 'connecting': return { ...s, phase: s.frame ? s.phase : 'connecting', goneReason: null }
+    case 'connecting': return { ...s, phase: s.frame ? s.phase : 'connecting', goneReason: null, fresh: true }
     case 'frame':
       // An older frame (a reconnect replaying) never replaces a newer one of the same tab.
-      if (s.frame && s.frame.tab === a.frame.tab && a.frame.seq <= s.frame.seq && s.phase === 'streaming') return s
-      return { ...s, frame: a.frame, phase: 'streaming', goneReason: null }
+      if (!s.fresh && s.frame && s.frame.tab === a.frame.tab && a.frame.seq <= s.frame.seq && s.phase === 'streaming') return s
+      return { ...s, frame: a.frame, phase: 'streaming', goneReason: null, fresh: false }
     case 'state': return { ...s, state: a.state }
     case 'gone': return { ...s, phase: 'ended', goneReason: a.reason }
     case 'stall': return s.frame ? s : { ...s, phase: 'stalled' }

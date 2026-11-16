@@ -46,6 +46,16 @@ describe('the screen view-model and its honesty line', () => {
     expect(browserScreenReducer({ ...INITIAL_BROWSER_SCREEN, phase: 'connecting' }, { type: 'stall' }).phase).toBe('stalled')
   })
 
+  test('a NEW connection (resize, second tab) restarts seq: its first frame is shown even when its seq is lower', () => {
+    let s = browserScreenReducer(INITIAL_BROWSER_SCREEN, { type: 'frame', frame: parseBrowserFrame(frame(9))! })
+    s = browserScreenReducer(s, { type: 'connecting' })
+    s = browserScreenReducer(s, { type: 'frame', frame: { ...parseBrowserFrame(frame(1))!, w: 1596, h: 400 } })
+    expect(s.frame).toMatchObject({ seq: 1, w: 1596 })
+    // ...and within that connection, order is enforced again
+    s = browserScreenReducer(s, { type: 'frame', frame: parseBrowserFrame(frame(1))! })
+    expect(s.frame!.w).toBe(1596)
+  })
+
   test('watching needs all three: in viewport, tab visible, panel open', () => {
     expect(browserWatching({ inViewport: true, documentVisible: true, panelOpen: true })).toBe(true)
     for (const k of ['inViewport', 'documentVisible', 'panelOpen'] as const) {
