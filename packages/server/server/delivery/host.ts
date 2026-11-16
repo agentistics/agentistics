@@ -283,6 +283,13 @@ async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Pr
 
 let cached: DeliveryService | null = null
 /** The process's delivery service (one store path, one set of deps). */
+/** The sweep's board: imported only when a tick runs it, so a CLI verb that never ticks loads none of the task store. */
+function lazySweep(): NonNullable<DeliveryDeps['sweep']> {
+  return {
+    tasks: async () => (await import('../sessions/task-source')).openTaskStore(),
+  }
+}
+
 export function deliveryService(overrides: Partial<DeliveryDeps> = {}): DeliveryService {
   if (cached && Object.keys(overrides).length === 0) return cached
   const store = overrides.store ?? createDeliveryStore()
@@ -303,6 +310,8 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
     oldPieces: async () => (await import('../sessions/task-web')).liveAntigaPieces(),
     autoReconcile: () => autoReconcileEnabled,
     proofStore: proofCacheFile(),
+    // S2b: the guard sweep reads and repairs the board itself (rule A shadow/on only; off does nothing).
+    sweep: lazySweep(),
     log: line => console.log(line),
     ...overrides,
   })

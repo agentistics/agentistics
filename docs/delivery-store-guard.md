@@ -82,6 +82,34 @@ the sentence in English and Portuguese (`safeError` for anything else, never the
 refusal persists leaves ONE board note per (piece, code), in both languages, until the refusal changes or clears
 (a tick in which it is not refused) and returns; a delivery record's `tickNote` is overwritten, never accumulated.
 
+## The sweep (S2b, spec §2.6)
+
+Every minute tick starts with `guardSweep` (`sweep.ts` logic, `sweep-plan.ts` pure plan; the service injects the stores, so
+the writer inventories see neither module as a writer). **Rule OFF: it does nothing at all.** Rule shadow: report-only
+(`sweep would-revert <piece>`), nothing reverted. Rule on, under the full envelope (tasks → deliveries → guards, 5 s each; a
+busy file skips the tick with a named line, never proceeds unguarded):
+
+1. **Intent recovery first.** An intent a crash left is committed when the documents already show its target (board status
+   and/or delivery phase) and dropped when they do not, so a legitimate move that crashed before its commit is never judged
+   as forged. Shadow recovers intents too.
+2. **Every piece, against its checkpoint** — no "changed since" filter and no event: the checkpoint, not the 2 000-event feed,
+   authorizes. A document above the checkpoint's rank is reverted to it (`above_checkpoint`; no checkpoint = rank 0,
+   `no_checkpoint`); rank ≥ 1 whose evidence ids/hashes are gone, point at other bytes, belong to an earlier capture round, or
+   whose record HEAD moved goes back to rank 0 (`evidence_stale`: board `in_progress`, phase `ajuste`, a new round). The
+   `ci` signal alone counts as rank (the Live moves on it) and is cleared by a revert.
+3. **One write per document.** All reverts of the tick land in one `deliveries.json` write and one `tasks.json` write
+   (`applyBoardReverts`, comments and events included); no per-tick cap. A revert only lowers a rank, so no guard context is
+   needed. A retreat to a RANK-0 phase bumps the revision; a retreat to a ranked phase keeps it (a changed revision on a ranked
+   phase is a new binding to the guard). The history entry is appended; every revert comments on the piece in EN and PT.
+4. **Board catch-up.** Board below the checkpoint while the phase is at it: `setPhaseStatus` is re-applied (never a violation).
+5. **Loop guard.** The second revert of a piece inside 24 h also moves it to `blocked` (`externo: an unknown writer keeps
+   moving this piece`), logs a WARN and shows it in health until a quiet day. Memory lives in `guards.json` (`sweep.reverts`),
+   written after the documents.
+6. **An `owner` / `override` checkpoint is never reverted**, whatever its `via`.
+
+Every revert comment and the loop WARN name the escape: `agentop flow guarantee off a`. Activation (S10) is what writes the
+grandfathered checkpoints of pieces already in flight; the sweep must not be switched on before that migration ran.
+
 The supplementary inventories parse executable TypeScript/JavaScript ASTs. Context must occupy the
 writer's actual context argument; words in comments, titles and callbacks do not count. The historical
 call identities and raw writer identities from `1b1c8a941` live in `guard-inventory.fixture.json` and have

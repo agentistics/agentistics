@@ -53,7 +53,7 @@ export interface PieceCheckpoint {
 
 export interface GuardIntent { transitionId: string; target: PieceCheckpoint; at: string }
 /** `rules`: S0d.2's authenticated MIRROR of each guarantee rule's state (`activation.ts` writes it in the same guards-locked section). */
-export interface GuardsDoc { version: 1; checkpoints: Record<string, PieceCheckpoint>; intents: Record<string, GuardIntent>; rules?: Record<string, 'off' | 'shadow' | 'on'>; deliveryFloors?: Record<string, TamperView>; pendingDelivery?: string }
+export interface GuardsDoc { version: 1; checkpoints: Record<string, PieceCheckpoint>; intents: Record<string, GuardIntent>; rules?: Record<string, 'off' | 'shadow' | 'on'>; deliveryFloors?: Record<string, TamperView>; pendingDelivery?: string; /** S2b: when the sweep reverted each piece (loop guard). */ sweep?: { reverts: Record<string, string[]> } }
 
 export class GuardsUnreadable extends Error {
   readonly code = 'guards_unreadable'
@@ -83,7 +83,14 @@ export function parseGuards(text: string): GuardsDoc {
     }
   }
   if (raw.pendingDelivery !== undefined && typeof raw.pendingDelivery !== 'string') throw new Error('pendingDelivery is not serialized data')
-  const floors = { ...(raw.deliveryFloors === undefined ? {} : { deliveryFloors }), ...(typeof raw.pendingDelivery === 'string' ? { pendingDelivery: raw.pendingDelivery } : {}) }
+  let sweep: { reverts: Record<string, string[]> } | undefined
+  if (raw.sweep !== undefined) {
+    if (!isRec(raw.sweep) || !isRec(raw.sweep.reverts)) throw new Error('sweep memory is malformed')
+    const reverts: Record<string, string[]> = {}
+    for (const [k, v] of Object.entries(raw.sweep.reverts)) { if (!Array.isArray(v) || v.some(s => typeof s !== 'string')) throw new Error(`sweep memory ${k} is malformed`); reverts[k] = v as string[] }
+    sweep = { reverts }
+  }
+  const floors = { ...(raw.deliveryFloors === undefined ? {} : { deliveryFloors }), ...(typeof raw.pendingDelivery === 'string' ? { pendingDelivery: raw.pendingDelivery } : {}), ...(sweep ? { sweep } : {}) }
   if (raw.checkpoints !== undefined && !isRec(raw.checkpoints)) throw new Error('checkpoints is not an object')
   if (raw.intents !== undefined && !isRec(raw.intents)) throw new Error('intents is not an object')
   for (const [k, v] of Object.entries((raw.checkpoints as Record<string, unknown>) ?? {})) {

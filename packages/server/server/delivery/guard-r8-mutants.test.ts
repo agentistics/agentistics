@@ -8,7 +8,8 @@ const repo = resolve(import.meta.dir, '../../../..')
 const delivery = 'packages/server/server/delivery/'
 let root: string
 const originals = new Map<string, string>()
-const files = ['service.ts', 'web.ts', 'machine.ts', 'guard-ast.testing.ts', 'sweep.ts', 'sweep-plan.ts', 'guards-store.ts', 'store.ts'].map(f => delivery + f).filter(f => existsSync(join(repo, f)))
+const taskStore = 'packages/server/server/sessions/task-store.ts'
+const files = [...['service.ts', 'web.ts', 'machine.ts', 'guard-ast.testing.ts', 'sweep.ts', 'sweep-plan.ts', 'guards-store.ts', 'store.ts'].map(f => delivery + f), taskStore].filter(f => existsSync(join(repo, f)))
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'guard-r8-mutants-'))
   cpSync(join(repo, 'packages'), join(root, 'packages'), { recursive: true, filter: p => !p.split('/').some(s => ['node_modules', 'dist', 'target', '.git'].includes(s)) })
@@ -57,6 +58,23 @@ const mutants: Array<[string, string, string, string, string, string[]]> = [
   ['R7-3 destructure', delivery + 'guard-ast.testing.ts', "out.push('constructor-destructure')", 'void n', 'R7-3', [notes]],
   ['R7-4 M7', delivery + 'service.ts', 'budget: AUTO_RUN_GH_BUDGET, tickActions: actions', 'budget: AUTO_RUN_GH_BUDGET', 'R7-4/M7', [service]],
   ['R7-4 M8', delivery + 'machine.ts', "if (r.phase !== 'fila' && r.phase !== 'bloqueado') return false", '', 'R7-4/M8', [notes]],
+  // ---- S2b: the guard sweep
+  ['S2b off', delivery + 'sweep.ts', "if (rule === 'off') return", '', 'OFF: a forged state stays', [sweepTest]],
+  ['S2b shadow', delivery + 'sweep.ts', "if (rule === 'shadow') {", 'if (false) {', 'SHADOW', [sweepTest]],
+  ['S2b delivery side', delivery + 'sweep-plan.ts', 'if (boardNow > rank || phaseNow > rank)', 'if (boardNow > rank)', 'delivery phase only', [sweepTest]],
+  ['S2b owner', delivery + 'sweep-plan.ts', 'if (cp && ownerAuthorized(cp.auth)) continue', '', 'owner checkpoint', [sweepTest]],
+  ['S2b stale evidence', delivery + 'sweep-plan.ts', '(staleEvidence(cp, p.record).length > 0 || headMoved(cp, p.record))', 'headMoved(cp, p.record)', 'evidence_stale', [sweepTest]],
+  ['S2b head moved', delivery + 'sweep-plan.ts', '(staleEvidence(cp, p.record).length > 0 || headMoved(cp, p.record))', 'staleEvidence(cp, p.record).length > 0', 'HEAD moved', [sweepTest]],
+  ['S2b catch-up', delivery + 'sweep-plan.ts', 'phaseNow === rank && boardNow < rank', 'false', 'caught up', [sweepTest]],
+  ['S2b loop limit', delivery + 'sweep-plan.ts', 'export const SWEEP_LOOP_LIMIT = 2', 'export const SWEEP_LOOP_LIMIT = 3', 'reverted twice', [sweepTest]],
+  ['S2b loop window', delivery + 'sweep-plan.ts', 'now - Date.parse(s) < SWEEP_LOOP_WINDOW_MS', 'now - Date.parse(s) < Infinity', 'loop window expires', [sweepTest]],
+  ['S2b intent commit', delivery + 'sweep.ts', 'if (documentsShow(intent.target, byKey))', 'if (false)', 'commits the intent', [sweepTest]],
+  ['S2b intent drop', delivery + 'sweep.ts', 'if (documentsShow(intent.target, byKey))', 'if (true)', 'drops it', [sweepTest]],
+  ['S2b ci signal', delivery + 'sweep-plan.ts', 'clearCi: p.ciRank > target', 'clearCi: false', 'ci SIGNAL', [sweepTest]],
+  ['S2b ranked revision', delivery + 'sweep.ts', 'phaseRank(to) === 0 ? r.revision + 1 : r.revision', 'r.revision + 1', 'not to rank 0', [sweepTest]],
+  ['S2b memory persisted', delivery + 'guards-store.ts', '...(sweep ? { sweep } : {})', '', 'BLOCKED', [sweepTest]],
+  ['S2b batch cap', delivery + 'sweep.ts', "if (plan.reverts.length > 0) {\n      const comments", "if (plan.reverts.length > 0) {\n      plan.reverts.length = Math.min(plan.reverts.length, 20)\n      const comments", '30 forged pieces', [sweepTest]],
+  ['S2b clear ci in store', 'packages/server/server/sessions/task-store.ts', 'if (r.clearCi) delete next.ci', '', 'ci SIGNAL', [sweepTest]],
 ]
 for (const [id, file, from, to, pattern, suites] of mutants) test(`r8 mutant ${id} is killed`, async () => {
   reset(); change(file, from, to)
@@ -67,7 +85,6 @@ for (const [id, file, from, to, pattern, suites] of mutants) test(`r8 mutant ${i
 }, 150_000)
 test('r8 mutation positive control', async () => {
   reset()
-  const r = await run([notes])
+  const r = await run([notes, sweepTest])
   expect(r.code, r.output).toBe(0)
 }, 150_000)
-void sweepTest

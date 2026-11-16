@@ -74,6 +74,22 @@ const subRank = (b: BoardSlice, s: BoardSlice['subtasks'][number]): number => {
   return Math.max(byStatus, bySignal)
 }
 
+/**
+ * PURE (S2b). Every piece the board holds, as the guard counts them (group members and tasks that have subtasks are not pieces),
+ * with the rank its STATUS gives and the rank its `ci` SIGNAL alone gives. The sweep reads this so it can never disagree with
+ * `boardRaises` about what a piece is.
+ */
+export function boardPieces(b: BoardSlice): Array<{ key: string; taskId: string; subtaskId?: string; status: string; statusRank: number; ciRank: number }> {
+  const out: Array<{ key: string; taskId: string; subtaskId?: string; status: string; statusRank: number; ciRank: number }> = []
+  const taskWithSubs = new Set(b.subtasks.map(s => s.taskId))
+  for (const s of b.subtasks) {
+    if (s.parentGroupId) continue
+    out.push({ key: s.id, taskId: s.taskId, subtaskId: s.id, status: s.status, statusRank: statusRank(b.statuses, s.status), ciRank: s.ci ? (s.ci.tagPublished ? 4 : 3) : 0 })
+  }
+  for (const t of b.tasks) if (!taskWithSubs.has(t.id)) out.push({ key: t.id, taskId: t.id, status: t.status, statusRank: statusRank(b.statuses, t.status), ciRank: 0 })
+  return out
+}
+
 /** PURE. Rank increases, newly exposed pieces, and changes to an already protected piece's binding. */
 export function boardRaises(before: BoardSlice, after: BoardSlice): Raised[] {
   const out: Raised[] = []

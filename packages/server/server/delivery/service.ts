@@ -20,7 +20,7 @@
 import { dirname } from 'node:path'
 import { contextOfActor, flowContext, GuardRefused } from './guard'
 import { reviewOutcome, ruleAState, guardPathsOf } from './guard-host'
-import { withGuardTransaction } from './guard-transaction'
+import { withGuardEnvelope, withGuardTransaction } from './guard-transaction'
 import {
   EDGES, GATES, adoptPhase, gatesFor, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
   refusalStatus, unlockerOf, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
@@ -36,7 +36,9 @@ import { isDocPath } from './classify'
 import { repoRefFacts } from './classify-declare'
 import { buildEvidenceItem, checkReuse, type EvidenceItem, type EvidenceKind, type Probe, type RepoRef, type ReuseEntry } from './evidence'
 import { createGuardsStore, defaultGuardsPath } from './guards-store'
+import { GuardsUnreadable } from './guards-store'
 import { GuardBusy } from './guard-locks'
+import { guardSweep, type SweepDeps } from './sweep'
 import { ownerIntent } from '../flows/owner-intent'
 import { requestReminderText } from './request-reminder'
 import {
@@ -108,6 +110,8 @@ export interface DeliveryDeps {
   autoReconcile?: boolean | (() => boolean)
   /** Tests: the automatic reconcile runs inside the tick (awaited) instead of in the background. */
   autoReconcileAwait?: boolean
+  /** S2b: the guard sweep the tick runs (rule A shadow/on only). The board store and the three lock paths it judges. */
+  sweep?: { tasks: () => Promise<import("../sessions/task-store").TaskStore>; paths?: import("./guard-locks").GuardLockPaths }
   /** The automatic reconcile's shortest cadence (default 30 min; it also waits 3x what the last run took). */
   autoReconcileEveryMs?: number
   /** Where what gh answered survives a restart (absent: this process only). A cache: a failed read or write costs one run, never a wrong answer. */
@@ -244,8 +248,10 @@ export function createDeliveryService(deps: DeliveryDeps) {
   // (`transition`, from the principal it resolved) wins. The allowlist lint (`guard-context.lint.test.ts`) tracks what is left.
   const rawStore = deps.store
   const d: DeliveryDeps = { ...deps, store: { ...rawStore, update: (fn, options) => rawStore.update(fn, { guard: flowContext(), ...options }) } }
+  /** The three guard lock paths beside this service's delivery store (one derivation for every transaction and the sweep). */
+  const lockPaths = () => guardPathsOf({ deliveriesFile: d.store.path }).paths
   const transaction = <A extends unknown[], R>(fn: (...args: A) => Promise<R>) => (...args: A): Promise<R> =>
-    withGuardTransaction(guardPathsOf({ deliveriesFile: d.store.path }).paths, () => fn(...args))
+    withGuardTransaction(lockPaths(), () => fn(...args))
   let proofCache: ProofCache | null = null
   /** The store's fingerprint when this process last read or wrote it: a different one means ANOTHER process (the CLI's reconcile) wrote it. */
   let proofStamp: string | null = null
@@ -371,7 +377,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
   }
 
   const transition = async (subtaskId: string, to: unknown, input: TransitionInput, actor: string, known?: ReadonlyMap<GateName, GateVerdict>): Promise<DeliveryReply> => {
-    return withGuardTransaction(guardPathsOf({ deliveriesFile: d.store.path }).paths, async () => {
+    return withGuardTransaction(lockPaths(), async () => {
     const got = await ensure(subtaskId)
     if (isReply(got)) return got
     if (got.dequeued) return fail(422, 'fora_da_fila', 'this piece was dequeued; stage it explicitly before starting it again', [], got)
@@ -1004,7 +1010,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
     }
     // External release probes above may run concurrently. Re-read/CAS and the entire write + board effects
     // share the full envelope; no network barrier holds a board lock while waiting for another caller.
-    return withGuardTransaction(guardPathsOf({ deliveriesFile: d.store.path }).paths, async () => {
+    return withGuardTransaction(lockPaths(), async () => {
     const batch = await d.store.update(doc => {
       for (const p of plan) {
         const cur = doc.deliveries[p.id]
@@ -2148,9 +2154,41 @@ export function createDeliveryService(deps: DeliveryDeps) {
     try { const c = JSON.parse(raw) as { remaining?: unknown; limit?: unknown }; return typeof c.remaining === 'number' && typeof c.limit === 'number' && c.limit > 0 ? c.remaining / c.limit : null } catch { return null }
   }
 
+  /** S2b: the real stores and locks behind the sweep's injected ports (sweep.ts imports none of them). */
+  const sweepPorts = async (sw: NonNullable<DeliveryDeps['sweep']>): Promise<SweepDeps> => {
+    const paths = sw.paths ?? lockPaths()
+    const dir = dirname(paths.guards)
+    const guards = createGuardsStore(paths.guards)
+    const [{ newCommentId, newEventId }, { effectiveSubtasks }] = await Promise.all([import('../sessions/task-model'), import('../sessions/task-report')])
+    return {
+      rule: () => ruleAState(dir),
+      envelope: fn => withGuardEnvelope(paths, fn),
+      guards: guards as never,
+      statusStages: async () => (await sw.tasks()).statusStageMirror(),
+      tasks: (await sw.tasks()) as never,
+      store: d.store as never,
+      guard: flowContext('entrega'),
+      ids: { comment: newCommentId, event: newEventId },
+      effective: subtasks => effectiveSubtasks(subtasks as never) as never,
+      now: d.now,
+      catchUp: (key, phase) => d.board.setPhaseStatus(key, phase as Phase),
+      log: line => d.log?.(line),
+    }
+  }
+
   const tickOnce = async (): Promise<{ actions: string[] }> => {
     const actions: string[] = []
     refusedNow.clear()
+    // S2b: the guard sweep runs FIRST, so everything below sees repaired documents. Rule off: it does nothing at all.
+    if (d.sweep) {
+      try {
+        await guardSweep(await sweepPorts(d.sweep), actions)
+      } catch (e) {
+        if (e instanceof GuardBusy) actions.push("sweep-skipped: another agentop process holds the board (guard_busy)")
+        else if (e instanceof GuardsUnreadable) { actions.push(`sweep-skipped: ${e.message}`); d.log?.(`[guard] sweep-skipped: ${e.message}`) }
+        else actions.push(`sweep-erro: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`)
+      }
+    }
     await cleanQueue(actions).catch(e => tickRefusal(e, actions))
     // ONE read of the fleet and ONE read of the board's blocked pieces per tick; null = could not be read (never "none").
     const sessions = await d.facts.sessions().catch(() => null)

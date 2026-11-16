@@ -147,6 +147,13 @@ export interface TaskStore {
     Promise<{ ok: true; task: Task } | { ok: false; reason: 'missing' | 'other'; task?: Task }>
   /** Write several ranks at once — a drag is one write, a rebalance is one pass. */
   setRanks(ranks: ReadonlyArray<{ id: string; rank: string }>): Promise<void>
+  /**
+   * S2b — the guard sweep's batch: every board revert of one tick (status back, `ci` signal cleared), the comments and events
+   * that say so, in ONE write. A revert only LOWERS a rank, so it needs no guard context and the store guard never refuses it.
+   */
+  /** S2b: the mirror of each status's stored stage, for readers that must judge a book an older writer stripped. */
+  statusStageMirror(): Promise<Record<string, string> | undefined>
+  applyBoardReverts(batch: { at: string; reverts: ReadonlyArray<{ key: string; subtaskId?: string; to: string; clearCi: boolean }>; comments: readonly TaskComment[]; events: readonly TaskEvent[] }): Promise<void>
   /** Append to the activity log. Never throws on a task that has since gone. */
   logEvents(events: readonly TaskEvent[]): Promise<void>
 
@@ -687,6 +694,8 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
   /** `base`: rule A was off when this mutation started, so it holds ONLY the tasks file lock (the base's semantics, N2). */
   let currentBase = false
   const anchor = guardPathsOf({ tasksFile: file })
+  /** The authenticated mirror of each status's stored stage (the guard's and the sweep's one reader of it). */
+  const stageMirror = async () => (await createGuaranteesStore(join(anchor.dir, 'guarantees.json')).read()).doc.statusStages
   const sliceOf = (b: TaskBook): BoardSlice => ({ tasks: b.tasks, subtasks: effectiveSubtasks(b.subtasks), statuses: b.statuses })
 
   /**
@@ -705,7 +714,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
     let prior = sliceOf(before)
     let after = sliceOf(book)
     if ([...before.statuses, ...book.statuses].some(s => !isStatusStage(s.stage))) {
-      const { doc } = await createGuaranteesStore(join(anchor.dir, 'guarantees.json')).read()
+      const doc = { statusStages: await stageMirror() }
       prior = { ...prior, statuses: before.statuses.map(s => ({ ...s, stage: s.stage ?? doc.statusStages?.[s.id] })) }
       after = { ...after, statuses: book.statuses.map(s => ({ ...s, stage: s.stage ?? doc.statusStages?.[s.id] })) }
     }
@@ -1039,6 +1048,25 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
           ...book,
           tasks: book.tasks.map(t => (by.has(t.id) ? { ...t, rank: by.get(t.id)! } : t)),
         })
+      })
+    },
+    statusStageMirror: () => stageMirror(),
+    applyBoardReverts(batch) {
+      return enqueue(async () => {
+        const book = await read()
+        const bySub = new Map(batch.reverts.filter(r => r.subtaskId).map(r => [r.subtaskId!, r] as const))
+        const byTask = new Map(batch.reverts.filter(r => !r.subtaskId).map(r => [r.key, r] as const))
+        const subtasks = book.subtasks.map(s => {
+          const r = bySub.get(s.id)
+          if (!r) return s
+          const next = { ...s, status: r.to, done: r.to === 'done', updatedAt: batch.at }
+          if (r.clearCi) delete next.ci
+          if (r.to !== 'done') delete next.deliveredAt
+          return next
+        })
+        const tasks = book.tasks.map(t => (byTask.has(t.id) ? { ...t, status: byTask.get(t.id)!.to, updatedAt: batch.at } : t))
+        const events = [...book.events, ...batch.events]
+        await write({ ...book, subtasks, tasks, comments: [...book.comments, ...batch.comments], events: events.slice(Math.max(0, events.length - MAX_EVENTS)) })
       })
     },
     logEvents(events) {

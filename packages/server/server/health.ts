@@ -194,8 +194,9 @@ export async function runHealthChecks(): Promise<HealthIssue[]> {
     const dir = dirname(defaultGuardLockPaths().tasks)
     const g = await createGuaranteesStore(join(dir, 'guarantees.json')).read()
     let guardsTamper: string | undefined
-    try { await createGuardsStore(join(dir, 'guards.json')).read() } catch (e) { guardsTamper = e instanceof GuardsUnreadable ? (e.tampered ?? e.why) : 'unreadable' }
-    analyzeGuardIntegrity({ ...(g.warn ? { guaranteesWarn: g.warn } : {}), ...(guardsTamper ? { guardsTamper } : {}), offWarnings: guaranteeWarnings(g.doc) }, issues)
+    let guardsSweep: import('./delivery/sweep-plan').SweepMemory | undefined
+    try { guardsSweep = (await createGuardsStore(join(dir, 'guards.json')).read()).sweep } catch (e) { guardsTamper = e instanceof GuardsUnreadable ? (e.tampered ?? e.why) : 'unreadable' }
+    analyzeGuardIntegrity({ ...(g.warn ? { guaranteesWarn: g.warn } : {}), ...(guardsTamper ? { guardsTamper } : {}), offWarnings: [...guaranteeWarnings(g.doc), ...(await import('./delivery/sweep-plan')).sweepWarnings(guardsSweep, Date.now())] }, issues)
   } catch { /* a health check never breaks the others */ }
 
   // Determine which harnesses are active so Claude-specific checks can be
