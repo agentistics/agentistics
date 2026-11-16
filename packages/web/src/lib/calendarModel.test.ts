@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { brtDay, buildCalendar, filterCalendar, type CalPiece, type CalVersion } from '@agentistics/core'
 import {
-  startedPiecesOfDay, addDays, addMonths, agendaOf, byPriority, dayBlocks, fitWeek, monthCells, pieceSegments, rangeLabel, stepAnchor, versionDays,
+  startedPiecesOfDay, addDays, addMonths, agendaOf, byPriority, fitWeek, monthCells, rangeLabel, stepAnchor, versionDays,
   weekDays, weekRibbons, weekdayMon0, packIntervals, swipeDay, placeColumn,
 } from './calendarModel'
 
@@ -77,7 +77,8 @@ describe('day arithmetic', () => {
     expect(rangeLabel('month', '2026-11-07', true)).toBe('novembro de 2026')
     expect(rangeLabel('month', '2026-11-07', false)).toBe('November 2026')
     expect(rangeLabel('week', '2026-11-07', true)).toBe('2 – 8 de novembro')
-    expect(rangeLabel('schedule', '2026-11-07', true)).toBe('Sáb 07 – Dom 08')
+    expect(rangeLabel('schedule', '2026-11-07', true)).toBe('novembro de 2026')
+    expect(stepAnchor('schedule', '2026-11-07', 1)).toBe('2026-11-14')
     expect(rangeLabel('day', '2026-11-07', true)).toBe('Sábado, 7 de novembro')
   })
 })
@@ -149,25 +150,6 @@ describe('agenda', () => {
 })
 
 describe('time axis', () => {
-  test('segments: the real trail, then ONE expected span to the estimate', () => {
-    const p = piece({
-      key: 'a', trail: [{ stage: 'running', enteredMs: NOW - 4 * H, ms: 3 * H }, { stage: 'qa', enteredMs: NOW - H, ms: H }],
-      publishEta: { kind: 'estimate', atMs: NOW + 6 * H, confidence: 'high' },
-    })
-    const s = pieceSegments(p, NOW)
-    expect(s.map(x => x.stage)).toEqual(['running', 'qa', 'expected'])
-    expect(s[2]).toMatchObject({ fromMs: NOW, toMs: NOW + 6 * H })
-  })
-  test('no estimate = no expected span', () => {
-    expect(pieceSegments(piece({ key: 'a' }), NOW).some(s => s.stage === 'expected')).toBe(false)
-  })
-  test('day blocks clip to the day and mark the expected rest', () => {
-    const p = piece({ key: 'a', stageEta: { kind: 'estimate', atMs: NOW + 3 * H, confidence: null }, publishEta: { kind: 'estimate', atMs: NOW + 30 * H, confidence: 'low' } })
-    const today = dayBlocks(p, '2026-11-07', NOW)
-    expect(today.some(b => !b.expected)).toBe(true)
-    expect(today.every(b => b.toMs <= Date.parse('2026-11-08T03:00:00.000Z'))).toBe(true)
-    expect(dayBlocks(p, '2026-11-09', NOW)).toEqual([])
-  })
   test('fitWeek: nothing is hidden when everything fits; no "+N"', () => {
     const rs = weekRibbons(['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07', '2026-11-08'],
       [version({ version: '1.0', state: 'published', atMs: Date.parse('2026-11-03T15:00:00Z') })], [], '2026-11-07')

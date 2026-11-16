@@ -26,6 +26,12 @@ export interface CalendarSources {
   inferredVersions?: Record<string, string>
 }
 
+/** The board's subtasks as the calendar reads them — `parentGroupId` rides along: it is the Cronograma tree's middle level. */
+export function subtaskInputs(subtasks: readonly { id: string; taskId: string; title: string; status?: string; priority?: string; dueDate?: string; parentGroupId?: string }[]): CalSubtaskInput[] {
+  return subtasks.map(s => ({ id: s.id, taskId: s.taskId, title: s.title, ...(s.status ? { status: s.status } : {}),
+    ...(s.priority ? { priority: s.priority } : {}), ...(s.dueDate ? { dueDate: s.dueDate } : {}), ...(s.parentGroupId ? { parentGroupId: s.parentGroupId } : {}) }))
+}
+
 export async function readCalendarSources(): Promise<CalendarSources> {
   const nowMs = Date.now()
   const [{ liveDeliveries }, { deliveryService }, { loadTaskWorld }, { getVersionInfo }] = await Promise.all([
@@ -65,8 +71,7 @@ export async function readCalendarSources(): Promise<CalendarSources> {
       ...(t.priority ? { priority: t.priority } : {}),
       ...(t.dueDate ? { dueDate: t.dueDate } : {}),
     })),
-    subtasks: world.book.subtasks.map(s => ({ id: s.id, taskId: s.taskId, title: s.title, status: s.status,
-      ...(s.priority ? { priority: s.priority } : {}), ...(s.dueDate ? { dueDate: s.dueDate } : {}) })),
+    subtasks: subtaskInputs(world.book.subtasks),
     resets: await readResets(nowMs).catch(() => []),
   }
 }

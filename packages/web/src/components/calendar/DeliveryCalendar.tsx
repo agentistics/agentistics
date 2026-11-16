@@ -206,11 +206,20 @@ function DeliveryCalendarBody({ lang, embedded, wide }: { lang: 'pt' | 'en'; emb
           {embedded ? <div style={{ flex: 1, minHeight: 300, display: 'flex', flexDirection: 'column' }}>{body}</div> : body}
           {!isMobile && (
             <div data-cal-legend style={{ display: 'flex', flexWrap: 'wrap', columnGap: 14, rowGap: 2, alignItems: 'center', minHeight: 30, padding: '4px 0', flexShrink: 0, color: 'var(--text-secondary)', fontSize: 11 }}>
-              {(['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published'] as const).map(s => (
+              {activeView === 'schedule' || activeView === 'day' ? (
+                <>
+                  <span><i style={{ display: 'inline-block', width: 12, height: 8, borderRadius: 3, marginRight: 5, background: 'var(--anthropic-orange)' }} />{pick(TEXT.legendRunning, pt)}</span>
+                  <span><i style={{ display: 'inline-block', width: 12, height: 8, borderRadius: 3, marginRight: 5, background: 'var(--accent-green)' }} />{pick(TEXT.legendPublished, pt)}</span>
+                  <span><i style={{ display: 'inline-block', width: 12, height: 8, borderRadius: 3, marginRight: 5, background: 'repeating-linear-gradient(135deg, var(--text-tertiary) 0 2px, transparent 2px 4px)' }} />{pick(TEXT.legendForecast, pt)}</span>
+                  <span><i style={{ display: 'inline-block', width: 12, height: 8, borderRadius: 3, marginRight: 5, background: '#222c55' }} />{pick(TEXT.legendTaskGroup, pt)}</span>
+                </>
+              ) : (['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published'] as const).map(s => (
                 <span key={s}><i style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, marginRight: 5, background: STAGE_LABEL[s].color }} />{pt ? STAGE_LABEL[s].pt : STAGE_LABEL[s].en}</span>
               ))}
-              <span style={{ marginLeft: 'auto', color: 'var(--accent-green)', whiteSpace: 'nowrap' }}>◆ {pick(TEXT.legendPublished, pt)}</span>
-              <span style={{ color: 'var(--text-tertiary)' }}>{pick(TEXT.legendExpected, pt)}</span>
+              {activeView !== 'schedule' && activeView !== 'day' && <>
+                <span style={{ marginLeft: 'auto', color: 'var(--accent-green)', whiteSpace: 'nowrap' }}>◆ {pick(TEXT.legendPublished, pt)}</span>
+                <span style={{ color: 'var(--text-tertiary)' }}>{pick(TEXT.legendExpected, pt)}</span>
+              </>}
             </div>
           )}
         </>
