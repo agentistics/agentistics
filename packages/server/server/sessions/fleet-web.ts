@@ -43,6 +43,7 @@ import { arrangeFleet, type FleetArrangement, type FleetViewRequest } from './fl
 import { markFleetPhase, timeFleetPhase } from './fleet-profile'
 import { processSessionHub, type SessionHub } from './session-hub'
 import { liveRowsSignature, planLiveFleetRead } from './live-fleet-plan'
+import { liveFleetRows } from './live-fleet-rows'
 import { forceRowScreen } from './adapter-state-host'
 import {
   buildFleetFrame, closedPage, compactFleetRows, compactFleetSession, compactGetBody, fleetEventsResponse, type FleetFrame,
@@ -208,17 +209,16 @@ export async function readLiveFleet(lang: CliLang): Promise<ControlSession[]> {
 }
 
 async function startLiveFleetBuild(lang: CliLang, hub: SessionHub, snapshot: unknown): Promise<ControlSession[]> {
-  const startSig = liveRowsSignature(snapshot as SessionSnapshot | null)
-  const host = await hostForFleet(lang)
   const promise = (async () => {
-    const frame = host.sessions ? await host.sessions() : null
-    const rows = frame?.sessions ?? []
-    const end = hub.last()
-    // The rows are as new as a hub read somewhere between start and end: if the states moved in between, no
-    // signature can vouch for them, so the next read rebuilds (r3).
-    const endSig = liveRowsSignature(end)
-    const signature = endSig === startSig ? endSig : null
-    liveFleetCache = { lang, snapshot: end, rows, atMs: Date.now(), signature }
+    // LIVE.COLD-START: mapped off the hub's snapshot (`live-fleet-rows.ts`), never through `host.sessions()`,
+    // whose repo facts and crash offer the Live never reads and which cost 6-8 s on the first read after a start.
+    // `read()` is the same read `host.sessions()` made: it holds the hub's lease and answers a fresh tick at once.
+    const read = await hub.read()
+    const { loadNativeFleet } = await import('./native-fleet')
+    const native = await loadNativeFleet(lang).catch(() => [])
+    const rows = liveFleetRows(read, cliStrings(lang), native)
+    // The rows are EXACTLY `read`'s, so its signature vouches for them (the r3/r4 straddle cannot happen here).
+    liveFleetCache = { lang, snapshot: read, rows, atMs: Date.now(), signature: liveRowsSignature(read) }
     return rows
   })()
   liveFleetInFlight = { lang, snapshot, promise }

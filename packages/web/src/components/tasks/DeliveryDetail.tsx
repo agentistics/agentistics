@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import { commentThread, type ChatAttachmentRef } from '@agentistics/core'
 import { CommentAttachments, CommentComposer } from './CommentComposer'
+import { activitySentence } from './activityText'
 import { commentAnchor, commentCandidates, sessionCandidateForMention, sessionCandidates } from './commentMention'
 import { sessionMentionTokens } from '../../lib/sessionMention'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -137,7 +138,7 @@ function ActivityTab({ id, lang }: { id: string; lang: Lang }) {
         {run && children.map(child => <div key={child.id} style={{ ...microLabel, paddingLeft: 52 }}>{time(child.at)} · {child.summary ?? (pt ? 'sem novidade' : 'no news')}</div>)}
       </div>
     }
-    return <div key={e.id} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>{' '}{e.kind === 'status' ? `moved ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'claim' ? (e.detail === 'takeover' ? 'took over' : 'claimed it') : e.kind === 'release' ? 'released it' : e.kind === 'priority' ? `set priority ${e.from ?? '?'} → ${e.to ?? '?'}` : e.kind === 'assign' ? `set the owner to ${e.to || 'nobody'}` : e.kind === 'session' ? `filed a ${e.detail ?? ''} session`.trim() : e.kind === 'move' ? 'reordered it' : e.kind}</span></div>
+    return <div key={e.id} style={{ display: 'flex', gap: 9, alignItems: 'baseline', fontSize: 12 }}><span style={{ ...microLabel, fontSize: 10, whiteSpace: 'nowrap' }}>{time(e.at)}</span><span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{e.actor}</strong>{' '}{activitySentence(e, lang)}</span></div>
   }
   if (loading) {
     return <div style={{ ...surface, padding: 14, fontSize: 12.5, color: 'var(--text-tertiary)' }}>Loading…</div>
@@ -354,7 +355,8 @@ function CommentMarkdown({ text, sessions, onOpenSession }: { text: string; sess
  * them. Not every input device can paste a file (a phone's on-screen keyboard has no
  * clipboard-file gesture), so the button is the one path that always works.
  */
-function AttachButton({ onFiles, disabled, accept }: {
+function AttachButton({ onFiles, disabled, accept, lang }: {
+  lang: Lang
   onFiles: (files: File[]) => void
   disabled?: boolean
   /** Same shape as the native `accept` attribute — narrows the OS file picker, not a guarantee:
@@ -377,7 +379,7 @@ function AttachButton({ onFiles, disabled, accept }: {
       />
       <button
         type="button" disabled={disabled} onClick={() => inputRef.current?.click()}
-        title="Attach a file"
+        title={lang === 'pt' ? 'Anexar um arquivo' : 'Attach a file'}
         style={{ ...button(isMobile), padding: isMobile ? undefined : '0 10px', flexShrink: 0 }}
       ><Paperclip size={13} /></button>
     </>
@@ -386,7 +388,8 @@ function AttachButton({ onFiles, disabled, accept }: {
 
 /** A pending attachment, shown as a chip — the same shape a comment draft and the description
     editor both need, so the row is drawn once. */
-function AttachmentChips({ attached, onRemove }: {
+function AttachmentChips({ attached, onRemove, lang }: {
+  lang: Lang
   attached: readonly CommentAttachment[]
   onRemove: (id: string) => void
 }) {
@@ -412,7 +415,7 @@ function AttachmentChips({ attached, onRemove }: {
           <button
             // Unpicking the REFERENCE only: the file stays on the task, where the Files tab can
             // delete it. Removing bytes because a draft changed its mind is a surprise.
-            onClick={() => onRemove(a.id)} title="Not on this comment"
+            onClick={() => onRemove(a.id)} title={lang === 'pt' ? 'Fora deste comentário' : 'Not on this comment'}
             style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'flex' }}
           ><X size={12} /></button>
         </span>
@@ -576,7 +579,7 @@ function DescriptionEditor({ id, task, files, lang, onSaved }: {
           </div>
           <button
             onClick={() => { setText(task.detail ?? ''); setAttached([]); setEditing(true) }}
-            title="Edit description"
+            title={lang === 'pt' ? 'Editar descrição' : 'Edit description'}
             style={{ background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', display: 'flex', flexShrink: 0 }}
           ><Pencil size={13} /></button>
         </div>
@@ -585,7 +588,7 @@ function DescriptionEditor({ id, task, files, lang, onSaved }: {
         <button
           style={{ ...button(isMobile), justifySelf: 'start' }}
           onClick={() => { setText(''); setAttached([]); setEditing(true) }}
-        ><Plus size={13} /> Add a description</button>
+        ><Plus size={13} /> {lang === 'pt' ? 'Adicionar uma descrição' : 'Add a description'}</button>
       )
   }
 
@@ -608,7 +611,7 @@ function DescriptionEditor({ id, task, files, lang, onSaved }: {
         maxLength={DESCRIPTION_MAX_LENGTH}
         style={{ ...field(isMobile), minHeight: 90, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
         value={text}
-        placeholder="What is this task for? Markdown works. Paste a file, or attach one."
+        placeholder={lang === 'pt' ? 'Para que serve esta tarefa? Markdown funciona. Cole um arquivo ou anexe um.' : 'What is this task for? Markdown works. Paste a file, or attach one.'}
         onChange={e => setText(e.target.value)}
         onPaste={e => {
           const fl = Array.from(e.clipboardData?.files ?? [])
@@ -630,9 +633,9 @@ function DescriptionEditor({ id, task, files, lang, onSaved }: {
             : text.length >= DESCRIPTION_MAX_LENGTH * 0.9 ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
         }}>{text.length} / {DESCRIPTION_MAX_LENGTH}</span>
       </div>
-      <AttachmentChips attached={attached} onRemove={fid => setAttached(a => a.filter(x => x.id !== fid))} />
+      <AttachmentChips lang={lang} attached={attached} onRemove={fid => setAttached(a => a.filter(x => x.id !== fid))} />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <AttachButton disabled={busy || room <= 0} onFiles={take} accept={DESCRIPTION_ACCEPT} />
+        <AttachButton lang={lang} disabled={busy || room <= 0} onFiles={take} accept={DESCRIPTION_ACCEPT} />
         <span style={{ flex: 1 }} />
         <button
           style={button(isMobile, 'primary')} disabled={busy}
@@ -640,8 +643,8 @@ function DescriptionEditor({ id, task, files, lang, onSaved }: {
             await onSaved(bodyWithAttachments(text, attached))
             setEditing(false)
           })()}
-        >Save</button>
-        <button style={button(isMobile)} onClick={() => setEditing(false)}>Cancel</button>
+        >{lang === 'pt' ? 'Salvar' : 'Save'}</button>
+        <button style={button(isMobile)} onClick={() => setEditing(false)}>{lang === 'pt' ? 'Cancelar' : 'Cancel'}</button>
       </div>
     </div>
   )
@@ -755,7 +758,7 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
                       painting a 44x44 square onto this thin header row. */}
                   <button
                     onClick={e => { e.stopPropagation(); setEditing({ id: c.id, body: c.body }) }} disabled={busy}
-                    title="Edit" className="ag-tap-icon"
+                    title={pt ? 'Editar' : 'Edit'} className="ag-tap-icon"
                     style={{
                       background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -763,7 +766,7 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
                   ><Pencil size={13} /></button>
                   <button
                     onClick={e => { e.stopPropagation(); setRemoving(c.id) }}
-                    disabled={busy} title="Delete" className="ag-tap-icon"
+                    disabled={busy} title={pt ? 'Excluir' : 'Delete'} className="ag-tap-icon"
                     style={{
                       background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -788,8 +791,8 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
                         await editComment(id, c.id, editing.body)
                         setEditing(null)
                       })}
-                    >Save</button>
-                    <button style={button(isMobile)} onClick={() => setEditing(null)}>Cancel</button>
+                    >{pt ? 'Salvar' : 'Save'}</button>
+                    <button style={button(isMobile)} onClick={() => setEditing(null)}>{pt ? 'Cancelar' : 'Cancel'}</button>
                   </div>
                 </div>
               )
@@ -828,10 +831,10 @@ export function CommentsTab({ id, detail, onChanged, target, lang = 'en', looseO
       />
         <ConfirmModal
           open={removing !== null}
-          title="Delete this comment?"
-          message="It goes for everyone reading this task. Its attachments are removed from the comment, not from disk."
-          confirmLabel="Delete"
-          cancelLabel="Cancel"
+          title={pt ? 'Excluir este comentário?' : 'Delete this comment?'}
+          message={pt ? 'O comentário some para todos que leem esta tarefa. Os anexos saem do comentário, não do disco.' : 'It goes for everyone reading this task. Its attachments are removed from the comment, not from disk.'}
+          confirmLabel={pt ? 'Excluir' : 'Delete'}
+          cancelLabel={pt ? 'Cancelar' : 'Cancel'}
           onCancel={() => setRemoving(null)}
           onConfirm={() => {
             const target = removing
@@ -1149,6 +1152,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
 
           {tab === 'files' && (
             <TaskFiles
+              lang={lang}
               files={detail.files}
               onUpload={f => run(() => uploadFile(id, f, 'you'))}
               onRemove={fid => run(() => deleteFile(fid))}

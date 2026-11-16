@@ -16,7 +16,7 @@ export function progressTooltipModel(done: number, total: number, percent: numbe
   const ids = [...order, ...Object.keys(counts).filter(id => !order.includes(id))]
   return {
     summary: lang === 'pt' ? `${done} de ${total} concluídas (${percent}%)` : `${done} of ${total} completed (${percent}%)`,
-    statuses: ids.filter(id => (counts[id] ?? 0) > 0).map(id => ({ id, label: statusLabel(id, lang, statuses), count: counts[id]!, color: statusStyle(statuses, id).color })),
+    statuses: ids.filter(id => (counts[id] ?? 0) > 0).map(id => ({ id, label: statusLabel(id, lang, statuses), count: counts[id]!, color: statusStyle(statuses, id, lang).color })),
     titles: [...titles].slice(0, 8), moreTitles: Math.max(0, titles.length - 8),
   }
 }
@@ -64,12 +64,12 @@ export function TaskProgressBar({ done, total, inProgress = 0, blocked = 0, stat
           const count = p.counts[id] ?? 0
           if (count <= 0) return null
           const width = count / p.total * 100
-          const node = <i key={id} aria-label={`${statusStyle(statuses, id).label}: ${count}`} style={{ position: 'absolute', left: `${left}%`, top: 0, width: `${width}%`, height: '100%', background: statusStyle(statuses, id).color }} />
+          const node = <i key={id} aria-label={`${statusStyle(statuses, id, lang).label}: ${count}`} style={{ position: 'absolute', left: `${left}%`, top: 0, width: `${width}%`, height: '100%', background: statusStyle(statuses, id, lang).color }} />
           left += width
           return node
         })}
       </ProgressBar>
-      {showPercent && <span style={{ ...microLabel, fontSize: 10, flexShrink: 0, fontVariantNumeric: 'tabular-nums', color: p.complete ? statusStyle(statuses, 'done').color : 'var(--text-tertiary)' }}>{p.percent}% · {p.done}/{p.total}</span>}
+      {showPercent && <span style={{ ...microLabel, fontSize: 10, flexShrink: 0, fontVariantNumeric: 'tabular-nums', color: p.complete ? statusStyle(statuses, 'done', lang).color : 'var(--text-tertiary)' }}>{p.percent}% · {p.done}/{p.total}</span>}
       {tooltip && typeof document !== 'undefined' && <ProgressTooltip model={model} x={tooltip.x} y={tooltip.y} />}
     </div>
   )

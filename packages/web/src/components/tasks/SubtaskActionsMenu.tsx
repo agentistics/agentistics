@@ -371,7 +371,7 @@ export function SubtaskActionsMenu(p: SubtaskActionsMenuProps) {
                     textDecoration: b.done ? 'line-through' : 'none',
                     color: b.done ? 'var(--text-tertiary)' : 'var(--text-secondary)',
                   }}>{b.title}</span>
-                  <span style={pill(statusStyle(p.statuses, b.status).color)}>
+                  <span style={pill(statusStyle(p.statuses, b.status, p.lang).color)}>
                     {statusLabel(b.status, p.lang, p.statuses)}
                   </span>
                   <button

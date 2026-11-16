@@ -148,6 +148,10 @@ export default function AppRouter() {
                 Preferences instead of an empty panel. */}
             <Route path="*" element={<Navigate to="/settings/preferences" replace />} />
           </Route>
+          {/* People say "live" for the Live Delivery board; and an address no route names must never leave the
+              boot screen up forever ("No routes matched location"), so everything else lands on the home page. */}
+          <Route path="live" element={<Navigate to="/tasks/live" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

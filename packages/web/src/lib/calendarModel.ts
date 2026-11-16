@@ -7,7 +7,7 @@
  * Every day is a BRT day (`brtDay`), whatever zone the browser is in.
  */
 import {
-  brtDay, brtDayStartMs, brtParts, CAL_STAGES, pieceDayPresence,
+  brtDay, brtDayStartMs, brtParts, CAL_STAGES,
   type CalMark, type CalPiece, type CalPriority, type CalStage, type CalVersion,
 } from '@agentistics/core'
 
@@ -96,7 +96,7 @@ export function weekDays(anchor: string): string[] {
 /** Moves the anchor one step of the view: a month, a week or a day. */
 export function stepAnchor(view: CalView, anchor: string, dir: -1 | 1): string {
   if (view === 'month') return addMonths(anchor, dir)
-  if (view === 'week') return addDays(anchor, 7 * dir)
+  if (view === 'week' || view === 'schedule') return addDays(anchor, 7 * dir)
   return addDays(anchor, dir)
 }
 
@@ -104,7 +104,7 @@ export function stepAnchor(view: CalView, anchor: string, dir: -1 | 1): string {
 export function viewWindow(view: CalView, anchor: string): { fromMs: number; toMs: number } {
   const [from, to] = view === 'month' ? [monthCells(anchor)[0]!.day, monthCells(anchor)[41]!.day]
     : view === 'week' ? [weekDays(anchor)[0]!, weekDays(anchor)[6]!]
-      : view === 'schedule' ? [anchor, addDays(anchor, 1)] : [anchor, anchor]
+      : view === 'schedule' ? [weekDays(anchor)[0]!, addDays(weekDays(anchor)[0]!, 13)] : [anchor, anchor]
   return { fromMs: brtDayStartMs(from), toMs: brtDayStartMs(addDays(to, 1)) - 1 }
 }
 
@@ -119,14 +119,10 @@ const monthIdx = (d: string) => Number(d.slice(5, 7)) - 1
 
 export function rangeLabel(view: CalView, anchor: string, pt: boolean): string {
   const m = (d: string) => monthName(monthIdx(d), pt)
-  if (view === 'month') return pt ? `${m(anchor)} de ${anchor.slice(0, 4)}` : `${m(anchor)} ${anchor.slice(0, 4)}`
+  if (view === 'month' || view === 'schedule') return pt ? `${m(anchor)} de ${anchor.slice(0, 4)}` : `${m(anchor)} ${anchor.slice(0, 4)}`
   if (view === 'week') {
     const w = weekDays(anchor), a = w[0]!, b = w[6]!
     return pt ? `${dayNum(a)}${monthIdx(a) !== monthIdx(b) ? ` de ${m(a)}` : ''} – ${dayNum(b)} de ${m(b)}` : `${m(a)} ${dayNum(a)} – ${monthIdx(a) !== monthIdx(b) ? `${m(b)} ` : ''}${dayNum(b)}`
-  }
-  if (view === 'schedule') {
-    const b = addDays(anchor, 1), s = (d: string) => `${dowShort(weekdayMon0(d), pt)} ${String(dayNum(d)).padStart(2, '0')}`
-    return `${s(anchor)} – ${s(b)}`
   }
   const dow = (pt ? DOW_PT : DOW_EN)[weekdayMon0(anchor)]!
   return pt ? `${dow}, ${dayNum(anchor)} de ${m(anchor)}` : `${dow}, ${m(anchor)} ${dayNum(anchor)}`
@@ -290,35 +286,6 @@ export function agendaOf(day: string, o: { versions: readonly CalVersion[]; piec
   for (const m of o.marks) if (m.kind === 'task-due' && m.day === day) out.push({ kind: 'due', atMs: null, mark: m })
   // Timed entries first, by time; the untimed (a due day) after them.
   return out.sort((a, b) => (a.atMs ?? Infinity) - (b.atMs ?? Infinity))
-}
-
-// ------------------------------------------------------------------------------------------ time axis (schedule + day)
-
-export interface Seg { stage: CalStage | 'expected'; fromMs: number; toMs: number }
-
-/** The real stages a piece went through, then — when it has an estimate — the rest of the way to Publicado as ONE expected span. */
-export function pieceSegments(p: CalPiece, nowMs: number): Seg[] {
-  const real: Seg[] = p.trail.map(v => ({ stage: v.stage, fromMs: v.enteredMs, toMs: Math.min(v.enteredMs + v.ms, p.stage === 'published' ? Infinity : nowMs) }))
-  // A piece with no recorded visits but a start still shows where it is: its current stage since it began.
-  const base = real.length ? real : p.startedAtMs !== null ? [{ stage: p.stage, fromMs: p.startedAtMs, toMs: p.publishedAtMs ?? nowMs } as Seg] : []
-  if (p.stage !== 'published' && p.publishEta.kind === 'estimate' && p.publishEta.atMs > nowMs) base.push({ stage: 'expected', fromMs: nowMs, toMs: p.publishEta.atMs })
-  return base.filter(s => s.toMs > s.fromMs)
-}
-
-/** Percent position of an instant inside [fromMs, toMs]; unclamped so a caller can tell "before" from "inside". */
-export function pct(ms: number, fromMs: number, toMs: number): number { return ((ms - fromMs) / (toMs - fromMs)) * 100 }
-
-export interface DayBlock { piece: CalPiece; stage: CalStage; fromMs: number; toMs: number; expected: boolean }
-
-/** The blocks one piece draws on one day column: where it is now, then (dashed) the expected rest. Clipped to the day. */
-export function dayBlocks(p: CalPiece, day: string, nowMs: number): DayBlock[] {
-  // Core's `piecePresence` is the ONE rule (also the API's window): real activity, or start -> ETA, never "open since".
-  return pieceDayPresence(p, day, nowMs).map(b => ({ piece: p, stage: p.stage, fromMs: b.fromMs, toMs: b.toMs, expected: b.expected }))
-}
-
-/** Which pieces have anything on that day — a column in the Dia view. */
-export function piecesOnDay(pieces: readonly CalPiece[], day: string, nowMs: number): CalPiece[] {
-  return pieces.filter(p => dayBlocks(p, day, nowMs).length > 0).sort(byPriority)
 }
 
 /** Month-cell chips for the context marks of one day. */

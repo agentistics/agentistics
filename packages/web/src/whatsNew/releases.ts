@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.217.0': {
+    features: [
+      {
+        pt: 'Calendário: uma nova linha do tempo mostra cada tarefa com suas subtarefas, e a visão de Dia agora é a linha do tempo do dia.',
+        en: 'Calendar: a new timeline shows each task with its subtasks, and the Day view is now the day\'s timeline.',
+      },
+      {
+        pt: 'Ao vivo: abre bem mais rápido logo depois que o aplicativo inicia.',
+        en: 'Live: opens much faster right after the app starts.',
+      },
+      {
+        pt: 'Tarefas: a aba Atividade, a Visualização e o botão de ordenação em português; reserva cabe em uma linha.',
+        en: 'Tasks: the Activity tab, the View panel and the sort button now speak Portuguese; the claim pill fits on one line.',
+      },
+      {
+        pt: 'Endereço desconhecido abre a página inicial em vez de ficar carregando.',
+        en: 'An unknown address opens the home page instead of staying on the loading screen.',
+      },
+    ],
+    fixes: [],
+  },
   '2.216.0': {
     features: [
       {

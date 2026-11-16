@@ -36,8 +36,6 @@ const view = filterCalendar(reply, {})
 let root: Root | undefined
 let createRoot: typeof import('react-dom/client').createRoot
 let Month: typeof import('./MonthView').MonthView
-let Schedule: typeof import('./ScheduleView').ScheduleView
-let Day: typeof import('./DayView').DayView
 let Agenda: typeof import('./AgendaView').AgendaView
 let Cards: typeof import('./VersionCards').VersionCards
 
@@ -46,8 +44,6 @@ beforeAll(async () => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   createRoot = (await import('react-dom/client')).createRoot
   Month = (await import('./MonthView')).MonthView
-  Schedule = (await import('./ScheduleView')).ScheduleView
-  Day = (await import('./DayView')).DayView
   Agenda = (await import('./AgendaView')).AgendaView
   Cards = (await import('./VersionCards')).VersionCards
 })
@@ -171,22 +167,6 @@ test('calendar detail localizes the leader reason', async () => {
   expect(document.querySelector('[data-cal-leader-reason]')!.textContent).toContain('no live leader is filed')
 })
 
-test('schedule: pieces by priority, a bar per piece, the "now" line, and "sem estimativa" where the model has none', async () => {
-  await mount(createElement(Schedule, { ...common, anchor: '2026-11-07', onOpenPiece: noop, onOpenVersion: noop, onOpenMark: noop }))
-  expect(document.querySelector('[data-cal-now]')).not.toBeNull()
-  expect(document.querySelectorAll('[data-cal-piece-row]').length).toBe(view.pieces.length)
-  expect(document.querySelector('[data-cal-piece-row="t/b"]')!.textContent).toContain('sem estimativa')
-  expect(document.querySelector('[data-cal-piece-row="t/a"] [data-cal-seg="expected"]')).not.toBeNull()
-  expect(document.querySelector('[data-cal-resets]')!.textContent).toContain('ChatGPT')
-})
-
-test('day: an all-day strip with the published version and the renewal; a column for the piece in flight', async () => {
-  await mount(createElement(Day, { ...common, day: '2026-11-07', onOpenPiece: noop, onOpenVersion: noop, onOpenMark: noop }))
-  expect(document.querySelector('[data-cal-allday="version"]')!.textContent).toContain('2.201.1')
-  expect(document.querySelector('[data-cal-allday="resets"]')).not.toBeNull()
-  expect(document.querySelectorAll('[data-cal-block]').length).toBeGreaterThan(0)
-})
-
 test('agenda: the phone list has today, ordered by time, with the renewal as ONE entry', async () => {
   await mount(createElement(Agenda, { ...common, mode: 'agenda', anchor: '2026-11-07', span: 7, onOpenPiece: noop, onOpenVersion: noop, onOpenMark: noop }))
   const today = document.querySelector('[data-cal-agenda-day="2026-11-07"]')!
@@ -289,11 +269,12 @@ test('phone header keeps filters behind a sheet; month day selection opens Day',
   expect(document.querySelector('[data-test-filters]')).not.toBeNull()
 })
 
-test('phone schedule reserves scrollable space after the timeline for its final labels', async () => {
-  await mount(createElement(Schedule, { ...common, anchor: '2026-11-07', mobile: true, onOpenPiece: noop, onOpenVersion: noop, onOpenMark: noop }))
-  const track = document.querySelector<HTMLElement>('[data-cal-schedule-track]')!
-  expect(track.style.paddingRight).toBe('220px')
-  expect(track.style.paddingBottom).toBe('64px')
+test('phone: the tree views (Cronograma, Dia) show ONE row of days — their own — and no week strip above it; the others keep the strip', async () => {
+  for (const [view, strip] of [['schedule', 0], ['day', 0], ['agenda', 7], ['week', 7]] as const) {
+    await mount(createElement(MobileCalendar, { ...common, anchor: '2026-11-07', view, ready: true, body: createElement('div', { 'data-tree-body': true }), filters: null, filterCount: 0, exportIcs: noop, onOpen: noop, onDay: noop, onView: noop }))
+    expect(document.querySelectorAll('[data-cal-week-strip] button').length).toBe(strip)
+    await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = ''
+  }
 })
 
 test('phone week: the "+N" chip and a card that hides others open THAT day — calDay and calView land in ONE URL change', async () => {
@@ -309,7 +290,7 @@ test('phone week: the "+N" chip and a card that hides others open THAT day — c
     return <>
       <span data-test-url={query.toString()} />
       <button data-test-back type="button" onClick={() => back(-1)} />
-      <MobileCalendar {...common} pieces={overlapping} anchor={anchor} view={calView} ready body={null} filters={null} filterCount={0}
+      <MobileCalendar {...common} pieces={overlapping} anchor={anchor} view={calView} ready body={calView === 'day' ? <div data-cal-grid-day={anchor} /> : null} filters={null} filterCount={0}
         exportIcs={noop} onOpen={noop}
         onDay={d => { dayCalls++; setQuery(q => { q.set('calDay', d); return q }, { replace: true }) }}
         onView={v => { viewCalls++; setQuery(q => { q.set('calView', v); return q }, { replace: true }) }}

@@ -12,7 +12,8 @@
  */
 
 import type { TaskStatusDef } from '@agentistics/core'
-import { liveStatusOrder } from './board'
+import { liveStatusMap, liveStatusOrder } from './board'
+import { statusLabel, type Lang } from './copy'
 
 /** The canonical default, in reading order. */
 export const DEFAULT_STATUS_ORDER = ['blocked', 'todo', 'in_progress', 'in_review', 'done'] as const
@@ -69,15 +70,29 @@ export function moveStatus(shown: readonly string[], id: string, by: -1 | 1): st
  * `in_review` plus a later custom "In review"); the first keeps its name, every later one gets its
  * id appended so the panel never lists the same visible name twice.
  */
-export function uniqueStatusLabels(list: readonly TaskStatusDef[] | null): Record<string, string> {
+export function uniqueStatusLabels(list: readonly TaskStatusDef[] | null, lang?: Lang): Record<string, string> {
   const out: Record<string, string> = {}
   const seen = new Set<string>()
   for (const id of liveStatusOrder(list)) {
-    const base = list?.find(s => s.id === id)?.label ?? id
+    const base = lang ? statusLabel(id, lang, list) : (list?.find(s => s.id === id)?.label ?? id)
     let label = seen.has(base.trim().toLowerCase()) ? `${base} (${id})` : base
     while (seen.has(label.trim().toLowerCase())) label += '*'
     seen.add(label.trim().toLowerCase())
     out[id] = label
   }
   return out
+}
+
+/**
+ * The "Visualização" popover's status rows: display name through `statusLabel` (the one helper the
+ * modal and the fields use), colour from the live list, count supplied by the caller.
+ */
+export function statusViewItems(
+  list: readonly TaskStatusDef[] | null, lang: Lang, countOf: (id: string) => number,
+): { id: string; label: string; color: string; count: number }[] {
+  const m = liveStatusMap(list, lang)
+  const names = uniqueStatusLabels(list, lang)
+  return liveStatusOrder(list).map(id => ({
+    id, label: names[id] ?? m[id]?.label ?? id, color: m[id]?.color ?? 'var(--text-tertiary)', count: countOf(id),
+  }))
 }
