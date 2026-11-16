@@ -115,6 +115,8 @@ interface TabProps {
   /** Coarse pointer (touch): sizing/visibility of the × follow it, not only the width. */
   touch: boolean
   pt: boolean
+  /** Phone only: the tab's width (default the whole strip — one session per snap). A browser's tabs use ~62 % so the neighbour shows. */
+  mobileWidth?: string
   onFocused: () => void
   onFocusTab: (key: string) => void
   focusable: boolean
@@ -130,7 +132,7 @@ const FOCUS_RING = '2px solid var(--anthropic-orange)'
 /** Enter/Space on the inner controls act on THEM; they must not reach the tab's own handler (which would activate it). */
 const stopKeys = (e: { key: string; stopPropagation(): void }) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation() }
 
-function Tab({ item, tabAttr, active, mobile, touch, pt, onFocused, onFocusTab, focusable, onPick, onClose, onUnpin, onMenu, onDropOn, setRef }: TabProps) {
+function Tab({ item, tabAttr, active, mobile, touch, pt, mobileWidth, onFocused, onFocusTab, focusable, onPick, onClose, onUnpin, onMenu, onDropOn, setRef }: TabProps) {
   const [hover, setHover] = useState(false)
   const [focus, setFocus] = useState(false)
   const [btnFocus, setBtnFocus] = useState(false)
@@ -151,7 +153,7 @@ function Tab({ item, tabAttr, active, mobile, touch, pt, onFocused, onFocusTab, 
     minHeight: mobile ? 44 : TAB_H, height: mobile ? undefined : TAB_H,
     padding: mobile ? '5px 6px 5px 12px' : '0 6px 0 12px', borderRadius: mobile ? 8 : '10px 10px 0 0', boxSizing: 'border-box',
     fontSize: 12, scrollSnapAlign: 'center', scrollSnapStop: 'always',
-    minWidth: mobile ? 132 : 110, width: mobile ? '100%' : 'max-content', maxWidth: mobile ? '100%' : 360,
+    minWidth: mobile ? 132 : 110, width: mobile ? (mobileWidth ?? '100%') : 'max-content', maxWidth: mobile ? (mobileWidth ?? '100%') : 360,
     fontWeight: active || needs ? 650 : 500,
     color: active || (!mobile && needs) ? 'var(--text-primary)' : 'var(--text-tertiary)',
     background: active ? (mobile ? 'var(--bg-elevated)' : 'var(--bg-card)') : hover ? 'color-mix(in srgb, var(--bg-elevated) 50%, transparent)' : 'transparent',
@@ -238,6 +240,8 @@ export interface TabStripViewProps {
   list: { label: string; count: number; extra?: ReactNode; expanded: boolean; onToggle: (el: HTMLButtonElement) => void; buttonRef?: Ref<HTMLButtonElement> }
   /** A "+" after the tabs (a browser's new tab). Absent = none. */
   plus?: { label: string; onClick: () => void; disabled?: boolean }
+  /** Phone tab width (see `TabProps.mobileWidth`). */
+  mobileTabWidth?: string
   onPick: (key: string) => void
   onClose?: (key: string) => void
   onUnpin?: (key: string) => void
@@ -254,7 +258,7 @@ export interface TabStripViewProps {
  * list button with its count · scrolling tablist with edge fade · optional "+". Keyboard focus moves along the
  * tabs with the arrows; the active tab is kept in view. It holds no rule about WHAT a tab is.
  */
-export function TabStripView({ items, activeKey, pt, stripAttr = 'data-session-tabs', tabAttr = 'data-session-tab', tablistLabel, pinnedCount = 0, list, plus, onPick, onClose, onUnpin, onMenu, onDropOn, children, after }: TabStripViewProps) {
+export function TabStripView({ items, activeKey, pt, stripAttr = 'data-session-tabs', tabAttr = 'data-session-tab', tablistLabel, pinnedCount = 0, list, plus, mobileTabWidth, onPick, onClose, onUnpin, onMenu, onDropOn, children, after }: TabStripViewProps) {
   const mobile = useIsMobile()
   const touch = useIsCoarsePointer()
   const order = useMemo(() => items.map(i => i.key), [items])
@@ -321,7 +325,7 @@ export function TabStripView({ items, activeKey, pt, stripAttr = 'data-session-t
                 <span aria-hidden style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '6px 2px', flexShrink: 0 }} />
               )}
               <Tab
-                item={item} tabAttr={tabAttr} active={k === activeKey} mobile={mobile} touch={touch} pt={pt}
+                item={item} tabAttr={tabAttr} active={k === activeKey} mobile={mobile} touch={touch} pt={pt} {...(mobileTabWidth ? { mobileWidth: mobileTabWidth } : {})}
                 onFocused={() => setFocusedKey(k)}
                 focusable={k === (focusedKey && order.includes(focusedKey) ? focusedKey : activeKey)}
                 onFocusTab={key => {

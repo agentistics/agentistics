@@ -136,6 +136,13 @@ export const PANEL_META: Record<PanelId, PanelMetaEntry> = {
       pt: 'Os recursos de hardware desta máquina.',
     },
   },
+  browser: {
+    title: { en: 'Browser', pt: 'Navegador' },
+    description: {
+      en: 'Your own browser: open any page, with tabs, next to the conversation.',
+      pt: 'O seu próprio navegador: abra qualquer página, com abas, ao lado da conversa.',
+    },
+  },
   cli: {
     title: { en: 'Claude Code', pt: 'Claude Code' },
     description: {
