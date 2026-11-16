@@ -45,6 +45,29 @@ const mount = async (el: React.ReactElement) => {
 const noop = () => {}
 const weekProps = { anchor: '2026-11-14', nowMs: NOW, pieces, pt: true, selected: null, onOpenPiece: noop }
 
+for (const pt of [true, false]) {
+  test(`day: approved header legend, ${pt ? 'pt' : 'en'}`, async () => {
+    await mount(createElement(Day, { ...weekProps, day: weekProps.anchor, pt }))
+    const legend = document.querySelector('[data-cal-tree-head] [data-cal-legend]')!
+    expect(legend).not.toBeNull()
+    expect(Array.from(legend.children).map(e => e.textContent)).toEqual(pt ? ['feito', 'previsto', 'sem horário'] : ['done', 'expected', 'no time'])
+    expect(legend.querySelectorAll('.crono-key')).toHaveLength(3)
+    expect(legend.querySelector('.crono-prev')).not.toBeNull()
+    expect(legend.querySelector('.crono-sem')).not.toBeNull()
+    expect(document.querySelector('[data-cal-tree-head]')!.nextElementSibling).toBe(document.querySelector('[data-cal-tree]'))
+  })
+
+  test(`week: approved header legend, ${pt ? 'pt' : 'en'}`, async () => {
+    await mount(createElement(Week, { ...weekProps, pt }))
+    const legend = document.querySelector('[data-cal-tree-head] [data-cal-legend]')!
+    expect(legend).not.toBeNull()
+    expect(Array.from(legend.children).map(e => e.textContent)).toEqual(pt ? ['em andamento', 'publicado', 'previsto', 'tarefa / grupo'] : ['in progress', 'published', 'expected', 'task / group'])
+    expect(legend.querySelectorAll('.crono-key')).toHaveLength(4)
+    expect(legend.querySelector('.crono-sem')).not.toBeNull()
+    expect(legend.querySelector('.crono-prev')).toBeNull()
+  })
+}
+
 test('week: the tree has task → group → subtask rows and the now line', async () => {
   await mount(createElement(Week, weekProps))
   expect(document.querySelectorAll('.crono-row[data-kind="task"]').length).toBe(1)

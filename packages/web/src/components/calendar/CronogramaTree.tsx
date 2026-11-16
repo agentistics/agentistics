@@ -122,6 +122,16 @@ export function CronogramaTree({ mode, anchor, nowMs, pieces, pt, selected, onOp
 
   return (
     <div className="crono" data-mode={axis.mode} data-cal-schedule={W ? '' : undefined} data-cal-day-view={W ? undefined : ''} data-cal-day={W ? undefined : anchor}>
+      <div className="crono-head" data-cal-tree-head>
+        <div className="crono-legend" data-cal-legend>
+          <span><i aria-hidden className="crono-key" style={{ background: stageColor('running') }} />{pick(W ? TEXT.legendRunning : TEXT.legendDone, pt)}</span>
+          {W && <span><i aria-hidden className="crono-key" style={{ background: stageColor('published') }} />{pick(TEXT.legendPublishedPiece, pt)}</span>}
+          <span><i aria-hidden className={`crono-key ${W ? 'crono-sem' : 'crono-prev'}`} />{pick(TEXT.legendForecast, pt)}</span>
+          {W
+            ? <span><i aria-hidden className="crono-key" style={{ background: 'var(--navy2)' }} />{pick(TEXT.legendTaskGroup, pt)}</span>
+            : <span><i aria-hidden className="crono-key crono-sem" />{pick(TEXT.noTime, pt)}</span>}
+        </div>
+      </div>
       <div className="crono-tl" data-cal-tree ref={tl}>
         <div className="crono-in">
           <div className="crono-hrow">

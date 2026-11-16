@@ -60,6 +60,8 @@ export const TEXT = {
   overdue: t('atrasadas', 'overdue'),
   overdueSince: t('atrasada desde', 'overdue since'),
   legendPublished: t('publicada', 'published'),
+  legendPublishedPiece: t('publicado', 'published'),
+  legendDone: t('feito', 'done'),
   legendRunning: t('em andamento', 'in progress'),
   legendForecast: t('previsto', 'expected'),
   legendTaskGroup: t('tarefa / grupo', 'task / group'),

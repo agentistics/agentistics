@@ -1,5 +1,7 @@
 # Delivery calendar on phones
 
+The tree calendar (Day and Cronograma) has a legend above the timeline, aligned to the right as in the approved prototypes. Day explains the solid phase colour (done), diagonal forecast stripes (expected), and dashed outline (no time); Cronograma explains in progress, published, expected (dashed outline), and task/group. The swatches reuse the bars' phase colours, forecast pattern and no-time outline. Copy follows the calendar's Portuguese/English setting. As in the prototypes, this legend is hidden below 700px. The Day footer describes rows with activity on the selected day and gives the actual number of pieces left out; it remains visible above the phone's bottom navigation.
+
 Below the app's 768px breakpoint, `/tasks/calendar` opens an hour grid for one BRT day. The header opens the month picker and view menu (Day, 3 days, Week, Month, Schedule, Agenda). The seven-day strip selects a date; a horizontal swipe changes its week. A horizontal swipe over the hour grid changes the selected day. Vertical gestures scroll the grid.
 
 Filters open in the app's bottom sheet. The sheet reuses the existing task, stage, version, harness, priority and confirmation controls. The URL stores `calDay`, `calView`, and `calFilters`, preserving unrelated query parameters. Invalid filter values fall back to the defaults.
