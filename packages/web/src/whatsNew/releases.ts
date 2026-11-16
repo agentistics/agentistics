@@ -24,6 +24,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Tarefas: a aba Atividade, a Visualização e o botão de ordenação em português; reserva cabe em uma linha.',
         en: 'Tasks: the Activity tab, the View panel and the sort button now speak Portuguese; the claim pill fits on one line.',
       },
+      {
+        pt: 'Endereço desconhecido abre a página inicial em vez de ficar carregando.',
+        en: 'An unknown address opens the home page instead of staying on the loading screen.',
+      },
     ],
     fixes: [],
   },
