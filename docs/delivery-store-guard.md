@@ -82,6 +82,40 @@ the sentence in English and Portuguese (`safeError` for anything else, never the
 refusal persists leaves ONE board note per (piece, code), in both languages, until the refusal changes or clears
 (a tick in which it is not refused) and returns; a delivery record's `tickNote` is overwritten, never accumulated.
 
+## Custody clocks (S7a, spec §5.1–§5.2) — rule C
+
+A piece whose leader stopped acting returns to the project leader's queue. The decision is the PURE `custody.ts`
+(`planCustody`); `custody-tick.ts` reads the facts, writes the patches in ONE `deliveries.json` write per tick and tells
+each custodian. Rule C `off` (the default) does nothing at all: no read, no stamp, no clock, no message — a test builds the
+same history with and without the custody step wired and compares the bytes. `shadow` reports (`custody would-…`) and writes
+nothing. `on` applies. S7b (`leads()` accepting the custodian, wake routing, check-in, SessionStart) and S7c (UI, verbs) are
+NOT in this slice.
+
+Three separate clocks. **Liveness** (the row is alive) is necessary, never sufficient. **Piece activity**
+(`record.leaderActivityAt/By`) is the last task-scoped board action of a leader or custodian on the piece — a guarded
+transition, a gate run, a block/unblock, a configure, an evidence attach/remove or a release declaration — written by the
+service only when the actor leads the piece (or holds its custody) and rule C is not off. Plain comments, `lastSeenMs`,
+heartbeats, status words and transcript writes are not inputs of the planner at all (a transcript is per conversation, not per
+task). **Absence** (`record.leaderAbsentSince`) is persisted, set and cleared only by the tick: it is set when a piece at a
+running stage (`executando`/`qa`/`ajuste`) or at rank 1–3 has no live leader (filed, custodian, or a live leader of its task)
+with activity within N, anchored at the moment the activity STOPPED (so a zombie that has not acted for N + 1 min is an orphan
+on the tick that sees it). A never-led piece is anchored at its stage entry; a led piece with no activity on record anchors at
+the first tick that sees it absent, so turning the rule on never takes pieces over on day one. A restart changes nothing (it is
+a stored ISO), and an unreadable fleet changes nothing (`custody-skipped`; no clock advances or clears). N = 4 h,
+`preferences.delivery.orphanAfterHours` (1–48).
+
+Past N the piece gets `record.custody = { sessionId, since, via, project }` — per piece, never filing. The custodian is the
+project leader: a live leader with piece activity in the last N on any piece of the same project (ties → most recent activity,
+then the smaller id; the piece's own filed leader and the custodian it just lost are never candidates). The project is
+`normalizeGitRemote(Task.repo)`, else the repository of the piece's own sessions, short-keyed `org/repo` on both routes; an
+unknown project is queued, never handed to anybody. No project leader → `{ sessionId: null, via: 'queue' }`, re-evaluated on
+every tick, assigned (and messaged) on the first tick a candidate exists. ONE message per custodian per tick; an assignment
+that did not arrive is retried (`notifiedAt` is stamped only after a delivered message). A custodian holds for N after its
+assignment or its own last piece action and loses custody when it dies or goes quiet longer than that; the filed leader acting
+on the piece again, or `publicado`, ends custody (every change is in `custodyLog`, capped). Custody is an authorization of the
+actor, never evidence or proof — guard A/B still judge every rank raise. `custodyView` says `no-leader` only while
+now − leaderAbsentSince ≤ N.
+
 ## The sweep (S2b, spec §2.6)
 
 Every minute tick starts with `guardSweep` (`sweep.ts` logic, `sweep-plan.ts` pure plan; the service injects the stores, so

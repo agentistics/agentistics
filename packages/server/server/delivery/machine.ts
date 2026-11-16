@@ -210,6 +210,14 @@ export interface DeliveryRecord {
   tickNote?: { at: string; phase: Phase; revision: number; reason: string; /** A gate REFUSED (as opposed to "not yet"): the piece waits on the leader. */ failed?: boolean }
   /** The last time the task's LEADER acted on this piece without moving it (a gate, a configure, a step). Restarts the review clock. */
   leaderTouchedAt?: string
+  /** S7a (spec §5.1): the last TASK-SCOPED board action a leader or custodian took on this piece. Written only while rule C is not `off`. */
+  leaderActivityAt?: string
+  leaderActivityBy?: string
+  /** S7a: since when no live leader has acted on the piece. Persisted; set and cleared only by the custody tick (`custody.ts`). */
+  leaderAbsentSince?: string | null
+  /** S7a: who has the piece while its leader is absent past N (per piece; NOT filing). */
+  custody?: import('./custody').Custody
+  custodyLog?: import('./custody').CustodyLogEntry[]
   /** FLUXO.CICLO-COMPLETO — the timed reminder to the live leader for a piece waiting on them (one per phase/revision, max 3). */
   reviewNudge?: { phase: Phase; revision: number; sent: number; lastAt?: string; lastAttemptAt?: string }
   history: DeliveryHistoryEntry[]

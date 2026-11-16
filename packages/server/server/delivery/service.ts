@@ -19,7 +19,7 @@
  */
 import { dirname } from 'node:path'
 import { contextOfActor, flowContext, GuardRefused } from './guard'
-import { reviewOutcome, ruleAState, guardPathsOf } from './guard-host'
+import { reviewOutcome, ruleAState, ruleCState, guardPathsOf } from './guard-host'
 import { withGuardEnvelope, withGuardTransaction } from './guard-transaction'
 import {
   EDGES, GATES, adoptPhase, gatesFor, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
@@ -38,6 +38,8 @@ import { buildEvidenceItem, checkReuse, type EvidenceItem, type EvidenceKind, ty
 import { createGuardsStore, defaultGuardsPath } from './guards-store'
 import { GuardsUnreadable } from './guards-store'
 import { GuardBusy } from './guard-locks'
+import { stampActivity } from './custody'
+import { custodyTick } from './custody-tick'
 import { guardSweep, type SweepDeps } from './sweep'
 import { ownerIntent } from '../flows/owner-intent'
 import { requestReminderText } from './request-reminder'
@@ -112,6 +114,8 @@ export interface DeliveryDeps {
   autoReconcileAwait?: boolean
   /** S2b: the guard sweep the tick runs (rule A shadow/on only). The board store and the three lock paths it judges. */
   sweep?: { tasks: () => Promise<import("../sessions/task-store").TaskStore>; paths?: import("./guard-locks").GuardLockPaths }
+  /** S7a: the custody tick's facts (rule C only; absent = the tick has no custody step). */
+  custody?: { projectsOf: import('./custody-tick').CustodyDeps['projectsOf']; orphanAfterHours: import('./custody-tick').CustodyDeps['orphanAfterHours']; titles?: import('./custody-tick').CustodyDeps['titles'] }
   /** The automatic reconcile's shortest cadence (default 30 min; it also waits 3x what the last run took). */
   autoReconcileEveryMs?: number
   /** Where what gh answered survives a restart (absent: this process only). A cache: a failed read or write costs one run, never a wrong answer. */
@@ -320,6 +324,27 @@ export function createDeliveryService(deps: DeliveryDeps) {
     const sessions = await d.facts.sessions().catch(() => [])
     return sessions.some(x => x.id === actor && x.role === 'leader' && x.taskId === r.taskId)
   }
+  /**
+   * S7a (§5.1): is this write a PIECE ACTION of a leader or custodian — the activity clock the custody tick reads? Only a session
+   * that leads the piece (or holds its custody) counts; the owner, the flow engine and an unattributed caller never do. Rule C
+   * `off` stamps NOTHING, so a machine that never turned it on keeps its records byte for byte.
+   */
+  const leaderAction = async (r: DeliveryRecord, actor: string): Promise<boolean> => {
+    if (!actor || actor === 'owner' || actor === 'unattributed' || actor.startsWith('flow:')) return false
+    if ((await ruleCState(dirname(d.store.path)).catch(() => 'off' as const)) === 'off') return false
+    return r.custody?.sessionId === actor || (await leads(r, actor))
+  }
+  /**
+   * S7a: records the piece action AFTER the action landed — a separate, context-carrying write (flow engine `custody`) that only
+   * touches the two activity fields, so the action's own write is byte for byte what it always was. Rule C off: never called into
+   * a write. A lagging stamp is safe: it can only make a leader look LESS recent than it is by the width of one call.
+   */
+  const touchLeader = async (subtaskId: string, actor: string, before: DeliveryRecord): Promise<void> => {
+    try {
+      if (!(await leaderAction(before, actor))) return
+      await d.store.update(doc => { const c = doc.deliveries[subtaskId]; if (c) stampActivity(c, actor, iso(d)) }, { guard: flowContext('custody') })
+    } catch { /* the activity clock is best effort; the action it describes already happened */ }
+  }
   const isReply = (v: DeliveryRecord | DeliveryReply): v is DeliveryReply => 'status' in v && 'ok' in v
 
   /** Gate evidence onto a record (revision-stamped), plus the facts the gate established. */
@@ -433,6 +458,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       }
       return refused(out.plan, out.cur)
     }
+    await touchLeader(subtaskId, actor, got)
     await effects(out.before, out.after, actor, warnings)
     return { ok: true, status: 200, record: out.after, warnings, ...(out.skipped ? { skipped: out.skipped } : {}) }
     })
@@ -463,6 +489,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       return structuredClone(cur)
     })
     if (!after) return fail(404, 'no_delivery', 'the delivery record vanished')
+    await touchLeader(subtaskId, actor, got)
     const warnings: string[] = []
     const step = STEP_ON_GATE[`${after.phase}:${name}`]
     if (v.ok && step) await d.board.logStep(after.taskId, after.subtaskId, step, actor).catch(e => warnings.push(String(e)))
@@ -482,6 +509,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       return { plan, before: structuredClone(cur) }
     })
     if (!out.plan.ok) return refused(out.plan, out.before)
+    await touchLeader(subtaskId, actor, got)
     const after = out.plan.next
     const warnings: string[] = [...blockWarnings]
     await effects(out.before, after, actor, warnings)
@@ -519,6 +547,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       return { plan, before: structuredClone(cur) }
     })
     if (!out.plan.ok) return refused(out.plan, out.before)
+    await touchLeader(subtaskId, actor, got)
     const warnings: string[] = []
     await effects(out.before, out.plan.next, actor, warnings)
     await d.emit('entrega.destravada', { subtarefa: subtaskId, fase: out.plan.next.phase }).catch(() => undefined)
@@ -567,6 +596,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       if (!actor.startsWith('flow:')) cur.leaderTouchedAt = iso(d) // a leader acting on the piece restarts its reminder clock
       return structuredClone(cur)
     })
+    await touchLeader(subtaskId, actor, got)
     await d.board.comment(after.taskId, subtaskId, `[fluxo entrega] configuração por ${actor}: ${Object.keys(patch).join(', ')}.`).catch(() => undefined)
     return { ok: true, status: 200, record: after, warnings: [] }
   }
@@ -682,6 +712,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       await rollbackUpload()
       return { ok: true, status: 200, record: stored.record, warnings: ['the same evidence was already attached; nothing changed'], evidence: stored.existing }
     }
+    await touchLeader(subtaskId, actor, got)
     return { ok: true, status: 200, record: stored.record, warnings: [], evidence: item }
   }
 
@@ -712,6 +743,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
     }, { evidence: true, guardsPath: d.guardsPath ?? defaultGuardsPath() })
     if (!after) return fail(409, 'evidence_in_use', 'this evidence backs a checkpoint or pending intent (or the checkpoints cannot be read): it cannot be removed', [], got)
     if (item.fileId) await d.evidenceFiles?.remove(item.fileId).catch(() => false)
+    await touchLeader(subtaskId, actor, got)
     return { ok: true, status: 200, record: after, warnings: [] }
   }
 
@@ -1026,6 +1058,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
     if (batch.kind === 'moved') return fail(409, 'revisao_obsoleta', `${batch.id} moved meanwhile; nothing was written — run the release again`, [], batch.cur ?? undefined)
     const pieces: ReleasePiece[] = []
     for (const x of drafts) {
+      // S7a: a release declaration is a piece action of the leader/custodian declaring it (rule C only).
+      if (x.changed) await touchLeader(x.id, actor, x.before)
       pieces.push({ subtaskId: x.id, phase: x.after.phase, changed: x.changed })
       if (x.askOwner) await d.notify.owner(`Aprovação pedida: ${x.id} quer entrar em publicado (portão humano). Aprove ou reprove no cartão da Live (botão), ou com: agentop flow approve --subtask ${x.id} --phase publicado --decision approve|reject.`, 'decisao').catch(e => warnings.push(`owner notice: ${String(e)}`))
       if (!x.transitions.length && JSON.stringify(x.before.ci) !== JSON.stringify(x.after.ci)) await d.board.setCi(x.id, x.after.ci ?? null).catch(e => warnings.push(`ci signal: ${String(e)}`))
@@ -2176,6 +2210,20 @@ export function createDeliveryService(deps: DeliveryDeps) {
     }
   }
 
+  /** S7a: the real stores and facts behind the custody step (custody-tick.ts imports no store of its own). */
+  const custodyPorts = async (c: NonNullable<DeliveryDeps['custody']>): Promise<import('./custody-tick').CustodyDeps> => ({
+    rule: () => ruleCState(dirname(d.store.path)),
+    store: d.store as never,
+    sessions: async () => { const rows = await d.facts.sessions().catch(() => null); return rows ? rows.map(s => ({ id: s.id, alive: s.alive, ...(s.role ? { role: s.role } : {}), ...(s.taskId ? { taskId: s.taskId } : {}) })) : null },
+    projectsOf: c.projectsOf,
+    orphanAfterHours: c.orphanAfterHours,
+    notify: (sessionId, text) => d.notify.session(sessionId, text, ''),
+    ...(c.titles ? { titles: c.titles } : {}),
+    guard: flowContext('custody'),
+    now: d.now,
+    log: line => d.log?.(line),
+  })
+
   const tickOnce = async (): Promise<{ actions: string[] }> => {
     const actions: string[] = []
     refusedNow.clear()
@@ -2189,6 +2237,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
         else actions.push(`sweep-erro: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`)
       }
     }
+    // S7a: the custody clocks (rule C only; `off` does nothing at all). A refusal is isolated like every other tick step.
+    if (d.custody) await custodyTick(await custodyPorts(d.custody), actions).catch(e => tickRefusal(e, actions))
     await cleanQueue(actions).catch(e => tickRefusal(e, actions))
     // ONE read of the fleet and ONE read of the board's blocked pieces per tick; null = could not be read (never "none").
     const sessions = await d.facts.sessions().catch(() => null)
