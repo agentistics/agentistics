@@ -24,13 +24,15 @@
  * rules then come from the authenticated mirror `setState` keeps in guards.json (`rulesWhenTampered`), with a WARN —
  * never "every rule off" in silence, and a forged `on` / forged owner log line is not believed.
  */
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { STATUS_STAGES } from '@agentistics/core'
 import { unsealed, verdictFor, writeSealed, type TamperReason } from './guard-integrity'
 import { createGuardsStore, keepUnreadableCopy, type GuardsDoc } from './guards-store'
-import { defaultGuardLockPaths } from './guard-locks'
+import { defaultGuardLockPaths, type GuardLockPaths } from './guard-locks'
 import { withGuardEnvelope } from './guard-transaction'
+import { parseDeliveryDocStrict, rollForwardDelivery } from './store'
+import { deliveryTamper, type TamperView } from './guard'
 
 export const RULE_IDS = ['a', 'b', 'c', 'd'] as const
 export type RuleId = (typeof RULE_IDS)[number]
@@ -40,7 +42,7 @@ export type RuleState = 'off' | 'shadow' | 'on'
 const STAGE_SET: ReadonlySet<string> = new Set(STATUS_STAGES)
 
 export interface RuleEntry { state: RuleState; since?: string; build: string }
-export interface GuaranteeChange { rule: RuleId; from: RuleState; to: RuleState; via: OwnerVia; at: string; build: string }
+export interface GuaranteeChange { rule: RuleId; from: RuleState; to: RuleState; via: OwnerVia; at: string; build: string; reconciledFloors?: { dropped: string[]; reason: string } }
 export interface GuaranteesDoc {
   rules: Partial<Record<RuleId, RuleEntry>>
   statusStages?: Record<string, string>
@@ -160,7 +162,29 @@ export function defaultGuaranteesPath(dataDir = process.env.AGENTISTICS_DIR ?? j
   return join(dataDir, 'guarantees.json')
 }
 
-export function createGuaranteesStore(path = defaultGuaranteesPath()): GuaranteesStore {
+// Read optimization ONLY. Writers continue to load and authenticate policy under their locks.
+// The inode/ctime stamp observes another process's atomic rename or deletion without reading policy bytes per read.
+const deliveryRules = new Map<string, { stamp: string; state: RuleState }>()
+const policyPath = defaultGuaranteesPath
+export async function deliveryReadRule(guardsPath: string): Promise<RuleState> {
+  const path = policyPath(dirname(guardsPath))
+  let stamp: string
+  try { const s = await stat(path); stamp = `${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}` }
+  catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; stamp = 'absent' }
+  const cached = deliveryRules.get(path)
+  if (cached?.stamp === stamp) return cached.state
+  const { doc, warn, tampered } = await createGuaranteesStore(path).read()
+  if (warn) console.warn(`[guard] ${warn}`)
+  const state = ruleState(doc, 'a')
+  // A tampered policy uses a mirror: do not cache a state whose mirror can change independently.
+  if (!tampered) {
+    if (deliveryRules.size >= 256) deliveryRules.delete(deliveryRules.keys().next().value!)
+    deliveryRules.set(path, { stamp, state })
+  }
+  return state
+}
+
+export function createGuaranteesStore(path = policyPath()): GuaranteesStore {
   const guards = createGuardsStore(join(dirname(path), 'guards.json'))
   /** The authenticated mirror, or `'tampered'` when guards.json itself cannot be trusted. */
   const mirror = async (): Promise<GuardsDoc | 'tampered'> => { try { return await guards.read() } catch { return 'tampered' } }
@@ -189,7 +213,7 @@ export function createGuaranteesStore(path = defaultGuaranteesPath()): Guarantee
       // `off` holds its own file lock while it writes, so the switch can never land in the middle of that write; and the
       // read-modify-write of guards.json / guarantees.json below can never interleave with a guarded write's checkpoint.
       const paths = defaultGuardLockPaths(dirname(path))
-      return withGuardEnvelope(paths, () => moveRule(rule, to, ctx))
+      return withGuardEnvelope(paths, () => moveRule(rule, to, ctx, paths))
     },
     async writeStatusStages(statuses) {
       const { doc, warn } = await load()
@@ -199,7 +223,7 @@ export function createGuaranteesStore(path = defaultGuaranteesPath()): Guarantee
       await save({ ...doc, statusStages: m })
     },
   }
-  async function moveRule(rule: RuleId, to: RuleState, { check, facts }: { check: OwnerCheck; facts: ActivationFacts }): Promise<MoveResult> {
+  async function moveRule(rule: RuleId, to: RuleState, { check, facts }: { check: OwnerCheck; facts: ActivationFacts }, paths: GuardLockPaths): Promise<MoveResult> {
     {
       // A tampered file is not a refusal for the OWNER: their proven move re-seals from the effective (mirrored) state.
       const { doc, warn, tampered } = await load()
@@ -219,9 +243,26 @@ export function createGuaranteesStore(path = defaultGuaranteesPath()): Guarantee
       // The authenticated mirror FIRST: a crash between the two leaves guarantees.json at its older, still-sealed state.
       let g: GuardsDoc
       try { g = await guards.read() } catch { return { ok: false, code: 'guards_unreadable' } }
+      g = await rollForwardDelivery(paths.deliveries, guards, g)
+      if (rule === 'a' && from === 'off' && to === 'shadow') {
+        // OFF explicitly permits restoring the ledger. Shadow starts with that ledger's floors, with an audit
+        // of every lost floor; it cannot authorize ON until a fresh shadow period has elapsed.
+        let deliveries: Record<string, TamperView>
+        try { deliveries = parseDeliveryDocStrict(await readFile(paths.deliveries, 'utf8')).deliveries }
+        catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; deliveries = {} }
+        const dropped = Object.entries(g.deliveryFloors ?? {}).filter(([id, floor]) => {
+          const now = deliveries[id]
+          return !now || now.taskId !== floor.taskId || deliveryTamper({ [id]: floor }, { [id]: now }, true).length > 0
+            || (floor.evidence ?? []).some(item => !(now.evidence ?? []).some(i => JSON.stringify(i) === JSON.stringify(item)))
+        }).map(([id]) => id)
+        const deliveryFloors = Object.fromEntries(Object.entries(deliveries).map(([id, r]) => [id, { taskId: r.taskId, revision: r.revision, history: r.history ?? [], evidenceHistory: r.evidenceHistory ?? [], evidence: r.evidence ?? [] }]))
+        g = { ...g, deliveryFloors }
+        log[log.length - 1] = { ...log[log.length - 1]!, reconciledFloors: { dropped, reason: 'off-to-shadow: re-sealed from the present delivery ledger after OFF permitted restore or edits' } }
+      }
       if (tampered) await keepUnreadableCopy(path) // the owner's re-seal replaces the bytes: one copy stays for a person to read
       await guards.write({ ...g, rules: Object.fromEntries(Object.entries(rules).map(([k, e]) => [k, e!.state])) })
       await save({ ...doc, rules, log })
+      deliveryRules.delete(path)
       return { ok: true }
     }
   }

@@ -65,7 +65,15 @@ const PROPERTY_WRITES = new Set(['linkSync', 'symlinkSync', 'execFileSync', 'exe
 const WRITING_MODULE = /^(node:)?(fs(\/promises)?|child_process|worker_threads|module)$|^bun$/
 const BUN_WRITES = new Set(['write', 'spawn', 'spawnSync', '$'])
 const literalText = (e: ts.Node | undefined): string | undefined => e && (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ? e.text : undefined
-const isModuleCall = (n: ts.Node): n is ts.CallExpression => ts.isCallExpression(n) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === 'require'))
+const isModuleCall = (n: ts.Node): n is ts.CallExpression => {
+  if (!ts.isCallExpression(n)) return false
+  const e = unwrap(n.expression)
+  if (e.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(e) && e.text === 'require')) return true
+  if (!ts.isPropertyAccessExpression(e)) return false
+  const receiver = unwrap(e.expression).getText()
+  return (e.name.text === 'require' && /^(import\.meta|module)$/.test(receiver))
+    || (e.name.text === 'getBuiltinModule' && receiver === 'process')
+}
 /** `x` or `await x` → x */
 const unwrap = (e: ts.Expression): ts.Expression => ts.isAwaitExpression(e) || ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isTypeAssertionExpression(e) || ts.isNonNullExpression(e) || ts.isSatisfiesExpression(e) ? unwrap(e.expression) : e
 
@@ -102,6 +110,10 @@ export function forbiddenCapabilities(src: string): string[] {
   const file = source('export {};\n' + src)
   const out: string[] = []
   const visit = (n: ts.Node) => {
+    if (ts.isIdentifier(n) && n.text === 'eval') out.push('eval')
+    if (((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && /^(node:)?vm$/.test(literalText(n.moduleSpecifier) ?? ''))
+      || (isModuleCall(n) && /^(node:)?vm$/.test(literalText(n.arguments[0]) ?? ''))
+      || (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference) && /^(node:)?vm$/.test(literalText(n.moduleReference.expression) ?? ''))) out.push('module:vm')
     if (ts.isCallExpression(n) || ts.isNewExpression(n)) {
       const e = unwrap(n.expression)
       const name = ts.isPropertyAccessExpression(e) ? e.name.text : ts.isElementAccessExpression(e) ? literalText(e.argumentExpression) : e.getText(file)
@@ -109,7 +121,7 @@ export function forbiddenCapabilities(src: string): string[] {
     }
     if (ts.isPropertyAccessExpression(n) && unwrap(n.expression).getText(file) === 'process' && n.name.text === 'binding') out.push('process.binding')
     if (ts.isElementAccessExpression(n) && unwrap(n.expression).getText(file) === 'process' && literalText(n.argumentExpression) === 'binding') out.push('process.binding')
-    if (ts.isElementAccessExpression(n) && /^(globalThis|Bun)$/.test(unwrap(n.expression).getText(file)) && literalText(n.argumentExpression) === undefined) out.push('computed:' + unwrap(n.expression).getText(file))
+    if (ts.isElementAccessExpression(n) && /^(global|globalThis|self|Bun)$/.test(unwrap(n.expression).getText(file)) && literalText(n.argumentExpression) === undefined) out.push('computed:' + unwrap(n.expression).getText(file))
     ts.forEachChild(n, visit)
   }
   visit(file)

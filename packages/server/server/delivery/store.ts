@@ -17,11 +17,12 @@ import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/prom
 import { dirname, join, resolve } from 'node:path'
 import { GuardBusy, GuardLockOrderError, withGuardLocks } from './guard-locks'
 import { inGuardTransaction, peekRuleA, serializeGuardWrite } from './guard-transaction'
-import { deliveryRaises, deliveryTamper, GuardRefused, type GuardContext } from './guard'
+import { deliveryRaises, deliveryTamper, phaseRank, GuardRefused, type GuardContext } from './guard'
 import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from './guard-host'
 import { withFileLock } from '../sessions/file-lock'
 import { isPhase, type DeliveryRecord } from './machine'
-import { createGuardsStore } from './guards-store'
+import { createGuardsStore, type GuardsDoc, type GuardsStore } from './guards-store'
+import { deliveryReadRule } from './activation'
 import type { TamperView } from './guard'
 
 export interface DeliveryDoc {
@@ -103,6 +104,23 @@ export function defaultDeliveriesPath(): string {
   return join(dir, 'deliveries.json')
 }
 
+async function materializeDelivery(path: string, serialized: string): Promise<void> {
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(tmp, serialized, { mode: 0o600 })
+  await rename(tmp, path)
+}
+
+/** Caller holds deliveries → guards. A rule move must resolve this commit before moving the rule. */
+export async function rollForwardDelivery(path: string, floorStore: GuardsStore, guardDoc: GuardsDoc): Promise<GuardsDoc> {
+  if (guardDoc.pendingDelivery !== undefined) {
+    await materializeDelivery(path, guardDoc.pendingDelivery)
+    const { pendingDelivery: _pending, ...recovered } = guardDoc
+    await floorStore.write(recovered)
+    return recovered
+  }
+  return guardDoc
+}
+
 export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
   guard?: GuardWiring
   /** In-process fault injection after the journal seal, before data rename; never read from a request. */
@@ -113,10 +131,12 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
   const readState = async (strict = false): Promise<{ kind: 'ok'; doc: DeliveryDoc } | { kind: 'missing' } | { kind: 'unreadable'; why: string }> => {
     // A sealed journal is the committed logical document even if the process died before the data rename.
     // Readers need no write lock; the next writer materializes it under deliveries → guards.
-    if (await peekRuleA(anchor.paths) !== 'off') {
-      const pending = (await createGuardsStore(anchor.paths.guards).read()).pendingDelivery
-      if (pending !== undefined) return { kind: 'ok', doc: parseDeliveryDocStrict(pending) }
-    }
+    try {
+      if (await deliveryReadRule(anchor.paths.guards) !== 'off') {
+        const pending = (await createGuardsStore(anchor.paths.guards).read()).pendingDelivery
+        if (pending !== undefined) return { kind: 'ok', doc: parseDeliveryDocStrict(pending) }
+      }
+    } catch (e) { console.warn('[guard] delivery read falls back to ledger:', e instanceof Error ? e.message : String(e)) }
     let text: string
     try { text = await readFile(path, 'utf8') } catch (e) {
       return (e as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'missing' } : { kind: 'unreadable', why: e instanceof Error ? e.message.split('\n')[0]! : String(e) }
@@ -147,19 +167,21 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
       if (options?.guardsPath && resolve(options.guardsPath) !== resolve(anchor.paths.guards)) throw new GuardLockOrderError('guardsPath must be the guard file beside this delivery store')
       await mkdir(dirname(path), { recursive: true })
       const write = async (held?: { contended: boolean }, base = false) => {
-        const materialize = async (serialized: string) => {
-          const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
-          await writeFile(tmp, serialized, { mode: 0o600 })
-          await rename(tmp, path)
-        }
+        const materialize = (serialized: string) => materializeDelivery(path, serialized)
         const floorStore = createGuardsStore(anchor.paths.guards)
         // Deterministic roll-forward, including a crash after rename but before journal removal.
-        if (!base) {
-          const guardDoc = await floorStore.read()
-          if (guardDoc.pendingDelivery !== undefined) {
-            await materialize(guardDoc.pendingDelivery)
-            const { pendingDelivery: _pending, ...recovered } = guardDoc
-            await floorStore.write(recovered)
+        if (!base) await rollForwardDelivery(path, floorStore, await floorStore.read())
+        else {
+          // OFF keeps its ordinary delivery lock. Only a present journal needs the later guards lock.
+          // Read again after taking it; activation cannot interleave while the delivery lock is held.
+          let guardDoc: GuardsDoc | undefined
+          try { guardDoc = await floorStore.read() }
+          catch (e) { if (await ruleAState(anchor.dir) !== 'off') throw e }
+          if (guardDoc?.pendingDelivery !== undefined) {
+            if (held?.contended) throw new GuardBusy('deliveries')
+            const recover = async () => { await rollForwardDelivery(path, floorStore, await floorStore.read()) }
+            if (options?.evidence && options.guardsPath) await recover()
+            else await withGuardLocks(['guards'], recover, { paths: anchor.paths, alreadyHeld: ['deliveries'] })
           }
         }
         const s = await readState(!!options?.evidence)
@@ -179,7 +201,6 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
         const final = parseDeliveryDocStrict(serialized)
         const floorRule = base ? 'off' : await ruleAState(anchor.dir)
         const floors = floorRule === 'off' ? {} : (await floorStore.read()).deliveryFloors ?? {}
-        const prior = { ...floors, ...phasesBefore }
         const commit = async () => {
           if (floorRule !== 'off') {
             // Seal floor + full pending bytes together. One atomic sealed rename commits both logically;
@@ -204,8 +225,15 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
         }
         const raised = deliveryRaises(phasesBefore, final.deliveries)
         const tampered = [
-          ...deliveryTamper(prior, final.deliveries, !!options?.guard),
-          ...deliveryTamper(floors, final.deliveries, true),
+          ...deliveryTamper(phasesBefore, final.deliveries, !!options?.guard),
+          ...deliveryTamper(Object.fromEntries(Object.entries(floors).filter(([id]) => {
+            const before = phasesBefore[id], after = final.deliveries[id]
+            if (JSON.stringify(before) === JSON.stringify(after)) return false
+            // A retreat (including its appended history/revision) does not reclaim lost authorization.
+            // The direct before/after tamper check above still protects existing history and evidence.
+            if (before && after && after.phase !== before.phase && phaseRank(after.phase) <= phaseRank(before.phase)) return false
+            return true
+          })), final.deliveries, true),
         ]
         if (base) {
           // Rule off when the write started. Nothing protected changed → the base write. Otherwise re-read the rule under

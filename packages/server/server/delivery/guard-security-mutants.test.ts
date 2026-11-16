@@ -46,6 +46,45 @@ async function run(targets: string[], pattern?: string) {
 }
 const storeTest = delivery + 'guard-store.test.ts'
 const r5Test = delivery + 'guard-r5.test.ts'
+const r6Test = delivery + 'guard-r6.test.ts'
+
+const r6Mutants: Array<[string, string, string, string, string]> = [
+  ['R5-1 activation', delivery + 'activation.ts', 'g = await rollForwardDelivery(paths.deliveries, guards, g)', 'void g', 'J1/J2'],
+  ['R5-1 N1', delivery + 'store.ts', 'if (guardDoc.pendingDelivery !== undefined) {', 'if (false && guardDoc.pendingDelivery !== undefined) {', 'N1 OFF writer'],
+  ['R5-1 N2', delivery + 'store.ts', 'await floorStore.write(committed)', 'void committed', 'N1 OFF writer'],
+  ['R5-2 reconciliation', delivery + 'activation.ts', "if (rule === 'a' && from === 'off' && to === 'shadow') {", 'if (false) {', 'R1 OFF restore'],
+  ['R5-2 unchanged', delivery + 'store.ts', 'if (JSON.stringify(before) === JSON.stringify(after)) return false', '', 'floors judge only'],
+  ['R5-2 downgrade', delivery + 'store.ts', 'if (before && after && after.phase !== before.phase && phaseRank(after.phase) <= phaseRank(before.phase)) return false', '', 'floors judge only'],
+  ['R5-3 fallback', delivery + 'store.ts', "catch (e) { console.warn('[guard] delivery read falls back to ledger:'", "catch (e) { throw e; console.warn('[guard] delivery read falls back to ledger:'", 'J3 unreadable'],
+  ['R5-4 eval', delivery + 'guard-ast.testing.ts', "if (ts.isIdentifier(n) && n.text === 'eval') out.push('eval')", '', 'eval references'],
+  ['R5-4 vm', delivery + 'guard-ast.testing.ts', "out.push('module:vm')", 'void n', 'eval references'],
+  ['R5-4 loaders', delivery + 'guard-ast.testing.ts', 'const receiver = unwrap(e.expression).getText()', "return false; const receiver = unwrap(e.expression).getText()", 'module loaders'],
+  ['R5-4 receivers', delivery + 'guard-ast.testing.ts', '/^(global|globalThis|self|Bun)$/', '/^(globalThis|Bun)$/', 'eval references'],
+  ['R5-5 N3', delivery + 'guard-inventory.testing.ts', 'while (changed) {\n    changed = false', 'for (let once = 0; once < 1; once++) {\n    changed = false', 'N3 two-step'],
+  ['R5-5 N4', tasks, 'if ([...before.statuses, ...book.statuses].some(s => !isStatusStage(s.stage))) {', 'if (before.statuses.some(s => !isStatusStage(s.stage))) {', 'N4 stripping'],
+  ['R5-5 N5', delivery + 'guard-ast.testing.ts', '|| ts.isNonNullExpression(e) ', '', 'eval references'],
+  ['OFF cost', delivery + 'activation.ts', 'if (cached?.stamp === stamp) return cached.state', '', 'OFF reads use'],
+]
+for (const [id, file, from, to, pattern] of r6Mutants) test(`r6 mutant ${id} is killed`, async () => {
+  reset(); change(file, from, to)
+  const r = await run([r6Test], pattern)
+  console.log(`${id}: exit ${r.code}\n${r.output.split('\n').filter(l => /\(fail\)|Expected:|Received:| pass| fail/.test(l)).join('\n')}`)
+  expect(r.code, r.output).toBe(1)
+  expect(r.output).toContain('(fail)')
+}, 120_000)
+
+test('r6 mutant: a production file under e2e cannot hide a forbidden capability', async () => {
+  reset()
+  const dir = join(root, 'packages/server/server/e2e')
+  mkdirSync(dir, { recursive: true })
+  const file = join(dir, 'new-module.ts')
+  writeFileSync(file, 'const run = eval; export const invoke = run')
+  try {
+    const r = await run([delivery + 'doors.lint.test.ts'], 'runtime escape hatches')
+    expect(r.code, r.output).toBe(1)
+    expect(r.output).toContain('server/server/e2e/new-module.ts:eval')
+  } finally { rmSync(file) }
+}, 120_000)
 
 const r5Mutants: Array<[string, string, string, string]> = [
   ['O1', tasks, 'subtasks: effectiveSubtasks(b.subtasks)', 'subtasks: b.subtasks'],
@@ -174,7 +213,7 @@ test('mutant N2: a board writer that read OFF never re-checks the rule under its
   await killed('retakes the envelope')
 }, 120_000)
 test('mutant N2/N5: the activation does not take the envelope', async () => {
-  reset(); change(delivery + 'activation.ts', 'return withGuardEnvelope(paths, () => moveRule(rule, to, ctx))', 'return moveRule(rule, to, ctx)')
+  reset(); change(delivery + 'activation.ts', 'return withGuardEnvelope(paths, () => moveRule(rule, to, ctx, paths))', 'return moveRule(rule, to, ctx, paths)')
   await killed('activation takes the full envelope')
 }, 120_000)
 test('mutant N1: the append-only check on history/evidence is dropped', async () => {

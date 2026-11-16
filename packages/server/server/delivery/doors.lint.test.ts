@@ -6,7 +6,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { forbiddenCapabilities, rawWriters, storeReach, testOnlyImports } from './guard-ast.testing'
+import { digest, forbiddenCapabilities, rawWriters, storeReach, testOnlyImports } from './guard-ast.testing'
 import { GUARDED_STORES, helperCeiling, helperInventory, inventoryGrowth, liveInventory, moduleCeiling, r3Inventory, scannedSources, writerCeiling } from './guard-inventory.testing'
 import { productionSources, read } from './lint-scan.testing'
 
@@ -16,8 +16,12 @@ export const offendingWriters = (src: string): string[] => rawWriters(src).map(c
 describe('raw writers and book references have a pinned, shrinking historical ceiling', () => {
   test('runtime escape hatches are forbidden and existing writer helpers may gain no new importer', () => {
     const sources = Object.fromEntries(scannedSources(PKGS).map(rel => [rel, read(PKGS, rel)]))
-    // Browser e2e programs are test drivers, not production entry points; production cannot import them below.
-    const forbidden = Object.entries(sources).filter(([rel]) => !/(^|\/)e2e\//.test(rel)).flatMap(([rel, src]) => forbiddenCapabilities(src).map(site => `${rel}:${site}`))
+    // This exact, frozen Playwright driver is outside web/tsconfig's src entry and Vite's index.html graph;
+    // its fixture HTML imports vault-expiry-fixture.tsx instead. No directory-wide e2e exception.
+    // Any edit to the driver or any new e2e module is checked normally; production imports of e2e are forbidden below.
+    const forbidden = Object.entries(sources).filter(([rel, src]) => !(rel === 'web/e2e/vault-expiry-nay.ts'
+      && digest(src) === '549f1d79617cd0dd4d8038e604a050b7a14f8b544b49b5e23947c335d3e78f3c'))
+      .flatMap(([rel, src]) => forbiddenCapabilities(src).map(site => `${rel}:${site}`))
     expect(forbidden).toEqual([])
     expect(inventoryGrowth(helperInventory(sources, PKGS), helperCeiling())).toEqual([])
   }, 60_000)

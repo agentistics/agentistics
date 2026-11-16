@@ -4,7 +4,9 @@
 and every machine that never turned it on) a board write takes only the tasks file lock through `withFileLock` — it
 proceeds after its wait and re-runs once, exactly as before S2a — and a delivery write takes only what the base took
 (`withFileLock`, or the evidence path's own locks). It never waits on deliveries/guards, never fails closed after 5 s
-and never loses a write. With A `shadow`/`on` the envelope below applies unchanged.
+and never loses a write. A pending, sealed delivery journal is an already committed write: even OFF must roll it
+forward under deliveries → guards before applying another mutation. With no journal, OFF retains the base locks.
+With A `shadow`/`on` the envelope below applies unchanged.
 
 The switch itself is safe: `activation.ts` `setState` takes the full tasks → deliveries → guards envelope, so a rule
 move cannot land while a writer genuinely holds its file lock. A writer that peeked `off` and then finds that its
@@ -50,6 +52,18 @@ evidence item APPEND-ONLY for every writer at every rank, and a revision never g
 or removing a record that carries any, needs a guard context (the service doors always carry one). With A on such a
 write is refused (`evidence_binding_protected`, EN/PT); shadow reports it; off writes it as the base did.
 
+The delivery floor and the serialized pending ledger are sealed together before the ledger rename. Readers use the
+pending bytes; the next writer materializes them and clears the journal after the rename. Every authenticated rule
+move resolves the journal before changing the rule, including moves to OFF. Unreadable guards only warn on delivery
+reads, which fall back to the ledger; guarded writers still fail closed. OFF reads cache the rule by the policy file's
+inode/size/mtime/ctime, invalidated by `setState`; after warmup they read only ledger bytes. The metadata stamp also
+detects another process's policy replacement without reading the policy file on every OFF read.
+
+Floors judge records changed by this write against its persisted before image. An unchanged record or a phase
+retreat cannot freeze unrelated writes. On OFF → shadow, the present ledger becomes the new sealed floor; the rule
+audit records which floors dropped and why. This permits the documented OFF → restore → shadow → ON recovery. ON
+still requires a fresh shadow period and new progress still needs evidence.
+
 The supplementary inventories parse executable TypeScript/JavaScript ASTs. Context must occupy the
 writer's actual context argument; words in comments, titles and callbacks do not count. The historical
 call identities and raw writer identities from `1b1c8a941` live in `guard-inventory.fixture.json` and have
@@ -69,3 +83,10 @@ a book path to a new module, grows it and fails, whatever the call looks like. (
 `*.testing` / `*.fixture` / `*.test` module, by any route, so moving a writer into a helper hides nothing. Stated limit:
 a book name assembled at runtime from fragments (`'tas' + 'ks.json'`) in a module that already reaches the data dir is
 not seen by a text scan; such a module is in the pinned reach list and is reviewed as such.
+
+The module and helper ceilings also follow transitive re-exports to a fixed point. Runtime code generation is
+forbidden: any `eval` identifier reference, `Function` calls, `vm`/`node:vm`, `process.binding`, and computed members
+on `global`, `globalThis`, `self` or `Bun`, including TypeScript wrappers. Module loaders include `import.meta.require`,
+`module.require` and `process.getBuiltinModule`. A directory named `e2e` grants no production exemption. One existing,
+unshipped Playwright driver is exempted by exact path and source digest; changes to it undergo the normal check.
+Deliberately obfuscated constructs such as `Reflect.get` with assembled names remain outside this lint's threat model.
