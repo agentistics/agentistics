@@ -139,6 +139,18 @@ interface Entry {
   /** What the block rules refused lately (newest first) — an action explains its own refusals from it. */
   blocked: BlockedHit[]
   lastAction: LastAction | null
+  /** S4: who else hears this browser's CDP events (the screencast). */
+  eventListeners: Set<(ev: CdpEvent) => void>
+  /** S4: page targets whose main frame is loading. */
+  loading: Set<string>
+}
+
+/** S4: what the live screen's `state` event is built from. */
+export interface StreamFacts {
+  owner: BrowserOwner
+  activeTab: string | null
+  tabs: { targetId: string; url: string; title: string; active: boolean; loading: boolean }[]
+  lastAction: LastAction | null
 }
 
 export type StopReason = 'requested' | 'idle' | 'memory' | 'session-ended' | 'evicted' | 'server-stop' | 'crashed' | 'start-failed'
@@ -230,6 +242,7 @@ export class BrowserHost {
       startedAt: this.d.now(), lastActivityMs: this.d.now(), viewers: 0, cdp: null, child: null,
       tabs: new Map(), activeTab: null, scope: false, scopeEscaped: false, sandbox: true, memory: null, stopping: null,
       tabSessions: new Map(), doomed: new Set(), sessionPage: new Map(), blocked: [], lastAction: null,
+      eventListeners: new Set(), loading: new Set(),
     }
     this.entries.set(key, entry)
     if (decision.evict) await this.stop(decision.evict, 'evicted')
@@ -388,6 +401,38 @@ export class BrowserHost {
       void this.onPaused(entry, ev)
     } else if (ev.method === 'Network.webSocketCreated' && ev.sessionId) {
       void this.onWebSocket(entry, ev)
+    } else if ((ev.method === 'Page.frameStartedLoading' || ev.method === 'Page.frameStoppedLoading') && ev.sessionId) {
+      // A page target's main frame id IS its target id; an iframe's loading is not the page loading.
+      const page = entry.sessionPage.get(ev.sessionId)
+      if (page && ev.params?.frameId === page) {
+        if (ev.method === 'Page.frameStartedLoading') entry.loading.add(page)
+        else entry.loading.delete(page)
+      }
+    }
+    if (ev.method === 'Target.targetDestroyed') entry.loading.delete(ev.params?.targetId)
+    for (const fn of entry.eventListeners) {
+      try { fn(ev) } catch { /* a listener never breaks the browser */ }
+    }
+  }
+
+  /** S4: hear this browser's CDP events (the screencast). The returned function stops listening. */
+  onCdpEvent(key: string, fn: (ev: CdpEvent) => void): () => void {
+    const e = this.entries.get(key)
+    if (!e) return () => {}
+    e.eventListeners.add(fn)
+    return () => { e.eventListeners.delete(fn) }
+  }
+
+  /** S4: the live screen's facts — `null` when there is no live browser for this key. */
+  streamFacts(key: string): StreamFacts | null {
+    const e = this.entries.get(key)
+    if (!e || e.phase !== 'live') return null
+    const active = e.activeTab && e.tabs.has(e.activeTab) ? e.activeTab : null
+    return {
+      owner: e.owner,
+      activeTab: active,
+      tabs: [...e.tabs.values()].map(t => ({ targetId: t.targetId, url: t.url, title: t.title, active: t.targetId === active, loading: e.loading.has(t.targetId) })),
+      lastAction: e.lastAction,
     }
   }
 

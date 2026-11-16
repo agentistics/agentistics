@@ -1,0 +1,101 @@
+import { describe, expect, test } from 'bun:test'
+import {
+  INITIAL_BROWSER_SCREEN, browserScreenReducer, browserScreenStatus, browserWatching, parseBrowserFrame, parseBrowserGone, parseBrowserState,
+} from './browserStream'
+import { terminalStatus, INITIAL_TERMINAL_STATE } from './terminalStream'
+import {
+  MOVE_MAX_PER_SECOND, browserAckReducer, browserInputOpen, browserKeyGoesToPage, cdpModifiers, normalizePoint, pointerButton, sampleMove,
+} from './terminalInput'
+
+const frame = (seq: number, tab = 'T1') => JSON.stringify({ tab, seq, w: 1280, h: 800, jpeg: 'AAAA', url: 'http://x/', title: 'X', at: 1 })
+
+describe('browser stream events', () => {
+  test('frame, state, gone parse; junk is null', () => {
+    expect(parseBrowserFrame(frame(3))).toMatchObject({ tab: 'T1', seq: 3, w: 1280, jpeg: 'AAAA' })
+    expect(parseBrowserFrame('{"tab":"T1"}')).toBeNull()
+    expect(parseBrowserFrame('nope')).toBeNull()
+    const st = parseBrowserState(JSON.stringify({ tab: 'T1', activeTab: 'T1', lock: 'unlocked', url: 'u', title: 't', loading: true, tabs: [{ id: 'T1', title: 't', active: true }, { nope: 1 }], lastAction: { kind: 'click', label: 'Entrar', x: 10, y: 20, at: 5 } }))
+    expect(st).toMatchObject({ lock: 'unlocked', loading: true, tabs: [{ id: 'T1' }], lastAction: { kind: 'click', label: 'Entrar', x: 10, y: 20 } })
+    expect(parseBrowserState(JSON.stringify({ tab: 'T1', lock: 'open' }))).toBeNull()
+    expect(parseBrowserGone('{"reason":"idle"}')).toBe('idle')
+  })
+})
+
+describe('the screen view-model and its honesty line', () => {
+  test('connecting → streaming → gone keeps the last picture and says why', () => {
+    let s = browserScreenReducer(INITIAL_BROWSER_SCREEN, { type: 'connecting' })
+    expect(browserScreenStatus(s, 'pt').tone).toBe('connecting')
+    s = browserScreenReducer(s, { type: 'frame', frame: parseBrowserFrame(frame(1))! })
+    expect(browserScreenStatus(s, 'en')).toMatchObject({ tone: 'live', label: 'Live', showCursor: false })
+    s = browserScreenReducer(s, { type: 'gone', reason: 'idle' })
+    expect(s.frame).not.toBeNull()
+    expect(browserScreenStatus(s, 'pt').detail).toBe('O navegador foi encerrado por ficar parado. A imagem abaixo é a última.')
+  })
+
+  test('not watching (scrolled away): the picture is frozen and SAID to be', () => {
+    let s = browserScreenReducer(INITIAL_BROWSER_SCREEN, { type: 'frame', frame: parseBrowserFrame(frame(1))! })
+    s = browserScreenReducer(s, { type: 'watching', watching: false })
+    expect(browserScreenStatus(s, 'pt')).toMatchObject({ label: 'Parado', detail: 'Parado — role até aqui para ver ao vivo.' })
+  })
+
+  test('an older frame never replaces a newer one; a stall never blanks a picture', () => {
+    let s = browserScreenReducer(INITIAL_BROWSER_SCREEN, { type: 'frame', frame: parseBrowserFrame(frame(5))! })
+    s = browserScreenReducer(s, { type: 'frame', frame: parseBrowserFrame(frame(4))! })
+    expect(s.frame!.seq).toBe(5)
+    expect(browserScreenReducer(s, { type: 'stall' })).toBe(s)
+    expect(browserScreenReducer({ ...INITIAL_BROWSER_SCREEN, phase: 'connecting' }, { type: 'stall' }).phase).toBe('stalled')
+  })
+
+  test('watching needs all three: in viewport, tab visible, panel open', () => {
+    expect(browserWatching({ inViewport: true, documentVisible: true, panelOpen: true })).toBe(true)
+    for (const k of ['inViewport', 'documentVisible', 'panelOpen'] as const) {
+      expect(browserWatching({ inViewport: true, documentVisible: true, panelOpen: true, [k]: false })).toBe(false)
+    }
+  })
+
+  test('terminalStatus speaks of a browser with the browser subject (no "lines"), the old subjects untouched', () => {
+    const live = { ...INITIAL_TERMINAL_STATE, phase: 'streaming' as const }
+    expect(terminalStatus(live, 'en', 'browser').detail).toBe('The browser\'s current screen.')
+    expect(terminalStatus(live, 'en', 'session').detail.startsWith('The agent\'s current screen')).toBe(true)
+  })
+})
+
+describe('browser input (client half)', () => {
+  test('the padlock decides what is offered: locked = nothing', () => {
+    expect(browserInputOpen('locked')).toBe(false)
+    expect(browserInputOpen('unlocked')).toBe(true)
+    expect(browserInputOpen('none')).toBe(true)
+  })
+
+  test('points normalize over the picture; outside is null, never clamped', () => {
+    const rect = { left: 100, top: 50, width: 640, height: 400 }
+    expect(normalizePoint(420, 250, rect)).toEqual({ x: 0.5, y: 0.5 })
+    expect(normalizePoint(99, 250, rect)).toBeNull()
+    expect(normalizePoint(420, 451, rect)).toBeNull()
+    expect(normalizePoint(1, 1, { left: 0, top: 0, width: 0, height: 10 })).toBeNull()
+  })
+
+  test('moves: only dragging or explicit hover, at most 30 per second', () => {
+    expect(sampleMove({ now: 1000, lastSentAt: 0, buttons: 0, hover: false })).toBeNull()
+    expect(sampleMove({ now: 1000, lastSentAt: 0, buttons: 1, hover: false })).toBe(1000)
+    expect(sampleMove({ now: 1000 + 1000 / MOVE_MAX_PER_SECOND - 1, lastSentAt: 1000, buttons: 1, hover: false })).toBeNull()
+    expect(sampleMove({ now: 1000 + Math.ceil(1000 / MOVE_MAX_PER_SECOND), lastSentAt: 1000, buttons: 0, hover: true })).not.toBeNull()
+  })
+
+  test('modifiers, buttons, keys that stay with the app', () => {
+    expect(cdpModifiers({ altKey: true, ctrlKey: true, metaKey: false, shiftKey: true })).toBe(11)
+    expect([0, 1, 2, 3].map(pointerButton)).toEqual(['left', 'middle', 'right', 'none'])
+    expect(browserKeyGoesToPage({ key: 'a', ctrlKey: false, metaKey: false, shiftKey: false })).toBe(true)
+    expect(browserKeyGoesToPage({ key: 'P', ctrlKey: true, metaKey: false, shiftKey: true })).toBe(false)
+    expect(browserKeyGoesToPage({ key: 'c', ctrlKey: false, metaKey: true, shiftKey: false })).toBe(false)
+    expect(browserKeyGoesToPage({ key: 'a', ctrlKey: false, metaKey: false, shiftKey: false, isComposing: true })).toBe(false)
+  })
+
+  test('acks: in flight counted, the last refusal kept until an ok', () => {
+    let s = browserAckReducer({ inFlight: 0, lastRefusal: null }, { type: 'sent' })
+    s = browserAckReducer(s, { type: 'ack', ok: false, reason: 'locked' })
+    expect(s).toEqual({ inFlight: 0, lastRefusal: 'locked' })
+    s = browserAckReducer(browserAckReducer(s, { type: 'sent' }), { type: 'ack', ok: true })
+    expect(s).toEqual({ inFlight: 0, lastRefusal: null })
+  })
+})

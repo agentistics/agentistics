@@ -50,6 +50,30 @@ describe("NAVEGADOR S3 MCP — progress while the padlock holds a call", () => {
     expect(t2.cleared).toBe(true);
   });
 
+  // QA S3 mutant Q4: the fake timers above ignore `ms`, so `every * 1000` survived. The INTERVAL handed to
+  // the real timer must be the constant, inside OpenCode's 60 s floor, and the message counts real seconds.
+  test("the interval actually armed is PROGRESS_EVERY_MS (no everyMs given), and the message says its seconds", async () => {
+    const armed: number[] = [];
+    let fire: () => void = () => {};
+    const sent: Array<{ params: { message: string } }> = [];
+    let release: (v: number) => void = () => {};
+    const p = withProgress(1, new Promise<number>(r => { release = r; }), {
+      send: async (n) => { sent.push(n as { params: { message: string } }); },
+      setInterval: (fn, ms) => { armed.push(ms); fire = fn; return 1; },
+      clearInterval: () => {},
+    });
+    expect(armed).toEqual([PROGRESS_EVERY_MS]);
+    expect(armed[0]!).toBeGreaterThanOrEqual(1_000);
+    expect(armed[0]!).toBeLessThanOrEqual(20_000);
+    fire(); fire();
+    expect(sent.map(s => s.params.message)).toEqual([
+      `waiting for the person to hand the browser back (${PROGRESS_EVERY_MS / 1000} s)`,
+      `waiting for the person to hand the browser back (${(2 * PROGRESS_EVERY_MS) / 1000} s)`,
+    ]);
+    release(7);
+    expect(await p).toBe(7);
+  });
+
   test("the tick is inside OpenCode's measured 60 s (≤ 20 s), and the token is read from _meta", () => {
     expect(PROGRESS_EVERY_MS).toBeLessThanOrEqual(20_000);
     expect(progressTokenOf({ params: { _meta: { progressToken: "a" } } })).toBe("a");

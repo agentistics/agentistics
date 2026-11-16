@@ -67,8 +67,12 @@ export function initialLock(now: number): LockState {
 /** How long an action may be held for this harness (and the longest `wait_unlock`). */
 export function holdMsFor(harness: HarnessId | undefined | null): number {
   const t = harness ? HARNESS_TOOL_TIMEOUT[harness] : null
-  const timeout = t ? t.ms : TOOL_TIMEOUT_UNKNOWN_MS
-  return Math.max(HOLD_MIN_MS, Math.min(HOLD_CAP_MS, timeout - HOLD_MARGIN_MS))
+  return holdMsForTimeout(t ? t.ms : TOOL_TIMEOUT_UNKNOWN_MS)
+}
+
+/** The clamp itself, for a measured tool timeout: never past `HOLD_CAP_MS`, never under `HOLD_MIN_MS`. */
+export function holdMsForTimeout(timeoutMs: number): number {
+  return Math.max(HOLD_MIN_MS, Math.min(HOLD_CAP_MS, timeoutMs - HOLD_MARGIN_MS))
 }
 
 /** `HH:MM` on this machine's clock — what the person saw on their own screen. */

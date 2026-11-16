@@ -113,6 +113,11 @@ import {
   createShellInputState, shellInputExists, shellInputAtCapacity, type ShellInputState,
 } from './sessions/shell-input-web'
 import { wsInputOriginOk } from './sessions/input-protocol'
+// NAVEGADOR S4: the person's input onto a browser tab. TYPE only here — the module (and the browser host
+// behind it) is loaded by the `/api/browser/input` route before the upgrade, which sets `browserInputMod`;
+// a socket of that kind cannot exist before that import has resolved.
+import type { BrowserInputState } from './browser/browser-input-web'
+let browserInputMod: typeof import('./browser/browser-input-web') | null = null
 // Type only: the module itself reaches `cli-start` → `@agentistics/tui/control` → Ink, and is
 // loaded by dynamic import inside the two /api/fleet handlers.
 import {
@@ -374,6 +379,8 @@ type WSData = {
   engineSocket?: EngineSocketState
   /** The tab's multiplexed push channel (`stream-mux.ts`) — a fifth, disjoint kind. */
   streamMux?: MuxState
+  /** NAVEGADOR S4: the person's input onto a browser tab (`browser/browser-input-web.ts`) — a sixth. */
+  browserInput?: BrowserInputState
 }
 
 // Shared WS + request handlers, so the binary can bind the SAME logic to two ports below:
@@ -381,18 +388,21 @@ type WSData = {
 const _wsHandlers = {
   open(ws: ServerWebSocket<WSData>) {
     if (ws.data.streamMux) return
+    if (ws.data.browserInput) { browserInputMod?.openBrowserInputSocket(ws); return }
     if (ws.data.fleetInput) { openInputSocket(ws); return }
     if (ws.data.shellInput) { openShellInputSocket(ws); return }
     if (ws.data.engineSocket) { openEngineSocket(ws.data.engineSocket, ws); return }
   },
   message(ws: ServerWebSocket<WSData>, msg: string | Buffer) {
     if (ws.data.streamMux) { onMuxMessage(ws.data.streamMux, ws, msg); return }
+    if (ws.data.browserInput) { browserInputMod?.onBrowserInputMessage(ws, msg); return }
     if (ws.data.fleetInput) { onInputMessage(ws, msg); return }
     if (ws.data.shellInput) { onShellInputMessage(ws, msg); return }
     if (ws.data.engineSocket) { onEngineSocketMessage(ws.data.engineSocket, msg); return }
   },
   close(ws: ServerWebSocket<WSData>, code?: number, reason?: string) {
     if (ws.data.streamMux) { closeMux(ws.data.streamMux); return }
+    if (ws.data.browserInput) { browserInputMod?.closeBrowserInputSocket(ws); return }
     if (ws.data.fleetInput) { closeInputSocket(ws); return }
     if (ws.data.shellInput) { closeShellInputSocket(ws); return }
     if (ws.data.engineSocket) { closeEngineSocket(ws.data.engineSocket, code ?? 1005, reason ?? ''); return }
@@ -3902,6 +3912,52 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       if (!browserAllowed(CAPS.localShell, (await readPreferences()).browserEnabled)) {
         return jsonOut({ ok: false, error: 'browser_disabled', sentence: 'The built-in browser is turned off on this machine (Settings).' }, 403)
       }
+      const browserOpts = { dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT] }
+      // S4/F1: WHO is calling, from the SOCKET (peer → /proc/net/tcp → pid → process tree), never from the body.
+      const identify = async () => {
+        const [{ identifyCaller }, { processSessionHub }] = await Promise.all([import('./browser/browser-caller-proc'), import('./sessions/session-hub')])
+        const sessionPids = new Set<number>()
+        for (const r of processSessionHub()?.last()?.sessions ?? []) if (typeof r.pid === 'number') sessionPids.add(r.pid)
+        const ip = server.requestIP(req)
+        return identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
+      }
+
+      // S4 — the live screen (SSE; rides the tab's stream-mux socket). Reading never starts a browser.
+      if (url.pathname === '/api/browser/stream') {
+        if (req.method !== 'GET') return jsonOut({ error: 'method_not_allowed' }, 405)
+        const { parseStreamOwner, parseStreamTab, browserStreamTarget, browserStreamAtCapacity, openBrowserStream } = await import('./browser/browser-stream-web')
+        const owner = parseStreamOwner(url.searchParams.get('owner'))
+        const tab = parseStreamTab(url.searchParams.get('tab'))
+        if (!owner || tab === false) return jsonOut({ ok: false, error: 'bad_request' }, 400)
+        const key = browserStreamTarget(browserOpts, owner)
+        if (!key) return jsonOut({ ok: false, error: 'no_browser', sentence: 'This browser is not open.' }, 404)
+        if (browserStreamAtCapacity(browserOpts)) return jsonOut({ ok: false, error: 'too_many_streams' }, 503)
+        return new Response(openBrowserStream(browserOpts, key, tab, req.signal), {
+          headers: { ...CORS_HEADERS, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+        })
+      }
+
+      // S4 — the person's input (WS). Same Origin (CSWSH), NOT a session (socket-identified, fail-closed),
+      // a live browser, the ceiling. The padlock itself is checked per event inside the channel.
+      if (url.pathname === '/api/browser/input') {
+        const mod = await import('./browser/browser-input-web')
+        const { parseStreamOwner, parseStreamTab, browserStreamTarget } = await import('./browser/browser-stream-web')
+        const { callerRefusal } = await import('./browser/browser-caller')
+        const owner = parseStreamOwner(url.searchParams.get('owner'))
+        const tab = parseStreamTab(url.searchParams.get('tab'))
+        if (!owner || tab === false) return jsonOut({ ok: false, error: 'bad_request' }, 400)
+        if (!wsInputOriginOk({ origin: req.headers.get('origin'), host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })) {
+          return jsonOut({ ok: false, error: 'forbidden_origin' }, 403)
+        }
+        const refused = callerRefusal(await identify())
+        if (refused) return jsonOut({ ok: false, error: refused.error, sentence: refused.sentence, ...(refused.why ? { why: refused.why } : {}) }, refused.status)
+        if (!browserStreamTarget(browserOpts, owner)) return jsonOut({ ok: false, error: 'no_browser', sentence: 'This browser is not open.' }, 404)
+        if (mod.browserInputAtCapacity()) return jsonOut({ ok: false, error: 'too_many_streams' }, 503)
+        browserInputMod = mod
+        if (server.upgrade(req, { data: { browserInput: mod.createBrowserInputState(browserOpts, owner, tab) } })) return
+        return jsonOut({ ok: false, error: 'upgrade_failed' }, 500)
+      }
+
       try {
         const [{ browserRoute, browserRouteDeps }, { verifySessionIdentity }, { processSessionHub }] = await Promise.all([
           import('./browser/browser-web'), import('./sessions/session-identity'), import('./sessions/session-hub'),
@@ -3926,7 +3982,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         }
         const audit = (ev: { action: 'browser.lock' | 'browser.unlock'; managedId: string }) =>
           void writeAudit({ action: ev.action, ip: clientIp, targetId: ev.managedId })
-        const deps = browserRouteDeps({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT], sessionLive }, verifySessionIdentity, { harnessOf, audit })
+        // F1: only the padlock route needs the caller; it is read once, before the route decides.
+        const lockCaller = url.pathname === '/api/browser/lock' ? await identify() : null
+        const deps = browserRouteDeps({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT], sessionLive }, verifySessionIdentity, {
+          harnessOf, audit, ...(lockCaller ? { caller: () => lockCaller } : {}),
+        })
         const answer = await browserRoute(req.method, url.pathname, body, deps)
         if (!answer) return jsonOut({ error: 'not_found' }, 404)
         return jsonOut(answer.body, answer.status)

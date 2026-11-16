@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { closeMux, createMuxState, createSseParser, muxPathAllowed, onMuxMessage, parseMuxMessage, type MuxServerMessage, type SseFrame } from './stream-mux'
+import { MUX_HIGH_WATER, closeMux, createMuxState, createSseParser, muxPathAllowed, onMuxMessage, parseMuxMessage, type MuxServerMessage, type SseFrame } from './stream-mux'
 
 describe('muxPathAllowed — the socket is a transport for push streams, never a general proxy', () => {
   test('the push routes are allowed, with their query strings', () => {
-    for (const u of ['/api/events', '/api/data-stream', '/api/fleet/chat-stream?id=a&lang=en', '/api/fleet/stream?id=x&cols=80&rows=24', '/api/shell/stream?id=s', '/api/runtime/sessions/ses_ab/stream?from=3']) expect(muxPathAllowed(u)).toBe(true)
+    for (const u of ['/api/events', '/api/data-stream', '/api/fleet/chat-stream?id=a&lang=en', '/api/fleet/stream?id=x&cols=80&rows=24', '/api/shell/stream?id=s', '/api/browser/stream?owner=abc&tab=T1', '/api/runtime/sessions/ses_ab/stream?from=3']) expect(muxPathAllowed(u)).toBe(true)
   })
   test('anything else is refused', () => {
     for (const u of ['/api/data', '/api/fleet/new', '/api/health', 'http://evil/api/events', '//evil/api/events', '/api/fleet/../events', '/api/runtime/sessions/a/b/stream', '', '/api/eventsX']) expect(muxPathAllowed(u)).toBe(false)
@@ -74,6 +74,29 @@ describe('a subscription is replayed through the REAL route with the upgrade req
     await tick()
     expect(out).toEqual([{ sid: 1, t: 'fail', status: 401 }])
   })
+  test('back-pressure: while the socket holds > MUX_HIGH_WATER unsent, the route\'s body is not read', async () => {
+    let pulls = 0
+    const st = createMuxState(new Request('http://h/api/stream-mux'), async () => {
+      const body = new ReadableStream<Uint8Array>({
+        // A real route produces on a timer; a synchronous producer would spin in microtasks and starve the loop.
+        async pull(c) { await new Promise(r => setTimeout(r, 2)); pulls++; c.enqueue(new TextEncoder().encode(`event: frame\ndata: ${pulls}\n\n`)) },
+      }, { highWaterMark: 0 })
+      return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } })
+    })
+    let buffered = MUX_HIGH_WATER + 1
+    const out: MuxServerMessage[] = []
+    onMuxMessage(st, { send: s => out.push(JSON.parse(s)), getBufferedAmount: () => buffered }, JSON.stringify({ op: 'sub', sid: 1, url: '/api/browser/stream?owner=a' }))
+    await tick(); await tick(); await tick()
+    const stalled = pulls
+    expect(stalled).toBeLessThanOrEqual(2) // the first chunk read, then the reader waits for the socket
+    await new Promise(r => setTimeout(r, 60))
+    expect(pulls).toBe(stalled)
+    buffered = 0
+    await new Promise(r => setTimeout(r, 60))
+    expect(pulls).toBeGreaterThan(stalled + 2) // drained: reading resumes
+    closeMux(st)
+  })
+
   test('unsub and socket close abort the route (its req.signal fires)', async () => {
     const aborted: number[] = []
     const st = createMuxState(new Request('http://h/api/stream-mux'), async r => {

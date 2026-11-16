@@ -7,7 +7,7 @@ import { HARNESS_ORDER, HARNESS_TOOL_TIMEOUT } from '@agentistics/core'
 import { ACTION_KIND, SESSION_ACTIONS } from './browser-action-spec'
 import {
   AUTO_LOCK_MS, HOLD_CAP_MS, HOLD_MIN_MS, MAX_HELD, PROGRESS_EVERY_MS,
-  autoLockDue, decideGate, decideLockRequest, decideWait, expireHeld, hhmm, holdMsFor, initialLock,
+  autoLockDue, decideGate, decideLockRequest, decideWait, expireHeld, hhmm, holdMsFor, holdMsForTimeout, initialLock,
   nextDeadline, notePersonInput, onBrowserStopped, setMode, waitReturnedAnswer, waitTimedOutAnswer,
   type LockState,
 } from './browser-lock'
@@ -24,6 +24,16 @@ describe('hold length — the harness\'s measured tool timeout', () => {
     expect(holdMsFor('codex')).toBe(50_000)
     expect(holdMsFor(undefined)).toBe(50_000)
     expect(holdMsFor(null)).toBe(50_000)
+  })
+
+  // QA S3 mutant Q12: no harness in the table is longer than 130 s, so raising the cap survived.
+  test('the cap is 10 minutes, and it binds a long harness; the floor binds a tiny one', () => {
+    expect(HOLD_CAP_MS).toBe(10 * 60_000)
+    expect(holdMsForTimeout(60 * 60_000)).toBe(10 * 60_000)
+    expect(holdMsForTimeout(10 * 60_000 + 5_000)).toBe(10 * 60_000)
+    expect(holdMsForTimeout(10 * 60_000 + 4_999)).toBe(10 * 60_000 - 1)
+    expect(holdMsForTimeout(130_000)).toBe(125_000)
+    expect(holdMsForTimeout(5_500)).toBe(HOLD_MIN_MS)
   })
 
   test('every harness: inside [1 s, 10 min], and always at least 5 s under its own timeout', () => {

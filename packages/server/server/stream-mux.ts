@@ -25,7 +25,7 @@
  */
 
 /** The streaming routes a subscription may name. Exact path match; query strings pass through. */
-const MUX_EXACT = new Set(['/api/events', '/api/data-stream', '/api/fleet/chat-stream', '/api/fleet/stream', '/api/shell/stream'])
+const MUX_EXACT = new Set(['/api/events', '/api/data-stream', '/api/fleet/chat-stream', '/api/fleet/stream', '/api/shell/stream', '/api/browser/stream'])
 const MUX_NATIVE = /^\/api\/runtime\/sessions\/[^/]+\/stream$/
 
 /** Most subscriptions one socket may hold. A page holds a handful; the ceiling bounds a misbehaving one. */
@@ -126,7 +126,15 @@ export function createMuxState(upgrade: Request, dispatch: MuxState['dispatch'])
   return { origin: new URL(upgrade.url).origin, headers, dispatch, subs: new Map(), closed: false }
 }
 
-interface Sink { send(data: string): unknown }
+interface Sink { send(data: string): unknown; getBufferedAmount?(): number }
+
+/**
+ * Back-pressure (NAVEGADOR S4): while the socket holds more than this unsent, a subscription stops
+ * READING its route's body. The route's stream then fills, and a route that cares (the browser screen)
+ * sees `desiredSize <= 0` and keeps only its newest frame instead of queueing behind a slow tab.
+ */
+export const MUX_HIGH_WATER = 1 << 20
+const DRAIN_POLL_MS = 15
 
 function emit(ws: Sink, m: MuxServerMessage) { try { ws.send(JSON.stringify(m)) } catch { /* socket gone */ } }
 
@@ -157,6 +165,9 @@ async function runSub(st: MuxState, ws: Sink, sid: number, url: string, lastEven
       const { done, value } = await reader.read()
       if (done) break
       feed(dec.decode(value, { stream: true }))
+      while (!ac.signal.aborted && (ws.getBufferedAmount?.() ?? 0) > MUX_HIGH_WATER) {
+        await new Promise(r => setTimeout(r, DRAIN_POLL_MS))
+      }
     }
   } catch { /* cancelled or the route threw — either way the stream is over */ }
   if (ac.signal.aborted) return

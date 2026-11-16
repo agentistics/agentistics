@@ -200,11 +200,12 @@ export interface TerminalStatus {
  * current screen" over a shell the person opened themselves is simply false, and it was on screen
  * at 390px before this parameter existed. The tone, the label and `showCursor` are untouched by it.
  */
-export type TerminalSubject = 'session' | 'shell'
+export type TerminalSubject = 'session' | 'shell' | 'browser'
 
 export function terminalStatus(
   state: TerminalState, lang: 'pt' | 'en', subject: TerminalSubject = 'session',
 ): TerminalStatus {
+  if (subject === 'browser') return browserScreenWords(state, lang)
   const pt = lang === 'pt'
   const shell = subject === 'shell'
   const f = state.frame
@@ -318,6 +319,39 @@ export function terminalStatus(
     detail,
     showCursor: false,
     truncated,
+  }
+}
+
+/**
+ * NAVEGADOR S4 — the same phases, said about a BROWSER screen (`/api/browser/stream`). A browser frame
+ * is a picture, not lines, so there is no "showing N lines"; the end reasons are the browser's own
+ * (`browserStream.ts` maps them onto `ended`). Same tones, same cursor rule (never one: it is a picture).
+ */
+function browserScreenWords(state: TerminalState, lang: 'pt' | 'en'): TerminalStatus {
+  const pt = lang === 'pt'
+  const base = { showCursor: false, truncated: false }
+  switch (state.phase) {
+    case 'idle':
+      return { ...base, tone: 'idle', label: pt ? 'Sem navegador' : 'No browser', detail: pt ? 'Nenhum navegador aberto para mostrar.' : 'No browser open to show.' }
+    case 'connecting':
+      return { ...base, tone: 'connecting', label: pt ? 'Conectando' : 'Connecting', detail: pt ? 'Abrindo a tela do navegador…' : 'Opening the browser screen…' }
+    case 'stalled':
+      return {
+        ...base, tone: 'stalled', label: pt ? 'Sem resposta' : 'No response',
+        detail: pt
+          ? 'O canal abriu, mas nenhuma imagem chegou. A página pode estar parada ou a conexão falhou. Toque em reconectar.'
+          : 'The channel opened but no picture arrived. The page may be still, or the connection failed. Tap reconnect.',
+      }
+    case 'streaming':
+    case 'finished':
+      return { ...base, tone: 'live', label: pt ? 'Ao vivo' : 'Live', detail: pt ? 'A tela atual do navegador.' : 'The browser\'s current screen.' }
+    default:
+      return {
+        ...base, tone: 'ended', label: pt ? 'Navegador encerrado' : 'Browser closed',
+        detail: state.frame
+          ? (pt ? 'O navegador foi encerrado; a imagem abaixo é a última que ele mostrou.' : 'The browser was closed; the picture below is the last one it showed.')
+          : (pt ? 'O navegador não está aberto; não há tela para mostrar.' : 'The browser is not open; there is no screen to show.'),
+      }
   }
 }
 

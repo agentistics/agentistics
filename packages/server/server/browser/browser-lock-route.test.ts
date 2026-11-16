@@ -40,6 +40,9 @@ function fixture(over: Partial<RouteDeps> = {}) {
     locks,
     harnessOf: (id) => (id === 'cla' ? 'claude' : id === 'ope' ? 'opencode' : undefined),
     audit: (ev) => audits.push(`${ev.action}:${ev.managedId}`),
+    // S4/F1: the socket says who is calling. These tests are about the padlock's rules, so the caller is
+    // the person unless a test says otherwise (the F1 tests below do).
+    caller: () => ({ kind: 'person', via: 'process', pid: 1 }),
     ...over,
   }
   return { deps, ran, audits, advance, live, locks }
@@ -178,5 +181,63 @@ describe('the padlock at the door', () => {
     await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
     await browserRoute('POST', '/api/browser/lock', { owner: 'aaa', lock: 'unlocked' }, f.deps)
     expect((await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://x/' }, f.deps))?.body).toEqual({ ok: true, action: 'navigate' })
+  })
+
+  // QA S3 mutant Q1: marking `evaluate` as a read passed every test. It is an ACTION (it runs code on the page).
+  test('unlocked: EVERY action is held — evaluate and close included — and none runs', async () => {
+    const f = fixture()
+    await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+    await browserRoute('POST', '/api/browser/lock', { owner: 'aaa', lock: 'unlocked' }, f.deps)
+    f.ran.length = 0
+    const pending: Array<Promise<unknown>> = []
+    for (const [verb, extra] of [['evaluate', { expression: '1+1' }], ['click', { ref: 'e1@g1' }], ['close', {}]] as const) {
+      let settled = false
+      const p = call(f, verb, { session: proof('aaa'), ...extra }).then(a => { settled = true; return a })
+      pending.push(p)
+      await tick()
+      expect([verb, settled]).toEqual([verb, false]) // held, not answered
+    }
+    expect(f.ran).toEqual([])
+    expect(f.live.has('s-aaa')).toBe(true) // close was held too: the browser is still there
+    f.advance(50_000)
+    const answers = await Promise.all(pending) as Array<{ body: { performed?: boolean } }>
+    for (const a of answers) expect(a.body.performed).toBe(false)
+    expect(f.ran).toEqual([])
+  })
+})
+
+describe('F1 — the padlock is the PERSON\'s, decided by the socket, never by the body', () => {
+  const body = { owner: 'aaa', lock: 'unlocked' }
+  test('a caller inside a session tree is refused, with session absent, null or under another name', async () => {
+    const f = fixture({ caller: () => ({ kind: 'session', pid: 4242, managedId: 'aaa' }) })
+    await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+    for (const b of [body, { ...body, session: null }, { ...body, sessionId: 'aaa' }, { ...body, Session: proof('aaa') }, { ...body, identity: 'x' }]) {
+      const a = await browserRoute('POST', '/api/browser/lock', b, f.deps)
+      expect(a).toMatchObject({ status: 403, body: { error: 'session_cannot_unlock' } })
+    }
+    expect(f.locks.view('s-aaa').mode).toBe('locked')
+    expect(f.audits).toEqual([])
+  })
+
+  test('a caller that cannot be identified is refused (fail-closed), both directions', async () => {
+    const f = fixture({ caller: () => ({ kind: 'unknown', reason: 'no-proc' }) })
+    await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+    expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 403, body: { error: 'caller_unidentified' } })
+    expect(await browserRoute('POST', '/api/browser/lock', { owner: 'aaa', lock: 'locked' }, f.deps)).toMatchObject({ status: 403, body: { error: 'caller_unidentified' } })
+    expect(f.locks.view('s-aaa').mode).toBe('locked')
+  })
+
+  test('a door wired WITHOUT the caller check refuses (absent = unidentified)', async () => {
+    const f = fixture({ caller: undefined })
+    await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+    expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 403, body: { error: 'caller_unidentified' } })
+  })
+
+  test('the person (process outside every session, the WSL relay, another machine) unlocks', async () => {
+    for (const v of [{ kind: 'person', via: 'process', pid: 9 }, { kind: 'person', via: 'wsl-relay' }, { kind: 'person', via: 'remote' }] as const) {
+      const f = fixture({ caller: () => v })
+      await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+      expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 200, body: { ok: true, lock: 'unlocked' } })
+    }
   })
 })

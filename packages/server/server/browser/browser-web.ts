@@ -33,6 +33,7 @@ import { ownerKey, statusTitle, statusUrl, type BrowserOwner } from './browser-s
 import type { HarnessId } from '@agentistics/core'
 import { decideLockRequest, holdMsFor, type PageFacts } from './browser-lock'
 import { BrowserLocks } from './browser-lock-host'
+import { callerRefusal, type CallerVerdict } from './browser-caller'
 
 let host: BrowserHost | null = null
 let exitHooked = false
@@ -102,6 +103,12 @@ export interface RouteDeps {
   audit?: (ev: { action: 'browser.lock' | 'browser.unlock'; managedId: string }) => void
   /** A session that has ended gets no browser (the watcher would stop it on its next tick anyway). */
   sessionLive?: (managedId: string) => boolean | undefined
+  /**
+   * S4/F1: WHO is on the other end of THIS request, read from the socket (`browser-caller.ts`). The
+   * padlock route refuses a session AND a caller it cannot identify; ABSENT = cannot identify = refused
+   * (fail-closed — a door wired without the check is a closed door, never an open one).
+   */
+  caller?: () => CallerVerdict
 }
 
 export interface RouteAnswer { status: number; body: unknown }
@@ -148,6 +155,9 @@ async function lockRoute(body: unknown, deps: RouteDeps): Promise<RouteAnswer> {
   const b = (body && typeof body === 'object' && !Array.isArray(body) ? body : {}) as Record<string, unknown>
   const d = decideLockRequest({ carriesSession: b.session !== undefined && b.session !== null, owner: b.owner, lock: b.lock })
   if (!d.ok) return { status: d.status, body: { ok: false, error: d.error, sentence: d.sentence } }
+  // F1: the body's word is not enough — a session that omits `session` is still a session. The socket says.
+  const refused = callerRefusal(deps.caller ? deps.caller() : { kind: 'unknown', reason: 'no-peer' })
+  if (refused) return { status: refused.status, body: { ok: false, error: refused.error, sentence: refused.sentence, ...(refused.why ? { why: refused.why } : {}) } }
   if (!deps.locks) return { status: 501, body: { ok: false, error: 'no_padlock', sentence: 'This build has no browser padlock.' } }
   const key = ownerKey({ kind: 'session', managedId: d.managedId })
   // Unlocking a browser that is not open hands the person nothing; locking is always allowed (and idempotent).
@@ -272,7 +282,7 @@ export function browserLocks(opts: BrowserWebOpts): BrowserLocks {
 export function browserRouteDeps(
   opts: BrowserWebOpts,
   verify: RouteDeps['verify'],
-  extra: { harnessOf?: RouteDeps['harnessOf']; audit?: RouteDeps['audit'] } = {},
+  extra: { harnessOf?: RouteDeps['harnessOf']; audit?: RouteDeps['audit']; caller?: RouteDeps['caller'] } = {},
 ): RouteDeps {
   const h = browserHost(opts)
   return {
@@ -281,6 +291,7 @@ export function browserRouteDeps(
     locks: browserLocks(opts),
     harnessOf: extra.harnessOf,
     audit: extra.audit,
+    caller: extra.caller,
     sessionLive: opts.sessionLive,
     run: async (ah, args) => {
       const { runAction } = await import('./browser-actions')
