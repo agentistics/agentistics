@@ -26,6 +26,13 @@ describe('sessionActivityOf — what the transcript says a session DID', () => {
     expect(sessionActivityOf({ tool_counts: { mcp__playwright__browser_click: 3 }, git_commits: 0, test_runs: 0 })!.browser).toBe(true)
     expect(sessionActivityOf({ tool_counts: { mcp__agentistics__agentistics_tasks: 3 }, git_commits: 0 })!.browser).toBe(false)
   })
+  test('a browser call is read in the SESSION\'S harness format, not only Claude\'s', () => {
+    expect(sessionActivityOf({ harness: 'gemini', tool_counts: { mcp_agentistics_agentistics_browser_click: 2 }, git_commits: 0 })!.browser).toBe(true)
+    expect(sessionActivityOf({ harness: 'copilot', tool_counts: { 'playwright-browser_click': 1 }, git_commits: 0 })!.browser).toBe(true)
+    expect(sessionActivityOf({ harness: 'antigravity', tool_counts: { browser_subagent: 1 }, git_commits: 0 })!.browser).toBe(true)
+    expect(sessionActivityOf({ harness: 'copilot', tool_counts: { mcp__playwright__browser_click: 1 }, git_commits: 0 })!.browser).toBe(false)
+    expect(sessionActivityOf({ harness: 'claude', tool_counts: { mcp__playwright__browser_click: 0 }, git_commits: 0 })!.browser).toBe(false)
+  })
   test('a transcript that was not counted for tests says null, not zero', () => {
     expect(sessionActivityOf({ tool_counts: {}, git_commits: 0 })!.tests).toBeNull()
   })

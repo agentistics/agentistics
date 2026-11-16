@@ -7,6 +7,7 @@
  * same `postWithOwnerProof` the delivery moves use, never a second proof path. Nothing here touches the DOM.
  */
 import { postWithOwnerProof, ownerProofSentence, type OwnerGrant } from './ownerProof'
+import { isOwnBrowserToolName } from '@agentistics/core'
 import { vaultPost } from './vaultApi'
 import type { BrowserScreenStateEvent } from './browserStream'
 
@@ -15,10 +16,10 @@ import type { BrowserScreenStateEvent } from './browserStream'
 /**
  * A call to the agentistics browser tools, in any harness's spelling: `agentistics_browser_click`
  * (bare), `mcp__agentistics__agentistics_browser_click` (Claude), `agentistics__agentistics_browser_…`.
- * S6 replaces this with core's per-harness `isBrowserTool`; until then the card only needs OUR tools.
+ * Delegates to core's per-harness `isBrowserTool` (S6); the card needs only OUR tools, whatever the harness.
  */
 export function isAgentisticsBrowserTool(name: string): boolean {
-  return /(^|_)agentistics_browser_[a-z_]+$/.test(name)
+  return isOwnBrowserToolName(name)
 }
 
 interface ToolTurn { tools?: ReadonlyArray<{ name: string }> }
