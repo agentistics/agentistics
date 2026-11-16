@@ -108,15 +108,33 @@ export function browserStreamAtCapacity(opts: BrowserWebOpts): boolean {
 
 const sse = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
+/**
+ * S4c: bounds for a DIRECT SSE reader (the mux path is unbounded: its socket dies with the tab). A client
+ * that vanished without a clean close never aborts the request, so it would hold a viewer — and the 15-min
+ * auto-lock with it — for ever. (1) `stallKeepalives` consecutive keepalives the reader never took ⇒ the
+ * socket is dead; (2) `lifetimeMs` caps even a healthy one (EventSource reconnects on its own).
+ */
+export interface StreamBounds { bounded: boolean; keepaliveMs: number; stallKeepalives: number; lifetimeMs: number }
+export const DIRECT_BOUNDS: StreamBounds = { bounded: true, keepaliveMs: KEEPALIVE_MS, stallKeepalives: 3, lifetimeMs: 5 * 60_000 }
+export const MUX_BOUNDS: StreamBounds = { ...DIRECT_BOUNDS, bounded: false }
+
+export const streamBoundsFor = (viaMux: boolean): StreamBounds => (viaMux ? MUX_BOUNDS : DIRECT_BOUNDS)
+
 /** The SSE body for one tab's screen. Cleanup is tied to `signal` (the browser left). */
-export function openBrowserStream(opts: BrowserWebOpts, key: string, tab: string | null, signal: AbortSignal): ReadableStream<Uint8Array> {
-  const h = browserScreencastHub(opts)
+export function openBrowserStream(opts: BrowserWebOpts, key: string, tab: string | null, signal: AbortSignal, bounds: StreamBounds = MUX_BOUNDS): ReadableStream<Uint8Array> {
+  return openSseStream(browserScreencastHub(opts), key, tab, signal, bounds)
+}
+
+export function openSseStream(h: ScreencastHub, key: string, tab: string | null, signal: AbortSignal, bounds: StreamBounds): ReadableStream<Uint8Array> {
   const enc = new TextEncoder()
   let sub: Subscription | null = null
   let keepalive: ReturnType<typeof setInterval> | null = null
+  let lifetime: ReturnType<typeof setTimeout> | null = null
+  let stalled = 0
   let closed = false
   const teardown = () => {
     closed = true
+    if (lifetime !== null) { clearTimeout(lifetime); lifetime = null }
     if (keepalive !== null) { clearInterval(keepalive); keepalive = null }
     sub?.close()
     sub = null
@@ -134,7 +152,15 @@ export function openBrowserStream(opts: BrowserWebOpts, key: string, tab: string
       }
       if (signal.aborted) { end(); return }
       push(sse('open', { owner: key, tab }))
-      keepalive = setInterval(() => push(': keepalive\n\n'), KEEPALIVE_MS)
+      keepalive = setInterval(() => {
+        if (bounds.bounded) {
+          // A queue still holding the last chunk at the next tick = nobody is taking bytes.
+          stalled = (controller.desiredSize ?? 1) <= 0 ? stalled + 1 : 0
+          if (stalled >= bounds.stallKeepalives) { end(); return }
+        }
+        push(': keepalive\n\n')
+      }, bounds.keepaliveMs)
+      if (bounds.bounded) lifetime = setTimeout(end, bounds.lifetimeMs)
       const sink: ScreenSink = {
         // Back-pressure: one chunk not yet taken by the reader ⇒ behind; the hub keeps the newest frame.
         frame: (f) => {
@@ -152,6 +178,7 @@ export function openBrowserStream(opts: BrowserWebOpts, key: string, tab: string
       else sub = s
     },
     pull() {
+      stalled = 0
       sub?.drained()
     },
     cancel() {

@@ -4,7 +4,7 @@
  * refused (fail-closed); the person's browser keeps working.
  */
 import { describe, expect, test } from 'bun:test'
-import { classifyCaller, callerRefusal, parseProcNetTcp, type CallerInput, type ProcLink } from './browser-caller'
+import { classifyCaller, callerRefusal, browserUnlockEarlyRefusal, parseProcNetTcp, type CallerInput, type ProcLink } from './browser-caller'
 
 // /proc/net/tcp lines as the kernel prints them (127.0.0.1:41000 → 127.0.0.1:47291, uid 1000, inode 777).
 const TCP = [
@@ -143,5 +143,31 @@ describe('callerRefusal', () => {
     expect(callerRefusal({ kind: 'unknown', reason: 'no-proc' })).toMatchObject({ status: 403, error: 'caller_unidentified' })
     expect(callerRefusal({ kind: 'person', via: 'process', pid: 1 })).toBeNull()
     expect(callerRefusal({ kind: 'person', via: 'remote' })).toBeNull()
+  })
+})
+
+describe('S4c — the early door on POST /api/vault/browser-unlock', () => {
+  const H = { 'Content-Type': 'application/json' }
+  test('a known session gets 403 session_cannot_unlock and its body is never read (no proof attempted)', async () => {
+    let cancelled = 0
+    const req = { body: { cancel: async () => { cancelled++ } } }
+    const r = await browserUnlockEarlyRefusal(req, { kind: 'session', pid: 7, managedId: null }, H)
+    expect(r?.status).toBe(403)
+    expect(await r!.json()).toMatchObject({ ok: false, code: 'session_cannot_unlock' })
+    expect(r!.headers.get('Cache-Control')).toBe('no-store')
+    expect(cancelled).toBe(1)
+  })
+  test('the person and an unidentified caller go on to the vault (the proof decides)', async () => {
+    const req = { body: null }
+    expect(await browserUnlockEarlyRefusal(req, { kind: 'person', via: 'process', pid: 1 }, H)).toBeNull()
+    expect(await browserUnlockEarlyRefusal(req, { kind: 'unknown', reason: 'no-proc' }, H)).toBeNull()
+  })
+  test('index.ts calls it BEFORE handing the request to the vault', async () => {
+    const src = await Bun.file(new URL('../index.ts', import.meta.url)).text()
+    const a = src.indexOf('browserUnlockEarlyRefusal(req')
+    const b = src.indexOf('await handleVaultHttp(req')
+    expect(a).toBeGreaterThan(0)
+    expect(b).toBeGreaterThan(a)
+    expect(src.slice(a, b)).toContain('if (early) return early')
   })
 })
