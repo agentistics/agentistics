@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, Filter } from 'lucide-react'
 import { brtDay, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
-import { addMonths, dowShort, monthCells, overduePiecesOfDay, rangeLabel, swipeDay, weekDays } from '../../lib/calendarModel'
+import { addMonths, dowShort, monthCells, overduePiecesOfDay, rangeLabel, stepAnchor, swipeDay, weekDays } from '../../lib/calendarModel'
 import { TEXT, VIEW_LABEL, pick } from './calendarText'
 import { MobileDayGrid, phoneEvents } from './MobileDayGrid'
 import type { CalSelection } from './CalendarDetail'
@@ -21,13 +21,14 @@ export function MobileCalendar(p: {
   versions: readonly CalVersion[]; pieces: readonly CalPiece[]; marks: readonly CalMark[]
   onOpen: (s: CalSelection, e: React.MouseEvent) => void; filterCount: number; filters: ReactNode; body: ReactNode; ready: boolean; exportIcs: () => void
 }) {
-  const [sheet, setSheet] = useState<'menu' | 'filters' | null>(null)
+  const [sheet, setSheet] = useState<'menu' | 'filters' | 'views' | null>(null)
   const start = useRef<{ x: number; y: number } | null>(null)
   const today = brtDay(p.nowMs)
   const days = weekDays(p.anchor)
   // The tree views (Cronograma, Dia) carry their own day header; a second row of days above it is the same fact twice.
   const treeView = p.view === 'schedule' || p.view === 'day'
   const openDay = p.onOpenDay ?? ((d: string) => { p.onDay(d); p.onView('day') })
+  const viewButtons = (['day', 'three', 'week', 'month', 'schedule', 'agenda'] as const).map(v => <button key={v} type="button" data-cal-view-option={v} className="cal-phone-button" aria-pressed={p.view === v} style={{ width: '100%' }} onClick={() => { p.onView(v); setSheet(null) }}>{pick(v === 'three' ? TEXT.threeDays : VIEW_LABEL[v], p.pt)}</button>)
   const month = <div data-cal-phone-month className="cal-phone-month">
     {Array.from({ length: 7 }, (_, i) => <span key={i}>{dowShort(i, p.pt).slice(0, 1)}</span>)}
     {monthCells(p.anchor).map(c => {
@@ -40,22 +41,35 @@ export function MobileCalendar(p: {
     })}
   </div>
   return <div data-cal-phone style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-    <header style={{ display: 'flex', alignItems: 'center', flexShrink: 0, gap: 4 }}>
+    {treeView ? <header data-cal-phone-header style={{ display: 'flex', flexDirection: 'column', flexShrink: 0, gap: 6, padding: '2px 0 8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <h1 data-cal-phone-title style={{ margin: 0, flex: 1, minWidth: 0, fontSize: 18, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.view === 'schedule' ? rangeLabel('schedule', p.anchor, p.pt) : rangeLabel('day', p.anchor, p.pt).replace(/^[^,]+/, w => (p.pt ? w.slice(0, 3).toLowerCase() : w.slice(0, 3)))}</h1>
+        <button type="button" className="cal-phone-button" data-cal-view-select aria-haspopup="dialog" aria-expanded={sheet === 'views'} onClick={() => setSheet('views')} style={{ border: '1px solid var(--border)', gap: 6, fontSize: 13 }}>{pick(VIEW_LABEL[p.view === 'three' ? 'day' : p.view], p.pt)} <ChevronDown size={14} aria-hidden /></button>
+        <button type="button" className="cal-phone-button" data-cal-filter-trigger aria-label={pick(TEXT.filters, p.pt)} onClick={() => setSheet('filters')}><Filter size={19} />{p.filterCount > 0 && <sup>{p.filterCount}</sup>}</button>
+      </div>
+      <div data-cal-nav-row style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+        <button type="button" className="cal-phone-button" data-cal-prev aria-label={pick(TEXT.prev, p.pt)} onClick={() => p.onDay(stepAnchor(p.view === 'schedule' ? 'schedule' : 'day', p.anchor, -1))}><ChevronLeft size={18} /></button>
+        <button type="button" className="cal-phone-button" data-cal-today onClick={() => p.onDay(today)} style={{ border: '1px solid var(--border)', padding: '0 14px', fontWeight: 600 }}>{pick(TEXT.today, p.pt)}</button>
+        <button type="button" className="cal-phone-button" data-cal-next aria-label={pick(TEXT.next, p.pt)} onClick={() => p.onDay(stepAnchor(p.view === 'schedule' ? 'schedule' : 'day', p.anchor, 1))}><ChevronRight size={18} /></button>
+      </div>
+    </header> : <header style={{ display: 'flex', alignItems: 'center', flexShrink: 0, gap: 4 }}>
       <button type="button" className="cal-phone-button" aria-expanded={sheet === 'menu'} onClick={() => setSheet('menu')} style={{ flex: 1, justifyContent: 'flex-start', fontWeight: 600, fontSize: 17 }}>{rangeLabel('month', p.anchor, p.pt)}<ChevronDown size={16} /></button>
       <button type="button" className="cal-phone-button" data-cal-filter-trigger aria-label={pick(TEXT.filters, p.pt)} onClick={() => setSheet('filters')}><Filter size={19} />{p.filterCount > 0 && <sup>{p.filterCount}</sup>}</button>
       <button type="button" className="cal-phone-button" data-cal-today aria-label={pick(TEXT.today, p.pt)} onClick={() => p.onDay(today)} style={{ border: '1px solid var(--border)' }}>{Number(today.slice(8))}</button>
-    </header>
+    </header>}
     {!treeView && <div data-cal-week-strip style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', flexShrink: 0, borderBottom: '1px solid var(--border)', touchAction: 'pan-y' }}
       onTouchStart={e => { const t = e.touches[0]; if (t) start.current = { x: t.clientX, y: t.clientY } }}
       onTouchEnd={e => { const t = e.changedTouches[0]; if (t && start.current) p.onDay(swipeDay(p.anchor, t.clientX - start.current.x, t.clientY - start.current.y, 7)); start.current = null }}>
       {days.map((day, i) => <button type="button" key={day} className="cal-phone-button cal-phone-weekday" aria-label={rangeLabel('day', day, p.pt)} aria-pressed={day === p.anchor} aria-current={day === today ? 'date' : undefined} onClick={() => p.onDay(day)}><small>{dowShort(i, p.pt).slice(0, 1)}</small><span>{Number(day.slice(8))}</span></button>)}
     </div>}
     {!p.ready ? p.body : p.view === 'month' ? month : p.view === 'schedule' || p.view === 'agenda' || p.view === 'day' ? p.body : <MobileDayGrid {...p} onOpenDay={openDay} span={p.view === 'week' ? 7 : p.view === 'three' ? 3 : 1} />}
-    {sheet && <CalendarSheet title={pick(sheet === 'filters' ? TEXT.filters : TEXT.title, p.pt)} closeLabel={pick(TEXT.close, p.pt)} onClose={() => setSheet(null)}>
-      {sheet === 'filters' ? p.filters : <>
+    {sheet && <CalendarSheet title={pick(sheet === 'filters' ? TEXT.filters : sheet === 'views' ? TEXT.title : TEXT.title, p.pt)} closeLabel={pick(TEXT.close, p.pt)} onClose={() => setSheet(null)}>
+      {sheet === 'filters' ? p.filters : sheet === 'views' ? <>
+        {viewButtons}
+      </> : <>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><button className="cal-phone-button" type="button" aria-label={pick(TEXT.prev, p.pt)} onClick={() => p.onDay(addMonths(p.anchor, -1))}><ChevronLeft size={18} /></button><b>{rangeLabel('month', p.anchor, p.pt)}</b><button className="cal-phone-button" type="button" aria-label={pick(TEXT.next, p.pt)} onClick={() => p.onDay(addMonths(p.anchor, 1))}><ChevronRight size={18} /></button></div>
         {month}
-        {(['day', 'three', 'week', 'month', 'schedule', 'agenda'] as const).map(v => <button key={v} type="button" className="cal-phone-button" aria-pressed={p.view === v} style={{ width: '100%' }} onClick={() => { p.onView(v); setSheet(null) }}>{pick(v === 'three' ? TEXT.threeDays : VIEW_LABEL[v], p.pt)}</button>)}
+        {viewButtons}
         <button type="button" className="cal-phone-button" onClick={p.exportIcs}>{pick(TEXT.exportIcs, p.pt)}</button>
       </>}
     </CalendarSheet>}
