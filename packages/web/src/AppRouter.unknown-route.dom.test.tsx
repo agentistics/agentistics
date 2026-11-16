@@ -3,7 +3,10 @@ import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { act } from 'react'
 
 // An address no route names used to leave the boot screen up forever ("No routes matched location").
-// The layout and the two pages that matter are stand-ins: what is under test is the ROUTE TABLE.
+// The layout, the loader and the two pages that matter are stand-ins: what is under test is the ROUTE TABLE.
+// `mock.module` is process-global in bun, so the real modules are captured first and put back in afterAll.
+const MOCKED = ['./App', './components/CenteredLoader', './pages/HomePage', './pages/TasksPage'] as const
+const real = Object.fromEntries(await Promise.all(MOCKED.map(async m => [m, { ...(await import(m)) }])))
 mock.module('./App', () => ({
   default: () => {
     const { Outlet } = require('react-router-dom')
@@ -25,7 +28,9 @@ beforeAll(async () => {
   createRoot = (await import('react-dom/client')).createRoot
   AppRouter = (await import('./AppRouter')).default
 })
-afterAll(async () => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = oldAct; await GlobalRegistrator.unregister() })
+afterAll(async () => {
+  for (const m of MOCKED) mock.module(m, () => real[m])
+  ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = oldAct; await GlobalRegistrator.unregister() })
 
 async function visit(path: string) {
   window.history.pushState({}, '', path)
