@@ -44,7 +44,7 @@ import {
 } from '../components/tasks/boardPrefs'
 import { pathOfView, viewOfPath } from '../lib/tasksViewRoute'
 import { AgentaskToolbar, ViewPanel, viewNames, type ViewActions, type ViewState } from '../components/tasks/AgentaskToolbar'
-import { isDefaultVisible, visibleStatuses, uniqueStatusLabels } from '../components/tasks/statusDefaults'
+import { isDefaultVisible, visibleStatuses, statusViewItems } from '../components/tasks/statusDefaults'
 import { DELIVERY_TABS, DeliveryDetail, type DeliveryTab } from '../components/tasks/DeliveryDetail'
 import { TaskHero } from '../components/tasks/TaskHero'
 import { liveSessionsOf } from '../components/tasks/threadView'
@@ -266,14 +266,9 @@ function TaskList() {
     ...sortTaskTypes(types ?? []).map(t => ({ id: t.id, label: t.label, color: t.color, count: shown.filter(r => r.task.type === t.id).length })),
     { id: NO_TYPE_KEY, label: lang === 'pt' ? 'Sem tipo' : 'No type', color: 'var(--text-tertiary)', count: shown.filter(r => !r.task.type).length },
   ], [types, shown, lang])
-  const statusItems = useMemo(() => {
-    const m = liveStatusMap(statuses)
-    const names = uniqueStatusLabels(statuses)
-    return liveStatusOrder(statuses).map(id => ({
-      id, label: names[id] ?? m[id]?.label ?? id, color: m[id]?.color ?? 'var(--text-tertiary)',
-      count: (!needle ? statusTotals?.[id] : undefined) ?? shown.filter(r => r.task.status === id).length,
-    }))
-  }, [statuses, shown, needle, statusTotals])
+  const statusItems = useMemo(() => statusViewItems(statuses, lang, id =>
+    (!needle ? statusTotals?.[id] : undefined) ?? shown.filter(r => r.task.status === id).length,
+  ), [statuses, shown, needle, statusTotals, lang])
   const viewState: ViewState = {
     view, items: onTypes ? typeItems : statusItems,
     shown: onTypes ? (storedTypeGroups ?? typeItems.map(i => i.id)) : boardColumns,

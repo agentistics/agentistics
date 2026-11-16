@@ -129,7 +129,7 @@ export function ViewPanel({ lang, state: s, actions: a, statuses }: {
   const byId = new Map(s.items.map(i => [i.id, i]))
   const shownItems = s.shown.map(id => byId.get(id)).filter((i): i is VisibilityItem => i !== undefined)
   const hiddenItems = s.items.filter(i => !s.shown.includes(i.id))
-  const sm = liveStatusMap(statuses)
+  const sm = liveStatusMap(statuses, lang)
   const row: CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 6, minHeight: mobile ? 44 : 30, padding: '0 4px', borderRadius: 6,
   }

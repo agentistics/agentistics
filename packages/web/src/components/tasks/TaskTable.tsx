@@ -912,7 +912,7 @@ export function TaskTable(p: TaskTableProps) {
     return liveStatusOrder(p.statuses).map(status => ({
       key: status,
       label: statusLabel(status, p.lang ?? 'en', p.statuses),
-      color: statusStyle(p.statuses, status).color,
+      color: statusStyle(p.statuses, status, p.lang).color,
       createStatus: status as TaskStatus,
       createType: undefined as string | undefined,
       rows: sortRows(p.rows.filter(r => (r.task.status as BoardStatus) === status), sort, sortCtx),
@@ -1590,7 +1590,7 @@ export function TaskTable(p: TaskTableProps) {
               value="__none__"
               options={[
                 { value: '__none__', label: p.lang === 'pt' ? 'Mover para…' : 'Move to…', color: 'var(--text-secondary)', dim: 'var(--bg-elevated)' },
-                ...statusOptions(liveStatusMap(p.statuses), liveStatusOrder(p.statuses)),
+                ...statusOptions(liveStatusMap(p.statuses, p.lang), liveStatusOrder(p.statuses)),
               ]}
               onPick={v => {
                 if (v === '__none__') return

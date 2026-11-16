@@ -12,6 +12,7 @@
 
 import type { CSSProperties } from 'react'
 import { HARNESS_COLORS } from '../../lib/harness'
+import { statusLabel, type Lang } from './copy'
 import { sortTaskStatuses, type HarnessId, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 
 /**
@@ -139,11 +140,13 @@ export function dimFromHex(hex: string, alpha = 0.16): string {
  * fixed `STATUS` map so nothing renders unstyled during the fetch.
  */
 export function liveStatusMap(
-  list: readonly TaskStatusDef[] | null,
+  list: readonly TaskStatusDef[] | null, lang?: Lang,
 ): Record<string, { label: string; color: string; dim: string }> {
   if (!list) return STATUS
   return Object.fromEntries(
-    list.map(s => [s.id, { label: s.label, color: s.color, dim: dimFromHex(s.color) }]),
+    // With a language the name goes through `statusLabel` — the ONE display-name helper (seeded
+    // protected defaults read in pt; an explicit rename is kept verbatim).
+    list.map(s => [s.id, { label: lang ? statusLabel(s.id, lang, list) : s.label, color: s.color, dim: dimFromHex(s.color) }]),
   )
 }
 
@@ -163,9 +166,9 @@ export function liveStatusOrder(list: readonly TaskStatusDef[] | null): string[]
  * relabelled an unrecognised status as a real one).
  */
 export function statusStyle(
-  list: readonly TaskStatusDef[] | null, id: string,
+  list: readonly TaskStatusDef[] | null, id: string, lang?: Lang,
 ): { label: string; color: string; dim: string } {
-  const found = liveStatusMap(list)[id]
+  const found = liveStatusMap(list, lang)[id]
   return found ?? { label: id, color: UNKNOWN_STATUS_COLOR, dim: UNKNOWN_STATUS_DIM }
 }
 

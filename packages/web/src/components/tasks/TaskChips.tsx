@@ -139,7 +139,7 @@ function BlockerList({ id, task, lang, statuses, onChanged }: {
               textDecoration: closed ? 'line-through' : 'none',
               color: closed ? 'var(--text-tertiary)' : 'var(--text-secondary)',
             }}>{b.task.title}</span>
-            <span style={pill(statusStyle(statuses, b.task.status).color)}>
+            <span style={pill(statusStyle(statuses, b.task.status, lang).color)}>
               {statusLabel(b.task.status, lang, statuses)}
             </span>
             <button
@@ -230,7 +230,7 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
     return r ? r.task.status !== 'done' && r.task.status !== 'abandoned' : false
   }).length
 
-  const blockedStyle = statusStyle(statuses, 'blocked')
+  const blockedStyle = statusStyle(statuses, 'blocked', lang)
 
   return (
     <>

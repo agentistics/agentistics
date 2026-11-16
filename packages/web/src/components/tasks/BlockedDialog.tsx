@@ -43,7 +43,7 @@ export function BlockedDialog(p: BlockedDialogProps) {
   const pt = p.lang === 'pt'
   const dismiss = useDismissOverlay(() => p.onCancel())
   const { statuses } = useTaskStatuses()
-  const blockedStyle = statusStyle(statuses, 'blocked')
+  const blockedStyle = statusStyle(statuses, 'blocked', p.lang ?? 'en')
   const [reason, setReason] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set(p.already ?? []))
   const [q, setQ] = useState('')
@@ -148,7 +148,7 @@ export function BlockedDialog(p: BlockedDialogProps) {
             )}
             {candidates.map(r => {
               const on = picked.has(r.task.id)
-              const st = statusStyle(statuses, r.task.status)
+              const st = statusStyle(statuses, r.task.status, p.lang ?? 'en')
               return (
                 <button
                   key={r.task.id}
