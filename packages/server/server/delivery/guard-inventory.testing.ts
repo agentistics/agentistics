@@ -1,7 +1,7 @@
 /** A migration ceiling pinned independently from the live inventory. Entries may disappear, never be replaced or added. */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { digest, rawWriters, storeReach } from './guard-ast.testing'
+import { digest, moduleCapabilities, rawWriters, storeReach } from './guard-ast.testing'
 import { productionSources, read } from './lint-scan.testing'
 
 export interface Inventory { base: string; contexts: Record<string, string[]>; writers: Record<string, string[]> }
@@ -47,15 +47,24 @@ export function scannedSources(pkgs: string): string[] {
 export const GUARDED_STORES = new Set(['server/server/sessions/task-store.ts', 'server/server/delivery/store.ts'])
 
 /** The live inventory: raw writers outside the two stores, and book references everywhere. */
-export function liveInventory(pkgs: string): { writers: Record<string, string[]>; reach: Record<string, string[]> } {
+export function liveInventory(pkgs: string): { writers: Record<string, string[]>; reach: Record<string, string[]>; modules: Record<string, string[]> } {
   const writers: Record<string, string[]> = {}
   const reach: Record<string, string[]> = {}
+  const modules: Record<string, string[]> = {}
   for (const rel of scannedSources(pkgs)) {
     const src = read(pkgs, rel)
+    const caps = moduleCapabilities(src); if (caps.length) modules[rel] = caps
     if (!GUARDED_STORES.has(rel)) { const w = rawWriters(src).map(c => c.id); if (w.length) writers[rel] = w }
     const r = storeReach(src); if (r.length) reach[rel] = r
   }
-  return { writers, reach }
+  return { writers, reach, modules }
+}
+
+/** Independently pinned r3 source ceiling. Capability-bearing modules may disappear, never grow. */
+export function moduleCeiling(): Record<string, string[]> {
+  const text = readFileSync(join(import.meta.dir, 'guard-modules.fixture.json'), 'utf8')
+  if (digest(text) !== '3f0e9f47f8930dfa57d5a62f2264a24f3de2c3c28c7d09b819ba8626bbe86bfb') throw new Error('Historical module capability inventory changed: shrink only')
+  return JSON.parse(text).modules
 }
 
 /** Old (r2) ∪ r3 writer ceilings, as one multiset per file. */

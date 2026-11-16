@@ -20,6 +20,7 @@ import { readFile, copyFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { withGuardLocks, type GuardLockName, type GuardLockPaths } from './guard-locks'
 import { unsealed, verdictFor, writeSealed, type TamperReason } from './guard-integrity'
+import type { TamperView } from './guard'
 
 export type GuardAuth =
   | { kind: 'evidence'; ids: string[]; sha256: string[] }
@@ -49,7 +50,7 @@ export interface PieceCheckpoint {
 
 export interface GuardIntent { transitionId: string; target: PieceCheckpoint; at: string }
 /** `rules`: S0d.2's authenticated MIRROR of each guarantee rule's state (`activation.ts` writes it in the same guards-locked section). */
-export interface GuardsDoc { version: 1; checkpoints: Record<string, PieceCheckpoint>; intents: Record<string, GuardIntent>; rules?: Record<string, 'off' | 'shadow' | 'on'> }
+export interface GuardsDoc { version: 1; checkpoints: Record<string, PieceCheckpoint>; intents: Record<string, GuardIntent>; rules?: Record<string, 'off' | 'shadow' | 'on'>; deliveryFloors?: Record<string, TamperView> }
 
 export class GuardsUnreadable extends Error {
   readonly code = 'guards_unreadable'
@@ -70,6 +71,15 @@ export function parseGuards(text: string): GuardsDoc {
   if (!isRec(raw) || raw.version !== 1) throw new Error('not a version 1 guards document')
   const checkpoints: Record<string, PieceCheckpoint> = {}
   const intents: Record<string, GuardIntent> = {}
+  const deliveryFloors: Record<string, TamperView> = {}
+  if (raw.deliveryFloors !== undefined) {
+    if (!isRec(raw.deliveryFloors)) throw new Error('deliveryFloors is not an object')
+    for (const [k, v] of Object.entries(raw.deliveryFloors)) {
+      if (!isRec(v) || !Number.isInteger(v.revision) || (v.revision as number) < 1 || !Array.isArray(v.history) || !Array.isArray(v.evidence) || !Array.isArray(v.evidenceHistory)) throw new Error(`delivery floor ${k} is malformed`)
+      deliveryFloors[k] = v as TamperView
+    }
+  }
+  const floors = raw.deliveryFloors === undefined ? {} : { deliveryFloors }
   if (raw.checkpoints !== undefined && !isRec(raw.checkpoints)) throw new Error('checkpoints is not an object')
   if (raw.intents !== undefined && !isRec(raw.intents)) throw new Error('intents is not an object')
   for (const [k, v] of Object.entries((raw.checkpoints as Record<string, unknown>) ?? {})) {
@@ -84,9 +94,9 @@ export function parseGuards(text: string): GuardsDoc {
     if (!isRec(raw.rules)) throw new Error('rules is not an object')
     const rules: Record<string, 'off' | 'shadow' | 'on'> = {}
     for (const [k, v] of Object.entries(raw.rules)) { if (v !== 'off' && v !== 'shadow' && v !== 'on') throw new Error(`rule ${k} is malformed`); rules[k] = v }
-    return { version: 1, checkpoints, intents, rules }
+    return { version: 1, checkpoints, intents, rules, ...floors }
   }
-  return { version: 1, checkpoints, intents }
+  return { version: 1, checkpoints, intents, ...floors }
 }
 
 /** PURE. Phase one: record what is about to be written. */

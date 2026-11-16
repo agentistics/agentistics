@@ -73,6 +73,9 @@ export async function reviewOutcome(o: {
     if (again.ok) { c = again.classification; declared = prior }
   }
   if (!c.ok) return { ok: false, code: c.code, message: c.message, messagePt: c.messagePt, ...(c.paths ? { paths: c.paths } : {}), missing: [] }
+  // Never select captures from an ambiguous id multiset, including books written by an older binary.
+  const ids = (o.record?.evidence ?? []).map(i => i.id)
+  if (new Set(ids).size !== ids.length) return { ok: false, code: 'evidence_binding_protected', message: 'Evidence ids must be unique within a piece.', messagePt: 'Os identificadores de evidência devem ser únicos na peça.', missing: [] }
   // A revision increments at every normal phase move. Only an adjustment starts a new capture round.
   // Its durable history entry is the lower revision bound; normal advances keep using that round's captures.
   const round = Math.max(0, ...(o.record?.history ?? []).filter(h => h.to === 'ajuste').map(h => h.revision))

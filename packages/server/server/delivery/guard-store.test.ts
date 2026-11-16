@@ -20,7 +20,8 @@ import { writeSealed } from './guard-integrity'
 import { GuardBusy, GuardLockOrderError } from './guard-locks'
 import { withGuardTransaction } from './guard-transaction'
 import { gitSync, put } from './git-fixture.testing'
-import { T, makeWorld, shot } from './evidence-world.testing'
+import { T, makeWorld, shot, png } from './evidence-world.testing'
+import { buildEvidenceItem } from './evidence'
 import { createTaskStore } from '../sessions/task-store'
 import type { Subtask } from '../sessions/task-model'
 
@@ -518,8 +519,20 @@ describe('r3 N1: the capture round cannot be erased by a write without context',
 describe('r3 N4: discriminating probes for the surviving mutants', () => {
   test('M6: captures stamped with a revision AFTER the record’s own are not this round’s evidence', async () => {
     const { tasks, deliveries } = await afterAdjustment()
-    // A door with context adds copies of the old captures stamped in the future: still not evidence for revision 3.
-    expect(await outcome(() => deliveries.update(doc => { const r = doc.deliveries.p1!; r.evidence = [...(r.evidence ?? []), ...(r.evidence ?? []).map(i => ({ ...i, id: i.id + '-future', revision: r.revision + 5 }))] }, { guard: ctx }))).toBe('WRITTEN')
+    // Fresh bytes isolate the upper revision bound: reusing the old captures is independently refused by Q1.
+    expect(await outcome(() => deliveries.update(doc => {
+      const r = doc.deliveries.p1!
+      const future = [
+        { kind: 'screenshot' as const, bytes: png(1280, 800, 31) },
+        { kind: 'screenshot' as const, bytes: png(390, 800, 32) },
+        { kind: 'probe' as const, probe: { kind: 'bundle' as const, literal: 'fresh-future-literal-of-12+' } },
+      ].map(input => {
+        const built = buildEvidenceItem(input, { revision: r.revision + 5, headSha: r.evidence![0]!.headSha, treeClean: true, by: 'worker', at: ISO, items: [] })
+        if (!built.ok) throw new Error(built.message)
+        return built.item
+      })
+      r.evidence = [...(r.evidence ?? []), ...future]
+    }, { guard: ctx }))).toBe('WRITTEN')
     expect(await outcome(() => tasks.upsertSubtask(sub('p1', { status: 'in_review' }), ctx))).toBe('evidence_required')
   })
   test('M4 (§3.5 downgrade): stages an older writer dropped come back from the mirror without being read as progress', async () => {

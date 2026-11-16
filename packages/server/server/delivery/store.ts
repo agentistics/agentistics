@@ -21,6 +21,8 @@ import { deliveryRaises, deliveryTamper, GuardRefused, type GuardContext } from 
 import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from './guard-host'
 import { withFileLock } from '../sessions/file-lock'
 import { isPhase, type DeliveryRecord } from './machine'
+import { createGuardsStore } from './guards-store'
+import type { TamperView } from './guard'
 
 export interface DeliveryDoc {
   version: 1
@@ -147,13 +149,37 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guar
         // Snapshot every protected binding before the callback; the evidence option cannot disable detection.
         const phasesBefore = structuredClone(doc.deliveries)
         const value = await fn(doc)
+        // Judge exactly the representation the serializer will persist, including promoted preserved records.
+        const serialized = serializeDeliveryDoc(doc)
+        const final = parseDeliveryDocStrict(serialized)
+        const floorStore = createGuardsStore(anchor.paths.guards)
+        const floorRule = base ? 'off' : await ruleAState(anchor.dir)
+        const floors = floorRule === 'off' ? {} : (await floorStore.read()).deliveryFloors ?? {}
+        const prior = { ...floors, ...phasesBefore }
         const commit = async () => {
+          if (floorRule !== 'off') {
+            // Keep the high-water history outside the removable delivery record. Seal BEFORE the document rename;
+            // a crash can conservatively retain a higher floor, but can never reopen an older capture round.
+            const guardDoc = await floorStore.read()
+            const next = { ...(guardDoc.deliveryFloors ?? {}) }
+            for (const [id, r] of Object.entries({ ...phasesBefore, ...final.deliveries })) {
+              const old = next[id]
+              const items = new Map((old?.evidence ?? []).map(i => [i.id, i]))
+              for (const i of r.evidence ?? []) if (!items.has(i.id)) items.set(i.id, i)
+              const extend = (was: readonly unknown[] = [], now: readonly unknown[] = []) => was.every((e, i) => JSON.stringify(e) === JSON.stringify(now[i])) ? now : was
+              next[id] = { taskId: r.taskId, revision: Math.max(old?.revision ?? 0, r.revision), history: extend(old?.history, r.history), evidenceHistory: extend(old?.evidenceHistory, r.evidenceHistory), evidence: [...items.values()] }
+            }
+            if (JSON.stringify(next) !== JSON.stringify(guardDoc.deliveryFloors ?? {})) await floorStore.write({ ...guardDoc, deliveryFloors: next })
+          }
           const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
-          await writeFile(tmp, serializeDeliveryDoc(doc), { mode: 0o600 })
+          await writeFile(tmp, serialized, { mode: 0o600 })
           await rename(tmp, path)
         }
-        const raised = deliveryRaises(phasesBefore, doc.deliveries)
-        const tampered = deliveryTamper(phasesBefore, doc.deliveries, !!options?.guard)
+        const raised = deliveryRaises(phasesBefore, final.deliveries)
+        const tampered = [
+          ...deliveryTamper(prior, final.deliveries, !!options?.guard),
+          ...deliveryTamper(floors, final.deliveries, true),
+        ]
         if (base) {
           // Rule off when the write started. Nothing protected changed → the base write. Otherwise re-read the rule under
           // the deliveries lock (the activation takes it first). A rule that moved mid-write fails closed: the callback is
@@ -172,8 +198,8 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guar
         await guardedWrite({
           raised, ctx: options?.guard, paths: anchor.paths, wiring: opts.guard,
           locks: [], alreadyHeld: ['deliveries', 'guards'],
-          recordOf: async key => doc.deliveries[key] ?? null,
-          stateOf: r => ({ boardStatus: '', boardStage: '', phase: doc.deliveries[r.key]?.phase ?? null }),
+          recordOf: async key => final.deliveries[key] ?? null,
+          stateOf: r => ({ boardStatus: '', boardStage: '', phase: final.deliveries[r.key]?.phase ?? null }),
           writeDocuments: commit,
         })
         return value

@@ -172,12 +172,13 @@ export type EvidenceListReply = { ok: true; status: 200; record: DeliveryRecord;
 
 export type DeliveryReply =
   | { ok: true; status: 200; record: DeliveryRecord; warnings: string[]; skipped?: unknown; gate?: GateVerdict; classification?: { category: string; headSha: string } }
-  | { ok: false; status: number; code: string; sentence: string; missing: string[]; record?: DeliveryRecord; gate?: GateVerdict }
+  | { ok: false; status: number; code: string; sentence: string; sentencePt?: string; missing: string[]; record?: DeliveryRecord; gate?: GateVerdict }
 
 /** The answer of a step report on a piece with no delivery record: the event is all that was written. */
 export type StepEventReply = { ok: true; status: 200; step: number; recorded: 'event' } | Extract<DeliveryReply, { ok: false }>
 
 const fail = (status: number, code: string, sentence: string, missing: string[] = [], record?: DeliveryRecord): Extract<DeliveryReply, { ok: false }> => ({ ok: false, status, code, sentence, missing, ...(record ? { record } : {}) })
+const guardFailure = (e: GuardRefused, record?: DeliveryRecord): Extract<DeliveryReply, { ok: false }> => ({ ...fail(e.status, e.code, e.message, e.missing, record), sentencePt: e.messagePt })
 const refused = (p: TransitionRefusal, record?: DeliveryRecord): DeliveryReply => fail(refusalStatus(p), p.code, p.sentence, p.missing, record)
 const iso = (d: DeliveryDeps) => new Date(d.now()).toISOString()
 const SUB_ID = /^[A-Za-z0-9_.:-]{1,120}$/
@@ -211,7 +212,7 @@ const safe = <A extends unknown[]>(fn: (...a: A) => Promise<DeliveryReply>) => a
     if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message)
     if (e instanceof GuardBusy) return fail(e.status, e.code, e.message)
     // S2a: the store's guard refused a phase raise this verb made (nothing was written) — an answer, never a thrown 500.
-    if (e instanceof GuardRefused) return fail(e.status, e.code, e.message, e.missing)
+    if (e instanceof GuardRefused) return guardFailure(e)
     throw e
   }
 }
@@ -221,7 +222,7 @@ const safeEnsure = <A extends unknown[]>(fn: (...a: A) => Promise<DeliveryRecord
   try { return await fn(...a) } catch (e) {
     if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message)
     if (e instanceof GuardBusy) return fail(e.status, e.code, e.message)
-    if (e instanceof GuardRefused) return fail(e.status, e.code, e.message, e.missing)
+    if (e instanceof GuardRefused) return guardFailure(e)
     throw e
   }
 }
@@ -403,7 +404,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       }, { guard: contextOfActor(actor) })
     } catch (e) {
       // The STORE's guard refused the phase move (nothing was written), or could not take its locks (§2.6.1).
-      if (e instanceof GuardRefused) return fail(422, e.code, e.message, e.missing, got)
+      if (e instanceof GuardRefused) return guardFailure(e, got)
       if (e instanceof GuardBusy) return fail(409, e.code, e.message, [], got)
       throw e
     }
@@ -2214,7 +2215,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
     release: async (o: { version: unknown; mergeSha: unknown; subtaskIds: unknown; repo?: unknown }, actor: string): Promise<ReleaseReply> => {
       try { return await release(o, actor) } catch (e) {
         if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
-        if (e instanceof GuardBusy || e instanceof GuardRefused) return fail(e.status, e.code, e.message) as Extract<DeliveryReply, { ok: false }>
+        if (e instanceof GuardRefused) return guardFailure(e)
+        if (e instanceof GuardBusy) return fail(e.status, e.code, e.message) as Extract<DeliveryReply, { ok: false }>
         return fail(500, 'store_erro', `the release could not be written (${e instanceof Error ? e.message.split('\n')[0] : String(e)}); the batch write is all-or-nothing and the verb is idempotent — run it again`) as Extract<DeliveryReply, { ok: false }>
       }
     },

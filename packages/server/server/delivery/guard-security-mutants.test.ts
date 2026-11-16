@@ -12,7 +12,7 @@ const restore = 'packages/server/server/backup/restore.ts'
 let root: string
 const originals = new Map<string, string>()
 const files = [delivery + 'guard-host.ts', delivery + 'guard.ts', delivery + 'store.ts', delivery + 'guard-sites.testing.ts', delivery + 'guard-inventory.fixture.json', tasks, restore,
-  delivery + 'guard-transaction.ts', delivery + 'activation.ts', delivery + 'guard-ast.testing.ts', delivery + 'guard-inventory-r3.fixture.json']
+  delivery + 'guard-transaction.ts', delivery + 'activation.ts', delivery + 'guard-ast.testing.ts', delivery + 'guard-inventory-r3.fixture.json', delivery + 'service.ts', delivery + 'guard-modules.fixture.json']
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'guard-mutants-'))
   cpSync(join(repo, 'packages'), join(root, 'packages'), { recursive: true, filter: p => !p.split('/').some(s => ['node_modules', 'dist', 'target', '.git'].includes(s)) })
@@ -96,7 +96,7 @@ test('mutant F4: bindings, advanced adoption and exposed pieces disappear from d
 test('mutant F5: evidence:true disables detection', async () => {
   reset()
   change(delivery + 'store.ts', 'const phasesBefore = structuredClone(doc.deliveries)', 'const phasesBefore = options?.evidence ? null : structuredClone(doc.deliveries)')
-  change(delivery + 'store.ts', 'const raised = deliveryRaises(phasesBefore, doc.deliveries)', 'const raised = phasesBefore ? deliveryRaises(phasesBefore, doc.deliveries) : []')
+  change(delivery + 'store.ts', 'const raised = deliveryRaises(phasesBefore, final.deliveries)', 'const raised = phasesBefore ? deliveryRaises(phasesBefore, final.deliveries) : []')
   await killed('F5')
 }, 120_000)
 test('mutant F6: policy captured before acquiring guards is trusted after activation', async () => {
@@ -222,4 +222,46 @@ test('mutant N3: production imports a *.testing helper that writes', async () =>
     expect(r.code, r.output).toBe(1); expect(r.output).toContain('mutant-import.ts')
     console.log('N3 testing import: killed')
   } finally { rmSync(file) }
+}, 120_000)
+
+const r4Test = delivery + 'guard-r4.test.ts'
+test('mutant Q1: duplicate ids again collapse in the append-only Map', async () => {
+  reset(); change(delivery + 'guard.ts', 'if (new Set(ids).size !== ids.length)', 'if (false)')
+  await killed('Q1 duplicate evidence IDs', [r4Test])
+}, 120_000)
+test('mutant Q2: judge callbacks before the preserved merge', async () => {
+  reset(); change(delivery + 'store.ts', 'const final = parseDeliveryDocStrict(serialized)', 'const final = doc')
+  await killed('Q2', [r4Test])
+}, 120_000)
+test('mutant Q3: forget durable floors when a delivery was deleted', async () => {
+  reset(); change(delivery + 'store.ts', "const floors = floorRule === 'off' ? {} : (await floorStore.read()).deliveryFloors ?? {}", 'const floors = {}')
+  await killed('Q3', [r4Test])
+}, 120_000)
+test('mutant Q8: the flow door drops only the Portuguese refusal', async () => {
+  reset(); change(delivery + 'service.ts', 'sentencePt: e.messagePt', 'sentencePt: undefined')
+  await killed('Q8', [r4Test])
+}, 120_000)
+const r4Modules: Record<string, string> = {
+  'Q4.generated': "import fs from 'node:fs'; fs.writeFileSync.call(fs, process.env['BOOK_PATH'], '{}')",
+  Q4: "import { Worker } from 'node:worker_threads'; new Worker(new URL('./writer.testing.ts', import.meta.url))",
+  Q5: "import fs from 'node:fs'; fs.writeFileSync.call(fs, process.env['BOOK_PATH'], '{}')",
+  Q6: "const fs = await import(process.env['FS_MODULE']); const put = fs['writeFileSync']; put(process.env['BOOK_PATH'], '{}')",
+  Q7: "import { createRequire } from 'node:module'; const load = createRequire(import.meta.url); const fs = load('node:fs'); const put = fs['writeFileSync']; put(process.env['BOOK_PATH'], '{}')",
+}
+for (const [id, src] of Object.entries(r4Modules)) test(`mutant ${id}: a new capability-bearing production MODULE is refused`, async () => {
+  reset()
+  const file = join(root, delivery, `mutant-${id}.ts`)
+  writeFileSync(file, src)
+  try {
+    const r = await run([lintTest], 'no new raw writer')
+    console.log(`${id}: exit ${r.code}`)
+    expect(r.code, r.output).toBe(1)
+    expect(r.output).toContain(`mutant-${id}.ts`)
+    expect(r.output).toContain('(fail)')
+  } finally { rmSync(file) }
+}, 120_000)
+test('mutant Q4–Q7: enlarging the module list itself is refused', async () => {
+  reset()
+  change(delivery + 'guard-modules.fixture.json', '"modules": {', '"modules": { "mutant.ts": ["module:fs"],')
+  await killed('no new raw writer', [lintTest])
 }, 120_000)

@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { rawWriters, storeReach, testOnlyImports } from './guard-ast.testing'
-import { GUARDED_STORES, inventoryGrowth, liveInventory, r3Inventory, scannedSources, writerCeiling } from './guard-inventory.testing'
+import { GUARDED_STORES, inventoryGrowth, liveInventory, moduleCeiling, r3Inventory, scannedSources, writerCeiling } from './guard-inventory.testing'
 import { productionSources, read } from './lint-scan.testing'
 
 const PKGS = join(import.meta.dir, '..', '..', '..')
@@ -18,6 +18,7 @@ describe('raw writers and book references have a pinned, shrinking historical ce
     const live = liveInventory(PKGS)
     expect(inventoryGrowth(live.writers, writerCeiling())).toEqual([])
     expect(inventoryGrowth(live.reach, r3Inventory().reach)).toEqual([])
+    expect(inventoryGrowth(live.modules, moduleCeiling())).toEqual([])
   }, 60_000)
   test('no production module imports a test-only module (a *.testing / *.fixture / *.test import is scanned as production)', () => {
     const out: string[] = []

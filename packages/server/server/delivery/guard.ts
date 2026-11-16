@@ -119,7 +119,7 @@ export function deliveryRaises(before: Readonly<Record<string, DeliveryBinding>>
  * that do it (`evidenceAdd`, `evidenceRemove`, adoption) always carry one. Anything else would let a contextless rank-0
  * write erase the round floor (GAP-1) or relabel old captures into the current round (GAP-2).
  */
-type TamperView = { taskId?: string; revision?: number; history?: readonly unknown[]; evidence?: readonly { id: string }[]; evidenceHistory?: readonly unknown[] }
+export type TamperView = { taskId?: string; revision?: number; history?: readonly unknown[]; evidence?: readonly { id: string; sha256?: string; revision?: number }[]; evidenceHistory?: readonly unknown[] }
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const keepsPrefix = (was: readonly unknown[] | undefined, now: readonly unknown[] | undefined) =>
   (was ?? []).every((e, i) => (now ?? []).length > i && sameJson(e, now![i]))
@@ -143,10 +143,13 @@ export function deliveryTamper(before: Readonly<Record<string, TamperView>>, aft
       const nowItems = new Map((now.evidence ?? []).map(i => [i.id, i] as const))
       const wasIds = new Set((was.evidence ?? []).map(i => i.id))
       if ((was.evidence ?? []).some(i => nowItems.has(i.id) && !sameJson(i, nowItems.get(i.id)))) out.push(tamper(id, 'rewrites an existing evidence item', 'reescreve uma evidência existente', false))
+      else if ((now.evidence ?? []).some(i => !wasIds.has(i.id) && i.sha256 && (was.evidence ?? []).some(old => old.sha256 === i.sha256 && old.revision !== i.revision))) out.push(tamper(id, 'reuses a capture at another revision', 'reutiliza uma captura em outra revisão', false))
       else if (!hasContext && ((was.evidence ?? []).some(i => !nowItems.has(i.id)) || (now.evidence ?? []).some(i => !wasIds.has(i.id)))) out.push(tamper(id, 'adds or removes evidence', 'adiciona ou remove evidência', true))
     }
   }
   for (const [id, now] of Object.entries(after)) {
+    const ids = (now.evidence ?? []).map(i => i.id)
+    if (new Set(ids).size !== ids.length) out.push(tamper(id, 'duplicates an evidence id', 'duplica um identificador de evidência', false))
     if (!before[id] && !hasContext && (now.evidence?.length ?? 0) > 0) out.push(tamper(id, 'creates a delivery record that already carries evidence', 'cria um registro de entrega já com evidência', true))
   }
   return out

@@ -66,6 +66,32 @@ const isModuleCall = (n: ts.Node): n is ts.CallExpression => ts.isCallExpression
 /** `x` or `await x` → x */
 const unwrap = (e: ts.Expression): ts.Expression => ts.isAwaitExpression(e) ? unwrap(e.expression) : ts.isParenthesizedExpression(e) ? unwrap(e.expression) : e
 
+/** r4: inventory the MODULE's capabilities, before interpreting calls or tracking aliases.
+ * Importing fs/process/Worker/createRequire already makes a module capable of writing. A computed loader is
+ * equally capable regardless of its current value; its exact expression must be pinned too.
+ * Bun is conservatively treated as a capability on any reference (including reads and aliases).
+ */
+export function moduleCapabilities(src: string): string[] {
+  const file = source(src)
+  const out = new Set<string>()
+  const module = (spec: ts.Node | undefined) => {
+    const text = literalText(spec)
+    if (text === undefined) out.add(`computed:${digest(spec?.getText(file) ?? '<missing>')}`)
+    else if (WRITING_MODULE.test(text)) out.add(`module:${text.replace(/^node:/, '')}`)
+  }
+  const visit = (n: ts.Node) => {
+    if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier) module(n.moduleSpecifier)
+    if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference)) module(n.moduleReference.expression)
+    if (isModuleCall(n)) module(n.arguments[0])
+    if (ts.isIdentifier(n) && n.text === 'Bun') out.add('global:Bun')
+    if (ts.isElementAccessExpression(n) && literalText(n.argumentExpression) === 'Bun') out.add('global:Bun')
+    if (ts.isNewExpression(n) && n.expression.getText(file).split('.').at(-1) === 'Worker') out.add('constructor:Worker')
+    ts.forEachChild(n, visit)
+  }
+  visit(file)
+  return [...out].sort()
+}
+
 /**
  * Conservative: inventory every raw fs / process writer, including unknown/computed destinations and aliases — named,
  * default and namespace imports, `require` / `import()` with destructuring renames, element access (`fs['writeFileSync']`),
