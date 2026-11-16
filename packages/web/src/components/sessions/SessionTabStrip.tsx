@@ -7,9 +7,9 @@ import { ActionNotice } from './ActionNotice'
  * a pin is `lib/pinnedSessions.ts` (never a second store); how a state looks is `STATE_COLOR`.
  * Every status mark carries its word (`aria-label` + `title`) — colour is never the only signal.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type Ref } from 'react'
 import { RoleIcon } from '../nav/RoleIcon'
-import { ChevronDown, List, Moon, Pin, X } from 'lucide-react'
+import { ChevronDown, List, Moon, Pin, Plus, X } from 'lucide-react'
 import { sessionIdentityKey } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
@@ -53,27 +53,64 @@ export interface SessionTabStripProps {
 const keyOf = (r: ControlSession): string => sessionIdentityKey(r)
 
 // ── the status mark every tab carries ──────────────────────────────────────────────────────────
-function TabStatus({ state, label, size = 8 }: { state: ControlSession['state']; label: string; size?: number }) {
-  const c = STATE_COLOR[state]
-  const ended = ENDED.has(state)
+/** The dot: filled (`hollow` false) or an outline; `pulse` = busy; `ring` = waiting on a person. */
+export function TabDot({ color, hollow, pulse = false, ring = false, label, size = 8 }: { color: string; hollow: boolean; pulse?: boolean; ring?: boolean; label: string; size?: number }) {
   return (
     <span role="img" aria-label={label} title={label} style={{ position: 'relative', display: 'inline-flex', width: size, height: size, flexShrink: 0 }}>
-      {state === 'waiting-approval' && (
-        <span className="ag-mic-pulse" aria-hidden style={{ position: 'absolute', inset: -3, borderRadius: '50%', border: `1.5px solid ${c}` }} />
+      {ring && (
+        <span className="ag-mic-pulse" aria-hidden style={{ position: 'absolute', inset: -3, borderRadius: '50%', border: `1.5px solid ${color}` }} />
       )}
-      <span aria-hidden className={state === 'working' ? 'ag-hint-pulse' : undefined} style={{
+      <span aria-hidden className={pulse ? 'ag-hint-pulse' : undefined} style={{
         width: size, height: size, borderRadius: '50%', boxSizing: 'border-box',
-        background: ended ? 'transparent' : c, border: ended ? `1.5px solid ${c}` : 'none',
+        background: hollow ? 'transparent' : color, border: hollow ? `1.5px solid ${color}` : 'none',
       }} />
     </span>
   )
 }
 
+function TabStatus({ state, label, size = 8 }: { state: ControlSession['state']; label: string; size?: number }) {
+  return <TabDot color={STATE_COLOR[state]} hollow={ENDED.has(state)} pulse={state === 'working'} ring={state === 'waiting-approval'} label={label} size={size} />
+}
+
+/** What a session tab draws before its title: status, harness, role. */
+function SessionTabLeading({ k, row, active, pt }: { k: string; row: ControlSession | undefined; active: boolean; pt: boolean }) {
+  const role = useSessionRole(k)
+  const state = row?.state ?? 'unknown'
+  const label = row?.stateLabel ?? (pt ? 'sem estado' : 'no state')
+  return (
+    <>
+      <TabStatus state={state} label={label} />
+      {row && <span style={{ display: 'inline-flex', flexShrink: 0, opacity: active ? 1 : 0.6 }}><HarnessMark harness={row.harness} size={14} /></span>}
+      <RoleIcon kind={role ?? (hasLeaderTitle(row?.title ?? '') ? 'leader' : 'auto')} size={11} pt={pt} style={{ opacity: active ? 1 : 0.6 }} />
+    </>
+  )
+}
+
+/**
+ * One tab of a `TabStripView` — what it SAYS, never how it looks. The look (36px tab, 10/10/0/0 radius,
+ * active on `--bg-card` with no border and no orange line; on the phone a 44px segment, radius 8, active on
+ * `--bg-elevated`) belongs to the strip, so a browser's tabs and the session tabs cannot drift apart.
+ */
+export interface TabStripItem {
+  key: string
+  title: string
+  tooltip: string
+  /** Drawn before the title (the status dot, marks). */
+  leading: ReactNode
+  /** Pinned: an unpin button instead of the ×, and no close by key/middle click. */
+  pinned?: boolean
+  /** false = no × at all (a tab the person cannot close from here). Default true. */
+  closable?: boolean
+  /** Wants the person: bold, and the phone's underline. */
+  emphasis?: boolean
+  /** Finished: the title dims when not active. */
+  ended?: boolean
+}
+
 interface TabProps {
-  k: string
-  row: ControlSession | undefined
+  item: TabStripItem
+  tabAttr: string
   active: boolean
-  pinned: boolean
   mobile: boolean
   /** Coarse pointer (touch): sizing/visibility of the × follow it, not only the width. */
   touch: boolean
@@ -84,8 +121,8 @@ interface TabProps {
   onPick: () => void
   onClose: () => void
   onUnpin: () => void
-  onMenu: (x: number, y: number) => void
-  onDropOn: (dragKey: string) => void
+  onMenu?: (x: number, y: number) => void
+  onDropOn?: (dragKey: string) => void
   setRef: (el: HTMLDivElement | null) => void
 }
 
@@ -93,18 +130,17 @@ const FOCUS_RING = '2px solid var(--anthropic-orange)'
 /** Enter/Space on the inner controls act on THEM; they must not reach the tab's own handler (which would activate it). */
 const stopKeys = (e: { key: string; stopPropagation(): void }) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation() }
 
-function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab, focusable, onPick, onClose, onUnpin, onMenu, onDropOn, setRef }: TabProps) {
-  const role = useSessionRole(k)
+function Tab({ item, tabAttr, active, mobile, touch, pt, onFocused, onFocusTab, focusable, onPick, onClose, onUnpin, onMenu, onDropOn, setRef }: TabProps) {
   const [hover, setHover] = useState(false)
   const [focus, setFocus] = useState(false)
   const [btnFocus, setBtnFocus] = useState(false)
   const big = mobile || touch
   const press = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const state = row?.state ?? 'unknown'
-  const label = row?.stateLabel ?? (pt ? 'sem estado' : 'no state')
-  const ended = ENDED.has(state)
-  const needs = row !== undefined && needsAttention(row)
-  const title = sessionDisplayTitle(row?.title ?? k.slice(0, 8))
+  const pinned = item.pinned === true
+  const closable = item.closable !== false
+  const ended = item.ended === true
+  const needs = item.emphasis === true
+  const title = item.title
   const clear = () => { if (press.current !== null) { clearTimeout(press.current); press.current = null } }
   const btn: CSSProperties = {
     display: 'flex', width: big ? 32 : 20, height: big ? 32 : 20, alignItems: 'center', justifyContent: 'center',
@@ -128,32 +164,30 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
   return (
     <div
       ref={setRef}
-      role="tab" aria-selected={active} tabIndex={focusable ? 0 : -1} data-session-tab={k}
-      title={row ? `${row.title}\n${label} · ${row.cwd}` : title}
-      draggable
-      onDragStart={e => setDragPayload(e, k)}
+      role="tab" aria-selected={active} tabIndex={focusable ? 0 : -1} {...{ [tabAttr]: item.key }}
+      title={item.tooltip}
+      draggable={onDropOn !== undefined}
+      onDragStart={e => setDragPayload(e, item.key)}
       onDragOver={e => e.preventDefault()}
-      onDrop={e => { const d = readDragPayload(e); if (d) { e.preventDefault(); onDropOn(d) } }}
+      onDrop={e => { const d = readDragPayload(e); if (d && onDropOn) { e.preventDefault(); onDropOn(d) } }}
       onClick={onPick}
       onKeyDown={e => {
         if (e.target !== e.currentTarget) return
         if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); onFocusTab(e.key) }
         else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick() }
-        else if ((e.key === 'Delete' || e.key === 'Backspace') && !pinned) { e.preventDefault(); onClose() }
+        else if ((e.key === 'Delete' || e.key === 'Backspace') && !pinned && closable) { e.preventDefault(); onClose() }
       }}
-      onAuxClick={e => { if (e.button === 1) { e.preventDefault(); if (!pinned) onClose() } }}
-      onContextMenu={e => { e.preventDefault(); onMenu(e.clientX, e.clientY) }}
-      onTouchStart={e => { const t = e.touches[0]; if (t) { clear(); press.current = setTimeout(() => onMenu(t.clientX, t.clientY), 500) } }}
+      onAuxClick={e => { if (e.button === 1) { e.preventDefault(); if (!pinned && closable) onClose() } }}
+      onContextMenu={e => { if (!onMenu) return; e.preventDefault(); onMenu(e.clientX, e.clientY) }}
+      onTouchStart={e => { const t = e.touches[0]; if (t && onMenu) { clear(); press.current = setTimeout(() => onMenu(t.clientX, t.clientY), 500) } }}
       onTouchEnd={clear} onTouchMove={clear} onTouchCancel={clear}
       onFocus={() => { setFocus(true); onFocused() }} onBlur={() => setFocus(false)}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={style}
     >
-      <TabStatus state={state} label={label} />
-      {row && <span style={{ display: 'inline-flex', flexShrink: 0, opacity: active ? 1 : 0.6 }}><HarnessMark harness={row.harness} size={14} /></span>}
-      <RoleIcon kind={role ?? (hasLeaderTitle(row?.title ?? '') ? 'leader' : 'auto')} size={11} pt={pt} style={{ opacity: active ? 1 : 0.6 }} />
+      {item.leading}
       <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', flex: 1, minWidth: 0, lineHeight: 1.35, opacity: ended && !active ? 0.7 : 1 }}>{title}</span>
-      {pinned
+      {!closable && !pinned ? null : pinned
         ? (
           <button
             type="button" aria-label={pt ? 'Desafixar' : 'Unpin'} title={pt ? 'Desafixar' : 'Unpin'}
@@ -190,10 +224,137 @@ export const TABLIST_TOP_PAD = 8
 export const TAB_HEADER_OVERLAP = 2
 export const TAB_STRIP_H = TAB_H + TABLIST_TOP_PAD
 
-export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen, onNone, onNoticeChange }: SessionTabStripProps) {
-  const pt = lang === 'pt'
+export interface TabStripViewProps {
+  items: readonly TabStripItem[]
+  activeKey: string
+  pt: boolean
+  /** The attribute naming the strip and each tab (`data-session-tabs` / `data-session-tab` for sessions). */
+  stripAttr?: string
+  tabAttr?: string
+  tablistLabel: string
+  /** How many leading items are pinned: a hairline separates them from the rest. */
+  pinnedCount?: number
+  /** The list button at the start: its label, the count it shows, what else it carries. */
+  list: { label: string; count: number; extra?: ReactNode; expanded: boolean; onToggle: (el: HTMLButtonElement) => void; buttonRef?: Ref<HTMLButtonElement> }
+  /** A "+" after the tabs (a browser's new tab). Absent = none. */
+  plus?: { label: string; onClick: () => void; disabled?: boolean }
+  onPick: (key: string) => void
+  onClose?: (key: string) => void
+  onUnpin?: (key: string) => void
+  onMenu?: (key: string, x: number, y: number) => void
+  onDropOn?: (drag: string, drop: string) => void
+  /** Popovers drawn inside the row (menus). */
+  children?: ReactNode
+  /** Drawn under the row (a notice). */
+  after?: ReactNode
+}
+
+/**
+ * The tab strip's PRESENTATION, shared by the session tabs and the browser tabs (NAVEGADOR S5, spec §3.1):
+ * list button with its count · scrolling tablist with edge fade · optional "+". Keyboard focus moves along the
+ * tabs with the arrows; the active tab is kept in view. It holds no rule about WHAT a tab is.
+ */
+export function TabStripView({ items, activeKey, pt, stripAttr = 'data-session-tabs', tabAttr = 'data-session-tab', tablistLabel, pinnedCount = 0, list, plus, onPick, onClose, onUnpin, onMenu, onDropOn, children, after }: TabStripViewProps) {
   const mobile = useIsMobile()
   const touch = useIsCoarsePointer()
+  const order = useMemo(() => items.map(i => i.key), [items])
+  const [focusedKey, setFocusedKey] = useState<string | null>(null)
+  const stripRef = useRef<HTMLDivElement | null>(null)
+  const tabEls = useRef<Map<string, HTMLDivElement>>(new Map())
+  const [edges, setEdges] = useState({ left: false, right: false })
+  const measure = useCallback(() => {
+    const el = stripRef.current
+    if (el) setEdges(tabStripEdgeFade({ scrollLeft: el.scrollLeft, clientWidth: el.clientWidth, scrollWidth: el.scrollWidth }))
+  }, [])
+  const attach = useCallback((el: HTMLDivElement | null) => {
+    stripRef.current = el
+    if (el === null) return
+    measure()
+    tabEls.current.get(activeKey)?.scrollIntoView({ inline: 'center', block: 'nearest' })
+  }, [activeKey, measure])
+  useEffect(() => {
+    setFocusedKey(activeKey)
+    tabEls.current.get(activeKey)?.scrollIntoView({ inline: 'center', block: 'nearest' })
+    measure()
+  }, [activeKey, order.length, measure])
+  useEffect(() => {
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [measure])
+  const fade = tabStripFadeMask(edges)
+  const listBtn: CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 30, minWidth: mobile ? 44 : 0, justifyContent: 'center',
+    padding: '0 8px', marginLeft: 6, marginTop: mobile ? 0 : TABLIST_TOP_PAD, boxSizing: 'border-box', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-tertiary)',
+    cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
+  }
+
+  return (
+    <div {...{ [stripAttr]: '' }} style={{ position: 'relative', flexShrink: 0, minWidth: 0, boxSizing: 'border-box', ...(mobile ? { borderBottom: '1px solid var(--border-subtle)' } : { height: TAB_STRIP_H, background: 'var(--bg-base)' }) }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0, ...(mobile ? null : { height: TAB_STRIP_H }) }}>
+      <button
+        ref={list.buttonRef}
+        type="button" aria-haspopup="menu" aria-expanded={list.expanded} aria-label={list.label}
+        onClick={e => list.onToggle(e.currentTarget)}
+        style={listBtn}
+      ><List size={13} aria-hidden />{list.count}{list.extra}<ChevronDown size={12} aria-hidden /></button>
+      <div
+        ref={attach} className="tabscroll" role="tablist" aria-label={tablistLabel} onScroll={measure}
+        style={{
+          display: 'flex', alignItems: 'stretch', gap: 3, overflowX: 'auto', flex: 1, minWidth: 0,
+          ...(mobile ? {
+            background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 3, margin: '4px 6px',
+          } : {
+            // Lift above the following header and extend the clipping box into it. No seam at 1× or 2× DPR.
+            position: 'relative', zIndex: 1, alignSelf: 'flex-end', boxSizing: 'border-box',
+            height: TAB_H + TAB_HEADER_OVERLAP, paddingBottom: TAB_HEADER_OVERLAP,
+            margin: `0 6px -${TAB_HEADER_OVERLAP}px`,
+          }),
+          WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory',
+          ...(!mobile && fade !== null ? { maskImage: fade, WebkitMaskImage: fade } : null),
+        }}
+      >
+        {items.map((item, i) => {
+          const k = item.key
+          return (
+            <span key={k} style={{ display: 'contents' }}>
+              {i === pinnedCount && pinnedCount > 0 && (
+                <span aria-hidden style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '6px 2px', flexShrink: 0 }} />
+              )}
+              <Tab
+                item={item} tabAttr={tabAttr} active={k === activeKey} mobile={mobile} touch={touch} pt={pt}
+                onFocused={() => setFocusedKey(k)}
+                focusable={k === (focusedKey && order.includes(focusedKey) ? focusedKey : activeKey)}
+                onFocusTab={key => {
+                  const target = key === 'Home' ? order[0] : key === 'End' ? order[order.length - 1] : stepTab(order, k, key === 'ArrowRight' ? 1 : -1)
+                  if (target) { setFocusedKey(target); tabEls.current.get(target)?.focus(); tabEls.current.get(target)?.scrollIntoView({ inline: 'center', block: 'nearest' }) }
+                }}
+                onPick={() => { if (k !== activeKey) onPick(k) }}
+                onClose={() => onClose?.(k)}
+                onUnpin={() => onUnpin?.(k)}
+                {...(onMenu ? { onMenu: (x: number, y: number) => onMenu(k, x, y) } : {})}
+                {...(onDropOn ? { onDropOn: (d: string) => onDropOn(d, k) } : {})}
+                setRef={el => { if (el) tabEls.current.set(k, el); else tabEls.current.delete(k) }}
+              />
+            </span>
+          )
+        })}
+      </div>
+      {plus && (
+        <button
+          type="button" aria-label={plus.label} title={plus.label} disabled={plus.disabled}
+          onClick={plus.onClick}
+          style={{ ...listBtn, marginLeft: 0, marginRight: 6, cursor: plus.disabled ? 'default' : 'pointer', opacity: plus.disabled ? 0.5 : 1 }}
+        ><Plus size={13} aria-hidden /></button>
+      )}
+      {children}
+    </div>
+    {after}
+    </div>
+  )
+}
+
+export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen, onNone, onNoticeChange }: SessionTabStripProps) {
+  const pt = lang === 'pt'
   const pane = usePaneId()
   const open = useOpenTabs()
   const allPins = useSyncExternalStore(subscribePinnedSessions, getPinnedIds, pinnedServerSnapshot)
@@ -216,7 +377,6 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
     [open, pins, byKey],
   )
   const drawnPins = pins.filter(k => order.includes(k))
-  const [focusedKey, setFocusedKey] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   useEffect(() => { onNoticeChange?.(notice) }, [notice, onNoticeChange])
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[]; below?: boolean; pick: (a: string) => void } | null>(null)
@@ -299,31 +459,8 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
     return () => window.removeEventListener('keydown', onKey)
   }, [order, activeKey, goTo])
 
-  // ── scroll + edge fade, the active tab kept on screen (the mobile panel switcher's own pattern) ─
+  // The scroll, the edge fade and the active tab kept on screen live in `TabStripView`.
   const listMenuButtonRef = useRef<HTMLButtonElement>(null)
-  const stripRef = useRef<HTMLDivElement | null>(null)
-  const tabEls = useRef<Map<string, HTMLDivElement>>(new Map())
-  const [edges, setEdges] = useState({ left: false, right: false })
-  const measure = useCallback(() => {
-    const el = stripRef.current
-    if (el) setEdges(tabStripEdgeFade({ scrollLeft: el.scrollLeft, clientWidth: el.clientWidth, scrollWidth: el.scrollWidth }))
-  }, [])
-  const attach = useCallback((el: HTMLDivElement | null) => {
-    stripRef.current = el
-    if (el === null) return
-    measure()
-    tabEls.current.get(activeKey)?.scrollIntoView({ inline: 'center', block: 'nearest' })
-  }, [activeKey, measure])
-  useEffect(() => {
-    setFocusedKey(activeKey)
-    tabEls.current.get(activeKey)?.scrollIntoView({ inline: 'center', block: 'nearest' })
-    measure()
-  }, [activeKey, order.length, measure])
-  useEffect(() => {
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [measure])
-  const fade = tabStripFadeMask(edges)
 
   // ── menus ─────────────────────────────────────────────────────────────────────────────────────
   const tabMenu = (key: string, x: number, y: number) => {
@@ -378,63 +515,40 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
     })
   }
 
+  const items: TabStripItem[] = order.map(k => {
+    const row = byKey.get(k)
+    const active2 = k === activeKey
+    const label = row?.stateLabel ?? (pt ? 'sem estado' : 'no state')
+    const title = sessionDisplayTitle(row?.title ?? k.slice(0, 8))
+    return {
+      key: k, title,
+      tooltip: row ? `${row.title}\n${label} · ${row.cwd}` : title,
+      leading: <SessionTabLeading k={k} row={row} active={active2} pt={pt} />,
+      pinned: pins.includes(k),
+      emphasis: row !== undefined && needsAttention(row),
+      ended: ENDED.has(row?.state ?? 'unknown'),
+    }
+  })
+
   return (
-    <div data-session-tabs style={{ position: 'relative', flexShrink: 0, minWidth: 0, boxSizing: 'border-box', ...(mobile ? { borderBottom: '1px solid var(--border-subtle)' } : { height: TAB_STRIP_H, background: 'var(--bg-base)' }) }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0, ...(mobile ? null : { height: TAB_STRIP_H }) }}>
-      <button
-        ref={listMenuButtonRef}
-        type="button" aria-haspopup="menu" aria-expanded={Boolean(menu?.below)} aria-label={pt ? 'Abas abertas e dormindo' : 'Open and sleeping tabs'}
-        onClick={e => { if (menu?.below) setMenu(null); else listMenu(e.currentTarget) }}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 30, minWidth: mobile ? 44 : 0, justifyContent: 'center',
-          padding: '0 8px', marginLeft: 6, marginTop: mobile ? 0 : TABLIST_TOP_PAD, boxSizing: 'border-box', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-tertiary)',
-          cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
-        }}
-      ><List size={13} aria-hidden />{order.length}{sleeping.length > 0 && <Moon size={10} fill="currentColor" aria-hidden style={{ color: 'var(--text-tertiary)' }} />}<ChevronDown size={12} aria-hidden /></button>
-      <div
-        ref={attach} className="tabscroll" role="tablist" aria-label={pt ? 'Sessões abertas' : 'Open sessions'} onScroll={measure}
-        style={{
-          display: 'flex', alignItems: 'stretch', gap: 3, overflowX: 'auto', flex: 1, minWidth: 0,
-          ...(mobile ? {
-            background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 3, margin: '4px 6px',
-          } : {
-            // Lift above the following header and extend the clipping box into it. No seam at 1× or 2× DPR.
-            position: 'relative', zIndex: 1, alignSelf: 'flex-end', boxSizing: 'border-box',
-            height: TAB_H + TAB_HEADER_OVERLAP, paddingBottom: TAB_HEADER_OVERLAP,
-            margin: `0 6px -${TAB_HEADER_OVERLAP}px`,
-          }),
-          WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory',
-          ...(!mobile && fade !== null ? { maskImage: fade, WebkitMaskImage: fade } : null),
-        }}
-      >
-        {order.map((k, i) => (
-          <span key={k} style={{ display: 'contents' }}>
-            {i === drawnPins.length && drawnPins.length > 0 && (
-              <span aria-hidden style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '6px 2px', flexShrink: 0 }} />
-            )}
-            <Tab
-              k={k} row={byKey.get(k)} active={k === activeKey} pinned={pins.includes(k)} mobile={mobile} touch={touch} pt={pt}
-              onFocused={() => setFocusedKey(k)}
-              focusable={k === (focusedKey && order.includes(focusedKey) ? focusedKey : activeKey)}
-              onFocusTab={key => {
-                const target = key === 'Home' ? order[0] : key === 'End' ? order[order.length - 1] : stepTab(order, k, key === 'ArrowRight' ? 1 : -1)
-                if (target) { setFocusedKey(target); tabEls.current.get(target)?.focus(); tabEls.current.get(target)?.scrollIntoView({ inline: 'center', block: 'nearest' }) }
-              }}
-              onPick={() => { if (k !== activeKey) goTo(k) }}
-              onClose={() => close(k)}
-              onUnpin={() => togglePin(k)}
-              onMenu={(x, y) => tabMenu(k, x, y)}
-              onDropOn={d => dropOn(d, k)}
-              setRef={el => { if (el) tabEls.current.set(k, el); else tabEls.current.delete(k) }}
-            />
-          </span>
-        ))}
-      </div>
+    <TabStripView
+      items={items} activeKey={activeKey} pt={pt} pinnedCount={drawnPins.length}
+      tablistLabel={pt ? 'Sessões abertas' : 'Open sessions'}
+      list={{
+        label: pt ? 'Abas abertas e dormindo' : 'Open and sleeping tabs', count: order.length, expanded: Boolean(menu?.below), buttonRef: listMenuButtonRef,
+        extra: sleeping.length > 0 ? <Moon size={10} fill="currentColor" aria-hidden style={{ color: 'var(--text-tertiary)' }} /> : null,
+        onToggle: el => { if (menu?.below) setMenu(null); else listMenu(el) },
+      }}
+      onPick={goTo}
+      onClose={close}
+      onUnpin={togglePin}
+      onMenu={tabMenu}
+      onDropOn={dropOn}
+      after={notice !== null && !onNoticeChange ? <ActionNotice message={notice} lang={lang} onDismiss={() => setNotice(null)} /> : null}
+    >
       {menu !== null && (
         <SessionRowMenu triggerRef={menu.below ? listMenuButtonRef : undefined} sessionList={menu.below} below={menu.below} x={menu.x} y={menu.y} entries={menu.entries} onPick={menu.pick} onClose={() => setMenu(null)} />
       )}
-    </div>
-    {notice !== null && !onNoticeChange && <ActionNotice message={notice} lang={lang} onDismiss={() => setNotice(null)} />}
-    </div>
+    </TabStripView>
   )
 }

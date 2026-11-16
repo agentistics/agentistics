@@ -93,12 +93,18 @@ export function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGo
   )
 }
 
-/** A shared icon control; mobile targets use the existing projected tap area. */
-export function IconButton({ label, onClick, isMobile, largeTarget = false, children }: { label: string; onClick: () => void; isMobile: boolean; largeTarget?: boolean; children: ReactNode }) {
+/**
+ * A shared icon control; mobile targets use the existing projected tap area. `tone` marks a TOGGLE's state
+ * (the browser padlock): `framed` = a quiet outline, `on` = the orange "you have it" state. Absent = plain.
+ */
+export function IconButton({ label, onClick, isMobile, largeTarget = false, tone, pressed, disabled = false, children }: { label: string; onClick: () => void; isMobile: boolean; largeTarget?: boolean; tone?: 'framed' | 'on'; pressed?: boolean; disabled?: boolean; children: ReactNode }) {
   return (
-    <button onClick={onClick} aria-label={label} title={label} className={isMobile && !largeTarget ? 'ag-tap-icon' : undefined} style={{
+    <button type="button" onClick={onClick} aria-label={label} title={label} aria-pressed={pressed} disabled={disabled} className={isMobile && !largeTarget ? 'ag-tap-icon' : undefined} style={{
       width: largeTarget ? 44 : 30, height: largeTarget ? 44 : 30, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      border: 'none', borderRadius: 7, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer',
+      border: tone === 'on' ? `1px solid ${ORANGE}` : tone === 'framed' ? '1px solid var(--border-strong, var(--border))' : 'none', borderRadius: 7,
+      background: tone === 'on' ? ORANGE_DIM : tone === 'framed' ? 'var(--bg-elevated)' : 'transparent',
+      color: tone === 'on' ? 'var(--anthropic-orange-light, var(--anthropic-orange))' : tone === 'framed' ? 'var(--text-primary)' : 'var(--text-secondary)',
+      cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.6 : 1, boxSizing: 'border-box',
     }}>{children}</button>
   )
 }
