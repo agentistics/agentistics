@@ -50,13 +50,13 @@ const asWritten: Splitter = (name) => norm(name)
  */
 export const BROWSER_TOOL_FORMATS: Record<HarnessId, Splitter> = {
   claude: dunder(false),
-  codex: dunder(true),
-  gemini: mcpUnderscore,
-  copilot: asWritten,
-  antigravity: mcpUnderscore,
+  codex: dunder(true), // unmeasured: spelling in a real transcript not yet captured (spec §2 "a medir")
+  gemini: mcpUnderscore, // unmeasured: spelling in a real transcript not yet captured (spec §2 "a medir")
+  copilot: asWritten, // unmeasured: spelling in a real transcript not yet captured (spec §2 "a medir")
+  antigravity: mcpUnderscore, // `mcp_` measured; the `call_mcp_tool` wrapper form is unmeasured
   kimi: dunder(false),
-  opencode: asWritten,
-  hermes: mcpUnderscore,
+  opencode: asWritten, // unmeasured: spelling in a real transcript not yet captured (spec §2 "a medir")
+  hermes: mcpUnderscore, // unmeasured: spelling in a real transcript not yet captured (spec §2 "a medir")
 }
 
 const OURS = /^(agentistics_)?agentistics_browser_[a-z0-9_]+$/
@@ -66,8 +66,13 @@ const FOREIGN: ReadonlyArray<readonly [RegExp, ForeignBrowser]> = [
   [/^claude_in_chrome_./, 'claude-in-chrome'],
   [/^(remote_devices_)?claude_browser_./, 'app-browser'],
   [/^(remote_devices_computer_|computer_use(_mcp)?_)./, 'computer-use'],
-  [/^(playwright|chrome_devtools|puppeteer|browsermcp|browser|chrome)_./, 'third-party'],
+  [/^(playwright|chrome_devtools|puppeteer|browsermcp|browsers?|chromedriver|chrome)_./, 'third-party'],
 ]
+
+/**
+ * Copilot/OpenCode native `browser_*` tools: spec §2 gives only Antigravity a browser of its own and marks the
+ * others unknown, so a bare `browser_*` there stays `third-party` (unmeasured; revisit when P-probes measure).
+ */
 
 /** Antigravity's own browser tools (`browser_subagent`, `browser_navigate`, …) carry no server prefix. */
 const AGY_OWN = /^browser_[a-z0-9_]+$/i

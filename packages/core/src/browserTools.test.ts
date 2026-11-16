@@ -88,6 +88,23 @@ describe('isBrowserTool', () => {
     expect(isBrowserTool('gemini', 'mcp__playwright__browser_click')).toBeNull()
   })
 
+  test('browser/chrome-named servers and the old prefix-matched names stay foreign (per harness spelling)', () => {
+    const spell: Record<HarnessId, (s: string, t: string) => string> = {
+      claude: (s, t) => `mcp__${s}__${t}`, codex: (s, t) => `mcp__${s}__${t}`, kimi: (s, t) => `mcp__${s}__${t}`,
+      gemini: (s, t) => `mcp_${s}_${t}`, antigravity: (s, t) => `mcp_${s}_${t}`, hermes: (s, t) => `mcp_${s}_${t}`,
+      copilot: (s, t) => `${s}-${t}`, opencode: (s, t) => `${s}_${t}`,
+    }
+    for (const h of HARNESS_ORDER)
+      for (const [s, t] of [['browser', 'open'], ['chrome', 'navigate'], ['browser_use', 'run'], ['chromedriver', 'start'], ['browsers', 'open']] as const)
+        expect(isBrowserTool(h, spell[h](s, t))).toEqual({ kind: 'foreign', foreign: 'third-party' })
+  })
+
+  test('near-miss names are refused in every harness', () => {
+    for (const h of HARNESS_ORDER)
+      for (const n of ['agentistics_browserx', 'my_agentistics_browser_x', 'mcp__agentistics__agentistics_browserx', 'mcp__agentistics__my_agentistics_browser_x', 'mcp__playwrightish__click'])
+        expect(isBrowserTool(h, n)).toBeNull()
+  })
+
   test('foreign kinds are told apart', () => {
     expect(isBrowserTool('claude', 'mcp__playwright__browser_click')).toEqual({ kind: 'foreign', foreign: 'third-party' })
     expect(isBrowserTool('claude', 'mcp__chrome-devtools__take_snapshot')).toEqual({ kind: 'foreign', foreign: 'third-party' })
