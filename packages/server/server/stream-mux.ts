@@ -138,12 +138,17 @@ const DRAIN_POLL_MS = 15
 
 function emit(ws: Sink, m: MuxServerMessage) { try { ws.send(JSON.stringify(m)) } catch { /* socket gone */ } }
 
+/** Requests the mux replays itself (an in-process GET) — a handler may tell them from a direct client's. */
+export const muxReplayed = new WeakSet<Request>()
+
 async function runSub(st: MuxState, ws: Sink, sid: number, url: string, lastEventId: string | undefined, ac: AbortController) {
   const headers = new Headers(st.headers)
   if (lastEventId) headers.set('last-event-id', lastEventId)
   let res: Response | undefined
   try {
-    res = await st.dispatch(new Request(st.origin + url, { method: 'GET', headers, signal: ac.signal }))
+    const replay = new Request(st.origin + url, { method: 'GET', headers, signal: ac.signal })
+    muxReplayed.add(replay)
+    res = await st.dispatch(replay)
   } catch {
     res = undefined
   }

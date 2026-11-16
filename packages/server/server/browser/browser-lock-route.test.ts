@@ -266,6 +266,15 @@ describe('S4b — an unlock owes the person\'s vault proof; who the process look
     expect(f.audits).toEqual([])
   })
 
+  test('S4c: the browser closes WHILE the proof is checked ⇒ 409 no_browser, no unlock, no audit, padlock untouched', async () => {
+    const f = fixture({ ownerProof: async () => { f.live.delete('s-aaa'); return { ok: true, grantId: 'g' } } })
+    await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+    const a = await browserRoute('POST', '/api/browser/lock', body, f.deps)
+    expect(a).toMatchObject({ status: 409, body: { ok: false, error: 'no_browser' } })
+    expect(f.locks.view('s-aaa').mode).toBe('locked')
+    expect(f.audits).toEqual([])
+  })
+
   test('a door wired WITHOUT the proof refuses every unlock (absent = no proof possible, fail-closed)', async () => {
     const f = fixture({ ownerProof: undefined })
     await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })

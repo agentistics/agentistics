@@ -62,6 +62,10 @@ export interface SpawnedBrowser {
 }
 
 export interface BrowserHostDeps {
+  /** S4c: after a browser's pipe fds are closed, make the runtime drop every stale handle to them NOW (Bun
+   *  finalizers close an fd NUMBER late, and the kernel has already handed it to the next browser's pipe —
+   *  Chrome then reads EOF and exits 0 half a second after `close → navigate`). Default: a forced GC. */
+  settleFds?: () => Promise<void>
   /** `<data dir>/browser`. */
   root: string
   bin: () => BrowserBin
@@ -253,6 +257,9 @@ export class BrowserHost {
       if (this.entries.get(key) === entry) this.entries.delete(key)
       this.removeProfile(entry.profileDir)
       this.writeRecords()
+      entry.child = null
+      entry.cdp = null
+      await this.d.settleFds?.()
       this.noteStop(key, 'start-failed')
       return { ok: false, reason: 'start-failed', sentence: 'The browser could not be started.' }
     }
@@ -565,6 +572,9 @@ export class BrowserHost {
       this.noteStop(key, reason)
       this.log(`stopped ${key} (${reason})`)
       if (this.entries.size === 0) this.stopTimer()
+      e.child = null
+      e.cdp = null
+      await this.d.settleFds?.()
     })()
     return e.stopping
   }
@@ -1015,6 +1025,15 @@ export function probeScope(env: Record<string, string | undefined> = process.env
   } catch { return false }
 }
 
+/** A forced GC, with a turn of the event loop either side so closed handles are unreachable and finalized. */
+export async function settleFds(): Promise<void> {
+  const gc = (globalThis as { Bun?: { gc?: (sync: boolean) => void } }).Bun?.gc
+  if (!gc) return
+  await new Promise<void>(r => setTimeout(r, 30))
+  try { gc(true) } catch { /* best effort */ }
+  await new Promise<void>(r => setTimeout(r, 30))
+}
+
 /** The host wired to the real machine. */
 export function createBrowserHost(opts: {
   dataDir: string
@@ -1033,6 +1052,7 @@ export function createBrowserHost(opts: {
     now: () => Date.now(),
     spawn: spawnWithPipe,
     kill: (pid, sig) => { process.kill(pid, sig) },
+    settleFds,
     proc: process.platform === 'linux' ? linuxProc : null,
     scopeWorks: () => probeScope(),
     agentisticsPorts: opts.agentisticsPorts,

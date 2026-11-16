@@ -455,3 +455,17 @@ describe('S2: the S1 QA reservations, on the host', () => {
     await h.stopAll()
   })
 })
+
+describe('S4c — a stopped browser\'s pipe fds are settled BEFORE the next browser can take their numbers', () => {
+  test('stop() settles (forces the runtime to drop the stale fd handles) BEFORE it resolves — and a next start follows', async () => {
+    env = makeEnv()
+    const order: string[] = []
+    env.deps.settleFds = async () => { order.push('settle') }
+    const h = env.host()
+    await h.start(S('fd1'))
+    await h.stop('s-fd1', 'requested').then(() => order.push('stopped'))
+    expect(order).toEqual(['settle', 'stopped'])
+    expect(await h.start(S('fd1'))).toMatchObject({ ok: true })
+    await h.stopAll()
+  })
+})

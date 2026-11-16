@@ -1293,18 +1293,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // Hello / Touch ID dialog on the person's desk. Same socket hint as the padlock route; the proof
         // itself is still what decides for everyone else (an unidentified caller goes on to the vault).
         if (url.pathname === '/api/vault/browser-unlock' && req.method === 'POST') {
-          const [{ identifyCaller }, { processSessionHub }, { callerRefusal }] = await Promise.all([
+          const [{ identifyCaller }, { processSessionHub }, { browserUnlockEarlyRefusal }] = await Promise.all([
             import('./browser/browser-caller-proc'), import('./sessions/session-hub'), import('./browser/browser-caller'),
           ])
           const sessionPids = new Set<number>()
           for (const r of processSessionHub()?.last()?.sessions ?? []) if (typeof r.pid === 'number') sessionPids.add(r.pid)
           const ip = server.requestIP(req)
           const who = identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
-          if (who.kind === 'session') {
-            await req.body?.cancel().catch(() => {})
-            const r = callerRefusal(who)!
-            return new Response(JSON.stringify({ ok: false, code: r.error, sentence: r.sentence }), { status: 403, headers: { ...json, 'Cache-Control': 'no-store' } })
-          }
+          const early = await browserUnlockEarlyRefusal(req, who, json)
+          if (early) return early
         }
         // SECRETS.4 §2.4: a 'read' grant is bound to THIS session (the session cookie; a local profile
         // with no sign-in has one session) and travels in a header, never a cookie, so it cannot ride
@@ -3949,7 +3946,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const key = browserStreamTarget(browserOpts, owner)
         if (!key) return jsonOut({ ok: false, error: 'no_browser', sentence: 'This browser is not open.' }, 404)
         if (browserStreamAtCapacity(browserOpts)) return jsonOut({ ok: false, error: 'too_many_streams' }, 503)
-        return new Response(openBrowserStream(browserOpts, key, tab, req.signal), {
+        return new Response(openBrowserStream(browserOpts, key, tab, req.signal, (await import('./browser/browser-stream-web')).streamBoundsFor((await import('./stream-mux')).muxReplayed.has(req))), {
           headers: { ...CORS_HEADERS, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
         })
       }

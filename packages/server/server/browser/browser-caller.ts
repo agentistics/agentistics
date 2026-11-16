@@ -169,3 +169,15 @@ export function callerRefusal(v: CallerVerdict): { status: 403; error: 'session_
     sentence: 'Could not confirm that this request comes from the person (not from a session), so the padlock was not changed. Use the agentistics screen.',
   }
 }
+
+/**
+ * S4b/S4c: the early door on `POST /api/vault/browser-unlock`. A KNOWN session may not even ASK for the
+ * proof — it would raise a Hello / Touch ID dialog on the person's desk. Returns the 403 to send (body
+ * cancelled, so nothing is read), or `null` to go on to the vault (the proof still decides for everyone else).
+ */
+export async function browserUnlockEarlyRefusal(req: { body?: { cancel(): Promise<unknown> } | null }, who: CallerVerdict, headers: Record<string, string>): Promise<Response | null> {
+  if (who.kind !== 'session') return null
+  await req.body?.cancel().catch(() => {})
+  const r = callerRefusal(who)!
+  return new Response(JSON.stringify({ ok: false, code: r.error, sentence: r.sentence }), { status: 403, headers: { ...headers, 'Cache-Control': 'no-store' } })
+}
