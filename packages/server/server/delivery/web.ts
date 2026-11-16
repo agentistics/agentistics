@@ -125,7 +125,7 @@ export async function deliveryRequest(method: string, path: string, body: Record
       if (e instanceof GuardRefused) return { status: e.status, body: { ok: false, error: e.code, sentence: e.message, sentencePt: e.messagePt, missing: e.missing } }
       const safe = safeError(e, { verbose: false })
       console.error(safe.logLine)
-      return { status: 500, body: { ...safe.body, sentence: 'the delivery tick could not finish' } }
+      return { status: safe.status ?? 500, body: { ...safe.body, sentence: safe.body.sentence ?? 'the delivery tick could not finish' } }
     }
   }
   if (rest === 'queue-next') return { status: 200, body: await d.service.queueNext() }
@@ -137,7 +137,7 @@ export async function deliveryRequest(method: string, path: string, body: Record
       if (e instanceof GuardRefused) return { status: e.status, body: { ok: false, error: e.code, sentence: e.message, sentencePt: e.messagePt, missing: e.missing } }
       const safe = safeError(e, { verbose: false })
       console.error(safe.logLine)
-      return { status: 500, body: { ...safe.body, sentence: 'the reconcile could not finish' } }
+      return { status: safe.status ?? 500, body: { ...safe.body, sentence: safe.body.sentence ?? 'the reconcile could not finish' } }
     }
     return r.ok
       ? { status: 200, body: { ok: true, apply: r.apply, moved: r.moved, unproven: r.unproven, summary: r.summary, gh: r.gh, ...(r.stopped ? { stopped: r.stopped } : {}), entries: r.entries } }

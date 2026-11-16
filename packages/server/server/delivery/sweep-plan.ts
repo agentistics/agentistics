@@ -38,6 +38,10 @@ export interface SweepRecord {
 
 /** One piece, as the two documents show it right now. */
 export interface PieceView {
+  derived?: boolean
+  checkpointKey?: string
+  /** Members inherit their group's evidence, while only their own stored status is repaired. */
+  authorizationRecord?: SweepRecord | null
   key: string
   taskId: string
   subtaskId?: string
@@ -52,6 +56,7 @@ export interface PieceView {
 export interface BoardRevert { to: string; clearCi: boolean }
 export interface DeliveryRevert { to: string }
 export interface SweepRevert {
+  deliveryKey?: string
   key: string
   taskId: string
   subtaskId?: string
@@ -66,7 +71,7 @@ export interface SweepRevert {
 }
 export interface SweepCatchUp { key: string; taskId: string; phase: string }
 
-export interface SweepMemory { reverts: Record<string, string[]> }
+export interface SweepMemory { reverts: Record<string, string[]>; plans?: Record<string, string>; catchUpFailures?: Record<string, string>; warning?: string }
 export const emptyMemory = (): SweepMemory => ({ reverts: {} })
 
 export interface SweepPlan { reverts: SweepRevert[]; catchUps: SweepCatchUp[]; memory: SweepMemory }
@@ -119,21 +124,22 @@ export function planSweep(o: { pieces: readonly PieceView[]; checkpoints: Readon
   const memory: SweepMemory = { reverts: Object.fromEntries(Object.entries(o.memory.reverts).map(([k, v]) => [k, recent(v, o.now)]).filter(([, v]) => (v as string[]).length > 0)) }
   const at = new Date(o.now).toISOString()
   for (const p of o.pieces) {
-    const cp = o.checkpoints[p.key]
-    if (cp && ownerAuthorized(cp.auth)) continue
-    const rank = cp?.rank ?? 0
+    const cp = o.checkpoints[p.checkpointKey ?? p.key]
+    if (cp && (ownerAuthorized(cp.auth) || (cp.by as { kind?: string } | undefined)?.kind === 'owner')) continue
+    const rank = checkpointRank(cp, o.statuses)
     const boardNow = Math.max(p.boardRank, p.ciRank)
     const phaseNow = phaseRank(p.record?.phase)
     let reason: SweepReason | null = null
     let target = rank
     if (boardNow > rank || phaseNow > rank) reason = cp ? 'above_checkpoint' : 'no_checkpoint'
-    else if (cp && rank >= 1 && Math.max(boardNow, phaseNow) >= 1 && (staleEvidence(cp, p.record).length > 0 || headMoved(cp, p.record))) { reason = 'evidence_stale'; target = 0 }
+    else if (cp && rank >= 1 && Math.max(boardNow, phaseNow) >= 1 && (staleEvidence(cp, p.authorizationRecord ?? p.record).length > 0 || headMoved(cp, p.authorizationRecord ?? p.record))) { reason = 'evidence_stale'; target = 0 }
     if (!reason) {
       // The board is BELOW what the delivery (and the checkpoint) authorized: finish the board effect that failed. Not a violation.
-      if (cp && rank >= 1 && p.record && phaseNow === rank && boardNow < rank) catchUps.push({ key: p.key, taskId: p.taskId, phase: p.record.phase })
+      const authorized = p.record ?? p.authorizationRecord
+      if (!p.derived && cp && rank >= 1 && authorized && phaseRank(authorized.phase) === rank && boardNow < rank) catchUps.push({ key: p.key, taskId: p.taskId, phase: authorized.phase })
       continue
     }
-    const board: BoardRevert | undefined = (boardNow > target || p.ciRank > target) && p.boardStatus !== null
+    const board: BoardRevert | undefined = (p.derived ? p.ciRank > target : boardNow > target || p.ciRank > target) && p.boardStatus !== null
       ? { to: boardTarget(cp, target, o.statuses), clearCi: p.ciRank > target }
       : undefined
     const delivery: DeliveryRevert | undefined = p.record && phaseNow > target
@@ -142,14 +148,23 @@ export function planSweep(o: { pieces: readonly PieceView[]; checkpoints: Readon
     if (!board && !delivery) continue
     const stamps = [...recent(memory.reverts[p.key], o.now), at]
     memory.reverts[p.key] = stamps
-    reverts.push({ key: p.key, taskId: p.taskId, ...(p.subtaskId ? { subtaskId: p.subtaskId } : {}), reason, ...(board ? { board } : {}), ...(delivery ? { delivery } : {}), ...(stamps.length >= SWEEP_LOOP_LIMIT ? { loop: true } : {}), count: stamps.length })
+    reverts.push({ key: p.key, taskId: p.taskId, ...(!p.record && p.checkpointKey && p.authorizationRecord ? { deliveryKey: p.checkpointKey } : {}), ...(p.subtaskId ? { subtaskId: p.subtaskId } : {}), reason, ...(board ? { board } : {}), ...(delivery ? { delivery } : {}), ...(stamps.length >= SWEEP_LOOP_LIMIT ? { loop: true } : {}), count: stamps.length })
   }
   return { reverts, catchUps, memory }
 }
 
 /** Pure: the pieces the loop guard has stopped inside the window — what health shows as a WARN until they stay quiet for a day. */
 export function sweepWarnings(memory: SweepMemory | undefined, now: number): string[] {
-  return Object.entries(memory?.reverts ?? {})
+  const pieces = Object.entries(memory?.reverts ?? {})
     .filter(([, v]) => recent(v, now).length >= SWEEP_LOOP_LIMIT)
-    .map(([key]) => `sweep-loop: ${key} was reverted ${recent(memory!.reverts[key], now).length} times in 24 h — an unknown writer keeps moving it; ${SWEEP_ESCAPE}`)
+    .map(([key]) => key)
+  return [...(pieces.length ? [`sweep-loop: ${pieces.join(', ')} — an unknown writer keeps moving these pieces; um escritor desconhecido continua movendo estas peças; ${SWEEP_ESCAPE}`] : []), ...(memory?.warning ? [memory.warning] : [])]
+}
+
+/** Historical maxima cannot authorize a new jump after an authorized retreat. */
+export function checkpointRank(cp: Pick<PieceCheckpoint, 'rank' | 'boardStatus' | 'phase'> | undefined, statuses: BoardSlice['statuses']): number {
+  if (!cp) return 0
+  const status = statuses.find(s => s.id === cp.boardStatus)
+  const board = stageRank(status?.stage ?? (cp.boardStatus === 'in_review' ? 'leader' : cp.boardStatus === 'done' ? 'published' : undefined))
+  return Math.min(cp.rank, Math.max(board, phaseRank(cp.phase)))
 }

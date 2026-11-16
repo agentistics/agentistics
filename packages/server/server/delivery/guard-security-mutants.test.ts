@@ -151,7 +151,7 @@ test('mutant F4: bindings, advanced adoption and exposed pieces disappear from d
   change(delivery + 'guard.ts', '(to >= 1 && was && (was.taskId !== s.taskId || was.parentGroupId !== s.parentGroupId || JSON.stringify(was.ci) !== JSON.stringify(s.ci)))', 'false')
   change(delivery + 'guard.ts', 'const from = was && !taskWithSubsBefore.has(t.id) ? statusRank(before.statuses, was.status) : 0', 'const from = was ? statusRank(before.statuses, was.status) : 0')
   change(delivery + 'guard.ts', 'const to = phaseRank(r.phase)', 'if (!was) continue\n    const to = phaseRank(r.phase)')
-  change(delivery + 'guard.ts', '(to >= 1 && was && binding(was) !== binding(r))', 'false')
+  change(delivery + 'guard.ts', '(to >= 1 && was && !retreat && binding(was) !== binding(r))', 'false')
   await killed('F4')
 }, 120_000)
 test('mutant F5: evidence:true disables detection', async () => {
@@ -163,7 +163,7 @@ test('mutant F5: evidence:true disables detection', async () => {
 test('mutant F6: policy captured before acquiring guards is trusted after activation', async () => {
   reset()
   change(tasks, 'let currentGuard: GuardContext | undefined', "let staleRule: 'off' | 'shadow' | 'on' | undefined\n  let currentGuard: GuardContext | undefined")
-  change(tasks, 'raised, ctx: currentGuard,', 'rule: staleRule, raised, ctx: currentGuard,')
+  change(tasks, 'raised, retreats, ctx: currentGuard,', 'rule: staleRule, raised, retreats, ctx: currentGuard,')
   change(tasks, "if (await peekRuleA(anchor.paths) !== 'off') return enveloped()", "staleRule = await ruleAState(anchor.dir); if (staleRule !== 'off') return enveloped()")
   change(delivery + 'guard-host.ts', 'const rule = await ruleAState(dirname(o.paths.guards))', 'const rule = o.rule ?? await ruleAState(dirname(o.paths.guards))')
   await killed('F6')

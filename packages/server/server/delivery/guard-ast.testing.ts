@@ -109,6 +109,23 @@ export function forbiddenCapabilities(src: string): string[] {
   // identifier named await, swallowing the global receiver. The marker has no executable inventory sites.
   const file = source('export {};\n' + src)
   const out: string[] = []
+  const keys = new Map<string, ts.Expression>()
+  const collectKeys = (n: ts.Node) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) keys.set(n.name.text, n.initializer)
+    ts.forEachChild(n, collectKeys)
+  }
+  collectKeys(file)
+  const keyText = (node: ts.Expression | undefined, seen = new Set<string>()): string | undefined => {
+    if (!node) return undefined
+    const e = unwrap(node), literal = literalText(e)
+    if (literal !== undefined) return literal
+    if (ts.isIdentifier(e) && !seen.has(e.text)) return keyText(keys.get(e.text), new Set([...seen, e.text]))
+    if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = keyText(e.left, seen), right = keyText(e.right, seen)
+      if (left !== undefined && right !== undefined) return left + right
+    }
+    return undefined
+  }
   const visit = (n: ts.Node) => {
     if (ts.isIdentifier(n) && n.text === 'eval') out.push('eval')
     if (ts.isIdentifier(n) && n.text === 'Function') out.push('Function')
@@ -117,8 +134,18 @@ export function forbiddenCapabilities(src: string): string[] {
       || (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference) && /^(node:)?vm$/.test(literalText(n.moduleReference.expression) ?? ''))) out.push('module:vm')
     if (ts.isCallExpression(n) || ts.isNewExpression(n)) {
       const e = unwrap(n.expression)
-      const name = ts.isPropertyAccessExpression(e) ? e.name.text : ts.isElementAccessExpression(e) ? literalText(e.argumentExpression) : e.getText(file)
+      const name = ts.isPropertyAccessExpression(e) ? e.name.text : ts.isElementAccessExpression(e) ? keyText(e.argumentExpression) : e.getText(file)
       if (/^(eval|Function)$/.test(name ?? '')) out.push(n.expression.getText(file))
+      if (ts.isCallExpression(n) && (ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e))
+        && unwrap(e.expression).getText(file) === 'Reflect' && name === 'get'
+        && keyText(n.arguments[1]) === 'constructor') out.push('constructor-reflect-get')
+    }
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isObjectLiteralExpression(unwrap(n.left))) {
+      const target = unwrap(n.left) as ts.ObjectLiteralExpression
+      for (const p of target.properties) {
+        const name = p.name
+        if (name && (ts.isIdentifier(name) ? name.text : ts.isComputedPropertyName(name) ? keyText(name.expression) : literalText(name)) === 'constructor') out.push('constructor-assignment-destructure')
+      }
     }
     if (ts.isBindingElement(n) && (n.propertyName ? (ts.isIdentifier(n.propertyName) || ts.isStringLiteral(n.propertyName)) && n.propertyName.text === 'constructor' : ts.isIdentifier(n.name) && n.name.text === 'constructor')) out.push('constructor-destructure')
     if (ts.isPropertyAccessExpression(n) && unwrap(n.expression).getText(file) === 'process' && n.name.text === 'binding') out.push('process.binding')

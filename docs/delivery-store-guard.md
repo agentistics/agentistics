@@ -38,7 +38,7 @@ before a single file is written, under the full lock set, with one sentence in E
 the CLI and the web job both print through `restoreReason`.
 
 Grandfathered checkpoints preserve the state migrated at activation. They authorize no new progress;
-the next protected write classifies the checkout and validates evidence again. Such a write replaces
+the next write authorizing new progress classifies the checkout and validates evidence again. Such a write replaces
 the inherited authorization with the evidence that actually passed.
 
 Evidence belongs to a capture round. Every phase transition increments the delivery revision, but only
@@ -127,22 +127,41 @@ busy file skips the tick with a named line, never proceeds unguarded):
    and/or delivery phase) and dropped when they do not, so a legitimate move that crashed before its commit is never judged
    as forged. Shadow recovers intents too.
 2. **Every piece, against its checkpoint** — no "changed since" filter and no event: the checkpoint, not the 2 000-event feed,
-   authorizes. A document above the checkpoint's rank is reverted to it (`above_checkpoint`; no checkpoint = rank 0,
-   `no_checkpoint`); rank ≥ 1 whose evidence ids/hashes are gone, point at other bytes, belong to an earlier capture round, or
+   authorizes. A document above the checkpoint's current phase/status is reverted to it (`above_checkpoint`); an authorized
+   retreat lowers the checkpoint, rather than retaining its historical maximum. Groups are derived: the sweep judges and
+   repairs each member's stored status against the group's checkpoint, never the group's ignored stored status. An identical
+   plan that would leave the derived group rank unchanged is not written or commented again. No checkpoint means rank 0
+   (`no_checkpoint`) only after both safety locks below pass. Rank ≥ 1 whose evidence ids/hashes are gone, point at other bytes, belong to an earlier capture round, or
    whose record HEAD moved goes back to rank 0 (`evidence_stale`: board `in_progress`, phase `ajuste`, a new round). The
    `ci` signal alone counts as rank (the Live moves on it) and is cleared by a revert.
 3. **One write per document.** All reverts of the tick land in one `deliveries.json` write and one `tasks.json` write
-   (`applyBoardReverts`, comments and events included); no per-tick cap. A revert only lowers a rank, so no guard context is
+   (`applyBoardReverts`, comments and events included); no per-tick cap for authorized checkpoints. A revert only lowers a rank, so no guard context is
    needed. A retreat to a RANK-0 phase bumps the revision; a retreat to a ranked phase keeps it (a changed revision on a ranked
    phase is a new binding to the guard). The history entry is appended; every revert comments on the piece in EN and PT.
+   `deliveredAt` is preserved and the previous timestamp is also recorded in the revert event.
 4. **Board catch-up.** Board below the checkpoint while the phase is at it: `setPhaseStatus` is re-applied (never a violation).
+   The engine can reuse the authorization for that exact record revision/phase, like a grandfathered checkpoint; it does not
+   reclassify a removed worker checkout. Failure (returned or thrown) leaves one `sweep-catch-up-failed <piece>: <code>` line
+   per piece/code until it changes or clears. Another phase/binding still needs the normal evidence check.
 5. **Loop guard.** The second revert of a piece inside 24 h also moves it to `blocked` (`externo: an unknown writer keeps
    moving this piece`), logs a WARN and shows it in health until a quiet day. Memory lives in `guards.json` (`sweep.reverts`),
-   written after the documents.
-6. **An `owner` / `override` checkpoint is never reverted**, whatever its `via`.
+   written after the documents and pruned on quiet ticks. Board-only loops also block an existing delivery record. The board
+   carries `blockedReason: 'externo: an unknown writer keeps moving this piece'`. Health shows ONE aggregated `sweep-loop`
+   WARN with full piece ids, its own EN/PT sentence, and the guide `agentop flow guarantee off a`.
+6. **An `owner` / `override` checkpoint is never reverted**, whatever its `via`. `by.kind: owner` is also exempt; the guarded
+   writer records `{kind: 'owner', via}` when the requesting principal is the owner (the initial evidence gate still applies).
 
-Every revert comment and the loop WARN name the escape: `agentop flow guarantee off a`. Activation (S10) is what writes the
-grandfathered checkpoints of pieces already in flight; the sweep must not be switched on before that migration ran.
+Every revert comment and the loop WARN name the escape: `agentop flow guarantee off a`. S10 writes grandfathered checkpoints
+and a sealed `guards.json` migration stamp: `migrations: { a: { version: 1, at: <ISO timestamp> } }`. Caller-supplied activation
+facts never create that stamp. With A on and no stamp, the sweep reports `sweep-skipped: migration_missing` + WARN and writes
+nothing. Even with the stamp, more than 20 `no_checkpoint` reverts OR more than 5% of all pieces in one tick trips the breaker:
+`sweep-skipped: no_checkpoint_breaker` + WARN, no writes/comments. Intent recovery remains first in the plan but is persisted
+only after those locks pass. Shadow writes no document, including intents or loop memory.
+
+Guard contention is a structured 409 `guard_busy` with a code and EN/PT sentence through REST (comments included), MCP and
+CLI. Unexpected route errors pass through `safeError`; the HTTP boundary never exposes Bun's source/error page.
+Reads can also acquire the envelope when seeding a legacy vocabulary: MCP GET errors retain their code/sentence, and CLI
+task reads use the same structured refusal as task writes (exit 2, including `--json`).
 
 The supplementary inventories parse executable TypeScript/JavaScript ASTs. Context must occupy the
 writer's actual context argument; words in comments, titles and callbacks do not count. The historical
@@ -169,11 +188,13 @@ forbidden: any `eval` or `Function` identifier reference, `vm`/`node:vm`, `proce
 on `global`, `globalThis`, `self` or `Bun`, including TypeScript wrappers. Module loaders include `import.meta.require`,
 `module.require` and `process.getBuiltinModule`. A directory named `e2e` grants no production exemption. One existing,
 unshipped Playwright driver is exempted by exact path and source digest; changes to it undergo the normal check.
-Deliberately obfuscated constructs such as `Reflect.get` with assembled names remain outside this lint's threat model.
+`Reflect.get` with a literal or statically computed `constructor` key is refused, including string aliases and concatenation;
+fixed safe keys and ordinary Proxy forwarding remain allowed.
 Literal `.eval`/`.Function` and `['eval']`/`['Function']` accesses on those global receivers are also forbidden, as are
 `.constructor`/`['constructor']` on function or arrow literals and on `Object.getPrototypeOf` of such a literal.
 On ANY receiver, a `.constructor` / `['constructor']` access (or a destructured `constructor`) is forbidden unless its only
 use is an identity comparison (`=== !== == !=`) or a `.name` read: `x.constructor(...)`, `new x.constructor`,
 `x.constructor.constructor`, `Reflect.construct(x.constructor, …)`, an alias or an argument all reach `Function`.
-This includes `Reflect.construct`/`Reflect.apply` with `Function` as the target. Runtime-built strings and data-URL
+Assignment destructuring (`({ constructor: C } = x)`) is refused too, including computed literal keys.
+This includes `Reflect.construct`/`Reflect.apply` with `Function` as the target. Other runtime-built strings and data-URL
 imports remain outside this round's threat model. Exemptions remain fixed by exact path and digest.

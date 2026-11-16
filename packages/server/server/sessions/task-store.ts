@@ -33,7 +33,7 @@ import type {
   TaskEvent, TaskFile, TaskLink, TaskPriority, TaskStatus, TaskThread,
 } from './task-model'
 import { isCommentKind, type ThreadDelivery, type ThreadParticipant } from '@agentistics/core'
-import { boardRaises, type BoardSlice, type GuardContext } from '../delivery/guard'
+import { boardRaises, boardPieces, type BoardSlice, type GuardContext } from '../delivery/guard'
 import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from '../delivery/guard-host'
 import { GuardBusy } from '../delivery/guard-locks'
 import { createDeliveryStore } from '../delivery/store'
@@ -463,6 +463,7 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
     ...(str(t.deliveredAt) ? { deliveredAt: str(t.deliveredAt)! } : {}),
     ...(str(t.sessionId) ? { sessionId: str(t.sessionId)! } : {}),
     ...(str(t.notes) ? { notes: str(t.notes)! } : {}),
+    ...(str(t.blockedReason) ? { blockedReason: str(t.blockedReason)! } : {}),
     // A sibling-subtask blocker list — same trap as the hierarchy fields below: `patchSubtask`
     // already sanitizes it against the delivery's own subtasks before it is written
     // (`sanitizeSubtaskBlockedBy`, `task-attach.ts`), so this whitelist only needs to carry the
@@ -719,7 +720,13 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
       after = { ...after, statuses: book.statuses.map(s => ({ ...s, stage: s.stage ?? doc.statusStages?.[s.id] })) }
     }
     const raised = boardRaises(prior, after)
-    if (raised.length === 0) return writeRaw(book)
+    const beforePieces = new Map(boardPieces(prior).map(p => [p.key, p]))
+    const retreats = currentGuard ? boardPieces(after).flatMap(p => {
+      const was = beforePieces.get(p.key)
+      return was && Math.max(p.statusRank, p.ciRank) < Math.max(was.statusRank, was.ciRank)
+        ? [{ key: p.key, rank: Math.max(p.statusRank, p.ciRank), fromBoardStatus: was.status, boardStatus: p.status, boardStage: after.statuses.find(s => s.id === p.status)?.stage ?? '' }] : []
+    }) : []
+    if (raised.length === 0 && retreats.length === 0) return writeRaw(book)
     if (currentBase) {
       // Rule off when the mutation started: re-read it under the tasks lock. The activation takes tasks first, so while
       // that lock is really held the answer cannot change under us; a rule that moved means retake the full envelope.
@@ -732,7 +739,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
     const tasks = new Map(book.tasks.map(t => [t.id, t] as const))
     const stageOf = (status: string) => after.statuses.find(d => d.id === status)?.stage ?? 'none'
     await guardedWrite({
-      raised, ctx: currentGuard, paths: anchor.paths, wiring: opts.guard,
+      raised, retreats, ctx: currentGuard, paths: anchor.paths, wiring: opts.guard,
       locks: [], alreadyHeld: ['tasks', 'deliveries', 'guards'],
       recordOf: async key => (await createDeliveryStore(anchor.paths.deliveries).read()).deliveries[key] ?? null,
       stateOf: r => { const status = (r.subtaskId ? subs.get(r.key)?.status : tasks.get(r.key)?.status) ?? ''; return { boardStatus: status, boardStage: stageOf(status), phase: null } },
@@ -1061,10 +1068,10 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
           if (!r) return s
           const next = { ...s, status: r.to, done: r.to === 'done', updatedAt: batch.at }
           if (r.clearCi) delete next.ci
-          if (r.to !== 'done') delete next.deliveredAt
+          if (r.to === 'blocked') next.blockedReason = 'externo: an unknown writer keeps moving this piece'
           return next
         })
-        const tasks = book.tasks.map(t => (byTask.has(t.id) ? { ...t, status: byTask.get(t.id)!.to, updatedAt: batch.at } : t))
+        const tasks = book.tasks.map(t => (byTask.has(t.id) ? { ...t, status: byTask.get(t.id)!.to, updatedAt: batch.at, ...(byTask.get(t.id)!.to === 'blocked' ? { blockedReason: 'externo: an unknown writer keeps moving this piece' } : {}) } : t))
         const events = [...book.events, ...batch.events]
         await write({ ...book, subtasks, tasks, comments: [...book.comments, ...batch.comments], events: events.slice(Math.max(0, events.length - MAX_EVENTS)) })
       })

@@ -50,6 +50,10 @@ export function analyzeGuardIntegrity(f: { guaranteesWarn?: string; guardsTamper
     })
   }
   for (const w of f.offWarnings) {
+    if (w.startsWith('sweep-loop:') || w.startsWith('sweep-skipped:')) {
+      issues.push({ id: w.startsWith('sweep-loop:') ? 'sweep-loop' : 'sweep-skipped', severity: 'warning', title: w.startsWith('sweep-loop:') ? 'The delivery sweep blocked repeated external moves' : 'The delivery sweep is report-only', description: w, guide: 'agentop flow guarantee off a' })
+      continue
+    }
     issues.push({ id: `guarantee-off:${w.split(':')[1]?.split(',')[0]?.trim() ?? ''}`, severity: 'warning', title: w, description: `${w}. The owner turned this delivery rule off; it stays WARNed until it is back on.`, guide: 'agentop flow guarantee shadow <rule>' })
   }
 }

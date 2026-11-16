@@ -125,7 +125,8 @@ export function deliveryRaises(before: Readonly<Record<string, DeliveryBinding>>
   for (const [id, r] of Object.entries(after)) {
     const was = before[id]
     const to = phaseRank(r.phase)
-    if (to > phaseRank(was?.phase) || (to >= 1 && was && binding(was) !== binding(r))) out.push({ key: id, taskId: r.taskId ?? '', subtaskId: id, rank: to })
+    const retreat = was && to < phaseRank(was.phase) && binding({ ...was, revision: r.revision }) === binding(r)
+    if (to > phaseRank(was?.phase) || (to >= 1 && was && !retreat && binding(was) !== binding(r))) out.push({ key: id, taskId: r.taskId ?? '', subtaskId: id, rank: to })
   }
   return out
 }
