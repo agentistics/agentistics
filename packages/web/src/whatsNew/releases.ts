@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.217.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Calendário no celular: as visões Dia e Cronograma mostram a data, a escolha de visão e o botão Hoje, como no desenho aprovado.',
+        en: 'Calendar on phones: the Day and Schedule views show the date, the view picker and the Today button, as in the approved design.',
+      },
+    ],
+  },
   '2.217.0': {
     features: [
       {
