@@ -1,4 +1,7 @@
-/** Guard inventories use the TypeScript parser: strings/comments are never executable sites. */
+/** Guard inventories use the TypeScript parser: strings/comments are never executable sites.
+ * Threat model: prevent accidental raw writers in our own code; deliberately obfuscated committed code is covered by
+ * code review. Runtime code generation, process.binding and nonliteral globalThis/Bun access are forbidden outright.
+ */
 import ts from 'typescript'
 import { createHash } from 'node:crypto'
 
@@ -64,7 +67,7 @@ const BUN_WRITES = new Set(['write', 'spawn', 'spawnSync', '$'])
 const literalText = (e: ts.Node | undefined): string | undefined => e && (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ? e.text : undefined
 const isModuleCall = (n: ts.Node): n is ts.CallExpression => ts.isCallExpression(n) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === 'require'))
 /** `x` or `await x` → x */
-const unwrap = (e: ts.Expression): ts.Expression => ts.isAwaitExpression(e) ? unwrap(e.expression) : ts.isParenthesizedExpression(e) ? unwrap(e.expression) : e
+const unwrap = (e: ts.Expression): ts.Expression => ts.isAwaitExpression(e) || ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isTypeAssertionExpression(e) || ts.isNonNullExpression(e) || ts.isSatisfiesExpression(e) ? unwrap(e.expression) : e
 
 /** r4: inventory the MODULE's capabilities, before interpreting calls or tracking aliases.
  * Importing fs/process/Worker/createRequire already makes a module capable of writing. A computed loader is
@@ -90,6 +93,42 @@ export function moduleCapabilities(src: string): string[] {
   }
   visit(file)
   return [...out].sort()
+}
+
+/** These constructs are forbidden, not grandfathered capabilities. */
+export function forbiddenCapabilities(src: string): string[] {
+  // Production files run as modules. Without a module marker TS parses top-level `await (x)` as a call to an
+  // identifier named await, swallowing the global receiver. The marker has no executable inventory sites.
+  const file = source('export {};\n' + src)
+  const out: string[] = []
+  const visit = (n: ts.Node) => {
+    if (ts.isCallExpression(n) || ts.isNewExpression(n)) {
+      const e = unwrap(n.expression)
+      const name = ts.isPropertyAccessExpression(e) ? e.name.text : ts.isElementAccessExpression(e) ? literalText(e.argumentExpression) : e.getText(file)
+      if (/^(eval|Function)$/.test(name ?? '')) out.push(n.expression.getText(file))
+    }
+    if (ts.isPropertyAccessExpression(n) && unwrap(n.expression).getText(file) === 'process' && n.name.text === 'binding') out.push('process.binding')
+    if (ts.isElementAccessExpression(n) && unwrap(n.expression).getText(file) === 'process' && literalText(n.argumentExpression) === 'binding') out.push('process.binding')
+    if (ts.isElementAccessExpression(n) && /^(globalThis|Bun)$/.test(unwrap(n.expression).getText(file)) && literalText(n.argumentExpression) === undefined) out.push('computed:' + unwrap(n.expression).getText(file))
+    ts.forEachChild(n, visit)
+  }
+  visit(file)
+  return out
+}
+
+/** Literal module edges, including re-exports and dynamic loaders. The inventory resolves relative/workspace/absolute paths. */
+export function localImports(src: string): string[] {
+  const file = source(src)
+  const out: string[] = []
+  const add = (n: ts.Node | undefined) => { const s = literalText(n); if (s !== undefined) out.push(s) }
+  const visit = (n: ts.Node) => {
+    if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier) add(n.moduleSpecifier)
+    if (isModuleCall(n)) add(n.arguments[0])
+    if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference)) add(n.moduleReference.expression)
+    ts.forEachChild(n, visit)
+  }
+  visit(file)
+  return out.sort()
 }
 
 /**
@@ -188,7 +227,7 @@ export function rawWriters(src: string) {
 export function testOnlyImports(src: string): string[] {
   const file = source(src)
   const out: string[] = []
-  const check = (spec: string | undefined) => { if (spec !== undefined && /\.(testing|fixture|test)(\.[cm]?[jt]sx?)?$/.test(spec)) out.push(spec) }
+  const check = (spec: string | undefined) => { if (spec !== undefined && (/\.(testing|fixture|test)(\.[cm]?[jt]sx?)?$/.test(spec) || /(^|\/)e2e\//.test(spec))) out.push(spec) }
   const visit = (n: ts.Node) => {
     if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier) check(literalText(n.moduleSpecifier))
     if (isModuleCall(n)) check(literalText(n.arguments[0]))

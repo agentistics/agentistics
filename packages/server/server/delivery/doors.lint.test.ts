@@ -6,14 +6,21 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { rawWriters, storeReach, testOnlyImports } from './guard-ast.testing'
-import { GUARDED_STORES, inventoryGrowth, liveInventory, moduleCeiling, r3Inventory, scannedSources, writerCeiling } from './guard-inventory.testing'
+import { forbiddenCapabilities, rawWriters, storeReach, testOnlyImports } from './guard-ast.testing'
+import { GUARDED_STORES, helperCeiling, helperInventory, inventoryGrowth, liveInventory, moduleCeiling, r3Inventory, scannedSources, writerCeiling } from './guard-inventory.testing'
 import { productionSources, read } from './lint-scan.testing'
 
 const PKGS = join(import.meta.dir, '..', '..', '..')
 export const offendingWriters = (src: string): string[] => rawWriters(src).map(c => c.id)
 
 describe('raw writers and book references have a pinned, shrinking historical ceiling', () => {
+  test('runtime escape hatches are forbidden and existing writer helpers may gain no new importer', () => {
+    const sources = Object.fromEntries(scannedSources(PKGS).map(rel => [rel, read(PKGS, rel)]))
+    // Browser e2e programs are test drivers, not production entry points; production cannot import them below.
+    const forbidden = Object.entries(sources).filter(([rel]) => !/(^|\/)e2e\//.test(rel)).flatMap(([rel, src]) => forbiddenCapabilities(src).map(site => `${rel}:${site}`))
+    expect(forbidden).toEqual([])
+    expect(inventoryGrowth(helperInventory(sources, PKGS), helperCeiling())).toEqual([])
+  }, 60_000)
   test('no new raw writer and no new book reference in any package, including computed targets / workers / JS / TSX', () => {
     const live = liveInventory(PKGS)
     expect(inventoryGrowth(live.writers, writerCeiling())).toEqual([])

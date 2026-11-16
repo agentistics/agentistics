@@ -1,0 +1,325 @@
+[
+ {
+  "step": "create task",
+  "status": 200,
+  "body": {
+   "task": {
+    "id": "<id>",
+    "title": "QA off",
+    "status": "todo",
+    "priority": "low",
+    "createdAt": "<iso>",
+    "updatedAt": "<iso>"
+   }
+  }
+ },
+ {
+  "step": "add subtask p1",
+  "status": 200,
+  "body": {
+   "ok": true,
+   "id": "<id>"
+  }
+ },
+ {
+  "step": "add group g",
+  "status": 200,
+  "body": {
+   "ok": true,
+   "id": "<id>"
+  }
+ },
+ {
+  "step": "add member m",
+  "status": 200,
+  "body": {
+   "ok": true,
+   "id": "<id>"
+  }
+ },
+ {
+  "step": "join m to g",
+  "status": 200,
+  "body": {
+   "ok": true
+  }
+ },
+ {
+  "step": "p1 -> in_review",
+  "status": 200,
+  "body": {
+   "ok": true
+  }
+ },
+ {
+  "step": "m -> done (member)",
+  "status": 200,
+  "body": {
+   "ok": true
+  }
+ },
+ {
+  "step": "p1 -> done (no session)",
+  "status": 422,
+  "body": {
+   "ok": false,
+   "message": "done_needs_session"
+  }
+ },
+ {
+  "step": "task status in_review",
+  "status": 422,
+  "body": {
+   "ok": false,
+   "message": "open_subtasks",
+   "openSubtaskIds": [
+    "<id>",
+    "<id>"
+   ]
+  }
+ },
+ {
+  "step": "comment",
+  "status": 200,
+  "body": {
+   "ok": true,
+   "id": "<cid>"
+  }
+ },
+ {
+  "step": "evidence probe p1",
+  "status": 403,
+  "body": {
+   "ok": false,
+   "error": "evidence_forbidden",
+   "sentence": "only the piece's own session, the task leader or the owner attaches evidence",
+   "missing": []
+  }
+ },
+ {
+  "step": "evidence list",
+  "status": 200,
+  "body": {
+   "ok": true,
+   "evidence": [],
+   "binding": {
+    "headSha": null,
+    "treeClean": false
+   }
+  }
+ },
+ {
+  "step": "rename p1 while tasks.json held 7s",
+  "status": 200,
+  "body": {
+   "ok": true
+  }
+ },
+ {
+  "step": "evidence while deliveries.json held 7s",
+  "status": 403,
+  "body": {
+   "ok": false,
+   "error": "evidence_forbidden",
+   "sentence": "only the piece's own session, the task leader or the owner attaches evidence",
+   "missing": []
+  }
+ },
+ {
+  "step": "task detail",
+  "status": 200,
+  "body": {
+   "excludedByFilter": 0,
+   "task": {
+    "task": {
+     "id": "<id>",
+     "title": "QA off",
+     "status": "in_progress",
+     "createdAt": "<iso>",
+     "updatedAt": "<iso>",
+     "startedAt": "<iso>",
+     "priority": "low"
+    },
+    "attempts": [],
+    "rollup": {
+     "sessionsUsed": 0,
+     "sessionsLinked": 0,
+     "provenance": {
+      "assigned": 0,
+      "observed": 0,
+      "none": 0
+     },
+     "rounds": null,
+     "activeMinutes": null,
+     "tokens": null,
+     "costUSD": null,
+     "costByHarness": null,
+     "costMeasuredSessions": 0,
+     "costEstimatedSessions": 0,
+     "costUnpricedSessions": 0,
+     "credits": null,
+     "mixedCurrency": false
+    },
+    "times": {
+     "startedAt": "<iso>",
+     "completedAt": null,
+     "durationMs": null,
+     "activeMinutes": null,
+     "source": "status"
+    },
+    "stats": {
+     "models": [],
+     "harnesses": [],
+     "tokens": null,
+     "agentRuns": null,
+     "filesModified": null,
+     "linesAdded": null,
+     "linesRemoved": null,
+     "commits": null,
+     "toolErrors": null,
+     "deliveryMs": null,
+     "firstSessionAt": null,
+     "lastSessionAt": null
+    },
+    "sessions": [],
+    "comments": [
+     {
+      "id": "<cid>",
+      "taskId": "<id>",
+      "body": "hello",
+      "author": "qa",
+      "createdAt": "<iso>"
+     }
+    ],
+    "commentThreads": [
+     {
+      "target": {
+       "kind": "task",
+       "id": null
+      },
+      "comments": [
+       {
+        "id": "<cid>",
+        "taskId": "<id>",
+        "body": "hello",
+        "author": "qa",
+        "createdAt": "<iso>"
+       }
+      ]
+     }
+    ],
+    "threads": [],
+    "subtasks": [
+     {
+      "id": "<id>",
+      "taskId": "<id>",
+      "title": "renamed",
+      "status": "in_review",
+      "done": false,
+      "createdAt": "<iso>",
+      "updatedAt": "<iso>"
+     },
+     {
+      "id": "<id>",
+      "taskId": "<id>",
+      "title": "g",
+      "status": "done",
+      "done": true,
+      "createdAt": "<iso>",
+      "updatedAt": "<iso>",
+      "isGroup": true
+     },
+     {
+      "id": "<id>",
+      "taskId": "<id>",
+      "title": "m",
+      "status": "done",
+      "done": true,
+      "createdAt": "<iso>",
+      "updatedAt": "<iso>",
+      "startedAt": "<iso>",
+      "deliveredAt": "<iso>",
+      "parentGroupId": "<id>"
+     }
+    ],
+    "files": [],
+    "subtaskRollups": [
+     {
+      "id": "<id>",
+      "rollup": {
+       "sessionsUsed": 0,
+       "sessionsLinked": 0,
+       "provenance": {
+        "assigned": 0,
+        "observed": 0,
+        "none": 0
+       },
+       "rounds": null,
+       "activeMinutes": null,
+       "tokens": null,
+       "costUSD": null,
+       "costByHarness": null,
+       "costMeasuredSessions": 0,
+       "costEstimatedSessions": 0,
+       "costUnpricedSessions": 0,
+       "credits": null,
+       "mixedCurrency": false
+      },
+      "stats": null,
+      "groupProgress": {
+       "done": 1,
+       "total": 1,
+       "counts": {
+        "done": 1
+       },
+       "inProgress": 0,
+       "blocked": 0,
+       "percent": 100,
+       "donePercent": 100,
+       "inProgressPercent": 0,
+       "blockedPercent": 0,
+       "complete": true
+      },
+      "times": {
+       "startedAt": "<iso>",
+       "completedAt": "<iso>",
+       "durationMs": 0,
+       "activeMinutes": null,
+       "source": "status"
+      }
+     },
+     {
+      "id": "<id>",
+      "rollup": {
+       "sessionsUsed": 0,
+       "sessionsLinked": 0,
+       "provenance": {
+        "assigned": 0,
+        "observed": 0,
+        "none": 0
+       },
+       "rounds": null,
+       "activeMinutes": null,
+       "tokens": null,
+       "costUSD": null,
+       "costByHarness": null,
+       "costMeasuredSessions": 0,
+       "costEstimatedSessions": 0,
+       "costUnpricedSessions": 0,
+       "credits": null,
+       "mixedCurrency": false
+      },
+      "stats": null,
+      "times": {
+       "startedAt": null,
+       "completedAt": null,
+       "durationMs": null,
+       "activeMinutes": null,
+       "source": null
+      }
+     }
+    ]
+   }
+  }
+ }
+]

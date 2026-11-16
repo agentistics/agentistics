@@ -1,7 +1,7 @@
 /** A migration ceiling pinned independently from the live inventory. Entries may disappear, never be replaced or added. */
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { digest, moduleCapabilities, rawWriters, storeReach } from './guard-ast.testing'
+import { join, dirname, normalize, isAbsolute, relative } from 'node:path'
+import { digest, localImports, moduleCapabilities, rawWriters, storeReach } from './guard-ast.testing'
 import { productionSources, read } from './lint-scan.testing'
 
 export interface Inventory { base: string; contexts: Record<string, string[]>; writers: Record<string, string[]> }
@@ -72,4 +72,28 @@ export function writerCeiling(): Record<string, string[]> {
   const out: Record<string, string[]> = {}
   for (const src of [historicInventory().writers, r3Inventory().writers]) for (const [f, ids] of Object.entries(src)) out[f] = [...(out[f] ?? []), ...ids]
   return out
+}
+
+/** Every importer inherits a raw writer's capability, including generic helpers and re-export chains. */
+export function helperInventory(sources: Readonly<Record<string, string>>, base = join(process.cwd(), 'packages')): Record<string, string[]> {
+  const capable = new Set(Object.entries(sources).filter(([, src]) => rawWriters(src).length > 0 || moduleCapabilities(src).length > 0).map(([rel]) => rel))
+  const edges = new Map(Object.entries(sources).map(([rel, src]) => [rel, localImports(src).flatMap(spec => {
+    const workspace = /^@agentistics\/([^/]+)(?:\/(.*))?$/.exec(spec)
+    const p = spec.startsWith('.') ? normalize(join(dirname(rel), spec)) : isAbsolute(spec) ? relative(base, spec) : workspace ? `${workspace[1]}/${workspace[2] ?? 'src/index'}` : spec
+    const resolved = [p, ...['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'].map(ext => p + ext), p + '/index.ts', p + '/index.js', p.replace(/\.js$/, '.ts')].find(p => sources[p] !== undefined)
+    return resolved ? [resolved] : []
+  })]))
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const [rel, imports] of edges) if (!capable.has(rel) && imports.some(p => capable.has(p))) { capable.add(rel); changed = true }
+  }
+  return Object.fromEntries([...edges].filter(([, imports]) => imports.some(p => capable.has(p))).map(([rel]) => [rel, ['raw-writer-helper']]))
+}
+
+/** r5 pins existing helper reuse independently; new importers must never be added to this ceiling. */
+export function helperCeiling(): Record<string, string[]> {
+  const text = readFileSync(join(import.meta.dir, 'guard-helpers.fixture.json'), 'utf8')
+  if (digest(text) !== '4057fe6ea3d43bc28566e742f3834e5662e9c3c324343a6a7724ce3175b6dd38') throw new Error('Historical raw-writer helper inventory changed: shrink only')
+  return JSON.parse(text)
 }

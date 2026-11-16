@@ -37,6 +37,7 @@ import { boardRaises, type BoardSlice, type GuardContext } from '../delivery/gua
 import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from '../delivery/guard-host'
 import { GuardBusy } from '../delivery/guard-locks'
 import { createDeliveryStore } from '../delivery/store'
+import { effectiveSubtasks } from './task-report'
 
 export interface TaskPatch {
   title?: string
@@ -686,7 +687,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
   /** `base`: rule A was off when this mutation started, so it holds ONLY the tasks file lock (the base's semantics, N2). */
   let currentBase = false
   const anchor = guardPathsOf({ tasksFile: file })
-  const sliceOf = (b: TaskBook): BoardSlice => ({ tasks: b.tasks, subtasks: b.subtasks, statuses: b.statuses })
+  const sliceOf = (b: TaskBook): BoardSlice => ({ tasks: b.tasks, subtasks: effectiveSubtasks(b.subtasks), statuses: b.statuses })
 
   /**
    * THE CHOKE POINT. Every task-board writer ends here. When the guarantee is on (rule A), a write that raises any piece's
@@ -694,17 +695,21 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
    * never turned it on) this is one diff of references and three `stat`s, and the write is exactly what it always was.
    */
   async function write(book: TaskBook): Promise<void> {
-    const before = await read()
+    // The production memo is mutable. Only persisted bytes may describe the guarded before image.
+    if (!currentBase) bookMemo.delete(file)
+    const before = currentBase ? await read() : await readUncached()
     // Cheap exits first: the guard only cares about three collections.
     if (before === book || (before.tasks === book.tasks && before.subtasks === book.subtasks && before.statuses === book.statuses)) return writeRaw(book)
     // A downgrade may strip stages from tasks.json. The authenticated mirror is still the stored stage,
     // so restoring it is not new progress and must keep an existing checkpoint intact.
     let prior = sliceOf(before)
-    if (before.statuses.some(s => !isStatusStage(s.stage))) {
+    let after = sliceOf(book)
+    if ([...before.statuses, ...book.statuses].some(s => !isStatusStage(s.stage))) {
       const { doc } = await createGuaranteesStore(join(anchor.dir, 'guarantees.json')).read()
       prior = { ...prior, statuses: before.statuses.map(s => ({ ...s, stage: s.stage ?? doc.statusStages?.[s.id] })) }
+      after = { ...after, statuses: book.statuses.map(s => ({ ...s, stage: s.stage ?? doc.statusStages?.[s.id] })) }
     }
-    const raised = boardRaises(prior, sliceOf(book))
+    const raised = boardRaises(prior, after)
     if (raised.length === 0) return writeRaw(book)
     if (currentBase) {
       // Rule off when the mutation started: re-read it under the tasks lock. The activation takes tasks first, so while
@@ -714,9 +719,9 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
     }
     // `withFileLock` goes ahead WITHOUT the lock after its wait; a guard never does (§2.6.1).
     if (currentContended) throw new GuardBusy('tasks')
-    const subs = new Map(book.subtasks.map(s => [s.id, s] as const))
+    const subs = new Map(after.subtasks.map(s => [s.id, s] as const))
     const tasks = new Map(book.tasks.map(t => [t.id, t] as const))
-    const stageOf = (status: string) => book.statuses.find(d => d.id === status)?.stage ?? 'none'
+    const stageOf = (status: string) => after.statuses.find(d => d.id === status)?.stage ?? 'none'
     await guardedWrite({
       raised, ctx: currentGuard, paths: anchor.paths, wiring: opts.guard,
       locks: [], alreadyHeld: ['tasks', 'deliveries', 'guards'],

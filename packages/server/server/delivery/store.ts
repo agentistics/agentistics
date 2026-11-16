@@ -103,10 +103,20 @@ export function defaultDeliveriesPath(): string {
   return join(dir, 'deliveries.json')
 }
 
-export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guard?: GuardWiring } = {}): DeliveryStore {
+export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
+  guard?: GuardWiring
+  /** In-process fault injection after the journal seal, before data rename; never read from a request. */
+  afterFloorSeal?: () => void | Promise<void>
+} = {}): DeliveryStore {
   const anchor = guardPathsOf({ deliveriesFile: path })
   /** `missing` (no file yet) is an empty book; `unreadable` is NOT an empty book. */
   const readState = async (strict = false): Promise<{ kind: 'ok'; doc: DeliveryDoc } | { kind: 'missing' } | { kind: 'unreadable'; why: string }> => {
+    // A sealed journal is the committed logical document even if the process died before the data rename.
+    // Readers need no write lock; the next writer materializes it under deliveries → guards.
+    if (await peekRuleA(anchor.paths) !== 'off') {
+      const pending = (await createGuardsStore(anchor.paths.guards).read()).pendingDelivery
+      if (pending !== undefined) return { kind: 'ok', doc: parseDeliveryDocStrict(pending) }
+    }
     let text: string
     try { text = await readFile(path, 'utf8') } catch (e) {
       return (e as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'missing' } : { kind: 'unreadable', why: e instanceof Error ? e.message.split('\n')[0]! : String(e) }
@@ -137,6 +147,21 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guar
       if (options?.guardsPath && resolve(options.guardsPath) !== resolve(anchor.paths.guards)) throw new GuardLockOrderError('guardsPath must be the guard file beside this delivery store')
       await mkdir(dirname(path), { recursive: true })
       const write = async (held?: { contended: boolean }, base = false) => {
+        const materialize = async (serialized: string) => {
+          const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
+          await writeFile(tmp, serialized, { mode: 0o600 })
+          await rename(tmp, path)
+        }
+        const floorStore = createGuardsStore(anchor.paths.guards)
+        // Deterministic roll-forward, including a crash after rename but before journal removal.
+        if (!base) {
+          const guardDoc = await floorStore.read()
+          if (guardDoc.pendingDelivery !== undefined) {
+            await materialize(guardDoc.pendingDelivery)
+            const { pendingDelivery: _pending, ...recovered } = guardDoc
+            await floorStore.write(recovered)
+          }
+        }
         const s = await readState(!!options?.evidence)
         if (s.kind === 'unreadable') {
           // Keep the bytes (once per distinct file state) and refuse: an empty document must never replace them.
@@ -152,14 +177,13 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guar
         // Judge exactly the representation the serializer will persist, including promoted preserved records.
         const serialized = serializeDeliveryDoc(doc)
         const final = parseDeliveryDocStrict(serialized)
-        const floorStore = createGuardsStore(anchor.paths.guards)
         const floorRule = base ? 'off' : await ruleAState(anchor.dir)
         const floors = floorRule === 'off' ? {} : (await floorStore.read()).deliveryFloors ?? {}
         const prior = { ...floors, ...phasesBefore }
         const commit = async () => {
           if (floorRule !== 'off') {
-            // Keep the high-water history outside the removable delivery record. Seal BEFORE the document rename;
-            // a crash can conservatively retain a higher floor, but can never reopen an older capture round.
+            // Seal floor + full pending bytes together. One atomic sealed rename commits both logically;
+            // after a crash readers see the journal and the next writer rolls it forward before any mutation.
             const guardDoc = await floorStore.read()
             const next = { ...(guardDoc.deliveryFloors ?? {}) }
             for (const [id, r] of Object.entries({ ...phasesBefore, ...final.deliveries })) {
@@ -169,11 +193,14 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guar
               const extend = (was: readonly unknown[] = [], now: readonly unknown[] = []) => was.every((e, i) => JSON.stringify(e) === JSON.stringify(now[i])) ? now : was
               next[id] = { taskId: r.taskId, revision: Math.max(old?.revision ?? 0, r.revision), history: extend(old?.history, r.history), evidenceHistory: extend(old?.evidenceHistory, r.evidenceHistory), evidence: [...items.values()] }
             }
-            if (JSON.stringify(next) !== JSON.stringify(guardDoc.deliveryFloors ?? {})) await floorStore.write({ ...guardDoc, deliveryFloors: next })
+            await floorStore.write({ ...guardDoc, deliveryFloors: next, pendingDelivery: serialized })
+            await opts.afterFloorSeal?.()
           }
-          const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
-          await writeFile(tmp, serialized, { mode: 0o600 })
-          await rename(tmp, path)
+          await materialize(serialized)
+          if (floorRule !== 'off') {
+            const { pendingDelivery: _pending, ...committed } = await floorStore.read()
+            await floorStore.write(committed)
+          }
         }
         const raised = deliveryRaises(phasesBefore, final.deliveries)
         const tampered = [

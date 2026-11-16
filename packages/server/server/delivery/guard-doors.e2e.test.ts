@@ -112,6 +112,30 @@ describe('rule ON — the negatives (the only thing missing is the evidence)', (
   beforeAll(async () => { e = await boot('on') }, 90_000)
   afterAll(async () => { await e?.stop() })
 
+  test('O1 REST: completing group members cannot publish the derived group without judgement', async () => {
+    // The r4 Opus REST attack: members have no sessions and are individually exempt from done_needs_session.
+    const group = await post(e, '/api/tasks/t1/subtasks', { title: 'group', isGroup: true })
+    expect(group.status).toBe(200)
+    const members: string[] = []
+    for (const title of ['m1', 'm2']) {
+      const member = await post(e, '/api/tasks/t1/subtasks', { title })
+      expect(member.status).toBe(200)
+      members.push(member.body.id)
+      expect((await post(e, '/api/tasks/t1/subtasks', { id: member.body.id, parentGroupId: group.body.id })).status).toBe(200)
+    }
+    expect((await post(e, '/api/tasks/t1/subtasks', { id: members[0], status: 'done' })).status).toBe(200)
+    const before = bytes(e.root)
+    const attack = await post(e, '/api/tasks/t1/subtasks', { id: members[1], status: 'done' })
+    expect(attack.status).toBe(422)
+    expect(attack.body.guard).toMatchObject({ code: 'classification_required', piece: group.body.id })
+    expect(attack.body.guard.message.length).toBeGreaterThan(0)
+    expect(attack.body.guard.messagePt.length).toBeGreaterThan(0)
+    expect(bytes(e.root)).toEqual(before)
+    const detail = await fetch(`${e.base}/api/tasks/t1`).then(r => r.json()) as any
+    expect(detail.task.subtasks.find((s: any) => s.id === group.body.id).status).not.toBe('done')
+    expect((await checkpoints(e))[group.body.id]).toBeUndefined()
+  })
+
   test('§3.5.1 MCP agentistics_task_status {status: in_review} → refused evidence_required, the guard\'s sentence, nothing written', async () => {
     const before = bytes(e.root)
     const r = await mcp(e, 'agentistics_task_status', { ref: 't2', status: 'in_review' })

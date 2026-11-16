@@ -12,7 +12,7 @@ const restore = 'packages/server/server/backup/restore.ts'
 let root: string
 const originals = new Map<string, string>()
 const files = [delivery + 'guard-host.ts', delivery + 'guard.ts', delivery + 'store.ts', delivery + 'guard-sites.testing.ts', delivery + 'guard-inventory.fixture.json', tasks, restore,
-  delivery + 'guard-transaction.ts', delivery + 'activation.ts', delivery + 'guard-ast.testing.ts', delivery + 'guard-inventory-r3.fixture.json', delivery + 'service.ts', delivery + 'guard-modules.fixture.json']
+  delivery + 'guard-transaction.ts', delivery + 'activation.ts', delivery + 'guard-ast.testing.ts', delivery + 'guard-inventory-r3.fixture.json', delivery + 'service.ts', delivery + 'guard-modules.fixture.json', delivery + 'lint-scan.testing.ts', delivery + 'guard-helpers.fixture.json', delivery + 'guard-inventory.testing.ts']
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'guard-mutants-'))
   cpSync(join(repo, 'packages'), join(root, 'packages'), { recursive: true, filter: p => !p.split('/').some(s => ['node_modules', 'dist', 'target', '.git'].includes(s)) })
@@ -45,6 +45,28 @@ async function run(targets: string[], pattern?: string) {
   } finally { clearTimeout(timer) }
 }
 const storeTest = delivery + 'guard-store.test.ts'
+const r5Test = delivery + 'guard-r5.test.ts'
+
+const r5Mutants: Array<[string, string, string, string]> = [
+  ['O1', tasks, 'subtasks: effectiveSubtasks(b.subtasks)', 'subtasks: b.subtasks'],
+  ['O2', tasks, 'after = { ...after, statuses: book.statuses.map(s => ({ ...s, stage: s.stage ?? doc.statusStages?.[s.id] })) }', 'after = sliceOf(book)'],
+  ['O3', delivery + 'store.ts', 'deliveryFloors: next, pendingDelivery: serialized', 'deliveryFloors: next'],
+  ['O4', tasks, 'const before = currentBase ? await read() : await readUncached()', 'const before = await read()'],
+  ['MU2', delivery + 'store.ts', 'Object.entries({ ...phasesBefore, ...final.deliveries })', 'Object.entries(final.deliveries)'],
+  ['MU3', delivery + 'guard.ts', 'if (!hasContext && ((was.evidence?.length ?? 0) > 0 || (was.history?.length ?? 0) > 0))', 'if (!hasContext && (was.evidence?.length ?? 0) > 0)'],
+  ['MU5', delivery + 'guard.ts', "case 'done': return 4", "case 'done': return 0"],
+  ['O5 dangerous', delivery + 'guard-ast.testing.ts', 'export function forbiddenCapabilities(src: string): string[] {', 'export function forbiddenCapabilities(src: string): string[] { return [];'],
+  ['O5 existing', delivery + 'guard-inventory.testing.ts', 'const capable = new Set(Object.entries(sources)', 'return {}; const capable = new Set(Object.entries(sources)'],
+  ['O5 shipped', delivery + 'lint-scan.testing.ts', "if (!['node_modules', '.git'].includes(name))", "if (!['node_modules', '.git', 'target', 'build', 'dist'].includes(name))"],
+]
+for (const [id, file, from, to] of r5Mutants) test(`r5 mutant ${id} is killed`, async () => {
+  reset(); change(file, from, to)
+  if (id === 'O4') change(tasks, 'if (!currentBase) bookMemo.delete(file)', '')
+  const r = await run(id === 'O1' ? [r5Test, delivery + 'guard-doors.e2e.test.ts'] : [r5Test], id)
+  console.log(`${id}: exit ${r.code}\n${r.output}`)
+  expect(r.code, r.output).toBe(1)
+  expect(r.output).toContain('(fail) ' + id)
+}, 120_000)
 async function killed(id: string, targets = [storeTest]) {
   const r = await run(targets, id)
   console.log(`${id}: exit ${r.code}\n${r.output.split('\n').filter(l => /\(fail\)|Expected:|Received:| pass| fail/.test(l)).join('\n')}`)

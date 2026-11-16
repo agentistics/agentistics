@@ -12,6 +12,9 @@
  * S2a scope: ranks 1–3 need guard A (evidence); ranks 4–5 need A as well until guard B (S5) arrives — B itself is not
  * enforced here. Override and the owner-only moves belong to later slices; guard A binds every principal alike
  * ("the owner is not exempt from guard A", §3.5.15 v).
+ *
+ * The writer inventory prevents accidental raw writers in our own code; deliberately obfuscated committed code is
+ * covered by code review. Production forbids eval/Function, process.binding and nonliteral globalThis/Bun access.
  */
 import type { RequestPrincipal } from './principal'
 

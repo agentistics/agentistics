@@ -8,6 +8,9 @@
  * TWO-PHASE COMMIT. intent (guards.json) → the document write(s) → checkpoint commit + intent removal
  * (guards.json). A crash between steps leaves an INTENT: recovery commits it when the documents already show the
  * target and drops it otherwise (`planRecovery`). Events play no part in authorization.
+ * Delivery floors additionally carry `pendingDelivery`: floor + serialized delivery bytes are sealed in one rename.
+ * Readers see those committed bytes; the next delivery writer rolls them forward before its mutation and clears the
+ * journal only after the delivery rename. A crash cannot strand the data behind its floor or require lowering it.
  *
  * LOCKING IS NOT DONE HERE. The functions on this file assume the caller holds the guards lock (and, per §2.6.1,
  * tasks → deliveries before it) through `withGuardLocks`; `applyGuardedWrite` is the one composition that does.
@@ -50,7 +53,7 @@ export interface PieceCheckpoint {
 
 export interface GuardIntent { transitionId: string; target: PieceCheckpoint; at: string }
 /** `rules`: S0d.2's authenticated MIRROR of each guarantee rule's state (`activation.ts` writes it in the same guards-locked section). */
-export interface GuardsDoc { version: 1; checkpoints: Record<string, PieceCheckpoint>; intents: Record<string, GuardIntent>; rules?: Record<string, 'off' | 'shadow' | 'on'>; deliveryFloors?: Record<string, TamperView> }
+export interface GuardsDoc { version: 1; checkpoints: Record<string, PieceCheckpoint>; intents: Record<string, GuardIntent>; rules?: Record<string, 'off' | 'shadow' | 'on'>; deliveryFloors?: Record<string, TamperView>; pendingDelivery?: string }
 
 export class GuardsUnreadable extends Error {
   readonly code = 'guards_unreadable'
@@ -79,7 +82,8 @@ export function parseGuards(text: string): GuardsDoc {
       deliveryFloors[k] = v as TamperView
     }
   }
-  const floors = raw.deliveryFloors === undefined ? {} : { deliveryFloors }
+  if (raw.pendingDelivery !== undefined && typeof raw.pendingDelivery !== 'string') throw new Error('pendingDelivery is not serialized data')
+  const floors = { ...(raw.deliveryFloors === undefined ? {} : { deliveryFloors }), ...(typeof raw.pendingDelivery === 'string' ? { pendingDelivery: raw.pendingDelivery } : {}) }
   if (raw.checkpoints !== undefined && !isRec(raw.checkpoints)) throw new Error('checkpoints is not an object')
   if (raw.intents !== undefined && !isRec(raw.intents)) throw new Error('intents is not an object')
   for (const [k, v] of Object.entries((raw.checkpoints as Record<string, unknown>) ?? {})) {
