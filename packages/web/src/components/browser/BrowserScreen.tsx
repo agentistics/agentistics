@@ -22,11 +22,14 @@ export interface BrowserScreenProps {
   onInput?: (ev: BrowserInputEvent) => void
   /** Hide the whose-turn pill (a surface that says it elsewhere). */
   noPill?: boolean
+  onResize?: (size: { width: number; height: number; deviceScaleFactor: number }) => void
+  /** Full screen reserves Escape for leaving the overlay, including keyup after it closes. */
+  reserveEscape?: boolean
 }
 
 const ORANGE = 'var(--anthropic-orange)'
 
-export function BrowserScreen({ screen, lock, lang, onInput, noPill = false }: BrowserScreenProps) {
+export function BrowserScreen({ screen, lock, lang, onInput, noPill = false, onResize, reserveEscape }: BrowserScreenProps) {
   const pt = lang === 'pt'
   const imgRef = useRef<HTMLImageElement | null>(null)
   const lastMove = useRef(0)
@@ -38,10 +41,20 @@ export function BrowserScreen({ screen, lock, lang, onInput, noPill = false }: B
   useEffect(() => {
     const el = boxRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => setBox({ width: el.clientWidth, height: el.clientHeight }))
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const initial = { width: el.clientWidth, height: el.clientHeight }
+    if (initial.width > 0 && initial.height > 0) onResize?.({ ...initial, deviceScaleFactor: window.devicePixelRatio || 1 })
+    const measure = () => {
+      const size = { width: el.clientWidth, height: el.clientHeight }
+      setBox(size)
+      if (timer) clearTimeout(timer)
+      if (size.width > 0 && size.height > 0) timer = setTimeout(() => onResize?.({ ...size, deviceScaleFactor: window.devicePixelRatio || 1 }), 250)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
     ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+    return () => { ro.disconnect(); if (timer) clearTimeout(timer) }
+  }, [onResize])
   const fit = box ? containBox(box, frame) : null
   const ring = lock === 'locked' ? ringAt(screen.state?.lastAction ?? null, frame) : null
   const status = browserScreenStatus(screen, lang)
@@ -77,11 +90,13 @@ export function BrowserScreen({ screen, lock, lang, onInput, noPill = false }: B
       onInput!({ op: 'pointer', type: 'wheel', x: p.x, y: p.y, deltaX: e.deltaX, deltaY: e.deltaY, mods: mods(e) })
     },
     onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
+      if (reserveEscape && e.key === 'Escape') return
       if (!browserKeyGoesToPage(e.nativeEvent)) return
       e.preventDefault()
       onInput!({ op: 'key', type: 'down', key: e.key, code: e.code, ...(e.key.length === 1 ? { text: e.key } : {}), mods: mods(e) })
     },
     onKeyUp: (e: KeyboardEvent<HTMLDivElement>) => {
+      if (reserveEscape && e.key === 'Escape') return
       if (!browserKeyGoesToPage(e.nativeEvent)) return
       onInput!({ op: 'key', type: 'up', key: e.key, code: e.code, mods: mods(e) })
     },

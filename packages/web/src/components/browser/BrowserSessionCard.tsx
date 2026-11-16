@@ -18,7 +18,7 @@ import { Activity, Lock, LockOpen, Maximize2, Minimize2, MousePointerClick, Paus
 import { IconButton } from '../nay/NayWindowFrame'
 import { TabDot, TabStripView, type TabStripItem } from '../sessions/SessionTabStrip'
 import { BrowserScreen } from './BrowserScreen'
-import { useBrowserInput, useBrowserScreen, type OpenStream } from '../../hooks/useBrowserScreen'
+import { useBrowserInput, useBrowserScreen, type OpenStream, type ViewerSize } from '../../hooks/useBrowserScreen'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { browserWatching } from '../../lib/browserStream'
 import { browserCaption, displayUrl, setBrowserLock, type LockOutcome } from '../../lib/browserCard'
@@ -66,9 +66,12 @@ function useWatching(): [(el: HTMLDivElement | null) => void, boolean] {
 export function BrowserSessionCard({ managedId, lang, maximized, onToggleMax, onFloat, onOpenVault, setLock = setBrowserLock, openStream }: BrowserSessionCardProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
+  const cardFocus = useRef<HTMLDivElement | null>(null)
+  useEffect(() => { if (maximized) cardFocus.current?.focus() }, [maximized])
   const [watchRef, watching] = useWatching()
   const [tab, setTab] = useState<string | null>(null)
-  const screen = useBrowserScreen(managedId, tab, watching, openStream)
+  const [size, setSize] = useState<ViewerSize>()
+  const screen = useBrowserScreen(managedId, tab, watching && (size !== undefined || typeof ResizeObserver === 'undefined'), openStream, size)
   const serverLock = screen.state?.lock === 'unlocked' ? 'unlocked' : 'locked'
   // The answer of the person's own click, until the server's next `state` says the same (≤ 500 ms).
   const [mine, setMine] = useState<'locked' | 'unlocked' | null>(null)
@@ -95,13 +98,6 @@ export function BrowserSessionCard({ managedId, lang, maximized, onToggleMax, on
     }
   }
 
-  useEffect(() => {
-    if (!maximized) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); onToggleMax() } }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [maximized, onToggleMax])
-
   const url = screen.state?.url || screen.frame?.url || ''
   const caption = browserCaption(screen.state ? lock : null, screen.state?.lastAction ?? null, lang)
   const tabs = screen.state?.tabs ?? []
@@ -117,7 +113,11 @@ export function BrowserSessionCard({ managedId, lang, maximized, onToggleMax, on
   const radius = maximized && mobile ? 0 : 16
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0, ...(maximized ? { height: '100%' } : null) }}>
+    <div
+      ref={cardFocus} tabIndex={maximized ? -1 : undefined}
+      onKeyDownCapture={maximized ? e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onToggleMax() } } : undefined}
+      onKeyUpCapture={maximized ? e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation() } } : undefined}
+      style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0, ...(maximized ? { height: '100%' } : null) }}>
       <div
         ref={watchRef}
         data-browser-card={managedId}
@@ -155,11 +155,10 @@ export function BrowserSessionCard({ managedId, lang, maximized, onToggleMax, on
           <TabStripView
             items={items} activeKey={watchedTab} pt={pt} stripAttr="data-browser-tabs" tabAttr="data-browser-tab"
             tablistLabel={pt ? 'Abas do navegador' : 'Browser tabs'}
-            list={{ label: pt ? 'Abas do navegador' : 'Browser tabs', count: items.length, expanded: false, onToggle: () => {} }}
             onPick={k => setTab(k)}
           />
         )}
-        <BrowserScreen screen={screen} lock={lock} lang={lang} {...(unlocked ? { onInput: input.send } : {})} />
+        <BrowserScreen screen={screen} lock={lock} lang={lang} onResize={setSize} reserveEscape={maximized} {...(unlocked ? { onInput: input.send } : {})} />
         <div data-browser-caption style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 12px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--text-secondary)', flexShrink: 0, minWidth: 0 }}>
           {caption.kind === 'yours'
             ? <><Pause size={13} aria-hidden style={{ flexShrink: 0 }} /><span>{pt ? 'Sua vez. Trave o cadeado para devolver ao modelo.' : 'Your turn. Lock the padlock to hand it back to the model.'}</span></>

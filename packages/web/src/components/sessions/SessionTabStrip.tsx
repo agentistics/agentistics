@@ -235,7 +235,7 @@ export interface TabStripViewProps {
   /** How many leading items are pinned: a hairline separates them from the rest. */
   pinnedCount?: number
   /** The list button at the start: its label, the count it shows, what else it carries. */
-  list: { label: string; count: number; extra?: ReactNode; expanded: boolean; onToggle: (el: HTMLButtonElement) => void; buttonRef?: Ref<HTMLButtonElement> }
+  list?: { label: string; count: number; extra?: ReactNode; expanded: boolean; onToggle: (el: HTMLButtonElement) => void; buttonRef?: Ref<HTMLButtonElement> }
   /** A "+" after the tabs (a browser's new tab). Absent = none. */
   plus?: { label: string; onClick: () => void; disabled?: boolean }
   onPick: (key: string) => void
@@ -291,12 +291,12 @@ export function TabStripView({ items, activeKey, pt, stripAttr = 'data-session-t
   return (
     <div {...{ [stripAttr]: '' }} style={{ position: 'relative', flexShrink: 0, minWidth: 0, boxSizing: 'border-box', ...(mobile ? { borderBottom: '1px solid var(--border-subtle)' } : { height: TAB_STRIP_H, background: 'var(--bg-base)' }) }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0, ...(mobile ? null : { height: TAB_STRIP_H }) }}>
-      <button
+      {list && <button
         ref={list.buttonRef}
         type="button" aria-haspopup="menu" aria-expanded={list.expanded} aria-label={list.label}
         onClick={e => list.onToggle(e.currentTarget)}
         style={listBtn}
-      ><List size={13} aria-hidden />{list.count}{list.extra}<ChevronDown size={12} aria-hidden /></button>
+      ><List size={13} aria-hidden />{list.count}{list.extra}<ChevronDown size={12} aria-hidden /></button>}
       <div
         ref={attach} className="tabscroll" role="tablist" aria-label={tablistLabel} onScroll={measure}
         style={{

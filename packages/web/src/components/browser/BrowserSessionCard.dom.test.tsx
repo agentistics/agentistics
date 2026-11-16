@@ -52,12 +52,15 @@ let store: typeof import('../../lib/sessionTabsStore')
 let originalWs: typeof globalThis.WebSocket
 let originalFetch: typeof globalThis.fetch
 let originalAct: boolean | undefined
+let originalResize: typeof ResizeObserver
 
 beforeAll(async () => {
   originalWs = globalThis.WebSocket
   originalFetch = globalThis.fetch
   originalAct = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
   GlobalRegistrator.register({ width: 1280, height: 800 })
+  originalResize = globalThis.ResizeObserver
+  globalThis.ResizeObserver = undefined as never
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never
   Element.prototype.scrollIntoView = () => {}
@@ -75,6 +78,7 @@ afterAll(async () => {
   store.resetOpenTabsCache()
   globalThis.WebSocket = originalWs
   globalThis.fetch = originalFetch
+  globalThis.ResizeObserver = originalResize
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = originalAct
   await GlobalRegistrator.unregister()
 })
@@ -116,6 +120,36 @@ const pointer = (el: Element, type: string, x: number, y: number) => {
 }
 
 describe('locked (a1-locked)', () => {
+  test('stream opens at the screen size and only reopens after a 250ms resize debounce', async () => {
+    let resize = () => {}
+    let width = 800
+    const widthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
+    const heightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => width })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 300 })
+    globalThis.ResizeObserver = class { constructor(cb: () => void) { resize = cb } observe() {} disconnect() {} } as never
+    try {
+      render()
+      expect(stream().url).toBe(`/api/browser/stream?owner=m1&width=800&height=300&dpr=${window.devicePixelRatio || 1}`)
+      width = 900
+      act(() => resize())
+      await act(async () => { await new Promise(r => setTimeout(r, 150)) })
+      expect(FakeStream.all.length).toBe(1)
+      width = 1000
+      act(() => resize())
+      await act(async () => { await new Promise(r => setTimeout(r, 150)) })
+      expect(FakeStream.all.length).toBe(1)
+      await act(async () => { await new Promise(r => setTimeout(r, 130)) })
+      expect(stream().url).toContain('width=1000&height=300')
+      expect(FakeStream.all.length).toBe(2)
+    } finally {
+      globalThis.ResizeObserver = undefined as never
+      if (widthDescriptor) Object.defineProperty(HTMLElement.prototype, 'clientWidth', widthDescriptor)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
+      if (heightDescriptor) Object.defineProperty(HTMLElement.prototype, 'clientHeight', heightDescriptor)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
+    }
+  })
   test('the screen comes through the stream mux for this session', () => {
     render()
     expect(stream().url).toBe('/api/browser/stream?owner=m1')
@@ -216,6 +250,30 @@ describe('the padlock button', () => {
 })
 
 describe('full screen (a1-max)', () => {
+  test('focused unlocked page cannot swallow Escape or receive either Escape event in max', () => {
+    let exits = 0
+    render({ maximized: true, onToggleMax: () => { exits++ } }); feed('unlocked')
+    const ws = FakeWs.all[0]!
+    act(() => ws.open())
+    const target = q('[data-browser-input]')!
+    target.focus()
+    act(() => {
+      for (const type of ['keydown', 'keyup']) target.dispatchEvent(new window.KeyboardEvent(type, { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }) as unknown as Event)
+    })
+    expect(exits).toBe(1)
+    expect(ws.sent).toEqual([])
+  })
+
+  test('SessionBrowser mounts exactly one screen when maximized (QA M4)', async () => {
+    const { SessionBrowserBlock, SessionBrowserOverlay } = await import('./SessionBrowser')
+    for (const maximized of [false, true, false]) {
+      const props = { managedId: 'm1', lang: 'pt' as const, openStream, onOpenVault: () => {}, model: { anchor: 0, live: true, maximized, setMaximized: () => {} } }
+      act(() => root.render(createElement('div', {}, createElement(SessionBrowserBlock, props), createElement(SessionBrowserOverlay, props))))
+      expect(host.querySelectorAll('[data-browser-screen]').length).toBe(1)
+      expect(host.querySelectorAll('[data-browser-card]').length).toBe(1)
+      expect(host.querySelectorAll('[data-browser-max] [data-browser-screen]').length).toBe(maximized ? 1 : 0)
+    }
+  })
   test('the button toggles, and says which way', () => {
     let n = 0
     render({ onToggleMax: () => { n++ } }); feed('locked')
@@ -231,10 +289,10 @@ describe('full screen (a1-max)', () => {
   test('Esc leaves full screen, and only while maximized', () => {
     let n = 0
     render({ onToggleMax: () => { n++ } })
-    act(() => { window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }) as unknown as Event) })
+    act(() => { q('[data-browser-card]')!.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }) as unknown as Event) })
     expect(n).toBe(0)
     render({ maximized: true, onToggleMax: () => { n++ } })
-    act(() => { window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }) as unknown as Event) })
+    act(() => { q('[data-browser-card]')!.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }) as unknown as Event) })
     expect(n).toBe(1)
   })
 })
@@ -247,6 +305,7 @@ describe('tabs reuse the session tab strip', () => {
     expect(q('[data-browser-tabs]')).toBeNull()
     feed('locked', two)
     expect(host.querySelectorAll('[data-browser-tab]').length).toBe(2)
+    expect(host.querySelectorAll('[data-browser-tabs] button[aria-haspopup="menu"]').length).toBe(0)
     act(() => (q('[data-browser-tab="T2"]') as HTMLElement).click())
     expect(stream().url).toBe('/api/browser/stream?owner=m1&tab=T2')
     // the model's tabs are the model's: no × on them

@@ -3,7 +3,7 @@
  * (and with it the 15-min auto-lock) forever. The mux path (`bounded: false`) is unchanged.
  */
 import { describe, expect, test } from 'bun:test'
-import { openSseStream, streamBoundsFor } from './browser-stream-web'
+import { openSseStream, parseViewerViewport, streamBoundsFor } from './browser-stream-web'
 import type { ScreencastHub, ScreenSink, Subscription } from './browser-screencast'
 
 function fakeHub() {
@@ -15,6 +15,22 @@ function fakeHub() {
   return { hub, st }
 }
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+test('stream query dimensions reach the subscription, with bounded finite values', async () => {
+  const size = parseViewerViewport(new URLSearchParams('width=9999&height=250&dpr=2'))
+  expect(size).toEqual({ width: 1920, height: 250, deviceScaleFactor: 2 })
+  expect(parseViewerViewport(new URLSearchParams())).toBeUndefined()
+  expect(parseViewerViewport(new URLSearchParams('width=Infinity&height=300'))).toBeUndefined()
+  const { hub } = fakeHub()
+  let received: unknown
+  const subscribe = hub.subscribe
+  hub.subscribe = (key, tab, sink, v) => { received = v; return subscribe(key, tab, sink, v) }
+  const ac = new AbortController()
+  openSseStream(hub, 'k', null, ac.signal, streamBoundsFor(true), size)
+  await sleep(0)
+  ac.abort()
+  expect(received).toEqual(size)
+})
 
 describe('direct SSE liveness bounds', () => {
   test('a client that never reads (socket dead, no abort) is dropped after N stalled keepalives', async () => {

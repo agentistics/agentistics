@@ -116,8 +116,8 @@ export function browserCaption(lock: 'locked' | 'unlocked' | 'none' | null, last
   if (lock === 'unlocked') return { kind: 'yours' }
   if (!lastAction) return { kind: 'watching' }
   const v = VERB[lastAction.kind]
-  if (!v) return lastAction.label ? { kind: 'acting', verb: '', target: lastAction.label } : { kind: 'watching' }
-  return { kind: 'acting', verb: lang === 'pt' ? v.pt : v.en, target: lastAction.label }
+  if (!v) return { kind: 'watching' }
+  return { kind: 'acting', verb: lang === 'pt' ? v.pt : v.en, target: lastAction.kind === 'evaluate' ? '' : lastAction.label }
 }
 
 /** Where the ring goes on the picture, as percentages of the frame, or null when the action has no point. */

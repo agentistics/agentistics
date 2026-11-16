@@ -18,8 +18,9 @@ import {
 import { browserAckReducer, type BrowserAckState, type BrowserInputOut } from '../lib/terminalInput'
 import { sessionBrowserOf } from '../lib/browserCard'
 
-export function browserStreamUrl(owner: string, tab: string | null): string {
-  return `/api/browser/stream?owner=${encodeURIComponent(owner)}${tab ? `&tab=${encodeURIComponent(tab)}` : ''}`
+export interface ViewerSize { width: number; height: number; deviceScaleFactor: number }
+export function browserStreamUrl(owner: string, tab: string | null, size?: ViewerSize): string {
+  return `/api/browser/stream?owner=${encodeURIComponent(owner)}${tab ? `&tab=${encodeURIComponent(tab)}` : ''}${size ? `&width=${size.width}&height=${size.height}&dpr=${size.deviceScaleFactor}` : ''}`
 }
 
 export function browserInputUrl(owner: string, tab: string | null, protocol: string, host: string): string {
@@ -29,13 +30,13 @@ export function browserInputUrl(owner: string, tab: string | null, protocol: str
 
 export type OpenStream = (url: string) => EventStreamLike
 
-export function useBrowserScreen(owner: string | null, tab: string | null, watching: boolean, open: OpenStream = openEventStream): BrowserScreenState {
+export function useBrowserScreen(owner: string | null, tab: string | null, watching: boolean, open: OpenStream = openEventStream, size?: ViewerSize): BrowserScreenState {
   const [state, dispatch] = useReducer(browserScreenReducer, INITIAL_BROWSER_SCREEN)
   useEffect(() => { dispatch({ type: 'watching', watching }) }, [watching])
   useEffect(() => {
     if (!owner || !watching) return
     dispatch({ type: 'connecting' })
-    const es = open(browserStreamUrl(owner, tab))
+    const es = open(browserStreamUrl(owner, tab, size))
     const onFrame = (e: MessageEvent) => { const f = parseBrowserFrame(String(e.data)); if (f) dispatch({ type: 'frame', frame: f }) }
     const onState = (e: MessageEvent) => { const s = parseBrowserState(String(e.data)); if (s) dispatch({ type: 'state', state: s }) }
     const onGone = (e: MessageEvent) => { const r = parseBrowserGone(String(e.data)); if (r) dispatch({ type: 'gone', reason: r }) }
@@ -50,7 +51,7 @@ export function useBrowserScreen(owner: string | null, tab: string | null, watch
       es.onerror = null
       es.close()
     }
-  }, [owner, tab, watching, open])
+  }, [owner, tab, watching, open, size?.width, size?.height, size?.deviceScaleFactor])
   return state
 }
 

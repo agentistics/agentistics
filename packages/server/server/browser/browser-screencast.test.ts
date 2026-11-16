@@ -4,6 +4,7 @@
  * server queue — it keeps only the newest frame and the ack waits for it (bounded).
  */
 import { describe, expect, test } from 'bun:test'
+import { createViewportCast } from './browser-viewport'
 import {
   createScreencastHub, FRAME_INTERVAL_MS, MAX_ACK_WAIT_MS, MAX_FPS, STATE_POLL_MS,
   type CastFrame, type CastState, type RawCastFrame, type ScreenSink,
@@ -81,6 +82,32 @@ function sink(opts: { busy?: () => boolean } = {}) {
 }
 
 const flush = () => new Promise(r => setTimeout(r, 0))
+
+test('hub passes each viewer size, last resize wins; only final reader clears metrics', async () => {
+  const calls: Array<[string, Record<string, unknown>]> = []
+  const c = clock()
+  const hub = createScreencastHub({
+    ...c,
+    activeTab: () => 'T1', viewer: () => {},
+    state: () => ({ tab: 'T1', activeTab: 'T1', lock: 'locked', url: '', title: '', loading: false, tabs: [], lastAction: null }),
+    start: async (_key, _tab, _onFrame, size) => {
+      const cast = createViewportCast(async (method, params) => { calls.push([method, params]) })
+      await cast.start(size)
+      return { ok: true, ack: () => {}, resize: cast.resize, stop: cast.stop }
+    },
+  })
+  expect(calls).toEqual([])
+  const a = await hub.subscribe('k', null, sink().s, { width: 390, height: 260, deviceScaleFactor: 2 })
+  expect(calls[0]).toEqual(['Emulation.setDeviceMetricsOverride', { width: 390, height: 260, deviceScaleFactor: 2, mobile: false }])
+  const b = await hub.subscribe('k', null, sink().s, { width: 1100, height: 700, deviceScaleFactor: 1 })
+  expect(calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride').at(-1)?.[1]).toMatchObject({ width: 1100, height: 700 })
+  a.close()
+  await flush()
+  expect(calls.some(([m]) => m === 'Emulation.clearDeviceMetricsOverride')).toBe(false)
+  b.close()
+  await flush()
+  expect(calls.at(-1)?.[0]).toBe('Emulation.clearDeviceMetricsOverride')
+})
 
 describe('nobody watching = no screencast', () => {
   test('no subscriber: start is never called', () => {

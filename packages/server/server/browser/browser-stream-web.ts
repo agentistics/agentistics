@@ -14,9 +14,10 @@
  *
  * Reading a screen never starts a browser: no live browser ⇒ 404 `no_browser`.
  */
-import { createScreencastHub, SCREENCAST_PARAMS, type CastState, type ScreencastHub, type ScreenSink, type Subscription } from './browser-screencast'
+import { createScreencastHub, type CastState, type ScreencastHub, type ScreenSink, type Subscription } from './browser-screencast'
 import { browserHost, browserLocks, type BrowserWebOpts } from './browser-web'
 import { ownerKey, statusTitle, type BrowserOwner } from './browser-spec'
+import { clampViewport, createViewportCast, createViewportQueue, type ViewerViewport } from './browser-viewport'
 
 /** Concurrent screen streams for the whole process (each holds a socket and, shared, a cast). */
 export const MAX_BROWSER_STREAMS = 32
@@ -24,6 +25,12 @@ const KEEPALIVE_MS = 15_000
 const MAX_URL = 2_048
 
 let hub: ScreencastHub | null = null
+const viewportQueue = createViewportQueue()
+
+export function parseViewerViewport(query: URLSearchParams): ViewerViewport | undefined {
+  const v = clampViewport({ width: Number(query.get('width')), height: Number(query.get('height')), deviceScaleFactor: Number(query.get('dpr') ?? 1) })
+  return v ?? undefined
+}
 
 /** `owner` query → the browser's owner, or null. */
 export function parseStreamOwner(raw: string | null): BrowserOwner | null {
@@ -43,7 +50,7 @@ export function browserScreencastHub(opts: BrowserWebOpts): ScreencastHub {
   const host = browserHost(opts)
   const locks = browserLocks(opts)
   const h = createScreencastHub({
-    start: async (key, tab, onFrame) => {
+    start: async (key, tab, onFrame, size) => {
       const ah = host.actionHost(key)
       const cdp = host.cdpOf(key)
       if (!ah || !cdp) return { ok: false, reason: 'no_browser' }
@@ -53,16 +60,20 @@ export function browserScreencastHub(opts: BrowserWebOpts): ScreencastHub {
       const off = host.onCdpEvent(key, (ev) => {
         if (ev.method === 'Page.screencastFrame' && ev.sessionId === sid) onFrame(ev.params)
       })
+      const target = `${key}\u0000${tab}`
+      const cast = createViewportCast((method, params) => cdp.send(method, params, sid), fn => viewportQueue(target, fn))
       try {
-        await cdp.send('Page.startScreencast', { ...SCREENCAST_PARAMS }, sid)
+        await cast.start(size)
       } catch {
         off()
+        await cast.stop().catch(() => {})
         return { ok: false, reason: 'cast_failed' }
       }
       return {
         ok: true,
         ack: (n) => { void cdp.send('Page.screencastFrameAck', { sessionId: n }, sid).catch(() => {}) },
-        stop: async () => { off(); await cdp.send('Page.stopScreencast', {}, sid).catch(() => {}) },
+        resize: v => cast.resize(v),
+        stop: async () => { off(); await cast.stop().catch(() => {}) },
       }
     },
     state: (key, tab) => {
@@ -121,11 +132,11 @@ export const MUX_BOUNDS: StreamBounds = { ...DIRECT_BOUNDS, bounded: false }
 export const streamBoundsFor = (viaMux: boolean): StreamBounds => (viaMux ? MUX_BOUNDS : DIRECT_BOUNDS)
 
 /** The SSE body for one tab's screen. Cleanup is tied to `signal` (the browser left). */
-export function openBrowserStream(opts: BrowserWebOpts, key: string, tab: string | null, signal: AbortSignal, bounds: StreamBounds = MUX_BOUNDS): ReadableStream<Uint8Array> {
-  return openSseStream(browserScreencastHub(opts), key, tab, signal, bounds)
+export function openBrowserStream(opts: BrowserWebOpts, key: string, tab: string | null, signal: AbortSignal, bounds: StreamBounds = MUX_BOUNDS, size?: ViewerViewport): ReadableStream<Uint8Array> {
+  return openSseStream(browserScreencastHub(opts), key, tab, signal, bounds, size)
 }
 
-export function openSseStream(h: ScreencastHub, key: string, tab: string | null, signal: AbortSignal, bounds: StreamBounds): ReadableStream<Uint8Array> {
+export function openSseStream(h: ScreencastHub, key: string, tab: string | null, signal: AbortSignal, bounds: StreamBounds, size?: ViewerViewport): ReadableStream<Uint8Array> {
   const enc = new TextEncoder()
   let sub: Subscription | null = null
   let keepalive: ReturnType<typeof setInterval> | null = null
@@ -173,7 +184,7 @@ export function openSseStream(h: ScreencastHub, key: string, tab: string | null,
         gone: (reason) => { push(sse('gone', { reason })); end() },
       }
       signal.addEventListener('abort', end, { once: true })
-      const s = await h.subscribe(key, tab, sink)
+      const s = await h.subscribe(key, tab, sink, size)
       if (closed) s.close()
       else sub = s
     },

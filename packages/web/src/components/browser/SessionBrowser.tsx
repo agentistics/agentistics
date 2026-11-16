@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Globe } from 'lucide-react'
 import { BrowserSessionCard } from './BrowserSessionCard'
 import { browserAnchor } from '../../lib/browserCard'
-import { useSessionBrowserLive } from '../../hooks/useBrowserScreen'
+import { useSessionBrowserLive, type OpenStream } from '../../hooks/useBrowserScreen'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { overlayPadding } from '../../lib/mobileOverlay'
 
@@ -31,10 +31,10 @@ export function useSessionBrowser(managedId: string | null, turns: ReadonlyArray
   return { anchor, live, maximized, setMaximized }
 }
 
-interface Props { managedId: string; lang: 'pt' | 'en'; model: SessionBrowserModel; onOpenVault: () => void }
+interface Props { managedId: string; lang: 'pt' | 'en'; model: SessionBrowserModel; onOpenVault: () => void; openStream?: OpenStream }
 
 /** In the message column: the card, or — once its browser is closed — one quiet line. Nothing while maximized. */
-export function SessionBrowserBlock({ managedId, lang, model, onOpenVault }: Props) {
+export function SessionBrowserBlock({ managedId, lang, model, onOpenVault, openStream }: Props) {
   const pt = lang === 'pt'
   if (model.anchor === null) return null
   if (!model.live) {
@@ -45,17 +45,17 @@ export function SessionBrowserBlock({ managedId, lang, model, onOpenVault }: Pro
     )
   }
   if (model.maximized) return null
-  return <BrowserSessionCard managedId={managedId} lang={lang} maximized={false} onToggleMax={() => model.setMaximized(true)} onOpenVault={onOpenVault} />
+  return <BrowserSessionCard managedId={managedId} lang={lang} maximized={false} onToggleMax={() => model.setMaximized(true)} onOpenVault={onOpenVault} openStream={openStream} />
 }
 
 /** Full screen over the session area (its parent is the conversation panel, `position: relative`). */
-export function SessionBrowserOverlay({ managedId, lang, model, onOpenVault }: Props) {
+export function SessionBrowserOverlay({ managedId, lang, model, onOpenVault, openStream }: Props) {
   const mobile = useIsMobile()
   if (!model.live || !model.maximized || model.anchor === null) return null
   return (
     <div data-browser-max style={{ position: 'absolute', inset: 0, zIndex: 40, background: 'var(--bg-base)', display: 'flex', padding: overlayPadding(mobile, 10), boxSizing: 'border-box' }}>
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <BrowserSessionCard managedId={managedId} lang={lang} maximized onToggleMax={() => model.setMaximized(false)} onOpenVault={onOpenVault} />
+        <BrowserSessionCard managedId={managedId} lang={lang} maximized onToggleMax={() => model.setMaximized(false)} onOpenVault={onOpenVault} openStream={openStream} />
       </div>
     </div>
   )

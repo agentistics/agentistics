@@ -174,3 +174,9 @@ test('lockRefusalSentence: our words for proof codes, else the server sentence',
   expect(lockRefusalSentence('weird', 'Server said so.', false)).toBe('Server said so.')
   expect(lockRefusalSentence('weird', undefined, false)).toBe('Could not change the padlock.')
 })
+test('script and unknown actions never expose internal labels in either language', () => {
+  for (const lang of ['pt', 'en'] as const) {
+    expect(browserCaption('locked', { kind: 'evaluate', label: 'script', at: 1 }, lang)).toEqual({ kind: 'acting', verb: lang === 'pt' ? 'Lendo a página' : 'Reading the page', target: '' })
+    expect(browserCaption('locked', { kind: 'future_internal_kind', label: 'internal', at: 1 }, lang)).toEqual({ kind: 'watching' })
+  }
+})

@@ -21,6 +21,8 @@
  *    when it changed. A tab or browser that disappears ends its readers with `gone {reason}`.
  */
 
+import type { ViewerViewport } from './browser-viewport'
+
 export const MAX_FPS = 12
 /** One delivery slot. `ceil` so 12 slots never fit in less than a second. */
 export const FRAME_INTERVAL_MS = Math.ceil(1000 / MAX_FPS)
@@ -81,14 +83,14 @@ export interface Subscription {
 }
 
 export type StartCast =
-  | { ok: true; ack(sessionId: number): void; stop(): Promise<void> }
+  | { ok: true; ack(sessionId: number): void; stop(): Promise<void>; resize?(v: ViewerViewport): Promise<void> }
   | { ok: false; reason: string }
 
 type Timer = unknown
 
 export interface ScreencastDeps {
   /** `Page.startScreencast` on the tab; frames go to `onFrame` until `stop()` (= `Page.stopScreencast`). */
-  start(key: string, tab: string, onFrame: (f: RawCastFrame) => void): Promise<StartCast>
+  start(key: string, tab: string, onFrame: (f: RawCastFrame) => void, size?: ViewerViewport): Promise<StartCast>
   /** The tab's state now; `null` = the tab (or its browser) is gone. */
   state(key: string, tab: string): CastState | null
   /** The browser's active tab, for a reader that named none. */
@@ -136,7 +138,7 @@ interface Loop {
 
 export interface ScreencastHub {
   /** Watch a tab (`tab` null = the active one). Always resolves; a failure arrives as `gone`. */
-  subscribe(key: string, tab: string | null, sink: ScreenSink): Promise<Subscription>
+  subscribe(key: string, tab: string | null, sink: ScreenSink, size?: ViewerViewport): Promise<Subscription>
   /** The browser stopped: end its readers with `reason`. */
   browserGone(key: string, reason: string): void
   /** The last frame size of a watched tab (CSS px of the viewport) — what input coordinates map onto. */
@@ -269,7 +271,7 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
   }
 
   return {
-    async subscribe(key, tabIn, sink) {
+    async subscribe(key, tabIn, sink, size) {
       const tab = tabIn ?? d.activeTab(key)
       if (!tab) { try { sink.gone('no_browser') } catch { /* */ } return { close() {}, drained() {} } }
       let loop = loops.get(id(key, tab))
@@ -286,7 +288,7 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
         d.viewer(key, 1)
         created.starting = (async () => {
           let started: StartCast
-          try { started = await d.start(key, tab, raw => onRaw(created, raw)) } catch { started = { ok: false, reason: 'cast_failed' } }
+          try { started = await d.start(key, tab, raw => onRaw(created, raw), size) } catch { started = { ok: false, reason: 'cast_failed' } }
           if (!started.ok) { end(created, started.reason); return }
           if (created.ended || created.readers.size === 0) { void started.stop().catch(() => {}); end(created, null); return }
           created.cast = started
@@ -302,6 +304,9 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
         d.viewer(key, 1)
         if (loop.starting) await loop.starting
         if (loop.ended) return { close() {}, drained() {} }
+        if (size && loop.cast?.resize) {
+          try { await loop.cast.resize(size) } catch { end(loop, 'cast_failed'); return { close() {}, drained() {} } }
+        }
         if (loop.lastState) { try { sink.state(loop.lastState) } catch { /* */ } }
         if (loop.lastFrame) give(reader, loop.lastFrame)
       }

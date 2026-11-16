@@ -3939,14 +3939,14 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // S4 — the live screen (SSE; rides the tab's stream-mux socket). Reading never starts a browser.
       if (url.pathname === '/api/browser/stream') {
         if (req.method !== 'GET') return jsonOut({ error: 'method_not_allowed' }, 405)
-        const { parseStreamOwner, parseStreamTab, browserStreamTarget, browserStreamAtCapacity, openBrowserStream } = await import('./browser/browser-stream-web')
+        const { parseStreamOwner, parseStreamTab, parseViewerViewport, browserStreamTarget, browserStreamAtCapacity, openBrowserStream } = await import('./browser/browser-stream-web')
         const owner = parseStreamOwner(url.searchParams.get('owner'))
         const tab = parseStreamTab(url.searchParams.get('tab'))
         if (!owner || tab === false) return jsonOut({ ok: false, error: 'bad_request' }, 400)
         const key = browserStreamTarget(browserOpts, owner)
         if (!key) return jsonOut({ ok: false, error: 'no_browser', sentence: 'This browser is not open.' }, 404)
         if (browserStreamAtCapacity(browserOpts)) return jsonOut({ ok: false, error: 'too_many_streams' }, 503)
-        return new Response(openBrowserStream(browserOpts, key, tab, req.signal, (await import('./browser/browser-stream-web')).streamBoundsFor((await import('./stream-mux')).muxReplayed.has(req))), {
+        return new Response(openBrowserStream(browserOpts, key, tab, req.signal, (await import('./browser/browser-stream-web')).streamBoundsFor((await import('./stream-mux')).muxReplayed.has(req)), parseViewerViewport(url.searchParams)), {
           headers: { ...CORS_HEADERS, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
         })
       }
