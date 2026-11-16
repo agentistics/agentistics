@@ -521,10 +521,11 @@ async function runRestoreJob(
       return
     }
 
-    const { restoreMetrics, restoreRepos, readManifestOf } = await import('./backup/restore')
+    const { restoreMetrics, restoreReason, restoreRepos, readManifestOf } = await import('./backup/restore')
     const metrics = await restoreMetrics({ archive: dl.archivePath, homeDir: HOME_DIR, onLine: log })
     if (!metrics.ok) {
-      rr.finishRestoreJob(job, { ok: false, reason: metrics.reason })
+      const { resolveLang } = await import('./cli-i18n')
+      rr.finishRestoreJob(job, { ok: false, reason: restoreReason(metrics, await resolveLang()) })
       return
     }
     // VAULT.PERSONAL: a vault bundle beside the archive is staged in the service (24 words to open it).

@@ -27,7 +27,7 @@ import { runBackup, walkSources } from './backup/backup'
 import { probeAll, candidatePaths, createBundle, capturePatch, listUntracked } from './backup/repo-probe'
 import { groupRepos, expandHome, assetRel, type RepoEntry } from './backup/repo-manifest'
 import { planRepos } from './backup/restore-plan'
-import { readManifestOf, restoreMetrics, restoreRepos, readRestoreState, restoreStateFile } from './backup/restore'
+import { readManifestOf, restoreMetrics, restoreReason, restoreRepos, readRestoreState, restoreStateFile } from './backup/restore'
 import { MIN_CUSTOM_HOURS, SCHEDULE_IDS, scheduleStatus, normalizeHour, type ScheduleId } from './backup/schedule'
 import { parseDaysArg, DAY_NAMES } from './backup/days-arg'
 import { loadConsolidated } from './consolidate'
@@ -851,7 +851,7 @@ async function runRestorePhases(
 
   if (!opts.reposPhase) {
     const r = await restoreMetrics({ archive, homeDir: HOME_DIR, onLine: log })
-    if (!r.ok) { console.error(`restore failed: ${r.reason}`); return 1 }
+    if (!r.ok) { console.error(`restore failed: ${restoreReason(r, await resolveLang())}`); return 1 }
     log(`metrics: ${r.written} written, ${r.skipped} skipped (a newer local copy always wins)`)
     await stageVaultFromArchive(archive, log).catch(() => 'refused')
 

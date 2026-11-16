@@ -11,7 +11,8 @@ const tasks = 'packages/server/server/sessions/task-store.ts'
 const restore = 'packages/server/server/backup/restore.ts'
 let root: string
 const originals = new Map<string, string>()
-const files = [delivery + 'guard-host.ts', delivery + 'guard.ts', delivery + 'store.ts', delivery + 'guard-sites.testing.ts', delivery + 'guard-inventory.fixture.json', tasks, restore]
+const files = [delivery + 'guard-host.ts', delivery + 'guard.ts', delivery + 'store.ts', delivery + 'guard-sites.testing.ts', delivery + 'guard-inventory.fixture.json', tasks, restore,
+  delivery + 'guard-transaction.ts', delivery + 'activation.ts', delivery + 'guard-ast.testing.ts', delivery + 'guard-inventory-r3.fixture.json']
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'guard-mutants-'))
   cpSync(join(repo, 'packages'), join(root, 'packages'), { recursive: true, filter: p => !p.split('/').some(s => ['node_modules', 'dist', 'target', '.git'].includes(s)) })
@@ -100,10 +101,9 @@ test('mutant F5: evidence:true disables detection', async () => {
 }, 120_000)
 test('mutant F6: policy captured before acquiring guards is trusted after activation', async () => {
   reset()
-  change(tasks, 'guardedWrite, guardPathsOf, type GuardWiring', 'guardedWrite, guardPathsOf, ruleAState, type GuardWiring')
   change(tasks, 'let currentGuard: GuardContext | undefined', "let staleRule: 'off' | 'shadow' | 'on' | undefined\n  let currentGuard: GuardContext | undefined")
   change(tasks, 'raised, ctx: currentGuard,', 'rule: staleRule, raised, ctx: currentGuard,')
-  change(tasks, 'const run = () => withGuardTransaction(anchor.paths, serialized)', 'const run = async () => { staleRule = await ruleAState(anchor.dir); return withGuardTransaction(anchor.paths, serialized) }')
+  change(tasks, "if (await peekRuleA(anchor.paths) !== 'off') return enveloped()", "staleRule = await ruleAState(anchor.dir); if (staleRule !== 'off') return enveloped()")
   change(delivery + 'guard-host.ts', 'const rule = await ruleAState(dirname(o.paths.guards))', 'const rule = o.rule ?? await ruleAState(dirname(o.paths.guards))')
   await killed('F6')
 }, 120_000)
@@ -132,4 +132,94 @@ test('mutant F8: new call and enlarged live allowance cannot enlarge the pinned 
     expect(r.output).toContain('Historical guard inventory changed')
     console.log('F8 call + enlarged allowance: killed by independent pin')
   } finally { rmSync(file); reset() }
+}, 120_000)
+
+// ── S2a r3: one mutant per finding of the live Opus re-QA (N1–N5) and per surviving QA mutant (M1, M3–M7) ─────────────
+const guardTest = delivery + 'guard.test.ts'
+const locksTest = delivery + 'guard-locks.test.ts'
+const restoreTest = restore.replace('.ts', '.test.ts')
+const lintTest = delivery + 'doors.lint.test.ts'
+test('mutant N2: rule OFF takes the full envelope again (the r2 behaviour)', async () => {
+  reset(); change(tasks, "if (await peekRuleA(anchor.paths) !== 'off') return enveloped()", 'return enveloped()')
+  await killed('OFF-1')
+}, 120_000)
+test('mutant N2: a delivery write under rule OFF takes deliveries + guards again', async () => {
+  reset(); change(delivery + 'store.ts', "if (await peekRuleA(paths) !== 'off') return guarded()", 'return guarded()')
+  await killed('OFF-3')
+}, 120_000)
+test('mutant N2: a board writer that read OFF never re-checks the rule under its lock', async () => {
+  reset(); change(tasks, 'throw new RuleNoLongerOff()', 'return writeRaw(book)')
+  await killed('retakes the envelope')
+}, 120_000)
+test('mutant N2/N5: the activation does not take the envelope', async () => {
+  reset(); change(delivery + 'activation.ts', 'return withGuardEnvelope(paths, () => moveRule(rule, to, ctx))', 'return moveRule(rule, to, ctx)')
+  await killed('activation takes the full envelope')
+}, 120_000)
+test('mutant N1: the append-only check on history/evidence is dropped', async () => {
+  reset(); change(delivery + 'store.ts', 'if (rule === \'on\') throw new GuardRefused(tampered[0]!)', 'if (false) throw new GuardRefused(tampered[0]!)')
+  await killed('GAP-1')
+}, 120_000)
+test('mutant N1: the pure history check keeps only the length (a rewritten entry passes)', async () => {
+  reset(); change(delivery + 'guard.ts', '(was ?? []).every((e, i) => (now ?? []).length > i && sameJson(e, now![i]))', '(now ?? []).length >= (was ?? []).length')
+  await killed('GAP-1', [guardTest])
+}, 120_000)
+test('mutant M1: headSha leaves the delivery binding', async () => {
+  reset(); change(delivery + 'guard.ts', 'r.revision, r.headSha, r.qaSha', 'r.revision, r.qaSha')
+  await killed('M1', [guardTest])
+}, 120_000)
+test('mutant M3: restore guards tasks.json only', async () => {
+  reset(); change(restore, "return name === 'tasks.json' || name === 'deliveries.json'", "return name === 'tasks.json'")
+  await killed('M3', [restoreTest])
+}, 120_000)
+test('mutant M4: the downgrade stage mirror is ignored', async () => {
+  reset(); change(tasks, 'stage: s.stage ?? doc.statusStages?.[s.id]', 'stage: s.stage')
+  await killed('M4')
+}, 120_000)
+test('mutant M5: an envelope is matched on the tasks file only', async () => {
+  reset(); change(delivery + 'guard-transaction.ts', "(['tasks', 'deliveries', 'guards'] as const).every(", "(['tasks'] as const).every(")
+  await killed('M5', [locksTest])
+}, 120_000)
+test('mutant M6: no upper revision bound on this round’s captures', async () => {
+  reset(); change(delivery + 'guard-host.ts', 'i.revision >= round && i.revision <= (o.record?.revision ?? Infinity)', 'i.revision >= round')
+  await killed('M6')
+}, 120_000)
+test('mutant M7: the subtask CI signal leaves the binding', async () => {
+  reset(); change(delivery + 'guard.ts', ' || JSON.stringify(was.ci) !== JSON.stringify(s.ci)', '')
+  await killed('M7', [guardTest])
+}, 120_000)
+test('mutant N6: the restore decides inside the loop again (after earlier files were written)', async () => {
+  reset()
+  change(restore, "if (await ruleAState(anchor.dir) === 'on') return { ok: false as const", "if (false) return { ok: false as const")
+  change(restore, "      if (a.rel.endsWith('.json') && manifest.homeDir !== opts.homeDir) {", "      if (isGuardedBook(to) && await ruleAState(dirname(to)) === 'on') throw new Error('guard_restore_refused')\n      if (a.rel.endsWith('.json') && manifest.homeDir !== opts.homeDir) {")
+  await killed('N6', [restoreTest])
+}, 120_000)
+test('mutant N3: the new writer forms are not detected (element access, Bun global, child process, links…)', async () => {
+  reset()
+  change(delivery + 'guard-ast.testing.ts', 'if (isBun(e.expression)) return BUN_WRITES.has(name)', "if (isBun(e.expression)) return name === 'write' && e.expression.getText(file) === 'Bun'")
+  change(delivery + 'guard-ast.testing.ts', 'return WRITES.has(name) || PROPERTY_WRITES.has(name) || (MODULE_WRITES.has(name) && fromWritingModule(e.expression))', 'return WRITES.has(name)')
+  await killed('nine forms', [lintTest])
+}, 120_000)
+test('mutant N3: book references are not pinned (a retargeted inherited call passes)', async () => {
+  reset(); change(delivery + 'guard-ast.testing.ts', "if (ts.isIdentifier(n) && REACH_IDENTS.has(n.text)) out.push(`ident:${n.text}`)", '')
+  await killed('retargeting', [lintTest])
+}, 120_000)
+test('mutant N3: a new module retargets a write at a book through a constant', async () => {
+  reset()
+  const file = join(root, delivery, 'mutant-reach.ts')
+  writeFileSync(file, "import { TASKS_FILE } from '../config'\nimport { cacheWrite } from './cache-helper'\nawait cacheWrite(TASKS_FILE, '{}')\n")
+  try {
+    const r = await run([lintTest], 'no new raw writer')
+    expect(r.code, r.output).toBe(1); expect(r.output).toContain('mutant-reach.ts')
+    console.log('N3 new reach module: killed')
+  } finally { rmSync(file) }
+}, 120_000)
+test('mutant N3: production imports a *.testing helper that writes', async () => {
+  reset()
+  const file = join(root, delivery, 'mutant-import.ts')
+  writeFileSync(file, "import { put } from './evidence-world.testing'\nexport const x = put\n")
+  try {
+    const r = await run([lintTest], 'test-only module')
+    expect(r.code, r.output).toBe(1); expect(r.output).toContain('mutant-import.ts')
+    console.log('N3 testing import: killed')
+  } finally { rmSync(file) }
 }, 120_000)

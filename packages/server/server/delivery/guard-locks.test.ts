@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { lockFile } from '../sessions/file-lock'
 import { GUARD_LOCK_ORDER, GuardBusy, GuardLockOrderError, withGuardLocks, type GuardLockPaths } from './guard-locks'
-import { inGuardTransaction, withGuardTransaction } from './guard-transaction'
+import { inGuardTransaction, withGuardEnvelope as withGuardTransaction } from './guard-transaction'
 
 let dir: string
 let paths: GuardLockPaths
@@ -15,6 +15,17 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 const lockDirs = () => readdirSync(dir).filter(n => n.endsWith('.lock'))
+
+describe('r3 M5: an envelope is reused only for the SAME three files', () => {
+  test('a different deliveries or guards file is not inside this envelope, even with the same tasks file', async () => {
+    const other = join(dir, 'other')
+    let seen: boolean[] = []
+    await withGuardTransaction(paths, async () => {
+      seen = [inGuardTransaction(paths), inGuardTransaction({ ...paths, deliveries: join(other, 'deliveries.json') }), inGuardTransaction({ ...paths, guards: join(other, 'guards.json') })]
+    })
+    expect(seen).toEqual([true, false, false])
+  })
+})
 
 describe('the global order is tasks → deliveries → guards', () => {
   test('an async continuation cannot reuse an expired transaction lease', async () => {

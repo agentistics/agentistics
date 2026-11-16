@@ -21,7 +21,8 @@
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { isStatusStage, isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
-import { inGuardTransaction, serializeGuardWrite, withGuardTransaction } from '../delivery/guard-transaction'
+import { inGuardTransaction, peekRuleA, RuleNoLongerOff, serializeGuardWrite, withGuardEnvelope } from '../delivery/guard-transaction'
+import { withFileLock } from './file-lock'
 import { createGuaranteesStore } from '../delivery/activation'
 import { historicalLinkId, migratePriority, migrateStatus, nativeLinkId, subtaskDone } from './task-model'
 import { heldByOther } from './task-next'
@@ -33,7 +34,7 @@ import type {
 } from './task-model'
 import { isCommentKind, type ThreadDelivery, type ThreadParticipant } from '@agentistics/core'
 import { boardRaises, type BoardSlice, type GuardContext } from '../delivery/guard'
-import { guardedWrite, guardPathsOf, type GuardWiring } from '../delivery/guard-host'
+import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from '../delivery/guard-host'
 import { GuardBusy } from '../delivery/guard-locks'
 import { createDeliveryStore } from '../delivery/store'
 
@@ -682,6 +683,8 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
   // store instance runs at a time (the queue), so one pair of slots is enough.
   let currentGuard: GuardContext | undefined
   let currentContended = false
+  /** `base`: rule A was off when this mutation started, so it holds ONLY the tasks file lock (the base's semantics, N2). */
+  let currentBase = false
   const anchor = guardPathsOf({ tasksFile: file })
   const sliceOf = (b: TaskBook): BoardSlice => ({ tasks: b.tasks, subtasks: b.subtasks, statuses: b.statuses })
 
@@ -703,6 +706,12 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
     }
     const raised = boardRaises(prior, sliceOf(book))
     if (raised.length === 0) return writeRaw(book)
+    if (currentBase) {
+      // Rule off when the mutation started: re-read it under the tasks lock. The activation takes tasks first, so while
+      // that lock is really held the answer cannot change under us; a rule that moved means retake the full envelope.
+      if (await ruleAState(anchor.dir) === 'off') return writeRaw(book)
+      throw new RuleNoLongerOff()
+    }
     // `withFileLock` goes ahead WITHOUT the lock after its wait; a guard never does (§2.6.1).
     if (currentContended) throw new GuardBusy('tasks')
     const subs = new Map(book.subtasks.map(s => [s.id, s] as const))
@@ -731,17 +740,32 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
     for (const fn of [...bookWriteListeners]) { try { fn() } catch { /* a listener never fails a write */ } }
   }
 
-  /** One mutation, under the cross-process lock, re-run once when the lock was contended. */
+  /**
+   * One mutation. Rule A off (N2): exactly the base — the tasks file lock, re-run once when it was contended, never a
+   * guards lock and never a fail-closed wait. Rule A shadow/on: the full tasks → deliveries → guards envelope, fail closed.
+   */
   function enqueue<T>(fn: (held: { contended: boolean }) => Promise<T>, guard?: GuardContext): Promise<T> {
-    const mutate = async (): Promise<T> => {
-      const previousGuard = currentGuard
-      currentGuard = guard; currentContended = false
-      try { return await fn({ contended: false }) } finally { currentGuard = previousGuard }
+    const mutate = (base: boolean) => async (held: { contended: boolean }): Promise<T> => {
+      const previous = [currentGuard, currentContended, currentBase] as const
+      currentGuard = guard; currentContended = held.contended; currentBase = base
+      try { return await fn(held) } finally { [currentGuard, currentContended, currentBase] = previous }
     }
     // A transaction already holds all files. Do not wait behind a queued mutation waiting for those same locks.
-    const serialized = () => serializeGuardWrite(anchor.paths, 'tasks', mutate)
+    const serialized = () => serializeGuardWrite(anchor.paths, 'tasks', () => mutate(false)({ contended: false }))
     if (inGuardTransaction(anchor.paths)) return serialized()
-    const run = () => withGuardTransaction(anchor.paths, serialized)
+    const enveloped = () => withGuardEnvelope(anchor.paths, serialized)
+    const run = async (): Promise<T> => {
+      if (await peekRuleA(anchor.paths) !== 'off') return enveloped()
+      try {
+        let contended = false
+        const first = await withFileLock(file, async held => { contended = held.contended; return mutate(true)(held) })
+        if (!contended) return first
+        return await withFileLock(file, held => mutate(true)(held))
+      } catch (e) {
+        if (e instanceof RuleNoLongerOff) return enveloped()
+        throw e
+      }
+    }
     const next = queue.then(run)
     queue = next.catch(() => undefined)
     return next

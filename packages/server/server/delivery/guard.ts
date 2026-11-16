@@ -111,6 +111,47 @@ export function deliveryRaises(before: Readonly<Record<string, DeliveryBinding>>
   return out
 }
 
+/**
+ * PURE (QA r2 N1). The capture ROUND a piece's evidence is judged in comes from its durable history (the last `ajuste`) and
+ * from each item's own revision. Those are facts about the past, so they are APPEND-ONLY at every rank and for every writer:
+ * a history entry, an `evidenceHistory` entry or an existing evidence item is never rewritten or dropped, and a revision
+ * never goes back. Adding or removing evidence (and removing a record that carries any) needs a guard context — the doors
+ * that do it (`evidenceAdd`, `evidenceRemove`, adoption) always carry one. Anything else would let a contextless rank-0
+ * write erase the round floor (GAP-1) or relabel old captures into the current round (GAP-2).
+ */
+type TamperView = { taskId?: string; revision?: number; history?: readonly unknown[]; evidence?: readonly { id: string }[]; evidenceHistory?: readonly unknown[] }
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+const keepsPrefix = (was: readonly unknown[] | undefined, now: readonly unknown[] | undefined) =>
+  (was ?? []).every((e, i) => (now ?? []).length > i && sameJson(e, now![i]))
+const tamper = (piece: string, what: string, whatPt: string, needsContext: boolean): GuardRefusal => ({
+  code: 'evidence_binding_protected', piece, missing: [needsContext ? 'a guard context' : 'an append-only history'],
+  message: `This write ${what} on ${piece}. The capture round and the evidence it holds are append-only${needsContext ? ' and change only through a door that says who is asking' : ''}, so the store refuses it.`,
+  messagePt: `Esta escrita ${whatPt} em ${piece}. A rodada de captura e as evidências dela só crescem${needsContext ? ' e só mudam por uma porta que diz quem está pedindo' : ''}, então o armazém recusa.`,
+})
+export function deliveryTamper(before: Readonly<Record<string, TamperView>>, after: Readonly<Record<string, TamperView>>, hasContext: boolean): GuardRefusal[] {
+  const out: GuardRefusal[] = []
+  for (const [id, was] of Object.entries(before)) {
+    const now = after[id]
+    if (!now) {
+      if (!hasContext && ((was.evidence?.length ?? 0) > 0 || (was.history?.length ?? 0) > 0)) out.push(tamper(id, 'removes a delivery record that carries history or evidence', 'remove um registro de entrega com histórico ou evidência', true))
+      continue
+    }
+    if (!keepsPrefix(was.history, now.history)) out.push(tamper(id, 'rewrites or drops a history entry', 'reescreve ou apaga uma entrada do histórico', false))
+    else if (!keepsPrefix(was.evidenceHistory, now.evidenceHistory)) out.push(tamper(id, 'rewrites or drops an evidence history entry', 'reescreve ou apaga uma entrada do histórico de evidências', false))
+    else if ((now.revision ?? 0) < (was.revision ?? 0)) out.push(tamper(id, 'moves the revision back', 'volta a revisão', false))
+    else {
+      const nowItems = new Map((now.evidence ?? []).map(i => [i.id, i] as const))
+      const wasIds = new Set((was.evidence ?? []).map(i => i.id))
+      if ((was.evidence ?? []).some(i => nowItems.has(i.id) && !sameJson(i, nowItems.get(i.id)))) out.push(tamper(id, 'rewrites an existing evidence item', 'reescreve uma evidência existente', false))
+      else if (!hasContext && ((was.evidence ?? []).some(i => !nowItems.has(i.id)) || (now.evidence ?? []).some(i => !wasIds.has(i.id)))) out.push(tamper(id, 'adds or removes evidence', 'adiciona ou remove evidência', true))
+    }
+  }
+  for (const [id, now] of Object.entries(after)) {
+    if (!before[id] && !hasContext && (now.evidence?.length ?? 0) > 0) out.push(tamper(id, 'creates a delivery record that already carries evidence', 'cria um registro de entrega já com evidência', true))
+  }
+  return out
+}
+
 // ── refusal & decision ───────────────────────────────────────────────────────
 
 export interface GuardRefusal {

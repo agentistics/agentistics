@@ -16,8 +16,9 @@
  *     `stage` (it is not in its status whitelist), this file is one it never opens, and `restoreStatusStages`
  *     puts the stages back.
  *
- * No locking here: the caller holds the guards lock through `withGuardLocks` (a guarantee change is a guards-set
- * write). Writes are atomic, 0600, and never replace an unreadable file.
+ * `setState` takes the full tasks → deliveries → guards envelope itself (S2a r3, QA N2/N5): a rule move can never land
+ * inside a writer's decision. `writeStatusStages` is called under the guards lock by its caller (status-stage-sync).
+ * Writes are atomic, 0600, and never replace an unreadable file.
  *
  * S0d.2 (QA F2): the file is SEALED (`guard-integrity.ts`). Deleted, hand-edited or unsealed reads as TAMPERED: the
  * rules then come from the authenticated mirror `setState` keeps in guards.json (`rulesWhenTampered`), with a WARN —
@@ -28,6 +29,8 @@ import { dirname, join } from 'node:path'
 import { STATUS_STAGES } from '@agentistics/core'
 import { unsealed, verdictFor, writeSealed, type TamperReason } from './guard-integrity'
 import { createGuardsStore, keepUnreadableCopy, type GuardsDoc } from './guards-store'
+import { defaultGuardLockPaths } from './guard-locks'
+import { withGuardEnvelope } from './guard-transaction'
 
 export const RULE_IDS = ['a', 'b', 'c', 'd'] as const
 export type RuleId = (typeof RULE_IDS)[number]
@@ -181,7 +184,23 @@ export function createGuaranteesStore(path = defaultGuaranteesPath()): Guarantee
   return {
     path,
     async read() { const { doc, warn, tampered } = await load(); return { doc, ...(warn ? { warn } : {}), ...(tampered ? { tampered } : {}) } },
-    async setState(rule, to, { check, facts }) {
+    async setState(rule, to, ctx) {
+      // QA r2 N2/N5: a rule move takes the FULL envelope (tasks → deliveries → guards). A writer that read the rule as
+      // `off` holds its own file lock while it writes, so the switch can never land in the middle of that write; and the
+      // read-modify-write of guards.json / guarantees.json below can never interleave with a guarded write's checkpoint.
+      const paths = defaultGuardLockPaths(dirname(path))
+      return withGuardEnvelope(paths, () => moveRule(rule, to, ctx))
+    },
+    async writeStatusStages(statuses) {
+      const { doc, warn } = await load()
+      if (warn) throw new Error('guarantees.json is unreadable or tampered; the stage mirror was not written')
+      const m: Record<string, string> = {}
+      for (const s of statuses) if (s.stage !== undefined && STAGE_SET.has(s.stage)) m[s.id] = s.stage
+      await save({ ...doc, statusStages: m })
+    },
+  }
+  async function moveRule(rule: RuleId, to: RuleState, { check, facts }: { check: OwnerCheck; facts: ActivationFacts }): Promise<MoveResult> {
+    {
       // A tampered file is not a refusal for the OWNER: their proven move re-seals from the effective (mirrored) state.
       const { doc, warn, tampered } = await load()
       if (warn && !tampered) return { ok: false, code: 'guarantees_unreadable' }
@@ -204,14 +223,7 @@ export function createGuaranteesStore(path = defaultGuaranteesPath()): Guarantee
       await guards.write({ ...g, rules: Object.fromEntries(Object.entries(rules).map(([k, e]) => [k, e!.state])) })
       await save({ ...doc, rules, log })
       return { ok: true }
-    },
-    async writeStatusStages(statuses) {
-      const { doc, warn } = await load()
-      if (warn) throw new Error('guarantees.json is unreadable or tampered; the stage mirror was not written')
-      const m: Record<string, string> = {}
-      for (const s of statuses) if (s.stage !== undefined && STAGE_SET.has(s.stage)) m[s.id] = s.stage
-      await save({ ...doc, statusStages: m })
-    },
+    }
   }
 }
 

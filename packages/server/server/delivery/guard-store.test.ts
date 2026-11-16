@@ -384,3 +384,159 @@ describe('a grandfathered checkpoint covers what was already in flight (ranks �
     expect(e.code).toBe('evidence_required')
   })
 })
+
+// ── S2a r3 (QA r2 Opus) ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** WRITTEN, or the refusal code — the QA probes' shape. */
+async function outcome(run: () => Promise<unknown>): Promise<string> {
+  try { await run(); return 'WRITTEN' } catch (e) { if (e instanceof GuardRefused || e instanceof GuardBusy) return e.code; throw e }
+}
+const rename = (title: string) => ({ id: 't1', title, status: 'in_progress', createdAt: ISO, updatedAt: ISO }) as never
+/** Seal rule A to `state` directly (no lock), the way the F6 probe flips it mid-acquisition. */
+async function sealRule(state: 'shadow' | 'on') {
+  const g = createGuaranteesStore(join(root, 'guarantees.json'))
+  const doc = (await g.read()).doc
+  doc.rules.a = { state, build: 'test' }
+  await writeSealed(g.path, 'guarantees', doc)
+}
+
+describe('r3 N2: rule OFF takes exactly the locks the base took', () => {
+  test('OFF-1: another holder on deliveries.json does not delay or refuse a board write (base: tasks lock only)', async () => {
+    const { tasks } = await setup({ rule: 'off' })
+    const held = await lockFile(join(root, 'deliveries.json'))
+    const t0 = Date.now()
+    try { expect(await outcome(() => tasks.upsertTask(rename('renamed')))).toBe('WRITTEN') } finally { await held.release() }
+    expect(Date.now() - t0).toBeLessThan(2000)
+    expect((await tasks.read()).tasks[0]!.title).toBe('renamed')
+  }, 20_000)
+  test('OFF-2: a contended tasks.json lock waits and then WRITES, as withFileLock always did (never guard_busy)', async () => {
+    const { tasks } = await setup({ rule: 'off' })
+    const held = await lockFile(join(root, 'tasks.json'))
+    try { expect(await outcome(() => tasks.upsertTask(rename('renamed')))).toBe('WRITTEN') } finally { await held.release() }
+    expect((await tasks.read()).tasks[0]!.title).toBe('renamed')
+  }, 30_000)
+  test('OFF-3: another holder on guards.json delays neither a board write nor a delivery write', async () => {
+    const { tasks, deliveries, world } = await setup({ rule: 'off' })
+    await world.svc.ensure('p1')
+    const held = await lockFile(join(root, 'guards.json'))
+    const t0 = Date.now()
+    try {
+      expect(await outcome(() => tasks.upsertSubtask(sub('p1', { status: 'done' })))).toBe('WRITTEN')
+      expect(await outcome(() => deliveries.update(doc => { doc.deliveries.p1!.phase = 'publicado' }))).toBe('WRITTEN')
+    } finally { await held.release() }
+    expect(Date.now() - t0).toBeLessThan(2000)
+  }, 20_000)
+  test('OFF-4: a delivery write with tasks.json held elsewhere is not delayed; contended deliveries.json still writes (base)', async () => {
+    const { deliveries, world } = await setup({ rule: 'off' })
+    await world.svc.ensure('p1')
+    const heldTasks = await lockFile(join(root, 'tasks.json'))
+    try { expect(await outcome(() => deliveries.update(doc => { doc.deliveries.p1!.branch = 'b1' }))).toBe('WRITTEN') } finally { await heldTasks.release() }
+    const heldDeliveries = await lockFile(join(root, 'deliveries.json'))
+    try { expect(await outcome(() => deliveries.update(doc => { doc.deliveries.p1!.branch = 'b2' }))).toBe('WRITTEN') } finally { await heldDeliveries.release() }
+    expect((await deliveries.get('p1'))!.branch).toBe('b2')
+  }, 30_000)
+  test('ON control: the same holders still fail closed (the envelope is kept under the rule)', async () => {
+    const { tasks } = await setup()
+    const held = await lockFile(join(root, 'deliveries.json'))
+    try { expect(await outcome(() => tasks.upsertTask(rename('renamed')))).toBe('guard_busy') } finally { await held.release() }
+  }, 20_000)
+  test('the activation takes the full envelope: a writer holding the tasks lock makes it fail closed, nothing moves', async () => {
+    await setup({ rule: 'off' })
+    const held = await lockFile(join(root, 'tasks.json'))
+    const g = createGuaranteesStore(join(root, 'guarantees.json'))
+    const facts = { now: new Date(T).toISOString(), build: 'test', capabilities: ['S0', 'S1', 'S2', 'S3'], migrated: ['a'] as const, unexplainedWouldRefuse: 0 }
+    try {
+      await expect(g.setState('a', 'shadow', { check: async () => ({ ok: true, via: 'legacy-browser' }), facts: facts as never })).rejects.toBeInstanceOf(GuardBusy)
+    } finally { await held.release() }
+    expect(await ruleAState(root)).toBe('off')
+  }, 20_000)
+  test('a board writer that read OFF and finds the rule moved under its tasks lock retakes the envelope and is judged', async () => {
+    const { tasks } = await setup({ rule: 'off' })
+    const held = await lockFile(join(root, 'tasks.json'))
+    const before = bytes()
+    const moving = outcome(() => tasks.upsertSubtask(sub('p1', { status: 'in_review' }), ctx))
+    try { await Bun.sleep(150); await sealRule('on') } finally { await held.release() }
+    expect(await moving).toBe('evidence_required')
+    expect(bytes()).toEqual(before)
+  }, 20_000)
+  test('a delivery writer that read OFF and finds the rule moved under its lock fails closed (guard_busy), nothing written', async () => {
+    const { deliveries, world } = await setup({ rule: 'off' })
+    await world.svc.ensure('p1')
+    const held = await lockFile(join(root, 'deliveries.json'))
+    const before = bytes()
+    const moving = outcome(() => deliveries.update(doc => { doc.deliveries.p1!.phase = 'publicado' }))
+    try { await Bun.sleep(150); await sealRule('on') } finally { await held.release() }
+    expect(await moving).toBe('guard_busy')
+    expect(bytes()).toEqual(before)
+  }, 20_000)
+})
+
+/** The F7 scenario: valid round-1 evidence, then a reproval → ajuste → back to qa at the SAME HEAD. */
+async function afterAdjustment(rule: 'on' | 'off' = 'on') {
+  const s = await setup({ rule: rule === 'on' ? 'on' : 'off' })
+  await attachAll(s.world.svc)
+  await s.deliveries.update(doc => { const r = doc.deliveries.p1!; r.revision += 2; r.phase = 'qa'; r.history.push({ from: 'qa', to: 'ajuste', at: ISO, actor: 'worker', detail: 'recapture', revision: r.revision - 1 }) })
+  return s
+}
+describe('r3 N1: the capture round cannot be erased by a write without context', () => {
+  test('CONTROL: after the adjustment, review with the old round is refused', async () => {
+    const { tasks } = await afterAdjustment()
+    expect(await outcome(() => tasks.upsertSubtask(sub('p1', { status: 'in_review' }), ctx))).toBe('evidence_required')
+  })
+  test('GAP-1: stripping the ajuste entry (rank 0, no context) is refused; review stays refused', async () => {
+    const { tasks, deliveries } = await afterAdjustment()
+    const before = bytes()
+    expect(await outcome(() => deliveries.update(doc => { const r = doc.deliveries.p1!; r.history = r.history.filter(h => h.to !== 'ajuste') }))).toBe('evidence_binding_protected')
+    expect(await outcome(() => deliveries.update(doc => { for (const h of doc.deliveries.p1!.history) if (h.to === 'ajuste') h.to = 'qa' }))).toBe('evidence_binding_protected')
+    expect(bytes()).toEqual(before)
+    expect(await outcome(() => tasks.upsertSubtask(sub('p1', { status: 'in_review' }), ctx))).toBe('evidence_required')
+  })
+  test('GAP-2: relabelling old items to the current revision is refused even WITH a context; review stays refused', async () => {
+    const { tasks, deliveries } = await afterAdjustment()
+    const before = bytes()
+    for (const guard of [undefined, ctx]) expect(await outcome(() => deliveries.update(doc => { const r = doc.deliveries.p1!; for (const i of r.evidence ?? []) i.revision = r.revision }, guard ? { guard } : undefined))).toBe('evidence_binding_protected')
+    expect(bytes()).toEqual(before)
+    expect(await outcome(() => tasks.upsertSubtask(sub('p1', { status: 'in_review' }), ctx))).toBe('evidence_required')
+  })
+  test('GAP-3: copying old captures in as NEW items without a context is refused', async () => {
+    const { deliveries } = await afterAdjustment()
+    expect(await outcome(() => deliveries.update(doc => { const r = doc.deliveries.p1!; r.evidence = [...(r.evidence ?? []), ...(r.evidence ?? []).map(i => ({ ...i, id: i.id + '-copy', revision: r.revision }))] }))).toBe('evidence_binding_protected')
+  })
+  test('OFF control: the same edits are written exactly as the base wrote them', async () => {
+    const { deliveries } = await afterAdjustment('off')
+    expect(await outcome(() => deliveries.update(doc => { const r = doc.deliveries.p1!; r.history = r.history.filter(h => h.to !== 'ajuste') }))).toBe('WRITTEN')
+  })
+  test('the service doors still add and remove evidence (they carry a context)', async () => {
+    const { world } = await setup()
+    await attachAll(world.svc)
+    const id = (await world.svc.get('p1'))!.evidence![0]!.id
+    const removed = await world.svc.evidenceRemove('p1', id, 'worker')
+    expect(removed.ok, JSON.stringify(removed)).toBe(true)
+  })
+})
+
+describe('r3 N4: discriminating probes for the surviving mutants', () => {
+  test('M6: captures stamped with a revision AFTER the record’s own are not this round’s evidence', async () => {
+    const { tasks, deliveries } = await afterAdjustment()
+    // A door with context adds copies of the old captures stamped in the future: still not evidence for revision 3.
+    expect(await outcome(() => deliveries.update(doc => { const r = doc.deliveries.p1!; r.evidence = [...(r.evidence ?? []), ...(r.evidence ?? []).map(i => ({ ...i, id: i.id + '-future', revision: r.revision + 5 }))] }, { guard: ctx }))).toBe('WRITTEN')
+    expect(await outcome(() => tasks.upsertSubtask(sub('p1', { status: 'in_review' }), ctx))).toBe('evidence_required')
+  })
+  test('M4 (§3.5 downgrade): stages an older writer dropped come back from the mirror without being read as progress', async () => {
+    const { tasks } = await setup({ rule: 'off' })
+    await tasks.upsertSubtask(sub('p2', { status: 'pr_merge' }))
+    await createGuaranteesStore(join(root, 'guarantees.json')).writeStatusStages((await tasks.read()).statuses)
+    const g = createGuaranteesStore(join(root, 'guarantees.json'))
+    const check = async () => ({ ok: true as const, via: 'legacy-browser' as const })
+    const facts = (now: string): ActivationFacts => ({ now, build: 'test', capabilities: ['S0', 'S1', 'S2', 'S3'], migrated: ['a'], unexplainedWouldRefuse: 0 })
+    expect(await g.setState('a', 'shadow', { check, facts: facts(new Date(T - 25 * 3600_000).toISOString()) })).toEqual({ ok: true })
+    expect(await g.setState('a', 'on', { check, facts: facts(new Date(T).toISOString()) })).toEqual({ ok: true })
+    // The v2.210.1 writer: every status loses its stored stage.
+    const raw = JSON.parse(readFileSync(join(root, 'tasks.json'), 'utf8'))
+    for (const s of raw.statuses) delete s.stage
+    writeFileSync(join(root, 'tasks.json'), JSON.stringify(raw, null, 2))
+    const stages = Object.fromEntries(DEFS.map(d => [(d as unknown as { id: string }).id, (d as unknown as { stage: string }).stage]))
+    expect(await outcome(() => tasks.setStatusStages(stages))).toBe('WRITTEN')
+    expect((await tasks.read()).statuses.find(s => s.id === 'pr_merge')!.stage).toBe('merge')
+  })
+})

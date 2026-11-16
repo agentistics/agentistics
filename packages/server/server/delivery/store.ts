@@ -16,9 +16,10 @@
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { GuardBusy, GuardLockOrderError, withGuardLocks } from './guard-locks'
-import { inGuardTransaction, serializeGuardWrite } from './guard-transaction'
-import { deliveryRaises, type GuardContext } from './guard'
-import { guardedWrite, guardPathsOf, type GuardWiring } from './guard-host'
+import { inGuardTransaction, peekRuleA, serializeGuardWrite } from './guard-transaction'
+import { deliveryRaises, deliveryTamper, GuardRefused, type GuardContext } from './guard'
+import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from './guard-host'
+import { withFileLock } from '../sessions/file-lock'
 import { isPhase, type DeliveryRecord } from './machine'
 
 export interface DeliveryDoc {
@@ -133,7 +134,7 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guar
     async update(fn, options) {
       if (options?.guardsPath && resolve(options.guardsPath) !== resolve(anchor.paths.guards)) throw new GuardLockOrderError('guardsPath must be the guard file beside this delivery store')
       await mkdir(dirname(path), { recursive: true })
-      const write = async (held?: { contended: boolean }) => {
+      const write = async (held?: { contended: boolean }, base = false) => {
         const s = await readState(!!options?.evidence)
         if (s.kind === 'unreadable') {
           // Keep the bytes (once per distinct file state) and refuse: an empty document must never replace them.
@@ -152,6 +153,19 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guar
           await rename(tmp, path)
         }
         const raised = deliveryRaises(phasesBefore, doc.deliveries)
+        const tampered = deliveryTamper(phasesBefore, doc.deliveries, !!options?.guard)
+        if (base) {
+          // Rule off when the write started. Nothing protected changed → the base write. Otherwise re-read the rule under
+          // the deliveries lock (the activation takes it first). A rule that moved mid-write fails closed: the callback is
+          // not re-run (it may have effects outside the document) — the caller retries under the guarded lock set.
+          if ((!raised.length && !tampered.length) || await ruleAState(anchor.dir) === 'off') { await commit(); return value }
+          throw new GuardBusy('guards')
+        }
+        if (tampered.length) {
+          const rule = await ruleAState(anchor.dir)
+          if (rule === 'on') throw new GuardRefused(tampered[0]!)
+          if (rule === 'shadow') for (const t of tampered) console.warn(`[guard] would_refuse ${t.code} ${t.piece}`)
+        }
         if (!raised.length) { await commit(); return value }
         // `withFileLock` goes ahead WITHOUT the lock after its wait; a guard never does (§2.6.1).
         if (held?.contended) throw new GuardBusy('deliveries')
@@ -166,7 +180,13 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: { guar
       }
       // Both policy and records are read only after deliveries and guards are held.
       const paths = anchor.paths
-      return inGuardTransaction(paths) ? serializeGuardWrite(paths, 'deliveries', write) : withGuardLocks(['deliveries', 'guards'], write, { paths })
+      if (inGuardTransaction(paths)) return serializeGuardWrite(paths, 'deliveries', () => write())
+      const guarded = () => withGuardLocks(['deliveries', 'guards'], () => write(), { paths })
+      if (await peekRuleA(paths) !== 'off') return guarded()
+      // Rule A off (N2): exactly the base's locking — the evidence path's fail-closed locks, otherwise `withFileLock`.
+      return options?.evidence
+        ? withGuardLocks(options.guardsPath ? ['deliveries', 'guards'] : ['deliveries'], () => write(undefined, true), { paths })
+        : withFileLock(path, held => write(held, true))
     },
   }
 }

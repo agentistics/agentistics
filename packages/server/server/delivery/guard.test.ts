@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import {
-  GuardRefused, boardRaises, deliveryRaises, decideGuard, phaseRank, refusalOfOutcome, stageRank,
+  GuardRefused, boardRaises, deliveryRaises, deliveryTamper, decideGuard, phaseRank, refusalOfOutcome, stageRank,
   type BoardSlice, type GuardContext,
 } from './guard'
 
@@ -66,6 +66,64 @@ describe('deliveryRaises', () => {
     expect(deliveryRaises({ p: rec('revisao_lider') }, { p: rec('ci') }).map(r => r.rank)).toEqual([3])
     expect(deliveryRaises({ p: rec('ci') }, { p: rec('revisao_lider') })).toEqual([])
     expect(deliveryRaises({}, { p: rec('revisao_lider') }).map(r => r.key)).toEqual(['p'])
+  })
+})
+
+describe('r3 N4 — bindings a protected piece may not change without authorization', () => {
+  test('M1: a HEAD change on a delivery at rank ≥ 1 is a protected change (headSha is in the binding)', () => {
+    const was = { phase: 'revisao_lider', taskId: 't1', revision: 3, headSha: 'a'.repeat(40) }
+    expect(deliveryRaises({ p: was }, { p: { ...was, headSha: 'b'.repeat(40) } }).map(r => [r.key, r.rank])).toEqual([['p', 1]])
+    expect(deliveryRaises({ p: { ...was, phase: 'qa' } }, { p: { ...was, phase: 'qa', headSha: 'b'.repeat(40) } })).toEqual([])
+  })
+  test('M7: a CI-signal change on a subtask at rank ≥ 1 is a protected change, at the same rank', () => {
+    const ci = (tag: string) => ({ mergedMain: true, releaseGreen: false, tagPublished: false, tag, pr: null })
+    const before = slice([{ id: 's1', status: 'in_review', ci: ci('v1') }])
+    const after = slice([{ id: 's1', status: 'in_review', ci: ci('v2') }])
+    expect(boardRaises(before, after).map(r => [r.key, r.rank])).toEqual([['s1', 3]])
+    expect(boardRaises(before, before)).toEqual([])
+  })
+})
+
+describe('r3 N1 — deliveryTamper: the capture round and its evidence are append-only', () => {
+  const item = (id: string, revision: number) => ({ id, sha256: id.repeat(4), revision })
+  const rec = () => ({ taskId: 't1', revision: 4, history: [{ from: 'qa', to: 'ajuste', revision: 3 }, { from: 'ajuste', to: 'qa', revision: 4 }], evidence: [item('e1', 1), item('e2', 4)], evidenceHistory: [{ sha256: 'x', revision: 1 }] })
+  const codes = (b: object, a: object, ctx = false) => deliveryTamper({ p: b as never }, { p: a as never }, ctx).map(r => r.code)
+  test('GAP-1: dropping the ajuste entry is refused for every writer, context or not', () => {
+    const a = rec(); a.history = a.history.filter(h => h.to !== 'ajuste')
+    expect(codes(rec(), a)).toEqual(['evidence_binding_protected'])
+    expect(codes(rec(), a, true)).toEqual(['evidence_binding_protected'])
+    // …and so is rewriting it in place (same length: the ajuste relabelled, or its revision moved down).
+    const relabelled = rec(); relabelled.history = relabelled.history.map(h => h.to === 'ajuste' ? { ...h, to: 'qa' } : h)
+    expect(codes(rec(), relabelled)).toEqual(['evidence_binding_protected'])
+    const lowered = rec(); lowered.history = lowered.history.map(h => h.to === 'ajuste' ? { ...h, revision: 1 } : h)
+    expect(codes(rec(), lowered, true)).toEqual(['evidence_binding_protected'])
+  })
+  test('GAP-2: relabelling an existing item to the current revision is refused for every writer', () => {
+    const a = rec(); a.evidence = a.evidence.map(i => ({ ...i, revision: 4 }))
+    expect(codes(rec(), a, true)).toEqual(['evidence_binding_protected'])
+  })
+  test('a forged item, a removed item and a removed record need a context; a revision never goes back', () => {
+    const forged = rec(); forged.evidence = [...forged.evidence, item('e9', 4)]
+    expect(codes(rec(), forged)).toEqual(['evidence_binding_protected'])
+    expect(codes(rec(), forged, true)).toEqual([])
+    const dropped = rec(); dropped.evidence = dropped.evidence.slice(1)
+    expect(codes(rec(), dropped)).toEqual(['evidence_binding_protected'])
+    expect(codes(rec(), dropped, true)).toEqual([])
+    expect(deliveryTamper({ p: rec() as never }, {}, false).map(r => r.code)).toEqual(['evidence_binding_protected'])
+    expect(deliveryTamper({}, { p: rec() as never }, false).map(r => r.code)).toEqual(['evidence_binding_protected'])
+    const back = rec(); back.revision = 2
+    expect(codes(rec(), back, true)).toEqual(['evidence_binding_protected'])
+    const evh = rec(); evh.evidenceHistory = []
+    expect(codes(rec(), evh, true)).toEqual(['evidence_binding_protected'])
+  })
+  test('appending history, raising the revision and unrelated fields are never refused', () => {
+    const a = rec(); a.history = [...a.history, { from: 'qa', to: 'ajuste', revision: 5 }]; a.revision = 5
+    expect(codes(rec(), { ...a, branch: 'x' })).toEqual([])
+  })
+  test('the refusal is bilingual and names the piece', () => {
+    const a = rec(); a.history = []
+    const [r] = deliveryTamper({ p: rec() as never }, { p: a as never }, true)
+    expect(r).toMatchObject({ piece: 'p' }); expect(r!.message).toContain('append-only'); expect(r!.messagePt).toContain('só crescem')
   })
 })
 
