@@ -15,6 +15,8 @@
  *                                         their merged PR and first release tag (dry-run unless `apply`; applying: a leader or the owner)
  */
 import type { DeliveryReply, DeliveryService } from './service'
+import { GuardRefused } from './guard'
+import { safeError } from '../errors'
 import { actorOf, ownerMove, ownerRefusal, resolveRestPrincipal, type OwnerProofMode, type OwnerScope, type RequestPrincipal } from './principal'
 
 /** What the HTTP adapter (`index.ts`) observed about the browser. Absent = not a browser (a plain `curl`, a test). */
@@ -117,7 +119,15 @@ export async function deliveryRequest(method: string, path: string, body: Record
   /** The verified session id (a proven session is always the `session` principal, §2.3). */
   const session = principal.kind === 'session' ? principal.id : null
   const actor = actorOf(principal)
-  if (rest === 'tick') return { status: 200, body: await d.service.tick() }
+  if (rest === 'tick') {
+    try { return { status: 200, body: await d.service.tick() } }
+    catch (e) {
+      if (e instanceof GuardRefused) return { status: e.status, body: { ok: false, error: e.code, sentence: e.message, sentencePt: e.messagePt, missing: e.missing } }
+      const safe = safeError(e, { verbose: false })
+      console.error(safe.logLine)
+      return { status: 500, body: { ...safe.body, sentence: 'the delivery tick could not finish' } }
+    }
+  }
   if (rest === 'queue-next') return { status: 200, body: await d.service.queueNext() }
   if (rest === 'reconcile') {
     const r = await d.service.reconcile({ apply: body.apply }, actor)

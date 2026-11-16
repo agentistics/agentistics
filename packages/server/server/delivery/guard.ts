@@ -122,7 +122,7 @@ export function deliveryRaises(before: Readonly<Record<string, DeliveryBinding>>
  * that do it (`evidenceAdd`, `evidenceRemove`, adoption) always carry one. Anything else would let a contextless rank-0
  * write erase the round floor (GAP-1) or relabel old captures into the current round (GAP-2).
  */
-export type TamperView = { taskId?: string; revision?: number; history?: readonly unknown[]; evidence?: readonly { id: string; sha256?: string; revision?: number }[]; evidenceHistory?: readonly unknown[] }
+export type TamperView = { taskId?: string; phase?: string; revision?: number; history?: readonly unknown[]; evidence?: readonly { id: string; sha256?: string; revision?: number }[]; evidenceHistory?: readonly unknown[] }
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const keepsPrefix = (was: readonly unknown[] | undefined, now: readonly unknown[] | undefined) =>
   (was ?? []).every((e, i) => (now ?? []).length > i && sameJson(e, now![i]))

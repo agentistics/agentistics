@@ -58,11 +58,23 @@ move resolves the journal before changing the rule, including moves to OFF. Unre
 reads, which fall back to the ledger; guarded writers still fail closed. OFF reads cache the rule by the policy file's
 inode/size/mtime/ctime, invalidated by `setState`; after warmup they read only ledger bytes. The metadata stamp also
 detects another process's policy replacement without reading the policy file on every OFF read.
+OFF writers check for a pending journal with the same inode/size/mtime/ctime cache strategy. A missing guards file
+does not cause a journal read or parse; policy authentication keeps its existing sibling-seal check. A new or replaced
+journal invalidates the cache and is materialized before the OFF mutation.
 
 Floors judge records changed by this write against its persisted before image. An unchanged record or a phase
 retreat cannot freeze unrelated writes. On OFF → shadow, the present ledger becomes the new sealed floor; the rule
 audit records which floors dropped and why. This permits the documented OFF → restore → shadow → ON recovery. ON
 still requires a fresh shadow period and new progress still needs evidence.
+Floors survive shadow → ON and ON → shadow unchanged. The re-seal audit also names pieces that climbed a phase or
+were created in a ranked phase while OFF; `guaranteeWarnings` retains the latest re-seal until ON.
+
+Pure board adoptions (`isPureAdoption`, with no evidence or evidence history) acquire no floor. Releasing and adopting
+one again is ordinary bookkeeping. Evidence and ranked history still keep their floors after deletion, including
+floors sealed by older builds. The minute tick isolates guard refusals per piece and continues its remaining steps;
+it records the piece and refusal code in a tick note (a board note when there is no writable delivery record).
+OFF retains its batch writes. The tick HTTP door returns a structured code and sentence for guard refusals and uses
+`safeError` for unexpected failures.
 
 The supplementary inventories parse executable TypeScript/JavaScript ASTs. Context must occupy the
 writer's actual context argument; words in comments, titles and callbacks do not count. The historical
@@ -85,8 +97,12 @@ a book name assembled at runtime from fragments (`'tas' + 'ks.json'`) in a modul
 not seen by a text scan; such a module is in the pinned reach list and is reviewed as such.
 
 The module and helper ceilings also follow transitive re-exports to a fixed point. Runtime code generation is
-forbidden: any `eval` identifier reference, `Function` calls, `vm`/`node:vm`, `process.binding`, and computed members
+forbidden: any `eval` or `Function` identifier reference, `vm`/`node:vm`, `process.binding`, and computed members
 on `global`, `globalThis`, `self` or `Bun`, including TypeScript wrappers. Module loaders include `import.meta.require`,
 `module.require` and `process.getBuiltinModule`. A directory named `e2e` grants no production exemption. One existing,
 unshipped Playwright driver is exempted by exact path and source digest; changes to it undergo the normal check.
 Deliberately obfuscated constructs such as `Reflect.get` with assembled names remain outside this lint's threat model.
+Literal `.eval`/`.Function` and `['eval']`/`['Function']` accesses on those global receivers are also forbidden, as are
+`.constructor`/`['constructor']` on function or arrow literals and on `Object.getPrototypeOf` of such a literal.
+This includes `Reflect.construct`/`Reflect.apply` with `Function` as the target. Runtime-built strings and data-URL
+imports remain outside this round's threat model. Exemptions remain fixed by exact path and digest.

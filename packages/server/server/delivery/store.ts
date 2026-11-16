@@ -20,9 +20,9 @@ import { inGuardTransaction, peekRuleA, serializeGuardWrite } from './guard-tran
 import { deliveryRaises, deliveryTamper, phaseRank, GuardRefused, type GuardContext } from './guard'
 import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from './guard-host'
 import { withFileLock } from '../sessions/file-lock'
-import { isPhase, type DeliveryRecord } from './machine'
+import { isPhase, isPureAdoption, type DeliveryRecord } from './machine'
 import { createGuardsStore, type GuardsDoc, type GuardsStore } from './guards-store'
-import { deliveryReadRule } from './activation'
+import { deliveryReadRule, deliveryHasJournal } from './activation'
 import type { TamperView } from './guard'
 
 export interface DeliveryDoc {
@@ -36,6 +36,8 @@ export interface DeliveryDoc {
 
 const SAFE_ID = /^[A-Za-z0-9_.:-]{1,120}$/
 const isRec = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+const protectedFloor = (r: TamperView | undefined): boolean => !!r && (!!r.evidence?.length || !!r.evidenceHistory?.length
+  || phaseRank(r.phase) >= 1 || (r.history ?? []).some(h => isRec(h) && (phaseRank(String(h.from)) >= 1 || phaseRank(String(h.to)) >= 1)))
 
 /** A write was refused because the file on disk could not be read; the bytes were kept as `backup`. */
 export class DeliveryStoreUnreadable extends Error {
@@ -175,7 +177,7 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
           // OFF keeps its ordinary delivery lock. Only a present journal needs the later guards lock.
           // Read again after taking it; activation cannot interleave while the delivery lock is held.
           let guardDoc: GuardsDoc | undefined
-          try { guardDoc = await floorStore.read() }
+          try { if (await deliveryHasJournal(anchor.paths.guards)) guardDoc = await floorStore.read() }
           catch (e) { if (await ruleAState(anchor.dir) !== 'off') throw e }
           if (guardDoc?.pendingDelivery !== undefined) {
             if (held?.contended) throw new GuardBusy('deliveries')
@@ -209,10 +211,13 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
             const next = { ...(guardDoc.deliveryFloors ?? {}) }
             for (const [id, r] of Object.entries({ ...phasesBefore, ...final.deliveries })) {
               const old = next[id]
+              // Board-only adoptions carry no authorization. Their release/re-adoption must not acquire a tombstone.
+              // Keep any older evidence or ranked history, including floors sealed by older builds.
+              if (isPureAdoption(r) && !protectedFloor(old)) { delete next[id]; continue }
               const items = new Map((old?.evidence ?? []).map(i => [i.id, i]))
               for (const i of r.evidence ?? []) if (!items.has(i.id)) items.set(i.id, i)
               const extend = (was: readonly unknown[] = [], now: readonly unknown[] = []) => was.every((e, i) => JSON.stringify(e) === JSON.stringify(now[i])) ? now : was
-              next[id] = { taskId: r.taskId, revision: Math.max(old?.revision ?? 0, r.revision), history: extend(old?.history, r.history), evidenceHistory: extend(old?.evidenceHistory, r.evidenceHistory), evidence: [...items.values()] }
+              next[id] = { taskId: r.taskId, phase: old?.phase && phaseRank(old.phase) >= phaseRank(r.phase) ? old.phase : r.phase, revision: Math.max(old?.revision ?? 0, r.revision), history: extend(old?.history, r.history), evidenceHistory: extend(old?.evidenceHistory, r.evidenceHistory), evidence: [...items.values()] }
             }
             await floorStore.write({ ...guardDoc, deliveryFloors: next, pendingDelivery: serialized })
             await opts.afterFloorSeal?.()
@@ -228,6 +233,7 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
           ...deliveryTamper(phasesBefore, final.deliveries, !!options?.guard),
           ...deliveryTamper(Object.fromEntries(Object.entries(floors).filter(([id]) => {
             const before = phasesBefore[id], after = final.deliveries[id]
+            if (after && isPureAdoption(after) && !protectedFloor(floors[id])) return false
             if (JSON.stringify(before) === JSON.stringify(after)) return false
             // A retreat (including its appended history/revision) does not reclaim lost authorization.
             // The direct before/after tamper check above still protects existing history and evidence.

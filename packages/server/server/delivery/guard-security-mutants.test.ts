@@ -12,7 +12,7 @@ const restore = 'packages/server/server/backup/restore.ts'
 let root: string
 const originals = new Map<string, string>()
 const files = [delivery + 'guard-host.ts', delivery + 'guard.ts', delivery + 'store.ts', delivery + 'guard-sites.testing.ts', delivery + 'guard-inventory.fixture.json', tasks, restore,
-  delivery + 'guard-transaction.ts', delivery + 'activation.ts', delivery + 'guard-ast.testing.ts', delivery + 'guard-inventory-r3.fixture.json', delivery + 'service.ts', delivery + 'guard-modules.fixture.json', delivery + 'lint-scan.testing.ts', delivery + 'guard-helpers.fixture.json', delivery + 'guard-inventory.testing.ts']
+  delivery + 'guard-transaction.ts', delivery + 'activation.ts', delivery + 'guard-ast.testing.ts', delivery + 'guard-inventory-r3.fixture.json', delivery + 'service.ts', delivery + 'guard-modules.fixture.json', delivery + 'lint-scan.testing.ts', delivery + 'guard-helpers.fixture.json', delivery + 'guard-inventory.testing.ts', delivery + 'web.ts', delivery + 'machine.ts']
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'guard-mutants-'))
   cpSync(join(repo, 'packages'), join(root, 'packages'), { recursive: true, filter: p => !p.split('/').some(s => ['node_modules', 'dist', 'target', '.git'].includes(s)) })
@@ -325,4 +325,36 @@ test('mutant Q4–Q7: enlarging the module list itself is refused', async () => 
   reset()
   change(delivery + 'guard-modules.fixture.json', '"modules": {', '"modules": { "mutant.ts": ["module:fs"],')
   await killed('no new raw writer', [lintTest])
+}, 120_000)
+
+const r7Test = delivery + 'guard-r7.test.ts'
+const r7Mutants: Array<[string, string, string, string, string, string[]?]> = [
+  ['X1', delivery + 'activation.ts', "rule === 'a' && from === 'off' && to === 'shadow'", "rule === 'a' && to !== 'off'", 'R6-2 X1'],
+  ['X2', delivery + 'activation.ts', 'reconciledFloors: { dropped, reason', 'reconciledFloors: { dropped: [], reason', 'R1 OFF restore', [r6Test]],
+  ['X3', delivery + 'store.ts', 'if (before && after && after.phase !== before.phase && phaseRank', 'if (before && after && phaseRank', 'floors judge only', [r6Test]],
+  ['X4', delivery + 'store.ts', "if (await deliveryReadRule(anchor.paths.guards) !== 'off') {", "if (await deliveryReadRule(anchor.paths.guards) === 'on') {", 'OFF reads use', [r6Test]],
+  ['X5', delivery + 'guard-ast.testing.ts', '/^(global|globalThis|self|Bun)$/.test(unwrap(n.expression)', '/^(global|globalThis|Bun)$/.test(unwrap(n.expression)', 'eval references', [r6Test]],
+  ['R6-1 floor', delivery + 'store.ts', 'if (isPureAdoption(r) && !protectedFloor(old))', 'if (false)', 'A1'],
+  ['R6-1 isolation', delivery + 'service.ts', 'if (!(e instanceof GuardRefused)) throw e', 'throw e', 'per-piece tick refusal'],
+  ['R6-1 batch', delivery + 'service.ts', "if (await ruleAState(dirname(d.store.path)) === 'off') { await write(ids); return }", 'await write(ids); return', 'a refused wake stamp'],
+  ['R6-1 queue', delivery + 'service.ts', 'if (!d.spawn) return { actions }', "if (!d.spawn) return { actions }; const tickRefusal = async (e: unknown) => { throw e }", 'queue reminder refusal'],
+  ['R6-1 HTTP', delivery + 'web.ts', 'if (e instanceof GuardRefused) return { status: e.status', 'if (false) return { status: e.status', 'tick HTTP refusal'],
+  ['R6-3 Function', delivery + 'guard-ast.testing.ts', "if (ts.isIdentifier(n) && n.text === 'Function') out.push('Function')", '', 'R6-3'],
+  ['R6-3 literal global', delivery + 'guard-ast.testing.ts', "out.push('global-code:' + key)", 'void key', 'R6-3'],
+  ['R6-3 constructor', delivery + 'guard-ast.testing.ts', "if (key === 'constructor')", 'if (false)', 'R6-3'],
+  ['R6-4 climbed', delivery + 'activation.ts', 'climbed, createdRanked }', 'climbed: [], createdRanked }', 'B1 off'],
+  ['R6-4 created', delivery + 'activation.ts', 'climbed, createdRanked }', 'climbed, createdRanked: [] }', 'B1 off'],
+  ['R6-4 warning', delivery + 'activation.ts', "if (latest?.reconciledFloors) out.push", 'if (false) out.push', 'B1 off'],
+  ['R6-5 cache', delivery + 'activation.ts', 'if (cached?.stamp === stamp) return cached.pending', '', 'R6-5'],
+]
+for (const [id, file, from, to, pattern, suites] of r7Mutants) test(`r7 mutant ${id} is killed`, async () => {
+  reset(); change(file, from, to)
+  if (id === 'R6-1 floor') change(delivery + 'store.ts', 'if (after && isPureAdoption(after) && !protectedFloor(floors[id])) return false', '')
+  const r = await run(suites ?? [r7Test], pattern)
+  console.log(`${id}: exit ${r.code}\n${r.output.split('\n').filter(l => /\(fail\)|Expected:|Received:| pass| fail/.test(l)).join('\n')}`)
+  expect(r.code, r.output).toBe(1)
+  expect(r.output).toContain('(fail)')
+}, 120_000)
+test('r7 mutation positive control', async () => {
+  reset(); const r = await run([r7Test]); expect(r.code, r.output).toBe(0)
 }, 120_000)

@@ -439,6 +439,8 @@ export function planBlock(r: DeliveryRecord, reason: unknown, text: string, ctx:
  */
 export function isPureAdoption(r: DeliveryRecord): boolean {
   if (r.adopted !== 'board') return false
+  if (r.phase !== 'fila' && r.phase !== 'bloqueado') return false
+  if (r.evidence?.length || r.evidenceHistory?.length) return false
   if (r.headSha || r.branch || r.pr || r.mergeSha || r.authorSessionId || r.qaSessionId || r.qa || r.review || Object.keys(r.gates ?? {}).length > 0) return false
   const bookkeeping = (p: string) => p === 'fila' || p === 'bloqueado'
   return r.history.every(h => bookkeeping(h.from) && bookkeeping(h.to))

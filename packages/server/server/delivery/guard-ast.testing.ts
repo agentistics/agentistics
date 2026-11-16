@@ -111,6 +111,7 @@ export function forbiddenCapabilities(src: string): string[] {
   const out: string[] = []
   const visit = (n: ts.Node) => {
     if (ts.isIdentifier(n) && n.text === 'eval') out.push('eval')
+    if (ts.isIdentifier(n) && n.text === 'Function') out.push('Function')
     if (((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && /^(node:)?vm$/.test(literalText(n.moduleSpecifier) ?? ''))
       || (isModuleCall(n) && /^(node:)?vm$/.test(literalText(n.arguments[0]) ?? ''))
       || (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference) && /^(node:)?vm$/.test(literalText(n.moduleReference.expression) ?? ''))) out.push('module:vm')
@@ -122,6 +123,16 @@ export function forbiddenCapabilities(src: string): string[] {
     if (ts.isPropertyAccessExpression(n) && unwrap(n.expression).getText(file) === 'process' && n.name.text === 'binding') out.push('process.binding')
     if (ts.isElementAccessExpression(n) && unwrap(n.expression).getText(file) === 'process' && literalText(n.argumentExpression) === 'binding') out.push('process.binding')
     if (ts.isElementAccessExpression(n) && /^(global|globalThis|self|Bun)$/.test(unwrap(n.expression).getText(file)) && literalText(n.argumentExpression) === undefined) out.push('computed:' + unwrap(n.expression).getText(file))
+    if (ts.isPropertyAccessExpression(n) || ts.isElementAccessExpression(n)) {
+      const receiver = unwrap(n.expression)
+      const key = ts.isPropertyAccessExpression(n) ? n.name.text : literalText(n.argumentExpression)
+      if (/^(global|globalThis|self|Bun)$/.test(receiver.getText(file)) && /^(eval|Function)$/.test(key ?? '')) out.push('global-code:' + key)
+      if (key === 'constructor') {
+        const literal = (e: ts.Expression) => ts.isFunctionExpression(unwrap(e)) || ts.isArrowFunction(unwrap(e))
+        if (literal(receiver) || (ts.isCallExpression(receiver) && unwrap(receiver.expression).getText(file) === 'Object.getPrototypeOf'
+          && receiver.arguments[0] && literal(receiver.arguments[0]))) out.push('function-literal.constructor')
+      }
+    }
     ts.forEachChild(n, visit)
   }
   visit(file)

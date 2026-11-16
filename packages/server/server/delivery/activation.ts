@@ -32,7 +32,8 @@ import { createGuardsStore, keepUnreadableCopy, type GuardsDoc } from './guards-
 import { defaultGuardLockPaths, type GuardLockPaths } from './guard-locks'
 import { withGuardEnvelope } from './guard-transaction'
 import { parseDeliveryDocStrict, rollForwardDelivery } from './store'
-import { deliveryTamper, type TamperView } from './guard'
+import { deliveryTamper, phaseRank, type TamperView } from './guard'
+import { isPureAdoption } from './machine'
 
 export const RULE_IDS = ['a', 'b', 'c', 'd'] as const
 export type RuleId = (typeof RULE_IDS)[number]
@@ -42,7 +43,7 @@ export type RuleState = 'off' | 'shadow' | 'on'
 const STAGE_SET: ReadonlySet<string> = new Set(STATUS_STAGES)
 
 export interface RuleEntry { state: RuleState; since?: string; build: string }
-export interface GuaranteeChange { rule: RuleId; from: RuleState; to: RuleState; via: OwnerVia; at: string; build: string; reconciledFloors?: { dropped: string[]; reason: string } }
+export interface GuaranteeChange { rule: RuleId; from: RuleState; to: RuleState; via: OwnerVia; at: string; build: string; reconciledFloors?: { dropped: string[]; climbed?: string[]; createdRanked?: string[]; reason: string } }
 export interface GuaranteesDoc {
   rules: Partial<Record<RuleId, RuleEntry>>
   statusStages?: Record<string, string>
@@ -84,6 +85,10 @@ export const ruleState = (doc: GuaranteesDoc, rule: RuleId): RuleState => doc.ru
 /** PURE. `guarantee-off: <rule>, by <via>` for each rule whose latest recorded move is an owner's `off`. */
 export function guaranteeWarnings(doc: GuaranteesDoc): string[] {
   const out: string[] = []
+  if (ruleState(doc, 'a') !== 'on') {
+    const latest = [...(doc.log ?? [])].reverse().find(c => c.rule === 'a' && (c.to === 'on' || c.reconciledFloors))
+    if (latest?.reconciledFloors) out.push(`guarantee-reseal: a at ${latest.at}; dropped: ${latest.reconciledFloors.dropped.join(', ')}; climbed: ${(latest.reconciledFloors.climbed ?? []).join(', ')}; created ranked: ${(latest.reconciledFloors.createdRanked ?? []).join(', ')}`)
+  }
   for (const r of RULE_IDS) {
     if (ruleState(doc, r) !== 'off') continue
     const last = [...(doc.log ?? [])].reverse().find(c => c.rule === r)
@@ -165,6 +170,19 @@ export function defaultGuaranteesPath(dataDir = process.env.AGENTISTICS_DIR ?? j
 // Read optimization ONLY. Writers continue to load and authenticate policy under their locks.
 // The inode/ctime stamp observes another process's atomic rename or deletion without reading policy bytes per read.
 const deliveryRules = new Map<string, { stamp: string; state: RuleState }>()
+const deliveryJournals = new Map<string, { stamp: string; pending: boolean }>()
+/** OFF journal detection shares the read policy cache's stat-keyed strategy; absence reads no guards bytes. */
+export async function deliveryHasJournal(guardsPath: string): Promise<boolean> {
+  let stamp: string
+  try { const s = await stat(guardsPath); stamp = `${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}` }
+  catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; stamp = 'absent' }
+  const cached = deliveryJournals.get(guardsPath)
+  if (cached?.stamp === stamp) return cached.pending
+  const pending = stamp !== 'absent' && (await createGuardsStore(guardsPath).read()).pendingDelivery !== undefined
+  if (deliveryJournals.size >= 256) deliveryJournals.delete(deliveryJournals.keys().next().value!)
+  deliveryJournals.set(guardsPath, { stamp, pending })
+  return pending
+}
 const policyPath = defaultGuaranteesPath
 export async function deliveryReadRule(guardsPath: string): Promise<RuleState> {
   const path = policyPath(dirname(guardsPath))
@@ -247,7 +265,7 @@ export function createGuaranteesStore(path = policyPath()): GuaranteesStore {
       if (rule === 'a' && from === 'off' && to === 'shadow') {
         // OFF explicitly permits restoring the ledger. Shadow starts with that ledger's floors, with an audit
         // of every lost floor; it cannot authorize ON until a fresh shadow period has elapsed.
-        let deliveries: Record<string, TamperView>
+        let deliveries: ReturnType<typeof parseDeliveryDocStrict>['deliveries']
         try { deliveries = parseDeliveryDocStrict(await readFile(paths.deliveries, 'utf8')).deliveries }
         catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; deliveries = {} }
         const dropped = Object.entries(g.deliveryFloors ?? {}).filter(([id, floor]) => {
@@ -255,9 +273,15 @@ export function createGuaranteesStore(path = policyPath()): GuaranteesStore {
           return !now || now.taskId !== floor.taskId || deliveryTamper({ [id]: floor }, { [id]: now }, true).length > 0
             || (floor.evidence ?? []).some(item => !(now.evidence ?? []).some(i => JSON.stringify(i) === JSON.stringify(item)))
         }).map(([id]) => id)
-        const deliveryFloors = Object.fromEntries(Object.entries(deliveries).map(([id, r]) => [id, { taskId: r.taskId, revision: r.revision, history: r.history ?? [], evidenceHistory: r.evidenceHistory ?? [], evidence: r.evidence ?? [] }]))
+        const climbed = Object.entries(deliveries).filter(([id, r]) => {
+          const old = g.deliveryFloors?.[id]
+          const rank = old?.phase === undefined ? Math.max(0, ...(old?.history ?? []).map(h => isRec(h) ? phaseRank(String(h.to)) : 0)) : phaseRank(old.phase)
+          return old && phaseRank(r.phase) > rank
+        }).map(([id]) => id)
+        const createdRanked = Object.entries(deliveries).filter(([id, r]) => !g.deliveryFloors?.[id] && phaseRank(r.phase) >= 1).map(([id]) => id)
+        const deliveryFloors = Object.fromEntries(Object.entries(deliveries).filter(([, r]) => !isPureAdoption(r)).map(([id, r]) => [id, { taskId: r.taskId, phase: r.phase, revision: r.revision, history: r.history ?? [], evidenceHistory: r.evidenceHistory ?? [], evidence: r.evidence ?? [] }]))
         g = { ...g, deliveryFloors }
-        log[log.length - 1] = { ...log[log.length - 1]!, reconciledFloors: { dropped, reason: 'off-to-shadow: re-sealed from the present delivery ledger after OFF permitted restore or edits' } }
+        log[log.length - 1] = { ...log[log.length - 1]!, reconciledFloors: { dropped, reason: 'off-to-shadow: re-sealed from the present delivery ledger after OFF permitted restore or edits', climbed, createdRanked } }
       }
       if (tampered) await keepUnreadableCopy(path) // the owner's re-seal replaces the bytes: one copy stays for a person to read
       await guards.write({ ...g, rules: Object.fromEntries(Object.entries(rules).map(([k, e]) => [k, e!.state])) })
