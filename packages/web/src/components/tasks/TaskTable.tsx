@@ -31,7 +31,7 @@ import {
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
-  NA, PRIORITY, button, claimLeft, field, fmtDateTime, fmtInt, fmtStamp, fmtTokens, harnessColor, liveStatusMap,
+  NA, PRIORITY, priorityLabel, button, claimLeft, field, fmtDateTime, fmtInt, fmtStamp, fmtTokens, harnessColor, liveStatusMap,
   liveStatusOrder, microLabel, NO_TYPE_KEY, numeric, pill, statusStyle, surface, typeStyle, type BoardStatus, type ColumnId,
 } from './board'
 import { copilotCreditsTooltip, formatTaskCost, useMoney, type Money } from './money'
@@ -208,9 +208,9 @@ function DueCell({ date, closed, nowMs }: { date: string; closed: boolean; nowMs
  * An expired lease is said out loud ("lease expired") rather than blanked: the task is available
  * again, and a cell that simply stopped naming a holder would read as one nobody ever took.
  */
-function ClaimCell({ claim, nowMs }: { claim?: TaskClaim; nowMs: number }) {
+function ClaimCell({ claim, nowMs, lang }: { claim?: TaskClaim; nowMs: number; lang: 'pt' | 'en' }) {
   if (!claim) return <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
-  const left = claimLeft(claim.expiresAt, nowMs)
+  const left = claimLeft(claim.expiresAt, nowMs, lang)
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
       <span style={pill(left.expired ? 'var(--text-tertiary)' : 'var(--accent-green)')}>
@@ -272,7 +272,7 @@ function cellFor(
         compact
         value={!row.task.priority || row.task.priority === 'none' ? 'low' : row.task.priority}
         options={PRIORITY_ORDER.map(id => ({
-          value: id, label: PRIORITY[id]!.label, color: PRIORITY[id]!.color, dim: PRIORITY[id]!.dim,
+          value: id, label: priorityLabel(id, lang), color: PRIORITY[id]!.color, dim: PRIORITY[id]!.dim,
         }))}
         onPick={v => onPriority(v as TaskPriorityId)}
       />
@@ -280,7 +280,7 @@ function cellFor(
     case 'due': return row.task.dueDate
       ? <DueCell date={row.task.dueDate} closed={row.task.status === 'done' || row.task.status === 'abandoned'} nowMs={nowMs} />
       : <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
-    case 'claim': return <ClaimCell claim={row.task.claim} nowMs={nowMs} />
+    case 'claim': return <ClaimCell claim={row.task.claim} nowMs={nowMs} lang={lang} />
     case 'progress': return row.counts.subtasks === 0
       // Nothing to be a fraction of. An empty bar here would say "0% done" about a task nobody
       // broke up, which is a claim about the work rather than about the board.
@@ -1168,7 +1168,7 @@ export function TaskTable(p: TaskTableProps) {
                             style={{ ...th, textAlign: c.numeric ? 'right' : 'left' }}
                             dataCol={c.id}
                             handle={resizeHandle(c.id)}
-                            reorder={{ scope: 'task-columns', id: c.id, onMove: (d, t) => setColumns(moveColumn(shown, d as ColumnId, t as ColumnId)) }}
+                            reorder={{ label: p.lang === 'pt' ? 'Arrastar para reordenar a coluna' : undefined, scope: 'task-columns', id: c.id, onMove: (d, t) => setColumns(moveColumn(shown, d as ColumnId, t as ColumnId)) }}
                           />
                         ))}
                       </tr>
@@ -1234,7 +1234,7 @@ export function TaskTable(p: TaskTableProps) {
                                     { ...m, [row.task.id]: pickSubtaskSort(sort, m[row.task.id] ?? null, k) }
                                   ))}
                                   title={L.sortByColumn.replace('{column}', label)}
-                                  reorder={{ scope: 'subtask-columns', id, onMove: (d, t) => setSubtaskColumns(moveColumn(shownSubtaskCols, d as SubtaskColumnId, t as SubtaskColumnId)) }}
+                                  reorder={{ label: p.lang === 'pt' ? 'Arrastar para reordenar a coluna' : undefined, scope: 'subtask-columns', id, onMove: (d, t) => setSubtaskColumns(moveColumn(shownSubtaskCols, d as SubtaskColumnId, t as SubtaskColumnId)) }}
                                   dataCol={`subtask-${id}`}
                                   handle={subtaskResizeHandle(id)}
                                   style={{
@@ -1477,7 +1477,7 @@ export function TaskTable(p: TaskTableProps) {
                       <td colSpan={cols.length + 1} style={{ ...cellBox }}>
                         {adding === g.key && !p.onRequestCreate ? (
                           <input
-                            autoFocus value={draft} placeholder="Task name, then Enter"
+                            autoFocus value={draft} placeholder={p.lang === 'pt' ? 'Nome da tarefa e Enter' : 'Task name, then Enter'}
                             onChange={e => setDraft(e.target.value)}
                             onBlur={() => { setAdding(null); setDraft('') }}
                             onKeyDown={e => {
@@ -1504,7 +1504,7 @@ export function TaskTable(p: TaskTableProps) {
                               display: 'inline-flex', alignItems: 'center', gap: 5,
                               minHeight: isMobile ? 44 : 20,
                             }}
-                          ><Plus size={12} /> Add</button>
+                          ><Plus size={12} /> {p.lang === 'pt' ? 'Adicionar' : 'Add'}</button>
                         )}
                       </td>
                     </tr>
@@ -1589,7 +1589,7 @@ export function TaskTable(p: TaskTableProps) {
             <ChipSelect
               value="__none__"
               options={[
-                { value: '__none__', label: 'Move to…', color: 'var(--text-secondary)', dim: 'var(--bg-elevated)' },
+                { value: '__none__', label: p.lang === 'pt' ? 'Mover para…' : 'Move to…', color: 'var(--text-secondary)', dim: 'var(--bg-elevated)' },
                 ...statusOptions(liveStatusMap(p.statuses), liveStatusOrder(p.statuses)),
               ]}
               onPick={v => {
@@ -1605,7 +1605,7 @@ export function TaskTable(p: TaskTableProps) {
           ><Trash2 size={13} /></button>
           <button
             onClick={() => setSel(clearTicks)}
-            aria-label="Clear the selection" title="Clear the selection"
+            aria-label={p.lang === 'pt' ? 'Limpar a seleção' : 'Clear the selection'} title={p.lang === 'pt' ? 'Limpar a seleção' : 'Clear the selection'}
             style={{
               background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer',
               display: 'inline-flex', ...tap(isMobile),

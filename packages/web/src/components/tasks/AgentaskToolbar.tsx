@@ -86,6 +86,12 @@ const T = (lang: Lang) => lang === 'pt'
     clear: 'Remove', handOrder: 'Hand order',
   }
 
+/** The four view names, from the SAME table the desktop switcher reads — the mobile sheet must not carry its own copy. */
+export function viewNames(lang: Lang) {
+  const t = T(lang)
+  return { metrics: t.metrics, board: t.board, table: t.table, live: t.live }
+}
+
 /** The sort a panel treats as "nothing chosen". */
 const PLAIN_SORT: SortSpec = DEFAULT_PREFS.sort
 

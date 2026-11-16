@@ -11,6 +11,7 @@
 import type { Compared, HistoryBucket, HistoryComparison, HistorySubtaskRow, HistoryTaskRow, Observed, ObservedHistory, ScoreType, Verdict, VerdictResult } from '@agentistics/core/benchmark'
 import { percentile } from '@agentistics/core'
 import type { ComparisonKey, TaskSides } from '@agentistics/core/benchmark'
+import { pointTone, scoreOf, scoreTone, taskScore, vezes, firmness, type Ratios } from './benchmarkScore'
 import { METRIC_LABEL, fmtInterval, fmtValue, harnessState, nf, cardCoverage, cardHeadline, cardSubline, type Lang, type MetricKey, type Money } from './benchmarkFormat'
 
 export type Tone = 'good' | 'bad' | 'tie' | 'none'
@@ -66,7 +67,7 @@ export function parseExperiments(raw: readonly unknown[] | null | undefined): Ex
 
 export const toneOf = (v: Verdict | null | undefined): Tone => v === 'pays' ? 'good' : v === 'does_not_pay' ? 'bad' : v === 'tie' ? 'tie' : 'none'
 /** A 0–100 score read the way the prototype does: ≥ 55.55 pays (1.25×), ≤ 44.45 does not, between is a tie. */
-export const toneOfScore = (n: number): Tone => n >= 55.55 ? 'good' : n <= 44.45 ? 'bad' : 'tie'
+export const toneOfScore = (n: number): Tone => scoreTone(n)
 export const wordOf = (t: Tone, lang: Lang): string => {
   const pt = lang === 'pt'
   return t === 'good' ? (pt ? 'Compensou' : 'Paid off') : t === 'bad' ? (pt ? 'Não compensou' : 'Did not pay off') : t === 'tie' ? (pt ? 'Empate' : 'Tie') : (pt ? 'Sem veredito' : 'No verdict')
@@ -92,7 +93,10 @@ export function entriesOf(observed: Observed | null, experiments: readonly Exper
   const pt = lang === 'pt'
   const cmp = observed?.history ? comparisonsOf(observed.history, lang) : []
   if (cmp.length) {
-    const seals: Entry[] = cmp.map(c => ({ id: c.id, kind: 'comparison', name: c.name, sample: c.sample, score: null, tone: 'none', word: pt ? 'observado' : 'observed', experiment: null, comparison: c }))
+    const seals: Entry[] = cmp.map(c => {
+      const score = comparisonScore(c).score, tone: Tone = score === null ? 'none' : pointTone(score)
+      return { id: c.id, kind: 'comparison', name: c.name, sample: c.sample, score, tone, word: score === null ? (pt ? 'observado' : 'observed') : wordOf(tone, lang), experiment: null, comparison: c }
+    })
     return [...seals, ...experiments.map(e => experimentEntry(e, lang)), ...unmeasuredEntries(lang)]
   }
   const list: Entry[] = [{
@@ -143,8 +147,6 @@ export interface Hero {
   why: string[]
   /** What the observed history lets us say (history entry only). */
   facts?: string[]
-  /** One quiet line under the sentence (comparisons): what it is made of. */
-  caption?: string
   /** Title of the disclosure holding `why` and `facts`; when set they are folded away. */
   disclosure?: string
 }
@@ -343,41 +345,17 @@ export function coverageFacts(h: ObservedHistory, lang: Lang, withCount = true):
   return out
 }
 
-/** Sizes whose own ratio runs against the headline's direction (clearly: more than 10% on the other side of 1). */
-function oppositeSizes(c: Comparison): { metric: 'cost' | 'wall'; size: 'S' | 'M' | 'L' }[] {
-  const out: { metric: 'cost' | 'wall'; size: 'S' | 'M' | 'L' }[] = []
-  for (const metric of ['wall', 'cost'] as const) {
-    const k = c[metric]
-    if (!k || Math.abs(k.ratio - 1) < 0.05) continue
-    for (const p of k.sizes) {
-      const r = p.ratio
-      if ((k.ratio > 1 && r < 0.9) || (k.ratio < 1 && r > 1.1)) out.push({ metric, size: p.size })
-    }
-  }
-  return out
-}
-
-function oppositeNote(c: Comparison, lang: Lang): string {
-  const pt = lang === 'pt'
-  const o = oppositeSizes(c)
-  if (!o.length) return ''
-  // Per METRIC: "in time, S; in cost, L" never "in time and cost, S and L" (that would say S was opposite in cost too).
-  const metrics = [...new Set(o.map(x => x.metric))]
-  const parts = metrics.map((m, i) => {
-    const list = o.filter(x => x.metric === m).map(x => sizeWord(x.size, lang)).join(pt ? ' e ' : ' and ')
-    const what = m === 'wall' ? (pt ? 'tempo' : 'time') : (pt ? 'custo' : 'cost')
-    if (pt) return i === 0 ? `no ${what}, nas peças ${list} foi o contrário` : `no ${what}, nas ${list}`
-    return i === 0 ? `in ${what}, the opposite for ${list} pieces` : `in ${what}, for ${list}`
-  })
-  return parts.join('; ')
-}
-
-export type HistorySortKey = 'title' | 'cost' | 'wall' | 'qa' | 'sessions'
+export type HistorySortKey = 'title' | 'cost' | 'wall' | 'qa' | 'sessions' | 'score'
 /** A task row of the history with its two sides, as the SERVER sent them (an older server sent none: every cell is then "—"). */
 export interface HistoryPairRow { task: HistoryTaskRow; sides: TaskSides }
 const NO_SIDES = (key: ComparisonKey): TaskSides => ({ key, nA: 0, nB: 0, sessions: [null, null], costUSD: [null, null], wallMs: [null, null], qaRounds: [null, null], costPartial: [false, false], defects: [null, null], accepted: [null, null] })
+/** A task row's own 0–100 score from the median piece of each side (A = reference, B = candidate); null when neither cost nor time has both sides. */
+export function historyRowScore(sd: TaskSides): number | null {
+  const ratio = (p: readonly [number | null, number | null]) => p[0] !== null && p[1] !== null && p[0] > 0 && p[1] > 0 ? p[0] / p[1] : null
+  return taskScore({ cost: ratio(sd.costUSD), time: ratio(sd.wallMs) })
+}
 const hv = (r: HistoryPairRow, k: HistorySortKey): number | string | null =>
-  k === 'title' ? r.task.title.toLowerCase() : k === 'cost' ? r.sides.costUSD[1] : k === 'wall' ? r.sides.wallMs[1] : k === 'qa' ? r.sides.qaRounds[1] : r.sides.sessions[1]
+  k === 'score' ? historyRowScore(r.sides) : k === 'title' ? r.task.title.toLowerCase() : k === 'cost' ? r.sides.costUSD[1] : k === 'wall' ? r.sides.wallMs[1] : k === 'qa' ? r.sides.qaRounds[1] : r.sides.sessions[1]
 
 /** Filtered and sorted history rows, each with its two sides under one comparison; a row with no value for the key (the B side) goes LAST in both directions. */
 export function historyTaskRows(rows: readonly HistoryTaskRow[], o: { size: SizeFilter; needle: string; key: HistorySortKey; dir: 1 | -1; sides?: ComparisonKey }): HistoryPairRow[] {
@@ -429,6 +407,12 @@ export function comparisonsOf(h: ObservedHistory, lang: Lang): Comparison[] {
   }))
 }
 
+/** The score's ratios for a comparison: reference ÷ candidate, so > 1 = side B is better. The server's `ratio` is B ÷ A, hence the inversion HERE, once. Quality and reliability are not recorded: absent, not zero. */
+export function comparisonRatios(c: Comparison): Ratios {
+  return { cost: c.cost ? 1 / c.cost.ratio : null, time: c.wall ? 1 / c.wall.ratio : null }
+}
+export const comparisonScore = (c: Comparison) => scoreOf(comparisonRatios(c))
+
 const times = (r: number, lang: Lang) => `${nf(r >= 1 ? r : 1 / r, lang, 1)}×`
 /** B ÷ A as it is (0,6× is cheaper, 1,7× is dearer): a tile or a pair never hides the direction behind an inversion. */
 const ratioText = (r: number, lang: Lang) => `${nf(r, lang, 1)}×`
@@ -449,19 +433,28 @@ function comparisonSentence(c: Comparison, lang: Lang): string {
 function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Money): Hero {
   const pt = lang === 'pt'
   const h = observed.history!
+  const sc = comparisonScore(c).score
+  const tone: Tone = sc === null ? 'none' : pointTone(sc)
+  const fm = firmness(comparisonRatios(c))
+  const alt = { equal: pt ? 'pesos iguais' : 'equal weights', quality: pt ? 'Qualidade valendo mais' : 'Quality weighted higher', costTime: pt ? 'Custo e Tempo valendo mais' : 'Cost and Time weighted higher' }
   return {
-    tone: 'none', word: pt ? 'Indício, não prova' : 'Evidence, not proof', delta: null, score: null, firm: null, range: null,
+    tone, word: sc === null ? (pt ? 'Sem dados ainda' : 'No data yet') : wordOf(tone, lang), delta: null, score: sc,
+    firm: sc === null ? null : fm.changes.length === 0 ? { ok: true, text: pt ? 'Resultado firme' : 'Firm result' } : { ok: false, text: pt ? 'Depende do que você valoriza' : 'Depends on what you value' },
+    range: null,
     say: comparisonSentence(c, lang),
-    caption: (pt ? `contra ${c.aShort} · ${c.nA} × ${c.nB} peças · mesmo tamanho` : `against ${c.aShort} · ${c.nA} × ${c.nB} pieces · same size`) + (oppositeNote(c, lang) ? ` · ${oppositeNote(c, lang)}` : ''),
-    disclosure: pt ? 'Por que não é prova?' : 'Why is this not proof?',
+    disclosure: pt ? 'Por que esse resultado?' : 'Why this result?',
+    // The approved prototype's disclosure: why the verdict, the firmness sentence, then "Baseado em". Nothing else.
     why: [
-      pt ? 'Peças difíceis vão para o método pesado e tendem a ter mais rodadas e mais sessões: a diferença pode ser a dificuldade, não o método. Comparar dentro do mesmo tamanho (linhas) é um controle fraco.' : 'Hard pieces go to the heavy method and tend to have more rounds and sessions: the difference may be the difficulty, not the method. Matching by size (lines) is a weak control.',
-      pt ? `Para um veredito falta um experimento controlado (mínimo ${MIN_SAMPLE.tasks} tarefas × ${MIN_SAMPLE.repsPerTask} repetições, ${MIN_SAMPLE.acceptedPerArm} aceitas por lado); nenhum rodou ainda.` : `A verdict needs a controlled experiment (minimum ${MIN_SAMPLE.tasks} tasks × ${MIN_SAMPLE.repsPerTask} repetitions, ${MIN_SAMPLE.acceptedPerArm} accepted per side); none has run yet.`,
-      pt ? 'Qualidade final não é medida: defeito escapado depois do release e peça reaberta não são registrados.' : 'Final quality is not measured: defects escaped after release and reopened pieces are not recorded.',
-      ...(harnessCoverageLine(observed, lang) ? [harnessCoverageLine(observed, lang)!] : []),
-      ...(c.id === 'qa' ? [pt ? 'As rodadas de QA vêm do rótulo das sessões de QA: indicativo, o fluxo ainda não registra veredito estruturado.' : 'QA rounds come from the QA sessions\' labels: indicative, the flow does not record a structured verdict yet.'] : []),
+      ...(sc === null ? [] : [
+        tone === 'good' ? (pt ? 'A nota fica acima do empate.' : 'The score is above the tie.')
+          : tone === 'bad' ? (pt ? 'A nota fica abaixo do empate.' : 'The score is below the tie.')
+          : (pt ? 'A nota ficou perto de 50: não dá para dizer quem ganhou.' : 'The score is too close to 50: it cannot say who won.'),
+        fm.changes.length === 0
+          ? (pt ? 'Com outros pesos razoáveis, o resultado é o mesmo.' : 'With other reasonable weights, the result is the same.')
+          : fm.changes.map(x => `${alt[x.weights]}: ${wordOf(x.tone, lang)}`).join('; '),
+      ]),
+      pt ? `Baseado em indício observado, não em experimento: contra ${c.aShort} · ${c.nA} × ${c.nB} peças · comparado dentro do mesmo tamanho.` : `Based on observed evidence, not an experiment: against ${c.aShort} · ${c.nA} × ${c.nB} pieces · compared within the same size.`,
     ],
-    facts: coverageFacts(h, lang, false),
   }
 }
 
@@ -469,6 +462,7 @@ const sessionsWord = (n: number, lang: Lang) => lang === 'pt' ? `${nf(n, lang, 1
 
 function partsOfComparison(c: Comparison, lang: Lang, money: Money, withoutDuration = 0): Part[] {
   const pt = lang === 'pt'
+  const sc = comparisonScore(c)
   const seal = pt ? 'observado' : 'observed'
   const sameSize = pt ? 'comparado dentro do mesmo tamanho' : 'compared within the same size'
   // The headline is the size-matched ratio, so the figures behind it are the per-size pairs: each one gives ITS ratio.
@@ -477,9 +471,14 @@ function partsOfComparison(c: Comparison, lang: Lang, money: Money, withoutDurat
     sub: `${ratioText(p.ratio, lang)} · ${pt ? 'peças' : 'pieces'} ${p.nA} × ${p.nB}`, measured: true,
   }))
   const none = (type: TypeKey, why: string): Part => ({ type, name: pt ? TYPE_META[type].pt : TYPE_META[type].en, question: pt ? TYPE_META[type].qpt : TYPE_META[type].qen, pct: null, points: null, max: null, tone: 'none', state: 'none', word: pt ? 'sem dados' : 'no data', hint: why, rows: [] })
-  const tile = (type: TypeKey, k: Compared | null, f: (n: number) => string, rowLabel: string): Part => k
-    ? { type, name: pt ? TYPE_META[type].pt : TYPE_META[type].en, question: pt ? TYPE_META[type].qpt : TYPE_META[type].qen, pct: null, points: null, max: null, tone: 'none', state: 'history', big: ratioText(k.ratio, lang), word: sameSize, rows: pair(k, f, rowLabel) }
-    : none(type, pt ? 'sem dados suficientes' : 'not enough data')
+  const tile = (type: TypeKey, k: Compared | null, f: (n: number) => string, rowLabel: string): Part => {
+    if (!k) return none(type, pt ? 'sem dados suficientes' : 'not enough data')
+    const base = { type, name: pt ? TYPE_META[type].pt : TYPE_META[type].en, question: pt ? TYPE_META[type].qpt : TYPE_META[type].qen, rows: pair(k, f, rowLabel) }
+    const t = type === 'cost' || type === 'time' ? sc.types[type] : undefined
+    if (!t) return { ...base, pct: null, points: null, max: null, tone: 'none', state: 'history', big: ratioText(k.ratio, lang), word: sameSize }
+    const tone = toneOfScore(t.nr)
+    return { ...base, pct: Math.round(t.nr), points: t.points, max: t.max, tone, state: 'scored', big: ratioText(k.ratio, lang), word: `${wordOf(tone, lang)} · ${vezes(t.ratio, lang)}` }
+  }
   const third = c.third
   const rework: Part = third.kind === 'sessions'
     ? { ...tile('rework', third.sessions, n => sessionsWord(n, lang), pt ? 'Sessões por peça' : 'Sessions per piece'), name: pt ? 'Sessões por peça' : 'Sessions per piece', question: pt ? 'Quantas sessões gastou?' : 'How many sessions did it take?' }
@@ -490,7 +489,7 @@ function partsOfComparison(c: Comparison, lang: Lang, money: Money, withoutDurat
   return [
     none('quality', pt ? 'defeito escapado e peça reaberta não são registrados' : 'escaped defects and reopened pieces are not recorded'),
     tile('cost', c.cost, n => moneyText(n, lang, money), pt ? 'Custo mediano' : 'Median cost'),
-    ((t: Part): Part => withoutDuration > 0 && t.state === 'history'
+    ((t: Part): Part => withoutDuration > 0 && t.state !== 'none'
       ? { ...t, rows: [...t.rows, { key: 'no-duration', label: pt ? 'Sem duração' : 'No duration', value: `${withoutDuration} ${pt ? (withoutDuration === 1 ? 'peça' : 'peças') : (withoutDuration === 1 ? 'piece' : 'pieces')}`, sub: pt ? 'início = entrega: fora das medianas de tempo' : 'start = delivery: left out of the time medians', measured: false }] } : t
     )(tile('time', c.wall, n => durationText(n, lang), pt ? 'Tempo mediano' : 'Median time')),
     none('reliability', pt ? 'nenhuma tarefa foi repetida' : 'no task was repeated'),
