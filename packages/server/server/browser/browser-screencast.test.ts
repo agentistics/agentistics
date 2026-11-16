@@ -97,8 +97,8 @@ test('hub passes each viewer size, last resize wins; only final reader clears me
     },
   })
   expect(calls).toEqual([])
-  const a = await hub.subscribe('k', null, sink().s, { width: 390, height: 260, deviceScaleFactor: 2 })
-  expect(calls[0]).toEqual(['Emulation.setDeviceMetricsOverride', { width: 390, height: 260, deviceScaleFactor: 2, mobile: false }])
+  const a = await hub.subscribe('k', null, sink().s, { width: 1200, height: 600, deviceScaleFactor: 2 })
+  expect(calls[0]).toEqual(['Emulation.setDeviceMetricsOverride', { width: 1200, height: 600, deviceScaleFactor: 2, mobile: false }])
   const b = await hub.subscribe('k', null, sink().s, { width: 1100, height: 700, deviceScaleFactor: 1 })
   expect(calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride').at(-1)?.[1]).toMatchObject({ width: 1100, height: 700 })
   a.close()
@@ -107,6 +107,37 @@ test('hub passes each viewer size, last resize wins; only final reader clears me
   b.close()
   await flush()
   expect(calls.at(-1)?.[0]).toBe('Emulation.clearDeviceMetricsOverride')
+})
+
+test('when the viewer who sized the page leaves, the one who stays takes over at once', async () => {
+  const calls: Array<[string, Record<string, unknown>]> = []
+  const hub = createScreencastHub({
+    ...clock(),
+    activeTab: () => 'T1', viewer: () => {},
+    state: () => ({ tab: 'T1', activeTab: 'T1', lock: 'locked', url: '', title: '', loading: false, tabs: [], lastAction: null }),
+    start: async (_key, _tab, _onFrame, size) => {
+      const cast = createViewportCast(async (method, params) => { calls.push([method, params]) })
+      await cast.start(size)
+      return { ok: true, ack: () => {}, resize: cast.resize, stop: cast.stop }
+    },
+  })
+  const overrides = () => calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride').map(([, p]) => p)
+  const a = await hub.subscribe('k', null, sink().s, { width: 1200, height: 600, deviceScaleFactor: 1 })
+  const b = await hub.subscribe('k', null, sink().s, { width: 1000, height: 1000, deviceScaleFactor: 1 })
+  expect(overrides().at(-1)).toMatchObject({ width: 1024, height: 1024 })
+  b.close()
+  await flush()
+  expect(overrides().at(-1)).toMatchObject({ width: 1200, height: 600 }) // a's size, no stale b size
+  expect(calls.some(([m]) => m === 'Emulation.clearDeviceMetricsOverride')).toBe(false)
+  // leaving a non-owner changes nothing
+  const n = overrides().length
+  const c = await hub.subscribe('k', null, sink().s, { width: 1500, height: 750, deviceScaleFactor: 1 })
+  a.close(); await flush()
+  expect(overrides().at(-1)).toMatchObject({ width: 1500, height: 750 })
+  const m = overrides().length
+  c.close(); await flush()
+  expect(overrides().length).toBe(m)
+  void n
 })
 
 describe('nobody watching = no screencast', () => {

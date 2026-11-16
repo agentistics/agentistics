@@ -18,7 +18,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 test('stream query dimensions reach the subscription, with bounded finite values', async () => {
   const size = parseViewerViewport(new URLSearchParams('width=9999&height=250&dpr=2'))
-  expect(size).toEqual({ width: 1920, height: 250, deviceScaleFactor: 2 })
+  expect(size).toEqual({ width: 1920, height: 400, deviceScaleFactor: 2 })
   expect(parseViewerViewport(new URLSearchParams())).toBeUndefined()
   expect(parseViewerViewport(new URLSearchParams('width=Infinity&height=300'))).toBeUndefined()
   const { hub } = fakeHub()

@@ -105,6 +105,9 @@ export interface ScreencastDeps {
 }
 
 interface Reader {
+  /** The size this viewer asked for and when (the newest one owns the page's viewport). */
+  size?: ViewerViewport
+  sizedAt: number
   sink: ScreenSink
   /** The newest frame this reader has not taken yet (its transport was behind). */
   pending: CastFrame | null
@@ -243,6 +246,8 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
     else loop.flushTimer = d.setTimeout(() => flush(loop), wait)
   }
 
+  let sizeClock = 0
+
   function pollState(loop: Loop): boolean {
     if (loop.ended) return false
     const s = d.state(loop.key, loop.tab)
@@ -261,7 +266,14 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
     loop.readers.delete(r)
     d.viewer(loop.key, -1)
     if (loop.readers.size === 0) end(loop, null)
-    else rearmAck(loop) // a lagging reader leaving may be the one the ack waited on
+    else {
+      rearmAck(loop) // a lagging reader leaving may be the one the ack waited on
+      // The viewer that sized the page left: the newest remaining sized viewer takes over now.
+      if (r.size && loop.cast?.resize) {
+        const owner = [...loop.readers].filter(o => o.size).reduce<Reader | null>((acc, o) => (!acc || o.sizedAt > acc.sizedAt ? o : acc), null)
+        if (owner?.size && r.sizedAt > owner.sizedAt) void loop.cast.resize(owner.size).catch(() => {})
+      }
+    }
   }
 
   /** The reason the ack was waiting may be gone (a reader drained or left): decide again now. */
@@ -275,7 +287,7 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
       const tab = tabIn ?? d.activeTab(key)
       if (!tab) { try { sink.gone('no_browser') } catch { /* */ } return { close() {}, drained() {} } }
       let loop = loops.get(id(key, tab))
-      const reader: Reader = { sink, pending: null, lagging: false, closed: false }
+      const reader: Reader = { sink, pending: null, lagging: false, closed: false, size, sizedAt: ++sizeClock }
       if (!loop) {
         const created: Loop = {
           key, tab, readers: new Set(), cast: null, starting: null, latest: null, unacked: [], oldestUnackedAt: 0,

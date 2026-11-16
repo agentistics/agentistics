@@ -23,13 +23,11 @@ export interface BrowserScreenProps {
   /** Hide the whose-turn pill (a surface that says it elsewhere). */
   noPill?: boolean
   onResize?: (size: { width: number; height: number; deviceScaleFactor: number }) => void
-  /** Full screen reserves Escape for leaving the overlay, including keyup after it closes. */
-  reserveEscape?: boolean
 }
 
 const ORANGE = 'var(--anthropic-orange)'
 
-export function BrowserScreen({ screen, lock, lang, onInput, noPill = false, onResize, reserveEscape }: BrowserScreenProps) {
+export function BrowserScreen({ screen, lock, lang, onInput, noPill = false, onResize }: BrowserScreenProps) {
   const pt = lang === 'pt'
   const imgRef = useRef<HTMLImageElement | null>(null)
   const lastMove = useRef(0)
@@ -90,13 +88,11 @@ export function BrowserScreen({ screen, lock, lang, onInput, noPill = false, onR
       onInput!({ op: 'pointer', type: 'wheel', x: p.x, y: p.y, deltaX: e.deltaX, deltaY: e.deltaY, mods: mods(e) })
     },
     onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
-      if (reserveEscape && e.key === 'Escape') return
       if (!browserKeyGoesToPage(e.nativeEvent)) return
       e.preventDefault()
       onInput!({ op: 'key', type: 'down', key: e.key, code: e.code, ...(e.key.length === 1 ? { text: e.key } : {}), mods: mods(e) })
     },
     onKeyUp: (e: KeyboardEvent<HTMLDivElement>) => {
-      if (reserveEscape && e.key === 'Escape') return
       if (!browserKeyGoesToPage(e.nativeEvent)) return
       onInput!({ op: 'key', type: 'up', key: e.key, code: e.code, mods: mods(e) })
     },

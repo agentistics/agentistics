@@ -1204,7 +1204,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_browser_screenshot",
     description:
-      "A picture of the page (the viewport, or fullPage up to 6000 px tall). / Captura da tela.",
+      "A picture of the page (the viewport, or fullPage up to 6000 px tall). The viewport follows the person watching this browser (their screen's proportions, always a desktop width of 1024 px or more); it is 1280x713 when nobody watches. / Captura da tela.",
     inputSchema: { type: "object", properties: { fullPage: { type: "boolean" }, format: { type: "string", enum: ["png", "jpeg"] }, tab: { type: "string", description: "Tab id from agentistics_browser_tabs (default: the active tab)" } }, required: [] },
   },
   {

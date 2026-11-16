@@ -13,9 +13,25 @@ export function createViewportQueue() {
   }
 }
 
+export const MIN_PAGE_WIDTH = 1024
+export const MAX_PAGE_WIDTH = 1920
+export const MIN_PAGE_HEIGHT = 400
+/** Tall enough for a full-screen phone (aspect up to ~2.1 at 1024 wide). */
+export const MAX_PAGE_HEIGHT = 2200
+
+/**
+ * The surface the person watches -> the page the model keeps. Only the surface's ASPECT RATIO is
+ * taken, never its raw size: the page is always a desktop layout (>= 1024 wide, no "mobile" media
+ * query) and the frame is scaled down to fill the surface exactly (no black bars).
+ */
 export function clampViewport(v: ViewerViewport): ViewerViewport | null {
   if (![v.width, v.height, v.deviceScaleFactor].every(n => Number.isFinite(n) && n > 0)) return null
-  return { width: Math.max(320, Math.min(1920, Math.round(v.width))), height: Math.max(240, Math.min(1200, Math.round(v.height))), deviceScaleFactor: Math.max(1, Math.min(3, v.deviceScaleFactor)) }
+  const aspect = v.height / v.width
+  let width = Math.min(MAX_PAGE_WIDTH, Math.max(MIN_PAGE_WIDTH, Math.round(v.width)))
+  let height = Math.round(width * aspect)
+  if (height < MIN_PAGE_HEIGHT) { height = MIN_PAGE_HEIGHT; width = Math.min(MAX_PAGE_WIDTH, Math.round(height / aspect)) }
+  else if (height > MAX_PAGE_HEIGHT) { height = MAX_PAGE_HEIGHT; width = Math.max(MIN_PAGE_WIDTH, Math.round(height / aspect)) }
+  return { width, height, deviceScaleFactor: Math.max(1, Math.min(3, v.deviceScaleFactor)) }
 }
 
 /** Serialized per target by the caller, including a previous cast's teardown on reconnect. */

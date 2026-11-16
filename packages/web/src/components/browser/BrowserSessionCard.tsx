@@ -158,7 +158,7 @@ export function BrowserSessionCard({ managedId, lang, maximized, onToggleMax, on
             onPick={k => setTab(k)}
           />
         )}
-        <BrowserScreen screen={screen} lock={lock} lang={lang} onResize={setSize} reserveEscape={maximized} {...(unlocked ? { onInput: input.send } : {})} />
+        <BrowserScreen screen={screen} lock={lock} lang={lang} onResize={setSize} {...(unlocked ? { onInput: input.send } : {})} />
         <div data-browser-caption style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 12px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--text-secondary)', flexShrink: 0, minWidth: 0 }}>
           {caption.kind === 'yours'
             ? <><Pause size={13} aria-hidden style={{ flexShrink: 0 }} /><span>{pt ? 'Sua vez. Trave o cadeado para devolver ao modelo.' : 'Your turn. Lock the padlock to hand it back to the model.'}</span></>
