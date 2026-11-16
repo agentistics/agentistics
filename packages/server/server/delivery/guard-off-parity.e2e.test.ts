@@ -1,6 +1,6 @@
 /** The 15-step r4 Opus REST transcript, byte-compared to its live base capture (2af66b7be). */
 import { test, expect } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { lockFile } from '../sessions/file-lock'
@@ -60,6 +60,7 @@ test('OFF: QA 15-step REST transcript stays byte-identical, including the 7s tas
     await call('task detail', 'GET', `/api/tasks/${t}`)
     console.log('OFF REST timings', JSON.stringify(timings))
     expect(JSON.stringify(log, null, 1) + '\n').toBe(readFileSync(join(import.meta.dir, 'guard-off-base.fixture.json'), 'utf8'))
+    expect(existsSync(join(root, 'guards.json'))).toBe(false)
     const rename = timings.find(t => t.step.startsWith('rename'))!
     // Leave scheduling margin in the full precommit run; the holder still runs its original 7000ms timer.
     expect(rename.ms).toBeGreaterThan(5000)

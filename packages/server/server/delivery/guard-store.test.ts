@@ -62,6 +62,16 @@ async function setup(o: { rule?: 'off' | 'shadow' | 'on' } = {}) {
 const bytes = () => ({ tasks: readFileSync(join(root, 'tasks.json'), 'utf8'), deliveries: existsSync(join(root, 'deliveries.json')) ? readFileSync(join(root, 'deliveries.json'), 'utf8') : '' })
 const checkpoints = async () => (await createGuardsStore(join(root, 'guards.json')).read()).checkpoints
 
+for (const via of ['vault-credential', 'legacy-browser'] as const) test(`S2B-6 owner principal persists owner authorization via ${via}`, async () => {
+  const { world, tasks } = await setup()
+  await world.svc.ensure('p1')
+  await attachAll(world.svc)
+  const principal = via === 'vault-credential' ? { kind: 'owner' as const, via, grantId: 'test-grant' } : { kind: 'owner' as const, via }
+  await tasks.upsertSubtask(sub('p1', { status: 'in_review' }), { principal })
+  expect((await checkpoints()).p1!.auth).toContainEqual({ kind: 'owner', via })
+  expect((await checkpoints()).p1!.auth.some(a => a.kind === 'evidence')).toBe(true)
+})
+
 async function attachAll(svc: ReturnType<typeof makeWorld>['svc'], id = 'p1') {
   for (const input of [shot(1280, 1), shot(390, 2), { kind: 'probe', probe: { kind: 'bundle', literal: 'a-literal-of-12+' } }]) {
     const r = await svc.evidenceAdd(id, input as never, 'worker')

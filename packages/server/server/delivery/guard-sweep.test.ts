@@ -42,6 +42,7 @@ async function world(rule: 'off' | 'shadow' | 'on', pieces = ['p1']): Promise<Wo
   await tasks.seedStatuses(DEFS)
   await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
   for (const id of pieces) await tasks.upsertSubtask(subtask(id))
+  for (let i = 0; i < 40; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
   const store = createDeliveryStore(paths.deliveries, { guard: { deps, now: () => clock.now } })
   const board = { catchUps: [] as string[], comments: [] as string[] }
   const logs: string[] = []
@@ -59,6 +60,8 @@ async function world(rule: 'off' | 'shadow' | 'on', pieces = ['p1']): Promise<Wo
     const g = createGuaranteesStore(join(root, 'guarantees.json'))
     expect(await g.setState('a', 'shadow', { check, facts: facts(T - 25 * 3600_000) })).toEqual({ ok: true })
     if (rule === 'on') expect(await g.setState('a', 'on', { check, facts: facts(T) })).toEqual({ ok: true })
+    const guards = createGuardsStore(paths.guards)
+    await guards.write({ ...(await guards.read()), migrations: { a: { version: 1, at: ISO } } })
   }
   return { svc, tasks, store, guards: createGuardsStore(paths.guards), clock, board, logs, paths }
 }
@@ -125,6 +128,8 @@ describe('§3.5.17 forged state against the real storage', () => {
     await w.svc.tick()
     expect((await boardOf(w, 'p1')).status).toBe('in_review')
     expect((await w.store.get('p1'))!.phase).toBe('revisao_lider')
+    expect((await w.store.get('p1'))!.revision).toBe(2)
+    expect((await w.store.get('p1'))!.history.at(-1)!.revision).toBe(2)
   })
 
   test('the ci SIGNAL alone moves the Live: it is cleared when the checkpoint is lower', async () => {
@@ -281,7 +286,7 @@ describe('one write per document, no cap, loop guard', () => {
     expect((await boardOf(w, 'p1')).status).toBe('blocked')
     expect((await comments(w, 'p1')).join(' ')).toContain('an unknown writer keeps moving this piece')
     const rec = (await w.store.get('p1'))!
-    expect(rec.phase).toBe('executando')
+    expect(rec.phase).toBe('bloqueado')
     expect(w.logs.join('\n')).toContain('agentop flow guarantee off a')
     const doc = await w.guards.read()
     expect(sweepWarnings(doc.sweep, w.clock.now).join(' ')).toContain('agentop flow guarantee off a')

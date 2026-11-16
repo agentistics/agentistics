@@ -13,7 +13,7 @@
 
 import { loadTaskWorld } from './task-source'
 import { buildTaskDetail, buildTaskList, findTask, type AttemptView } from './task-report'
-import { markTask } from './task-web'
+import { guardInfoOf, markTask } from './task-web'
 import { parseTaskArgs, type TaskCommand } from './task-parse'
 import type { TaskStatus } from './task-model'
 import type { AttemptRollup } from './task-rollup'
@@ -195,6 +195,15 @@ async function runRefile(apply: boolean, json: boolean): Promise<number> {
 }
 
 export async function runTask(argv: string[]): Promise<number> {
+  try { return await runTaskInner(argv) } catch (e) {
+    const info = guardInfoOf(e)
+    if (!info) throw e
+    console.error(argv.includes('--json') ? JSON.stringify({ ok: false, error: info.code, sentence: info.message, sentencePt: info.messagePt }, null, 2) : `${info.code}: ${info.message}`)
+    return 2
+  }
+}
+
+async function runTaskInner(argv: string[]): Promise<number> {
   // FLUXO.ENTREGA-DSL P4: the pre-dispatch (staged session) of a subtask.
   // ENTREGA.GARANTIDA S1c: the evidence a piece needs before review (`add|ls|rm`).
   if (argv[0] === 'evidence') return (await import('../delivery/cli')).runDeliveryCli(['task-evidence', ...argv.slice(1)])

@@ -740,7 +740,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -769,7 +769,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -812,7 +812,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -885,7 +885,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
-        return json(safe.body, 500)
+        return json(safe.body, safe.status ?? 500)
       }
     }
 
@@ -944,7 +944,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -1002,7 +1002,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
-        return new Response(JSON.stringify(safe.body), { status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
+        return new Response(JSON.stringify(safe.body), { status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
       }
     }
 
@@ -1022,7 +1022,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
-        return new Response(JSON.stringify(safe.body), { status: 500, headers })
+        return new Response(JSON.stringify(safe.body), { status: safe.status ?? 500, headers })
       }
     }
 
@@ -1037,7 +1037,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -1162,7 +1162,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1287,7 +1287,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
-        return new Response(JSON.stringify(safe.body), { status: 500, headers: json })
+        return new Response(JSON.stringify(safe.body), { status: safe.status ?? 500, headers: json })
       }
     }
 
@@ -1303,7 +1303,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1320,7 +1320,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1339,7 +1339,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1382,7 +1382,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: false })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1412,7 +1412,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: false })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1463,7 +1463,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: false })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1483,7 +1483,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1506,7 +1506,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1531,7 +1531,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1586,7 +1586,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1776,8 +1776,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1816,8 +1817,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1870,8 +1872,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -1934,7 +1937,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
-        return json(safe.body, 500)
+        return json(safe.body, safe.status ?? 500)
       }
     }
 
@@ -2376,7 +2379,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: false })
         console.error(safe.logLine)
-        return json(safe.body, 500)
+        return json(safe.body, safe.status ?? 500)
       }
     }
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'GET') {
@@ -2978,8 +2981,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3142,7 +3146,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify({ ok: false, ...safe.body }), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3182,8 +3186,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3227,8 +3232,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3341,8 +3347,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3383,8 +3390,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3428,8 +3436,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3464,8 +3473,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3498,8 +3508,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3596,8 +3607,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3645,8 +3657,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3671,8 +3684,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ files: [], ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ files: [], ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3694,8 +3708,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3739,8 +3754,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3783,8 +3799,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -4192,7 +4209,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -4236,7 +4253,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -4312,7 +4329,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error('[/api/data]', safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -4353,8 +4370,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 }
 
 async function handleCompressed(req: Request, server: Server<WSData>): Promise<Response | undefined> {
-  const res = await handleRequest(req, server)
-  return res ? compressResponse(req, res) : res
+  try {
+    const res = await handleRequest(req, server)
+    return res ? compressResponse(req, res) : res
+  } catch (err) {
+    const safe = safeError(err, { verbose: false })
+    console.error(safe.logLine)
+    const CORS_HEADERS = corsHeadersFor(req.headers.get('origin'), ALLOWED_ORIGINS, !SERVE_STATIC)
+    return new Response(JSON.stringify(safe.body), { status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
+  }
 }
 
 await bootstrapServer()

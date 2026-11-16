@@ -119,14 +119,27 @@ const CATALOG = [
 
 async function apiGetText(path: string) {
   const res = await fetch(`${API}${path}`);
-  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}${await apiErrorDetail(res)}`);
   return res.text();
 }
 
 async function apiGet(path: string) {
   const res = await fetch(`${API}${path}`);
-  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}${await apiErrorDetail(res)}`);
   return res.json();
+}
+
+/** Reads can seed legacy board metadata too: every API error keeps its actionable code and sentence. */
+async function apiErrorDetail(res: Response): Promise<string> {
+  const raw = await res.text().catch(() => "");
+  let detail = raw.slice(0, 400);
+  try {
+    const body = JSON.parse(raw);
+    const g = body?.guard;
+    if (g && typeof g.message === "string") detail = `${g.code ?? "refused"}: ${g.message}`;
+    else if (typeof body?.sentence === 'string') detail = `${body.code ?? body.error ?? 'refused'}: ${body.sentence}`;
+  } catch { /* not JSON: keep the raw text */ }
+  return detail ? ` ${detail}` : '';
 }
 
 const LEGACY_TOOLS: Record<ProjectedTool, (data: any, harness?: string) => unknown> = {
@@ -183,15 +196,7 @@ async function apiSend(method: string, path: string, body?: unknown) {
     // The BODY, not just the status. A refusal here is usually actionable — "this move needs a
     // reason", "somebody else holds this claim" — and a bare `HTTP 422` teaches the caller nothing
     // it can act on, which turns one refusal into a retry loop.
-    const raw = await res.text().catch(() => "");
-    // ENTREGA.GARANTIDA S2a: a refusal by the store's guard carries its own sentence (`guard.message`, the same one REST and the
-    // CLI print) — shown whole, never cut at 400 characters in the middle of what is missing.
-    let detail = raw.slice(0, 400);
-    try {
-      const g = JSON.parse(raw)?.guard;
-      if (g && typeof g.message === "string") detail = `${g.code ?? "refused"}: ${g.message}`;
-    } catch { /* not JSON: keep the raw text */ }
-    throw new Error(`${method} ${path} → HTTP ${res.status}${detail ? ` ${detail}` : ""}`);
+    throw new Error(`${method} ${path} → HTTP ${res.status}${await apiErrorDetail(res)}`);
   }
   return res.json().catch(() => ({}));
 }

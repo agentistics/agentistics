@@ -229,6 +229,10 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
           }
         }
         const raised = deliveryRaises(phasesBefore, final.deliveries)
+        const retreats = Object.entries(final.deliveries).flatMap(([key, r]) => {
+          const before = phasesBefore[key]
+          return before && phaseRank(r.phase) < phaseRank(before.phase) ? [{ key, rank: phaseRank(r.phase), fromPhase: before.phase }] : []
+        })
         const tampered = [
           ...deliveryTamper(phasesBefore, final.deliveries, !!options?.guard),
           ...deliveryTamper(Object.fromEntries(Object.entries(floors).filter(([id]) => {
@@ -253,11 +257,11 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
           if (rule === 'on') throw new GuardRefused(tampered[0]!)
           if (rule === 'shadow') for (const t of tampered) console.warn(`[guard] would_refuse ${t.code} ${t.piece}`)
         }
-        if (!raised.length) { await commit(); return value }
+        if (!raised.length && (!retreats.length || !options?.guard)) { await commit(); return value }
         // `withFileLock` goes ahead WITHOUT the lock after its wait; a guard never does (§2.6.1).
         if (held?.contended) throw new GuardBusy('deliveries')
         await guardedWrite({
-          raised, ctx: options?.guard, paths: anchor.paths, wiring: opts.guard,
+          raised, retreats, ctx: options?.guard, paths: anchor.paths, wiring: opts.guard,
           locks: [], alreadyHeld: ['deliveries', 'guards'],
           recordOf: async key => final.deliveries[key] ?? null,
           stateOf: r => ({ boardStatus: '', boardStage: '', phase: final.deliveries[r.key]?.phase ?? null }),

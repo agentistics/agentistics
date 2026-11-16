@@ -18,6 +18,7 @@ import type { DeliveryRecord } from './machine'
 import { defaultGuardLockPaths, withGuardLocks, type GuardLockName, type GuardLockPaths } from './guard-locks'
 import { beginIntent, commitIntent, createGuardsStore, GuardsUnreadable, type GuardAuth, type PieceCheckpoint } from './guards-store'
 import { decideGuard, GuardRefused, type GuardContext, type Raised, type ReviewOutcome, type RuleState } from './guard'
+import { checkpointRank } from './sweep-plan'
 
 /** How a store reaches the guard. Everything optional: production defaults come from the data directory and the registry. */
 export interface GuardWiring {
@@ -89,6 +90,7 @@ export interface GuardedWriteOptions {
   /** Deprecated input: the policy is always resolved again under the held guards lock. */
   rule?: RuleState
   raised: readonly Raised[]
+  retreats?: readonly { key: string; rank: number; fromPhase?: string; fromBoardStatus?: string; boardStatus?: string; boardStage?: string }[]
   ctx: GuardContext | undefined
   paths: GuardLockPaths
   /** Locks still needed by the caller; empty when its store/transaction already holds the complete set. */
@@ -126,27 +128,48 @@ export async function guardedWrite(o: GuardedWriteOptions): Promise<void> {
     }
     const deps = o.wiring?.deps ?? await registryClassifyDeps()
     const outcomes: Record<string, ReviewOutcome> = {}
-    if (o.ctx) for (const r of o.raised) outcomes[r.key] = await reviewOutcome({ deps, raised: r, record: await o.recordOf(r.key), checkpoint: doc.checkpoints[r.key] })
+    if (o.ctx) for (const r of o.raised) {
+      const checkpoint = doc.checkpoints[r.key]
+      const rec = await o.recordOf(r.key)
+      // Only the engine completing the board effect of THIS authorized phase may reuse its checkpoint.
+      // A new phase/binding still classifies and validates normally.
+      const st = o.stateOf(r)
+      const covered = o.ctx.principal.kind === 'flow' && checkpoint && !st.phase && rec?.phase === checkpoint.phase
+        && r.rank <= checkpointRank(checkpoint, [{ id: checkpoint.boardStatus, stage: checkpoint.boardStage }])
+        && (rec?.revision ?? 0) === checkpoint.revision
+      outcomes[r.key] = covered
+        ? { ok: true, ids: [], sha256: [], headSha: checkpoint.headSha, category: checkpoint.classification?.category ?? 'non-code', grandfathered: true }
+        : await reviewOutcome({ deps, raised: r, record: rec, checkpoint })
+    }
     const decision = decideGuard({ rule, raised: o.raised, ctx: o.ctx, outcomes })
     if (decision.verdict === 'refuse') throw new GuardRefused(decision.refusal)
     reportWouldRefuse(rule, decision.wouldRefuse ?? [])
     const passed = decision.passed ?? []
-    if (passed.length === 0) { await o.writeDocuments(); return }
     const targets: PieceCheckpoint[] = []
     for (const p of passed) {
       const r = o.raised.find(x => x.key === p.key)!
       const rec = await o.recordOf(p.key)
       const st = o.stateOf(r)
       const auth: GuardAuth[] = p.outcome.grandfathered
-        ? (doc.checkpoints[p.key]?.auth ?? [])
+        ? [...(doc.checkpoints[p.key]?.auth ?? [])]
         : [{ kind: 'evidence', ids: p.outcome.ids, sha256: p.outcome.sha256 }]
+      if (o.ctx!.principal.kind === 'owner') auth.push({ kind: 'owner', via: o.ctx!.principal.via })
       targets.push({
-        key: p.key, rank: Math.max(p.rank, doc.checkpoints[p.key]?.rank ?? 0), boardStatus: st.boardStatus, boardStage: st.boardStage, phase: st.phase,
+        key: p.key, rank: p.rank, boardStatus: st.boardStatus, boardStage: st.boardStage, phase: st.phase ?? (p.outcome.grandfathered ? doc.checkpoints[p.key]?.phase ?? null : null),
         revision: rec?.revision ?? 0, headSha: p.outcome.headSha, auth, by: o.ctx!.principal as unknown as PieceCheckpoint['by'], at,
         transitionId: `tr-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
         classification: { category: p.outcome.category, headSha: p.outcome.headSha ?? '', ...(p.outcome.declared ? { declared: p.outcome.declared } : {}) },
       })
     }
+    // A guarded retreat of the checkpoint's actual phase lowers its authority without demanding fresh evidence.
+    // A forged before image cannot lower an unrelated checkpoint. Sweep corrections therefore do not grant anything.
+    if (o.ctx) for (const r of o.retreats ?? []) {
+      const prior = doc.checkpoints[r.key]
+      if (!prior || (r.fromPhase !== undefined ? prior.phase !== r.fromPhase : prior.boardStatus !== r.fromBoardStatus) || targets.some(t => t.key === r.key)) continue
+      const rec = await o.recordOf(r.key)
+      targets.push({ ...prior, rank: r.rank, phase: r.fromPhase !== undefined ? rec?.phase ?? null : null, boardStatus: r.boardStatus ?? '', boardStage: r.boardStage ?? '', revision: rec?.revision ?? prior.revision, at, transitionId: `retreat-${now}-${r.key}` })
+    }
+    if (targets.length === 0) { await o.writeDocuments(); return }
     let withIntents = doc
     for (const t of targets) withIntents = beginIntent(withIntents, t, at)
     await store.write(withIntents)
