@@ -120,6 +120,7 @@ export function forbiddenCapabilities(src: string): string[] {
       const name = ts.isPropertyAccessExpression(e) ? e.name.text : ts.isElementAccessExpression(e) ? literalText(e.argumentExpression) : e.getText(file)
       if (/^(eval|Function)$/.test(name ?? '')) out.push(n.expression.getText(file))
     }
+    if (ts.isBindingElement(n) && (n.propertyName ? (ts.isIdentifier(n.propertyName) || ts.isStringLiteral(n.propertyName)) && n.propertyName.text === 'constructor' : ts.isIdentifier(n.name) && n.name.text === 'constructor')) out.push('constructor-destructure')
     if (ts.isPropertyAccessExpression(n) && unwrap(n.expression).getText(file) === 'process' && n.name.text === 'binding') out.push('process.binding')
     if (ts.isElementAccessExpression(n) && unwrap(n.expression).getText(file) === 'process' && literalText(n.argumentExpression) === 'binding') out.push('process.binding')
     if (ts.isElementAccessExpression(n) && /^(global|globalThis|self|Bun)$/.test(unwrap(n.expression).getText(file)) && literalText(n.argumentExpression) === undefined) out.push('computed:' + unwrap(n.expression).getText(file))
@@ -128,6 +129,14 @@ export function forbiddenCapabilities(src: string): string[] {
       const key = ts.isPropertyAccessExpression(n) ? n.name.text : literalText(n.argumentExpression)
       if (/^(global|globalThis|self|Bun)$/.test(receiver.getText(file)) && /^(eval|Function)$/.test(key ?? '')) out.push('global-code:' + key)
       if (key === 'constructor') {
+        // R7-3: whatever the receiver, the constructor is only ever COMPARED or have its `.name` read. Called, constructed, handed to
+        // Reflect/another call, aliased, destructured or chained (`.constructor.constructor`) it is the `Function` constructor spelled out.
+        let cur: ts.Node = n
+        while (cur.parent && (ts.isParenthesizedExpression(cur.parent) || ts.isAsExpression(cur.parent) || ts.isNonNullExpression(cur.parent) || ts.isTypeAssertionExpression(cur.parent) || ts.isSatisfiesExpression(cur.parent))) cur = cur.parent
+        const p = cur.parent
+        const compared = !!p && ts.isBinaryExpression(p) && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken].includes(p.operatorToken.kind)
+        const named = !!p && ts.isPropertyAccessExpression(p) && p.expression === cur && p.name.text === 'name' && !(p.parent && (ts.isCallExpression(p.parent) && p.parent.expression === p))
+        if (!compared && !named) out.push('constructor-access')
         const literal = (e: ts.Expression) => ts.isFunctionExpression(unwrap(e)) || ts.isArrowFunction(unwrap(e))
         if (literal(receiver) || (ts.isCallExpression(receiver) && unwrap(receiver.expression).getText(file) === 'Object.getPrototypeOf'
           && receiver.arguments[0] && literal(receiver.arguments[0]))) out.push('function-literal.constructor')

@@ -1675,18 +1675,26 @@ export function createDeliveryService(deps: DeliveryDeps) {
   /** A refusal belongs to one piece, never to the fleet. IO/lock failures retain the tick's outer handling. */
   const tickRefusal = async (e: unknown, actions: string[], piece?: { id: string; taskId: string }) => {
     if (!(e instanceof GuardRefused)) throw e
-    const reason = `guard-refused ${e.piece}: ${e.code}: ${e.message}`
+    // Both languages in one sentence, like the other [fluxo entrega] notes: the English part keeps the machine-readable prefix.
+    const reason = `guard-refused ${e.piece}: ${e.code}: ${e.message} | recusa do guarda em ${e.piece}: ${e.code}: ${e.messagePt}`
     actions.push(reason)
+    refusedNow.add(e.piece)
     const r = await d.store.get(e.piece)
     if (r) {
       try { await writeNote(r, reason, true); return }
       catch (noteError) { if (!(noteError instanceof GuardRefused)) throw noteError }
     }
     // A missing piece (adoption refused) or an already short history cannot accept a delivery note.
-    // Preserve its floor and leave the same named note on the board instead.
+    // Preserve its floor and leave the same named note on the board instead — ONCE per (piece, code): the same refusal repeating
+    // every minute is one fact, not 1440 comments a day (R7-2). It is written again when the refusal changes or clears and returns.
+    if (refusalSeen.get(e.piece) === e.code) return
+    refusalSeen.set(e.piece, e.code)
     const taskId = r?.taskId ?? piece?.taskId ?? (await d.facts.subtask(e.piece).catch(() => null))?.taskId
     if (taskId) await d.board.comment(taskId, e.piece, `[fluxo entrega] ${reason}`).catch(() => undefined)
   }
+  /** The refusal each piece last put on the board (piece → code), and the pieces refused during the tick that is running. */
+  const refusalSeen = new Map<string, string>()
+  const refusedNow = new Set<string>()
 
   /** Keep the OFF batch/lock behavior; under A isolate each piece before applying any effects. */
   const tickBatch = async (ids: string[], actions: string[], write: (ids: string[]) => Promise<unknown>) => {
@@ -1973,9 +1981,10 @@ export function createDeliveryService(deps: DeliveryDeps) {
           else await d.board.comment(r.taskId, r.subtaskId, `[fluxo entrega] publicado na ${e.tag ?? 'tag'} — prova: PR #${e.pr ?? '?'}, ${e.via ?? 'merge'}.`).catch(() => undefined)
         } else e.applied = true
       } catch (error) {
-        if (!opts.tickActions || !(error instanceof GuardRefused)) throw error
+        // A refusal belongs to ONE piece in every door (R7-1): the tick also leaves a note, the manual verb reports it on the entry.
+        if (!(error instanceof GuardRefused)) throw error
         e.applied = false; e.reason = `${error.code}: ${error.message}`; delete e.to
-        await tickRefusal(error, opts.tickActions)
+        if (opts.tickActions) await tickRefusal(error, opts.tickActions)
       }
     }
     const moved = entries.filter(e => e.to && e.applied !== false).length
@@ -2141,6 +2150,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
 
   const tickOnce = async (): Promise<{ actions: string[] }> => {
     const actions: string[] = []
+    refusedNow.clear()
     await cleanQueue(actions).catch(e => tickRefusal(e, actions))
     // ONE read of the fleet and ONE read of the board's blocked pieces per tick; null = could not be read (never "none").
     const sessions = await d.facts.sessions().catch(() => null)
@@ -2292,6 +2302,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
     await nudgeLeaders(sessions, actions).catch(e => { if (e instanceof DeliveryStoreUnreadable) throw e; actions.push(`nudge-erro: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`) })
     // CICLO.RECONCILE-2 — the review column cleans itself: proven pieces move without anyone running a verb.
     await autoReconcile(actions).catch(e => tickRefusal(e, actions))
+    for (const piece of [...refusalSeen.keys()]) if (!refusedNow.has(piece)) refusalSeen.delete(piece) // a refusal that did not repeat has cleared
     return { actions }
   }
 
@@ -2317,6 +2328,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
     reconcile: async (o: { apply?: unknown }, actor: string, opts?: { budget?: number }): Promise<ReconcileReply> => {
       try { return await reconcile(o, actor, opts) } catch (e) {
         if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
+        if (e instanceof GuardRefused) return guardFailure(e) as never
+        if (e instanceof GuardBusy) return fail(e.status, e.code, e.message) as never
         throw e
       }
     },

@@ -130,10 +130,18 @@ export async function deliveryRequest(method: string, path: string, body: Record
   }
   if (rest === 'queue-next') return { status: 200, body: await d.service.queueNext() }
   if (rest === 'reconcile') {
-    const r = await d.service.reconcile({ apply: body.apply }, actor)
+    let r: Awaited<ReturnType<typeof d.service.reconcile>>
+    try { r = await d.service.reconcile({ apply: body.apply }, actor) }
+    catch (e) {
+      // R7-1: a refusal is an answer (code + sentence in both languages), never the runtime's error page.
+      if (e instanceof GuardRefused) return { status: e.status, body: { ok: false, error: e.code, sentence: e.message, sentencePt: e.messagePt, missing: e.missing } }
+      const safe = safeError(e, { verbose: false })
+      console.error(safe.logLine)
+      return { status: 500, body: { ...safe.body, sentence: 'the reconcile could not finish' } }
+    }
     return r.ok
       ? { status: 200, body: { ok: true, apply: r.apply, moved: r.moved, unproven: r.unproven, summary: r.summary, gh: r.gh, ...(r.stopped ? { stopped: r.stopped } : {}), entries: r.entries } }
-      : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing } }
+      : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, ...('sentencePt' in r && r.sentencePt ? { sentencePt: r.sentencePt } : {}), missing: r.missing } }
   }
   if (rest === 'antigas') {
     // The "Antigas sem registro" group: { action: 'publish'|'archive', ids?: string[], all?: boolean, expect?: number, version?, reason? }.

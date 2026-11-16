@@ -76,6 +76,12 @@ it records the piece and refusal code in a tick note (a board note when there is
 OFF retains its batch writes. The tick HTTP door returns a structured code and sentence for guard refusals and uses
 `safeError` for unexpected failures.
 
+The manual `reconcile` verb isolates a refusal per piece exactly as the tick does: the refused entry reports
+`applied: false` with the code and sentence, the other pieces still move, and the route answers a structured code with
+the sentence in English and Portuguese (`safeError` for anything else, never the runtime's error page). A piece whose
+refusal persists leaves ONE board note per (piece, code), in both languages, until the refusal changes or clears
+(a tick in which it is not refused) and returns; a delivery record's `tickNote` is overwritten, never accumulated.
+
 The supplementary inventories parse executable TypeScript/JavaScript ASTs. Context must occupy the
 writer's actual context argument; words in comments, titles and callbacks do not count. The historical
 call identities and raw writer identities from `1b1c8a941` live in `guard-inventory.fixture.json` and have
@@ -104,5 +110,8 @@ unshipped Playwright driver is exempted by exact path and source digest; changes
 Deliberately obfuscated constructs such as `Reflect.get` with assembled names remain outside this lint's threat model.
 Literal `.eval`/`.Function` and `['eval']`/`['Function']` accesses on those global receivers are also forbidden, as are
 `.constructor`/`['constructor']` on function or arrow literals and on `Object.getPrototypeOf` of such a literal.
+On ANY receiver, a `.constructor` / `['constructor']` access (or a destructured `constructor`) is forbidden unless its only
+use is an identity comparison (`=== !== == !=`) or a `.name` read: `x.constructor(...)`, `new x.constructor`,
+`x.constructor.constructor`, `Reflect.construct(x.constructor, …)`, an alias or an argument all reach `Function`.
 This includes `Reflect.construct`/`Reflect.apply` with `Function` as the target. Runtime-built strings and data-URL
 imports remain outside this round's threat model. Exemptions remain fixed by exact path and digest.
