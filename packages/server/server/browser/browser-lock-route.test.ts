@@ -172,7 +172,7 @@ describe('the padlock at the door', () => {
   test('the status carries each session browser\'s padlock; the personal one carries none', async () => {
     const f = fixture()
     await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
-    await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://x/' }, f.deps)
+    await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://x/' }, { ...f.deps, caller: () => ({ kind: 'person', via: 'process', pid: 1 }) })
     await browserRoute('POST', '/api/browser/lock', { owner: 'aaa', lock: 'unlocked' }, f.deps)
     const st = (await browserRoute('GET', '/api/browser/status', undefined, f.deps))!.body as { live: any[] }
     expect(st.live.find(e => e.key === 's-aaa').lock).toMatchObject({ mode: 'unlocked', held: 0 })
@@ -183,7 +183,7 @@ describe('the padlock at the door', () => {
     const f = fixture()
     await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
     await browserRoute('POST', '/api/browser/lock', { owner: 'aaa', lock: 'unlocked' }, f.deps)
-    expect((await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://x/' }, f.deps))?.body).toEqual({ ok: true, action: 'navigate' })
+    expect((await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://x/' }, { ...f.deps, caller: () => ({ kind: 'person', via: 'process', pid: 1 }) }))?.body).toEqual({ ok: true, action: 'navigate' })
   })
 
   // QA S3 mutant Q1: marking `evaluate` as a read passed every test. It is an ACTION (it runs code on the page).

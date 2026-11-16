@@ -74,13 +74,35 @@ describe('browserRoute', () => {
   })
 
   test('the personal browser refuses a request carrying a session identity — even a valid one', async () => {
-    const f = fakeDeps()
+    const f = fakeDeps({ caller: () => ({ kind: 'person', via: 'process', pid: 1 }) })
     const r = await browserRoute('POST', '/api/browser/personal/navigate', { session: proof('aaa'), url: 'http://a/' }, f.deps)
     expect(r).toMatchObject({ status: 403, body: { error: 'session_cannot_drive_personal' } })
     const ok = await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://a/' }, f.deps)
     expect(ok?.status).toBe(200)
     expect(f.ran.map(x => x.key)).toEqual(['personal'])
     expect((await browserRoute('POST', '/api/browser/personal/evaluate', { expression: '1' }, f.deps))?.status).toBe(404)
+  })
+
+  test('F2: a managed session WITHOUT `session` in the body is refused on every personal route, by the socket', async () => {
+    const caller = { kind: 'session' as const, pid: 9, managedId: 'aaa' }
+    const f = fakeDeps({ caller: () => caller })
+    for (const action of ['navigate', 'snapshot', 'screenshot', 'click', 'tab_new']) {
+      const r = await browserRoute('POST', `/api/browser/personal/${action}`, { url: 'http://a/', ref: 'e1' }, f.deps)
+      expect(r).toMatchObject({ status: 403, body: { ok: false, error: 'session_cannot_drive_personal' } })
+      expect(typeof (r!.body as any).sentence).toBe('string')
+    }
+    expect(f.started).toEqual([])
+    expect(f.ran).toEqual([])
+  })
+
+  test('F2: an unidentified caller fails closed, an absent identifier too; the person still works', async () => {
+    const f1 = fakeDeps({ caller: () => ({ kind: 'unknown', reason: 'no-proc' }) })
+    expect(await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://a/' }, f1.deps)).toMatchObject({ status: 403, body: { error: 'caller_unidentified' } })
+    const f2 = fakeDeps()
+    expect(await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://a/' }, f2.deps)).toMatchObject({ status: 403, body: { error: 'caller_unidentified' } })
+    const f3 = fakeDeps({ caller: () => ({ kind: 'person', via: 'process', pid: 1 }) })
+    expect((await browserRoute('POST', '/api/browser/personal/navigate', { url: 'http://a/' }, f3.deps))?.status).toBe(200)
+    expect(f3.ran.map(x => x.key)).toEqual(['personal'])
   })
 
   test('a session that ended gets no browser', async () => {

@@ -23,10 +23,10 @@ import type { PanelId } from './panelSlots'
  * right. Composed from the two lucide icons so it follows `currentColor` and the rail's sizing like every
  * other panel icon — never a separate asset.
  */
-export function GlobeSearchIcon({ size = 14 }: { size?: number }) {
+export function GlobeSearchIcon({ size = 14, style }: { size?: number; style?: import('react').CSSProperties }) {
   const lens = Math.max(8, Math.round(size * 0.55))
   return (
-    <span aria-hidden="true" data-globe-search style={{ position: 'relative', display: 'inline-flex', width: size, height: size, flexShrink: 0 }}>
+    <span aria-hidden="true" data-globe-search style={{ position: 'relative', display: 'inline-flex', width: size, height: size, flexShrink: 0, ...style }}>
       <Globe size={size} />
       <span style={{
         position: 'absolute', right: -Math.round(size * 0.2), bottom: -Math.round(size * 0.2), display: 'inline-flex',

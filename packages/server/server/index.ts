@@ -3943,6 +3943,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const owner = parseStreamOwner(url.searchParams.get('owner'))
         const tab = parseStreamTab(url.searchParams.get('tab'))
         if (!owner || tab === false) return jsonOut({ ok: false, error: 'bad_request' }, 400)
+        // S10/F2: the person's own browser is read by the person only — by the socket, before anything else.
+        if (owner.kind === 'personal') {
+          const { streamOwnerRefusal } = await import('./browser/browser-caller')
+          const refused = streamOwnerRefusal(owner, await identify())
+          if (refused) return jsonOut({ ok: false, error: refused.error, sentence: refused.sentence, ...(refused.why ? { why: refused.why } : {}) }, refused.status)
+        }
         const key = browserStreamTarget(browserOpts, owner)
         if (!key) return jsonOut({ ok: false, error: 'no_browser', sentence: 'This browser is not open.' }, 404)
         if (browserStreamAtCapacity(browserOpts)) return jsonOut({ ok: false, error: 'too_many_streams' }, 503)
@@ -3997,7 +4003,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const audit = (ev: { action: 'browser.lock' | 'browser.unlock'; managedId: string }) =>
           void writeAudit({ action: ev.action, ip: clientIp, targetId: ev.managedId })
         // F1: only the padlock route needs the caller; it is read once, before the route decides.
-        const lockCaller = url.pathname === '/api/browser/lock' ? await identify() : null
+        // S10/F2: the personal routes read it too — the person's browser is the person's, by the socket.
+        const lockCaller = url.pathname === '/api/browser/lock' || url.pathname.startsWith('/api/browser/personal/') ? await identify() : null
         // S4b: an unlock spends the person's single-use vault grant (header, never a URL), bound to the same
         // HTTP session the vault route minted it for, on loopback only. The socket check stays as a hint.
         const ownerProof = async (managedId: string) => {

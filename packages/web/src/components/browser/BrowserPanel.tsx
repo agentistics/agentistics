@@ -76,15 +76,28 @@ export function BrowserPanel({ lang, onClose, hideCloseButton, controls, openStr
     if (!n.ok) { setRefusal(n.sentence); return }
     await run('navigate', { url: n.url, ...(live && activeId ? { tab: activeId } : {}) })
   }
+  // F1: a picked tab STAYS chosen — the stream (and the input socket) re-open on THAT tab, because the server
+  // resolves a tab-less subscription once, at subscribe. Left at null the strip marked the new tab and the
+  // screen and address stayed on the old one.
   const pick = async (key: string) => {
     setListOpen(false)
-    setTab(null)
+    setTab(key)
     await run('tab_select', { tab: key })
   }
   const closeTab = async (key: string) => {
     if (key === tab) setTab(null)
     await run('tab_close', { tab: key })
   }
+  // A new tab becomes the server's active one: stop pinning the old choice and follow it.
+  const newTab = async () => {
+    setTab(null)
+    await run('tab_new')
+  }
+  // A chosen tab that no longer exists (closed from the page, a popup, another window) hands the choice back.
+  const stateTabs = screen.state?.tabs
+  useEffect(() => {
+    if (tab && stateTabs && stateTabs.length > 0 && !stateTabs.some(t => t.id === tab)) setTab(null)
+  }, [tab, stateTabs])
 
   const items: TabStripItem[] = tabs.map(t => ({
     key: t.id, title: t.title || (pt ? 'Nova aba' : 'New tab'), tooltip: t.title, closable: true,
@@ -102,7 +115,7 @@ export function BrowserPanel({ lang, onClose, hideCloseButton, controls, openStr
         {!hideCloseButton && (
           <button
             type="button" className="ag-tap-icon" onClick={onClose} title={pt ? 'Fechar' : 'Close'} aria-label={pt ? 'Fechar o navegador' : 'Close the browser'}
-            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 22, flexShrink: 0, borderRadius: 6, padding: 0, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: mobile ? 44 : 26, height: mobile ? 44 : 22, flexShrink: 0, borderRadius: 6, padding: 0, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer' }}
           ><X size={13} /></button>
         )}
         {controls}
@@ -113,7 +126,7 @@ export function BrowserPanel({ lang, onClose, hideCloseButton, controls, openStr
           tablistLabel={pt ? 'Abas do navegador' : 'Browser tabs'}
           list={{ label: pt ? 'Abas do navegador' : 'Browser tabs', count: items.length, expanded: listOpen, onToggle: () => setListOpen(o => !o) }}
           mobileTabWidth="62%"
-          plus={{ label: pt ? 'Nova aba' : 'New tab', onClick: () => void run('tab_new'), disabled: busy }}
+          plus={{ label: pt ? 'Nova aba' : 'New tab', onClick: () => void newTab(), disabled: busy }}
           onPick={k => void pick(k)}
           onClose={k => void closeTab(k)}
         >
@@ -152,7 +165,7 @@ export function BrowserPanel({ lang, onClose, hideCloseButton, controls, openStr
             {pt ? 'Digite um endereço acima. As abas ficam aqui, ao lado da conversa.' : 'Type an address above. Your tabs stay here, next to the conversation.'}
           </div>
           <button
-            type="button" disabled={busy} onClick={() => void run('tab_new')}
+            type="button" disabled={busy} onClick={() => void newTab()}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: mobile ? 44 : 30, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border-strong, var(--border))', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
           ><Plus size={13} aria-hidden />{pt ? 'Nova aba em branco' : 'New blank tab'}</button>
         </div>

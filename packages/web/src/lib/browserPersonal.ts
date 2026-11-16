@@ -46,9 +46,28 @@ export type PersonalOutcome = { ok: true } | { ok: false; sentence: string }
 
 export type PersonalAction = 'navigate' | 'back' | 'forward' | 'reload' | 'tab_new' | 'tab_select' | 'tab_close' | 'close'
 
+/** Server refusal codes the panel knows, said in Portuguese (the server's own sentences are English). */
+function ptSentenceFor(error: unknown, reason: unknown): string | null {
+  switch (error) {
+    case 'blocked':
+      return reason === 'scheme' ? 'Recusado: esse tipo de endereço (file:, chrome:, devtools:…) nunca é carregado. As outras portas de localhost (o seu servidor de desenvolvimento) são permitidas.'
+        : reason === 'agentistics-port' ? 'Recusado: esse endereço aponta para a porta do próprio agentistics. As outras portas de localhost (o seu servidor de desenvolvimento) são permitidas.'
+        : reason === 'debug-port' ? 'Recusado: esse endereço aponta para a porta de depuração de outro navegador. As outras portas de localhost (o seu servidor de desenvolvimento) são permitidas.'
+        : 'Recusado: esse endereço não é válido.'
+    case 'session_cannot_drive_personal': return 'Uma sessão não pode usar o navegador da pessoa; as ferramentas dela alcançam só o navegador da própria sessão.'
+    case 'caller_unidentified': return 'Não foi possível confirmar que o pedido vem da pessoa (e não de uma sessão). Use a tela do agentistics.'
+    case 'browser_disabled': return 'O navegador está desligado nesta máquina (Ajustes).'
+    default: return null
+  }
+}
+
 /** The server's refusal, in words (a blocked URL, no Chromium here, the switch off…). */
 export function personalFailure(status: number, body: unknown, pt: boolean): string {
-  const b = body && typeof body === 'object' ? body as { sentence?: unknown; error?: unknown } : {}
+  const b = body && typeof body === 'object' ? body as { sentence?: unknown; error?: unknown; reason?: unknown } : {}
+  if (pt) {
+    const known = ptSentenceFor(b.error, b.reason)
+    if (known) return known
+  }
   if (typeof b.sentence === 'string' && b.sentence.trim()) return b.sentence
   if (status === 403 || status === 404) return pt ? 'O navegador não está disponível neste perfil ou foi desligado.' : 'The browser is not available in this profile or was turned off.'
   return pt ? 'Não foi possível usar o navegador agora.' : 'Could not use the browser right now.'

@@ -37,6 +37,21 @@ describe('normalizeAddress', () => {
   })
 })
 
+describe('personalFailure — a known server code reads in the interface language (F5)', () => {
+  const body = (error: string, extra: Record<string, unknown> = {}) => ({ ok: false, error, sentence: `EN ${error}`, ...extra })
+  test('blocked by reason, a session caller, an unidentified caller, the switch off: pt sentences; en keeps the server\'s', () => {
+    expect(personalFailure(200, body('blocked', { reason: 'scheme' }), true)).toMatch(/^Recusado/)
+    expect(personalFailure(200, body('blocked', { reason: 'agentistics-port' }), true)).toMatch(/^Recusado/)
+    expect(personalFailure(200, body('blocked', { reason: 'debug-port' }), true)).toMatch(/^Recusado/)
+    expect(personalFailure(200, body('blocked', { reason: 'parse' }), true)).toMatch(/^Recusado/)
+    expect(personalFailure(403, body('session_cannot_drive_personal'), true)).toContain('pessoa')
+    expect(personalFailure(403, body('caller_unidentified'), true)).toContain('pessoa')
+    expect(personalFailure(403, body('browser_disabled'), true)).toContain('desligado')
+    expect(personalFailure(200, body('blocked', { reason: 'scheme' }), false)).toBe('EN blocked')
+    expect(personalFailure(200, body('something_new'), true)).toBe('EN something_new')
+  })
+})
+
 describe('personalAct', () => {
   test('posts to the personal route and is ok on a 200', async () => {
     const seen: Array<[string, unknown]> = []

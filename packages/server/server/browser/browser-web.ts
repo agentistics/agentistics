@@ -33,7 +33,7 @@ import { ownerKey, statusTitle, statusUrl, type BrowserOwner } from './browser-s
 import type { HarnessId } from '@agentistics/core'
 import { decideLockRequest, holdMsFor, ownerProofRefusal, type OwnerProofVerdict, type PageFacts } from './browser-lock'
 import { BrowserLocks } from './browser-lock-host'
-import { callerRefusal, type CallerVerdict } from './browser-caller'
+import { callerRefusal, personalCallerRefusal, type CallerVerdict } from './browser-caller'
 
 let host: BrowserHost | null = null
 let exitHooked = false
@@ -212,6 +212,13 @@ export async function browserRoute(method: string, pathname: string, body: unkno
   const route = m[1] as 'session' | 'personal'
   const action = m[2]!
   const b = (body && typeof body === 'object' && !Array.isArray(body) ? body : {}) as Record<string, unknown>
+
+  // S10/F2: the person's own browser is decided by the SOCKET, never by the body (`session` omitted is still a
+  // session). Absent `caller` = cannot identify = refused (fail-closed). Before anything else: not even a 404.
+  if (route === 'personal') {
+    const refused = personalCallerRefusal(deps.caller ? deps.caller() : { kind: 'unknown', reason: 'no-peer' })
+    if (refused) return { status: refused.status, body: { ok: false, error: refused.error, sentence: refused.sentence, ...(refused.why ? { why: refused.why } : {}) } }
+  }
 
   const s = b.session as { id?: unknown; token?: unknown } | undefined
   const carriesSession = s !== undefined && s !== null

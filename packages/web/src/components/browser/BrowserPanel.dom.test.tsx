@@ -204,6 +204,103 @@ describe('open (b1-open)', () => {
   })
 })
 
+const tabEls = () => Array.from(host.querySelectorAll('[data-browser-tab]')) as HTMLElement[]
+const state2 = (id: string, url: string, title: string, tabs = state().tabs) => state({ tab: id, activeTab: id, url, title, tabs: tabs.map(t => ({ ...t, active: t.id === id })) })
+const feedFor = (id: string, url: string, title: string) => act(() => { stream().emit('state', state2(id, url, title)); stream().emit('frame', { ...frame, tab: id, seq: 2, url, title }) })
+
+describe('F1 — switching tab switches the screen AND the address (S10 QA)', () => {
+  test('a picked tab STAYS chosen: the stream and the input socket re-open on that tab, the old stream closes', async () => {
+    render({ live: true }); feed()
+    const first = stream()
+    await act(async () => { tabEls()[1]!.click() })
+    expect(posts.at(-1)).toEqual(['/api/browser/personal/tab_select', { tab: 'T2' }])
+    expect(first.closed).toBe(true)
+    expect(stream().url).toBe('/api/browser/stream?owner=personal&tab=T2')
+    expect(FakeWs.all.at(-1)!.url).toBe(`ws://${window.location.host}/api/browser/input?owner=personal&tab=T2`)
+    feedFor('T2', 'https://exemplo.com/loja', 'Loja exemplo')
+    expect((q('[data-browser-url-input]') as HTMLInputElement).value).toBe('exemplo.com/loja')
+    expect(host.querySelector('[data-browser-screen] img')?.getAttribute('src')).toBe(`data:image/jpeg;base64,${JPEG}`)
+  })
+
+  test('the list button picks a tab the same way', async () => {
+    render({ live: true }); feed()
+    await act(async () => { (q('[data-browser-tabs] button[aria-label="Abas do navegador"]') as HTMLButtonElement).click() })
+    await act(async () => { (Array.from(host.querySelectorAll('[data-browser-tab-list] [role="menuitem"]'))[2] as HTMLElement).click() })
+    expect(stream().url).toBe('/api/browser/stream?owner=personal&tab=T3')
+  })
+
+  test('navigating, back and reload then act on the CHOSEN tab', async () => {
+    render({ live: true }); feed()
+    await act(async () => { tabEls()[1]!.click() })
+    feedFor('T2', 'https://exemplo.com/loja', 'Loja exemplo')
+    const [back] = Array.from(host.querySelectorAll('[data-browser-address] button')) as HTMLButtonElement[]
+    await act(async () => { back!.click() })
+    expect(posts.at(-1)).toEqual(['/api/browser/personal/back', { tab: 'T2' }])
+  })
+
+  test('"+" follows the new tab the server makes active (the stream re-opens with no tab pinned)', async () => {
+    render({ live: true }); feed()
+    await act(async () => { tabEls()[1]!.click() })
+    expect(stream().url).toContain('tab=T2')
+    await act(async () => { (q('[data-browser-tabs] button[aria-label="Nova aba"]') as HTMLButtonElement).click() })
+    expect(posts.at(-1)).toEqual(['/api/browser/personal/tab_new', {}])
+    expect(stream().url).toBe('/api/browser/stream?owner=personal')
+  })
+
+  test('a chosen tab that no longer exists (closed elsewhere) lets the panel follow the server again', async () => {
+    render({ live: true }); feed()
+    await act(async () => { tabEls()[1]!.click() })
+    act(() => { stream().emit('state', state({ tab: 'T2', activeTab: 'T1', tabs: [{ id: 'T1', title: 'Documentação', active: true }, { id: 'T3', title: 'Busca', active: false }] })) })
+    expect(stream().url).toBe('/api/browser/stream?owner=personal')
+  })
+
+  test('closing the chosen tab frees the choice', async () => {
+    render({ live: true }); feed()
+    await act(async () => { tabEls()[1]!.click() })
+    const x = tabEls()[1]!.querySelector('[data-tab-close]') as HTMLElement
+    await act(async () => { x.click() })
+    expect(posts.at(-1)).toEqual(['/api/browser/personal/tab_close', { tab: 'T2' }])
+    expect(stream().url).toBe('/api/browser/stream?owner=personal')
+  })
+})
+
+describe('F6 — after a link the address shows the URL, never the page title', () => {
+  test('the address follows the page\'s url while the tab keeps the title', () => {
+    render({ live: true }); feed()
+    feedFor('T1', 'https://exemplo.com/loja', 'Loja exemplo')
+    const input = q('[data-browser-url-input]') as HTMLInputElement
+    expect(input.value).toBe('exemplo.com/loja')
+    expect(input.value).not.toContain('Loja exemplo')
+  })
+})
+
+describe('F3 — the phone\'s close button is a 44px target', () => {
+  test('on a phone the header close is 44×44; on a desktop it stays the compact 26×22', () => {
+    render({ live: false })
+    const desk = host.querySelector('button[aria-label="Fechar o navegador"]') as HTMLElement
+    expect([desk.style.width, desk.style.height]).toEqual(['26px', '22px'])
+    act(() => root.unmount()); root = createRoot(host)
+    const w = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true })
+    try {
+      render({ live: false })
+      const phone = host.querySelector('button[aria-label="Fechar o navegador"]') as HTMLElement
+      expect([phone.style.width, phone.style.height]).toEqual(['44px', '44px'])
+    } finally { Object.defineProperty(window, 'innerWidth', { value: w, configurable: true }) }
+  })
+})
+
+describe('F5 — the server\'s refusal reads in the interface language', () => {
+  test('a blocked file: address says it in Portuguese in the pt panel', async () => {
+    render({ live: false, post: post({ status: 200, body: { ok: false, error: 'blocked', reason: 'scheme', sentence: 'Refused: file:///etc/passwd points at that kind of address (file:, chrome:, devtools:… are never loaded).' } }) })
+    type(q('[data-browser-url-input]') as HTMLInputElement, 'file:///etc/passwd')
+    await act(async () => { submit() })
+    const t = q('[data-browser-refusal]')?.textContent ?? ''
+    expect(t).toContain('Recusado')
+    expect(t).not.toContain('Refused')
+  })
+})
+
 describe('the panel header (b1-open)', () => {
   test('globe+search, "Navegador", no Flutuar until S11, own close only when the slot has no fixed controls', () => {
     render({ live: false })

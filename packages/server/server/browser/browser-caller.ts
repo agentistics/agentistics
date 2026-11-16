@@ -170,6 +170,34 @@ export function callerRefusal(v: CallerVerdict): { status: 403; error: 'session_
   }
 }
 
+export interface PersonalRefusal { status: 403; error: 'session_cannot_drive_personal' | 'caller_unidentified'; sentence: string; why?: string }
+
+/**
+ * S10/F2: the person's OWN browser (`/api/browser/personal/*` and `/api/browser/stream?owner=personal`) is the
+ * person's — decided by the SOCKET, never by the body (a session that omits `session` is still a session; it
+ * read and drove the page with a plain `curl`). A session is refused, and so is a caller that cannot be
+ * identified (fail-closed, as the WS input already is). The same code and sentence on every door.
+ */
+export function personalCallerRefusal(v: CallerVerdict, lang: 'en' | 'pt' = 'en'): PersonalRefusal | null {
+  if (v.kind === 'person') return null
+  const pt = lang === 'pt'
+  if (v.kind === 'session') {
+    return {
+      status: 403, error: 'session_cannot_drive_personal',
+      sentence: pt ? 'Uma sessão não pode usar o navegador da pessoa; as ferramentas dela alcançam só o navegador da própria sessão.' : "A session cannot use the person's own browser; its tools reach only the browser of the session itself.",
+    }
+  }
+  return {
+    status: 403, error: 'caller_unidentified', why: v.reason,
+    sentence: pt ? 'Não foi possível confirmar que o pedido vem da pessoa (e não de uma sessão). Use a tela do agentistics.' : 'Could not confirm that this request comes from the person (not from a session). Use the agentistics screen.',
+  }
+}
+
+/** The stream door: only the personal owner needs the caller check (a session's own stream is read as before). */
+export function streamOwnerRefusal(owner: { kind: 'personal' } | { kind: 'session'; managedId: string }, v: CallerVerdict, lang: 'en' | 'pt' = 'en'): PersonalRefusal | null {
+  return owner.kind === 'personal' ? personalCallerRefusal(v, lang) : null
+}
+
 /**
  * S4b/S4c: the early door on `POST /api/vault/browser-unlock`. A KNOWN session may not even ASK for the
  * proof — it would raise a Hello / Touch ID dialog on the person's desk. Returns the 403 to send (body
