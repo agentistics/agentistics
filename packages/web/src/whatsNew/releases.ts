@@ -20,6 +20,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Ao vivo: abre bem mais rápido logo depois que o aplicativo inicia.',
         en: 'Live: opens much faster right after the app starts.',
       },
+      {
+        pt: 'Tarefas: a aba Atividade, a Visualização e o botão de ordenação em português; reserva cabe em uma linha.',
+        en: 'Tasks: the Activity tab, the View panel and the sort button now speak Portuguese; the claim pill fits on one line.',
+      },
     ],
     fixes: [],
   },

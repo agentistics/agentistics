@@ -306,7 +306,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
       if (st !== last) {
         last = st
         rowItems.push({
-          kind: 'head', status: st, color: statusStyle(p.statuses, st).color,
+          kind: 'head', status: st, color: statusStyle(p.statuses, st, p.lang).color,
           count: sorted.filter(x => x[0]!.subtask.status === st).length,
         })
       }

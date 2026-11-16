@@ -65,7 +65,7 @@ export function SubtaskFilterMenu({ value, onChange, sessions, statuses, lang, l
     }
   }, [open])
 
-  const map = liveStatusMap(statuses)
+  const map = liveStatusMap(statuses, lang)
   const sections: { key: keyof SubtaskFilterState; title: string; options: Option[] }[] = [
     {
       key: 'status', title: copy.status,

@@ -45,7 +45,7 @@ export function StatusChip({ value, onPick, lang, statuses, compact, block = tru
   // Built here rather than passed in, so no caller can offer a different set of statuses — the
   // point of the component is that the menu is the same everywhere. Every entry's label/colour is
   // the LIVE one (a person's rename or custom status wins over any fixed word).
-  const map = liveStatusMap(statuses)
+  const map = liveStatusMap(statuses, lang)
   const order = liveStatusOrder(statuses)
   const options = order.map(id => ({
     value: id,

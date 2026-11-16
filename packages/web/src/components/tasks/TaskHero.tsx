@@ -56,7 +56,7 @@ export function Ring({ done, inProgress, blocked, total, size, statuses, counts,
   const r = 36
   const c = 2 * Math.PI * r
   const statusCounts = progress.counts
-  const segments = liveStatusOrder(statuses).map(id => ({ id, count: statusCounts[id] ?? 0, color: statusStyle(statuses, id).color, label: statusStyle(statuses, id).label }))
+  const segments = liveStatusOrder(statuses).map(id => ({ id, count: statusCounts[id] ?? 0, color: statusStyle(statuses, id, lang).color, label: statusStyle(statuses, id, lang).label }))
   const model = progressTooltipModel(progress.done, progress.total, pct, statusCounts, statuses, lang, titles)
   const [tip, setTip] = useState<{ x: number; y: number } | null>(null)
   let offset = 0
@@ -164,7 +164,7 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
           <Ring
             done={subsDone} inProgress={subsInProgress} blocked={subsBlocked} total={subsTotal}
             size={isMobile ? 56 : 68} statuses={statuses} counts={subtaskCounts}
-            titles={effectiveSubtasks.filter(s => s.status === 'in_progress' || s.status === 'in_review').map(s => `${statusStyle(statuses, s.status).label}: ${s.title}`)} lang={lang}
+            titles={effectiveSubtasks.filter(s => s.status === 'in_progress' || s.status === 'in_review').map(s => `${statusStyle(statuses, s.status, lang).label}: ${s.title}`)} lang={lang}
           />
         )}
         <div style={{ minWidth: 0, flex: 1 }}>

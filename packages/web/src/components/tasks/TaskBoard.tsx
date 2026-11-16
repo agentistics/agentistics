@@ -43,7 +43,7 @@ function Card({ row, onOpen, live, nowMs, statuses, lang = 'en' }: {
   statuses: readonly TaskStatusDef[] | null
 }) {
   const pending = useStatusPending(`/api/tasks/${encodeURIComponent(row.task.id)}`)
-  const s = statusStyle(statuses, row.task.status)
+  const s = statusStyle(statuses, row.task.status, lang)
   const counts = row.counts
   const priority = row.task.priority && row.task.priority !== 'none'
     ? PRIORITY[row.task.priority]
@@ -390,7 +390,7 @@ export function BoardView(p: BoardViewProps) {
             }}
           >
             {lane.columns.filter(col => !hiddenCols.has(col.status)).map(col => {
-              const s = statusStyle(p.statuses, col.status)
+              const s = statusStyle(p.statuses, col.status, p.lang)
               const limit = p.wip[col.status]
               const over_ = limit !== undefined && col.rows.length > limit
               const isOverCol = over?.lane === lane.name && over.status === col.status

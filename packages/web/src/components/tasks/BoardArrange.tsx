@@ -81,7 +81,7 @@ export function BoardArrange(p: BoardArrangeProps) {
   const isMobile = useIsMobile()
   const copy = boardCopy(p.lang ?? 'en')
   const statusOrder = liveStatusOrder(p.statuses)
-  const statusMap = liveStatusMap(p.statuses)
+  const statusMap = liveStatusMap(p.statuses, p.lang)
   const LANE_LABEL = LANE_LABELS[p.lang ?? 'en']
   const limited = Object.keys(p.wip).length
 
