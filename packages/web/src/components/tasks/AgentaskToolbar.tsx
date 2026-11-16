@@ -24,7 +24,7 @@ import { DEFAULT_PREFS } from './boardPrefs'
 import { button, field, liveStatusMap, microLabel, type BoardStatus } from './board'
 import type { BoardView, GroupBy, LaneKey } from './boardPrefs'
 import { LANE_KEYS } from './boardPrefs'
-import type { Lang } from './copy'
+import { boardCopy, type Lang } from './copy'
 import { PanelMenu } from './PickerMenu'
 import { SearchField } from './SearchField'
 import { moveStatus } from './statusDefaults'
@@ -104,7 +104,7 @@ export function activeChips(s: ViewState, lang: Lang): Array<{ id: string; label
   if (s.view === 'board' && s.lanes !== 'none') out.push({ id: 'lanes', label: `${t.lanes}: ${t[s.lanes]}`, clear: 'lanes' })
   if (s.view === 'table' && s.groupBy === 'type') out.push({ id: 'groupBy', label: `${t.group} ${t.byType}`, clear: 'groupBy' })
   if (s.view === 'board' && (s.sort.key !== PLAIN_SORT.key || s.sort.dir !== PLAIN_SORT.dir)) {
-    const k = BOARD_SORTS.find(x => x.key === s.sort.key)?.label ?? String(s.sort.key)
+    const k = boardCopy(lang).list.keys[s.sort.key] ?? BOARD_SORTS.find(x => x.key === s.sort.key)?.label ?? String(s.sort.key)
     out.push({ id: 'sort', label: `${t.sort}: ${k} ${s.sort.dir === 'asc' ? '↑' : '↓'}`, clear: 'sort' })
   }
   const wip = Object.keys(s.wip).length
@@ -218,7 +218,7 @@ export function ViewPanel({ lang, state: s, actions: a, statuses }: {
                     onClick={() => a.onSort(on && o.key !== 'manual'
                       ? { key: o.key, dir: s.sort.dir === 'asc' ? 'desc' : 'asc' }
                       : { key: o.key, dir: 'asc' })}>
-                    {o.key === 'manual' ? t.handOrder : o.label}
+                    {o.key === 'manual' ? t.handOrder : (boardCopy(lang).list.keys[o.key] ?? o.label)}
                     {on && o.key !== 'manual' && (s.sort.dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
                   </button>
                 )

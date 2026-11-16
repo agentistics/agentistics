@@ -154,10 +154,10 @@ export function BoardArrange(p: BoardArrangeProps) {
         <ViewSortMenu
           label={copy.viewBar.sort}
           title={copy.viewBar.sortBy}
-          options={BOARD_SORTS.filter(s => s.key !== 'manual')}
+          options={BOARD_SORTS.filter(s => s.key !== 'manual').map(s => ({ ...s, label: copy.list.keys[s.key] ?? s.label }))}
           current={p.sort.key === 'manual' ? null : p.sort}
           onChange={next => p.onSort(next ?? { key: 'manual', dir: 'asc' })}
-          defaultLabel="Hand order"
+          defaultLabel={copy.list.handOrder}
           ascLabel={copy.viewBar.asc}
           descLabel={copy.viewBar.desc}
           note="A card nothing could price sorts last whichever way the arrow points."
