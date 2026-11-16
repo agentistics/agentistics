@@ -162,6 +162,45 @@ export function nextDeadline(state: LockState): number | null {
 }
 
 // ---------------------------------------------------------------------------------------------------
+// S4b — the person's vault proof that an unlock carries.
+
+/** What the padlock route needs to know about THIS request's owner grant (`X-Agentop-Owner-Grant`). */
+export type OwnerProofVerdict =
+  | { ok: true; grantId: string }
+  | { ok: false; status: 403; error: 'owner_proof_required' | 'owner_proof_scope' | 'owner_proof_local_only' | 'owner_proof_unavailable'; sentence: string; action?: { kind: 'open-vault'; path: '/vault' } }
+
+/**
+ * PURE. A spent grant's refusal, in the person's language. `setup` = this machine's vault cannot give the
+ * proof at all (not set up, or silent protection only): the sentence says what to do and the answer carries
+ * the action that does it (open the Vault) — the person is never told to run a command.
+ */
+export function ownerProofRefusal(
+  code: 'grant-invalid' | 'grant-scope' | 'owner-proof-local-only',
+  lang: 'pt' | 'en',
+  setup: boolean,
+): Extract<OwnerProofVerdict, { ok: false }> {
+  const pt = lang === 'pt'
+  if (code === 'owner-proof-local-only') {
+    return { ok: false, status: 403, error: 'owner_proof_local_only', sentence: pt
+      ? 'Assumir o navegador de uma sessão só pode ser confirmado neste computador.'
+      : "Taking over a session's browser can only be confirmed on this computer." }
+  }
+  if (setup) {
+    return { ok: false, status: 403, error: 'owner_proof_unavailable', action: { kind: 'open-vault', path: '/vault' }, sentence: pt
+      ? 'Para assumir o navegador de uma sessão, o agentistics precisa confirmar que é você. Abra o Cofre e crie uma senha (ou ative o Windows Hello / Touch ID); depois tente de novo.'
+      : "To take over a session's browser, agentistics needs to confirm it is you. Open the Vault and set a password (or turn on Windows Hello / Touch ID), then try again." }
+  }
+  if (code === 'grant-scope') {
+    return { ok: false, status: 403, error: 'owner_proof_scope', sentence: pt
+      ? 'Essa confirmação era para o navegador de outra sessão. Confirme de novo para este.'
+      : "That confirmation was for another session's browser. Confirm again for this one." }
+  }
+  return { ok: false, status: 403, error: 'owner_proof_required', sentence: pt
+    ? 'Confirme que é você (senha do Cofre, Windows Hello ou Touch ID) para assumir este navegador. Cada confirmação vale uma vez, por 5 minutos.'
+    : 'Confirm it is you (Vault password, Windows Hello or Touch ID) to take over this browser. Each confirmation works once, for 5 minutes.' }
+}
+
+// ---------------------------------------------------------------------------------------------------
 // Changing the padlock.
 
 export type LockRequestDecision =

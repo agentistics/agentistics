@@ -31,7 +31,7 @@ import { decideDriver } from './browser-gate'
 import { createBrowserHost, type BrowserHost, type StartResult, type StopReason } from './browser-host'
 import { ownerKey, statusTitle, statusUrl, type BrowserOwner } from './browser-spec'
 import type { HarnessId } from '@agentistics/core'
-import { decideLockRequest, holdMsFor, type PageFacts } from './browser-lock'
+import { decideLockRequest, holdMsFor, ownerProofRefusal, type OwnerProofVerdict, type PageFacts } from './browser-lock'
 import { BrowserLocks } from './browser-lock-host'
 import { callerRefusal, type CallerVerdict } from './browser-caller'
 
@@ -109,6 +109,12 @@ export interface RouteDeps {
    * (fail-closed — a door wired without the check is a closed door, never an open one).
    */
   caller?: () => CallerVerdict
+  /**
+   * S4b: spend the person's single-use vault grant for THIS browser (`X-Agentop-Owner-Grant`, minted by
+   * `POST /api/vault/browser-unlock`). The proof every unlock owes — the socket check above is only a hint
+   * (a session that drops its inheritance looks like the person). ABSENT = no proof possible = refused.
+   */
+  ownerProof?: (managedId: string) => Promise<OwnerProofVerdict>
 }
 
 export interface RouteAnswer { status: number; body: unknown }
@@ -155,14 +161,35 @@ async function lockRoute(body: unknown, deps: RouteDeps): Promise<RouteAnswer> {
   const b = (body && typeof body === 'object' && !Array.isArray(body) ? body : {}) as Record<string, unknown>
   const d = decideLockRequest({ carriesSession: b.session !== undefined && b.session !== null, owner: b.owner, lock: b.lock })
   if (!d.ok) return { status: d.status, body: { ok: false, error: d.error, sentence: d.sentence } }
-  // F1: the body's word is not enough — a session that omits `session` is still a session. The socket says.
-  const refused = callerRefusal(deps.caller ? deps.caller() : { kind: 'unknown', reason: 'no-peer' })
-  if (refused) return { status: refused.status, body: { ok: false, error: refused.error, sentence: refused.sentence, ...(refused.why ? { why: refused.why } : {}) } }
+  // F1: the body's word is not enough — a session that omits `session` is still a session. The socket says
+  // so when it CAN (a known session is refused outright, whatever it carries). S4b: it cannot always — a
+  // detached child with a clean environment looks like the person — so the socket is a hint and the vault
+  // proof below is what an unlock owes. An unidentified caller (no /proc, macOS, Windows) is therefore not
+  // refused here: locking only reduces exposure, and unlocking still needs the person's proof.
+  const caller = deps.caller ? deps.caller() : { kind: 'unknown' as const, reason: 'no-peer' as const }
+  if (caller.kind === 'session') {
+    const refused = callerRefusal(caller)!
+    return { status: refused.status, body: { ok: false, error: refused.error, sentence: refused.sentence } }
+  }
   if (!deps.locks) return { status: 501, body: { ok: false, error: 'no_padlock', sentence: 'This build has no browser padlock.' } }
   const key = ownerKey({ kind: 'session', managedId: d.managedId })
   // Unlocking a browser that is not open hands the person nothing; locking is always allowed (and idempotent).
   if (d.mode === 'unlocked' && !deps.host.actionHost(key)) {
     return { status: 409, body: { ok: false, error: 'no_browser', sentence: 'This session has no browser open, so there is nothing to unlock.' } }
+  }
+  if (d.mode === 'unlocked') {
+    // Spent only once the unlock can happen (a 409 above leaves the grant for the retry).
+    const proof: OwnerProofVerdict = deps.ownerProof
+      ? await deps.ownerProof(d.managedId)
+      : ownerProofRefusal('grant-invalid', 'en', false)
+    if (!proof.ok) {
+      const { ok: _ok, status, ...rest } = proof
+      return { status, body: { ok: false, ...rest } }
+    }
+    // The person may have locked (or the browser closed) while the proof was checked.
+    if (!deps.host.actionHost(key)) {
+      return { status: 409, body: { ok: false, error: 'no_browser', sentence: 'This session has no browser open, so there is nothing to unlock.' } }
+    }
   }
   const r = deps.locks.setLock(key, d.mode, 'person', pageOf(deps, key))
   if (r.changed) deps.audit?.({ action: d.mode === 'locked' ? 'browser.lock' : 'browser.unlock', managedId: d.managedId })
@@ -282,7 +309,7 @@ export function browserLocks(opts: BrowserWebOpts): BrowserLocks {
 export function browserRouteDeps(
   opts: BrowserWebOpts,
   verify: RouteDeps['verify'],
-  extra: { harnessOf?: RouteDeps['harnessOf']; audit?: RouteDeps['audit']; caller?: RouteDeps['caller'] } = {},
+  extra: { harnessOf?: RouteDeps['harnessOf']; audit?: RouteDeps['audit']; caller?: RouteDeps['caller']; ownerProof?: RouteDeps['ownerProof'] } = {},
 ): RouteDeps {
   const h = browserHost(opts)
   return {
@@ -292,6 +319,7 @@ export function browserRouteDeps(
     harnessOf: extra.harnessOf,
     audit: extra.audit,
     caller: extra.caller,
+    ownerProof: extra.ownerProof,
     sessionLive: opts.sessionLive,
     run: async (ah, args) => {
       const { runAction } = await import('./browser-actions')

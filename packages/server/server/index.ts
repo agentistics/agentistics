@@ -1289,6 +1289,23 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const json = { ...CORS_HEADERS, 'Content-Type': 'application/json' }
       try {
         const { handleVaultHttp } = await import('./vault/http')
+        // NAVEGADOR S4b: a KNOWN session may not even ASK for the browser-unlock proof — it would raise a
+        // Hello / Touch ID dialog on the person's desk. Same socket hint as the padlock route; the proof
+        // itself is still what decides for everyone else (an unidentified caller goes on to the vault).
+        if (url.pathname === '/api/vault/browser-unlock' && req.method === 'POST') {
+          const [{ identifyCaller }, { processSessionHub }, { callerRefusal }] = await Promise.all([
+            import('./browser/browser-caller-proc'), import('./sessions/session-hub'), import('./browser/browser-caller'),
+          ])
+          const sessionPids = new Set<number>()
+          for (const r of processSessionHub()?.last()?.sessions ?? []) if (typeof r.pid === 'number') sessionPids.add(r.pid)
+          const ip = server.requestIP(req)
+          const who = identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
+          if (who.kind === 'session') {
+            await req.body?.cancel().catch(() => {})
+            const r = callerRefusal(who)!
+            return new Response(JSON.stringify({ ok: false, code: r.error, sentence: r.sentence }), { status: 403, headers: { ...json, 'Cache-Control': 'no-store' } })
+          }
+        }
         // SECRETS.4 §2.4: a 'read' grant is bound to THIS session (the session cookie; a local profile
         // with no sign-in has one session) and travels in a header, never a cookie, so it cannot ride
         // along on a forged request.
@@ -3984,8 +4001,20 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           void writeAudit({ action: ev.action, ip: clientIp, targetId: ev.managedId })
         // F1: only the padlock route needs the caller; it is read once, before the route decides.
         const lockCaller = url.pathname === '/api/browser/lock' ? await identify() : null
+        // S4b: an unlock spends the person's single-use vault grant (header, never a URL), bound to the same
+        // HTTP session the vault route minted it for, on loopback only. The socket check stays as a hint.
+        const ownerProof = async (managedId: string) => {
+          const [gate, { vaultHttpSession, loopbackRequest }, { vaultLang }, { ownerProofRefusal }] = await Promise.all([
+            import('./vault/gate'), import('./vault/http'), import('./vault/service'), import('./browser/browser-lock'),
+          ])
+          const ctx = { session: vaultHttpSession('local'), loopback: loopbackRequest(req, server.requestIP(req)?.address ?? null, { requireOrigin: true }) }
+          const used = gate.consumeBrowserUnlockGrant(req.headers.get('x-agentop-owner-grant'), ctx, managedId)
+          if (used.ok) return used
+          const setup = used.code === 'grant-invalid' && (await gate.ownerProofAvailable().catch(() => null)) === false
+          return ownerProofRefusal(used.code, vaultLang() === 'pt' ? 'pt' : 'en', setup)
+        }
         const deps = browserRouteDeps({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT], sessionLive }, verifySessionIdentity, {
-          harnessOf, audit, ...(lockCaller ? { caller: () => lockCaller } : {}),
+          harnessOf, audit, ownerProof, ...(lockCaller ? { caller: () => lockCaller } : {}),
         })
         const answer = await browserRoute(req.method, url.pathname, body, deps)
         if (!answer) return jsonOut({ error: 'not_found' }, 404)

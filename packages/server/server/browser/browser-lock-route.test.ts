@@ -5,6 +5,7 @@
 import { describe, expect, test } from 'bun:test'
 import { browserRoute, type RouteDeps, type RouteHost } from './browser-web'
 import { BrowserLocks } from './browser-lock-host'
+import { ownerProofRefusal } from './browser-lock'
 import type { ActionHost } from './browser-actions'
 import type { BrowserOwner } from './browser-spec'
 
@@ -43,6 +44,8 @@ function fixture(over: Partial<RouteDeps> = {}) {
     // S4/F1: the socket says who is calling. These tests are about the padlock's rules, so the caller is
     // the person unless a test says otherwise (the F1 tests below do).
     caller: () => ({ kind: 'person', via: 'process', pid: 1 }),
+    // S4b: and the person carries a valid vault proof, unless a test says otherwise (the S4b tests below do).
+    ownerProof: async () => ({ ok: true, grantId: 'g' }),
     ...over,
   }
   return { deps, ran, audits, advance, live, locks }
@@ -219,18 +222,27 @@ describe('F1 — the padlock is the PERSON\'s, decided by the socket, never by t
     expect(f.audits).toEqual([])
   })
 
-  test('a caller that cannot be identified is refused (fail-closed), both directions', async () => {
-    const f = fixture({ caller: () => ({ kind: 'unknown', reason: 'no-proc' }) })
+  test('a known session is refused even when it carries a valid vault grant (the socket layer stays)', async () => {
+    let spent = 0
+    const f = fixture({ caller: () => ({ kind: 'session', pid: 4242, managedId: null }), ownerProof: async () => { spent++; return { ok: true, grantId: 'g' } } })
     await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
-    expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 403, body: { error: 'caller_unidentified' } })
-    expect(await browserRoute('POST', '/api/browser/lock', { owner: 'aaa', lock: 'locked' }, f.deps)).toMatchObject({ status: 403, body: { error: 'caller_unidentified' } })
+    expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 403, body: { error: 'session_cannot_unlock' } })
+    expect(spent).toBe(0) // refused before the grant is touched
     expect(f.locks.view('s-aaa').mode).toBe('locked')
   })
 
-  test('a door wired WITHOUT the caller check refuses (absent = unidentified)', async () => {
-    const f = fixture({ caller: undefined })
-    await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
-    expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 403, body: { error: 'caller_unidentified' } })
+  test('S4b: a caller that cannot be identified (macOS, Windows, no /proc) is decided by the proof, not refused outright', async () => {
+    for (const caller of [() => ({ kind: 'unknown', reason: 'no-proc' }) as const, undefined]) {
+      const denied = fixture({ caller, ownerProof: async () => ownerProofRefusal('grant-invalid', 'en', false) })
+      await call(denied, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+      expect(await browserRoute('POST', '/api/browser/lock', body, denied.deps)).toMatchObject({ status: 403, body: { error: 'owner_proof_required' } })
+      expect(denied.locks.view('s-aaa').mode).toBe('locked')
+      const proven = fixture({ caller })
+      await call(proven, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+      expect(await browserRoute('POST', '/api/browser/lock', body, proven.deps)).toMatchObject({ status: 200, body: { lock: 'unlocked' } })
+      // locking only reduces exposure: it needs no proof
+      expect(await browserRoute('POST', '/api/browser/lock', { owner: 'aaa', lock: 'locked' }, denied.deps)).toMatchObject({ status: 200, body: { lock: 'locked' } })
+    }
   })
 
   test('the person (process outside every session, the WSL relay, another machine) unlocks', async () => {
@@ -239,5 +251,68 @@ describe('F1 — the padlock is the PERSON\'s, decided by the socket, never by t
       await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
       expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 200, body: { ok: true, lock: 'unlocked' } })
     }
+  })
+})
+
+describe('S4b — an unlock owes the person\'s vault proof; who the process looks like is only a hint', () => {
+  const body = { owner: 'aaa', lock: 'unlocked' }
+  test('"the person" by /proc (a detached session with a clean env looks exactly like this) WITHOUT the proof is refused', async () => {
+    const f = fixture({ ownerProof: async () => ownerProofRefusal('grant-invalid', 'en', false) })
+    await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+    const a = await browserRoute('POST', '/api/browser/lock', body, f.deps)
+    expect(a).toMatchObject({ status: 403, body: { ok: false, error: 'owner_proof_required' } })
+    expect(String((a?.body as { sentence: string }).sentence)).toContain('Vault password')
+    expect(f.locks.view('s-aaa').mode).toBe('locked')
+    expect(f.audits).toEqual([])
+  })
+
+  test('a door wired WITHOUT the proof refuses every unlock (absent = no proof possible, fail-closed)', async () => {
+    const f = fixture({ ownerProof: undefined })
+    await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+    expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 403, body: { error: 'owner_proof_required' } })
+    expect(f.locks.view('s-aaa').mode).toBe('locked')
+  })
+
+  test('the proof is asked for THAT browser, once per unlock; locking never asks it', async () => {
+    const asked: string[] = []
+    const f = fixture({ ownerProof: async (id) => { asked.push(id); return { ok: true, grantId: 'g' } } })
+    await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+    expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 200, body: { lock: 'unlocked' } })
+    expect(await browserRoute('POST', '/api/browser/lock', { owner: 'aaa', lock: 'locked' }, f.deps)).toMatchObject({ status: 200, body: { lock: 'locked' } })
+    expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 200, body: { lock: 'unlocked' } })
+    expect(asked).toEqual(['aaa', 'aaa'])
+    expect(f.audits).toEqual(['browser.unlock:aaa', 'browser.lock:aaa', 'browser.unlock:aaa'])
+  })
+
+  test('no browser open → 409 and the grant is NOT spent (the retry can use it)', async () => {
+    let spent = 0
+    const f = fixture({ ownerProof: async () => { spent++; return { ok: true, grantId: 'g' } } })
+    expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 409, body: { error: 'no_browser' } })
+    expect(spent).toBe(0)
+  })
+
+  test('the refusal carries the vault\'s words and, where the vault cannot ask anyone, the action that fixes it', async () => {
+    for (const lang of ['en', 'pt'] as const) {
+      const f = fixture({ ownerProof: async () => ownerProofRefusal('grant-invalid', lang, true) })
+      await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+      const a = await browserRoute('POST', '/api/browser/lock', body, f.deps)
+      expect(a).toMatchObject({ status: 403, body: { error: 'owner_proof_unavailable', action: { kind: 'open-vault', path: '/vault' } } })
+      const s = String((a?.body as { sentence: string }).sentence)
+      expect(s).toContain(lang === 'pt' ? 'Abra o Cofre' : 'Open the Vault')
+      expect(s).not.toMatch(/agentop|run |terminal/i) // users are not technical: the action, never a command
+    }
+  })
+
+  test('ownerProofRefusal: every code has a pt and an en sentence', () => {
+    for (const code of ['grant-invalid', 'grant-scope', 'owner-proof-local-only'] as const) {
+      for (const setup of [false, true]) {
+        const en = ownerProofRefusal(code, 'en', setup); const pt = ownerProofRefusal(code, 'pt', setup)
+        expect(en.status).toBe(403)
+        expect(en.sentence.length).toBeGreaterThan(20)
+        expect(pt.sentence).not.toBe(en.sentence)
+      }
+    }
+    expect(ownerProofRefusal('grant-scope', 'en', false).error).toBe('owner_proof_scope')
+    expect(ownerProofRefusal('owner-proof-local-only', 'en', true).error).toBe('owner_proof_local_only')
   })
 })

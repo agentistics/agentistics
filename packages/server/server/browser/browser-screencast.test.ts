@@ -213,6 +213,23 @@ describe('back-pressure: a slow reader keeps the newest frame, never a queue', (
     expect(slow.frames.map(x => x.jpeg)).toEqual(['jpeg1'])
   })
 
+  test('S4b (QA Q-M6): the bound is ONE SECOND in wall time — a stuck reader costs the page at most ~1 frame/s, never less', async () => {
+    // Literal numbers on purpose: a test written against the constant moves with it, so raising the bound
+    // (e.g. to 10 min, which would reduce the page to ~1 frame per 10 min) would go unnoticed.
+    expect(MAX_ACK_WAIT_MS).toBe(1_000)
+    const f = fixture()
+    const stuck = sink({ busy: () => true })
+    await f.hub.subscribe('k', 'T1', stuck.s)
+    const cast = f.casts.get('k|T1')!
+    const acked: number[] = []
+    for (let i = 0; i < 3; i++) {
+      const n = f.frame()
+      f.c.advance(1_000)
+      if (cast.acks.includes(n)) acked.push(n)
+    }
+    expect(acked.length).toBe(3) // every frame acked within 1 s of a stuck reader
+  })
+
   test('frames arriving while a reader is behind replace each other; it gets only the newest', async () => {
     const f = fixture()
     let busy = true

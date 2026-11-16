@@ -123,6 +123,17 @@ describe('the input channel', () => {
     expect(c.sent.length).toBe(1)
   })
 
+  test('S4b (QA Q-M2): the person hands the browser back WHILE the viewport is read → the event is refused, nothing reaches the page', async () => {
+    let unlocked = true
+    const c = channel({ allowed: () => unlocked, viewport: async () => { unlocked = false; return vp } })
+    c.ch.submit(down(1))
+    c.ch.submit(JSON.stringify({ seq: 2, op: 'text', text: 'segredo' }))
+    await settle()
+    expect(c.acks).toEqual([{ seq: 1, ok: false, reason: 'locked' }, { seq: 2, ok: false, reason: 'locked' }])
+    expect(c.sent).toEqual([])
+    expect(c.inputs()).toBe(0)
+  })
+
   test('unlocked: one ack per event, in order, and the person\'s input is noted (auto-lock clock)', async () => {
     let release: () => void = () => {}
     const gate = new Promise<void>(r => { release = r })
