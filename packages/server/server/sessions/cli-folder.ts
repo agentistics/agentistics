@@ -62,6 +62,22 @@ export async function resolveFolders(refs: readonly (string | undefined)[], deps
   return { ok: true, byRef }
 }
 
+/**
+ * LIDER.PASSAGEM: the finished folder a retired session belongs in — the one beside the folder it sits
+ * in now (`findFinishedFolder`), else a top-level one; `undefined` when the machine has none. Never throws.
+ */
+export async function finishedFolderFor(
+  row: { id: string; conversationId?: string | undefined }, deps: Pick<FolderDeps, 'read'> = defaultDeps,
+): Promise<string | undefined> {
+  try {
+    const { findFinishedFolder } = await import('./finished-folder')
+    const groups = groupsOf(await deps.read())
+    const keys = new Set([sessionIdentityKey(row), row.id, ...(row.conversationId ? [row.conversationId] : [])])
+    const near = groups.groups.find(g => g.sessionKeys.some(k => keys.has(k)))
+    return findFinishedFolder(groups, near?.id)?.id
+  } catch { return undefined }
+}
+
 /** File one session into a resolved folder (a MOVE: it leaves any other folder and is unpinned). */
 export async function fileInFolder(
   folderId: string, row: { id: string; conversationId?: string | undefined }, deps: FolderDeps = defaultDeps,

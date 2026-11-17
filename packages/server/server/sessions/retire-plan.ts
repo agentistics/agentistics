@@ -19,7 +19,10 @@
  * - the successor (a hand-off) is still alive — a successor that died CANCELS the request, so a task
  *   is never left without its leader.
  *
- * At or past `deadlineAt` nothing is ever killed: the request EXPIRES with the reasons in words.
+ * At or past `deadlineAt` a plain request is never killed: it EXPIRES with the reasons in words. A
+ * HAND-OFF (a request naming a successor) is the exception (LIDER.PASSAGEM): its deadline is at most
+ * `HANDOFF_DEADLINE_MS` after the request, and past it — with the successor confirmed alive — the
+ * predecessor is closed whatever it is doing (`forced`), because the successor already holds the task.
  * A row that is no longer running has nothing to kill and is simply filed as retired.
  */
 import type { RetireRequest, SessionActivity } from './types'
@@ -29,6 +32,22 @@ import type { ProcNode, WorkChildrenResult } from './work-children'
 export const MIN_QUIET_FOR_MS = 10_000
 export const DEFAULT_QUIET_FOR_MS = 60_000
 export const DEFAULT_DEADLINE_MS = 30 * 60_000
+/**
+ * LIDER.PASSAGEM — the HARD deadline of a hand-off (a request naming a successor). Past it, with the
+ * successor confirmed alive, the predecessor is closed whatever it is doing: a leader is nudged by
+ * watchers and messages all the time, so "wait until it goes quiet" never ended (55 of 59 real
+ * hand-off requests expired, every old leader was closed by hand). It also CAPS an older request
+ * stored with the 30-minute default (`effectiveDeadline`).
+ */
+export const HANDOFF_DEADLINE_MS = 10 * 60_000
+
+/** The deadline that binds: a hand-off never waits longer than `HANDOFF_DEADLINE_MS` from its request. */
+export function effectiveDeadline(req: RetireRequest): number {
+  const stored = Date.parse(req.deadlineAt)
+  if (!req.successorId) return stored
+  const cap = Date.parse(req.requestedAt) + HANDOFF_DEADLINE_MS
+  return Number.isFinite(cap) ? Math.min(stored, cap) : stored
+}
 /** Polls of `waiting` in a row before it counts — the `event-plan.ts` confirmation. */
 export const CONFIRM_POLLS = 2
 
@@ -82,8 +101,9 @@ export type RetireDecision =
   /** An expired request, or no request: nothing to do, ever. */
   | { readonly action: 'none' }
   | { readonly action: 'wait'; readonly reasons: readonly RetireReason[]; readonly notes: readonly RetireNote[] }
-  /** `kill: false` = the row already stopped on its own; only the filing is left. */
-  | { readonly action: 'retire'; readonly kill: boolean; readonly notes: readonly RetireNote[] }
+  /** `kill: false` = the row already stopped on its own; only the filing is left. `forced` = a
+   *  hand-off past its hard deadline, closed with `reasons` still standing (LIDER.PASSAGEM). */
+  | { readonly action: 'retire'; readonly kill: boolean; readonly notes: readonly RetireNote[]; readonly forced?: true; readonly reasons?: readonly RetireReason[] }
   | { readonly action: 'expire'; readonly reasons: readonly RetireReason[]; readonly notes: readonly RetireNote[] }
   | { readonly action: 'cancel'; readonly reason: 'successor-dead' }
 
@@ -119,8 +139,16 @@ export function decideRetire(req: RetireRequest | undefined, obs: RetireObservat
     else if (!obs.childrenTrusted) notes.push({ code: 'children-unchecked', why: 'untrusted' })
   }
 
-  // At or past the deadline nothing is killed, however quiet the session has become.
-  if (now >= Date.parse(req.deadlineAt)) return { action: 'expire', reasons, notes }
+  if (now >= effectiveDeadline(req)) {
+    // A HAND-OFF past its hard deadline: the successor holds the task (confirmed alive), so the
+    // predecessor is closed whatever it is doing. Not observed yet = keep waiting, never a guess.
+    if (req.successorId) {
+      if (obs.successorAlive !== true) return { action: 'wait', reasons, notes }
+      return { action: 'retire', kill: true, notes, forced: true, reasons }
+    }
+    // Any other request: at or past the deadline nothing is killed, however quiet it has become.
+    return { action: 'expire', reasons, notes }
+  }
   if (reasons.length === 0) return { action: 'retire', kill: true, notes }
   return { action: 'wait', reasons, notes }
 }
@@ -180,8 +208,11 @@ export function planRetireRequest(
   if (existing && !existing.expiredAt && existing.successorId && existing.successorId !== input.successorId) {
     return { ok: false, code: 'handoff_pending', successorId: existing.successorId }
   }
-  const quietForMs = Math.max(MIN_QUIET_FOR_MS, input.quietForMs ?? DEFAULT_QUIET_FOR_MS)
-  const deadlineMs = input.deadlineMs ?? DEFAULT_DEADLINE_MS
+  // A hand-off closes the predecessor once its CURRENT turn ends (the short confirmed quiet), and
+  // never later than its hard deadline.
+  const handoff = Boolean(input.successorId)
+  const quietForMs = Math.max(MIN_QUIET_FOR_MS, input.quietForMs ?? (handoff ? MIN_QUIET_FOR_MS : DEFAULT_QUIET_FOR_MS))
+  const deadlineMs = input.deadlineMs ?? (handoff ? HANDOFF_DEADLINE_MS : DEFAULT_DEADLINE_MS)
   return {
     ok: true,
     request: {

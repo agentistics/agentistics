@@ -524,7 +524,7 @@ describe('LIDER.KILL: a new leader retires its predecessor', () => {
     const out = await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, deps)
     expect(out).toMatchObject({ ok: true, role: 'leader', retire: { ok: true, id: 'old', title: 'Old lead' } })
     expect(retired).toEqual([['old', 'new']])
-    expect(out.ok && out.message).toContain('Old lead will be closed when it goes quiet.')
+    expect(out.ok && out.message).toContain('Old lead will be closed once its current turn ends (within 10 minutes at most).')
     expect(out.ok && out.warning).toBeUndefined()
   })
   test('a working predecessor is live too', async () => {

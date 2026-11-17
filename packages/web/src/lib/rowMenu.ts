@@ -16,9 +16,10 @@
  * passed IN by the caller rather than composed here, so this module still holds no table of its
  * own, and it is always last: the verbs that act on the session come first.
  *
- * "Stop" is two different verbs. On a row that is mid-turn it is `interrupt` (stop what it is
- * doing, keep the session); everywhere else it is `kill` (end it). Offering both would ask the
- * reader to know the difference before they have read the row.
+ * "Stop" is two different verbs: `interrupt` (stop what it is doing, keep the session) and `kill`
+ * (end it). `kill` is on every row that may still be running; a row that is mid-turn ALSO offers
+ * `interrupt`, just above it. Hiding End while a session worked made it unreachable on the rows
+ * that need it most (SESSAO.MENU-ENCERRAR, owner 2026-11-17).
  */
 
 export interface RowVerb {
@@ -66,12 +67,17 @@ export function rowMenuEntries(
   endedAt?: number,
 ): MenuEntry[] {
   const find = (a: string) => verbs.find(v => v.action === a)
-  const stop = ENDED.has(state) || (state === 'lost' && endedAt !== undefined) ? undefined : MID_TURN.has(state) ? find('interrupt') : find('kill')
+  const ended = ENDED.has(state) || (state === 'lost' && endedAt !== undefined)
+  // SESSAO.MENU-ENCERRAR: End (`kill`) is offered on EVERY row that may still be running. It used
+  // to be swapped for `interrupt` while the row was `working`, so a busy session — a leader is
+  // nearly always busy — had no End at all, while "Remove from list" said "end it first" (and on a
+  // native row the interrupt it got instead is disabled). Mid-turn adds "stop the turn" BEFORE it.
+  const stops = ended ? [] : [MID_TURN.has(state) ? find('interrupt') : undefined, find('kill')]
   // `archive` exists only on a NATIVE row (the server offers it nowhere else). `delete` is deliberately
   // NOT here: it permanently deletes a conversation — it lives in the
   // session's own menu (`SessionActions`), which asks first.
   // `forget` only hides a row; its caller asks through ConfirmModal before acting.
-  const fleet = [find('rename'), stop, find('resume'), find('archive'), find('forget')].filter((v): v is RowVerb => v !== undefined)
+  const fleet = [find('rename'), ...stops, find('resume'), find('archive'), find('forget')].filter((v): v is RowVerb => v !== undefined)
   return [...fleet, ...extra]
 }
 
