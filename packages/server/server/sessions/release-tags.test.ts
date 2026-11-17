@@ -8,6 +8,23 @@ import { publishedAmong, publishedIn, releaseTagsIdle, resetReleaseTagsForTest, 
 
 afterEach(async () => { await resetReleaseTagsForTest() })
 
+describe('tagDateIn — the date a version tag was made, from the piece\'s own repository', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tagdate-'))
+  const git = (d: string, ...a: string[]) => execFileSync('git', ['-C', dir, ...a], { env: { ...gitTestEnv(), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_COMMITTER_DATE: d, GIT_AUTHOR_DATE: d } }).toString().trim()
+  test('annotated tag → the tag date; lightweight tag → the commit date; unknown version → null', async () => {
+    git('2026-11-01T12:00:00Z', 'init', '-q', '-b', 'main')
+    writeFileSync(join(dir, 'a'), 'a'); git('2026-11-01T12:00:00Z', 'add', 'a'); git('2026-11-01T12:00:00Z', 'commit', '-q', '-m', 'a')
+    git('2026-11-02T09:00:00Z', 'tag', '-a', 'v1.2.3', '-m', 'v1.2.3')
+    writeFileSync(join(dir, 'b'), 'b'); git('2026-11-05T10:00:00Z', 'add', 'b'); git('2026-11-05T10:00:00Z', 'commit', '-q', '-m', 'b')
+    git('2026-11-09T00:00:00Z', 'tag', 'v1.3.0')
+    const { tagDateIn } = await import('./release-tags')
+    expect(await tagDateIn('1.2.3', [dir])).toBe(Date.parse('2026-11-02T09:00:00Z'))
+    expect(await tagDateIn('1.3.0', [dir])).toBe(Date.parse('2026-11-05T10:00:00Z'))
+    expect(await tagDateIn('9.9.9', [dir])).toBeNull()
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
 describe('release-tags (the cached tag lookup the Live asks, never per request)', () => {
   test('unknown commits resolve in the background; the next ask knows them', async () => {
     let calls = 0

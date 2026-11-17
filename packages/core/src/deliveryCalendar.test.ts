@@ -18,15 +18,20 @@ test('composer subtask priority and due date take precedence over its parent on 
   expect(reply.pieces.find(p => p.subtaskId === 's2')).toMatchObject({ priority: 'high', dueDate: '2026-11-13' })
 })
 
-test('repository releases remain published after delivery records stop at an older version', () => {
+test('a release no piece of the board belongs to never becomes a version (the app\'s own releases are not the user\'s)', () => {
   const reply = buildCalendar({ nowMs: NOW, lives: [], records: [], releases: [
     { version: '2.204.3', publishedAt: '2026-11-01T12:00:00.000Z' },
     { version: '2.205.1', publishedAt: '2026-11-03T12:00:00.000Z' },
     { version: '2.207.0', publishedAt: '2026-11-07T12:00:00.000Z' },
   ], tasks: [], subtasks: [], resets: [] })
-  expect(reply.versions.map(v => v.version)).toEqual(['2.204.3', '2.205.1', '2.207.0'])
-  expect(reply.versions.every(v => v.state === 'published' && v.basis === 'published' && v.taggedRelease)).toBe(true)
-  expect(reply.versions.find(v => v.version === '2.207.0')!.atMs).toBe(Date.parse('2026-11-07T12:00:00.000Z'))
+  expect(reply.versions).toEqual([])
+})
+
+test('a release only dates a version a piece carries; the others stay out', () => {
+  const reply = buildCalendar({ nowMs: NOW, lives: [live({ key: 't1/s1', taskId: 't1', stage: 'qa' })], tasks: [{ id: 't1', title: 'T', status: 'in_progress' }], subtasks: [], resets: [],
+    records: [{ subtaskId: 's1', taskId: 't1', phase: 'qa', versionTarget: '2.207.0' }],
+    releases: [{ version: '2.204.3', publishedAt: '2026-11-01T12:00:00.000Z' }, { version: '2.207.0', publishedAt: '2026-11-07T12:00:00.000Z' }] })
+  expect(reply.versions.map(v => v.version)).toEqual(['2.207.0'])
 })
 const H = 3600_000
 

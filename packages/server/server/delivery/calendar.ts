@@ -14,6 +14,23 @@ import {
   type CalRecordInput, type CalResetInput, type CalStage, type CalSubtaskInput, type CalTaskInput,
 } from '@agentistics/core'
 
+/** A piece's version PROVEN by a tag in its own repo, and when git says that tag was made (null: not read yet). */
+export type PieceRelease = { version: string; publishedAt: number | null }
+
+/**
+ * PURE: the calendar's `releases` from the pieces' own tags — one per version, the earliest tag date, and ONLY for versions a
+ * piece carries (a release is never a version by itself; core still ignores one no piece names). Undated proofs are skipped.
+ */
+export function releasesFromPieceTags(byPiece: Readonly<Record<string, PieceRelease>>): { version: string; publishedAt: string }[] {
+  const at = new Map<string, number>()
+  for (const r of Object.values(byPiece)) {
+    if (r.publishedAt === null) continue
+    const prev = at.get(r.version)
+    if (prev === undefined || r.publishedAt < prev) at.set(r.version, r.publishedAt)
+  }
+  return [...at].map(([version, ms]) => ({ version, publishedAt: new Date(ms).toISOString() }))
+}
+
 export interface CalendarSources {
   nowMs: number
   lives: CalLiveInput[]
@@ -34,12 +51,13 @@ export function subtaskInputs(subtasks: readonly { id: string; taskId: string; t
 
 export async function readCalendarSources(): Promise<CalendarSources> {
   const nowMs = Date.now()
-  const [{ liveDeliveries }, { deliveryService }, { loadTaskWorld }, { getVersionInfo }] = await Promise.all([
-    import('../sessions/task-web'), import('./host'), import('../sessions/task-source'), import('../version'),
+  // Versions come ONLY from the user's own data (records, tags in their repos) — never the app's update feed (`../version`).
+  const [{ liveDeliveries }, { deliveryService }, { loadTaskWorld }] = await Promise.all([
+    import('../sessions/task-web'), import('./host'), import('../sessions/task-source'),
   ])
-  const [view, records, world, versionInfo, inferredVersions] = await Promise.all([
-    liveDeliveries(), deliveryService().list(), loadTaskWorld(), getVersionInfo(),
-    import('../sessions/task-web').then(m => m.pieceVersionsFromTags()).catch(() => ({} as Record<string, string>)),
+  const [view, records, world, pieceReleases] = await Promise.all([
+    liveDeliveries(), deliveryService().list(), loadTaskWorld(),
+    import('../sessions/task-web').then(m => m.pieceReleasesFromTags()).catch(() => ({} as Record<string, PieceRelease>)),
   ])
   const lives: CalLiveInput[] = view.deliveries.map(d => ({
     key: d.key, taskId: d.taskId, taskTitle: d.taskTitle, subtaskId: d.subtaskId, title: d.title, ...(d.kind ? { kind: d.kind } : {}), ...(d.leaderAvailabilityReasonCode ? { leaderAvailabilityReasonCode: d.leaderAvailabilityReasonCode } : {}),
@@ -53,7 +71,10 @@ export async function readCalendarSources(): Promise<CalendarSources> {
     deliveredAtMs: d.deliveredAtMs,
   }))
   return {
-    nowMs, lives, inferredVersions,
+    nowMs, lives,
+    // The tag's date comes from git in the piece's own repo and only for versions a piece carries — never from the app's feed.
+    inferredVersions: Object.fromEntries(Object.entries(pieceReleases).map(([k, r]) => [k, r.version])),
+    releases: releasesFromPieceTags(pieceReleases),
     records: records.map(r => ({
       subtaskId: r.subtaskId, taskId: r.taskId, phase: r.phase,
       ...(r.versionTarget ? { versionTarget: r.versionTarget } : {}),
@@ -62,10 +83,6 @@ export async function readCalendarSources(): Promise<CalendarSources> {
       ...(r.history[0] ? { firstAt: r.history[0].at } : {}),
       ...(r.history.length ? { lastAt: r.history[r.history.length - 1]!.at } : {}),
     })),
-    releases: (versionInfo.releases ?? []).flatMap(r => {
-      const m = /^v?(\d+\.\d+\.\d+)$/.exec(r.tag)
-      return m ? [{ version: m[1]!, publishedAt: r.published_at }] : []
-    }),
     tasks: world.book.tasks.map(t => ({
       id: t.id, title: t.title, status: t.status,
       ...(t.priority ? { priority: t.priority } : {}),

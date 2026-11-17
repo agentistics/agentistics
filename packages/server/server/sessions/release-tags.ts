@@ -91,6 +91,32 @@ export async function tagContainsIn(sha: string, dir: string): Promise<boolean> 
   return r.ok && r.out.length > 0
 }
 
+/**
+ * When release `<version>` was made, read from the piece's own repository: git's `creatordate` of `refs/tags/v<version>` is the
+ * tagger date of an annotated tag and the COMMIT date of a lightweight one. The earliest among the repositories that carry the
+ * tag. null when no clone has it. A tag is immutable, so a positive answer is kept.
+ */
+const tagDateMemo = new Map<string, number>()
+export async function tagDateIn(version: string, dirs: readonly string[]): Promise<number | null> {
+  if (!/^\d+\.\d+\.\d+$/.test(version)) return null
+  let best: number | null = null
+  for (const d of await distinctRepos(dirs)) {
+    const key = `${(await repoKey(d)) ?? d}\0${version}`
+    let at = tagDateMemo.get(key) ?? null
+    if (at === null) {
+      const r = await git(d, ['for-each-ref', `refs/tags/v${version}`, '--format=%(creatordate:unix)'])
+      const secs = r.ok ? Number(r.out.split('\n')[0]) : NaN
+      if (Number.isFinite(secs) && secs > 0) {
+        at = secs * 1000
+        if (tagDateMemo.size >= MAX_POSITIVE) tagDateMemo.clear()
+        tagDateMemo.set(key, at)
+      }
+    }
+    if (at !== null && (best === null || at < best)) best = at
+  }
+  return best
+}
+
 const firstTagMemo = new Map<string, string>()
 
 /**
@@ -232,6 +258,6 @@ export function publishedAmong(
 /** Test seam: forget everything, and wait for the refill in flight. */
 export async function resetReleaseTagsForTest(): Promise<void> {
   await running
-  positive.clear(); negative.clear(); firstTagMemo.clear(); repoKeyMemo.clear(); pinMemo.clear(); tagPin.clear(); resetReleaseSquashForTest()
+  positive.clear(); negative.clear(); firstTagMemo.clear(); tagDateMemo.clear(); repoKeyMemo.clear(); pinMemo.clear(); tagPin.clear(); resetReleaseSquashForTest()
 }
 export const releaseTagsIdle = (): Promise<void> => running ?? Promise.resolve()
