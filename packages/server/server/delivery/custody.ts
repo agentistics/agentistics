@@ -209,6 +209,52 @@ export function planCustody(input: CustodyInput): CustodyPlan {
   return plan
 }
 
+/** One stamp request: the store applies it in the SAME write as the action (store.update `stamp`). */
+export interface ActivityStamp { key: string; actor: string; at: string; /** Evaluated after the write callback; `false` = the action was refused, nothing to stamp. */ when?: () => boolean }
+
+/** Fields a write refreshes without anything having happened: they never make an action. */
+const NOISE_FIELDS = ['updatedAt', 'leaderTouchedAt', 'leaderActivityAt', 'leaderActivityBy'] as const
+const strip = (r: unknown): string => {
+  const c = structuredClone(r) as Record<string, unknown>
+  for (const k of NOISE_FIELDS) delete c[k]
+  return JSON.stringify(c)
+}
+/**
+ * PURE. Did a write change the record in any way that is not a timestamp refresh? An empty, invalid or idempotent patch is not an
+ * action, so it is no activity (§5.1: the clock follows WORK, not calls). A brand-new record is a change.
+ */
+export function semanticallyChanged(before: unknown, after: unknown): boolean {
+  if (!after) return false
+  if (!before) return true
+  return strip(before) !== strip(after)
+}
+
+/** What the board knows of leader work on a piece (the tick reads it under the tasks lock). */
+export interface BoardActivityFacts {
+  comments: ReadonlyArray<{ taskId: string; subtaskId?: string; threadId?: string; role?: string; sessionId?: string; kind?: string; createdAt: string }>
+  events: ReadonlyArray<{ taskId: string; subtaskId?: string; at: string; actor: string; kind: string }>
+}
+/**
+ * PURE. The latest board-side piece action on `piece` (§5.1): a thread comment of kind `decision`/`block` posted by a VERIFIED
+ * session (`role: 'session'`, a `sessionId`) on this task/piece, and an authorized board status move by a session actor outside
+ * the DeliveryService. Plain comments (no thread / no kind), unverified posters and the flow's own events never count.
+ */
+export function boardActivityOf(piece: { key: string; taskId: string }, facts: BoardActivityFacts): { at: string; by: string } | null {
+  let best: { at: string; by: string; t: number } | null = null
+  const on = (taskId: string, subtaskId: string | undefined) => taskId === piece.taskId && (subtaskId === piece.key || (subtaskId === undefined && piece.key === piece.taskId))
+  const take = (at: string, by: string) => { const t = ms(at); if (t !== null && (!best || t > best.t)) best = { at, by, t } }
+  for (const c of facts.comments) {
+    if (!c.threadId || (c.kind !== 'decision' && c.kind !== 'block') || c.role !== 'session' || !c.sessionId || !on(c.taskId, c.subtaskId)) continue
+    take(c.createdAt, c.sessionId)
+  }
+  for (const e of facts.events) {
+    if (e.kind !== 'status' || !e.actor || e.actor === 'owner' || e.actor.startsWith('flow:') || !on(e.taskId, e.subtaskId)) continue
+    take(e.at, e.actor)
+  }
+  const b = best as { at: string; by: string } | null
+  return b ? { at: b.at, by: b.by } : null
+}
+
 /** PURE. The piece-activity stamp the service writes when the actor leads (or holds custody of) the piece. Mutates and returns `rec`. */
 export function stampActivity<T extends { leaderActivityAt?: string; leaderActivityBy?: string }>(rec: T, actor: string, at: string): T {
   rec.leaderActivityAt = at

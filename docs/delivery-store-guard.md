@@ -116,6 +116,36 @@ on the piece again, or `publicado`, ends custody (every change is in `custodyLog
 actor, never evidence or proof — guard A/B still judge every rank raise. `custodyView` says `no-leader` only while
 now − leaderAbsentSince ≤ N.
 
+### S7a r2 — what the independent QA changed (F1–F6)
+
+- **The tick decides AND applies inside the envelope (F1/F2).** Rule C `on` takes the shared fail-closed envelope
+  (tasks → deliveries → guards) BY ITSELF — whether rule A is on, shadow or off — reads the documents under the locks,
+  plans, and recomputes the plan once more INSIDE the delivery write, so a leader action (or a publish, or a retreat) that
+  landed in between always wins. Only the assignments the write actually committed are messaged. A busy envelope SKIPS
+  the tick (`custody-skipped: … guard_busy`); it never writes after the wait expired while the lock is still held.
+  Rule C `off` keeps the old locking untouched. The `notifiedAt` mark takes the envelope too; if it is busy it waits for
+  the next tick (at-least-once: a duplicate message is possible, a lost one is not).
+- **Only a semantic, authorized change is activity (F3).** The stamp is a `store.update` option (`stamp`), applied only
+  when the write changed the record beyond `updatedAt`/`leaderTouchedAt`/the activity fields (`semanticallyChanged`). An
+  empty, invalid or idempotent `configure` — and the board comment `configure` itself writes — are not activity; a refused
+  transition is not either (`when`).
+- **The stamp is part of the action's own write (F4).** No second best-effort write: a crash cannot separate an action from
+  its stamp. The board-side sources that already exist count too, read by the tick under the tasks lock
+  (`boardActivityOf`): a thread comment of kind `decision`/`block` by a verified session (`role: 'session'`) on that
+  task/piece, and a board `status` event by a session actor outside the DeliveryService (the actor must still be the piece's
+  leader or custodian to count — the planner decides). Plain comments, notes, handbacks, owner posts and transcripts stay
+  excluded. The board comment is itself the durable fact, so there is no second write to lose.
+- **Project (F5, §5.2.6).** `custody-project.ts`: Task.repo → the repo of the piece's sessions (ANY session filed on the piece,
+  the leader's own included: the spec says "the piece's sessions", it does not exclude leaders) → the sidebar folder of those
+  sessions (the TOP-level folder: a nested `Project/Active` names `Project`; key `folder:<name>`, never `org/repo`) → `''`.
+  Two repos or two folders among a piece's sessions are a conflict, not a vote: `''`, and the piece is queued.
+- **Absence anchor.** The plan anchors absence at the moment the activity STOPPED, not at "now" as §5.1 reads literally: a
+  zombie that has not acted for N + 1 min must be an orphan on the tick that sees it (§5.4.2). A led piece with no activity
+  on record still anchors at the first tick that sees it, so it gets its full N.
+- Stated limits: a board `status` event's `actor` is whatever the writer recorded; the planner only believes it when that actor
+  is a live leader of the piece, and a forged free-text actor naming a live leader would count. There is no exactly-once
+  delivery of the assignment message.
+
 ## The sweep (S2b, spec §2.6)
 
 Every minute tick starts with `guardSweep` (`sweep.ts` logic, `sweep-plan.ts` pure plan; the service injects the stores, so

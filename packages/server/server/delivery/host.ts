@@ -282,24 +282,20 @@ async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Pr
 }
 
 /**
- * S7a (§5.2.6): the PROJECT of each piece — `normalizeGitRemote(Task.repo)`, else the repository of the piece's own (non-leader)
- * sessions, else `''` (unknown: such a piece is queued, never handed to a leader of another repository). Keyed by the short
- * `org/repo` on both routes so a remote and a registry fact name one project one way. ONE read of the board and the registry.
+ * S7a (§5.2.6): the PROJECT of each piece — see `custody-project.ts` (Task.repo → the repo of the piece's sessions → the sidebar
+ * folder → unknown). ONE read of the board, the registry and the folders; the rule itself is pure and tested there.
  */
 export async function custodyProjectsOf(pieces: ReadonlyArray<{ taskId: string; subtaskId: string }>): Promise<ReadonlyMap<string, string>> {
-  const [{ loadTaskWorld }, { readRegistry }, { normalizeGitRemote, repoShortName }] = await Promise.all([import('../sessions/task-source'), import('../sessions/registry'), import('@agentistics/core')])
+  const [{ loadTaskWorld }, { readRegistry }, { resolveCustodyProjects }, prefs] = await Promise.all([import('../sessions/task-source'), import('../sessions/registry'), import('./custody-project'), import('../preferences')])
   const { book } = await loadTaskWorld()
-  const repoOfTask = new Map(book.tasks.map(t => [t.id, (t as { repo?: string }).repo ?? ''] as const))
   const registry = await readRegistry().catch(() => [])
-  const out = new Map<string, string>()
-  for (const p of pieces) {
-    const fromTask = repoOfTask.get(p.taskId) ?? ''
-    const key = fromTask ? repoShortName(normalizeGitRemote(fromTask)) : ''
-    if (key) { out.set(p.subtaskId, key); continue }
-    const row = registry.find(r => (r.subtaskId === p.subtaskId || (!r.subtaskId && r.taskId === p.taskId && p.subtaskId === p.taskId)) && (r as { role?: string }).role !== 'leader' && r.repo?.repo?.includes('/'))
-    out.set(p.subtaskId, row?.repo?.repo ?? '')
-  }
-  return out
+  const groups = ((await prefs.readPreferences().catch(() => ({}))) as { sessionGroups?: { groups: never[] } }).sessionGroups ?? { groups: [] }
+  return resolveCustodyProjects({
+    pieces,
+    taskRepos: new Map(book.tasks.map(t => [t.id, (t as { repo?: string }).repo ?? ''] as const)),
+    sessions: registry.map(r => ({ id: r.id, conversationId: r.conversationId, taskId: r.taskId, subtaskId: r.subtaskId, repo: r.repo?.repo })),
+    groups: groups as never,
+  })
 }
 
 let cached: DeliveryService | null = null
@@ -334,7 +330,7 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
     // S2b: the guard sweep reads and repairs the board itself (rule A shadow/on only; off does nothing).
     sweep: lazySweep(),
     // S7a: the custody clocks (rule C only; off does nothing).
-    custody: { projectsOf: custodyProjectsOf, orphanAfterHours: async () => ((await (await import('../preferences')).readPreferences()) as { delivery?: { orphanAfterHours?: unknown } }).delivery?.orphanAfterHours },
+    custody: { tasks: async () => (await import('../sessions/task-source')).openTaskStore(), projectsOf: custodyProjectsOf, orphanAfterHours: async () => ((await (await import('../preferences')).readPreferences()) as { delivery?: { orphanAfterHours?: unknown } }).delivery?.orphanAfterHours },
     log: line => console.log(line),
     ...overrides,
   })
