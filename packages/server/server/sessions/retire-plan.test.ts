@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  MIN_QUIET_FOR_MS, CONFIRM_POLLS, DEFAULT_DEADLINE_MS, DEFAULT_QUIET_FOR_MS, decideRetire, nextStreak, planRetireRequest,
+  MIN_QUIET_FOR_MS, CONFIRM_POLLS, DEFAULT_DEADLINE_MS, DEFAULT_QUIET_FOR_MS, HANDOFF_DEADLINE_MS, decideRetire, effectiveDeadline, nextStreak, planRetireRequest,
   retireNoteText, retireReasonsText, type QuietStreak, type RetireObservation,
 } from './retire-plan'
 import type { RetireRequest } from './types'
@@ -103,6 +103,53 @@ describe('planRetireRequest', () => {
     expect(planRetireRequest(pending, { by: 'x', successorId: 's2' }, T0)).toEqual({ ok: false, code: 'handoff_pending', successorId: 's1' })
     expect(planRetireRequest(pending, { by: 'x', successorId: 's1', deadlineMs: 5 }, T0).ok).toBe(true)
     expect(planRetireRequest({ ...pending, expiredAt: 'x' }, { by: 'x', successorId: 's2' }, T0).ok).toBe(true)
+  })
+})
+
+// LIDER.PASSAGEM (owner 2026-11-17): old leaders stayed `working` beside their successors. 55 of 59
+// real hand-off retires EXPIRED ("its child processes could not be read" — a structured session has
+// no pane), and the deadline only ever expired. A HAND-OFF with a live successor is now guaranteed.
+describe('hand-off retire is guaranteed (LIDER.PASSAGEM)', () => {
+  const handoff = (over: Partial<RetireRequest> = {}) => req({ successorId: 's', ...over })
+  it('a new hand-off request defaults to the short quiet and a 10-minute deadline', () => {
+    const p = planRetireRequest(undefined, { by: 's', successorId: 's' }, T0)
+    expect(p).toMatchObject({ ok: true, request: { quietForMs: MIN_QUIET_FOR_MS, deadlineAt: new Date(T0 + HANDOFF_DEADLINE_MS).toISOString() } })
+    expect(HANDOFF_DEADLINE_MS).toBeLessThanOrEqual(10 * 60_000)
+  })
+  it('a plain (non hand-off) request keeps its old defaults', () => {
+    expect(planRetireRequest(undefined, { by: 'person' }, T0)).toMatchObject({ request: { quietForMs: DEFAULT_QUIET_FOR_MS } })
+  })
+  it('retires as soon as the turn ends: confirmed waiting for the short quiet, children unmeasured', () => {
+    const r = handoff({ quietForMs: MIN_QUIET_FOR_MS })
+    const obs = quiet({ successorAlive: true, streak: streak(T0, 2, T0 + MIN_QUIET_FOR_MS), children: { checked: false, reason: 'unmeasured' } })
+    expect(decideRetire(r, obs, T0 + MIN_QUIET_FOR_MS).action).toBe('retire')
+  })
+  it('past the deadline a hand-off with a LIVE successor is closed even while working (kept nudged)', () => {
+    const dl = Date.parse(handoff().deadlineAt)
+    for (const o of [
+      { activity: 'working' as const, streak: null },
+      { children: null },
+      { bgTasksRunning: 3 },
+      { activity: 'waiting' as const, streak: streak(dl - 4000, 1, dl - 4000) },
+    ]) {
+      const d = decideRetire(handoff(), quiet({ successorAlive: true, ...o }), dl)
+      expect(d).toMatchObject({ action: 'retire', kill: true, forced: true })
+    }
+  })
+  it('the 10-minute cap also binds an OLD request stored with a 30-minute deadline', () => {
+    const old = handoff() // deadlineAt = T0 + 30 min
+    const d = decideRetire(old, quiet({ successorAlive: true, activity: 'working', streak: null }), T0 + HANDOFF_DEADLINE_MS)
+    expect(d).toMatchObject({ action: 'retire', kill: true, forced: true })
+    expect(effectiveDeadline(old)).toBe(T0 + HANDOFF_DEADLINE_MS)
+  })
+  it('a successor not yet observed never forces a kill — it waits; a dead one cancels', () => {
+    const dl = Date.parse(handoff().deadlineAt)
+    expect(decideRetire(handoff(), quiet({ successorAlive: null, activity: 'working', streak: null }), dl).action).toBe('wait')
+    expect(decideRetire(handoff(), quiet({ successorAlive: false }), dl)).toEqual({ action: 'cancel', reason: 'successor-dead' })
+  })
+  it('a request with no successor still expires at its deadline (unchanged)', () => {
+    const dl = T0 + 30 * 60_000
+    expect(decideRetire(req(), quiet({ activity: 'working', streak: null }), dl).action).toBe('expire')
   })
 })
 

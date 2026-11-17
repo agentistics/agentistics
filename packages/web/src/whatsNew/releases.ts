@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.217.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões: o clique direito agora sempre mostra "Encerrar sessão" numa sessão que está rodando, mesmo quando ela está trabalhando.',
+        en: 'Sessions: right-click now always offers "End session" on a running session, even while it is working.',
+      },
+      {
+        pt: 'Passagem de líder: o líder antigo fecha sozinho em até 10 minutos depois que o novo assume, e vai para a pasta de finalizadas.',
+        en: 'Leader hand-off: the old leader now closes on its own within 10 minutes after the new one takes over, and is filed in the finished folder.',
+      },
+    ],
+  },
   '2.217.3': {
     features: [],
     fixes: [
