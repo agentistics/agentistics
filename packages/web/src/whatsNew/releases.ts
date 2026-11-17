@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.217.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Calendário: as versões do próprio agentistics não aparecem mais como se fossem suas. Só aparecem versões que têm peças suas, com a data da tag no seu repositório.',
+        en: "Calendar: agentistics' own versions no longer show up as if they were yours. Only versions that carry your pieces appear, dated by the tag in your repository.",
+      },
+    ],
+  },
   '2.217.1': {
     features: [],
     fixes: [
