@@ -7,7 +7,7 @@
  */
 
 import { join } from 'node:path'
-import { buildLive, legacyReviewShaPieces, prepareForecastHistory, FORECAST_BUCKET_MS, FORECAST_METHOD_VERSION, type ForecastHistory } from './task-live'
+import { buildLive, legacyReviewShaPieces, type ShaPiece, prepareForecastHistory, FORECAST_BUCKET_MS, FORECAST_METHOD_VERSION, type ForecastHistory } from './task-live'
 import { readForecastAnchors, saveForecastAnchors } from './task-forecast-cache'
 import { dirsForShas } from './release-repos'
 import { firstTagContaining, publishedAmong, tagDateIn } from './release-tags'
@@ -275,8 +275,16 @@ export async function pieceReleasesFromTags(): Promise<Record<string, { version:
       }
     })().finally(() => { shaRefill = null })
   }
+  return joinPieceReleases(pieces, shaVersion)
+}
+
+/** PURE: each piece's release = the newest version among the commits IT named (a commit's version never leaks to another piece). */
+export function joinPieceReleases(
+  pieces: ReadonlyMap<string, readonly ShaPiece[]>,
+  versions: ReadonlyMap<string, { version: string; publishedAt: number | null }>,
+): Record<string, { version: string; publishedAt: number | null }> {
   const out: Record<string, { version: string; publishedAt: number | null }> = {}
-  for (const [sha, found] of shaVersion) {
+  for (const [sha, found] of versions) {
     if (!pieces.has(sha)) continue
     const version = found.version
     for (const p of pieces.get(sha) ?? []) {
