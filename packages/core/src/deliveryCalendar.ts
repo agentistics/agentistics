@@ -262,10 +262,13 @@ export function buildCalendar(o: {
     // ceiling forecast (flagged for review) instead of a piece with no date at all.
     const dueEta = plannedEta(published ? null : dueDate)
     const review = !published && dueEta === null && !shipped && l.overdueSinceMs != null
-    const overdueSinceMs = dueEta !== null && deadlinePassed(dueDate, o.nowMs, today) ? dueEta.atMs : null
-    const publishEta: CalEta = stage === 'published' ? { kind: 'none', reason: 'final' }
-      : dueEta ?? (review ? (l.ceilingEtaMs != null ? { kind: 'estimate', atMs: l.ceilingEtaMs, confidence: 'low' } : { kind: 'none', reason: 'review' }) : eta(l.publishEta, confidence))
     const parked = INACTIVE_STATUSES.has((l.subtaskId ? sub?.status : task?.status) ?? '')
+    // A parked/abandoned piece is never overdue, whatever filter shows it.
+    const overdueSinceMs = !parked && dueEta !== null && deadlinePassed(dueDate, o.nowMs, today) ? dueEta.atMs : null
+    // A ceiling forecast already in the past is not a forecast: the piece gets no date (flagged for review), never a past day.
+    const ceilingFuture = l.ceilingEtaMs != null && l.ceilingEtaMs >= o.nowMs
+    const publishEta: CalEta = stage === 'published' ? { kind: 'none', reason: 'final' }
+      : dueEta ?? (review ? (ceilingFuture ? { kind: 'estimate', atMs: l.ceilingEtaMs as number, confidence: 'low' } : { kind: 'none', reason: 'review' }) : eta(l.publishEta, confidence))
     pieces.push({
       key: l.key, taskId: l.taskId, taskTitle: l.taskTitle, subtaskId: l.subtaskId, title: l.title, ...(l.kind ? { kind: l.kind } : {}), ...(l.leaderAvailabilityReasonCode ? { leaderAvailabilityReasonCode: l.leaderAvailabilityReasonCode } : {}), stage,
       version,
@@ -322,7 +325,7 @@ export function buildCalendar(o: {
       seen.add(key)
       const planned = plannedEta(dueDate)
       const parked = INACTIVE_STATUSES.has(sub?.status ?? task?.status ?? '')
-      const gone = planned !== null && deadlinePassed(dueDate, o.nowMs, today)
+      const gone = !parked && planned !== null && deadlinePassed(dueDate, o.nowMs, today)
       const noDate: CalEta = { kind: 'none', reason: 'not-started' }
       pieces.push({
         key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,

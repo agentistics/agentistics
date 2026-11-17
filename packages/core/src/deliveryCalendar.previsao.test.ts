@@ -59,6 +59,40 @@ describe('2 · overdue is a due date that passed, not a stage median', () => {
   })
 })
 
+describe('2b · a ceiling forecast already in the past is not a forecast', () => {
+  test('ceilingEtaMs < now: no date, flagged for review, never drawn on a past day', () => {
+    const r = build({ lives: [live({ key: 't1/a', stage: 'leader', overdueSinceMs: NOW - 3 * H, ceilingEtaMs: NOW - 2 * 24 * H,
+      publishEta: { kind: 'none', reason: 'beyond-range' } })], subtasks: [sub('a')] })
+    const p = r.pieces[0]!
+    expect(p.publishEta).toEqual({ kind: 'none', reason: 'review' })
+    expect(p.review).toBe(true)
+    expect(p.late).toBe(false)
+    expect(calendarToIcs(filterCalendar(r, { tasks: 'all' }), NOW)).not.toContain('DTSTART:20261115')
+  })
+  test('no piece of a mixed set carries an estimate before now', () => {
+    const r = build({ lives: [
+      live({ key: 't1/a', stage: 'leader', overdueSinceMs: NOW - H, ceilingEtaMs: NOW - 30 * 24 * H, publishEta: { kind: 'none', reason: 'x' } }),
+      live({ key: 't1/b', stage: 'qa', overdueSinceMs: NOW - H, ceilingEtaMs: NOW + 24 * H, publishEta: { kind: 'none', reason: 'x' } }),
+    ], subtasks: [sub('a'), sub('b')] })
+    for (const p of r.pieces) if (p.publishEta.kind === 'estimate') expect(p.publishEta.atMs).toBeGreaterThanOrEqual(NOW)
+    expect(r.pieces.find(p => p.key === 't1/b')!.publishEta.kind).toBe('estimate')
+  })
+})
+
+describe('4b · a parked piece is never overdue, even with the filter on Tudo', () => {
+  test.each(['ideias_adiado', 'abandoned'])('%s with a passed due date: overdueSinceMs null, absent from the overdue block', status => {
+    const r = build({ lives: [live({ key: 't1/a', stage: 'running' })], subtasks: [sub('a', { status, dueDate: '2026-11-01' })] })
+    expect(r.pieces[0]!.overdueSinceMs).toBeNull()
+    const all = filterCalendar(r, { tasks: 'all' })
+    expect(all.pieces).toHaveLength(1)
+    expect(all.pieces.filter(p => p.overdueSinceMs != null)).toHaveLength(0)
+  })
+  test('a record-only parked piece is not overdue either', () => {
+    const r = build({ records: [{ subtaskId: 'a', taskId: 't1', phase: 'fila' }], subtasks: [sub('a', { status: 'ideias_adiado', dueDate: '2026-11-01' })] })
+    expect(r.pieces[0]!.overdueSinceMs).toBeNull()
+  })
+})
+
 describe('3 · a piece with a due date and no session still appears, on its date', () => {
   test('a queued live piece with no start gets the due day, not not-started', () => {
     const r = build({ lives: [live({ key: 't1/a', stage: 'queue', startedAtMs: null, publishEta: { kind: 'none', reason: 'not-started' } })], subtasks: [sub('a', { dueDate: '2026-11-21' })] })

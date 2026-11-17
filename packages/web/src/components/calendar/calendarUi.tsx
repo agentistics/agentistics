@@ -31,8 +31,10 @@ export function StageChip({ stage, pt }: { stage: CalStage; pt: boolean }) {
 /** Three little bars: how sure the estimate is. Never colour alone — the title says the words. */
 export function Confidence({ level, pt }: { level: CalConfidence | null; pt: boolean }) {
   if (!level) return null
-  const filled = level === 'high' || level === 'owner' ? 3 : level === 'medium' ? 2 : 1
-  const color = level === 'owner' ? 'var(--accent-blue)' : level === 'high' ? 'var(--accent-green)' : level === 'medium' ? 'var(--accent-amber)' : 'var(--accent-red)'
+  // 'owner' (the board's own due date) reuses the highest EXISTING visual; only its text label differs.
+  const visual: Exclude<CalConfidence, 'owner'> = level === 'owner' ? 'high' : level
+  const filled = visual === 'high' ? 3 : visual === 'medium' ? 2 : 1
+  const color = visual === 'high' ? 'var(--accent-green)' : visual === 'medium' ? 'var(--accent-amber)' : 'var(--accent-red)'
   return (
     <span role="img" aria-label={pick(CONFIDENCE_LABEL[level], pt)} title={pick(CONFIDENCE_LABEL[level], pt)}
       style={{ display: 'inline-flex', gap: 2, alignItems: 'flex-end', height: 11, verticalAlign: -1 }}>
