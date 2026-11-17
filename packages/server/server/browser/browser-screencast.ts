@@ -21,6 +21,7 @@
  *    when it changed. A tab or browser that disappears ends its readers with `gone {reason}`.
  */
 
+import { jpegDims, isStaleFrame } from './browser-frame-check'
 import type { ViewerViewport } from './browser-viewport'
 
 export const MAX_FPS = 12
@@ -30,6 +31,10 @@ export const FRAME_INTERVAL_MS = Math.ceil(1000 / MAX_FPS)
 export const MAX_ACK_WAIT_MS = 1_000
 /** How often a watched tab's state is looked at (it is pushed only when it changed). */
 export const STATE_POLL_MS = 500
+/** A frame whose pixels are not the page's size is dropped and the screencast is re-asked after this delay… */
+export const STALE_KICK_DELAY_MS = 120
+/** …at most this many times in a row (a good frame resets the count), so a page that cannot render never loops. */
+export const MAX_STALE_KICKS = 5
 /** `Page.startScreencast` parameters (spec §1.5). */
 export const SCREENCAST_PARAMS = { format: 'jpeg', quality: 60, maxWidth: 1280, maxHeight: 800, everyNthFrame: 1 } as const
 
@@ -44,6 +49,8 @@ export interface RawCastFrame {
 export interface CastFrame {
   tab: string
   seq: number
+  /** Bumped every time the page viewport is re-applied: a frame of an older epoch is of an older size. */
+  epoch: number
   w: number
   h: number
   /** base64 JPEG, as CDP gave it. */
@@ -83,7 +90,11 @@ export interface Subscription {
 }
 
 export type StartCast =
-  | { ok: true; ack(sessionId: number): void; stop(): Promise<void>; resize?(v: ViewerViewport): Promise<void> }
+  | {
+    ok: true; ack(sessionId: number): void; stop(): Promise<void>; resize?(v: ViewerViewport): Promise<void>
+    /** The page viewport (CSS px) the cast has applied right now, when it sized one. */
+    viewport?(): { w: number; h: number } | null
+  }
   | { ok: false; reason: string }
 
 type Timer = unknown
@@ -136,6 +147,10 @@ interface Loop {
   lastState: CastState | null
   viewport: { w: number; h: number } | null
   seq: number
+  epoch: number
+  /** Stale-size frames dropped since the last good one (the re-ask budget). */
+  kicks: number
+  kickTimer: Timer | null
   ended: boolean
 }
 
@@ -161,9 +176,9 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
     if (loop.ended) return
     loop.ended = true
     loops.delete(id(loop.key, loop.tab))
-    for (const t of [loop.flushTimer, loop.ackTimer]) if (t !== null) d.clearTimeout(t)
+    for (const t of [loop.flushTimer, loop.ackTimer, loop.kickTimer]) if (t !== null) d.clearTimeout(t)
     if (loop.stateTimer !== null) d.clearInterval(loop.stateTimer)
-    loop.flushTimer = loop.ackTimer = loop.stateTimer = null
+    loop.flushTimer = loop.ackTimer = loop.stateTimer = loop.kickTimer = null
     const cast = loop.cast
     loop.cast = null
     for (const r of [...loop.readers]) {
@@ -225,13 +240,52 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
     const st = loop.lastState
     const w = Number(raw.metadata?.deviceWidth) || loop.viewport?.w || 0
     const h = Number(raw.metadata?.deviceHeight) || loop.viewport?.h || 0
+    // A picture of the page at an OLD size (rendered before the viewport change landed, or in flight across it)
+    // is never delivered: a still page would not send another one and the card would keep it for good. It is
+    // acked (Chromium must go on) and the cast is re-asked, which makes Chromium render the page again.
+    if (loop.cast?.resize && isStaleFrame({ jpeg: jpegDims(raw.data), meta: { w, h }, expected: loop.cast.viewport?.() ?? null }) && sizedOwner(loop)) {
+      tryAck(loop)
+      kick(loop)
+      return
+    }
+    loop.kicks = 0
     if (w > 0 && h > 0) loop.viewport = { w, h }
     loop.seq += 1
-    const frame: CastFrame = { tab: loop.tab, seq: loop.seq, w, h, jpeg: raw.data, url: st?.url ?? '', title: st?.title ?? '', at: d.now() }
+    const frame: CastFrame = { tab: loop.tab, seq: loop.seq, epoch: loop.epoch, w, h, jpeg: raw.data, url: st?.url ?? '', title: st?.title ?? '', at: d.now() }
     loop.lastFrame = frame
     loop.lastDeliveryAt = d.now()
     for (const r of [...loop.readers]) give(r, frame)
     tryAck(loop)
+  }
+
+  /** The newest sized viewer: the one that owns the page's viewport. */
+  function sizedOwner(loop: Loop): Reader | null {
+    return [...loop.readers].filter(o => o.size && !o.closed).reduce<Reader | null>((acc, o) => (!acc || o.sizedAt > acc.sizedAt ? o : acc), null)
+  }
+
+  /**
+   * Re-apply a viewport and restart the screencast. Everything captured BEFORE it is of the old size, so it is
+   * forgotten here (the replay for a late viewer, the frame waiting for its slot, a lagging reader's kept
+   * frame) and the epoch moves on: a frame can only ever be of the viewport of its own epoch.
+   */
+  async function resizeLoop(loop: Loop, size: ViewerViewport): Promise<void> {
+    if (!loop.cast?.resize) return
+    loop.epoch += 1
+    loop.lastFrame = null
+    loop.latest = null
+    for (const r of loop.readers) r.pending = null
+    await loop.cast.resize(size)
+  }
+
+  function kick(loop: Loop): void {
+    if (loop.ended || loop.kickTimer !== null || loop.kicks >= MAX_STALE_KICKS) return
+    loop.kicks += 1
+    loop.kickTimer = d.setTimeout(() => {
+      loop.kickTimer = null
+      const owner = sizedOwner(loop)
+      if (loop.ended || !owner?.size) return
+      void resizeLoop(loop, owner.size).catch(() => {})
+    }, STALE_KICK_DELAY_MS)
   }
 
   function onRaw(loop: Loop, raw: RawCastFrame): void {
@@ -270,8 +324,8 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
       rearmAck(loop) // a lagging reader leaving may be the one the ack waited on
       // The viewer that sized the page left: the newest remaining sized viewer takes over now.
       if (r.size && loop.cast?.resize) {
-        const owner = [...loop.readers].filter(o => o.size).reduce<Reader | null>((acc, o) => (!acc || o.sizedAt > acc.sizedAt ? o : acc), null)
-        if (owner?.size && r.sizedAt > owner.sizedAt) void loop.cast.resize(owner.size).catch(() => {})
+        const owner = sizedOwner(loop)
+        if (owner?.size && r.sizedAt > owner.sizedAt) void resizeLoop(loop, owner.size).catch(() => {})
       }
     }
   }
@@ -292,7 +346,7 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
         const created: Loop = {
           key, tab, readers: new Set(), cast: null, starting: null, latest: null, unacked: [], oldestUnackedAt: 0,
           lastDeliveryAt: -Infinity, lastAckAt: -Infinity, flushTimer: null, ackTimer: null, stateTimer: null, stateDigest: '', lastFrame: null,
-          lastState: null, viewport: null, seq: 0, ended: false,
+          lastState: null, viewport: null, seq: 0, epoch: 0, kicks: 0, kickTimer: null, ended: false,
         }
         loop = created
         loops.set(id(key, tab), created)
@@ -317,7 +371,7 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
         if (loop.starting) await loop.starting
         if (loop.ended) return { close() {}, drained() {} }
         if (size && loop.cast?.resize) {
-          try { await loop.cast.resize(size) } catch { end(loop, 'cast_failed'); return { close() {}, drained() {} } }
+          try { await resizeLoop(loop, size) } catch { end(loop, 'cast_failed'); return { close() {}, drained() {} } }
         }
         if (loop.lastState) { try { sink.state(loop.lastState) } catch { /* */ } }
         if (loop.lastFrame) give(reader, loop.lastFrame)

@@ -16,8 +16,13 @@ export function createViewportQueue() {
 export const MIN_PAGE_WIDTH = 1024
 export const MAX_PAGE_WIDTH = 1920
 export const MIN_PAGE_HEIGHT = 400
-/** Tall enough for a full-screen phone (aspect up to ~2.1 at 1024 wide). */
-export const MAX_PAGE_HEIGHT = 2200
+/**
+ * Tall enough for a full-screen phone at a 1024-wide page: 3200 / 1024 = aspect 3.125, which covers the
+ * tallest real phones (360x800 = 2.22, 390x844 = 2.16, 430x932 = 2.17, 380x900 = 2.37). Past the cap the page
+ * would be narrower than 1024 or the frame would not fill the card (black bars) — so the cap is the choice
+ * (raise it, never crop: cropping would hide part of the page from the person and the model's clicks).
+ */
+export const MAX_PAGE_HEIGHT = 3200
 
 /**
  * The surface the person watches -> the page the model keeps. Only the surface's ASPECT RATIO is
@@ -38,10 +43,12 @@ export function clampViewport(v: ViewerViewport): ViewerViewport | null {
 export function createViewportCast(send: (method: string, params: Record<string, unknown>) => Promise<unknown>, serialize?: (fn: () => Promise<void>) => Promise<void>) {
   let tail = Promise.resolve()
   let overridden = false
+  let current: { w: number; h: number } | null = null
   const queue = (fn: () => Promise<void>) => {
     if (serialize) return serialize(fn)
     const next = tail.then(fn); tail = next.catch(() => {}); return next
   }
+  const want = (v?: ViewerViewport) => { const s = v ? clampViewport(v) : null; if (s) current = { w: s.width, h: s.height } }
   const start = async (v?: ViewerViewport) => {
     const size = v ? clampViewport(v) : null
     if (size) {
@@ -51,11 +58,16 @@ export function createViewportCast(send: (method: string, params: Record<string,
     await send('Page.startScreencast', { ...SCREENCAST_PARAMS, ...(size ? { maxWidth: size.width, maxHeight: size.height } : {}) })
   }
   return {
-    start: (v?: ViewerViewport) => queue(() => start(v)),
-    resize: (v: ViewerViewport) => queue(async () => { await send('Page.stopScreencast', {}); await start(v) }),
+    /**
+     * The viewport (CSS px) the page is ABOUT to be at / is at: set the moment a start or resize is ASKED
+     * (not when it lands), so a frame of the previous size that is still in flight is already recognised as old.
+     */
+    current: () => current,
+    start: (v?: ViewerViewport) => { want(v); return queue(() => start(v)) },
+    resize: (v: ViewerViewport) => { want(v); return queue(async () => { await send('Page.stopScreencast', {}); await start(v) }) },
     stop: () => queue(async () => {
       try { await send('Page.stopScreencast', {}) } finally {
-        if (overridden) { await send('Emulation.clearDeviceMetricsOverride', {}); overridden = false }
+        if (overridden) { await send('Emulation.clearDeviceMetricsOverride', {}); overridden = false; current = null }
       }
     }),
   }

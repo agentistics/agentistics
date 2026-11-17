@@ -9,6 +9,21 @@ import {
 
 const frame = (seq: number, tab = 'T1') => JSON.stringify({ tab, seq, w: 1280, h: 800, jpeg: 'AAAA', url: 'http://x/', title: 'X', at: 1 })
 
+describe('viewport epoch', () => {
+  const ef = (seq: number, epoch: number) => ({ tab: 'T1', seq, epoch, w: 1596, h: 400, jpeg: 'AAAA', url: '', title: '', at: 1 })
+  test('the epoch is parsed when the server sends it and absent otherwise', () => {
+    expect(parseBrowserFrame(JSON.stringify(ef(1, 3)))?.epoch).toBe(3)
+    expect(parseBrowserFrame(frame(1))?.epoch).toBeUndefined()
+  })
+  test('a frame of an older epoch never replaces one of a newer epoch on the same connection', () => {
+    let s = browserScreenReducer(INITIAL_BROWSER_SCREEN, { type: 'connecting' })
+    s = browserScreenReducer(s, { type: 'frame', frame: ef(5, 2) })
+    const kept = browserScreenReducer(s, { type: 'frame', frame: ef(9, 1) })
+    expect(kept.frame?.epoch).toBe(2)
+    expect(browserScreenReducer(s, { type: 'frame', frame: ef(6, 2) }).frame?.seq).toBe(6)
+  })
+})
+
 describe('browser stream events', () => {
   test('frame, state, gone parse; junk is null', () => {
     expect(parseBrowserFrame(frame(3))).toMatchObject({ tab: 'T1', seq: 3, w: 1280, jpeg: 'AAAA' })

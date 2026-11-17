@@ -9,7 +9,7 @@
  */
 import { INITIAL_TERMINAL_STATE, terminalStatus, type TerminalPhase, type TerminalStatus } from './terminalStream'
 
-export interface BrowserFrame { tab: string; seq: number; w: number; h: number; jpeg: string; url: string; title: string; at: number }
+export interface BrowserFrame { tab: string; seq: number; /** the server's viewport epoch (absent from an older server) */ epoch?: number; w: number; h: number; jpeg: string; url: string; title: string; at: number }
 export interface BrowserTabView { id: string; title: string; active: boolean }
 export interface BrowserScreenStateEvent {
   tab: string
@@ -30,7 +30,7 @@ export function parseBrowserFrame(raw: string): BrowserFrame | null {
   if (!isRec(o)) return null
   const { tab, seq, w, h, jpeg, url, title, at } = o
   if (typeof tab !== 'string' || typeof seq !== 'number' || typeof w !== 'number' || typeof h !== 'number' || typeof jpeg !== 'string' || jpeg.length === 0) return null
-  return { tab, seq, w, h, jpeg, url: typeof url === 'string' ? url : '', title: typeof title === 'string' ? title : '', at: typeof at === 'number' ? at : 0 }
+  return { tab, seq, ...(typeof o.epoch === 'number' ? { epoch: o.epoch } : {}), w, h, jpeg, url: typeof url === 'string' ? url : '', title: typeof title === 'string' ? title : '', at: typeof at === 'number' ? at : 0 }
 }
 
 export function parseBrowserState(raw: string): BrowserScreenStateEvent | null {
@@ -84,6 +84,8 @@ export function browserScreenReducer(s: BrowserScreenState, a: BrowserScreenActi
     case 'frame':
       // An older frame (a reconnect replaying) never replaces a newer one of the same tab.
       if (!s.fresh && s.frame && s.frame.tab === a.frame.tab && a.frame.seq <= s.frame.seq && s.phase === 'streaming') return s
+      // A frame of an OLDER viewport epoch (a size the page has since left) never replaces one of a newer epoch on the same connection.
+      if (!s.fresh && s.frame && s.frame.tab === a.frame.tab && s.phase === 'streaming' && a.frame.epoch !== undefined && s.frame.epoch !== undefined && a.frame.epoch < s.frame.epoch) return s
       return { ...s, frame: a.frame, phase: 'streaming', goneReason: null, fresh: false }
     case 'state': return { ...s, state: a.state }
     case 'gone': return { ...s, phase: 'ended', goneReason: a.reason }
