@@ -27,7 +27,7 @@ export interface CustodyDeps {
   }
   /** Runs `fn` under the full envelope (tasks → deliveries → guards, fail closed — a busy file throws `guard_busy`, it never proceeds). */
   envelope<T>(fn: () => Promise<T>): Promise<T>
-  /** The board's activity facts (verified decision/block comments, status events); read under the envelope. Absent = no board source. */
+  /** The board's activity facts (verified decision/block comments); read under the envelope. Absent = no board source. */
   board?(): Promise<BoardActivityFacts>
   /** `null` = the fleet could not be read (never "nobody"). */
   sessions(): Promise<readonly CustodySession[] | null>
@@ -57,12 +57,15 @@ export function planOf(o: { now: number; orphanMs: number; records: readonly Del
   const pieces: CustodyPiece[] = []
   for (const r of o.records) {
     if (!o.projects.has(r.subtaskId)) continue
-    // The board's own activity (a verified decision/block thread comment, an authorized board move) competes with the record's
-    // stamp: the LATEST wins, by whoever did it. The planner then judges whether that actor is the piece's leader/custodian.
-    const b = o.board ? boardActivityOf({ key: r.subtaskId, taskId: r.taskId }, o.board) : null
-    const useBoard = !!b && Date.parse(b.at) > (r.leaderActivityAt ? Date.parse(r.leaderActivityAt) : -Infinity)
-    const at = useBoard ? b!.at : r.leaderActivityAt
-    const by = useBoard ? b!.by : r.leaderActivityBy
+    // The board's own activity (a verified decision/block thread comment) competes with the record's stamp: the LATEST wins — but only
+    // among ELIGIBLE actors (N2): the filed leader, the current custodian or a live leader of the task. A worker's block, or a
+    // stamp left by a custodian that lost the piece, never masks (or anchors) the absence of the piece's own leader.
+    const eligible = (by: string): boolean => by === r.leaderSessionId || by === r.custody?.sessionId || o.fleet.some(s => s.id === by && s.alive && s.role === 'leader' && s.taskId === r.taskId)
+    const b = o.board ? boardActivityOf({ key: r.subtaskId, taskId: r.taskId }, o.board, eligible) : null
+    const own = r.leaderActivityAt && r.leaderActivityBy && eligible(r.leaderActivityBy) ? r : null
+    const useBoard = !!b && (!own || Date.parse(b.at) > Date.parse(own.leaderActivityAt!))
+    const at = useBoard ? b!.at : own?.leaderActivityAt
+    const by = useBoard ? b!.by : own?.leaderActivityBy
     pieces.push({
       key: r.subtaskId, taskId: r.taskId, phase: r.phase, project: o.projects.get(r.subtaskId) ?? '', stageSince: stageSinceOf(r),
       ...(r.leaderSessionId ? { leaderSessionId: r.leaderSessionId } : {}),

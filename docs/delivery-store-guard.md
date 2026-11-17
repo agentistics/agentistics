@@ -132,8 +132,7 @@ now − leaderAbsentSince ≤ N.
 - **The stamp is part of the action's own write (F4).** No second best-effort write: a crash cannot separate an action from
   its stamp. The board-side sources that already exist count too, read by the tick under the tasks lock
   (`boardActivityOf`): a thread comment of kind `decision`/`block` by a verified session (`role: 'session'`) on that
-  task/piece, and a board `status` event by a session actor outside the DeliveryService (the actor must still be the piece's
-  leader or custodian to count — the planner decides). Plain comments, notes, handbacks, owner posts and transcripts stay
+  task/piece. Plain comments, notes, handbacks, owner posts and transcripts stay
   excluded. The board comment is itself the durable fact, so there is no second write to lose.
 - **Project (F5, §5.2.6).** `custody-project.ts`: Task.repo → the repo of the piece's sessions (ANY session filed on the piece,
   the leader's own included: the spec says "the piece's sessions", it does not exclude leaders) → the sidebar folder of those
@@ -142,9 +141,23 @@ now − leaderAbsentSince ≤ N.
 - **Absence anchor.** The plan anchors absence at the moment the activity STOPPED, not at "now" as §5.1 reads literally: a
   zombie that has not acted for N + 1 min must be an orphan on the tick that sees it (§5.4.2). A led piece with no activity
   on record still anchors at the first tick that sees it, so it gets its full N.
-- Stated limits: a board `status` event's `actor` is whatever the writer recorded; the planner only believes it when that actor
-  is a live leader of the piece, and a forged free-text actor naming a live leader would count. There is no exactly-once
-  delivery of the assignment message.
+- Stated limits: there is no exactly-once delivery of the assignment message.
+
+### S7a r3 — what the second independent QA changed (N1–N4)
+
+- **N1 — doors are fail-closed under rule C.** A write carrying a custody stamp (built only while rule C is on) takes the
+  fail-closed lock set (`deliveries` + `guards`) whatever rule A says, and a busy file answers 409 `guard_busy` with nothing
+  written — it never goes ahead after the lock wait while another process holds the file. Rule C `off` keeps the old path.
+- **N2 — only an eligible actor anchors activity.** The latest activity of a piece (record stamp or board comment) is taken
+  among the piece's ELIGIBLE actors only: its filed leader, its current custodian, or a live leader of its task. A worker's
+  verified `block`/`decision` never masks the custodian's or the leader's activity, never erases the filed leader's project
+  candidacy and never anchors the absence at the worker's time.
+- **N3 — the board `status` event is NOT a custody source (dropped).** Its `actor` is free text from REST (`markTask`) and the
+  event is written even for an idempotent re-mark, so it proves neither who acted nor that anything happened (a zombie leader
+  could be kept "present" forever). It may return as a source only once a producer stores a VERIFIED principal on the event
+  and only for `from !== to`. Until then the board sources are the verified `decision`/`block` thread comments.
+- **N4 — tests.** The delivery mark lands only on the custodian that was told (custody changing between the message and the
+  mark leaves `notifiedAt` unset) and the release declaration stamps exactly the pieces it changed; both have tests and mutants.
 
 ## The sweep (S2b, spec §2.6)
 

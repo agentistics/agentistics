@@ -281,7 +281,10 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
       const paths = anchor.paths
       if (inGuardTransaction(paths)) return serializeGuardWrite(paths, 'deliveries', () => write())
       const guarded = () => withGuardLocks(['deliveries', 'guards'], () => write(), { paths })
-      if (await peekRuleA(paths) !== 'off') return guarded()
+      // A write carrying a custody stamp (only built when rule C is on) is fail-closed whatever rule A says (S7a N1, §2.6.1): it never
+      // goes ahead after the lock wait with another holder still on the file, and the stamp never rides a write that did.
+      const stamped = Array.isArray(options?.stamp) ? options.stamp.length > 0 : options?.stamp !== undefined
+      if (stamped || await peekRuleA(paths) !== 'off') return guarded()
       // Rule A off (N2): exactly the base's locking — the evidence path's fail-closed locks, otherwise `withFileLock`.
       return options?.evidence
         ? withGuardLocks(options.guardsPath ? ['deliveries', 'guards'] : ['deliveries'], () => write(undefined, true), { paths })

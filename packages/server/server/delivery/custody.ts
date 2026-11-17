@@ -229,27 +229,30 @@ export function semanticallyChanged(before: unknown, after: unknown): boolean {
   return strip(before) !== strip(after)
 }
 
-/** What the board knows of leader work on a piece (the tick reads it under the tasks lock). */
+/**
+ * What the board knows of leader work on a piece (the tick reads it under the tasks lock). `events` is read but NOT a source (S7a r3,
+ * N3): the board's `status` event carries a free-text `actor` from REST and is written even for an idempotent re-mark, so it proves
+ * neither who acted nor that anything happened. It returns as a source the day a producer stores a VERIFIED principal on the event
+ * and only for `from !== to`.
+ */
 export interface BoardActivityFacts {
   comments: ReadonlyArray<{ taskId: string; subtaskId?: string; threadId?: string; role?: string; sessionId?: string; kind?: string; createdAt: string }>
-  events: ReadonlyArray<{ taskId: string; subtaskId?: string; at: string; actor: string; kind: string }>
+  events?: ReadonlyArray<{ taskId: string; subtaskId?: string; at: string; actor: string; kind: string }>
 }
 /**
  * PURE. The latest board-side piece action on `piece` (§5.1): a thread comment of kind `decision`/`block` posted by a VERIFIED
- * session (`role: 'session'`, a `sessionId`) on this task/piece, and an authorized board status move by a session actor outside
- * the DeliveryService. Plain comments (no thread / no kind), unverified posters and the flow's own events never count.
+ * session (`role: 'session'`, a `sessionId`) on this task/piece. Plain comments (no thread / no kind) and unverified posters never
+ * count. `eligible` (S7a r3, N2) restricts WHO may anchor activity — a worker's verified block must never become "the last activity"
+ * of the piece and mask its leader or custodian; absent = everybody (the pure shape the older tests read).
  */
-export function boardActivityOf(piece: { key: string; taskId: string }, facts: BoardActivityFacts): { at: string; by: string } | null {
+export function boardActivityOf(piece: { key: string; taskId: string }, facts: BoardActivityFacts, eligible?: (by: string) => boolean): { at: string; by: string } | null {
   let best: { at: string; by: string; t: number } | null = null
   const on = (taskId: string, subtaskId: string | undefined) => taskId === piece.taskId && (subtaskId === piece.key || (subtaskId === undefined && piece.key === piece.taskId))
-  const take = (at: string, by: string) => { const t = ms(at); if (t !== null && (!best || t > best.t)) best = { at, by, t } }
   for (const c of facts.comments) {
     if (!c.threadId || (c.kind !== 'decision' && c.kind !== 'block') || c.role !== 'session' || !c.sessionId || !on(c.taskId, c.subtaskId)) continue
-    take(c.createdAt, c.sessionId)
-  }
-  for (const e of facts.events) {
-    if (e.kind !== 'status' || !e.actor || e.actor === 'owner' || e.actor.startsWith('flow:') || !on(e.taskId, e.subtaskId)) continue
-    take(e.at, e.actor)
+    if (eligible && !eligible(c.sessionId)) continue
+    const t = ms(c.createdAt)
+    if (t !== null && (!best || t > best.t)) best = { at: c.createdAt, by: c.sessionId, t }
   }
   const b = best as { at: string; by: string } | null
   return b ? { at: b.at, by: b.by } : null

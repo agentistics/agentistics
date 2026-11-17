@@ -61,10 +61,16 @@ describe('F4 — boardActivityOf: only a verified leader-grade board record on T
     ['no thread', { threadId: undefined }], ['a note', { kind: undefined }], ['a handback', { kind: 'handback' }], ['unverified (no role)', { role: undefined }],
     ['an owner post', { role: 'owner' }], ['no session id', { sessionId: undefined }], ['another task', { taskId: 't-2' }], ['another piece', { subtaskId: 'p2' }],
   ] as const) test(`control: ${name} is not activity`, () => expect(boardActivityOf(piece1, { comments: [c(o)], events: [] })).toBeNull())
-  test('a status event counts for a session actor only — never the flow, the owner or another piece', () => {
-    const e = (o: Record<string, unknown>) => ({ taskId: 't-1', subtaskId: 'p1', at: iso(T0 + MIN), actor: 'L1', kind: 'status', ...o }) as never
-    expect(boardActivityOf(piece1, { comments: [], events: [e({})] })).toEqual({ at: iso(T0 + MIN), by: 'L1' })
-    for (const o of [{ actor: 'flow:sweep' }, { actor: 'owner' }, { subtaskId: 'p2' }, { kind: 'comment' }]) expect(boardActivityOf(piece1, { comments: [], events: [e(o)] })).toBeNull()
+  test('a board status event is NOT a source (r3 N3: its actor is free text and an idempotent re-mark is written too)', () => {
+    const e = { taskId: 't-1', subtaskId: 'p1', at: iso(T0 + MIN), actor: 'L1', kind: 'status', from: 'in_progress', to: 'in_progress' } as never
+    expect(boardActivityOf(piece1, { comments: [], events: [e] })).toBeNull()
+    expect(boardActivityOf(piece1, { comments: [c()], events: [e] })).toEqual({ at: iso(T0), by: 'L1' })
+  })
+  test('r3 N2: only an eligible actor anchors board activity (a worker\'s block is skipped, the leader\'s earlier decision is found)', () => {
+    const facts = { comments: [c({ sessionId: 'L1' }), c({ sessionId: 'W1', kind: 'block', createdAt: iso(T0 + H) })] }
+    expect(boardActivityOf(piece1, facts)).toEqual({ at: iso(T0 + H), by: 'W1' })
+    expect(boardActivityOf(piece1, facts, by => by === 'L1')).toEqual({ at: iso(T0), by: 'L1' })
+    expect(boardActivityOf(piece1, facts, () => false)).toBeNull()
   })
 })
 

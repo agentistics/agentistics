@@ -2213,7 +2213,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
     // F2: rule C takes the fail-closed envelope by ITSELF — whether rule A is on or off (a base `withFileLock` would write
     // after its wait expired with the lock still held by someone else).
     envelope: fn => withGuardEnvelope(c.paths ?? lockPaths(), fn),
-    ...(c.tasks ? { board: async () => { const b = await (await c.tasks!()).read(); return { comments: b.comments, events: b.events } } } : {}),
+    ...(c.tasks ? { board: async () => { const b = await (await c.tasks!()).read(); return { comments: b.comments } } } : {}),
     store: d.store as never,
     sessions: async () => { const rows = await d.facts.sessions().catch(() => null); return rows ? rows.map(s => ({ id: s.id, alive: s.alive, ...(s.role ? { role: s.role } : {}), ...(s.taskId ? { taskId: s.taskId } : {}) })) : null },
     projectsOf: c.projectsOf,

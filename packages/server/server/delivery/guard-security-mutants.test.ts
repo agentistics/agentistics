@@ -205,7 +205,7 @@ test('mutant N2: rule OFF takes the full envelope again (the r2 behaviour)', asy
   await killed('OFF-1')
 }, 120_000)
 test('mutant N2: a delivery write under rule OFF takes deliveries + guards again', async () => {
-  reset(); change(delivery + 'store.ts', "if (await peekRuleA(paths) !== 'off') return guarded()", 'return guarded()')
+  reset(); change(delivery + 'store.ts', "if (stamped || await peekRuleA(paths) !== 'off') return guarded()", 'return guarded()')
   await killed('OFF-3')
 }, 120_000)
 test('mutant N2: a board writer that read OFF never re-checks the rule under its lock', async () => {
