@@ -498,7 +498,8 @@ test('disabled account stays hidden through probe timeout, restart, error and su
   await assertHidden()
   expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({
     version: 2,
-    accounts: [{ ...account, available: false, lastSeen: now }],
+    // `setAvailable(false)` is the Agenda switch off: it is stored as such.
+    accounts: [{ ...account, available: false, agentUseEnabled: false, lastSeen: now }],
     bindings: { 'claude:': account!.id },
     segments: {},
   })
@@ -568,12 +569,43 @@ test('F3: a harness whose every account is off BY SCHEDULE is listed spawnable:f
   __setHarnessAccountsForTest(store)
   await store.current(['copilot'])
   const rec = (await store.list(['copilot']))[0]!
-  await store.setAvailable('copilot', 'gh:me', false)
+  await store.update(rec.id, { available: false })
   await store.update(rec.id, { agentSchedule: { enabled: true, days: {} } })
   const body = await planLimitsPayload(undefined, now, [])
   expect(body.harnesses.copilot?.spawnable).toBe(false)
   expect(body.harnesses.copilot?.unavailableReason).toContain('day off')
 })
+
+test('CONTAS.AGENDA-SALVAR: the Agenda switch OFF hides the account outright and the row says agenda-off', async () => {
+  const now = Date.now()
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), now: () => now, probe: async () => ({ key: 'known-login', label: 'Known account' }) })
+  __setHarnessAccountsForTest(store)
+  await store.current(['claude'])
+  const rec = (await store.list(['claude']))[0]!
+  await ingestPlanLimits({ harness: 'claude', account: rec.id, plan: 'Max', windows: [{ kind: '5h', usedPct: 10, resetsAt: now + 3_600_000 }], updatedAt: now, source: 'claude-stream' })
+  // An override cannot rescue an account whose Agenda is off.
+  await updateAccountForTest(store, rec.id, { agentUseEnabled: false, agentOverride: true, available: false })
+  const body = await planLimitsPayload(undefined, now, [])
+  expect(Object.keys(body.harnesses)).not.toContain('claude') // hidden outright, not "named with a reason"
+  const hidden = body.hiddenFromAgents.find(b => b.account === rec.id)
+  expect(hidden?.agentUse).toMatchObject({ reason: 'agenda-off', on: false, enabled: false, override: true })
+  // The owner's own off switch is never named to an agent (same as a manual off).
+  expect(planLimitsTool({ kind: 'spec-impl' }, body).offBySchedule).toBeUndefined()
+  expect(JSON.stringify(planLimitsTool({ kind: 'spec-impl' }, body))).not.toContain('claude')
+})
+
+test('CONTAS.AGENDA-SALVAR: Agenda on + override on reads override-on and stays visible', async () => {
+  const now = Date.now()
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), now: () => now, probe: async () => ({ key: 'known-login', label: 'Known account' }) })
+  __setHarnessAccountsForTest(store)
+  await store.current(['claude'])
+  const rec = (await store.list(['claude']))[0]!
+  await ingestPlanLimits({ harness: 'claude', account: rec.id, plan: 'Max', windows: [{ kind: '5h', usedPct: 10, resetsAt: now + 3_600_000 }], updatedAt: now, source: 'claude-stream' })
+  await updateAccountForTest(store, rec.id, { agentUseEnabled: true, agentOverride: true, agentSchedule: { enabled: true, days: {} }, available: true })
+  const body = await planLimitsPayload(undefined, now, [])
+  expect(body.budgets.find(b => b.account === rec.id)?.agentUse).toMatchObject({ reason: 'override-on', on: true, enabled: true, override: true })
+})
+const updateAccountForTest = (store: { update: (id: string, patch: Record<string, unknown>) => Promise<unknown> }, id: string, patch: Record<string, unknown>) => store.update(id, patch)
 
 // ─── C1: meter attribution + switch detection (spec §5; D1–D3 of §1) ─────────────────────────
 

@@ -6,7 +6,8 @@
  * has one in flight is refused (`busy`) instead of racing it. The caller disables the controls while
  * `inFlight` holds the id. An unidentified account (id '') has no route to PATCH and is refused.
  */
-export type PatchBody = { available?: boolean; nickname?: string }
+import type { AgentSchedule } from '@agentistics/core'
+export type PatchBody = { available?: boolean; nickname?: string; agentUseEnabled?: boolean; agentOverride?: boolean; agentSchedule?: AgentSchedule }
 
 export type PatchResult<A> =
   | { status: 'ok'; account: A }

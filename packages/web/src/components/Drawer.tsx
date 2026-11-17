@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useEscapeOwner } from '../lib/overlayStack'
 import { ConfirmModal } from '../pages/settings/primitives'
+import { LeaveChangesDialog } from './LeaveChangesDialog'
 import {
   drawerAfterFrame, drawerAfterTransition, drawerFrame, drawerMounted, drawerPhaseFor,
   prefersReducedMotion, swipeClosePx, swipeCloses, swipeIsHorizontal,
@@ -24,7 +25,7 @@ import {
  * back and the inbox, not a heading), there is no X (the backdrop, Esc, the system back and a
  * swipe towards the edge all close it), and the panel follows a finger swiping it shut.
  */
-export function Drawer({ open, title, onClose, children, footer, dirty = false, lang = 'en', side = 'right' }: {
+export function Drawer({ open, title, onClose, children, footer, dirty = false, leave, lang = 'en', side = 'right' }: {
   open: boolean
   /** A heading for `'right'`; the caller's own header row for `'left'`. */
   title: React.ReactNode
@@ -34,6 +35,8 @@ export function Drawer({ open, title, onClose, children, footer, dirty = false, 
   /** When true, closing (backdrop / X / Escape) or leaving the tab asks to confirm first, so
    *  unsaved edits are never silently discarded. Drawers compute this from their form state. */
   dirty?: boolean
+  /** With `dirty`: the leave dialog lists WHAT changed (`changes`, in words) and offers Discard / Save. Absent: the plain discard confirm. */
+  leave?: { who?: string; changes: readonly string[]; onSave: () => void }
   lang?: 'pt' | 'en'
   side?: DrawerSide
 }) {
@@ -192,8 +195,11 @@ export function Drawer({ open, title, onClose, children, footer, dirty = false, 
         )}
       </div>
     </div>
+    {leave && <LeaveChangesDialog open={confirmDiscard} lang={lang} who={leave.who} changes={leave.changes}
+      onKeep={() => setConfirmDiscard(false)} onDiscard={() => { setConfirmDiscard(false); onClose() }}
+      onSave={() => { setConfirmDiscard(false); leave.onSave() }} />}
     <ConfirmModal
-      open={confirmDiscard}
+      open={confirmDiscard && !leave}
       title={pt ? 'Descartar alterações?' : 'Discard changes?'}
       message={pt
         ? 'Você tem alterações não salvas. Se sair agora, elas serão perdidas.'
