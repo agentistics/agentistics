@@ -261,7 +261,9 @@ export function buildCalendar(o: {
     // having passed, never a stage running past its median. With no due day, a stage past its median keeps the
     // ceiling forecast (flagged for review) instead of a piece with no date at all.
     const dueEta = plannedEta(published ? null : dueDate)
-    const review = !published && dueEta === null && !shipped && l.overdueSinceMs != null
+    // The piece's own publish estimate already behind us, with no due day, is not a forecast either: review, not late.
+    const ownEtaPast = !published && dueEta === null && !shipped && l.publishEta.kind === 'estimate' && typeof l.publishEta.atMs === 'number' && l.publishEta.atMs < o.nowMs
+    const review = !published && dueEta === null && !shipped && (l.overdueSinceMs != null || ownEtaPast)
     const parked = INACTIVE_STATUSES.has((l.subtaskId ? sub?.status : task?.status) ?? '')
     // A parked/abandoned piece is never overdue, whatever filter shows it.
     const overdueSinceMs = !parked && dueEta !== null && deadlinePassed(dueDate, o.nowMs, today) ? dueEta.atMs : null
@@ -279,7 +281,7 @@ export function buildCalendar(o: {
       stageEta: published ? { kind: 'none', reason: 'final' } : eta(l.stageEta, confidence),
       publishEta, overdueSinceMs, ...(review ? { review: true } : {}), publishedAtMs, dueDate, ...(parentDueDate ? { parentDueDate } : {}),
       confirmed: published || (publishEta.kind === 'estimate' && publishEta.confidence !== null && RANK[publishEta.confidence] >= RANK.medium),
-      late: !published && !parked && (overdueSinceMs !== null || (dueEta === null && !review && publishEta.kind === 'estimate' && publishEta.atMs < o.nowMs)),
+      late: !published && !parked && overdueSinceMs !== null,
     })
     seen.add(l.key)
   }

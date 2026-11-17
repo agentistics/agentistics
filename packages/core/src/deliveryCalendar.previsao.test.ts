@@ -77,6 +77,14 @@ describe('2b · a ceiling forecast already in the past is not a forecast', () =>
     for (const p of r.pieces) if (p.publishEta.kind === 'estimate') expect(p.publishEta.atMs).toBeGreaterThanOrEqual(NOW)
     expect(r.pieces.find(p => p.key === 't1/b')!.publishEta.kind).toBe('estimate')
   })
+  test('a running piece whose own publish estimate is already past, with no due date: no date, review, not late (QA r2 F1)', () => {
+    const r = build({ lives: [live({ key: 't1/a', stage: 'running', publishEta: { kind: 'estimate', atMs: NOW - 2 * 24 * H } })], subtasks: [sub('a')] })
+    const p = r.pieces[0]!
+    expect(p.publishEta).toEqual({ kind: 'none', reason: 'review' })
+    expect(p.review).toBe(true)
+    expect(p.late).toBe(false)
+    expect(p.overdueSinceMs).toBeNull()
+  })
 })
 
 describe('4b · a parked piece is never overdue, even with the filter on Tudo', () => {
