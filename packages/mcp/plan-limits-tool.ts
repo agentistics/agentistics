@@ -20,7 +20,8 @@ export function planLimitsTool(
   const routed = args?.kind ? routeRecommendation(budgets, args.kind, args.authorHarness, { visibleHarnesses }) : undefined;
   const recommendation = routed?.accountLabel !== undefined ? { ...routed, accountLabel: plainLabel(routed.accountLabel) } : routed;
   const aggregates = harnessAggregate(budgets);
-  const offBySchedule = (body.hiddenFromAgents ?? []).filter(b => b?.agentUse && !b.agentUse.on)
+  // `agenda-off` is the owner turning the account off outright: like a manual off it is never named to an agent (CONTAS.AGENDA-SALVAR keeps that rule).
+  const offBySchedule = (body.hiddenFromAgents ?? []).filter(b => b?.agentUse && !b.agentUse.on && b.agentUse.reason !== 'agenda-off')
     .map(b => ({ harness: b.harness, account: b.account, reason: b.agentUse.reason as string }));
   return {
     budgets,

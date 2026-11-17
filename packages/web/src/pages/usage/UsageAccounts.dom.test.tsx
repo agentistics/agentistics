@@ -113,29 +113,6 @@ describe('the account row and its editor', () => {
     expect(el.querySelector('button[aria-label="Set plan · me@example.test"] .lucide-pencil')).not.toBeNull()
     expect(el.textContent).toContain('Plans and cost')
   })
-
-  test('the pencil opens the editor; the nickname and agent use save through PATCH /api/accounts/:id', async () => {
-    const el = mount('/usage')
-    await flush()
-    act(() => (el.querySelector('button[aria-label="Set plan · me@example.test"]') as HTMLButtonElement).click())
-    await flush()
-    const dialog = document.querySelector('[role=dialog]') as HTMLElement
-    expect(dialog).not.toBeNull()
-    // Agent use is editable from inside the editor too.
-    act(() => (dialog.querySelector('[data-account-agents] [role=switch]') as HTMLButtonElement).click())
-    await flush()
-    expect(patches).toEqual([{ url: '/api/accounts/c1', body: { available: false } }])
-
-    const input = dialog.querySelector('input[maxlength="40"]') as HTMLInputElement
-    act(() => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Work')
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    const save = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Save') as HTMLButtonElement
-    act(() => save.click())
-    await flush()
-    expect(patches.at(-1)).toEqual({ url: '/api/accounts/c1', body: { nickname: 'Work' } })
-  })
 })
 
 describe('#contas lands on the list (QA P2-1)', () => {
@@ -257,35 +234,107 @@ describe('removing a plan in the edge cases (CONTAS.MAC.NOVO)', () => {
   })
 })
 
-describe('the agent schedule in the account editor (CONTAS.AGENDA-AGENTICA)', () => {
-  test('turning the schedule on, adding Saturday and saving PATCHes the whole schedule', async () => {
+describe('the agent use in the account editor (CONTAS.AGENDA-SALVAR)', () => {
+  /** The drawer slides out before it unmounts: wait for the end of the transition. */
+  const drawerClosed = async () => {
+    for (let i = 0; i < 25; i++) {
+      if (!document.querySelector('[role=dialog]')) return true
+      await act(async () => { await new Promise(r => setTimeout(r, 60)) })
+    }
+    return false
+  }
+  const openEditor = async () => {
     const el = mount('/usage')
     await flush()
     act(() => (el.querySelector('button[aria-label="Set plan · me@example.test"]') as HTMLButtonElement).click())
     await flush()
-    const box = document.querySelector('[data-account-schedule]') as HTMLElement
-    expect(box).not.toBeNull()
-    expect(box.querySelectorAll('[data-agent-day]').length).toBe(7)
-    act(() => (box.querySelector('[role=switch][aria-label^="Agent-use schedule"]') as HTMLButtonElement).click())
-    act(() => (box.querySelector('[data-agent-day="sat"]') as HTMLButtonElement).click())
+    return document.querySelector('[role=dialog]') as HTMLElement
+  }
+  const sw = (dialog: HTMLElement, label: string) => dialog.querySelector(`[role=switch][aria-label^="${label}"]`) as HTMLButtonElement
+  const press = (name: string) => act(() => (Array.from(document.querySelectorAll('button')).find(b => b.textContent === name) as HTMLButtonElement).click())
+
+  test('there is ONE Save: no schedule Save, and a switch alone writes nothing', async () => {
+    const dialog = await openEditor()
+    expect(dialog.querySelector('[data-agent-schedule-save]')).toBeNull()
+    expect(Array.from(dialog.querySelectorAll('button')).filter(b => b.textContent === 'Save')).toHaveLength(1)
+    act(() => sw(dialog, 'Schedule').click())
     await flush()
-    expect(box.querySelector('[data-agent-day-editor="sat"]')).not.toBeNull()
-    act(() => (box.querySelector('[data-agent-schedule-save]') as HTMLButtonElement).click())
-    await flush()
-    const last = patches.at(-1)!
-    expect(last.url).toBe('/api/accounts/c1')
-    const sched = last.body.agentSchedule as { enabled: boolean; days: Record<string, { windows: unknown[] }> }
-    expect(sched.enabled).toBe(true)
-    expect(Object.keys(sched.days).sort()).toEqual(['fri', 'mon', 'sat', 'thu', 'tue', 'wed'])
-    expect(sched.days.sat!.windows).toEqual([{ from: '09:00', to: '18:00' }])
+    expect(patches).toEqual([])
   })
 
-  test('the reason badge is drawn from the server state', async () => {
-    account = { ...account, available: false, agentSchedule: { enabled: true, days: {} }, agentUse: { reason: 'day-off', on: false, dayUsedPct: null } }
-    const el = mount('/usage')
+  test('the switches, the schedule and the nickname go in ONE PATCH, at Save', async () => {
+    const dialog = await openEditor()
+    act(() => sw(dialog, 'Override the schedule').click())
+    act(() => (dialog.querySelector('[data-agent-day="sat"]') as HTMLButtonElement).click())
+    const input = dialog.querySelector('input[maxlength="40"]') as HTMLInputElement
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Work')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
     await flush()
-    act(() => (el.querySelector('button[aria-label="Set plan · me@example.test"]') as HTMLButtonElement).click())
+    expect(patches).toEqual([])
+    press('Save')
     await flush()
-    expect(document.querySelector('[data-agent-use-badge="day-off"]')?.textContent).toContain('Day not scheduled')
+    expect(patches).toHaveLength(1)
+    const body = patches[0]!.body as { nickname: string; agentOverride: boolean; agentUseEnabled?: boolean; agentSchedule: { enabled: boolean; days: Record<string, { windows: unknown[] }> } }
+    expect(patches[0]!.url).toBe('/api/accounts/c1')
+    expect(body.nickname).toBe('Work')
+    expect(body.agentOverride).toBe(true)
+    expect(body.agentUseEnabled).toBeUndefined() // only what changed
+    expect(body.agentSchedule.enabled).toBe(true)
+    expect(Object.keys(body.agentSchedule.days).sort()).toEqual(['fri', 'mon', 'sat', 'thu', 'tue', 'wed'])
+  })
+
+  test('Override is disabled while the Agenda is off, and says to turn the Agenda on first', async () => {
+    const dialog = await openEditor()
+    act(() => sw(dialog, 'Schedule').click())
+    await flush()
+    expect(sw(dialog, 'Override the schedule').disabled).toBe(true)
+    expect(dialog.querySelector('[data-agent-use-switches]')?.textContent).toContain('Turn the schedule on first.')
+    expect(dialog.querySelector('[data-agent-now-pill]')?.getAttribute('data-agent-now-pill')).toBe('off')
+  })
+
+  test('leaving with changes lists WHAT changed; Discard closes without writing', async () => {
+    const dialog = await openEditor()
+    act(() => sw(dialog, 'Schedule').click())
+    act(() => (dialog.querySelector('[data-agent-day="sat"]') as HTMLButtonElement).click())
+    await flush()
+    expect(dialog.querySelector('[data-drawer-unsaved]')?.textContent).toBe('2 unsaved changes')
+    act(() => (dialog.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click())
+    await flush()
+    const list = document.querySelector('[data-leave-changes]') as HTMLElement
+    expect(list).not.toBeNull()
+    const lines = Array.from(list.querySelectorAll('li')).map(li => li.textContent)
+    expect(lines.some(l => l?.includes('Schedule: on → off'))).toBe(true)
+    expect(lines.some(l => l?.includes('Saturday joined the schedule'))).toBe(true)
+    act(() => (document.querySelector('[data-leave-discard]') as HTMLButtonElement).click())
+    await flush()
+    expect(patches).toEqual([])
+    expect(await drawerClosed()).toBe(true)
+  })
+
+  test('leaving with changes and choosing Save writes the same one PATCH', async () => {
+    const dialog = await openEditor()
+    act(() => sw(dialog, 'Schedule').click())
+    await flush()
+    act(() => (dialog.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click())
+    await flush()
+    act(() => (document.querySelector('[data-leave-save]') as HTMLButtonElement).click())
+    await flush()
+    expect(patches).toEqual([{ url: '/api/accounts/c1', body: { agentUseEnabled: false } }])
+  })
+
+  test('with nothing changed, closing asks nothing', async () => {
+    const dialog = await openEditor()
+    act(() => (dialog.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click())
+    await flush()
+    expect(document.querySelector('[data-leave-changes]')).toBeNull()
+    expect(await drawerClosed()).toBe(true)
+  })
+
+  test('the "Now" line is drawn from the server state', async () => {
+    account = { ...account, available: false, agentSchedule: { enabled: true, days: {} }, agentUse: { reason: 'day-off', on: false, enabled: true, override: false, dayUsedPct: null, weekUsedPct: null } }
+    const dialog = await openEditor()
+    expect(dialog.querySelector('[data-agent-now-pill]')?.textContent).toContain('Day not scheduled')
   })
 })

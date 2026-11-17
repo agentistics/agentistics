@@ -4,6 +4,7 @@ import type { AgentUseView } from './agentScheduleView'
 import { subscribeEvent } from './eventStream'
 import { pushLocalNotification } from './notifications'
 import { createAccountMutator } from '../pages/settings/accountMutations'
+import { draftOf } from './agentUseDraft'
 
 type PlanAccount = {
   id: string; harness: HarnessId; available: boolean; retired?: boolean
@@ -23,9 +24,14 @@ export function loginNeedsRelogin(a: { login?: string; relogin?: boolean }): boo
 
 /** What a surface needs to draw one account's agent-use controls. */
 export interface AgentUseControl {
+  /** The effective flag (what agents get right now). */
   on: boolean
+  /** The two switches, as stored. */
+  enabled: boolean
+  override: boolean
   pending: boolean
-  onToggle: () => void
+  setEnabled: (next: boolean) => void
+  setOverride: (next: boolean) => void
   accountId: string
   schedule?: AgentSchedule
   view?: AgentUseView
@@ -41,7 +47,7 @@ export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
   const [accounts, setAccounts] = useState<PlanAccount[]>([])
   // False until the registry answered once (or failed): rows must not render controls-less in between.
   const [loaded, setLoaded] = useState(false)
-  const [optimistic, setOptimistic] = useState<Record<string, boolean>>({})
+  const [optimistic, setOptimistic] = useState<Record<string, { enabled: boolean; override: boolean }>>({})
   const mutator = useRef(createAccountMutator<PlanAccount>((id, body) => fetch(`/api/accounts/${encodeURIComponent(id)}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }))).current
@@ -70,9 +76,29 @@ export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
   const lookup = (harness: HarnessId, id?: string): AgentUseControl | undefined => {
     const account = accounts.find(a => a.id && a.id === id && a.harness === harness && !a.retired)
     if (!enabled || !account) return undefined
+    const saved = draftOf(account)
+    const shown = optimistic[account.id]
+    // One single-field PATCH per click (the popup has no Save): the switch moves at once, the server's answer replaces it.
+    const write = async (patch: { agentUseEnabled?: boolean; agentOverride?: boolean }) => {
+      if (mutator.has(account.id)) return
+      revision.current++
+      setOptimistic(prev => ({ ...prev, [account.id]: { enabled: patch.agentUseEnabled ?? saved.enabled, override: patch.agentOverride ?? saved.override } }))
+      const result = await mutator.patch(account.id, patch)
+      revision.current++
+      if (result.status === 'ok') {
+        setAccounts(prev => prev.map(a => a.id === account.id ? result.account : a))
+      } else if (result.status === 'failed') {
+        setAccounts(prev => prev.map(a => a.id === account.id ? account : a))
+        pushLocalNotification({ type: 'error', title: lang === 'pt' ? 'Não foi possível alterar o uso por agentes' : 'Could not change agent use',
+          message: lang === 'pt' ? 'A escolha anterior foi mantida. Tente novamente.' : 'Your previous choice was kept. Try again.' })
+      }
+      setOptimistic(prev => { const next = { ...prev }; delete next[account.id]; return next })
+    }
     return {
-      on: optimistic[account.id] ?? account.available,
-      pending: Object.hasOwn(optimistic, account.id),
+      on: account.available,
+      enabled: shown?.enabled ?? saved.enabled,
+      override: shown?.override ?? saved.override,
+      pending: shown !== undefined,
       accountId: account.id,
       ...(account.agentSchedule ? { schedule: account.agentSchedule } : {}),
       ...(account.agentUse ? { view: account.agentUse } : {}),
@@ -82,26 +108,10 @@ export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
         const a = next as PlanAccount | null
         if (a && a.id === account.id) { revision.current++; setAccounts(prev => prev.map(x => x.id === a.id ? a : x)) }
       },
-      onToggle: async () => {
-        if (mutator.has(account.id)) return
-        revision.current++
-        const available = !account.available
-        setOptimistic(prev => ({ ...prev, [account.id]: available }))
-        const result = await mutator.patch(account.id, { available })
-        revision.current++
-        if (result.status === 'ok') {
-          setAccounts(prev => prev.map(a => a.id === account.id ? result.account : a))
-        } else if (result.status === 'failed') {
-          setAccounts(prev => prev.map(a => a.id === account.id ? account : a))
-          pushLocalNotification({ type: 'error', title: lang === 'pt' ? 'Não foi possível alterar o uso por agentes' : 'Could not change agent use',
-            message: lang === 'pt' ? 'A escolha anterior foi mantida. Tente novamente.' : 'Your previous choice was kept. Try again.' })
-        }
-        setOptimistic(prev => { const next = { ...prev }; delete next[account.id]; return next })
-      },
+      setEnabled: (next: boolean) => write({ agentUseEnabled: next }),
+      setOverride: (next: boolean) => write({ agentOverride: next }),
     }
   }
-  // `loaded` lets a row show a placeholder instead of a controls-less first frame; `accounts` lets the
-  // list add the accounts that have no plan reading (they would otherwise be invisible here).
   return Object.assign(lookup, {
     loaded,
     accounts: accounts.filter(a => !a.retired).map(a => ({ harness: a.harness, id: a.id, label: a.nickname ?? a.label })),
