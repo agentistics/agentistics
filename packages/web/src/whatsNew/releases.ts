@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.217.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Calendário: cada tarefa aparece no dia do prazo que você definiu no quadro. "Atrasada" agora só quer dizer que esse prazo passou.',
+        en: 'Calendar: each task shows on the due date you set on the board. "Overdue" now only means that date has passed.',
+      },
+      {
+        pt: 'Calendário: tarefas adiadas ou abandonadas não contam mais como atrasadas, e nada aparece previsto para um dia que já passou.',
+        en: 'Calendar: deferred or abandoned tasks no longer count as overdue, and nothing is forecast for a day already gone.',
+      },
+    ],
+  },
   '2.217.2': {
     features: [],
     fixes: [

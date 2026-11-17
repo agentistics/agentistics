@@ -98,12 +98,13 @@ export const PRIORITY_LABEL: Record<CalPriority, L> = {
 }
 
 export const CONFIDENCE_LABEL: Record<CalConfidence, L> = {
-  high: t('confiança alta', 'high confidence'), medium: t('confiança média', 'medium confidence'), low: t('confiança baixa', 'low confidence'),
+  owner: t('data planejada no quadro', 'date planned on the board'), high: t('confiança alta', 'high confidence'), medium: t('confiança média', 'medium confidence'), low: t('confiança baixa', 'low confidence'),
 }
 
 export const NO_ESTIMATE_REASON: Record<string, L> = {
   'no-history': t('sem histórico parecido para estimar', 'no similar history to estimate from'),
   'not-started': t('ainda não começou', 'not started yet'),
   'beyond-range': t('já passou do tempo típico', 'already past the typical time'),
+  review: t('passou do tempo típico — revisar', 'past the typical time — review'),
   final: t('já publicada', 'already published'),
 }
