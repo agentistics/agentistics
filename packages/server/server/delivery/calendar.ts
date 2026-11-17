@@ -68,6 +68,7 @@ export async function readCalendarSources(): Promise<CalendarSources> {
     stageEta: d.stageEta.kind === 'estimate' ? { kind: 'estimate', atMs: d.stageEta.atMs } : { kind: 'none', reason: d.stageEta.reason },
     publishEta: d.publishEta.kind === 'estimate' ? { kind: 'estimate', atMs: d.publishEta.atMs } : { kind: 'none', reason: d.publishEta.reason },
     ...(d.overdueSinceMs != null ? { overdueSinceMs: d.overdueSinceMs } : {}),
+    ...(d.ceilingEtaMs != null ? { ceilingEtaMs: d.ceilingEtaMs } : {}),
     deliveredAtMs: d.deliveredAtMs,
   }))
   return {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { buildCalendar } from '@agentistics/core'
-import { answerCalendar, calendarFiltersOf, subtaskInputs } from './calendar'
+import { buildCalendar, calendarToIcs, filterCalendar } from '@agentistics/core'
+import { answerCalendar, calendarFiltersOf, calendarFrom, releasesFromPieceTags, subtaskInputs } from './calendar'
 
 describe('calendarFiltersOf', () => {
   test('no query = the default: tasks being worked on', () => {
@@ -16,6 +16,32 @@ describe('calendarFiltersOf', () => {
   test('an unparseable instant is dropped, not turned into NaN', () => {
     const f = calendarFiltersOf(new URLSearchParams('from=banana'))
     expect('fromMs' in f).toBe(false)
+  })
+})
+
+describe('rule 5 through the host builder: a tag-proven published piece leaves leader/ci', () => {
+  const NOW = Date.parse('2026-11-17T15:00:00.000Z')
+  const started = NOW - 8 * 86_400_000
+  const base = {
+    nowMs: NOW, resets: [], tasks: [{ id: 't', title: 'Task', status: 'in_progress' }], subtasks: [{ id: 's', taskId: 't', title: 'Piece', status: 'in_review' }],
+    lives: [{
+      key: 't/s', taskId: 't', taskTitle: 'Task', subtaskId: 's', title: 'Piece', stage: 'ci' as const, startedAtMs: started, stageSinceMs: NOW - 3600_000,
+      harnesses: ['claude'], models: ['opus'], eta: { kind: 'none' as const }, stageEta: { kind: 'none' as const }, publishEta: { kind: 'none' as const, reason: 'no-history' }, deliveredAtMs: null,
+    }],
+    records: [{ subtaskId: 's', taskId: 't', phase: 'ci', versionTarget: '2.230.0' }],
+  }
+  test('without proof the piece stays in ci; with the tag proof (via releasesFromPieceTags) it is published and leaves the stage', () => {
+    const before = calendarFrom(base).pieces[0]!
+    expect(before.stage).toBe('ci')
+    const tagMs = NOW - 2 * 86_400_000
+    const after = calendarFrom({
+      ...base, inferredVersions: { 't/s': '2.229.0' },
+      releases: releasesFromPieceTags({ 't/s': { version: '2.229.0', publishedAt: tagMs } }),
+    })
+    expect(after.pieces[0]).toMatchObject({ stage: 'published', version: '2.229.0', active: false, late: false })
+    expect(filterCalendar(after, {}).pieces.filter(p => ['leader', 'merge', 'ci'].includes(p.stage))).toHaveLength(0)
+    // the same reply feeds the .ics: the event sits on the tag's day
+    expect(calendarToIcs(filterCalendar(after, { tasks: 'all' }), NOW)).toContain('20261115')
   })
 })
 

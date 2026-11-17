@@ -35,6 +35,7 @@ function etaRows(p: CalPiece, pt: boolean): React.ReactNode {
     return <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
       ~{stamp(p.publishEta.atMs, pt)} <Confidence level={p.publishEta.confidence} pt={pt} />
       {p.publishEta.confidence && <span style={{ color: 'var(--text-tertiary)' }}>{pick(CONFIDENCE_LABEL[p.publishEta.confidence], pt)}</span>}
+      {p.review && <span style={{ color: 'var(--accent-amber)' }}>{pick(NO_ESTIMATE_REASON.review!, pt)}</span>}
     </span>
   }
   return <>{pick(TEXT.noEstimate, pt)}{p.publishEta.reason && NO_ESTIMATE_REASON[p.publishEta.reason] ? <span style={{ color: 'var(--text-tertiary)' }}> · {pick(NO_ESTIMATE_REASON[p.publishEta.reason]!, pt)}</span> : null}</>
