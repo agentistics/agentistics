@@ -155,11 +155,11 @@ describe('buildCalendar', () => {
     const r = buildCalendar({ nowMs: NOW, lives: [live({ key: 'z/q', taskId: 'z', stage: 'qa', publishEta: { kind: 'estimate', atMs: NOW - H } })], records: [], tasks: [], subtasks: [], resets: [] })
     expect(r.pieces[0]!.late).toBe(true)
   })
-  test('an overdue stage has no rolling publish time and preserves when it became overdue', () => {
+  test('a stage past its typical time has no rolling publish time: it is flagged for review, and overdue only means a due date passed', () => {
     const since = NOW - 3 * 24 * H
     const r = buildCalendar({ nowMs: NOW, lives: [live({ key: 'z/late', taskId: 'z', stage: 'leader', stageSinceMs: since, overdueSinceMs: since + H, publishEta: { kind: 'estimate', atMs: NOW + H } })], records: [], tasks: [], subtasks: [], resets: [] })
-    expect(r.pieces[0]!.publishEta).toEqual({ kind: 'none', reason: 'overdue' })
-    expect(r.pieces[0]!).toMatchObject({ overdueSinceMs: since + H, late: true })
+    expect(r.pieces[0]!.publishEta).toEqual({ kind: 'none', reason: 'review' })
+    expect(r.pieces[0]!).toMatchObject({ overdueSinceMs: null, review: true, late: false })
   })
 })
 

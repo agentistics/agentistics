@@ -26,7 +26,8 @@ export const CAL_STAGES = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leade
 export type CalStage = (typeof CAL_STAGES)[number]
 export type CalPriority = 'urgent' | 'high' | 'medium' | 'low'
 export const CAL_PRIORITIES: readonly CalPriority[] = ['urgent', 'high', 'medium', 'low']
-export type CalConfidence = 'low' | 'medium' | 'high'
+/** `owner`: not a forecast at all — the date the board's own due day plans. */
+export type CalConfidence = 'low' | 'medium' | 'high' | 'owner'
 
 /** The ETA of a piece reaching Publicado (or leaving its stage) — `none` is "no estimate", never a time. */
 export type CalEta =
@@ -66,6 +67,8 @@ export interface CalPiece {
   publishEta: CalEta
   /** The original stage estimate that has elapsed without the piece leaving the stage. */
   overdueSinceMs?: number | null
+  /** True when the stage ran past its typical time with no due day: the date drawn is the stage's ceiling forecast, to be reviewed. */
+  review?: boolean
   /** The real publication instant (the release's own) — null until it shipped. */
   publishedAtMs: number | null
   /** `yyyy-MM-dd` — the piece's OWN due day (its subtask's; a task-level piece's is the task's). Never inherited. */
@@ -126,6 +129,8 @@ export interface CalLiveInput {
   stageEta: { kind: 'estimate'; atMs: number } | { kind: 'none'; reason?: string }
   publishEta: { kind: 'estimate'; atMs: number } | { kind: 'none'; reason?: string }
   overdueSinceMs?: number | null
+  /** Publication forecast from the stage's declared ceiling (`stageCeilingForecast`) — what a stage past its median keeps instead of "no date". */
+  ceilingEtaMs?: number | null
   deliveredAtMs: number | null
 }
 export interface CalRecordInput {
@@ -163,7 +168,17 @@ export function brtParts(ms: number): { day: string; hour: number; minute: numbe
 /** Epoch ms of 00:00 BRT of a `yyyy-MM-dd`. */
 export function brtDayStartMs(day: string): number { return Date.parse(`${day}T00:00:00.000Z`) - BRT_OFFSET_MS }
 
-const RANK: Record<CalConfidence, number> = { low: 0, medium: 1, high: 2 }
+const RANK: Record<CalConfidence, number> = { low: 0, medium: 1, high: 2, owner: 3 }
+
+/** A piece the owner parked or dropped: on the board, but not part of what is being worked on. */
+const INACTIVE_STATUSES: ReadonlySet<string> = new Set(['ideias_adiado', 'abandoned'])
+
+/** The instant a board due day plans publication for: a bare day is 18:00 BRT, an explicit time is itself. */
+const plannedEta = (due: string | null): Extract<CalEta, { kind: 'estimate' }> | null => {
+  if (!due) return null
+  const ms = due.includes('T') ? Date.parse(due) : brtDayStartMs(due.slice(0, 10)) + 18 * 3600_000
+  return Number.isFinite(ms) ? { kind: 'estimate', atMs: ms, confidence: 'owner' } : null
+}
 
 export function buildCalendar(o: {
   nowMs: number
@@ -215,12 +230,19 @@ export function buildCalendar(o: {
     return startedAtMs !== null && at < startedAtMs ? null : v
   }
 
+  const preferShipped = (declared: string | null, proven: string | null): string | null =>
+    proven !== null && releasePublishedAt.has(proven) && (declared === null || !releasePublishedAt.has(declared)) ? proven : declared ?? proven
+
   const pieces: CalPiece[] = []
   const seen = new Set<string>()
   for (const l of o.lives) {
     const rec = l.subtaskId ? recBySub.get(l.subtaskId) : undefined
     const task = taskById.get(l.taskId)
-    const version = pickVersion(rec?.versionTarget) ?? provenVersion(l.key, l.stage, l.startedAtMs)
+    const proven = provenVersion(l.key, l.stage, l.startedAtMs)
+    const declared = pickVersion(rec?.versionTarget)
+    // Rule 5: a commit PROVEN inside a tag that went out wins over a declared release that has not (declared on the
+    // next version, rode an earlier one).
+    const version = preferShipped(declared, proven)
     // A piece waiting on the leader/merge/CI whose version already went out IS published: the board keeps it
     // in_review until the OWNER validates, so the calendar must not read that as still being reviewed.
     const releasedAt = version ? releasePublishedAt.get(version) ?? null : null
@@ -228,8 +250,6 @@ export function buildCalendar(o: {
     const stage: CalStage = shipped ? 'published' : l.stage
     const publishedAtMs = parseMs(rec?.publishedAt) ?? (shipped ? releasedAt : l.stage === 'published' ? l.deliveredAtMs : null)
     const confidence = l.eta.kind === 'estimate' ? l.eta.confidence : null
-    const overdueSinceMs = shipped ? null : l.overdueSinceMs ?? null
-    const publishEta = stage === 'published' ? ({ kind: 'none', reason: 'final' } as CalEta) : overdueSinceMs !== null ? ({ kind: 'none', reason: 'overdue' } as CalEta) : eta(l.publishEta, confidence)
     const sub = l.subtaskId ? subById.get(l.subtaskId) : undefined
     // The piece's OWN deadline. The parent task's day is context (`parentDueDate`), never copied onto every piece;
     // a task-level piece (no subtask) IS the task, so its deadline is the task's.
@@ -237,17 +257,26 @@ export function buildCalendar(o: {
     const parentDueDate = l.subtaskId ? task?.dueDate ?? null : null
     // A finished piece without a release (`completed`) is closed: neither open nor late.
     const published = stage === 'published' || (stage as string) === 'completed'
+    // THE BOARD'S PLAN OUTRANKS THE STAGE CLOCK. A due day is the date the piece is planned for; "overdue" is that day
+    // having passed, never a stage running past its median. With no due day, a stage past its median keeps the
+    // ceiling forecast (flagged for review) instead of a piece with no date at all.
+    const dueEta = plannedEta(published ? null : dueDate)
+    const review = !published && dueEta === null && !shipped && l.overdueSinceMs != null
+    const overdueSinceMs = dueEta !== null && deadlinePassed(dueDate, o.nowMs, today) ? dueEta.atMs : null
+    const publishEta: CalEta = stage === 'published' ? { kind: 'none', reason: 'final' }
+      : dueEta ?? (review ? (l.ceilingEtaMs != null ? { kind: 'estimate', atMs: l.ceilingEtaMs, confidence: 'low' } : { kind: 'none', reason: 'review' }) : eta(l.publishEta, confidence))
+    const parked = INACTIVE_STATUSES.has((l.subtaskId ? sub?.status : task?.status) ?? '')
     pieces.push({
       key: l.key, taskId: l.taskId, taskTitle: l.taskTitle, subtaskId: l.subtaskId, title: l.title, ...(l.kind ? { kind: l.kind } : {}), ...(l.leaderAvailabilityReasonCode ? { leaderAvailabilityReasonCode: l.leaderAvailabilityReasonCode } : {}), stage,
       version,
       harness: l.harnesses[0] ?? null, model: l.models[0] ?? null,
       priority: toPriority(sub?.priority ?? task?.priority),
-      active: !published,
+      active: !published && !parked,
       startedAtMs: l.startedAtMs, stageSinceMs: l.stageSinceMs, trail: l.trail ? l.trail.map(v => ({ ...v })) : [],
       stageEta: published ? { kind: 'none', reason: 'final' } : eta(l.stageEta, confidence),
-      publishEta, overdueSinceMs, publishedAtMs, dueDate, ...(parentDueDate ? { parentDueDate } : {}),
+      publishEta, overdueSinceMs, ...(review ? { review: true } : {}), publishedAtMs, dueDate, ...(parentDueDate ? { parentDueDate } : {}),
       confirmed: published || (publishEta.kind === 'estimate' && publishEta.confidence !== null && RANK[publishEta.confidence] >= RANK.medium),
-      late: !published && (overdueSinceMs !== null || deadlinePassed(dueDate, o.nowMs, today) || (publishEta.kind === 'estimate' && publishEta.atMs < o.nowMs)),
+      late: !published && !parked && (overdueSinceMs !== null || (dueEta === null && !review && publishEta.kind === 'estimate' && publishEta.atMs < o.nowMs)),
     })
     seen.add(l.key)
   }
@@ -271,7 +300,7 @@ export function buildCalendar(o: {
       if ((board === 'in_progress' || board === 'todo' || board === 'blocked') && (phaseStage === 'leader' || phaseStage === 'merge' || phaseStage === 'ci')) continue
     }
     // Waiting on the leader/merge/CI with a version that already went out: published, exactly as for a Live piece.
-    const openVersion = phaseStage && phaseStage !== 'published' ? pickVersion(r.versionTarget) ?? provenVersion(key, phaseStage, parseMs(r.firstAt)) : null
+    const openVersion = phaseStage && phaseStage !== 'published' ? preferShipped(pickVersion(r.versionTarget), provenVersion(key, phaseStage, parseMs(r.firstAt))) : null
     const flippedAt = openVersion && phaseStage && FLIPS.has(phaseStage) ? releasePublishedAt.get(openVersion) ?? null : null
     if (flippedAt !== null) {
       seen.add(key)
@@ -288,16 +317,21 @@ export function buildCalendar(o: {
     const stage = phaseStage
     if (stage && stage !== 'published') {
       // A piece the delivery flow tracks (it has a phase, maybe a version) that the Live line does not draw — planned
-      // work with no session yet. It belongs on a calendar, but with NO estimate: the Live model produced none.
+      // work with no session yet. It belongs on a calendar; the Live model produced no estimate, so its date is the
+      // board's own due day when it has one, and "not started" only when it has none.
       seen.add(key)
+      const planned = plannedEta(dueDate)
+      const parked = INACTIVE_STATUSES.has(sub?.status ?? task?.status ?? '')
+      const gone = planned !== null && deadlinePassed(dueDate, o.nowMs, today)
+      const noDate: CalEta = { kind: 'none', reason: 'not-started' }
       pieces.push({
         key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,
         title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage, version: openVersion,
-        harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: task?.status === 'in_progress',
+        harness: null, model: null, priority: toPriority(sub?.priority ?? task?.priority), active: task?.status === 'in_progress' && !parked,
         startedAtMs: parseMs(r.firstAt), stageSinceMs: parseMs(r.lastAt), trail: [],
-        stageEta: { kind: 'none', reason: 'not-started' }, publishEta: { kind: 'none', reason: 'not-started' },
-        publishedAtMs: null, dueDate, ...(parentDueDate ? { parentDueDate } : {}), confirmed: false, overdueSinceMs: null,
-        late: deadlinePassed(dueDate, o.nowMs, today),
+        stageEta: noDate, publishEta: planned ?? noDate,
+        publishedAtMs: null, dueDate, ...(parentDueDate ? { parentDueDate } : {}), confirmed: planned !== null, overdueSinceMs: gone ? planned.atMs : null,
+        late: !parked && deadlinePassed(dueDate, o.nowMs, today),
       })
       continue
     }

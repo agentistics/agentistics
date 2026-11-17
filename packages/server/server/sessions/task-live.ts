@@ -148,6 +148,8 @@ export interface LiveDelivery {
   publishEta: LivePublishEta
   /** Original current-stage estimate once it has elapsed without a transition. */
   overdueSinceMs?: number | null
+  /** Publication forecast from the stage ceiling, kept for a stage past its typical time (the calendar shows it flagged for review). */
+  ceilingEtaMs?: number | null
   block: LiveBlock | null
   /** "Antiga sem registro" (`delivery/antigas.ts`): shown (marked "antiga") only in "Tudo", where its group decides it in one click. */
   old?: boolean
@@ -722,7 +724,7 @@ export function stageOverdueSinceMs(stage: LiveStage, sinceMs: number | null, no
   return boundary <= nowMs ? boundary : null
 }
 
-function stageCeilingForecast(o: EstimateOptions & {
+export function stageCeilingForecast(o: EstimateOptions & {
   stage: LiveStage; origin: LiveStage | null; sinceMs: number | null
   typicals: Partial<Record<LiveStage, StageTypical>>
 }): { eta: LiveEta; stageEta: LiveStageEta; publishEta: LivePublishEta } | null {
@@ -1220,13 +1222,17 @@ export function buildLive(o: {
       })
       return mergeStep(reported, derived)
     })()
-    const { eta, stageEta, publishEta } = resolvePieceForecast({
+    const forecastOptions = {
       stage, origin: originStage, sinceMs: stageSinceMs, nowMs: o.nowMs, typicals,
       startedAtMs: stage === 'queue' ? null : startedAtMs, harness, model, taskType: p.task.type ?? null, cohorts,
       scheduledAtMs: rec?.queueHold?.kind === 'agendar' ? ms(rec.queueHold.until) : null,
       blockReason: rec?.block?.text || rec?.block?.reason || p.blockedReason || (p.dependsOn > 0 ? 'dependencia' : null),
       overrunAnchorAtMs: o.overrunAnchors?.get(subject),
-    })
+    }
+    const { eta, stageEta, publishEta } = resolvePieceForecast(forecastOptions)
+    const overdueNow = stageOverdueSinceMs(stage, stageSinceMs, o.nowMs, typicals)
+    const ceilingPublish = overdueNow !== null ? stageCeilingForecast(forecastOptions)?.publishEta : undefined
+    const ceilingEtaMs = ceilingPublish?.kind === 'estimate' ? ceilingPublish.atMs : null
     ;(isOld ? oldReviews : oldPublished ? history : deliveries).push({
       key: subject,
       taskId: p.task.id, taskTitle: p.task.title,
@@ -1241,8 +1247,8 @@ export function buildLive(o: {
       models: [...new Set(liveSessions.concat(p.sessions).map(s => s.model).filter((m): m is string => !!m))],
       efforts: [...new Set(liveSessions.concat(p.sessions).map(s => s.effort).filter((m): m is string => !!m))],
       eta, workMs, trail, stageEta, publishEta,
-      ...(stageOverdueSinceMs(stage, stageSinceMs, o.nowMs, typicals) !== null
-        ? { overdueSinceMs: stageOverdueSinceMs(stage, stageSinceMs, o.nowMs, typicals) } : {}),
+      ...(overdueNow !== null
+        ? { overdueSinceMs: overdueNow, ...(ceilingEtaMs !== null ? { ceilingEtaMs } : {}) } : {}),
       block: stage === 'blocked' ? blockOf({ text: userWait ? 'decisao_do_dono:' : rec?.block ? `${rec.block.reason}: ${rec.block.text}` : p.blockedReason, dependsOn: p.dependsOn, originStage }) : null,
       ci: stage === 'ci' ? (ciSignalOf(rec?.ci ?? ((p.sub ?? p.task) as { ci?: unknown }).ci) ?? { mergedMain: true, releaseGreen: false, tagPublished: false, tag: null, pr: null }) : null,
       step: stepInfo?.step ?? null,
