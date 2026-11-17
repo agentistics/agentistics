@@ -346,7 +346,7 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
       ok: true, ...base, role: next ?? 'auto', changed, renamed, notified, ...(next ? { origin } : {}), line: roleLine(next),
       message: (changed
         ? `Role set to ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}${notified ? '; the session was told' : ''}.`
-        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`) + (retire?.ok ? ` ${retire.title} will be closed when it goes quiet.` : '')
+        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`) + (retire?.ok ? ` ${retire.title} will be closed once its current turn ends (within 10 minutes at most).` : '')
         + (retire && !retire.ok && retire.code === 'dirty_worktrees' ? ` The predecessor was NOT retired — ${retire.reason}: ${retire.blocking.join('; ')}.` : '')
         + (warning ? ` ${warning}` : ''),
     }

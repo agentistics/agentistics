@@ -832,7 +832,7 @@ const TOOLS: Tool[] = [
       properties: {
         ref: { type: "string", description: "A session reference (managed id, conversation id, exact title or unique id prefix). Omit for your own session." },
         role: { type: "string", enum: ["leader", "worker", "auto"], description: "The role to set. Omit to read it." },
-        retirePredecessor: { type: "string", description: "A leader taking over can pass the previous leader on the SAME task (managed id, conversation id, exact title or unique id prefix); the server closes it when it goes quiet. Only for your own session declared leader; otherwise the role still changes and the reply says why the retire was refused." },
+        retirePredecessor: { type: "string", description: "A leader taking over can pass the previous leader on the SAME task (managed id, conversation id, exact title or unique id prefix); the server closes it once its current turn ends, and within 10 minutes at most even if it keeps being nudged, then files it in the finished folder. Only for your own session declared leader; otherwise the role still changes and the reply says why the retire was refused." },
       },
       required: [],
     },

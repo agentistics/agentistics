@@ -23,7 +23,7 @@ import type { SessionView } from './session-view'
 import type { ManagedSession, RetireRequest } from './types'
 import type { SessionPatch } from './registry'
 import {
-  MIN_QUIET_FOR_MS, activityReasons, decideRetire, nextStreak, retireNoteText, retireReasonsText,
+  MIN_QUIET_FOR_MS, activityReasons, decideRetire, effectiveDeadline, nextStreak, retireNoteText, retireReasonsText,
   type QuietStreak, type RetireDecision,
 } from './retire-plan'
 import type { HarnessTranscript } from './harness-transcript'
@@ -39,6 +39,8 @@ export interface RetireRunnerDeps {
   /** Marks the row ended (`registry.retireSession`). */
   markEnded(id: string): Promise<void>
   fileInFolder(folderId: string, row: { id: string; conversationId?: string }): Promise<boolean>
+  /** The finished folder a retired hand-off predecessor is filed in; `undefined` = none. Absent = not wired. */
+  finishedFolder?(row: { id: string; conversationId?: string }): Promise<string | undefined>
   /** Unsettled background tasks in the row's transcript; `null` = cannot be read. */
   bgTasks(row: ManagedSession): Promise<number | null>
   /** The row's work children. */
@@ -100,10 +102,12 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
         }
         // No further probes between this activity check and the kill operation (which records the
         // end decision before removing the pane, just like the CLI/web kill paths).
+        // A FORCED hand-off (past its hard deadline) skips the quiet re-check — being busy is exactly
+        // why it is forced — but still needs the row running and the successor alive.
         if (snap.unavailable || !running(view) ||
           (req.successorId && (!successor || ['exited', 'lost', 'closed'].includes(successor.status) || successor.activity === 'exited')) ||
-          activityReasons(req, { activity: view?.activity, streak }).length ||
-          d.now() >= Date.parse(req.deadlineAt)) return
+          (!decision.forced && (activityReasons(req, { activity: view?.activity, streak }).length ||
+            d.now() >= effectiveDeadline(req)))) return
       }
       if (!decision.kill) {
         const snap = await d.readFresh()
@@ -124,11 +128,17 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
       await d.patch(row.id, { retire: null })
       streaks.delete(row.id)
       let filed = ''
-      if (req.folderId) {
-        const ok = await d.fileInFolder(req.folderId, { id: row.id, ...(fresh.conversationId ? { conversationId: fresh.conversationId } : {}) }).catch(() => false)
+      const rowRef = { id: row.id, ...(fresh.conversationId ? { conversationId: fresh.conversationId } : {}) }
+      // A hand-off files the predecessor in the task's FINISHED folder (the one beside where it sat).
+      const folderId = req.folderId ?? (req.successorId ? await d.finishedFolder?.(rowRef).catch(() => undefined) : undefined)
+      if (folderId) {
+        const ok = await d.fileInFolder(folderId, rowRef).catch(() => false)
         filed = ok ? '' : ' (could not move it to its finished folder)'
       }
-      const body = `Session ${who} retired${succ}${decision.kill ? ' once it was idle' : ' (it had already stopped)'}${filed}.${notes.length ? ` Note: ${notes.join('; ')}.` : ''}`
+      const how = !decision.kill ? ' (it had already stopped)'
+        : decision.forced ? ` at its hand-off deadline although ${retireReasonsText(decision.reasons ?? [])}`
+          : ' once it was idle'
+      const body = `Session ${who} retired${succ}${how}${filed}.${notes.length ? ` Note: ${notes.join('; ')}.` : ''}`
       log(`[retire] ${body}`)
       if (fresh.taskId) await d.comment(fresh.taskId, body).catch(() => {})
       d.notify('info', 'Session retired', body, 'retire.done', { id: row.id, label: fresh.label ?? row.id, successorId: req.successorId ?? '', reason: '' })
@@ -276,7 +286,7 @@ export async function startRetireRunner(log: (line: string) => void = console.lo
 
 async function attachRetireRunner(log: (line: string) => void): Promise<(() => void) | null> {
   try {
-    const [{ ensureSessionHub }, reg, { resolveBackend }, { fileInFolder }, { readProcTree, workChildren }, { exeName }, { HARNESS_TRANSCRIPTS }, { broadcastNotification }, { kickFleet }] =
+    const [{ ensureSessionHub }, reg, { resolveBackend }, { fileInFolder, finishedFolderFor },{ readProcTree, workChildren }, { exeName }, { HARNESS_TRANSCRIPTS }, { broadcastNotification }, { kickFleet }] =
       await Promise.all([
         import('../cli-start'), import('./registry'), import('./index'), import('./cli-folder'),
         import('./work-children'), import('./process-conversation'), import('./harness-transcript'),
@@ -291,12 +301,13 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
       readFresh: () => hub.refresh(),
       markEnded: id => reg.retireSession(id),
       fileInFolder: (f, row) => fileInFolder(f, row),
+      finishedFolder: row => finishedFolderFor(row),
       async bgTasks(row) {
         return readRetireBgTasks(row, HARNESS_TRANSCRIPTS)
       },
       async children(row) {
         const pid = (await backend.listPanePids?.())?.get(row.id)
-        if (pid === undefined) return { checked: false, reason: 'unreadable' }
+        if (pid === undefined) return paneLessChildren(row)
         const [tree, paneExe, mcp] = await Promise.all([
           readProcTree(pid), exeName(pid), MCP_COMMAND_SOURCES[row.harness]?.(row.cwd).catch(() => []) ?? [],
         ])
@@ -318,6 +329,17 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
     log(`[retire] not started: ${e instanceof Error ? e.message : String(e)}`)
     return null
   }
+}
+
+/**
+ * LIDER.PASSAGEM — the children answer for a row with NO tmux pane. A STRUCTURED session (its harness
+ * over its own protocol: `structuredDriver`) never has one, so its tree was "unreadable" on EVERY poll,
+ * which on a trusted harness (claude) blocks forever — 55 of 59 real hand-off retires expired that way.
+ * For a structured row the honest answer is `unmeasured` (a note, never a block: its turns are stated by
+ * the protocol itself). A PANE row whose pid could not be read stays `unreadable` and keeps blocking.
+ */
+export function paneLessChildren(row: Pick<ManagedSession, 'structuredDriver'>): WorkChildrenResult {
+  return row.structuredDriver ? { checked: false, reason: 'unmeasured' } : { checked: false, reason: 'unreadable' }
 }
 
 /** A successor can be born after the poll started; allow the registry's birth grace. */

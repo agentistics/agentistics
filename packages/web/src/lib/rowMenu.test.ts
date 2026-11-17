@@ -10,13 +10,15 @@ const verbs = [
 ]
 
 describe('rowMenuEntries', () => {
-  it('offers rename, stop and reopen, in that order', () => {
-    expect(rowMenuEntries(verbs, 'working').map(e => e.action)).toEqual(['rename', 'interrupt', 'resume'])
+  it('offers rename, stop the turn, end and reopen, in that order, on a working row', () => {
+    expect(rowMenuEntries(verbs, 'working').map(e => e.action)).toEqual(['rename', 'interrupt', 'kill', 'resume'])
   })
 
-  it('stops a running turn with interrupt and a stopped one with kill', () => {
-    expect(rowMenuEntries(verbs, 'working')[1]!.action).toBe('interrupt')
-    expect(rowMenuEntries(verbs, 'waiting')[1]!.action).toBe('kill')
+  it('a working row offers BOTH stops: interrupt the turn AND end the session (SESSAO.MENU-ENCERRAR)', () => {
+    const actions = rowMenuEntries(verbs, 'working').map(e => e.action)
+    expect(actions).toContain('interrupt')
+    expect(actions).toContain('kill')
+    expect(rowMenuEntries(verbs, 'waiting').map(e => e.action)).toEqual(['rename', 'kill', 'resume'])
   })
 
   it('keeps a refused verb, disabled, with its reason — never drops it', () => {
@@ -38,6 +40,40 @@ describe('rowMenuEntries', () => {
 
   it('keeps Stop on a lost row — its backend may still be running', () => {
     expect(rowMenuEntries(verbs, 'lost').map(e => e.action)).toContain('kill')
+  })
+
+  // SESSAO.MENU-ENCERRAR — every LIVE state, on every row kind the server builds, offers End.
+  // Before the fix a `working` row swapped End for "stop the turn" (and on a native row that one
+  // is disabled), so the menu told the reader to end the session first and gave no way to.
+  const nativeWorking = [
+    { action: 'rename', label: 'Renomear', enabled: true },
+    { action: 'interrupt', label: 'Parar o que está fazendo', enabled: false, reason: 'native' },
+    { action: 'kill', label: 'Encerrar sessão', enabled: true },
+    { action: 'resume', label: 'Reabrir', enabled: false },
+  ]
+  const forgetLive = { action: 'forget', label: 'Remover da lista', enabled: false, reason: 'Uma sessão viva fica na lista — encerre-a primeiro.' }
+  const cases: Array<[string, readonly { action: string; label: string; enabled: boolean; reason?: string }[], string, number | undefined]> = [
+    ['managed working', [...verbs, forgetLive], 'working', undefined],
+    ['managed waiting', [...verbs, forgetLive], 'waiting', undefined],
+    ['managed waiting-approval', [...verbs, forgetLive], 'waiting-approval', undefined],
+    ['managed idle', [...verbs, forgetLive], 'idle', undefined],
+    ['managed lost (unread)', verbs, 'lost', undefined],
+    ['native working', nativeWorking, 'working', undefined],
+    ['native waiting', nativeWorking, 'waiting', undefined],
+  ]
+  for (const [name, vs, state, endedAt] of cases) {
+    it(`offers an ENABLED End on a live row: ${name}`, () => {
+      const kill = rowMenuEntries(vs, state, [], endedAt).find(e => e.action === 'kill')
+      expect(kill?.enabled).toBe(true)
+    })
+  }
+  it('whenever Remove is refused because the session is live, End is offered beside it', () => {
+    for (const state of ['working', 'waiting', 'waiting-approval', 'idle']) {
+      const entries = rowMenuEntries([...verbs, forgetLive], state)
+      const forget = entries.find(e => e.action === 'forget')!
+      expect(forget.enabled).toBe(false)
+      expect(entries.find(e => e.action === 'kill')?.enabled).toBe(true)
+    }
   })
 
   it('omits a verb the row does not carry at all', () => {
