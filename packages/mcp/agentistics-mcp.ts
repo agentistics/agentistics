@@ -31,6 +31,7 @@ import { HARNESS_CAPABILITIES, contextReading, nativeVisibleFrom, projectionSurf
 import { planLimitsTool } from "./plan-limits-tool.js";
 import { benchmarkObservedTool, benchmarkQueryFromArgs } from "./benchmark-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
+import { callAnswer } from "./session-call.js";
 import { deliveryIntegrityOf, vaultStatusTool } from "./vault-tool.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
@@ -832,7 +833,19 @@ const TOOLS: Tool[] = [
       properties: {
         ref: { type: "string", description: "A session reference (managed id, conversation id, exact title or unique id prefix). Omit for your own session." },
         role: { type: "string", enum: ["leader", "worker", "auto"], description: "The role to set. Omit to read it." },
-        retirePredecessor: { type: "string", description: "A leader taking over can pass the previous leader on the SAME task (managed id, conversation id, exact title or unique id prefix); the server closes it when it goes quiet. Only for your own session declared leader; otherwise the role still changes and the reply says why the retire was refused." },
+        retirePredecessor: { type: "string", description: "A leader taking over can pass the previous leader on the SAME task (managed id, conversation id, exact title or unique id prefix); the server closes it when it goes quiet — never while the owner is in a voice call with it: the reply then carries `retire.heldByCall` and the close waits for the call to end. Only for your own session declared leader; otherwise the role still changes and the reply says why the retire was refused." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_session_call",
+    description:
+      "Is the owner in a VOICE CALL with a session right now? A session in a call is idle between turns, so its state says nothing about the person on the line. With `ref` (managed id, conversation id, exact title or unique id prefix) it answers for that session: `{ id, inCall: boolean, since?: <ISO time the call began>, callId? }`. With no `ref` it lists every live call. `voice: false` means this build has no voice, so no call can exist. A retire (agentistics_session_role retirePredecessor, `agentop session retire`) never closes a session in a call — it waits for the call to end; `agentop session kill` refuses without --force.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "A session reference. Omit to list every live call." },
       },
       required: [],
     },
@@ -1596,6 +1609,11 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const a = args as any;
         const body = await apiSend("POST", "/api/session-roles", sessionRoleBody(a, sessionProof(process.env)));
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_call": {
+        const ref = typeof (args as any)?.ref === "string" ? String((args as any).ref).trim() : "";
+        const body = await apiGet(`/api/fleet/calls${ref ? `?session=${encodeURIComponent(ref)}` : ""}`);
+        return { content: [{ type: "text", text: JSON.stringify(callAnswer(body, ref), null, 2) }] };
       }
       case "agentistics_session_switch_account": {
         const a = args as any;

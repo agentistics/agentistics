@@ -286,6 +286,11 @@ describe('--folder', () => {
     expect(parseSessionArgs(['kill', 'abc'])).toEqual({ kind: 'kill', ref: 'abc' })
     expect(parseSessionArgs(['kill', 'abc', '--folder']).kind).toBe('error')
   })
+  it('kill takes --force anywhere (a session in a voice call is refused without it)', () => {
+    expect(parseSessionArgs(['kill', 'abc', '--force'])).toEqual({ kind: 'kill', ref: 'abc', force: true })
+    expect(parseSessionArgs(['kill', '--force', 'abc', '--folder', 'X'])).toEqual({ kind: 'kill', ref: 'abc', folder: 'X', force: true })
+    expect(parseSessionArgs(['kill', '--force']).kind).toBe('error')
+  })
   it('folders lists, with --json', () => {
     expect(parseSessionArgs(['folders'])).toEqual({ kind: 'folders' })
     expect(parseSessionArgs(['folders', '--json'])).toEqual({ kind: 'folders', json: true })

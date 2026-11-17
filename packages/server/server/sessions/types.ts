@@ -335,6 +335,8 @@ export interface RetireRequest {
   expiredAt?: string
   /** Why it never went quiet, in words. */
   expiredReason?: string
+  /** When the voice told a call on this session that the leadership passed to `successorId` (said once). */
+  callNoticeAt?: string
 }
 
 /** One session as the PRODUCT sees it. Persisted; the backend knows none of this. */

@@ -19,6 +19,12 @@
  * - the successor (a hand-off) is still alive — a successor that died CANCELS the request, so a task
  *   is never left without its leader.
  *
+ * - NO VOICE CALL is open on it. A session in a call is idle between turns, so its activity says nothing
+ *   about the person on the line (LIGACAO-SUCESSOR: a leader handed over mid-call and the owner lost what
+ *   he said). A call HOLDS the retire — before the quiet checks, and past the deadline too: at the deadline
+ *   a held request is not expired and never killed, the runner extends the deadline (`extendedDeadline`)
+ *   and reports it. A call state that could not be read is unknown, and unknown is never quiet.
+ *
  * At or past `deadlineAt` nothing is ever killed: the request EXPIRES with the reasons in words.
  * A row that is no longer running has nothing to kill and is simply filed as retired.
  */
@@ -31,6 +37,8 @@ export const DEFAULT_QUIET_FOR_MS = 60_000
 export const DEFAULT_DEADLINE_MS = 30 * 60_000
 /** Polls of `waiting` in a row before it counts — the `event-plan.ts` confirmation. */
 export const CONFIRM_POLLS = 2
+/** How long a retire held by a call is given after the call ends, once its deadline has come. */
+export const CALL_GRACE_MS = 5 * 60_000
 
 /** Consecutive polls that observed `waiting`, and since when. Kept in memory by the runner. */
 export interface QuietStreak {
@@ -62,9 +70,18 @@ export interface RetireObservation {
   readonly childrenTrusted: boolean
   /** `null` when the request names no successor. */
   readonly successorAlive: boolean | null
+  /** The voice call on the row. Absent = `none` (no engine, or voice off). */
+  readonly call?: CallObservation
 }
 
+export type CallObservation =
+  | { readonly state: 'none' }
+  | { readonly state: 'active'; readonly since: number; readonly callId?: string }
+  | { readonly state: 'unknown' }
+
 export type RetireReason =
+  | { readonly code: 'in-call'; readonly since: number }
+  | { readonly code: 'call-unknown' }
   | { readonly code: 'working' }
   | { readonly code: 'waiting-approval' }
   | { readonly code: 'activity-unknown' }
@@ -104,6 +121,11 @@ export function decideRetire(req: RetireRequest | undefined, obs: RetireObservat
   if (!obs.running) return { action: 'retire', kill: false, notes: [] }
   if (obs.successorAlive === false) return { action: 'cancel', reason: 'successor-dead' }
 
+  // A call outranks everything: nothing else about the row matters while somebody is talking to it, and the
+  // expensive probes below are not worth running.
+  const callReasons = callHoldReasons(obs.call)
+  if (callReasons.length > 0) return { action: 'wait', reasons: callReasons, notes: [] }
+
   const reasons = activityReasons(req, obs)
   const notes: RetireNote[] = []
   if (req.successorId && obs.successorAlive === null) reasons.push({ code: 'successor-unknown' })
@@ -125,11 +147,29 @@ export function decideRetire(req: RetireRequest | undefined, obs: RetireObservat
   return { action: 'wait', reasons, notes }
 }
 
+/** The hold a call puts on a retire (empty when there is none). */
+export function callHoldReasons(call: CallObservation | undefined): RetireReason[] {
+  if (!call || call.state === 'none') return []
+  return call.state === 'active' ? [{ code: 'in-call', since: call.since }] : [{ code: 'call-unknown' }]
+}
+
+/**
+ * The deadline of a request held by a call, or `null` when it needs no move. A held request never expires,
+ * so its deadline follows the call: whenever less than half of `CALL_GRACE_MS` is left (or it has passed)
+ * it becomes `now + CALL_GRACE_MS`, which is what lets the retire fire after the call ends.
+ */
+export function extendedDeadline(req: RetireRequest, now: number): string | null {
+  const left = Date.parse(req.deadlineAt) - now
+  return left < CALL_GRACE_MS / 2 ? new Date(now + CALL_GRACE_MS).toISOString() : null
+}
+
 const secs = (ms: number): string => `${Math.max(0, Math.round(ms / 1000))}s`
 
 /** One reason in words, for the expiry notification and the CLI. */
 export function retireReasonText(r: RetireReason): string {
   switch (r.code) {
+    case 'in-call': return `the owner is in a voice call with it (since ${new Date(r.since).toISOString()})`
+    case 'call-unknown': return 'whether it is in a voice call could not be read'
     case 'working': return 'still working'
     case 'waiting-approval': return 'waiting on a permission dialog (a person must answer it)'
     case 'activity-unknown': return 'its state could not be read'
@@ -188,6 +228,8 @@ export function planRetireRequest(
       requestedAt: new Date(now).toISOString(),
       by: input.by,
       ...(input.successorId ? { successorId: input.successorId } : {}),
+      // The voice says the leadership passed ONCE per hand-off: re-asking for the same successor keeps it said.
+      ...(existing?.callNoticeAt && existing.successorId && existing.successorId === input.successorId ? { callNoticeAt: existing.callNoticeAt } : {}),
       ...(input.folderId ? { folderId: input.folderId } : {}),
       quietForMs,
       deadlineAt: new Date(now + deadlineMs).toISOString(),

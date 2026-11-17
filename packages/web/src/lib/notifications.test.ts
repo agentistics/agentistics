@@ -300,7 +300,7 @@ describe('every {placeholder} is interpolated, not only the hand-listed ones', (
 describe('retirement notification localization', () => {
   test('all retire codes resolve in both languages with metadata', async () => {
     const { resolveNotification } = await import('./notifications')
-    for (const code of ['retire.done', 'retire.cancelled', 'retire.expired']) {
+    for (const code of ['retire.done', 'retire.cancelled', 'retire.expired', 'retire.held_by_call']) {
       const n: AppNotification = { id: 'retire1', type: 'info', code, ts: 0, read: false,
         meta: { id: 'p1', label: 'Leader', successorId: 's1', reason: 'working' } }
       const en = resolveNotification(n, 'en')
@@ -324,7 +324,7 @@ describe('retirement notification localization', () => {
 test('every retirement expiry reason code has translated copy, including multiple reasons', async () => {
   const { resolveNotification, RETIRE_REASON_TEXT } = await import('./notifications')
   const codes = ['working', 'waiting-approval', 'activity-unknown', 'not-confirmed', 'quiet-too-short',
-    'bg-tasks', 'bg-unknown', 'children-unreadable', 'successor-unknown', 'work-child', 'deadline']
+    'bg-tasks', 'bg-unknown', 'children-unreadable', 'successor-unknown', 'work-child', 'in-call', 'call-unknown', 'deadline']
   for (const reason of codes) {
     const n: AppNotification = { id: 'retire-reason', code: 'retire.expired', type: 'warning', ts: 0, read: false,
       meta: { id: 'p1', label: 'Leader', reason } }

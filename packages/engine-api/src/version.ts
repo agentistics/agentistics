@@ -242,7 +242,13 @@
  * supplies live board/session state to the book bookmark. Owner-order pages still come only from the canonical
  * pedidos of the owner-request flow (no new book door). Additive only: older hosts simply omit these capabilities.
  */
-export const ENGINE_API_VERSION = '1.28.0'
+/**
+ * 1.29.0 — LIGACAO-SUCESSOR: `Engine.voice` (optional, `EngineVoice`) — the live voice calls the host reads
+ * (`activeCalls` / `activeCall`) so retire and kill never close a session whose owner is on the line, plus
+ * `announceHandoff` and `transferCall` for the spoken notice and the move to the successor. Additive only: an
+ * engine without `voice` has no calls, and a host that predates it never asks.
+ */
+export const ENGINE_API_VERSION = '1.29.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

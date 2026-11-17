@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  MIN_QUIET_FOR_MS, CONFIRM_POLLS, DEFAULT_DEADLINE_MS, DEFAULT_QUIET_FOR_MS, decideRetire, nextStreak, planRetireRequest,
+  MIN_QUIET_FOR_MS, CONFIRM_POLLS, CALL_GRACE_MS, extendedDeadline, DEFAULT_DEADLINE_MS, DEFAULT_QUIET_FOR_MS, decideRetire, nextStreak, planRetireRequest,
   retireNoteText, retireReasonsText, type QuietStreak, type RetireObservation,
 } from './retire-plan'
 import type { RetireRequest } from './types'
@@ -122,5 +122,58 @@ describe('retire QA safety gates', () => {
   it('new requests enforce minimum quietFor even outside the CLI', () => {
     const p = planRetireRequest(undefined, { by: 'person', quietForMs: 0 }, T0)
     expect(p).toMatchObject({ ok: true, request: { quietForMs: MIN_QUIET_FOR_MS } })
+  })
+})
+
+describe('a voice call holds the retire (LIGACAO-SUCESSOR)', () => {
+  const inCall = { state: 'active', since: T0 - 120_000 } as const
+
+  it('call active → the session is held even when it is long quiet', () => {
+    const d = decideRetire(req(), quiet({ call: inCall }), at)
+    expect(d).toEqual({ action: 'wait', reasons: [{ code: 'in-call', since: T0 - 120_000 }], notes: [] })
+  })
+  it('call ends → the very same observation retires', () => {
+    expect(decideRetire(req(), quiet({ call: inCall }), at).action).toBe('wait')
+    expect(decideRetire(req(), quiet({ call: { state: 'none' } }), at)).toEqual({ action: 'retire', kill: true, notes: [] })
+    expect(decideRetire(req(), quiet(), at).action).toBe('retire') // absent = no call
+  })
+  it('the deadline passing with a call open does NOT expire and never kills', () => {
+    const past = Date.parse(req().deadlineAt) + 1
+    const d = decideRetire(req(), quiet({ call: inCall }), past)
+    expect(d.action).toBe('wait')
+    expect(d).toMatchObject({ reasons: [{ code: 'in-call' }] })
+    // and without the call the same moment expires (nothing is ever killed past the deadline)
+    expect(decideRetire(req(), quiet(), past).action).toBe('expire')
+  })
+  it('a call state that could not be read is unknown, and unknown is never quiet', () => {
+    expect(decideRetire(req(), quiet({ call: { state: 'unknown' } }), at)).toMatchObject({ action: 'wait', reasons: [{ code: 'call-unknown' }] })
+  })
+  it('a row that already stopped is filed whatever the call says (nothing to kill)', () => {
+    expect(decideRetire(req(), quiet({ running: false, call: inCall }), at)).toEqual({ action: 'retire', kill: false, notes: [] })
+  })
+  it('a dead successor still cancels (the task is never left without a leader)', () => {
+    expect(decideRetire(req({ successorId: 'b' }), quiet({ successorAlive: false, call: inCall }), at)).toEqual({ action: 'cancel', reason: 'successor-dead' })
+  })
+  it('the call outranks a working row: it is the reason said', () => {
+    expect(decideRetire(req(), quiet({ activity: 'working', streak: null, call: inCall }), at)).toMatchObject({ reasons: [{ code: 'in-call' }] })
+  })
+  it('the reason says it in words', () => {
+    expect(retireReasonsText([{ code: 'in-call', since: T0 }])).toContain('voice call')
+    expect(retireReasonsText([{ code: 'call-unknown' }])).toContain('voice call')
+  })
+  it('extendedDeadline follows the call: only when the deadline is near or past', () => {
+    const r = req()
+    expect(extendedDeadline(r, T0)).toBeNull()
+    const near = Date.parse(r.deadlineAt) - CALL_GRACE_MS / 4
+    expect(extendedDeadline(r, near)).toBe(new Date(near + CALL_GRACE_MS).toISOString())
+    const past = Date.parse(r.deadlineAt) + 1000
+    expect(Date.parse(extendedDeadline(r, past)!)).toBe(past + CALL_GRACE_MS)
+  })
+  it('re-asking for the SAME successor keeps the voice notice said; another successor is refused anyway', () => {
+    const said = req({ successorId: 'b', callNoticeAt: new Date(T0).toISOString() })
+    const again = planRetireRequest(said, { by: 'x', successorId: 'b' }, T0 + 1000)
+    expect(again.ok && again.request.callNoticeAt).toBe(new Date(T0).toISOString())
+    const fresh = planRetireRequest(undefined, { by: 'x', successorId: 'b' }, T0)
+    expect(fresh.ok && fresh.request.callNoticeAt).toBeUndefined()
   })
 })

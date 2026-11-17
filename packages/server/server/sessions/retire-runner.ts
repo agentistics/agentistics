@@ -23,8 +23,8 @@ import type { SessionView } from './session-view'
 import type { ManagedSession, RetireRequest } from './types'
 import type { SessionPatch } from './registry'
 import {
-  MIN_QUIET_FOR_MS, activityReasons, decideRetire, nextStreak, retireNoteText, retireReasonsText,
-  type QuietStreak, type RetireDecision,
+  MIN_QUIET_FOR_MS, activityReasons, decideRetire, extendedDeadline, nextStreak, retireNoteText, retireReasonsText,
+  type CallObservation, type QuietStreak, type RetireDecision,
 } from './retire-plan'
 import type { HarnessTranscript } from './harness-transcript'
 import { WORK_CHILDREN_TRUSTED, type WorkChildrenResult } from './work-children'
@@ -43,6 +43,16 @@ export interface RetireRunnerDeps {
   bgTasks(row: ManagedSession): Promise<number | null>
   /** The row's work children. */
   children(row: ManagedSession): Promise<WorkChildrenResult>
+  /**
+   * The voice call on the row (LIGACAO-SUCESSOR): `none`, `active` (and since when) or `unknown` when it
+   * could not be read — which holds the retire like a call does. Absent dep = no voice on this host.
+   */
+  call?(row: ManagedSession): Promise<CallObservation>
+  /**
+   * The voice says ONCE, to the call on `row`, that the leadership passed to the successor and offers to
+   * move the call. Resolves true when it was said. Absent dep = nothing to say it with.
+   */
+  announceHandoff?(row: ManagedSession, successorId: string): Promise<boolean>
   /** A comment on the row's task (best effort). */
   comment(taskId: string, body: string): Promise<void>
   /** A user-facing notification (expire / cancel / retire). */
@@ -76,6 +86,7 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
     map.set(id, { at: Math.max(at, prev?.at ?? at), polls })
     return polls >= 2
   }
+  const heldReported = new Set<string>()
   let queue: Promise<void> = Promise.resolve()
   const log = d.log ?? (() => {})
 
@@ -98,6 +109,9 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
           if (streak) streaks.set(row.id, streak)
           else streaks.delete(row.id)
         }
+        // A call can open in the gap between the decision and here: the owner picking up the line is the
+        // one thing that must never be cut, so it is asked again right before the kill.
+        if (d.call && (await d.call(fresh).catch((): CallObservation => ({ state: 'unknown' }))).state !== 'none') return
         // No further probes between this activity check and the kill operation (which records the
         // end decision before removing the pane, just like the CLI/web kill paths).
         if (snap.unavailable || !running(view) ||
@@ -154,6 +168,40 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
     d.notify('warning', 'Retire expired', body, 'retire.expired', { id: row.id, label: fresh.label ?? row.id, successorId: req.successorId ?? '', reason: decision.reasons[0]?.code ?? 'deadline', reasons: decision.reasons.map(r => r.code) })
   }
 
+  /**
+   * What a call does to a pending request, besides holding it: the deadline follows the call (a held
+   * request is never expired, so it fires after the call ends) and the voice says the leadership passed —
+   * both ONCE, and both written on the request so a restart does not repeat them.
+   */
+  async function holdByCall(
+    row: ManagedSession, req: RetireRequest, call: CallObservation, successorAlive: boolean | null, now: number,
+  ): Promise<void> {
+    try {
+      const fresh = (await d.readRegistry()).find(m => m.id === row.id)
+      if (!fresh?.retire || fresh.retire.requestedAt !== req.requestedAt || fresh.retire.expiredAt) return
+      const who = nameOf(fresh)
+      const extended = extendedDeadline(fresh.retire, now)
+      const say = call.state === 'active' && !!req.successorId && successorAlive !== false && !fresh.retire.callNoticeAt && !!d.announceHandoff
+      const said = say ? await d.announceHandoff!(fresh, req.successorId!).catch(() => false) : false
+      if (extended || said) {
+        await d.patch(row.id, { retire: {
+          ...fresh.retire,
+          ...(extended ? { deadlineAt: extended } : {}),
+          ...(said ? { callNoticeAt: new Date(now).toISOString() } : {}),
+        } })
+      }
+      if (!heldReported.has(req.requestedAt + row.id)) {
+        heldReported.add(req.requestedAt + row.id)
+        const body = `Retire of ${who} is HELD: the owner is in a voice call with it${call.state === 'active' ? ` (since ${new Date(call.since).toISOString()})` : ' (the call state could not be read)'}. Nothing was killed; it is carried out once the call ends.`
+        log(`[retire] ${body}`)
+        if (fresh.taskId) await d.comment(fresh.taskId, body).catch(() => {})
+        d.notify('info', 'Retire held by a call', body, 'retire.held_by_call', { id: row.id, label: fresh.label ?? row.id, successorId: req.successorId ?? '' })
+      }
+    } catch (e) {
+      log(`[retire] ${row.id}: call hold bookkeeping failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
   async function consumeOne(snap: SessionSnapshot): Promise<void> {
     // A failed poll hands back the PREVIOUS list: it says nothing new and must not advance a streak.
     if (snap.unavailable) return
@@ -200,12 +248,18 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
         childrenTrusted: WORK_CHILDREN_TRUSTED[row.harness as HarnessId] ?? false,
         successorAlive,
       }
+      // A call is read for every pending row, running or not: it is one in-process lookup, and it is what
+      // holds the retire (and moves the deadline) however busy or quiet the row looks.
+      const call: CallObservation = base.running && base.successorAlive !== false && d.call
+        ? await d.call(row).catch((): CallObservation => ({ state: 'unknown' }))
+        : { state: 'none' }
+      if (call.state !== 'none') await holdByCall(row, req, call, successorAlive, now)
       // The probes cost a transcript read and a /proc walk: only for a row the activity says is quiet.
-      const probe = base.running && base.successorAlive !== false && activityReasons(req, base).length === 0
+      const probe = base.running && base.successorAlive !== false && call.state === 'none' && activityReasons(req, base).length === 0
       const [bgTasksRunning, children] = probe
         ? await Promise.all([d.bgTasks(row).catch(() => null), d.children(row).catch(() => null)])
         : [null, null]
-      const decision = decideRetire(req, { ...base, bgTasksRunning, children }, now)
+      const decision = decideRetire(req, { ...base, bgTasksRunning, children, call }, now)
       try {
         await act(row, req, decision)
       } catch (e) {
@@ -306,6 +360,8 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
         const { addComment } = await import('./task-web')
         await addComment(taskId, { author: 'agentop', body })
       },
+      call: row => probeCallOf(row),
+      announceHandoff: (row, successorId) => announceHandoffOf(row, successorId),
       notify: (level, title, message, code, meta) => broadcastNotification({ type: level, title, message, code, meta }),
       refresh: id => kickFleet(id),
       now: () => Date.now(),
@@ -318,6 +374,27 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
     log(`[retire] not started: ${e instanceof Error ? e.message : String(e)}`)
     return null
   }
+}
+
+/** The engine's voice on THIS server process (`null`: no engine, or an engine without voice — no call can exist). */
+async function voiceOf() {
+  const { engine, loadEngine } = await import('../engine/load')
+  await loadEngine().catch(() => undefined)
+  return engine()?.voice ?? null
+}
+
+async function probeCallOf(row: ManagedSession): Promise<CallObservation> {
+  const { probeCall } = await import('./call-state')
+  return probeCall(row, await voiceOf())
+}
+
+async function announceHandoffOf(row: ManagedSession, successorId: string): Promise<boolean> {
+  const voice = await voiceOf()
+  if (!voice?.announceHandoff) return false
+  const reg = await import('./registry')
+  const title = (await reg.readRegistry()).find(m => m.id === successorId)?.label
+  const out = await voice.announceHandoff(row.id, { successorId, ...(title ? { successorTitle: title } : {}) })
+  return out.announced
 }
 
 /** A successor can be born after the poll started; allow the registry's birth grace. */

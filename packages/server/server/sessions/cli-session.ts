@@ -109,7 +109,7 @@ const USAGE = `Usage:
   agentop session ls     [--all] [--group ${GROUPINGS.join('|')}] [--json]
   agentop session list
   agentop session attach <id|name>
-  agentop session kill   <id|name> [--folder <folder>]
+  agentop session kill   <id|name> [--folder <folder>] [--force]
   agentop session retire <id|name> [--cancel] [--quiet-for 60s] [--deadline 30m] [--folder <folder>] [--json]
   agentop session folders [--json]
   agentop session rename <id|name> "label"
@@ -350,7 +350,7 @@ async function runSessionCommand(argv: string[]): Promise<number> {
     case 'list': return list(backend, cmd.json ?? false)
     case 'ls': return ls(cmd, backend)
     case 'attach': return attach(cmd.ref, backend)
-    case 'kill': return kill(cmd.ref, backend, cmd.folder)
+    case 'kill': return kill(cmd.ref, backend, cmd.folder, cmd.force === true)
     case 'retire': {
       const f = cmd.folder ? folderByRef.get(cmd.folder) : undefined
       const { retireCommand } = await import('./cli-retire')
@@ -1719,7 +1719,7 @@ async function switchAccount(
   return out.ok ? 0 : 1
 }
 
-async function kill(ref: string, backend: SessionBackend, folder?: string): Promise<number> {
+async function kill(ref: string, backend: SessionBackend, folder?: string, force = false): Promise<number> {
   const registry = await readRegistry()
   const reconciled = reconcileSessions(registry, await backend.list())
   const found = resolveSessionRef(reconciled.map(toRefCandidate), ref)
@@ -1733,6 +1733,12 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
     const f = folder ? folderByRef.get(folder) : undefined
     return retireCommand({ ref: id, ...(f ? { folderId: f.id, folderPath: f.path } : {}), caller: id })
   }
+
+  // LIGACAO-SUCESSOR: a session the owner is TALKING to is idle between turns — killing it hangs up on them.
+  const { guardKillAgainstCall } = await import('./kill-guard')
+  const guard = await guardKillAgainstCall(registry.find(m => m.id === id) ?? { id }, force)
+  if (!guard.allow) { console.error(guard.message); return 1 }
+  if (guard.warn) console.error(guard.warn)
 
   // HANDOFF.RELAY: a predecessor's last answer to the owner reaches its successor before it dies.
   const { flushBeforeKill } = await import('./handoff-relay-io')

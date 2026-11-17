@@ -90,6 +90,7 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_checkin_report',
   'agentistics_session_role',
   'agentistics_session_away',
+  'agentistics_session_call',
   'agentistics_session_switch_account',
   // Metrics (6)
   'agentistics_summary',
@@ -225,6 +226,10 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_session_role: {
     ...GROUPS, risk: 'W', routes: ['POST /api/session-roles'],
     reason: 'sets a session label (role + title prefix) and types a one-line note; reversible by setting auto; a session may only touch itself or the sessions it started',
+  },
+  agentistics_session_call: {
+    ...GROUPS, risk: 'R', routes: ['GET /api/fleet/calls'],
+    reason: 'reads whether the owner is in a voice call with a session (yes/no, since when) or lists the live calls; changes nothing',
   },
   agentistics_session_away: {
     ...GROUPS, risk: 'W', routes: ['GET /api/away', 'PUT /api/away', 'PUT /api/away/session', 'POST /api/away/notice'],

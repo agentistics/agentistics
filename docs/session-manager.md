@@ -797,6 +797,28 @@ a pipe held open by an escaped descendant can delay exit only until the group gr
 50 ms scheduling allowance and one extra second for draining; buffered output is then flushed and
 exit is published even if stdout never closes.
 
+### A voice call holds the retire (LIGACAO-SUCESSOR)
+
+A session the owner is TALKING to is idle between turns, so its activity says nothing about the person
+on the line. A leader that handed over mid-call used to be closed under them. The call lives in the
+engine's voice (`Engine.voice`, engine-api 1.29: `activeCalls` / `activeCall`), and the host asks it:
+
+- `decideRetire` puts the call BEFORE every quiet check (`in-call`; an unreadable state is `call-unknown`
+  and holds too — unknown is never quiet). The expensive probes are not run for a held row.
+- Past the deadline a held request is NOT expired and never killed: the runner moves the deadline with
+  the call (`extendedDeadline`, `CALL_GRACE_MS` after now), so the retire fires after the call ends.
+  The hold is reported once (`retire.held_by_call`, a task comment) and the runner re-asks the call right
+  before the kill, since a line can open in the gap.
+- When the request names a successor, the voice says ONCE (in the call's language) that the leadership
+  passed and offers to move the call; `callNoticeAt` on the request makes it once across restarts. A yes
+  (or `POST /api/engine/x/voice/call/transfer {sessionId, successorId}`) moves the call, with what was
+  said, to the successor; a no, or a successor that cannot take it, leaves the call where it is.
+- `agentop session kill <ref>` refuses on a session in a call and names the call (`--force` hangs up on
+  them). The CLI asks the running server (`GET /api/fleet/calls`, `?session=<ref>` resolves a reference);
+  no server means no call, and a server that cannot answer is unknown, which is refused too.
+- The MCP reads it with `agentistics_session_call` (`inCall`, `since`), and the `retirePredecessor`
+  reply and `agentop session retire` say `heldByCall`.
+
 Known limitation (S5 QA L3, deferred to S6): configured MCP commands are read only for Claude.
 For other harnesses, an extra MCP server can conservatively count as a work child and delay
 retirement until expiry. The shared `agentop mcp` exclusion still applies to every harness.

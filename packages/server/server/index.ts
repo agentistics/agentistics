@@ -2928,6 +2928,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return res
     }
 
+    // Who is on a voice line right now (LIGACAO-SUCESSOR). The call lives in the engine (voice is private) and
+    // only THIS process holds it, so a one-shot CLI (`agentop session kill|retire`) and the MCP ask here.
+    // No engine, or an engine without voice, answers an empty list — no call can exist there.
+    if (url.pathname === '/api/fleet/calls' && req.method === 'GET') {
+      const { fleetCallsBody } = await import('./sessions/call-state-web')
+      return new Response(JSON.stringify(await fleetCallsBody(url.searchParams.get('session'))), {
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      })
+    }
+
     // Older CLOSED rows, paged most recent first — what the events stream does not re-send (P-13).
     if (url.pathname === '/api/fleet/closed' && req.method === 'GET') {
       const { readClosedFleet, fleetLang } = await import('./sessions/fleet-web')

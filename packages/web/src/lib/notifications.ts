@@ -36,6 +36,8 @@ export const RETIRE_REASON_TEXT: Record<string, { pt: string; en: string }> = {
   'children-unreadable': { pt: 'não foi possível ler os processos filhos', en: 'its child processes could not be read' },
   'successor-unknown': { pt: 'a sessão sucessora ainda não foi observada', en: 'its successor has not been observed yet' },
   'work-child': { pt: 'há processos filhos em execução', en: 'child processes are still running' },
+  'in-call': { pt: 'você está em uma ligação de voz com ela', en: 'you are in a voice call with it' },
+  'call-unknown': { pt: 'não foi possível ler se há uma ligação de voz com ela', en: 'whether it is in a voice call could not be read' },
   deadline: { pt: 'só ficou inativa após o prazo', en: 'it was quiet only after the deadline' },
 }
 
@@ -223,6 +225,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   'retire.expired': {
     pt: { title: 'Prazo de encerramento expirado', message: 'A sessão {label} ({id}) foi mantida: {reason}. Nenhum processo foi encerrado.' },
     en: { title: 'Retire expired', message: 'Session {label} ({id}) was kept: {reason}. Nothing was killed.' },
+  },
+  'retire.held_by_call': {
+    pt: { title: 'Encerramento aguardando a ligação', message: 'A sessão {label} ({id}) continua aberta: você está em uma ligação de voz com ela. Ela será encerrada quando a ligação terminar.' },
+    en: { title: 'Retire waiting for the call', message: 'Session {label} ({id}) stays open: you are in a voice call with it. It will be retired when the call ends.' },
   },
   'clean.suggestion': {
     pt: { title: 'Há espaço para liberar', message: '{count} item(ns) concluído(s) ou parado(s) podem ser removido(s). Veja o que dá para limpar.' },

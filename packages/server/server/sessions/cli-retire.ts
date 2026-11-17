@@ -11,6 +11,7 @@
  */
 import { PORT } from '../config'
 import { planRetireRequest, retireReasonsText } from './retire-plan'
+import { callSentence, callsFromServer, observeFromCalls } from './call-state'
 import { patchSession, readRegistry } from './registry'
 import { resolveSessionRef } from './session-ref'
 import type { ManagedSession } from './types'
@@ -76,13 +77,18 @@ export async function retireCommand(o: RetireCliInput): Promise<number> {
     return 1
   }
   const up = await serverUp()
+  // The reply says when a voice call holds it: the owner on the line outranks every quiet check.
+  const call = up ? observeFromCalls(row, await callsFromServer(PORT)) : { state: 'none' as const }
+  const heldByCall = call.state === 'active' ? { since: new Date(call.since).toISOString(), ...(call.callId ? { callId: call.callId } : {}) } : call.state === 'unknown' ? ('unknown' as const) : undefined
   if (o.json) {
-    console.log(JSON.stringify({ id: row.id, retire: plan.request, serverRunning: up }, null, 2))
+    console.log(JSON.stringify({ id: row.id, retire: plan.request, serverRunning: up, ...(heldByCall ? { heldByCall } : {}) }, null, 2))
     return 0
   }
   const quiet = Math.round(plan.request.quietForMs / 1000)
   const replaced = row.retire?.expiredAt ? ` (replacing an expired one: ${row.retire.expiredReason ?? retireReasonsText([])})` : ''
   console.log(`Retire requested for ${row.id}${replaced}: it ends once it has been idle for ${quiet}s with no background task or child command, and never after ${plan.request.deadlineAt}.${o.folderPath ? ` Then it is moved to ${o.folderPath}.` : ''}`)
+  if (call.state === 'active') console.log(`HELD by a voice call: ${callSentence(call, Date.now())}. It stays open and is retired after the call ends (the deadline moves with the call).`)
+  else if (call.state === 'unknown') console.log('Whether the session is in a voice call could not be read: it will not be closed while that is unknown.')
   if (!up) console.log(`No agentop server is answering on port ${PORT}: the request waits until one runs (it carries retirements out). Cancel with: agentop session retire ${row.id} --cancel`)
   return 0
 }

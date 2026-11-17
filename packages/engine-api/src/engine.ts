@@ -126,6 +126,35 @@ export interface EngineBook {
   start?(): Promise<void>
 }
 
+/** A voice call aimed at one session, alive right now (1.29). */
+export interface EngineVoiceCall {
+  callId: string
+  /** The session the owner is talking to. */
+  sessionId: string
+  /** Epoch ms the call began. */
+  startedAt: number
+}
+
+/**
+ * 1.29 (optional) — the voice mode's state, read by the host. A session in a call is idle between turns,
+ * so its activity says nothing about the person on the line: the host asks here before it closes one.
+ * An engine without voice simply omits `voice`; no call can exist then.
+ */
+export interface EngineVoice {
+  /** Calls alive now aimed at a session (the Nay call is not one). */
+  activeCalls(): readonly EngineVoiceCall[]
+  /** The live call on this session, or `null`. */
+  activeCall(sessionId: string): EngineVoiceCall | null
+  /**
+   * The session is being retired in favour of `successorId`: the voice says ONCE that the leadership
+   * passed and offers to move the call. `announced` is false when there was nothing to say it to (no call,
+   * or already said for this successor).
+   */
+  announceHandoff?(sessionId: string, to: { successorId: string; successorTitle?: string }): Promise<{ announced: boolean }>
+  /** Move the call to the successor, carrying what was said. Used by the owner's accept and the UI action. */
+  transferCall?(sessionId: string, successorId: string): Promise<{ ok: true; callId: string } | { ok: false; reason: string }>
+}
+
 export interface EngineCommand {
   verb: 'code' | 'provider' | 'ingest' | 'flow' | 'book'
   /** Help text in both languages; the host prints it in `agentop --help`. */
@@ -191,6 +220,8 @@ export interface Engine<E extends EngineEvent = EngineEvent> {
   structured?: EngineStructured
   /** 1.25 — the local hand-off book and its flow-op transport. */
   book?: EngineBook
+  /** 1.29 — the voice mode's live calls. Absent: no call can exist. */
+  voice?: EngineVoice
   /** 1.16 — built-in deterministic flow definitions and durable run status. */
   flows?: {
     list(): readonly string[]
