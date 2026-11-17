@@ -37,8 +37,8 @@ test('an inferred version the release list does not know (an old real tag) is dr
   expect(reply.pieces[0]).toMatchObject({ stage: 'leader', version: null })
   expect(reply.versions.find(v => v.version === '2.113.0')).toBeUndefined()
   expect(reply.versions.filter(v => v.state === 'planned')).toHaveLength(0)
-  // the real release of today is still there, published, on its own day
-  expect(reply.versions.find(v => v.version === '2.211.0')).toMatchObject({ state: 'published', atMs: Date.parse('2026-11-13T10:00:00.000Z') })
+  // a release no piece belongs to is not a version
+  expect(reply.versions).toEqual([])
 })
 
 test('an inferred version in the release list publishes the piece waiting on the leader', () => {
@@ -55,7 +55,7 @@ test('an OPEN piece (queue / new round) is never counted under a published relea
   })
   for (const p of reply.pieces) expect(p.version).toBeNull()
   expect(reply.pieces.map(p => p.stage)).toEqual(['queue', 'running'])
-  expect(reply.versions.find(v => v.version === '2.204.4')!.pieceKeys).toEqual([])
+  expect(reply.versions.find(v => v.version === '2.204.4')).toBeUndefined()
 })
 
 test('a new round DECLARED against an already published release keeps its target but is not on that release card', () => {
@@ -115,7 +115,7 @@ test('r4: an inferred release published BEFORE the piece started is dropped, not
     inferredVersions: { 't1/a': '2.204.4' },
   })
   expect(reply.pieces[0]).toMatchObject({ stage: 'leader', version: null })
-  expect(reply.versions.find(v => v.version === '2.204.4')!.pieceKeys).toEqual([])
+  expect(reply.versions.find(v => v.version === '2.204.4')).toBeUndefined()
 })
 test('r4: a release published AFTER the piece started still publishes it', () => {
   const reply = buildCalendar({

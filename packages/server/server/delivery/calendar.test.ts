@@ -58,6 +58,46 @@ describe('the Cronograma group level (parentGroupId)', () => {
   })
 })
 
+describe('the app\'s own releases are not the user\'s versions', () => {
+  const APP_RELEASES = ['2.204.3', '2.205.0', '2.217.1'].map(v => ({ tag: `v${v}`, published_at: '2026-11-10T12:00:00.000Z' }))
+  test('readCalendarSources never reads the update feed: app releases available, no records/tags -> 0 versions', async () => {
+    const { mock } = await import('bun:test')
+    let asked = 0
+    mock.module('../version', () => ({ getVersionInfo: async () => { asked++; return { current: '2.217.1', latest: '2.217.1', releases: APP_RELEASES } } }))
+    const { readCalendarSources, calendarFrom } = await import('./calendar')
+    const src = await readCalendarSources()
+    expect(asked).toBe(0)
+    expect(src.releases).toEqual([]) // only pieces' own tags can date a release
+    expect(calendarFrom(src).versions).toEqual([])
+  })
+  test('a piece whose commit sits in a v1.2.3 tag of its repo, no record → published in 1.2.3 at the tag date; no version without a piece', async () => {
+    const { releasesFromPieceTags } = await import('./calendar')
+    const NOW = Date.parse('2026-11-16T12:00:00.000Z'), tagAt = Date.parse('2026-11-14T09:00:00.000Z')
+    const releases = releasesFromPieceTags({ 't/s': { version: '1.2.3', publishedAt: tagAt } })
+    expect(releases).toEqual([{ version: '1.2.3', publishedAt: new Date(tagAt).toISOString() }])
+    const reply = buildCalendar({
+      nowMs: NOW, releases, inferredVersions: { 't/s': '1.2.3' },
+      lives: [{ key: 't/s', taskId: 't', taskTitle: 'T', subtaskId: 's', title: 'P', stage: 'leader', startedAtMs: tagAt - 9e6, stageSinceMs: tagAt - 3e6,
+        harnesses: [], models: [], eta: { kind: 'none' }, stageEta: { kind: 'none' }, publishEta: { kind: 'none', reason: 'no-history' }, deliveredAtMs: null }],
+      records: [], tasks: [{ id: 't', title: 'T', status: 'in_progress' }], subtasks: [], resets: [],
+    })
+    expect(reply.pieces[0]).toMatchObject({ stage: 'published', version: '1.2.3' })
+    expect(reply.versions).toMatchObject([{ version: '1.2.3', state: 'published', atMs: tagAt, pieceKeys: ['t/s'] }])
+  })
+  test('a real record tag yields that version only', () => {
+    const NOW = Date.parse('2026-11-16T12:00:00.000Z')
+    const reply = buildCalendar({
+      nowMs: NOW,
+      lives: [{ key: 't/s', taskId: 't', taskTitle: 'T', subtaskId: 's', title: 'P', stage: 'published', startedAtMs: NOW - 9e6, stageSinceMs: NOW - 3e6,
+        harnesses: [], models: [], eta: { kind: 'none' }, stageEta: { kind: 'none' }, publishEta: { kind: 'none', reason: 'no-history' }, deliveredAtMs: NOW - 3e6 }],
+      records: [{ subtaskId: 's', taskId: 't', phase: 'publicado', versionTarget: '3.1.0', tag: 'v3.1.0', publishedAt: '2026-11-15T12:00:00.000Z' }],
+      tasks: [{ id: 't', title: 'T', status: 'in_progress' }], subtasks: [], resets: [],
+    })
+    expect(reply.versions.map(v => v.version)).toEqual(['3.1.0'])
+    expect(reply.pieces).toHaveLength(1)
+  })
+})
+
 describe('a leader working alone reaches the Calendar (LIVE.EM-ANDAMENTO-E-LIDER)', () => {
   test('the leader piece (task-level, running, on the leader session\'s clock) is a piece of the calendar', () => {
     const NOW = Date.parse('2026-11-09T15:00:00.000Z')

@@ -7,10 +7,10 @@
  */
 
 import { join } from 'node:path'
-import { buildLive, legacyReviewShaPieces, prepareForecastHistory, FORECAST_BUCKET_MS, FORECAST_METHOD_VERSION, type ForecastHistory } from './task-live'
+import { buildLive, legacyReviewShaPieces, type ShaPiece, prepareForecastHistory, FORECAST_BUCKET_MS, FORECAST_METHOD_VERSION, type ForecastHistory } from './task-live'
 import { readForecastAnchors, saveForecastAnchors } from './task-forecast-cache'
 import { dirsForShas } from './release-repos'
-import { firstTagContaining, publishedAmong } from './release-tags'
+import { firstTagContaining, publishedAmong, tagDateIn } from './release-tags'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
 import { stat } from 'node:fs/promises'
 import type { StagedSessionDraft, StatusStage, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
@@ -220,7 +220,7 @@ async function buildLiveReply(key: string): Promise<LiveBuildCache['reply']> {
 const SHA_BATCH = 40
 const SHA_MISS_TTL_MS = 10 * 60_000
 /** sha → the version a release tag (or the squash that carried it) proved. A positive answer is permanent. */
-const shaVersion = new Map<string, string>()
+const shaVersion = new Map<string, { version: string; publishedAt: number | null }>()
 const shaMissAt = new Map<string, number>()
 let shaRefill: Promise<void> | null = null
 /** Test seam: wait for the background pass, or forget everything. */
@@ -257,6 +257,11 @@ async function shaPiecesOfBook(): Promise<NonNullable<typeof shaPiecesMemo>> {
 }
 
 export async function pieceVersionsFromTags(): Promise<Record<string, string>> {
+  return Object.fromEntries(Object.entries(await pieceReleasesFromTags()).map(([k, r]) => [k, r.version]))
+}
+
+/** Same proof as `pieceVersionsFromTags`, plus WHEN the tag was made (git's own date in the piece's repo; null when not read yet). */
+export async function pieceReleasesFromTags(): Promise<Record<string, { version: string; publishedAt: number | null }>> {
   const { pieces, dirsFor } = await shaPiecesOfBook()
   // Never wait for git: what is known NOW is answered, the rest (newest commits first, a bounded batch per pass, one
   // pass at a time) is resolved in the background and the next read — the calendar is rebuilt every few seconds — has it.
@@ -266,18 +271,27 @@ export async function pieceVersionsFromTags(): Promise<Record<string, string>> {
     shaRefill = (async () => {
       for (const sha of todo.slice(0, SHA_BATCH)) {
         const version = await firstTagContaining(sha, dirsFor(sha)).catch(() => null)
-        if (version) shaVersion.set(sha, version); else shaMissAt.set(sha, Date.now())
+        if (version) shaVersion.set(sha, { version, publishedAt: await tagDateIn(version, dirsFor(sha)).catch(() => null) }); else shaMissAt.set(sha, Date.now())
       }
     })().finally(() => { shaRefill = null })
   }
-  const out: Record<string, string> = {}
-  for (const [sha, version] of shaVersion) {
+  return joinPieceReleases(pieces, shaVersion)
+}
+
+/** PURE: each piece's release = the newest version among the commits IT named (a commit's version never leaks to another piece). */
+export function joinPieceReleases(
+  pieces: ReadonlyMap<string, readonly ShaPiece[]>,
+  versions: ReadonlyMap<string, { version: string; publishedAt: number | null }>,
+): Record<string, { version: string; publishedAt: number | null }> {
+  const out: Record<string, { version: string; publishedAt: number | null }> = {}
+  for (const [sha, found] of versions) {
     if (!pieces.has(sha)) continue
+    const version = found.version
     for (const p of pieces.get(sha) ?? []) {
       const key = p.subtaskId ? `${p.taskId}/${p.subtaskId}` : p.taskId
       // A piece naming several commits ships with the LAST of them.
       const cur = out[key]
-      if (!cur || version.localeCompare(cur, undefined, { numeric: true }) > 0) out[key] = version
+      if (!cur || version.localeCompare(cur.version, undefined, { numeric: true }) > 0) out[key] = found
     }
   }
   return out

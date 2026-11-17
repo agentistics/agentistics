@@ -355,10 +355,8 @@ export function buildCalendar(o: {
       confidence: lowest, pieceKeys: ps.map(p => p.key), stageCounts,
     })
   }
-  for (const [version, publishedAt] of releasePublishedAt) {
-    if (byVersion.has(version)) continue
-    versions.push({ version, state: 'published', atMs: publishedAt, basis: 'published', taggedRelease: true, confidence: null, pieceKeys: [], stageCounts: {} })
-  }
+  // A release no piece of the board belongs to is NOT a version: it only dates the ones above. (The app's own update
+  // feed once arrived here and drew every agentistics release as the user's.)
   versions.sort((a, b) => compareVersions(a.version, b.version))
 
   // ---- marks of the context
