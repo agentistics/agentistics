@@ -27,6 +27,28 @@ function row(over: Partial<ControlSession> = {}): ControlSession {
 
 const verb = (r: ReturnType<typeof fleetRow>, a: string) => r.verbs.find(v => v.action === a)!
 
+// SESSAO.MENU-ENCERRAR: the server half of "a live session always offers End" — pane, structured
+// and native rows, every live state. (The menu half is `rowMenu.ts` / SessionRowMenu.encerrar.dom.test.)
+describe('fleetRow — End is enabled on every row that may still be running', () => {
+  const states = ['working', 'waiting', 'waiting-approval', 'idle', 'lost'] as const
+  for (const state of states) {
+    it(`pane / structured / native · ${state}`, () => {
+      const kinds: Partial<ControlSession>[] = [{}, { structured: true }, { harness: 'agentistics' as ControlSession['harness'] }]
+      for (const over of kinds) {
+        const r = fleetRow(row({ state, ...over }), S)
+        expect(verb(r, 'kill').enabled).toBe(true)
+      }
+    })
+  }
+  it('whenever Remove is refused as live, End is enabled on the same row', () => {
+    for (const state of ['working', 'waiting', 'waiting-approval', 'idle'] as const) {
+      const r = fleetRow(row({ state }), S)
+      expect(verb(r, 'forget').enabled).toBe(false)
+      expect(verb(r, 'kill').enabled).toBe(true)
+    }
+  })
+})
+
 describe('fleetRow — the verbs a web row is offered', () => {
   it('never offers attach: a browser tab has no terminal, so it carries the command instead', () => {
     const r = fleetRow(row(), S)

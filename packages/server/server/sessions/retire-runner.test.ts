@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { HARNESS_ORDER } from '@agentistics/core'
-import { BG_TASKS_APPLICABLE, readRetireBgTasks, SUCCESSOR_GRACE_MS, PREDECESSOR_GRACE_MS, RETIRE_TRANSCRIPT_MAX_BYTES, createRetireRunner, MCP_COMMAND_SOURCES, type RetireRunnerDeps } from './retire-runner'
+import { BG_TASKS_APPLICABLE, readRetireBgTasks, SUCCESSOR_GRACE_MS, PREDECESSOR_GRACE_MS, RETIRE_TRANSCRIPT_MAX_BYTES, createRetireRunner, MCP_COMMAND_SOURCES, paneLessChildren, type RetireRunnerDeps } from './retire-runner'
+import { HANDOFF_DEADLINE_MS } from './retire-plan'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -436,4 +437,59 @@ describe('retire absent predecessor confirmation', () => {
       expect(w.rows[0]!.retire).toBeDefined()
     })
   }
+})
+
+// LIDER.PASSAGEM (owner 2026-11-17): an old leader kept `working` beside its successor until closed by
+// hand. With a fake clock: a hand-off is closed once the current turn ends, and by its hard deadline
+// even when it never goes quiet; it is filed in the task's finished folder.
+describe('hand-off retire is guaranteed (LIDER.PASSAGEM)', () => {
+  const succ: ManagedSession = { id: 's1', harness: 'claude', cwd: '/w', createdAt: new Date(T0).toISOString(), taskId: 't1' }
+  const handoffReq = (over: Partial<RetireRequest> = {}): RetireRequest => {
+    const { folderId: _f, ...base } = req({ by: 's1', successorId: 's1', deadlineAt: new Date(T0 + 30 * 60_000).toISOString(), ...over })
+    return base
+  }
+  it('a predecessor kept busy by watchers is closed at the 10-minute hard deadline, filed in Finalizadas', async () => {
+    const w = world(handoffReq(), [succ])
+    w.deps.finishedFolder = async () => 'finalizadas'
+    const r = createRetireRunner(w.deps)
+    // Nudged every 5 s: working, a 5 s blip of waiting, working again — never two quiet polls.
+    let i = 0
+    while (w.deps.now() < T0 + HANDOFF_DEADLINE_MS) {
+      const act = i++ % 3 === 2 ? 'waiting' : 'working'
+      await r.consume(w.snap([w.view('p1', act), w.view('s1', 'working')]))
+      expect(w.calls.kill).toEqual([])
+      w.advance(5000)
+    }
+    w.setFresh(w.snap([w.view('p1', 'working'), w.view('s1', 'working')]))
+    await r.consume(w.snap([w.view('p1', 'working'), w.view('s1', 'working')]))
+    expect(w.calls.kill).toEqual(['p1'])
+    expect(w.calls.filed).toEqual(['finalizadas:p1'])
+    expect(w.calls.codes).toEqual(['retire.done'])
+    expect(w.calls.comments[0]).toContain('hand-off deadline')
+    expect(w.rows[0]!.retire).toBeUndefined()
+  })
+  it('a predecessor whose turn ends is closed at once, not at the deadline', async () => {
+    const w = world(handoffReq({ quietForMs: 10_000 }), [succ])
+    const r = createRetireRunner(w.deps)
+    await r.consume(w.snap([w.view('p1', 'working'), w.view('s1', 'working')]))
+    for (let k = 0; k < 3; k++) {
+      w.advance(5000)
+      w.setFresh(w.snap([w.view('p1', 'waiting'), w.view('s1', 'working')]))
+      await r.consume(w.snap([w.view('p1', 'waiting'), w.view('s1', 'working')]))
+    }
+    expect(w.calls.kill).toEqual(['p1'])
+    expect(w.deps.now() - T0).toBeLessThan(60_000)
+  })
+  it('a dead successor still cancels — the task is never left without its leader', async () => {
+    const w = world(handoffReq(), [{ ...succ, endedAt: new Date(T0).toISOString() }])
+    const r = createRetireRunner(w.deps)
+    w.advance(HANDOFF_DEADLINE_MS)
+    await r.consume(w.snap([w.view('p1', 'working')]))
+    expect(w.calls.kill).toEqual([])
+    expect(w.calls.codes).toEqual(['retire.cancelled'])
+  })
+  it('a structured row (no pane) answers `unmeasured`; a pane row whose pid is missing stays `unreadable`', () => {
+    expect(paneLessChildren({ structuredDriver: 'claude-stream-json' })).toEqual({ checked: false, reason: 'unmeasured' })
+    expect(paneLessChildren({})).toEqual({ checked: false, reason: 'unreadable' })
+  })
 })
