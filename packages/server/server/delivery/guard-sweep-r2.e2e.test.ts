@@ -69,6 +69,8 @@ test('S2B-8 live comment contention is 409 JSON; no accepted comment is lost rac
     } finally { await lock.release() }
     const book = JSON.parse(readFileSync(join(root, 'tasks.json'), 'utf8'))
     book.statuses = vocabulary
+    // R3's breaker counts every revert kind. Keep this race below five percent so it actually applies all chunks.
+    book.tasks.push(...Array.from({ length: 240 }, (_, i) => ({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: at, updatedAt: at })))
     book.subtasks = book.subtasks.map((s: any) => ({ ...s, status: 'in_review' }))
     writeFileSync(join(root, 'tasks.json'), JSON.stringify(book))
     const pendingTick = call('/api/deliveries/tick', {})

@@ -263,10 +263,10 @@ test('S2B-4 breaker rejects over five percent and over twenty missing checkpoint
     writeFileSync(w.paths.tasks, JSON.stringify(raw))
   }
   forge(3)
-  const before = readFileSync(w.paths.tasks, 'utf8'), guards = readFileSync(w.paths.guards, 'utf8')
+  const before = readFileSync(w.paths.tasks, 'utf8')
   expect((await w.svc.tick()).actions).toContain('sweep-skipped: no_checkpoint_breaker')
   expect(readFileSync(w.paths.tasks, 'utf8')).toBe(before)
-  expect(readFileSync(w.paths.guards, 'utf8')).toBe(guards)
+  expect((await w.guards.read()).sweep?.warning).toContain('sweep-breaker:')
   forge(21)
   expect((await w.svc.tick()).actions).toContain('sweep-skipped: no_checkpoint_breaker')
   forge(0); forge(2)
@@ -366,7 +366,7 @@ test('S2B-1 identical ineffective member plan never writes or comments again', a
   const second: string[] = [], third: string[] = []
   await guardSweep(deps, second)
   await guardSweep(deps, third)
-  expect(writes).toBe(1)
+  expect(writes).toBe(0)
   expect(second).toEqual([])
   expect(third).toEqual([])
 })

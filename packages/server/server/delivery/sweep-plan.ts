@@ -40,6 +40,8 @@ export interface SweepRecord {
 export interface PieceView {
   derived?: boolean
   checkpointKey?: string
+  /** The group's effective board rank, judged by the same derivation as the write guard. */
+  groupRank?: number
   /** Members inherit their group's evidence, while only their own stored status is repaired. */
   authorizationRecord?: SweepRecord | null
   key: string
@@ -133,6 +135,8 @@ export function planSweep(o: { pieces: readonly PieceView[]; checkpoints: Readon
     let target = rank
     if (boardNow > rank || phaseNow > rank) reason = cp ? 'above_checkpoint' : 'no_checkpoint'
     else if (cp && rank >= 1 && Math.max(boardNow, phaseNow) >= 1 && (staleEvidence(cp, p.authorizationRecord ?? p.record).length > 0 || headMoved(cp, p.authorizationRecord ?? p.record))) { reason = 'evidence_stale'; target = 0 }
+    // Members may advance individually. Only a group whose DERIVED rank exceeds its checkpoint needs member repairs.
+    if (p.checkpointKey && (p.groupRank ?? 0) <= rank) reason = null
     if (!reason) {
       // The board is BELOW what the delivery (and the checkpoint) authorized: finish the board effect that failed. Not a violation.
       const authorized = p.record ?? p.authorizationRecord

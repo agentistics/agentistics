@@ -896,7 +896,9 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
     upsertSubtask(t, guard) {
       return enqueue(async () => {
         const book = await read()
-        await write({ ...book, subtasks: [...book.subtasks.filter(x => x.id !== t.id), t] })
+        const next = { ...t }
+        if (next.status !== 'blocked') delete next.blockedReason
+        await write({ ...book, subtasks: [...book.subtasks.filter(x => x.id !== t.id), next] })
       }, guard)
     },
     removeSubtask(id) {
@@ -1069,6 +1071,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
           const next = { ...s, status: r.to, done: r.to === 'done', updatedAt: batch.at }
           if (r.clearCi) delete next.ci
           if (r.to === 'blocked') next.blockedReason = 'externo: an unknown writer keeps moving this piece'
+          else delete next.blockedReason
           return next
         })
         const tasks = book.tasks.map(t => (byTask.has(t.id) ? { ...t, status: byTask.get(t.id)!.to, updatedAt: batch.at, ...(byTask.get(t.id)!.to === 'blocked' ? { blockedReason: 'externo: an unknown writer keeps moving this piece' } : {}) } : t))

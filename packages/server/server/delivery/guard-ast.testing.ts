@@ -110,8 +110,12 @@ export function forbiddenCapabilities(src: string): string[] {
   const file = source('export {};\n' + src)
   const out: string[] = []
   const keys = new Map<string, ts.Expression>()
+  const reflectGets = new Set<string>()
   const collectKeys = (n: ts.Node) => {
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) keys.set(n.name.text, n.initializer)
+    if (ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name) && n.initializer && unwrap(n.initializer).getText(file) === 'Reflect') {
+      for (const el of n.name.elements) if (ts.isIdentifier(el.name) && (el.propertyName?.getText(file) ?? el.name.text) === 'get') reflectGets.add(el.name.text)
+    }
     ts.forEachChild(n, collectKeys)
   }
   collectKeys(file)
@@ -126,6 +130,20 @@ export function forbiddenCapabilities(src: string): string[] {
     }
     return undefined
   }
+  const isReflectGet = (node: ts.Expression): boolean => {
+    const e = unwrap(node)
+    return ts.isIdentifier(e) ? reflectGets.has(e.text) : (ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e))
+      && unwrap(e.expression).getText(file) === 'Reflect' && (ts.isPropertyAccessExpression(e) ? e.name.text : keyText(e.argumentExpression)) === 'get'
+  }
+  const assignmentConstructors = (node: ts.Expression) => {
+    const target = unwrap(node)
+    if (ts.isArrayLiteralExpression(target)) for (const el of target.elements) assignmentConstructors(el)
+    if (ts.isObjectLiteralExpression(target)) for (const p of target.properties) {
+      const name = p.name
+      if (name && (ts.isIdentifier(name) ? name.text : ts.isComputedPropertyName(name) ? keyText(name.expression) : literalText(name)) === 'constructor') out.push('constructor-assignment-destructure')
+      if (ts.isPropertyAssignment(p)) assignmentConstructors(p.initializer)
+    }
+  }
   const visit = (n: ts.Node) => {
     if (ts.isIdentifier(n) && n.text === 'eval') out.push('eval')
     if (ts.isIdentifier(n) && n.text === 'Function') out.push('Function')
@@ -136,17 +154,14 @@ export function forbiddenCapabilities(src: string): string[] {
       const e = unwrap(n.expression)
       const name = ts.isPropertyAccessExpression(e) ? e.name.text : ts.isElementAccessExpression(e) ? keyText(e.argumentExpression) : e.getText(file)
       if (/^(eval|Function)$/.test(name ?? '')) out.push(n.expression.getText(file))
-      if (ts.isCallExpression(n) && (ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e))
-        && unwrap(e.expression).getText(file) === 'Reflect' && name === 'get'
+      if (ts.isCallExpression(n) && isReflectGet(e)
         && keyText(n.arguments[1]) === 'constructor') out.push('constructor-reflect-get')
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(e) && e.expression.getText(file) === 'Reflect' && e.name.text === 'apply'
+        && n.arguments[0] && isReflectGet(n.arguments[0]) && n.arguments[2] && ts.isArrayLiteralExpression(unwrap(n.arguments[2]))
+        && keyText((unwrap(n.arguments[2]) as ts.ArrayLiteralExpression).elements[1]) === 'constructor') out.push('constructor-reflect-apply')
     }
-    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isObjectLiteralExpression(unwrap(n.left))) {
-      const target = unwrap(n.left) as ts.ObjectLiteralExpression
-      for (const p of target.properties) {
-        const name = p.name
-        if (name && (ts.isIdentifier(name) ? name.text : ts.isComputedPropertyName(name) ? keyText(name.expression) : literalText(name)) === 'constructor') out.push('constructor-assignment-destructure')
-      }
-    }
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken) assignmentConstructors(n.left)
+    if ((ts.isForOfStatement(n) || ts.isForInStatement(n)) && !ts.isVariableDeclarationList(n.initializer)) assignmentConstructors(n.initializer)
     if (ts.isBindingElement(n) && (n.propertyName ? (ts.isIdentifier(n.propertyName) || ts.isStringLiteral(n.propertyName)) && n.propertyName.text === 'constructor' : ts.isIdentifier(n.name) && n.name.text === 'constructor')) out.push('constructor-destructure')
     if (ts.isPropertyAccessExpression(n) && unwrap(n.expression).getText(file) === 'process' && n.name.text === 'binding') out.push('process.binding')
     if (ts.isElementAccessExpression(n) && unwrap(n.expression).getText(file) === 'process' && literalText(n.argumentExpression) === 'binding') out.push('process.binding')

@@ -68,12 +68,12 @@ const mutants: Array<[string, string, string, string, string, string[]]> = [
   ['S2b catch-up', delivery + 'sweep-plan.ts', 'phaseRank(authorized.phase) === rank && boardNow < rank', 'false', 'caught up', [sweepTest]],
   ['S2b loop limit', delivery + 'sweep-plan.ts', 'export const SWEEP_LOOP_LIMIT = 2', 'export const SWEEP_LOOP_LIMIT = 3', 'reverted twice', [sweepTest]],
   ['S2b loop window', delivery + 'sweep-plan.ts', 'now - Date.parse(s) < SWEEP_LOOP_WINDOW_MS', 'now - Date.parse(s) < Infinity', 'loop window expires', [sweepTest]],
-  ['S2b intent commit', delivery + 'sweep.ts', 'if (documentsShow(intent.target, recoveryViews))', 'if (false)', 'commits the intent', [sweepTest]],
-  ['S2b intent drop', delivery + 'sweep.ts', 'if (documentsShow(intent.target, recoveryViews))', 'if (true)', 'drops it', [sweepTest]],
+  ['S2b intent commit', delivery + 'sweep.ts', 'if (documentsShow(intent.target, shown))', 'if (false)', 'commits the intent', [sweepTest]],
+  ['S2b intent drop', delivery + 'sweep.ts', 'if (documentsShow(intent.target, shown))', 'if (true)', 'drops it', [sweepTest]],
   ['S2b ci signal', delivery + 'sweep-plan.ts', 'clearCi: p.ciRank > target', 'clearCi: false', 'ci SIGNAL', [sweepTest]],
   ['S2b ranked revision', delivery + 'sweep.ts', 'phaseRank(to) === 0 ? r.revision + 1 : r.revision', 'r.revision + 1', 'not to rank 0', [sweepTest]],
   ['S2b memory persisted', delivery + 'guards-store.ts', '...(sweep ? { sweep } : {})', '...{}', 'BLOCKED', [sweepTest]],
-  ['S2b batch cap', delivery + 'sweep.ts', "if (plan.reverts.length > 0) {\n      const comments", "if (plan.reverts.length > 0) {\n      plan.reverts.length = Math.min(plan.reverts.length, 20)\n      const comments", '30 forged pieces', [sweepTest]],
+  ['S2b missing chunk', delivery + 'sweep.ts', 'offset < plan.reverts.length;', 'offset < plan.reverts.length - SWEEP_CHUNK_SIZE;', '12 forged pieces', [sweepTest]],
   ['S2b clear ci in store', 'packages/server/server/sessions/task-store.ts', 'if (r.clearCi) delete next.ci', '', 'ci SIGNAL', [sweepTest]],
 ]
 for (const [id, file, from, to, pattern, suites] of mutants) test(`r8 mutant ${id} is killed`, async () => {

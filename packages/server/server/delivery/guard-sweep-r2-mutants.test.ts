@@ -9,7 +9,7 @@ const delivery = 'packages/server/server/delivery/'
 let root: string
 const originals = new Map<string, string>()
 const taskStore = 'packages/server/server/sessions/task-store.ts'
-const files = [...['guard-host.ts', 'guard-ast.testing.ts', 'sweep.ts', 'sweep-plan.ts', 'guards-store.ts', 'store.ts', 'owner-health.ts'].map(f => delivery + f), taskStore, 'packages/server/server/errors.ts', 'packages/server/server/index.ts', 'packages/server/server/sessions/cli-task.ts', 'packages/mcp/agentistics-mcp.ts'].filter(f => existsSync(join(repo, f)))
+const files = [...['service.ts', 'guard-host.ts', 'guard-ast.testing.ts', 'sweep.ts', 'sweep-plan.ts', 'guards-store.ts', 'store.ts', 'owner-health.ts'].map(f => delivery + f), taskStore, 'packages/server/server/errors.ts', 'packages/server/server/index.ts', 'packages/server/server/sessions/cli-task.ts', 'packages/mcp/agentistics-mcp.ts'].filter(f => existsSync(join(repo, f)))
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'guard-r8-mutants-'))
   cpSync(join(repo, 'packages'), join(root, 'packages'), { recursive: true, filter: p => !p.split('/').some(s => ['node_modules', 'dist', 'target', '.git'].includes(s)) })
@@ -44,21 +44,41 @@ async function run(targets: string[], pattern?: string) {
 
 
 const regression = delivery + 'guard-sweep-r2.test.ts'
+const r3 = delivery + 'guard-sweep-r3.test.ts'
 const host = delivery + 'guard-sweep-host-r2.test.ts'
 const errors = 'packages/server/server/errors.test.ts'
 const storeTest = delivery + 'guard-store.test.ts'
 const rest = delivery + 'guard-sweep-r2.e2e.test.ts'
 const mcp = 'packages/mcp/task-write-proof.test.ts'
 const mutants: Array<[string, string, string, string, string, string[]]> = [
+ ['R2-1 member derived rank', delivery + 'sweep-plan.ts', 'if (p.checkpointKey && (p.groupRank ?? 0) <= rank) reason = null', '', 'R2-M1|R2-M2', [r3]],
+ ['R2-2 retain phase', delivery + 'guard-host.ts', 'rec?.phase ?? null : prior.phase', 'rec?.phase ?? null : null', 'R2-K2', [r3]],
+ ['R2-2 retain phase rank', delivery + 'guard-host.ts', 'rank: Math.max(r.rank, phaseRank(phase))', 'rank: r.rank', 'R2-K2', [r3]],
+ ['R2-2 owner retreat', delivery + 'guard-host.ts', "if (o.ctx.principal.kind === 'owner') auth.push({ kind: 'owner', via: o.ctx.principal.via })", '', 'R2-K2', [r3]],
+ ['R2-3 health warning', delivery + 'sweep.ts', 'if (current.sweep?.warning !== warning) await d.guards.write', 'if (false) await d.guards.write', 'R2-3 breaker', [r3]],
+ ['R2-3 leader notice', delivery + 'sweep.ts', 'await d.notifyLeaders?.([...new Set(plan.reverts.map(r => r.taskId))], warning)', 'void warning', 'R2-3 breaker', [r3]],
+ ['R2-3 notice dedupe', delivery + 'sweep.ts', "notify = !current.sweep?.warning?.startsWith('sweep-breaker:')", 'notify = true', 'R2-3 breaker', [r3]],
+ ['R2-4 all kinds', delivery + 'sweep.ts', 'const revertCount = plan.reverts.length', "const revertCount = plan.reverts.filter(r => r.reason === 'no_checkpoint').length", 'R2-4', [r3]],
+ ['R2-5 bounded chunks', delivery + 'sweep.ts', 'export const SWEEP_CHUNK_SIZE = 4', 'export const SWEEP_CHUNK_SIZE = 1000', 'R2-5 planning', [r3]],
+ ['R2-5 revalidate', delivery + 'sweep.ts', 'const reverts = proposed.filter(r => signature(fresh.byKey.get(r.key), fresh.doc.checkpoints, fresh.doc.sweep) === expected.get(r.key))', 'const reverts = proposed', 'R2-5 planning', [r3]],
+ ['R2-5 plan outside', delivery + 'sweep.ts', 'const initial = await snapshot()', 'const initial = await d.envelope(snapshot)', 'R2-5 planning', [r3]],
+ ['R2-5 tick envelope', delivery + 'service.ts', 'try { return await tickOnce() }', 'try { return await transaction(tickOnce)() }', 'R2-5 the real service', [r3]],
+ ['R2-6 normal clear', taskStore, "if (next.status !== 'blocked') delete next.blockedReason", '', 'R2-6', [r3]],
+ ['R2-6 sweep clear', taskStore, 'else delete next.blockedReason', '', 'R2-6', [r3]],
+ ['R2-7 Reflect alias', delivery + 'guard-ast.testing.ts', 'reflectGets.add(el.name.text)', 'void el', 'R2-7 refuses const', [r3]],
+ ['R2-7 Reflect apply', delivery + 'guard-ast.testing.ts', "out.push('constructor-reflect-apply')", 'void n', 'R2-7 refuses Reflect', [r3]],
+ ['R2-7 nested array', delivery + 'guard-ast.testing.ts', 'if (ts.isArrayLiteralExpression(target)) for (const el of target.elements) assignmentConstructors(el)', '', 'R2-7 refuses \\[', [r3]],
+ ['R2-7 for-of', delivery + 'guard-ast.testing.ts', 'if ((ts.isForOfStatement(n) || ts.isForInStatement(n)) && !ts.isVariableDeclarationList(n.initializer)) assignmentConstructors(n.initializer)', '', 'R2-7 refuses for', [r3]],
+ ['R2-8 N10 revision', delivery + 'guard-host.ts', '&& (rec?.revision ?? 0) === checkpoint.revision', '', 'R2-8 N10', [r3]],
  ['G1 raw members', delivery + 'sweep.ts', 'slice.subtasks.filter(s => !groups.has(s.id))', 'slice.subtasks.filter(s => !groups.has(s.id) && !s.parentGroupId)', 'G1', [regression]],
- ['G1 safety net', delivery + 'sweep.ts', 'if (doc.sweep?.plans?.[r.key] !== signatures[r.key]) return true', 'return true; if (false) return true', 'identical ineffective', [regression]],
+ ['G1 derived rank', delivery + 'sweep-plan.ts', 'if (p.checkpointKey && (p.groupRank ?? 0) <= rank) reason = null', '', 'identical ineffective', [regression]],
  ['K1 current checkpoint', delivery + 'sweep-plan.ts', 'return Math.min(cp.rank, Math.max(board, phaseRank(cp.phase)))', 'return cp.rank', 'K1', [regression]],
  ['K1 retreat hook', delivery + 'guard-host.ts', 'if (o.ctx) for (const r of o.retreats ?? [])', 'if (false) for (const r of o.retreats ?? [])', 'authorized.*retreat lowers', [regression]],
  ['CU1 checkpoint cover', delivery + 'guard-host.ts', "const covered = o.ctx.principal.kind === 'flow'", 'const covered = false', 'CU1', [host]],
  ['CU failure dedupe', delivery + 'sweep.ts', 'if (doc.sweep?.catchUpFailures?.[c.key] !== code)', 'if (true)', 'catch-up refusals', [regression]],
  ['migration stamp', delivery + 'sweep.ts', "!doc.migrations?.a ? 'migration_missing'", "false ? 'migration_missing'", 'migration missing', [regression]],
- ['breaker percent', delivery + 'sweep.ts', 'noCheckpoint > views.length * 0.05', 'false', 'breaker rejects', [regression]],
- ['breaker count', delivery + 'sweep.ts', 'noCheckpoint > 20', 'false', 'breaker absolute', [regression]],
+ ['breaker percent', delivery + 'sweep.ts', 'revertCount > views.length * 0.05', 'false', 'breaker rejects', [regression]],
+ ['breaker count', delivery + 'sweep.ts', 'revertCount > 20', 'false', 'breaker absolute', [regression]],
  ['delivered timestamp', taskStore, "if (r.clearCi) delete next.ci", "if (r.clearCi) delete next.ci; delete next.deliveredAt", 'delivered piece', [regression]],
  ['B1 reason', taskStore, "if (r.to === 'blocked') next.blockedReason = 'externo: an unknown writer keeps moving this piece'", '', 'B1', [regression]],
  ['health aggregation', delivery + 'owner-health.ts', "if (w.startsWith('sweep-loop:') || w.startsWith('sweep-skipped:'))", 'if (false)', 'health has one', [regression]],
@@ -86,6 +106,6 @@ for (const [id, file, from, to, pattern, suites] of mutants) test(`r2 mutant ${i
 }, 150_000)
 test('r2 mutation positive control', async () => {
  reset()
- const r = await run([regression, host, errors, storeTest])
+ const r = await run([regression, r3, host, errors, storeTest])
  expect(r.code, r.output).toBe(0)
 }, 150_000)

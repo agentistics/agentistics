@@ -50,6 +50,10 @@ export function analyzeGuardIntegrity(f: { guaranteesWarn?: string; guardsTamper
     })
   }
   for (const w of f.offWarnings) {
+    if (w.startsWith('sweep-breaker:')) {
+      issues.push({ id: 'sweep-breaker', severity: 'warning', title: 'The delivery sweep breaker tripped / O disjuntor da varredura disparou', description: w, guide: 'agentop flow guarantee off a' })
+      continue
+    }
     if (w.startsWith('sweep-loop:') || w.startsWith('sweep-skipped:')) {
       issues.push({ id: w.startsWith('sweep-loop:') ? 'sweep-loop' : 'sweep-skipped', severity: 'warning', title: w.startsWith('sweep-loop:') ? 'The delivery sweep blocked repeated external moves' : 'The delivery sweep is report-only', description: w, guide: 'agentop flow guarantee off a' })
       continue

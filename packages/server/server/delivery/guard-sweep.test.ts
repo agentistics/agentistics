@@ -251,13 +251,14 @@ describe('evidence, owner, catch-up', () => {
   })
 })
 
-describe('one write per document, no cap, loop guard', () => {
-  test('30 forged pieces are all repaired in ONE tick with ONE write per document', async () => {
-    const ids = Array.from({ length: 30 }, (_, i) => `q${i}`)
+describe('bounded chunks, breaker, loop guard', () => {
+  test('12 forged pieces below the breaker are all repaired in one tick in bounded document chunks', async () => {
+    const ids = Array.from({ length: 12 }, (_, i) => `q${i}`)
     const w = await world('on', ids)
     for (const id of ids) await writeCheckpoint(w, cp(id, { rank: 0, boardStatus: 'in_progress', boardStage: 'running', phase: 'executando', auth: [{ kind: 'grandfathered', at: ISO }] }))
     for (const id of ids) forgeDelivery(w, id, record(id, 'executando'))
     const raw = JSON.parse(readFileSync(w.paths.tasks, 'utf8'))
+    raw.tasks.push(...Array.from({ length: 240 }, (_, i) => ({ id: `padding-${i}`, title: 'padding', status: 'in_progress', createdAt: ISO, updatedAt: ISO })))
     raw.subtasks = raw.subtasks.map((s: any) => ({ ...s, status: 'in_review' }))
     writeFileSync(w.paths.tasks, JSON.stringify(raw))
     const del = JSON.parse(readFileSync(w.paths.deliveries, 'utf8'))
@@ -266,10 +267,10 @@ describe('one write per document, no cap, loop guard', () => {
     const original = fs.rename, renamed: string[] = []
     const spy = spyOn(fs, 'rename').mockImplementation(((from: any, to: any) => { renamed.push(String(to)); return (original as any)(from, to) }) as typeof fs.rename)
     try { await w.svc.tick() } finally { spy.mockRestore() }
-    expect(renamed.filter(p => p === w.paths.tasks)).toHaveLength(1)
-    expect(renamed.filter(p => p === w.paths.deliveries)).toHaveLength(1)
+    expect(renamed.filter(p => p === w.paths.tasks)).toHaveLength(3)
+    expect(renamed.filter(p => p === w.paths.deliveries)).toHaveLength(3)
     const book = await w.tasks.read()
-    expect(book.subtasks.filter(s => s.status === 'in_progress')).toHaveLength(30)
+    expect(book.subtasks.filter(s => s.status === 'in_progress')).toHaveLength(12)
     for (const id of ids) expect((await w.store.get(id))!.phase).toBe('executando')
   })
 

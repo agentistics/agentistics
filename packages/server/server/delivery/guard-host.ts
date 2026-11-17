@@ -17,7 +17,7 @@ import { execGit, gatherFacts, type ClassifyDeps } from './classify-host'
 import type { DeliveryRecord } from './machine'
 import { defaultGuardLockPaths, withGuardLocks, type GuardLockName, type GuardLockPaths } from './guard-locks'
 import { beginIntent, commitIntent, createGuardsStore, GuardsUnreadable, type GuardAuth, type PieceCheckpoint } from './guards-store'
-import { decideGuard, GuardRefused, type GuardContext, type Raised, type ReviewOutcome, type RuleState } from './guard'
+import { decideGuard, GuardRefused, phaseRank, type GuardContext, type Raised, type ReviewOutcome, type RuleState } from './guard'
 import { checkpointRank } from './sweep-plan'
 
 /** How a store reaches the guard. Everything optional: production defaults come from the data directory and the registry. */
@@ -167,7 +167,10 @@ export async function guardedWrite(o: GuardedWriteOptions): Promise<void> {
       const prior = doc.checkpoints[r.key]
       if (!prior || (r.fromPhase !== undefined ? prior.phase !== r.fromPhase : prior.boardStatus !== r.fromBoardStatus) || targets.some(t => t.key === r.key)) continue
       const rec = await o.recordOf(r.key)
-      targets.push({ ...prior, rank: r.rank, phase: r.fromPhase !== undefined ? rec?.phase ?? null : null, boardStatus: r.boardStatus ?? '', boardStage: r.boardStage ?? '', revision: rec?.revision ?? prior.revision, at, transitionId: `retreat-${now}-${r.key}` })
+      const phase = r.fromPhase !== undefined ? rec?.phase ?? null : prior.phase
+      const auth = [...prior.auth]
+      if (o.ctx.principal.kind === 'owner') auth.push({ kind: 'owner', via: o.ctx.principal.via })
+      targets.push({ ...prior, rank: Math.max(r.rank, phaseRank(phase)), phase, auth, by: o.ctx.principal as unknown as PieceCheckpoint['by'], boardStatus: r.boardStatus ?? '', boardStage: r.boardStage ?? '', revision: rec?.revision ?? prior.revision, at, transitionId: `retreat-${now}-${r.key}` })
     }
     if (targets.length === 0) { await o.writeDocuments(); return }
     let withIntents = doc

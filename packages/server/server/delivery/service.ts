@@ -1047,7 +1047,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
    */
   let tickChain: Promise<unknown> = Promise.resolve()
   const tick = (): Promise<{ actions: string[] }> => {
-    const guarded = async () => { try { return await transaction(tickOnce)() } catch (e) { if (e instanceof DeliveryStoreUnreadable) return { actions: [`store-unreadable: ${e.message}`] }; if (e instanceof GuardBusy) return { actions: ['guard_busy: tick skipped'] }; throw e } }
+    // Each mutation owns its short envelope. A whole tick includes probes, adoption and session wakes.
+    const guarded = async () => { try { return await tickOnce() } catch (e) { if (e instanceof DeliveryStoreUnreadable) return { actions: [`store-unreadable: ${e.message}`] }; if (e instanceof GuardBusy) return { actions: ['guard_busy: tick skipped'] }; throw e } }
     const run = tickChain.then(guarded, guarded)
     tickChain = run.catch(() => undefined)
     return run
@@ -1490,7 +1491,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
     }
   }
   /** The live leader to chase for a task: the one filed on the piece itself, else the task's newest. Null = nobody to wake. */
-  const leaderFor = (sessions: readonly SessionFact[], taskId: string, subtaskId: string): string | null => {
+  const leaderFor = (sessions: readonly SessionFact[], taskId: string, subtaskId?: string): string | null => {
     const mine =sessions.filter(s => s.alive && s.role === 'leader' && s.taskId === taskId)
     const byNewest = (a: SessionFact, b: SessionFact) => (Date.parse(b.createdAt ?? '') || 0) - (Date.parse(a.createdAt ?? '') || 0)
     return [...mine.filter(s => s.subtaskId === subtaskId).sort(byNewest), ...mine.sort(byNewest)][0]?.id ?? null
@@ -2171,7 +2172,15 @@ export function createDeliveryService(deps: DeliveryDeps) {
       ids: { comment: newCommentId, event: newEventId },
       effective: subtasks => effectiveSubtasks(subtasks as never) as never,
       now: d.now,
-      catchUp: (key, phase) => d.board.setPhaseStatus(key, phase as Phase),
+      catchUp: (key, phase, unchanged) => withGuardEnvelope(paths, async () => {
+        if (!await unchanged()) return { ok: false, code: 'sweep_changed' }
+        return d.board.setPhaseStatus(key, phase as Phase)
+      }),
+      notifyLeaders: async (taskIds, text) => {
+        const sessions = await d.facts.sessions()
+        const leaders = new Set(taskIds.map(taskId => leaderFor(sessions, taskId)).filter((id): id is string => !!id))
+        for (const id of leaders) await d.notify.session(id, text).catch(() => false)
+      },
       log: line => d.log?.(line),
     }
   }

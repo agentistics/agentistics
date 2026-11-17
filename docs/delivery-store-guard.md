@@ -91,18 +91,24 @@ busy file skips the tick with a named line, never proceeds unguarded):
 
 1. **Intent recovery first.** An intent a crash left is committed when the documents already show its target (board status
    and/or delivery phase) and dropped when they do not, so a legitimate move that crashed before its commit is never judged
-   as forged. Shadow recovers intents too.
+   as forged. Shadow only reports the proposed recovery and writes nothing.
 2. **Every piece, against its checkpoint** — no "changed since" filter and no event: the checkpoint, not the 2 000-event feed,
    authorizes. A document above the checkpoint's current phase/status is reverted to it (`above_checkpoint`); an authorized
-   retreat lowers the checkpoint, rather than retaining its historical maximum. Groups are derived: the sweep judges and
-   repairs each member's stored status against the group's checkpoint, never the group's ignored stored status. An identical
-   plan that would leave the derived group rank unchanged is not written or commented again. No checkpoint means rank 0
+   retreat lowers the checkpoint, rather than retaining its historical maximum. A board-only retreat retains the authorized
+   delivery phase and its rank; it never invents a delivery-phase retreat. Owner retreats carry the owner authorization too.
+   Groups are derived: a member is repaired only when the group's derived rank exceeds its checkpoint. An individual member
+   may legitimately finish while its siblings remain open, exactly as the write guard allows. Such a move is never reverted,
+   counted toward a loop or allowed to block the group. The group's ignored stored status is never repaired. No checkpoint means rank 0
    (`no_checkpoint`) only after both safety locks below pass. Rank ≥ 1 whose evidence ids/hashes are gone, point at other bytes, belong to an earlier capture round, or
    whose record HEAD moved goes back to rank 0 (`evidence_stale`: board `in_progress`, phase `ajuste`, a new round). The
    `ci` signal alone counts as rank (the Live moves on it) and is cleared by a revert.
-3. **One write per document.** All reverts of the tick land in one `deliveries.json` write and one `tasks.json` write
-   (`applyBoardReverts`, comments and events included); no per-tick cap for authorized checkpoints. A revert only lowers a rank, so no guard context is
-   needed. A retreat to a RANK-0 phase bumps the revision; a retreat to a ranked phase keeps it (a changed revision on a ranked
+3. **Bounded apply chunks.** Planning reads snapshots outside the locks. Reverts land in chunks of at most four, each with
+   one `deliveries.json` write and one `tasks.json` write (`applyBoardReverts`, comments and events included). Each chunk
+   re-reads both books and the sealed checkpoint/memory under tasks → deliveries → guards, and skips any piece whose state,
+   group rank, authorization or revision changed. Unrelated accepted writes are retained. The tick itself holds no outer
+   envelope: adoption, probes and session wakes cannot extend a sweep chunk's lease. The target maximum hold is about two
+   seconds; replaying QA's 18 MB board with twenty first-time and twenty loop repairs measured a maximum of 577 ms.
+   A retreat to a RANK-0 phase bumps the revision; a retreat to a ranked phase keeps it (a changed revision on a ranked
    phase is a new binding to the guard). The history entry is appended; every revert comments on the piece in EN and PT.
    `deliveredAt` is preserved and the previous timestamp is also recorded in the revert event.
 4. **Board catch-up.** Board below the checkpoint while the phase is at it: `setPhaseStatus` is re-applied (never a violation).
@@ -114,15 +120,19 @@ busy file skips the tick with a named line, never proceeds unguarded):
    written after the documents and pruned on quiet ticks. Board-only loops also block an existing delivery record. The board
    carries `blockedReason: 'externo: an unknown writer keeps moving this piece'`. Health shows ONE aggregated `sweep-loop`
    WARN with full piece ids, its own EN/PT sentence, and the guide `agentop flow guarantee off a`.
+   Leaving `blocked` clears the stale reason on both normal subtask writes and sweep repairs.
 6. **An `owner` / `override` checkpoint is never reverted**, whatever its `via`. `by.kind: owner` is also exempt; the guarded
    writer records `{kind: 'owner', via}` when the requesting principal is the owner (the initial evidence gate still applies).
 
 Every revert comment and the loop WARN name the escape: `agentop flow guarantee off a`. S10 writes grandfathered checkpoints
 and a sealed `guards.json` migration stamp: `migrations: { a: { version: 1, at: <ISO timestamp> } }`. Caller-supplied activation
 facts never create that stamp. With A on and no stamp, the sweep reports `sweep-skipped: migration_missing` + WARN and writes
-nothing. Even with the stamp, more than 20 `no_checkpoint` reverts OR more than 5% of all pieces in one tick trips the breaker:
-`sweep-skipped: no_checkpoint_breaker` + WARN, no writes/comments. Intent recovery remains first in the plan but is persisted
-only after those locks pass. Shadow writes no document, including intents or loop memory.
+nothing. Even with the stamp, more than 20 reverts of **any kind** OR more than 5% of all pieces in one tick trips the breaker.
+The compatibility action remains `sweep-skipped: no_checkpoint_breaker`; no repairs, catch-ups, intent recovery or comments
+land in that tick. Only the sealed `sweep.warning` is updated. Health shows its own `sweep-breaker` WARN with the count,
+an EN/PT explanation and guide `agentop flow guarantee off a`. The first tick of an episode logs it and notifies each affected
+task's leader (deduped across leaders); repeated ticks do neither. A normal tick clears the warning. Intent recovery is
+planned first but persisted only after the safety checks pass. Shadow writes no document, including intents or loop memory.
 
 Guard contention is a structured 409 `guard_busy` with a code and EN/PT sentence through REST (comments included), MCP and
 CLI. Unexpected route errors pass through `safeError`; the HTTP boundary never exposes Bun's source/error page.
@@ -161,6 +171,9 @@ Literal `.eval`/`.Function` and `['eval']`/`['Function']` accesses on those glob
 On ANY receiver, a `.constructor` / `['constructor']` access (or a destructured `constructor`) is forbidden unless its only
 use is an identity comparison (`=== !== == !=`) or a `.name` read: `x.constructor(...)`, `new x.constructor`,
 `x.constructor.constructor`, `Reflect.construct(x.constructor, …)`, an alias or an argument all reach `Function`.
-Assignment destructuring (`({ constructor: C } = x)`) is refused too, including computed literal keys.
+Assignment destructuring (`({ constructor: C } = x)`) is refused too, including computed literal keys, nested array targets
+(`[{ constructor: C }] = [x]`) and for-of targets. Destructured `Reflect.get` aliases and
+`Reflect.apply(Reflect.get, null, [x, 'constructor'])` are refused too. Constructor name/identity comparisons and ordinary
+reflection with a safe key remain allowed.
 This includes `Reflect.construct`/`Reflect.apply` with `Function` as the target. Other runtime-built strings and data-URL
 imports remain outside this round's threat model. Exemptions remain fixed by exact path and digest.

@@ -1081,6 +1081,7 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
     ...found,
     ...(patch.title?.trim() ? { title: patch.title.trim() } : {}),
     status,
+    ...(status !== 'blocked' ? { blockedReason: undefined } : {}),
     done: subtaskDone(status),
     // An empty string CLEARS the column — that is how a date is removed, and it is why these are
     // not filtered out the way an empty title is. `startedAt`/`deliveredAt` are NEVER taken from
