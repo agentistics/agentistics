@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { brtDay, buildCalendar, filterCalendar, type CalPiece, type CalVersion } from '@agentistics/core'
 import {
   startedPiecesOfDay, addDays, addMonths, agendaOf, byPriority, fitWeek, monthCells, rangeLabel, stepAnchor, versionDays,
-  weekDays, weekRibbons, weekdayMon0, packIntervals, swipeDay, placeColumn,
+  weekDays, weekRibbons, weekdayMon0, packIntervals, swipeDay, placeColumn, overduePiecesOfDay,
 } from './calendarModel'
 
 describe('placeColumn (thin phone columns: one full-width card, overlaps become a +N chip)', () => {
@@ -212,5 +212,21 @@ describe('a piece with no version and no estimate is placed by its start (LIVE.E
     const withEta = { ...pieces[0]!, publishEta: { kind: 'estimate' as const, atMs: NOW + 5 * 86_400_000, confidence: 'low' as const } }
     expect(startedPiecesOfDay(day, [withEta])).toEqual([])
     expect(startedPiecesOfDay(day, [{ ...pieces[0]!, version: '2.205.0' }])).toEqual([])
+  })
+})
+
+describe('overduePiecesOfDay: a parked piece never counts, even on the Tudo filter', () => {
+  const NOW2 = Date.parse('2026-11-17T15:00:00.000Z')
+  const mk = (status: string) => buildCalendar({
+    nowMs: NOW2, resets: [], records: [], tasks: [{ id: 't1', title: 'T', status: 'in_progress' }],
+    subtasks: [{ id: 'a', taskId: 't1', title: 'a', status, dueDate: '2026-11-01' }],
+    lives: [{
+      key: 't1/a', taskId: 't1', taskTitle: 'T', subtaskId: 'a', title: 'a', stage: 'running', startedAtMs: NOW2 - 3_600_000, stageSinceMs: NOW2 - 3_600_000,
+      harnesses: ['claude'], models: ['opus'], eta: { kind: 'none' }, stageEta: { kind: 'none' }, publishEta: { kind: 'none', reason: 'x' }, deliveredAtMs: null,
+    }],
+  } as never)
+  test('an open piece past its due date is in the overdue block; the same piece parked is not', () => {
+    expect(overduePiecesOfDay('2026-11-17', filterCalendar(mk('in_progress'), { tasks: 'all' }).pieces, NOW2)).toHaveLength(1)
+    for (const s of ['ideias_adiado', 'abandoned']) expect(overduePiecesOfDay('2026-11-17', filterCalendar(mk(s), { tasks: 'all' }).pieces, NOW2)).toHaveLength(0)
   })
 })

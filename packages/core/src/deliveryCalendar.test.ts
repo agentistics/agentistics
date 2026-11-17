@@ -151,15 +151,15 @@ describe('buildCalendar', () => {
     const due = c.marks.filter(m => m.kind === 'task-due')
     expect(due.map(m => m.kind === 'task-due' && m.taskId)).toEqual(['t1'])
   })
-  test('a piece past its publish ETA is late', () => {
+  test('a piece past its own publish ETA with no due date is flagged for review, not late (late only means a due date passed)', () => {
     const r = buildCalendar({ nowMs: NOW, lives: [live({ key: 'z/q', taskId: 'z', stage: 'qa', publishEta: { kind: 'estimate', atMs: NOW - H } })], records: [], tasks: [], subtasks: [], resets: [] })
-    expect(r.pieces[0]!.late).toBe(true)
+    expect(r.pieces[0]!).toMatchObject({ late: false, review: true, publishEta: { kind: 'none', reason: 'review' } })
   })
-  test('an overdue stage has no rolling publish time and preserves when it became overdue', () => {
+  test('a stage past its typical time has no rolling publish time: it is flagged for review, and overdue only means a due date passed', () => {
     const since = NOW - 3 * 24 * H
     const r = buildCalendar({ nowMs: NOW, lives: [live({ key: 'z/late', taskId: 'z', stage: 'leader', stageSinceMs: since, overdueSinceMs: since + H, publishEta: { kind: 'estimate', atMs: NOW + H } })], records: [], tasks: [], subtasks: [], resets: [] })
-    expect(r.pieces[0]!.publishEta).toEqual({ kind: 'none', reason: 'overdue' })
-    expect(r.pieces[0]!).toMatchObject({ overdueSinceMs: since + H, late: true })
+    expect(r.pieces[0]!.publishEta).toEqual({ kind: 'none', reason: 'review' })
+    expect(r.pieces[0]!).toMatchObject({ overdueSinceMs: null, review: true, late: false })
   })
 })
 
