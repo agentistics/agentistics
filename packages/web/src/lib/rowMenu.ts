@@ -37,6 +37,16 @@ export interface RowVerb {
   leaderLabel?: string
   /** A section boundary before this entry, drawn by the shared menu. */
   separatorBefore?: boolean
+  /** A cascading entry: opens these on hover / click / Enter / →, instead of acting (`rowMenuCascade.ts`). */
+  children?: MenuEntry[]
+  /** The current value, shown to the right of an entry that opens a submenu. */
+  hint?: string
+  /** Heading drawn at the top of this entry's submenu. */
+  heading?: string
+  /** Leading icon key (see `SessionRowMenu`'s `ICONS`). */
+  icon?: string
+  /** Red, destructive. */
+  danger?: boolean
 }
 
 /** Tallest a fixed menu may be, in CSS px. `innerHeight` is ALREADY in CSS px: `zoomGeometry.ts`
