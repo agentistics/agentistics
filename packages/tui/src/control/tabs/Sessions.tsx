@@ -192,6 +192,8 @@ type Ask =
   | { kind: 'rename'; session: ControlSession }
   | { kind: 'note'; session: ControlSession }
   | { kind: 'kill'; session: ControlSession }
+  /** The stop was refused because the session is in use: asked once more, then `force`. */
+  | { kind: 'killHeld'; session: ControlSession; message: string }
   /** Typing a line into a session without entering it. */
   | { kind: 'prompt'; session: ControlSession }
   /**
@@ -1063,7 +1065,7 @@ export function Sessions({
       })()
       return
     }
-    setAsk({ kind, session: selected })
+    setAsk({ kind, session: selected } as Ask)
   }, [selected, host, run, onExit, s, onOpenCode])
 
   /** SS-09: a key in the task picker — `wizardKey` decides; reaching `review` means "file it". */
@@ -2263,6 +2265,7 @@ export function Sessions({
             // to disarm, which is the state this screen must never leave a person in.
             onStopped={() => setBulk(BULK_STOP_OFF)}
             onAskFinish={task => setAsk({ kind: 'finishTask', task, afterStop: true })}
+            onAskKillHeld={(session, message) => setAsk({ kind: 'killHeld', session, message })}
           />
         ) : (
           detail.length > 0
@@ -2956,7 +2959,7 @@ function Detail({ lines, width, rows }: {
  * read at the moment the user is deciding, and the row being acted on stays visible above.
  */
 function Question({
-  ask, strings: s, width, rows, fellAgo, onClose, onRun, onAskFinish, host, query, onQuery, fleet,
+  ask, strings: s, width, rows, fellAgo, onClose, onRun, onAskFinish, onAskKillHeld, host, query, onQuery, fleet,
   onStopped,
 }: {
   /** Never `new` — the wizard takes the whole screen and is rendered before this is reached. */
@@ -2984,6 +2987,8 @@ function Question({
   fleet: ControlSessions | null | undefined
   /** Called once the bulk stop actually runs, so the mode closes itself behind it. */
   onStopped: () => void
+  /** The stop was refused (it is in use): ask the second, explicit question. */
+  onAskKillHeld: (session: ControlSession, message: string) => void
   /** Ask about a DELIVERY once its session has been stopped — see `onRun`'s `then`. */
   onAskFinish: (task: string) => void
 }) {
@@ -3282,6 +3287,23 @@ function Question({
     )
   }
 
+  if (ask.kind === 'killHeld') {
+    return (
+      <ConfirmPrompt
+        label={`${ask.message} ${s.sessionsKillConfirm(session.title)}`}
+        yesLabel={s.yes}
+        noLabel={s.no}
+        width={width}
+        onCancel={onClose}
+        onAnswer={(yes: boolean) => {
+          if (!yes) return onClose()
+          const kill = host.killSession
+          if (!kill) return onClose()
+          onRun(() => kill.call(host, session.id, true), s.actSessions.kill)
+        }}
+      />
+    )
+  }
   if (ask.kind === 'kill') {
     return (
       <ConfirmPrompt
@@ -3308,11 +3330,14 @@ function Question({
            */
           // SS-10: asked only when this was the task's LAST live session — with another one still
           // working on it, "is the task done?" has an obvious answer and asking it is noise.
-          if (task && !(fleet?.finishedTasks ?? []).includes(task) && lastLiveOfTask(fleet?.sessions ?? [], session)) {
-            onRun(() => kill.call(host, session.id), s.actSessions.kill, () => onAskFinish(task))
-            return
+          // A stop refused because the session is in use asks once more (below) — and not about the task.
+          let held: string | undefined
+          const stop = async () => { const r = await kill.call(host, session.id); if (r.held) held = r.message; return r }
+          const afterStop = (): void => {
+            if (held !== undefined) onAskKillHeld(session, held)
+            else if (task && !(fleet?.finishedTasks ?? []).includes(task) && lastLiveOfTask(fleet?.sessions ?? [], session)) onAskFinish(task)
           }
-          onRun(() => kill.call(host, session.id), s.actSessions.kill)
+          onRun(stop, s.actSessions.kill, afterStop)
         }}
       />
     )

@@ -11,6 +11,7 @@ import type { SessionSnapshot } from './sessions-host'
 import type { SessionView } from './session-view'
 import type { ManagedSession, RetireRequest, SessionActivity } from './types'
 import type { SessionPatch } from './registry'
+import type { HoldObservation } from './retire-plan'
 
 const T0 = Date.parse('2026-10-16T10:00:00.000Z')
 
@@ -22,6 +23,8 @@ function world(retire: RetireRequest, extra: ManagedSession[] = []) {
   ]
   const calls = { kill: [] as string[], ended: [] as string[], filed: [] as string[], comments: [] as string[], notes: [] as string[], codes: [] as string[], meta: [] as Record<string, unknown>[], refresh: 0, probes: 0 }
   let bg: number | null = 0
+  let holdState: HoldObservation = { state: 'none' }
+  const said: string[] = []
   let latest: SessionSnapshot
   let fresh: SessionSnapshot | undefined
   const deps: RetireRunnerDeps = {
@@ -40,6 +43,8 @@ function world(retire: RetireRequest, extra: ManagedSession[] = []) {
     async fileInFolder(f, row) { calls.filed.push(`${f}:${row.id}`); return true },
     async bgTasks() { calls.probes++; return bg },
     async children() { return { checked: true, children: [] } },
+    async hold() { return holdState },
+    async announceHandoff(_row, successorId) { said.push(successorId); return true },
     async comment(_t, body) { calls.comments.push(body) },
     notify(_l, title, _message, code, meta) { calls.notes.push(title); calls.codes.push(code); calls.meta.push(meta) },
     refresh() { calls.refresh++ },
@@ -54,6 +59,8 @@ function world(retire: RetireRequest, extra: ManagedSession[] = []) {
     advance(ms: number) { now += ms },
     setFresh(s: SessionSnapshot) { fresh = s },
     setBg(n: number | null) { bg = n },
+    setHold(c: HoldObservation) { holdState = c },
+    said,
   }
 }
 
@@ -491,5 +498,91 @@ describe('hand-off retire is guaranteed (LIDER.PASSAGEM)', () => {
   it('a structured row (no pane) answers `unmeasured`; a pane row whose pid is missing stays `unreadable`', () => {
     expect(paneLessChildren({ structuredDriver: 'claude-stream-json' })).toEqual({ checked: false, reason: 'unmeasured' })
     expect(paneLessChildren({})).toEqual({ checked: false, reason: 'unreadable' })
+  })
+})
+
+describe('a hold holds the retire', () => {
+  const held: HoldObservation = { state: 'held', since: T0 - 60_000, sentence: { en: 'engine words', pt: 'palavras do engine' } }
+  const quietPolls = async (w: ReturnType<typeof world>, r: ReturnType<typeof createRetireRunner>, n: number) => {
+    for (let i = 0; i < n; i++) { await r.consume(w.snap([w.view('p1', 'waiting')])); w.advance(5000) }
+  }
+
+  it('a quiet held session is NOT killed; when the hold ends it is, exactly once', async () => {
+    const w = world(req({ deadlineAt: new Date(T0 + 30 * 60_000).toISOString() }))
+    w.setHold(held)
+    const r = createRetireRunner(w.deps)
+    await quietPolls(w, r, 8)
+    expect(w.calls.kill).toEqual([])
+    expect(w.calls.probes).toBe(0) // the expensive probes are not run for a held row
+    expect(w.calls.codes).toEqual(['retire.held']) // reported once, not per poll
+    w.setHold({ state: 'none' })
+    await quietPolls(w, r, 4)
+    expect(w.calls.kill).toEqual(['p1'])
+    expect(w.calls.codes).toEqual(['retire.held', 'retire.done'])
+  })
+
+  it('a hold appearing in the gap before the kill stops it (re-asked right before acting)', async () => {
+    const w = world(req({ deadlineAt: new Date(T0 + 30 * 60_000).toISOString() }))
+    const r = createRetireRunner(w.deps)
+    await quietPolls(w, r, 2) // not confirmed long enough yet
+    // The decision to kill is made on the next poll (the plan reads `none`); the hold starts before the kill
+    // is carried out, which is why the runner asks AGAIN right before it.
+    let asked = 0
+    w.deps.hold = async () => (++asked >= 2 ? { state: 'held', since: T0, sentence: { en: 'engine words', pt: 'palavras do engine' } } : { state: 'none' })
+    await r.consume(w.snap([w.view('p1', 'waiting')]))
+    expect(asked).toBe(2)
+    expect(w.calls.kill).toEqual([])
+  })
+
+  it('the deadline passing with a hold open: nothing is killed, the request is NOT expired and its deadline follows the hold', async () => {
+    const w = world(req()) // deadline T0+60s
+    w.setHold(held)
+    const r = createRetireRunner(w.deps)
+    await quietPolls(w, r, 20) // runs well past the deadline
+    expect(w.calls.kill).toEqual([])
+    expect(w.rows[0]!.retire?.expiredAt).toBeUndefined()
+    expect(Date.parse(w.rows[0]!.retire!.deadlineAt)).toBeGreaterThan(T0 + 60_000)
+    expect(w.calls.codes).not.toContain('retire.expired')
+    // The hold ends after the original deadline: the retire still fires.
+    w.setHold({ state: 'none' })
+    await quietPolls(w, r, 4)
+    expect(w.calls.kill).toEqual(['p1'])
+  })
+
+  it('an unreadable hold state holds like a hold does', async () => {
+    const w = world(req({ deadlineAt: new Date(T0 + 30 * 60_000).toISOString() }))
+    w.setHold({ state: 'unknown' })
+    const r = createRetireRunner(w.deps)
+    await quietPolls(w, r, 8)
+    expect(w.calls.kill).toEqual([])
+  })
+
+  it('a hand-off says the leadership passed ONCE, however many polls the hold outlasts', async () => {
+    const succ: ManagedSession = { id: 's1', harness: 'claude', cwd: '/w', createdAt: new Date(T0).toISOString() }
+    const w = world(req({ successorId: 's1', deadlineAt: new Date(T0 + 30 * 60_000).toISOString() }), [succ])
+    w.setHold(held)
+    const r = createRetireRunner(w.deps)
+    for (let i = 0; i < 6; i++) { await r.consume(w.snap([w.view('p1', 'waiting'), w.view('s1', 'working')])); w.advance(5000) }
+    expect(w.said).toEqual(['s1'])
+    expect(w.rows[0]!.retire?.handoffNoticeAt).toBeDefined()
+    expect(w.calls.kill).toEqual([])
+  })
+
+  it('no successor, no notice (a plain retire is not a hand-off)', async () => {
+    const w = world(req({ deadlineAt: new Date(T0 + 30 * 60_000).toISOString() }))
+    w.setHold(held)
+    const r = createRetireRunner(w.deps)
+    await quietPolls(w, r, 4)
+    expect(w.said).toEqual([])
+  })
+
+  it('a successor that died cancels the request even mid-hold (the task keeps its leader)', async () => {
+    const succ: ManagedSession = { id: 's1', harness: 'claude', cwd: '/w', createdAt: new Date(T0).toISOString() }
+    const w = world(req({ successorId: 's1', deadlineAt: new Date(T0 + 30 * 60_000).toISOString() }), [succ])
+    w.setHold(held)
+    const r = createRetireRunner(w.deps)
+    await r.consume(w.snap([w.view('p1', 'waiting'), w.view('s1', 'exited', 'exited')]))
+    expect(w.calls.codes).toEqual(['retire.cancelled'])
+    expect(w.said).toEqual([])
   })
 })

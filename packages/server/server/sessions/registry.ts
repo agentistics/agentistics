@@ -32,6 +32,10 @@ import { withFileLock } from './file-lock'
 import { RefusalLog } from './refusal-log'
 import { withIdentityPreferences } from './session-identity-prefs'
 import { isServerProcess } from './shared-snapshot'
+import { HoldError, observeHoldNow } from './hold-guard'
+import type { HoldObservation } from './retire-plan'
+
+export { HoldError }
 
 /** Distinguishes two writes from the SAME process; the pid distinguishes the processes. */
 let writeSeq = 0
@@ -685,13 +689,28 @@ export async function retireSession(
   if (!(await registry.patch(id, { endedAt: new Date().toISOString() }))) await registry.remove(id)
 }
 
-/** Record the decision BEFORE removing the pane; undo it if the backend refuses the kill. */
+export interface KillOptions {
+  /** Cut off whatever holds the session (the person confirmed). */
+  force?: boolean
+  /** Where the hold is read from (tests); default `observeHoldNow`. */
+  observe?: (row: { id: string; conversationId?: string }) => Promise<HoldObservation>
+}
+
+/** Record the decision BEFORE removing the pane; undo it if the backend refuses the kill. Throws `HoldError` on a held session. */
 export async function killAndRetireSession(
   id: string,
   kill: () => Promise<boolean>,
   registry: SessionRegistry = defaultRegistry,
+  opts: KillOptions = {},
 ): Promise<boolean> {
-  const previous = (await registry.read()).find(m => m.id === id)?.endedAt
+  const row = (await registry.read()).find(m => m.id === id)
+  // THE ONE HOLD GUARD: asked here, as late as it can be, so every door — CLI, web/cockpit, account switch,
+  // mode migration, retire — is covered and a hold that starts during a caller's own awaits is still seen. `force` cuts it off.
+  if (opts.force !== true) {
+    const hold = await (opts.observe ?? observeHoldNow)(row ?? { id })
+    if (hold.state !== 'none') throw new HoldError(id, hold)
+  }
+  const previous = row?.endedAt
   await registry.patch(id, { endedAt: previous ?? new Date().toISOString() })
   try {
     if (await kill()) {

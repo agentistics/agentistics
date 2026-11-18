@@ -48,7 +48,7 @@ export const claudeProjectDir = (cwd: string): string => cwd.replace(/[^a-zA-Z0-
 export type SwitchRefusal =
   | SpawnAccountRefusal
   | 'switch_unsupported' | 'no_conversation' | 'same_account' | 'not_running_here' | 'no_transcript' | 'no_target'
-  | 'harness_unavailable'
+  | 'harness_unavailable' | 'in-use'
 
 /** One copy: a file, or a directory copied recursively. Never a move. */
 export interface SwitchCopy { from: string; to: string; kind: 'file' | 'dir' }
@@ -367,7 +367,7 @@ export function decideSwitch(o: {
 export function switchStatus(reason: SwitchRefusal): 403 | 404 | 409 | 422 {
   if (reason === 'account_unavailable') return 403
   if (reason === 'no_target') return 404
-  if (reason === 'account_retired' || reason === 'account_signed_out' || reason === 'not_running_here' || reason === 'no_transcript') return 409
+  if (reason === 'account_retired' || reason === 'account_signed_out' || reason === 'not_running_here' || reason === 'no_transcript' || reason === 'in-use') return 409
   return 422
 }
 
@@ -392,6 +392,9 @@ export function switchMessage(reason: SwitchRefusal, detail: string, lang: 'en' 
     case 'harness_unavailable':
       return pt ? `${detail} não pode iniciar uma sessão nesta máquina (não está instalado ou não está no PATH do servidor). Nada foi encerrado.`
         : `${detail} cannot start a session on this machine (it is not installed or not on the server's PATH). Nothing was ended.`
+    case 'in-use':
+      return pt ? 'Esta sessão está em uso agora: a troca de conta fica adiada até terminar. Nada mudou.'
+        : 'This session is in use right now: the account switch is deferred until that ends. Nothing changed.'
     case 'no_target':
       return pt ? 'Essa sessão não existe mais. Atualize a lista.' : 'That session no longer exists. Refresh the list.'
     default:

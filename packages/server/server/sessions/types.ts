@@ -335,6 +335,10 @@ export interface RetireRequest {
   expiredAt?: string
   /** Why it never went quiet, in words. */
   expiredReason?: string
+  /** When whatever holds this session was told that the leadership passed to `successorId` (said once). */
+  handoffNoticeAt?: string
+  /** Set when a hold moved `deadlineAt`: that extension then binds a hand-off too (it is not trimmed back to the 10-minute cap). */
+  holdExtendedAt?: string
 }
 
 /** One session as the PRODUCT sees it. Persisted; the backend knows none of this. */

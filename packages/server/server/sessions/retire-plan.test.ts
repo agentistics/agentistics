@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  MIN_QUIET_FOR_MS, CONFIRM_POLLS, DEFAULT_DEADLINE_MS, DEFAULT_QUIET_FOR_MS, HANDOFF_DEADLINE_MS, decideRetire, effectiveDeadline, nextStreak, planRetireRequest,
+  MIN_QUIET_FOR_MS, CONFIRM_POLLS, HOLD_GRACE_MS, DEFAULT_DEADLINE_MS, DEFAULT_QUIET_FOR_MS, HANDOFF_DEADLINE_MS, decideRetire, effectiveDeadline, extendedDeadline, nextStreak, planRetireRequest,
   retireNoteText, retireReasonsText, type QuietStreak, type RetireObservation,
 } from './retire-plan'
 import type { RetireRequest } from './types'
@@ -169,5 +169,66 @@ describe('retire QA safety gates', () => {
   it('new requests enforce minimum quietFor even outside the CLI', () => {
     const p = planRetireRequest(undefined, { by: 'person', quietForMs: 0 }, T0)
     expect(p).toMatchObject({ ok: true, request: { quietForMs: MIN_QUIET_FOR_MS } })
+  })
+})
+
+describe('a hold holds the retire', () => {
+  const held = { state: 'held', since: T0 - 120_000, sentence: { en: 'engine words', pt: 'palavras do engine' } } as const
+
+  it('held → the session is held even when it is long quiet', () => {
+    const d = decideRetire(req(), quiet({ hold: held }), at)
+    expect(d).toEqual({ action: 'wait', reasons: [{ code: 'in-use', since: T0 - 120_000, sentence: held.sentence }], notes: [] })
+  })
+  it('hold ends → the very same observation retires', () => {
+    expect(decideRetire(req(), quiet({ hold: held }), at).action).toBe('wait')
+    expect(decideRetire(req(), quiet({ hold: { state: 'none' } }), at)).toEqual({ action: 'retire', kill: true, notes: [] })
+    expect(decideRetire(req(), quiet(), at).action).toBe('retire') // absent = no hold
+  })
+  it('the deadline passing with a hold open does NOT expire and never kills', () => {
+    const past = Date.parse(req().deadlineAt) + 1
+    const d = decideRetire(req(), quiet({ hold: held }), past)
+    expect(d.action).toBe('wait')
+    expect(d).toMatchObject({ reasons: [{ code: 'in-use' }] })
+    // and without the hold the same moment expires (nothing is ever killed past the deadline)
+    expect(decideRetire(req(), quiet(), past).action).toBe('expire')
+  })
+  it('a hold state that could not be read is unknown, and unknown is never quiet', () => {
+    expect(decideRetire(req(), quiet({ hold: { state: 'unknown' } }), at)).toMatchObject({ action: 'wait', reasons: [{ code: 'hold-unknown' }] })
+  })
+  it('a row that already stopped is filed whatever the hold says (nothing to kill)', () => {
+    expect(decideRetire(req(), quiet({ running: false, hold: held }), at)).toEqual({ action: 'retire', kill: false, notes: [] })
+  })
+  it('a dead successor still cancels (the task is never left without a leader)', () => {
+    expect(decideRetire(req({ successorId: 'b' }), quiet({ successorAlive: false, hold: held }), at)).toEqual({ action: 'cancel', reason: 'successor-dead' })
+  })
+  it('the hold outranks a working row: it is the reason said', () => {
+    expect(decideRetire(req(), quiet({ activity: 'working', streak: null, hold: held }), at)).toMatchObject({ reasons: [{ code: 'in-use' }] })
+  })
+  it('the reason says it in words', () => {
+    expect(retireReasonsText([{ code: 'in-use', since: T0, sentence: { en: 'engine words', pt: 'palavras do engine' } }])).toContain('engine words')
+    expect(retireReasonsText([{ code: 'hold-unknown' }])).toContain('could not be read')
+  })
+  it('extendedDeadline follows the hold: only when the deadline is near or past', () => {
+    const r = req()
+    expect(extendedDeadline(r, T0)).toBeNull()
+    const near = Date.parse(r.deadlineAt) - HOLD_GRACE_MS / 4
+    expect(extendedDeadline(r, near)).toBe(new Date(near + HOLD_GRACE_MS).toISOString())
+    const past = Date.parse(r.deadlineAt) + 1000
+    expect(Date.parse(extendedDeadline(r, past)!)).toBe(past + HOLD_GRACE_MS)
+  })
+  it('re-asking for the SAME successor keeps the notice said; another successor is refused anyway', () => {
+    const said = req({ successorId: 'b', handoffNoticeAt: new Date(T0).toISOString() })
+    const again = planRetireRequest(said, { by: 'x', successorId: 'b' }, T0 + 1000)
+    expect(again.ok && again.request.handoffNoticeAt).toBe(new Date(T0).toISOString())
+    const fresh = planRetireRequest(undefined, { by: 'x', successorId: 'b' }, T0)
+    expect(fresh.ok && fresh.request.handoffNoticeAt).toBeUndefined()
+  })
+})
+
+describe('a hold-extended hand-off is not trimmed back to the 10-minute cap', () => {
+  it('effectiveDeadline: the cap binds a hand-off, but not once a hold moved the deadline', () => {
+    const base = req({ successorId: 'b', deadlineAt: new Date(T0 + 30 * 60_000).toISOString(), requestedAt: new Date(T0).toISOString() })
+    expect(effectiveDeadline(base)).toBe(T0 + HANDOFF_DEADLINE_MS)
+    expect(effectiveDeadline({ ...base, holdExtendedAt: new Date(T0).toISOString() })).toBe(T0 + 30 * 60_000)
   })
 })

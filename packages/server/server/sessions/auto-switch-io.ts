@@ -49,7 +49,7 @@ export interface AutoSwitchDeps {
   options: (row: ManagedSession, accountId: string | undefined) => Promise<readonly SwitchOption[]>
   /** Accounts whose login the harness refused (registry `loginExpiredAt`): never a target. */
   expired?: () => Promise<ReadonlySet<string>>
-  switchAccount: (req: { id: string; accountId: string; resendPending: true }) => Promise<{ ok: boolean; message?: string; id?: string }>
+  switchAccount: (req: { id: string; accountId: string; resendPending: true }) => Promise<{ ok: boolean; message?: string; id?: string; /** held back by a hold: tried again once it ends, the target is NOT counted as tried */ deferred?: boolean }>
   /** Type a message into a live session (the single resume after a "nobody has room" stop). */
   sendPrompt?: (id: string, text: string) => Promise<boolean>
   label: (harness: HarnessId, accountId: string | undefined) => Promise<string | undefined>
@@ -58,9 +58,12 @@ export interface AutoSwitchDeps {
   store: EpisodeStore
 }
 
-export interface AutoSwitchResult { moved: Array<{ from: string; to: string; id?: string }>; none: string[]; failed: string[]; resumed: string[] }
+export interface AutoSwitchResult { moved: Array<{ from: string; to: string; id?: string }>; none: string[]; failed: string[]; resumed: string[]; /** held back by a hold, to be tried again */ deferred: string[] }
 
 const shortId = (row: ManagedSession) => row.label?.trim() || row.harnessName?.trim() || row.id
+
+/** Sessions whose deferral by a hold was already told (this process): once, not every tick. */
+const deferredTold = new Set<string>()
 
 /** A session being moved right now (this process): a slow switch is never started twice by two ticks. */
 const inFlight = new Set<string>()
@@ -71,7 +74,7 @@ const resumeText = (lang: 'en' | 'pt') => lang === 'pt'
   : '[from agentistics · account] The account limit is over. You can carry on where you stopped.'
 
 export async function runAutoSwitchTick(d: AutoSwitchDeps): Promise<AutoSwitchResult> {
-  const out: AutoSwitchResult = { moved: [], none: [], failed: [], resumed: [] }
+  const out: AutoSwitchResult = { moved: [], none: [], failed: [], resumed: [], deferred: [] }
   if (!(await d.enabled().catch(() => false))) return out
   const rows = await d.rows().catch(() => [] as readonly ManagedSession[])
   const alive = await d.alive().catch(() => new Set<string>())
@@ -133,6 +136,18 @@ export async function runAutoSwitchTick(d: AutoSwitchDeps): Promise<AutoSwitchRe
       inFlight.add(row.id)
       try {
         const r = await d.switchAccount({ id: row.id, accountId: decision.target.id, resendPending: true })
+        if (!r.ok && r.deferred) {
+          // Something live is using this session: ending it now would cut it off. Nothing was tried and nothing is recorded
+          // against the target — the next tick decides again. Said once per session (a tick every minute must not be a notification every minute).
+          out.deferred.push(row.id)
+          if (!deferredTold.has(row.id)) {
+            deferredTold.add(row.id)
+            const w = autoSwitchWords({ kind: 'deferred', lang: d.lang, session: shortId(row), from, ...tz })
+            d.notify({ type: 'info', code: 'account.auto_deferred', title: w.title, message: w.message, meta: { id: row.id, session: shortId(row), from } })
+          }
+          continue
+        }
+        deferredTold.delete(row.id)
         if (!r.ok) {
           // The switch gave the session back on its own account (or refused): this target counts as tried, so the next tick picks another.
           await d.store.update(doc => { doc[conv] = { account: current ?? '', tried: [...new Set([...decision.episode.tried, decision.target.id])], handled: false, at: d.now() } })
@@ -248,7 +263,7 @@ export async function defaultAutoSwitchDeps(lang: 'en' | 'pt'): Promise<AutoSwit
       const host = await hostForFleet(lang)
       if (!host.switchSessionAccount) return { ok: false, message: 'unavailable' }
       const r = await host.switchSessionAccount(req)
-      return { ok: r.ok, ...(r.message ? { message: r.message } : {}), ...(r.id ? { id: r.id } : {}) }
+      return { ok: r.ok, ...(r.message ? { message: r.message } : {}), ...(r.id ? { id: r.id } : {}), ...((r as { deferred?: boolean }).deferred ? { deferred: true } : {}) }
     },
     label: async (harness, id) => (await import('./account-switch-io')).accountLabel(harness, id),
     notify: n => { void import('../sse').then(m => m.broadcastNotification({ type: n.type, code: n.code, title: n.title, message: n.message, meta: n.meta })).catch(() => undefined) },

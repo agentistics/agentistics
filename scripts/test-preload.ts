@@ -17,6 +17,11 @@ const ROOT = resolve(import.meta.dir, '..')
 const RUNNER = process.pid
 process.env[RUNNER_ENV] = String(RUNNER)
 
+// A kill asks whether something live is using the session; under test that must never reach the real server on
+// the developer's port. No hold by default — a test of the guard passes its own observer.
+const { __setHoldObserverForTest } = await import('../packages/server/server/sessions/hold-guard')
+__setHoldObserverForTest(async () => ({ state: 'none' }))
+
 let swept = false
 function sweep(): number {
   if (swept) return 0

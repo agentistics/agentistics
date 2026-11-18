@@ -106,7 +106,7 @@ export type SessionCommand =
   | { kind: 'open'; task: string; json?: boolean; force?: boolean; folder?: string }
   | { kind: 'attach'; ref: string }
   /** `--folder <ref>`: after ending it, move it to that folder (e.g. "…/Finalizadas"). */
-  | { kind: 'kill'; ref: string; folder?: string }
+  | { kind: 'kill'; ref: string; folder?: string; force?: boolean }
   /**
    * Ask the server to end the session once it is provably quiet (`retire-plan.ts`); `--cancel` drops a
    * pending request. `--folder`: file it there once retired. Durations take `s`/`m`/`h` (`60s`, `30m`).
@@ -264,9 +264,10 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
   if (head === 'kill') {
     const f = takeFolder(argv.slice(1))
     if ('error' in f) return { kind: 'error', message: f.error }
-    const ref = f.rest[0]
-    if (!ref) return { kind: 'error', message: 'Usage: agentop session kill <id|name> [--folder <folder>]' }
-    return { kind: 'kill', ref, ...(f.folder ? { folder: f.folder } : {}) }
+    const force = f.rest.includes('--force')
+    const ref = f.rest.filter(a => a !== '--force')[0]
+    if (!ref) return { kind: 'error', message: 'Usage: agentop session kill <id|name> [--folder <folder>] [--force]' }
+    return { kind: 'kill', ref, ...(f.folder ? { folder: f.folder } : {}), ...(force ? { force: true } : {}) }
   }
 
   if (head === 'retire') return parseRetire(argv.slice(1), jsonFlag)

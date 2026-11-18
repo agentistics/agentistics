@@ -31,6 +31,7 @@ import { HARNESS_CAPABILITIES, contextReading, nativeVisibleFrom, projectionSurf
 import { planLimitsTool } from "./plan-limits-tool.js";
 import { benchmarkObservedTool, benchmarkQueryFromArgs } from "./benchmark-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
+import { holdAnswer } from "./session-hold.js";
 import { deliveryIntegrityOf, vaultStatusTool } from "./vault-tool.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
@@ -832,9 +833,21 @@ const TOOLS: Tool[] = [
       properties: {
         ref: { type: "string", description: "A session reference (managed id, conversation id, exact title or unique id prefix). Omit for your own session." },
         role: { type: "string", enum: ["leader", "worker", "auto"], description: "The role to set. Omit to read it." },
-        retirePredecessor: { type: "string", description: "A leader taking over can pass the previous leader on the SAME task (managed id, conversation id, exact title or unique id prefix); the server closes it once its current turn ends, and within 10 minutes at most even if it keeps being nudged, then files it in the finished folder. Only for your own session declared leader; otherwise the role still changes and the reply says why the retire was refused." },
+        retirePredecessor: { type: "string", description: "A leader taking over can pass the previous leader on the SAME task (managed id, conversation id, exact title or unique id prefix); the server closes it once its current turn ends, and within 10 minutes at most even if it keeps being nudged, then files it in the finished folder — but never while something live the engine runs is using it: the reply then carries `retire.held` and the close waits for that to end. Only for your own session declared leader; otherwise the role still changes and the reply says why the retire was refused." },
       },
       required: [],
+    },
+  },
+  {
+    name: "agentistics_session_hold",
+    description:
+      "Is something live the engine runs using a session right now? A session in use is idle between turns, so its state says nothing about whoever is on the other side. Pass `ref` (managed id, conversation id, exact title or unique id prefix): `{ id, held: boolean, since?: <ISO time it began>, sentence?: <the engine's own words for what holds it> }`. `available: false` means this build's engine reports no holds, so nothing can hold a session. A retire (agentistics_session_role retirePredecessor, `agentop session retire`) never closes a held session — it waits for the hold to end; `agentop session kill` refuses without --force.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "A session reference (required)." },
+      },
+      required: ["ref"],
     },
   },
   {
@@ -1596,6 +1609,11 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const a = args as any;
         const body = await apiSend("POST", "/api/session-roles", sessionRoleBody(a, sessionProof(process.env)));
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_hold": {
+        const ref = typeof (args as any)?.ref === "string" ? String((args as any).ref).trim() : "";
+        const body = ref ? await apiGet(`/api/fleet/holds?session=${encodeURIComponent(ref)}`) : {};
+        return { content: [{ type: "text", text: JSON.stringify(holdAnswer(body, ref), null, 2) }] };
       }
       case "agentistics_session_switch_account": {
         const a = args as any;
