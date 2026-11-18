@@ -10,7 +10,7 @@ import type { HarnessId } from '@agentistics/core'
 import { HARNESS_LABELS, HARNESS_COLORS } from '../lib/harness'
 import { splitInlinedHistory } from '../lib/transcriptSplit'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { surfaceTurnText, parseSystemEvent } from '../lib/systemEvent'
+import { surfaceTurnText, parseSystemEvent, isRenameEcho } from '../lib/systemEvent'
 import { FleetSystemEventRow } from './sessions/ChatBubble'
 
 interface HarnessChatProps {
@@ -89,6 +89,7 @@ function ToolsBlock({ tools, pt }: { tools: string[]; pt: boolean }) {
 
 export function MessageBubble({ msg, harness, pt }: { msg: TranscriptMessage; harness: HarnessId; pt: boolean }) {
   const isUser = msg.role === 'user'
+  if (isRenameEcho(msg.content)) return null
   // A prompt agentistics injected (another session's handback, away, check-in) is not the person's.
   const surfaceText = isUser ? surfaceTurnText(msg.content) : null
   const event = isUser && surfaceText === null ? (msg.system ? { kind: 'notice' as const, label: msg.system, body: msg.system } : parseSystemEvent(msg.content)) : null

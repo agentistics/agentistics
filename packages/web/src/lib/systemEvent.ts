@@ -46,6 +46,12 @@ function unwrapAgentMessage(text: string): string | null {
 // Before the producer added a header, these prompts were stored as ordinary user turns.
 const LEGACY_CHECKIN = /^\s*(?:Faça o check-in da liderança agora\.|Run the leadership check-in now\.)/
 
+/** The harness's own "Session renamed to: X" acknowledgement. The typed `/rename` already draws ONE
+ *  "Session renamed" line, so this echo must never become a second one (a bubble named after the harness). */
+export function isRenameEcho(text: string): boolean {
+  return /^\s*(?:<local-command-stdout>\s*)?Session renamed to:[^\n<]*(?:<\/local-command-stdout>)?\s*$/i.test(text)
+}
+
 export function parseSystemEvent(raw: string): SystemEvent | null {
   const text = unwrapAllPasted(raw)
   if (CONTEXT_BLOCK.test(text)) {

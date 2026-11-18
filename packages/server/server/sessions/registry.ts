@@ -121,6 +121,8 @@ export interface SessionPatch {
   label?: string
   /** Written alongside `label`, never on its own — see `ManagedSession.labelSince`. */
   labelSince?: number
+  /** See `ManagedSession.renameSent`. `null` clears it (the harness half did not land). */
+  renameSent?: string | null
   note?: string
   task?: string | null
   /** See `ManagedSession.taskId`. `null` clears a filing refused by the board after spawn. */
@@ -233,6 +235,7 @@ function sanitize(raw: unknown): ManagedSession | null {
     ...(typeof s.labelSince === 'number' && Number.isFinite(s.labelSince)
       ? { labelSince: s.labelSince }
       : {}),
+    ...(typeof s.renameSent === 'string' && s.renameSent ? { renameSent: s.renameSent } : {}),
     ...(typeof s.note === 'string' ? { note: s.note } : {}),
     ...(typeof s.task === 'string' ? { task: s.task } : {}),
     ...(typeof s.taskId === 'string' ? { taskId: s.taskId } : {}),

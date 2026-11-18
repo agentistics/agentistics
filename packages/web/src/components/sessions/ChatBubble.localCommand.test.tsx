@@ -63,6 +63,21 @@ describe('local command acknowledgement', () => {
     }
   })
 
+  test('one rename = one line: the harness echo is never a bubble (assistant turn, transcript row or stdout)', async () => {
+    const echo = 'Session renamed to: Example'
+    const html = renderToStaticMarkup(<ChatBubble turn={{ role: 'assistant', text: echo }} harness="claude" lang="en" />)
+    expect(html).toBe('')
+    const { MessageBubble } = await import('../HarnessChat')
+    for (const role of ['assistant', 'user'] as const) {
+      expect(renderToStaticMarkup(<MessageBubble msg={{ role, content: `<local-command-stdout>${echo}</local-command-stdout>`, timestamp: 1 }} harness="claude" pt={false} />)).toBe('')
+    }
+    // the typed command still draws exactly one line
+    const typed = renderToStaticMarkup(<ChatBubble turn={{ role: 'user', text: '/rename Example' }} harness="claude" lang="en" />)
+    expect(typed.split('Session renamed to').length - 1).toBe(1)
+    // prose that merely mentions it stays a normal bubble
+    expect(renderToStaticMarkup(<ChatBubble turn={{ role: 'assistant', text: 'I ran it and Session renamed to: Example appeared' }} harness="claude" lang="en" />)).not.toBe('')
+  })
+
   test('acknowledging a command keeps a later mid-turn prompt unread', () => {
     const queue = [{ text: 'Please review the next change' }, { text: '/rename Example' }]
     expect(visibleQueued(queue, ['/rename Example'], true)).toEqual([queue[0]!])
