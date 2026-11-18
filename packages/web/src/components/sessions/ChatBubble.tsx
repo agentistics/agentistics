@@ -35,7 +35,7 @@ import remarkBreaks from 'remark-breaks'
 import { ArrowUpRight, Info, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User, Workflow } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { loadClosedFleet, useFleet } from '../../lib/fleet'
-import { surfaceTurnText, parseSystemEvent, systemEventLine, systemEventTitle, systemEventSender, type SystemEvent } from '../../lib/systemEvent'
+import { surfaceTurnText, parseSystemEvent, isRenameEcho, systemEventLine, systemEventTitle, systemEventSender, type SystemEvent } from '../../lib/systemEvent'
 import type { ChatTaskEnd } from '@agentistics/core'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
@@ -1357,6 +1357,7 @@ export function FleetSystemEventRow({ event, lang, at }: { event: SystemEvent; l
 }
 
 export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
+  if (props.turn.role === 'assistant' && isRenameEcho(props.turn.text)) return null
   const parsed = props.turn.role === 'user' ? parseSystemEvent(props.turn.text) : null
   // Only the confirmed turn says the rename happened. Queued commands keep their delivery status.
   const event = parsed?.kind === 'rename' && (props.awaiting || props.turn.pending) ? null : parsed
