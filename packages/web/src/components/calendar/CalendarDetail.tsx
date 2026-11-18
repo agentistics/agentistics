@@ -4,7 +4,7 @@
  * or the reason there is none) and leads to the task and to the Live line, where the card, its session and the
  * actions already are. Nothing here acts on a delivery, so there is no second controller for one gesture.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ExternalLink, X } from 'lucide-react'
 import { brtDay, type CalMark, type CalPiece, type CalVersion } from '@agentistics/core'
@@ -12,6 +12,7 @@ import { clock, stamp } from '../../lib/calendarModel'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
 import { HarnessBadges } from '../tasks/HarnessBadges'
 import { CONFIDENCE_LABEL, NO_ESTIMATE_REASON, TEXT, pick } from './calendarText'
+import { DETAIL_MAX_H, placeDetail } from './placeDetail'
 import { Confidence, PriorityFlag, StageChip, VersionTag } from './calendarUi'
 
 export type CalSelection =
@@ -53,6 +54,19 @@ export function CalendarDetail({ selection, anchor, pieces, versions, marks, now
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
   useEffect(() => { ref.current?.focus() }, [selection])
+  // Measured after layout, and again when the window changes size: the popover's real height is
+  // what decides how far up it must shift to stay inside the viewport.
+  const [height, setHeight] = useState<number | null>(null)
+  const [, setTick] = useState(0)
+  useLayoutEffect(() => {
+    const h = ref.current?.offsetHeight
+    if (h) setHeight(prev => (prev === h ? prev : h))
+  })
+  useEffect(() => {
+    const onResize = () => { setHeight(null); setTick(t => t + 1) }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   let title = '', sub: React.ReactNode = null, body: React.ReactNode = null, taskId: string | null = null
   if (selection.kind === 'piece') {
@@ -118,8 +132,9 @@ export function CalendarDetail({ selection, anchor, pieces, versions, marks, now
     ? { left: 0, right: 0, bottom: 0, borderRadius: 'var(--radius-xl) var(--radius-xl) 0 0', maxHeight: 'calc(70dvh / var(--ui-zoom, 1))', paddingBottom: 'calc(14px + env(safe-area-inset-bottom))' }
     : (() => {
       const vw = typeof window !== 'undefined' ? window.innerWidth : 1280, vh = typeof window !== 'undefined' ? window.innerHeight : 800
-      const x = Math.max(8, Math.min((anchor?.x ?? vw / 2) + 14, vw - W - 8)), y = Math.max(8, Math.min((anchor?.y ?? 120) - 30, vh - 380))
-      return { left: x, top: y, width: W, maxHeight: 'min(560px, calc(100dvh / var(--ui-zoom, 1) - 16px))', borderRadius: 'var(--radius-lg)' }
+      // The MEASURED height (a first paint assumes the 560 cap) — see `placeDetail`.
+      const p = placeDetail(anchor, { w: W, h: Math.min(height ?? DETAIL_MAX_H, DETAIL_MAX_H) }, vw, vh)
+      return { left: p.left, top: p.top, width: p.width, maxHeight: Math.min(DETAIL_MAX_H, p.maxHeight), borderRadius: 'var(--radius-lg)' }
     })()
 
   return (

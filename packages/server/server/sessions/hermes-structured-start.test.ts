@@ -99,8 +99,11 @@ describe('Hermes structured doors', () => {
   })
 
   test('POST /api/fleet/new with harness hermes from the web starts a structured session', async () => {
+    // `force` is the "start anyway" door: this test is about WHICH backend takes a Hermes spawn, not about
+    // the host's real memory admission, which would refuse (`memory_budget`) whenever the machine running
+    // the suite is low on free RAM. The reopen test above skips the gate for the same reason.
     __setFleetHostForTest('en', null)
-    const out = await quiet(() => runFleetSpawn('en', { harness: 'hermes', cwd: dir, prompt: 'hi' } as never))
+    const out = await quiet(() => runFleetSpawn('en', { harness: 'hermes', cwd: dir, prompt: 'hi', force: true } as never))
     expect(out).toMatchObject({ ok: true })
     expect(structuredSpawns).toHaveLength(1)
     expect(structuredSpawns[0]!.structured).toMatchObject({ harness: 'hermes', origin: 'web' })

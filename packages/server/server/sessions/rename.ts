@@ -27,6 +27,30 @@ export type HarnessRenameResult =
   /** It was attempted and the backend refused to type it. */
   | { kind: 'failed' }
 
+/**
+ * Is this rename a NO-OP? PURE. Renaming a session to the title it already carries must change
+ * nothing — not the registry stamp and, above all, not the harness: each `/rename` typed into Claude
+ * Code writes a command entry plus an acknowledgement into the conversation, so a repeat (a leader
+ * spawned with `--role leader` that then calls `agentistics_session_role leader`, both computing the
+ * same `[ LÍDER ] - X`, the second against a fleet row the 5 s poll had not refreshed yet) showed the
+ * same rename twice. The comparison is on the TRIMMED label, against what agentop recorded.
+ */
+export function isRenameNoop(
+  current: { label?: string; renameSent?: string } | undefined,
+  requested: string,
+): boolean {
+  const wanted = requested.trim()
+  // The label is written BEFORE the harness half, so a matching label alone proves nothing about the
+  // harness: a skipped (not running / dialog open) or failed rename left it recorded, and a retry
+  // must still reach the harness. Only a title the harness CONFIRMED is a no-op.
+  return wanted !== '' && current?.renameSent !== undefined && current.renameSent.trim() === wanted
+}
+
+/** The registry patch that remembers what the harness half became. PURE. */
+export function renameOutcomeRecord(result: HarnessRenameResult, title: string): { renameSent: string | null } {
+  return { renameSent: result.kind === 'sent' ? title.trim() : null }
+}
+
 /** How much of the screen to read before typing. The same window `promptSession` uses. */
 const CAPTURE_LINES = 60
 

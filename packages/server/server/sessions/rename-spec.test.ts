@@ -98,3 +98,40 @@ describe('typableTitle', () => {
     expect(typableTitle('a\nb')).toBe(false)
   })
 })
+
+describe('isRenameNoop', () => {
+  test('the same title again is a no-op ONLY once the harness confirmed it', async () => {
+    const { isRenameNoop } = await import('./rename')
+    const t = '[ LÍDER ] - Jarvis'
+    expect(isRenameNoop({ label: t, renameSent: t }, t)).toBe(true)
+    expect(isRenameNoop({ label: t, renameSent: t }, '  ' + t + ' ')).toBe(true)
+    // Label recorded, harness half skipped/failed (no renameSent): a retry MUST reach the harness.
+    expect(isRenameNoop({ label: t }, t)).toBe(false)
+    // The harness confirmed an OLDER title.
+    expect(isRenameNoop({ label: t, renameSent: 'old' }, t)).toBe(false)
+    expect(isRenameNoop({ label: 'Jarvis', renameSent: 'Jarvis' }, t)).toBe(false)
+    expect(isRenameNoop({}, 'Jarvis')).toBe(false)
+    expect(isRenameNoop(undefined, 'Jarvis')).toBe(false)
+    expect(isRenameNoop({ label: 'x', renameSent: 'x' }, '')).toBe(false)
+  })
+})
+
+describe('renameOutcomeRecord', () => {
+  test('records the title only when the harness actually received it', async () => {
+    const { renameOutcomeRecord } = await import('./rename')
+    expect(renameOutcomeRecord({ kind: 'sent' }, ' T ')).toEqual({ renameSent: 'T' })
+    expect(renameOutcomeRecord({ kind: 'failed' }, 'T')).toEqual({ renameSent: null })
+    expect(renameOutcomeRecord({ kind: 'skipped', reason: 'dialog' }, 'T')).toEqual({ renameSent: null })
+  })
+})
+
+describe('retry after a skipped harness half', () => {
+  test('skipped then the same title: not a no-op; sent then the same title: a no-op', async () => {
+    const { isRenameNoop, renameOutcomeRecord } = await import('./rename')
+    const t = '[ LÍDER ] - Jarvis'
+    const rec = (r: Parameters<typeof renameOutcomeRecord>[0]) => renameOutcomeRecord(r, t).renameSent ?? undefined
+    expect(isRenameNoop({ label: t, renameSent: rec({ kind: 'skipped', reason: 'dialog' }) }, t)).toBe(false)
+    expect(isRenameNoop({ label: t, renameSent: rec({ kind: 'failed' }) }, t)).toBe(false)
+    expect(isRenameNoop({ label: t, renameSent: rec({ kind: 'sent' }) }, t)).toBe(true)
+  })
+})

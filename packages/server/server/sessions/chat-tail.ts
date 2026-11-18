@@ -30,7 +30,7 @@ import { UUID_RE } from '../git'
 import { isUserRoleMessage } from '../jsonl'
 import { commandSummary, hasUnreadableWrite, shellWrites } from './shell-writes'
 import { isPatchTool, patchDetail } from './patch-detail'
-import { classifyUserEntry, type UserEntry } from './chat-envelope'
+import { classifyUserEntry, isRenameEcho, type UserEntry } from './chat-envelope'
 import { bashEntryText, parseBashInput, parseBashOutput, type ShellOutput } from './bash-mode'
 import { parseImageCompanion, resolveCompanionImages } from './attachment-companion'
 import { resolveViewedImagePath, VIEWED_IMAGE_RE } from './viewed-image'
@@ -465,7 +465,8 @@ function extractAssistantText(e: Record<string, unknown>): string | null {
   if (!Array.isArray(msgContent)) return null
   const text = (msgContent as Record<string, unknown>[])
     .find(p => p.type === 'text' && typeof p.text === 'string')?.text as string | undefined
-  return text?.trim() || null
+  const out = text?.trim() || null
+  return out !== null && isRenameEcho(out) ? null : out
 }
 
 /** The tool names an assistant entry is calling, when it carries no text at all — see `ChatTurn.pending`. */

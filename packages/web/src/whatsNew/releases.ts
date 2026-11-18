@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.217.5': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões: renomear uma sessão com o mesmo nome não repete mais a renomeação no chat, e uma nova tentativa só diz "renomeado" depois que o assistente recebeu o nome.',
+        en: 'Sessions: renaming a session to the same name no longer repeats the rename in the chat, and a retry only says "renamed" once the assistant has received the name.',
+      },
+      {
+        pt: 'Calendário: a janela de detalhes de um item agora fica sempre dentro da tela, em qualquer canto e tamanho de janela.',
+        en: 'Calendar: the details popup of an item now always stays inside the screen, in any corner and window size.',
+      },
+    ],
+  },
   '2.217.4': {
     features: [],
     fixes: [

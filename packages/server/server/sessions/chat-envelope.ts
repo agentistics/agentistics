@@ -134,6 +134,16 @@ function unwrapAll(text: string): string {
 }
 
 /**
+ * The harness's own one-line acknowledgement of `/rename` ("Session renamed to: X", optionally inside
+ * `<local-command-stdout>`). The typed command is already drawn as ONE "Session renamed" info line
+ * (`systemEvent.ts`), so the echo — which Claude Code writes as command stdout and some versions as an
+ * assistant turn — doubled every rename. Anchored and single-line: prose that merely mentions it stays.
+ */
+export function isRenameEcho(text: string): boolean {
+  return /^\s*(?:<local-command-stdout>\s*)?Session renamed to:[^\n<]*(?:<\/local-command-stdout>)?\s*$/i.test(text)
+}
+
+/**
  * Classify one user entry's text.
  *
  * Empty or whitespace-only input is `system` with an empty note, so a caller can drop it — an
@@ -142,6 +152,8 @@ function unwrapAll(text: string): string {
 export function classifyUserText(text: string): UserEntry {
   const trimmed = text.trim()
   if (trimmed === '') return { kind: 'system', note: '' }
+  // The harness's acknowledgement of `/rename` repeats the info line the typed command already draws.
+  if (isRenameEcho(trimmed)) return { kind: 'system', note: '' }
 
   const tag = leadingTag(trimmed)
   if (tag === null) return { kind: 'person', text: trimmed }

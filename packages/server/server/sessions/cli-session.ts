@@ -41,7 +41,7 @@ import { spawnGate, UNPROVEN_SESSION, verifyBornRole } from './spawn-gate'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
-import { renameInHarness, renameMessage } from './rename'
+import { isRenameNoop, renameInHarness, renameMessage, renameOutcomeRecord } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { configureSpawn, configurationPendingMessage } from './spawn-configuration'
@@ -367,17 +367,26 @@ async function runSessionCommand(argv: string[]): Promise<number> {
     // very same function, because one gesture implemented twice is the bug `task-reopen.ts` exists
     // to have fixed once. It never blocks the registry write: whatever became of the harness half is
     // reported in a sentence instead.
-    case 'rename': return patch(
-      cmd.ref,
-      { label: cmd.label, labelSince: Date.now() },
-      'renamed',
-      backend,
-      async session => {
-        const s = cliStrings(await resolveLang())
-        const outcome = await renameInHarness(session, cmd.label.trim(), backend)
-        return `${session.id} ${renameMessage(outcome, session.harness, s)}`
-      },
-    )
+    case 'rename': {
+      // Same guard as the cockpit's verb: a title the harness already CONFIRMED is not typed again.
+      const found = resolveSessionRef(await readRegistry(), cmd.ref)
+      if (found.ok && isRenameNoop(found.session, cmd.label)) {
+        console.log(`${found.session.id} renamed.`)
+        return 0
+      }
+      return patch(
+        cmd.ref,
+        { label: cmd.label, labelSince: Date.now() },
+        'renamed',
+        backend,
+        async session => {
+          const s = cliStrings(await resolveLang())
+          const outcome = await renameInHarness(session, cmd.label.trim(), backend)
+          await patchSession(session.id, renameOutcomeRecord(outcome, cmd.label))
+          return `${session.id} ${renameMessage(outcome, session.harness, s)}`
+        },
+      )
+    }
     case 'note': return patch(cmd.ref, { note: cmd.text }, 'annotated', backend)
     case 'switch-account': return switchAccount(cmd, backend)
   }

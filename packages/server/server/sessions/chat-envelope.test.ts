@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from 'bun:test'
-import { classifyUserEntry, classifyUserText } from './chat-envelope'
+import { classifyUserEntry, classifyUserText, isRenameEcho } from './chat-envelope'
 
 describe('classifyUserText', () => {
   it('keeps a plain message as the person’s, verbatim', () => {
@@ -226,4 +226,18 @@ test('a task-notification note carries the tool-use id it answers (falling back 
   expect(classifyNote('<task-notification><task-id>t9</task-id></task-notification>'))
     .toEqual({ kind: 'system', note: 'background task reported back', noteRef: 't9' })
   expect(classifyNote('<task-notification>x</task-notification>')).toEqual({ kind: 'system', note: 'background task reported back' })
+})
+
+describe('harness rename echo', () => {
+  test('the stdout of /rename is dropped, the typed command stays the one info line', () => {
+    expect(classifyUserText('<local-command-stdout>Session renamed to: [ LÍDER ] - Jarvis</local-command-stdout>')).toEqual({ kind: 'system', note: '' })
+    // any other command output keeps its note
+    expect(classifyUserText('<local-command-stdout>Total cost: $1</local-command-stdout>')).toEqual({ kind: 'system', note: 'command output' })
+  })
+  test('isRenameEcho matches only the harness acknowledgement', () => {
+    expect(isRenameEcho('Session renamed to: Jarvis')).toBe(true)
+    expect(isRenameEcho('<local-command-stdout>Session renamed to: Jarvis</local-command-stdout>')).toBe(true)
+    expect(isRenameEcho('I think Session renamed to: Jarvis is what it printed')).toBe(false)
+    expect(isRenameEcho('Session renamed to: A\nand more prose')).toBe(false)
+  })
 })
