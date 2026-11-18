@@ -242,7 +242,14 @@
  * supplies live board/session state to the book bookmark. Owner-order pages still come only from the canonical
  * pedidos of the owner-request flow (no new book door). Additive only: older hosts simply omit these capabilities.
  */
-export const ENGINE_API_VERSION = '1.28.0'
+/**
+ * 1.29.0 — `Engine.holds` (optional, `EngineHolds`): the host asks, before it stops a session, whether something live the
+ * engine runs is using it (`observe` → none | held + the engine's own sentence | unknown), and may tell it once that a
+ * successor takes over (`handoff`). Additive only: an engine without `holds` has none, and a host that predates it never asks.
+ * Also `Engine.presentation` (optional, `EnginePresentation.chatTurns`) — a pass the host runs over every chat turn before
+ * a person sees it, so the engine may strip transport metadata and drop a turn left empty. Absent: identity.
+ */
+export const ENGINE_API_VERSION = '1.29.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

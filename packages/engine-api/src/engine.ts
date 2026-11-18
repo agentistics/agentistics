@@ -8,6 +8,7 @@
 import type { CodeHostPort } from './code-host'
 import type { HarnessId, ProviderId, CapabilityName, EngineEvent, EngineHealthIssue } from './mirrors'
 import type { IntegrationRegistry } from './integration'
+import type { EngineChatTurn } from './chat'
 import type { EngineStructured } from './structured'
 import type { EngineHostServices, PersonAsker } from './host'
 import { apiCompatible } from './version'
@@ -126,6 +127,44 @@ export interface EngineBook {
   start?(): Promise<void>
 }
 
+/** What the engine says about a session the host is about to stop (1.29). */
+export type HoldObservation =
+  | { state: 'none' }
+  /** Something live the engine runs is using the session. `sentence` is the engine's own words for what (per language). */
+  | { state: 'held'; since: number; sentence: { en: string; pt: string } }
+  /** The engine could not tell. The host never treats unknown as free to stop. */
+  | { state: 'unknown' }
+
+/** The row the host is asking about: the registry id, and the conversation id when it has one. */
+export interface HoldRow { id: string; conversationId?: string }
+
+/**
+ * 1.29 (optional) — holds on a session. A session something live is using can be idle between turns, so its
+ * activity says nothing about whether stopping it now would cut that off: the host asks here before it stops one.
+ * What the thing is, and how it reads to a person, comes FROM the engine at runtime (`sentence`); the host
+ * names none of it. An engine without `holds` has none to report, and a host that predates it never asks.
+ */
+export interface EngineHolds {
+  /** Whether something live holds `row`. Throwing, or never answering, is read as `unknown`. */
+  observe(row: HoldRow): Promise<HoldObservation>
+  /**
+   * The session is being retired in favour of `successorId`: whatever holds it may be told ONCE (`announced` is
+   * false when there was nothing to tell, or it was already told for this successor).
+   */
+  handoff?(row: HoldRow, to: { successorId: string; successorTitle?: string }): Promise<{ announced: boolean }>
+}
+
+/**
+ * 1.29 (optional) — what a person is shown of a conversation. The host hands every chat turn it is about to put
+ * on a screen (web, terminal, MCP) through `chatTurns` first; the engine may rewrite a turn (strip text that is
+ * transport metadata, not words anyone said) and drop a turn it leaves empty. Pure and synchronous. An engine
+ * without it presents turns as they are, and a host that predates it never asks.
+ */
+export interface EnginePresentation {
+  /** The same turns, presented. Returns the SAME array when nothing changed, and never mutates its input. */
+  chatTurns(turns: EngineChatTurn[]): EngineChatTurn[]
+}
+
 export interface EngineCommand {
   verb: 'code' | 'provider' | 'ingest' | 'flow' | 'book'
   /** Help text in both languages; the host prints it in `agentop --help`. */
@@ -191,6 +230,10 @@ export interface Engine<E extends EngineEvent = EngineEvent> {
   structured?: EngineStructured
   /** 1.25 — the local hand-off book and its flow-op transport. */
   book?: EngineBook
+  /** 1.29 — what live thing the engine runs is using a session. Absent: nothing holds one. */
+  holds?: EngineHolds
+  /** 1.29 — how a conversation's turns are presented to a person. Absent: they are shown as read. */
+  presentation?: EnginePresentation
   /** 1.16 — built-in deterministic flow definitions and durable run status. */
   flows?: {
     list(): readonly string[]

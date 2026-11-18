@@ -145,7 +145,7 @@ describe('ES.6h — the typed code host (1.8)', () => {
     answer: () => ({ ok: false as const, sentence: 'x' }), cancel: () => ({ ok: false as const, sentence: 'x' }), end: async () => {},
   })
   test('the engine-api is 1.9 (1.8 + the chat channel) and a 1.7 engine\'s opaque handle still satisfies CodeHost but is not a port', () => {
-    expect(ENGINE_API_VERSION).toBe('1.28.0')
+    expect(ENGINE_API_VERSION).toBe('1.29.0')
     const opaque: CodeHost = { kind: 'code-host', dispose: async () => {} }
     expect(asCodePort(opaque)).toBeNull()
     expect(asCodePort(null)).toBeNull()
@@ -238,5 +238,37 @@ describe('1.22 — chat history is optional both ways (mismatch)', () => {
   })
   test('a 1.22 engine with chatHistory loads on a 1.22 host', () => {
     expect(checkEngine({ manifest: base('1.22.0', ['claude', 'opencode']), routes: [], commands: [] }, '1.22.0', table)).toEqual([])
+  })
+})
+
+describe('1.29 — Engine.holds and Engine.presentation are optional', () => {
+  const manifest = (apiVersion: string): EngineManifest => ({
+    name: 'agentistics-engine', version: '0.0.1', apiVersion,
+    provides: { nativeRuntime: false, replay: [], live: [], chat: ['claude'], providers: [] },
+  })
+  const table = (_p: string): CapabilityName | null => null
+  test('a 1.28 engine (neither member) loads on a 1.29 host, and a 1.29 engine that offers both loads on it too', () => {
+    const old = { manifest: manifest('1.28.0'), routes: [], commands: [] }
+    expect(checkEngine(old, '1.29.0', table)).toEqual([])
+    expect('holds' in old || 'presentation' in old).toBe(false)
+    const holds: import('./engine').EngineHolds = { observe: async () => ({ state: 'none' }) }
+    const presentation: import('./engine').EnginePresentation = { chatTurns: t => t }
+    const both = { manifest: manifest('1.29.0'), routes: [], commands: [], holds, presentation }
+    expect(checkEngine(both, '1.29.0', table)).toEqual([])
+  })
+  test('a 1.29 engine is refused in words by a 1.28 host that did not negotiate down', () => {
+    expect(checkEngine({ manifest: manifest('1.29.0'), routes: [], commands: [] }, '1.28.0', table))
+      .toEqual([{ kind: 'api-mismatch', host: '1.28.0', engine: '1.29.0' }])
+  })
+  test('a hold observation is one of three states, and `held` carries the engine\'s own sentence in both languages', async () => {
+    const held: import('./engine').HoldObservation = { state: 'held', since: 5, sentence: { en: 'in use', pt: 'em uso' } }
+    const holds: import('./engine').EngineHolds = { observe: async row => (row.id === 'a' ? held : { state: 'none' }) }
+    expect(await holds.observe({ id: 'a' })).toEqual(held)
+    expect(await holds.observe({ id: 'b' })).toEqual({ state: 'none' })
+  })
+  test('presentation is a pure pass that returns the same array when nothing changes', () => {
+    const turns = [{ role: 'user' as const, text: 'a' }]
+    const ident: import('./engine').EnginePresentation = { chatTurns: t => t }
+    expect(ident.chatTurns(turns)).toBe(turns)
   })
 })

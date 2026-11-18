@@ -11,6 +11,7 @@
  */
 import { PORT } from '../config'
 import { planRetireRequest, retireReasonsText } from './retire-plan'
+import { holdLine, holdsFromServer, observeFromAnswer } from './hold-state'
 import { patchSession, readRegistry } from './registry'
 import { resolveSessionRef } from './session-ref'
 import type { ManagedSession } from './types'
@@ -76,13 +77,18 @@ export async function retireCommand(o: RetireCliInput): Promise<number> {
     return 1
   }
   const up = await serverUp()
+  // The reply says when something live holds it: that outranks every quiet check.
+  const hold = up ? observeFromAnswer(await holdsFromServer(PORT, row)) : { state: 'none' as const }
+  const held = hold.state === 'held' ? { since: new Date(hold.since).toISOString(), sentence: hold.sentence.en } : hold.state === 'unknown' ? ('unknown' as const) : undefined
   if (o.json) {
-    console.log(JSON.stringify({ id: row.id, retire: plan.request, serverRunning: up }, null, 2))
+    console.log(JSON.stringify({ id: row.id, retire: plan.request, serverRunning: up, ...(held ? { held } : {}) }, null, 2))
     return 0
   }
   const quiet = Math.round(plan.request.quietForMs / 1000)
   const replaced = row.retire?.expiredAt ? ` (replacing an expired one: ${row.retire.expiredReason ?? retireReasonsText([])})` : ''
   console.log(`Retire requested for ${row.id}${replaced}: it ends once it has been idle for ${quiet}s with no background task or child command, and never after ${plan.request.deadlineAt}.${o.folderPath ? ` Then it is moved to ${o.folderPath}.` : ''}`)
+  if (hold.state === 'held') console.log(`HELD: ${holdLine(hold, Date.now())}. It stays open and is retired after the hold ends (the deadline moves with it).`)
+  else if (hold.state === 'unknown') console.log('Whether something live is using the session could not be read: it will not be closed while that is unknown.')
   if (!up) console.log(`No agentop server is answering on port ${PORT}: the request waits until one runs (it carries retirements out). Cancel with: agentop session retire ${row.id} --cancel`)
   return 0
 }

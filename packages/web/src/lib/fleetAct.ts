@@ -32,6 +32,8 @@ export interface FleetActResult {
   action?: { kind: 'update-harness'; harness: string; need: string }
   /** A `resume` the memory gate refused: the surface may offer "reopen anyway" (re-sent with `force: true`). */
   memoryBudget?: true
+  /** A `kill` refused because the session is in use right now: ask "end anyway?", re-send with `force: true`. */
+  held?: true
   /** A refused fork's memory-queue entry: "start anyway" takes it off the queue first, so no twin starts later. */
   queuedId?: string
 }
@@ -63,6 +65,7 @@ export function parseActResult(json: unknown, lang: 'pt' | 'en'): FleetActResult
   return {
     ok: o.ok === true, message, ...(id ? { id } : {}), ...(o.confirm === true ? { confirm: true } : {}), ...(failure ? { failure } : {}), ...(action ? { action } : {}),
     ...(o.ok !== true && o.memoryBudget === true ? { memoryBudget: true as const } : {}),
+    ...(o.ok !== true && o.held === true ? { held: true as const } : {}),
     ...(o.ok !== true && o.memoryBudget === true && typeof o.queuedId === 'string' && o.queuedId !== '' ? { queuedId: o.queuedId } : {}),
   }
 }

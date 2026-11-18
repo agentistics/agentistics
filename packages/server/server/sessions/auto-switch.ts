@@ -179,13 +179,18 @@ export interface AutoWords { title: string; message: string; comment?: string }
  * The notice (and, for a move, the board comment) — `from`/`to` are account labels. A "none" notice promises only what the
  * policy does: with a known reset the session is resumed once (reset + 1 min); without one it says nobody can tell when.
  */
-export function autoSwitchWords(o: { kind: 'move' | 'none'; lang: 'en' | 'pt'; session: string; from: string; to?: string; resetsAt?: number; tz?: string }): AutoWords {
+export function autoSwitchWords(o: { kind: 'move' | 'none' | 'deferred'; lang: 'en' | 'pt'; session: string; from: string; to?: string; resetsAt?: number; tz?: string }): AutoWords {
   const pt = o.lang === 'pt'
   const until = clock(o.resetsAt, o.lang, o.tz)
   if (o.kind === 'move') {
     return pt
       ? { title: 'Conta trocada', message: `A sessão ${o.session} parou no limite da conta ${o.from} (volta às ${until}) e continua na conta ${o.to}, de onde parou.`, comment: `Conta trocada de ${o.from} para ${o.to}: limite até ${until}` }
       : { title: 'Account switched', message: `Session ${o.session} stopped at the limit of account ${o.from} (back at ${until}) and carries on with account ${o.to}, where it left off.`, comment: `Account switched from ${o.from} to ${o.to}: limit until ${until}` }
+  }
+  if (o.kind === 'deferred') {
+    return pt
+      ? { title: 'Troca de conta adiada', message: `A sessão ${o.session} está no limite da conta ${o.from}, mas ela está em uso agora: a troca de conta espera terminar, para não cortar o que a usa.` }
+      : { title: 'Account switch deferred', message: `Session ${o.session} is at the limit of account ${o.from}, but it is in use right now: the account switch waits until that ends, so nothing in use is cut off.` }
   }
   if (o.resetsAt === undefined) {
     return pt

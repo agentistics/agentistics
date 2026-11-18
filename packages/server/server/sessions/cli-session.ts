@@ -109,7 +109,7 @@ const USAGE = `Usage:
   agentop session ls     [--all] [--group ${GROUPINGS.join('|')}] [--json]
   agentop session list
   agentop session attach <id|name>
-  agentop session kill   <id|name> [--folder <folder>]
+  agentop session kill   <id|name> [--folder <folder>] [--force]
   agentop session retire <id|name> [--cancel] [--quiet-for 60s] [--deadline 30m] [--folder <folder>] [--json]
   agentop session folders [--json]
   agentop session rename <id|name> "label"
@@ -350,7 +350,7 @@ async function runSessionCommand(argv: string[]): Promise<number> {
     case 'list': return list(backend, cmd.json ?? false)
     case 'ls': return ls(cmd, backend)
     case 'attach': return attach(cmd.ref, backend)
-    case 'kill': return kill(cmd.ref, backend, cmd.folder)
+    case 'kill': return kill(cmd.ref, backend, cmd.folder, cmd.force === true)
     case 'retire': {
       const f = cmd.folder ? folderByRef.get(cmd.folder) : undefined
       const { retireCommand } = await import('./cli-retire')
@@ -1728,7 +1728,7 @@ async function switchAccount(
   return out.ok ? 0 : 1
 }
 
-async function kill(ref: string, backend: SessionBackend, folder?: string): Promise<number> {
+async function kill(ref: string, backend: SessionBackend, folder?: string, force = false): Promise<number> {
   const registry = await readRegistry()
   const reconciled = reconcileSessions(registry, await backend.list())
   const found = resolveSessionRef(reconciled.map(toRefCandidate), ref)
@@ -1743,6 +1743,12 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
     return retireCommand({ ref: id, ...(f ? { folderId: f.id, folderPath: f.path } : {}), caller: id })
   }
 
+  // A session something live is using is idle between turns — killing it cuts them off.
+  const { guardKillAgainstHold } = await import('./kill-guard')
+  const guard = await guardKillAgainstHold(registry.find(m => m.id === id) ?? { id }, force)
+  if (!guard.allow) { console.error(guard.message); return 1 }
+  if (guard.warn) console.error(guard.warn)
+
   // HANDOFF.RELAY: a predecessor's last answer to the owner reaches its successor before it dies.
   const { flushBeforeKill } = await import('./handoff-relay-io')
   const flushed = await flushBeforeKill(id, async (to, text) => {
@@ -1751,10 +1757,19 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
   }, await resolveLang())
   if (flushed.warning) console.error(flushed.warning)
 
-  const confirmed = await killAndRetireSession(id, async () => {
-    const killed = await backend.kill(id)
-    return killed || statusBefore === 'lost' || statusBefore === 'exited'
-  })
+  // The guard runs AGAIN inside the kill, after the hand-off flush above (seconds long): a hold that started meanwhile still stops it.
+  let confirmed: boolean
+  try {
+    confirmed = await killAndRetireSession(id, async () => {
+      const killed = await backend.kill(id)
+      return killed || statusBefore === 'lost' || statusBefore === 'exited'
+    }, undefined, { force })
+  } catch (e) {
+    const { HoldError } = await import('./hold-guard')
+    if (!(e instanceof HoldError)) throw e
+    console.error(e.message)
+    return 1
+  }
   // A session that was already `lost` (the backend has nothing by this id — there was never
   // anything for `kill` to do) or `exited` (the hosted command already finished) is safe to clear
   // even on a backend report we cannot trust, because the reconciled view established BEFORE this

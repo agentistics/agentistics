@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { conversationOwnedElsewhere, createSessionRegistry, killAndRetireSession, linkConversationVerified, newSessionId, retireFallenSessions, retireSession } from './registry'
 import { planCrashGroup } from './crash-group'
+import type { KillOptions } from './registry'
+import { HoldError } from './hold-guard'
+
+const noHold: KillOptions = { observe: async () => ({ state: 'none' }) }
 
 let dir = ''
 let file = ''
@@ -40,17 +44,47 @@ describe('createSessionRegistry', () => {
     expect(await killAndRetireSession('killed', async () => {
       expect(planCrashGroup({ entries: await reg.read(), backendIds: new Set() })).toBeNull()
       return true
-    }, reg)).toBe(true)
+    }, reg, noHold)).toBe(true)
     expect(planCrashGroup({ entries: await createSessionRegistry(file).read(), backendIds: new Set() })).toBeNull()
   })
 
   it('restores the previous state when a kill is refused or throws', async () => {
     const reg = createSessionRegistry(file)
     await reg.add(session('live'))
-    expect(await killAndRetireSession('live', async () => false, reg)).toBe(false)
+    expect(await killAndRetireSession('live', async () => false, reg, noHold)).toBe(false)
     expect((await reg.read())[0]!.endedAt).toBeUndefined()
-    await expect(killAndRetireSession('live', async () => { throw new Error('unreachable') }, reg)).rejects.toThrow('unreachable')
+    await expect(killAndRetireSession('live', async () => { throw new Error('unreachable') }, reg, noHold)).rejects.toThrow('unreachable')
     expect((await reg.read())[0]!.endedAt).toBeUndefined()
+  })
+
+  describe('one hold guard behind every kill', () => {
+    const held: KillOptions = { observe: async () => ({ state: 'held', since: Date.now() - 60_000, sentence: { en: 'engine words', pt: 'palavras do engine' } }) }
+    it('a held session is NOT killed: nothing is called, nothing is recorded as ended', async () => {
+      const reg = createSessionRegistry(file)
+      await reg.add(session('busy'))
+      let killed = false
+      await expect(killAndRetireSession('busy', async () => { killed = true; return true }, reg, held)).rejects.toBeInstanceOf(HoldError)
+      expect(killed).toBe(false)
+      expect((await reg.read())[0]!.endedAt).toBeUndefined()
+    })
+    it('a hold that cannot be read is held too (unknown is not free to kill)', async () => {
+      const reg = createSessionRegistry(file)
+      await reg.add(session('maybe'))
+      await expect(killAndRetireSession('maybe', async () => true, reg, { observe: async () => ({ state: 'unknown' }) })).rejects.toBeInstanceOf(HoldError)
+    })
+    it('force cuts it off on purpose', async () => {
+      const reg = createSessionRegistry(file)
+      await reg.add(session('forced'))
+      expect(await killAndRetireSession('forced', async () => true, reg, { ...held, force: true })).toBe(true)
+      expect((await reg.read())[0]!.endedAt).toBeDefined()
+    })
+    it('the hold is asked for the managed id AND the conversation id of the row', async () => {
+      const reg = createSessionRegistry(file)
+      await reg.add({ ...session('both'), conversationId: 'conv-1' } as never)
+      let asked: { id: string; conversationId?: string } | undefined
+      await killAndRetireSession('both', async () => true, reg, { observe: async r => { asked = r; return { state: 'none' } } })
+      expect(asked).toMatchObject({ id: 'both', conversationId: 'conv-1' })
+    })
   })
 
   it('starts empty and never throws on a missing file', async () => {

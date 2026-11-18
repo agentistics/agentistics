@@ -36,6 +36,8 @@ export const RETIRE_REASON_TEXT: Record<string, { pt: string; en: string }> = {
   'children-unreadable': { pt: 'não foi possível ler os processos filhos', en: 'its child processes could not be read' },
   'successor-unknown': { pt: 'a sessão sucessora ainda não foi observada', en: 'its successor has not been observed yet' },
   'work-child': { pt: 'há processos filhos em execução', en: 'child processes are still running' },
+  'in-use': { pt: 'ela está em uso agora', en: 'it is in use right now' },
+  'hold-unknown': { pt: 'não foi possível ler se algo a está usando', en: 'whether something is using it could not be read' },
   deadline: { pt: 'só ficou inativa após o prazo', en: 'it was quiet only after the deadline' },
 }
 
@@ -73,6 +75,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   'account.auto_switched': {
     pt: { title: 'Conta trocada', message: 'A sessão {session} parou no limite da conta {from} (volta às {until}) e continua na conta {to}, de onde parou.' },
     en: { title: 'Account switched', message: 'Session {session} stopped at the limit of account {from} (back at {until}) and carries on with account {to}, where it left off.' },
+  },
+  'account.auto_deferred': {
+    pt: { title: 'Troca de conta adiada', message: 'A sessão {session} está no limite da conta {from}, mas ela está em uso agora: a troca de conta espera terminar, para não cortar o que a usa.' },
+    en: { title: 'Account switch deferred', message: 'Session {session} is at the limit of account {from}, but it is in use right now: the account switch waits until that ends, so nothing in use is cut off.' },
   },
   'account.auto_none': {
     pt: { title: 'Sessão parada no limite', message: 'A sessão {session} parou no limite da conta {from} e nenhuma outra conta tem folga agora. A janela abre às {until}; um minuto depois o agentistics reenvia a última mensagem, uma única vez.' },
@@ -223,6 +229,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   'retire.expired': {
     pt: { title: 'Prazo de encerramento expirado', message: 'A sessão {label} ({id}) foi mantida: {reason}. Nenhum processo foi encerrado.' },
     en: { title: 'Retire expired', message: 'Session {label} ({id}) was kept: {reason}. Nothing was killed.' },
+  },
+  'retire.held': {
+    pt: { title: 'Encerramento em espera', message: 'A sessão {label} ({id}) continua aberta: ela está em uso agora. Será encerrada quando terminar.' },
+    en: { title: 'Retire on hold', message: 'Session {label} ({id}) stays open: it is in use right now. It will be retired when that ends.' },
   },
   'clean.suggestion': {
     pt: { title: 'Há espaço para liberar', message: '{count} item(ns) concluído(s) ou parado(s) podem ser removido(s). Veja o que dá para limpar.' },

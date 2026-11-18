@@ -155,6 +155,8 @@ export interface FleetActionResponse {
    * after a confirmation). Kept apart from `code` — that one maps to an HTTP status for the account rule.
    */
   memoryBudget?: true
+  /** `kill` refused: the session is in use right now. The surface asks "end anyway?" and re-sends with `force: true`. */
+  held?: true
   /** A refused fork's queue entry (`/api/resources/queue/:id`): "start anyway" cancels it first so no twin starts later. */
   queuedId?: string
   /** A group reopen's partial result (opened / already running / every refused row with its code). */
@@ -911,7 +913,7 @@ async function runFleetActionOnce(
         return { ok, message: ok ? cliStrings(lang).sessKilled(name) : cliStrings(lang).sessKillUnconfirmed(name) }
       }
       if (!host.killSession) return { ok: false, message: s.sessionsNoHost }
-      return await host.killSession(req.id)
+      return await host.killSession(req.id, req.force === true)
     // Only a NATIVE session has a store to archive or delete from (`native-fleet.ts`); any other id is
     // refused in words rather than reaching a host verb that does not exist.
     case 'archive':

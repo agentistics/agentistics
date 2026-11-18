@@ -60,7 +60,7 @@ describe('notification coverage', () => {
   })
 
   it('retire notifications are covered through the positional emitter', () => {
-    for (const code of ['retire.done', 'retire.cancelled', 'retire.expired']) {
+    for (const code of ['retire.done', 'retire.cancelled', 'retire.expired', 'retire.held']) {
       expect(emitted().has(code)).toBe(true)
     }
   })

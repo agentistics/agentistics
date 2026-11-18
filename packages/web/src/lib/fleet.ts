@@ -262,7 +262,7 @@ export interface FleetState {
     force?: boolean
     /** EXT.OPEN: yes to ending an external process so its conversation continues here. */
     confirm?: boolean
-  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed'; action?: { kind: 'update-harness'; harness: string; need: string }; memoryBudget?: true; queuedId?: string }>
+  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed'; action?: { kind: 'update-harness'; harness: string; need: string }; memoryBudget?: true; held?: true; queuedId?: string }>
 }
 
 /**

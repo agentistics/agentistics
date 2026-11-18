@@ -18,6 +18,7 @@
  * Dependencies are injected so the rules are testable with a fake host.
  */
 
+import type { HoldObservation } from './retire-plan'
 import { randomBytes } from 'node:crypto'
 import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -175,6 +176,8 @@ export interface RoleDeps {
   leaveTeam?: (rowId: string) => Promise<boolean>
   /** Write a retire request on the predecessor (`retire-runner.ts` carries it out). Absent = not wired. */
   requestRetire?: (predecessorId: string, successorId: string) => Promise<boolean>
+  /** What holds a session: the retire reply says when something live does. Absent = not wired. */
+  holdOf?: (rowId: string) => Promise<HoldObservation>
   /**
    * ORQ.H3 `passagem-sem-sujo`: may the task's leadership change hands, given its worktrees? Absent, or
    * flows off, = passes. A refusal names each dirty worktree and how to release it.
@@ -193,7 +196,7 @@ export interface RoleRequest {
 }
 
 export type RetireOutcome =
-  | { ok: true; id: string; title: string }
+  | { ok: true; id: string; title: string; held?: { since: number; sentence: { en: string; pt: string } } | 'unknown' }
   | { ok: false; code: 'not_own' | 'not_leader_target' | 'different_task' | 'not_live' | 'no_task' | 'self' | 'no_such_session' | 'not_wired' }
   | { ok: false; code: 'dirty_worktrees'; reason: string; blocking: string[]; runId?: string }
 
@@ -346,7 +349,11 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
       ok: true, ...base, role: next ?? 'auto', changed, renamed, notified, ...(next ? { origin } : {}), line: roleLine(next),
       message: (changed
         ? `Role set to ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}${notified ? '; the session was told' : ''}.`
-        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`) + (retire?.ok ? ` ${retire.title} will be closed once its current turn ends (within 10 minutes at most).` : '')
+        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`) + (retire?.ok
+          ? retire.held
+            ? ` ${retire.title} is in use right now (${retire.held === 'unknown' ? 'could not be read' : retire.held.sentence.en}), so it stays open: it will be closed when that ends and it goes quiet.`
+            : ` ${retire.title} will be closed once its current turn ends (within 10 minutes at most).`
+          : '')
         + (retire && !retire.ok && retire.code === 'dirty_worktrees' ? ` The predecessor was NOT retired — ${retire.reason}: ${retire.blocking.join('; ')}.` : '')
         + (warning ? ` ${warning}` : ''),
     }
@@ -374,7 +381,10 @@ async function planPredecessorRetire(
     : { ok: true }
   if (!gate.ok) return { ok: false, code: 'dirty_worktrees', reason: gate.reason, blocking: gate.blocking, ...(gate.runId ? { runId: gate.runId } : {}) }
   if (!c.deps.requestRetire || !(await c.deps.requestRetire(pred.id, c.resolved.id).catch(() => false))) return { ok: false, code: 'not_wired' }
-  return { ok: true, id: pred.id, title: pred.title }
+  // A predecessor something live is using is NOT closed when it goes quiet: the retire waits for the hold.
+  const hold = await c.deps.holdOf?.(pred.id).catch((): HoldObservation => ({ state: 'unknown' }))
+  const held = hold?.state === 'held' ? { since: hold.since, sentence: hold.sentence } : hold?.state === 'unknown' ? ('unknown' as const) : undefined
+  return { ok: true, id: pred.id, title: pred.title, ...(held ? { held } : {}) }
 }
 
 /**
@@ -496,6 +506,13 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
     parentOf: async rowId => (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)?.parentSessionId,
     leaveTeam: async rowId => (await import('./team-links-io')).leaveTeamAsLeader(rowId),
     requestRetire: async (predecessorId, successorId) => (await import('./team-links-io')).requestRetire(predecessorId, successorId),
+    holdOf: async rowId => {
+      const { probeHold } = await import('./hold-state')
+      const { engine, loadEngine } = await import('../engine/load')
+      await loadEngine().catch(() => undefined)
+      const row = (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)
+      return probeHold(row ?? { id: rowId }, engine()?.holds ?? null)
+    },
     handoffGate: handoffGateFor,
   }
 }

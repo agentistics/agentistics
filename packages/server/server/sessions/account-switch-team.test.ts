@@ -38,6 +38,7 @@ async function scenario(source: string, target: string, opts: { worker?: boolean
         startable: async () => [source, target], turns: async () => ({ turns: [] }),
         role: async () => opts.worker ? 'worker' : 'leader', label: async () => undefined,
         killAndRetire: async (id, kill) => { if (!await kill()) return false; return patchSession(id, { endedAt: '2026-11-05T22:02:00Z' }) },
+        hold: async () => ({ state: 'none' }),
       },
     })
     const rows = await readRegistry()

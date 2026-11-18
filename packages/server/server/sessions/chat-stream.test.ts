@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, appendFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chatStreamCount, chatStreamResponse, DEBOUNCE_MS, MAX_CHAT_STREAMS, nextReadDelay, resetChatStreams, wakeChat } from './chat-stream'
-import type { ChatPayload } from './chat-web'
+import { finishChatRead, type ChatPayload } from './chat-web'
+import { presentChatTurns } from '../engine/present-turns'
 
 const dirs: string[] = []
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }) })
@@ -207,5 +208,29 @@ describe('chat stream — the chat-source switch (F4 fix2)', () => {
     expect(done).toBe(true)
     resetChatStreams() // unregistered on close: the count never goes below where it was
     expect(chatStreamCount()).toBe(before)
+  })
+})
+
+describe('the live chat stream shows only presented turns', () => {
+  test('a turn the engine empties never reaches the first frame, nor a later append (the read goes through finishChatRead)', async () => {
+    const s = setup()
+    const presenter = { chatTurns: <T extends { text: string }>(ts: T[]): T[] => ts.flatMap(t => { const text = t.text.replace(/<meta>.*?<\/meta>/g, '').trim(); return text === '' ? [] : [{ ...t, text }] }) }
+    let raw: ChatPayload['turns'] = [{ role: 'user', text: 'hello <meta>x</meta>' }, { role: 'user', text: '<meta>only</meta>' }]
+    const deps = {
+      async read(_fresh: boolean, onPath: (p: string) => void): Promise<ChatPayload> {
+        onPath(s.file)
+        return finishChatRead('s1', 'c1', { turns: [...raw] }, true, 'en', 's1', ts => presentChatTurns(ts, presenter as never))
+      },
+    }
+    const ctl = new AbortController()
+    const res = chatStreamResponse('s1', deps, ctl.signal)!
+    const first = await events(res, e => e.length >= 1)
+    expect(JSON.parse(first[0]!.data).turns.map((t: { text: string }) => t.text)).toEqual(['hello'])
+    raw = [...raw, { role: 'assistant', text: 'hi <meta>y</meta>' }]
+    appendFileSync(s.file, '{"x":1}\n')
+    const next = await events(res, e => e.some(x => x.event === 'chat-delta'))
+    const d = JSON.parse(next.find(x => x.event === 'chat-delta')!.data)
+    expect(d.append.map((t: { text: string }) => t.text)).toEqual(['hi'])
+    ctl.abort()
   })
 })

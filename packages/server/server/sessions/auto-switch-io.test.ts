@@ -17,7 +17,7 @@ const budget = (account: string, o: Partial<AccountBudget> = {}): AccountBudget 
 }) as AccountBudget
 
 /** A fleet of fake rows driven through the REAL switch implementation (`switchSessionAccountImpl`). */
-function world(o: { enabled?: boolean; limited?: (row: ManagedSession) => { resetsAt?: number; at?: number; pendingPrompt?: string } | null; limitRead?: (row: ManagedSession) => LimitRead; idle?: (row: ManagedSession) => number | undefined; corrupt?: boolean; sentPrompts?: string[]; budgets?: AccountBudget[]; refuseTarget?: string[]; rowsInit?: ManagedSession[]; harness?: string } = {}) {
+function world(o: { hold?: import('./retire-plan').HoldObservation; enabled?: boolean; limited?: (row: ManagedSession) => { resetsAt?: number; at?: number; pendingPrompt?: string } | null; limitRead?: (row: ManagedSession) => LimitRead; idle?: (row: ManagedSession) => number | undefined; corrupt?: boolean; sentPrompts?: string[]; budgets?: AccountBudget[]; refuseTarget?: string[]; rowsInit?: ManagedSession[]; harness?: string } = {}) {
   let n = 0
   const rows: ManagedSession[] = o.rowsInit ?? [{ id: 'm1', harness: (o.harness ?? 'claude') as never, cwd: '/w', createdAt: '2026-10-30T00:00:00Z', conversationId: 'conv1', accountId: 'acc_a', label: 'Líder Motor', taskId: 't-1', subtaskId: 's-1' }]
   const alive = new Set(rows.map(r => r.id))
@@ -48,6 +48,7 @@ function world(o: { enabled?: boolean; limited?: (row: ManagedSession) => { rese
       copy: async () => {},
       limit: async () => ({ pendingPrompt: pending }),
       killAndRetire: async (id, kill) => { rows.find(m => m.id === id)!.endedAt = 'now'; return kill() },
+      hold: async () => o.hold ?? { state: 'none' },
     },
   })
   let episodes: Record<string, AutoEpisode> = {}
@@ -72,7 +73,7 @@ function world(o: { enabled?: boolean; limited?: (row: ManagedSession) => { rese
     },
     budgets: async () => o.budgets ?? [budget('acc_a', { fiveHourPct: 100 }), budget('acc_b'), budget('acc_c', { fiveHourPct: 60 })],
     options: async (_row, current) => accounts.filter(a => a.id !== current).map(a => ({ id: a.id, harness: 'claude', label: labels[a.id]! })) as never,
-    switchAccount: req => switchSessionAccountImpl(req, switchDeps()),
+    switchAccount: async req => { const r = await switchSessionAccountImpl(req, switchDeps()); return { ok: r.ok, message: r.message, ...(r.id ? { id: r.id } : {}), ...(r.deferred ? { deferred: true } : {}) } },
     label: async (_h, id) => (id ? labels[id] : undefined),
     notify: n => { notices.push({ code: n.code, meta: n.meta, message: n.message }) },
     comment: async (taskId, subtaskId, body) => { comments.push({ taskId, ...(subtaskId ? { subtaskId } : {}), body }) },
@@ -162,6 +163,24 @@ describe('runAutoSwitchTick — a limit-blocked row through the real switch', ()
     const r = await runAutoSwitchTick(w.deps)
     expect(r.moved.length).toBeLessThanOrEqual(MAX_MOVES_PER_TICK)
     expect(r.moved).toHaveLength(2) // acc_b and acc_c: one session each; the rest wait for the next tick (the budgets are read once)
+  })
+})
+
+describe('HIGH-1: a limit-blocked held session is DEFERRED, never switched', () => {
+  test('nothing is killed or resumed; the target is not counted as tried; told once; the next tick moves it when the hold is over', async () => {
+    const w = world({ hold: { state: 'held', since: NOW - 60_000, sentence: { en: 'engine words', pt: 'palavras do engine' } } })
+    const first = await runAutoSwitchTick(w.deps)
+    expect(first.deferred).toEqual(['m1'])
+    expect(first.failed).toEqual([])
+    expect(w.resumed).toEqual([])
+    expect(w.live().map(r => r.id)).toEqual(['m1'])
+    expect(w.episodes().conv1).toBeUndefined() // no target was tried
+    const second = await runAutoSwitchTick(w.deps)
+    expect(second.deferred).toEqual(['m1'])
+    expect(w.notices.filter(n => n.code === 'account.auto_deferred')).toHaveLength(1)
+    expect(w.notices.find(n => n.code === 'account.auto_deferred')!.message).toContain('em uso agora')
+    // once the call is over the same session moves (a world with no hold): the deferral cost nothing
+    expect((await runAutoSwitchTick(world().deps)).moved).toHaveLength(1)
   })
 })
 
