@@ -170,7 +170,7 @@ import {
 import { approvalFor, choiceKey, fieldIsOpen, isFreeTextOption, markerReadOptions } from './sessions/approval-spec'
 // Carrying a rename through to the harness. Shared with `agentop session rename` — one gesture, one
 // implementation, for the reason `task-reopen.ts` exists.
-import { renameInHarness, renameMessage } from './sessions/rename'
+import { isRenameNoop, renameInHarness, renameMessage, renameOutcomeRecord } from './sessions/rename'
 import { formMoved, needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-choice'
 import { answerFollowUp } from './sessions/answer-followup'
 import { liveTranscriptDeps, runTranscriptSearch } from './sessions/transcript-run'
@@ -4344,6 +4344,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (isNativeSessionId(id)) return runNativeVerb(id, 'rename', lang, { title: label })
       const s = S()
       const managed = (await readRegistry()).find(m => m.id === id)
+      // Same title again: nothing to write and nothing to type into the harness.
+      if (managed && isRenameNoop(managed, label)) return { ok: true, message: s.sessRenamed }
       // The INSTANT goes down with the name. A session can also be renamed from inside the harness,
       // and recency is the only non-arbitrary way to settle a disagreement between the two — a
       // stored name with no timestamp cannot take part in that. See `pickTitle`.
@@ -4359,6 +4361,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const outcome = blocked
         ? ({ kind: 'skipped', reason: 'not-running' } as const)
         : await renameInHarness({ id, harness: managed.harness }, label.trim(), backend)
+      // Remember whether the harness really got it, so only a CONFIRMED title is a later no-op.
+      await patchSession(id, renameOutcomeRecord(outcome, label))
       return { ok: true, message: renameMessage(outcome, managed.harness, s) }
     },
 

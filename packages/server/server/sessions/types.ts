@@ -401,6 +401,12 @@ export interface ManagedSession {
    * than treating as "long ago". See `harness-session-file.ts`.
    */
   labelSince?: number
+  /**
+   * The title the HARNESS last CONFIRMED receiving as a `/rename` (`renameInHarness` → `sent`). The
+   * label is written first and unconditionally, so `label` alone cannot say whether the harness half
+   * happened; the no-op guard (`isRenameNoop`) skips a repeat only when this equals the label.
+   */
+  renameSent?: string
   note?: string
   /**
    * The piece of work this session belongs to.

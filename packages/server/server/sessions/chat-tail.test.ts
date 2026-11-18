@@ -115,6 +115,18 @@ describe('readRecentChatTurns', () => {
   })
   afterEach(async () => { await rm(root, { recursive: true, force: true }) })
 
+  test('a /rename is ONE info line: the harness echo ("Session renamed to:") is never a turn', async () => {
+    await writeFile(file, [
+      userTurn('<command-name>/rename</command-name>\n<command-message>rename</command-message>\n<command-args>[ LÍDER ] - Jarvis</command-args>'),
+      userTurn('<local-command-stdout>Session renamed to: [ LÍDER ] - Jarvis</local-command-stdout>'),
+      assistantTurn('Session renamed to: [ LÍDER ] - Jarvis'),
+    ].join('\n') + '\n')
+    const turns = await readRecentChatTurns(file)
+    expect(turns).toHaveLength(1)
+    expect(turns[0]!.role).toBe('user')
+    expect(turns[0]!.text).toContain('Jarvis')
+  })
+
   test('returns turns oldest-first with real roles', async () => {
     await writeFile(file, [
       userTurn('what does this do'),
