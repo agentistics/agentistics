@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.218.0': {
+    features: [
+      {
+        pt: 'Sessões: uma sessão que está sendo usada ao vivo não é mais encerrada por troca de conta, passagem de líder ou encerramento automático; a troca de conta espera, e o botão Encerrar pede confirmação antes de forçar.',
+        en: 'Sessions: a session that is in live use is no longer ended by an account switch, a leader hand-off or an automatic close; the account switch waits, and the End button asks before forcing it.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Chat: as notas internas que o app junta à sua mensagem não aparecem mais na sua bolha nem como uma bolha separada, também no histórico de sessões encerradas.',
+        en: 'Chat: the internal notes the app attaches to your message no longer show in your bubble or as a separate bubble, including in the history of ended sessions.',
+      },
+    ],
+  },
   '2.217.6': {
     features: [],
     fixes: [
