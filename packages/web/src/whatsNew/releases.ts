@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.217.6': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões: o menu do clique direito agora é agrupado por assunto (Abrir, Tarefa, Organizar, Tipo), abre os grupos ao passar o mouse ou com o teclado e fica sempre dentro da tela; "Encerrar sessão" aparece em toda sessão ativa.',
+        en: 'Sessions: the right-click menu is now grouped by subject (Open, Task, Organize, Type), opens each group on hover or with the keyboard and always stays inside the screen; "End session" shows on every live session.',
+      },
+    ],
+  },
   '2.217.5': {
     features: [],
     fixes: [
