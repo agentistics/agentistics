@@ -58,9 +58,11 @@ export function planOf(o: { now: number; orphanMs: number; records: readonly Del
   for (const r of o.records) {
     if (!o.projects.has(r.subtaskId)) continue
     // The board's own activity (a verified decision/block thread comment) competes with the record's stamp: the LATEST wins — but only
-    // among ELIGIBLE actors (N2): the filed leader, the current custodian or a live leader of the task. A worker's block, or a
+    // among ELIGIBLE actors (N2): the filed leader, the current custodian or a leader of the task (alive or not: liveness is checked in planCustody `present`). A worker's block, or a
     // stamp left by a custodian that lost the piece, never masks (or anchors) the absence of the piece's own leader.
-    const eligible = (by: string): boolean => by === r.leaderSessionId || by === r.custody?.sessionId || o.fleet.some(s => s.id === by && s.alive && s.role === 'leader' && s.taskId === r.taskId)
+    // Liveness is NOT part of eligibility (r5, N5): a co-leader that acted and died still anchors the absence at ITS instant; presence
+    // is judged by planCustody. Remaining limit (S7b): eligibility reads the fleet registry, so a PURGED co-leader row stops being eligible.
+    const eligible = (by: string): boolean => by === r.leaderSessionId || by === r.custody?.sessionId || o.fleet.some(s => s.id === by && s.role === 'leader' && s.taskId === r.taskId)
     const b = o.board ? boardActivityOf({ key: r.subtaskId, taskId: r.taskId }, o.board, eligible) : null
     const own = r.leaderActivityAt && r.leaderActivityBy && eligible(r.leaderActivityBy) ? r : null
     const useBoard = !!b && (!own || Date.parse(b.at) > Date.parse(own.leaderActivityAt!))

@@ -217,3 +217,64 @@ describe('Q6 — a release declaration stamps the pieces it changed, and only th
     expect(w.read('p1').leaderActivityAt).toBeUndefined()
   })
 })
+
+const boardComment = (w: World, id: string, piece: string, by: string, kind: 'decision' | 'block', at: number) =>
+  w.tasks.addComment({ id, taskId: `t-${piece}`, subtaskId: piece, threadId: 'th1', role: 'session', sessionId: by, kind, author: by, body: kind, createdAt: iso(at) } as never)
+
+describe('N5 (r5) — a co-leader of the task who acted and then died anchors the absence at ITS action, not at the old filed leader\'s stamp', () => {
+  const coLeader = async (l4Dies: boolean) => {
+    const w = await world({ c: 'on' })
+    seed(w, 'p1', { leaderSessionId: 'L1', leaderActivityBy: 'L1', leaderActivityAt: iso(T0) })
+    seed(w, 'p2', { taskId: 't-p2', leaderSessionId: 'L2', leaderActivityBy: 'L2', leaderActivityAt: iso(T0 + 4 * H) })
+    w.fleet.rows = [row('L1', 't-p1', false), row('L2', 't-p2'), row('L4', 't-p1')]
+    await boardComment(w, 'c-l4', 'p1', 'L4', 'decision', T0 + 3 * H)
+    await upTo(w, T0 + 3 * H + 10 * MIN, T0 + 3 * H + 30 * MIN)
+    expect(w.read('p1').custody ?? null).toBeNull() // L4 present
+    if (l4Dies) w.fleet.rows = [row('L1', 't-p1', false), row('L2', 't-p2'), row('L4', 't-p1', false)]
+    await upTo(w, T0 + 3 * H + 40 * MIN, T0 + 4 * H + 10 * MIN)
+    return w
+  }
+  test('control: L4 alive → no custody 70 min after its decision', async () => {
+    expect((await coLeader(false)).read('p1').custody ?? null).toBeNull()
+  })
+  test('attack: L4 dies 30 min after its decision → no custody before T0+3h+N; absence anchored at ≥ its action', async () => {
+    const rec = (await coLeader(true)).read('p1')
+    expect(rec.custody ?? null).toBeNull()
+    expect(Date.parse(rec.leaderAbsentSince)).toBeGreaterThanOrEqual(T0 + 3 * H)
+  })
+  // Remaining limit (S7b): eligibility is read off the fleet registry; if the co-leader's row is PURGED its eligibility vanishes and
+  // the absence falls back to the filed leader's stamp. Closing that needs the comment to carry the author's role+task.
+})
+
+describe('N6 (r5) — eligibility on the task board and on the record\'s own stamp', () => {
+  test('R4-P4: a live leader of ANOTHER task posting a verified block on the piece is not eligible', async () => {
+    const w = await established()
+    w.fleet.rows = [...w.fleet.rows, row('L3', 't-p3'), row('LX', 't-other')]
+    seed(w, 'p3', { taskId: 't-p3', leaderSessionId: 'L3', leaderActivityBy: 'L3', leaderActivityAt: iso(T0 + N + 3 * H) })
+    const assignedAt = Date.parse(w.read('p1').custody.since)
+    await boardComment(w, 'c-l2', 'p1', 'L2', 'decision', assignedAt + 3 * H)
+    await boardComment(w, 'c-lx', 'p1', 'LX', 'block', assignedAt + 3 * H + 30 * MIN)
+    await tickAt(w, assignedAt + N + 5 * MIN)
+    expect(w.read('p1').custody).toMatchObject({ sessionId: 'L2' })
+    expect(w.read('p1').custodyLog.map((e: any) => `${e.event}:${e.sessionId}`)).toEqual(['assigned:L2'])
+    expect(custodyMsgs(w, 'LX')).toHaveLength(0)
+  })
+  const stamped = async (by: string, rows: Row[]) => {
+    const w = await world({ c: 'on' })
+    seed(w, 'p1', { leaderSessionId: 'L1', leaderActivityBy: by, leaderActivityAt: iso(T0 + 3 * H) })
+    seed(w, 'p2', { taskId: 't-p2', leaderSessionId: 'L2', leaderActivityBy: 'L2', leaderActivityAt: iso(T0 + 8 * H) })
+    w.fleet.rows = [row('L1', 't-p1', false), row('L2', 't-p2'), ...rows]
+    await tickAt(w, T0 + 4 * H)
+    return w.read('p1')
+  }
+  test('the record stamp of a DEAD co-leader of the same task anchors the absence at its instant', async () => {
+    const rec = await stamped('L4', [row('L4', 't-p1', false)])
+    expect(rec.leaderAbsentSince).toBe(iso(T0 + 3 * H))
+  })
+  test('the record stamp of a worker, or of a leader of another task, anchors nothing (absence = now)', async () => {
+    for (const r of [row('W1', 't-p1', true, 'worker'), row('LX', 't-other', false)]) {
+      const rec = await stamped(r.id, [r])
+      expect(rec.leaderAbsentSince).toBe(iso(T0 + 4 * H))
+    }
+  })
+})
