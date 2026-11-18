@@ -10,6 +10,56 @@ import {
 const frame = (seq: number, tab = 'T1') => JSON.stringify({ tab, seq, w: 1280, h: 800, jpeg: 'AAAA', url: 'http://x/', title: 'X', at: 1 })
 
 describe('viewport epoch', () => {
+  for (const [width, height, w, h, oldW, oldH] of [
+    [818, 205, 1596, 400, 1314, 400],
+    [348, 148, 1024, 435, 1024, 652],
+    [318, 148, 1024, 477, 1024, 652],
+    [348, 148, 1024, 435, 1024, 652],
+  ]) {
+    test(`r5: two tabs at surface ${width}x${height} paint the matching frame after the stale equal key`, () => {
+      let s = browserScreenReducer(INITIAL_BROWSER_SCREEN, { type: 'connecting', viewport: { width: width!, height: height! } })
+      const f = { tab: 'T2', seq: 1, epoch: 0, w: oldW!, h: oldH!, jpeg: 'AAAA', url: '', title: '', at: 1 }
+      s = browserScreenReducer(s, { type: 'frame', frame: f })
+      s = browserScreenReducer(s, { type: 'frame', frame: { ...f, w: w!, h: h! } })
+      expect(s.frame).toMatchObject({ w, h })
+    })
+  }
+  test('r5: the unmodified QA probe also corrects an equal key when no surface was supplied', () => {
+    const f = { tab: 'T1', seq: 1, epoch: 0, w: 1024, h: 652, jpeg: '', url: '', title: '', at: 0 }
+    let s = browserScreenReducer(INITIAL_BROWSER_SCREEN, { type: 'connecting' })
+    s = browserScreenReducer(s, { type: 'frame', frame: f })
+    s = browserScreenReducer(s, { type: 'frame', frame: { ...f, h: 435 } })
+    expect(s.frame?.h).toBe(435)
+  })
+  test('r5: a stale first frame cannot consume fresh; same epoch/seq corrects 652 to 435', () => {
+    let s = browserScreenReducer(INITIAL_BROWSER_SCREEN, { type: 'connecting', viewport: { width: 348, height: 148 } })
+    const f = { tab: 'T1', seq: 1, epoch: 0, w: 1024, h: 652, jpeg: 'AAAA', url: '', title: '', at: 1 }
+    s = browserScreenReducer(s, { type: 'frame', frame: f })
+    expect(s.fresh).toBe(true)
+    s = browserScreenReducer(s, { type: 'frame', frame: { ...f, h: 435 } })
+    expect(s.frame?.h).toBe(435)
+    expect(s.fresh).toBe(false)
+  })
+  test('r5: equal keys prefer the frame that matches the current viewport, even if an old frame is displayed', () => {
+    const f = { tab: 'T1', seq: 1, epoch: 0, w: 1024, h: 652, jpeg: 'AAAA', url: '', title: '', at: 1 }
+    const s = { ...INITIAL_BROWSER_SCREEN, phase: 'streaming' as const, fresh: false, frame: f, viewport: { width: 348, height: 148 } }
+    const good = browserScreenReducer(s, { type: 'frame', frame: { ...f, h: 435 } })
+    expect(good.frame?.h).toBe(435)
+    expect(browserScreenReducer(good, { type: 'frame', frame: f })).toBe(good)
+  })
+  test('r5: epoch takes precedence over sequence', () => {
+    const f = { tab: 'T1', seq: 99, epoch: 2, w: 1024, h: 435, jpeg: 'AAAA', url: '', title: '', at: 1 }
+    let s = browserScreenReducer(INITIAL_BROWSER_SCREEN, { type: 'frame', frame: f })
+    s = browserScreenReducer(s, { type: 'frame', frame: { ...f, seq: 1, epoch: 3 } })
+    expect(s.frame?.epoch).toBe(3)
+    s = browserScreenReducer(s, { type: 'connecting' })
+    const stale = browserScreenReducer(s, { type: 'frame', frame: { ...f, seq: 100, epoch: 2 } })
+    expect(stale.fresh).toBe(true)
+    expect(stale.frame?.epoch).toBe(3)
+    const oldSequence = browserScreenReducer(s, { type: 'frame', frame: { ...f, seq: 0, epoch: 3 } })
+    expect(oldSequence.fresh).toBe(true)
+    expect(oldSequence.frame?.seq).toBe(1)
+  })
   const ef = (seq: number, epoch: number) => ({ tab: 'T1', seq, epoch, w: 1596, h: 400, jpeg: 'AAAA', url: '', title: '', at: 1 })
   test('the epoch is parsed when the server sends it and absent otherwise', () => {
     expect(parseBrowserFrame(JSON.stringify(ef(1, 3)))?.epoch).toBe(3)
@@ -63,7 +113,7 @@ describe('the screen view-model and its honesty line', () => {
 
   test('a NEW connection (resize, second tab) restarts seq: its first frame is shown even when its seq is lower', () => {
     let s = browserScreenReducer(INITIAL_BROWSER_SCREEN, { type: 'frame', frame: parseBrowserFrame(frame(9))! })
-    s = browserScreenReducer(s, { type: 'connecting' })
+    s = browserScreenReducer(s, { type: 'connecting', viewport: { width: 1596, height: 400 } })
     s = browserScreenReducer(s, { type: 'frame', frame: { ...parseBrowserFrame(frame(1))!, w: 1596, h: 400 } })
     expect(s.frame).toMatchObject({ seq: 1, w: 1596 })
     // ...and within that connection, order is enforced again

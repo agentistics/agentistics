@@ -99,6 +99,62 @@ const tick = () => new Promise(r => setTimeout(r, 0))
 const V = (width: number, height: number) => ({ width, height, deviceScaleFactor: 1 })
 
 describe('the hub never delivers a frame of an old size', () => {
+  for (const [width, height] of [[818, 205], [348, 148], [318, 148], [348, 192]]) {
+    test(`r5: two-tab surface ${width}x${height} rejects the previous size and paints its own`, async () => {
+      const f = fixture(), a = f.sink(), b = f.sink()
+      const old = await f.hub.subscribe('k', 'T1', a.s, V(818, 249))
+      f.raw(1314, 400); f.c.advance(100); old.close()
+      await f.hub.subscribe('k', 'T2', b.s, V(width!, height!))
+      f.raw(1314, 400); f.c.advance(100)
+      expect(b.frames).toHaveLength(0)
+      const size = f.sent.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride').at(-1)![1]
+      f.raw(Number(size.width), Number(size.height)); f.c.advance(100)
+      expect(b.frames).toHaveLength(1)
+      expect(b.frames[0]).toMatchObject({ w: size.width, h: size.height })
+    })
+  }
+  test('r5: a raw startup frame is validated even before the cast is returned', async () => {
+    const c = clock(), frames: CastFrame[] = []
+    const hub = createScreencastHub({
+      ...c, activeTab: () => 'T1', state: () => null, viewer: () => {},
+      start: async (_k, _t, emit) => {
+        emit({ data: fakeJpeg(1024, 652), sessionId: 1, metadata: { deviceWidth: 1024, deviceHeight: 652 } })
+        expect(frames).toHaveLength(0)
+        return { ok: true, ack: () => {}, stop: async () => {}, resize: async () => {}, viewport: () => ({ w: 1024, h: 435 }) }
+      },
+    })
+    await hub.subscribe('k', 'T1', { frame: f => { frames.push(f); return true }, state: () => {}, gone: () => {} }, V(348, 148))
+    expect(frames).toHaveLength(0)
+  })
+  test('r5: reconnects and tab switches never reuse an epoch/seq pair', async () => {
+    const f = fixture()
+    const a = f.sink(), b = f.sink(), c = f.sink()
+    const sub = await f.hub.subscribe('k', 'T1', a.s, V(350, 223))
+    f.raw(1024, 652); f.c.advance(100)
+    sub.close()
+    const next = await f.hub.subscribe('k', 'T2', b.s, V(348, 148))
+    f.raw(1024, 435); f.c.advance(100)
+    next.close()
+    await f.hub.subscribe('k', 'T1', c.s, V(348, 148))
+    f.raw(1024, 435); f.c.advance(100)
+    const frames = [...a.frames, ...b.frames, ...c.frames]
+    expect(frames).toHaveLength(3)
+    expect(new Set(frames.map(x => `${x.epoch}:${x.seq}`)).size).toBe(3)
+  })
+  test('r5: after the fast retry budget, a silent page is re-requested with backoff and recovers', async () => {
+    const f = fixture(), a = f.sink()
+    const sub = await f.hub.subscribe('k', 'T1', a.s, V(818, 205))
+    for (let i = 0; i < MAX_STALE_KICKS; i++) { f.raw(1596, 400, 718, 400); f.c.advance(STALE_KICK_DELAY_MS + 100); await tick() }
+    const before = f.resizes()
+    f.c.advance(6000); await tick()
+    expect(f.resizes()).toBeGreaterThan(before)
+    f.raw(1596, 400); f.c.advance(100)
+    expect(a.frames).toHaveLength(1)
+    sub.close()
+    const stopped = f.resizes()
+    f.c.advance(30000); await tick()
+    expect(f.resizes()).toBe(stopped)
+  })
   test('two tabs, page opened at 1280: the 718x400 first frame is dropped, the cast re-asked, the right frame painted', async () => {
     const f = fixture()
     const a = f.sink()
@@ -115,7 +171,7 @@ describe('the hub never delivers a frame of an old size', () => {
     expect(a.frames.map(x => `${x.w}x${x.h}`)).toEqual(['1596x400'])
   })
 
-  test('the re-ask budget is bounded: a page that only ever renders stale frames does not loop forever', async () => {
+  test('the fast re-ask budget is bounded: a page that only renders stale frames backs off', async () => {
     const f = fixture()
     const a = f.sink()
     await f.hub.subscribe('k', 'T1', a.s, V(818, 205))

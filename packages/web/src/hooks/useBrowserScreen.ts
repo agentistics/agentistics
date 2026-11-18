@@ -35,7 +35,7 @@ export function useBrowserScreen(owner: string | null, tab: string | null, watch
   useEffect(() => { dispatch({ type: 'watching', watching }) }, [watching])
   useEffect(() => {
     if (!owner || !watching) return
-    dispatch({ type: 'connecting' })
+    dispatch({ type: 'connecting', viewport: size })
     const es = open(browserStreamUrl(owner, tab, size))
     const onFrame = (e: MessageEvent) => { const f = parseBrowserFrame(String(e.data)); if (f) dispatch({ type: 'frame', frame: f }) }
     const onState = (e: MessageEvent) => { const s = parseBrowserState(String(e.data)); if (s) dispatch({ type: 'state', state: s }) }

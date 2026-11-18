@@ -33,8 +33,10 @@ export const MAX_ACK_WAIT_MS = 1_000
 export const STATE_POLL_MS = 500
 /** A frame whose pixels are not the page's size is dropped and the screencast is re-asked after this delay… */
 export const STALE_KICK_DELAY_MS = 120
-/** …at most this many times in a row (a good frame resets the count), so a page that cannot render never loops. */
+/** …this many fast retries before backing off (a good frame resets the count). */
 export const MAX_STALE_KICKS = 5
+/** Once the fast retries are exhausted, keep recovering a still page at a bounded, slower cadence. */
+export const STALE_BACKOFF_MS = 5_000
 /** `Page.startScreencast` parameters (spec §1.5). */
 export const SCREENCAST_PARAMS = { format: 'jpeg', quality: 60, maxWidth: 1280, maxHeight: 800, everyNthFrame: 1 } as const
 
@@ -49,7 +51,7 @@ export interface RawCastFrame {
 export interface CastFrame {
   tab: string
   seq: number
-  /** Bumped every time the page viewport is re-applied: a frame of an older epoch is of an older size. */
+  /** Unique across cast starts/tab switches and bumped when the page viewport is re-applied. */
   epoch: number
   w: number
   h: number
@@ -171,6 +173,9 @@ const id = (key: string, tab: string) => `${key}\u0000${tab}`
 
 export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
   const loops = new Map<string, Loop>()
+  // Survives loop teardown/reconnect and tab switches: a different capture never reuses (epoch, seq).
+  // Seed from the server clock so a reconnect after a server restart also moves forward.
+  let epochClock = d.now()
 
   function end(loop: Loop, reason: string | null): void {
     if (loop.ended) return
@@ -234,7 +239,7 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
 
   function flush(loop: Loop): void {
     loop.flushTimer = null
-    if (loop.ended || loop.latest === null) return
+    if (loop.ended || loop.latest === null || !loop.cast) return
     const raw = loop.latest
     loop.latest = null
     const st = loop.lastState
@@ -249,6 +254,7 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
       return
     }
     loop.kicks = 0
+    if (loop.kickTimer !== null) { d.clearTimeout(loop.kickTimer); loop.kickTimer = null }
     if (w > 0 && h > 0) loop.viewport = { w, h }
     loop.seq += 1
     const frame: CastFrame = { tab: loop.tab, seq: loop.seq, epoch: loop.epoch, w, h, jpeg: raw.data, url: st?.url ?? '', title: st?.title ?? '', at: d.now() }
@@ -270,7 +276,7 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
    */
   async function resizeLoop(loop: Loop, size: ViewerViewport): Promise<void> {
     if (!loop.cast?.resize) return
-    loop.epoch += 1
+    loop.epoch = ++epochClock
     loop.lastFrame = null
     loop.latest = null
     for (const r of loop.readers) r.pending = null
@@ -278,14 +284,15 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
   }
 
   function kick(loop: Loop): void {
-    if (loop.ended || loop.kickTimer !== null || loop.kicks >= MAX_STALE_KICKS) return
-    loop.kicks += 1
+    if (loop.ended || loop.kickTimer !== null) return
+    const delay = loop.kicks < MAX_STALE_KICKS ? STALE_KICK_DELAY_MS : STALE_BACKOFF_MS
     loop.kickTimer = d.setTimeout(() => {
       loop.kickTimer = null
       const owner = sizedOwner(loop)
       if (loop.ended || !owner?.size) return
-      void resizeLoop(loop, owner.size).catch(() => {})
-    }, STALE_KICK_DELAY_MS)
+      loop.kicks = Math.min(MAX_STALE_KICKS, loop.kicks + 1)
+      void resizeLoop(loop, owner.size).catch(() => {}).then(() => { if (loop.kicks > 0) kick(loop) })
+    }, delay)
   }
 
   function onRaw(loop: Loop, raw: RawCastFrame): void {
@@ -346,7 +353,7 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
         const created: Loop = {
           key, tab, readers: new Set(), cast: null, starting: null, latest: null, unacked: [], oldestUnackedAt: 0,
           lastDeliveryAt: -Infinity, lastAckAt: -Infinity, flushTimer: null, ackTimer: null, stateTimer: null, stateDigest: '', lastFrame: null,
-          lastState: null, viewport: null, seq: 0, epoch: 0, kicks: 0, kickTimer: null, ended: false,
+          lastState: null, viewport: null, seq: 0, epoch: ++epochClock, kicks: 0, kickTimer: null, ended: false,
         }
         loop = created
         loops.set(id(key, tab), created)
@@ -358,6 +365,7 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
           if (!started.ok) { end(created, started.reason); return }
           if (created.ended || created.readers.size === 0) { void started.stop().catch(() => {}); end(created, null); return }
           created.cast = started
+          flush(created) // frames can arrive before startScreencast resolves; validate against the applied viewport
           if (!pollState(created)) return
           created.stateTimer = d.setInterval(() => { pollState(created) }, STATE_POLL_MS)
           tryAck(created)

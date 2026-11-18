@@ -63,14 +63,16 @@ export interface BrowserScreenState {
   goneReason: string | null
   /** false = this surface is not watching (scrolled away, tab hidden, panel closed): no frames come. */
   watching: boolean
-  /** A new connection was opened and has not delivered yet: its sequence restarts, so its first frame is always shown. */
+  /** A new connection has not delivered a matching frame yet; legacy servers may restart its sequence. */
   fresh?: boolean
+  /** The currently requested surface; stale-size frames must not consume a reconnect's fresh flag. */
+  viewport?: { width: number; height: number }
 }
 
 export const INITIAL_BROWSER_SCREEN: BrowserScreenState = { phase: 'idle', frame: null, state: null, goneReason: null, watching: true }
 
 export type BrowserScreenAction =
-  | { type: 'connecting' }
+  | { type: 'connecting'; viewport?: { width: number; height: number } }
   | { type: 'frame'; frame: BrowserFrame }
   | { type: 'state'; state: BrowserScreenStateEvent }
   | { type: 'gone'; reason: string }
@@ -80,12 +82,20 @@ export type BrowserScreenAction =
 export function browserScreenReducer(s: BrowserScreenState, a: BrowserScreenAction): BrowserScreenState {
   switch (a.type) {
     // A new connection drops nothing it may still show honestly: the picture stays until a new one comes.
-    case 'connecting': return { ...s, phase: s.frame ? s.phase : 'connecting', goneReason: null, fresh: true }
+    case 'connecting': return { ...s, phase: s.frame ? s.phase : 'connecting', goneReason: null, fresh: true, viewport: a.viewport }
     case 'frame':
-      // An older frame (a reconnect replaying) never replaces a newer one of the same tab.
-      if (!s.fresh && s.frame && s.frame.tab === a.frame.tab && a.frame.seq <= s.frame.seq && s.phase === 'streaming') return s
-      // A frame of an OLDER viewport epoch (a size the page has since left) never replaces one of a newer epoch on the same connection.
-      if (!s.fresh && s.frame && s.frame.tab === a.frame.tab && s.phase === 'streaming' && a.frame.epoch !== undefined && s.frame.epoch !== undefined && a.frame.epoch < s.frame.epoch) return s
+      if (!matchesViewport(a.frame, s.viewport)) return s
+      if (s.frame?.tab === a.frame.tab && a.frame.epoch !== undefined && s.frame.epoch !== undefined && a.frame.epoch < s.frame.epoch) return s
+      if (s.frame && s.frame.tab === a.frame.tab && s.phase === 'streaming' && (!s.fresh || (a.frame.epoch !== undefined && s.frame.epoch !== undefined))) {
+        const epoch = (a.frame.epoch ?? 0) - (s.frame.epoch ?? 0)
+        if (epoch < 0) return s
+        if (epoch === 0 && a.frame.seq < s.frame.seq) return s
+        // Older servers can reuse a key across a resize. Prefer the matching size; without surface data,
+        // accept the later size correction (the original QA probe), but never replay the same-size duplicate.
+        if (epoch === 0 && a.frame.seq === s.frame.seq) {
+          if (s.viewport ? matchesViewport(s.frame, s.viewport) : a.frame.w === s.frame.w && a.frame.h === s.frame.h) return s
+        }
+      }
       return { ...s, frame: a.frame, phase: 'streaming', goneReason: null, fresh: false }
     case 'state': return { ...s, state: a.state }
     case 'gone': return { ...s, phase: 'ended', goneReason: a.reason }
@@ -93,6 +103,13 @@ export function browserScreenReducer(s: BrowserScreenState, a: BrowserScreenActi
     case 'watching': return s.watching === a.watching ? s : { ...s, watching: a.watching }
     default: return s
   }
+}
+
+function matchesViewport(frame: BrowserFrame, viewport: BrowserScreenState['viewport']): boolean {
+  if (!viewport) return true
+  // At most one displayed pixel of rounding, matching the CSS surface rather than the JPEG's raw scale.
+  return Math.abs(frame.w / frame.h * viewport.height - viewport.width) <= 1
+    && Math.abs(frame.h / frame.w * viewport.width - viewport.height) <= 1
 }
 
 /** Watching = the card is in the viewport, the page tab is visible, the panel is open (shellWatching's rule). */
