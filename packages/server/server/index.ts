@@ -2928,6 +2928,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return res
     }
 
+    // What holds a session right now. The hold lives in the engine and only THIS process holds it, so a one-shot CLI
+    // (`agentop session kill|retire`) and the MCP ask here. No engine, or an engine without holds, answers
+    // `available: false` — nothing can hold a session there.
+    if (url.pathname === '/api/fleet/holds' && req.method === 'GET') {
+      const { fleetHoldsBody } = await import('./sessions/hold-state-web')
+      return new Response(JSON.stringify(await fleetHoldsBody(url.searchParams.get('session'))), {
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      })
+    }
+
     // Older CLOSED rows, paged most recent first — what the events stream does not re-send (P-13).
     if (url.pathname === '/api/fleet/closed' && req.method === 'GET') {
       const { readClosedFleet, fleetLang } = await import('./sessions/fleet-web')

@@ -10,6 +10,7 @@
  * "nothing is running" and "this machine cannot tell". An empty list rendered as a confident zero is
  * the same defect `liveEmptyNotice` exists to prevent on the dashboard.
  */
+import { presentChatTurns } from '../engine/present-turns'
 import { initialRegistry, isInitialSnapshot, markInitialSnapshot } from './boot-fleet'
 
 import { dedupeRepeatedPrompt } from './prompt-dedupe'
@@ -619,7 +620,7 @@ export function createSessionsPoller(o: {
             const ended = r.status === 'lost' || r.status === 'exited' || !!r.managed?.endedAt
             const turns = st && kept && kept.path === path && kept.size === st.size && kept.mtimeMs === st.mtimeMs && kept.ended === ended
               ? kept.turns
-              : await transcript.readRecent(path, TAIL_CHAT_TURNS, { sessionEnded: ended }).catch(() => [] as ChatTurn[])
+              : presentChatTurns(await transcript.readRecent(path, TAIL_CHAT_TURNS, { sessionEnded: ended }).catch(() => [] as ChatTurn[]))
             if (st && turns !== kept?.turns) chatTailMemo.set(r.id, { path, size: st.size, mtimeMs: st.mtimeMs, ended, turns })
             if (turns.length > 0) chatTails.set(r.id, anyGrant() ? await scrubDeep(r.id, turns) : turns)
             return turns

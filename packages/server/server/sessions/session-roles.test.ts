@@ -527,6 +527,23 @@ describe('LIDER.KILL: a new leader retires its predecessor', () => {
     expect(out.ok && out.message).toContain('Old lead will be closed once its current turn ends (within 10 minutes at most).')
     expect(out.ok && out.warning).toBeUndefined()
   })
+  test('a held predecessor: the reply says the retire waits for the hold', async () => {
+    await pred()
+    const base = setup([live('old', 'Old lead', 'waiting'), live('new', 'New', 'working')], { old: 't1', new: 't1' })
+    const since = Date.parse('2026-11-17T14:00:00.000Z')
+    const deps = { ...base.deps, holdOf: async (id: string) => (id === 'old' ? { state: 'held' as const, since, sentence: { en: 'engine words', pt: 'palavras do engine' } } : { state: 'none' as const }) }
+    const out = await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, deps)
+    expect(out).toMatchObject({ ok: true, retire: { ok: true, id: 'old', held: { since, sentence: { en: 'engine words', pt: 'palavras do engine' } } } })
+    expect(out.ok && out.message).toContain('engine words')
+    expect(out.ok && out.message).toContain('when that ends')
+    expect(base.retired).toEqual([['old', 'new']]) // the request is still written: it just waits
+  })
+  test('an unreadable hold state is said as held too; a throwing reader never breaks the retire', async () => {
+    await pred()
+    const base = setup([live('old', 'Old lead', 'waiting'), live('new', 'New', 'working')], { old: 't1', new: 't1' })
+    const out = await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, { ...base.deps, holdOf: async () => { throw new Error('boom') } })
+    expect(out).toMatchObject({ ok: true, retire: { ok: true, held: 'unknown' } })
+  })
   test('a working predecessor is live too', async () => {
     await pred()
     const { deps, retired } = setup([live('old', 'Old', 'working'), live('new', 'New')], { old: 't1', new: 't1' })

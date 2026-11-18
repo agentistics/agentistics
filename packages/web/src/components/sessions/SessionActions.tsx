@@ -36,7 +36,7 @@ export interface SessionActionsProps {
   row: FleetRow
   lang: 'pt' | 'en'
   act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; force?: boolean })
-    => Promise<{ ok: boolean; message: string; id?: string; memoryBudget?: true; queuedId?: string }>
+    => Promise<{ ok: boolean; message: string; id?: string; memoryBudget?: true; held?: true; queuedId?: string }>
   /** Called after a verb that removes the row, so the panel can step away from it. */
   onGone?: () => void
   /**
@@ -127,6 +127,8 @@ export function SessionActions({
   /** The memory gate refused a fork: "Iniciar mesmo assim" is offered (behind a confirmation), and the queue entry it filed is cancelled first. */
   const [forkRefused, setForkRefused] = useState<{ queuedId?: string } | null>(null)
   const [confirmingFork, setConfirmingFork] = useState(false)
+  /** `kill` refused because the session is in use right now: the sentence the second, explicit confirm asks over (it re-sends with `force`). */
+  const [killHeld, setKillHeld] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   // CONTA.TROCA: asked only while the menu is open, so a list of rows costs nothing.
   const [switching, setSwitching] = useState(false)
@@ -134,7 +136,7 @@ export function SessionActions({
 
   // A different row is a different set of answers: an in-flight rename must not carry across.
   useEffect(() => {
-    setOpen(false); setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingForget(false); setConfirmingTerminal(false); setNotice(null); setForkRefused(null); setConfirmingFork(false)
+    setOpen(false); setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingForget(false); setConfirmingTerminal(false); setNotice(null); setForkRefused(null); setConfirmingFork(false); setKillHeld(null)
   }, [row.id])
 
   useEffect(() => { if (asking) inputRef.current?.focus() }, [asking])
@@ -158,6 +160,8 @@ export function SessionActions({
     // menu closes and an inline notice would go with it.
     if (action === 'terminal') pushNotification(terminalToast(out, lang))
     // Each refused attempt needs feedback, even when its text matches a previously seen bell row.
+    // In use: no error toast — the SECOND question (a confirm dialog) says it, and `force` ends it on purpose.
+    if (action === 'kill' && !out.ok && out.held === true) { setKillHeld(out.message); return }
     if (action === 'kill' && !out.ok) pushNotification({ type: 'error', title: pt ? 'Encerrar sessão' : 'End session', message: out.message, meta: { notificationKey: `session-kill-refused:${row.id}:${crypto.randomUUID()}` } })
     if (action === 'fork' && !out.ok && out.memoryBudget === true) setForkRefused({ ...(out.queuedId ? { queuedId: out.queuedId } : {}) })
     if (!out.ok) { setConfirmingTerminal(false); return }
@@ -511,6 +515,17 @@ export function SessionActions({
           </div>
         </>
       )}
+      {killHeld !== null && <ConfirmModal
+        open
+        title={pt ? 'Encerrar mesmo assim?' : 'End anyway?'}
+        message={killHeld}
+        confirmLabel={pt ? 'Encerrar mesmo assim' : 'End anyway'}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        busy={busy}
+        focusCancel
+        onConfirm={() => { setKillHeld(null); void run('kill', undefined, true) }}
+        onCancel={() => setKillHeld(null)}
+      />}
       {confirmingFork && <ConfirmModal
         open
         title={pt ? 'Iniciar mesmo assim?' : 'Start anyway?'}

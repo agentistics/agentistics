@@ -18,13 +18,14 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { HarnessId } from '@agentistics/core'
+import type { EngineHolds } from '@agentistics/engine-api'
 import type { SessionSnapshot } from './sessions-host'
 import type { SessionView } from './session-view'
 import type { ManagedSession, RetireRequest } from './types'
 import type { SessionPatch } from './registry'
 import {
-  MIN_QUIET_FOR_MS, activityReasons, decideRetire, effectiveDeadline, nextStreak, retireNoteText, retireReasonsText,
-  type QuietStreak, type RetireDecision,
+  MIN_QUIET_FOR_MS, activityReasons, decideRetire, effectiveDeadline, extendedDeadline, nextStreak, retireNoteText, retireReasonsText,
+  type HoldObservation, type QuietStreak, type RetireDecision,
 } from './retire-plan'
 import type { HarnessTranscript } from './harness-transcript'
 import { WORK_CHILDREN_TRUSTED, type WorkChildrenResult } from './work-children'
@@ -45,6 +46,16 @@ export interface RetireRunnerDeps {
   bgTasks(row: ManagedSession): Promise<number | null>
   /** The row's work children. */
   children(row: ManagedSession): Promise<WorkChildrenResult>
+  /**
+   * What holds the row: `none`, `held` (since when, and the engine's own sentence) or `unknown` when it
+   * could not be read — which holds the retire like a hold does. Absent dep = nothing holds sessions on this host.
+   */
+  hold?(row: ManagedSession): Promise<HoldObservation>
+  /**
+   * Whatever holds `row` is told ONCE that the leadership passed to the successor. Resolves true when it
+   * was told. Absent dep = nothing to tell it with.
+   */
+  announceHandoff?(row: ManagedSession, successorId: string): Promise<boolean>
   /** A comment on the row's task (best effort). */
   comment(taskId: string, body: string): Promise<void>
   /** A user-facing notification (expire / cancel / retire). */
@@ -78,6 +89,7 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
     map.set(id, { at: Math.max(at, prev?.at ?? at), polls })
     return polls >= 2
   }
+  const heldReported = new Set<string>()
   let queue: Promise<void> = Promise.resolve()
   const log = d.log ?? (() => {})
 
@@ -100,6 +112,9 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
           if (streak) streaks.set(row.id, streak)
           else streaks.delete(row.id)
         }
+        // A hold can start in the gap between the decision and here: something live taking the session is the
+        // one thing that must never be cut, so it is asked again right before the kill.
+        if (d.hold && (await d.hold(fresh).catch((): HoldObservation => ({ state: 'unknown' }))).state !== 'none') return
         // No further probes between this activity check and the kill operation (which records the
         // end decision before removing the pane, just like the CLI/web kill paths).
         // A FORCED hand-off (past its hard deadline) skips the quiet re-check — being busy is exactly
@@ -164,6 +179,40 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
     d.notify('warning', 'Retire expired', body, 'retire.expired', { id: row.id, label: fresh.label ?? row.id, successorId: req.successorId ?? '', reason: decision.reasons[0]?.code ?? 'deadline', reasons: decision.reasons.map(r => r.code) })
   }
 
+  /**
+   * What a hold does to a pending request, besides holding it: the deadline follows the hold (a held
+   * request is never expired, so it fires after the hold ends) and whatever holds it is told the leadership passed —
+   * both ONCE, and both written on the request so a restart does not repeat them.
+   */
+  async function holdByHold(
+    row: ManagedSession, req: RetireRequest, hold: HoldObservation, successorAlive: boolean | null, now: number,
+  ): Promise<void> {
+    try {
+      const fresh = (await d.readRegistry()).find(m => m.id === row.id)
+      if (!fresh?.retire || fresh.retire.requestedAt !== req.requestedAt || fresh.retire.expiredAt) return
+      const who = nameOf(fresh)
+      const extended = extendedDeadline(fresh.retire, now)
+      const say = hold.state === 'held' && !!req.successorId && successorAlive !== false && !fresh.retire.handoffNoticeAt && !!d.announceHandoff
+      const said = say ? await d.announceHandoff!(fresh, req.successorId!).catch(() => false) : false
+      if (extended || said) {
+        await d.patch(row.id, { retire: {
+          ...fresh.retire,
+          ...(extended ? { deadlineAt: extended, holdExtendedAt: new Date(now).toISOString() } : {}),
+          ...(said ? { handoffNoticeAt: new Date(now).toISOString() } : {}),
+        } })
+      }
+      if (!heldReported.has(req.requestedAt + row.id)) {
+        heldReported.add(req.requestedAt + row.id)
+        const body = `Retire of ${who} is HELD: ${hold.state === 'held' ? `${hold.sentence.en} (since ${new Date(hold.since).toISOString()})` : 'whether something live is using it could not be read'}. Nothing was killed; it is carried out once the hold ends.`
+        log(`[retire] ${body}`)
+        if (fresh.taskId) await d.comment(fresh.taskId, body).catch(() => {})
+        d.notify('info', 'Retire held', body, 'retire.held', { id: row.id, label: fresh.label ?? row.id, successorId: req.successorId ?? '' })
+      }
+    } catch (e) {
+      log(`[retire] ${row.id}: hold bookkeeping failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
   async function consumeOne(snap: SessionSnapshot): Promise<void> {
     // A failed poll hands back the PREVIOUS list: it says nothing new and must not advance a streak.
     if (snap.unavailable) return
@@ -210,12 +259,18 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
         childrenTrusted: WORK_CHILDREN_TRUSTED[row.harness as HarnessId] ?? false,
         successorAlive,
       }
+      // A hold is read for every pending row, running or not: it is one in-process lookup, and it is what
+      // holds the retire (and moves the deadline) however busy or quiet the row looks.
+      const hold: HoldObservation = base.running && base.successorAlive !== false && d.hold
+        ? await d.hold(row).catch((): HoldObservation => ({ state: 'unknown' }))
+        : { state: 'none' }
+      if (hold.state !== 'none') await holdByHold(row, req, hold, successorAlive, now)
       // The probes cost a transcript read and a /proc walk: only for a row the activity says is quiet.
-      const probe = base.running && base.successorAlive !== false && activityReasons(req, base).length === 0
+      const probe = base.running && base.successorAlive !== false && hold.state === 'none' && activityReasons(req, base).length === 0
       const [bgTasksRunning, children] = probe
         ? await Promise.all([d.bgTasks(row).catch(() => null), d.children(row).catch(() => null)])
         : [null, null]
-      const decision = decideRetire(req, { ...base, bgTasksRunning, children }, now)
+      const decision = decideRetire(req, { ...base, bgTasksRunning, children, hold }, now)
       try {
         await act(row, req, decision)
       } catch (e) {
@@ -297,7 +352,8 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
     const runner = createRetireRunner({
       readRegistry: reg.readRegistry,
       patch: reg.patchSession,
-      kill: id => reg.killAndRetireSession(id, () => backend.kill(id)),
+      // A hold that starts after the runner's own check is stopped by the guard inside the kill: the request is kept, never expired.
+      kill: id => reg.killAndRetireSession(id, () => backend.kill(id)).catch(e => { if (e instanceof reg.HoldError) return false; throw e }),
       readFresh: () => hub.refresh(),
       markEnded: id => reg.retireSession(id),
       fileInFolder: (f, row) => fileInFolder(f, row),
@@ -317,6 +373,8 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
         const { addComment } = await import('./task-web')
         await addComment(taskId, { author: 'agentop', body })
       },
+      hold: row => probeHoldOf(row),
+      announceHandoff: (row, successorId) => announceHandoffOf(row, successorId),
       notify: (level, title, message, code, meta) => broadcastNotification({ type: level, title, message, code, meta }),
       refresh: id => kickFleet(id),
       now: () => Date.now(),
@@ -340,6 +398,30 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
  */
 export function paneLessChildren(row: Pick<ManagedSession, 'structuredDriver'>): WorkChildrenResult {
   return row.structuredDriver ? { checked: false, reason: 'unmeasured' } : { checked: false, reason: 'unreadable' }
+}
+
+/** The engine's holds on THIS server process (`null`: no engine, or an engine without holds — nothing can hold a session). */
+async function holdsOf(): Promise<EngineHolds | null> {
+  const { engine, loadEngine } = await import('../engine/load')
+  await loadEngine() // a rejection is an engine that could not be read — the caller says `unknown`, never "no hold"
+  return engine()?.holds ?? null
+}
+
+async function probeHoldOf(row: ManagedSession): Promise<HoldObservation> {
+  const { probeHold } = await import('./hold-state')
+  // Only an engine KNOWN to have no holds means none; one that could not be read is unknown (and unknown holds).
+  let holds: EngineHolds | null
+  try { holds = await holdsOf() } catch { return { state: 'unknown' } }
+  return probeHold(row, holds)
+}
+
+async function announceHandoffOf(row: ManagedSession, successorId: string): Promise<boolean> {
+  const holds = await holdsOf().catch(() => null)
+  if (!holds?.handoff) return false
+  const reg = await import('./registry')
+  const title = (await reg.readRegistry()).find(m => m.id === successorId)?.label
+  const out = await holds.handoff({ id: row.id, ...(row.conversationId ? { conversationId: row.conversationId } : {}) }, { successorId, ...(title ? { successorTitle: title } : {}) })
+  return out.announced
 }
 
 /** A successor can be born after the poll started; allow the registry's birth grace. */

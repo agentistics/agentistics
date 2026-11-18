@@ -24,7 +24,9 @@ import {
 import { accountLabel, executeCopies, findSourceFiles, readLimitState, resolveRoot, startableHere } from './account-switch-io'
 import { spawnAccountContext } from './spawn-account-io'
 import { spawnAccountMessage } from './spawn-account'
-import { killAndRetireSession, readRegistry } from './registry'
+import { HoldError, killAndRetireSession, readRegistry } from './registry'
+import { observeHoldNow } from './hold-guard'
+import type { HoldObservation } from './retire-plan'
 import type { ManagedSession, SessionBackend } from './types'
 import { registryOfSpawnRows, resolveSessionAccount } from './session-account'
 
@@ -55,6 +57,8 @@ export interface SwitchIo {
   copy: typeof executeCopies
   limit: typeof readLimitState
   killAndRetire: (id: string, kill: () => Promise<boolean>) => Promise<boolean>
+  /** What holds the row, right now: a session something live is using is never ended by a switch. */
+  hold: (row: ManagedSession) => Promise<HoldObservation>
   startable: typeof startableHere
   /** The session's conversation, through its harness's own transcript reader. */
   turns: (m: ManagedSession) => Promise<{ turns: SummaryTurn[] } | { unavailable: string }>
@@ -71,6 +75,7 @@ const REAL_IO: SwitchIo = {
   copy: executeCopies,
   limit: readLimitState,
   killAndRetire: (id, kill) => killAndRetireSession(id, kill),
+  hold: row => observeHoldNow(row),
   startable: startableHere,
   turns: async m => (await import('./handoff-relay-io')).readSessionTurns(m),
   role: async keys => (await import('./session-roles')).storedRoleFor(keys) as Promise<'leader' | 'worker' | undefined>,
@@ -89,7 +94,12 @@ function floorSentence(r: SpawnSessionResult): string {
 }
 
 /** `ended` + `endedId`: the session WAS ended and could not be given back — the UI offers Reopen on that row. */
-export type SwitchResult = SpawnSessionResult & { code?: SwitchRefusal; status?: number; ended?: boolean; endedId?: string }
+export type SwitchResult = SpawnSessionResult & { code?: SwitchRefusal; status?: number; ended?: boolean; endedId?: string; /** held back by a hold; it will be tried again once it ends */ deferred?: true }
+
+/** The switch is deferred until the hold ends: refused with its own code so the auto-switch does not count the target as tried. */
+function deferredByHold(lang: 'en' | 'pt'): SwitchResult {
+  return { ...refuse('in-use', '', lang), deferred: true }
+}
 
 function refuse(reason: SwitchRefusal, detail: string, lang: 'en' | 'pt'): SwitchResult {
   return {
@@ -108,6 +118,9 @@ export async function switchSessionAccountImpl(req: SwitchAccountRequest, deps: 
   if (!row) return refuse('not_running_here', '', lang)
   const harness = row.harness as HarnessId
   if (req.harness && req.harness !== harness) return crossHarnessSwitch(row, rows, req, deps, io)
+  // A session something live is using is idle between turns: ending it for a switch would cut that off. The switch waits
+  // (the auto-switch tries again on its next tick; a person is told, in words, that it is deferred) — never a kill mid-use.
+  if (!row.endedAt && (await io.hold(row).catch((): HoldObservation => ({ state: 'unknown' }))).state !== 'none') return deferredByHold(lang)
   const conversationId = row.conversationId
   const context = await io.context([harness])
   // CONTA.IDENTIDADE: WHO the session runs as is the shared resolver's answer (the GET dialog shows
@@ -143,7 +156,9 @@ export async function switchSessionAccountImpl(req: SwitchAccountRequest, deps: 
     if (!fresh || (fresh.endedAt && !row.endedAt)) return refuse('no_target', '', lang)
     const live = (await deps.backend.list().catch(() => [])).find(b => b.id === row.id)
     if (live?.alive) {
-      const ended = await io.killAndRetire(row.id, () => deps.backend.kill(row.id)).catch(() => false)
+      let held = false
+      const ended = await io.killAndRetire(row.id, () => deps.backend.kill(row.id)).catch(e => { held = e instanceof HoldError; return false })
+      if (held) return deferredByHold(lang) // a hold started since the check above: nothing was ended, nothing was copied
       if (!ended) {
         return { ok: false, message: lang === 'pt' ? 'Não foi possível encerrar a sessão para trocar de conta. Nada mudou.' : 'The session could not be ended to switch accounts. Nothing changed.' }
       }
@@ -203,6 +218,8 @@ async function crossHarnessSwitch(row: ManagedSession, rows: readonly ManagedSes
   const startable = await io.startable()
   const context = await io.context([target])
   const live = (await deps.backend.list().catch(() => [])).find(b => b.id === row.id)
+  // Before anything is spawned: the new session would otherwise start beside one that cannot be ended.
+  if (live?.alive === true && (await io.hold(row).catch((): HoldObservation => ({ state: 'unknown' }))).state !== 'none') return deferredByHold(lang)
   const decided = decideCrossSwitch({
     harness, targetHarness: target, running: !row.endedAt && live?.alive === true,
     requested: req.accountId, agentCaller: req.callerVerified === true, context, startable,
@@ -253,8 +270,11 @@ async function crossHarnessSwitch(row: ManagedSession, rows: readonly ManagedSes
     return { ok: false, message: pt ? `A nova sessão não iniciou; a sessão atual continua como estava.${why}` : `The new session did not start; the current session continues as it was.${why}` }
   }
   await io.link(row.id, newId).catch(() => undefined)
-  const ended = await io.killAndRetire(row.id, () => deps.backend.kill(row.id)).catch(() => false)
+  let heldNow = false
+  const ended = await io.killAndRetire(row.id, () => deps.backend.kill(row.id)).catch(e => { heldNow = e instanceof HoldError; return false })
   const done = pt ? 'Trabalho continuado em outro assistente, numa conversa nova com um resumo da anterior.' : 'Work continued on another assistant, in a new conversation briefed with a summary of the previous one.'
-  const tail = ended ? '' : (pt ? ' A sessão anterior não pôde ser encerrada: encerre-a você.' : ' The previous session could not be ended: end it yourself.')
+  const tail = ended ? '' : heldNow
+    ? (pt ? ' A sessão anterior entrou em uso: ela NÃO foi encerrada; encerre-a quando terminar.' : ' The previous session came into use: it was NOT ended; end it once that is over.')
+    : (pt ? ' A sessão anterior não pôde ser encerrada: encerre-a você.' : ' The previous session could not be ended: end it yourself.')
   return { ...started, ok: true, id: newId, message: `${done}${pending ? (pt ? ' A última mensagem foi reenviada.' : ' The last message was re-sent.') : ''}${floorSentence(started)}${tail}` }
 }

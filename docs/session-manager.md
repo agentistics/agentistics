@@ -797,6 +797,30 @@ a pipe held open by an escaped descendant can delay exit only until the group gr
 50 ms scheduling allowance and one extra second for draining; buffered output is then flushed and
 exit is published even if stdout never closes.
 
+### A hold keeps a session open
+
+A session something live is using is idle between turns, so its activity says nothing about whoever is on
+the other side. A leader that handed over mid-use used to be closed under them. What holds a session lives
+in the engine (`Engine.holds`, engine-api 1.29: `observe(row)` → `none | held + since + sentence | unknown`),
+and the host asks it. The host names none of it: the human sentence (`sentence: { en, pt }`) comes from the
+engine at runtime, so every surface says what holds the session in the engine's own words.
+
+- `decideRetire` puts the hold BEFORE every quiet check (`held`; an unreadable state is `hold-unknown`
+  and holds too — unknown is never quiet). The expensive probes are not run for a held row.
+- Past the deadline a held request is NOT expired and never killed: the runner moves the deadline with
+  the hold (`extendedDeadline`, `HOLD_GRACE_MS` after now), so the retire fires after the hold ends.
+  The hold is reported once (`retire.held`, a task comment) and the runner re-asks right before the kill,
+  since a hold can start in the gap.
+- When the request names a successor, `Engine.holds.handoff` may tell whatever holds the session ONCE that
+  the leadership passed; `handoffNoticeAt` on the request makes it once across restarts.
+- `agentop session kill <ref>` refuses on a held session and says what holds it (`--force` cuts it off).
+  The CLI asks the running server (`GET /api/fleet/holds?session=<ref>` resolves a reference); no server
+  means nothing holds it, and a server that cannot answer is unknown, which is refused too.
+- Every kill goes through one guard (`killAndRetireSession`); the web and cockpit surfaces refuse the first
+  press with `held: true` and ask "End anyway?", and an account switch is deferred while a session is held.
+- The MCP reads it with `agentistics_session_hold` (`held`, `since`, `sentence`), and the `retirePredecessor`
+  reply and `agentop session retire` say `held`.
+
 Known limitation (S5 QA L3, deferred to S6): configured MCP commands are read only for Claude.
 For other harnesses, an extra MCP server can conservatively count as a work child and delay
 retirement until expiry. The shared `agentop mcp` exclusion still applies to every harness.

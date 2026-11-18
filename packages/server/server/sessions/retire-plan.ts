@@ -19,12 +19,20 @@
  * - the successor (a hand-off) is still alive — a successor that died CANCELS the request, so a task
  *   is never left without its leader.
  *
+ * - NOTHING LIVE HOLDS it. A session something live is using is idle between turns, so its activity says nothing
+ *   about whoever is on the other side (a leader handed over mid-use and the owner lost what they said). A hold
+ *   HOLDS the retire — before the quiet checks, and past the deadline too: at the deadline a held request is not
+ *   expired and never killed, the runner extends the deadline (`extendedDeadline`) and reports it. A hold state
+ *   that could not be read is unknown, and unknown is never quiet. What holds it is said by the engine, not here.
+ *
  * At or past `deadlineAt` a plain request is never killed: it EXPIRES with the reasons in words. A
  * HAND-OFF (a request naming a successor) is the exception (LIDER.PASSAGEM): its deadline is at most
  * `HANDOFF_DEADLINE_MS` after the request, and past it — with the successor confirmed alive — the
  * predecessor is closed whatever it is doing (`forced`), because the successor already holds the task.
  * A row that is no longer running has nothing to kill and is simply filed as retired.
  */
+import type { HoldObservation } from '@agentistics/engine-api'
+
 import type { RetireRequest, SessionActivity } from './types'
 import type { ProcNode, WorkChildrenResult } from './work-children'
 
@@ -44,12 +52,14 @@ export const HANDOFF_DEADLINE_MS = 10 * 60_000
 /** The deadline that binds: a hand-off never waits longer than `HANDOFF_DEADLINE_MS` from its request. */
 export function effectiveDeadline(req: RetireRequest): number {
   const stored = Date.parse(req.deadlineAt)
-  if (!req.successorId) return stored
+  if (!req.successorId || req.holdExtendedAt) return stored
   const cap = Date.parse(req.requestedAt) + HANDOFF_DEADLINE_MS
   return Number.isFinite(cap) ? Math.min(stored, cap) : stored
 }
 /** Polls of `waiting` in a row before it counts — the `event-plan.ts` confirmation. */
 export const CONFIRM_POLLS = 2
+/** How long a retire held by a hold is given after the hold ends, once its deadline has come. */
+export const HOLD_GRACE_MS = 5 * 60_000
 
 /** Consecutive polls that observed `waiting`, and since when. Kept in memory by the runner. */
 export interface QuietStreak {
@@ -81,9 +91,15 @@ export interface RetireObservation {
   readonly childrenTrusted: boolean
   /** `null` when the request names no successor. */
   readonly successorAlive: boolean | null
+  /** What holds the row. Absent = `none` (no engine, or an engine without holds). */
+  readonly hold?: HoldObservation
 }
 
+export type { HoldObservation }
+
 export type RetireReason =
+  | { readonly code: 'in-use'; readonly since: number; readonly sentence: { readonly en: string; readonly pt: string } }
+  | { readonly code: 'hold-unknown' }
   | { readonly code: 'working' }
   | { readonly code: 'waiting-approval' }
   | { readonly code: 'activity-unknown' }
@@ -124,6 +140,11 @@ export function decideRetire(req: RetireRequest | undefined, obs: RetireObservat
   if (!obs.running) return { action: 'retire', kill: false, notes: [] }
   if (obs.successorAlive === false) return { action: 'cancel', reason: 'successor-dead' }
 
+  // A hold outranks everything: nothing else about the row matters while something live uses it, and the
+  // expensive probes below are not worth running.
+  const holdWhy = holdReasons(obs.hold)
+  if (holdWhy.length > 0) return { action: 'wait', reasons: holdWhy, notes: [] }
+
   const reasons = activityReasons(req, obs)
   const notes: RetireNote[] = []
   if (req.successorId && obs.successorAlive === null) reasons.push({ code: 'successor-unknown' })
@@ -153,11 +174,29 @@ export function decideRetire(req: RetireRequest | undefined, obs: RetireObservat
   return { action: 'wait', reasons, notes }
 }
 
+/** The hold put on a retire (empty when there is none). */
+export function holdReasons(hold: HoldObservation | undefined): RetireReason[] {
+  if (!hold || hold.state === 'none') return []
+  return hold.state === 'held' ? [{ code: 'in-use', since: hold.since, sentence: hold.sentence }] : [{ code: 'hold-unknown' }]
+}
+
+/**
+ * The deadline of a request held by a hold, or `null` when it needs no move. A held request never expires,
+ * so its deadline follows the hold: whenever less than half of `HOLD_GRACE_MS` is left (or it has passed)
+ * it becomes `now + HOLD_GRACE_MS`, which is what lets the retire fire after the hold ends.
+ */
+export function extendedDeadline(req: RetireRequest, now: number): string | null {
+  const left = Date.parse(req.deadlineAt) - now
+  return left < HOLD_GRACE_MS / 2 ? new Date(now + HOLD_GRACE_MS).toISOString() : null
+}
+
 const secs = (ms: number): string => `${Math.max(0, Math.round(ms / 1000))}s`
 
 /** One reason in words, for the expiry notification and the CLI. */
 export function retireReasonText(r: RetireReason): string {
   switch (r.code) {
+    case 'in-use': return `${r.sentence.en} (since ${new Date(r.since).toISOString()})`
+    case 'hold-unknown': return 'whether something live is using it could not be read'
     case 'working': return 'still working'
     case 'waiting-approval': return 'waiting on a permission dialog (a person must answer it)'
     case 'activity-unknown': return 'its state could not be read'
@@ -219,6 +258,8 @@ export function planRetireRequest(
       requestedAt: new Date(now).toISOString(),
       by: input.by,
       ...(input.successorId ? { successorId: input.successorId } : {}),
+      // Whatever holds the session is told the leadership passed ONCE per hand-off: re-asking for the same successor keeps it said.
+      ...(existing?.handoffNoticeAt && existing.successorId && existing.successorId === input.successorId ? { handoffNoticeAt: existing.handoffNoticeAt } : {}),
       ...(input.folderId ? { folderId: input.folderId } : {}),
       quietForMs,
       deadlineAt: new Date(now + deadlineMs).toISOString(),

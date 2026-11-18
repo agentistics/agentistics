@@ -1291,6 +1291,8 @@ export interface ActionResult {
   action?: { kind: 'update-harness'; harness: string; need: string }
   /** The action is a question and must be explicitly confirmed before it can proceed. */
   confirm?: boolean
+  /** `kill` refused because something live is using the session: ask once more ("end anyway?"), then re-send with `force`. */
+  held?: true
   /** A failed pane write classified from the post-write screen. */
   failure?: 'prompt' | 'ended' | 'unconfirmed'
   /** PLAN.ACCOUNTS D3: refused by the account rule — the server maps it to an HTTP status. */
@@ -1616,7 +1618,8 @@ export interface ControlHost {
    */
   attachSession?(id: string): Promise<AttachTicket | null>
 
-  killSession?(id: string): Promise<ActionResult>
+  /** `force`: the person confirmed ending a session something live is using (the first press is refused with `held`). */
+  killSession?(id: string, force?: boolean): Promise<ActionResult>
 
   /**
    * Stop the current turn WITHOUT ending the session.

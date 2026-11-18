@@ -8,7 +8,7 @@ import type { ManagedSession } from './types'
 const acc = (o: Partial<SpawnAccountRow> & { id: string }): SpawnAccountRow =>
   ({ harness: 'claude', root: null, bound: true, available: true, firstSeen: 1, ...o })
 
-function world(opts: { copyFails?: boolean; transcript?: boolean; pending?: string; accounts?: SpawnAccountRow[]; refuseTarget?: boolean; refuseAll?: boolean } = {}) {
+function world(opts: { hold?: import('./retire-plan').HoldObservation; copyFails?: boolean; transcript?: boolean; pending?: string; accounts?: SpawnAccountRow[]; refuseTarget?: boolean; refuseAll?: boolean } = {}) {
   let n = 0
   const rows: ManagedSession[] = [{
     id: 'm1', harness: 'claude', cwd: '/w', createdAt: '2026-10-24T00:00:00Z', conversationId: 'conv1', accountId: 'acc_a', label: 'Fix', note: 'n',
@@ -44,11 +44,52 @@ function world(opts: { copyFails?: boolean; transcript?: boolean; pending?: stri
       copy: async c => { if (opts.copyFails) throw new Error('disk full'); copied.push(...c) },
       limit: async () => opts.pending ? { pendingPrompt: opts.pending } : null,
       killAndRetire: async (id, kill) => { const r = rows.find(m => m.id === id)!; r.endedAt = 'now'; return kill() },
+      hold: async () => opts.hold ?? { state: 'none' },
     },
   }
   const live = () => rows.filter(r => !r.endedAt)
   return { deps, rows, killed, resumed, copied, live }
 }
+
+describe('HIGH-1: an account switch never ends a held session', () => {
+  const held = { state: 'held', since: 1_000, sentence: { en: 'engine words', pt: 'palavras do engine' } } as const
+  test('same harness: deferred, in words, with its own code; nothing killed, copied or resumed', async () => {
+    const w = world({ hold: held })
+    const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, w.deps)
+    expect(out).toMatchObject({ ok: false, code: 'in-use', status: 409, deferred: true })
+    expect(out.message).toContain('deferred until that ends')
+    expect(w.killed).toEqual([])
+    expect(w.copied).toEqual([])
+    expect(w.resumed).toEqual([])
+    expect(w.live().map(r => r.id)).toEqual(['m1'])
+  })
+  test('an unreadable hold is held too', async () => {
+    const w = world({ hold: { state: 'unknown' } })
+    expect((await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, w.deps)).code).toBe('in-use')
+    expect(w.killed).toEqual([])
+  })
+  test('a hold that starts between the check and the kill (the guard inside the kill) still stops it, before anything is copied', async () => {
+    const w = world()
+    w.deps.io!.killAndRetire = async () => { throw new (await import('./hold-guard')).HoldError('m1', held) }
+    const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, w.deps)
+    expect(out).toMatchObject({ ok: false, code: 'in-use', deferred: true })
+    expect(w.copied).toEqual([])
+    expect(w.resumed).toEqual([])
+  })
+  test('another harness: nothing is spawned beside a session that cannot be ended', async () => {
+    const w = world({ hold: held })
+    let spawned = 0
+    w.deps.spawn = async () => { spawned++; return { ok: true, message: 'ok', id: 'x' } }
+    const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b', harness: 'codex' }, w.deps)
+    expect(out).toMatchObject({ ok: false, code: 'in-use', deferred: true })
+    expect(spawned).toBe(0)
+    expect(w.killed).toEqual([])
+  })
+  test('no hold: unchanged', async () => {
+    const w = world()
+    expect((await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, w.deps)).ok).toBe(true)
+  })
+})
 
 describe('switchSessionAccountImpl', () => {
   test('ends, copies, resumes the same conversation on the target; one live row', async () => {
@@ -207,6 +248,7 @@ describe('switchSessionAccountImpl — another harness (v2 hand-off)', () => {
         context: async () => ({ enabled: true, accounts: [acc({ id: 'acc_a' }), acc({ id: 'acc_k', harness: 'codex', root: '/r/k' })] }),
         limit: async () => ({ pendingPrompt: 'fix the CSV header' }),
         killAndRetire: async (id, kill) => { order.push(`retire:${id}`); return kill() },
+        hold: async () => ({ state: 'none' }),
         startable: async () => (opts.installed ?? ['claude', 'codex']) as never,
         turns: async () => ({ turns: [{ role: 'user', text: 'Add export' }, { role: 'assistant', text: 'Done; tests next.' }, { role: 'assistant', text: "You've hit your session limit · resets 6:30pm" }] }),
         role: async () => 'worker',
@@ -324,6 +366,7 @@ describe('switchSessionAccountImpl — CONTA.IDENTIDADE hand-off label', () => {
         context: async () => ({ enabled: true, accounts: [acc({ id: 'acc_a' }), acc({ id: 'acc_k', harness: 'codex', root: '/r/k' })] }),
         limit: async () => null,
         killAndRetire: async (_id, kill) => kill(),
+        hold: async () => ({ state: 'none' }),
         startable: async () => ['claude', 'codex'] as never,
         turns: async () => ({ turns: [] }),
         role: async () => undefined,

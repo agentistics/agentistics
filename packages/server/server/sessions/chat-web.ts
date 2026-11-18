@@ -26,6 +26,7 @@
 
 import { stripContextTurns } from './agentistics-context'
 import { anyGrant, scrubDeep } from '../vault/grants'
+import { presentChatTurns } from '../engine/present-turns'
 import { isExternalRowId } from './external-continue'
 import type { StartHost } from '../cli-start'
 import { applyPendingRewind, forgetRewind, pendingRewindFor } from './rewind-pending'
@@ -470,7 +471,11 @@ export async function finishChatRead(
   lang: CliLang,
   /** The managed ROW id: an attachment message filed before the conversation was linked is keyed by it. */
   pendingId: string = id,
+  /** Injection point for tests; default is the loaded engine's presentation (identity without one). */
+  present: typeof presentChatTurns = presentChatTurns,
 ): Promise<ChatPayload> {
+  // What the person sees of a turn is the engine's call (transport metadata out, an emptied turn dropped).
+  read.turns = present(read.turns)
   // The fenced agentistics context (a harness with no invisible channel gets it in its first message)
   // never reaches a bubble: the person's own words stay, and one small chip says it was sent.
   read.turns = stripContextTurns(read.turns)
