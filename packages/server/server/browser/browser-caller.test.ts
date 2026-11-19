@@ -4,7 +4,7 @@
  * refused (fail-closed); the person's browser keeps working.
  */
 import { describe, expect, test } from 'bun:test'
-import { classifyCaller, callerRefusal, browserUnlockEarlyRefusal, parseProcNetTcp, type CallerInput, type ProcLink } from './browser-caller'
+import { classifyCaller, callerRefusal, personalCallerRefusal, browserUnlockEarlyRefusal, parseProcNetTcp, type CallerInput, type ProcLink } from './browser-caller'
 
 // /proc/net/tcp lines as the kernel prints them (127.0.0.1:41000 → 127.0.0.1:47291, uid 1000, inode 777).
 const TCP = [
@@ -143,6 +143,19 @@ describe('callerRefusal', () => {
     expect(callerRefusal({ kind: 'unknown', reason: 'no-proc' })).toMatchObject({ status: 403, error: 'caller_unidentified' })
     expect(callerRefusal({ kind: 'person', via: 'process', pid: 1 })).toBeNull()
     expect(callerRefusal({ kind: 'person', via: 'remote' })).toBeNull()
+  })
+})
+
+describe('personalCallerRefusal (F2 of the S10 QA: the own browser of the person)', () => {
+  test('a session is refused with the drive code and a sentence in both languages; an unknown caller fails closed; the person passes', () => {
+    const s = personalCallerRefusal({ kind: 'session', pid: 1, managedId: 'x' })
+    expect(s).toMatchObject({ status: 403, error: 'session_cannot_drive_personal' })
+    expect(s!.sentence).toContain('person')
+    expect(personalCallerRefusal({ kind: 'session', pid: 1, managedId: null }, 'pt')!.sentence).toContain('pessoa')
+    expect(personalCallerRefusal({ kind: 'unknown', reason: 'no-proc' })).toMatchObject({ status: 403, error: 'caller_unidentified', why: 'no-proc' })
+    expect(personalCallerRefusal({ kind: 'unknown', reason: 'no-proc' }, 'pt')!.sentence).toContain('pessoa')
+    expect(personalCallerRefusal({ kind: 'person', via: 'process', pid: 1 })).toBeNull()
+    expect(personalCallerRefusal({ kind: 'person', via: 'wsl-relay' })).toBeNull()
   })
 })
 

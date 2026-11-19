@@ -16,7 +16,7 @@
  */
 import { createScreencastHub, type CastState, type ScreencastHub, type ScreenSink, type Subscription } from './browser-screencast'
 import { browserHost, browserLocks, type BrowserWebOpts } from './browser-web'
-import { ownerKey, statusTitle, type BrowserOwner } from './browser-spec'
+import { ownerKey, statusLabel, statusTitle, type BrowserOwner } from './browser-spec'
 import { clampViewport, createViewportCast, createViewportQueue, type ViewerViewport } from './browser-viewport'
 
 /** Concurrent screen streams for the whole process (each holds a socket and, shared, a cast). */
@@ -30,6 +30,26 @@ const viewportQueue = createViewportQueue()
 export function parseViewerViewport(query: URLSearchParams): ViewerViewport | undefined {
   const v = clampViewport({ width: Number(query.get('width')), height: Number(query.get('height')), deviceScaleFactor: Number(query.get('dpr') ?? 1) })
   return v ?? undefined
+}
+
+/**
+ * The `state` event of one tab, from the host's facts (pure). `null` = the tab is gone. The action label passes through
+ * `statusLabel` (S10 r3 F2b): `navigate`/`back`/`reload` label themselves with the page URL, and a URL carries tokens.
+ */
+export function buildCastState(f: { activeTab: string | null; tabs: Array<{ targetId: string; url: string; title: string; active: boolean; loading: boolean }>; lastAction: { kind: string; label: string; x?: number; y?: number; at: number } | null }, tab: string, lock: CastState['lock']): CastState | null {
+  const t = f.tabs.find(x => x.targetId === tab)
+  if (!t) return null
+  const la = f.lastAction
+  return {
+    tab,
+    activeTab: f.activeTab,
+    lock,
+    url: t.url.slice(0, MAX_URL),
+    title: statusTitle(t.title),
+    loading: t.loading,
+    tabs: f.tabs.map(x => ({ id: x.targetId, title: statusTitle(x.title), active: x.active })),
+    lastAction: la ? { kind: la.kind, label: statusLabel(la.label), ...(la.x !== undefined ? { x: la.x } : {}), ...(la.y !== undefined ? { y: la.y } : {}), at: la.at } : null,
+  }
 }
 
 /** `owner` query → the browser's owner, or null. */
@@ -80,20 +100,7 @@ export function browserScreencastHub(opts: BrowserWebOpts): ScreencastHub {
     state: (key, tab) => {
       const f = host.streamFacts(key)
       if (!f) return null
-      const t = f.tabs.find(x => x.targetId === tab)
-      if (!t) return null
-      const la = f.lastAction
-      const s: CastState = {
-        tab,
-        activeTab: f.activeTab,
-        lock: f.owner.kind === 'session' ? locks.view(key).mode : 'none',
-        url: t.url.slice(0, MAX_URL),
-        title: statusTitle(t.title),
-        loading: t.loading,
-        tabs: f.tabs.map(x => ({ id: x.targetId, title: statusTitle(x.title), active: x.active })),
-        lastAction: la ? { kind: la.kind, label: statusTitle(la.label), ...(la.x !== undefined ? { x: la.x } : {}), ...(la.y !== undefined ? { y: la.y } : {}), at: la.at } : null,
-      }
-      return s
+      return buildCastState(f, tab, f.owner.kind === 'session' ? locks.view(key).mode : 'none')
     },
     activeTab: (key) => host.streamFacts(key)?.activeTab ?? null,
     viewer: (key, delta) => { if (delta > 0) host.addViewer(key); else host.removeViewer(key) },

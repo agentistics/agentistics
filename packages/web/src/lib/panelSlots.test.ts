@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import {
   DEFAULT_PLACEMENT, EMPTY_SLOT_LAYOUT, PANEL_IDS, allowed, bottomPanels, closePanel,
-  getPanelLayout, hidePanel, hiddenPanels, hidePanelPlacement, isPanelId, isPanelPinned,
+  getPanelLayout, hidePanel, hiddenPanels, hidePanelPlacement, isPanelId, isTabPanelId, isPanelPinned,
   isPanelShown, movePanel, openPanel, openPanelOnPhone, overlayOutsideAction, parseLayout, planPanelDrop, railClickAction,
   railPanels, readLayout, relocatePanel, reorderPlacement, resetPanelSlots, resolveForGates,
   resolveForViewport, restorePanelPlacement, rightSlotShowing, setBandOpen, setBottomOpen,
@@ -31,15 +31,40 @@ function memory(): Storage {
 // ---------------------------------------------------------------------------------------------
 
 describe('PANEL_IDS', () => {
-  test('is exactly the seventeen panels — the former Contents tabs, search, calendar, livedelivery, plus studio/hardware/cli/shell', () => {
+  test('is exactly the eighteen panels — the former Contents tabs, search, calendar, livedelivery, plus studio/hardware/cli/shell and the browser', () => {
     expect(PANEL_IDS.slice().sort()).toEqual([
-      'agents', 'calendar', 'cli', 'forks', 'gallery', 'hardware', 'live', 'livedelivery', 'mcps', 'metrics', 'prs', 'search',
+      'agents', 'browser', 'calendar', 'cli', 'forks', 'gallery', 'hardware', 'live', 'livedelivery', 'mcps', 'metrics', 'prs', 'search',
       'shell', 'skills', 'studio', 'tasks', 'workflows',
     ])
   })
 
   test('has no duplicate', () => {
     expect(new Set(PANEL_IDS).size).toBe(PANEL_IDS.length)
+  })
+})
+
+describe('the browser panel (NAVEGADOR S10)', () => {
+  test('sits on the rail by default and is the LAST panel, so the rail draws its separator before it', () => {
+    expect(DEFAULT_PLACEMENT.browser).toBe('rail')
+    expect(PANEL_IDS[PANEL_IDS.length - 1]).toBe('browser')
+    expect(isPanelId('browser')).toBe(true)
+    expect(isTabPanelId('browser')).toBe(false)
+  })
+})
+
+describe('the browser panel meta', () => {
+  test('the rail tooltip names it "Navegador" / "Browser"', async () => {
+    const { PANEL_META } = await import('./panelMeta')
+    expect(PANEL_META.browser.title).toEqual({ en: 'Browser', pt: 'Navegador' })
+  })
+})
+
+describe('the browser panel on a phone', () => {
+  test('a stored right-slot browser reads as absent on a phone (its door is the full-screen drawer), present on desktop', () => {
+    const open = openPanel(EMPTY_SLOT_LAYOUT, 'browser')
+    expect(open.right).toBe('browser')
+    expect(resolveForGates(open, { editorEnabled: true, shellEnabled: true, relayed: false, phone: true }).right).toBeNull()
+    expect(resolveForGates(open, { editorEnabled: true, shellEnabled: true, relayed: false }).right).toBe('browser')
   })
 })
 

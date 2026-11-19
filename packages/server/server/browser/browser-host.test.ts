@@ -13,7 +13,7 @@ import { IDLE_SESSION_MS, PSS_KILL_BYTES, PSS_TRIM_BYTES } from './browser-spec'
 
 const GB = 1024 ** 3
 
-interface Fake { pid: number; argv: string[]; signals: string[]; exited: boolean; exit: () => void; closed: string[]; methods: string[]; emit: (ev: object) => void }
+interface Fake { page: { url: string; title: string }; pid: number; argv: string[]; signals: string[]; exited: boolean; exit: () => void; closed: string[]; methods: string[]; emit: (ev: object) => void }
 
 function makeEnv(opts: { mem?: number | null; dead?: (n: number) => boolean; sandboxFails?: boolean; scope?: boolean; escapeScope?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'browser-host-test-'))
@@ -51,7 +51,7 @@ function makeEnv(opts: { mem?: number | null; dead?: (n: number) => boolean; san
       let resolveExit!: () => void
       const exited = new Promise<void>((r) => { resolveExit = r })
       const fake: Fake = {
-        pid: nextPid++, argv, signals: [], exited: false, closed: [], methods: [], emit: (ev) => { inp.write(JSON.stringify(ev) + '\0') },
+        page: { url: 'about:blank', title: '' }, pid: nextPid++, argv, signals: [], exited: false, closed: [], methods: [], emit: (ev) => { inp.write(JSON.stringify(ev) + '\0') },
         exit: () => { if (fake.exited) return; fake.exited = true; inp.end(); resolveExit() },
       }
       fakes.push(fake)
@@ -68,6 +68,7 @@ function makeEnv(opts: { mem?: number | null; dead?: (n: number) => boolean; san
           fake.methods.push(msg.method + (msg.sessionId ? `@${msg.sessionId}` : ''))
           let result: any = {}
           if (msg.method === 'Target.getTargets') result = { targetInfos: targets }
+          if (msg.method === 'Runtime.evaluate') result = { result: { value: fake.page } }
           if (msg.method === 'Target.createTarget') { const t = { targetId: `T${targets.length}`, type: 'page', url: msg.params.url, title: '' }; targets = [...targets, t]; result = { targetId: t.targetId } }
           if (msg.method === 'Target.closeTarget') { fake.closed.push(msg.params.targetId); targets = targets.filter(t => t.targetId !== msg.params.targetId); inp.write(JSON.stringify({ method: 'Target.targetDestroyed', params: { targetId: msg.params.targetId } }) + '\0') }
           inp.write(JSON.stringify({ id: msg.id, result }) + '\0')
@@ -120,6 +121,28 @@ describe('start and stop by the saved PID', () => {
     expect(existsSync(dir)).toBe(false)
     expect(records(env.root)).toEqual([])
     expect((await h.status()).recentStops[0]).toMatchObject({ key: 's-aaa', reason: 'requested' })
+  })
+  test('S10 r3 F2b: status never carries a query string in lastAction.label', async () => {
+    const h = env.host()
+    await h.start(S('aaa'))
+    h.actionHost('s-aaa')!.noteAction({ kind: 'navigate', label: 'https://shop.example/cart?token=abc#access_token=zzz', at: 1 })
+    const live = (await h.status()).live.find(e => e.key === 's-aaa')!
+    expect(live.lastAction?.label).toBe('https://shop.example/cart')
+    expect(JSON.stringify(live)).not.toContain('token=')
+  })
+  test('S10 r3 F6: a tab the page navigated itself takes the page title once the frame stops loading (not the URL Chromium keeps)', async () => {
+    const h = env.host()
+    await h.start(S('aaa'))
+    const fake = env.fakes[0]!
+    fake.emit({ method: 'Target.attachedToTarget', params: { sessionId: 'S1', targetInfo: { targetId: 'T0', type: 'page', url: 'http://x.example/docs', title: 'x.example/docs' }, waitingForDebugger: false } })
+    await new Promise(r => setTimeout(r, 30))
+    // a followed link: Chromium reports the URL as the title and never announces the real one
+    fake.emit({ method: 'Target.targetInfoChanged', params: { targetInfo: { targetId: 'T0', type: 'page', url: 'http://x.example/loja', title: 'x.example/loja' } } })
+    fake.page = { url: 'http://x.example/loja', title: 'Loja exemplo' }
+    fake.emit({ method: 'Page.frameStoppedLoading', sessionId: 'S1', params: { frameId: 'T0' } })
+    await new Promise(r => setTimeout(r, 60))
+    const tab = (await h.status()).live.find(e => e.key === 's-aaa')!.tabs.find(x => x.targetId === 'T0')!
+    expect(tab.title).toBe('Loja exemplo')
   })
   test('the same owner twice (even concurrently) is ONE browser', async () => {
     const h = env.host()

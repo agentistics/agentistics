@@ -47,6 +47,8 @@ export interface EventStreamLike {
 
 class MuxSource implements EventStreamLike {
   readonly url: string
+  /** S10 r3: a personal-browser grant, sent in the `sub` FRAME (never the URL). */
+  grant: string | undefined
   readyState = 0
   onopen: ((e: Event) => void) | null = null
   onmessage: ((e: MessageEvent) => void) | null = null
@@ -59,7 +61,7 @@ class MuxSource implements EventStreamLike {
   native: EventSource | null = null
   private listeners = new Map<string, Set<Listener>>()
   private nativeBound = new Map<string, Listener>()
-  constructor(url: string, private mux: Mux) { this.url = url }
+  constructor(url: string, private mux: Mux, grant?: string) { this.url = url; this.grant = grant }
 
   addEventListener(type: string, handler: (e: MessageEvent) => void): void {
     const fn = handler as Listener
@@ -120,8 +122,8 @@ class Mux {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   constructor(private makeWs: () => WebSocket | null) {}
 
-  open(url: string): EventStreamLike {
-    const src = new MuxSource(url, this)
+  open(url: string, grant?: string): EventStreamLike {
+    const src = new MuxSource(url, this, grant)
     if (this.broken) { src.goNative(); return src }
     src.sid = this.nextSid++
     this.sources.set(src.sid, src)
@@ -138,7 +140,7 @@ class Mux {
   private send(m: unknown): void { try { this.ws?.send(JSON.stringify(m)) } catch { /* reconnect handles it */ } }
 
   private sub(src: MuxSource): void {
-    this.send({ op: 'sub', sid: src.sid, url: src.url, ...(src.lastEventId ? { lastEventId: src.lastEventId } : {}) })
+    this.send({ op: 'sub', sid: src.sid, url: src.url, ...(src.lastEventId ? { lastEventId: src.lastEventId } : {}), ...(src.grant ? { grant: src.grant } : {}) })
   }
 
   private connect(): void {
@@ -232,18 +234,18 @@ function defaultSocket(): WebSocket | null {
 }
 
 /** PURE factory for tests: a mux over an injected socket maker. */
-export function createStreamMux(makeWs: () => WebSocket | null): { open(url: string): EventStreamLike } {
+export function createStreamMux(makeWs: () => WebSocket | null): { open(url: string, grant?: string): EventStreamLike } {
   return new Mux(makeWs)
 }
 
 // Anchored on globalThis for the same reason as `eventStream.ts`: a code-split bundle duplicates
 // this module into several chunks, and a per-copy singleton would open one socket per chunk.
 const GLOBAL_KEY = '__agentisticsStreamMux__'
-type Holder = { [GLOBAL_KEY]?: { open(url: string): EventStreamLike } }
+type Holder = { [GLOBAL_KEY]?: { open(url: string, grant?: string): EventStreamLike } }
 
 /** Drop-in for `new EventSource(url)` on a same-origin push route. */
-export function openEventStream(url: string): EventSource {
+export function openEventStream(url: string, grant?: string): EventSource {
   const holder = globalThis as unknown as Holder
   const mux = (holder[GLOBAL_KEY] ??= createStreamMux(defaultSocket))
-  return mux.open(url) as unknown as EventSource
+  return mux.open(url, grant) as unknown as EventSource
 }

@@ -40,7 +40,7 @@ import {
   KILL_GRACE_MS, MAX_LIVE_BROWSERS, MAX_PERSONAL_BROWSERS, MAX_SESSION_BROWSERS, MAX_TABS_PERSONAL, MAX_TABS_SESSION,
   MIN_AVAILABLE_BYTES, START_TIMEOUT_MS, WATCH_INTERVAL_MS, browserArgv, descendants, idleExpired, memoryVerdict,
   ownerKey, parseSmapsRollup, planOrphanSweep, planUnrecordedOrphans, ppidFromStat, profileDirFor, scopeUnitName,
-  mustCloseNewTarget, scopeWrap, statusTitle, statusUrl, tabToTrim, urlBlockReason, validManagedId, needsResolve, resolvedBlockReason,
+  mustCloseNewTarget, scopeWrap, statusLabel, statusTitle, statusUrl, tabToTrim, urlBlockReason, validManagedId, needsResolve, resolvedBlockReason,
   startTimeFromStat,
   type BlockContext, type BlockReason, type BrowserOwner, type MemoryVerdict, type PidRecord, type SweepPlan,
 } from './browser-spec'
@@ -413,7 +413,7 @@ export class BrowserHost {
       const page = entry.sessionPage.get(ev.sessionId)
       if (page && ev.params?.frameId === page) {
         if (ev.method === 'Page.frameStartedLoading') entry.loading.add(page)
-        else entry.loading.delete(page)
+        else { entry.loading.delete(page); void this.refreshTab(entry, page) }
       }
     }
     if (ev.method === 'Target.targetDestroyed') entry.loading.delete(ev.params?.targetId)
@@ -541,6 +541,23 @@ export class BrowserHost {
     entry.blocked.length = Math.min(entry.blocked.length, 20)
     this.log(`${entry.key}: a page opened a WebSocket to a blocked address (${reason}); closing its tab`)
     if (page) await entry.cdp?.send('Target.closeTarget', { targetId: page }).catch(() => {})
+  }
+
+  /**
+   * S10 r3 F6: a tab the PAGE navigated itself (a followed link) kept the title Chromium reports while a document
+   * loads — its URL — because the later title change is not always announced. When the main frame stops loading,
+   * ask the page what it is called now (`document.title`), so the tab strip shows the title and the address the URL.
+   */
+  private async refreshTab(entry: Entry, targetId: string): Promise<void> {
+    const sid = entry.tabSessions.get(targetId)
+    if (!sid || !entry.cdp) return
+    try {
+      const r = await entry.cdp.send<{ result?: { value?: { url?: unknown; title?: unknown } } }>('Runtime.evaluate', { expression: '({url: location.href, title: document.title})', returnByValue: true }, sid, 5_000)
+      const v = r?.result?.value
+      if (!v || typeof v.title !== 'string' || typeof v.url !== 'string') return
+      if (!entry.tabs.has(targetId) || entry.doomed.has(targetId) || entry.phase !== 'live') return
+      this.upsertTab(entry, { targetId, url: v.url, title: v.title })
+    } catch { /* the tab went away or is busy: the next load asks again */ }
   }
 
   private upsertTab(entry: Entry, t: { targetId: string; url?: string; title?: string }): void {
@@ -892,7 +909,7 @@ export class BrowserHost {
       // S1 QA reservation c: status is a summary — origin+path, `data:` reduced to its type, a clean title.
       tabs: [...e.tabs.values()].map(t => ({ targetId: t.targetId, url: statusUrl(t.url), title: statusTitle(t.title), active: t.targetId === e.activeTab })),
       blocked: e.blocked.slice(0, 5).map(b => ({ url: b.url, reason: b.reason, resourceType: b.resourceType, redirect: b.redirect, at: b.at })),
-      lastAction: e.lastAction ? { kind: e.lastAction.kind, label: statusTitle(e.lastAction.label), at: e.lastAction.at } : null,
+      lastAction: e.lastAction ? { kind: e.lastAction.kind, label: statusLabel(e.lastAction.label), at: e.lastAction.at } : null,
       memory: e.memory ? { basis: e.memory.basis, bytes: e.memory.bytes, action: e.memory.action } : null,
       scope: e.scope, scopeEscaped: e.scopeEscaped, sandbox: e.sandbox,
     }

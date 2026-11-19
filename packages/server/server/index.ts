@@ -1292,7 +1292,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // NAVEGADOR S4b: a KNOWN session may not even ASK for the browser-unlock proof — it would raise a
         // Hello / Touch ID dialog on the person's desk. Same socket hint as the padlock route; the proof
         // itself is still what decides for everyone else (an unidentified caller goes on to the vault).
-        if (url.pathname === '/api/vault/browser-unlock' && req.method === 'POST') {
+        if ((url.pathname === '/api/vault/browser-unlock' || url.pathname === '/api/vault/personal-browser') && req.method === 'POST') {
           const [{ identifyCaller }, { processSessionHub }, { browserUnlockEarlyRefusal }] = await Promise.all([
             import('./browser/browser-caller-proc'), import('./sessions/session-hub'), import('./browser/browser-caller'),
           ])
@@ -3943,6 +3943,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const owner = parseStreamOwner(url.searchParams.get('owner'))
         const tab = parseStreamTab(url.searchParams.get('tab'))
         if (!owner || tab === false) return jsonOut({ ok: false, error: 'bad_request' }, 400)
+        // S10 r3: the person's own browser is read by the person only — their owner grant (the vault proof) first,
+        // the socket as an extra refusal. The mux replays the subscription with the grant its `sub` carried.
+        if (owner.kind === 'personal') {
+          const [{ streamDoor }, { vaultHttpSession }, { vaultLang }] = await Promise.all([import('./browser/personal-doors'), import('./vault/http'), import('./vault/service')])
+          const refused = await streamDoor({ owner, req, session: vaultHttpSession('local'), caller: identify, lang: vaultLang() === 'pt' ? 'pt' : 'en' })
+          if (refused) return jsonOut(refused.body, refused.status)
+        }
         const key = browserStreamTarget(browserOpts, owner)
         if (!key) return jsonOut({ ok: false, error: 'no_browser', sentence: 'This browser is not open.' }, 404)
         if (browserStreamAtCapacity(browserOpts)) return jsonOut({ ok: false, error: 'too_many_streams' }, 503)
@@ -3963,12 +3970,23 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         if (!wsInputOriginOk({ origin: req.headers.get('origin'), host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })) {
           return jsonOut({ ok: false, error: 'forbidden_origin' }, 403)
         }
-        const refused = callerRefusal(await identify())
+        // A session's own browser keeps the socket check (a session may not drive the person's padlock); the person's
+        // own browser is decided by their grant first and the socket only as an extra refusal (`inputDoor` below).
+        const refused = owner.kind === 'personal' ? null : callerRefusal(await identify())
         if (refused) return jsonOut({ ok: false, error: refused.error, sentence: refused.sentence, ...(refused.why ? { why: refused.why } : {}) }, refused.status)
+        // S10 r3: the personal owner's input socket needs the grant too — carried as a sub-protocol, never in the URL.
+        let acceptProtocol = false
+        if (owner.kind === 'personal') {
+          const [{ inputDoor }, { vaultHttpSession }, { vaultLang }] = await Promise.all([import('./browser/personal-doors'), import('./vault/http'), import('./vault/service')])
+          const denied = await inputDoor({ owner, req, session: vaultHttpSession('local'), caller: identify, lang: vaultLang() === 'pt' ? 'pt' : 'en' })
+          if (denied) return jsonOut(denied.body, denied.status)
+          acceptProtocol = true
+        }
         if (!browserStreamTarget(browserOpts, owner)) return jsonOut({ ok: false, error: 'no_browser', sentence: 'This browser is not open.' }, 404)
         if (mod.browserInputAtCapacity()) return jsonOut({ ok: false, error: 'too_many_streams' }, 503)
         browserInputMod = mod
-        if (server.upgrade(req, { data: { browserInput: mod.createBrowserInputState(browserOpts, owner, tab) } })) return
+        const { INPUT_ACCEPT_PROTOCOL } = await import('./browser/personal-doors')
+        if (server.upgrade(req, { data: { browserInput: mod.createBrowserInputState(browserOpts, owner, tab) }, ...(acceptProtocol ? { headers: { 'Sec-WebSocket-Protocol': INPUT_ACCEPT_PROTOCOL } } : {}) })) return
         return jsonOut({ ok: false, error: 'upgrade_failed' }, 500)
       }
 
@@ -3997,7 +4015,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const audit = (ev: { action: 'browser.lock' | 'browser.unlock'; managedId: string }) =>
           void writeAudit({ action: ev.action, ip: clientIp, targetId: ev.managedId })
         // F1: only the padlock route needs the caller; it is read once, before the route decides.
-        const lockCaller = url.pathname === '/api/browser/lock' ? await identify() : null
+        // S10/F2: the personal routes read it too — the person's browser is the person's, by the socket.
+        const lockCaller = url.pathname === '/api/browser/lock' || url.pathname.startsWith('/api/browser/personal/') ? await identify() : null
         // S4b: an unlock spends the person's single-use vault grant (header, never a URL), bound to the same
         // HTTP session the vault route minted it for, on loopback only. The socket check stays as a hint.
         const ownerProof = async (managedId: string) => {
@@ -4010,8 +4029,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           const setup = used.code === 'grant-invalid' && (await gate.ownerProofAvailable().catch(() => null)) === false
           return ownerProofRefusal(used.code, vaultLang() === 'pt' ? 'pt' : 'en', setup)
         }
+        // S10 r3: the person's own browser (verbs AND status) answers to the owner's grant; the HTTP session is the vault's.
+        const [{ requestHasPersonalGrant }, { vaultHttpSession: httpSession }, { vaultLang: lang }] = await Promise.all([import('./browser/personal-doors'), import('./vault/http'), import('./vault/service')])
         const deps = browserRouteDeps({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT], sessionLive }, verifySessionIdentity, {
           harnessOf, audit, ownerProof, ...(lockCaller ? { caller: () => lockCaller } : {}),
+          personalGrant: () => requestHasPersonalGrant(req, httpSession('local')),
+          lang: () => (lang() === 'pt' ? 'pt' : 'en'),
         })
         const answer = await browserRoute(req.method, url.pathname, body, deps)
         if (!answer) return jsonOut({ error: 'not_found' }, 404)

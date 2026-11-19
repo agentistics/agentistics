@@ -67,6 +67,19 @@ describe('a subscription is replayed through the REAL route with the upgrade req
       { sid: 4, t: 'end' },
     ])
   })
+  test('S10 r3: a personal-browser grant rides the sub FRAME and is replayed as a header; the upgrade can never smuggle one', async () => {
+    const seen: Request[] = []
+    const tok = 'aB3_dE-fG4hI5jK6lM7nO8pQ9rS0tU1vW2xY3zA4bC5'
+    const upgrade = new Request('http://127.0.0.1:1/api/stream-mux', { headers: { 'x-agentop-personal-grant': 'smuggled-by-the-upgrade-0000000000' } })
+    const st = createMuxState(upgrade, async r => { seen.push(r); return sseResponse([]) })
+    const send = (m: object) => onMuxMessage(st, { send: () => {} }, JSON.stringify(m))
+    send({ op: 'sub', sid: 1, url: '/api/browser/stream?owner=personal', grant: tok })
+    send({ op: 'sub', sid: 2, url: '/api/browser/stream?owner=personal' })
+    send({ op: 'sub', sid: 3, url: '/api/browser/stream?owner=personal', grant: 'bad token!' })
+    await tick(); await tick()
+    expect(seen.map(r => r.headers.get('x-agentop-personal-grant'))).toEqual([tok, null, null])
+    expect(parseMuxMessage(JSON.stringify({ op: 'sub', sid: 1, url: '/api/events', grant: 12 }))).toEqual({ op: 'sub', sid: 1, url: '/api/events' })
+  })
   test('a refusal by the route (auth, capability, host gate) is a final fail with its status', async () => {
     const st = createMuxState(new Request('http://h/api/stream-mux'), async () => new Response('{"error":"auth required"}', { status: 401, headers: { 'Content-Type': 'application/json' } }))
     const out: MuxServerMessage[] = []

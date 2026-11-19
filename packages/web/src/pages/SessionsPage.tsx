@@ -56,7 +56,7 @@ import {
   type OpenPlacement, type PanelGates, type PanelId, type TabPanelId,
   unpinPanel,
 } from '../lib/panelSlots'
-import { panelIconFor } from '../lib/panelIcons'
+import { GlobeSearchIcon, panelIconFor } from '../lib/panelIcons'
 import {
   floatPanel, minimizeFloatingPanel, placePanel, raisePanel, setFloatingArea, setFloatingSession,
   useFloatingPanels,
@@ -99,6 +99,8 @@ import { TopBarGroup } from '../components/nav/TopBarGroup'
 import { LivePreview } from '../components/tasks/LivePreview'
 import { ArtifactsAside } from '../components/sessions/ArtifactsAside'
 import { HardwarePanel } from '../components/sessions/HardwarePanel'
+import { BrowserPanel } from '../components/browser/BrowserPanel'
+import { setBrowserDrawerOpen } from '../lib/browserDrawer'
 import { UnsavedChangesGuard } from '../components/sessions/UnsavedChangesGuard'
 import { PanelFixedControls, PanelPinButton, PanelTileDropdown } from '../components/sessions/bandControls'
 import { ShellCloseStatus } from '../components/sessions/ShellCloseStatus'
@@ -932,7 +934,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   useLayoutEffect(() => () => setFloatingSession(null, pane), [pane])
   const floating = useFloatingPanels()
   const panelFocus = usePanelFocusRequest()
-  const panelGates: PanelGates = { editorEnabled, shellEnabled, relayed }
+  const panelGates: PanelGates = { editorEnabled, shellEnabled, relayed, phone: isMobile }
   const slotLayout = resolveForGates(resolveForViewport(rawSlotLayout, isMobile), panelGates)
   const rightIsStudio = slotLayout.right === 'studio'
   /**
@@ -950,6 +952,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const rightIsCli = slotLayout.right === 'cli'
   const rightIsShell = slotLayout.right === 'shell'
   const rightIsHardware = slotLayout.right === 'hardware'
+  const rightIsBrowser = slotLayout.right === 'browser'
+  const bottomIsBrowser = slotLayout.bottom === 'browser'
   /** Is the right slot showing one of the ten former Contents tabs right now? Replaces the old
    *  `rightIsContents` — every one of the ten now carries its own occupancy directly. */
   const rightIsTab = slotLayout.right !== null && isTabPanelId(slotLayout.right)
@@ -1045,10 +1049,10 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    */
   const [tabFullscreen, setTabFullscreen] = useState(false)
   useEffect(() => {
-    const rightIsTabOrHardware = rightIsTab || rightIsHardware
-    const bottomIsTabOrHardware = bottomIsTab || bottomIsHardware
+    const rightIsTabOrHardware = rightIsTab || rightIsHardware || rightIsBrowser
+    const bottomIsTabOrHardware = bottomIsTab || bottomIsHardware || bottomIsBrowser
     if (!rightIsTabOrHardware && !bottomIsTabOrHardware) setTabFullscreen(false)
-  }, [rightIsTab, rightIsHardware, bottomIsTab, bottomIsHardware])
+  }, [rightIsTab, rightIsHardware, rightIsBrowser, bottomIsTab, bottomIsHardware, bottomIsBrowser])
   const onArtifacts = useCallback((a: { artifacts: Artifact[]; loading: boolean; unavailable?: string; older?: string; unlisted: boolean; turns: readonly LiveTurn[] }) => {
     setArtifacts(a.artifacts)
     setArtifactTurns(a.turns)
@@ -1467,6 +1471,16 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * above it).
    */
   const hardwarePaneEl = <HardwarePanel lang={pt ? 'pt' : 'en'} onClose={() => closeSlotPanel('hardware')} hideCloseButton={!isMobile} />
+  /** THE PERSON'S OWN BROWSER (NAVEGADOR S10): one element for the right slot (header trio folded in) and one for the bottom band. */
+  const browserPaneEl = <BrowserPanel lang={pt ? 'pt' : 'en'} onClose={() => closeSlotPanel('browser')} hideCloseButton={!isMobile} />
+  const browserPaneRightEl = (
+    <BrowserPanel
+      lang={pt ? 'pt' : 'en'}
+      onClose={() => closeSlotPanel('browser')}
+      hideCloseButton={!isMobile}
+      controls={panelFixedControlsFor('browser', pt ? 'Navegador' : 'Browser', () => closeSlotPanel('browser'))}
+    />
+  )
   const hardwarePaneRightEl = (
     <HardwarePanel
       lang={pt ? 'pt' : 'en'}
@@ -1502,6 +1516,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     if (id === 'cli') return !relayed
     if (id === 'shell') return shellEnabled === true && !relayed
     if (id === 'hardware') return hardwareOffered
+    // A phone has no rail: its door is the globe button in the session bar (and the area sheet), a full-screen drawer.
+    if (id === 'browser') return !relayed && !isMobile
     return true
   }
   /** The floating windows this session can actually serve right now — `railGateOpen` again, so a
@@ -1888,6 +1904,16 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         </>
       )
     }
+    if (id === 'browser') {
+      return (
+        <BrowserPanel
+          lang={pt ? 'pt' : 'en'}
+          onClose={() => dockBack('browser')}
+          hideCloseButton
+          controls={dockControls('browser', panelTitle('browser', pt), true)}
+        />
+      )
+    }
     if (id === 'hardware') {
       return (
         <HardwarePanel
@@ -1909,7 +1935,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * no "currently overlaying" state for them to read here.
    */
   const rightSlotFullscreen =
-    (rightIsStudio && studioFullscreen) || ((rightIsTab || rightIsHardware) && tabFullscreen)
+    (rightIsStudio && studioFullscreen) || ((rightIsTab || rightIsHardware || rightIsBrowser) && tabFullscreen)
 
   /** What the right box actually shows: the Studio's own target (StudioHost re-parents its carrier
    *  into it) while `panelSlots` says so; `cli`/`shell` render their own `ShellBand`
@@ -1956,6 +1982,11 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           theme={theme === 'light' ? 'light' : 'dark'}
         />
       </div>
+    </div>
+  ) : rightIsBrowser ? (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
+      {rightSlotHeader}
+      {browserPaneRightEl}
     </div>
   ) : rightIsHardware ? (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
@@ -2121,7 +2152,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // Any of the ten former Contents tabs, or Hardware, docked at the bottom — the SAME reused
       // content elements the right slot renders (`tabPane`/`hardwarePaneEl`), plus the ONE shared
       // full-screen state (see `tabFullscreen`'s own header above).
-      bottomTabPane={bottomIsHardware ? hardwarePaneEl : bottomTabPane}
+      bottomTabPane={bottomIsBrowser ? browserPaneEl : bottomIsHardware ? hardwarePaneEl : bottomTabPane}
       bottomTabFullscreen={tabFullscreen}
       onBottomTabFullscreenChange={setTabFullscreen}
       // The terminal's own screen. A route, so it survives a reload and can be sent to somebody.
@@ -2911,6 +2942,15 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         </div>
         <HandoffMeter id={selected.id} pt={pt} act={act} />
         {selected.actionable && <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact />}
+        {/* THE PERSON'S BROWSER (NAVEGADOR S10, prototype b1-open-390): the phone has no right rail, so the
+            globe+search glyph opens it full screen from the session's own bar. */}
+        {!relayed && (
+          <button
+            type="button" data-browser-open className="ag-tap-icon" onClick={() => setBrowserDrawerOpen(true)}
+            aria-label={pt ? 'Abrir o navegador' : 'Open the browser'} title={pt ? 'Navegador' : 'Browser'}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44, flexShrink: 0, border: 'none', borderRadius: 12, background: 'transparent', color: 'var(--anthropic-orange)', cursor: 'pointer', padding: 0 }}
+          ><GlobeSearchIcon size={20} /></button>
+        )}
       </div>
       <EngineSurfaceIndicatorRow lang={tPt} />
       {tabNoticeEl}

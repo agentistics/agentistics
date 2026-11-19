@@ -13,12 +13,30 @@
 
 import {
   Activity, CalendarDays, FileDiff, Bot, BarChart3, ClipboardList, Cpu, FolderTree, GitBranch, GitPullRequest, Image, Plug,
-  Search, Sparkles, TerminalSquare, Workflow, type LucideIcon,
+  Globe, Search, Sparkles, TerminalSquare, Workflow, type LucideIcon,
 } from 'lucide-react'
 import { HarnessMark } from '../components/sessions/HarnessMark'
 import type { PanelId } from './panelSlots'
 
-const ICON: Record<Exclude<PanelId, 'cli' | 'shell'>, LucideIcon> = {
+/**
+ * The browser's own glyph (prototype `opcao-final.html`): a globe with a small magnifier at its lower
+ * right. Composed from the two lucide icons so it follows `currentColor` and the rail's sizing like every
+ * other panel icon — never a separate asset.
+ */
+export function GlobeSearchIcon({ size = 14, style }: { size?: number; style?: import('react').CSSProperties }) {
+  const lens = Math.max(8, Math.round(size * 0.55))
+  return (
+    <span aria-hidden="true" data-globe-search style={{ position: 'relative', display: 'inline-flex', width: size, height: size, flexShrink: 0, ...style }}>
+      <Globe size={size} />
+      <span style={{
+        position: 'absolute', right: -Math.round(size * 0.2), bottom: -Math.round(size * 0.2), display: 'inline-flex',
+        background: 'var(--bg-card)', borderRadius: '50%', padding: 0.5,
+      }}><Search size={lens} strokeWidth={3} /></span>
+    </span>
+  )
+}
+
+const ICON: Record<Exclude<PanelId, 'cli' | 'shell' | 'browser'>, LucideIcon> = {
   search: Search,
   live: FileDiff,
   gallery: Image,
@@ -43,6 +61,7 @@ export function panelIconFor(panel: PanelId, size = 14, harness?: string): React
       : <TerminalSquare size={size} />
   }
   if (panel === 'shell') return <TerminalSquare size={size} />
+  if (panel === 'browser') return <GlobeSearchIcon size={size} />
   const Icon = ICON[panel]
   return <Icon size={size} />
 }

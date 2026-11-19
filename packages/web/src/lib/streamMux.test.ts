@@ -14,6 +14,20 @@ class FakeWs {
 }
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
 
+describe('streamMux — the personal-browser grant (S10 r3)', () => {
+  test('a grant rides the sub FRAME, never the URL; a stream without one sends none (also after a reconnect)', () => {
+    const sockets: FakeWs[] = []
+    const mux = createStreamMux(() => { const w = new FakeWs(); sockets.push(w); return w as unknown as WebSocket })
+    mux.open('/api/browser/stream?owner=personal', 'tok-aaaaaaaaaaaaaaaaaaaa')
+    mux.open('/api/events')
+    sockets[0]!.open()
+    expect(sockets[0]!.sent).toEqual([
+      { op: 'sub', sid: 1, url: '/api/browser/stream?owner=personal', grant: 'tok-aaaaaaaaaaaaaaaaaaaa' },
+      { op: 'sub', sid: 2, url: '/api/events' },
+    ])
+  })
+})
+
 describe('streamMux — every push stream of a tab over one socket', () => {
   test('N streams share ONE socket and arrive as EventSource events', () => {
     const sockets: FakeWs[] = []
