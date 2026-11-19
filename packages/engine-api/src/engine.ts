@@ -12,6 +12,7 @@ import type { EngineChatTurn } from './chat'
 import type { EngineStructured } from './structured'
 import type { EngineHostServices, PersonAsker } from './host'
 import { apiCompatible } from './version'
+import { mcpToolRefusals, type EngineMcpTool, type McpToolRefusalReason } from './mcp-tools'
 import { surfaceRefusals, type EngineSurface, type EngineSocketHandlers, type SurfaceRefusalReason } from './surfaces'
 
 export interface EngineManifest {
@@ -37,6 +38,8 @@ export interface EngineManifest {
   }
   /** 1.15 — UI surfaces the host may draw a button for (`surfaces.ts`). Absent: none. */
   surfaces?: EngineSurface[]
+  /** 1.30 — MCP tools the public MCP server proxies to this engine's `/api/engine/x/` routes (`mcp-tools.ts`). Absent: none. */
+  mcpTools?: EngineMcpTool[]
 }
 
 /** What the host knows about a request that the `Request` itself does not carry. */
@@ -276,6 +279,8 @@ export type EngineRefusal =
   | { kind: 'duplicate-command'; verb: EngineCommand['verb'] }
   | { kind: 'surface'; id: string; reason: SurfaceRefusalReason }
   | { kind: 'surface-no-route' }
+  | { kind: 'mcp-tool'; name: string; reason: McpToolRefusalReason }
+  | { kind: 'mcp-tool-no-route' }
 
 /**
  * PURE. The host's load-time judgement of an engine: the contract version, and every route and
@@ -305,6 +310,10 @@ export function checkEngine(
   for (const f of surfaceRefusals(engine.manifest.surfaces)) refusals.push({ kind: 'surface', ...f })
   if ((engine.manifest.surfaces?.length ?? 0) > 0 && !engine.routes.some(r => r.prefix === '/api/engine/x')) {
     refusals.push({ kind: 'surface-no-route' })
+  }
+  for (const f of mcpToolRefusals(engine.manifest.mcpTools)) refusals.push({ kind: 'mcp-tool', ...f })
+  if ((engine.manifest.mcpTools?.length ?? 0) > 0 && !engine.routes.some(r => r.prefix === '/api/engine/x')) {
+    refusals.push({ kind: 'mcp-tool-no-route' })
   }
   const seen = new Set<string>()
   for (const c of engine.commands) {

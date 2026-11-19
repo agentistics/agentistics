@@ -48,6 +48,7 @@ import {
   startEngineSocketSweep, type EngineSocketState,
 } from './engine/engine-sockets'
 import { engineSurfacesFor } from './engine/engine-surfaces'
+import { engineMcpToolsFor } from './engine/engine-mcp-tools'
 import { hostGate, currentHostAllowlist, startHostAllowlistRefresh, badRequestTarget } from './host-allow'
 
 /**
@@ -2014,6 +2015,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         flows: Boolean(engine()?.flows),
         surfaces: engineSurfacesFor(engine()?.manifest.surfaces, process.env),
       })
+    }
+
+    // THE ENGINE'S DECLARED MCP TOOLS — read by the MCP server on list_tools (`[]` with no engine).
+    // Authenticated like `GET /api/engine`; the proxied calls themselves ride `/api/engine/x` (localShell).
+    if (url.pathname === '/api/engine/mcp-tools' && req.method === 'GET') {
+      await loadEngine()
+      return json({ tools: engineMcpToolsFor(engine()?.manifest.mcpTools) })
     }
 
     // PER-SESSION NOTIFICATIONS — the door the MCP tool and the CLI use (`sessions/session-notify-web.ts`).

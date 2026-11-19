@@ -249,7 +249,13 @@
  * Also `Engine.presentation` (optional, `EnginePresentation.chatTurns`) — a pass the host runs over every chat turn before
  * a person sees it, so the engine may strip transport metadata and drop a turn left empty. Absent: identity.
  */
-export const ENGINE_API_VERSION = '1.29.0'
+/**
+ * 1.30.0 — `EngineManifest.mcpTools` (optional, `EngineMcpTool[]`, `mcp-tools.ts`): MCP tools the engine declares
+ * (`agentistics_x_<name>`, a risk R/W, a GET/POST route under `/api/engine/x/`). The host lists the valid ones at
+ * `GET /api/engine/mcp-tools` and the MCP server proxies calls to the declared route. `checkEngine` refuses a bad
+ * name, a path outside the prefix, a duplicate, or tools with no `/api/engine/x` route. Additive only.
+ */
+export const ENGINE_API_VERSION = '1.30.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
