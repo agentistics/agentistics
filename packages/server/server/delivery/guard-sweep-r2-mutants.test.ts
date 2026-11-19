@@ -45,6 +45,7 @@ async function run(targets: string[], pattern?: string) {
 
 const regression = delivery + 'guard-sweep-r2.test.ts'
 const r3 = delivery + 'guard-sweep-r3.test.ts'
+const r4 = delivery + 'guard-sweep-r4.test.ts'
 const host = delivery + 'guard-sweep-host-r2.test.ts'
 const errors = 'packages/server/server/errors.test.ts'
 const storeTest = delivery + 'guard-store.test.ts'
@@ -56,17 +57,28 @@ const mutants: Array<[string, string, string, string, string, string[]]> = [
  ['R2-2 retain phase rank', delivery + 'guard-host.ts', 'rank: Math.max(r.rank, phaseRank(phase))', 'rank: r.rank', 'R2-K2', [r3]],
  ['R2-2 owner retreat', delivery + 'guard-host.ts', "if (o.ctx.principal.kind === 'owner') auth.push({ kind: 'owner', via: o.ctx.principal.via })", '', 'R2-K2', [r3]],
  ['R2-3 health warning', delivery + 'sweep.ts', 'if (current.sweep?.warning !== warning) await d.guards.write', 'if (false) await d.guards.write', 'R2-3 breaker', [r3]],
- ['R2-3 leader notice', delivery + 'sweep.ts', 'await d.notifyLeaders?.([...new Set(plan.reverts.map(r => r.taskId))], warning)', 'void warning', 'R2-3 breaker', [r3]],
+ ['R2-3 leader notice', delivery + 'sweep.ts', 'await d.notifyLeaders?.(', 'void (', 'R2-3 breaker', [r3]],
  ['R2-3 notice dedupe', delivery + 'sweep.ts', "notify = !current.sweep?.warning?.startsWith('sweep-breaker:')", 'notify = true', 'R2-3 breaker', [r3]],
- ['R2-4 all kinds', delivery + 'sweep.ts', 'const revertCount = plan.reverts.length', "const revertCount = plan.reverts.filter(r => r.reason === 'no_checkpoint').length", 'R2-4', [r3]],
+ ['R3-2 breaker counts every kind', delivery + 'sweep.ts', "const checkpointed = plan.reverts.filter(r => r.reason !== 'no_checkpoint')", 'const checkpointed: typeof plan.reverts = []', 'R2-4/R3-2|R3-2', [r3, r4]],
+ ['R3-2 ceiling', delivery + 'sweep.ts', "checkpointed.length > SWEEP_CHECKPOINT_CEILING ? 'checkpoint_ceiling'", "false ? 'checkpoint_ceiling'", 'R3-2 checkpointed reverts have their own', [r4]],
+ ['R3-2 breaker keeps checkpointed repairs', delivery + 'sweep.ts', "const toApply = skipped === 'no_checkpoint_breaker' ? checkpointed : plan.reverts", "const toApply = skipped === 'no_checkpoint_breaker' ? [] : plan.reverts", 'R3-2 a checkpointed forgery', [r4]],
+ ['R3-1 accepted status', delivery + 'sweep-plan.ts', 'if (accepted && accepted.status === p.boardStatus) reason = null', '', 'R3-1 a group of 17', [r4]],
+ ['R3-1 restore status', delivery + 'sweep-plan.ts', 'to: restore ?? boardTarget(cp, target, o.statuses)', 'to: boardTarget(cp, target, o.statuses)', 'R3-1 a group of 17', [r4]],
+ ['R3-1 sweep baseline', delivery + 'sweep.ts', 'if (plan.baselines.length) {', 'if (false) {', 'R3-1 a quiet tick', [r4]],
+ ['R3-1 guard retreat records members', delivery + 'guard-host.ts', 'const members = r.members ? { ...(prior.members ?? {}), ...acceptedAt(r.members, at) } : prior.members', 'const members = prior.members', 'R3-1 the guard records', [r4]],
+ ['R3-3 recorded board rank', delivery + 'sweep-plan.ts', ' && boardNow < statusRankIn(o.statuses, cp.boardStatus)', '', 'R3-3', [r4]],
+ ['R3-3 abandoned', delivery + 'sweep-plan.ts', " && p.boardStatus !== 'abandoned'", '', 'R3-3 abandoned', [r4]],
+ ['R3-4 group rank without ci', delivery + 'sweep.ts', 'groupRank: board.get(parentOf.get(key)!)?.statusRank ?? 0,', 'groupRank: Math.max(board.get(parentOf.get(key)!)?.statusRank ?? 0, board.get(parentOf.get(key)!)?.ciRank ?? 0),', 'R3-4', [r4]],
+ ['R3-5 spread', delivery + 'guard-ast.testing.ts', 'if (ts.isSpreadElement(target)) assignmentConstructors(target.expression)', '', 'R3-5', [r4]],
+ ['R3-5 spread assignment', delivery + 'guard-ast.testing.ts', 'if (ts.isSpreadAssignment(p)) assignmentConstructors(p.expression)', '', 'R3-5', [r4]],
+ ['R3-5 indirect Reflect', delivery + 'guard-ast.testing.ts', "out.push('reflect-indirect')", 'void n', 'R3-5', [r4]],
+ ['R3-6 sweep_changed', delivery + 'service.ts', "if (!await unchanged()) return { ok: false, code: 'sweep_changed' }", '', 'R3-6', [r4]],
  ['R2-5 bounded chunks', delivery + 'sweep.ts', 'export const SWEEP_CHUNK_SIZE = 4', 'export const SWEEP_CHUNK_SIZE = 1000', 'R2-5 planning', [r3]],
- ['R2-5 revalidate', delivery + 'sweep.ts', 'const reverts = proposed.filter(r => signature(fresh.byKey.get(r.key), fresh.doc.checkpoints, fresh.doc.sweep) === expected.get(r.key))', 'const reverts = proposed', 'R2-5 planning', [r3]],
+ ['R2-5 revalidate', delivery + 'sweep.ts', 'const reverts = proposed.filter(r => (r.checkKeys ?? [r.key]).every(k => signature(fresh.byKey.get(k), fresh.doc.checkpoints, fresh.doc.sweep) === expected.get(k)))', 'const reverts = proposed', 'R2-5 planning', [r3]],
  ['R2-5 plan outside', delivery + 'sweep.ts', 'const initial = await snapshot()', 'const initial = await d.envelope(snapshot)', 'R2-5 planning', [r3]],
  ['R2-5 tick envelope', delivery + 'service.ts', 'try { return await tickOnce() }', 'try { return await transaction(tickOnce)() }', 'R2-5 the real service', [r3]],
  ['R2-6 normal clear', taskStore, "if (next.status !== 'blocked') delete next.blockedReason", '', 'R2-6', [r3]],
  ['R2-6 sweep clear', taskStore, 'else delete next.blockedReason', '', 'R2-6', [r3]],
- ['R2-7 Reflect alias', delivery + 'guard-ast.testing.ts', 'reflectGets.add(el.name.text)', 'void el', 'R2-7 refuses const', [r3]],
- ['R2-7 Reflect apply', delivery + 'guard-ast.testing.ts', "out.push('constructor-reflect-apply')", 'void n', 'R2-7 refuses Reflect', [r3]],
  ['R2-7 nested array', delivery + 'guard-ast.testing.ts', 'if (ts.isArrayLiteralExpression(target)) for (const el of target.elements) assignmentConstructors(el)', '', 'R2-7 refuses \\[', [r3]],
  ['R2-7 for-of', delivery + 'guard-ast.testing.ts', 'if ((ts.isForOfStatement(n) || ts.isForInStatement(n)) && !ts.isVariableDeclarationList(n.initializer)) assignmentConstructors(n.initializer)', '', 'R2-7 refuses for', [r3]],
  ['R2-8 N10 revision', delivery + 'guard-host.ts', '&& (rec?.revision ?? 0) === checkpoint.revision', '', 'R2-8 N10', [r3]],
@@ -99,6 +111,9 @@ const mutants: Array<[string, string, string, string, string, string[]]> = [
 ]
 for (const [id, file, from, to, pattern, suites] of mutants) test(`r2 mutant ${id} is killed`, async () => {
  reset(); change(file, from, to)
+ // r5 adds an independent literal-key check; disable its constructor arm too to model the original escape.
+ if (id === 'Reflect.get') change(file, " && literalText(call.arguments[1]) !== 'constructor'", '')
+ if (id === 'R3-1 guard retreat records members') change(file, 'for (const m of o.memberChanges ?? [])', 'for (const m of [] as NonNullable<typeof o.memberChanges>)')
  const r = await run(suites, pattern)
  console.log(`${id}: exit ${r.code}\n${r.output.split('\n').filter(l => l.startsWith('(fail)') || /Expected:|Received:| pass| fail/.test(l)).join('\n')}`)
  expect(r.code, r.output).toBe(1)
@@ -106,6 +121,6 @@ for (const [id, file, from, to, pattern, suites] of mutants) test(`r2 mutant ${i
 }, 150_000)
 test('r2 mutation positive control', async () => {
  reset()
- const r = await run([regression, r3, host, errors, storeTest])
+ const r = await run([regression, r3, r4, host, errors, storeTest])
  expect(r.code, r.output).toBe(0)
 }, 150_000)

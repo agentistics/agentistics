@@ -50,6 +50,8 @@ export interface PieceCheckpoint {
   transitionId: string
   /** How the piece was classified when it was authorized (S1b, §3.2); `declared` when a leader named where to look. */
   classification?: { category: string; headSha: string; declared?: { by: string; repo: string; head: string; at: string } }
+  /** A GROUP's checkpoint: the board status the guard accepted for each member (R3-1) — the sweep reverts a member only when it differs. */
+  members?: Record<string, { status: string; at: string }>
 }
 
 export interface GuardIntent { transitionId: string; target: PieceCheckpoint; at: string }
@@ -90,12 +92,17 @@ export function parseGuards(text: string): GuardsDoc {
     const reverts: Record<string, string[]> = {}
     for (const [k, v] of Object.entries(raw.sweep.reverts)) { if (!Array.isArray(v) || v.some(s => typeof s !== 'string')) throw new Error(`sweep memory ${k} is malformed`); reverts[k] = v as string[] }
     sweep = { reverts }
-    for (const field of ['plans', 'catchUpFailures'] as const) {
+    for (const field of ['plans', 'catchUpFailures', 'noBaselineSince'] as const) {
       const value = raw.sweep[field]
       if (value !== undefined) {
         if (!isRec(value) || Object.values(value).some(v => typeof v !== 'string')) throw new Error(`sweep ${field} is malformed`)
         sweep[field] = value as Record<string, string>
       }
+    }
+    if (raw.sweep.memberAlerts !== undefined) {
+      const value = raw.sweep.memberAlerts
+      if (!isRec(value) || Object.values(value).some(v => !isRec(v) || typeof v.at !== 'string' || typeof v.text !== 'string')) throw new Error('sweep memberAlerts is malformed')
+      sweep.memberAlerts = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, { at: (v as { at: string }).at, text: (v as { text: string }).text }]))
     }
     if (raw.sweep.warning !== undefined) {
       if (typeof raw.sweep.warning !== 'string') throw new Error('sweep warning is malformed')

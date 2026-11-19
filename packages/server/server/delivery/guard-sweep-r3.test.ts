@@ -156,8 +156,8 @@ for (const [label, ctx] of [['owner', OWNER], ['session', SESSION]] as const) {
 
 test('R2-B1 the no_checkpoint breaker trips: health (sweepWarnings + the migration line) must WARN, not only a log line', async () => {
   const w = await world('on')
-  for (const id of ['x1', 'x2', 'x3']) await w.tasks.upsertSubtask(subtask(id))
-  forgeBoard(w, s => ['x1', 'x2', 'x3'].includes(s.id), { status: 'in_review' })
+  for (const id of ['x1', 'x2', 'x3', 'x4', 'x5', 'x6']) await w.tasks.upsertSubtask(subtask(id))
+  forgeBoard(w, s => ['x1', 'x2', 'x3', 'x4', 'x5', 'x6'].includes(s.id), { status: 'in_review' })
   const out = await w.svc.tick()
   const doc = await w.guards.read()
   const warns = sweepWarnings(doc.sweep, w.clock.now)
@@ -203,7 +203,7 @@ test('R2-S1 safety-net memory survives only while the plan repeats: legit-lookin
 
 test('R2-3 breaker has its own bilingual health warning and one deduped leader notice', async () => {
   const w = await world('on')
-  for (let i = 0; i < 3; i++) await w.tasks.upsertSubtask(subtask(`x${i}`))
+  for (let i = 0; i < 6; i++) await w.tasks.upsertSubtask(subtask(`x${i}`))
   forgeBoard(w, s => s.id.startsWith('x'), { status: 'done' })
   await w.svc.tick(); await w.svc.tick()
   const warnings = sweepWarnings((await w.guards.read()).sweep, T)
@@ -219,7 +219,8 @@ test('R2-3 breaker has its own bilingual health warning and one deduped leader n
   expect(sweepWarnings((await w.guards.read()).sweep, T)).toEqual([])
 })
 
-test('R2-4 breaker counts above_checkpoint as well as no_checkpoint', async () => {
+// R3-2 (r4) supersedes R2-4: the breaker judges only reverts with NO checkpoint; checkpointed ones are always repaired.
+test('R2-4/R3-2 checkpointed forgeries are repaired, never counted by the no_checkpoint breaker', async () => {
   const w = await world('on')
   for (let i = 0; i < 3; i++) {
     const key = `x${i}`
@@ -228,9 +229,9 @@ test('R2-4 breaker counts above_checkpoint as well as no_checkpoint', async () =
   }
   forgeBoard(w, s => s.id.startsWith('x'), { status: 'done' })
   const out = await w.svc.tick()
-  expect(out.actions.join(' ')).toContain('breaker')
-  expect(out.actions.join(' ')).not.toContain('sweep-revert')
-  expect((await sub(w, 'x0')).status).toBe('done')
+  expect(out.actions.join(' ')).not.toContain('breaker')
+  expect(out.actions.filter((a: string) => a.startsWith('sweep-revert'))).toHaveLength(3)
+  expect((await sub(w, 'x0')).status).toBe('in_progress')
 })
 
 test('R2-6 leaving blocked clears the reason on a normal member write and a sweep repair', async () => {

@@ -163,7 +163,7 @@ test('mutant F5: evidence:true disables detection', async () => {
 test('mutant F6: policy captured before acquiring guards is trusted after activation', async () => {
   reset()
   change(tasks, 'let currentGuard: GuardContext | undefined', "let staleRule: 'off' | 'shadow' | 'on' | undefined\n  let currentGuard: GuardContext | undefined")
-  change(tasks, 'raised, retreats, ctx: currentGuard,', 'rule: staleRule, raised, retreats, ctx: currentGuard,')
+  change(tasks, 'raised, retreats, memberChanges, ctx: currentGuard,', 'rule: staleRule, raised, retreats, memberChanges, ctx: currentGuard,')
   change(tasks, "if (await peekRuleA(anchor.paths) !== 'off') return enveloped()", "staleRule = await ruleAState(anchor.dir); if (staleRule !== 'off') return enveloped()")
   change(delivery + 'guard-host.ts', 'const rule = await ruleAState(dirname(o.paths.guards))', 'const rule = o.rule ?? await ruleAState(dirname(o.paths.guards))')
   await killed('F6')

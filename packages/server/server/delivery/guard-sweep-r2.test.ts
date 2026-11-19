@@ -96,6 +96,7 @@ const sweepLines = (a: string[]) => a.filter(x => x.startsWith('sweep'))
 test('G1 forged GROUP MEMBERS (derived group status): the sweep must repair it or stay quiet, never loop forever', async () => {
   const w = await world('on', [['g', { isGroup: true }], ['m1', { parentGroupId: 'g' }], ['m2', { parentGroupId: 'g' }]])
   await writeCp(w, cp('g', { rank: 0, boardStatus: 'in_progress', boardStage: 'running', phase: null, auth: [{ kind: 'grandfathered', at: ISO }] }))
+  await w.svc.tick() // Establish the old-store member baseline before simulating a raw writer.
   forgeBoard(w, s => s.parentGroupId === 'g', { status: 'done', done: true }) // an older binary finishing both members
   const per: unknown[] = []
   for (let i = 0; i < 5; i++) {
@@ -177,7 +178,9 @@ test('B1 the loop guard writes `blocked` with no blockedReason (the board rule b
 
 test('S2B-7 Reflect.get and assignment destructuring constructor escapes are refused; controls stay clean', () => {
   for (const src of ["Reflect.get(x, 'constructor')('x')", "Reflect['get'](x, `constructor`)", "const key = 'constructor'; Reflect.get(x, key)", "Reflect.get(x, 'con' + 'structor')", "({ constructor: C } = x)", "({ ['constructor']: C } = x)"]) expect(forbiddenCapabilities(src).length, src).toBeGreaterThan(0)
-  for (const src of ['x.constructor.name', 'x.constructor === Map', 'x.constructor !== Object', 'class C { constructor() {} }', "Reflect.get(x, 'size')", 'new Proxy(x, { get(target, prop) { return Reflect.get(target, prop, target) } })']) expect(forbiddenCapabilities(src), src).toEqual([])
+  for (const src of ['x.constructor.name', 'x.constructor === Map', 'x.constructor !== Object', 'class C { constructor() {} }', "Reflect.get(x, 'size')"]) expect(forbiddenCapabilities(src), src).toEqual([])
+  // r5: a runtime proxy key cannot prove that it excludes 'constructor'.
+  expect(forbiddenCapabilities('new Proxy(x, { get(target, prop) { return Reflect.get(target, prop, target) } })')).toContain('reflect-indirect')
 })
 
 const piece = (extra = {}) => ({ key: 'p1', taskId: 't1', subtaskId: 'p1', boardStatus: 'in_review', boardRank: 1, ciRank: 0, record: record('p1', 'revisao_lider'), ...extra })
@@ -256,13 +259,13 @@ test('S2B-5 Q1 board-only second revert blocks the existing record too', async (
 })
 
 test('S2B-4 breaker rejects over five percent and over twenty missing checkpoints; boundary is allowed', async () => {
-  const w = await world('on') // 41 pieces, so two is below 5%, three is above.
+  const w = await world('on') // More than five candidates AND over 5% trips the percentage breaker.
   const forge = (count: number) => {
     const raw = JSON.parse(readFileSync(w.paths.tasks, 'utf8'))
     raw.tasks = raw.tasks.map((t: any, i: number) => i > 0 ? { ...t, status: i <= count ? 'done' : 'in_progress' } : t)
     writeFileSync(w.paths.tasks, JSON.stringify(raw))
   }
-  forge(3)
+  forge(6)
   const before = readFileSync(w.paths.tasks, 'utf8')
   expect((await w.svc.tick()).actions).toContain('sweep-skipped: no_checkpoint_breaker')
   expect(readFileSync(w.paths.tasks, 'utf8')).toBe(before)
@@ -311,6 +314,7 @@ test('G1 board-only member loops block their shared group record once', async ()
   const w = await world('on', [['g', { isGroup: true }], ['m1', { parentGroupId: 'g' }], ['m2', { parentGroupId: 'g' }]])
   await writeCp(w, cp('g', { rank: 0, phase: 'executando', boardStatus: 'in_progress', auth: [] }))
   forgeDelivery(w, 'g', record('g', 'executando'))
+  await w.svc.tick() // Establish accepted members before the two raw forgeries.
   for (let i = 0; i < 2; i++) { forgeBoard(w, s => !!s.parentGroupId, { status: 'done' }); await w.svc.tick(); w.clock.now += 60_000 }
   expect((await w.store.get('g'))!.phase).toBe('bloqueado')
   expect((await w.store.get('g'))!.history.filter(h => h.actor === 'flow:sweep' && h.to === 'bloqueado')).toHaveLength(1)
@@ -359,7 +363,7 @@ test('S2B-3 catch-up refusals and throws report once per piece/code until cleare
 
 test('S2B-1 identical ineffective member plan never writes or comments again', async () => {
   let writes = 0
-  let doc: any = { checkpoints: { g: cp('g', { rank: 0, phase: null, boardStatus: 'in_progress', auth: [] }) }, intents: {}, migrations: { a: { version: 1, at: ISO } } }
+  let doc: any = { checkpoints: {}, intents: {}, migrations: { a: { version: 1, at: ISO } } }
   const book: any = { tasks: [{ id: 't1', status: 'in_progress' }], statuses: DEFS, subtasks: [{ id: 'g', taskId: 't1', status: 'in_progress' }, { id: 'm', taskId: 't1', parentGroupId: 'g', status: 'done' }] }
   const deps: any = { rule: async () => 'on', envelope: (fn: any) => fn(), guards: { read: async () => doc, write: async (d: any) => { doc = d } }, tasks: { read: async () => book, applyBoardReverts: async () => { writes++ } }, store: { read: async () => ({ deliveries: {} }) }, statusStages: async () => undefined, effective: (subs: any) => subs.map((s: any) => s.id === 'g' ? { ...s, status: 'in_progress' } : s), ids: { comment: () => 'c', event: () => 'e' }, now: () => T }
   await guardSweep(deps, [])

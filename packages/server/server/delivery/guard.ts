@@ -67,7 +67,8 @@ function statusRank(statuses: BoardSlice['statuses'], id: string): number {
   switch (id) { case 'in_review': return 1; case 'done': return 4; default: return 0 }
 }
 
-const subRank = (b: BoardSlice, s: BoardSlice['subtasks'][number]): number => {
+/** A subtask's own ladder rank: its status, or the `ci` signal the Live moves a card on. */
+export const subRank = (b: BoardSlice, s: BoardSlice['subtasks'][number]): number => {
   const byStatus = statusRank(b.statuses, s.status)
   // The Live shows a card on CI the moment the CI signal exists and on Publicado once its tag is published.
   const bySignal = s.ci ? (s.ci.tagPublished ? 4 : 3) : 0
@@ -87,6 +88,16 @@ export function boardPieces(b: BoardSlice): Array<{ key: string; taskId: string;
     out.push({ key: s.id, taskId: s.taskId, subtaskId: s.id, status: s.status, statusRank: statusRank(b.statuses, s.status), ciRank: s.ci ? (s.ci.tagPublished ? 4 : 3) : 0 })
   }
   for (const t of b.tasks) if (!taskWithSubs.has(t.id)) out.push({ key: t.id, taskId: t.id, status: t.status, statusRank: statusRank(b.statuses, t.status), ciRank: 0 })
+  return out
+}
+
+/**
+ * PURE (S2b r4, R3-1). The stored board status of every member of a group — what the guard records as ACCEPTED when it accepts the
+ * group — optionally only the members whose own rank is at most `maxRank` (a guarded retreat must not bless a forged member).
+ */
+export function memberStatuses(b: BoardSlice, groupKey: string, maxRank?: number): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const s of b.subtasks) if (s.parentGroupId === groupKey && (maxRank === undefined || subRank(b, s) <= maxRank)) out[s.id] = s.status
   return out
 }
 

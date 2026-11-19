@@ -33,7 +33,7 @@ import type {
   TaskEvent, TaskFile, TaskLink, TaskPriority, TaskStatus, TaskThread,
 } from './task-model'
 import { isCommentKind, type ThreadDelivery, type ThreadParticipant } from '@agentistics/core'
-import { boardRaises, boardPieces, type BoardSlice, type GuardContext } from '../delivery/guard'
+import { boardRaises, boardPieces, memberStatuses, subRank, type BoardSlice, type GuardContext } from '../delivery/guard'
 import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from '../delivery/guard-host'
 import { GuardBusy } from '../delivery/guard-locks'
 import { createDeliveryStore } from '../delivery/store'
@@ -153,7 +153,11 @@ export interface TaskStore {
    */
   /** S2b: the mirror of each status's stored stage, for readers that must judge a book an older writer stripped. */
   statusStageMirror(): Promise<Record<string, string> | undefined>
-  applyBoardReverts(batch: { at: string; reverts: ReadonlyArray<{ key: string; subtaskId?: string; to: string; clearCi: boolean }>; comments: readonly TaskComment[]; events: readonly TaskEvent[] }): Promise<void>
+  /**
+   * R5-1: a revert carrying `parentGroupId` puts an accepted member back in its group; with a `placeholder` and no subtask under that
+   * id, it writes one carrying only the accepted record (id, status, group) — the group's status is derived from its members.
+   */
+  applyBoardReverts(batch: { at: string; reverts: ReadonlyArray<{ key: string; subtaskId?: string; to: string; clearCi: boolean; parentGroupId?: string; placeholder?: { taskId: string; title: string } }>; comments: readonly TaskComment[]; events: readonly TaskEvent[] }): Promise<void>
   /** Append to the activity log. Never throws on a task that has since gone. */
   logEvents(events: readonly TaskEvent[]): Promise<void>
 
@@ -720,13 +724,31 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
       after = { ...after, statuses: book.statuses.map(s => ({ ...s, stage: s.stage ?? doc.statusStages?.[s.id] })) }
     }
     const raised = boardRaises(prior, after)
+    const groupKeys = new Set(after.subtasks.flatMap(s => s.parentGroupId ? [s.parentGroupId] : []))
+    const isGroupKey = (key: string) => groupKeys.has(key)
     const beforePieces = new Map(boardPieces(prior).map(p => [p.key, p]))
     const retreats = currentGuard ? boardPieces(after).flatMap(p => {
       const was = beforePieces.get(p.key)
       return was && Math.max(p.statusRank, p.ciRank) < Math.max(was.statusRank, was.ciRank)
-        ? [{ key: p.key, rank: Math.max(p.statusRank, p.ciRank), fromBoardStatus: was.status, boardStatus: p.status, boardStage: after.statuses.find(s => s.id === p.status)?.stage ?? '' }] : []
+        ? [{ key: p.key, rank: Math.max(p.statusRank, p.ciRank), fromBoardStatus: was.status, boardStatus: p.status, boardStage: after.statuses.find(s => s.id === p.status)?.stage ?? '',
+          ...(isGroupKey(p.key) ? { members: memberStatuses(after, p.key, Math.max(p.statusRank, p.ciRank)) } : {}) }] : []
     }) : []
-    if (raised.length === 0 && retreats.length === 0) return writeRaw(book)
+    // Record only members changed by this accepted write; unrelated raw changes are not accepted with them.
+    const beforeMembers = new Map(before.subtasks.map(s => [s.id, s]))
+    // R5-4: only what the write CHANGED. A status it set is recorded as such; a member it only MOVED into a group keeps the status it
+    // already had, which is accepted only as far as an authority covers it (its old group's accepted record, or its own checkpoint)
+    // — a status a raw writer forged in `before` is never laundered by a move. A member that left its group is dropped from the record.
+    const afterSubs = new Map(book.subtasks.map(s => [s.id, s]))
+    const memberChanges: Array<{ key: string; id: string; status?: string; removed?: true; moved?: { fromGroup?: string; rank: number } }> = [
+      ...before.subtasks.flatMap(s => s.parentGroupId && afterSubs.get(s.id)?.parentGroupId !== s.parentGroupId ? [{ key: s.parentGroupId, id: s.id, removed: true as const }] : []),
+      ...book.subtasks.flatMap(s => {
+        const was = beforeMembers.get(s.id)
+        if (!s.parentGroupId || !s.status || (was?.status === s.status && was.parentGroupId === s.parentGroupId)) return []
+        if (!was || was.status !== s.status) return [{ key: s.parentGroupId, id: s.id, status: s.status }]
+        return [{ key: s.parentGroupId, id: s.id, status: s.status, moved: { ...(was.parentGroupId ? { fromGroup: was.parentGroupId } : {}), rank: subRank(prior, was) } }]
+      }),
+    ]
+    if (raised.length === 0 && retreats.length === 0 && memberChanges.length === 0) return writeRaw(book)
     if (currentBase) {
       // Rule off when the mutation started: re-read it under the tasks lock. The activation takes tasks first, so while
       // that lock is really held the answer cannot change under us; a rule that moved means retake the full envelope.
@@ -739,10 +761,10 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
     const tasks = new Map(book.tasks.map(t => [t.id, t] as const))
     const stageOf = (status: string) => after.statuses.find(d => d.id === status)?.stage ?? 'none'
     await guardedWrite({
-      raised, retreats, ctx: currentGuard, paths: anchor.paths, wiring: opts.guard,
+      raised, retreats, memberChanges, ctx: currentGuard, paths: anchor.paths, wiring: opts.guard,
       locks: [], alreadyHeld: ['tasks', 'deliveries', 'guards'],
       recordOf: async key => (await createDeliveryStore(anchor.paths.deliveries).read()).deliveries[key] ?? null,
-      stateOf: r => { const status = (r.subtaskId ? subs.get(r.key)?.status : tasks.get(r.key)?.status) ?? ''; return { boardStatus: status, boardStage: stageOf(status), phase: null } },
+      stateOf: r => { const status = (r.subtaskId ? subs.get(r.key)?.status : tasks.get(r.key)?.status) ?? ''; return { boardStatus: status, boardStage: stageOf(status), phase: null, ...(isGroupKey(r.key) ? { members: memberStatuses(after, r.key) } : {}) } },
       writeDocuments: () => writeRaw(book),
     })
   }
@@ -1068,12 +1090,21 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         const subtasks = book.subtasks.map(s => {
           const r = bySub.get(s.id)
           if (!r) return s
-          const next = { ...s, status: r.to, done: r.to === 'done', updatedAt: batch.at }
+          const next = { ...s, status: r.to, done: r.to === 'done', updatedAt: batch.at, ...(r.parentGroupId ? { parentGroupId: r.parentGroupId } : {}) }
           if (r.clearCi) delete next.ci
           if (r.to === 'blocked') next.blockedReason = 'externo: an unknown writer keeps moving this piece'
           else delete next.blockedReason
           return next
         })
+        const present = new Set(book.subtasks.map(s => s.id))
+        for (const r of batch.reverts) {
+          if (!r.subtaskId || !r.placeholder || !r.parentGroupId || present.has(r.subtaskId)) continue
+          if (!book.subtasks.some(s => s.id === r.parentGroupId)) continue
+          subtasks.push({
+            id: r.subtaskId, taskId: r.placeholder.taskId, title: r.placeholder.title, parentGroupId: r.parentGroupId, status: r.to, done: r.to === 'done',
+            createdAt: batch.at, updatedAt: batch.at, ...(r.to === 'blocked' ? { blockedReason: 'externo: an unknown writer keeps moving this piece' } : {}),
+          })
+        }
         const tasks = book.tasks.map(t => (byTask.has(t.id) ? { ...t, status: byTask.get(t.id)!.to, updatedAt: batch.at, ...(byTask.get(t.id)!.to === 'blocked' ? { blockedReason: 'externo: an unknown writer keeps moving this piece' } : {}) } : t))
         const events = [...book.events, ...batch.events]
         await write({ ...book, subtasks, tasks, comments: [...book.comments, ...batch.comments], events: events.slice(Math.max(0, events.length - MAX_EVENTS)) })

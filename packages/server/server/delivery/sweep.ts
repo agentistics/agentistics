@@ -24,6 +24,8 @@ import { planBlock, type DeliveryRecord } from './machine'
 import { LOOP_BLOCK_TEXT, SWEEP_ESCAPE, SWEEP_ESCAPE_PT, emptyMemory, planSweep, type PieceCheckpointLike, type PieceView, type SweepMemory, type SweepRevert } from './sweep-plan'
 
 export const SWEEP_CHUNK_SIZE = 4
+/** Reverts that have a checkpoint behind them are always repaired; more than this in one tick is report-only (a wholesale rewrite, not a forgery). */
+export const SWEEP_CHECKPOINT_CEILING = 100
 
 interface BoardBook { tasks: BoardSlice['tasks']; subtasks: BoardSlice['subtasks']; statuses: Array<BoardSlice['statuses'][number]> }
 export interface SweepGuardsDoc { checkpoints: Record<string, PieceCheckpointLike>; intents: Record<string, { transitionId: string; target: PieceCheckpointLike }>; migrations?: { a?: { version: 1; at: string } }; sweep?: SweepMemory; [k: string]: unknown }
@@ -37,7 +39,7 @@ export interface SweepDeps {
   statusStages: () => Promise<Record<string, string> | undefined>
   tasks: {
     read(): Promise<BoardBook>
-    applyBoardReverts(batch: { at: string; reverts: Array<{ key: string; subtaskId?: string; to: string; clearCi: boolean }>; comments: never[]; events: never[] }): Promise<void>
+    applyBoardReverts(batch: { at: string; reverts: Array<{ key: string; subtaskId?: string; to: string; clearCi: boolean; parentGroupId?: string; placeholder?: { taskId: string; title: string } }>; comments: never[]; events: never[] }): Promise<void>
   }
   store: { read(): Promise<{ deliveries: Record<string, DeliveryRecord> }>; update(fn: (doc: { deliveries: Record<string, DeliveryRecord> }) => void, opts: { guard: unknown }): Promise<unknown> }
   /** The flow engine's context: a revert only lowers a rank, but every delivery write says who is asking. */
@@ -58,17 +60,26 @@ const ACTOR = 'flow:sweep'
 const REASON_EN: Record<SweepRevert['reason'], string> = {
   above_checkpoint: 'it moved above what its checkpoint authorized',
   no_checkpoint: 'it moved forward with no authorization on record',
+  member_removed: 'an accepted member of its group was deleted by an unknown writer, lifting the group; it was put back from the accepted record (only its id, status and group: the rest of its data is gone)',
+  member_moved_out: 'an accepted member was moved out of its group by an unknown writer, lifting the group; it was put back in the group',
   evidence_stale: 'the evidence that authorized it no longer holds (gone, other bytes, an earlier round or a moved HEAD)',
 }
 const REASON_PT: Record<SweepRevert['reason'], string> = {
   above_checkpoint: 'avançou acima do que o checkpoint autorizou',
   no_checkpoint: 'avançou sem nenhuma autorização registrada',
+  member_removed: 'um membro aceito do grupo foi apagado por um escritor desconhecido, levantando o grupo; foi recolocado a partir do registro aceito (só id, status e grupo: o resto dos dados se perdeu)',
+  member_moved_out: 'um membro aceito foi tirado do grupo por um escritor desconhecido, levantando o grupo; foi recolocado no grupo',
   evidence_stale: 'a evidência que o autorizou não vale mais (sumiu, outros bytes, rodada anterior ou HEAD mudou)',
 }
 
 const textOf = (r: SweepRevert) =>
   `[fluxo entrega] guard sweep reverted ${r.key}: ${REASON_EN[r.reason]}${r.loop ? `; it was reverted ${r.count} times in 24 h, so it is now blocked (externo: an unknown writer keeps moving this piece)` : ''}. ${SWEEP_ESCAPE}`
   + ` | varredura do guarda reverteu ${r.key}: ${REASON_PT[r.reason]}${r.loop ? `; foi revertida ${r.count} vezes em 24 h, então agora está bloqueada (externo: um escritor desconhecido continua movendo esta peça)` : ''}. ${SWEEP_ESCAPE_PT}`
+
+/** R5-1: the health WARN for a group whose accepted members a raw writer removed or moved out. */
+const memberAlertText = (group: string, list: readonly string[]) =>
+  `sweep members: group ${group} lost accepted members to an unknown writer (${list.join(', ')}); the sweep put them back. `
+  + `O grupo ${group} perdeu membros aceitos para um escritor desconhecido; a varredura os recolocou. ${SWEEP_ESCAPE}`
 
 /** Pure over the two documents: every piece either of them (or a checkpoint) mentions, as the sweep reads it. */
 export function viewsOf(slice: BoardSlice, records: Readonly<Record<string, DeliveryRecord>>, keys: Iterable<string>, effective: BoardSlice = slice): PieceView[] {
@@ -85,7 +96,7 @@ export function viewsOf(slice: BoardSlice, records: Readonly<Record<string, Deli
     if (!b && !r) continue
     out.push({
       key, taskId: b?.taskId ?? r!.taskId, ...(b?.subtaskId ? { subtaskId: b.subtaskId } : {}),
-      ...(parentOf.get(key) ? { checkpointKey: parentOf.get(key), groupRank: Math.max(board.get(parentOf.get(key)!)?.statusRank ?? 0, board.get(parentOf.get(key)!)?.ciRank ?? 0), authorizationRecord: records[parentOf.get(key)!] ?? null } : {}),
+      ...(parentOf.get(key) ? { checkpointKey: parentOf.get(key), groupRank: board.get(parentOf.get(key)!)?.statusRank ?? 0, authorizationRecord: records[parentOf.get(key)!] ?? null } : {}),
       ...(groups.has(key) ? { derived: true } : {}),
       boardStatus: b?.status ?? null, boardRank: b?.statusRank ?? 0, ciRank: b?.ciRank ?? 0,
       record: r && { phase: r.phase, revision: r.revision, ...(r.headSha ? { headSha: r.headSha } : {}), evidence: r.evidence ?? [], history: r.history ?? [] },
@@ -101,6 +112,7 @@ export function documentsShow(target: PieceCheckpointLike, views: ReadonlyMap<st
   if (!target.boardStatus && !target.phase) return false
   if (target.boardStatus && v.boardStatus !== target.boardStatus) return false
   if (target.phase && v.record?.phase !== target.phase) return false
+  if (target.members && Object.entries(target.members).some(([id, m]) => views.get(id)?.boardStatus !== m.status)) return false
   return true
 }
 
@@ -122,7 +134,7 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
   const initial = await snapshot()
   let doc = initial.doc
   const { views, statuses } = initial
-  const recoveryViews = new Map(viewsOf({ ...initial.effective, subtasks: initial.effective.subtasks.filter(s => !s.parentGroupId) }, initial.ddoc.deliveries, Object.keys(doc.intents)).map(v => [v.key, v] as const))
+  const recoveryViews = initial.byKey
   const recoveryActions: string[] = []
   for (const [key, intent] of Object.entries(doc.intents)) {
     const { [key]: _gone, ...rest } = doc.intents
@@ -131,20 +143,30 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
   }
   const at = new Date(d.now()).toISOString()
   const plan = planSweep({ pieces: views, checkpoints: doc.checkpoints, statuses, memory: doc.sweep ?? emptyMemory(), now: d.now() })
+  actions.push(...plan.reports)
   if (rule === 'shadow') {
     actions.push(...recoveryActions.map(a => a.replace('sweep-intent-', 'sweep would-recover-intent-')))
     for (const r of plan.reverts) actions.push(`sweep would-revert ${r.key}: ${r.reason}`)
     return
   }
-  const revertCount = plan.reverts.length
-  const skipped = !doc.migrations?.a ? 'migration_missing' : revertCount > 20 || revertCount > views.length * 0.05 ? 'no_checkpoint_breaker' : null
+  // R3-2: the breaker judges only reverts that have NO checkpoint behind them (no proof of what was authorized). A revert that
+  // HAS one (`above_checkpoint` / `evidence_stale`) is always repaired — under its own absolute ceiling — so a few checkpoint-less
+  // forgeries can never switch the repair of the others off, and a small store is never left only reporting.
+  const checkpointed = plan.reverts.filter(r => r.reason !== 'no_checkpoint')
+  const revertCount = plan.reverts.length - checkpointed.length
+  const noCheckpointTrip = revertCount > 20 || (revertCount > views.length * 0.05 && revertCount > 5)
+  const skipped = !doc.migrations?.a ? 'migration_missing' : checkpointed.length > SWEEP_CHECKPOINT_CEILING ? 'checkpoint_ceiling' : noCheckpointTrip ? 'no_checkpoint_breaker' : null
+  const toApply = skipped === 'no_checkpoint_breaker' ? checkpointed : plan.reverts
+  let tripWarning: string | undefined
   if (skipped) {
     actions.push(`sweep-skipped: ${skipped}`)
     if (skipped === 'migration_missing') {
       d.log?.(`[guard] WARN sweep-skipped: migration_missing; ${SWEEP_ESCAPE}`)
       return
     }
-    const warning = `sweep-breaker: ${revertCount}/${views.length} pieces need a revert; the sweep is report-only for this tick. A varredura está apenas relatando neste tick: ${revertCount}/${views.length} peças precisam de reversão. agentop flow guarantee off a`
+    const count = skipped === 'checkpoint_ceiling' ? checkpointed.length : revertCount
+    const warning = `sweep-breaker: ${count}/${views.length} pieces need a revert; the sweep is report-only for ${skipped === 'checkpoint_ceiling' ? 'this tick' : 'the pieces with no checkpoint'}. A varredura está apenas relatando ${skipped === 'checkpoint_ceiling' ? 'neste tick' : 'as peças sem checkpoint'}: ${count}/${views.length} peças precisam de reversão. agentop flow guarantee off a`
+    tripWarning = warning
     let notify = false
     await d.envelope(async () => {
       if (await d.rule() !== 'on') return
@@ -155,9 +177,9 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
     })
     if (notify) {
       d.log?.(`[guard] WARN ${warning}`)
-      await d.notifyLeaders?.([...new Set(plan.reverts.map(r => r.taskId))], warning)
+      await d.notifyLeaders?.([...new Set(plan.reverts.filter(r => skipped === 'checkpoint_ceiling' || r.reason === 'no_checkpoint').map(r => r.taskId))], warning)
     }
-    return
+    if (skipped === 'checkpoint_ceiling' || checkpointed.length === 0) return
   }
 
   // Recovery is itself bounded and compares the intent identity under lock. A replaced intent is never consumed.
@@ -168,7 +190,7 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
       if (await d.rule() !== 'on') return
       const fresh = await snapshot()
       let current = fresh.doc, changed = false
-      const shown = new Map(viewsOf({ ...fresh.effective, subtasks: fresh.effective.subtasks.filter(s => !s.parentGroupId) }, fresh.ddoc.deliveries, entries.map(([key]) => key)).map(v => [v.key, v] as const))
+      const shown = fresh.byKey
       for (const [key, intent] of entries) {
         if (JSON.stringify(current.intents[key]) !== JSON.stringify(intent)) continue
         const { [key]: _gone, ...rest } = current.intents
@@ -180,18 +202,24 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
     })
   }
 
-  const signature = (v: PieceView | undefined, checkpoints: SweepGuardsDoc['checkpoints'], memory: SweepMemory | undefined) =>
-    JSON.stringify([v, v ? checkpoints[v.checkpointKey ?? v.key] : null, v ? memory?.reverts[v.key] ?? [] : [], statuses])
+  const signature = (v: PieceView | undefined, checkpoints: SweepGuardsDoc['checkpoints'], memory: SweepMemory | undefined) => {
+    const cp = v ? checkpoints[v.checkpointKey ?? v.key] : undefined
+    // A sibling's accepted member change does not change this member's authority. Its status, aggregate rank and shared
+    // phase/evidence still participate, so a concurrent change to any of those continues to invalidate this proposal.
+    const authority = v?.checkpointKey && cp ? { ...cp, members: cp.members?.[v.key], at: undefined, transitionId: undefined } : cp
+    return JSON.stringify([v, authority, v ? memory?.reverts[v.key] ?? [] : [], statuses])
+  }
   const expected = new Map(views.map(v => [v.key, signature(v, doc.checkpoints, doc.sweep)]))
   const loops: string[] = []
+  const restored = new Map<string, string[]>()
   // No network, adoption or leader wake lives in these chunks. Each chunk writes each document at most once.
-  for (let offset = 0; offset < plan.reverts.length; offset += SWEEP_CHUNK_SIZE) {
-    const proposed = plan.reverts.slice(offset, offset + SWEEP_CHUNK_SIZE)
+  for (let offset = 0; offset < toApply.length; offset += SWEEP_CHUNK_SIZE) {
+    const proposed = toApply.slice(offset, offset + SWEEP_CHUNK_SIZE)
     await d.envelope(async () => {
       if (await d.rule() !== 'on') return
       const fresh = await snapshot()
       if (!fresh.doc.migrations?.a || JSON.stringify(fresh.statuses) !== JSON.stringify(statuses)) return
-      const reverts = proposed.filter(r => signature(fresh.byKey.get(r.key), fresh.doc.checkpoints, fresh.doc.sweep) === expected.get(r.key))
+      const reverts = proposed.filter(r => (r.checkKeys ?? [r.key]).every(k => signature(fresh.byKey.get(k), fresh.doc.checkpoints, fresh.doc.sweep) === expected.get(k)))
       if (!reverts.length) return
       const recordReverts = new Map<string, SweepRevert>()
       for (const r of reverts) {
@@ -213,7 +241,10 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
         events.push({ id: d.ids.event(), taskId: r.taskId, ...(r.subtaskId ? { subtaskId: r.subtaskId } : {}), at, actor: ACTOR, kind: 'status', detail: `sweep revert: ${r.reason}${oldDeliveredAt?.deliveredAt ? `; previous deliveredAt: ${oldDeliveredAt.deliveredAt}` : ''}`, ...(r.board ? { to: r.loop ? 'blocked' : r.board.to } : {}) })
       }
       await d.tasks.applyBoardReverts({
-        at, reverts: reverts.filter(r => r.board).map(r => ({ key: r.key, ...(r.subtaskId ? { subtaskId: r.subtaskId } : {}), to: r.loop ? 'blocked' : r.board!.to, clearCi: r.board!.clearCi })),
+        at, reverts: reverts.filter(r => r.board).map(r => ({
+          key: r.key, ...(r.subtaskId ? { subtaskId: r.subtaskId } : {}), to: r.loop ? 'blocked' : r.board!.to, clearCi: r.board!.clearCi,
+          ...(r.restore ? { parentGroupId: r.restore.parentGroupId, ...(r.restore.placeholder ? { placeholder: r.restore.placeholder } : {}) } : {}),
+        })),
         comments: comments as never[], events: events as never[],
       })
       // After both documents: a crash loses at most this chunk's count and never invents a loop.
@@ -223,10 +254,23 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
         memory.reverts[r.key] = plan.memory.reverts[r.key]!
         actions.push(`sweep-revert ${r.key}: ${r.reason}${r.loop ? ' (loop: blocked)' : ''}`)
         if (r.loop) loops.push(r.key)
+        if (r.restore) {
+          const g = r.restore.parentGroupId
+          restored.set(g, [...(restored.get(g) ?? []), `${r.key} ${r.reason}`])
+          memory.memberAlerts = { ...(memory.memberAlerts ?? {}), [g]: { at, text: memberAlertText(g, restored.get(g)!) } }
+        }
       }
       await d.guards.write({ ...current, sweep: memory })
+      // Only advance expectations for inputs that matched before our own chunk. A concurrent write keeps its mismatch.
+      const afterChunk = await snapshot()
+      for (const v of fresh.views) {
+        if (signature(v, fresh.doc.checkpoints, fresh.doc.sweep) === expected.get(v.key)) {
+          expected.set(v.key, signature(afterChunk.byKey.get(v.key), afterChunk.doc.checkpoints, afterChunk.doc.sweep))
+        }
+      }
     })
   }
+  for (const [g, list] of restored) d.log?.(`[guard] WARN ${memberAlertText(g, list)}`)
   if (loops.length) d.log?.(`[guard] WARN sweep-loop: ${loops.join(', ')} keep being moved by an unknown writer and were blocked; um escritor desconhecido continua movendo estas peças — ${SWEEP_ESCAPE}`)
 
   // A catch-up uses its own short guarded door. It never inherits the sweep's lock lease or a tick-wide lease.
@@ -256,7 +300,20 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
     const current = await d.guards.read()
     const memory = planSweep({ pieces: [], checkpoints: {}, statuses, memory: current.sweep ?? emptyMemory(), now: d.now() }).memory
     if (Object.keys(failures).length) memory.catchUpFailures = failures
-    if (JSON.stringify(memory) !== JSON.stringify(current.sweep ?? emptyMemory())) await d.guards.write({ ...current, sweep: memory })
+    if (tripWarning) memory.warning = tripWarning
+    if (plan.memory.noBaselineSince) memory.noBaselineSince = plan.memory.noBaselineSince
+    // R3-1: record what the guard accepts for each group member (only when this tick's plan says something changed). The plan is
+    // re-derived from a fresh snapshot under the lock, so a write that landed since is judged as it is NOW.
+    let checkpoints = current.checkpoints
+    if (plan.baselines.length) {
+      const fresh = await snapshot()
+      const again = planSweep({ pieces: fresh.views, checkpoints: fresh.doc.checkpoints, statuses: fresh.statuses, memory: fresh.doc.sweep ?? emptyMemory(), now: d.now() }).baselines
+      if (JSON.stringify(fresh.statuses) === JSON.stringify(statuses) && again.length) {
+        checkpoints = { ...fresh.doc.checkpoints }
+        for (const b of again) checkpoints[b.key] = { ...checkpoints[b.key]!, members: b.members }
+      }
+    }
+    if (checkpoints !== current.checkpoints || JSON.stringify(memory) !== JSON.stringify(current.sweep ?? emptyMemory())) await d.guards.write({ ...current, checkpoints, sweep: memory })
   })
 }
 

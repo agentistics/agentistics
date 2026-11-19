@@ -18,7 +18,7 @@ import type { DeliveryRecord } from './machine'
 import { defaultGuardLockPaths, withGuardLocks, type GuardLockName, type GuardLockPaths } from './guard-locks'
 import { beginIntent, commitIntent, createGuardsStore, GuardsUnreadable, type GuardAuth, type PieceCheckpoint } from './guards-store'
 import { decideGuard, GuardRefused, phaseRank, type GuardContext, type Raised, type ReviewOutcome, type RuleState } from './guard'
-import { checkpointRank } from './sweep-plan'
+import { checkpointRank, type AcceptedMembers } from './sweep-plan'
 
 /** How a store reaches the guard. Everything optional: production defaults come from the data directory and the registry. */
 export interface GuardWiring {
@@ -90,7 +90,9 @@ export interface GuardedWriteOptions {
   /** Deprecated input: the policy is always resolved again under the held guards lock. */
   rule?: RuleState
   raised: readonly Raised[]
-  retreats?: readonly { key: string; rank: number; fromPhase?: string; fromBoardStatus?: string; boardStatus?: string; boardStage?: string }[]
+  /** Member changes this write made (R4-1/R5-4): a status it set, a member it moved in (`moved`), a member that left (`removed`). */
+  memberChanges?: readonly { key: string; id: string; status?: string; removed?: true; moved?: { fromGroup?: string; rank: number } }[]
+  retreats?: readonly { key: string; rank: number; fromPhase?: string; fromBoardStatus?: string; boardStatus?: string; boardStage?: string; /** The members of a group whose own rank is within the retreat's. */ members?: Record<string, string> }[]
   ctx: GuardContext | undefined
   paths: GuardLockPaths
   /** Locks still needed by the caller; empty when its store/transaction already holds the complete set. */
@@ -101,12 +103,14 @@ export interface GuardedWriteOptions {
   /** The delivery record of a raised piece, read while the locks are held. */
   recordOf: (key: string) => Promise<Pick<DeliveryRecord, 'evidence' | 'revision' | 'phase'> & Partial<Pick<DeliveryRecord, 'history'>> | null>
   /** What the checkpoint says about the board/phase at the target. */
-  stateOf: (r: Raised) => { boardStatus: string; boardStage: string; phase: string | null }
+  stateOf: (r: Raised) => { boardStatus: string; boardStage: string; phase: string | null; /** A group's member statuses at this write (R3-1). */ members?: Record<string, string> }
   /** The document write — runs after the intent is durable. */
   writeDocuments: () => Promise<void>
   /** Test seam: a crash point between the documents and the checkpoint commit. */
   afterDocuments?: () => void | Promise<void>
 }
+
+const acceptedAt = (members: Record<string, string>, at: string): AcceptedMembers => Object.fromEntries(Object.entries(members).map(([id, status]) => [id, { status, at }]))
 
 /** Where a `would_refuse` goes in `shadow`: the log (a persistent report is S9/S10's). */
 function reportWouldRefuse(rule: RuleState, would: readonly { code: string; piece: string }[]): void {
@@ -123,7 +127,7 @@ export async function guardedWrite(o: GuardedWriteOptions): Promise<void> {
     let doc
     try { doc = await store.read() } catch (e) {
       if (!(e instanceof GuardsUnreadable)) throw e
-      if (rule === 'on') throw new GuardRefused({ code: 'guards_unreadable', piece: o.raised[0]!.key, missing: [], message: `${e.message} — guarded moves are refused until it is repaired`, messagePt: 'guards.json está ilegível ou adulterado — movimentos guardados ficam recusados até ser reparado' })
+      if (rule === 'on') throw new GuardRefused({ code: 'guards_unreadable', piece: o.raised[0]?.key ?? o.memberChanges?.[0]?.key ?? o.retreats?.[0]?.key ?? 'unknown', missing: [], message: `${e.message} — guarded moves are refused until it is repaired`, messagePt: 'guards.json está ilegível ou adulterado — movimentos guardados ficam recusados até ser reparado' })
       await o.writeDocuments(); return
     }
     const deps = o.wiring?.deps ?? await registryClassifyDeps()
@@ -159,6 +163,8 @@ export async function guardedWrite(o: GuardedWriteOptions): Promise<void> {
         revision: rec?.revision ?? 0, headSha: p.outcome.headSha, auth, by: o.ctx!.principal as unknown as PieceCheckpoint['by'], at,
         transitionId: `tr-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
         classification: { category: p.outcome.category, headSha: p.outcome.headSha ?? '', ...(p.outcome.declared ? { declared: p.outcome.declared } : {}) },
+        // R3-1: accepting a group accepts the statuses its members hold now, so the sweep can tell them from a later forgery.
+        ...(st.members ? { members: acceptedAt(st.members, at) } : {}),
       })
     }
     // A guarded retreat of the checkpoint's actual phase lowers its authority without demanding fresh evidence.
@@ -170,7 +176,32 @@ export async function guardedWrite(o: GuardedWriteOptions): Promise<void> {
       const phase = r.fromPhase !== undefined ? rec?.phase ?? null : prior.phase
       const auth = [...prior.auth]
       if (o.ctx.principal.kind === 'owner') auth.push({ kind: 'owner', via: o.ctx.principal.via })
-      targets.push({ ...prior, rank: Math.max(r.rank, phaseRank(phase)), phase, auth, by: o.ctx.principal as unknown as PieceCheckpoint['by'], boardStatus: r.boardStatus ?? '', boardStage: r.boardStage ?? '', revision: rec?.revision ?? prior.revision, at, transitionId: `retreat-${now}-${r.key}` })
+      // A retreat accepts only the members at or below its rank; a forged one above it is not blessed.
+      const members = r.members ? { ...(prior.members ?? {}), ...acceptedAt(r.members, at) } : prior.members
+      targets.push({ ...prior, ...(members ? { members } : {}), rank: Math.max(r.rank, phaseRank(phase)), phase, auth, by: o.ctx.principal as unknown as PieceCheckpoint['by'], boardStatus: r.boardStatus ?? '', boardStage: r.boardStage ?? '', revision: rec?.revision ?? prior.revision, at, transitionId: `retreat-${now}-${r.key}` })
+    }
+    // R5-4: a member only MOVED into a group carries a status this write did not set; it is accepted only as far as an authority
+    // already covers it — its old group's accepted record, else its old group's or its own checkpoint (rank 0 needs none).
+    const cpRank = (c: PieceCheckpoint) => checkpointRank(c, [{ id: c.boardStatus, stage: c.boardStage }])
+    const movedAccepted = (m: NonNullable<GuardedWriteOptions['memberChanges']>[number]): boolean => {
+      if (!m.moved) return true
+      const from = m.moved.fromGroup ? doc.checkpoints[m.moved.fromGroup] : undefined
+      if (from?.members?.[m.id]) return from.members[m.id]!.status === m.status
+      const own = from && !from.members ? from : doc.checkpoints[m.id]
+      return own ? m.moved.rank <= cpRank(own) : m.moved.rank === 0
+    }
+    if (rule === 'on') for (const m of o.memberChanges ?? []) {
+      let target = targets.find(t => t.key === m.key)
+      const prior = target ?? doc.checkpoints[m.key]
+      // R5-3: a group with no accepted record yet (the migration window) gets its first one, whole, from the sweep's quiet baseline or
+      // from a guarded raise; a partial record written here would turn every member it does not name into an unaccepted one.
+      if (!prior?.members || !movedAccepted(m) || (m.removed && !prior.members[m.id])) continue
+      if (!target) {
+        target = { ...prior, members: { ...prior.members }, at, transitionId: `member-${now}-${m.key}` }
+        targets.push(target)
+      }
+      if (m.removed) { const { [m.id]: _gone, ...rest } = target.members ?? {}; target.members = rest }
+      else target.members = { ...target.members, [m.id]: { status: m.status!, at } }
     }
     if (targets.length === 0) { await o.writeDocuments(); return }
     let withIntents = doc

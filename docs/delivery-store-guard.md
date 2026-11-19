@@ -96,9 +96,38 @@ busy file skips the tick with a named line, never proceeds unguarded):
    authorizes. A document above the checkpoint's current phase/status is reverted to it (`above_checkpoint`); an authorized
    retreat lowers the checkpoint, rather than retaining its historical maximum. A board-only retreat retains the authorized
    delivery phase and its rank; it never invents a delivery-phase retreat. Owner retreats carry the owner authorization too.
-   Groups are derived: a member is repaired only when the group's derived rank exceeds its checkpoint. An individual member
-   may legitimately finish while its siblings remain open, exactly as the write guard allows. Such a move is never reverted,
-   counted toward a loop or allowed to block the group. The group's ignored stored status is never repaired. No checkpoint means rank 0
+   Groups are derived; their ignored stored status is never repaired. A group checkpoint carries
+   `members: { <id>: { status, at } }`, recording each accepted member change in the same intent/envelope as the board write,
+   even when the aggregate rank stays unchanged. An individual member can therefore finish while its siblings remain open.
+   A raw advance beyond a member's recorded authority is repaired even after an earlier chunk lowers the aggregate rank.
+   The target is the member's recorded status, independent of the group's rank (`abandoned` stays `abandoned`), subject to
+   the evidence checks below. Chunk expectations advance only for changes caused by that chunk; concurrent writes still invalidate them.
+   The member record (`members`) is written ONLY by the guarded store, in the same write as the change: a status the write
+   set, a member it created, a member that left the group (dropped from the record). A member the write only MOVED into a
+   group keeps the status it already had, accepted only as far as an authority covers it (its old group's accepted record,
+   else its old group's or its own checkpoint; rank 0 needs none), so a status a raw writer forged before the move is never
+   laundered by it. The sweep never adds, changes or removes a member it merely observed on the board.
+   **Migration window** (a group checkpoint with no `members` record at all, i.e. an older store): members are never
+   reverted; a divergence is reported as `sweep would-revert <id>: no_member_baseline`. Only a quiet tick, with no
+   divergence signal and the aggregate rank inside the checkpoint's authority, writes the group's first record, whole.
+   That is the only record the sweep ever writes; once a group has one it is never rewritten from the board, so a lateral,
+   lower or higher divergence is never consolidated. A report that persists for more than 60 ticks of the minute tick
+   (`SWEEP_NO_BASELINE_WARN_MS`, one hour) raises a health WARN `sweep no_member_baseline: <ids>` until it stops.
+   Residual migration risk (declared): a raw writer active before the upgrade can leave a forgery that a quiet migration
+   tick accepts as its initial baseline, and a group forged above its checkpoint before the upgrade is reported (and,
+   after an hour, WARNed) but never repaired by the sweep. This is intentional: migration must never undo legitimate
+   deliveries by board order; a person repairs it by hand.
+   **Baselined group** (it has a `members` record): a member the record does not name was created by a raw writer. It is
+   reverted (`above_checkpoint`) when it lifts the group's derived rank above the checkpoint, otherwise reported every tick
+   as `sweep report <id>: unaccepted_member`, and never recorded. A group whose derived rank is above its checkpoint
+   because accepted members were deleted or moved out is never left silent: a moved-out member gets its `parentGroupId`
+   (and, if it was forged above it, its accepted status) back (`member_moved_out`); a deleted member is written back as a
+   placeholder under the same id carrying only what the record holds — id, accepted status, group (`member_removed`); its
+   other data is gone. The group's status is a pure function of its members, so this is the one way to bring the derived
+   status back to its checkpoint for the board and for release. Only members whose accepted status can lower the derived
+   status are restored (a `done` or non-real one never can). Both leave a revert comment, count toward the loop guard and
+   raise a health WARN `sweep members: group <id> lost accepted members …` for 24 h. Shadow only reports them.
+   No checkpoint means rank 0
    (`no_checkpoint`) only after both safety locks below pass. Rank ≥ 1 whose evidence ids/hashes are gone, point at other bytes, belong to an earlier capture round, or
    whose record HEAD moved goes back to rank 0 (`evidence_stale`: board `in_progress`, phase `ajuste`, a new round). The
    `ci` signal alone counts as rank (the Live moves on it) and is cleared by a revert.
@@ -112,6 +141,8 @@ busy file skips the tick with a named line, never proceeds unguarded):
    phase is a new binding to the guard). The history entry is appended; every revert comments on the piece in EN and PT.
    `deliveredAt` is preserved and the previous timestamp is also recorded in the revert event.
 4. **Board catch-up.** Board below the checkpoint while the phase is at it: `setPhaseStatus` is re-applied (never a violation).
+   Only when the board is below the rank of the board status the checkpoint RECORDED (r4, R3-3): a guard-accepted drag back
+   (owner, session or unattributed) recorded a lower status and is never undone, and `abandoned` is a decision, never caught up.
    The engine can reuse the authorization for that exact record revision/phase, like a grandfathered checkpoint; it does not
    reclassify a removed worker checkout. Failure (returned or thrown) leaves one `sweep-catch-up-failed <piece>: <code>` line
    per piece/code until it changes or clears. Another phase/binding still needs the normal evidence check.
@@ -127,9 +158,13 @@ busy file skips the tick with a named line, never proceeds unguarded):
 Every revert comment and the loop WARN name the escape: `agentop flow guarantee off a`. S10 writes grandfathered checkpoints
 and a sealed `guards.json` migration stamp: `migrations: { a: { version: 1, at: <ISO timestamp> } }`. Caller-supplied activation
 facts never create that stamp. With A on and no stamp, the sweep reports `sweep-skipped: migration_missing` + WARN and writes
-nothing. Even with the stamp, more than 20 reverts of **any kind** OR more than 5% of all pieces in one tick trips the breaker.
-The compatibility action remains `sweep-skipped: no_checkpoint_breaker`; no repairs, catch-ups, intent recovery or comments
-land in that tick. Only the sealed `sweep.warning` is updated. Health shows its own `sweep-breaker` WARN with the count,
+nothing. Even with the stamp, more than 20 `no_checkpoint` reverts OR (more than 5% of all pieces AND more than five candidates) in a tick trips
+the breaker (r4, R3-2: reverts that HAVE a checkpoint — `above_checkpoint` / `evidence_stale` — are never counted, so a few
+checkpoint-less forgeries cannot switch the repair of the others off and a small store is never left only reporting). The
+compatibility action remains `sweep-skipped: no_checkpoint_breaker`; the checkpoint-less pieces are then left alone (report-only)
+while the checkpointed repairs of the same tick still land. The checkpointed reverts have their own absolute ceiling
+(`SWEEP_CHECKPOINT_CEILING` = 100 per tick, `sweep-skipped: checkpoint_ceiling`, a wholesale rewrite rather than a forgery):
+past it nothing is repaired in that tick. Only the sealed `sweep.warning` is updated. Health shows its own `sweep-breaker` WARN with the count,
 an EN/PT explanation and guide `agentop flow guarantee off a`. The first tick of an episode logs it and notifies each affected
 task's leader (deduped across leaders); repeated ticks do neither. A normal tick clears the warning. Intent recovery is
 planned first but persisted only after the safety checks pass. Shadow writes no document, including intents or loop memory.

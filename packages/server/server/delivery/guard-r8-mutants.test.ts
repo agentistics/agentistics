@@ -73,7 +73,7 @@ const mutants: Array<[string, string, string, string, string, string[]]> = [
   ['S2b ci signal', delivery + 'sweep-plan.ts', 'clearCi: p.ciRank > target', 'clearCi: false', 'ci SIGNAL', [sweepTest]],
   ['S2b ranked revision', delivery + 'sweep.ts', 'phaseRank(to) === 0 ? r.revision + 1 : r.revision', 'r.revision + 1', 'not to rank 0', [sweepTest]],
   ['S2b memory persisted', delivery + 'guards-store.ts', '...(sweep ? { sweep } : {})', '...{}', 'BLOCKED', [sweepTest]],
-  ['S2b missing chunk', delivery + 'sweep.ts', 'offset < plan.reverts.length;', 'offset < plan.reverts.length - SWEEP_CHUNK_SIZE;', '12 forged pieces', [sweepTest]],
+  ['S2b missing chunk', delivery + 'sweep.ts', 'offset < toApply.length;', 'offset < toApply.length - SWEEP_CHUNK_SIZE;', '12 forged pieces', [sweepTest]],
   ['S2b clear ci in store', 'packages/server/server/sessions/task-store.ts', 'if (r.clearCi) delete next.ci', '', 'ci SIGNAL', [sweepTest]],
 ]
 for (const [id, file, from, to, pattern, suites] of mutants) test(`r8 mutant ${id} is killed`, async () => {

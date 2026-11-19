@@ -137,8 +137,10 @@ export function forbiddenCapabilities(src: string): string[] {
   }
   const assignmentConstructors = (node: ts.Expression) => {
     const target = unwrap(node)
+    if (ts.isSpreadElement(target)) assignmentConstructors(target.expression)
     if (ts.isArrayLiteralExpression(target)) for (const el of target.elements) assignmentConstructors(el)
     if (ts.isObjectLiteralExpression(target)) for (const p of target.properties) {
+      if (ts.isSpreadAssignment(p)) assignmentConstructors(p.expression)
       const name = p.name
       if (name && (ts.isIdentifier(name) ? name.text : ts.isComputedPropertyName(name) ? keyText(name.expression) : literalText(name)) === 'constructor') out.push('constructor-assignment-destructure')
       if (ts.isPropertyAssignment(p)) assignmentConstructors(p.initializer)
@@ -159,6 +161,18 @@ export function forbiddenCapabilities(src: string): string[] {
       if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(e) && e.expression.getText(file) === 'Reflect' && e.name.text === 'apply'
         && n.arguments[0] && isReflectGet(n.arguments[0]) && n.arguments[2] && ts.isArrayLiteralExpression(unwrap(n.arguments[2]))
         && keyText((unwrap(n.arguments[2]) as ts.ArrayLiteralExpression).elements[1]) === 'constructor') out.push('constructor-reflect-apply')
+    }
+    // R3-5: `Reflect` may only be CALLED directly (`Reflect.<m>(…)`, literal key). An alias, `.call`/`.bind`, a destructured or
+    // handed-over member are all the way to `Reflect.get(f, 'constructor')` without the call this ceiling can read.
+    if (ts.isIdentifier(n) && n.text === 'Reflect' && !(n.parent && ts.isPropertyAccessExpression(n.parent) && n.parent.name === n)
+      && !(n.parent && (ts.isVariableDeclaration(n.parent) || ts.isParameter(n.parent) || ts.isBindingElement(n.parent)) && n.parent.name === n)) {
+      const member = n.parent && (ts.isPropertyAccessExpression(n.parent) || ts.isElementAccessExpression(n.parent)) && n.parent.expression === n ? n.parent : undefined
+      const direct = !!member && !!member.parent && ts.isCallExpression(member.parent) && member.parent.expression === member
+        && (ts.isPropertyAccessExpression(member) || literalText(member.argumentExpression) !== undefined)
+      const call = direct && member && ts.isCallExpression(member.parent) ? member.parent : undefined
+      const method = member && (ts.isPropertyAccessExpression(member) ? member.name.text : keyText(member.argumentExpression))
+      const safeKey = call && literalText(call.arguments[1]) !== undefined && literalText(call.arguments[1]) !== 'constructor'
+      if (!direct || (method === 'get' || method === 'set' || method === 'has' || method === 'deleteProperty' || method === 'defineProperty' || method === 'getOwnPropertyDescriptor') && !safeKey) out.push('reflect-indirect')
     }
     if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken) assignmentConstructors(n.left)
     if ((ts.isForOfStatement(n) || ts.isForInStatement(n)) && !ts.isVariableDeclarationList(n.initializer)) assignmentConstructors(n.initializer)
