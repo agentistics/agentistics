@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.218.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões: enquanto o assistente trabalha, o andamento mostra o passo concluído e o que vem a seguir, em vez de ficar parado no último passo.',
+        en: 'Sessions: while the assistant works, progress shows the finished step and what comes next instead of sitting on the last step.',
+      },
+    ],
+  },
   '2.218.1': {
     features: [],
     fixes: [
