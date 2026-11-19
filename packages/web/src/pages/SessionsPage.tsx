@@ -3072,6 +3072,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             </div>
             <SessionActions
               inline
+              heldToHost
               row={rowIndex.get(selected.id)!}
               lang={tPt}
               act={act}

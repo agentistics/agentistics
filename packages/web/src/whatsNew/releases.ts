@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.218.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões: encerrar pelo celular uma sessão que ainda está em uso pede confirmação antes de forçar.',
+        en: 'Sessions: ending a session that is still in use from a phone asks for confirmation before forcing it.',
+      },
+      {
+        pt: 'Sessões: uma sessão encerrada não mostra mais que está trabalhando.',
+        en: 'Sessions: an ended session no longer shows that it is working.',
+      },
+      {
+        pt: 'Contas: a troca manual de conta diz para tentar de novo quando a sessão terminar, em vez de prometer uma nova tentativa automática.',
+        en: 'Accounts: a manual account switch tells you to try again when the session finishes instead of promising an automatic retry.',
+      },
+    ],
+  },
   '2.218.2': {
     features: [],
     fixes: [
