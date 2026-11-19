@@ -66,9 +66,11 @@ describe('other harnesses are unchanged', () => {
 
 describe('the turn notification', () => {
   const deliveries: string[] = []
+  const g = globalThis as Record<string, unknown>
+  const had = { window: 'window' in g, localStorage: 'localStorage' in g }
+  const before = { window: g.window, localStorage: g.localStorage }
   beforeEach(() => {
     const store = new Map<string, string>()
-    const g = globalThis as Record<string, unknown>
     g.localStorage = {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: (k: string, v: string) => { store.set(k, v) },
@@ -83,7 +85,11 @@ describe('the turn notification', () => {
     })
     resetNotificationMemory()
   })
-  afterEach(() => { observeDeliveries(null as never); resetNotificationMemory() })
+  afterEach(() => {
+    observeDeliveries(null as never); resetNotificationMemory()
+    // `window = globalThis` must not outlive this file: later files assign `window.innerWidth` and hit a readonly property.
+    for (const k of ['window', 'localStorage'] as const) { if (had[k]) g[k] = before[k]; else delete g[k] }
+  })
 
   it('a finished structured Hermes turn fires no needs-you notification', () => {
     const working = fleet([['hermes', 'hermes', 'working']], ['hermes'])

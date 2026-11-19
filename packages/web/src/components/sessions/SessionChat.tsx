@@ -2314,7 +2314,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * is DOING. Gating the note on the absence of live text hid the actions for exactly as long as
    * the screen had anything on it, which is most of the time a session is working.
    */
-  const showWorking = working && !loading
+  const showWorking = working && !loading && !sessionEnded
 
   // CHAT.ACTIVITY — flag off = the historic render, untouched.
   const [chatActivityOn, setChatActivityOn] = useState(() => chatActivityStore.get())
@@ -2758,7 +2758,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               {...(payload?.attachmentSends ? { attachmentSends: payload.attachmentSends } : {})}
               anchorId={echoAnchorId(session.id, q.text)}
               awaiting
-              awaitingWorking={working}
+              awaitingWorking={working && !sessionEnded}
               awaitingActions={queuedActionsFor(q.text)}
               onQuoteClick={onSentQuote}
               {...(q.at !== undefined ? { awaitingSinceMs: Math.max(0, now - q.at) } : {})}

@@ -17,6 +17,7 @@
  */
 
 import { ConfirmModal } from '../../pages/settings/primitives'
+import { offerHeldKill } from '../../lib/heldKill'
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { MoreHorizontal, X } from 'lucide-react'
@@ -84,6 +85,8 @@ export interface SessionActionsProps {
    * popover does — the verbs, their refusals, the confirmations, the notice — is the same code.
    */
   inline?: boolean
+  /** Hand a held "End anyway?" question to the page-level host even while this menu is mounted (a drawer is still mounted while it slides shut, and a dialog inside it goes with it). */
+  heldToHost?: boolean
 }
 
 /** The verbs that take a line of text before they can run. */
@@ -107,7 +110,7 @@ const TEXT_VERBS = new Set<string>(['rename', 'note'])
 const MENU_ORDER: string[] = ['rename', 'note', 'task', 'resume', 'terminal', 'fork', 'kill', 'forget', 'archive', 'delete']
 
 export function SessionActions({
-  row, lang, act, onGone, onOpened, extra = [], extraTop, inline = false,
+  row, lang, act, onGone, onOpened, extra = [], extraTop, inline = false, heldToHost = false,
 }: SessionActionsProps) {
   /** Open when the `task` verb was picked — see `TEXT_VERBS`. */
   const [linking, setLinking] = useState(false)
@@ -145,6 +148,10 @@ export function SessionActions({
     .map(a => row.verbs.find(v => v.action === a))
     .filter((v): v is FleetVerb => v !== undefined)
 
+  // A menu inside the phone drawer is unmounted while its kill is in flight; it then hands a refusal to the page-level host.
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+
   async function run(action: FleetActionId, text?: string, force = false) {
     setBusy(true)
     if (action === 'fork') setForkRefused(null)
@@ -161,7 +168,7 @@ export function SessionActions({
     if (action === 'terminal') pushNotification(terminalToast(out, lang))
     // Each refused attempt needs feedback, even when its text matches a previously seen bell row.
     // In use: no error toast — the SECOND question (a confirm dialog) says it, and `force` ends it on purpose.
-    if (action === 'kill' && !out.ok && out.held === true) { setKillHeld(out.message); return }
+    if (action === 'kill' && !out.ok && out.held === true) { if (mounted.current && !heldToHost) setKillHeld(out.message); else if (!offerHeldKill({ id: row.id, message: out.message })) { setNotice(out.message); setKillHeld(null) }; return }
     if (action === 'kill' && !out.ok) pushNotification({ type: 'error', title: pt ? 'Encerrar sessão' : 'End session', message: out.message, meta: { notificationKey: `session-kill-refused:${row.id}:${crypto.randomUUID()}` } })
     if (action === 'fork' && !out.ok && out.memoryBudget === true) setForkRefused({ ...(out.queuedId ? { queuedId: out.queuedId } : {}) })
     if (!out.ok) { setConfirmingTerminal(false); return }

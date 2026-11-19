@@ -138,6 +138,8 @@ import { AsideResizer } from './components/nav/AsideResizer'
 import { ASIDE_DEFAULT, ASIDE_MAX, ASIDE_MIN, clampAsideWidth } from './lib/asideWidth'
 import { PanelGap } from './components/sessions/PanelGap'
 import { OUTER_GAP, PANEL_BORDER, PANEL_GAP, PANEL_RADIUS } from './lib/panelLayout'
+import { HeldKillHost } from './components/sessions/HeldKillHost'
+import { isLiveState } from '@agentistics/core'
 import { useFleet, useFleetIndex, type FleetActionId } from './lib/fleet'
 import { BandSegment, BandSegmentTab } from './components/sessions/bandControls'
 import { SessionActions } from './components/sessions/SessionActions'
@@ -4144,6 +4146,12 @@ export default function AppLayout() {
             {!inSessionsWorkspace && backfillNote}
           </>}>
           <Outlet context={appCtx} />
+          <HeldKillHost
+            lang={lang === 'pt' ? 'pt' : 'en'}
+            act={headerFleetAct as never}
+            onEnded={() => navigate('/sessions')}
+            stillValid={id => headerFleet.sessions.some(r => r.id === id && isLiveState(r.state))}
+          />
         </PageRouteFrame>
       </main>
 
