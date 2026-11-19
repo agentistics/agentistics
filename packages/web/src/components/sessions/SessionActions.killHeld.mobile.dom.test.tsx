@@ -101,3 +101,28 @@ test('a REAL drawer that is closing when the held refusal lands → the page-lev
   expect(calls.at(-1)).toEqual({ id: 'agentop-abc', action: 'kill', force: true })
   root.unmount()
 })
+
+test('a question about a session that is gone is dropped, and cancelling then re-mounting never reopens it', async () => {
+  const { offerHeldKill, peekHeldKill } = await import('../../lib/heldKill')
+  const act_ = () => Promise.resolve({ ok: true, message: '' })
+  const host = document.createElement('div'); document.body.appendChild(host)
+  const root = createRoot(host)
+  let live = true
+  const tree = () => createElement(HeldKillHost, { lang: 'en', act: act_ as never, stillValid: () => live })
+  await act(async () => { root.render(tree()) })
+  await act(async () => { offerHeldKill({ id: 'agentop-abc', message: 'In use: words.' }) })
+  expect(document.body.textContent).toContain('End anyway?')
+  await act(async () => { byText(document.body, 'Cancel')!.click() })
+  expect(peekHeldKill()).toBeNull()
+  await act(async () => { root.unmount() })
+  const host2 = document.createElement('div'); document.body.appendChild(host2)
+  const root2 = createRoot(host2)
+  await act(async () => { root2.render(tree()) }) // navigating: a new host mounts
+  expect(document.body.textContent).not.toContain('End anyway?')
+  await act(async () => { offerHeldKill({ id: 'agentop-abc', message: 'again' }) })
+  live = false
+  await act(async () => { root2.render(tree()) })
+  expect(peekHeldKill()).toBeNull()
+  expect(document.body.textContent).not.toContain('End anyway?')
+  root2.unmount()
+})

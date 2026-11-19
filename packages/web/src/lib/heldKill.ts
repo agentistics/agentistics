@@ -17,7 +17,21 @@ const listeners = new Set<() => void>()
 const emit = (): void => { for (const l of listeners) l() }
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
 
-export function offerHeldKill(held: HeldKill): void { current = held; emit() }
+/** How many always-mounted hosts are listening. The question may only be stored while one is. */
+let hosts = 0
+/** A host announces itself; leaving (the last one) drops any question nobody can ask any more. */
+export function registerHeldKillHost(): () => void {
+  hosts += 1
+  return () => { hosts -= 1; if (hosts <= 0) { hosts = 0; clearHeldKill() } }
+}
+/**
+ * Hand the question to the host. Returns false — and stores NOTHING — when no host is mounted, so
+ * the caller falls back to its own notice instead of leaving a stale dialog to surface later.
+ */
+export function offerHeldKill(held: HeldKill): boolean {
+  if (hosts === 0) return false
+  current = held; emit(); return true
+}
 export function clearHeldKill(): void { if (current !== null) { current = null; emit() } }
 export function peekHeldKill(): HeldKill | null { return current }
 export function useHeldKill(): HeldKill | null {

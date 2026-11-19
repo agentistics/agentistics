@@ -1,14 +1,20 @@
 import { ConfirmModal } from '../../pages/settings/primitives'
-import { clearHeldKill, useHeldKill } from '../../lib/heldKill'
+import { useEffect } from 'react'
+import { clearHeldKill, registerHeldKillHost, useHeldKill } from '../../lib/heldKill'
 
 /** Asks the "End anyway?" question for a refusal whose row menu was unmounted (see `lib/heldKill.ts`). */
-export function HeldKillHost({ lang, act, onEnded }: {
+export function HeldKillHost({ lang, act, onEnded, stillValid }: {
   lang: 'pt' | 'en'
   act: (req: { id: string; action: 'kill'; force: true }) => Promise<{ ok: boolean; message?: string }>
   onEnded?: () => void
+  /** Is the session still there and still running? A question about one that is not is dropped. */
+  stillValid?: (id: string) => boolean
 }) {
   const held = useHeldKill()
-  if (held === null) return null
+  useEffect(() => registerHeldKillHost(), [])
+  const valid = held === null || stillValid === undefined || stillValid(held.id)
+  useEffect(() => { if (!valid) clearHeldKill() }, [valid])
+  if (held === null || !valid) return null
   const pt = lang === 'pt'
   return (
     <ConfirmModal

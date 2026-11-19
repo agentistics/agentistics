@@ -800,7 +800,7 @@ export function SessionsAside({
     if (action === 'resume') { void reopenRow(id); return }
     void act({ id, action }).then(out => {
       // A held refusal is a question for the page-level host ("End anyway?"), not a dead-end toast.
-      if (action === 'kill' && !out.ok && (out as { held?: boolean }).held === true) { offerHeldKill({ id, message: out.message }); return }
+      if (action === 'kill' && !out.ok && (out as { held?: boolean }).held === true && offerHeldKill({ id, message: out.message })) return
       setNotice(out.message)
     })
   }

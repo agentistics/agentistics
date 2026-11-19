@@ -148,7 +148,6 @@ import { dedicatedTerminalPath, paneForTarget, readTerminalPane } from '../lib/t
 import { ShellBand } from '../components/sessions/ShellBand'
 import { openInTerminalFor } from '../components/sessions/OpenInTerminalPane'
 import { targetLabel } from '../lib/terminalTarget'
-import { HeldKillHost } from '../components/sessions/HeldKillHost'
 import { sessionPlanFactor } from '../lib/costBasis'
 
 /** The dimensions a live fleet row can be narrowed by — the same set on both layouts. */
@@ -3344,7 +3343,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
 
   return (
     <>
-    <HeldKillHost lang={pt ? 'pt' : 'en'} act={act as never} onEnded={() => navigate('/sessions')} />
     {splitRoute && selected ? (
       <>
       {tabStripAboveTitle ? tabStripEl : null}

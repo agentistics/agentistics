@@ -168,7 +168,7 @@ export function SessionActions({
     if (action === 'terminal') pushNotification(terminalToast(out, lang))
     // Each refused attempt needs feedback, even when its text matches a previously seen bell row.
     // In use: no error toast — the SECOND question (a confirm dialog) says it, and `force` ends it on purpose.
-    if (action === 'kill' && !out.ok && out.held === true) { if (mounted.current && !heldToHost) setKillHeld(out.message); else offerHeldKill({ id: row.id, message: out.message }); return }
+    if (action === 'kill' && !out.ok && out.held === true) { if (mounted.current && !heldToHost) setKillHeld(out.message); else if (!offerHeldKill({ id: row.id, message: out.message })) { setNotice(out.message); setKillHeld(null) }; return }
     if (action === 'kill' && !out.ok) pushNotification({ type: 'error', title: pt ? 'Encerrar sessão' : 'End session', message: out.message, meta: { notificationKey: `session-kill-refused:${row.id}:${crypto.randomUUID()}` } })
     if (action === 'fork' && !out.ok && out.memoryBudget === true) setForkRefused({ ...(out.queuedId ? { queuedId: out.queuedId } : {}) })
     if (!out.ok) { setConfirmingTerminal(false); return }
