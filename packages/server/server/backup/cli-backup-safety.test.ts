@@ -43,3 +43,23 @@ test('prune deletes only a real file strictly inside the backups directory', asy
   expect((await readPrunedPaths()).has(normal)).toBe(true)
   expect((await readPrunedPaths()).has(absolute)).toBe(false)
 })
+
+test('CICLO.LIMPEZA: the size cap prunes the oldest files inside the backups directory, keeps the newest, journals rule + bytes', async () => {
+  const backups = join(AGENTISTICS_DATA_DIR, 'backups')
+  await mkdir(backups, { recursive: true })
+  const paths = [1, 2, 3, 4].map(n => join(backups, `b${n}.tar.zst`))
+  for (const [i, p] of paths.entries()) {
+    await writeFile(p, 'x')
+    await recordBackup({ ...makeRecord(`2026-01-0${i + 1}T00:00:00Z`, p), archiveBytes: 1000 })
+  }
+  const logs: string[] = []
+  // keep 7 by count (nothing by count), but 2500 bytes in total → the two newest (2000) stay.
+  await pruneOldBackups(7, line => logs.push(line), 2500)
+  expect(paths.map(p => existsSync(p))).toEqual([false, false, true, true])
+  expect(logs.filter(l => l.startsWith('pruned')).every(l => l.includes('over 2500 bytes in total'))).toBe(true)
+  const lines = (await Bun.file(join(AGENTISTICS_DATA_DIR, 'backups.jsonl')).text()).trim().split('\n').map(l => JSON.parse(l)).filter(l => l.kind === 'prune')
+  expect(lines.map(l => [l.path, l.reason, l.bytes])).toEqual([[paths[1], 'size', 1000], [paths[0], 'size', 1000]])
+  // Idempotent: a second pass removes nothing more.
+  await pruneOldBackups(7, () => {}, 2500)
+  expect(paths.map(p => existsSync(p))).toEqual([false, false, true, true])
+})

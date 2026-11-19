@@ -82,6 +82,10 @@ export interface PruneRecord {
   /** ISO. */
   at: string
   path: string
+  /** CICLO.LIMPEZA: which retention rule pruned it — beyond `keep` (count) or beyond `maxTotalBytes` (size). Absent on older lines. */
+  reason?: 'count' | 'size'
+  /** The archive's size when it was pruned (its record's `archiveBytes`). Absent on older lines. */
+  bytes?: number
 }
 
 type BackupLine = BackupRecord | PruneRecord
@@ -172,10 +176,29 @@ export function lastPerHarness(entries: BackupHistoryEntry[]): Partial<Record<Ha
   return out
 }
 
-/** Records whose files should be deleted to honour `keep`. Never one that is already gone. */
-export function toPrune(entries: BackupHistoryEntry[], keep: number): BackupHistoryEntry[] {
+/**
+ * Records whose files should be deleted to honour `keep` AND `maxTotalBytes` (CICLO.LIMPEZA), newest first, each with the
+ * rule that pruned it. Never one that is already gone. The NEWEST present backup is never pruned — not even when it alone
+ * is bigger than the cap — and a `keep` of zero or below prunes nothing (a config typo must not wipe every backup).
+ * `maxTotalBytes` of zero or below means no size cap. Sizes are the records' `archiveBytes`.
+ */
+export function toPrune(entries: BackupHistoryEntry[], keep: number, maxTotalBytes = 0): Array<BackupHistoryEntry & { pruneReason: 'count' | 'size' }> {
   if (keep <= 0) return []
-  return entries.filter(e => e.present).slice(keep)
+  const present = entries.filter(e => e.present)
+  const byCount = present.slice(0, keep)
+  let fit = byCount.length
+  if (maxTotalBytes > 0) {
+    let total = 0
+    for (let i = 0; i < byCount.length; i++) {
+      const bytes = Number.isFinite(byCount[i]!.archiveBytes) ? Math.max(0, byCount[i]!.archiveBytes) : 0
+      if (i > 0 && total + bytes > maxTotalBytes) { fit = i; break }
+      total += bytes
+    }
+  }
+  return [
+    ...byCount.slice(fit).map(e => ({ ...e, pruneReason: 'size' as const })),
+    ...present.slice(keep).map(e => ({ ...e, pruneReason: 'count' as const })),
+  ]
 }
 
 /** Every line of the store, parsed. A line that will not parse is SKIPPED, not thrown on: an
@@ -216,8 +239,8 @@ export async function recordBackup(record: BackupRecord, file = BACKUPS_FILE): P
 
 /** Append one prune event — deliberately never a rewrite of the backup record it is about; see
  *  the module header. */
-export async function recordPrune(path: string, file = BACKUPS_FILE): Promise<void> {
-  const rec: PruneRecord = { kind: 'prune', at: new Date().toISOString(), path }
+export async function recordPrune(path: string, file = BACKUPS_FILE, info: { reason?: 'count' | 'size'; bytes?: number } = {}): Promise<void> {
+  const rec: PruneRecord = { kind: 'prune', at: new Date().toISOString(), path, ...(info.reason ? { reason: info.reason } : {}), ...(typeof info.bytes === 'number' ? { bytes: info.bytes } : {}) }
   await mkdir(dirname(file), { recursive: true })
   await appendFile(file, JSON.stringify(rec) + '\n')
 }

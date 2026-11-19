@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.219.0': {
+    features: [
+      {
+        pt: 'Fluxos (experimental): a cada 6 horas e ao publicar, o agentistics apaga cópias de segurança de sessões cujo trabalho já está no repositório remoto.',
+        en: 'Flows (experimental): every 6 hours and on publish, agentistics removes session safety copies whose work is already on the remote repository.',
+      },
+      {
+        pt: 'Backups: ficam no máximo 7 e no máximo 3 GB no total; o mais novo nunca é apagado.',
+        en: 'Backups: at most 7 and at most 3 GB in total are kept; the newest is never removed.',
+      },
+    ],
+    fixes: [],
+  },
   '2.218.4': {
     features: [],
     fixes: [
