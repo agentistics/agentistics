@@ -151,14 +151,15 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
         style={collapsed
           ? { ...footBtn, width: 34, flex: 1, minWidth: 0, position: 'relative' }
           : {
-              // CONTAS.AGENDA-SALVAR r4 · N1: the prototype's labelled pill — dot + "Uso dos planos", hot while the popup is open.
-              display: 'inline-flex', alignItems: 'center', gap: 6, width: '100%', minHeight: footBtn.height, padding: '5px 10px', borderRadius: 99,
+              // CONTAS.AGENDA-SALVAR r4 · N1: the labelled button — gauge + "Uso dos planos", hot while the popup is open.
+              // USO.PILULA (owner 19/11): the footer's own corner radius (8), never a 99px pill.
+              display: 'inline-flex', alignItems: 'center', gap: 6, width: '100%', minHeight: footBtn.height, padding: '5px 10px', borderRadius: footBtn.borderRadius ?? 8,
               border: `1px solid ${rect !== null ? 'var(--anthropic-orange)' : 'var(--border)'}`,
               background: rect !== null ? 'var(--anthropic-orange-glow, var(--anthropic-orange-dim))' : 'transparent',
               color: rect !== null ? 'var(--text-primary)' : 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', transition: 'all 0.15s',
             }}
       >
-        {collapsed ? <Gauge size={15} /> : <span data-plan-usage-dot aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green, #10b981)' }} />}
+        {collapsed ? <Gauge size={15} /> : <Gauge data-plan-usage-gauge aria-hidden size={15} style={{ flexShrink: 0, color: level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green, #10b981)' }} />}
         {!collapsed && <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{base}</span>}
         {level !== 'ok' && (collapsed
           ? <span style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LimitLevelIcon pct={worst!.pct} size={14} lang={lang} /></span>

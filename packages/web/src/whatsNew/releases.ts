@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.218.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uso dos planos: o botão do rodapé volta a ter o ícone do velocímetro e as mesmas bordas dos outros botões.',
+        en: 'Plan usage: the footer button shows the gauge icon again and has the same corners as the other buttons.',
+      },
+    ],
+  },
   '2.218.3': {
     features: [],
     fixes: [

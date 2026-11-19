@@ -33,12 +33,19 @@ async function mount(collapsed: boolean) {
   return host.querySelector('button') as HTMLButtonElement
 }
 
-test('N1: expanded, the trigger is a pill with a visible "Uso dos planos" label and a dot', async () => {
+test('N1 + USO.PILULA: expanded, the trigger shows the gauge icon, the "Uso dos planos" label and the footer radius', async () => {
   const btn = await mount(false)
   expect(btn.textContent).toContain('Uso dos planos')
-  expect(btn.querySelector('[data-plan-usage-dot]')).not.toBeNull()
-  expect(btn.querySelector('svg')).toBeNull() // the label replaces the gauge icon
-  expect(btn.style.borderRadius).toBe('99px')
+  expect(btn.querySelector('[data-plan-usage-gauge]')).not.toBeNull() // owner 19/11: the gauge icon stays
+  expect(btn.querySelector('[data-plan-usage-dot]')).toBeNull()
+  expect(btn.style.borderRadius).toBe('8px') // owner 19/11: the footer's own radius, never a 99px pill
+})
+
+test('USO.PILULA: the radius follows the footer buttons when they set one', async () => {
+  host = document.createElement('div'); document.body.appendChild(host)
+  root = createRoot(host)
+  await act(async () => { root.render(createElement(PlanUsageFootButton, { lang: 'pt', collapsed: false, footBtn: { width: 34, height: 34, borderRadius: 6 } })) })
+  expect((host.querySelector('button') as HTMLButtonElement).style.borderRadius).toBe('6px')
 })
 
 test('N1: the pill opens the existing popup (hover or focus) and marks itself hot while open', async () => {
