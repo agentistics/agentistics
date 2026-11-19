@@ -11,6 +11,7 @@ import type { FleetRow } from '../../lib/fleet'
 let createRoot: typeof import('react-dom/client').createRoot
 let SessionActions: typeof import('./SessionActions').SessionActions
 let HeldKillHost: typeof import('./HeldKillHost').HeldKillHost
+let Drawer: typeof import('../Drawer').Drawer
 let originalFetch: typeof globalThis.fetch
 
 beforeAll(async () => {
@@ -27,6 +28,7 @@ beforeAll(async () => {
   createRoot = (await import('react-dom/client')).createRoot
   SessionActions = (await import('./SessionActions')).SessionActions
   HeldKillHost = (await import('./HeldKillHost')).HeldKillHost
+  Drawer = (await import('../Drawer')).Drawer
 })
 afterAll(async () => {
   await new Promise(r => setTimeout(r, 50))
@@ -67,4 +69,35 @@ test('menu unmounted before the held refusal lands → the page-level host still
   expect(ended).toBe(1)
   expect(document.body.textContent).not.toContain('End anyway?')
   pageRoot.unmount()
+})
+
+// The real phone case: the Drawer is still MOUNTED (phase `leaving`) when the refusal lands, so the menu is not
+// unmounted and used to open its own dialog inside the sliding panel, which went away with it.
+test('a REAL drawer that is closing when the held refusal lands → the page-level host asks, outside the drawer', async () => {
+  const calls: Array<{ id: string; action: string; force?: boolean }> = []
+  let release: (v: unknown) => void = () => {}
+  const act_ = (req: { id: string; action: string; force?: boolean }) => {
+    calls.push(req)
+    return req.force ? Promise.resolve({ ok: true, message: '' }) : new Promise(r => { release = r })
+  }
+  const host = document.createElement('div'); document.body.appendChild(host)
+  const root = createRoot(host)
+  const tree = (open: boolean) => createElement('div', null,
+    createElement(HeldKillHost, { lang: 'en', act: act_ as never }),
+    createElement(Drawer, { open, title: 'x', onClose: () => {}, side: 'left', lang: 'en' } as never,
+      createElement(SessionActions, { row, lang: 'en', inline: true, heldToHost: true, act: act_ as never })))
+  await act(async () => { root.render(tree(true)) })
+  await act(async () => { await new Promise(r => setTimeout(r, 50)) })
+  await act(async () => { byText(host, 'End')!.click() })
+  await act(async () => { byText(host, 'End')!.click() })
+  expect(calls).toEqual([{ id: 'agentop-abc', action: 'kill' }])
+  await act(async () => { root.render(tree(false)) }) // ending closes the drawer: phase `leaving`, still mounted
+  await act(async () => { release({ ok: false, held: true, message: 'In use right now: engine words.' }); await new Promise(r => setTimeout(r, 10)) })
+  const dialogs = Array.from(document.body.querySelectorAll('*')).filter(e => e.textContent?.includes('End anyway?') && e.children.length === 0)
+  expect(dialogs.length).toBeGreaterThan(0)
+  // The dialog lives outside the drawer panel, which is what keeps it alive and on screen.
+  expect(dialogs.every(d => !d.closest('[data-drawer-side]'))).toBe(true)
+  await act(async () => { byText(document.body, 'End anyway')!.click(); await new Promise(r => setTimeout(r, 10)) })
+  expect(calls.at(-1)).toEqual({ id: 'agentop-abc', action: 'kill', force: true })
+  root.unmount()
 })

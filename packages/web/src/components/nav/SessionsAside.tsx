@@ -109,6 +109,7 @@ import { GoToSessionContext, SessionLine, type SessionLineProps } from './Sessio
 import {
   autoUnfold, buildTeams, endedAge, endedSections, fellAge, liveAge, teamSummary, waitingIds, type AsideTab, type Team,
 } from '../../lib/asideTabs'
+import { offerHeldKill } from '../../lib/heldKill'
 import { toggleFoldedTeam, useAsideTab, useFoldedTeams } from '../../lib/sessionsAsidePrefs'
 
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
@@ -797,7 +798,11 @@ export function SessionsAside({
       setCleanupAsk({ id, action }); setMenu(null); return
     }
     if (action === 'resume') { void reopenRow(id); return }
-    void act({ id, action }).then(out => setNotice(out.message))
+    void act({ id, action }).then(out => {
+      // A held refusal is a question for the page-level host ("End anyway?"), not a dead-end toast.
+      if (action === 'kill' && !out.ok && (out as { held?: boolean }).held === true) { offerHeldKill({ id, message: out.message }); return }
+      setNotice(out.message)
+    })
   }
 
   // The top bar's magnifier focuses this field. An event rather than a prop because the button and
