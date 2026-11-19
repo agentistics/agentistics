@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.218.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Contas: a agenda de uso por agentes tem um único Salvar, no rodapé da gaveta, ao lado de Descartar; ao sair com mudanças, o app pergunta se você quer salvar.',
+        en: 'Accounts: the agent-use schedule has a single Save, in the drawer footer next to Discard; leaving with changes asks whether to save them.',
+      },
+      {
+        pt: 'Contas: a gaveta da conta ficou mais estreita, abre abaixo da barra de cima e mostra Limites de gasto, Plano e Apelido em seções que você abre quando precisar.',
+        en: 'Accounts: the account drawer is narrower, opens below the top bar and keeps Spend limits, Plan and Nickname in sections you open when needed.',
+      },
+      {
+        pt: 'Uso dos planos: o botão com nome fica na barra lateral e, no celular, o popup abre pelo menu "Ir para".',
+        en: 'Plan usage: the labelled button sits in the sidebar, and on the phone the popup opens from the "Go to" menu.',
+      },
+    ],
+  },
   '2.218.0': {
     features: [
       {

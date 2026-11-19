@@ -31,6 +31,7 @@ import type { AppContext } from '../../lib/app-context'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { Drawer } from '../../components/Drawer'
+import { DrawerFold } from '../../components/DrawerFold'
 import { DatePicker } from '../../components/DatePicker'
 import { HarnessMark } from '../../components/sessions/HarnessMark'
 import { Checkbox, ConfirmModal, FieldInput, SectionHeader, Select, TabSelect, Toggle, dialogButtonStyle } from './primitives'
@@ -68,6 +69,8 @@ import { addErrorText } from './addAccountLogic'
 import { accountLabelKey, fmtWhen, usePlanLimits } from '../../lib/planLimits'
 import { hasMeasuredPace } from '../../lib/usagePlan'
 import { PlanLimitBars } from '../../components/PlanLimitMeter'
+import { AgentUseSwitches } from '../../components/AgentUseSwitches'
+import { agentUseChanges, agentUsePatch, draftOf, sameDraft, unsavedCountText, type AgentUseDraft } from '../../lib/agentUseDraft'
 
 /** The wire shape of `GET /api/billing/plan-prices`. Declared here rather than imported: the web
  *  bundle must never reach into `packages/server`. */
@@ -301,8 +304,28 @@ export function BillingAccountsPanel() {
     openDraft(entry ? applyPlan(start, withLive(entry)) : start, r.account?.nickname ?? '')
     if (entry && !r.account?.plan && detection) setSeededFrom(pt ? detection.evidencePt : detection.evidenceEn)
   }
-  const close = () => { setEditKey(null); setDraft(null); setChangingFrom(null) }
-  const dirty = draft !== null && JSON.stringify([draft, nick]) !== origin
+  const [folds, setFolds] = useState({ limits: false, plan: false, nickname: false })
+  const toggleFold = (k: 'limits' | 'plan' | 'nickname') => setFolds(f => ({ ...f, [k]: !f[k] }))
+  const close = () => { setEditKey(null); setDraft(null); setChangingFrom(null); setAgentEdit(null); setFolds({ limits: false, plan: false, nickname: false }) }
+  // The drawer's ONE agent-use draft (the two switches + the schedule). It is saved by the drawer's
+  // single Save, together with the plan and the nickname — never on its own, never on a click.
+  const [agentEdit, setAgentEdit] = useState<{ key: string; draft: AgentUseDraft } | null>(null)
+  const agentSaved = useMemo(() => (row?.account?.id ? draftOf(row.account) : null), [row?.account])
+  const agentDraft: AgentUseDraft | null = agentSaved && agentEdit?.key === editKey ? agentEdit.draft : agentSaved
+  const agentDirty = agentSaved !== null && agentDraft !== null && !sameDraft(agentSaved, agentDraft)
+  const setAgentDraft = (next: AgentUseDraft) => { if (editKey) setAgentEdit({ key: editKey, draft: next }) }
+  const planNickDirty = draft !== null && JSON.stringify([draft, nick]) !== origin
+  const dirty = planNickDirty || agentDirty
+  /** WHAT is unsaved, in words, for the "Sair sem salvar?" dialog. */
+  const unsavedChanges = (): string[] => {
+    const out: string[] = []
+    const a = row?.account
+    if (a && nick.trim() !== (a.nickname ?? '')) out.push(`${pt ? 'Apelido' : 'Nickname'}: ${a.nickname || (pt ? '(nenhum)' : '(none)')} → ${nick.trim() || (pt ? '(nenhum)' : '(none)')}`)
+    const before = (JSON.parse(origin || '[null]') as [PeriodDraft | null])[0]
+    if (draft && planDraftWrites(draft, before)) out.push(pt ? 'Plano: dados alterados' : 'Plan: details changed')
+    if (agentSaved && agentDraft) out.push(...agentUseChanges(agentSaved, agentDraft, pt ? 'pt' : 'en'))
+    return out
+  }
 
   const pickPlan = (planId: string) => {
     const entry = findPlan(planId)
@@ -352,15 +375,20 @@ export function BillingAccountsPanel() {
     return ok
   }, [row, needPlan, ctx, pt])
 
+  /** The nickname and the agent-use draft go in ONE request: the drawer has one Save, so one write. */
   const saveNickname = async (): Promise<boolean> => {
     const a = row?.account
-    if (!a || nick.trim() === (a.nickname ?? '')) return true
-    const res = await mutator.patch(a.id, { nickname: nick.trim() })
+    if (!a) return true
+    const nickChanged = nick.trim() !== (a.nickname ?? '')
+    const agent = agentSaved && agentDraft ? agentUsePatch(agentSaved, agentDraft) : null
+    if (!nickChanged && !agent) return true
+    const res = await mutator.patch(a.id, { ...(nickChanged ? { nickname: nick.trim() } : {}), ...(agent ?? {}) })
     if (res.status !== 'ok') {
-      setSaveError({ msg: pt ? 'Não foi possível salvar o apelido. Tente de novo.' : 'Could not save the nickname. Try again.', id: null })
+      setSaveError({ msg: pt ? 'Não foi possível salvar. Tente de novo.' : 'Could not save. Try again.', id: null })
       return false
     }
-    setAccounts(h => h.map(x => x.id === a.id ? { ...x, ...res.account } : x))
+    setAccounts(h => h.map(x => x.id === a.id ? { ...x, ...res.account, agentSchedule: res.account.agentSchedule, agentUse: res.account.agentUse } : x))
+    setAgentEdit(null)
     return true
   }
 
@@ -392,6 +420,7 @@ export function BillingAccountsPanel() {
   const errPlace = saveErrorPlace(saveError, noticeState, draft !== null)
   const editingPast = draft !== null && draft.id !== '' && draft.id !== current?.id
   const editedPeriod = draft && draft.id !== '' ? periods.find(p => p.id === draft.id) ?? null : null
+  const planFoldHint = selectedEntry ? catalogPlanName(selectedEntry, pt ? 'pt' : 'en') : (draft?.label || undefined)
   const L = { fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 } as const
 
   // The one useful part of the old "Plan" page, kept per account: the sustainable parallel count.
@@ -459,14 +488,14 @@ export function BillingAccountsPanel() {
         <div role="alert" style={{ marginTop: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>
       )}
 
-      <Drawer open={draft !== null && row !== null} title={row?.title ?? ''} onClose={close} lang={pt ? 'pt' : 'en'} dirty={dirty}
+      <Drawer open={draft !== null && row !== null} variant="account" title={row?.title ?? ''} onClose={close} lang={pt ? 'pt' : 'en'} dirty={dirty}
+        leave={dirty ? { who: row?.title ?? '', changes: unsavedChanges(), onSave: () => { void save() } } : undefined}
         footer={
-          <div style={{ display: 'flex', gap: 8, width: '100%', flexDirection: isMobile ? 'column-reverse' : 'row' }}>
-            {!current && row?.account && (
-              <button type="button" style={{ ...dialogButtonStyle('secondary', isMobile), flex: isMobile ? undefined : 1 }} onClick={() => { void notSure() }}>
-                {pt ? 'Não sei agora' : 'Not sure yet'}
-              </button>
-            )}
+          <div data-drawer-footer style={{ display: 'flex', gap: 8, width: '100%', flexDirection: 'row', alignItems: 'center' }}>
+            {dirty && !isMobile && <span data-drawer-unsaved style={{ flex: 1, fontSize: 12, color: 'var(--anthropic-orange-light)' }}>{unsavedCountText(unsavedChanges().length, pt ? 'pt' : 'en')}</span>}
+            <button type="button" data-drawer-discard style={{ ...dialogButtonStyle('secondary', isMobile), flex: 1 }} onClick={close}>
+              {pt ? 'Descartar' : 'Discard'}
+            </button>
             <button type="button" style={{ ...dialogButtonStyle('primary', isMobile), flex: 1 }} onClick={() => { void save() }}>{pt ? 'Salvar' : 'Save'}</button>
           </div>
         }>
@@ -476,6 +505,11 @@ export function BillingAccountsPanel() {
               <HarnessMark harness={row.harness} size={22} />
               <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sub || row.title}</span>
             </div>
+            {!current && row.account && (
+              <button type="button" data-not-sure onClick={() => { void notSure() }} style={{ border: 0, background: 'transparent', padding: 0, margin: '0 0 12px', font: 'inherit', fontSize: 12.5, color: 'var(--anthropic-orange)', cursor: 'pointer', textDecoration: 'underline' }}>
+                {pt ? 'Não sei agora' : 'Not sure yet'}
+              </button>
+            )}
             {errPlace === 'drawer' && saveError && <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>}
             {row.account && loginOff(row) && (() => {
               const a = AUTH_COPY(pt)
@@ -505,27 +539,18 @@ export function BillingAccountsPanel() {
                 </button>
               </div>
             )}
-            {row.account && (
-              <div data-account-agents style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, minHeight: isMobile ? 44 : undefined }}>
+            {row.account && row.account.id && agentDraft && (
+              <div data-account-agents style={{ marginBottom: 14, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                 <span style={L}>{pt ? 'Uso por agentes' : 'Agent use'}</span>
-                <Toggle on={row.account.available} disabled={pendingIds.has(row.key)} label={`${pt ? 'Agentes' : 'Agents'} · ${row.title}`}
-                  onToggle={() => { if (row.account) void toggleAccount(row.account) }} />
+                <AgentUseSwitches enabled={agentDraft.enabled} override={agentDraft.override} view={row.account.agentUse}
+                  onEnabled={enabled => setAgentDraft({ ...agentDraft, enabled })} onOverride={override => setAgentDraft({ ...agentDraft, override })}
+                  lang={pt ? 'pt' : 'en'} isMobile={isMobile} who={row.title} />
+                <span style={{ ...L, marginTop: 18 }}>{pt ? 'Quando os agentes podem usar' : 'When agents may use it'}</span>
+                <div data-account-schedule style={{ minWidth: 0 }}>
+                  <AgentScheduleEditor draft={agentDraft.schedule} onChange={schedule => setAgentDraft({ ...agentDraft, schedule })} who={row.title}
+                    view={row.account.agentUse} lang={ctx.lang} isMobile={isMobile} muted={!agentDraft.enabled || agentDraft.override} />
+                </div>
               </div>
-            )}
-            {row.account && row.account.id && (
-              <div data-account-schedule style={{ marginBottom: 14, padding: 12, borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', minWidth: 0 }}>
-                <AgentScheduleEditor accountId={row.account.id} who={row.title} schedule={row.account.agentSchedule} view={row.account.agentUse} lang={ctx.lang} isMobile={isMobile}
-                  onSaved={next => { const a = next as BillingAccount | null; if (a?.id) setAccounts(prev => prev.map(x => x.id === a.id ? { ...x, ...a, agentSchedule: a.agentSchedule, agentUse: a.agentUse } : x)) }} />
-              </div>
-            )}
-            {row.limits && <div data-account-limits style={{ marginBottom: 12 }}><PlanLimitBars limits={row.limits} now={limitsNow} lang={ctx.lang} /></div>}
-            {pace && hasMeasuredPace(pace) && (
-              <p data-account-pace style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-secondary)' }}>
-                {pt
-                  ? `Paralelo recomendado: ${pace.suggestedParallel} · em execução: ${pace.liveSessions.length}`
-                  : `Recommended parallel: ${pace.suggestedParallel} · running: ${pace.liveSessions.length}`}
-                {pace.pauseUntil !== undefined && pace.pauseUntil > limitsNow && ` · ${pt ? 'pausar até' : 'pause until'} ${fmtWhen(pace.pauseUntil, limitsNow, ctx.lang)}`}
-              </p>
             )}
             {timelineErrors.size > 0 && (
               <div role="alert" style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginBottom: 14, padding: '10px 12px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--accent-red)' }}>
@@ -537,10 +562,26 @@ export function BillingAccountsPanel() {
                 </div>
               </div>
             )}
-            {row.account && (
-              <FieldInput label={pt ? 'Apelido' : 'Nickname'} value={nick} onChange={setNick} maxLength={40} placeholder={pt ? 'Ex.: Pessoal' : 'e.g. Personal'}
-                sub={pt ? 'É só este nome que os agentes veem — nunca o e-mail.' : 'Agents only ever see this name — never the e-mail.'} />
+            <div data-account-folds style={{ marginTop: 6, marginBottom: 14 }}>
+              <DrawerFold id="limits" label={pt ? 'Limites de gasto' : 'Spend limits'} hint={pt ? 'opcional' : 'optional'}
+                open={folds.limits} onToggle={() => toggleFold('limits')}>
+            {row.limits && <div data-account-limits style={{ marginBottom: 12 }}><PlanLimitBars limits={row.limits} now={limitsNow} lang={ctx.lang} /></div>}
+            {pace && hasMeasuredPace(pace) && (
+              <p data-account-pace style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-secondary)' }}>
+                {pt
+                  ? `Paralelo recomendado: ${pace.suggestedParallel} · em execução: ${pace.liveSessions.length}`
+                  : `Recommended parallel: ${pace.suggestedParallel} · running: ${pace.liveSessions.length}`}
+                {pace.pauseUntil !== undefined && pace.pauseUntil > limitsNow && ` · ${pt ? 'pausar até' : 'pause until'} ${fmtWhen(pace.pauseUntil, limitsNow, ctx.lang)}`}
+              </p>
             )}
+                {!(row.limits || (pace && hasMeasuredPace(pace))) && (
+                  <p data-account-limits-empty style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+                    {pt ? 'Sem leitura de limites desta conta ainda. A cota por dia fica no editor de dias acima (“Gastar no máximo”).' : 'No limit reading for this account yet. The per-day cap lives in the day editor above (“Spend at most”).'}
+                  </p>
+                )}
+              </DrawerFold>
+              <DrawerFold id="plan" label={pt ? 'Plano' : 'Plan'} hint={planFoldHint}
+                open={folds.plan} onToggle={() => toggleFold('plan')} forceOpen={showErrors && draftErrors.length > 0}>
             {editingPast && (
               <div style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>
                 {editedPeriod && editedPeriod.from > today()
@@ -629,20 +670,6 @@ export function BillingAccountsPanel() {
               </button>
             )}
 
-            {row.account?.root ? (
-              <div data-account-remove style={{ marginTop: 14, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-                <button type="button" style={{ ...linkBtn, color: 'var(--accent-red)' }} onClick={() => setConfirmRemoveAccount(row.account)}>
-                  {pt ? 'Remover esta conta' : 'Remove this account'}
-                </button>
-              </div>
-            ) : (
-              <p data-account-default style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-                {pt
-                  ? 'Esta é a conta padrão do assistente neste computador (o login dele na sua pasta pessoal): ela sempre aparece aqui. O plano dela pode ser removido; para trocar de conta, saia dela no próprio assistente.'
-                  : 'This is the assistant’s default account on this computer (its login in your home folder): it is always listed. Its plan can be removed; to change accounts, sign out in the assistant itself.'}
-              </p>
-            )}
-
             {history.length > 0 && (
               <div style={{ marginTop: 16, border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
                 <div style={{ padding: '9px 14px', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', background: 'var(--bg-elevated)' }}>
@@ -666,6 +693,30 @@ export function BillingAccountsPanel() {
                 ))}
               </div>
             )}
+              </DrawerFold>
+              {row.account && (
+                <DrawerFold id="nickname" label={pt ? 'Apelido' : 'Nickname'} hint={nick.trim() || undefined}
+                  open={folds.nickname} onToggle={() => toggleFold('nickname')}>
+                  <FieldInput label={pt ? 'Apelido' : 'Nickname'} value={nick} onChange={setNick} maxLength={40} placeholder={pt ? 'Ex.: Pessoal' : 'e.g. Personal'}
+                    sub={pt ? 'É só este nome que os agentes veem — nunca o e-mail.' : 'Agents only ever see this name — never the e-mail.'} />
+                </DrawerFold>
+              )}
+            </div>
+
+            {row.account?.root ? (
+              <div data-account-remove style={{ marginTop: 14, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+                <button type="button" style={{ ...linkBtn, color: 'var(--accent-red)' }} onClick={() => setConfirmRemoveAccount(row.account)}>
+                  {pt ? 'Remover esta conta' : 'Remove this account'}
+                </button>
+              </div>
+            ) : (
+              <p data-account-default style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+                {pt
+                  ? 'Esta é a conta padrão do assistente neste computador (o login dele na sua pasta pessoal): ela sempre aparece aqui. O plano dela pode ser removido; para trocar de conta, saia dela no próprio assistente.'
+                  : 'This is the assistant’s default account on this computer (its login in your home folder): it is always listed. Its plan can be removed; to change accounts, sign out in the assistant itself.'}
+              </p>
+            )}
+
           </div>
         )}
       </Drawer>
