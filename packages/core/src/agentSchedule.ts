@@ -6,11 +6,9 @@
  *
  * - `schedule` (optional, per account): the weekdays it may work, the hour windows of each day, and
  *   a daily ceiling expressed as a percentage of the WEEKLY quota spent since 00:00 local time.
- * - `manual` (optional): a person flipped the switch against the schedule. The manual choice wins
- *   until the schedule itself reaches the same answer — then it is cleared and the schedule rules
- *   again ("turning it off returns to what the schedule says"). So a manual ON outside a window
- *   lasts until the next window opens AND closes; a manual OFF inside a window lasts until it closes.
- * - No schedule (or a disabled one): `available` is the plain manual switch, exactly as before.
+ * - two stored switches (`AgentUseSettings`): `enabled` (Agenda, the master) and `override` (sticky,
+ *   ignores the schedule). `available = enabled && (override || schedule says on)`.
+ * - No schedule (or a disabled one): an enabled account is simply available.
  *
  * Times are the MACHINE's local clock — the windows are the person's working hours.
  */
@@ -40,9 +38,9 @@ export interface AgentSchedule {
 export type AgentManual = 'on' | 'off'
 
 export type AgentUseReason =
-  | 'no-schedule'     // no active schedule: the plain manual switch
-  | 'manual-on'       // turned on by hand against the schedule
-  | 'manual-off'      // turned off by hand against the schedule
+  | 'no-schedule'     // enabled, with no active schedule: always available
+  | 'override-on'     // "Sobrescrever a agenda" is on: free at any hour
+  | 'agenda-off'      // the Agenda switch is off: agents do not use the account at all
   | 'in-window'       // the schedule has it on now
   | 'outside-window'  // a scheduled day, but not inside one of its windows
   | 'day-off'         // the day is not selected
@@ -51,7 +49,7 @@ export type AgentUseReason =
 
 export interface AgentScheduleVerdict {
   on: boolean
-  reason: Exclude<AgentUseReason, 'no-schedule' | 'manual-on' | 'manual-off'>
+  reason: Exclude<AgentUseReason, 'no-schedule' | 'override-on' | 'agenda-off'>
   /** The day whose rules decided (a window crossing midnight belongs to the day it started on). */
   day: AgentDay
   /** The ceiling in force for that day, if any. */
@@ -63,6 +61,8 @@ export interface AgentScheduleVerdict {
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/
 export const isHHMM = (v: unknown): v is string => typeof v === 'string' && HHMM.test(v)
 const minutesOf = (hhmm: string): number => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5))
+/** The END of a window: "23:59" means until the end of the day (1440), so the last minute has no gap. The day runs 00:00-23:59; there is no "24:00". */
+const endMinutesOf = (hhmm: string): number => (hhmm === '23:59' ? 1440 : minutesOf(hhmm))
 
 /** Validate and normalise untrusted input; `null` when it is not a schedule at all. */
 export function parseAgentSchedule(raw: unknown): AgentSchedule | null {
@@ -113,12 +113,12 @@ export function scheduleVerdict(schedule: AgentSchedule, now: Date, dayUsedPct: 
   const yesterday = DAY_OF_INDEX[(now.getDay() + 6) % 7]!
   const minute = now.getHours() * 60 + now.getMinutes()
   const inToday = (w: AgentWindow) => {
-    const from = minutesOf(w.from), to = minutesOf(w.to)
+    const from = minutesOf(w.from), to = endMinutesOf(w.to)
     return to > from ? minute >= from && minute < to : minute >= from
   }
   // The tail of yesterday's window that crossed midnight.
   const inYesterdayTail = (w: AgentWindow) => {
-    const from = minutesOf(w.from), to = minutesOf(w.to)
+    const from = minutesOf(w.from), to = endMinutesOf(w.to)
     return to <= from && minute < to
   }
   const weekCap = schedule.maxWeeklyPct
@@ -141,36 +141,46 @@ export function scheduleVerdict(schedule: AgentSchedule, now: Date, dayUsedPct: 
   return withWeek({ on: false, reason: t ? 'outside-window' : 'day-off', day: today, ...(cap !== undefined ? { maxDailyPct: cap } : {}) })
 }
 
+/**
+ * The two switches a person sees (CONTAS.AGENDA-SALVAR), both STORED:
+ * - `enabled` ("Agenda"): the master — may agents use this account at all.
+ * - `override` ("Sobrescrever a agenda"): STICKY — while on, the account is free at any hour and the
+ *   schedule is ignored (kept, not erased). It replaces the old self-clearing `agentManual`.
+ */
+export interface AgentUseSettings { enabled: boolean; override: boolean }
+
+/**
+ * The settings of an account, migrating records written before the two switches existed: a stored
+ * `agentUseEnabled` wins; otherwise `agentManual: 'on'` becomes an override, `'off'` a disabled
+ * account, and with no manual choice an active schedule means enabled while a plain account keeps
+ * what its `available` flag said.
+ */
+export function agentUseSettings(a: {
+  available: boolean; agentUseEnabled?: boolean; agentOverride?: boolean; agentManual?: AgentManual; agentSchedule?: AgentSchedule | null
+}): AgentUseSettings {
+  if (typeof a.agentUseEnabled === 'boolean') return { enabled: a.agentUseEnabled, override: a.agentOverride === true }
+  if (a.agentManual === 'on') return { enabled: true, override: true }
+  if (a.agentManual === 'off') return { enabled: false, override: false }
+  return { enabled: scheduleActive(a.agentSchedule) ? true : a.available !== false, override: a.agentOverride === true }
+}
+
 export interface AgentUseState {
   /** What `available` must say. */
   available: boolean
-  /** The manual override after this evaluation (cleared once the schedule agrees with it). */
-  manual: AgentManual | undefined
   reason: AgentUseReason
 }
 
 /**
- * Combine the schedule's verdict with the manual override. Returns `null` when no schedule is
- * active: `available` is then the plain switch and must not be touched.
+ * THE rule: `available = enabled && (override || schedule says on)`. A schedule that is absent or
+ * switched off never blocks (the plain account), a verdict is only needed when one is active.
  */
 export function resolveAgentUse(
-  schedule: AgentSchedule | undefined | null, manual: AgentManual | undefined, verdict: AgentScheduleVerdict | null,
-): AgentUseState | null {
-  if (!scheduleActive(schedule) || !verdict) return null
-  const kept = manual && (manual === 'on') !== verdict.on ? manual : undefined
-  if (kept) return { available: kept === 'on', manual: kept, reason: kept === 'on' ? 'manual-on' : 'manual-off' }
-  return { available: verdict.on, manual: undefined, reason: verdict.reason }
-}
-
-/**
- * A person flipped the switch to `desired`. With no active schedule it is the plain flag. With one,
- * agreeing with the schedule clears the override (back to the schedule); disagreeing records it.
- */
-export function toggleAgentUse(
-  schedule: AgentSchedule | undefined | null, desired: boolean, verdict: AgentScheduleVerdict | null,
-): { available: boolean; manual: AgentManual | undefined } {
-  if (!scheduleActive(schedule) || !verdict) return { available: desired, manual: undefined }
-  return { available: desired, manual: desired === verdict.on ? undefined : desired ? 'on' : 'off' }
+  settings: AgentUseSettings, schedule: AgentSchedule | undefined | null, verdict: AgentScheduleVerdict | null,
+): AgentUseState {
+  if (!settings.enabled) return { available: false, reason: 'agenda-off' }
+  if (settings.override) return { available: true, reason: 'override-on' }
+  if (!scheduleActive(schedule) || !verdict) return { available: true, reason: 'no-schedule' }
+  return { available: verdict.on, reason: verdict.reason }
 }
 
 /** The local calendar day `YYYY-MM-DD` of `now` (machine clock). */

@@ -5,6 +5,7 @@ import { Gauge } from 'lucide-react'
 import { HARNESS_LABELS } from '../lib/harness'
 import { currentUsedPct, limitLevel, limitLevelWord, usePlanLimits, windowLabel } from '../lib/planLimits'
 import { requestUsagePage } from '../lib/usagePageRequests'
+import { subscribePlanUsagePopup } from '../lib/planUsagePopupRequests'
 import { scrollClosesPopover } from '../lib/popoverScroll'
 import { LimitLevelIcon, PlanUsageSummary } from './PlanLimitMeter'
 import { usePlanAgentUse } from '../lib/usePlanAgentUse'
@@ -17,17 +18,16 @@ const GRACE_MS = 100
 const EDGE = 8
 
 /**
- * PURE. Where the upward popover sits for a button at `btn`: centred on the button, never past either
- * viewport edge, with the caret under the button's centre. It used to be pinned to `left: 8` (the
- * aside's edge), which left it far from a button at the right end of a wide footer, the caret
- * clamped short of the button.
+ * PURE. Where the popover sits for the footer button at `btn` (CONTAS.AGENDA-SALVAR): BESIDE the
+ * button — to its right, past the sidebar — and centred vertically on the screen by the caller
+ * (`top: 50%` + `translateY(-50%)`). On a phone (<= 600px) there is no sidebar beside anything: it is
+ * a centred sheet 12px from each edge. `maxHeight` keeps it inside the screen; its list scrolls.
  */
-export function anchorAbove(btn: { left: number; width: number }, viewportW: number): { left: number; width: number; caretLeft: number } {
-  const width = Math.max(0, Math.min(POP_W + 20, viewportW - 2 * EDGE))
-  const centre = btn.left + btn.width / 2
-  const left = Math.min(Math.max(EDGE, centre - width / 2), Math.max(EDGE, viewportW - EDGE - width))
-  const caretLeft = Math.min(Math.max(12, centre - left - CARET / 2), Math.max(12, width - 12 - CARET))
-  return { left, width, caretLeft }
+export function anchorBeside(btn: { right: number }, viewportW: number, viewportH: number): { left: number; width: number; maxHeight: number; sheet: boolean } {
+  const maxHeight = popMaxHeight(viewportH)
+  if (viewportW <= 600) return { left: 12, width: Math.max(0, viewportW - 24), maxHeight, sheet: true }
+  const left = Math.min(btn.right + CARET + 4, Math.max(EDGE, viewportW - EDGE - 120))
+  return { left, width: Math.max(0, Math.min(POP_W + 20, viewportW - EDGE - left)), maxHeight, sheet: false }
 }
 
 /** PURE. The popup never outgrows the room above its anchor (nor 560px): the list inside scrolls. */
@@ -125,25 +125,20 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
   let pop: React.ReactNode = null
   if (rect) {
     const common: CSSProperties = { display: 'flex', flexDirection: 'column', position: 'fixed', zIndex: 600, background: 'var(--bg-card)', border: '1px solid var(--ag-tint-4)', borderRadius: 12, boxShadow: 'var(--ag-shadow-menu)' }
-    const caret: CSSProperties = { position: 'absolute', width: CARET, height: CARET, background: 'var(--bg-card)', transform: 'rotate(45deg)' }
-    const { left: popLeft, width: popW, caretLeft } = anchorAbove(rect, window.innerWidth)
-    const style: CSSProperties = collapsed
-      // Collapsed rail: opens to the RIGHT, caret on the left edge at the button's vertical middle.
-      ? { ...common, left: rect.right + CARET + 4, bottom: Math.max(8, window.innerHeight - rect.bottom - 8), maxWidth: POP_W + 20, maxHeight: popMaxHeight(window.innerHeight - Math.max(8, window.innerHeight - rect.bottom - 8)) }
-      // Expanded: opens UPWARD, centred on the button and kept inside the viewport, caret under the button's centre.
-      : { ...common, left: popLeft, width: popW, bottom: window.innerHeight - rect.top + CARET + 2, maxHeight: popMaxHeight(rect.top - CARET - 2) }
+    // CONTAS.AGENDA-SALVAR: the popup opens BESIDE its button (the sidebar's footer) and is centred
+    // vertically on the SCREEN — never pinned to the top, never hugging the footer. On a phone it is a
+    // centred sheet. No caret: it is not pointing at one spot of the button any more.
+    const { left: popLeft, width: popW, maxHeight } = anchorBeside(rect, window.innerWidth, window.innerHeight)
+    const style: CSSProperties = { ...common, left: popLeft, width: popW, top: '50%', transform: 'translateY(-50%)', maxHeight }
     pop = createPortal(
-      <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover style={style} onMouseEnter={open} onMouseLeave={closeSoon} onFocus={open} onBlur={closeSoon} onKeyDown={onPopKey}>
+      <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover data-plan-usage-placement="beside-centered" style={style} onMouseEnter={open} onMouseLeave={closeSoon} onFocus={open} onBlur={closeSoon} onKeyDown={onPopKey}>
         <PlanUsageSummary onOpen={openModal} agentUse={agentUse} onRelogin={r => { close(); setRelogin(r) }} limits={snap.limits} registered={snap.registered} accountLabels={snap.accountLabels} now={snap.now} lang={lang} />
-        {collapsed
-          ? <span aria-hidden style={{ ...caret, left: -CARET / 2 - 1, bottom: Math.max(4, rect.height / 2 + 8 - CARET / 2 - 8), borderLeft: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />
-          : <span aria-hidden style={{ ...caret, bottom: -CARET / 2 - 1, left: caretLeft, borderRight: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />}
       </div>,
       document.body,
     )
   }
   return (
-    <div style={{ flex: collapsed ? undefined : 1, minWidth: 0, width: collapsed ? 34 : 'auto', position: 'relative', display: 'flex' }} onMouseEnter={open} onMouseLeave={closeSoon}>
+    <div data-plan-usage-trigger style={{ flex: collapsed ? undefined : 1, minWidth: 0, width: collapsed ? 34 : 'auto', position: 'relative', display: 'flex' }} onMouseEnter={open} onMouseLeave={closeSoon}>
       <button
         ref={btnRef}
         type="button"
@@ -152,13 +147,54 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
         aria-expanded={rect !== null}
         onFocus={onBtnFocus} onBlur={closeSoon} onKeyDown={onBtnKey}
         onClick={openModal}
-        style={{ ...footBtn, width: collapsed ? 34 : '100%', flex: 1, minWidth: 0, position: 'relative' }}
+        data-plan-usage-hot={rect !== null ? 'true' : undefined}
+        style={collapsed
+          ? { ...footBtn, width: 34, flex: 1, minWidth: 0, position: 'relative' }
+          : {
+              // CONTAS.AGENDA-SALVAR r4 · N1: the prototype's labelled pill — dot + "Uso dos planos", hot while the popup is open.
+              display: 'inline-flex', alignItems: 'center', gap: 6, width: '100%', minHeight: footBtn.height, padding: '5px 10px', borderRadius: 99,
+              border: `1px solid ${rect !== null ? 'var(--anthropic-orange)' : 'var(--border)'}`,
+              background: rect !== null ? 'var(--anthropic-orange-glow, var(--anthropic-orange-dim))' : 'transparent',
+              color: rect !== null ? 'var(--text-primary)' : 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', transition: 'all 0.15s',
+            }}
       >
-        <Gauge size={15} />
-        {level !== 'ok' && <span style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LimitLevelIcon pct={worst!.pct} size={14} lang={lang} /></span>}
+        {collapsed ? <Gauge size={15} /> : <span data-plan-usage-dot aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green, #10b981)' }} />}
+        {!collapsed && <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{base}</span>}
+        {level !== 'ok' && (collapsed
+          ? <span style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LimitLevelIcon pct={worst!.pct} size={14} lang={lang} /></span>
+          : <span style={{ marginLeft: 'auto', display: 'inline-flex' }}><LimitLevelIcon pct={worst!.pct} size={14} lang={lang} /></span>)}
       </button>
       {pop}
       {relogin && <ReloginModal accountId={relogin.accountId} harness={relogin.harness} who={relogin.who} lang={lang} onClose={() => setRelogin(null)} />}
     </div>
   )
+}
+
+/**
+ * The phone's way into the same popup (CONTAS.AGENDA-SALVAR U1): there is no sidebar footer button on
+ * a phone, so the "Go to" sheet's "Uso dos planos" row opens THIS — the very `PlanUsageSummary` as a
+ * centred sheet (`anchorBeside` answers `sheet: true` at <= 600px) over a scrim. A press outside, Esc or
+ * "Abrir contas ›" closes it.
+ */
+export function PlanUsagePhoneSheet({ lang }: { lang: 'pt' | 'en' }) {
+  const [open, setOpen] = useState(false)
+  const snap = usePlanLimits()
+  const agentUse = usePlanAgentUse(open, lang)
+  const [relogin, setRelogin] = useState<{ accountId: string; harness: HarnessId; who: string } | null>(null)
+  const close = useCallback(() => setOpen(false), [])
+  useEffect(() => subscribePlanUsagePopup(() => setOpen(true)), [])
+  useEscapeOwner(open, close)
+  const { left, width, maxHeight } = anchorBeside({ right: 0 }, typeof window === 'undefined' ? 390 : window.innerWidth, typeof window === 'undefined' ? 800 : window.innerHeight)
+  return <>
+    {open && createPortal(
+      <div data-plan-usage-scrim onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 599, background: 'var(--ag-scrim, rgba(0,0,0,0.55))' }}>
+        <div role="dialog" aria-modal="true" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover data-plan-usage-placement="phone-sheet" onClick={e => e.stopPropagation()}
+          style={{ display: 'flex', flexDirection: 'column', position: 'fixed', zIndex: 600, background: 'var(--bg-card)', border: '1px solid var(--ag-tint-4)', borderRadius: 12, boxShadow: 'var(--ag-shadow-menu)', left, width, top: '50%', transform: 'translateY(-50%)', maxHeight }}>
+          <PlanUsageSummary onOpen={() => { close(); requestUsagePage() }} agentUse={agentUse} onRelogin={r => { close(); setRelogin(r) }} limits={snap.limits} registered={snap.registered} accountLabels={snap.accountLabels} now={snap.now} lang={lang} />
+        </div>
+      </div>,
+      document.body,
+    )}
+    {relogin && <ReloginModal accountId={relogin.accountId} harness={relogin.harness} who={relogin.who} lang={lang} onClose={() => setRelogin(null)} />}
+  </>
 }

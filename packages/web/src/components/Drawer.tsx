@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useEscapeOwner } from '../lib/overlayStack'
 import { ConfirmModal } from '../pages/settings/primitives'
+import { LeaveChangesDialog } from './LeaveChangesDialog'
 import {
   drawerAfterFrame, drawerAfterTransition, drawerFrame, drawerMounted, drawerPhaseFor,
   prefersReducedMotion, swipeClosePx, swipeCloses, swipeIsHorizontal,
@@ -24,7 +25,7 @@ import {
  * back and the inbox, not a heading), there is no X (the backdrop, Esc, the system back and a
  * swipe towards the edge all close it), and the panel follows a finger swiping it shut.
  */
-export function Drawer({ open, title, onClose, children, footer, dirty = false, lang = 'en', side = 'right' }: {
+export function Drawer({ open, title, onClose, children, footer, dirty = false, leave, lang = 'en', side = 'right', variant }: {
   open: boolean
   /** A heading for `'right'`; the caller's own header row for `'left'`. */
   title: React.ReactNode
@@ -34,12 +35,21 @@ export function Drawer({ open, title, onClose, children, footer, dirty = false, 
   /** When true, closing (backdrop / X / Escape) or leaving the tab asks to confirm first, so
    *  unsaved edits are never silently discarded. Drawers compute this from their form state. */
   dirty?: boolean
+  /** With `dirty`: the leave dialog lists WHAT changed (`changes`, in words) and offers Discard / Save. Absent: the plain discard confirm. */
+  leave?: { who?: string; changes: readonly string[]; onSave: () => void }
   lang?: 'pt' | 'en'
   side?: DrawerSide
+  /**
+   * `'account'` (CONTAS.AGENDA-SALVAR r4 · N2): the account editor's geometry from the approved prototype — 460px wide and
+   * starting BELOW the top bar — on a desktop screen. A phone, and every other drawer (no variant), keep the 680px
+   * full-height panel.
+   */
+  variant?: 'account'
 }) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const left = side === 'left'
+  const account = variant === 'account' && !left && !isMobile
   const [confirmDiscard, setConfirmDiscard] = React.useState(false)
   const [phase, setPhase] = React.useState<DrawerPhase>(open ? 'entering' : 'closed')
   const [dragPx, setDragPx] = React.useState(0)
@@ -119,6 +129,7 @@ export function Drawer({ open, title, onClose, children, footer, dirty = false, 
       data-drawer-phase={phase}
       style={{
         position: 'fixed', inset: 0, zIndex: 1000, display: 'flex',
+        ...(variant === 'account' && !left ? { top: isMobile ? 0 : 'var(--ag-topbar-h, 44px)' } : {}),
         justifyContent: left ? 'flex-start' : 'flex-end',
         paddingTop: isMobile && !left ? 'var(--safe-top)' : 0,
         // Its own layer, so the backdrop can fade without fading the panel it holds.
@@ -142,7 +153,7 @@ export function Drawer({ open, title, onClose, children, footer, dirty = false, 
         style={{
           width: left
             ? 'min(86%, 360px)'
-            : (isMobile ? '100%' : 'min(680px, calc(94vw / var(--ui-zoom, 1)))'),
+            : (isMobile ? '100%' : account ? 460 : 'min(680px, calc(94vw / var(--ui-zoom, 1)))'),
           height: '100%',
           background: left ? 'var(--bg-surface)' : 'var(--bg-card)',
           ...(left
@@ -192,8 +203,11 @@ export function Drawer({ open, title, onClose, children, footer, dirty = false, 
         )}
       </div>
     </div>
+    {leave && <LeaveChangesDialog open={confirmDiscard} lang={lang} who={leave.who} changes={leave.changes}
+      onKeep={() => setConfirmDiscard(false)} onDiscard={() => { setConfirmDiscard(false); onClose() }}
+      onSave={() => { setConfirmDiscard(false); leave.onSave() }} />}
     <ConfirmModal
-      open={confirmDiscard}
+      open={confirmDiscard && !leave}
       title={pt ? 'Descartar alterações?' : 'Discard changes?'}
       message={pt
         ? 'Você tem alterações não salvas. Se sair agora, elas serão perdidas.'
