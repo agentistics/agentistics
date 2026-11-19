@@ -89,6 +89,53 @@ test('pruning never proposes deleting a file that is already gone', () => {
   expect(toPrune(entries, 1)).toEqual([])
 })
 
+// CICLO.LIMPEZA: retention by count AND by total size.
+test('a size cap prunes the oldest beyond the cap, keeps the newest, and says which rule pruned each', () => {
+  const entries = markPresence([
+    rec({ at: '2026-09-04T00:00:00Z', path: '/b/4', archiveBytes: 600 }),
+    rec({ at: '2026-09-03T00:00:00Z', path: '/b/3', archiveBytes: 600 }),
+    rec({ at: '2026-09-02T00:00:00Z', path: '/b/2', archiveBytes: 600 }),
+    rec({ at: '2026-09-01T00:00:00Z', path: '/b/1', archiveBytes: 600 }),
+  ], NONE, () => true)
+  // keep 3 by count → /b/1 by count; 1500 bytes → only 2 of the 3 fit → /b/2 by size.
+  expect(toPrune(entries, 3, 1500).map(r => [r.path, r.pruneReason])).toEqual([['/b/2', 'size'], ['/b/1', 'count']])
+  // Exactly at the cap still fits.
+  expect(toPrune(entries, 3, 1800).map(r => r.path)).toEqual(['/b/1'])
+  // No cap (0) = count only, as before.
+  expect(toPrune(entries, 3, 0).map(r => r.path)).toEqual(['/b/1'])
+})
+
+test('the newest backup is never pruned by size, even when it alone is over the cap', () => {
+  const entries = markPresence([
+    rec({ at: '2026-09-02T00:00:00Z', path: '/b/big', archiveBytes: 5000 }),
+    rec({ at: '2026-09-01T00:00:00Z', path: '/b/old', archiveBytes: 10 }),
+  ], NONE, () => true)
+  expect(toPrune(entries, 7, 100).map(r => r.path)).toEqual(['/b/old'])
+})
+
+test('the size cap counts only files still present, and keep 0 still prunes nothing', () => {
+  const entries = markPresence([
+    rec({ at: '2026-09-03T00:00:00Z', path: '/b/3', archiveBytes: 600 }),
+    rec({ at: '2026-09-02T00:00:00Z', path: '/b/gone', archiveBytes: 600 }),
+    rec({ at: '2026-09-01T00:00:00Z', path: '/b/1', archiveBytes: 600 }),
+  ], NONE, p => p !== '/b/gone')
+  expect(toPrune(entries, 7, 1200).map(r => r.path)).toEqual([])
+  expect(toPrune(entries, 0, 1)).toEqual([])
+})
+
+test('a prune event records its rule and size; older prune lines without them still read', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'backup-store-prune-'))
+  try {
+    const file = join(dir, 'backups.jsonl')
+    await recordPrune('/b/old', file)
+    await recordPrune('/b/sized', file, { reason: 'size', bytes: 600 })
+    expect([...await readPrunedPaths(file)]).toEqual(['/b/old', '/b/sized'])
+    const lines = (await Bun.file(file).text()).trim().split('\n').map(l => JSON.parse(l))
+    expect(lines[0]).toEqual({ kind: 'prune', at: lines[0].at, path: '/b/old' })
+    expect(lines[1]).toMatchObject({ kind: 'prune', path: '/b/sized', reason: 'size', bytes: 600 })
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
 test('keep 0 or below prunes nothing — an accidental zero must not wipe the history', () => {
   const entries = markPresence([rec({ at: '2026-09-03T00:00:00Z', path: '/b/3' })], NONE, () => true)
   expect(toPrune(entries, 0)).toEqual([])

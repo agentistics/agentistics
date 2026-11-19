@@ -47,6 +47,8 @@ import type { GithubBackupConfig } from './backup/github-store'
 
 const DEFAULT_LAYERS: BackupLayer[] = ['metrics', 'repos']
 const DEFAULT_KEEP = 7
+/** CICLO.LIMPEZA: retention by total size too — 7 full archives of ~590 MB were 4.1 GB on the owner's machine. */
+export const DEFAULT_MAX_TOTAL_BYTES = 3 * 1024 ** 3
 const DEFAULT_MAX_BUNDLE = 200 * 1024 * 1024
 
 export interface BackupPrefs {
@@ -64,6 +66,8 @@ export interface BackupPrefs {
   harnesses: HarnessId[]
   destDir: string
   keep: number
+  /** Total bytes of local archives kept (0 = no size cap). */
+  maxTotalBytes: number
   maxBundleBytes: number
 }
 
@@ -90,6 +94,7 @@ export function readBackupPrefs(p: Preferences): BackupPrefs {
     harnesses: (b.harnesses as HarnessId[] | undefined)?.filter(h => HARNESS_ORDER.includes(h)) ?? [...HARNESS_ORDER],
     destDir: b.destDir ?? join(AGENTISTICS_DATA_DIR, 'backups'),
     keep: typeof b.keep === 'number' && b.keep > 0 ? b.keep : DEFAULT_KEEP,
+    maxTotalBytes: typeof b.maxTotalBytes === 'number' && Number.isFinite(b.maxTotalBytes) && b.maxTotalBytes >= 0 ? b.maxTotalBytes : DEFAULT_MAX_TOTAL_BYTES,
     maxBundleBytes: typeof b.maxBundleBytes === 'number' && b.maxBundleBytes > 0
       ? b.maxBundleBytes : DEFAULT_MAX_BUNDLE,
   }
@@ -517,14 +522,14 @@ async function buildRepoManifest(
  * on purpose, by retention, from one that vanished for some other reason. Without that second
  * event, every row past `keep` would read exactly like a real loss.
  */
-export async function pruneOldBackups(keep: number, log: (l: string) => void): Promise<void> {
+export async function pruneOldBackups(keep: number, log: (l: string) => void, maxTotalBytes = 0): Promise<void> {
   const entries = await loadBackupHistory()
   const backupsDir = await realpath(join(AGENTISTICS_DATA_DIR, 'backups')).catch(() => null)
   if (!backupsDir) {
     log('backup prune refused: the backups directory does not exist')
     return
   }
-  for (const old of toPrune(entries, keep)) {
+  for (const old of toPrune(entries, keep, maxTotalBytes)) {
     const resolved = await realpath(old.path).catch(() => null)
     const rel = resolved === null ? null : relative(backupsDir, resolved)
     if (resolved === null || rel === null) {
@@ -536,8 +541,8 @@ export async function pruneOldBackups(keep: number, log: (l: string) => void): P
       continue
     }
     await rm(old.path, { force: true }).catch(() => {})
-    await recordPrune(old.path)
-    log(`pruned ${old.path}`)
+    await recordPrune(old.path, undefined, { reason: old.pruneReason, bytes: old.archiveBytes })
+    log(`pruned ${old.path} (${old.pruneReason === 'size' ? `over ${maxTotalBytes} bytes in total` : `beyond keep ${keep}`})`)
   }
 }
 
@@ -601,7 +606,7 @@ export async function performBackup(
     // reported absent by `markPresence` from then on, which is the truth and is what the history is
     // for. Rewriting the file to drop them would reintroduce exactly the read-modify-write race the
     // append-only shape exists to remove.
-    await pruneOldBackups(prefs.keep, log)
+    await pruneOldBackups(prefs.keep, log, prefs.maxTotalBytes)
 
     // Not configured is a silent no-op — most machines never set this up. Configured, this walks
     // the whole confirmation ladder (`github-upload.ts`) and only deletes the local file once the
@@ -734,6 +739,7 @@ export async function runBackupCli(argv: string[]): Promise<number> {
       }
       log(`dest:            ${prefs.destDir}`)
       log(`keep:            ${prefs.keep}`)
+      log(`max total:       ${prefs.maxTotalBytes > 0 ? `${(prefs.maxTotalBytes / 1024 ** 3).toFixed(2)} GiB (oldest pruned first, the newest always kept)` : 'no size cap'}`)
       return 0
     }
 
