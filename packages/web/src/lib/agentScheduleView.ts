@@ -8,15 +8,15 @@ import { AGENT_DAYS, DAY_SHORT, dayWindowsText, scheduleSummaryText, type AgentD
 type Lang = 'pt' | 'en'
 
 /** What `GET /api/accounts` adds to an account with an active schedule. */
-export interface AgentUseView { reason: AgentUseReason; on: boolean; dayUsedPct: number | null; maxDailyPct?: number; weekUsedPct?: number | null; maxWeeklyPct?: number }
+export interface AgentUseView { reason: AgentUseReason; on: boolean; enabled?: boolean; override?: boolean; dayUsedPct: number | null; maxDailyPct?: number; weekUsedPct?: number | null; maxWeeklyPct?: number }
 
 export { DAY_SHORT, dayWindowsText, scheduleSummaryText }
 
 const REASON: Record<AgentUseReason, { pt: string; en: string }> = {
-  'no-schedule': { pt: 'Sem agenda', en: 'No schedule' },
-  'manual-on': { pt: 'Ligada à mão (vence a agenda)', en: 'Turned on by hand (overrides the schedule)' },
-  'manual-off': { pt: 'Desligada à mão (vence a agenda)', en: 'Turned off by hand (overrides the schedule)' },
-  'in-window': { pt: 'Ligada pela agenda', en: 'On by schedule' },
+  'no-schedule': { pt: 'Liberada (sem agenda)', en: 'Available (no schedule)' },
+  'override-on': { pt: 'Uso livre — agenda ignorada', en: 'Free use — schedule ignored' },
+  'agenda-off': { pt: 'Agentes não usam esta conta', en: 'Agents do not use this account' },
+  'in-window': { pt: 'Liberada pela agenda', en: 'On by schedule' },
   'outside-window': { pt: 'Fora da agenda — desligada para agentes', en: 'Outside the schedule — off for agents' },
   'day-off': { pt: 'Dia fora da agenda — desligada para agentes', en: 'Day not scheduled — off for agents' },
   'daily-cap': { pt: 'Teto do dia atingido — desligada para agentes', en: 'Daily ceiling reached — off for agents' },
