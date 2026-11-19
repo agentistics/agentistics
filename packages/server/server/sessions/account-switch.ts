@@ -393,8 +393,8 @@ export function switchMessage(reason: SwitchRefusal, detail: string, lang: 'en' 
       return pt ? `${detail} não pode iniciar uma sessão nesta máquina (não está instalado ou não está no PATH do servidor). Nada foi encerrado.`
         : `${detail} cannot start a session on this machine (it is not installed or not on the server's PATH). Nothing was ended.`
     case 'in-use':
-      return pt ? 'Esta sessão está em uso agora: a troca de conta fica adiada até terminar. Nada mudou.'
-        : 'This session is in use right now: the account switch is deferred until that ends. Nothing changed.'
+      return pt ? 'Esta sessão está em uso agora: tente a troca de conta de novo quando isso terminar. Nada mudou.'
+        : 'This session is in use right now: try the account switch again once that ends. Nothing changed.'
     case 'no_target':
       return pt ? 'Essa sessão não existe mais. Atualize a lista.' : 'That session no longer exists. Refresh the list.'
     default:

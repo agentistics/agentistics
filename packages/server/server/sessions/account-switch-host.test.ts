@@ -57,7 +57,7 @@ describe('HIGH-1: an account switch never ends a held session', () => {
     const w = world({ hold: held })
     const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, w.deps)
     expect(out).toMatchObject({ ok: false, code: 'in-use', status: 409, deferred: true })
-    expect(out.message).toContain('deferred until that ends')
+    expect(out.message).toContain('try the account switch again once that ends')
     expect(w.killed).toEqual([])
     expect(w.copied).toEqual([])
     expect(w.resumed).toEqual([])
