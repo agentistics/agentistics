@@ -267,6 +267,9 @@ export interface Preferences {
     harnesses?: string[]
     destDir?: string
     keep?: number
+    /** CICLO.LIMPEZA: local archives are also pruned (oldest first, the newest always kept) past this many bytes in total.
+     *  Absent = the default (3 GiB); 0 = no size cap (count only). */
+    maxTotalBytes?: number
     maxBundleBytes?: number
   }
   /**
