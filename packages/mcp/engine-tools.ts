@@ -14,8 +14,11 @@ export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 export interface Proof { id: string; token: string }
 
 const CACHE_MS = 15_000;
+/** An engine that accepts and never answers must not hang tools/list or a call. */
+const LIST_TIMEOUT_MS = 5_000;
+const CALL_TIMEOUT_MS = 60_000;
 
-export function createEngineTools(opts: { api: string; fetch?: Fetch; now?: () => number }) {
+export function createEngineTools(opts: { api: string; fetch?: Fetch; now?: () => number; listTimeoutMs?: number; callTimeoutMs?: number }) {
   const f: Fetch = opts.fetch ?? ((u, i) => fetch(u, i));
   const now = opts.now ?? Date.now;
   let cache: { at: number; tools: EngineMcpTool[] } | null = null;
@@ -24,7 +27,7 @@ export function createEngineTools(opts: { api: string; fetch?: Fetch; now?: () =
     if (cache && now() - cache.at < CACHE_MS) return cache.tools;
     let tools: EngineMcpTool[] = [];
     try {
-      const res = await f(`${opts.api}/api/engine/mcp-tools`);
+      const res = await f(`${opts.api}/api/engine/mcp-tools`, { signal: AbortSignal.timeout(opts.listTimeoutMs ?? LIST_TIMEOUT_MS) });
       if (res.ok) {
         const body = (await res.json()) as { tools?: unknown };
         const raw = Array.isArray(body?.tools) ? (body.tools as EngineMcpTool[]) : [];
@@ -47,6 +50,7 @@ export function createEngineTools(opts: { api: string; fetch?: Fetch; now?: () =
     const tool = (await list()).find(t => t.name === name);
     if (!tool || !mcpToolPathOk(tool.path)) throw new Error(`Unknown tool: ${name}`);
     const a = args ?? {};
+    const signal = AbortSignal.timeout(opts.callTimeoutMs ?? CALL_TIMEOUT_MS);
     let res: Response;
     if (tool.method === "GET") {
       const q = new URLSearchParams();
@@ -55,10 +59,12 @@ export function createEngineTools(opts: { api: string; fetch?: Fetch; now?: () =
         q.set(k, typeof v === "object" ? JSON.stringify(v) : String(v));
       }
       const qs = q.toString();
-      res = await f(`${opts.api}${tool.path}${qs ? `?${qs}` : ""}`);
+      res = await f(`${opts.api}${tool.path}${qs ? `?${qs}` : ""}`, { signal });
     } else {
-      const body = proof && a.session === undefined ? { ...a, session: proof } : a;
-      res = await f(`${opts.api}${tool.path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      // The proof comes from THIS process's environment only: a `session` the model put in the args never stands in for it.
+      const { session: _ignored, ...rest } = a;
+      const body = proof ? { ...rest, session: proof } : rest;
+      res = await f(`${opts.api}${tool.path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
     }
     if (!res.ok) {
       const detail = await res.text().catch(() => "");

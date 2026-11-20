@@ -44,6 +44,20 @@ describe('engine tools in the MCP', () => {
     expect(last.url).toBe('http://x/api/engine/x/act')
     expect(JSON.parse(String(last.init!.body))).toEqual({ n: 1, session: { id: 's1', token: 't' } })
   })
+  it('a session the model passes in the args never replaces the environment proof', async () => {
+    const { et, calls } = fake([tool({ name: 'agentistics_x_act', risk: 'W', method: 'POST', path: '/api/engine/x/act' })])
+    await et.call('agentistics_x_act', { n: 1, session: { id: 'other', token: 'forged' } }, { id: 's1', token: 't' })
+    expect(JSON.parse(String(calls.at(-1)!.init!.body))).toEqual({ n: 1, session: { id: 's1', token: 't' } })
+    await et.call('agentistics_x_act', { n: 2, session: { id: 'other', token: 'forged' } }, undefined)
+    expect(JSON.parse(String(calls.at(-1)!.init!.body))).toEqual({ n: 2 })
+  })
+  it('an engine that never answers the list gives no extra tools instead of hanging', async () => {
+    const hang = (_u: string, init?: RequestInit) => new Promise<Response>((_, rej) => {
+      init?.signal?.addEventListener('abort', () => rej(new Error('aborted')))
+    })
+    const et = createEngineTools({ api: 'http://x', fetch: hang, listTimeoutMs: 20 })
+    expect(await et.mcpTools()).toEqual([])
+  })
   it('an HTTP error becomes an error carrying the server sentence', async () => {
     const { et } = fake([tool({ name: 'agentistics_x_boom', method: 'POST', path: '/api/engine/x/boom' })])
     await expect(et.call('agentistics_x_boom', {}, undefined)).rejects.toThrow('HTTP 422 nope: bad input')
