@@ -117,3 +117,39 @@ describe('accountDisplayName (F4)', () => {
     expect(accountDisplayName(labels, 'claude', 'acc_9')).toBe('acc_9')
   })
 })
+
+describe('one request in flight at a time (USO.LENTO: the page fetched the 829 KB answer twice on open)', () => {
+  const stage = () => {
+    const handlers = new Map<string, (event: MessageEvent) => void>()
+    const subscribe = spyOn(events, 'subscribeEvent').mockImplementation((type, handler) => { handlers.set(type, handler); return () => { handlers.delete(type) } })
+    let calls = 0
+    const releases: (() => void)[] = []
+    globalThis.fetch = (() => { calls++; return new Promise<Response>(res => releases.push(() => res(new Response(JSON.stringify({ limits: [], budgets: [], readings: [] }), { status: 200 })))) }) as unknown as typeof fetch
+    return { handlers, subscribe, calls: () => calls, release: () => { releases.shift()?.() } }
+  }
+  test('`connected` arriving while the opening request is in flight joins it', async () => {
+    const s = stage()
+    const off = subscribePlanLimits(() => {})
+    try {
+      s.handlers.get('connected')!({} as MessageEvent)
+      await settle()
+      expect(s.calls()).toBe(1)
+      s.release(); await settle()
+      expect(planLimitsSnapshot().limits).toEqual([])
+      expect(s.calls()).toBe(1)
+    } finally { off(); s.subscribe.mockRestore() }
+  })
+  test('a `plan-limits` push during a request is never lost: exactly one trailing request, however many arrive', async () => {
+    const s = stage()
+    const off = subscribePlanLimits(() => {})
+    try {
+      for (let i = 0; i < 5; i++) s.handlers.get('plan-limits')!({} as MessageEvent)
+      await settle()
+      expect(s.calls()).toBe(1)
+      s.release(); await settle()
+      expect(s.calls()).toBe(2)
+      s.release(); await settle()
+      expect(s.calls()).toBe(2)
+    } finally { off(); s.subscribe.mockRestore() }
+  })
+})

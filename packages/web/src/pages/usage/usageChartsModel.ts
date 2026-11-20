@@ -100,11 +100,19 @@ export function toChartRows(series: readonly LimitSeries[], duration: number): {
     group[i]!.forEach(p => times.add(p.at))
     if (i) times.add(Math.floor((group[i - 1]!.at(-1)!.at + group[i]![0]!.at) / 2))
   }
+  // LINEAR: rows are visited in time order, so each series keeps a cursor (segment, point) that only moves
+  // forward. The previous `find` + `findLast` per row was O(rows x points): 14 days at 5 min x 4 accounts
+  // (16 000 rows over 4 000 points each) froze the Usage page for seconds.
+  const cursors = segments.map(() => ({ g: 0, p: 0 }))
   const rows = [...times].sort((a, b) => a - b).map(at => {
     const row: { at: number; [key: string]: number | null } = { at }
     segments.forEach((groups, i) => {
-      const segment = groups.find(g => at >= g[0]!.at && at <= g.at(-1)!.at)
-      row[`s${i}`] = segment?.findLast(p => p.at <= at)?.pct ?? null
+      const c = cursors[i]!
+      while (c.g < groups.length && groups[c.g]!.at(-1)!.at < at) { c.g++; c.p = 0 }
+      const segment = groups[c.g]
+      if (!segment || at < segment[0]!.at) { row[`s${i}`] = null; return }
+      while (c.p + 1 < segment.length && segment[c.p + 1]!.at <= at) c.p++
+      row[`s${i}`] = segment[c.p]!.pct
     })
     return row
   })

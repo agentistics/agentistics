@@ -5,6 +5,7 @@
  * same tree. The sheet starts folded; the aside expands the area holding the current URL. Group
  * headings only expand/collapse; their child pages navigate. A single-page area navigates directly.
  */
+import { usageIntentProps } from '../../lib/usageWarmup'
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { createPortal } from 'react-dom'
@@ -175,6 +176,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
         <button
           type="button"
           data-area-heading={area.id}
+          {...usageIntentProps(area.id === 'usage')}
           aria-label={collapsed ? label : undefined}
           aria-current={active && !area.pages.length ? 'page' : undefined}
           aria-expanded={hasPages ? !collapsed && expanded : undefined}
@@ -236,6 +238,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
       {results.map(({ area, page }) => (
         <a
           key={area.id + page.id} role="listitem" href={page.path}
+          {...usageIntentProps(page.path.startsWith('/usage'))}
           onClick={e => { e.preventDefault(); setQuery(''); go(page.path) }}
           style={{
             display: 'flex', alignItems: 'center', gap: 10, minHeight: sheet ? 44 : 34, padding: '0 12px',
@@ -267,6 +270,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
                     )}
                     <NavLink
                       to={page.path} end
+                      {...usageIntentProps(page.path.startsWith('/usage'))}
                       aria-current={active ? 'page' : undefined}
                       onClick={e => {
                         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return

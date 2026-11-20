@@ -273,6 +273,12 @@ export function ActivityChart({
   )
 }
 
+/**
+ * `CartesianGrid vertical={false}` still runs recharts' default vertical-line generator, which lays out every x tick
+ * (a forced synchronous layout per label, thousands per chart on a step series). Nothing is drawn from it, so skip it.
+ */
+export const noVerticalLines = (): number[] => []
+
 /** Evenly spaced, round-ish ticks across [min, max]: few enough to read at 390 px. */
 export function timeTicks(min: number, max: number, count: number): number[] {
   if (!(max > min) || count < 2) return [min]
@@ -317,7 +323,7 @@ export function ActivityPercentChart({ data, series, lang, height = 220, step = 
   return <div ref={box} style={{ minWidth: 0 }} role="img" aria-label={series.map(s => s.label).join(' · ')} onMouseLeave={() => setOpen(false)}>
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={data} margin={{ left: 0, right: 12, top: 8 }} onMouseMove={() => setOpen(true)} onClick={() => setOpen(true)}>
-        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <CartesianGrid stroke="var(--border)" vertical={false} verticalCoordinatesGenerator={noVerticalLines} />
         <XAxis dataKey="at" type="number" domain={[min, max]} ticks={ticks} tickFormatter={tickLabel} tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }} axisLine={false} tickLine={false} interval={0} />
         <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={v => `${v}%`} width={38} tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }} axisLine={false} tickLine={false} />
         <Tooltip active={open ? undefined : false} labelFormatter={v => dateLabel(Number(v))} formatter={v => v == null ? '—' : `${Number(v).toFixed(1)}%`} contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10 }} />

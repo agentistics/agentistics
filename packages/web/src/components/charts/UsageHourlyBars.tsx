@@ -1,5 +1,5 @@
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { timeTicks } from '../ActivityChart'
+import { noVerticalLines, timeTicks } from '../ActivityChart'
 
 export function UsageHourlyBars({ data, series, lang, messages = false, timeRange }: {
   data: { at: number; [key: string]: number }[]
@@ -12,7 +12,7 @@ export function UsageHourlyBars({ data, series, lang, messages = false, timeRang
   return <div style={{ minWidth: 0 }} role="img" aria-label={lang === 'pt' ? 'Uso por hora' : 'Hourly use'}>
     <ResponsiveContainer width="100%" height={180}>
       <BarChart data={data} margin={{ right: 12 }}>
-        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <CartesianGrid stroke="var(--border)" vertical={false} verticalCoordinatesGenerator={noVerticalLines} />
         <XAxis dataKey="at" type="number" domain={[min, max]} ticks={timeTicks(min, max, 4)} tickFormatter={date} tick={{ fontSize: 10, fill: 'var(--text-secondary)' }} />
         <YAxis width={42} tickFormatter={v => messages ? String(v) : `${v}%`} tick={{ fontSize: 10, fill: 'var(--text-secondary)' }} />
         <Tooltip labelFormatter={v => date(Number(v))} formatter={(v, name) => [`${Number(v).toFixed(messages ? 0 : 1)}${messages ? (lang === 'pt' ? ' mensagens' : ' messages') : (lang === 'pt' ? '% do limite usado' : '% of limit used')}`, name]}

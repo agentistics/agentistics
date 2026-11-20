@@ -8,6 +8,7 @@
  * actually prices on (its own, or the assistant default it inherits — `rowScope`), so what the row
  * says and what the editor changes can never be two different plans.
  */
+import { resetUsageWarmup, takeWarmAccounts, takeWarmAccountsBody } from '../../lib/usageWarmup'
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Navigate, useLocation, useOutletContext } from 'react-router-dom'
 import { signedOutHiddenStore } from '../../lib/appFlags'
@@ -114,11 +115,14 @@ export function BillingAccountsPanel() {
   }
 
   const { limits: planLimits, now: limitsNow, accountLabels, budgets } = usePlanLimits()
-  const [accounts, setAccounts] = useState<BillingAccount[]>([])
+  // An answer the Usage entry's intent already brought in is drawn in the FIRST commit (no second pass for the rings).
+  const seeded = useRef<{ accounts?: BillingAccount[] } | null | undefined>(undefined)
+  if (seeded.current === undefined) seeded.current = (takeWarmAccountsBody() as { accounts?: BillingAccount[] } | null | undefined) ?? null
+  const [accounts, setAccounts] = useState<BillingAccount[]>(seeded.current?.accounts ?? [])
   // The list arrived (a failed fetch never counts): only then may stale `failed` answers be pruned.
-  const [accountsLoaded, setAccountsLoaded] = useState(false)
+  const [accountsLoaded, setAccountsLoaded] = useState(!!seeded.current?.accounts)
   // The first answer arrived, ok or not: the list has its final height, so `#contas` may be scrolled to.
-  const [accountsSettled, setAccountsSettled] = useState(false)
+  const [accountsSettled, setAccountsSettled] = useState(!!seeded.current?.accounts)
   // The answer never came or was not ok: say so instead of listing a generic row per assistant.
   const [accountsFailed, setAccountsFailed] = useState(false)
   const [pendingIds, setPending] = useState<Set<string>>(new Set())
@@ -129,10 +133,13 @@ export function BillingAccountsPanel() {
     }))).current
   const [relogin, setRelogin] = useState<{ id: string; harness: HarnessId; who: string } | null>(null)
   const [accountsReload, setAccountsReload] = useState(0)
-  const reloadAccounts = useCallback(() => setAccountsReload(n => n + 1), [])
+  const reloadAccounts = useCallback(() => { resetUsageWarmup(); setAccountsReload(n => n + 1) }, [])
   useEffect(() => {
+    if (accountsReload === 0 && seeded.current?.accounts) return
     let cancelled = false
-    fetch('/api/accounts', { signal: AbortSignal.timeout(15_000) })
+    // First read: take the answer the Usage entry's intent (or the page's first render) already asked for.
+    const warm = accountsReload === 0 ? takeWarmAccounts() : null
+    ;(warm ?? fetch('/api/accounts', { signal: AbortSignal.timeout(15_000) }))
       .then(r => (r.ok ? r.json() : null))
       .then((b: { accounts?: BillingAccount[] } | null) => {
         if (cancelled) return
