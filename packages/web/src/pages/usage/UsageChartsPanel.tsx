@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { SessionMeta, SurfaceHarnessId } from '@agentistics/core'
 import { ActivityPercentChart } from '../../components/ActivityChart'
 import { WeekHourHeatmap } from '../../components/charts/WeekHourHeatmap'
@@ -19,6 +19,8 @@ import {
 } from './usageChartsModel'
 
 const HOUR = 3_600_000
+/** Accounts whose charts sit on the first screen; everything else is drawn on the frames right after the first paint. */
+const FIRST_SCREEN_ACCOUNTS = 2
 const WINDOW_MS = { '5h': 5 * HOUR, week: 7 * 24 * HOUR } as const
 const T = {
   pt: {
@@ -83,6 +85,14 @@ export function UsageChartsPanel({ budgets, readings, sessions, harnesses: avail
   const t = T[lang], isMobile = useIsMobile()
   const [mode, setMode] = useState<UsageScopeMode>('accounts')
   const [picked, setPicked] = useState<{ harness?: string; account?: string }>({})
+  // USO.LENTO r3c: the first commit draws the first screen only; the rest follows after the browser painted (once per mount).
+  const [rest, setRest] = useState(false)
+  useEffect(() => {
+    if (rest) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const frame = requestAnimationFrame(() => { timer = setTimeout(() => setRest(true), 0) })
+    return () => { cancelAnimationFrame(frame); clearTimeout(timer) }
+  }, [rest])
   const budgetOf = (r: PlanReadings) => budgets.find(b => accountKey(b) === readingKey(r))
   const labelOf = (r: PlanReadings) => seriesName(HARNESS_LABELS[r.harness], budgetOf(r) ? accountLabel(budgetOf(r)!) : r.account)
   const harnesses = useMemo(() => [...new Set([...available, ...sessions.map(s => s.harness), ...readings.map(r => r.harness)])], [available, sessions, readings])
@@ -117,8 +127,19 @@ export function UsageChartsPanel({ budgets, readings, sessions, harnesses: avail
   const description = (text: string) => <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 10px', lineHeight: 1.5 }}>{text}</p>
   const heading = (text: string) => <h2 style={{ fontSize: 13, margin: '0 0 6px' }}>{text}</h2>
   const two = { display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))', gap: 16 } as const
+  // The rows of a chart are a pure function of its series: build each once per `view`, not on every render
+  // (a tab change, the minute tick or a parent re-render used to rebuild all of them).
+  const chartOf = useMemo(() => {
+    const cache = new Map<string, ReturnType<typeof toChartRows>>()
+    return (kind: '5h' | 'week', series: typeof view.five.series) => {
+      const id = `${kind}|${series.map(s => s.key).join('|')}`
+      let hit = cache.get(id)
+      if (!hit) { hit = toChartRows(series, WINDOW_MS[kind]); cache.set(id, hit) }
+      return hit
+    }
+  }, [view])
   const lineChart = (kind: '5h' | 'week', series: typeof view.five.series) => {
-    const { rows, keys } = toChartRows(series, WINDOW_MS[kind])
+    const { rows, keys } = chartOf(kind, series)
     return rows.length ? <ActivityPercentChart lang={lang} data={rows} step showDay={kind === 'week'} timeRange={kind === '5h' ? [Math.floor((now - 48 * HOUR) / HOUR) * HOUR, now] : undefined} height={mode === 'accounts' ? 150 : 220}
       series={keys.map(k => ({ key: k.key, label: k.label, color: color(k.identity), connectNulls: false }))} /> : description(t.noWindow)
   }
@@ -149,7 +170,7 @@ export function UsageChartsPanel({ budgets, readings, sessions, harnesses: avail
         </div>}
         {ready && <>
         {mode === 'harnesses' && description(t.harnessDesc)}
-        {mode === 'accounts' ? accounts.map(account => <div key={account.value} data-usage-account={account.value} style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginBottom: 12 }}>
+        {mode === 'accounts' ? accounts.slice(0, rest ? undefined : FIRST_SCREEN_ACCOUNTS).map(account => <div key={account.value} data-usage-account={account.value} style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginBottom: 12 }}>
           <h3 style={{ fontSize: 13, margin: '0 0 12px', color: color(account.value) }}>{account.label}</h3>
           {pair(view.five.series.filter(s => s.key === account.value), view.week.series.filter(s => s.key === account.value))}
         </div>) : pair(view.five.series, view.week.series)}
@@ -158,6 +179,7 @@ export function UsageChartsPanel({ budgets, readings, sessions, harnesses: avail
         {view.missing.map(h => <p key={h} style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{HARNESS_LABELS[h as SurfaceHarnessId] ?? h} — {t.noReading}</p>)}
         </>}
       </div>
+      {rest && <>
       <div data-usage-chart="hours">
         {heading(t.hours)}{description(t.hoursDesc)}
         {view.msgs.total === 0 ? description(t.noMsgs) : <>{heading(t.perDay)}<WeekHourHeatmap cells={view.msgs.cells} lang={lang} /></>}
@@ -176,6 +198,7 @@ export function UsageChartsPanel({ budgets, readings, sessions, harnesses: avail
           <UsageHourlyBars lang={lang} messages data={view.messageRows} series={[{ key: 'messages', label: t.messages, color: 'var(--anthropic-orange)' }]} />
         </> : description(t.noMsgs)}
       </div>
+      </>}
     </div>
   </Section>
 }

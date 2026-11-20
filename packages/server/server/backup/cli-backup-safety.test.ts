@@ -49,7 +49,7 @@ test('CICLO.LIMPEZA: the size cap prunes the oldest files inside the backups dir
   await mkdir(backups, { recursive: true })
   const paths = [1, 2, 3, 4].map(n => join(backups, `b${n}.tar.zst`))
   for (const [i, p] of paths.entries()) {
-    await writeFile(p, 'x')
+    await writeFile(p, 'x'.repeat(1000)) // R3: the cap reads the real size
     await recordBackup({ ...makeRecord(`2026-01-0${i + 1}T00:00:00Z`, p), archiveBytes: 1000 })
   }
   const logs: string[] = []

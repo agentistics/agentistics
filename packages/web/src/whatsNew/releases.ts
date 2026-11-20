@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.220.0': {
+    features: [
+      {
+        pt: 'Fluxos (experimental): pastas de trabalho de sessões já publicadas e sem mudanças são apagadas sozinhas; arquivos como .env ou backups fazem a pasta ficar, e um arquivo .agentistics-keep protege qualquer pasta.',
+        en: 'Flows (experimental): work folders of sessions that are already published and have no changes are removed on their own; files such as .env or backups keep the folder, and an .agentistics-keep file protects any folder.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Backups: o limite de 3 GB passa a contar o tamanho real de cada arquivo.',
+        en: 'Backups: the 3 GB limit now counts the real size of each file.',
+      },
+      {
+        pt: 'Uso: a aba abre em menos de 1 segundo (antes levava vários segundos); os gráficos de baixo carregam logo em seguida.',
+        en: 'Usage: the tab opens in under 1 second (it used to take several seconds); the charts further down load right after.',
+      },
+    ],
+  },
   '2.219.0': {
     features: [
       {

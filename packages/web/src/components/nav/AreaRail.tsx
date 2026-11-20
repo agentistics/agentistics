@@ -7,6 +7,7 @@
  *
  * Icons and labels come from AreaTree; every expanded parent also appears in the collapsed rail.
  */
+import { usageIntentProps } from '../../lib/usageWarmup'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BetaTag } from '../BetaTag'
@@ -118,6 +119,7 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
                   <button
                     type="button"
                     aria-label={name}
+                    {...usageIntentProps(area.id === 'usage')}
                     aria-current={active ? 'page' : undefined}
                     aria-expanded={area.pages.length > 0 ? false : undefined}
                     onClick={() => {

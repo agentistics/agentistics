@@ -100,7 +100,24 @@ function retryLater(): void {
   retryTimer = setTimeout(() => { retryTimer = null; void refresh() }, retryDelayMs(attempts++))
 }
 
-async function refresh(): Promise<void> {
+/**
+ * ONE request in flight. `start()` and the SSE `connected` event both asked on open, so the Usage page
+ * downloaded the whole answer (readings included) twice. A `connected` ask joins the request already
+ * running; a `plan-limits` push means the data moved AFTER it was sampled, so it queues exactly one
+ * trailing request however many pushes arrive.
+ */
+let inflight: Promise<void> | null = null
+let dirty = false
+function refresh(join = false): Promise<void> {
+  if (inflight) { if (!join) dirty = true; return inflight }
+  inflight = fetchPlanLimits().finally(() => {
+    inflight = null
+    if (dirty) { dirty = false; void refresh() }
+  })
+  return inflight
+}
+
+async function fetchPlanLimits(): Promise<void> {
   try {
     const r = await fetch('/api/plan-limits', { cache: 'no-store', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
     if (!r.ok) {
@@ -137,10 +154,10 @@ async function refresh(): Promise<void> {
 }
 
 function start(): () => void {
-  void refresh()
+  void refresh(true)
   const offChange = subscribeEvent('plan-limits', () => { void refresh() })
   // A reconnect is a fresh chance: a refusal recorded before it (signed out, server restarted) is retried once.
-  const offConnected = subscribeEvent('connected', () => { if (terminal(snap.failure)) emit({ failure: null }); void refresh() })
+  const offConnected = subscribeEvent('connected', () => { if (terminal(snap.failure)) emit({ failure: null }); void refresh(true) })
   const tick = setInterval(() => emit({ now: Date.now() }), 60_000)
   return () => {
     offChange(); offConnected(); clearInterval(tick); clearRetry()

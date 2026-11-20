@@ -13,7 +13,7 @@ import { bundleForBackup, stageVaultFromArchive } from './vault/bundle-io'
 import { vaultBundlePathFor } from './backup/vault-bundle-github'
 import { hostname, tmpdir } from 'os'
 import { existsSync } from 'fs'
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'fs/promises'
 import { join, relative, isAbsolute, sep } from 'path'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
@@ -521,9 +521,20 @@ async function buildRepoManifest(
  * Each deletion is itself RECORDED (`recordPrune`) — the history distinguishes a backup deleted
  * on purpose, by retention, from one that vanished for some other reason. Without that second
  * event, every row past `keep` would read exactly like a real loss.
+ *
+ * The size cap reads each archive's REAL size (`stat`) — the record's `archiveBytes` is only the fallback when the file
+ * cannot be stat'ed — so a record with a wrong size cannot fool the cap (CICLO.LIMPEZA R3).
  */
+export async function withRealSizes<T extends { path: string; present: boolean; archiveBytes: number }>(entries: T[]): Promise<T[]> {
+  return Promise.all(entries.map(async e => {
+    if (!e.present) return e
+    const s = await stat(e.path).catch(() => null)
+    return s && s.isFile() ? { ...e, archiveBytes: s.size } : e
+  }))
+}
+
 export async function pruneOldBackups(keep: number, log: (l: string) => void, maxTotalBytes = 0): Promise<void> {
-  const entries = await loadBackupHistory()
+  const entries = await withRealSizes(await loadBackupHistory())
   const backupsDir = await realpath(join(AGENTISTICS_DATA_DIR, 'backups')).catch(() => null)
   if (!backupsDir) {
     log('backup prune refused: the backups directory does not exist')
