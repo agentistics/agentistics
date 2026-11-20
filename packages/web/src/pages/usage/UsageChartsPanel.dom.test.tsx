@@ -26,6 +26,8 @@ beforeAll(async () => {
 afterEach(() => { act(() => root?.unmount()); root = undefined })
 afterAll(() => { void GlobalRegistrator.unregister() })
 
+/** The panel draws the first screen at once and the rest on the next frames (USO.LENTO r3c). */
+const rest = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 60)) })
 function mount(over: Record<string, unknown> = {}) {
   const el = document.createElement('div'); document.body.append(el)
   root = createRoot(el)
@@ -43,8 +45,9 @@ describe('UsageChartsPanel loading', () => {
     expect(el.textContent).not.toContain('No usage history')
     expect(el.textContent).not.toContain('no limit readings')
   })
-  test('the message charts do not wait for the limits: they draw while the limits load', () => {
+  test('the message charts do not wait for the limits: they draw while the limits load', async () => {
     const el = mount({ readings: [], status: 'loading' })
+    await rest()
     expect(el.querySelector('[data-usage-chart="hours"]')).not.toBeNull()
     expect(el.querySelector('svg[aria-label="Messages by weekday and hour, last 14 days"]')).not.toBeNull()
     expect(el.querySelector('[data-usage-chart="peaks"]')?.textContent).toContain('Hours with the most messages')
@@ -104,8 +107,9 @@ describe('usageLimitsStatus', () => {
 })
 
 describe('UsageChartsPanel filter', () => {
-  test('default account rows and five modes; the account mode shows its picker and the 5 h note names the omitted harness', () => {
+  test('default account rows and five modes; the account mode shows its picker and the 5 h note names the omitted harness', async () => {
     const el = mount()
+    await rest()
     expect(Array.from(el.querySelectorAll('[role=tab]')).map(b => b.textContent)).toEqual(['By account', 'Overlaid by harness', 'All overlaid', 'One harness', 'One account'])
     expect(tab(el, 'By account').getAttribute('aria-selected')).toBe('true')
     expect(el.textContent).toContain('No 5 h window (omitted): Codex')
@@ -118,8 +122,9 @@ describe('UsageChartsPanel filter', () => {
     expect(el.querySelector('[data-usage-chart="peaks"]')).not.toBeNull()
     expect(el.querySelector('[data-usage-chart="peaks"]')?.textContent).toContain('Limit usage by hour')
   })
-  test('harnesses from sessions without readings remain selectable and show activity', () => {
+  test('harnesses from sessions without readings remain selectable and show activity', async () => {
     const el = mount()
+    await rest()
     act(() => tab(el, 'One harness').click())
     act(() => (el.querySelector('[data-usage-harness] button') as HTMLElement).click())
     const gemini = Array.from(document.querySelectorAll('[role=option]')).find(b => b.textContent?.includes('Gemini')) as HTMLElement

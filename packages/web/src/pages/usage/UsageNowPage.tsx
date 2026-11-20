@@ -14,6 +14,7 @@ import { useState } from 'react'
 import { HarnessPicker, withMissingHarnesses } from '../../components/sessions/HarnessPicker'
 import { HarnessInstallDialog } from '../../components/HarnessInstallDialog'
 import { useChatHarnesses } from '../../hooks/useChatHarnesses'
+import { warmUsageAccounts } from '../../lib/usageWarmup'
 
 export default function UsageNowPage() {
   const { lang, data } = useOutletContext<AppContext>()
@@ -26,6 +27,9 @@ export default function UsageNowPage() {
  * by fixture tests without mounting the application shell (`accounts={false}` skips the registry).
  */
 export function UsageNowContent({ lang, sessions = [], harnesses = [], accounts = true }: { lang: Lang; sessions?: SessionMeta[]; harnesses?: SurfaceHarnessId[]; accounts?: boolean }) {
+  // Start the account list before the charts render: the rings wait on it, not on the charts. Idempotent.
+  // Once per mount (lazy initial state), never on a re-render: an idle open tab must send nothing.
+  useState(() => { if (accounts) warmUsageAccounts('open'); return 0 })
   const isMobile = useIsMobile()
   const { budgets, readings, now, limits, failure } = usePlanLimits()
   const { harnesses: chatHarnesses, reload } = useChatHarnesses(true)

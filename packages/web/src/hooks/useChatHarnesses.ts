@@ -57,6 +57,19 @@ export interface UseChatHarnessesResult {
   reload: () => void
 }
 
+/** PURE. Is there still something worth re-asking about: no answer yet, or an installed harness not signed in. */
+export function chatHarnessesNeedPolling(harnesses: readonly HarnessChatStatus[]): boolean {
+  return harnesses.length === 0 || harnesses.some(h => h.installed && !h.ready)
+}
+
+export const HARNESS_POLL_FAST_MS = 4000
+export const HARNESS_POLL_SLOW_MS = 30_000
+export const HARNESS_POLL_FAST_WINDOW_MS = 120_000
+/** PURE. How long to wait before the next re-check: quick while a sign-in is likely being done, slow after. */
+export function harnessPollDelay(sinceMs: number): number {
+  return sinceMs < HARNESS_POLL_FAST_WINDOW_MS ? HARNESS_POLL_FAST_MS : HARNESS_POLL_SLOW_MS
+}
+
 /**
  * Fetches chat backends by default; all=true requests the complete session catalog,
  * including those that are not installed or not authenticated.
@@ -82,16 +95,32 @@ export function useChatHarnesses(all = false): UseChatHarnessesResult {
     return () => { cancelled = true }
   }, [generation, all])
 
-  // The badge must flip by itself after an install or a sign-in, so re-check while anything is not
-  // ready — and stop the moment everything is, so a settled machine pays nothing.
-  const settled = harnesses.length > 0 && harnesses.every(h => h.ready)
+  // The badge must flip by itself after a sign-in, so re-check while an INSTALLED harness is not ready —
+  // and stop the moment none is, so a settled machine pays nothing. A harness that is not installed does
+  // not flip by itself (an install reloads explicitly), and with `all=1` there is always one: counting
+  // it kept this poll alive for as long as the page was open, each round re-running the CLI probes.
+  const settled = !chatHarnessesNeedPolling(harnesses)
+  // `epoch` restarts the back-off clock: the tab becoming visible again and an explicit reload (the harness
+  // picker opening, an install finishing) both mean "somebody is looking", so the quick cadence returns.
+  const [epoch, setEpoch] = useState(0)
   useEffect(() => {
     if (settled) return
-    const timer = window.setInterval(() => setGeneration(n => n + 1), 4000)
-    return () => window.clearInterval(timer)
-  }, [settled])
+    const startedAt = Date.now()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const schedule = () => { timer = setTimeout(tick, harnessPollDelay(Date.now() - startedAt)) }
+    const tick = () => { if (!document.hidden) setGeneration(n => n + 1); schedule() }
+    const onVisible = () => {
+      if (document.hidden) return
+      clearTimeout(timer)
+      setGeneration(n => n + 1)
+      setEpoch(n => n + 1)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    schedule()
+    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible) }
+  }, [settled, epoch])
 
-  return { harnesses, loading, reload: () => setGeneration(n => n + 1) }
+  return { harnesses, loading, reload: () => { setGeneration(n => n + 1); setEpoch(n => n + 1) } }
 }
 
 export interface InstallResult {

@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.219.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uso: a aba abre em menos de 1 segundo (antes levava vários segundos); os gráficos de baixo carregam logo em seguida.',
+        en: 'Usage: the tab opens in under 1 second (it used to take several seconds); the charts further down load right after.',
+      },
+    ],
+  },
   '2.219.0': {
     features: [
       {
