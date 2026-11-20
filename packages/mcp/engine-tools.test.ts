@@ -58,6 +58,13 @@ describe('engine tools in the MCP', () => {
     const et = createEngineTools({ api: 'http://x', fetch: hang, listTimeoutMs: 20 })
     expect(await et.mcpTools()).toEqual([])
   })
+  it('a call to an engine that never answers fails instead of hanging', async () => {
+    const hang = (url: string, init?: RequestInit) => url.endsWith('/api/engine/mcp-tools')
+      ? Promise.resolve(Response.json({ tools: [tool()] }))
+      : new Promise<Response>((_, rej) => { init?.signal?.addEventListener('abort', () => rej(new Error('aborted'))) })
+    const et = createEngineTools({ api: 'http://x', fetch: hang, callTimeoutMs: 20 })
+    await expect(et.call('agentistics_x_example', {}, undefined)).rejects.toThrow('aborted')
+  })
   it('an HTTP error becomes an error carrying the server sentence', async () => {
     const { et } = fake([tool({ name: 'agentistics_x_boom', method: 'POST', path: '/api/engine/x/boom' })])
     await expect(et.call('agentistics_x_boom', {}, undefined)).rejects.toThrow('HTTP 422 nope: bad input')
