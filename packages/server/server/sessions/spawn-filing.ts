@@ -49,6 +49,8 @@ import { isFinishedFolder } from './finished-folder'
 export interface FilingRepo {
   remote?: string
   repo?: string
+  /** The remote's normalized host, when known (`RepoFacts.host`). */
+  host?: string
   worktree: boolean
   missing?: boolean
 }
@@ -110,7 +112,7 @@ export type FilingRefusal =
   | 'no_such_task' | 'ambiguous_task'
   | 'no_such_subtask' | 'ambiguous_subtask' | 'subtask_needs_task'
   | 'no_such_folder' | 'ambiguous_folder'
-  | 'cwd_missing' | 'cwd_wrong_repo' | 'cwd_needed' | 'cwd_shared_checkout'
+  | 'cwd_missing' | 'cwd_not_a_checkout' | 'cwd_wrong_repo' | 'cwd_needed' | 'cwd_shared_checkout'
   | 'subtask_refused' | 'worker_needs_subtask' | 'board_unreadable' | 'handoff_required'
 
 export type FilingPlan = {
@@ -218,8 +220,20 @@ function resolveFiling(input: FilingInput, taskRef: string | undefined, subtaskR
 
 // ── repository ──────────────────────────────────────────────────────────────────────────────────
 
-/** What identifies a repository: its short `org/repo` (lowercase) and, when a REMOTE said it, the host too. */
-interface RepoId { short: string; full?: string }
+/**
+ * What identifies a repository, compared FIELD BY FIELD: `host` (only a remote carries one), `owner`
+ * (everything between host and name — absent for a clone known only by its folder name) and `name`.
+ * `short` is `owner/name`, or `name` alone, and is what the `checkoutsOf` probe keys on.
+ */
+interface RepoId { short: string; name: string; owner?: string; host?: string }
+
+function makeId(path: string, host?: string): RepoId | undefined {
+  const parts = path.split('/').filter(Boolean)
+  const name = parts.pop()
+  if (!name) return undefined
+  const owner = parts.length ? parts.join('/') : undefined
+  return { short: owner ? `${owner}/${name}` : name, name, ...(owner ? { owner } : {}), ...(host ? { host } : {}) }
+}
 
 /** Board repos are usually short `org/repo`; only a real remote carries a host. */
 function taskRepoId(repo: string | undefined): RepoId | undefined {
@@ -228,15 +242,17 @@ function taskRepoId(repo: string | undefined): RepoId | undefined {
   const isRemote = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value)
     || /^[^/@]+@[^/:]+:/.test(value)
     || value.split('/')[0]!.includes('.')
-  return isRemote ? repoId(value) : { short: value.toLowerCase() }
+  return isRemote ? repoId(value) : makeId(value.toLowerCase())
 }
 
+/** A remote that normalizes to nothing (a local path) names no repository: it has no host or owner. */
 function repoId(remote: string | undefined): RepoId | undefined {
   if (!remote) return undefined
-  const full = (normalizeGitRemote(remote) || remote).toLowerCase()
+  const full = normalizeGitRemote(remote).toLowerCase()
+  if (!full) return undefined
   const short = repoShortName(full).toLowerCase()
-  if (!short) return undefined
-  return { short, ...(full !== short ? { full } : {}) }
+  const host = full.slice(0, Math.max(0, full.length - short.length)).replace(/\/$/, '')
+  return makeId(short, host || undefined)
 }
 /** `repo` is ALREADY the short form — normalizing it would read its org as a host. */
 const idOfFacts = (f: FilingRepo | null | undefined): RepoId | undefined => {
@@ -244,33 +260,33 @@ const idOfFacts = (f: FilingRepo | null | undefined): RepoId | undefined => {
   const fromRemote = repoId(f.remote)
   if (fromRemote) return fromRemote
   const short = f.repo?.trim().toLowerCase()
-  return short ? { short } : undefined
+  return short ? makeId(short, f.host?.trim().toLowerCase() || undefined) : undefined
 }
 /** The short key, for the `checkoutsOf` probe and for "is this in any repository at all". */
 const keyOfFacts = (f: FilingRepo | null | undefined): string | undefined => idOfFacts(f)?.short
 const exists = (f: FilingRepo | null): f is FilingRepo => f !== null && !f.missing
 
+/** Hosts differ only when BOTH sides state one. */
+const hostsDiffer = (a: RepoId, b: RepoId): boolean => !!a.host && !!b.host && a.host !== b.host
+
 /**
- * Whether a directory's repository IS the task's. Hosts are compared when BOTH sides carry one
- * (github.com/o/r is not gitlab.com/o/r); a host-less side (`ResolvedRepoFacts.repo`) falls back to
- * the repository name, allowing an owner transfer. A repository with no remote is only its folder
- * name — one segment — and is accepted when that is the task repo's last segment.
+ * Whether a directory's repository IS the task's: same host (when both state one), same owner and
+ * same name. A different owner is a different repository even under the same name — no owner
+ * transfer is assumed. A clone with no remote is only its folder name (no owner) and is accepted
+ * when that is the task repo's name.
  */
 function sameRepo(facts: FilingRepo, want: RepoId): boolean {
   const have = idOfFacts(facts)
-  if (!have) return false
-  if (have.full && want.full && have.full.split('/')[0] !== want.full.split('/')[0]) return false
-  if (have.short === want.short) return true
-  if (have.short.includes('/') && want.short.includes('/')) return have.short.split('/').pop() === want.short.split('/').pop()
-  return !facts.remote && !have.short.includes('/') && have.short === want.short.split('/').pop()
+  if (!have || hostsDiffer(have, want)) return false
+  if (have.name !== want.name) return false
+  return !have.owner || !want.owner || have.owner === want.owner
 }
 
-/** Same owner (and same host when both carry one): the task spans the org's repositories. */
+/** Same owner (and same host when both state one): the task spans the org's repositories. */
 function sameOrg(facts: FilingRepo, want: RepoId): boolean {
   const have = idOfFacts(facts)
-  if (!have || !have.short.includes('/') || !want.short.includes('/')) return false
-  if (have.full && want.full && have.full.split('/')[0] !== want.full.split('/')[0]) return false
-  return have.short.split('/')[0] === want.short.split('/')[0]
+  if (!have?.owner || !want.owner || hostsDiffer(have, want)) return false
+  return have.owner === want.owner
 }
 
 const trimSep = (p: string): string => (p.length > 1 ? p.replace(/[\\/]+$/, '') : p)
@@ -302,15 +318,20 @@ function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, t
   const want = taskRepoId(task?.repo)
   const mismatch = want !== undefined && !sameRepo(facts, want)
   let crossRepo: string | undefined
+  if (want && mismatch && !inheritedTask && source === 'explicit' && input.forceCwd && keyOfFacts(facts) === undefined) {
+    // --force overrides the repository mismatch, never the "this is a git checkout" requirement.
+    return refuse('cwd_not_a_checkout', `${cwd} is not a git checkout — --force only overrides which repository, so start the session in a checkout of ${task!.repo} (or another repository's checkout)`, checkoutsFor(input, want))
+  }
   if (want && mismatch && !inheritedTask && source === 'explicit' && (input.forceCwd || sameOrg(facts, want))) {
-    crossRepo = idOfFacts(facts)?.short ?? cwd
+    const have = idOfFacts(facts)
+    crossRepo = have?.owner ? have.short : cwd
   } else if (want && mismatch && !inheritedTask) {
     const candidates = checkoutsFor(input, want)
     return source === 'explicit'
       ? refuse('cwd_wrong_repo', `${cwd} is not a checkout of ${task!.repo} (task ${task!.id}) — use one of its worktrees (CLI: --cwd)`, candidates)
       : refuse('cwd_needed', `task ${task!.id} belongs to ${task!.repo} and ${cwd} is outside it — start the session in one of its worktrees (CLI: --cwd)`, candidates)
   }
-  const inheritedRepoMismatch = mismatch ? true : undefined
+  const inheritedRepoMismatch = mismatch && inheritedTask ? true : undefined
   const inRepo = keyOfFacts(facts) !== undefined
   if (inRepo && !facts.worktree && input.liveInCwd(cwd) >= 1) {
     if (!input.sharedCwd) {

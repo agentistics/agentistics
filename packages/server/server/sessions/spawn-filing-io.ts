@@ -47,7 +47,7 @@ export interface SpawnFilingRequest {
   /** Directories earlier plans of the same batch will occupy — they count as live sessions there. */
   extraLiveCwds?: readonly string[] | undefined
   /** Test seam: the git probe (the real one is process-global and a test file elsewhere may stub it). */
-  repoFacts?: (dir: string) => Promise<{ repo?: string | undefined; worktree: boolean; missing?: boolean | undefined } | null>
+  repoFacts?: (dir: string) => Promise<{ repo?: string | undefined; host?: string | undefined; worktree: boolean; missing?: boolean | undefined } | null>
   /** Test seams. */
   rows?: readonly ManagedSession[]
   book?: Pick<TaskBook, 'tasks' | 'subtasks'>
@@ -138,7 +138,7 @@ export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan
     for (let i = 0; i < todo.length; i += PROBE_CONCURRENCY) {
       await Promise.all(todo.slice(i, i + PROBE_CONCURRENCY).map(async d => {
         const f = await (o.repoFacts ?? repoFacts)(d).catch(() => null)
-        known.set(d, f ? { ...(f.repo ? { repo: f.repo } : {}), worktree: f.worktree, ...(f.missing ? { missing: true } : {}) } : null)
+        known.set(d, f ? { ...(f.repo ? { repo: f.repo } : {}), ...(f.host ? { host: f.host } : {}), worktree: f.worktree, ...(f.missing ? { missing: true } : {}) } : null)
       }))
     }
   }
