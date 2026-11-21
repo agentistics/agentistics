@@ -29,7 +29,21 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Floating windows that follow you across pages: the browser stays visible when you go from Sessions to Tasks, with Back and minimize, and a chip shows the session state.',
       },
     ],
-    fixes: [],
+    fixes: [
+      {
+        pt: 'Limpeza automática mais ampla: ambientes de teste encerrados, cópias temporárias antigas e restos de pacotes do git são apagados com segurança — nunca o que está marcado para manter, em uso ou de outro usuário.',
+        en: 'Wider automatic cleanup: finished test environments, old temporary copies and leftover git pack files are removed safely — never anything marked to keep, in use or owned by another user.',
+      },
+    ],
+  },
+  '2.221.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Correções de estabilidade do motor.',
+        en: 'Engine stability fixes.',
+      },
+    ],
   },
   '2.221.3': {
     features: [],
