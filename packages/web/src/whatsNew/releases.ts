@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.224.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Quando o motor encerra uma conversa que abriu para você, as outras sessões que você silenciou continuam silenciadas.',
+        en: 'When the engine ends a conversation it opened for you, the other sessions you muted stay muted.',
+      },
+    ],
+  },
   '2.224.1': {
     features: [],
     fixes: [
