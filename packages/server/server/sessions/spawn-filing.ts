@@ -72,6 +72,8 @@ export interface FilingInput {
   cwd?: string
   /** `--shared-cwd`: allow a main checkout another live session already works in. */
   sharedCwd?: boolean
+  /** `--force`: an EXPLICIT cwd outside the task's repository is accepted (and said so). */
+  forceCwd?: boolean
   /** The caller's cwd, absolute. */
   callerCwd: string
   /** The calling session's row, when a session is the caller — for the `parent` folder. */
@@ -102,7 +104,7 @@ export type FolderSource = 'explicit' | 'predecessor' | 'task' | 'parent' | 'non
 export type CwdSource = 'explicit' | 'caller' | 'predecessor'
 
 /** Codes, not sentences: the surfaces (CLI, route) render them in the reader's language. */
-export type FilingWarning = 'no_folder' | 'inherited_task_needs_subtask' | 'subtask_member_filed_on_group' | 'shared_checkout_override' | 'inherited_task_repo_mismatch'
+export type FilingWarning = 'no_folder' | 'inherited_task_needs_subtask' | 'subtask_member_filed_on_group' | 'shared_checkout_override' | 'inherited_task_repo_mismatch' | 'cross_repo_cwd'
 
 export type FilingRefusal =
   | 'no_such_task' | 'ambiguous_task'
@@ -128,6 +130,8 @@ export type FilingPlan = {
   folderSource: FolderSource
   cwd: string
   cwdSource: CwdSource
+  /** An explicit cwd in ANOTHER repository (same org, or --force) than the task's: that repo's `org/repo`. */
+  crossRepo?: string
   /** Absent for a person / unknown caller. */
   role?: 'worker' | 'leader'
   warnings: FilingWarning[]
@@ -261,6 +265,14 @@ function sameRepo(facts: FilingRepo, want: RepoId): boolean {
   return !facts.remote && !have.short.includes('/') && have.short === want.short.split('/').pop()
 }
 
+/** Same owner (and same host when both carry one): the task spans the org's repositories. */
+function sameOrg(facts: FilingRepo, want: RepoId): boolean {
+  const have = idOfFacts(facts)
+  if (!have || !have.short.includes('/') || !want.short.includes('/')) return false
+  if (have.full && want.full && have.full.split('/')[0] !== want.full.split('/')[0]) return false
+  return have.short.split('/')[0] === want.short.split('/')[0]
+}
+
 const trimSep = (p: string): string => (p.length > 1 ? p.replace(/[\\/]+$/, '') : p)
 const msOf = (iso: string | undefined): number => { const n = Date.parse(iso ?? ''); return Number.isNaN(n) ? -Infinity : n }
 
@@ -278,7 +290,7 @@ function checkoutsFor(input: FilingInput, want: RepoId): string[] {
   return [...out].slice(0, 10)
 }
 
-function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, task: Task | undefined, inheritedTask: boolean): { cwd: string; source: CwdSource; shared?: true; inheritedRepoMismatch?: true } | Refusal {
+function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, task: Task | undefined, inheritedTask: boolean): { cwd: string; source: CwdSource; shared?: true; inheritedRepoMismatch?: true; crossRepo?: string } | Refusal {
   const explicit = clean(input.cwd)
   const fromPred = !explicit && input.handoffOf ? input.handoffOf.cwd : undefined
   const cwd = explicit ?? fromPred ?? input.callerCwd
@@ -289,7 +301,10 @@ function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, t
 
   const want = taskRepoId(task?.repo)
   const mismatch = want !== undefined && !sameRepo(facts, want)
-  if (want && mismatch && !inheritedTask) {
+  let crossRepo: string | undefined
+  if (want && mismatch && !inheritedTask && source === 'explicit' && (input.forceCwd || sameOrg(facts, want))) {
+    crossRepo = idOfFacts(facts)?.short ?? cwd
+  } else if (want && mismatch && !inheritedTask) {
     const candidates = checkoutsFor(input, want)
     return source === 'explicit'
       ? refuse('cwd_wrong_repo', `${cwd} is not a checkout of ${task!.repo} (task ${task!.id}) — use one of its worktrees (CLI: --cwd)`, candidates)
@@ -302,9 +317,9 @@ function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, t
       return refuse('cwd_shared_checkout',
         `${cwd} is a main checkout another live session already works in — use a worktree (git worktree add .claude/worktrees/<name> -b <branch>) or allow sharing (CLI: --shared-cwd)`)
     }
-    return { cwd, source, shared: true, inheritedRepoMismatch }
+    return { cwd, source, shared: true, inheritedRepoMismatch, ...(crossRepo ? { crossRepo } : {}) }
   }
-  return { cwd, source, inheritedRepoMismatch }
+  return { cwd, source, inheritedRepoMismatch, ...(crossRepo ? { crossRepo } : {}) }
 }
 
 // ── folder ──────────────────────────────────────────────────────────────────────────────────────
@@ -410,6 +425,7 @@ export function planFiling(input: FilingInput): FilingPlan {
   if (filing.memberOf) warnings.push('subtask_member_filed_on_group')
   if (cwd.shared) warnings.push('shared_checkout_override')
   if (cwd.inheritedRepoMismatch) warnings.push('inherited_task_repo_mismatch')
+  if (cwd.crossRepo) warnings.push('cross_repo_cwd')
   if (folder.source === 'none') warnings.push('no_folder')
 
   return {
@@ -422,6 +438,7 @@ export function planFiling(input: FilingInput): FilingPlan {
     folderSource: folder.source,
     cwd: cwd.cwd,
     cwdSource: cwd.source,
+    ...(cwd.crossRepo ? { crossRepo: cwd.crossRepo } : {}),
     ...(role ? { role } : {}),
     warnings,
   }

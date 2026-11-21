@@ -23,6 +23,7 @@ const DIRS: Record<string, FilingRepo | null> = {
   '/home/u/agentistics': { repo: 'agentistics/agentistics', worktree: false },
   '/home/u/agentistics/.claude/worktrees/x': { repo: 'agentistics/agentistics', worktree: true },
   '/home/u/agentistics-engine': { remote: ENGINE, worktree: false },
+  '/home/u/acme': { remote: 'github.com/acme/thing', worktree: false },
   '/home/u/workspace': { worktree: false },
   '/home/u/Agentistics-CASE': { repo: 'Agentistics/Agentistics', worktree: true },
   '/home/u/elsewhere': { repo: 'agentistics/agentistics', worktree: true },
@@ -172,11 +173,11 @@ describe('cwd', () => {
   test('explicit cwd in another repo is cwd_wrong_repo, with candidates of the right remote', () => {
     const rows = [
       R('a', { cwd: '/home/u/agentistics/.claude/worktrees/x' }),
-      R('b', { cwd: '/home/u/agentistics-engine' }),
+      R('b', { cwd: '/home/u/acme' }),
       R('c', { cwd: '/home/u/agentistics/.claude/worktrees/x' }),
       R('d', { cwd: '/home/u/elsewhere', repo: { repo: 'agentistics/agentistics', worktree: true } }),
     ]
-    const p = refused(planFiling(base({ taskRef: 't-1', cwd: '/home/u/agentistics-engine', rows })))
+    const p = refused(planFiling(base({ taskRef: 't-1', cwd: '/home/u/acme', rows })))
     expect(p.code).toBe('cwd_wrong_repo')
     expect(p.candidates).toEqual(['/home/u/agentistics/.claude/worktrees/x', '/home/u/elsewhere'])
   })
@@ -406,7 +407,7 @@ describe('SPAWN.REPO — short board repository names', () => {
   })
   test('short task repo refuses a different checkout remote', () => {
     const p = refused(planFiling(base({
-      book: shortBook, taskRef: 't-short', cwd: '/home/u/agentistics-engine',
+      book: shortBook, taskRef: 't-short', cwd: '/home/u/acme',
     })))
     expect(p.code).toBe('cwd_wrong_repo')
   })
@@ -441,7 +442,7 @@ describe('SPAWN.TRANSFER — repository owner transfer', () => {
     })
     test(`old task owner refuses a different repository name: ${repo}`, () => {
       expect(refused(planFiling(base({
-        book: transferredBook, taskRef: 't-transfer', cwd: '/home/u/agentistics-engine',
+        book: transferredBook, taskRef: 't-transfer', cwd: '/home/u/acme',
       }))).code).toBe('cwd_wrong_repo')
     })
     test(`old task owner lists transferred checkouts as candidates: ${repo}`, () => {
@@ -478,7 +479,7 @@ describe('SPAWN.REPO — inherited task repository policy', () => {
     expect(ok(planFiling(base({ caller }))).warnings).not.toContain('inherited_task_repo_mismatch')
   })
   test('explicit task still refuses another repo even when the caller has that task', () => {
-    expect(refused(planFiling(base({ caller, taskRef: 't-1', cwd: '/home/u/agentistics-engine' }))).code).toBe('cwd_wrong_repo')
+    expect(refused(planFiling(base({ caller, taskRef: 't-1', cwd: '/home/u/acme' }))).code).toBe('cwd_wrong_repo')
     expect(refused(planFiling(base({ caller, taskRef: 't-1', callerCwd: '/home/u/workspace' }))).code).toBe('cwd_needed')
   })
   test('inherited task mismatch does not bypass the missing directory guard', () => {
@@ -498,7 +499,7 @@ describe('SPAWN.REPO — inherited task repository policy', () => {
   })
   test('a subtask resolved outside a missing inherited task keeps its repository check', () => {
     expect(refused(planFiling(base({
-      caller: R('leader', { taskId: 't-gone' }), subtaskRef: 's-1', cwd: '/home/u/agentistics-engine',
+      caller: R('leader', { taskId: 't-gone' }), subtaskRef: 's-1', cwd: '/home/u/acme',
     }))).code).toBe('cwd_wrong_repo')
   })
 })
@@ -590,5 +591,38 @@ describe('ORQ.FORA — verified parent continuation', () => {
   })
   test('explicit handoff preserves the same task and subtask', () => {
     expect(ok(planFiling(base({ caller, callerRole: 'leader', handoffOf: caller })))).toMatchObject({ taskId: 't-1', subtaskId: 's-1', role: 'leader' })
+  })
+})
+
+describe('cross-repo cwd (same-org explicit cwd, --force)', () => {
+  const other = DIRS
+  const repoOf2 = (d: string): FilingRepo | null => (d in other ? other[d]! : null)
+  const o = (over: Partial<FilingInput> = {}) => base({ repoOf: repoOf2, taskRef: 't-1', ...over })
+  test('explicit cwd in another repo of the SAME org is accepted with a note', () => {
+    const p = ok(planFiling(o({ cwd: '/home/u/agentistics-engine' })))
+    expect(p.crossRepo).toBe('agentistics/agentistics-engine')
+    expect(p.warnings).toContain('cross_repo_cwd')
+  })
+  test('explicit cwd in another ORG is still refused', () => {
+    expect(refused(planFiling(o({ cwd: '/home/u/acme' }))).code).toBe('cwd_wrong_repo')
+  })
+  test('same owner on another HOST is still refused', () => {
+    expect(refused(planFiling(o({ cwd: '/home/u/gitlab' }))).code).toBe('cwd_wrong_repo')
+  })
+  test('an IMPLICIT cwd (caller) in a same-org other repo keeps the refusal', () => {
+    expect(refused(planFiling(o({ callerCwd: '/home/u/agentistics-engine' }))).code).toBe('cwd_needed')
+  })
+  test('forceCwd accepts an explicit other-org cwd with the note', () => {
+    const p = ok(planFiling(o({ cwd: '/home/u/acme', forceCwd: true })))
+    expect(p.crossRepo).toBe('acme/thing')
+    expect(p.warnings).toContain('cross_repo_cwd')
+  })
+  test('forceCwd does not rescue an implicit cwd', () => {
+    expect(refused(planFiling(o({ callerCwd: '/home/u/acme', forceCwd: true }))).code).toBe('cwd_needed')
+  })
+  test('the task\'s own repo carries no note', () => {
+    const p = ok(planFiling(o({ cwd: '/home/u/agentistics/.claude/worktrees/x' })))
+    expect(p.crossRepo).toBeUndefined()
+    expect(p.warnings).not.toContain('cross_repo_cwd')
   })
 })

@@ -29,6 +29,8 @@ export interface SpawnFilingRequest {
   /** As typed — resolved against the caller's cwd, then realpath'd. */
   cwd?: string | undefined
   sharedCwd?: boolean | undefined
+  /** `--force`: accept an explicit cwd outside the task's repository. */
+  forceCwd?: boolean | undefined
   /** The session this command runs inside, if any (`AGENTOP_MANAGED_ID`). */
   callerSessionId?: string | undefined
   /** The predecessor's id, for a leader hand-off. */
@@ -123,6 +125,7 @@ export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan
       ...(o.folderRef !== undefined ? { folderRef: o.folderRef } : {}),
       ...(cwd ? { cwd } : {}),
       ...(o.sharedCwd ? { sharedCwd: true } : {}),
+      ...(o.forceCwd ? { forceCwd: true } : {}),
       callerCwd,
       ...(caller ? { caller } : {}),
       ...(handoffRow ? { handoffOf: handoffRow } : {}),

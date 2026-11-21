@@ -206,3 +206,22 @@ describe('only leaders are filed on the task itself', () => {
     }
   })
 })
+
+describe('cross-repo explicit cwd through the IO layer', () => {
+  const mk = (repo: string) => async (d: string) => ({ repo, worktree: true, missing: !existsSync(d) })
+  const task = { ...T('t-x', 'Spans repos'), repo: 'agentistics/agentistics' }
+  const b = { tasks: [task], subtasks: [S('s-x', 't-x', 'Slice')] }
+  const o = (d: string, repo: string) => ({ ...common, book: b, repoFacts: mk(repo), rows: [], liveIds: new Set<string>(), role: 'worker' as const, taskRef: 't-x', subtaskRef: 's-x', cwd: d })
+  test('same-org other repo is accepted and says so; other org needs --force and says so', async () => {
+    const d = gitDir()
+    const same = await planSpawnFiling(o(d, 'agentistics/agentistics-engine'))
+    expect(same).toMatchObject({ ok: true, crossRepo: 'agentistics/agentistics-engine' })
+    expect(await planSpawnFiling(o(d, 'acme/thing'))).toMatchObject({ ok: false, code: 'cwd_wrong_repo' })
+    expect(await planSpawnFiling({ ...o(d, 'acme/thing'), forceCwd: true })).toMatchObject({ ok: true, crossRepo: 'acme/thing' })
+  })
+  test('the web/fleet request carries force through to the planner', async () => {
+    const d = gitDir()
+    const req = spawnSessionFilingRequest({ cwd: d, taskId: 't-x', subtaskId: 's-x', role: 'worker', force: true })
+    expect(await planSpawnFiling({ ...common, book: b, repoFacts: mk('acme/thing'), rows: [], liveIds: new Set<string>(), ...req })).toMatchObject({ ok: true, crossRepo: 'acme/thing' })
+  })
+})
