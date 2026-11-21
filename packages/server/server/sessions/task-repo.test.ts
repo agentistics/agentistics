@@ -44,6 +44,8 @@ test.each([
   ['github.com/o/r/extra', 'host plus an extra segment'],
   ['https://github.com/o/r/tree/main/x', 'url with a path after the name (QA r1: was stored as o/r/tree/main/x)'],
   ['https://gitlab.com/grp/sub/proj', 'nested group url: not guessed'],
+  ['github.com/o', 'host and owner, no name (QA r2: was stored)'],
+  ['o/' + 'r'.repeat(400), 'absurdly long'],
   ['file:///srv/repo.git', 'file url'],
   ['org/re$po', 'bad chars'],
   ['org/..', 'dotdot'],

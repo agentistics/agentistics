@@ -23,6 +23,7 @@ const HOST = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/
 export function normalizeTaskRepo(input: string): TaskRepoResult {
   const raw = input.trim()
   if (!raw) return { ok: true, repo: '' }
+  if (raw.length > 300) return { ok: false, reason: `That repository is ${raw.length} characters long — give owner/name or a git URL.` }
   if (/\s/.test(raw)) return { ok: false, reason: `"${raw}" has spaces — a repository is written owner/name or as a git URL.` }
   if (/^(file:|\/|\.|~|[A-Za-z]:[\\/])/.test(raw) || raw.includes('\\')) {
     return { ok: false, reason: `"${raw}" looks like a local path — give the repository as owner/name or a git URL.` }
@@ -44,7 +45,8 @@ export function normalizeTaskRepo(input: string): TaskRepoResult {
   // owner/name stays as typed; host/owner/name drops the host, as inheritance does — but only when the
   // first segment IS a host (it has a dot: github.com, gitlab.example.org). `O/R/extra` is refused, never
   // silently read as host O.
-  if (parts.length === 2) return { ok: true, repo: remote }
+  // `github.com/o` is a host with an owner and no name — never an owner/name pair (owners carry no dots).
+  if (parts.length === 2) return HOST.test(parts[0]!) ? bad : { ok: true, repo: remote }
   if (parts.length === 3 && HOST.test(parts[0]!)) return { ok: true, repo: parts.slice(1).join('/') }
   return bad
 }
