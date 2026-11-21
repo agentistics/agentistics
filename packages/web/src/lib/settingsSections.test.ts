@@ -4,7 +4,7 @@ import { visibleSettingsSections, SETTINGS_SECTIONS } from './settingsSections'
 const ids = (v: Parameters<typeof visibleSettingsSections>[0]) => visibleSettingsSections(v).map(s => s.id)
 
 test('default viewer: the personal sections, no providers/memory until the native runtime is known', () => {
-  expect(ids({})).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'pricing', 'install', 'whatsnew', 'chat'])
+  expect(ids({})).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'pricing', 'install', 'whatsnew', 'chat', 'browser'])
 })
 
 test('every section is personal', () => {
@@ -43,4 +43,10 @@ test('the other sections are unaffected by chat being denied', () => {
 
 test('experimental is not a settings section', () => {
   expect(SETTINGS_SECTIONS.some(s => String(s.id) === 'experimental')).toBe(false)
+})
+
+test('browser follows the exposure profile (localShell): hidden when denied, shown when allowed or unknown — S12', () => {
+  expect(ids({ localShell: false })).not.toContain('browser')
+  expect(ids({ localShell: true })).toContain('browser')
+  expect(ids({})).toContain('browser')
 })

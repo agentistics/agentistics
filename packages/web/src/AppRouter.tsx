@@ -46,6 +46,7 @@ const HarnessesSettings = lazy(() => import('./pages/settings/HarnessesSettings'
 const InstallSettings = lazy(() => import('./pages/settings/InstallSettings'))
 const WhatsNewSettings = lazy(() => import('./pages/settings/WhatsNewSettings'))
 const ChatSettings = lazy(() => import('./pages/settings/ChatSettings'))
+const BrowserSettings = lazy(() => import('./pages/settings/BrowserSettings'))
 const ProvidersSettings = lazy(() => import('./pages/settings/ProvidersSettings'))
 const MemorySettings = lazy(() => import('./pages/settings/MemorySettings'))
 const PricingSettings = lazy(() => import('./pages/settings/PricingSettings'))
@@ -139,6 +140,7 @@ export default function AppRouter() {
             <Route path="whatsnew" element={<Suspense fallback={<PageFallback />}><WhatsNewSettings /></Suspense>} />
             <Route path="live" element={<Navigate to="/settings/preferences" replace />} />
             <Route path="chat" element={<Suspense fallback={<PageFallback />}><ChatSettings /></Suspense>} />
+            <Route path="browser" element={<Suspense fallback={<PageFallback />}><BrowserSettings /></Suspense>} />
             {/* VAULT v4 (2026-10-06): the vault has ONE page, `/vault`. The old Settings → Vault screen's
                 controls live in its tabs now; a bookmark or an old link lands on the tab that holds them. */}
             <Route path="vault" element={<LegacyVaultRedirect />} />

@@ -325,3 +325,28 @@ describe('S4b — an unlock owes the person\'s vault proof; who the process look
     expect(ownerProofRefusal('owner-proof-local-only', 'en', true).error).toBe('owner_proof_local_only')
   })
 })
+
+describe('S12 — POST /api/browser/profiles/delete', () => {
+  const del = (f: ReturnType<typeof fixture>) => browserRoute('POST', '/api/browser/profiles/delete', {}, f.deps)
+  test('the person gets the host answer: 200 when removed, 409 with a sentence when live', async () => {
+    const ok = fixture()
+    ok.deps.host.deleteProfiles = () => ({ ok: true, removed: 2 })
+    expect(await del(ok)).toEqual({ status: 200, body: { ok: true, removed: 2 } })
+    const live = fixture()
+    live.deps.host.deleteProfiles = () => ({ ok: false, error: 'browser_live', live: 1, sentence: 'A browser is open right now.' })
+    const r = await del(live)
+    expect(r?.status).toBe(409)
+    expect((r?.body as any).error).toBe('browser_live')
+  })
+  test('a session is refused and the host is never asked', async () => {
+    let asked = 0
+    const f = fixture({ caller: () => ({ kind: 'session', pid: 4242, managedId: 'aaa' }) })
+    f.deps.host.deleteProfiles = () => { asked++; return { ok: true, removed: 1 } }
+    const r = await del(f)
+    expect(r?.status).toBeGreaterThanOrEqual(400)
+    expect(asked).toBe(0)
+  })
+  test('GET is not allowed', async () => {
+    expect((await browserRoute('GET', '/api/browser/profiles/delete', {}, fixture().deps))?.status).toBe(405)
+  })
+})

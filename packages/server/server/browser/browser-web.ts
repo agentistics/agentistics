@@ -88,6 +88,8 @@ export interface RouteHost {
   stop(key: string, reason: StopReason): Promise<void>
   actionHost(key: string): ActionHost | null
   status(): Promise<unknown>
+  /** S12: remove the profile folders; refused (`browser_live`) while any browser is live. */
+  deleteProfiles?(): { ok: true; removed: number } | { ok: false; error: 'browser_live'; live: number; sentence: string }
 }
 
 export interface RouteDeps {
@@ -225,6 +227,19 @@ export async function browserRoute(method: string, pathname: string, body: unkno
   if (pathname === '/api/browser/status') {
     if (method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } }
     return { status: 200, body: withoutPersonal(withLocks(await deps.host.status(), deps), deps.personalGrant?.() === true) }
+  }
+  // S12: "Delete profiles" — the person's act (a session is refused, as for the padlock), refused in words
+  // while any browser is live.
+  if (pathname === '/api/browser/profiles/delete') {
+    if (method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } }
+    const caller = deps.caller ? deps.caller() : { kind: 'unknown' as const, reason: 'no-peer' as const }
+    if (caller.kind === 'session') {
+      const refused = callerRefusal(caller)!
+      return { status: refused.status, body: { ok: false, error: refused.error, sentence: refused.sentence } }
+    }
+    if (!deps.host.deleteProfiles) return { status: 501, body: { ok: false, error: 'unsupported' } }
+    const r = deps.host.deleteProfiles()
+    return r.ok ? { status: 200, body: r } : { status: 409, body: r }
   }
   if (pathname === '/api/browser/lock') {
     if (method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } }

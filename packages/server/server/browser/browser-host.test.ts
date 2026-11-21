@@ -492,3 +492,39 @@ describe('S4c — a stopped browser\'s pipe fds are settled BEFORE the next brow
     await h.stopAll()
   })
 })
+
+describe('S12 — status carries the ceilings, and Delete profiles refuses while a browser is live', () => {
+  beforeEach(() => { env = makeEnv() })
+
+  test('status states the PSS thresholds and how many profile folders are on disk', async () => {
+    const h = env.host()
+    mkdirSync(join(env.root, 'sessions', 'aaa'), { recursive: true })
+    mkdirSync(join(env.root, 'personal'), { recursive: true })
+    const st = await h.status()
+    expect(st.memory.trimBytes).toBe(PSS_TRIM_BYTES)
+    expect(st.memory.killBytes).toBe(PSS_KILL_BYTES)
+    expect(st.profiles.count).toBe(2)
+  })
+
+  test('with no browser live, every profile folder goes and the count is reported', async () => {
+    const h = env.host()
+    mkdirSync(join(env.root, 'sessions', 'aaa'), { recursive: true })
+    mkdirSync(join(env.root, 'sessions', 'bbb'), { recursive: true })
+    mkdirSync(join(env.root, 'personal'), { recursive: true })
+    expect(h.deleteProfiles()).toEqual({ ok: true, removed: 3 })
+    expect(existsSync(join(env.root, 'sessions', 'aaa'))).toBe(false)
+    expect(existsSync(join(env.root, 'personal'))).toBe(false)
+    expect((await h.status()).profiles.count).toBe(0)
+  })
+
+  test('refused while a browser is live — and nothing on disk is touched', async () => {
+    const h = env.host()
+    const r = await h.start(S('aaa'))
+    expect(r.ok).toBe(true)
+    const r2 = h.deleteProfiles()
+    expect(r2.ok).toBe(false)
+    if (!r2.ok) { expect(r2.error).toBe('browser_live'); expect(r2.sentence.length).toBeGreaterThan(10) }
+    expect(existsSync(join(env.root, 'sessions', 'aaa'))).toBe(true)
+    await h.stop('s-aaa', 'requested').catch(() => {})
+  })
+})
