@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.221.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Limpeza automática: um ambiente de teste descartável (agentop run) nunca mais apaga pastas reais fora dele; lá dentro a limpeza só simula e registra o motivo.',
+        en: 'Automatic cleanup: a throwaway test environment (agentop run) never deletes real folders outside it again; there the cleanup only simulates and records why.',
+      },
+      {
+        pt: 'Correções de estabilidade do motor.',
+        en: 'Engine stability fixes.',
+      },
+    ],
+  },
   '2.221.0': {
     features: [
       {
