@@ -1,109 +1,338 @@
 /**
- * noq-policy.ts — PURE. What a session in `no-questions` mode answers when its harness asks anyway.
+ * noq-policy.ts — what a session in `no-questions` mode answers when its harness asks anyway.
  *
- * Claude Code still draws a permission prompt under `bypassPermissions` for some commands. Nobody is
- * there to answer, so the session sat on "THIS SESSION IS ASKING" forever. The fleet already reads the
- * dialog (`approvalLines`, `dialogOptions`); this decides the answer.
+ * Claude Code still draws a permission prompt under `bypassPermissions` for a FEW commands (a `cd`
+ * outside the project inside a compound command, a write outside the project). Nobody is there to
+ * answer, so the session sat on "THIS SESSION IS ASKING" forever. This decides the answer.
  *
- * THE POLICY IS AN ALLOW-LIST THAT FAILS CLOSED. A deny list over raw shell text cannot be made safe
- * (`rm -r /tmp/{..,}`, `\rm`, `"r"m`, `cd / && rm -rf usr`, `find / -delete`, `kill $(pgrep …)` all slipped
- * through one), so a command is auto-approved only when it is ONE SIMPLE COMMAND — a single argv with no
- * shell metacharacter or expansion the harness could read differently from us — whose program is not in
- * the dangerous set and whose arguments touch nothing the autonomous rules protect. Anything else gets
- * "No" plus a typed reason; the model rephrases, which is the safe failure and never a hang.
+ * THE POLICY IS A POSITIVE ALLOW-LIST, and everything it does not name is refused. Three rounds of QA
+ * proved a deny set cannot close: program names are unbounded (`npx`, `busybox`, `unshare`,
+ * `script -c`, `python3 x.py`, `agentop run -- rm …`). A refusal is never a hang — the session gets
+ * "No" plus a typed reason and rephrases — so strictness costs one rephrase, while one wrong "Yes" can
+ * cost a machine. A command is approved only when it is ONE line, ONE simple argv (no shell syntax the
+ * harness could read differently from us), its program is named by bare basename and is on the list,
+ * and every argument passes that program's own rule. Writing verbs only reach paths STRICTLY inside the
+ * session cwd or `/tmp/<name>`, resolved through `realpath` (symlinks followed), never the cwd itself
+ * nor an ancestor of it, never ~/.agentistics. `cd` is always refused: the policy cannot know the live
+ * shell cwd, so a relative path is only meaningful while nothing ever changes it.
  *
- *  - `approve` — a simple, harmless command, or a Write/Edit inside the cwd or /tmp;
- *  - `deny` — everything else the policy understands;
- *  - `skip` — not our business (another mode, another harness, not a Yes/No permission prompt). The
- *    session keeps waiting for a person exactly as before.
+ *  - `approve` — on the allow-list;
+ *  - `deny` — everything else the policy can read;
+ *  - `skip` — not our business (another mode, another harness, not a Yes/No permission prompt, a dialog
+ *    shape this reader does not know). The session keeps waiting for a person exactly as before.
  *
- * STATED LIMITS: a path is resolved against the registry cwd, not the shell's live cwd (a prior `cd`
- * changes it), and symlinks are not followed (the module is pure).
+ * THE DIALOG is read off the SCREEN. Measured on claude 2.1.326 (2026-11-21, leader/qa/noq-trava-r4/live):
+ *
+ *     Bash command
+ *     Tip: auto mode handles these prompts for you — …
+ *     Create marker file                                  ← the description (dim), ABOVE the command
+ *     ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ *     touch marker.txt                                    ← the command (a multi-line one gets a `│ ` gutter)
+ *     ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ *     Do you want to proceed?
+ *     ❯ 1. Yes … 4. No
+ *
+ * Older releases drew the command indented under the header with the dim description BELOW it and no
+ * rules; there the description is told apart by its SGR dim attribute (an ANSI capture), and without
+ * one a two-line block is refused rather than guessed. A command spanning more than one line, a second
+ * "Do you want to…" anywhere before the final prompt, or a second header are refused.
  */
-import { basename, resolve, sep } from 'node:path'
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
 
 export interface NoqDialog {
   harness?: string
   /** The session's CURRENT canonical mode (`SessionView.mode.canonical`, or the runner's best knowledge of it). */
   mode?: string
   cwd: string
+  /** The dialog as the fleet read it (plain). Used when no fresher `frame` is given. */
   approvalLines?: string[]
+  /** A fresh capture of the pane, ANSI allowed (it is what tells the old layout's dim description apart). */
+  frame?: string[]
   dialogOptions?: ReadonlyArray<{ number: number; label: string }>
 }
 
+/** The filesystem facts the path rule needs. Injected so the rule is testable; the default reads the disk. */
+export interface NoqFs {
+  /** `realpath`, or null when the path does not exist (or cannot be resolved). */
+  realpath(p: string): string | null
+  /** Is `p` itself a symlink (lstat)? */
+  isSymlink(p: string): boolean
+  /** The branch checked out in `cwd`, or null when it cannot be read. */
+  branch(cwd: string): string | null
+}
+
+export interface NoqEnv { home: string; fs?: NoqFs }
+
 export type NoqRule =
-  | 'allowed' | 'not-simple' | 'dangerous-program' | 'inline-code' | 'rm-outside' | 'force-push'
-  | 'agentistics-port' | 'agentop-upgrade' | 'agentistics-write' | 'write-outside'
+  | 'allowed' | 'not-simple' | 'multi-line' | 'dialog-shape' | 'cd' | 'not-allowed' | 'kill' | 'interpreter'
+  | 'runner' | 'wrapper' | 'write-outside' | 'agentistics-write' | 'agentistics-port' | 'agentop' | 'git' | 'push'
 
 export type NoqDecision =
   | { action: 'skip'; why: string }
   | { action: 'approve' | 'deny'; choice: number; rule: NoqRule; command: string; reason: string }
 
 type Verdict = { rule: NoqRule; reason: string }
+const refuse = (rule: NoqRule, reason: string): Verdict => ({ rule, reason })
 
-const REASON_SIMPLE = 'Autonomous mode: run one simple command per call: no ;, &&, |, $(), redirections, globs or cd chains; use git -C / absolute paths.'
-const stripBox = (l: string): string => l.replace(/[│╭╮╰╯─┃┌┐└┘]/g, ' ').trim()
-
-/** The command text of a Claude permission dialog: what sits between the tool header and the question. */
-export function dialogCommand(lines: readonly string[]): string {
-  const clean = lines.map(stripBox)
-  const q = clean.findIndex(l => /^Do you want to /i.test(l))
-  const head = clean.findIndex(l => /^(Bash command|Command|Shell command)$/i.test(l))
-  if (head < 0 || q < 0 || q <= head) return ''
-  return clean.slice(head + 1, q).filter(Boolean).join('\n')
+const R = {
+  simple: 'Autonomous mode: run ONE simple command per call — no ;, &&, |, $(), redirections, globs, ~ or $VARS. Use absolute paths inside your worktree.',
+  multiLine: 'Autonomous mode: a command must fit on one line; send one simple command per call.',
+  shape: 'Autonomous mode: this permission prompt could not be read unambiguously; send one simple command per call.',
+  cd: 'Autonomous mode: do not cd. Use absolute paths inside your worktree instead (git -C is not auto-approved either).',
+  kill: 'Autonomous mode: never kill processes yourself; ask your leader (agentistics_session_message) to stop it.',
+  interp: 'Autonomous mode: interpreters and scripts are not auto-approved. Run tests with `agentop run --rm -- bun test <files>`, or ask your leader.',
+  runner: 'Autonomous mode: package runners (npx, bunx, npm run, make …) are not auto-approved. Run tests with `agentop run --rm -- bun test <files>`, or ask your leader.',
+  wrapper: 'Autonomous mode: run the program directly; wrappers (timeout, nohup, xargs, env with arguments, script, busybox …) are not auto-approved.',
+  path: 'Autonomous mode: file operations only on explicit paths STRICTLY inside your worktree or /tmp/<name>/ — never the worktree itself, an ancestor, a symlink leading elsewhere, or `..`.',
+  data: 'Autonomous mode: never touch ~/.agentistics directly; go through agentop or the API.',
+  port: 'Autonomous mode: ports 47291/47292 belong to agentistics; do not touch them. Use a throwaway server on another port.',
+  agentop: 'Autonomous mode: only `agentop --version|--help|status`, `agentop session list` and `agentop run --rm -- bun test <files in your worktree>` are auto-approved.',
+  push: 'Autonomous mode: only `git push origin <your current branch>` (not main/master/dev, no force, no delete, no refspecs) is auto-approved.',
+  slashProgram: 'Autonomous mode: call programs by their bare name (ls, git …), never by a path or quoted.',
 }
+const notAllowed = (p: string): Verdict =>
+  refuse('not-allowed', `Autonomous mode: \`${p}\` is not on the autonomous allow-list (read-only tools, git/gh read verbs, file operations inside your worktree or /tmp/<name>/). Use the Edit/Write tools for files, or ask your leader.`)
+const gitNo = (what: string): Verdict =>
+  refuse('git', `Autonomous mode: \`git ${what}\` is not auto-approved. Allowed: status, log, show, diff, branch (list), rev-parse, ls-files, ls-remote, remote -v, worktree list, blame, grep, describe, fetch, add, commit -m, restore --staged, switch -c, checkout -b, stash push/list/show, push origin <your branch>. No -C/-c/--git-dir.`)
+
+/* ───────────────────────────── the screen ───────────────────────────── */
+
+/** One captured line → its text (ANSI removed) and whether every visible character was drawn dim. */
+interface ScreenLine { text: string; dim: boolean }
+
+function readScreen(raw: readonly string[]): { lines: ScreenLine[]; ansi: boolean } {
+  let dim = false
+  let ansi = false
+  const lines = raw.map(line => {
+    let text = ''
+    let visible = 0
+    let dimVisible = 0
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]!
+      if (ch === '\x1b') {
+        ansi = true
+        const csi = /^\x1b\[([0-9;:?]*)([A-Za-z])/.exec(line.slice(i))
+        if (csi) {
+          if (csi[2] === 'm') {
+            const codes = csi[1] === '' ? ['0'] : csi[1]!.split(/[;:]/)
+            for (const c of codes) { if (c === '0' || c === '') dim = false; else if (c === '2') dim = true; else if (c === '22') dim = false }
+          }
+          i += csi[0].length - 1
+          continue
+        }
+        const osc = /^\x1b\][^\x07\x1b]*(\x07|\x1b\\)/.exec(line.slice(i))
+        if (osc) { i += osc[0].length - 1; continue }
+        continue
+      }
+      text += ch
+      // Box and gutter glyphs are the dialog's frame, not its content: they do not decide "dim".
+      if (ch.trim() && !/[│┃╭╮╰╯─━]/.test(ch)) { visible++; if (dim) dimVisible++ }
+    }
+    return { text, dim: visible > 0 && dimVisible === visible }
+  })
+  return { lines, ansi }
+}
+
+/** A boxed layout's `│ … │` borders come off; a bare `│ ` gutter (multi-line command) stays, so it is seen. */
+function unbox(t: string): string {
+  const s = t.replace(/\s+$/, '')
+  if (/^\s*[│┃]/.test(s) && /[│┃]$/.test(s)) return s.replace(/^\s*[│┃]/, '').replace(/[│┃]$/, '').trim()
+  if (/^[\s╭╮╰╯─┌┐└┘━]*$/.test(s) && /[╭╮╰╯┌┐└┘]/.test(s)) return ''
+  return s.trim()
+}
+
+const BASH_HEADER = /^(Bash command|Command|Shell command)$/i
+const FILE_HEADER = /^(Create|Edit|Write|Update|Overwrite)( file)?$/i
+const QUESTION = /^Do you want to /i
+const OPTION = /^(?:❯\s*)?(\d+)\.\s+(.*)$/
+const FOOTER = /^(Esc to cancel|Enter to confirm|Tab to amend|ctrl\+|↑|Press )/i
+const DASHED = /^╌+$/
+const SOLID = /^[─━]{8,}$/
+const HEADER_REACH = 40
+
+type Parsed =
+  | { kind: 'none' }
+  | { kind: 'unknown' }
+  | { kind: 'refuse'; rule: NoqRule; reason: string; shown: string; options: Array<{ number: number; label: string }> }
+  | { kind: 'bash'; command: string; options: Array<{ number: number; label: string }>; key: string }
+  | { kind: 'file'; path: string; options: Array<{ number: number; label: string }>; key: string }
 
 /**
- * The file of a Write/Edit dialog: the first line under the header. It is trusted only when the question
- * names the same leaf ("Do you want to make this edit to a.ts?") — a wrapped, truncated path would
- * otherwise be judged on a prefix.
+ * The permission dialog at the BOTTOM of a frame. The whole pane may hold conversation history that
+ * quotes a dialog, so the reader anchors on the LAST question and walks UP to its header, never past a
+ * solid rule (the dialog's own top edge).
  */
-export function dialogFile(lines: readonly string[]): string {
-  const clean = lines.map(stripBox)
-  const q = clean.findIndex(l => /^Do you want to /i.test(l))
-  const head = clean.findIndex(l => /^(Create|Edit|Write|Update|Overwrite)( file)?$/i.test(l))
-  if (head < 0 || q < 0 || q <= head) return ''
-  const path = clean.slice(head + 1, q).find(Boolean) ?? ''
-  const named = clean[q]!.match(/^Do you want to (?:make this edit to|create|overwrite|write to|update)\s+(.+?)\??$/i)?.[1]
-  if (!path || !named || path.endsWith('/') || basename(path) !== basename(named)) return ''
-  return path
+export function parseNoqDialog(raw: readonly string[]): Parsed {
+  const { lines: screen, ansi } = readScreen(raw)
+  const L = screen.map(l => ({ text: unbox(l.text), raw: l.text, dim: l.dim, gutter: /^\s*[│┃]\s/.test(l.text.replace(/\s+$/, '')) && !/[│┃]\s*$/.test(l.text.replace(/\s+$/, '')) }))
+  let q = -1
+  for (let i = L.length - 1; i >= 0; i--) if (QUESTION.test(L[i]!.text)) { q = i; break }
+  if (q < 0) return { kind: 'none' }
+  // After the question: options, a footer, blank — anything else is a shape we do not know.
+  const options: Array<{ number: number; label: string }> = []
+  for (let i = q + 1; i < L.length; i++) {
+    const t = L[i]!.text
+    if (!t) continue
+    const m = OPTION.exec(t)
+    if (m) { options.push({ number: Number(m[1]), label: m[2]!.trim() }); continue }
+    if (FOOTER.test(t)) continue
+    if (options.length > 0 && /^\s{4,}\S/.test(L[i]!.raw.replace(/^\s*[│┃]/, ' '))) continue // a wrapped option label
+    return { kind: 'unknown' }
+  }
+  // Walk up to the header.
+  let h = -1
+  for (let i = q - 1; i >= 0 && q - i <= HEADER_REACH; i--) {
+    const t = L[i]!.text
+    if (SOLID.test(t) && !DASHED.test(t)) break
+    if (BASH_HEADER.test(t) || FILE_HEADER.test(t)) { h = i; break }
+  }
+  if (h < 0) return { kind: 'none' }
+  // A second header above the one found (the command itself printed one) is not a dialog we can read.
+  for (let i = h - 1; i >= 0 && q - i <= HEADER_REACH; i--) {
+    const t = L[i]!.text
+    if (SOLID.test(t) && !DASHED.test(t)) break
+    if (BASH_HEADER.test(t) || FILE_HEADER.test(t) || QUESTION.test(t)) {
+      return { kind: 'refuse', rule: 'dialog-shape', reason: R.shape, shown: L.slice(i, q).map(l => l.text).filter(Boolean).join('\n'), options }
+    }
+  }
+  const body = L.slice(h + 1, q)
+  const key = L.slice(h).map(l => l.text).filter(Boolean).join('\n')
+  const shown = body.map(l => l.text).filter(Boolean).join('\n')
+  if (body.some(l => QUESTION.test(l.text))) return { kind: 'refuse', rule: 'dialog-shape', reason: R.shape, shown, options }
+  if (body.some(l => BASH_HEADER.test(l.text) || FILE_HEADER.test(l.text))) return { kind: 'refuse', rule: 'dialog-shape', reason: R.shape, shown, options }
+
+  if (FILE_HEADER.test(L[h]!.text)) {
+    const path = body.find(l => l.text)?.text ?? ''
+    const named = L[q]!.text.match(/^Do you want to (?:make this edit to|create|overwrite|write to|update)\s+(.+?)\??$/i)?.[1]
+    if (!path || !named || path.endsWith('/') || basename(path) !== basename(named)) return { kind: 'none' }
+    return { kind: 'file', path, options, key }
+  }
+
+  const rules = body.map((l, i) => (DASHED.test(l.text) ? i : -1)).filter(i => i >= 0)
+  let cmdLines: typeof body
+  if (rules.length === 2) {
+    cmdLines = body.slice(rules[0]! + 1, rules[1]!).filter(l => l.text)
+    if (cmdLines.some(l => l.gutter)) return { kind: 'refuse', rule: 'multi-line', reason: R.multiLine, shown, options }
+  } else if (rules.length === 0) {
+    // The old layout: the command, then (maybe) its dim description, then Claude's own notes.
+    const block: typeof body = []
+    for (const l of body) { if (!l.text) { if (block.length) break; continue } block.push(l) }
+    cmdLines = ansi ? block.filter(l => !l.dim) : block
+    if (ansi && block.length > 0 && block[0]!.dim) return { kind: 'refuse', rule: 'dialog-shape', reason: R.shape, shown, options }
+  } else {
+    return { kind: 'refuse', rule: 'dialog-shape', reason: R.shape, shown, options }
+  }
+  if (cmdLines.length === 0) return { kind: 'refuse', rule: 'dialog-shape', reason: R.shape, shown, options }
+  if (cmdLines.length > 1) return { kind: 'refuse', rule: 'multi-line', reason: R.multiLine, shown: cmdLines.map(l => l.text).join('\n'), options }
+  return { kind: 'bash', command: cmdLines[0]!.text, options, key }
 }
 
-const ALLOWED_ROOTS = ['/tmp']
+/** The identity of the dialog on a frame (header → options, text only). '' when there is none. */
+export function noqDialogKey(raw: readonly string[]): string {
+  const p = parseNoqDialog(raw)
+  if (p.kind === 'bash' || p.kind === 'file') return p.key
+  return ''
+}
+
+/* ───────────────────────────── paths ───────────────────────────── */
+
+export const diskFs: NoqFs = {
+  realpath(p) { try { return realpathSync(p) } catch { return null } },
+  isSymlink(p) { try { return lstatSync(p).isSymbolicLink() } catch { return false } },
+  branch(cwd) {
+    try {
+      let dir = resolve(cwd)
+      for (;;) {
+        const dot = join(dir, '.git')
+        let gitDir: string | null = null
+        try {
+          if (statSync(dot).isDirectory()) gitDir = dot
+          else {
+            const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(dot, 'utf8'))
+            if (m) gitDir = resolve(dir, m[1]!.trim())
+          }
+        } catch { /* not here */ }
+        if (gitDir) {
+          const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim()
+          return /^ref: refs\/heads\/(.+)$/.exec(head)?.[1] ?? null
+        }
+        const up = dirname(dir)
+        if (up === dir) return null
+        dir = up
+      }
+    } catch { return null }
+  },
+}
+
+interface Ctx { cwd: string; home: string; fs: NoqFs }
 
 function strictlyInside(path: string, root: string): boolean {
   const r = root.endsWith(sep) ? root : root + sep
   return path.startsWith(r) && path.length > r.length
 }
-
-/**
- * Where a removal may reach (STRICTLY inside, never the root itself): the cwd, /tmp, the throwaway cache,
- * the PARENT project of a worktree (`<project>/.worktrees/<name>`) and any `AGENTISTICS_NOQ_RM_ROOTS`.
- */
-export function rmRoots(cwd: string, home: string, extra: readonly string[] = []): string[] {
-  const m = cwd.match(/^(.*?)\/\.(?:claude\/)?worktrees\//)
-  const fromEnv = (process.env.AGENTISTICS_NOQ_RM_ROOTS ?? '').split(':').filter(Boolean)
-  return [resolve(cwd), ...ALLOWED_ROOTS, resolve(home, '.cache/agentistics-throwaway'), ...(m ? [m[1]!] : []), ...fromEnv, ...extra]
-}
-
-function toAbs(p: string, cwd: string, home: string): string {
-  const v = p.replace(/^--?[A-Za-z][\w-]*=/, '').replace(/^of=/, '')
-  if (v === '~') return resolve(home)
-  if (v.startsWith('~/')) return resolve(home, v.slice(2))
-  return resolve(cwd, v)
-}
+const insideOrEqual = (p: string, root: string): boolean => p === root || strictlyInside(p, root)
 
 function dataDirs(home: string): string[] {
   return [resolve(home, '.agentistics'), process.env.AGENTISTICS_HOME, process.env.AGENTISTICS_DATA_DIR]
     .filter((x): x is string => !!x).map(x => resolve(x))
 }
 
-function inData(p: string, cwd: string, home: string): boolean {
-  const abs = toAbs(p, cwd, home)
-  return dataDirs(home).some(d => abs === d || strictlyInside(abs, d))
+/** The real location of `abs`: realpath of the longest existing prefix plus the rest. Null = refuse. */
+function realOf(abs: string, fs: NoqFs): string | null {
+  const parts: string[] = []
+  let p = abs
+  for (;;) {
+    if (fs.isSymlink(p) && fs.realpath(p) === null) return null // a dangling link: a write would land wherever it points
+    const r = fs.realpath(p)
+    if (r !== null) return parts.length ? join(r, ...parts.reverse()) : r
+    const up = dirname(p)
+    if (up === p) return null
+    parts.push(basename(p))
+    p = up
+  }
 }
 
-// ── tokenizer ───────────────────────────────────────────────────────────────────────────────────
+const absOf = (arg: string, cwd: string): string => normalize(isAbsolute(arg) ? arg : resolve(cwd, arg))
+
+function touchesData(arg: string, c: Ctx): boolean {
+  const v = arg.replace(/^--?[A-Za-z][\w-]*=/, '')
+  if (!v || v.startsWith('-')) return false
+  const abs = absOf(v, c.cwd)
+  const real = realOf(abs, c.fs) ?? abs
+  return dataDirs(c.home).some(d => insideOrEqual(abs, d) || insideOrEqual(real, d) || insideOrEqual(real, c.fs.realpath(d) ?? d))
+}
+
+const PROTECTED_TMP = /^(\.|tmux-|agentistics|agentop|systemd-|ssh-|snap|pulse-|dbus-)/
+
+/**
+ * May a writing verb touch `arg`? Strictly inside the cwd or strictly inside /tmp (a non-system entry),
+ * after following every symlink; never the cwd, an ancestor of it, or ~/.agentistics.
+ */
+export function writablePath(arg: string, cwd: string, home: string, fs: NoqFs = diskFs): Verdict | null {
+  const c: Ctx = { cwd, home, fs }
+  if (!arg || arg.startsWith('-') || /(^|\/)\.\.(\/|$)/.test(arg)) return refuse('write-outside', R.path)
+  const abs = absOf(arg, cwd)
+  if (touchesData(arg, c)) return refuse('agentistics-write', R.data)
+  const real = realOf(abs, fs)
+  if (real === null) return refuse('write-outside', R.path)
+  // `rm -rf link/` empties the TARGET, `rm link` names one leading elsewhere: `real` followed it either way.
+  const cwdReal = fs.realpath(cwd) ?? resolve(cwd)
+  const cwdAbs = resolve(cwd)
+  for (const base of [cwdReal, cwdAbs]) if (insideOrEqual(base, real) || insideOrEqual(base, abs)) return refuse('write-outside', R.path)
+  if (strictlyInside(real, cwdReal)) return null
+  const tmpReal = fs.realpath('/tmp') ?? '/tmp'
+  for (const tmp of new Set([tmpReal, '/tmp'])) {
+    if (strictlyInside(real, tmp)) {
+      const first = real.slice(tmp.length + 1).split(sep)[0]!
+      return PROTECTED_TMP.test(first) ? refuse('write-outside', R.path) : null
+    }
+  }
+  return refuse('write-outside', R.path)
+}
+
+/* ───────────────────────────── the command ───────────────────────────── */
+
 interface Tok { text: string; quoted: boolean }
 const UNQUOTED_META = /[;&|`$(){}<>\\\n\r*?[\]!]/
 
@@ -134,245 +363,252 @@ function tokenize(cmd: string): Tok[] | null {
   return out
 }
 
-// ── program rules ───────────────────────────────────────────────────────────────────────────────
-const ALWAYS_DANGEROUS = new Set([
-  'xargs', 'kill', 'pkill', 'killall', 'shred', 'dd', 'sudo', 'su', 'doas', 'pkexec', 'systemctl', 'service',
-  'launchctl', 'eval', 'source', '.', 'chroot', 'mount', 'umount', 'reboot', 'shutdown', 'poweroff', 'halt', 'crontab', 'at',
+const KILLERS = new Set(['kill', 'pkill', 'killall', 'fuser', 'skill', 'xkill'])
+const INTERPRETERS = /^(bash|sh|zsh|dash|ksh|fish|csh|tcsh|ash|python[\d.]*|pypy[\d.]*|node|nodejs|bun|deno|perl|ruby|php|lua|tclsh|osascript|pwsh|powershell|awk|gawk|mawk|nawk|irb|ipython|R|Rscript|java|go)$/
+const RUNNERS = new Set(['npx', 'bunx', 'pnpx', 'pnpm', 'npm', 'yarn', 'make', 'gmake', 'cargo', 'just', 'task', 'turbo', 'nx', 'lerna', 'docker', 'podman', 'ssh', 'scp'])
+const WRAPPERS = new Set([
+  'timeout', 'nice', 'ionice', 'nohup', 'setsid', 'flock', 'watch', 'taskset', 'strace', 'ltrace', 'script', 'busybox', 'toybox',
+  'setpriv', 'unshare', 'nsenter', 'tmux', 'screen', 'chroot', 'xargs', 'parallel', 'command', 'exec', 'builtin', 'time', 'stdbuf',
+  'sudo', 'su', 'doas', 'pkexec', 'runuser', 'eval', 'source', '.', 'chrt', 'systemd-run', 'firejail', 'bwrap', 'faketime', 'expect',
 ])
-const INTERPRETERS = /^(bash|sh|zsh|dash|ksh|fish|csh|tcsh|python[\d.]*|node|nodejs|bun|deno|perl|ruby|php|lua|tclsh|osascript|pwsh|powershell)$/
-const WRITERS = new Set(['cp', 'mv', 'tee', 'ln', 'touch', 'truncate', 'install', 'rsync', 'mkdir', 'chmod', 'chown', 'chgrp', 'rm', 'rmdir', 'tar', 'unzip'])
-const WRAPPERS = new Set(['command', 'exec', 'nohup', 'setsid', 'time', 'nice', 'ionice', 'stdbuf', 'timeout', 'flock', 'env', 'builtin'])
 
-interface Ctx { cwd: string; home: string; extra: readonly string[] }
-const refuse = (rule: NoqRule, reason: string): Verdict => ({ rule, reason })
-const danger = (p: string): Verdict => refuse('dangerous-program', `Autonomous mode: \`${p}\` can destroy or disturb things beyond this session and is not auto-approved. Use a narrower, explicit command.`)
+type ArgRule = (args: string[], c: Ctx) => Verdict | null
+const ok: ArgRule = () => null
+const noFlag = (bad: RegExp, what: string): ArgRule => args => (args.some(a => bad.test(a)) ? notAllowed(what) : null)
 
-function rmVerdict(prog: string, args: string[], c: Ctx): Verdict | null {
-  const targets: string[] = []
-  let ddash = false
-  for (const a of args) {
-    if (!ddash && a === '--') { ddash = true; continue }
-    if (!ddash && a.startsWith('-')) {
-      if (!/^(-[rRfvidI]+|--recursive|--force|--verbose|--dir)$/.test(a)) return refuse('rm-outside', `Autonomous mode: \`${prog}\` option ${a} is not auto-approved.`)
-      continue
-    }
-    targets.push(a)
-  }
-  const roots = rmRoots(c.cwd, c.home, c.extra)
-  const bad = targets.length === 0 || targets.some(t =>
-    /(^|\/)\.\.(\/|$)/.test(t) || !roots.some(r => strictlyInside(toAbs(t, c.cwd, c.home), r))
-    // never the session's own directory or one of its ancestors (the parent-project root admits both)
-    || resolve(c.cwd) === toAbs(t, c.cwd, c.home) || strictlyInside(resolve(c.cwd), toAbs(t, c.cwd, c.home)))
-  return bad ? refuse('rm-outside', 'Autonomous mode: removal only strictly inside the session directory or /tmp/<name>, with explicit paths (no .., no globs, not the directory itself).') : null
+/** Read-only programs and the one rule each needs (an option that writes or runs something). */
+const READ_ONLY: Record<string, ArgRule> = {
+  ls: ok, cat: ok, head: ok, tail: ok, wc: ok, grep: ok, egrep: ok, fgrep: ok, stat: ok, du: ok, df: ok, pwd: ok,
+  echo: ok, printf: ok, which: ok, type: ok, diff: ok, cut: ok, tr: ok, jq: ok, realpath: ok, basename: ok, dirname: ok,
+  free: ok, uptime: ok, id: ok, whoami: ok, uname: ok, ps: ok, pgrep: ok,
+  rg: noFlag(/^--pre/, 'rg --pre'),
+  find: noFlag(/^-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/, 'find -delete/-exec/-ok/-fprint'),
+  sort: noFlag(/^(-o|--output|--compress-program)/, 'sort -o'),
+  tree: noFlag(/^(-o|--o)/, 'tree -o'),
+  file: noFlag(/^(-C|--compile)/, 'file -C'),
+  date: noFlag(/^(-s|--set)/, 'date -s'),
+  uniq: (args) => (args.filter(a => !a.startsWith('-')).length > 1 ? notAllowed('uniq <in> <out>') : null),
+  env: (args) => (args.length > 0 ? refuse('wrapper', R.wrapper) : null),
 }
 
-function pushVerdict(rest: string[]): Verdict | null {
-  const force = rest.some(a => a === '-f' || a.startsWith('--force') || a === '--mirror' || (/^-[A-Za-z]+$/.test(a) && a.includes('f')))
-  const positional = rest.filter(a => !a.startsWith('-'))
-  const plus = positional.some(a => a.startsWith('+'))
-  const protectedTarget = positional.some(a => /(^|:|\+)(refs\/heads\/)?(main|master|dev)$/.test(a)) || rest.includes('--all')
-  if (force || plus || protectedTarget) {
-    return refuse('force-push', 'Autonomous mode: no force-push and no push to main/master/dev. Push a normal commit to your own branch.')
-  }
-  return null
+const GIT_READ = new Set(['status', 'log', 'show', 'diff', 'branch', 'rev-parse', 'ls-files', 'ls-remote', 'remote', 'worktree', 'blame', 'grep', 'describe', 'fetch'])
+const GIT_BAD = /^(--output|--ext-diff|--textconv|--upload-pack|--receive-pack|--exec|--open-files-in-pager|-O|--config|--git-dir|--work-tree|--exec-path|--namespace)/
+const PROTECTED_BRANCH = /^(main|master|dev)$/
+const BRANCH_NAME = /^[A-Za-z0-9._][A-Za-z0-9._/-]*$/
+
+function stagePath(arg: string, c: Ctx): Verdict | null {
+  if (arg === '.' || arg === './') return null
+  if (/(^|\/)\.\.(\/|$)/.test(arg)) return refuse('write-outside', R.path)
+  const abs = absOf(arg, c.cwd)
+  const real = realOf(abs, c.fs) ?? abs
+  const cwdReal = c.fs.realpath(c.cwd) ?? resolve(c.cwd)
+  return insideOrEqual(real, cwdReal) ? null : refuse('write-outside', R.path)
 }
 
 function gitVerdict(args: string[], c: Ctx): Verdict | null {
-  let i = 0
-  while (i < args.length && args[i]!.startsWith('-')) {
-    const a = args[i]!
-    if (a === '-C' || a === '--git-dir' || a === '--work-tree') {
-      if (args[i + 1] && inData(args[i + 1]!, c.cwd, c.home)) return refuse('agentistics-write', 'Autonomous mode: never operate inside ~/.agentistics; go through agentop or the API.')
-      i += 2
-    } else if (a === '-c' || a === '--namespace' || a === '--exec-path') {
-      if (a === '-c' && /alias\.|sshcommand|fsmonitor|pager|editor|hookspath|gpg|credential|diff\.external/i.test(args[i + 1] ?? '')) {
-        return refuse('dangerous-program', 'Autonomous mode: this git -c setting can run arbitrary programs; not auto-approved.')
+  const sub = args[0]
+  if (!sub || sub.startsWith('-')) return gitNo(args.join(' '))
+  const rest = args.slice(1)
+  if (GIT_READ.has(sub)) {
+    if (rest.some(a => GIT_BAD.test(a))) return gitNo(`${sub} ${rest.find(a => GIT_BAD.test(a))}`)
+    if (sub === 'branch') {
+      const okFlags = new Set(['-a', '-r', '-v', '-vv', '--all', '--remotes', '--show-current', '--list', '-l', '--verbose', '--no-color'])
+      return rest.every(a => okFlags.has(a)) ? null : gitNo(`branch ${rest.join(' ')}`)
+    }
+    if (sub === 'remote') return rest.length === 0 || (rest.length === 1 && rest[0] === '-v') ? null : gitNo(`remote ${rest.join(' ')}`)
+    if (sub === 'worktree') return rest[0] === 'list' && rest.slice(1).every(a => a === '--porcelain' || a === '-v') ? null : gitNo(`worktree ${rest.join(' ')}`)
+    if (sub === 'fetch' || sub === 'ls-remote') {
+      const okFlags = new Set(['--prune', '-p', '--all', '--tags', '--no-tags', '-q', '--quiet', '-v', '--dry-run', '--heads', '--refs'])
+      return rest.every(a => !a.startsWith('-') || okFlags.has(a)) ? null : gitNo(`${sub} ${rest.join(' ')}`)
+    }
+    return null
+  }
+  switch (sub) {
+    case 'add': {
+      const okFlags = new Set(['-A', '--all', '-u', '--update', '-N', '--intent-to-add', '-v', '--verbose', '--'])
+      for (const a of rest) {
+        if (a.startsWith('-')) { if (!okFlags.has(a)) return gitNo(`add ${a}`); continue }
+        const v = stagePath(a, c); if (v) return v
       }
-      i += 2
-    } else i++
+      return null
+    }
+    case 'commit': {
+      for (let i = 0; i < rest.length; i++) {
+        const a = rest[i]!
+        if (a === '-m' || a === '--message' || /^-[aqsv]+m$/.test(a)) { if (rest[i + 1] === undefined) return gitNo('commit -m'); i++; continue }
+        if (a.startsWith('--message=') || /^-[aqsv]+$/.test(a) || a === '--all' || a === '--signoff' || a === '--quiet' || a === '--verbose') continue
+        return gitNo(`commit ${a}`)
+      }
+      return rest.length > 0 ? null : gitNo('commit (no -m)')
+    }
+    case 'restore': {
+      if (!rest.includes('--staged') || rest.some(a => a === '--worktree' || a === '-W' || a.startsWith('-s') || a.startsWith('--source'))) return gitNo(`restore ${rest.join(' ')}`)
+      for (const a of rest) {
+        if (a === '--staged' || a === '--') continue
+        if (a.startsWith('-')) return gitNo(`restore ${a}`)
+        const v = stagePath(a, c); if (v) return v
+      }
+      return null
+    }
+    case 'switch': case 'checkout': {
+      const flag = sub === 'switch' ? '-c' : '-b'
+      return rest.length === 2 && rest[0] === flag && BRANCH_NAME.test(rest[1]!) ? null : gitNo(`${sub} ${rest.join(' ')}`)
+    }
+    case 'stash': {
+      if (rest.length === 0 || (rest.length === 1 && (rest[0] === 'list' || rest[0] === 'show'))) return null
+      if (rest[0] === 'push' && (rest.length === 1 || (rest.length === 3 && (rest[1] === '-m' || rest[1] === '--message')))) return null
+      return gitNo(`stash ${rest.join(' ')}`)
+    }
+    case 'push': {
+      const r = rest[0] === '-u' || rest[0] === '--set-upstream' ? rest.slice(1) : rest
+      const cur = c.fs.branch(c.cwd)
+      if (r.length !== 2 || r[0] !== 'origin' || !cur || r[1] !== cur || PROTECTED_BRANCH.test(cur) || !BRANCH_NAME.test(cur)) return refuse('push', R.push)
+      return null
+    }
+    default:
+      return gitNo(sub)
   }
-  const sub = args[i]
-  const rest = args.slice(i + 1)
-  if (sub === 'push') return pushVerdict(rest)
+}
+
+function ghVerdict(args: string[]): Verdict | null {
+  const [area, verb] = args
+  const reads: Record<string, string[]> = { pr: ['view', 'list', 'diff', 'checks'], run: ['view', 'list'], release: ['view', 'list'] }
+  if (area && verb && reads[area]?.includes(verb)) return null
+  if (area === 'api' && !args.slice(1).some(a => /^(-X|--method|-f|-F|--field|--raw-field|--input)/.test(a))) return null
+  return notAllowed(`gh ${args.slice(0, 2).join(' ')}`)
+}
+
+function agentopVerdict(args: string[], c: Ctx): Verdict | null {
+  if (args.length === 1 && /^(--version|-v|version|--help|-h|help|status)$/.test(args[0]!)) return null
+  if (args[0] === 'session' && (args[1] === 'list' || args[1] === 'ls') && args.slice(2).every(a => a === '--json')) return null
+  if (args[0] === 'run' && args[1] === '--rm' && args[2] === '--' && args[3] === 'bun' && args[4] === 'test' && args.length > 5) {
+    const cwdReal = c.fs.realpath(c.cwd) ?? resolve(c.cwd)
+    const inside = args.slice(5).every(a => {
+      if (a.startsWith('-') || /(^|\/)\.\.(\/|$)/.test(a)) return false
+      const abs = absOf(a, c.cwd)
+      const real = realOf(abs, c.fs) ?? abs
+      return insideOrEqual(real, cwdReal)
+    })
+    if (inside) return null
+  }
+  return refuse('agentop', R.agentop)
+}
+
+/** Writing verbs: allowed options, then every positional through the path rule. */
+const WRITE_FLAGS: Record<string, RegExp> = {
+  mkdir: /^(-[pv]+|--parents|--verbose)$/,
+  touch: /^(-c|--no-create)$/,
+  cp: /^(-[rRapvfnT]+|--recursive|--archive|--force|--no-clobber|--verbose)$/,
+  mv: /^(-[vfnT]+|--force|--no-clobber|--verbose)$/,
+  rm: /^(-[rRfvd]+|--recursive|--force|--verbose|--dir)$/,
+  rmdir: /^(-v|--verbose|--ignore-fail-on-non-empty)$/,
+  ln: /^(-[sfnvT]+|--symbolic|--force|--no-dereference|--verbose)$/,
+}
+
+function writeVerdict(prog: string, args: string[], c: Ctx): Verdict | null {
+  const flags = WRITE_FLAGS[prog]!
+  const paths: string[] = []
+  let ddash = false
+  for (const a of args) {
+    if (!ddash && a === '--') { ddash = true; continue }
+    if (!ddash && a.startsWith('-')) { if (!flags.test(a)) return notAllowed(`${prog} ${a}`); continue }
+    paths.push(a)
+  }
+  if (paths.length === 0) return refuse('write-outside', R.path)
+  if (prog === 'ln') {
+    if (paths.length !== 2) return refuse('write-outside', R.path)
+    const symbolic = args.some(a => /^-[a-zA-Z]*s/.test(a) || a === '--symbolic')
+    const [target, link] = paths as [string, string]
+    const lv = writablePath(link, c.cwd, c.home, c.fs)
+    if (lv) return lv
+    // A symlink's target is read relative to the LINK's directory, not the shell's.
+    if (/(^|\/)\.\.(\/|$)/.test(target)) return refuse('write-outside', R.path)
+    const tAbs = isAbsolute(target) ? target : symbolic ? join(dirname(absOf(link, c.cwd)), target) : absOf(target, c.cwd)
+    return writablePath(tAbs, c.cwd, c.home, c.fs)
+  }
+  for (const p of paths) { const v = writablePath(p, c.cwd, c.home, c.fs); if (v) return v }
   return null
 }
 
-function judge(argv: Tok[], c: Ctx, depth = 0): Verdict | null {
-  if (argv.length === 0 || depth > 4) return refuse('not-simple', REASON_SIMPLE)
+function judge(argv: Tok[], c: Ctx): Verdict | null {
+  if (argv.length === 0) return refuse('not-simple', R.simple)
   const first = argv[0]!
-  if (first.quoted || first.text.includes('=')) return refuse('not-simple', REASON_SIMPLE)
-  const prog = basename(first.text)
+  if (first.quoted || first.text.includes('/')) return refuse('not-allowed', R.slashProgram)
+  if (!/^[a-z][a-z0-9._+-]*$/i.test(first.text)) return refuse('not-simple', R.simple)
+  const prog = first.text
   const args = argv.slice(1).map(t => t.text)
-
-  // The one allowed kill: explicit PIDs the session saved (`kill 1234`, `kill -TERM 1234`). Never 0/1/negative/names.
-  if (prog === 'kill') {
-    const pids = args.filter(a => !/^-(?:[A-Z]{3,7}|[0-9]{1,2}|s|SIG[A-Z]+)$/.test(a) && a !== '-s')
-    return pids.length > 0 && pids.every(a => /^[0-9]+$/.test(a) && Number(a) > 1)
-      ? null
-      : refuse('dangerous-program', 'Autonomous mode: kill only explicit PIDs you saved (kill <pid>), never names, groups or $(…).')
-  }
-  if (ALWAYS_DANGEROUS.has(prog) || prog.startsWith('mkfs')) return danger(prog)
-
-  if (WRAPPERS.has(prog)) return judgeWrapper(prog, args, argv, c, depth)
-
-  if (prog === 'rm' || prog === 'rmdir') {
-    return rmVerdict(prog, args, c) ?? dataWrite(args, c)
-  }
-  if (prog === 'find') {
-    if (args.some(a => /^-(delete|exec|execdir|ok|okdir|fprint0?|fls|fprintf)$/.test(a))) return danger('find -delete/-exec')
-    return null
-  }
-  if (INTERPRETERS.test(prog)) {
-    const lead: string[] = []
-    for (const a of args) { if (!a.startsWith('-')) break; lead.push(a) }
-    if (lead.some(a => /^-[A-Za-z]*[ceEp][A-Za-z]*$/.test(a) || /^--(eval|print|command)/.test(a))) {
-      return refuse('inline-code', 'Autonomous mode: inline code (-c / -e) is not auto-approved; put it in a script file inside your directory and run that.')
-    }
-    return null
-  }
-  if (prog === 'curl' && args.some(a => /^-[A-Za-z]*[oOJ][A-Za-z]*$/.test(a) || /^--(output|remote-name|remote-header)/.test(a))) return danger('curl -o/-O')
-  if (prog === 'wget' && args.some(a => /^-[A-Za-z]*[OP]$/.test(a) || /^--(output-document|directory-prefix)/.test(a))) return danger('wget -O/-P')
-  if (/^(npx|bunx|pnpx|pnpm|npm|bun|yarn)$/.test(prog) && args.some(a => /^agentop(@.*)?$/.test(a)) && args.includes('upgrade')) {
-    return refuse('agentop-upgrade', 'Autonomous mode: never run `agentop upgrade`; verify through the API instead.')
-  }
-  if (prog === 'agentop') {
-    if (args.some(a => /^(upgrade|server|restart|autostart)$/.test(a))) {
-      return refuse('agentop-upgrade', 'Autonomous mode: never run `agentop upgrade|server|restart|autostart`; use a throwaway (`agentop run --rm`) and verify through the API.')
-    }
-    return null
-  }
-  if (prog === 'git') return gitVerdict(args, c) ?? dataWrite(args, c)
-  if (prog === 'cd') return args[0] && inData(args[0], c.cwd, c.home) ? refuse('agentistics-write', 'Autonomous mode: do not work inside ~/.agentistics.') : null
-  if (/^(awk|gawk|mawk|nawk)$/.test(prog) && args.some(a => /system|getline|\|/.test(a))) return danger('awk with system()/getline')
-  if (prog === 'sed') {
-    const script = args.filter(a => !a.startsWith('-'))
-    if (script.some(a => /\/[0-9gIipm]*[ew](?=$|[;\s}])/.test(a) || /^[0-9,$]*[ew]\b/.test(a))) return danger('sed with e/w commands')
-  }
-  if (prog === 'tar') {
-    if (args.some(a => /^--(to-command|checkpoint-action|use-compress-program)/.test(a) || a === '-I')) return danger('tar with a program hook')
-    const i = args.findIndex(a => a === '-C' || a === '--directory' || a.startsWith('--directory='))
-    const dir = i < 0 ? undefined : args[i]!.includes('=') ? args[i]!.split('=')[1] : args[i + 1]
-    if (dir !== undefined && !rmRoots(c.cwd, c.home, c.extra).some(r => toAbs(dir, c.cwd, c.home) === r || strictlyInside(toAbs(dir, c.cwd, c.home), r))) {
-      return refuse('write-outside', 'Autonomous mode: extract only into the session directory or /tmp.')
-    }
-  }
-  if (prog === 'unzip') {
-    const i = args.indexOf('-d')
-    const dir = i < 0 ? undefined : args[i + 1]
-    if (dir !== undefined && !rmRoots(c.cwd, c.home, c.extra).some(r => toAbs(dir, c.cwd, c.home) === r || strictlyInside(toAbs(dir, c.cwd, c.home), r))) {
-      return refuse('write-outside', 'Autonomous mode: extract only into the session directory or /tmp.')
-    }
-  }
-  if ((prog === 'chmod' || prog === 'chown' || prog === 'chgrp') && args.some(a => /^-[A-Za-z]*R/.test(a) || a === '--recursive')) {
-    const roots = rmRoots(c.cwd, c.home, c.extra)
-    const targets = args.filter(a => !a.startsWith('-')).slice(1)
-    if (targets.length === 0 || targets.some(t => /(^|\/)\.\.(\/|$)/.test(t) || !roots.some(r => strictlyInside(toAbs(t, c.cwd, c.home), r)))) {
-      return refuse('write-outside', 'Autonomous mode: recursive chmod/chown only strictly inside the session directory or /tmp.')
-    }
-  }
-  if (WRITERS.has(prog) || (prog === 'sed' && args.some(a => /^(-[A-Za-z]*i|--in-place)/.test(a)))) return dataWrite(args, c)
-  return null
+  if (KILLERS.has(prog)) return refuse('kill', R.kill)
+  if (WRAPPERS.has(prog)) return refuse('wrapper', R.wrapper)
+  if (INTERPRETERS.test(prog)) return refuse('interpreter', R.interp)
+  if (RUNNERS.has(prog)) return refuse('runner', R.runner)
+  if (prog === 'git') return gitVerdict(args, c)
+  if (prog === 'gh') return ghVerdict(args)
+  if (prog === 'agentop') return agentopVerdict(args, c)
+  if (prog in WRITE_FLAGS) return writeVerdict(prog, args, c)
+  const rule = READ_ONLY[prog]
+  if (!rule) return notAllowed(prog)
+  if (args.some(a => touchesData(a, c))) return refuse('agentistics-write', R.data)
+  return rule(args, c)
 }
 
-function dataWrite(args: string[], c: Ctx): Verdict | null {
-  return args.some(a => inData(a, c.cwd, c.home))
-    ? refuse('agentistics-write', 'Autonomous mode: never write directly into ~/.agentistics; go through agentop or the API.')
-    : null
-}
+const CD = /(^|[\s;&|(`])(cd|pushd|popd)(?=$|[\s;&|)])/
 
-function judgeWrapper(prog: string, args: string[], argv: Tok[], c: Ctx, depth: number): Verdict | null {
-  let i = 0
-  const skipDash = (withValue: readonly string[] = []): void => {
-    while (i < args.length && args[i]!.startsWith('-') && args[i] !== '--') {
-      i += withValue.includes(args[i]!) ? 2 : 1
-    }
-    if (args[i] === '--') i++
-  }
-  if (prog === 'command' || prog === 'builtin') {
-    if (args[0] === '-v' || args[0] === '-V') return null
-    skipDash()
-  } else if (prog === 'exec' || prog === 'nohup' || prog === 'setsid' || prog === 'time') skipDash()
-  else if (prog === 'nice') skipDash(['-n', '--adjustment'])
-  else if (prog === 'ionice') skipDash(['-c', '-n', '-p'])
-  else if (prog === 'stdbuf') skipDash()
-  else if (prog === 'timeout') { skipDash(['-s', '-k', '--signal', '--kill-after']); i++ }
-  else if (prog === 'flock') {
-    if (args.some(a => a === '-c' || a === '--command')) return refuse('inline-code', 'Autonomous mode: flock -c runs a shell string; pass the command as separate words.')
-    skipDash(['-w', '-E', '--timeout', '--conflict-exit-code']); i++
-  } else if (prog === 'env') {
-    if (args.some(a => a === '-S' || a === '--split-string')) return danger('env -S')
-    while (i < args.length) {
-      const a = args[i]!
-      if (a === '-u' || a === '-C' || a === '--unset' || a === '--chdir') i += 2
-      else if (a.startsWith('-')) i++
-      else if (a.includes('=')) {
-        if (/^(LD_|DYLD_|BASH_ENV|ENV=|PATH=|PYTHONPATH|NODE_OPTIONS|GIT_)/.test(a)) return danger(`env ${a.split('=')[0]}=`)
-        i++
-      } else break
-    }
-  }
-  const rest = argv.slice(1 + i)
-  if (rest.length === 0) return null
-  return judge(rest, c, depth + 1)
-}
-
-/** The deny verdict for one command text, or null when the command may be auto-approved. */
-export function denyRule(command: string, cwd: string, home = '/root', extraRoots: readonly string[] = []): Verdict | null {
-  if (/\b4729[12]\b/.test(command)) {
-    return refuse('agentistics-port', 'Autonomous mode: ports 47291/47292 belong to agentistics; do not touch them. Use a throwaway server on another port.')
-  }
+/** The refusal for one command text, or null when it is on the allow-list. */
+export function commandRule(command: string, cwd: string, home: string, fs: NoqFs = diskFs): Verdict | null {
+  if (/\n|\r/.test(command)) return refuse('multi-line', R.multiLine)
+  if (/\b4729[12]\b/.test(command)) return refuse('agentistics-port', R.port)
+  if (CD.test(command)) return refuse('cd', R.cd)
   const argv = tokenize(command)
-  if (!argv) return refuse('not-simple', REASON_SIMPLE)
-  return judge(argv, { cwd, home, extra: extraRoots })
+  if (!argv) return refuse('not-simple', R.simple)
+  return judge(argv, { cwd, home, fs })
 }
 
-/** A Write/Edit of `path`: inside the cwd or /tmp is fine; ~/.agentistics or outside is refused. */
-export function fileRule(path: string, cwd: string, home = '/root', extraRoots: readonly string[] = []): Verdict | null {
-  if (/(^|\/)\.\.(\/|$)/.test(path)) return refuse('write-outside', 'Autonomous mode: file edits only inside the session directory or /tmp, without `..`.')
-  const abs = toAbs(path, cwd, home)
-  if (dataDirs(home).some(d => abs === d || strictlyInside(abs, d))) {
-    return refuse('agentistics-write', 'Autonomous mode: never write directly into ~/.agentistics; go through agentop or the API.')
-  }
-  const roots = [resolve(cwd), ...ALLOWED_ROOTS, ...extraRoots]
-  return roots.some(r => strictlyInside(abs, r)) ? null : refuse('write-outside', 'Autonomous mode: file edits only inside the session directory or /tmp.')
+/** A Write/Edit of `path`: the same path rule as a writing verb. */
+export function fileRule(path: string, cwd: string, home: string, fs: NoqFs = diskFs): Verdict | null {
+  return writablePath(path, cwd, home, fs)
 }
 
-/** The answer for one dialog. `home` is injected so the rule is testable. */
-export function decideNoqAnswer(d: NoqDialog, home = '/root', extraRoots: readonly string[] = []): NoqDecision {
+const toEnv = (env: string | NoqEnv | undefined): Required<NoqEnv> => {
+  const e = typeof env === 'string' ? { home: env } : (env ?? { home: '/root' })
+  return { home: e.home, fs: e.fs ?? diskFs }
+}
+
+/** The answer for one dialog. */
+export function decideNoqAnswer(d: NoqDialog, envIn?: string | NoqEnv): NoqDecision {
   if (d.harness !== 'claude') return { action: 'skip', why: 'harness' }
   if (d.mode !== 'no-questions') return { action: 'skip', why: 'mode' }
-  const opts = d.dialogOptions ?? []
-  const yes = opts.find(o => /^yes\b/i.test(o.label) && !/always|allow all|don't ask|do not ask|shift\+tab|auto-accept|manually/i.test(o.label))
+  const env = toEnv(envIn)
+  const p = parseNoqDialog(d.frame ?? d.approvalLines ?? [])
+  if (p.kind === 'none') return { action: 'skip', why: 'no-command' }
+  if (p.kind === 'unknown') return { action: 'skip', why: 'dialog-shape' }
+  const opts = p.options.length > 0 ? p.options : (d.dialogOptions ?? [])
+  const yes = opts.find(o => /^yes\b/i.test(o.label) && !/always|allow all|don.t ask|do not ask|shift\+tab|auto.accept|auto mode|manually|switch/i.test(o.label))
   const no = opts.find(o => /^no\b/i.test(o.label))
   if (!yes || !no) return { action: 'skip', why: 'not-a-permission-prompt' }
-  const lines = d.approvalLines ?? []
-  const command = dialogCommand(lines)
-  let v: Verdict | null
-  let shown: string
-  if (command) {
-    shown = command
-    v = denyRule(command, d.cwd, home, extraRoots)
-  } else {
-    const file = dialogFile(lines)
-    if (!file) return { action: 'skip', why: 'no-command' }
-    shown = `file: ${file}`
-    v = fileRule(file, d.cwd, home, extraRoots)
-  }
+  if (p.kind === 'refuse') return { action: 'deny', choice: no.number, rule: p.rule, command: p.shown, reason: p.reason }
+  const shown = p.kind === 'bash' ? p.command : `file: ${p.path}`
+  const v = p.kind === 'bash' ? commandRule(p.command, d.cwd, env.home, env.fs) : fileRule(p.path, d.cwd, env.home, env.fs)
   if (v) return { action: 'deny', choice: no.number, rule: v.rule, command: shown, reason: v.reason }
-  return { action: 'approve', choice: yes.number, rule: 'allowed', command: shown, reason: 'simple command off the deny list' }
+  return { action: 'approve', choice: yes.number, rule: 'allowed', command: shown, reason: 'on the autonomous allow-list' }
 }
 
 export interface NoqMemory { lastKey: Map<string, { key: string; atMs: number; ok: boolean }> }
+/** A FAILED answer to the same dialog is retried after this. */
 export const NOQ_RETRY_MS = 15_000
+/**
+ * An ANSWERED dialog still on screen after this is answered again: either the keystroke never landed,
+ * or the session asked the identical question twice with no poll between (M2). The host re-reads the
+ * dialog before typing, so a second answer only ever lands on the same question.
+ */
+export const NOQ_REPEAT_MS = 10_000
 
 /**
- * May this dialog be answered now? A dialog already answered SUCCESSFULLY is never answered again — only a
- * NEW dialog (a different frame hash) or the same one after it went away (`forget`) is. A FAILED answer is
- * retried after `NOQ_RETRY_MS`. Never a blind second keystroke into a frame that did not change.
+ * May this dialog be answered now? A new dialog (different key) is; the same one again only after
+ * `NOQ_REPEAT_MS` (answered) or `NOQ_RETRY_MS` (failed). A dialog that went away is forgotten by the runner.
  */
 export function shouldAnswer(mem: NoqMemory, id: string, key: string, nowMs: number): boolean {
   const prev = mem.lastKey.get(id)
-  if (prev && prev.key === key && (prev.ok || nowMs - prev.atMs < NOQ_RETRY_MS)) return false
+  if (prev && prev.key === key && nowMs - prev.atMs < (prev.ok ? NOQ_REPEAT_MS : NOQ_RETRY_MS)) return false
   mem.lastKey.set(id, { key, atMs: nowMs, ok: false })
   return true
 }

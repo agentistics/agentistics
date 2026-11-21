@@ -103,6 +103,7 @@ export const THROWAWAY_ENV_KEEP: Readonly<Record<string, string>> = {
   XDG_CACHE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
   XDG_DATA_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
   XDG_STATE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
+  AGENTISTICS_HOME: 'read only by noq-policy as a path a no-questions session may never write to; it relocates nothing',
 }
 export const isThrowawayEnvDrop = (key: string): boolean => THROWAWAY_ENV_DROP.includes(key) || /^KIMI_.*HOME$/.test(key)
 

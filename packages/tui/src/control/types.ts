@@ -1719,8 +1719,10 @@ export interface ControlHost {
    * The host re-reads the frame immediately before sending and refuses when the session is no longer
    * asking, or when the options on screen no longer match what the user was shown. A snapshot is up
    * to five seconds old, and an answer to a question that has changed is worse than no answer.
+   * `expect`, when given, is shown that very frame (plain text) and nothing is typed unless it agrees —
+   * the no-questions runner uses it to answer only the dialog it judged.
    */
-  answerSession?(id: string, choice?: number, text?: string, choices?: readonly number[]): Promise<ActionResult>
+  answerSession?(id: string, choice?: number, text?: string, choices?: readonly number[], expect?: (frame: readonly string[]) => boolean): Promise<ActionResult>
   /** Move a multi-question form to its next/previous question without answering this one. */
   stepDialog?(id: string, dir: 'next' | 'back'): Promise<ActionResult>
 

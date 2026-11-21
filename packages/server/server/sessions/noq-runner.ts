@@ -9,12 +9,19 @@
  * THE MODE must be the session's CURRENT one: the live chip, else the last chip this runner SAW for the
  * row, else the registry's recorded (chip-set) mode. The mode a session STARTED in is not enough — a
  * person may have cycled it to `default` since — and an unknown mode is left to the person (logged once).
- * A dialog already answered successfully is never answered again; only a new frame is evaluated.
+ *
+ * THE DIALOG IS RE-READ RIGHT BEFORE THE KEYSTROKE (M1). The poll's snapshot can be up to a poll old, so
+ * the runner captures the pane itself (`capture`, ANSI kept — the old layout's description is told apart
+ * by its dim attribute), decides on THAT frame, and hands the host the dialog's identity
+ * (`noqDialogKey`): the host compares it against the frame it reads immediately before typing and
+ * refuses when it differs. A refusal of that kind is re-captured and re-judged at once (bounded).
+ * The same dialog still on screen after `NOQ_REPEAT_MS` is answered again (M2: a keystroke that did not
+ * land, or the identical question asked twice between two polls) — never sooner.
  */
 import { appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { SessionSnapshot } from './sessions-host'
-import { decideNoqAnswer, noteAnswerResult, shouldAnswer, type NoqDecision, type NoqMemory } from './noq-policy'
+import { decideNoqAnswer, noqDialogKey, noteAnswerResult, shouldAnswer, type NoqDecision, type NoqMemory } from './noq-policy'
 
 export interface NoqAnswerRecord {
   at: string
@@ -29,7 +36,13 @@ export interface NoqAnswerRecord {
 }
 
 export interface NoqDeps {
-  answer(id: string, choice: number): Promise<{ ok: boolean; message: string }>
+  /**
+   * Type the option — ONLY if the dialog on the pane, read immediately before the keystroke, still has
+   * identity `expectKey`. `stale: true` = it did not (nothing was typed).
+   */
+  answer(id: string, choice: number, expectKey: string): Promise<{ ok: boolean; message: string; stale?: boolean }>
+  /** A fresh capture of the pane (ANSI allowed), or null. Without it the snapshot's lines are used. */
+  capture?(id: string): Promise<string[] | null>
   prompt(id: string, text: string): Promise<{ ok: boolean; message: string }>
   record(r: NoqAnswerRecord): Promise<void> | void
   /** The registry's CURRENT mode for the row (what the chip last set). Never the start mode alone. */
@@ -71,14 +84,24 @@ export function createNoqRunner(deps: NoqDeps) {
           if (!warned.has(v.id)) { warned.add(v.id); deps.log?.(`noq: ${v.id.slice(0, 8)} shows a dialog and its current mode is unknown; left to the person`) }
           continue
         }
-        const d: NoqDecision = decideNoqAnswer({
-          harness: v.harness, mode, cwd: v.cwd,
-          approvalLines: v.approvalLines, dialogOptions: v.dialogOptions,
-        }, deps.home)
-        if (d.action === 'skip') continue
-        if (!shouldAnswer(mem, v.id, (v.approvalLines ?? []).join('\n'), now())) continue
-        const out = await deps.answer(v.id, d.choice).catch((e: unknown) => ({ ok: false, message: String(e) }))
-        noteAnswerResult(mem, v.id, out.ok)
+        let d: NoqDecision = { action: 'skip', why: 'unread' }
+        let out: { ok: boolean; message: string; stale?: boolean } = { ok: false, message: '' }
+        let answered = false
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const frame = (await deps.capture?.(v.id).catch(() => null)) ?? v.approvalLines ?? []
+          d = decideNoqAnswer({
+            harness: v.harness, mode, cwd: v.cwd, frame, dialogOptions: v.dialogOptions,
+          }, { home: deps.home ?? '/root' })
+          if (d.action === 'skip') break
+          const key = noqDialogKey(frame) || frame.join('\n')
+          if (attempt === 0 && !shouldAnswer(mem, v.id, key, now())) break
+          if (attempt > 0) mem.lastKey.set(v.id, { key, atMs: now(), ok: false })
+          out = await deps.answer(v.id, d.choice, key).catch((e: unknown) => ({ ok: false, message: String(e) }))
+          noteAnswerResult(mem, v.id, out.ok)
+          answered = true
+          if (!out.stale) break
+        }
+        if (!answered || d.action === 'skip' || out.stale) continue
         const rec: NoqAnswerRecord = {
           at: new Date(now()).toISOString(), id: v.id, command: d.command, decision: d.action,
           choice: d.choice, rule: d.rule, reason: d.reason, ok: out.ok, message: out.message,
@@ -98,17 +121,23 @@ export async function defaultNoqDeps(): Promise<NoqDeps> {
   const { hostForFleet } = await import('./fleet-web')
   const { AGENTISTICS_DATA_DIR, HOME_DIR } = await import('../config')
   const { broadcastNotification } = await import('../sse')
+  const { resolveBackend } = await import('./index')
   const host = await hostForFleet('en')
   const file = join(AGENTISTICS_DATA_DIR, 'noq-answers.jsonl')
   return {
     home: HOME_DIR,
     registryMode: async id => (await (await import('./registry')).readRegistry()).find(m => m.id === id)?.mode,
     log: m => console.warn(m),
-    answer: async (id, choice) => {
+    capture: async id => (await (await resolveBackend()).captureTerminal(id, 60).catch(() => null))?.lines ?? null,
+    answer: async (id, choice, expectKey) => {
       if (!host.answerSession) return { ok: false, message: 'no host' }
-      const r = await host.answerSession(id, choice, '')
+      let stale = false
+      const r = await host.answerSession(id, choice, '', undefined, frame => {
+        stale = noqDialogKey(frame) !== expectKey
+        return !stale
+      })
       if (r.ok) (await import('../engine/fleet-hub')).fleetHub.noteAnswered(id, choice)
-      return r
+      return { ...r, stale }
     },
     prompt: async (id, text) => host.promptSession ? host.promptSession(id, text) : { ok: false, message: 'no host' },
     record: async r => {
