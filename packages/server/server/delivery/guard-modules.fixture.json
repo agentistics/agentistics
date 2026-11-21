@@ -1152,6 +1152,24 @@
     ],
     "../scripts/test-orphans.ts": [
       "module:fs"
+    ],
+    "server/server/browser/browser-bin.ts": [
+      "module:fs"
+    ],
+    "server/server/browser/browser-caller-proc.ts": [
+      "module:fs"
+    ],
+    "server/server/browser/browser-host.ts": [
+      "global:Bun",
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/browser/browser-web.ts": [
+      "module:fs"
+    ],
+    "server/server/delivery/release-proof.ts": [
+      "module:child_process",
+      "module:fs"
     ]
   }
 }

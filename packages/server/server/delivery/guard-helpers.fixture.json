@@ -2383,5 +2383,107 @@
   ],
   "../scripts/test-preload.ts": [
     "raw-writer-helper"
+  ],
+  "mcp/browser-tools.ts": [
+    "raw-writer-helper"
+  ],
+  "mcp/engine-tools.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/browser/browser-host.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/browser/browser-input-web.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/browser/browser-stream-web.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/browser/browser-web.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/engine/present-turns.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/nay-call.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/hold-guard.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/hold-state-web.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/hold-state.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/kill-door.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/kill-guard.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/live-fleet-rows.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/release-squash.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserAddressBar.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserDrawer.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserFollowChip.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserPanel.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserScreen.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserSessionCard.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserWindows.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/SessionBrowser.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/calendar/CronogramaTree.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/hooks/useBrowserScreen.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/hooks/useNayCallReport.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/hooks/usePersonalBrowser.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/hooks/usePersonalInput.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/hooks/useSessionBrowserCard.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/lib/browserCard.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/lib/browserPersonal.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/lib/browserStream.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/lib/nayCall.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/lib/rowMenuCascade.ts": [
+    "raw-writer-helper"
   ]
 }

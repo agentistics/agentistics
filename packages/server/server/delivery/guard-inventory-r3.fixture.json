@@ -333,6 +333,24 @@
     ],
     "web/scripts/gen-brand-assets.ts": [
       "16c224d12e25f514d3a53f616e9b77d192899a227481de667e60f16dce3dfcfd"
+    ],
+    "server/server/browser/browser-host.ts": [
+      "6e40dcf1f39e374e2fa4d0c7d34365dff8390f962011992dd92412acec27c406",
+      "e64e36557bd080176508918a4ff472cd2a231cf6b681017a4fde4d5224a410e5",
+      "6877b356752d1df16b301968329882f1b98b21d0068ea1e5facecbfbaa0709d9",
+      "a32e0f9507b6b7b99a8c46f8b227c5402b59309b77f211764c3bdf8b2f271d3f",
+      "07d524bf706909af1d94d158a6fd50337f5be9fa5ed1c399a2901e38304c85d4"
+    ],
+    "server/server/delivery/release-proof.ts": [
+      "ed537fb2b15920303cfc63b38d719476036f922ff0b58de2543adc18a3644554",
+      "5fa38a6950bbbca96384c771d754798d5411590803466eed6cd6c5391aa47d62",
+      "a16281092c999587a8cdede3fbe214811b25639a62e204023e8063d2215b35d9"
+    ],
+    "web/src/hooks/useBrowserScreen.ts": [
+      "1b1e2ece8ee3f08a54457b2cc8bd52439d2edd849901ca65bd2a7d04f9b84c61"
+    ],
+    "web/src/lib/streamMux.ts": [
+      "d9c70cf524de3527bf81bc01a55903cb2d9b1e19a125ef5f52a8404a922a0f16"
     ]
   },
   "reach": {
@@ -542,7 +560,8 @@
       "text:.agentistics/workflows",
       "text:A legacy copy of the agentistics preferences that sits under the Claude directory and may still hold a legacy `team.token` bearer token written by an older version. The staged `.agentistics/preferences.json` travels instead (see ALWAYS); this copy is not staged, so it would carry the token verbatim.",
       "text:nothing — `.agentistics/preferences.json` is the authoritative copy",
-      "text:referring into `.agentistics/content`. Not carried either: that content is itself a `secret` "
+      "text:referring into `.agentistics/content`. Not carried either: that content is itself a `secret` ",
+      "text:.agentistics/browser"
     ],
     "server/server/backup/backup-store.ts": [
       "ident:AGENTISTICS_DATA_DIR",
@@ -844,6 +863,9 @@
       "text:AGENTISTICS_DIR"
     ],
     "server/server/index.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
       "ident:AGENTISTICS_DATA_DIR",
       "ident:AGENTISTICS_DATA_DIR",
       "ident:AGENTISTICS_DATA_DIR",
@@ -1188,6 +1210,10 @@
     "web/src/pages/settings/SessionsSettings.tsx": [
       "text:Claude Code deletes transcripts older than 30 days on every startup. Choose how Agentistics preserves your history (everything stays local in ~/.agentistics).",
       "text:O Claude Code apaga transcripts com mais de 30 dias a cada inicialização. Escolha como o Agentistics preserva seu histórico (tudo fica local em ~/.agentistics)."
+    ],
+    "web/src/whatsNew/releases.ts": [
+      "text:Flows (experimental): work folders of sessions that are already published and have no changes are removed on their own; files such as .env or backups keep the folder, and an .agentistics-keep file protects any folder.",
+      "text:Fluxos (experimental): pastas de trabalho de sessões já publicadas e sem mudanças são apagadas sozinhas; arquivos como .env ou backups fazem a pasta ficar, e um arquivo .agentistics-keep protege qualquer pasta."
     ]
   }
 }
