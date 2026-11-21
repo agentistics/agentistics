@@ -71,6 +71,7 @@ function panelBarGateOpen(panel: PanelBarId, gates: PanelBarGates): boolean {
   if (panel === 'cli') return !gates.relayed && gates.screen !== false
   if (panel === 'shell') return gates.shellEnabled && !gates.relayed
   if (panel === 'hardware') return gates.hardwareOffered
+  if (panel === 'browser') return !gates.relayed
   return true
 }
 

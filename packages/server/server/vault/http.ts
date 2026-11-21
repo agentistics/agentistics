@@ -124,6 +124,9 @@ function addHeartbeatCookie(response: Response, token: string | null): Response 
  * asked. The page sends it in `x-vault-password` (never in a URL, never in a cookie); it is held for
  * THIS request only (password-context.ts) and read by nothing but the password protector.
  */
+/** The gate session an HTTP request is bound to — shared with the browser padlock, which spends the grant. */
+export function vaultHttpSession(envSession: string): string { return `http:${envSession}` }
+
 export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv): Promise<Response | null> {
   if (!url.pathname.startsWith('/api/vault')) return null
   return withVaultPassword(passwordInput(req.headers.get('x-vault-password')), () => handleVaultHttpInner(req, url, env))
@@ -136,7 +139,7 @@ async function handleVaultHttpInner(req: Request, url: URL, env: VaultHttpEnv): 
   // Review H2: the single-use proof the reply to this page's own unlock carried (memory only, like the grant).
   const fresh = req.headers.get('x-vault-fresh')
   // Namespaced so no cookie value can ever read as the local CLI's channel ('socket', gate.ts).
-  const session = `http:${env.session}`
+  const session = vaultHttpSession(env.session)
   const path = url.pathname
   if (!path.startsWith('/api/vault')) return null
   const allowed = vaultRequestAllowed(req, url.host, env.origins)
@@ -266,6 +269,26 @@ async function handleVaultHttpInner(req: Request, url: URL, env: VaultHttpEnv): 
     if (!str(b.pieceKey, 200) || !str(b.move, 200)) return bad()
     const r = await gate.requireDeliveryOwner({ session, loopback }, { pieceKey: b.pieceKey, move: b.move })
     return reply(r.ok ? { ok: true, ownerGrant: r.grant } : r)
+  }
+  if (path === '/api/vault/browser-unlock' && req.method === 'POST') {
+    // NAVEGADOR S4b: the person's fresh proof before taking over a session's browser. The single-use grant goes
+    // back in `X-Agentop-Owner-Grant` on `POST /api/browser/lock {lock:'unlocked'}` — never in a URL or a log.
+    const b = await body()
+    if (!str(b.managedId, 64)) return bad()
+    const r = await gate.requireBrowserUnlockOwner({ session, loopback }, b.managedId)
+    return reply(r.ok ? { ok: true, ownerGrant: r.grant } : r)
+  }
+  if (path === '/api/vault/personal-browser' && req.method === 'POST') {
+    // NAVEGADOR S10 r3: the person's fresh proof for their OWN browser. Returns a short-lived grant the UI keeps in
+    // memory and sends in `X-Agentop-Personal-Grant` (never a URL, never a cookie). `{revoke:true, grant}` ends it.
+    const b = await body()
+    if (b.revoke === true) {
+      const { personalGrants } = await import('../browser/personal-grant')
+      personalGrants().revoke(b.grant)
+      return reply({ ok: true })
+    }
+    const r = await gate.mintPersonalBrowserGrant({ session, loopback })
+    return reply(r.ok ? { ok: true, personalGrant: r.grant, expiresAt: r.expiresAt } : r)
   }
   if (path === '/api/vault/delivery-owner-mode' && req.method === 'POST') {
     const b = await body()

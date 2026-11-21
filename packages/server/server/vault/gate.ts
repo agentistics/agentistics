@@ -79,6 +79,9 @@ export type VaultAction =
   // ENTREGA.GARANTIDA §2.3.1: the owner's fresh proof for a delivery move. Decided ONLY by `requireDeliveryOwner`;
   // the row exists so the Record compiles and the vault screen can draw it. Never in ACTION_KIND_OF / REMOTE_ROWS.
   | 'delivery-owner'
+  // NAVEGADOR S4b: the person's fresh proof before a session's browser is unlocked (they take the controls).
+  // Same primitive as 'delivery-owner' (`requireBrowserUnlockOwner`); never in ACTION_KIND_OF / REMOTE_ROWS.
+  | 'browser-unlock'
 
 export interface ActionRow { code: boolean; gesture: boolean; grant: 'read' | 'delivery' | null }
 
@@ -145,6 +148,8 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   'set-auth-policy': { code: true, gesture: true, grant: null },
   // Dedicated gate, never generic: a fresh gesture/password proof against the open vault, every time.
   'delivery-owner': { code: false, gesture: true, grant: null },
+  // Dedicated gate too (`requireBrowserUnlockOwner`): fresh proof, single-use grant for ONE browser.
+  'browser-unlock': { code: false, gesture: true, grant: null },
 }
 
 /**
@@ -446,6 +451,7 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
   if (action === 'unlock') return refused('bad-request', 'unlock is the two-phase flow (completeUnlock)')
   // The generic tail passes any row that is not a no-proof one; this one must never ride it (§2.3.1 item 1).
   if (action === 'delivery-owner') return refused('bad-request', 'use requireDeliveryOwner')
+  if (action === 'browser-unlock') return refused('bad-request', 'use requireBrowserUnlockOwner')
   if (action === 'personal-grant-open' && !row.code && !row.gesture) {
     // No proof — but the vault must BE open (a locked one is the composer's one inline unlock, not a grant).
     if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
@@ -649,23 +655,24 @@ function scopeTag(s: DeliveryScope): string { return createHash('sha256').update
 /** What the audit log and the REST principal carry instead of the token: a hash, never the grant itself. */
 export function deliveryGrantHash(token: string): string { return createHash('sha256').update(token).digest('hex').slice(0, 16) }
 
-function mintDeliveryGrant(session: string, scope: DeliveryScope, nowMs = _now()): string {
+/**
+ * The two OWNER grant classes. Same shape, same single-use store, but the class is in the MAC'd payload: a
+ * `delivery` grant never unlocks a browser and a `browser-unlock` grant never stands for a delivery move.
+ */
+type OwnerGrantClass = 'delivery' | 'browser-unlock'
+
+function mintOwnerGrant(cls: OwnerGrantClass, session: string, scope: DeliveryScope, nowMs = _now()): string {
   const nonce = randomBytes(12).toString('hex')
   const exp = nowMs + GRANT_TTL_MS
   for (const [n, e] of _liveDeliveryGrants) if (e <= nowMs) _liveDeliveryGrants.delete(n)
   _liveDeliveryGrants.set(nonce, exp)
-  const payload = `${exp}.delivery.${sessionTag(session)}.${scopeTag(scope)}.${nonce}`
+  const payload = `${exp}.${cls}.${sessionTag(session)}.${scopeTag(scope)}.${nonce}`
   return `${payload}.${createHmac('sha256', _grantKey).update(`${GRANT_DOMAIN}.${payload}`).digest('hex')}`
 }
 
 export type DeliveryGrantUse = { ok: true; grantId: string } | { ok: false; code: 'grant-invalid' | 'grant-scope' | 'owner-proof-local-only' }
 
-/**
- * Spend a `delivery` grant for ONE move. Single-use: a success deletes it. A grant minted for another piece or
- * move is `grant-scope` and is NOT spent (it was not used); an expired, forged, unknown, other-session or
- * already-spent one is `grant-invalid`. A `read` grant never reaches here (its class differs) and this one never stands for a `read`.
- */
-export function consumeDeliveryGrant(token: string | null | undefined, ctx: { session: string; loopback?: boolean }, scope: DeliveryScope, nowMs = _now()): DeliveryGrantUse {
+function consumeOwnerGrant(cls: OwnerGrantClass, token: string | null | undefined, ctx: { session: string; loopback?: boolean }, scope: DeliveryScope, nowMs: number): DeliveryGrantUse {
   if (!ctx.loopback && !fromSocket(ctx)) return { ok: false, code: 'owner-proof-local-only' }
   if (!token) return { ok: false, code: 'grant-invalid' }
   const dot = token.lastIndexOf('.')
@@ -674,11 +681,32 @@ export function consumeDeliveryGrant(token: string | null | undefined, ctx: { se
   const mac = Buffer.from(token.slice(dot + 1))
   const want = Buffer.from(createHmac('sha256', _grantKey).update(`${GRANT_DOMAIN}.${payload}`).digest('hex'))
   if (mac.length !== want.length || !timingSafeEqual(mac, want)) return { ok: false, code: 'grant-invalid' }
-  const [exp, cls, stag, ctag, nonce] = payload.split('.')
-  if (cls !== 'delivery' || stag !== sessionTag(ctx.session) || !nonce || Number(exp) <= nowMs || (_liveDeliveryGrants.get(nonce) ?? 0) <= nowMs) return { ok: false, code: 'grant-invalid' }
+  const [exp, c, stag, ctag, nonce] = payload.split('.')
+  if (c !== cls || stag !== sessionTag(ctx.session) || !nonce || Number(exp) <= nowMs || (_liveDeliveryGrants.get(nonce) ?? 0) <= nowMs) return { ok: false, code: 'grant-invalid' }
   if (ctag !== scopeTag(scope)) return { ok: false, code: 'grant-scope' }
   _liveDeliveryGrants.delete(nonce)
   return { ok: true, grantId: deliveryGrantHash(token) }
+}
+
+/**
+ * Spend a `delivery` grant for ONE move. Single-use: a success deletes it. A grant minted for another piece or
+ * move is `grant-scope` and is NOT spent (it was not used); an expired, forged, unknown, other-session or
+ * already-spent one is `grant-invalid`. A `read` grant never reaches here (its class differs) and this one never stands for a `read`.
+ */
+export function consumeDeliveryGrant(token: string | null | undefined, ctx: { session: string; loopback?: boolean }, scope: DeliveryScope, nowMs = _now()): DeliveryGrantUse {
+  return consumeOwnerGrant('delivery', token, ctx, scope, nowMs)
+}
+
+/** NAVEGADOR S4b: the scope a browser-unlock grant is bound to — ONE session's browser. */
+function browserScope(managedId: string): DeliveryScope { return { pieceKey: `browser:${managedId}`, move: 'unlock' } }
+
+/**
+ * Spend a `browser-unlock` grant for ONE session's browser. Same rules as `consumeDeliveryGrant`: single-use,
+ * ≤ 5 min, loopback (or the CLI socket), this HTTP session; another browser's grant is `grant-scope` (not spent).
+ */
+export function consumeBrowserUnlockGrant(token: string | null | undefined, ctx: { session: string; loopback?: boolean }, managedId: string, nowMs = _now()): DeliveryGrantUse {
+  if (!managedId) return { ok: false, code: 'grant-invalid' }
+  return consumeOwnerGrant('browser-unlock', token, ctx, browserScope(managedId), nowMs)
 }
 
 function ownerProofUnavailable(): Refusal {
@@ -702,6 +730,15 @@ function ownerProofLocalOnly(): Refusal {
 export async function requireDeliveryOwner(ctx: GateContext, scope: DeliveryScope): Promise<GateResult> {
   if (!ctx.loopback && !fromSocket(ctx)) return ownerProofLocalOnly()
   if (!scope.pieceKey || !scope.move) return refused('bad-request', 'a delivery proof names the piece and the move')
+  const proven = await proveOwnerFresh()
+  if (!proven.ok) return proven
+  const grant = mintOwnerGrant('delivery', ctx.session, scope)
+  vaultAudit({ type: 'delivery.owner-proof', purpose: deliveryGrantHash(grant), name: `${scope.pieceKey}|${scope.move}`.slice(0, 200) })
+  return { ok: true, grant }
+}
+
+/** The owner proof both dedicated gates share: never "the vault is open", always a fresh human proof. */
+async function proveOwnerFresh(): Promise<{ ok: true } | Refusal> {
   if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
   const state = await loadState()
   if (state.frozen) return refused('stepup-frozen', sentence('stepup-frozen'))
@@ -711,9 +748,55 @@ export async function requireDeliveryOwner(ctx: GateContext, scope: DeliveryScop
   const g = await proveGesture(o)
   if (!g.ok) return g
   noteVaultActivity()
-  const grant = mintDeliveryGrant(ctx.session, scope)
-  vaultAudit({ type: 'delivery.owner-proof', purpose: deliveryGrantHash(grant), name: `${scope.pieceKey}|${scope.move}`.slice(0, 200) })
+  return { ok: true }
+}
+
+function browserProofNoVault(): Refusal {
+  return refused('owner-proof-unavailable', vaultLang() === 'pt'
+    ? 'Para assumir o navegador de uma sessão, o agentistics precisa confirmar que é você. Abra o Cofre e crie uma senha (ou ative o Windows Hello / Touch ID); depois tente de novo.'
+    : 'To take over a session\'s browser, agentistics needs to confirm it is you. Open the Vault and set a password (or turn on Windows Hello / Touch ID), then try again.')
+}
+
+/**
+ * NAVEGADOR S4b — the person's proof before a session's browser is unlocked. The SAME primitive as
+ * `requireDeliveryOwner` (fresh `proveGesture`: the typed vault password first, else the vault's own human
+ * wrapper; silent-only → `owner-proof-unavailable`; off this computer → `owner-proof-local-only`), minting a
+ * single-use `browser-unlock` grant bound to this HTTP session and to THAT browser only. Who the process is
+ * (the socket check, `browser-caller.ts`) is a hint layered on top; this is the proof.
+ */
+export async function requireBrowserUnlockOwner(ctx: GateContext, managedId: string): Promise<GateResult> {
+  if (!ctx.loopback && !fromSocket(ctx)) return ownerProofLocalOnly()
+  if (typeof managedId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(managedId)) return refused('bad-request', 'a browser proof names the session (its managed id)')
+  if ((await vaultStatus()).state === 'uninitialized') return browserProofNoVault()
+  const proven = await proveOwnerFresh()
+  if (!proven.ok) return proven.code === 'owner-proof-unavailable' ? browserProofNoVault() : proven
+  const grant = mintOwnerGrant('browser-unlock', ctx.session, browserScope(managedId))
+  vaultAudit({ type: 'browser.owner-proof', purpose: deliveryGrantHash(grant), name: managedId })
   return { ok: true, grant }
+}
+
+function personalProofNoVault(): Refusal {
+  return refused('owner-proof-unavailable', vaultLang() === 'pt'
+    ? 'Para usar o navegador pessoal, o agentistics precisa confirmar que é você. Abra o Cofre e crie uma senha (ou ative o Windows Hello / Touch ID); depois tente de novo.'
+    : 'To use your own browser, agentistics needs to confirm it is you. Open the Vault and set a password (or turn on Windows Hello / Touch ID), then try again.')
+}
+
+/**
+ * NAVEGADOR S10 r3 — the owner's proof for the person's OWN browser. The socket cannot prove "this is the person"
+ * (a detached child, a `--network host` container, `systemd-run` all pass it), so the same fresh vault proof the
+ * padlock unlock owes mints a SHORT-LIVED grant (≤ 12 h, random, in memory, revocable — `browser/personal-grant.ts`)
+ * that the person's UI sends on every personal door. Unlike a padlock grant it is not single-use: it stands for
+ * the whole sitting. Off this computer: `owner-proof-local-only`; a vault that cannot ask a person: the Vault action.
+ */
+export async function mintPersonalBrowserGrant(ctx: GateContext): Promise<{ ok: true; grant: string; expiresAt: number } | Refusal> {
+  if (!ctx.loopback && !fromSocket(ctx)) return ownerProofLocalOnly()
+  if ((await vaultStatus()).state === 'uninitialized') return personalProofNoVault()
+  const proven = await proveOwnerFresh()
+  if (!proven.ok) return proven.code === 'owner-proof-unavailable' ? personalProofNoVault() : proven
+  const { personalGrants } = await import('../browser/personal-grant')
+  const minted = personalGrants().mint(ctx.session)
+  vaultAudit({ type: 'browser.owner-proof', purpose: deliveryGrantHash(minted.token), name: 'personal' })
+  return { ok: true, grant: minted.token, expiresAt: minted.expiresAt }
 }
 
 /**

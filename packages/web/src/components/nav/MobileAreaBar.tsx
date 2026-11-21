@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ComponentType, type CSSProperties } from 'react'
 import { BarChart3, ChevronRight, ClipboardList, Ellipsis, Gauge, MessageSquare, type LucideIcon } from 'lucide-react'
 import { areaOfPath, APP_AREAS, type AreaId } from '../../lib/appAreas'
 import { mobileAreaSlot, previousPage, rememberPreviousPage } from '../../lib/mobileAreaTabs'
@@ -9,7 +9,7 @@ import { MobilePillBar } from './MobilePillBar'
 export interface MobileAreaAction {
   key: string
   label: string
-  icon: LucideIcon
+  icon: LucideIcon | ComponentType<{ size?: number; style?: CSSProperties }>
   onClick: () => void
   accent?: boolean
   badge?: string

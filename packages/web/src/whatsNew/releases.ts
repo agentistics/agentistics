@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.222.0': {
+    features: [
+      {
+        pt: 'Navegador do modelo: veja o assistente navegando na web em tempo real, com um cadeado que mostra quando ele está numa página protegida e desbloqueio com o cofre quando precisar entrar numa conta.',
+        en: 'Model browser: watch the assistant browse the web in real time, with a padlock showing when it is on a protected page and a vault unlock when it needs to sign in.',
+      },
+      {
+        pt: 'O navegador aparece como um cartão dentro da conversa e pode ser aberto em tela cheia.',
+        en: 'The browser shows up as a card inside the conversation and can be opened full screen.',
+      },
+      {
+        pt: 'Seu próprio navegador na barra da direita, para abrir páginas sem sair da sessão.',
+        en: 'Your own browser in the right rail, to open pages without leaving the session.',
+      },
+      {
+        pt: 'Janelas flutuantes que seguem você entre páginas: o navegador continua visível ao ir de Sessões para Tarefas, com Voltar e minimizar, e um aviso mostra o estado da sessão.',
+        en: 'Floating windows that follow you across pages: the browser stays visible when you go from Sessions to Tasks, with Back and minimize, and a chip shows the session state.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Limpeza automática mais ampla: ambientes de teste encerrados, cópias temporárias antigas e restos de pacotes do git são apagados com segurança — nunca o que está marcado para manter, em uso ou de outro usuário.',
+        en: 'Wider automatic cleanup: finished test environments, old temporary copies and leftover git pack files are removed safely — never anything marked to keep, in use or owned by another user.',
+      },
+    ],
+  },
   '2.221.4': {
     features: [],
     fixes: [

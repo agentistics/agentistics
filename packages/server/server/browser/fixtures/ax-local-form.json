@@ -1,0 +1,1321 @@
+[
+ {
+  "nodeId": "2",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "RootWebArea"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 144
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Form page",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label",
+     "superseded": true
+    },
+    {
+     "type": "relatedElement",
+     "value": {
+      "type": "computedString",
+      "value": "Form page"
+     },
+     "nativeSource": "title"
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "focused",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "url",
+    "value": {
+     "type": "string",
+     "value": "http://localhost:46125/"
+    }
+   }
+  ],
+  "childIds": [
+   "4"
+  ],
+  "backendDOMNodeId": 2,
+  "frameId": "237D0C7DECBF3F76F6724E82D7613319"
+ },
+ {
+  "nodeId": "4",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "2",
+  "childIds": [
+   "7"
+  ],
+  "backendDOMNodeId": 4
+ },
+ {
+  "nodeId": "7",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "4",
+  "childIds": [
+   "8",
+   "9",
+   "10",
+   "13",
+   "27",
+   "28",
+   "29",
+   "30",
+   "31"
+  ],
+  "backendDOMNodeId": 7
+ },
+ {
+  "nodeId": "8",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "heading"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 96
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Sign in",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Sign in"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "level",
+    "value": {
+     "type": "integer",
+     "value": 1
+    }
+   }
+  ],
+  "parentId": "7",
+  "childIds": [
+   "32"
+  ],
+  "backendDOMNodeId": 8
+ },
+ {
+  "nodeId": "9",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "paragraph"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 133
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "7",
+  "childIds": [
+   "33"
+  ],
+  "backendDOMNodeId": 9
+ },
+ {
+  "nodeId": "10",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "LabelText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 104
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "7",
+  "childIds": [
+   "34",
+   "11"
+  ],
+  "backendDOMNodeId": 10
+ },
+ {
+  "nodeId": "13",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "LabelText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 104
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "7",
+  "childIds": [
+   "35",
+   "14"
+  ],
+  "backendDOMNodeId": 13
+ },
+ {
+  "nodeId": "27",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "button"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 9
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Go",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "relatedElement",
+     "nativeSource": "label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Go"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "invalid",
+    "value": {
+     "type": "token",
+     "value": "false"
+    }
+   },
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   }
+  ],
+  "parentId": "7",
+  "childIds": [
+   "36"
+  ],
+  "backendDOMNodeId": 27
+ },
+ {
+  "nodeId": "28",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "link"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 110
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Next page",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Next page"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "url",
+    "value": {
+     "type": "string",
+     "value": "http://localhost:46125/page2"
+    }
+   }
+  ],
+  "parentId": "7",
+  "childIds": [
+   "37"
+  ],
+  "backendDOMNodeId": 28
+ },
+ {
+  "nodeId": "29",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "generic"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 88
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "7",
+  "childIds": [],
+  "backendDOMNodeId": 29
+ },
+ {
+  "nodeId": "30",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "7",
+  "childIds": [],
+  "backendDOMNodeId": 30
+ },
+ {
+  "nodeId": "31",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "button"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 9
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Far",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "relatedElement",
+     "nativeSource": "label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Far"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "invalid",
+    "value": {
+     "type": "token",
+     "value": "false"
+    }
+   },
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   }
+  ],
+  "parentId": "7",
+  "childIds": [
+   "38"
+  ],
+  "backendDOMNodeId": 31
+ },
+ {
+  "nodeId": "32",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Sign in",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Sign in"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "8",
+  "childIds": [
+   "-1000000002"
+  ],
+  "backendDOMNodeId": 32
+ },
+ {
+  "nodeId": "33",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Use your work e-mail.",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Use your work e-mail."
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "9",
+  "childIds": [
+   "-1000000003"
+  ],
+  "backendDOMNodeId": 33
+ },
+ {
+  "nodeId": "34",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Name ",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Name "
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "10",
+  "childIds": [
+   "-1000000004"
+  ],
+  "backendDOMNodeId": 34
+ },
+ {
+  "nodeId": "11",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "textbox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 170
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Name ",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "relatedElement",
+     "value": {
+      "type": "computedString",
+      "value": "Name "
+     },
+     "nativeSource": "labelwrapped",
+     "nativeSourceValue": {
+      "type": "nodeList",
+      "relatedNodes": [
+       {
+        "backendDOMNodeId": 10,
+        "text": "Name "
+       }
+      ]
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    },
+    {
+     "type": "placeholder",
+     "attribute": "placeholder",
+     "superseded": true
+    },
+    {
+     "type": "placeholder",
+     "attribute": "aria-placeholder",
+     "superseded": true
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "invalid",
+    "value": {
+     "type": "token",
+     "value": "false"
+    }
+   },
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   },
+   {
+    "name": "settable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "multiline",
+    "value": {
+     "type": "boolean",
+     "value": false
+    }
+   },
+   {
+    "name": "readonly",
+    "value": {
+     "type": "boolean",
+     "value": false
+    }
+   },
+   {
+    "name": "required",
+    "value": {
+     "type": "boolean",
+     "value": false
+    }
+   },
+   {
+    "name": "labelledby",
+    "value": {
+     "type": "nodeList",
+     "relatedNodes": [
+      {
+       "backendDOMNodeId": 10,
+       "text": "Name "
+      }
+     ]
+    }
+   }
+  ],
+  "parentId": "10",
+  "childIds": [
+   "12"
+  ],
+  "backendDOMNodeId": 11
+ },
+ {
+  "nodeId": "35",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Color ",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Color "
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "13",
+  "childIds": [
+   "-1000000005"
+  ],
+  "backendDOMNodeId": 35
+ },
+ {
+  "nodeId": "14",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "combobox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 209
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Color ",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "relatedElement",
+     "value": {
+      "type": "computedString",
+      "value": "Color "
+     },
+     "nativeSource": "labelwrapped",
+     "nativeSourceValue": {
+      "type": "nodeList",
+      "relatedNodes": [
+       {
+        "backendDOMNodeId": 13,
+        "text": "Color "
+       }
+      ]
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "value": {
+   "type": "string",
+   "value": "Red"
+  },
+  "properties": [
+   {
+    "name": "invalid",
+    "value": {
+     "type": "token",
+     "value": "false"
+    }
+   },
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "hasPopup",
+    "value": {
+     "type": "token",
+     "value": "menu"
+    }
+   },
+   {
+    "name": "expanded",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": false
+    }
+   },
+   {
+    "name": "labelledby",
+    "value": {
+     "type": "nodeList",
+     "relatedNodes": [
+      {
+       "backendDOMNodeId": 13,
+       "text": "Color "
+      }
+     ]
+    }
+   }
+  ],
+  "parentId": "13",
+  "childIds": [
+   "17"
+  ],
+  "backendDOMNodeId": 14
+ },
+ {
+  "nodeId": "36",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Go",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Go"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "27",
+  "childIds": [
+   "-1000000006"
+  ],
+  "backendDOMNodeId": 36
+ },
+ {
+  "nodeId": "37",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Next page",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Next page"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "28",
+  "childIds": [
+   "-1000000007"
+  ],
+  "backendDOMNodeId": 37
+ },
+ {
+  "nodeId": "38",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "StaticText"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 158
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Far",
+   "sources": [
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Far"
+     }
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "31",
+  "childIds": [
+   "-1000000008"
+  ],
+  "backendDOMNodeId": 38
+ },
+ {
+  "nodeId": "-1000000002",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Sign in"
+  },
+  "properties": [],
+  "parentId": "32",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000003",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Use your work e-mail."
+  },
+  "properties": [],
+  "parentId": "33",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000004",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Name "
+  },
+  "properties": [],
+  "parentId": "34",
+  "childIds": []
+ },
+ {
+  "nodeId": "12",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "generic"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 88
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "editable",
+    "value": {
+     "type": "token",
+     "value": "plaintext"
+    }
+   }
+  ],
+  "parentId": "11",
+  "childIds": [],
+  "backendDOMNodeId": 12
+ },
+ {
+  "nodeId": "-1000000005",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Color "
+  },
+  "properties": [],
+  "parentId": "35",
+  "childIds": []
+ },
+ {
+  "nodeId": "17",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "MenuListPopup"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 128
+  },
+  "name": {
+   "type": "computedString",
+   "value": "",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "attribute",
+     "attribute": "title"
+    }
+   ]
+  },
+  "properties": [],
+  "parentId": "14",
+  "childIds": [
+   "18"
+  ],
+  "backendDOMNodeId": 17
+ },
+ {
+  "nodeId": "-1000000006",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Go"
+  },
+  "properties": [],
+  "parentId": "36",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000007",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Next page"
+  },
+  "properties": [],
+  "parentId": "37",
+  "childIds": []
+ },
+ {
+  "nodeId": "-1000000008",
+  "ignored": false,
+  "role": {
+   "type": "internalRole",
+   "value": "InlineTextBox"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 101
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Far"
+  },
+  "properties": [],
+  "parentId": "38",
+  "childIds": []
+ },
+ {
+  "nodeId": "18",
+  "ignored": true,
+  "ignoredReasons": [
+   {
+    "name": "uninteresting",
+    "value": {
+     "type": "boolean",
+     "value": true
+    }
+   }
+  ],
+  "role": {
+   "type": "role",
+   "value": "none"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 0
+  },
+  "parentId": "17",
+  "childIds": [
+   "21",
+   "24"
+  ],
+  "backendDOMNodeId": 18
+ },
+ {
+  "nodeId": "21",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "option"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 127
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Red",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Red"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "selected",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   }
+  ],
+  "parentId": "18",
+  "childIds": [],
+  "backendDOMNodeId": 21
+ },
+ {
+  "nodeId": "24",
+  "ignored": false,
+  "role": {
+   "type": "role",
+   "value": "option"
+  },
+  "chromeRole": {
+   "type": "internalRole",
+   "value": 127
+  },
+  "name": {
+   "type": "computedString",
+   "value": "Green",
+   "sources": [
+    {
+     "type": "relatedElement",
+     "attribute": "aria-labelledby"
+    },
+    {
+     "type": "attribute",
+     "attribute": "aria-label"
+    },
+    {
+     "type": "contents",
+     "value": {
+      "type": "computedString",
+      "value": "Green"
+     }
+    },
+    {
+     "type": "attribute",
+     "attribute": "title",
+     "superseded": true
+    }
+   ]
+  },
+  "properties": [
+   {
+    "name": "focusable",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": true
+    }
+   },
+   {
+    "name": "selected",
+    "value": {
+     "type": "booleanOrUndefined",
+     "value": false
+    }
+   }
+  ],
+  "parentId": "18",
+  "childIds": [],
+  "backendDOMNodeId": 24
+ }
+]
