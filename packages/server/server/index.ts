@@ -4065,7 +4065,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           void writeAudit({ action: ev.action, ip: clientIp, targetId: ev.managedId })
         // F1: only the padlock route needs the caller; it is read once, before the route decides.
         // S10/F2: the personal routes read it too — the person's browser is the person's, by the socket.
-        const lockCaller = url.pathname === '/api/browser/lock' || url.pathname.startsWith('/api/browser/personal/') ? await identify() : null
+        // S12: "Delete profiles" is person-only too (it removes the personal profile's cookies and logins).
+        const lockCaller = (await import('./browser/personal-doors')).routeNeedsCaller(url.pathname) ? await identify() : null
         // S4b: an unlock spends the person's single-use vault grant (header, never a URL), bound to the same
         // HTTP session the vault route minted it for, on loopback only. The socket check stays as a hint.
         const ownerProof = async (managedId: string) => {

@@ -232,10 +232,12 @@ export async function browserRoute(method: string, pathname: string, body: unkno
   // while any browser is live.
   if (pathname === '/api/browser/profiles/delete') {
     if (method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } }
+    // PERSON-ONLY, fail-closed, like the padlock: a session, a forged proof and a caller the socket cannot
+    // identify are all refused (the personal profile holds the person's cookies and logins).
     const caller = deps.caller ? deps.caller() : { kind: 'unknown' as const, reason: 'no-peer' as const }
-    if (caller.kind === 'session') {
-      const refused = callerRefusal(caller)!
-      return { status: refused.status, body: { ok: false, error: refused.error, sentence: refused.sentence } }
+    const refused = callerRefusal(caller)
+    if (refused) {
+      return { status: refused.status, body: { ok: false, error: refused.error, sentence: refused.sentence, ...(refused.why ? { why: refused.why } : {}) } }
     }
     if (!deps.host.deleteProfiles) return { status: 501, body: { ok: false, error: 'unsupported' } }
     const r = deps.host.deleteProfiles()

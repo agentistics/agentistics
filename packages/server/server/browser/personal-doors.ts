@@ -42,3 +42,8 @@ async function personalOwnerDoor(i: { owner: StreamOwner; session: string; calle
 
 /** The sub-protocol an accepted input socket answers with (the browser requires the server to pick one it offered). */
 export const INPUT_ACCEPT_PROTOCOL = PERSONAL_GRANT_PROTOCOL
+
+/** Routes whose caller `index.ts` must read from the socket before the route decides (person-only doors). */
+export function routeNeedsCaller(pathname: string): boolean {
+  return pathname === '/api/browser/lock' || pathname === '/api/browser/profiles/delete' || pathname.startsWith('/api/browser/personal/')
+}
