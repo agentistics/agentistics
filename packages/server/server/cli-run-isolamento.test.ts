@@ -21,7 +21,7 @@ describe('RUN.ISOLAMENTO r2: env rules', () => {
     expect(build({ AGENTISTICS_REAPER_EXTRA: '1' }).AGENTISTICS_REAPER_EXTRA).toBeUndefined()
   })
   test('git variables a hook leaks (they point git at the real checkout) are dropped', () => {
-    const names = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0', 'GIT_CONFIG_NOSYSTEM']
+    const names = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0', 'GIT_CONFIG_NOSYSTEM']
     const env = build(Object.fromEntries(names.map(k => [k, '/real'])))
     for (const k of names) expect(env[k]).toBeUndefined()
     expect(build({ GIT_AUTHOR_NAME: 'x' }).GIT_AUTHOR_NAME).toBe('x')

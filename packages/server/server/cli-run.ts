@@ -89,6 +89,7 @@ export const THROWAWAY_ENV_DROP: readonly string[] = [
   'OPENCODE_DB', 'OPENCODE_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
   // A leaked git hook environment would point the run's git at the owner's real repository / index.
   'GIT_DIR', 'GIT_INDEX_FILE', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_CONFIG_PARAMETERS',
+  'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
 ]
 /** Every GIT_CONFIG_* (GLOBAL, SYSTEM, NOSYSTEM, COUNT, KEY_n, VALUE_n, ...): a hook leaks them and they redirect the run's git to the real config. */
 const isGitConfigLeak = (key: string): boolean => /^GIT_CONFIG_/i.test(key)
