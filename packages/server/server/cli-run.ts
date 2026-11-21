@@ -7,6 +7,7 @@ import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
 import { CURRENT_VERSION } from './version'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
+import { blockedPorts, forwardPorts, netnsArgv, netnsNotice, probeNetns, startSlirp, stopSlirp } from './run-netns'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
 export { SEED_ALLOW }
@@ -29,12 +30,14 @@ export type ThrowawayState = {
   /** Short per-run TMPDIR/TMUX_TMPDIR (see `createRunTmp`); removed with the run. */
   tmp?: string
   pid?: number
+  /** slirp4netns serving this run's network namespace (see run-netns.ts); signalled only while it still is a slirp4netns. */
+  slirpPid?: number
   unit?: string
   startedAt: string
   command: string[]
 }
 
-type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[]; serve: boolean; seedFrom: string | null; seedReal: boolean; cwd: string | null; keepEnv: string[] }
+type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[]; serve: boolean; seedFrom: string | null; seedReal: boolean; cwd: string | null; keepEnv: string[]; noNetns: boolean }
 
 /** A Unix socket path (sun_path) holds 108 bytes including the NUL; Chrome/tmux sockets live under TMPDIR. */
 export const SOCKET_PATH_MAX = 107
@@ -164,8 +167,8 @@ export function isOwnMachineHost(rawHost: string, ownHostname: string = hostname
 
 /**
  * RUN.CLI-SERVIDOR-REAL: why a call the agentop CLI is about to make must NOT go out from inside a run, else null.
- * SCOPE: this guards the agentop CLI process only (its `fetch` and `WebSocket`); it is not a network block for other processes
- * a run starts (a script, `curl`, a raw socket can still reach 47291/47292).
+ * SCOPE: this guards the agentop CLI process only (its `fetch` and `WebSocket`). The REAL block for every other process is the
+ * run's own network namespace (`run-netns.ts`); this guard remains as the fallback where namespaces are unavailable (`--no-netns`).
  * The real server sits on 47291/47292 and a CLI verb that fell back to it listed real sessions and could write to the real
  * store; a run with no `--serve` has no server of its own, so its own ports are refused with a sentence rather than left to fail.
  * Every loopback spelling counts (see `isOwnMachineHost`) over http, https, ws and wss.
@@ -258,12 +261,14 @@ export function readState(name: string): ThrowawayState | null {
 }
 
 function usage(): string {
-  return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] [--keep-env NAME]... -- <command...>
+  return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] [--keep-env NAME]... [--no-netns] -- <command...>
        agentop run --rm [--ttl 2h] [--port-offset N] [--name x]
        agentop run --rm --serve [--seed-from <staging> | --seed-real] [--cwd <worktree>] [--ttl 2h] [--name x] [-- <server command...>]
        --serve with no command runs the installed agentop; use --cwd with an explicit checkout command to serve that checkout.
        Env: AGENTISTICS_*/AGENTOP_* switches (and leaked GIT_* vars) are dropped; --keep-env NAME re-allows one (never a store/config path).
-       Network: inside a run the agentop CLI refuses the real server (:47291/:47292); other processes a run starts are NOT network-isolated.
+       Network: a run gets its own network namespace (own loopback; internet via slirp4netns), so NO program in it can reach the real server
+       (:47291/:47292); --serve ports are forwarded to the host's 127.0.0.1. Where namespaces are unavailable it falls back to the CLI-only guard
+       and says so; --no-netns asks for that fallback (debugging).
        agentop run ls
        agentop run stop <name>`
 }
@@ -298,6 +303,7 @@ export function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { act
   let seedFrom: string | null = null
   let seedReal = false
   let cwd: string | null = null
+  let noNetns = false
   const keepEnv: string[] = []
   let command: string[] = []
   for (let i = 0; i < args.length; i++) {
@@ -305,6 +311,7 @@ export function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { act
     if (arg === '--') { command = args.slice(i + 1); break }
     if (arg === '--rm') { remove = true; continue }
     if (arg === '--serve') { serve = true; continue }
+    if (arg === '--no-netns') { noNetns = true; continue }
     if (arg === '--seed-real') { seedReal = true; continue }
     if (arg === '--seed-from') { seedFrom = args[++i] ?? ''; continue }
     if (arg === '--keep-env') {
@@ -328,7 +335,7 @@ export function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { act
   if (!remove) throw new Error('agentop run requires --rm (throwaway runs are always explicit)')
   if ((seedFrom !== null || seedReal || cwd !== null) && !serve) throw new Error('--seed-from, --seed-real and --cwd only apply with --serve')
   if (seedFrom !== null && seedReal) throw new Error('--seed-from and --seed-real are exclusive')
-  return { name, ttl, portOffset, remove, command, serve, seedFrom, seedReal, cwd, keepEnv }
+  return { name, ttl, portOffset, remove, command, serve, seedFrom, seedReal, cwd, keepEnv, noNetns }
 }
 
 type ThrowawayPorts = { apiPort: number; webPort: number; reservationPaths: string[] }
@@ -505,6 +512,7 @@ export async function stopState(state: ThrowawayState): Promise<void> {
   if (process.platform === 'linux') await reapRunOwned(state.home)
   rmSync(state.home, { recursive: true, force: true })
   removeRunTmp(state.tmp)
+  stopSlirp(state.slirpPid)
   releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)
   rmSync(statePath(state.name), { force: true })
   console.log(`removed ${state.home}`)
@@ -711,6 +719,9 @@ async function startRun(options: RunOptions): Promise<number> {
     inside,
   }) ? (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'heavy', '--'] : [process.execPath, 'heavy', '--']) : []
   const argv = options.command.length ? [...heavyPrefix, ...options.command] : (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'server'] : [process.execPath, 'server'])
+  const netns = probeNetns(options.noNetns)
+  const notice = netnsNotice(netns)
+  if (notice) console.error(notice)
   const tmp = createRunTmp()
   state.tmp = tmp
   let child: ReturnType<typeof spawn>
@@ -721,8 +732,9 @@ async function startRun(options: RunOptions): Promise<number> {
     const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0, keep: options.keepEnv, serve: options.serve })
     keptEnv = keptEnvOf(env, process.env, options.keepEnv)
     systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await commandExists('systemd-run')
-    const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...argv] : argv
-    child = spawn(systemd ? 'systemd-run' : argv[0]!, systemd ? childArgs : argv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
+    const runArgv = netns.mode === 'netns' ? netnsArgv(argv, process.getuid!(), process.getgid!(), blockedPorts()) : argv
+    const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...runArgv] : runArgv
+    child = spawn(systemd ? 'systemd-run' : runArgv[0]!, systemd ? childArgs : runArgv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
     state.pid = child.pid
     if (systemd) state.unit = unit
     writeFileSync(statePath(options.name), JSON.stringify(state, null, 2), { mode: 0o600 })
@@ -738,10 +750,23 @@ async function startRun(options: RunOptions): Promise<number> {
   if (serveBuildNoticeResult) console.log(serveBuildNoticeResult.summary)
   if (keptEnv.length) console.log(`  kept env: ${keptEnv.join(', ')}`)
 
+  // Started WITHOUT awaiting: a command that dies at once must still reach `childExit` below; cleanup waits for this task so no slirp is orphaned.
+  const slirpTask: Promise<void> = netns.mode !== 'netns' ? Promise.resolve() : (async () => {
+    const slirp = await startSlirp(child.pid!, join(tmp, 'slirp.sock'), () => child.exitCode === null && child.signalCode === null)
+    if ('error' in slirp) { if (child.exitCode === null && child.signalCode === null) console.error(`agentop run: the run has its own loopback but no outside network (${slirp.error})`) }
+    else {
+      state.slirpPid = slirp.pid
+      writeFileSync(statePath(options.name), JSON.stringify(state, null, 2), { mode: 0o600 })
+      if (options.serve) {
+        const failed = await forwardPorts(slirp.socket, [apiPort, webPort])
+        if (failed.length) console.error(`agentop run: could not forward port(s) ${failed.join(', ')} to the host; the served URL is reachable only from inside the run`)
+      }
+    }
+  })().catch(error => { console.error(`agentop run: network setup failed (${error instanceof Error ? error.message : String(error)})`) })
   // One shared promise: a signal handler and the normal exit path both call this, and the second
   // caller must wait for the first one's removal instead of exiting the process under it.
   let cleaning: Promise<void> | undefined
-  const cleanup = () => (cleaning ??= stopState(state))
+  const cleanup = () => (cleaning ??= slirpTask.then(() => stopState(state)))
   // The command's end is recorded in the log BEFORE any cleanup line, so whoever reads run.log (the ambiente flow) can name the exit code.
   const childExit = new Promise<number>(resolve => {
     child.once('exit', (status, sig) => { console.log(status !== null ? `exit ${status}` : `exit signal ${sig}`); resolve(status ?? (sig ? 1 : 0)) })
