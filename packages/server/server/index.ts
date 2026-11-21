@@ -623,7 +623,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // PLAN.LIMITS — the 5-hour and weekly windows each harness account last reported, with the
     // plan registered in Settings → Billing. Reads only what the host already stored.
     if (url.pathname === '/api/plan-limits' && req.method === 'GET') {
-      const [{ planLimitsPayload, sampleLivePlanSessions, planAccountKey }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
+      const [{ planLimitsPayload, sampleLivePlanSessions, planAccountKey, fleetLiveSessions }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
       const now = Date.now()
       let liveSessions: import('@agentistics/core').LivePlanSession[] = []
       // USO.CARREGANDO: the data build is only for the live burn sample — never wait for the whole of it.
@@ -644,7 +644,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         return sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByAccount, working)
       })(), PLAN_LIMITS_DATA_WAIT_MS)
       liveSessions = sampled ?? []
-      const body = await planLimitsPayload(prefs.billing, now, liveSessions)
+      // Peek only (see above): the running fleet sessions hold slots even when idle or waiting.
+      const { processSessionHub: hubOf } = await import('./sessions/session-hub')
+      const fleetLive = await fleetLiveSessions(hubOf()?.last()?.sessions ?? [])
+      const body = await planLimitsPayload(prefs.billing, now, liveSessions, fleetLive)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
     }
     // The tab's push streams over ONE WebSocket (`stream-mux.ts`): a browser's ~6 HTTP/1.1
