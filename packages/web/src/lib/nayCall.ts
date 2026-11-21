@@ -1,13 +1,13 @@
 /**
  * nayCall.ts — PURE: the "call Nay" button in the Nay button's right-click pop (owner, 2026-11-07).
  *
- * The voice call is NOT implemented in this repository. The engine announces it as an ordinary
+ * The call is NOT implemented in this repository. The engine announces it as an ordinary
  * `composer` surface with the `phone` icon (`docs/engine-surfaces.md`), and the session composer's
  * phone button opens it with `openEngineSurface`. This module only answers three questions about that
- * existing path, so the pop reuses it instead of duplicating any voice logic:
+ * existing path, so the pop reuses it instead of duplicating any call logic:
  *
- *  - which announced surface is the call (`callSurfaceOf`) — none on a community build, with the voice
- *    kill switch, or with an engine that has no voice, and then the pop shows no call button at all;
+ *  - which announced surface is the call (`callSurfaceOf`) — none on a community build, with the
+ *    kill switch, or with an engine that has no call surface, and then the pop shows no call button at all;
  *  - what state the call is in (`callStateOf`) — idle, on screen, or parked (a call in progress that was
  *    taken off screen; the top-bar pill shows the very same mounted surface);
  *  - which Nay conversation the call is placed on (`naySessionForCall`).

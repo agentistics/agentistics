@@ -6,7 +6,7 @@ import { REQUEST_TTL_MS, STALE_MS, STATE_MAX_BYTES, acceptReport, callSurfaceFro
 
 const surfaces = [
   { id: 'sparkle', placement: 'composer', icon: 'sparkles', label: { pt: 'a', en: 'a' } },
-  { id: 'voice-call', placement: 'composer', icon: 'phone', label: { pt: 'Ligar', en: 'Call' } },
+  { id: 'nay-call', placement: 'composer', icon: 'phone', label: { pt: 'Ligar', en: 'Call' } },
 ]
 const surface = callSurfaceFrom(surfaces)
 const T0 = 1_000_000
@@ -15,8 +15,8 @@ const leaderDeps = (over: Partial<StartDeps> = {}, now = T0): StartDeps => ({ ve
 const deps = (over: Partial<StartDeps> = {}, now = T0): StartDeps => ({ verify: async () => null, roleOf: async () => undefined, now: () => now, ...over })
 
 describe('callSurfaceFrom', () => {
-  test('the same surface the button picks: composer + phone; none without voice', () => {
-    expect(surface?.id).toBe('voice-call')
+  test('the same surface the button picks: composer + phone; none without a call surface', () => {
+    expect(surface?.id).toBe('nay-call')
     expect(callSurfaceFrom([])).toBeNull()
     expect(callSurfaceFrom([surfaces[0]!, { id: 'r', placement: 'rail', icon: 'phone', label: { pt: 'a', en: 'a' } }])).toBeNull()
   })
@@ -38,7 +38,7 @@ describe('parseReport / callView', () => {
     expect(callView(store, surface, T0 + 1000)).toMatchObject({ browser: true, call: { active: true, sessionId: 'nay-1', since: 7 } })
     expect(callView(store, surface, T0 + STALE_MS + 1)).toMatchObject({ browser: false, call: null })
   })
-  test('without a voice surface the call is not available', () => {
+  test('without a call surface the call is not available', () => {
     expect(callView(newNayCallStore(), null, T0).available).toBe(false)
   })
 })
@@ -64,8 +64,8 @@ describe('requestStart', () => {
     expect(await requestStart(store, surface, LEADER, leaderDeps())).toMatchObject({ ok: true, already: true })
     expect(store.requestedAt).toBeNull()
   })
-  test('refused with no voice, and with no browser open (never queued)', async () => {
-    expect(await requestStart(fresh(), null, LEADER, leaderDeps())).toEqual({ ok: false, error: 'no_voice' })
+  test('refused with no call surface, and with no browser open (never queued)', async () => {
+    expect(await requestStart(fresh(), null, LEADER, leaderDeps())).toEqual({ ok: false, error: 'no_call_surface' })
     const empty = newNayCallStore()
     expect(await requestStart(empty, surface, LEADER, leaderDeps())).toEqual({ ok: false, error: 'no_browser' })
     expect(empty.requestedAt).toBeNull()
@@ -105,7 +105,7 @@ describe('requestStart', () => {
   test('status codes', () => {
     expect(startStatus({ ok: false, error: 'unverified_sender' })).toBe(401)
     expect(startStatus({ ok: false, error: 'leader_only' })).toBe(403)
-    expect(startStatus({ ok: false, error: 'no_voice' })).toBe(409)
+    expect(startStatus({ ok: false, error: 'no_call_surface' })).toBe(409)
     expect(startStatus({ ok: false, error: 'bad_report' })).toBe(400)
   })
 })

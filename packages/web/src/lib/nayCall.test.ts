@@ -2,15 +2,15 @@ import { describe, expect, test } from 'bun:test'
 import { NAY_CALL_IDLE, callStateOf, callSurfaceOf, nayCallFace, naySessionForCall } from './nayCall'
 import type { EngineSurfaceInfo } from './engineSurfaces'
 
-const call: EngineSurfaceInfo = { id: 'voice-call', placement: 'composer', icon: 'phone', label: { pt: 'Ligar', en: 'Call' }, module: '/api/engine/x/voice/m.js' }
+const call: EngineSurfaceInfo = { id: 'nay-call', placement: 'composer', icon: 'phone', label: { pt: 'Ligar', en: 'Call' }, module: '/api/engine/x/surface/m.js' }
 const other: EngineSurfaceInfo = { id: 'sparkle', placement: 'composer', icon: 'sparkles', label: { pt: 'X', en: 'X' }, module: '/api/engine/x/s/m.js' }
 const rail: EngineSurfaceInfo = { id: 'calls', placement: 'rail', icon: 'phone', label: { pt: 'Ligações', en: 'Calls' }, module: '/api/engine/x/calls/m.js' }
 
 describe('callSurfaceOf', () => {
   test('is the composer surface with the phone icon', () => {
-    expect(callSurfaceOf([other, rail, call])?.id).toBe('voice-call')
+    expect(callSurfaceOf([other, rail, call])?.id).toBe('nay-call')
   })
-  test('no voice (community build, kill switch, engine without voice) means no surface, so no button', () => {
+  test('no call surface (community build, kill switch, engine without a call surface) means no surface, so no button', () => {
     expect(callSurfaceOf([])).toBeNull()
     expect(callSurfaceOf([other, rail])).toBeNull()
   })
@@ -19,10 +19,10 @@ describe('callSurfaceOf', () => {
 describe('callStateOf / nayCallFace', () => {
   test('idle without a mounted call surface', () => {
     expect(callStateOf(call, [])).toEqual(NAY_CALL_IDLE)
-    expect(callStateOf(null, [{ surface: { id: 'voice-call' }, sessionId: 's', parked: false, indicator: null }])).toEqual(NAY_CALL_IDLE)
+    expect(callStateOf(null, [{ surface: { id: 'nay-call' }, sessionId: 's', parked: false, indicator: null }])).toEqual(NAY_CALL_IDLE)
   })
   test('reads the same mounted surface the top-bar pill reads (parked or on screen)', () => {
-    const st = callStateOf(call, [{ surface: { id: 'voice-call' }, sessionId: 'nay-1', parked: true, indicator: { since: 1234 } }])
+    const st = callStateOf(call, [{ surface: { id: 'nay-call' }, sessionId: 'nay-1', parked: true, indicator: { since: 1234 } }])
     expect(st).toEqual({ active: true, parked: true, sessionId: 'nay-1', since: 1234 })
   })
   test('the face reads "Ligar para a Nay" idle and "Voltar à ligação" during a call, pt and en', () => {

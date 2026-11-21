@@ -1,6 +1,6 @@
 /**
  * The right-click pop of the Nay button, in a real DOM (happy-dom): the "call Nay" button sits to the LEFT of
- * the vault icon, wears the same round style, is absent when there is no voice call to place, starts the call
+ * the vault icon, wears the same round style, is absent when there is no call to place, starts the call
  * through the callback it is given, and sinks with Escape like the vault does.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
@@ -34,7 +34,7 @@ const rightClick = (host: HTMLElement) => act(async () => { host.querySelector('
 const margin = (el: Element) => parseFloat((el as HTMLElement).style.marginLeft)
 
 describe('the Nay button pop — Call Nay', () => {
-  test('with a voice call: both icons rise, the call one to the LEFT of the vault, same round style', async () => {
+  test('with a call: both icons rise, the call one to the LEFT of the vault, same round style', async () => {
     let pressed = 0
     const host = await mount({ label: 'Ligar para a Nay', active: false, onPress: () => { pressed++ } })
     expect(host.querySelector('[data-nay-call-fab]')).toBeNull() // nothing before the right click
@@ -67,7 +67,7 @@ describe('the Nay button pop — Call Nay', () => {
     expect(callBtn.getAttribute('aria-label')).toBe('Voltar à ligação')
   })
 
-  test('no voice call to place: the pop has the vault icon alone', async () => {
+  test('no call to place: the pop has the vault icon alone', async () => {
     const host = await mount(null)
     await rightClick(host)
     expect(host.querySelector('[data-vault-fab-icon]')).not.toBeNull()
@@ -86,11 +86,11 @@ describe('the Nay button pop — Call Nay', () => {
 
 describe('NayDock wiring', () => {
   const src = readFileSync(join(import.meta.dir, 'NayDock.tsx'), 'utf8')
-  test('the pop gets a call button only when the engine announced the voice surface, and it uses the host opener', () => {
+  test('the pop gets a call button only when the engine announced the call surface, and it uses the host opener', () => {
     expect(src).toContain('call={callSurface ? {')
     expect(src).toContain(': null}')
     expect(src).toContain('openEngineSurface(callSurface, { sessionId: sid, sessionKind: \'nay\', lang })')
-    // No voice logic of its own: no microphone, no audio, no websocket.
+    // No call logic of its own: no microphone, no audio, no websocket.
     expect(src).not.toMatch(/getUserMedia|RTCPeerConnection|new WebSocket/)
   })
   test('an agent start request presses the button for an idle OR a parked call, never for one already on screen', () => {

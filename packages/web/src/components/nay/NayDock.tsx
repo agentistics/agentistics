@@ -313,7 +313,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
 
   // "Ligar para a Nay" in the button's right-click pop. The call is the engine's `composer` surface with
   // the phone icon — the very one the session composer's phone button opens — so this only picks the
-  // surface and the Nay conversation and calls the host's `openEngineSurface`. No voice logic lives here.
+  // surface and the Nay conversation and calls the host's `openEngineSurface`. No call logic lives here.
   const composerSurfaces = useEngineSurfaces('composer')
   const callSurface = callSurfaceOf(composerSurfaces)
   const callState = callStateOf(callSurface, mountedSurfaces)

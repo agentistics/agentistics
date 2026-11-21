@@ -257,7 +257,7 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   },
   agentistics_nay_call: {
     ...GROUPS, risk: 'W', routes: ['GET /api/nay-call', 'POST /api/nay-call/start'],
-    reason: 'reads the Call Nay button\'s state and asks the owner\'s open dashboard to place the voice call; refused without an open dashboard or a voice surface, and only a verified LEADER session may start one',
+    reason: 'reads the Call Nay button\'s state and asks the owner\'s open dashboard to place the call; refused without an open dashboard or a call surface, and only a verified LEADER session may start one',
   },
   agentistics_session_away: {
     ...GROUPS, risk: 'W', routes: ['GET /api/away', 'PUT /api/away', 'PUT /api/away/session', 'POST /api/away/notice'],

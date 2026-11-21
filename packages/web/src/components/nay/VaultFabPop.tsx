@@ -34,7 +34,7 @@ function prefersReducedMotion(): boolean {
 type Action = VaultFabEvent | { type: 'panel-closed' }
 const reducer = (s: VaultFabState, a: Action): VaultFabState => (a.type === 'panel-closed' ? closeVaultPanel(s) : vaultFabReduce(s, a))
 
-/** The "call Nay" button, to the LEFT of the vault icon. Absent (`null`) wherever there is no voice call to place. */
+/** The "call Nay" button, to the LEFT of the vault icon. Absent (`null`) wherever there is no call to place. */
 export interface FabCallButton {
   label: string
   /** A call is in progress: the button reads "back to the call" and wears the filled face. */

@@ -1,12 +1,12 @@
 /**
  * nay-call.ts — the "call Nay" button, readable and pressable by agents (MCP `agentistics_nay_call`).
  *
- * The voice call is the ENGINE's `composer` surface with the phone icon; it lives in the BROWSER (it is
+ * The call is the ENGINE's `composer` surface with the phone icon; it lives in the BROWSER (it is
  * mounted by the web host, with the microphone). This module is the server's mirror of the one button:
  *
  *  - `available` / `surface` come from the same announced-surface list `GET /api/engine` serves, so the
- *    MCP and the button agree on whether a call can be placed (community build, voice kill switch or an
- *    engine without voice → not available, and the pop shows no button either);
+ *    MCP and the button agree on whether a call can be placed (community build, kill switch or an
+ *    engine without a call surface → not available, and the pop shows no button either);
  *  - the call's STATE (`active`, `parked`, which session, since when) is what a browser REPORTS from its
  *    mounted-surface store — the very state the top-bar pill reads — with a heartbeat. A report older
  *    than `STALE_MS` is dropped: "no call" is never claimed from a browser that stopped answering;
@@ -106,7 +106,7 @@ export function acceptReport(store: NayCallStore, body: unknown, now: number): {
   return { ok: true, start }
 }
 
-export type StartError = 'no_voice' | 'no_browser' | 'unverified_sender' | 'leader_only' | 'bad_request'
+export type StartError = 'no_call_surface' | 'no_browser' | 'unverified_sender' | 'leader_only' | 'bad_request'
 export type StartReply =
   | { ok: true; already: boolean; view: NayCallView }
   | { ok: false; error: StartError }
@@ -129,7 +129,7 @@ export async function requestStart(store: NayCallStore, surface: CallSurfaceRef 
   if ((await deps.roleOf(sender)) !== 'leader') return { ok: false, error: 'leader_only' }
   const now = deps.now()
   const view = callView(store, surface, now)
-  if (!view.available) return { ok: false, error: 'no_voice' }
+  if (!view.available) return { ok: false, error: 'no_call_surface' }
   if (!view.browser) return { ok: false, error: 'no_browser' }
   // A call on screen is `already`; a PARKED one is returned to, like the button ("Voltar à ligação").
   if (view.call?.active && !view.call.parked) return { ok: true, already: true, view }

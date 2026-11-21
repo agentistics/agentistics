@@ -1,11 +1,11 @@
 /**
- * useNayCallReport — tells the server the state of the "call Nay" button (the mounted voice-call surface,
+ * useNayCallReport — tells the server the state of the "call Nay" button (the mounted call surface,
  * the same fact the top-bar pill reads) so agents can read it over MCP (`agentistics_nay_call`), and
  * collects an agent's start request from the reply, pressing the same button the person would.
  *
  * It reports on every change and as a heartbeat while the tab is visible; the server forgets a report
  * after 20 s, so a closed or hidden tab reads as "unknown", never as "no call". Nothing is reported on a
- * build with no voice surface.
+ * build with no call surface.
  */
 import { useEffect, useRef } from 'react'
 import type { NayCallState } from '../lib/nayCall'
