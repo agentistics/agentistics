@@ -19,7 +19,7 @@
  */
 import { dirname } from 'node:path'
 import { contextOfActor, flowContext, GuardRefused } from './guard'
-import { reviewOutcome, ruleAState, guardPathsOf } from './guard-host'
+import { reviewOutcome, ruleAState, ruleCState, guardPathsOf } from './guard-host'
 import { withGuardEnvelope, withGuardTransaction } from './guard-transaction'
 import {
   EDGES, GATES, adoptPhase, gatesFor, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
@@ -38,6 +38,8 @@ import { buildEvidenceItem, checkReuse, type EvidenceItem, type EvidenceKind, ty
 import { createGuardsStore, defaultGuardsPath } from './guards-store'
 import { GuardsUnreadable } from './guards-store'
 import { GuardBusy } from './guard-locks'
+import type { ActivityStamp } from './custody'
+import { custodyTick } from './custody-tick'
 import { guardSweep, type SweepDeps } from './sweep'
 import { ownerIntent } from '../flows/owner-intent'
 import { requestReminderText } from './request-reminder'
@@ -112,6 +114,8 @@ export interface DeliveryDeps {
   autoReconcileAwait?: boolean
   /** S2b: the guard sweep the tick runs (rule A shadow/on only). The board store and the three lock paths it judges. */
   sweep?: { tasks: () => Promise<import("../sessions/task-store").TaskStore>; paths?: import("./guard-locks").GuardLockPaths }
+  /** S7a: the custody tick's facts (rule C only; absent = the tick has no custody step). */
+  custody?: { tasks?: () => Promise<import("../sessions/task-store").TaskStore>; paths?: import("./guard-locks").GuardLockPaths; projectsOf: import('./custody-tick').CustodyDeps['projectsOf']; orphanAfterHours: import('./custody-tick').CustodyDeps['orphanAfterHours']; titles?: import('./custody-tick').CustodyDeps['titles'] }
   /** The automatic reconcile's shortest cadence (default 30 min; it also waits 3x what the last run took). */
   autoReconcileEveryMs?: number
   /** Where what gh answered survives a restart (absent: this process only). A cache: a failed read or write costs one run, never a wrong answer. */
@@ -320,6 +324,28 @@ export function createDeliveryService(deps: DeliveryDeps) {
     const sessions = await d.facts.sessions().catch(() => [])
     return sessions.some(x => x.id === actor && x.role === 'leader' && x.taskId === r.taskId)
   }
+  /**
+   * S7a (§5.1): is this write a PIECE ACTION of a leader or custodian — the activity clock the custody tick reads? Only a session
+   * that leads the piece (or holds its custody) counts; the owner, the flow engine and an unattributed caller never do. Rule C
+   * `off` stamps NOTHING, so a machine that never turned it on keeps its records byte for byte.
+   */
+  const leaderAction = async (r: DeliveryRecord, actor: string): Promise<boolean> => {
+    if (!actor || actor === 'owner' || actor === 'unattributed' || actor.startsWith('flow:')) return false
+    if ((await ruleCState(dirname(d.store.path)).catch(() => 'off' as const)) === 'off') return false
+    return r.custody?.sessionId === actor || (await leads(r, actor))
+  }
+  /**
+   * S7a (F3/F4): the piece-activity stamp of an action, handed to the SAME `store.update` that performs it — the stamp is part of
+   * the action's own write (no second best-effort write, so no crash can separate them) and the store applies it only when the
+   * write changed something semantic (an empty, invalid or idempotent patch is no action). `undefined` = this actor does not lead
+   * the piece (a worker, a stranger, the owner, the flow) or rule C is off: the write is then byte for byte what it always was.
+   */
+  const stampFor = async (subtaskId: string, actor: string, before: DeliveryRecord, when?: () => boolean): Promise<{ stamp?: ActivityStamp }> => {
+    try {
+      if (!(await leaderAction(before, actor))) return {}
+      return { stamp: { key: subtaskId, actor, at: iso(d), ...(when ? { when } : {}) } }
+    } catch { return {} }
+  }
   const isReply = (v: DeliveryRecord | DeliveryReply): v is DeliveryReply => 'status' in v && 'ok' in v
 
   /** Gate evidence onto a record (revision-stamped), plus the facts the gate established. */
@@ -396,6 +422,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
     const warnings: string[] = []
     const autonomous = await autonomousNow(got.leaderSessionId, warnings)
     let out
+    let landed = false
+    const stamped = await stampFor(subtaskId, actor, got, () => landed)
     try {
       out = await d.store.update(doc => {
         const cur = doc.deliveries[subtaskId]
@@ -406,8 +434,9 @@ export function createDeliveryService(deps: DeliveryDeps) {
         const plan = planTransition(candidate, to, input, { at: iso(d), actor, autonomous, requireEvidence })
         if (!plan.ok) return { kind: 'refused' as const, plan, cur: structuredClone(cur) }
         doc.deliveries[subtaskId] = plan.next
+        landed = true
         return { kind: 'moved-ok' as const, before: got, after: plan.next, skipped: plan.skipped }
-      }, { guard: contextOfActor(actor) })
+      }, { guard: contextOfActor(actor), ...stamped })
     } catch (e) {
       // The STORE's guard refused the phase move (nothing was written), or could not take its locks (§2.6.1).
       if (e instanceof GuardRefused) return guardFailure(e, got)
@@ -461,7 +490,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       absorb(cur, name, v)
       if (!actor.startsWith('flow:')) cur.leaderTouchedAt = iso(d)
       return structuredClone(cur)
-    })
+    }, { guard: contextOfActor(actor), ...(await stampFor(subtaskId, actor, got)) })
     if (!after) return fail(404, 'no_delivery', 'the delivery record vanished')
     const warnings: string[] = []
     const step = STEP_ON_GATE[`${after.phase}:${name}`]
@@ -480,7 +509,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       const plan = planBlock(cur, reason, text, { at: iso(d), actor, autonomous })
       if (plan.ok) doc.deliveries[subtaskId] = plan.next
       return { plan, before: structuredClone(cur) }
-    })
+    }, { guard: contextOfActor(actor), ...(await stampFor(subtaskId, actor, got)) })
     if (!out.plan.ok) return refused(out.plan, out.before)
     const after = out.plan.next
     const warnings: string[] = [...blockWarnings]
@@ -517,7 +546,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       const plan = planUnblock(cur, { at: iso(d), actor, ...(detail ? { detail } : {}), ...(to !== undefined ? { to } : {}) })
       if (plan.ok) doc.deliveries[subtaskId] = plan.next
       return { plan, before: structuredClone(cur) }
-    })
+    }, { guard: contextOfActor(actor), ...(await stampFor(subtaskId, actor, got)) })
     if (!out.plan.ok) return refused(out.plan, out.before)
     const warnings: string[] = []
     await effects(out.before, out.plan.next, actor, warnings)
@@ -566,7 +595,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       cur.updatedAt = iso(d)
       if (!actor.startsWith('flow:')) cur.leaderTouchedAt = iso(d) // a leader acting on the piece restarts its reminder clock
       return structuredClone(cur)
-    })
+    }, { guard: contextOfActor(actor), ...(await stampFor(subtaskId, actor, got)) })
     await d.board.comment(after.taskId, subtaskId, `[fluxo entrega] configuração por ${actor}: ${Object.keys(patch).join(', ')}.`).catch(() => undefined)
     return { ok: true, status: 200, record: after, warnings: [] }
   }
@@ -664,7 +693,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       cur.evidenceHistory = [...(cur.evidenceHistory ?? []), { sha256: item.sha256, pieceKey: subtaskId, revision: item.revision }]
       cur.updatedAt = iso(d)
       return { record: structuredClone(cur) }
-    }, { evidence: true }) } catch (error) {
+    }, { evidence: true, guard: contextOfActor(actor), ...(await stampFor(subtaskId, actor, got)) }) } catch (error) {
       await rollbackUpload(error)
       if (error instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', error.message)
       if (error instanceof GuardBusy) return fail(error.status, error.code, error.message)
@@ -709,7 +738,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
       cur.evidence = (cur.evidence ?? []).filter(i => i.id !== evidenceId)   // evidenceHistory is NOT pruned: a removal frees nothing
       cur.updatedAt = iso(d)
       return structuredClone(cur)
-    }, { evidence: true, guardsPath: d.guardsPath ?? defaultGuardsPath() })
+    }, { evidence: true, guardsPath: d.guardsPath ?? defaultGuardsPath(), guard: contextOfActor(actor), ...(await stampFor(subtaskId, actor, got)) })
     if (!after) return fail(409, 'evidence_in_use', 'this evidence backs a checkpoint or pending intent (or the checkpoints cannot be read): it cannot be removed', [], got)
     if (item.fileId) await d.evidenceFiles?.remove(item.fileId).catch(() => false)
     return { ok: true, status: 200, record: after, warnings: [] }
@@ -1012,6 +1041,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
     // External release probes above may run concurrently. Re-read/CAS and the entire write + board effects
     // share the full envelope; no network barrier holds a board lock while waiting for another caller.
     return withGuardTransaction(lockPaths(), async () => {
+    const stamps: ActivityStamp[] = []
+    for (const x of drafts) if (x.changed) { const s = await stampFor(x.id, actor, x.before); if (s.stamp) stamps.push(s.stamp) }
     const batch = await d.store.update(doc => {
       for (const p of plan) {
         const cur = doc.deliveries[p.id]
@@ -1023,7 +1054,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
         doc.deliveries[x.id] = x.after
       }
       return { kind: 'ok' as const }
-    })
+    }, { guard: contextOfActor(actor), ...(stamps.length ? { stamp: stamps } : {}) })
     if (batch.kind === 'moved') return fail(409, 'revisao_obsoleta', `${batch.id} moved meanwhile; nothing was written — run the release again`, [], batch.cur ?? undefined)
     const pieces: ReleasePiece[] = []
     for (const x of drafts) {
@@ -2186,6 +2217,24 @@ export function createDeliveryService(deps: DeliveryDeps) {
     }
   }
 
+  /** S7a: the real stores and facts behind the custody step (custody-tick.ts imports no store of its own). */
+  const custodyPorts = async (c: NonNullable<DeliveryDeps['custody']>): Promise<import('./custody-tick').CustodyDeps> => ({
+    rule: () => ruleCState(dirname(d.store.path)),
+    // F2: rule C takes the fail-closed envelope by ITSELF — whether rule A is on or off (a base `withFileLock` would write
+    // after its wait expired with the lock still held by someone else).
+    envelope: fn => withGuardEnvelope(c.paths ?? lockPaths(), fn),
+    ...(c.tasks ? { board: async () => { const b = await (await c.tasks!()).read(); return { comments: b.comments } } } : {}),
+    store: d.store as never,
+    sessions: async () => { const rows = await d.facts.sessions().catch(() => null); return rows ? rows.map(s => ({ id: s.id, alive: s.alive, ...(s.role ? { role: s.role } : {}), ...(s.taskId ? { taskId: s.taskId } : {}) })) : null },
+    projectsOf: c.projectsOf,
+    orphanAfterHours: c.orphanAfterHours,
+    notify: (sessionId, text) => d.notify.session(sessionId, text, ''),
+    ...(c.titles ? { titles: c.titles } : {}),
+    guard: flowContext('custody'),
+    now: d.now,
+    log: line => d.log?.(line),
+  })
+
   const tickOnce = async (): Promise<{ actions: string[] }> => {
     const actions: string[] = []
     refusedNow.clear()
@@ -2199,6 +2248,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
         else actions.push(`sweep-erro: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`)
       }
     }
+    // S7a: the custody clocks (rule C only; `off` does nothing at all). A refusal is isolated like every other tick step.
+    if (d.custody) await custodyTick(await custodyPorts(d.custody), actions).catch(e => tickRefusal(e, actions))
     await cleanQueue(actions).catch(e => tickRefusal(e, actions))
     // ONE read of the fleet and ONE read of the board's blocked pieces per tick; null = could not be read (never "none").
     const sessions = await d.facts.sessions().catch(() => null)

@@ -24,6 +24,7 @@ import { isPhase, isPureAdoption, type DeliveryRecord } from './machine'
 import { createGuardsStore, type GuardsDoc, type GuardsStore } from './guards-store'
 import { deliveryReadRule, deliveryHasJournal } from './activation'
 import type { TamperView } from './guard'
+import { semanticallyChanged, stampActivity, type ActivityStamp } from './custody'
 
 export interface DeliveryDoc {
   version: 1
@@ -96,7 +97,7 @@ export interface DeliveryStore {
    * `guard` (S2a, optional): who is asking. A write that RAISES a record's phase rank (revisao_lider and beyond) without one is
    * refused by the store when the guarantee is on (`GuardRefused`, before a byte lands).
    */
-  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>, options?: { evidence?: boolean; guardsPath?: string; guard?: GuardContext }): Promise<T>
+  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>, options?: { evidence?: boolean; guardsPath?: string; guard?: GuardContext; stamp?: ActivityStamp | readonly ActivityStamp[] }): Promise<T>
 }
 
 export function defaultDeliveriesPath(): string {
@@ -198,6 +199,13 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
         // Snapshot every protected binding before the callback; the evidence option cannot disable detection.
         const phasesBefore = structuredClone(doc.deliveries)
         const value = await fn(doc)
+        // S7a (§5.1): the piece-activity stamp lands in the SAME write as the action it describes — never a second best-effort write,
+        // so no crash can leave an action without its stamp. Only a SEMANTIC change stamps: an empty or idempotent patch (which still
+        // refreshes `updatedAt`) is not an action.
+        for (const st of options?.stamp ? (Array.isArray(options.stamp) ? options.stamp : [options.stamp]) : []) {
+          const after = doc.deliveries[st.key]
+          if (after && (st.when?.() ?? true) && semanticallyChanged(phasesBefore[st.key], after)) stampActivity(after, st.actor, st.at)
+        }
         // Judge exactly the representation the serializer will persist, including promoted preserved records.
         const serialized = serializeDeliveryDoc(doc)
         const final = parseDeliveryDocStrict(serialized)
@@ -273,7 +281,10 @@ export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
       const paths = anchor.paths
       if (inGuardTransaction(paths)) return serializeGuardWrite(paths, 'deliveries', () => write())
       const guarded = () => withGuardLocks(['deliveries', 'guards'], () => write(), { paths })
-      if (await peekRuleA(paths) !== 'off') return guarded()
+      // A write carrying a custody stamp (only built when rule C is on) is fail-closed whatever rule A says (S7a N1, §2.6.1): it never
+      // goes ahead after the lock wait with another holder still on the file, and the stamp never rides a write that did.
+      const stamped = Array.isArray(options?.stamp) ? options.stamp.length > 0 : options?.stamp !== undefined
+      if (stamped || await peekRuleA(paths) !== 'off') return guarded()
       // Rule A off (N2): exactly the base's locking — the evidence path's fail-closed locks, otherwise `withFileLock`.
       return options?.evidence
         ? withGuardLocks(options.guardsPath ? ['deliveries', 'guards'] : ['deliveries'], () => write(undefined, true), { paths })

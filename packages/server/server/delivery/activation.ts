@@ -184,6 +184,11 @@ export async function deliveryHasJournal(guardsPath: string): Promise<boolean> {
   return pending
 }
 const policyPath = defaultGuaranteesPath
+/** S7a: authenticated rule C state (custody) — the same document and seal as rule A, read at the data directory `dir`. */
+export async function ruleCState(dir: string): Promise<RuleState> {
+  const { doc } = await createGuaranteesStore(policyPath(dir)).read()
+  return ruleState(doc, 'c')
+}
 export async function deliveryReadRule(guardsPath: string): Promise<RuleState> {
   const path = policyPath(dirname(guardsPath))
   let stamp: string

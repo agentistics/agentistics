@@ -11,6 +11,7 @@
  */
 import { dirname, join } from 'node:path'
 import { createGuaranteesStore, ruleState } from './activation'
+export { ruleCState } from './activation'
 import { classifyPiece, evaluateEvidence } from './classify'
 import { declareClassification } from './classify-declare'
 import { execGit, gatherFacts, type ClassifyDeps } from './classify-host'
@@ -45,7 +46,6 @@ export async function ruleAState(dir: string): Promise<RuleState> {
   const { doc } = await createGuaranteesStore(join(dir, 'guarantees.json')).read()
   return ruleState(doc, 'a')
 }
-
 /** The registry's rows as the classification host reads them (the same shape `delivery/host.ts` hands the service). */
 export async function registryClassifyDeps(): Promise<ClassifyDeps> {
   return {

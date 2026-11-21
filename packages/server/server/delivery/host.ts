@@ -281,6 +281,23 @@ async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Pr
   return out.ok ? { ok: true } : { ok: false, message: ('guard' in out && out.guard ? out.guard.message : out.message) ?? 'board refused the change' }
 }
 
+/**
+ * S7a (§5.2.6): the PROJECT of each piece — see `custody-project.ts` (Task.repo → the repo of the piece's sessions → the sidebar
+ * folder → unknown). ONE read of the board, the registry and the folders; the rule itself is pure and tested there.
+ */
+export async function custodyProjectsOf(pieces: ReadonlyArray<{ taskId: string; subtaskId: string }>): Promise<ReadonlyMap<string, string>> {
+  const [{ loadTaskWorld }, { readRegistry }, { resolveCustodyProjects }, prefs] = await Promise.all([import('../sessions/task-source'), import('../sessions/registry'), import('./custody-project'), import('../preferences')])
+  const { book } = await loadTaskWorld()
+  const registry = await readRegistry().catch(() => [])
+  const groups = ((await prefs.readPreferences().catch(() => ({}))) as { sessionGroups?: { groups: never[] } }).sessionGroups ?? { groups: [] }
+  return resolveCustodyProjects({
+    pieces,
+    taskRepos: new Map(book.tasks.map(t => [t.id, (t as { repo?: string }).repo ?? ''] as const)),
+    sessions: registry.map(r => ({ id: r.id, conversationId: r.conversationId, taskId: r.taskId, subtaskId: r.subtaskId, repo: r.repo?.repo })),
+    groups: groups as never,
+  })
+}
+
 let cached: DeliveryService | null = null
 /** The process's delivery service (one store path, one set of deps). */
 /** The sweep's board: imported only when a tick runs it, so a CLI verb that never ticks loads none of the task store. */
@@ -312,6 +329,8 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
     proofStore: proofCacheFile(),
     // S2b: the guard sweep reads and repairs the board itself (rule A shadow/on only; off does nothing).
     sweep: lazySweep(),
+    // S7a: the custody clocks (rule C only; off does nothing).
+    custody: { tasks: async () => (await import('../sessions/task-source')).openTaskStore(), projectsOf: custodyProjectsOf, orphanAfterHours: async () => ((await (await import('../preferences')).readPreferences()) as { delivery?: { orphanAfterHours?: unknown } }).delivery?.orphanAfterHours },
     log: line => console.log(line),
     ...overrides,
   })
