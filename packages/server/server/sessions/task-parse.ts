@@ -24,10 +24,12 @@ export type TaskCommand =
    */
   | { kind: 'deliver'; ref: string; json?: boolean }
   | { kind: 'abandon'; ref: string; json?: boolean }
+  /** `agentop task edit <ref> --repo <value>` — today only the repository is editable here (`''` clears it). */
+  | { kind: 'edit'; ref: string; repo: string; json?: boolean }
   | { kind: 'help' }
   | { kind: 'error'; message: string }
 
-const USAGE = 'Usage: agentop task [ls | show <id|name> | deliver <id|name> | abandon <id|name>]'
+const USAGE = 'Usage: agentop task [ls | show <id|name> | deliver <id|name> | abandon <id|name> | edit <id|name> --repo <value>]'
 
 export function parseTaskArgs(argv: string[]): TaskCommand {
   const json = argv.includes('--json')
@@ -46,6 +48,17 @@ export function parseTaskArgs(argv: string[]): TaskCommand {
     const ref = rest.slice(1).join(' ').trim()
     if (!ref) return { kind: 'error', message: `Usage: agentop task ${head} <id|name>` }
     return { kind: head, ref, ...(json ? { json: true } : {}) }
+  }
+
+  if (head === 'edit') {
+    const at = rest.indexOf('--repo')
+    const usage = 'Usage: agentop task edit <id|name> --repo <owner/name|url|\'\'>'
+    if (at < 0) return { kind: 'error', message: usage }
+    const ref = rest.slice(1, at).join(' ').trim()
+    const value = rest.slice(at + 1)
+    if (!ref || value.length === 0) return { kind: 'error', message: usage }
+    // Joined, not one token: a value with a space must reach the normalizer to be refused in words.
+    return { kind: 'edit', ref, repo: value.join(' '), ...(json ? { json: true } : {}) }
   }
 
   return { kind: 'error', message: `Unknown subcommand "${head}". ${USAGE}` }

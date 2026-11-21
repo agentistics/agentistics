@@ -28,7 +28,6 @@ import {
 } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
 import { withFileLock } from './file-lock'
-import { isRepoInherited } from './task-model'
 
 export const SESSION_ROLES_FILE = 'session-roles.json'
 
@@ -187,7 +186,6 @@ export interface RoleDeps {
   parentOf: (rowId: string) => Promise<string | undefined>
   /** Does the task exist, and which repositories does it touch (its free-text `repo` only)? Absent = not wired (declaring a lead is then refused). */
   taskInfoOf?: (taskId: string) => Promise<TaskRepoInfo>
-  /** The repository the session itself runs in (its cwd/remote), as written by repoFacts. Used ONLY to refuse a task repo inherited from it; never to accept anything. Absent = nothing is refused on that ground. */
   repoOfRow?: (rowId: string) => Promise<string | undefined>
   /** A session declared LEADER leaves its parent's team (`team-links.ts`, rule 2). Absent = not wired. */
   leaveTeam?: (rowId: string) => Promise<boolean>
@@ -483,8 +481,10 @@ export async function markCallerVerified(
 export interface TaskRepoInfo {
   exists: boolean
   repo?: string
-  /** The repo was written by a filed session (or is a legacy one with no provenance), never said by a person. Absent = explicit. */
-  repoInherited?: boolean
+  /** The task's title, for the sentence that names it. */
+  title?: string
+  /** The repo was SAID by a person (`repoSource: 'explicit'`). Inherited from a filed session, or legacy with no provenance, is never explicit: it proves nothing about the task. Absent = not explicit. */
+  repoExplicit?: boolean
 }
 
 /** A task's repository, normalized to `host/owner/name` (lowercase). `Task.repo` is free text: a bare `owner/name` is GitHub shorthand, anything else goes through the one remote normalizer. `''` = no repository. */
@@ -506,6 +506,10 @@ export function sameRepo(a: string, b: string): { same: boolean; ownerDiffers: b
   return { same, ownerDiffers: same && a !== b }
 }
 
+// Named constants: these are lead-reply codes the dashboard never renders (not notification or chat-note codes).
+const OWNER_DIFFERS = 'owner_differs' as const
+const NOT_OWN_TASK = 'not_own_task' as const
+
 export interface LeadRequest { ref?: string; add?: readonly string[]; remove?: readonly string[] }
 export type LeadReply =
   | { ok: true; key: string; id: string; title: string; leads: string[]; changed: boolean; message: string; note?: 'owner_differs' }
@@ -521,7 +525,8 @@ const LEAD_MESSAGES: Record<string, string> = {
   no_such_task: 'No task with that id exists.',
   other_project: 'That task belongs to another repository than the leader\'s own task.',
   no_repo_target: 'That task has no repository; set the task\'s repo first.',
-  repo_inherited_from_self: "That task's repository was only inherited from the leader's own working directory, so it proves nothing. Set it explicitly first (agentop task edit <ref> --repo <owner/name>).",
+  repo_not_explicit: 'The task repository was not set explicitly.',
+  not_own_task: 'A session may change the repository only of the task it is filed on as leader; the person can change any.',
   no_repo_own: 'The leader\'s own task has no repository; set the task\'s repo first.',
   not_wired: 'Task lookup is not available here.',
 }
@@ -561,10 +566,12 @@ export function leadOp(senderId: string | null, req: LeadRequest, deps: RoleDeps
       if (!filing) return fail('no_task')
       const ownInfo = await deps.taskInfoOf(filing).catch(() => ({ exists: false } as TaskRepoInfo))
       const mine = taskRepoKey(ownInfo)
-      // The leader's own cwd repo. A task repo INHERITED from it (the leader filed itself on a repo-less task) proves nothing.
-      const cwdKey = taskRepoKey({ repo: await deps.repoOfRow?.(t.id).catch(() => undefined) })
-      const fromSelf = (i: TaskRepoInfo, key: string): boolean => !!cwdKey && !!key && i.repoInherited === true && sameRepo(cwdKey, key).same
-      if (fromSelf(ownInfo, mine)) return fail('repo_inherited_from_self')
+      // INHERITED NEVER COUNTS: leading needs the repository of BOTH tasks to have been said by a person (`repoSource: 'explicit'`).
+      // A repo copied from a filed session (any session, any cwd) or a legacy one with no provenance proves nothing.
+      const notExplicit = (i: TaskRepoInfo, ref: string): LeadReply => ({
+        ...fail('repo_not_explicit'),
+        message: `The repository of task "${i.title ?? ref}" (${ref}) was not set explicitly, so it cannot be used to lead. Set it first: agentop task edit ${ref} --repo <owner/name>.`,
+      })
       for (const id of add) {
         const info = await deps.taskInfoOf(id).catch(() => ({ exists: false } as TaskRepoInfo))
         if (!info.exists) return fail('no_such_task')
@@ -572,7 +579,8 @@ export function leadOp(senderId: string | null, req: LeadRequest, deps: RoleDeps
         const theirs = taskRepoKey(info)
         if (!theirs) return { ...fail('other_project'), message: LEAD_MESSAGES.no_repo_target! }
         if (!mine) return { ...fail('other_project'), message: LEAD_MESSAGES.no_repo_own! }
-        if (fromSelf(info, theirs)) return fail('repo_inherited_from_self')
+        if (ownInfo.repoExplicit !== true) return notExplicit(ownInfo, filing)
+        if (info.repoExplicit !== true) return notExplicit(info, id)
         const m = sameRepo(mine, theirs)
         if (!m.same) return fail('other_project')
         if (m.ownerDiffers) ownerDiffers = true
@@ -595,7 +603,7 @@ export function leadOp(senderId: string | null, req: LeadRequest, deps: RoleDeps
       const changed = next.length !== before.length || next.some(x => !before.includes(x))
       const dirty = JSON.stringify(leads) !== JSON.stringify(doc.leads ?? {})
       if (dirty) await writeRolesDoc(deps.dataDir, { ...doc, leads })
-      return { ok: true, key, id: t.id, title: t.title, leads: next, changed, message: changed ? `Leads: ${next.join(', ') || 'no extra task'}.` : 'Nothing changed.', ...(ownerDiffers ? { note: 'owner_differs' as const } : {}) }
+      return { ok: true, key, id: t.id, title: t.title, leads: next, changed, message: changed ? `Leads: ${next.join(', ') || 'no extra task'}.` : 'Nothing changed.', ...(ownerDiffers ? { note: OWNER_DIFFERS } : {}) }
     })
   })()
 }
@@ -617,6 +625,21 @@ export async function listLeads(deps: RoleDeps): Promise<{ ok: true; leaders: { 
   const doc = await loadRoles(deps)
   const led = leadsOfRows(doc, rows)
   return { ok: true, leaders: rows.filter(r => led.has(r.id)).map(r => ({ id: r.id, title: r.title, state: r.state ?? '', leads: [...led.get(r.id)!] })) }
+}
+
+/**
+ * Who may write a task's EXPLICIT repository. The person (no verified session) any task; a verified SESSION only the
+ * task it is filed on, and only as a declared leader — otherwise a leader could set another task's repository to its
+ * own and then lead it. `null` = allowed. Fail closed on anything unreadable.
+ */
+export async function repoWriteRefusal(sender: string | null, taskId: string, deps: RoleDeps): Promise<{ code: 'not_own_task'; message: string } | null> {
+  if (sender === null) return null
+  const refuse = { code: NOT_OWN_TASK, message: LEAD_MESSAGES.not_own_task! }
+  const filing = await deps.taskOf?.(sender).catch(() => undefined)
+  if (!filing || filing !== taskId) return refuse
+  const row = (await deps.rows().catch(() => [] as FleetRowForGroups[])).find(r => r.id === sender)
+  if (!row || roleOfRow((await loadRoles(deps)).roles, row) !== 'leader') return refuse
+  return null
 }
 
 export function leadStatus(out: LeadReply): number {
@@ -691,13 +714,7 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
       const w = await (await import('./task-source')).loadTaskWorld()
       const t = w.book.tasks.find(x => x.id === taskId)
       if (!t) return { exists: false }
-      return { exists: true, ...(t.repo ? { repo: String(t.repo) } : {}), ...(isRepoInherited(t) ? { repoInherited: true } : {}) }
-    },
-    repoOfRow: async rowId => {
-      const row = (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)
-      if (!row?.cwd) return undefined
-      const { repoFacts } = await import('./repo-facts')
-      return (await repoFacts(row.cwd, row.repo).catch(() => null))?.repo
+      return { exists: true, title: t.title, ...(t.repo ? { repo: String(t.repo) } : {}), ...(t.repo && t.repoSource === 'explicit' ? { repoExplicit: true } : {}) }
     },
   }
 }

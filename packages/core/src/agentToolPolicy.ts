@@ -92,6 +92,7 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_session_leads',
   'agentistics_session_away',
   'agentistics_session_hold',
+  'agentistics_nay_call',
   'agentistics_session_switch_account',
   // Metrics (6)
   'agentistics_summary',
@@ -258,6 +259,10 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_session_hold: {
     ...GROUPS, risk: 'R', routes: ['GET /api/fleet/holds'],
     reason: 'reads whether something live the engine runs is using a session (yes/no, since when, in the engine own words); changes nothing',
+  },
+  agentistics_nay_call: {
+    ...GROUPS, risk: 'W', routes: ['GET /api/nay-call', 'POST /api/nay-call/start'],
+    reason: 'reads the Call Nay button\'s state and asks the owner\'s open dashboard to place the call; refused without an open dashboard or a call surface, and only a verified LEADER session may start one',
   },
   agentistics_session_away: {
     ...GROUPS, risk: 'W', routes: ['GET /api/away', 'PUT /api/away', 'PUT /api/away/session', 'POST /api/away/notice'],

@@ -432,7 +432,7 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     // this process's own fleet polls (`readRawFleetSnapshot`) and plans nothing while nobody listens.
     apiVersion: ENGINE_API_VERSION,
     // 1.7 (B6.2): delegation to another harness — consent (default deny), admission and filing are the host's.
-    fleet: { subscribe: cb => fleetHub.subscribe(cb), ...hostDelegateMembers(() => lang) },
+    fleet: { subscribe: cb => fleetHub.subscribe(cb), ...hostDelegateMembers(() => lang, id => structuredSessionsHost.owner(id)) },
     // 1.26 (LIVRO.SEAMS slice 2): a book takeover's spawn / stop / retire / proof check, through the fleet's own doors.
     book: hostBookPort(() => lang),
     // 1.7 (A5.2): the API port, for an engine to write into a harness's OTel exporter config.

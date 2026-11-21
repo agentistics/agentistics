@@ -552,7 +552,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_edit",
     description:
-      "Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`. An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
+      "Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`, `repo` (the task's repository: `owner/name`, `host/owner/name` or an https/ssh git URL, stored as `owner/name`; empty string clears it; a local path, spaces or garbage is refused with a sentence — use it when the repository moved or was inherited wrong; subtasks carry no repo). An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {
@@ -564,6 +564,7 @@ const TOOLS: Tool[] = [
         dueDate: { type: "string" },
         startDate: { type: "string" },
         labels: { type: "array", items: { type: "string" } },
+        repo: { type: "string", description: "owner/name, host/owner/name or a git URL; empty string clears it." },
         actor: { type: "string" },
       },
       required: ["ref"],
@@ -899,6 +900,16 @@ const TOOLS: Tool[] = [
         target: { type: "string", description: "A session's managed id or conversation id: switch only that session's own autonomous mode (with `on`)." },
         notice: { type: "string", description: "While autonomous: a warning or decision that cannot wait, sent to the owner's bell/Nay as a notice (max 500 chars) instead of a question that blocks your turn. Leaders only; ignores the other fields." },
       },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_nay_call",
+    description:
+      "The \"Call Nay\" button of the Nay chat button's right-click pop, for agents — the same source as the button. `action: \"status\"` (default) reports `available` (a call surface is announced by the engine: false on a community build, with the kill switch, or with an engine without a call surface — then the button does not exist), `browser` (a dashboard tab answered in the last 20 s), and `call` = {active, parked, sessionId, since} — the call in progress, the one the top-bar pill shows; `call` is null when no browser is reporting (unknown, NOT \"no call\"). `action: \"start\"` asks the owner's open dashboard to press the same button (a new call on the open or newest Nay conversation, or \"back to the call\" when one is parked); it is refused with `no_call_surface` or `no_browser` (never queued for later), and only a LEADER session may start one (`leader_only`) because it starts a live call in the owner's dashboard. Returns `already: true` when a call is already active.",
+    inputSchema: {
+      type: "object",
+      properties: { action: { type: "string", enum: ["status", "start"], description: "status (default) reads; start asks the dashboard to place the call." } },
       required: [],
     },
   },
@@ -1601,7 +1612,7 @@ async function callTool(
         const a = args as any;
         const ref = encodeURIComponent(String(a?.ref ?? ""));
         const patch: Record<string, unknown> = {};
-        for (const f of ["title", "detail", "priority", "type", "dueDate", "startDate", "actor"]) {
+        for (const f of ["title", "detail", "priority", "type", "dueDate", "startDate", "repo", "actor"]) {
           if (typeof a?.[f] === "string") patch[f] = a[f];
         }
         if (Array.isArray(a?.labels)) patch.labels = a.labels;
@@ -1818,6 +1829,13 @@ async function callTool(
           ...(a.topCaps !== undefined ? { topCaps: a.topCaps } : {}),
           session: sessionProof(process.env),
         });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_nay_call": {
+        const a = args as any;
+        const body = a?.action === "start"
+          ? await apiSend("POST", "/api/nay-call/start", { session: sessionProof(process.env) })
+          : await apiGet("/api/nay-call");
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_session_message": {

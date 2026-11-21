@@ -33,7 +33,7 @@ import { conversationOfRow } from './row-conversation'
 import { attachmentMessageOf, recordAttachmentMessage } from './attachment-web'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
-import type { ProjectSearchResult, SpawnSessionResult } from '@agentistics/tui/control'
+import type { ProjectSearchResult, SpawnSessionResult, SpawnSessionRequest } from '@agentistics/tui/control'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { fleetRow, type FleetActionRequest, type FleetRow } from './fleet-row'
 import { planFleetSpawn, type FleetSpawnBody } from './fleet-spawn'
@@ -1524,6 +1524,8 @@ export interface FleetSpawnResponse {
 export async function runFleetSpawn(
   lang: CliLang,
   body: FleetSpawnBody,
+  /** In-process only (never read from a request body): engine-api 1.31 — the OWNER's own session an engine opens, see `SpawnSessionRequest.ownerSession`. */
+  extra?: { ownerSession?: SpawnSessionRequest['ownerSession'] },
 ): Promise<FleetSpawnResponse> {
   const s = controlStrings(lang)
   const host = await hostFor(lang)
@@ -1572,7 +1574,7 @@ export async function runFleetSpawn(
   }
 
   // F2.0: born in the browser — with `adapter-chat` on and a ready driver it runs structured.
-  const out = await host.spawnSession({ ...decision.plan, origin: 'web' })
+  const out = await host.spawnSession({ ...decision.plan, origin: 'web', ...(extra?.ownerSession ? { ownerSession: extra.ownerSession } : {}) })
   if (out.ok) kickFleet()
   return spawnResponse(out, lang)
 }

@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.224.0': {
+    features: [
+      {
+        pt: 'Conversas com a Nay abertas pelo motor agora viram sessões do app: aparecem na lista enquanto acontecem, vão para Encerradas quando terminam e podem ser reabertas com o contexto.',
+        en: 'Conversations with Nay opened by the engine now become app sessions: they show in the list while they happen, move to Ended when they finish, and can be reopened with their context.',
+      },
+      {
+        pt: 'Assistentes podem listar essas conversas e ler o que foi dito pela ferramenta MCP, incluindo a sessão de cada uma.',
+        en: 'Assistants can list those conversations and read what was said through the MCP tools, including each one\'s session.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.223.0': {
+    features: [
+      {
+        pt: 'Ligar para a Nay no clique direito do botão dela: o botão "Ligar para a Nay" aparece ao lado do Cofre, e vira "Voltar para a ligação" quando há uma em andamento.',
+        en: 'Call Nay from her button\'s right-click menu: a "Call Nay" button sits next to the Vault, and turns into "Back to the call" while one is in progress.',
+      },
+      {
+        pt: 'Assistentes líderes também podem ver o estado da ligação e pedir para iniciá-la pela ferramenta MCP, pela mesma fonte do botão.',
+        en: 'Leader assistants can also read the call state and ask to start it through an MCP tool, from the same source as the button.',
+      },
+    ],
+    fixes: [],
+  },
   '2.222.0': {
     features: [
       {

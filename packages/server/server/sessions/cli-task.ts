@@ -155,12 +155,35 @@ async function runMark(ref: string, to: TaskStatus, json: boolean): Promise<numb
   return 0
 }
 
+async function runEdit(ref: string, repo: string, json: boolean): Promise<number> {
+  const { normalizeTaskRepo } = await import('./task-repo')
+  const r = normalizeTaskRepo(repo)
+  if (!r.ok) { console.error(r.reason); return 1 }
+  const { resolveCliPrincipal, realCliAuth } = await import('../delivery/cli-principal')
+  const { actorOf } = await import('../delivery/principal')
+  const who = await resolveCliPrincipal(process.env, false, { pieceKey: ref, move: 'edit:repo' }, await realCliAuth())
+  // A SESSION (proven, or merely claiming to be one through its environment) writes a repository only on the task it leads.
+  const claimed = who.principal.kind === 'session' ? who.principal.id : process.env.AGENTOP_MANAGED_ID?.trim() || null
+  if (claimed) {
+    const { repoEditGateFor } = await import('./task-repo-gate')
+    const refused = await repoEditGateFor(who.principal.kind === 'session' ? claimed : '\u0000unproven', ref)
+    if (refused) { console.error(refused.body.message); return 1 }
+  }
+  const { editTask } = await import('./task-web')
+  const ok = await editTask(ref, { repo: r.repo, actor: actorOf(who.principal) })
+  if (!ok) { console.error(`No task matches "${ref}". \`agentop task ls\` lists them.`); return 1 }
+  if (json) console.log(JSON.stringify({ ok: true, ref, repo: r.repo }))
+  else console.log(r.repo ? `"${ref}" repository is now ${r.repo}.` : `"${ref}" repository cleared.`)
+  return 0
+}
+
 function printHelp(): void {
   console.log(`agentop task — the tasks your sessions are filed under.
 
   agentop task                 list every task with its rollup
   agentop task show <id|name>  one task, its attempts side by side
   agentop task deliver <ref>   mark it done, and attach the git evidence
+  agentop task edit <ref> --repo <owner/name|git url>   set the task's repository ('' clears it)
   agentop task abandon <ref>   mark it given up on (no evidence attached)
   agentop task evidence add|ls|rm --subtask S …   the proof a piece needs before review (see: agentop task evidence help)
   agentop evidence capture <url> [--out f]            capture an API response in the shape api-capture evidence accepts
@@ -202,6 +225,7 @@ export async function runTask(argv: string[]): Promise<number> {
     case 'ls': return await runLs(cmd.json === true)
     case 'show': return await runShow(cmd.ref, cmd.json === true)
     case 'deliver': return await runMark(cmd.ref, 'done', cmd.json === true)
+    case 'edit': return await runEdit(cmd.ref, cmd.repo, cmd.json === true)
     case 'abandon': return await runMark(cmd.ref, 'abandoned', cmd.json === true)
   }
 }

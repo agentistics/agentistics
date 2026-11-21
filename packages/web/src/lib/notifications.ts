@@ -246,6 +246,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão não verificada', message: 'Só uma sessão iniciada pelo agentistics pode definir papéis de sessão; esta chamada não conseguiu provar de qual sessão vem.' },
     en: { title: 'Unverified session', message: 'Only a session started by agentistics can set session roles; this request could not prove which session it comes from.' },
   },
+  not_own_task: {
+    pt: { title: 'Repositório só na própria tarefa', message: 'Uma sessão só pode mudar o repositório da tarefa em que está filiada como líder; só a pessoa muda o de qualquer tarefa.' },
+    en: { title: 'Repository only on its own task', message: 'A session may change the repository only of the task it is filed on as leader; only the person can change any task.' },
+  },
   'tasks.thread_resolved': {
     pt: { title: 'Tópico resolvido', message: 'O tópico foi movido para Resolvidos.' },
     en: { title: 'Topic resolved', message: 'The topic was moved to Resolved.' },

@@ -2171,6 +2171,34 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
       return json(out, awayStatus(out))
     }
+    // THE "CALL NAY" BUTTON, FOR AGENTS — state mirror + start request (`nay-call.ts`, MCP `agentistics_nay_call`).
+    // The call itself is the engine's phone surface in the BROWSER; the browser reports its state here and
+    // collects a start request in the reply. Read: any authenticated caller; start: the person or a leader.
+    if (url.pathname === '/api/nay-call' && req.method === 'GET') {
+      await loadEngine()
+      const nc = await import('./nay-call')
+      return json(nc.callView(nc.nayCallStore(), nc.callSurfaceFrom(engineSurfacesFor(engine()?.manifest.surfaces, process.env)), Date.now()))
+    }
+    if (url.pathname === '/api/nay-call/state' && req.method === 'PUT') {
+      const nc = await import('./nay-call')
+      const out = await nc.handleStateWrite(req, nc.nayCallStore(), { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC }, Date.now())
+      return json(out.body, out.status)
+    }
+    if (url.pathname === '/api/nay-call/start' && req.method === 'POST') {
+      await loadEngine()
+      const nc = await import('./nay-call')
+      const out = await nc.handleStart(req, nc.nayCallStore(), nc.callSurfaceFrom(engineSurfacesFor(engine()?.manifest.surfaces, process.env)), { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC }, {
+        verify: async (id, token) => (await import('./sessions/session-identity')).verifySessionIdentity(id, token),
+        roleOf: async managedId => {
+          const { readRegistry } = await import('./sessions/registry')
+          const { storedRoleFor } = await import('./sessions/session-roles')
+          const row = (await readRegistry()).find(m => m.id === managedId || m.conversationId === managedId)
+          return storedRoleFor([row?.conversationId, row?.id, managedId])
+        },
+        now: () => Date.now(),
+      })
+      return json(out.body, out.status)
+    }
     // PER-SESSION AWAY — one session's own flag (`ManagedSession.away`); the person or a verified leader.
     if (url.pathname === '/api/away/session' && req.method === 'PUT') {
       const body = await req.json().catch(() => ({})) as { lang?: unknown }
@@ -2848,8 +2876,18 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         })
         return json(out, out.ok ? 200 : 404)
       }
-      const FIELDS = ['title', 'detail', 'priority', 'type', 'dueDate', 'startDate'] as const
+      const FIELDS = ['title', 'detail', 'priority', 'type', 'dueDate', 'startDate', 'repo'] as const
       if (FIELDS.some(f => typeof body[f] === 'string') || Array.isArray(body.labels)) {
+        // An unusable repository is refused with a sentence (422), never as the bare 404 a missing task gets.
+        if (typeof body.repo === 'string') {
+          const { normalizeTaskRepo } = await import('./sessions/task-repo')
+          const r = normalizeTaskRepo(body.repo)
+          if (!r.ok) return json({ error: 'bad_repo', message: r.reason }, 422)
+          // The repository a person writes is what counts for leading: a SESSION may write it only on the task it leads as its own filing.
+          const [{ repoEditGate }, { verifySessionIdentity }] = await Promise.all([import('./sessions/task-repo-gate'), import('./sessions/session-identity')])
+          const refused = await repoEditGate(body, ref, verifySessionIdentity)
+          if (refused) return json(refused.body, refused.status)
+        }
         const ok = await mod.editTask(ref, {
           ...Object.fromEntries(FIELDS.filter(f => typeof body[f] === 'string').map(f => [f, body[f] as string])),
           ...(Array.isArray(body.labels)

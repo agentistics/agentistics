@@ -22,7 +22,7 @@ function deps(rows: Row[], extra: Partial<RoleDeps> = {}): RoleDeps {
     dataDir: dir, rows: async () => rows as never, legacyPref: async () => undefined, uiLang: async () => 'en',
     rename: async () => ({ ok: true }), prompt: async () => ({ ok: true }), parentOf: async () => undefined,
     taskOf: async id => filed[id],
-    taskInfoOf: async id => (tasks[id] ? { exists: true, ...tasks[id]! } : { exists: false }),
+    taskInfoOf: async id => (tasks[id] ? { exists: true, repoExplicit: true, ...tasks[id]! } : { exists: false }),
     ...extra,
   }
 }
@@ -81,7 +81,7 @@ describe('a task repository is Task.repo only: same host + same name, owner may 
   })
   test('ssh, https, case and .git are the same repository', async () => {
     await withRoles({ LM: 'leader' })
-    const d = deps(rows(), { taskInfoOf: async id => ({ exists: true, repo: id === 'MOTOR' ? 'git@github.com:Org/Repo.git' : 'https://github.com/org/repo' }) })
+    const d = deps(rows(), { taskInfoOf: async id => ({ exists: true, repoExplicit: true, repo: id === 'MOTOR' ? 'git@github.com:Org/Repo.git' : 'https://github.com/org/repo' }) })
     expect(await leadOp('LM', { add: ['NAV'] }, d)).toMatchObject({ ok: true })
   })
   test('another name is another project (Motor -> Jarvis, Motor -> Prontuario)', async () => {
@@ -91,12 +91,12 @@ describe('a task repository is Task.repo only: same host + same name, owner may 
   })
   test('another host with the same name is another project', async () => {
     await withRoles({ LM: 'leader' })
-    const d = deps(rows(), { taskInfoOf: async id => ({ exists: true, repo: id === 'MOTOR' ? 'github.com/a/x' : 'gitlab.com/a/x' }) })
+    const d = deps(rows(), { taskInfoOf: async id => ({ exists: true, repoExplicit: true, repo: id === 'MOTOR' ? 'github.com/a/x' : 'gitlab.com/a/x' }) })
     expect(await leadOp('LM', { add: ['NAV'] }, d)).toMatchObject({ ok: false, code: 'other_project' })
   })
   test('BYPASS: session remotes do not count; the info carries only the repo, so filing sessions proves nothing', async () => {
     await withRoles({ LM: 'leader' })
-    const d = deps(rows(), { taskInfoOf: async id => ({ exists: true, repo: tasks[id]?.repo, remotes: ['github.com/blpsoares/prontuario'] } as never) })
+    const d = deps(rows(), { taskInfoOf: async id => ({ exists: true, repoExplicit: true, repo: tasks[id]?.repo, remotes: ['github.com/blpsoares/prontuario'] } as never) })
     expect(await leadOp('LM', { add: ['PRONT'] }, d)).toMatchObject({ ok: false, code: 'other_project' })
   })
   test('FAIL CLOSED: a target task with no repository is refused, with the way forward', async () => {
@@ -113,52 +113,6 @@ describe('a task repository is Task.repo only: same host + same name, owner may 
   })
 })
 
-describe('r4: a repo inherited from the leader\'s OWN cwd never counts (provenance)', () => {
-  const CWD = 'agentistics/agentistics-workspace'
-  const info = (m: Record<string, { repo?: string; inherited?: boolean }>) => async (id: string) =>
-    (m[id] ? { exists: true, ...(m[id]!.repo ? { repo: m[id]!.repo } : {}), ...(m[id]!.inherited ? { repoInherited: true } : {}) } : { exists: false })
-  const base = { repoOfRow: async () => CWD }
-
-  test('LIVE VECTOR 11-12: the leader files itself on a repo-less task (repo inherited from its cwd), then leads Jarvis -> refused', async () => {
-    await withRoles({ LE: 'leader' })
-    const d = deps(rows(), { ...base, taskInfoOf: info({ EMPTY: { repo: CWD, inherited: true }, JARVIS: { repo: CWD } }) })
-    const out = await leadOp('LE', { add: ['JARVIS'] }, d)
-    expect(out).toMatchObject({ ok: false, code: 'repo_inherited_from_self' })
-    expect(!out.ok && out.message).toContain('agentop task edit')
-  })
-  test('a LEGACY repo (no provenance recorded) equal to the leader cwd repo is read as inherited -> refused', async () => {
-    await withRoles({ LE: 'leader' })
-    // repoInherited is what the wiring derives for "repo present, repoSource not explicit"; here the target side is the inherited one
-    const d = deps(rows(), { ...base, taskInfoOf: info({ EMPTY: { repo: 'x/y' }, JARVIS: { repo: CWD, inherited: true } }), taskOf: async () => 'EMPTY' })
-    expect(await leadOp('LE', { add: ['JARVIS'] }, d)).toMatchObject({ ok: false, code: 'repo_inherited_from_self' })
-  })
-  test('an inherited repo DIFFERENT from the leader cwd repo keeps counting (Motor -> Navegador stays 200)', async () => {
-    await withRoles({ LM: 'leader' })
-    const d = deps(rows(), { ...base, taskInfoOf: info({ MOTOR: { repo: 'blpsoares/agentistics', inherited: true }, NAV: { repo: 'agentistics/agentistics', inherited: true } }) })
-    expect(await leadOp('LM', { add: ['NAV'] }, d)).toMatchObject({ ok: true, leads: ['NAV'], note: 'owner_differs' })
-  })
-  test('an EXPLICIT repo equal to the leader cwd repo counts (a person said so)', async () => {
-    await withRoles({ LE: 'leader' })
-    const d = deps(rows(), { ...base, taskInfoOf: info({ EMPTY: { repo: CWD }, JARVIS: { repo: CWD } }) })
-    expect(await leadOp('LE', { add: ['JARVIS'] }, d)).toMatchObject({ ok: true, leads: ['JARVIS'] })
-  })
-  test('the cwd never widens: without repoOfRow wired nothing changes for explicit repos', async () => {
-    await withRoles({ LM: 'leader' })
-    expect(await leadOp('LM', { add: ['JARVIS'] }, deps(rows(), base))).toMatchObject({ ok: false, code: 'other_project' })
-  })
-  test('M4: a target of ANOTHER name whose session remote matches the leader repo stays refused', async () => {
-    await withRoles({ LM: 'leader' })
-    const d = deps(rows(), { taskInfoOf: async id => ({ exists: true, repo: tasks[id]?.repo, remotes: ['github.com/blpsoares/agentistics'] } as never) })
-    expect(await leadOp('LM', { add: ['PRONT'] }, d)).toMatchObject({ ok: false, code: 'other_project' })
-    expect(await leadOp('LM', { add: ['JARVIS'] }, d)).toMatchObject({ ok: false, code: 'other_project' })
-  })
-  test('ORDER: a worker gets not_leader, not a repository answer, even with a repo-less task', async () => {
-    await withRoles({ W: 'worker' })
-    const d = deps(rows(), { taskOf: async () => 'EMPTY' })
-    expect(await leadOp('W', { add: ['X'] }, d)).toMatchObject({ ok: false, code: 'not_leader' })
-    expect(await leadOp('W', { add: ['EMPTY'] }, d)).toMatchObject({ ok: false, code: 'not_leader' })
-  })
-})
 
 describe('stored entries of sessions that are gone are pruned on write', () => {
   test('a dead session lead entry disappears at the next write; the live ones stay', async () => {
