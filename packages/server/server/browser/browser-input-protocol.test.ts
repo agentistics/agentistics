@@ -178,3 +178,37 @@ describe('the input channel', () => {
     expect(c.acks.at(-1)).toEqual({ seq: 999, ok: true })
   })
 })
+
+describe('S11: history (the floating window\'s back / forward / reload)', () => {
+  test('parses the three actions and refuses anything else', () => {
+    for (const action of ['back', 'forward', 'reload'] as const) {
+      expect(parseBrowserInput(JSON.stringify({ seq: 1, op: 'history', action }))).toEqual({ ok: true, msg: { seq: 1, op: 'history', action } })
+    }
+    expect(parseBrowserInput(JSON.stringify({ seq: 2, op: 'history', action: 'go' }))).toEqual({ ok: false, seq: 2, reason: 'bad_message' })
+    expect(parseBrowserInput(JSON.stringify({ seq: 3, op: 'history', action: 'location.href="file:///etc/passwd"' }))).toEqual({ ok: false, seq: 3, reason: 'bad_message' })
+    expect(parseBrowserInput(JSON.stringify({ seq: 4, op: 'history' }))).toEqual({ ok: false, seq: 4, reason: 'bad_message' })
+  })
+
+  test('becomes a CONSTANT CDP call — nothing the person sends reaches an expression', () => {
+    const cmd = (action: string) => { const p = parseBrowserInput(JSON.stringify({ seq: 1, op: 'history', action })); if (!p.ok) throw new Error('parse'); return toCdpCommands(p.msg, vp) }
+    expect(cmd('reload')).toEqual([{ method: 'Page.reload', params: {} }])
+    expect(cmd('back')).toEqual([{ method: 'Runtime.evaluate', params: { expression: 'history.back()', userGesture: true } }])
+    expect(cmd('forward')).toEqual([{ method: 'Runtime.evaluate', params: { expression: 'history.forward()', userGesture: true } }])
+  })
+
+  test('LOCKED: refused like every other event, nothing reaches the page', async () => {
+    const c = channel({ allowed: () => false })
+    c.ch.submit(JSON.stringify({ seq: 1, op: 'history', action: 'back' }))
+    await settle()
+    expect(c.acks).toEqual([{ seq: 1, ok: false, reason: 'locked' }])
+    expect(c.sent).toEqual([])
+  })
+
+  test('unlocked: one ack, one call', async () => {
+    const c = channel()
+    c.ch.submit(JSON.stringify({ seq: 1, op: 'history', action: 'reload' }))
+    await settle()
+    expect(c.acks).toEqual([{ seq: 1, ok: true }])
+    expect(c.sent).toEqual([[{ method: 'Page.reload', params: {} }]])
+  })
+})

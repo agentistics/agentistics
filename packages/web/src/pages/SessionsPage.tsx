@@ -101,6 +101,7 @@ import { ArtifactsAside } from '../components/sessions/ArtifactsAside'
 import { HardwarePanel } from '../components/sessions/HardwarePanel'
 import { BrowserPanel } from '../components/browser/BrowserPanel'
 import { setBrowserDrawerOpen } from '../lib/browserDrawer'
+import { floatBrowser, updateBrowserWindows, useBrowserPlace } from '../lib/browserWindows'
 import { UnsavedChangesGuard } from '../components/sessions/UnsavedChangesGuard'
 import { PanelFixedControls, PanelPinButton, PanelTileDropdown } from '../components/sessions/bandControls'
 import { ShellCloseStatus } from '../components/sessions/ShellCloseStatus'
@@ -1472,12 +1473,15 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    */
   const hardwarePaneEl = <HardwarePanel lang={pt ? 'pt' : 'en'} onClose={() => closeSlotPanel('hardware')} hideCloseButton={!isMobile} />
   /** THE PERSON'S OWN BROWSER (NAVEGADOR S10): one element for the right slot (header trio folded in) and one for the bottom band. */
-  const browserPaneEl = <BrowserPanel lang={pt ? 'pt' : 'en'} onClose={() => closeSlotPanel('browser')} hideCloseButton={!isMobile} />
+  // S11 "Flutuar": the browser leaves its slot for the app-level window (`BrowserWindows`, mounted in App).
+  const floatPersonalBrowser = () => { updateBrowserWindows((s, vp) => floatBrowser(s, 'personal', vp, undefined, routeLocation.pathname)); closeSlotPanel('browser') }
+  const browserPaneEl = <BrowserPanel lang={pt ? 'pt' : 'en'} onClose={() => closeSlotPanel('browser')} hideCloseButton={!isMobile} onFloat={floatPersonalBrowser} />
   const browserPaneRightEl = (
     <BrowserPanel
       lang={pt ? 'pt' : 'en'}
       onClose={() => closeSlotPanel('browser')}
       hideCloseButton={!isMobile}
+      onFloat={floatPersonalBrowser}
       controls={panelFixedControlsFor('browser', pt ? 'Navegador' : 'Browser', () => closeSlotPanel('browser'))}
     />
   )
@@ -1533,7 +1537,13 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    *  `artifactsStore.ts` a few lines below (`setArtifactLive`) for the metrics card's References
    *  section; read back here through the SAME store rather than recomputed, so the rail can never
    *  disagree with what that card is currently saying about this exact session. */
-  const railActivity = railActivityFromHint(useArtifactLive(selected?.id))
+  const railActivityHint = railActivityFromHint(useArtifactLive(selected?.id))
+  // NAVEGADOR S11: the person's browser floating in a window wears the rail icon's dot (prototype `b1-floating`).
+  const personalBrowserPlace = useBrowserPlace('personal')
+  const railActivity = useMemo<ReadonlySet<PanelId>>(
+    () => (personalBrowserPlace === 'docked' ? railActivityHint : new Set([...railActivityHint, 'browser' as PanelId])),
+    [railActivityHint, personalBrowserPlace],
+  )
   // THE HARDWARE ICON'S OWN RED (addendum item 6) — `hardwareCritical` is read from the single
   // `useHardwarePressureWatch` call this page makes, moved up beside the idle-sessions hook (see
   // that block's own comment) so `ramUnderPressure` is available before it is needed. Runs whenever

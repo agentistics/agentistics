@@ -11,12 +11,14 @@
  * absent until S11 gives it somewhere to go (a control with nowhere to go is not drawn).
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Lock, Plus, X } from 'lucide-react'
+import { ArrowDownToLine, Lock, PictureInPicture2, Plus, X } from 'lucide-react'
+import { LabelButton } from '../nay/NayWindowFrame'
+import { dockBrowser, updateBrowserWindows, useBrowserPlace } from '../../lib/browserWindows'
 import { TabDot, TabStripView, type TabStripItem } from '../sessions/SessionTabStrip'
 import { GlobeSearchIcon } from '../../lib/panelIcons'
 import { BrowserScreen } from './BrowserScreen'
 import { BrowserAddressBar } from './BrowserAddressBar'
-import { useBrowserScreen, type OpenStream } from '../../hooks/useBrowserScreen'
+import { useBrowserScreen, type OpenStream, type ViewerSize } from '../../hooks/useBrowserScreen'
 import { usePersonalActions, usePersonalBrowserLive, type PersonalTabFact } from '../../hooks/usePersonalBrowser'
 import { usePersonalInput } from '../../hooks/usePersonalInput'
 import { openEventStream } from '../../lib/streamMux'
@@ -43,6 +45,10 @@ export interface BrowserPanelProps {
   tabsOverride?: { tabs: PersonalTabFact[]; asOf: number }
   /** Injected in tests: the vault's proof. */
   askGrant?: AskGrant
+  /** S11: "Flutuar" in the header (the app-level window). Absent = no button. */
+  onFloat?: () => void
+  /** S11: drawn INSIDE the floating window — the window frame is the header, and it never shows the placeholder. */
+  headless?: boolean
 }
 
 const ORANGE = 'var(--anthropic-orange)'
@@ -63,7 +69,58 @@ function useDocumentVisible(): boolean {
   return v
 }
 
-export function BrowserPanel({ lang, onClose, hideCloseButton, controls, onOpenVault, openStream, post, liveOverride, tabsOverride, askGrant }: BrowserPanelProps) {
+/**
+ * The panel's slot while the person's browser FLOATS (S11): the header stays (the slot is still the browser's),
+ * the screen is a placeholder with "Voltar para a barra" — one browser is never on screen in two places.
+ */
+export function BrowserPanel(props: BrowserPanelProps) {
+  const place = useBrowserPlace('personal')
+  if (props.headless || place === 'docked') return <BrowserPanelLive {...props} />
+  const { lang, onClose, hideCloseButton, controls } = props
+  const pt = lang === 'pt'
+  return (
+    <div data-browser-panel data-browser-floating={place} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0, background: 'var(--bg-card)' }}>
+      <PanelHeader pt={pt} onClose={onClose} hideCloseButton={hideCloseButton} controls={controls} />
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
+        <span style={{ color: 'var(--text-tertiary)' }}><PictureInPicture2 size={28} aria-hidden /></span>
+        <div style={{ fontSize: 13, fontWeight: 650, color: 'var(--text-primary)' }}>{place === 'minimized' ? (pt ? 'Navegador minimizado' : 'Browser minimized') : (pt ? 'Navegador flutuando' : 'Browser floating')}</div>
+        <div style={{ fontSize: 12, lineHeight: 1.5, maxWidth: 280 }}>{pt ? 'Ele está numa janela que acompanha você por outras páginas.' : 'It is in a window that follows you to other pages.'}</div>
+        <LabelButton icon={<ArrowDownToLine size={13} />} label={pt ? 'Voltar para a barra' : 'Back to the sidebar'}
+          title={pt ? 'Voltar o navegador para a barra da direita' : 'Put the browser back in the right sidebar'}
+          onClick={() => updateBrowserWindows(s => dockBrowser(s, 'personal'))} />
+      </div>
+    </div>
+  )
+}
+
+function PanelHeader({ pt, onClose, hideCloseButton, controls, onFloat }: { pt: boolean; onClose: () => void; hideCloseButton?: boolean; controls?: ReactNode; onFloat?: () => void }) {
+  const mobile = useIsMobile()
+  return (
+    <header style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minWidth: 0, padding: mobile ? '8px 12px' : '10px 12px', borderBottom: '1px solid var(--border)', minHeight: mobile ? 44 : undefined, boxSizing: 'border-box' }}>
+      <span style={{ color: 'var(--anthropic-orange)', display: 'inline-flex', flexShrink: 0 }}><GlobeSearchIcon size={15} /></span>
+      <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: 'var(--text-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {pt ? 'Navegador' : 'Browser'}
+      </span>
+      <span style={{ flex: 1 }} />
+      {onFloat && (
+        <button type="button" data-browser-float onClick={onFloat} title={pt ? 'Abrir numa janela flutuante, para acompanhar de qualquer página' : 'Open in a floating window, to follow it from any page'} style={{
+          display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, height: mobile ? 44 : 28, padding: '0 9px', borderRadius: 8,
+          border: '1px solid var(--border-strong, var(--border))', background: 'var(--bg-elevated)', color: 'var(--text-primary)',
+          fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer',
+        }}><PictureInPicture2 size={13} aria-hidden />{pt ? 'Flutuar' : 'Float'}</button>
+      )}
+      {!hideCloseButton && (
+        <button
+          type="button" className="ag-tap-icon" onClick={onClose} title={pt ? 'Fechar' : 'Close'} aria-label={pt ? 'Fechar o navegador' : 'Close the browser'}
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: mobile ? 44 : 26, height: mobile ? 44 : 22, flexShrink: 0, borderRadius: 6, padding: 0, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+        ><X size={13} /></button>
+      )}
+      {controls}
+    </header>
+  )
+}
+
+function BrowserPanelLive({ lang, onClose, hideCloseButton, controls, onOpenVault, openStream, post, liveOverride, tabsOverride, askGrant, onFloat, headless }: BrowserPanelProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
   const visible = useDocumentVisible()
@@ -83,7 +140,9 @@ export function BrowserPanel({ lang, onClose, hideCloseButton, controls, onOpenV
   const watching = browserWatching({ inViewport: true, documentVisible: visible, panelOpen: true })
   // The grant goes in the mux `sub` frame (never the URL); a new `open` identity re-subscribes (after a closed tab).
   const open = useMemo<OpenStream>(() => (url: string) => (openStream ?? openEventStream)(url, grant ?? undefined) as ReturnType<OpenStream>, [openStream, grant, reopen])
-  const screen = useBrowserScreen(live ? 'personal' : null, tab, watching, open)
+  // S11: the viewport follows whoever watches (the rail, the drawer or the floating window) — S5c's rule for the card.
+  const [size, setSize] = useState<ViewerSize>()
+  const screen = useBrowserScreen(live ? 'personal' : null, tab, watching && (size !== undefined || typeof ResizeObserver === 'undefined'), open, size)
   const input = usePersonalInput(tab, grant, live)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [unlockRefusal, setUnlockRefusal] = useState<{ sentence: string; openVault: boolean } | null>(null)
@@ -161,20 +220,7 @@ export function BrowserPanel({ lang, onClose, hideCloseButton, controls, onOpenV
 
   return (
     <div data-browser-panel style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0, background: 'var(--bg-card)' }}>
-      <header style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minWidth: 0, padding: mobile ? '8px 12px' : '10px 12px', borderBottom: '1px solid var(--border)', minHeight: mobile ? 44 : undefined, boxSizing: 'border-box' }}>
-        <span style={{ color: 'var(--anthropic-orange)', display: 'inline-flex', flexShrink: 0 }}><GlobeSearchIcon size={15} /></span>
-        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: 'var(--text-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {pt ? 'Navegador' : 'Browser'}
-        </span>
-        <span style={{ flex: 1 }} />
-        {!hideCloseButton && (
-          <button
-            type="button" className="ag-tap-icon" onClick={onClose} title={pt ? 'Fechar' : 'Close'} aria-label={pt ? 'Fechar o navegador' : 'Close the browser'}
-            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: mobile ? 44 : 26, height: mobile ? 44 : 22, flexShrink: 0, borderRadius: 6, padding: 0, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer' }}
-          ><X size={13} /></button>
-        )}
-        {controls}
-      </header>
+      {!headless && <PanelHeader pt={pt} onClose={onClose} hideCloseButton={hideCloseButton} controls={controls} onFloat={onFloat} />}
       {!unlocked ? (
         <div data-browser-locked style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
           <span style={{ color: 'var(--text-tertiary)' }}><Lock size={28} aria-hidden /></span>
@@ -236,7 +282,7 @@ export function BrowserPanel({ lang, onClose, hideCloseButton, controls, onOpenV
         <div role="alert" data-browser-refusal style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, lineHeight: 1.5, color: 'var(--text-primary)', background: 'var(--bg-elevated)', flexShrink: 0 }}>{refusal}</div>
       )}
       {live ? (
-        <BrowserScreen screen={screen} lock="none" lang={lang} noPill onInput={input.send} />
+        <BrowserScreen screen={screen} lock="none" lang={lang} noPill onInput={input.send} onResize={setSize} />
       ) : (
         <div data-browser-empty style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
           <span style={{ color: 'var(--text-tertiary)' }}><GlobeSearchIcon size={28} /></span>

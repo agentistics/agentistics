@@ -27,6 +27,11 @@ export type BrowserInputMessage =
   | { seq: number; op: 'pointer'; type: PointerType; x: number; y: number; button: PointerButton; clicks: number; deltaX: number; deltaY: number; mods: number }
   | { seq: number; op: 'key'; type: 'down' | 'up'; key: string; code: string; text?: string; mods: number }
   | { seq: number; op: 'text'; text: string }
+  /** S11: back / forward / reload from the floating window's address row — same padlock, same ack. */
+  | { seq: number; op: 'history'; action: HistoryAction }
+
+export type HistoryAction = 'back' | 'forward' | 'reload'
+const HISTORY_ACTIONS = new Set<HistoryAction>(['back', 'forward', 'reload'])
 
 export type BrowserInputReason =
   | 'bad_json' | 'bad_message' | 'out_of_range' | 'empty_text' | 'text_too_long'
@@ -85,6 +90,10 @@ export function parseBrowserInput(raw: string): ParsedInput {
     if (r.text.length > MAX_BROWSER_TEXT) return { ok: false, seq, reason: 'text_too_long' }
     return { ok: true, msg: { seq, op: 'text', text: r.text } }
   }
+  if (r.op === 'history') {
+    if (typeof r.action !== 'string' || !HISTORY_ACTIONS.has(r.action as HistoryAction)) return bad
+    return { ok: true, msg: { seq, op: 'history', action: r.action as HistoryAction } }
+  }
   return bad
 }
 
@@ -109,6 +118,13 @@ const MOUSE_TYPE: Record<PointerType, string> = { down: 'mousePressed', up: 'mou
 /** PURE: one event → the CDP calls that perform it, in viewport pixels. */
 export function toCdpCommands(msg: BrowserInputMessage, viewport: { w: number; h: number }): CdpCommand[] {
   if (msg.op === 'text') return [{ method: 'Input.insertText', params: { text: msg.text } }]
+  // A CONSTANT expression per action — nothing the person sends reaches it. Where the page may go is still
+  // decided by the host's request rules (`Fetch.enable`, spec §4), exactly as for a click on a link.
+  if (msg.op === 'history') {
+    return msg.action === 'reload'
+      ? [{ method: 'Page.reload', params: {} }]
+      : [{ method: 'Runtime.evaluate', params: { expression: msg.action === 'back' ? 'history.back()' : 'history.forward()', userGesture: true } }]
+  }
   if (msg.op === 'pointer') {
     const x = Math.round(msg.x * viewport.w)
     const y = Math.round(msg.y * viewport.h)

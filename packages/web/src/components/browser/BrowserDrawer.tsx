@@ -7,6 +7,7 @@
 import { BrowserPanel } from './BrowserPanel'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { setBrowserDrawerOpen, useBrowserDrawerOpen } from '../../lib/browserDrawer'
+import { floatBrowser, updateBrowserWindows } from '../../lib/browserWindows'
 import { useEscapeOwner } from '../../lib/overlayStack'
 
 export function BrowserDrawer({ lang }: { lang: 'pt' | 'en' }) {
@@ -19,7 +20,9 @@ export function BrowserDrawer({ lang }: { lang: 'pt' | 'en' }) {
       position: 'fixed', inset: 0, zIndex: 660, display: 'flex', flexDirection: 'column', background: 'var(--bg-card)',
       paddingTop: 'var(--safe-top, 0px)', paddingBottom: 'var(--safe-bottom, 0px)', boxSizing: 'border-box',
     }}>
-      <BrowserPanel lang={lang} onClose={() => setBrowserDrawerOpen(false)} onOpenVault={() => { setBrowserDrawerOpen(false); window.history.pushState({}, '', '/vault'); window.dispatchEvent(new PopStateEvent('popstate')) }} />
+      <BrowserPanel lang={lang} onClose={() => setBrowserDrawerOpen(false)}
+        onFloat={() => { setBrowserDrawerOpen(false); updateBrowserWindows((s, vp) => floatBrowser(s, 'personal', vp)) }}
+        onOpenVault={() => { setBrowserDrawerOpen(false); window.history.pushState({}, '', '/vault'); window.dispatchEvent(new PopStateEvent('popstate')) }} />
     </div>
   )
 }

@@ -234,6 +234,8 @@ export type BrowserInputOut =
   | { seq: number; op: 'pointer'; type: 'down' | 'up' | 'move' | 'wheel'; x: number; y: number; button?: 'left' | 'middle' | 'right' | 'none'; clicks?: number; deltaX?: number; deltaY?: number; mods?: number }
   | { seq: number; op: 'key'; type: 'down' | 'up'; key: string; code: string; text?: string; mods?: number }
   | { seq: number; op: 'text'; text: string }
+  /** NAVEGADOR S11: the floating A1 window's back / forward / reload — the person's, so only while unlocked. */
+  | { seq: number; op: 'history'; action: 'back' | 'forward' | 'reload' }
 
 const DOM_BUTTON = ['left', 'middle', 'right'] as const
 

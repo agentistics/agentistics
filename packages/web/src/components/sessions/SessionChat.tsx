@@ -2343,7 +2343,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [sessionBrowser.anchor, firstShown, chatActivityOn, activityItems, turns.length])
   const openVault = useCallback(() => navigate('/vault'), [navigate])
   const browserBlock = browserAt === null ? null : (
-    <SessionBrowserBlock managedId={session.id} lang={lang} model={sessionBrowser} onOpenVault={openVault} />
+    <SessionBrowserBlock managedId={session.id} lang={lang} model={sessionBrowser} onOpenVault={openVault} title={session.title} />
   )
   // Rendered per turn exactly as before; shared by both paths so the flag changes grouping only.
   const renderTurn = (t: ChatTurn, i: number) => (
@@ -2689,7 +2689,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       }}
       onDrop={onDrop}
     >
-      <SessionBrowserOverlay managedId={session.id} lang={lang} model={sessionBrowser} onOpenVault={openVault} />
+      <SessionBrowserOverlay managedId={session.id} lang={lang} model={sessionBrowser} onOpenVault={openVault} title={session.title} />
       <div
         ref={scrollRef}
         onScroll={onScroll}

@@ -1,6 +1,7 @@
 import { EngineSurfaceButtons } from './components/EngineSurfaceButtons'
 import { EngineSurfaceHost } from './components/EngineSurfaceHost'
 import { BrowserDrawer } from './components/browser/BrowserDrawer'
+import { BrowserWindows } from './components/browser/BrowserWindows'
 import { setBrowserDrawerOpen } from './lib/browserDrawer'
 import { setEngineSurfaceLang } from './lib/engineSurfaceHost'
 import { EngineSurfaceIndicators } from './components/EngineSurfaceIndicator'
@@ -4339,6 +4340,8 @@ export default function AppLayout() {
       <AwayDialogHost />
       <EngineSurfaceHost />
       <BrowserDrawer lang={lang === 'pt' ? 'pt' : 'en'} />
+      {/* NAVEGADOR S11: the floating browsers (A1/B1) belong to the app, so they follow the person across pages. */}
+      <BrowserWindows lang={lang === 'pt' ? 'pt' : 'en'} />
 
       {/* VAULT.PERSONAL §10: the one unlock any screen can ask for (ensureVaultOpen), and — on this
           computer — the phones waiting for approval. */}

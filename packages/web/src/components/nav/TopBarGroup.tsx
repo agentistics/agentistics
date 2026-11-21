@@ -20,6 +20,7 @@ import { useVaultWatch } from '../../lib/vaultWatch'
 import { pathOfView } from '../../lib/tasksViewRoute'
 import { liveActivity } from '../tasks/liveShortcutModel'
 import { LivePreview, sessionIdOfPath } from '../tasks/LivePreview'
+import { BrowserFollowChip } from '../browser/BrowserFollowChip'
 import { BetaTag } from '../BetaTag'
 import { BottomSheet } from '../BottomSheet'
 import { VaultGlyph } from '../vault/VaultGlyph'
@@ -28,7 +29,12 @@ import { groupAccented, groupRows, type GroupRow } from './topBarGroupModel'
 
 const HOVER_CLOSE_MS = 180
 
-export function TopBarGroup({ lang, enabled = true, onOpenHardware }: { lang: 'pt' | 'en'; enabled?: boolean; onOpenHardware?: () => void }) {
+/** The group button, preceded by the floating-browser follow chip (the prototype draws it in this same bar). */
+export function TopBarGroup(props: { lang: 'pt' | 'en'; enabled?: boolean; onOpenHardware?: () => void }) {
+  return <><BrowserFollowChip lang={props.lang} enabled={props.enabled} /><TopBarGroupButton {...props} /></>
+}
+
+function TopBarGroupButton({ lang, enabled = true, onOpenHardware }: { lang: 'pt' | 'en'; enabled?: boolean; onOpenHardware?: () => void }) {
   const pt = lang === 'pt'
   const navigate = useNavigate()
   const { pathname } = useLocation()

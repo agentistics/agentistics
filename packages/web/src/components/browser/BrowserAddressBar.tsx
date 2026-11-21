@@ -21,9 +21,11 @@ export interface BrowserAddressBarProps {
   onForward: () => void
   onReload: () => void
   autoFocus?: boolean
+  /** A session's browser (A1 window): the address is shown, never typed — the model drives where it goes. */
+  readOnly?: boolean
 }
 
-export function BrowserAddressBar({ url, pt, hasPage, busy = false, onGo, onBack, onForward, onReload, autoFocus = false }: BrowserAddressBarProps) {
+export function BrowserAddressBar({ url, pt, hasPage, busy = false, onGo, onBack, onForward, onReload, autoFocus = false, readOnly = false }: BrowserAddressBarProps) {
   const mobile = useIsMobile()
   const shown = displayUrl(url)
   const [text, setText] = useState(shown)
@@ -48,10 +50,10 @@ export function BrowserAddressBar({ url, pt, hasPage, busy = false, onGo, onBack
   return (
     <form
       data-browser-address
-      onSubmit={e => { e.preventDefault(); onGo(text) }}
+      onSubmit={e => { e.preventDefault(); if (!readOnly) onGo(text) }}
       style={{ display: 'flex', alignItems: 'center', gap: mobile ? 0 : 2, padding: mobile ? '0 8px' : '6px 8px', flexShrink: 0, minWidth: 0, background: 'var(--bg-card)', borderBottom: '1px solid var(--border)' }}
     >
-      {nav(pt ? 'Voltar' : 'Back', !hasPage || busy, onBack, <ArrowLeft size={15} aria-hidden />)}
+      {nav(pt ? 'Página anterior' : 'Previous page', !hasPage || busy, onBack, <ArrowLeft size={15} aria-hidden />)}
       {nav(pt ? 'Avançar' : 'Forward', !hasPage || busy, onForward, <ArrowRight size={15} aria-hidden />)}
       {nav(pt ? 'Recarregar' : 'Reload', !hasPage || busy, onReload, <RotateCw size={14} aria-hidden />)}
       <input
@@ -59,6 +61,7 @@ export function BrowserAddressBar({ url, pt, hasPage, busy = false, onGo, onBack
         type="text" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} autoFocus={autoFocus}
         aria-label={pt ? 'Endereço' : 'Address'}
         placeholder={pt ? 'Digite um endereço' : 'Type an address'}
+        readOnly={readOnly}
         value={text}
         onFocus={e => { editing.current = true; e.currentTarget.select() }}
         onBlur={() => { editing.current = false; setText(shown) }}

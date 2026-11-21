@@ -79,6 +79,8 @@ export const USER_UI_PREF_REGISTRY = {
   fellDismissed: { machine: 'ui', maxBytes: MEDIUM },
   nayDockTab: { machine: 'ui', maxBytes: SMALL },
   nayDockWindows: { machine: 'ui', maxBytes: MEDIUM },
+  /** NAVEGADOR S11: which browsers float (and minimized, and the session title) — the geometry stays per device. */
+  browserWindows: { machine: 'ui', maxBytes: MEDIUM },
   editorPreviewMode: { machine: 'ui', maxBytes: SMALL },
   studioTreeSide: { machine: 'ui', maxBytes: SMALL },
   sessionsFiltersOpen: { machine: 'ui', maxBytes: SMALL },

@@ -13,15 +13,15 @@
  * component, so they cannot look different — and picking one chooses which tab this card WATCHES (the
  * model's tabs are the model's to open and close).
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { Activity, Lock, LockOpen, Maximize2, Minimize2, MousePointerClick, Pause, PictureInPicture2 } from 'lucide-react'
 import { IconButton } from '../nay/NayWindowFrame'
 import { TabDot, TabStripView, type TabStripItem } from '../sessions/SessionTabStrip'
 import { BrowserScreen } from './BrowserScreen'
-import { useBrowserInput, useBrowserScreen, type OpenStream, type ViewerSize } from '../../hooks/useBrowserScreen'
+import type { OpenStream } from '../../hooks/useBrowserScreen'
+import { useSessionBrowserCard } from '../../hooks/useSessionBrowserCard'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { browserWatching } from '../../lib/browserStream'
-import { browserCaption, displayUrl, setBrowserLock, type LockOutcome } from '../../lib/browserCard'
+import { displayUrl, setBrowserLock, type LockOutcome } from '../../lib/browserCard'
 
 export const CARD_H_DESKTOP = 330
 export const CARD_H_MOBILE = 290
@@ -42,64 +42,13 @@ export interface BrowserSessionCardProps {
   openStream?: OpenStream
 }
 
-/** Is this element on screen while the page is visible? (the card's "watching" — spec §1.5). */
-function useWatching(): [(el: HTMLDivElement | null) => void, boolean] {
-  const [inView, setInView] = useState(true)
-  const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
-  const obs = useRef<IntersectionObserver | null>(null)
-  const ref = useCallback((el: HTMLDivElement | null) => {
-    obs.current?.disconnect()
-    obs.current = null
-    if (!el || typeof IntersectionObserver === 'undefined') return
-    const o = new IntersectionObserver(entries => { for (const e of entries) setInView(e.isIntersecting) })
-    o.observe(el)
-    obs.current = o
-  }, [])
-  useEffect(() => {
-    const on = () => setVisible(document.visibilityState !== 'hidden')
-    document.addEventListener('visibilitychange', on)
-    return () => { document.removeEventListener('visibilitychange', on); obs.current?.disconnect() }
-  }, [])
-  return [ref, browserWatching({ inViewport: inView, documentVisible: visible, panelOpen: true })]
-}
-
 export function BrowserSessionCard({ managedId, lang, maximized, onToggleMax, onFloat, onOpenVault, setLock = setBrowserLock, openStream }: BrowserSessionCardProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
   const cardFocus = useRef<HTMLDivElement | null>(null)
   useEffect(() => { if (maximized) cardFocus.current?.focus() }, [maximized])
-  const [watchRef, watching] = useWatching()
-  const [tab, setTab] = useState<string | null>(null)
-  const [size, setSize] = useState<ViewerSize>()
-  const screen = useBrowserScreen(managedId, tab, watching && (size !== undefined || typeof ResizeObserver === 'undefined'), openStream, size)
-  const serverLock = screen.state?.lock === 'unlocked' ? 'unlocked' : 'locked'
-  // The answer of the person's own click, until the server's next `state` says the same (≤ 500 ms).
-  const [mine, setMine] = useState<'locked' | 'unlocked' | null>(null)
-  useEffect(() => { if (mine !== null && serverLock === mine) setMine(null) }, [serverLock, mine])
-  const lock = mine ?? serverLock
-  const unlocked = lock === 'unlocked'
-  const input = useBrowserInput(managedId, tab, unlocked)
-  const [busy, setBusy] = useState(false)
-  const [refusal, setRefusal] = useState<{ sentence: string; openVault: boolean } | null>(null)
-
-  const toggleLock = async () => {
-    if (busy) return
-    setBusy(true)
-    setRefusal(null)
-    const want = unlocked ? 'locked' : 'unlocked'
-    try {
-      const r = await setLock(managedId, want, pt)
-      if (r.ok) setMine(r.lock)
-      else setRefusal({ sentence: r.sentence, openVault: r.openVault })
-    } catch {
-      setRefusal({ sentence: pt ? 'Não foi possível mudar o cadeado.' : 'Could not change the padlock.', openVault: false })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const url = screen.state?.url || screen.frame?.url || ''
-  const caption = browserCaption(screen.state ? lock : null, screen.state?.lastAction ?? null, lang)
+  // The card's state is the floating window's too (S11): one hook, so the two frames can never disagree.
+  const { screen, lock, unlocked, busy, refusal, toggleLock, input, tab, setTab, setSize, url, caption, watchRef } = useSessionBrowserCard(managedId, lang, setLock, openStream)
   const tabs = screen.state?.tabs ?? []
   const watchedTab = tab ?? screen.state?.activeTab ?? tabs.find(t => t.active)?.id ?? ''
   const items: TabStripItem[] = tabs.map(t => {

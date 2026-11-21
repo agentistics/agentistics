@@ -49,12 +49,16 @@ let grantStore: typeof import('../../lib/personalGrant')
 let originalWs: typeof globalThis.WebSocket
 let originalFetch: typeof globalThis.fetch
 let originalAct: boolean | undefined
+let originalResize: typeof ResizeObserver
 
 beforeAll(async () => {
   originalWs = globalThis.WebSocket
   originalFetch = globalThis.fetch
   originalAct = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
   GlobalRegistrator.register({ width: 1280, height: 800 })
+  // As in the card's tests: no ResizeObserver = the stream opens at once, without a viewer size (S11 sizes it).
+  originalResize = globalThis.ResizeObserver
+  globalThis.ResizeObserver = undefined as never
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never
   Element.prototype.scrollIntoView = () => {}
@@ -69,6 +73,7 @@ afterAll(async () => {
   await new Promise(r => setTimeout(r, 50))
   globalThis.WebSocket = originalWs
   globalThis.fetch = originalFetch
+  globalThis.ResizeObserver = originalResize
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = originalAct
   await GlobalRegistrator.unregister()
 })
@@ -152,6 +157,24 @@ describe('nothing open yet', () => {
 })
 
 describe('open (b1-open)', () => {
+  test('S11: the personal stream opens at the size of the screen that watches it (rail, drawer or window)', () => {
+    const widthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
+    const heightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight')
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 540 })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 290 })
+    globalThis.ResizeObserver = class { observe() {} disconnect() {} } as never
+    try {
+      render({ live: true })
+      expect(stream().url).toBe(`/api/browser/stream?owner=personal&width=540&height=290&dpr=${window.devicePixelRatio || 1}`)
+    } finally {
+      globalThis.ResizeObserver = undefined as never
+      if (widthDescriptor) Object.defineProperty(HTMLElement.prototype, 'clientWidth', widthDescriptor)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth')
+      if (heightDescriptor) Object.defineProperty(HTMLElement.prototype, 'clientHeight', heightDescriptor)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight')
+    }
+  })
+
   test('watches the PERSONAL browser; the address and the page show; there is no padlock and no "só olhando" pill', () => {
     render({ live: true }); feed()
     expect(stream().url).toBe('/api/browser/stream?owner=personal')
