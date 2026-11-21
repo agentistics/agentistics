@@ -53,6 +53,8 @@ function ownerRefused(code: EngineOwnerSessionRefusal, sentence: string): Engine
 }
 
 export function createDelegateMembers(d: DelegateDeps): DelegateMembers {
+  /** Ids of the owner sessions this instance opened (and muted) — the only ones `stop` un-mutes. */
+  const opened = new Set<string>()
   return {
     async delegateHarnesses() {
       const [installed, allowed] = await Promise.all([d.startable(), d.allowed()])
@@ -118,11 +120,13 @@ export function createDelegateMembers(d: DelegateDeps): DelegateMembers {
         await d.kill(out.id).catch(() => {})
         return ownerRefused('refused', 'The owner session started but could not be reached, so it was stopped.')
       }
+      opened.add(out.id)
       await v.mute(out.id, true).catch(() => {}) // best effort: a session the engine is talking to must not ring the bell on every reply
       return { ok: true, managedId: out.id, session }
     },
     async stop(managedId) {
-      await d.ownerSession?.mute(managedId, false).catch(() => {})
+      // Only a session this engine opened itself gets its mute lifted: a delegated worker keeps the mute its owner set.
+      if (opened.delete(managedId)) await d.ownerSession?.mute(managedId, false).catch(() => {})
       await d.kill(managedId).catch(() => {})
     },
   }
