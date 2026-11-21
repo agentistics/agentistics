@@ -76,6 +76,8 @@ export function refusalLine(r: EngineRefusal): string {
     case 'duplicate-command': return `the engine offered the verb ${r.verb} twice`
     case 'surface': return `the engine announced a surface (${r.id || 'no id'}) the host cannot place: ${r.reason}`
     case 'surface-no-route': return `the engine announced surfaces but serves no route under /api/engine/x`
+    case 'mcp-tool': return `the engine declared an MCP tool (${r.name || 'no name'}) the host cannot expose: ${r.reason}`
+    case 'mcp-tool-no-route': return `the engine declared MCP tools but serves no route under /api/engine/x`
   }
 }
 
