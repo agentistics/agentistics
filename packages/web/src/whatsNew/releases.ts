@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.222.1': {
+  '2.223.0': {
     features: [
       {
         pt: 'Ligar para a Nay no clique direito do botão dela: o botão "Ligar para a Nay" aparece ao lado do Cofre, e vira "Voltar para a ligação" quando há uma em andamento.',
