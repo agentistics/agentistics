@@ -2885,7 +2885,14 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           if (!r.ok) return json({ error: 'bad_repo', message: r.reason }, 422)
           // The repository a person writes is what counts for leading: a SESSION may write it only on the task it leads as its own filing.
           const [{ repoEditGate }, { verifySessionIdentity }] = await Promise.all([import('./sessions/task-repo-gate'), import('./sessions/session-identity')])
-          const refused = await repoEditGate(body, ref, verifySessionIdentity)
+          const caller = async () => {
+            const [{ identifyCaller }, { processSessionHub }] = await Promise.all([import('./browser/browser-caller-proc'), import('./sessions/session-hub')])
+            const sessionPids = new Set<number>()
+            for (const row of processSessionHub()?.last()?.sessions ?? []) if (typeof row.pid === 'number') sessionPids.add(row.pid)
+            const ip = server.requestIP(req)
+            return identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
+          }
+          const refused = await repoEditGate(body, ref, verifySessionIdentity, r.repo, caller)
           if (refused) return json(refused.body, refused.status)
         }
         const ok = await mod.editTask(ref, {

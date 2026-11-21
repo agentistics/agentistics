@@ -510,3 +510,17 @@ The agentistics dashboard provides a dedicated MCP Management interface (in Sett
 
 - [Nay chat](./nay.md) — the built-in assistant; a Nay conversation is a managed session with every tool allowed
 - [Data sources](./data-sources.md) — what `/api/data` returns and how it's computed
+
+## Who may write a task's repository (LIVE.LIDER-MULTITAREFA r6)
+
+Leading a task requires an EXPLICIT repository on both the leader's own task and the target. A **session** may
+write a task's repository only when (a) the task is the one it is filed on as declared leader and (b) the value
+equals the repository of its OWN working directory as `repo-facts` resolves it — a verifiable fact, not a
+declaration. Anything else answers 403 `repo_not_own_cwd` / `not_own_task`; the person sets it with
+`agentop task edit <task> --repo <owner/name>` from their own terminal or the task screen.
+
+Who is asking is read from the process tree / socket, never from what the request omits: the CLI looks for a managed
+session among its ancestors (`env -u AGENTOP_MANAGED_ID` changes nothing), and REST without a `session` body uses the
+browser padlock's socket classifier (`browser-caller.ts`). Stated limits: where there is no /proc (macOS, Windows) the
+socket cannot be read and REST falls back to the body, so a `curl` from a session there passes as the person; a
+process reparented to init (double fork/setsid) leaves its session's tree.

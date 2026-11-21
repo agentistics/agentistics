@@ -250,6 +250,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Repositório só na própria tarefa', message: 'Uma sessão só pode mudar o repositório da tarefa em que está filiada como líder; só a pessoa muda o de qualquer tarefa.' },
     en: { title: 'Repository only on its own task', message: 'A session may change the repository only of the task it is filed on as leader; only the person can change any task.' },
   },
+  repo_not_own_cwd: {
+    pt: { title: 'Repositório só pela pessoa', message: 'Uma sessão só pode gravar o repositório do próprio diretório; qualquer outro, só a pessoa: agentop task edit <tarefa> --repo <dono/nome> no seu terminal, ou a tela da tarefa.' },
+    en: { title: 'Repository set by the person', message: 'A session may write only the repository of its own working directory; any other is the person\'s: agentop task edit <task> --repo <owner/name> from your terminal, or the task screen.' },
+  },
   'tasks.thread_resolved': {
     pt: { title: 'Tópico resolvido', message: 'O tópico foi movido para Resolvidos.' },
     en: { title: 'Topic resolved', message: 'The topic was moved to Resolved.' },

@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { addSession } from './registry'
 import { defaultRoleDeps, leadOp, repoWriteRefusal, writeRolesDoc, type RoleDeps, type TaskRepoInfo } from './session-roles'
-import { repoEditGate } from './task-repo-gate'
+import { cliRepoSender, repoEditGate, repoEditGateFor } from './task-repo-gate'
+import type { CallerVerdict } from '../browser/browser-caller'
 import { createTask, editTask } from './task-web'
 import { loadTaskWorld } from './task-source'
 
@@ -101,21 +102,70 @@ describe('REAL wiring (defaultRoleDeps over the real board and registry) — M1b
     expect(t).toMatchObject({ repo: 'o/said', repoSource: 'explicit' })
   })
 
-  test('write gate: the person (no proof) writes any task; a leader only its own filing; a worker or another task is 403 not_own_task', async () => {
+  const person: CallerVerdict = { kind: 'person', via: 'process', pid: 1 }
+  const verify = (ok: string[]) => async (id: unknown) => (typeof id === 'string' && ok.includes(id) ? id : null)
+
+  test('write gate: the person writes any task; a leader only its own filing and only its OWN cwd repo; a worker or another task is 403', async () => {
     const { a, b, lid, wid, deps } = await setup()
-    const verify = (ok: string[]) => async (id: unknown) => (typeof id === 'string' && ok.includes(id) ? id : null)
+    const own: RoleDeps = { ...deps, cwdRepoOf: async () => 'o/own' }
     const asLeader = { session: { id: lid, token: 't' } }
-    expect(await repoEditGate({}, b.id, verify([]), deps)).toBeNull()
-    expect(await repoEditGate(asLeader, a.id, verify([lid]), deps)).toBeNull()
-    expect(await repoEditGate(asLeader, b.id, verify([lid]), deps)).toMatchObject({ status: 403, body: { error: 'not_own_task' } })
-    expect(await repoEditGate({ session: { id: wid, token: 't' } }, a.id, verify([wid]), deps)).toMatchObject({ status: 403, body: { error: 'not_own_task' } })
-    expect(await repoEditGate({ session: { id: lid, token: 'forged' } }, a.id, verify([]), deps)).toMatchObject({ status: 403, body: { error: 'unverified_sender' } })
+    expect(await repoEditGate({}, b.id, verify([]), 'x/anything', () => person, own)).toBeNull()
+    // D1: own filing + value equal to the cwd repo -> 200
+    expect(await repoEditGate(asLeader, a.id, verify([lid]), 'o/own', undefined, own)).toBeNull()
+    // D1 (r5 blocker 1): own filing, value NOT the cwd repo -> 403 repo_not_own_cwd, with the plain sentence
+    const foreign = await repoEditGate(asLeader, a.id, verify([lid]), 'blpsoares/prontuario', undefined, own)
+    expect(foreign).toMatchObject({ status: 403, body: { error: 'repo_not_own_cwd' } })
+    expect(foreign!.body.message).toContain('Only the person can set a repository')
+    expect(foreign!.body.message).toContain('agentop task edit')
+    // clearing is not a verifiable fact either
+    expect(await repoEditGate(asLeader, a.id, verify([lid]), '', undefined, own)).toMatchObject({ body: { error: 'repo_not_own_cwd' } })
+    // a session with no resolvable cwd repo is refused (fail-closed)
+    expect(await repoEditGate(asLeader, a.id, verify([lid]), 'o/own', undefined, { ...deps, cwdRepoOf: async () => undefined })).toMatchObject({ body: { error: 'repo_not_own_cwd' } })
+    expect(await repoEditGate(asLeader, b.id, verify([lid]), 'o/own', undefined, own)).toMatchObject({ status: 403, body: { error: 'not_own_task' } })
+    expect(await repoEditGate({ session: { id: wid, token: 't' } }, a.id, verify([wid]), 'o/own', undefined, own)).toMatchObject({ status: 403, body: { error: 'not_own_task' } })
+    expect(await repoEditGate({ session: { id: lid, token: 'forged' } }, a.id, verify([]), 'o/own', undefined, own)).toMatchObject({ status: 403, body: { error: 'unverified_sender' } })
+  })
+
+  test('D3: REST without a session body — the SOCKET decides (a curl from inside a session is a session)', async () => {
+    const { a, lid, deps } = await setup()
+    const own: RoleDeps = { ...deps, cwdRepoOf: async () => 'o/own' }
+    const asSession = (managedId: string | null): CallerVerdict => ({ kind: 'session', pid: 9, managedId })
+    // a peer in the leader's tree, body silent, foreign value -> 403
+    expect(await repoEditGate({}, a.id, verify([]), 'blpsoares/prontuario', () => asSession(lid), own)).toMatchObject({ status: 403, body: { error: 'repo_not_own_cwd' } })
+    // the same peer writing its own cwd repo on its own filing -> allowed
+    expect(await repoEditGate({}, a.id, verify([]), 'o/own', () => asSession(lid), own)).toBeNull()
+    // a session peer with no id (a structured session's harness) is refused outright
+    expect(await repoEditGate({}, a.id, verify([]), 'o/own', () => asSession(null), own)).toMatchObject({ status: 403 })
+    // an unidentifiable local peer on Linux is refused (fail-closed)…
+    expect(await repoEditGate({}, a.id, verify([]), 'o/own', () => ({ kind: 'unknown', reason: 'socket-not-found' }), own)).toMatchObject({ status: 403 })
+    // …but where there is no /proc the body is all there is (stated limit), and the person's terminal/browser is the person
+    expect(await repoEditGate({}, a.id, verify([]), 'x/y', () => ({ kind: 'unknown', reason: 'no-proc' }), own)).toBeNull()
+    expect(await repoEditGate({}, a.id, verify([]), 'x/y', () => person, own)).toBeNull()
+  })
+
+  test('D2: the CLI is decided by its process tree, never by the environment variable', async () => {
+    const { a, lid, deps } = await setup()
+    const own: RoleDeps = { ...deps, cwdRepoOf: async () => 'o/own' }
+    // env -u AGENTOP_MANAGED_ID: no variable, but a managed ancestor -> still that session
+    const stripped = cliRepoSender({ ancestry: [{ managedId: null }, { managedId: lid }], proven: null, claimed: null })
+    expect(stripped).toBe(lid)
+    expect(await repoEditGateFor(stripped, a.id, 'blpsoares/prontuario', own)).toMatchObject({ status: 403, body: { error: 'repo_not_own_cwd' } })
+    expect(await repoEditGateFor(stripped, a.id, 'o/own', own)).toBeNull()
+    // a claimed id with no proof anywhere is refused, fail-closed
+    const forged = cliRepoSender({ ancestry: [{ managedId: null }], proven: null, claimed: lid })
+    expect(await repoEditGateFor(forged, a.id, 'o/own', own)).toMatchObject({ status: 403, body: { error: 'not_own_task' } })
+    // the tree beats a claim that names someone else
+    expect(cliRepoSender({ ancestry: [{ managedId: lid }], proven: null, claimed: 'other' })).toBe(lid)
+    // no managed ancestor and no claim: the person
+    expect(cliRepoSender({ ancestry: [{ managedId: null }], proven: null, claimed: null })).toBeNull()
+    expect(await repoEditGateFor(null, a.id, 'x/y', own)).toBeNull()
   })
 
   test('write gate: a leader cannot set another task\'s repo to its own and then lead it', async () => {
     const { a, c, lid, deps } = await setup()
     expect(await editTask(a.id, { repo: 'o/own' })).toBe(true)
-    const refused = await repoEditGate({ session: { id: lid, token: 't' } }, c.id, async id => (id === lid ? lid : null), deps)
+    const own: RoleDeps = { ...deps, cwdRepoOf: async () => 'o/own' }
+    const refused = await repoEditGate({ session: { id: lid, token: 't' } }, c.id, async id => (id === lid ? lid : null), 'o/own', undefined, own)
     expect(refused).toMatchObject({ status: 403 })
     // the refused write never happened, so the target stays repo-less and cannot be led
     expect(await leadOp(lid, { add: [c.id] }, deps)).toMatchObject({ ok: false })
@@ -123,7 +173,7 @@ describe('REAL wiring (defaultRoleDeps over the real board and registry) — M1b
 
   test('repoWriteRefusal: no sender allows, an unfiled session is refused', async () => {
     const { a, deps } = await setup()
-    expect(await repoWriteRefusal(null, a.id, deps)).toBeNull()
-    expect(await repoWriteRefusal('ghost', a.id, deps)).toMatchObject({ code: 'not_own_task' })
+    expect(await repoWriteRefusal(null, a.id, deps, 'o/r')).toBeNull()
+    expect(await repoWriteRefusal('ghost', a.id, deps, 'o/r')).toMatchObject({ code: 'not_own_task' })
   })
 })

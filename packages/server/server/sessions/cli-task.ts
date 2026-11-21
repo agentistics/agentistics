@@ -162,13 +162,17 @@ async function runEdit(ref: string, repo: string, json: boolean): Promise<number
   const { resolveCliPrincipal, realCliAuth } = await import('../delivery/cli-principal')
   const { actorOf } = await import('../delivery/principal')
   const who = await resolveCliPrincipal(process.env, false, { pieceKey: ref, move: 'edit:repo' }, await realCliAuth())
-  // A SESSION (proven, or merely claiming to be one through its environment) writes a repository only on the task it leads.
-  const claimed = who.principal.kind === 'session' ? who.principal.id : process.env.AGENTOP_MANAGED_ID?.trim() || null
-  if (claimed) {
-    const { repoEditGateFor } = await import('./task-repo-gate')
-    const refused = await repoEditGateFor(who.principal.kind === 'session' ? claimed : '\u0000unproven', ref)
-    if (refused) { console.error(refused.body.message); return 1 }
-  }
+  // WHO is asking comes from the PROCESS TREE, never from whether the environment variable is set: an agent that
+  // runs `env -u AGENTOP_MANAGED_ID agentop task edit …` is still a descendant of its session's pane.
+  const { cliRepoSender, repoEditGateFor } = await import('./task-repo-gate')
+  const { ancestry } = await import('../browser/browser-caller-proc')
+  const sender = cliRepoSender({
+    ancestry: process.platform === 'linux' ? ancestry(process.pid) : null,
+    proven: who.principal.kind === 'session' ? who.principal.id : null,
+    claimed: process.env.AGENTOP_MANAGED_ID?.trim() || null,
+  })
+  const refused = await repoEditGateFor(sender, ref, r.repo)
+  if (refused) { console.error(refused.body.message); return 1 }
   const { editTask } = await import('./task-web')
   const ok = await editTask(ref, { repo: r.repo, actor: actorOf(who.principal) })
   if (!ok) { console.error(`No task matches "${ref}". \`agentop task ls\` lists them.`); return 1 }
