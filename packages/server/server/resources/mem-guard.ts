@@ -49,7 +49,18 @@ export function shouldWaitForMemory(availableBytes: number | null, minBytes = RU
  */
 export function insideHeavyLock(env: Record<string, string | undefined>, ancestorCmdlines: readonly string[]): boolean {
   if (env.AGENTISTICS_HEAVY_JOB === '1') return true
-  return ancestorCmdlines.some(c => /\bflock\b/.test(c) && /agentistics-heavy[^ ]*\.lock/.test(c))
+  return ancestorCmdlines.some(isHeavyFlockCmdline)
+}
+
+/**
+ * True only for a real `flock` process on the heavy lock: argv[0]'s basename is exactly `flock` and a
+ * later argument is the lock path. Text inside some other process's argument (a `claude` prompt that
+ * quotes the brief) never counts. The cmdline is argv joined by spaces, so argv[0] is its first token.
+ */
+function isHeavyFlockCmdline(cmdline: string): boolean {
+  const [argv0, ...args] = cmdline.trim().split(/\s+/)
+  if (!argv0 || argv0.split('/').pop() !== 'flock') return false
+  return args.some(a => /^(?:.*\/)?agentistics-heavy[^/ ]*\.lock$/.test(a))
 }
 
 /** Whether `agentop run --rm` puts its command through the heavy slot. */

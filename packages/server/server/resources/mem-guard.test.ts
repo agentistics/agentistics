@@ -26,6 +26,14 @@ describe('insideHeavyLock / shouldWrapHeavy', () => {
     expect(insideHeavyLock({}, ['flock /tmp/agentistics-heavy.2.lock x'])).toBe(true)
     expect(insideHeavyLock({}, ['flock /tmp/other.lock x', 'bun test'])).toBe(false)
   })
+  test('only an ancestor whose argv[0] is flock counts; text in a prompt never does', () => {
+    const prompt = 'claude --append-system-prompt run flock /tmp/agentistics-heavy.lock agentop run --rm -- bun test'
+    expect(insideHeavyLock({}, [prompt, 'bash'])).toBe(false)
+    expect(insideHeavyLock({}, ['claude -p use flock /tmp/agentistics-heavy.lock for builds'])).toBe(false)
+    expect(insideHeavyLock({}, ['/usr/bin/flock /tmp/agentistics-heavy.lock bash -c x'])).toBe(true)
+    expect(insideHeavyLock({}, ['flock -w 600 /tmp/agentistics-heavy.lock bash -c x'])).toBe(true)
+    expect(insideHeavyLock({}, ['myflock /tmp/agentistics-heavy.lock bash -c x'])).toBe(false)
+  })
   test('wraps only a real command on linux with flock and outside the lock', () => {
     const base = { hasCommand: true, linux: true, hasFlock: true, inside: false }
     expect(shouldWrapHeavy(base)).toBe(true)
