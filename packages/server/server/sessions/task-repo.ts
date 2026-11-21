@@ -17,6 +17,8 @@ export type TaskRepoResult = { ok: true; repo: string } | { ok: false; reason: s
 
 const SEGMENT = /^[A-Za-z0-9_.-]+$/
 const SCP = /^[^/@\s]+@[^/:\s]+:.+$/
+/** A host segment: at least one dot between labels (github.com, git.example.org). */
+const HOST = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/
 
 export function normalizeTaskRepo(input: string): TaskRepoResult {
   const raw = input.trim()
@@ -33,10 +35,16 @@ export function normalizeTaskRepo(input: string): TaskRepoResult {
   if (parts.length < 2 || parts.some(p => !SEGMENT.test(p) || p === '.' || p === '..')) return bad
 
   if (isUrl) {
-    // normalizeGitRemote always leads with the host; a URL with no owner/name after it is not a repo.
+    // normalizeGitRemote always leads with the host: exactly host/owner/name. Anything after the name
+    // (`/tree/main/x`, a nested group) is not something we can store without guessing — refuse it.
+    if (parts.length !== 3) return bad
     const repo = repoShortName(remote)
     return repo.includes('/') ? { ok: true, repo } : bad
   }
-  // owner/name stays as typed; host/owner/name (3+ segments) drops the host, as inheritance does.
-  return { ok: true, repo: parts.length === 2 ? remote : parts.slice(1).join('/') }
+  // owner/name stays as typed; host/owner/name drops the host, as inheritance does — but only when the
+  // first segment IS a host (it has a dot: github.com, gitlab.example.org). `O/R/extra` is refused, never
+  // silently read as host O.
+  if (parts.length === 2) return { ok: true, repo: remote }
+  if (parts.length === 3 && HOST.test(parts[0]!)) return { ok: true, repo: parts.slice(1).join('/') }
+  return bad
 }
