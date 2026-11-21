@@ -57,6 +57,8 @@ import { SessionsAside } from '../nav/SessionsAside'
 import { MinimizedMenu } from './MinimizedMenu'
 import { NayFab } from './NayFab'
 import { VaultFabPop } from './VaultFabPop'
+import { useNayCallReport } from '../../hooks/useNayCallReport'
+import { callStateOf, callSurfaceOf, nayCallFace, naySessionForCall } from '../../lib/nayCall'
 import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { followSettled, forceRest, shouldWake, frameStyle, initFollow, landImpulse, nextQuiet, renderDock, REST_AFTER_FRAMES, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { DockSettings, DockSettingsScreen } from './DockSettings'
@@ -79,6 +81,7 @@ import { cardStyleOf, clampFabPos, defaultFabPos, dockStyleOf, FAB_SIZE } from '
 import { setNayFabPrefs, useNayFabPrefs } from '../../lib/nayFabPrefsStore'
 import { createPersonalDoc, createSharedPref } from '../../lib/sharedPref'
 import { NAY_UNDOCK_SESSION } from '../../lib/nayDockBridge'
+import { useFabMenusExclusion } from '../../lib/nayFabMenus'
 
 const QuickVaultBody = lazy(() => import('../../pages/VaultPage').then(m => ({ default: m.QuickVaultBody })))
 
@@ -165,6 +168,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
     const o = v as Partial<Size>
     return typeof o?.w === 'number' && typeof o?.h === 'number' ? { w: o.w, h: o.h } : PANEL_DEFAULT
   }, PANEL_DEFAULT), viewport()))
+  const fabMenus = useFabMenusExclusion()
   const [starting, setStarting] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   /** Sessions just started here, and when — so the panel says "starting" rather than "not found". */
@@ -277,7 +281,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   const summaryOf = (run: { harness: string; model?: string | undefined; effort?: string | undefined }) =>
     launchSummary(run, harnessLabel(run.harness), harnesses?.find(h => h.id === run.harness), pt)
 
-  const startNay = useCallback(async () => {
+  const startNay = useCallback(async (): Promise<string | null> => {
     setStarting(true)
     setNotice(null)
     try {
@@ -293,6 +297,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
         // The server has just filed it under "Nay › Ativas"; pick that up now rather than on focus.
         void loadSharedPrefs()
         open(out.id)
+        return out.id
       } else {
         setNotice(out?.message === 'chat_disabled'
           ? (pt ? 'O chat está desligado em Configurações → Chat.' : 'The chat is turned off in Settings → Chat.')
@@ -303,7 +308,24 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
     } finally {
       setStarting(false)
     }
+    return null
   }, [lang, pt, open, launch])
+
+  // "Ligar para a Nay" in the button's right-click pop. The call is the engine's `composer` surface with
+  // the phone icon — the very one the session composer's phone button opens — so this only picks the
+  // surface and the Nay conversation and calls the host's `openEngineSurface`. No call logic lives here.
+  const composerSurfaces = useEngineSurfaces('composer')
+  const callSurface = callSurfaceOf(composerSurfaces)
+  const callState = callStateOf(callSurface, mountedSurfaces)
+  const callFace = nayCallFace(callState, lang)
+  const placeCall = useCallback(async () => {
+    if (!callSurface) return
+    const sid = callState.active ? callState.sessionId : (naySessionForCall(fleet.rows, dockRef.current.panelSession) ?? await startNay())
+    if (!sid && !callState.active) return
+    if (sid) setDock(d => openSession(d, sid))
+    openEngineSurface(callSurface, { sessionId: sid, sessionKind: 'nay', lang })
+  }, [callSurface, callState.active, callState.sessionId, fleet.rows, startNay, lang])
+  useNayCallReport(callSurface !== null, callState, () => { if (!callState.active || callState.parked) void placeCall() })
 
   const actFleet = useCallback(
     (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number }) => act(req),
@@ -712,8 +734,10 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
         <NayFab prefs={fabPrefs} onPrefs={setFabPrefs} isMobile={isMobile} routeKey={inSession ? 'session' : 'app'}>
           {fab => (
             // Right-click / long-press / Shift+F10 on the button pops the vault icon above it (owner 2026-10-03).
-            <VaultFabPop lang={pt ? 'pt' : 'en'} isMobile={isMobile} suppressed={fab.dragging}>
+            <VaultFabPop lang={pt ? 'pt' : 'en'} isMobile={isMobile} suppressed={fab.dragging} {...fabMenus.pop}
+              call={callSurface ? { label: callFace.label, active: callState.active, onPress: () => { void placeCall() } } : null}>
             <MinimizedMenu
+              {...fabMenus.menu}
               longPress={false}
               pt={pt}
               items={minimized.map(w => ({ id: w.id, row: findSession(w.id) }))}
