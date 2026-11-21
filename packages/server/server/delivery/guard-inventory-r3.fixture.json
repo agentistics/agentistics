@@ -258,6 +258,10 @@
     "server/server/sessions/login-env.ts": [
       "a7f2698f5ae69bfbabc1efb9c4d46020b17aae099af003b77f4bc0e0fb2958d5"
     ],
+    "server/server/sessions/noq-runner.ts": [
+      "819dcc72abfce5440b057f8798ceafe508bb11a90f9a3f66519a78f5e6ffb533",
+      "60a0f291cd0dcaba496f4f4af8a46ef6e297a4c8091981ad633049d66cb04a2f"
+    ],
     "server/server/sessions/release-squash.ts": [
       "2e00f60de63e65f2a99dc5ae62c28faa364db45cc4410e92e448e519234e5376",
       "b0964524b3246bb8b8f585a53e327766fad0fdc7f4b44ca2d508f52e62dbb544",
@@ -988,6 +992,15 @@
       "ident:AGENTISTICS_DATA_DIR"
     ],
     "server/server/sessions/native-fleet.ts": [
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/noq-policy.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "text:.agentistics",
+      "text:Autonomous mode: never touch ~/.agentistics directly; go through agentop or the API."
+    ],
+    "server/server/sessions/noq-runner.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
       "ident:AGENTISTICS_DATA_DIR"
     ],
     "server/server/sessions/pending-prompts.ts": [

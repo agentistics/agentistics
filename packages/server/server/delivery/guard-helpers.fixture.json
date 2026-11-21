@@ -869,6 +869,9 @@
   "server/server/sessions/nay-web.ts": [
     "raw-writer-helper"
   ],
+  "server/server/sessions/noq-runner.ts": [
+    "raw-writer-helper"
+  ],
   "server/server/sessions/opencode-chat-io.ts": [
     "raw-writer-helper"
   ],

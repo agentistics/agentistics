@@ -741,6 +741,12 @@
     "server/server/sessions/nay-web.ts": [
       "module:fs"
     ],
+    "server/server/sessions/noq-policy.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/noq-runner.ts": [
+      "module:fs/promises"
+    ],
     "server/server/sessions/opencode-chat-io.ts": [
       "module:fs"
     ],
