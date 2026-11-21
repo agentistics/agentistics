@@ -40,12 +40,16 @@ export function makeWorld(root: string) {
     { id: 'leader', role: 'leader', taskId: 't1', alive: true, cwd: repo, harness: 'claude', worktree: false },
     { id: 'worker', role: 'worker', taskId: 't1', subtaskId: 'p1', alive: true, cwd: repo, harness: 'claude', worktree: true, createdAt: '2026-11-13T09:00:00Z' },
     { id: 'worker2', role: 'worker', taskId: 't1', subtaskId: 'p2', alive: true, cwd: repo, harness: 'claude', worktree: true, createdAt: '2026-11-13T09:00:00Z' },
+    // S2a: two more pieces of the same task (the doors suite uses one piece per positive door).
+    { id: 'worker3', role: 'worker', taskId: 't1', subtaskId: 'p3', alive: true, cwd: repo, harness: 'claude', worktree: true, createdAt: '2026-11-13T09:00:00Z' },
+    { id: 'worker4', role: 'worker', taskId: 't1', subtaskId: 'p4', alive: true, cwd: repo, harness: 'claude', worktree: true, createdAt: '2026-11-13T09:00:00Z' },
     { id: 'stranger', role: 'worker', taskId: 't9', subtaskId: 'zz', alive: true, cwd: '/nowhere', harness: 'claude', worktree: true },
   ]
   const guardsPath = join(root, 'guards.json')
   const svc = createDeliveryService({
-    store: createDeliveryStore(join(root, 'deliveries.json')),
-    facts: { subtask: async (id: string) => (['p1', 'p2'].includes(id) ? { id, taskId: 't1', title: id, status: 'in_progress', groupMember: false, blockedBy: [] } : null), sessions: async () => sessions } as never,
+    // S2a: the store's guard (when a rule is on) reads the piece's checkout through the SAME in-memory sessions the service uses.
+    store: createDeliveryStore(join(root, 'deliveries.json'), { guard: { deps: { sessions: async () => sessions, git: execGit }, now: () => T } }),
+    facts: { subtask: async (id: string) => (['p1', 'p2', 'p3', 'p4'].includes(id) ? { id, taskId: 't1', title: id, status: 'in_progress', groupMember: false, blockedBy: [] } : null), sessions: async () => sessions } as never,
     board: { comment: async () => undefined } as never,
     notify: { session: async () => true, owner: async () => undefined } as never,
     autonomous: async () => true, emit: async () => undefined, now: () => T,

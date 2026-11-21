@@ -1,13 +1,16 @@
 /**
  * delivery/guards-store.ts — durable checkpoints and intents, `<dataDir>/guards.json` (spec §2.6).
  *
- * A checkpoint is the highest rank a piece was AUTHORIZED to reach and the complete set of authorizations that
+ * A checkpoint is the current rank a piece is AUTHORIZED to hold and the complete set of authorizations that
  * granted it. It is per piece and never evicted while the piece exists — unlike the activity feed (`TaskEvent`,
  * capped at 2000) it cannot age out. Older binaries never read or write this file (§2.7), so they cannot erase it.
  *
  * TWO-PHASE COMMIT. intent (guards.json) → the document write(s) → checkpoint commit + intent removal
  * (guards.json). A crash between steps leaves an INTENT: recovery commits it when the documents already show the
  * target and drops it otherwise (`planRecovery`). Events play no part in authorization.
+ * Delivery floors additionally carry `pendingDelivery`: floor + serialized delivery bytes are sealed in one rename.
+ * Readers see those committed bytes; the next delivery writer rolls them forward before its mutation and clears the
+ * journal only after the delivery rename. A crash cannot strand the data behind its floor or require lowering it.
  *
  * LOCKING IS NOT DONE HERE. The functions on this file assume the caller holds the guards lock (and, per §2.6.1,
  * tasks → deliveries before it) through `withGuardLocks`; `applyGuardedWrite` is the one composition that does.
@@ -20,6 +23,8 @@ import { readFile, copyFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { withGuardLocks, type GuardLockName, type GuardLockPaths } from './guard-locks'
 import { unsealed, verdictFor, writeSealed, type TamperReason } from './guard-integrity'
+import type { TamperView } from './guard'
+import type { SweepMemory } from './sweep-plan'
 
 export type GuardAuth =
   | { kind: 'evidence'; ids: string[]; sha256: string[] }
@@ -45,11 +50,13 @@ export interface PieceCheckpoint {
   transitionId: string
   /** How the piece was classified when it was authorized (S1b, §3.2); `declared` when a leader named where to look. */
   classification?: { category: string; headSha: string; declared?: { by: string; repo: string; head: string; at: string } }
+  /** A GROUP's checkpoint: the board status the guard accepted for each member (R3-1) — the sweep reverts a member only when it differs. */
+  members?: Record<string, { status: string; at: string }>
 }
 
 export interface GuardIntent { transitionId: string; target: PieceCheckpoint; at: string }
 /** `rules`: S0d.2's authenticated MIRROR of each guarantee rule's state (`activation.ts` writes it in the same guards-locked section). */
-export interface GuardsDoc { version: 1; checkpoints: Record<string, PieceCheckpoint>; intents: Record<string, GuardIntent>; rules?: Record<string, 'off' | 'shadow' | 'on'> }
+export interface GuardsDoc { version: 1; checkpoints: Record<string, PieceCheckpoint>; intents: Record<string, GuardIntent>; rules?: Record<string, 'off' | 'shadow' | 'on'>; deliveryFloors?: Record<string, TamperView>; pendingDelivery?: string; migrations?: { a?: { version: 1; at: string } }; sweep?: SweepMemory }
 
 export class GuardsUnreadable extends Error {
   readonly code = 'guards_unreadable'
@@ -70,6 +77,58 @@ export function parseGuards(text: string): GuardsDoc {
   if (!isRec(raw) || raw.version !== 1) throw new Error('not a version 1 guards document')
   const checkpoints: Record<string, PieceCheckpoint> = {}
   const intents: Record<string, GuardIntent> = {}
+  const deliveryFloors: Record<string, TamperView> = {}
+  if (raw.deliveryFloors !== undefined) {
+    if (!isRec(raw.deliveryFloors)) throw new Error('deliveryFloors is not an object')
+    for (const [k, v] of Object.entries(raw.deliveryFloors)) {
+      if (!isRec(v) || !Number.isInteger(v.revision) || (v.revision as number) < 1 || !Array.isArray(v.history) || !Array.isArray(v.evidence) || !Array.isArray(v.evidenceHistory)) throw new Error(`delivery floor ${k} is malformed`)
+      deliveryFloors[k] = v as TamperView
+    }
+  }
+  if (raw.pendingDelivery !== undefined && typeof raw.pendingDelivery !== 'string') throw new Error('pendingDelivery is not serialized data')
+  let sweep: SweepMemory | undefined
+  if (raw.sweep !== undefined) {
+    if (!isRec(raw.sweep) || !isRec(raw.sweep.reverts)) throw new Error('sweep memory is malformed')
+    const reverts: Record<string, string[]> = {}
+    for (const [k, v] of Object.entries(raw.sweep.reverts)) { if (!Array.isArray(v) || v.some(s => typeof s !== 'string')) throw new Error(`sweep memory ${k} is malformed`); reverts[k] = v as string[] }
+    sweep = { reverts }
+    for (const field of ['plans', 'catchUpFailures', 'noBaselineSince', 'unacceptedSince'] as const) {
+      const value = raw.sweep[field]
+      if (value !== undefined) {
+        if (!isRec(value) || Object.values(value).some(v => typeof v !== 'string')) throw new Error(`sweep ${field} is malformed`)
+        sweep[field] = value as Record<string, string>
+      }
+    }
+    if (raw.sweep.memberAlerts !== undefined) {
+      const value = raw.sweep.memberAlerts
+      if (!isRec(value) || Object.values(value).some(v => !isRec(v) || typeof v.at !== 'string' || typeof v.text !== 'string')) throw new Error('sweep memberAlerts is malformed')
+      if (Object.values(value).some(v => (v as { actions?: unknown }).actions !== undefined && (!Array.isArray((v as { actions?: unknown }).actions) || ((v as { actions: unknown[] }).actions).some(x => typeof x !== 'string')))) throw new Error('sweep memberAlerts is malformed')
+      sweep.memberAlerts = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, { at: (v as { at: string }).at, text: (v as { text: string }).text, ...((v as { actions?: string[] }).actions ? { actions: (v as { actions: string[] }).actions } : {}) }]))
+    }
+    if (raw.sweep.forgedMarks !== undefined) {
+      const value = raw.sweep.forgedMarks
+      if (!isRec(value) || Object.values(value).some(v => typeof v !== 'string')) throw new Error('sweep forgedMarks is malformed')
+      sweep.forgedMarks = value as Record<string, string>
+    }
+    if (raw.sweep.placeholders !== undefined) {
+      const value = raw.sweep.placeholders
+      if (!isRec(value) || Object.values(value).some(v => !isRec(v) || typeof v.groupId !== 'string' || typeof v.taskId !== 'string' || typeof v.restoredAt !== 'string' || typeof v.restorationId !== 'string' || (v.dismissedAt !== undefined && typeof v.dismissedAt !== 'string'))) throw new Error('sweep placeholders is malformed')
+      sweep.placeholders = value as NonNullable<SweepMemory['placeholders']>
+    }
+    for (const field of ['ownerRemoved', 'acceptedMissing'] as const) {
+      const value = raw.sweep[field]
+      if (value !== undefined) {
+        if (!isRec(value) || Object.values(value).some(v => !isRec(v) || typeof v.groupId !== 'string' || typeof v.at !== 'string')) throw new Error(`sweep ${field} is malformed`)
+        sweep[field] = value as NonNullable<SweepMemory['ownerRemoved']>
+      }
+    }
+    if (raw.sweep.warning !== undefined) {
+      if (typeof raw.sweep.warning !== 'string') throw new Error('sweep warning is malformed')
+      sweep.warning = raw.sweep.warning
+    }
+  }
+  if (raw.migrations !== undefined && (!isRec(raw.migrations) || (raw.migrations.a !== undefined && (!isRec(raw.migrations.a) || raw.migrations.a.version !== 1 || typeof raw.migrations.a.at !== 'string' || !Number.isFinite(Date.parse(raw.migrations.a.at)))))) throw new Error('migration stamp is malformed')
+  const floors = { ...(raw.deliveryFloors === undefined ? {} : { deliveryFloors }), ...(typeof raw.pendingDelivery === 'string' ? { pendingDelivery: raw.pendingDelivery } : {}), ...(sweep ? { sweep } : {}), ...(raw.migrations ? { migrations: raw.migrations as GuardsDoc['migrations'] } : {}) }
   if (raw.checkpoints !== undefined && !isRec(raw.checkpoints)) throw new Error('checkpoints is not an object')
   if (raw.intents !== undefined && !isRec(raw.intents)) throw new Error('intents is not an object')
   for (const [k, v] of Object.entries((raw.checkpoints as Record<string, unknown>) ?? {})) {
@@ -84,9 +143,9 @@ export function parseGuards(text: string): GuardsDoc {
     if (!isRec(raw.rules)) throw new Error('rules is not an object')
     const rules: Record<string, 'off' | 'shadow' | 'on'> = {}
     for (const [k, v] of Object.entries(raw.rules)) { if (v !== 'off' && v !== 'shadow' && v !== 'on') throw new Error(`rule ${k} is malformed`); rules[k] = v }
-    return { version: 1, checkpoints, intents, rules }
+    return { version: 1, checkpoints, intents, rules, ...floors }
   }
-  return { version: 1, checkpoints, intents }
+  return { version: 1, checkpoints, intents, ...floors }
 }
 
 /** PURE. Phase one: record what is about to be written. */

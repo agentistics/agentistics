@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { lockFile } from '../sessions/file-lock'
 import { GUARD_LOCK_ORDER, GuardBusy, GuardLockOrderError, withGuardLocks, type GuardLockPaths } from './guard-locks'
+import { inGuardTransaction, withGuardEnvelope as withGuardTransaction } from './guard-transaction'
 
 let dir: string
 let paths: GuardLockPaths
@@ -15,7 +16,30 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 const lockDirs = () => readdirSync(dir).filter(n => n.endsWith('.lock'))
 
+describe('r3 M5: an envelope is reused only for the SAME three files', () => {
+  test('a different deliveries or guards file is not inside this envelope, even with the same tasks file', async () => {
+    const other = join(dir, 'other')
+    let seen: boolean[] = []
+    await withGuardTransaction(paths, async () => {
+      seen = [inGuardTransaction(paths), inGuardTransaction({ ...paths, deliveries: join(other, 'deliveries.json') }), inGuardTransaction({ ...paths, guards: join(other, 'guards.json') })]
+    })
+    expect(seen).toEqual([true, false, false])
+  })
+})
+
 describe('the global order is tasks → deliveries → guards', () => {
+  test('an async continuation cannot reuse an expired transaction lease', async () => {
+    let release!: () => void
+    const barrier = new Promise<void>(r => { release = r })
+    let later!: Promise<{ active: boolean; acquired: string }>
+    await withGuardTransaction(paths, async () => {
+      expect(inGuardTransaction(paths)).toBe(true)
+      later = (async () => { await barrier; const active = inGuardTransaction(paths); return { active, acquired: await withGuardTransaction(paths, async () => 'fresh') } })()
+    })
+    release()
+    expect(await later).toEqual({ active: false, acquired: 'fresh' })
+    expect(lockDirs()).toEqual([])
+  })
   test('the order constant is exactly that', () => { expect([...GUARD_LOCK_ORDER]).toEqual(['tasks', 'deliveries', 'guards']) })
 
   test('acquires in order and holds all of them while fn runs, releases all after', async () => {

@@ -123,14 +123,27 @@ const CATALOG = [
 
 async function apiGetText(path: string) {
   const res = await fetch(`${API}${path}`);
-  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}${await apiErrorDetail(res)}`);
   return res.text();
 }
 
 async function apiGet(path: string) {
   const res = await fetch(`${API}${path}`);
-  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}${await apiErrorDetail(res)}`);
   return res.json();
+}
+
+/** Reads can seed legacy board metadata too: every API error keeps its actionable code and sentence. */
+async function apiErrorDetail(res: Response): Promise<string> {
+  const raw = await res.text().catch(() => "");
+  let detail = raw.slice(0, 400);
+  try {
+    const body = JSON.parse(raw);
+    const g = body?.guard;
+    if (g && typeof g.message === "string") detail = `${g.code ?? "refused"}: ${g.message}`;
+    else if (typeof body?.sentence === 'string') detail = `${body.code ?? body.error ?? 'refused'}: ${body.sentence}`;
+  } catch { /* not JSON: keep the raw text */ }
+  return detail ? ` ${detail}` : '';
 }
 
 const LEGACY_TOOLS: Record<ProjectedTool, (data: any, harness?: string) => unknown> = {
@@ -187,8 +200,7 @@ async function apiSend(method: string, path: string, body?: unknown) {
     // The BODY, not just the status. A refusal here is usually actionable — "this move needs a
     // reason", "somebody else holds this claim" — and a bare `HTTP 422` teaches the caller nothing
     // it can act on, which turns one refusal into a retry loop.
-    const detail = await res.text().catch(() => "");
-    throw new Error(`${method} ${path} → HTTP ${res.status}${detail ? ` ${detail.slice(0, 400)}` : ""}`);
+    throw new Error(`${method} ${path} → HTTP ${res.status}${await apiErrorDetail(res)}`);
   }
   return res.json().catch(() => ({}));
 }
@@ -314,7 +326,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_status",
     description:
-      "Move a task to a status. The status VOCABULARY is an editable list now, not a fixed set — call agentistics_task_statuses first if you are unsure what this board currently has; a fresh board starts with exactly `todo`, `in_progress`, `blocked` and `done`. Only `done` stamps a task and closes rounds-to-delivery; `abandoned` (when the board has it) records that the work was given up on, which is a real outcome and not a failure to report — but it is NOT created by default, so use agentistics_task_status_edit to add it (or any other status) first if it is missing. **`blocked` REQUIRES a `reason` or a `blockedBy` list** and is refused (422) without one: it is the status that names a problem somebody has to go and solve, and a blocked card that does not say what it is waiting on cannot be unblocked by anyone but you. **`done` REQUIRES the task to have at least one session filed under it** and is refused (422, `done_needs_session`) without one. A `status` naming nothing this board currently has is refused (400, `unknown_status`). Pass `actor` (who you are) so the move is recorded against you in the activity log.",
+      "Move a task to a status. The status VOCABULARY is an editable list now, not a fixed set — call agentistics_task_statuses first if you are unsure what this board currently has; a fresh board starts with exactly `todo`, `in_progress`, `blocked` and `done`. Only `done` stamps a task and closes rounds-to-delivery; `abandoned` (when the board has it) records that the work was given up on, which is a real outcome and not a failure to report — but it is NOT created by default, so use agentistics_task_status_edit to add it (or any other status) first if it is missing. **`blocked` REQUIRES a `reason` or a `blockedBy` list** and is refused (422) without one: it is the status that names a problem somebody has to go and solve, and a blocked card that does not say what it is waiting on cannot be unblocked by anyone but you. **`done` REQUIRES the task to have at least one session filed under it** and is refused (422, `done_needs_session`) without one. A `status` naming nothing this board currently has is refused (400, `unknown_status`). When the owner has turned the delivery guarantee on, a move that advances a piece (review, merge, CI, published, done) is refused (422, `evidence_required` / `evidence_stale` / `uncommitted_changes` / `classification_required`) until the piece carries the evidence its change needs — the answer's `guard.message` says what is missing; attach it with agentistics_task_evidence. Pass `actor` (who you are) so the move is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {
@@ -454,6 +466,11 @@ const TOOLS: Tool[] = [
           type: "boolean",
           description:
             "Create this subtask as a GROUP instead of an ordinary subtask. Only meaningful together with `title` (creation) — a group's shape cannot be changed afterwards.",
+        },
+        dismissPlaceholder: {
+          type: "boolean",
+          description:
+            "With `id`: dismiss a PLACEHOLDER the guard sweep restored after a raw delete (its title says \"restored by the guard sweep\"). Only the task leader or the owner may; it is NOT a general remove — a real subtask is refused (`not_a_placeholder`). The sweep will not re-create a dismissed one.",
         },
         parentGroupId: {
           type: "string",
@@ -1515,6 +1532,10 @@ async function callTool(
         // false -> "todo" (the same transition the bare tick makes). A `status` that contradicts it is
         // REFUSED, never half-applied. The route validates group membership against the post-patch state, so
         // `parentGroupId` + done is two writes in order: join first, then close.
+        if (a?.id !== undefined && a?.dismissPlaceholder === true) {
+          const body = await apiSend("POST", `/api/tasks/${encodeURIComponent(String(a?.ref))}/subtasks`, { id: a.id, dismissPlaceholder: true });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
         const wantsDone = typeof a?.done === "boolean" ? (a.done as boolean) : undefined;
         const doneStatus = wantsDone === undefined ? undefined : wantsDone ? "done" : "todo";
         if (a?.id !== undefined && doneStatus !== undefined && named.length > 0 && typeof a?.status === "string" && (wantsDone ? a.status !== "done" : a.status === "done")) {
