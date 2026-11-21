@@ -261,6 +261,8 @@ const CLOSED_WORD = /abandon|cancel|closed|encerr|descart|arquiv|won'?t|wont/i
 export function stageOfPieceStatus(
   status: string, statusLabel?: (id: string) => string | undefined, statusStage?: (id: string) => StatusStage | undefined,
 ): LiveStage | null {
+  // `pr_merge` is the delivery machine's own status id: approved and waiting for publication, never "Revisão do líder".
+  if (status === 'pr_merge') return 'merge'
   const stored = statusStage?.(status)
   if (stored !== undefined) return stored === 'none' ? null : stored
   return stageOfStatus(status, statusStage ? undefined : statusLabel?.(status))
@@ -1115,6 +1117,7 @@ export function buildLive(o: {
       if (closedNow) { rec = undefined; stage = null }
       else if (boardStage === 'blocked' && lateOpen) { rec = undefined; stage = 'blocked'; fromReview = true }
       else if (lateOpen && (boardStage === 'running' || boardStage === 'queue')) { rec = undefined; stage = boardStage }
+      else if (rec.phase === 'revisao_lider' && boardStage === 'merge') stage = 'merge' // approved, waiting publication: the board is ahead of a stale record
       else if (rec.phase === 'revisao_lider' && boardStage === 'leader') {
         const subj = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
         if (o.uncheckedWhy?.get(id) !== 'no-repos' && legacyShaGroups(p, eventsBySubject.get(subj)).some(g => g.every(sha => o.publishedShas?.has(sha)))) { rec = undefined; stage = 'published' }

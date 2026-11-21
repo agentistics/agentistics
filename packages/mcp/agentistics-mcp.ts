@@ -842,6 +842,20 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_session_leads",
+    description:
+      "Declare which TASKS a leader leads, besides the one its session is filed on (the filing is a single cost bucket, so a leader that also runs a second task would otherwise leave that task's cards in the Live column \"No leader\"). `add` / `remove` take task ids; with neither it just reads the leader's declared tasks. Only a session declared LEADER can lead (agentistics_session_role first); you may change only your OWN leads (the person may address any leader with `ref`); the leader must be filed on a task of its own, and a task of another repository is refused (`other_project`). Leadership counts only while the session is live and still a leader: when it closes the cards go back to \"No leader\", unless a successor declared with retirePredecessor inherits the leads. It never moves cost: rollups stay on the single filing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "A session reference (managed id, conversation id, exact title or unique id prefix). Omit for your own session." },
+        add: { type: "array", items: { type: "string" }, description: "Task ids to lead." },
+        remove: { type: "array", items: { type: "string" }, description: "Task ids to stop leading." },
+      },
+      required: [],
+    },
+  },
+  {
     name: "agentistics_session_hold",
     description:
       "Is something live the engine runs using a session right now? A session in use is idle between turns, so its state says nothing about whoever is on the other side. Pass `ref` (managed id, conversation id, exact title or unique id prefix): `{ id, held: boolean, since?: <ISO time it began>, sentence?: <the engine's own words for what holds it> }`. `available: false` means this build's engine reports no holds, so nothing can hold a session. A retire (agentistics_session_role retirePredecessor, `agentop session retire`) never closes a held session — it waits for the hold to end; `agentop session kill` refuses without --force.",
@@ -1750,6 +1764,16 @@ async function callTool(
       case "agentistics_session_role": {
         const a = args as any;
         const body = await apiSend("POST", "/api/session-roles", sessionRoleBody(a, sessionProof(process.env)));
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_leads": {
+        const a = args as any;
+        const list = (v: unknown) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+        const body = await apiSend("POST", "/api/session-leads", {
+          ...(typeof a?.ref === "string" && a.ref ? { ref: a.ref } : {}),
+          add: list(a?.add), remove: list(a?.remove),
+          session: sessionProof(process.env) ?? null,
+        });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_session_hold": {

@@ -88,7 +88,7 @@ const TOOL_GROUPS = {
     'agentistics_task_claim', 'agentistics_task_activity', 'agentistics_task_edit', 'agentistics_task_session', 'agentistics_task_delete',
     'agentistics_task_phase', 'agentistics_task_stage', 'agentistics_task_evidence', 'agentistics_task_queue', 'agentistics_task_queue_answer',
   ],
-  Sessions: ['agentistics_sessions', 'agentistics_session_groups', 'agentistics_session_group_create', 'agentistics_session_group_edit', 'agentistics_session_notify', 'agentistics_session_message', 'agentistics_session_role', 'agentistics_session_away', 'agentistics_session_hold', 'agentistics_session_switch_account', 'agentistics_checkin_report'],
+  Sessions: ['agentistics_sessions', 'agentistics_session_groups', 'agentistics_session_group_create', 'agentistics_session_group_edit', 'agentistics_session_notify', 'agentistics_session_message', 'agentistics_session_role', 'agentistics_session_leads', 'agentistics_session_away', 'agentistics_session_hold', 'agentistics_session_switch_account', 'agentistics_checkin_report'],
   Metrics: ['agentistics_live_delivery', 'agentistics_delivery_calendar', 'agentistics_benchmark_observed', 'agentistics_summary', 'agentistics_costs', 'agentistics_projects', 'agentistics_repos', 'agentistics_harnesses', 'agentistics_plan_limits', 'agentistics_tags', 'agentistics_tag_detail', 'agentistics_flow_run', 'agentistics_flow_status', 'agentistics_wait'],
   // COFRE.DESBLOQUEIO: how the vault is protected (never what it holds) — read-only, not listed in the briefing.
   Vault: ['agentistics_vault_status'],

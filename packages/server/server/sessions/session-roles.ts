@@ -42,6 +42,8 @@ export interface RolesDoc {
   origins?: Record<string, RoleOrigin>
   /** Last role note delivered to a session. Prevents reopen/takeover from typing it repeatedly. */
   lastDeliveredRole?: Record<string, SessionRole>
+  /** LEADERSHIP link (separate from the cost filing): the tasks a declared leader leads, keyed like `roles`. */
+  leads?: Record<string, string[]>
 }
 
 const emptyDoc = (): RolesDoc => ({ version: 1, migrated: false, roles: {}, lastDeliveredRole: {} })
@@ -57,6 +59,15 @@ export function parseOrigins(raw: unknown): Record<string, RoleOrigin> {
   const out: Record<string, RoleOrigin> = {}
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) { const o = parseRoleOrigin(v); if (o) out[k] = o }
+  return out
+}
+
+export function parseLeads(raw: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (Array.isArray(v)) { const ids = [...new Set(v.filter((x): x is string => typeof x === 'string' && x !== ''))]; if (ids.length) out[k] = ids }
+  }
   return out
 }
 
@@ -79,6 +90,7 @@ export async function readRolesDoc(dataDir: string): Promise<RolesDoc> {
       at: parseRoleTimes(p.at),
       origins: parseOrigins(p.origins),
       lastDeliveredRole: parseRoles(p.lastDeliveredRole),
+      leads: parseLeads(p.leads),
     }
   } catch {
     return emptyDoc()
@@ -172,6 +184,8 @@ export interface RoleDeps {
   /** Who started this managed session (the registry's parentSessionId), if anyone. */
   taskOf?: (rowId: string) => Promise<string | undefined>
   parentOf: (rowId: string) => Promise<string | undefined>
+  /** Does the task exist, and in which repository? Absent = not wired (declaring a lead is then refused). */
+  taskInfoOf?: (taskId: string) => Promise<{ exists: boolean; repo?: string }>
   /** A session declared LEADER leaves its parent's team (`team-links.ts`, rule 2). Absent = not wired. */
   leaveTeam?: (rowId: string) => Promise<boolean>
   /** Write a retire request on the predecessor (`retire-runner.ts` carries it out). Absent = not wired. */
@@ -320,6 +334,17 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     if (next === 'leader' && wantRetire) retire = await planPredecessorRetire(wantRetire, { own, senderId, resolved, rows, roles: state.roles, deps })
     // The retired predecessor is no longer "another live leader"; a third one still is.
     const retiredId = retire?.ok ? retire.id : undefined
+    // A successor inherits the predecessor's leadership (the retire plan already proved same task and a clean hand-off).
+    if (retire?.ok) {
+      const pred = rows.find(r => r.id === retire.id)
+      if (pred) await serial(deps.dataDir, async () => {
+        const latest = await loadRoles(deps)
+        const from = latest.leads?.[sessionIdentityKey(pred)] ?? latest.leads?.[pred.id] ?? []
+        if (from.length === 0) return
+        const k = sessionIdentityKey(resolved)
+        await writeRolesDoc(deps.dataDir, { ...latest, leads: { ...(latest.leads ?? {}), [k]: [...new Set([...(latest.leads?.[k] ?? []), ...from])] } })
+      }).catch(() => {})
+    }
     let warning: string | undefined
     if (next === 'leader' && deps.taskOf) {
       const taskId = await deps.taskOf(resolved.id)
@@ -451,6 +476,92 @@ export async function markCallerVerified(
   return ok
 }
 
+export interface LeadRequest { ref?: string; add?: readonly string[]; remove?: readonly string[] }
+export type LeadReply =
+  | { ok: true; key: string; id: string; title: string; leads: string[]; changed: boolean; message: string }
+  | { ok: false; code: string; message: string; matches?: string[] }
+
+const LEAD_MESSAGES: Record<string, string> = {
+  missing_argument: 'A session reference is required.',
+  no_such_session: 'No session on this machine matches that reference.',
+  ambiguous_session: 'More than one session matches that reference; use its id.',
+  not_own: 'A session may declare leadership only for itself.',
+  not_leader: 'Only a session declared leader can lead tasks; set the role first (agentistics_session_role).',
+  no_task: 'The leader must be filed on a task of its own before it can lead another.',
+  no_such_task: 'No task with that id exists.',
+  other_project: 'That task belongs to another repository than the leader\'s own task.',
+  not_wired: 'Task lookup is not available here.',
+}
+
+/**
+ * Declare (add) or drop (remove) the tasks a LEADER leads, besides the one it is filed on. The Live uses this link
+ * (not the cost filing) to know a task has a leader. A verified session may only change its OWN leads; the person
+ * (senderId null) may address any leader. Fail closed on every rule.
+ */
+export function leadOp(senderId: string | null, req: LeadRequest, deps: RoleDeps): Promise<LeadReply> {
+  const fail = (code: string, matches?: string[]): LeadReply => ({ ok: false, code, message: LEAD_MESSAGES[code] ?? code, ...(matches ? { matches } : {}) })
+  return (async () => {
+    const rows = await deps.rows().catch(() => [] as FleetRowForGroups[])
+    const ref = req.ref?.trim() ?? ''
+    let target: FleetRowForGroups | undefined
+    if (ref === '') {
+      if (!senderId) return fail('missing_argument')
+      target = rows.find(r => r.id === senderId)
+      if (!target) return fail('no_such_session')
+    } else {
+      const r = resolveSessionForGroup(rows, ref)
+      if (!r.ok) return fail(r.code, r.matches)
+      target = r.session
+      if (senderId !== null && target.id !== senderId && target.conversationId !== senderId) return fail('not_own')
+    }
+    const t = target
+    const key = sessionIdentityKey(t)
+    const add = [...new Set((req.add ?? []).map(x => x.trim()).filter(Boolean))]
+    const remove = new Set((req.remove ?? []).map(x => x.trim()).filter(Boolean))
+    const writing = add.length > 0 || remove.size > 0
+    if (add.length > 0) {
+      if (!deps.taskInfoOf) return fail('not_wired')
+      const filing = await deps.taskOf?.(t.id).catch(() => undefined)
+      if (!filing) return fail('no_task')
+      const mine = await deps.taskInfoOf(filing).catch(() => ({ exists: false } as { exists: boolean; repo?: string }))
+      for (const id of add) {
+        const info = await deps.taskInfoOf(id).catch(() => ({ exists: false } as { exists: boolean; repo?: string }))
+        if (!info.exists) return fail('no_such_task')
+        if (info.repo && mine.repo && info.repo !== mine.repo) return fail('other_project')
+      }
+    }
+    return serial(deps.dataDir, async (): Promise<LeadReply> => {
+      const doc = await loadRoles(deps)
+      if (writing && roleOfRow(doc.roles, t) !== 'leader') return fail('not_leader')
+      const before = doc.leads?.[key] ?? doc.leads?.[t.id] ?? []
+      if (!writing) return { ok: true, key, id: t.id, title: t.title, leads: before, changed: false, message: before.length ? `Leads: ${before.join(', ')}.` : 'Leads no extra task.' }
+      const next = [...new Set([...before, ...add])].filter(x => !remove.has(x))
+      const leads = { ...(doc.leads ?? {}) }
+      delete leads[t.id]
+      if (next.length) leads[key] = next; else delete leads[key]
+      const changed = next.length !== before.length || next.some(x => !before.includes(x))
+      if (changed) await writeRolesDoc(deps.dataDir, { ...doc, leads })
+      return { ok: true, key, id: t.id, title: t.title, leads: next, changed, message: changed ? `Leads: ${next.join(', ') || 'no extra task'}.` : 'Nothing changed.' }
+    })
+  })()
+}
+
+/** Row id -> the tasks it leads, for rows that are STILL leaders (revoking the role revokes the leadership). */
+export function leadsOfRows(doc: Pick<RolesDoc, 'roles' | 'leads'>, rows: readonly { id: string; conversationId?: string | undefined }[]): Map<string, readonly string[]> {
+  const out = new Map<string, readonly string[]>()
+  for (const r of rows) {
+    if (roleOfRow(doc.roles, r) !== 'leader') continue
+    const l = doc.leads?.[sessionIdentityKey(r)] ?? doc.leads?.[r.id]
+    if (l && l.length) out.set(r.id, l)
+  }
+  return out
+}
+
+export function leadStatus(out: LeadReply): number {
+  if (out.ok) return 200
+  return out.code === 'not_own' || out.code === 'not_leader' ? 403 : out.code === 'no_such_session' || out.code === 'no_such_task' ? 404 : 400
+}
+
 export function roleStatus(out: RoleReply): number {
   if (!out.ok && out.code === 'unverified_sender') return 403
   if (out.ok) return 200
@@ -514,6 +625,10 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
       return probeHold(row ?? { id: rowId }, engine()?.holds ?? null)
     },
     handoffGate: handoffGateFor,
+    taskInfoOf: async taskId => {
+      const t = (await (await import('./task-source')).loadTaskBoard()).book.tasks.find(x => x.id === taskId)
+      return t ? { exists: true, ...(t.repo ? { repo: String(t.repo) } : {}) } : { exists: false }
+    },
   }
 }
 

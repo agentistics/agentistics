@@ -89,6 +89,7 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_wait',
   'agentistics_checkin_report',
   'agentistics_session_role',
+  'agentistics_session_leads',
   'agentistics_session_away',
   'agentistics_session_hold',
   'agentistics_session_switch_account',
@@ -249,6 +250,10 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_session_role: {
     ...GROUPS, risk: 'W', routes: ['POST /api/session-roles'],
     reason: 'sets a session label (role + title prefix) and types a one-line note; reversible by setting auto; a session may only touch itself or the sessions it started',
+  },
+  agentistics_session_leads: {
+    ...GROUPS, risk: 'W', routes: ['POST /api/session-leads'],
+    reason: 'declares which tasks a leader leads besides its own filing (the Live link, never cost); reversible with remove; a session may only change its own, and only a leader, within its own repository',
   },
   agentistics_session_hold: {
     ...GROUPS, risk: 'R', routes: ['GET /api/fleet/holds'],

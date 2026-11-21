@@ -2131,6 +2131,18 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }, await defaultRoleDeps())
       return json(out, roleStatus(out))
     }
+    // LEADERSHIP — the tasks a declared leader leads besides its own filing (`sessions/session-roles.ts` `leadOp`).
+    if (url.pathname === '/api/session-leads' && (req.method === 'POST' || req.method === 'GET')) {
+      const body = (req.method === 'POST' ? await req.json().catch(() => ({})) : { ref: url.searchParams.get('ref') ?? undefined }) as { ref?: unknown; add?: unknown; remove?: unknown; session?: unknown; lang?: unknown }
+      const { verifySessionIdentity } = await import('./sessions/session-identity')
+      const { leadOp, leadStatus, roleSenderFromBody, defaultRoleDeps } = await import('./sessions/session-roles')
+      const who = await roleSenderFromBody(body, verifySessionIdentity, body.lang === 'pt' ? 'pt' : 'en')
+      if (!who.ok) return json(who, 403)
+      const strs = (v: unknown) => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : typeof v === 'string' ? [v] : []
+      const out = await leadOp(who.sender, { ...(typeof body.ref === 'string' && body.ref ? { ref: body.ref } : {}), add: strs(body.add), remove: strs(body.remove) }, await defaultRoleDeps())
+      if (out.ok && out.changed) void import('./sessions/fleet-web').then(m => m.kickFleet(out.id)).catch(() => {})
+      return json(out, leadStatus(out))
+    }
     // TEAMS — the person takes a session out of its leader's team, or moves it into another leader's
     // (`sessions/team-links.ts`). A leader is never moved into a team; a session proof is refused.
     if (url.pathname === '/api/session-team' && req.method === 'POST') {

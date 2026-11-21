@@ -156,10 +156,12 @@ export interface LiveFilters { task?: string; stage?: LiveStage | 'no-leader'; s
  * satisfies this check. `unknown` is deliberately distinct from `absent`: a failed fleet read
  * must not make a review look abandoned.
  */
-function leaderForTask(o: { taskId: string; taskTitle: string; rows: readonly FleetRowLite[]; leaderIds: ReadonlySet<string>; fleetRead: 'ok' | 'unknown' }): { availability: LeaderAvailability; reason?: string; reasonCode?: 'fleet-unreadable' | 'no-live-leader' } {
+function leaderForTask(o: { taskId: string; taskTitle: string; rows: readonly FleetRowLite[]; leaderIds: ReadonlySet<string>; leadsOf?: ReadonlyMap<string, readonly string[]>; fleetRead: 'ok' | 'unknown' }): { availability: LeaderAvailability; reason?: string; reasonCode?: 'fleet-unreadable' | 'no-live-leader' } {
   if (o.fleetRead === 'unknown') return { availability: 'unknown', reason: 'leader availability could not be read from the fleet', reasonCode: 'fleet-unreadable' }
   const sameTask = (r: FleetRowLite) => r.task === o.taskId || r.task === o.taskTitle
-  const leader = o.rows.some(r => o.leaderIds.has(r.id) && sameTask(r) && isLiveState(r.state))
+  // A leader counts when the task is its filing OR one it declared it leads (the leadership link, apart from the cost filing).
+  const leads = (r: FleetRowLite) => o.leadsOf?.get(r.id)?.includes(o.taskId) === true
+  const leader = o.rows.some(r => o.leaderIds.has(r.id) && (sameTask(r) || leads(r)) && isLiveState(r.state))
   return leader ? { availability: 'available' } : { availability: 'absent', reason: 'no live leader is filed on this task', reasonCode: 'no-live-leader' }
 }
 
@@ -168,6 +170,8 @@ export function describeLive(o: {
   rows: readonly FleetRowLite[]
   /** Row ids whose stored role is `leader` (by managed id or conversation key, resolved by the caller). */
   leaderIds: ReadonlySet<string>
+  /** Row id -> task ids that leader declared it leads besides its own filing (`session-roles.ts` `leadsOfRows`). */
+  leadsOf?: ReadonlyMap<string, readonly string[]>
   nowMs: number
   filters?: LiveFilters
   lang?: LiveLang
@@ -197,7 +201,7 @@ export function describeLive(o: {
     const alive = agents.some(a => isLiveState(a.state))
     const workMs = d.workMs ?? (alive && d.startedAtMs !== null ? Math.max(0, o.nowMs - d.startedAtMs) : null)
     const leader = d.stage === 'leader'
-      ? leaderForTask({ taskId: d.taskId, taskTitle: d.taskTitle, rows: o.rows, leaderIds: o.leaderIds, fleetRead: o.fleetRead ?? 'ok' })
+      ? leaderForTask({ taskId: d.taskId, taskTitle: d.taskTitle, rows: o.rows, leaderIds: o.leaderIds, ...(o.leadsOf ? { leadsOf: o.leadsOf } : {}), fleetRead: o.fleetRead ?? 'ok' })
       : null
     return { ...d, workMs, agents, liveState, stalled,
       ...(leader?.availability === 'absent' ? { displayStage: 'no-leader' as const } : {}),
