@@ -115,3 +115,53 @@ test('a collapsed destination still navigates without expanding the rail', async
   expect(visits).toEqual(['/vault'])
   expect(host.querySelector('[data-area-rail]')!.getAttribute('data-open')).toBe('false')
 })
+
+async function mountOpen(overlay: boolean | undefined, visits: string[]) {
+  host = document.createElement('div'); document.body.append(host)
+  const outside = document.createElement('button'); outside.id = 'outside'; document.body.append(outside)
+  outside.addEventListener('click', () => visits.push('outside-click'))
+  await act(async () => { root = createRoot(host); root.render(<MemoryRouter><AreaRail lang="en" pathname="/sessions" overlay={overlay} initialTreeOpen onNavigate={to => visits.push(to)} /></MemoryRouter>) })
+  return outside
+}
+const press = (el: Element) => { el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })) }
+
+test('outside press folds the open rail and swallows the click underneath', async () => {
+  const visits: string[] = []
+  const outside = await mountOpen(undefined, visits)
+  const rail = () => host.querySelector<HTMLElement>('[data-area-rail]')!
+  expect(rail().dataset.open).toBe('true')
+  await act(async () => { press(outside) })
+  expect(rail().dataset.open).toBe('false')
+  expect(visits).toEqual([])
+  await act(async () => { press(outside) })
+  expect(visits).toEqual(['outside-click'])
+  outside.remove()
+})
+
+test('presses inside the open rail do not fold it', async () => {
+  const visits: string[] = []
+  const outside = await mountOpen(undefined, visits)
+  const rail = () => host.querySelector<HTMLElement>('[data-area-rail]')!
+  await act(async () => { press(host.querySelector<HTMLElement>('[data-area-heading="tasks"]')!) })
+  expect(rail().dataset.open).toBe('true')
+  outside.remove()
+})
+
+test('a docked (non-overlay) rail never folds on an outside press', async () => {
+  const visits: string[] = []
+  const outside = await mountOpen(false, visits)
+  await act(async () => { press(outside) })
+  expect(host.querySelector<HTMLElement>('[data-area-rail]')!.dataset.open).toBe('true')
+  expect(visits).toEqual(['outside-click'])
+  outside.remove()
+})
+
+test('Escape folds the open rail and returns focus to the toggle', async () => {
+  const visits: string[] = []
+  const outside = await mountOpen(undefined, visits)
+  await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+  const rail = host.querySelector<HTMLElement>('[data-area-rail]')!
+  expect(rail.dataset.open).toBe('false')
+  expect(document.activeElement).toBe(rail.querySelector('button'))
+  outside.remove()
+})

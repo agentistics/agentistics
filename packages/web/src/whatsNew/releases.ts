@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.221.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Menu lateral: quando ele está aberto por cima da página, clicar fora dele (ou apertar Esc) o recolhe. O clique usado para fechar não aciona o que estava embaixo.',
+        en: 'Side menu: when it is open over the page, clicking outside it (or pressing Esc) folds it back. The click that closes it does not trigger whatever was underneath.',
+      },
+      {
+        pt: 'agentop run --serve não recusa mais subir o servidor de teste achando, por engano, que está dentro de um trabalho pesado.',
+        en: 'agentop run --serve no longer refuses to start the test server by wrongly thinking it runs inside a heavy job.',
+      },
+    ],
+  },
   '2.221.2': {
     features: [],
     fixes: [
