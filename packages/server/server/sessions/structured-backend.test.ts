@@ -14,10 +14,7 @@ import { answerFits, structuredRegistry, stubDriver } from '@agentistics/engine-
 import { acpAsStructured, recordingSession, structuredSpawnOf, withStructured, type StructuredProvider } from './structured-backend'
 import { SessionNotice, sessionActionError } from './action-error'
 import { isReplayCall } from './structured-replay'
-import {
-  HERMES_STRUCTURED_ONLY_NOTICE, STRUCTURED_ROUTE_OFF, answerStructured, reopenOrigin, routableDriver,
-  routeSpawn, spawnOriginOf, structuredIntentOf,
-} from './structured-route'
+import { HERMES_STRUCTURED_ONLY_NOTICE, STRUCTURED_ROUTE_OFF, answerStructured, ownerStructuredIntent, reopenOrigin, routableDriver, routeSpawn, spawnOriginOf, structuredIntentOf } from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
 
 function fakeBase(): SessionBackend & { calls: Array<[string, unknown?]> } {
@@ -945,5 +942,22 @@ describe('QA F2 — the driver speaks the language of the screen that ASKED', ()
     const c = withStructured(fakeBase(), provider(eng.reg, { lang: async () => 'pt' }))
     await c.spawn(web('opencode', { id: 'b' }))
     expect(eng.started[1]!.lang).toBe('pt') // no request language: the stored preference
+  })
+})
+
+describe('engine-api 1.31: the structured intent of an owner session', () => {
+  const base = structuredIntentOf({ harness: 'claude', origin: 'web' }, {
+    model: 'haiku', ctx: { text: 'HOST BRIEFING', block: '<host/>' }, mcp: { command: 'agentistics-mcp', args: ['a'] },
+  })
+  test('the engine\'s own context and MCP stand in for the host\'s briefing and its agentistics server', () => {
+    const v = ownerStructuredIntent(base, { instructions: { text: 'OWN', block: '<owner-context>OWN</owner-context>' }, mcp: [{ name: 'browse', command: 'bun', args: ['tv'] }] })
+    expect(v.instructions).toEqual({ text: 'OWN', block: '<owner-context>OWN</owner-context>' })
+    expect(v.mcp).toEqual([{ name: 'browse', command: 'bun', args: ['tv'] }])
+    expect(v).toMatchObject({ harness: 'claude', origin: 'web', model: 'haiku' })
+  })
+  test('without MCP of its own the session carries none (never the board\'s tools by default)', () => {
+    const v = ownerStructuredIntent(base, { instructions: { text: 'N', block: 'b' } })
+    expect(v.mcp).toBeUndefined()
+    expect(JSON.stringify(v)).not.toContain('HOST BRIEFING')
   })
 })

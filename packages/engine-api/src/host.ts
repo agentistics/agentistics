@@ -12,7 +12,7 @@
  */
 import type { CapabilityName, EngineEvent, EngineSessionActivity, HarnessId } from './mirrors'
 import type { ReuseSurface } from './reuse'
-import type { EngineStructuredSessions } from './structured'
+import type { EngineStructuredSessions, StructuredMcpServer, StructuredSessionHandle } from './structured'
 
 /** Where an append's answer is read. A host's richer result is assignable to it. */
 export interface ProviderAppendResult {
@@ -130,6 +130,45 @@ export type EngineDelegateSpawnResult =
   | { ok: true; managedId: string }
   | { ok: false; code: EngineDelegateRefusal; sentence: string }
 
+/**
+ * 1.31 — a session that is the OWNER'S OWN, opened by an engine on the owner's behalf (the owner started it from an
+ * engine surface, never an agent): a managed session of the host, so it shows in the fleet while it lives and, once
+ * stopped, among the ended ones, where it reopens with its whole conversation. No consent list, no `requestedBy`, no
+ * task. Only the host decides where it runs; the engine says WHAT it is (`instructions`, `mcp`) and speaks through the
+ * returned handle.
+ */
+export interface EngineOwnerSessionSpawn {
+  harness: HarnessId
+  /** Absolute. */
+  cwd: string
+  model: string
+  effort?: 'low' | 'medium' | 'high'
+  /** The session's name in the fleet. */
+  label: string
+  /** The opening context, through the harness's official channel (same shape as `StructuredSpawn.instructions`). */
+  instructions?: { text: string; block: string }
+  /** Extra MCP servers for the session. Never carries a secret in `env`. */
+  mcp?: readonly StructuredMcpServer[]
+  /** The language of the owner's screen, for the sentences a driver writes into the chat. */
+  lang?: 'en' | 'pt'
+}
+
+/** `unavailable`: this host cannot run one (no structured driver for the harness, harness not installed); `memory_budget`: admission refused it; `refused`: any other refusal, in the sentence. */
+export type EngineOwnerSessionRefusal = 'unavailable' | 'memory_budget' | 'refused'
+
+export type EngineOwnerSessionResult =
+  | {
+    ok: true
+    managedId: string
+    /**
+     * The door on the session. It is the OWNER's: `send` and `submit` are typed WITHOUT the
+     * `[from agentistics · surface]` header, so the words read in the conversation as what the owner said.
+     * `follow` and `cancel` are the usual ones. It dies when the session ends (`fleet.stop`, or the process going).
+     */
+    session: StructuredSessionHandle
+  }
+  | { ok: false; code: EngineOwnerSessionRefusal; sentence: string }
+
 /** 1.26 — a leader's successor the book asks the host to start (`EngineBookHost.spawnSuccessor`). */
 export interface EngineBookSuccessorSpawn {
   /** The verified leader being replaced (a managed id). The successor inherits its folder and filing. */
@@ -196,7 +235,12 @@ export interface EngineFleet {
   delegateSpawn?(req: EngineDelegateSpawn): Promise<EngineDelegateSpawnResult>
   /** 1.7 — the session's latest assistant reply (its handback), and whether it is still live. */
   lastReply?(managedId: string): Promise<{ ok: true; text: string; live: boolean } | { ok: false; reason: string }>
-  /** 1.7 — ends a session this engine started. */
+  /**
+   * 1.31 (optional) — opens a session that is the OWNER's own (see `EngineOwnerSessionSpawn`). A host without it offers
+   * no such session: the engine keeps whatever private conversation it had before.
+   */
+  openOwnerSession?(req: EngineOwnerSessionSpawn): Promise<EngineOwnerSessionResult>
+  /** 1.7 — ends a session this engine started (an owner session too: it then shows among the ended ones and reopens). */
   stop?(managedId: string): Promise<void>
 }
 
