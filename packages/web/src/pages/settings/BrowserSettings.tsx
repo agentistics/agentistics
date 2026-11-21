@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import type { AppContext } from '../../lib/app-context'
+import { vaultPost } from '../../lib/vaultApi'
 import { SectionHeader, Divider, PrefRow, Toggle, Button, ConfirmModal } from './primitives'
 import {
   ceilingSentence, executableLine, fmtBytes, harnessLines, memoryLines, profilesRow, totalBytes,
@@ -18,7 +19,14 @@ import {
 
 const TONE_COLOR = { ok: 'var(--text-secondary)', trim: '#f59e0b', kill: '#ef4444' } as const
 
-export default function BrowserSettings() {
+export type AskProfilesGrant = () => Promise<{ ok: true; ownerGrant: string } | { ok: false; sentence: string }>
+const vaultAskProfilesGrant: AskProfilesGrant = async () => {
+  const r = await vaultPost<{ ownerGrant: string }>('/api/vault/browser-profiles', {})
+  return r.ok && typeof r.ownerGrant === 'string' ? { ok: true, ownerGrant: r.ownerGrant } : { ok: false, sentence: r.ok ? '' : r.sentence }
+}
+
+/** `askProfilesGrant` is injected by tests; the page asks the vault. */
+export default function BrowserSettings({ askProfilesGrant }: { askProfilesGrant?: AskProfilesGrant } = {}) {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
 
@@ -72,7 +80,13 @@ export default function BrowserSettings() {
   const deleteProfiles = useCallback(async () => {
     setBusy(true)
     try {
-      const r = await fetch('/api/browser/profiles/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      // S12 r4: the owner's single-use vault proof (the same prompt as the padlock unlock), asked at the confirm.
+      const proof = await (askProfilesGrant ?? vaultAskProfilesGrant)()
+      if (!proof.ok) {
+        setNotice(proof.sentence || (pt ? 'Não foi possível confirmar que é você. Nenhum perfil foi apagado.' : 'Could not confirm it is you. No profile was deleted.'))
+        return
+      }
+      const r = await fetch('/api/browser/profiles/delete', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Agentop-Owner-Grant': proof.ownerGrant }, body: '{}' })
       const body = await r.json().catch(() => ({})) as { ok?: boolean; removed?: number; sentence?: string }
       setNotice(r.ok
         ? (pt ? `${body.removed ?? 0} perfil(is) apagado(s).` : `${body.removed ?? 0} profile(s) deleted.`)
@@ -82,7 +96,7 @@ export default function BrowserSettings() {
     } finally {
       setBusy(false); setConfirm(false); await loadStatus()
     }
-  }, [pt, loadStatus])
+  }, [pt, loadStatus, askProfilesGrant])
 
   const lines = status ? memoryLines(status.live, pt) : []
   const total = status ? totalBytes(status.live) : null
@@ -154,8 +168,8 @@ export default function BrowserSettings() {
           </PrefRow>
           {notice && <div data-browser-notice style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 14 }}>{notice}</div>}
           <ConfirmModal open={confirm} title={pt ? 'Apagar perfis?' : 'Delete profiles?'}
-            message={pt ? 'Isto apaga os cookies e o cache guardados dos navegadores já encerrados. Você terá de entrar de novo nos sites.'
-              : 'This deletes the cookies and cache stored for browsers already closed. You will have to sign in to sites again.'}
+            message={pt ? 'Isto apaga os cookies e o cache guardados dos navegadores já encerrados. Você terá de entrar de novo nos sites. O Cofre vai pedir que você confirme que é você.'
+              : 'This deletes the cookies and cache stored for browsers already closed. You will have to sign in to sites again. The Vault will ask you to confirm it is you.'}
             confirmLabel={pt ? 'Apagar' : 'Delete'} cancelLabel={pt ? 'Cancelar' : 'Cancel'} busy={busy}
             onConfirm={() => { void deleteProfiles() }} onCancel={() => setConfirm(false)} />
         </>

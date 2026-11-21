@@ -178,8 +178,20 @@ export function ownerProofRefusal(
   code: 'grant-invalid' | 'grant-scope' | 'owner-proof-local-only',
   lang: 'pt' | 'en',
   setup: boolean,
+  subject: 'unlock' | 'profiles' = 'unlock',
 ): Extract<OwnerProofVerdict, { ok: false }> {
   const pt = lang === 'pt'
+  if (subject === 'profiles') {
+    const e = code === 'owner-proof-local-only' ? 'owner_proof_local_only' : setup ? 'owner_proof_unavailable' : code === 'grant-scope' ? 'owner_proof_scope' : 'owner_proof_required'
+    const sentence = code === 'owner-proof-local-only'
+      ? (pt ? 'Apagar os perfis só pode ser confirmado neste computador.' : 'Deleting the profiles can only be confirmed on this computer.')
+      : setup
+        ? (pt ? 'Para apagar os perfis do navegador, o agentistics precisa confirmar que é você. Abra o Cofre e crie uma senha (ou ative o Windows Hello / Touch ID); depois tente de novo.'
+          : 'To delete the browser profiles, agentistics needs to confirm it is you. Open the Vault and set a password (or turn on Windows Hello / Touch ID), then try again.')
+        : (pt ? 'Confirme que é você (senha do Cofre, Windows Hello ou Touch ID) para apagar os perfis. Cada confirmação vale uma vez, por 5 minutos; nenhum perfil foi apagado.'
+          : 'Confirm it is you (Vault password, Windows Hello or Touch ID) to delete the profiles. Each confirmation works once, for 5 minutes; no profile was deleted.')
+    return { ok: false, status: 403, error: e, ...(setup && code !== 'owner-proof-local-only' ? { action: { kind: 'open-vault' as const, path: '/vault' as const } } : {}), sentence }
+  }
   if (code === 'owner-proof-local-only') {
     return { ok: false, status: 403, error: 'owner_proof_local_only', sentence: pt
       ? 'Assumir o navegador de uma sessão só pode ser confirmado neste computador.'

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Subprocess } from 'bun'
 import { routeNeedsCaller } from './browser/personal-doors'
+import { browserRouteDeps } from './browser/browser-web'
 
 const root = mkdtempSync(join(tmpdir(), 'agentistics-browser-profiles-wiring-'))
 const home = join(root, 'home')
@@ -63,5 +64,25 @@ describe('index.ts reads the caller for POST /api/browser/profiles/delete', () =
     // Not the route's own fail-closed fallback: that is what a path missing from the caller list produces.
     expect(body.why).not.toBe('no-peer')
     if (res.status === 403) expect(body.error).toMatch(/session_cannot_unlock|caller_unidentified/)
+  })
+
+  it('r4: from this machine\'s own socket with NO owner grant the live door still answers 403 (the grant, not the socket, is the proof)', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/browser/profiles/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error?: string; why?: string }
+    expect(body.error).not.toBe('unsupported')
+  })
+  it('r4: browserRouteDeps hands the profiles proof to the route (dropped = every delete 403s even with a real grant)', () => {
+    const proof = async () => ({ ok: true as const, grantId: 'p' })
+    const d = browserRouteDeps({ dataDir: root, agentisticsPorts: [1, 2] } as never, async () => null, { profilesProof: proof })
+    expect(d.profilesProof).toBe(proof)
+  })
+  it('r4: a forged owner grant is refused and nothing is deleted; the vault door for the grant is wired and early-guarded', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/browser/profiles/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-agentop-owner-grant': 'forged.token' }, body: '{}' })
+    expect(res.status).toBe(403)
+    const src = readFileSync(join(import.meta.dir, 'index.ts'), 'utf8')
+    expect(src).toMatch(/profilesProof,/)
+    expect(src).toContain("consumeBrowserProfilesGrant(req.headers.get('x-agentop-owner-grant')")
+    expect(src).toContain("'/api/vault/browser-profiles'")
   })
 })

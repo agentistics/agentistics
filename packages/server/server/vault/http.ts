@@ -278,6 +278,13 @@ async function handleVaultHttpInner(req: Request, url: URL, env: VaultHttpEnv): 
     const r = await gate.requireBrowserUnlockOwner({ session, loopback }, b.managedId)
     return reply(r.ok ? { ok: true, ownerGrant: r.grant } : r)
   }
+  if (path === '/api/vault/browser-profiles' && req.method === 'POST') {
+    // NAVEGADOR S12 r4: the person's fresh proof before "Delete profiles". The single-use grant goes back in
+    // `X-Agentop-Owner-Grant` on `POST /api/browser/profiles/delete` — never in a URL or a log.
+    await body()
+    const r = await gate.requireBrowserProfilesOwner({ session, loopback })
+    return reply(r.ok ? { ok: true, ownerGrant: r.grant } : r)
+  }
   if (path === '/api/vault/personal-browser' && req.method === 'POST') {
     // NAVEGADOR S10 r3: the person's fresh proof for their OWN browser. Returns a short-lived grant the UI keeps in
     // memory and sends in `X-Agentop-Personal-Grant` (never a URL, never a cookie). `{revoke:true, grant}` ends it.

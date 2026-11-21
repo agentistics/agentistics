@@ -27,6 +27,7 @@ const baseStatus = {
   profiles: { count: 2 },
 }
 
+let lastGrantHeader: string | null = null
 let host: HTMLDivElement, root: Root
 let prefs: { browserEnabled?: boolean }, status: typeof baseStatus, puts: unknown[], deletes: number, deleteAnswer: { status: number; body: unknown }, statusCode: number
 
@@ -39,19 +40,19 @@ beforeEach(() => {
     if (url === '/api/preferences') return Response.json(prefs)
     if (url === '/api/session') return Response.json({ capabilities: { localShell: true } })
     if (url === '/api/browser/status') return statusCode === 200 ? Response.json(status) : Response.json({ error: 'browser_disabled' }, { status: statusCode })
-    if (url === '/api/browser/profiles/delete') { deletes++; if (init?.body !== '{}') return Response.json({ ok: false, error: 'invalid_json' }, { status: 400 }); return Response.json(deleteAnswer.body, { status: deleteAnswer.status }) }
+    if (url === '/api/browser/profiles/delete') { deletes++; lastGrantHeader = (init?.headers as Record<string, string> | undefined)?.['X-Agentop-Owner-Grant'] ?? null; if (init?.body !== '{}') return Response.json({ ok: false, error: 'invalid_json' }, { status: 400 }); return Response.json(deleteAnswer.body, { status: deleteAnswer.status }) }
     return Response.json({})
   }) as typeof fetch
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
 })
 afterEach(() => { act(() => root.unmount()); host.remove() })
 
-async function mount(lang: 'en' | 'pt' = 'en') {
+async function mount(lang: 'en' | 'pt' = 'en', ask?: (typeof import('./BrowserSettings'))['default'] extends (p: infer P) => unknown ? NonNullable<P> extends { askProfilesGrant?: infer A } ? A : never : never) {
   const { MemoryRouter, Routes, Route, Outlet } = RR
   await act(async () => {
     root.render(
       <MemoryRouter initialEntries={['/s']}>
-        <Routes><Route element={<Outlet context={{ lang }} />}><Route path="/s" element={<BrowserSettings />} /></Route></Routes>
+        <Routes><Route element={<Outlet context={{ lang }} />}><Route path="/s" element={<BrowserSettings askProfilesGrant={ask ?? (async () => ({ ok: true as const, ownerGrant: 'grant-1' }))} />} /></Route></Routes>
       </MemoryRouter>,
     )
   })
@@ -119,6 +120,27 @@ describe('Delete profiles', () => {
     await click(btn('Delete')!)
     expect(deletes).toBe(1)
     expect(host.querySelector('[data-browser-notice]')!.textContent).toBe('2 profile(s) deleted.')
+  })
+  test('r4: confirming asks the vault for the owner grant and sends it as X-Agentop-Owner-Grant', async () => {
+    await mount()
+    await click(btn('Delete profiles')!)
+    expect(text()).toContain('The Vault will ask you to confirm it is you.')
+    await click(btn('Delete')!)
+    expect(lastGrantHeader).toBe('grant-1')
+  })
+  test('r4: a refused vault proof deletes nothing and shows the vault sentence', async () => {
+    await mount('en', async () => ({ ok: false, sentence: 'Confirm it is you to delete the profiles.' }))
+    await click(btn('Delete profiles')!)
+    await click(btn('Delete')!)
+    expect(deletes).toBe(0)
+    expect(host.querySelector('[data-browser-notice]')!.textContent).toBe('Confirm it is you to delete the profiles.')
+  })
+  test('r4: the server refusing (403, spent grant) shows the server sentence', async () => {
+    deleteAnswer = { status: 403, body: { ok: false, error: 'owner_proof_required', sentence: 'Confirm it is you.' } }
+    await mount()
+    await click(btn('Delete profiles')!)
+    await click(btn('Delete')!)
+    expect(host.querySelector('[data-browser-notice]')!.textContent).toBe('Confirm it is you.')
   })
   test('refused while a browser is live: the button is disabled and the sentence says why', async () => {
     status.live = [{ key: 'a', owner: { kind: 'session', managedId: 'abcdef123456' }, memory: { basis: 'pss', bytes: 100 * MB, action: 'ok' } }]

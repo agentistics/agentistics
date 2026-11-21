@@ -72,7 +72,11 @@ holds it. They are never backed up (`backup-plan.ts`, `runtime`). Your own brows
 
 **Settings → Browser → Delete profiles** removes every profile folder now (cookies and cache of browsers
 already closed). It asks first, and is **refused while any browser is live** (the server answers 409
-`browser_live`; the button is disabled with the reason). A session cannot call it.
+`browser_live`; the button is disabled with the reason). A session cannot call it, and the process-tree check
+is only a hint (a same-user agent can escape it with `systemd-run --user`): the request must also carry the
+owner's **single-use vault grant** (`X-Agentop-Owner-Grant`, class `browser-profiles`, minted by
+`POST /api/vault/browser-profiles` after the same fresh Windows Hello / Touch ID / password proof as the padlock
+unlock; ≤ 5 min, this page's session, loopback only). Without one the answer is 403 and nothing is deleted.
 
 ## Turning it off
 
