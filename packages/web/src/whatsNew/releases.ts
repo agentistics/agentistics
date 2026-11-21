@@ -24,6 +24,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'O modo autônomo responde aos pedidos de permissão com uma lista positiva do que é permitido, e avisa quando não consegue responder.',
         en: 'Autonomous mode answers permission prompts using a positive allow-list, and tells you when it cannot.',
       },
+      {
+        pt: 'Tarefas: troque o repositório de uma tarefa com `agentop task edit <ref> --repo`, pelo MCP ou pela API.',
+        en: "Tasks: change a task's repository with `agentop task edit <ref> --repo`, the MCP or the API.",
+      },
     ],
     fixes: [
       {
