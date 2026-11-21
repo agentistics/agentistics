@@ -2049,6 +2049,8 @@ export interface SpawnSessionRequest {
   callerVerified?: boolean
   /** DSL.TIPO-SESSAO — the spawn door when it is not the person's (`engine`: an agent's delegation through the engine). */
   spawnDoor?: 'engine'
+  /** engine-api 1.31 — the OWNER's own session (`fleet.openOwnerSession`): structured only, the engine's own context and MCP, the row marked `origin: 'engine'`. In-process only. */
+  ownerSession?: { instructions?: { text: string; block: string }; mcp?: readonly { name: string; command: string; args: readonly string[]; env?: Readonly<Record<string, string>> }[] }
   /** The task/subtask the spawn gate judges the spawn for, when the session is filed only after it starts (the delegate). */
   gateTaskId?: string
   gateSubtaskId?: string
