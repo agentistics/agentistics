@@ -40,6 +40,8 @@ export interface TaskPatch {
   /** System-stamped, never set by an ordinary caller — see `Task.startedAt`'s own note. */
   startedAt?: string
   repo?: string
+  repoSource?: 'explicit' | 'inherited'
+  repoFromSession?: string
   updatedAt?: string
   blockedBy?: string[]
   links?: TaskLink[]
@@ -239,6 +241,8 @@ function sanitizeTask(raw: unknown): Task | null {
     ...(typeof t.deliveredAt === 'string' ? { deliveredAt: t.deliveredAt } : {}),
     ...(typeof t.startedAt === 'string' ? { startedAt: t.startedAt } : {}),
     ...(typeof t.repo === 'string' ? { repo: t.repo } : {}),
+    ...(t.repoSource === 'explicit' || t.repoSource === 'inherited' ? { repoSource: t.repoSource } : {}),
+    ...(typeof t.repoFromSession === 'string' && t.repoFromSession ? { repoFromSession: t.repoFromSession } : {}),
     ...(Array.isArray(t.links)
       ? {
         links: t.links.map(sanitizeLink).filter((l): l is TaskLink => l !== null),
@@ -747,7 +751,9 @@ export function createTaskStore(file: string): TaskStore {
         // corrupt-quarantine, for a no-op.
         if (!target) return false
         if (patch.status === 'in_review' && o?.allowOpenSubtasks !== true && book.subtasks.some(s => s.taskId === id && !s.parentGroupId && !['done', 'abandoned'].includes(s.status))) return false
-        const next = { ...target, ...patch }
+        // An INHERITED repo never overwrites one that is already there (it may have been set, explicitly, since the caller read the task).
+        const { repo: _r, repoSource: _s, repoFromSession: _f, ...rest } = patch
+        const next = { ...target, ...(patch.repoSource === 'inherited' && target.repo ? rest : patch) }
         await write({ ...book, tasks: book.tasks.map(t => (t.id === id ? next : t)) })
         return true
       })

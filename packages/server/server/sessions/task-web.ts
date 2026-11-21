@@ -34,7 +34,7 @@ import { readPreferences, writePreferences } from '../preferences'
 import {
   isGroupMember, legacyTaskId, marksStart, migratePriority, newCommentId, newEventId, newFileId,
   newLinkId, newSubtaskId, newTaskId, statusAfterAllSubtasksDone, statusAfterAttach, statusAfterHandback,
-  statusAfterSubtaskProgress, subtaskDone,
+  repoInheritancePatch, statusAfterSubtaskProgress, subtaskDone,
   type Subtask, type Task, type TaskEvent, type TaskStatus,
 } from './task-model'
 import { boardProgress, DEFAULT_LEASE_MS, planNext } from './task-next'
@@ -1460,8 +1460,8 @@ export async function attachSession(
   if (!task.repo) {
     const { repoFacts } = await import('./repo-facts')
     const facts = await repoFacts(row.cwd, row.repo).catch(() => null)
-    const repo = facts?.repo
-    if (repo) await w.store.patchTask(task.id, { repo, updatedAt: new Date().toISOString() })
+    const inherit = repoInheritancePatch(task, sessionId, facts?.repo)
+    if (inherit) await w.store.patchTask(task.id, { ...inherit, updatedAt: new Date().toISOString() })
   }
   await w.store.logEvents([event(task.id, row.label || sessionId, 'session', {
     to: sessionId, detail: row.harness,
@@ -1571,7 +1571,8 @@ export async function attachConversation(
     const { repoFacts } = await import('./repo-facts')
     const facts = await repoFacts(conv.meta.project_path ?? '').catch(() => null)
     const repo = facts?.repo || (conv.meta.git_remote ? repoShortName(conv.meta.git_remote) : '')
-    if (repo) await w.store.patchTask(task.id, { repo, updatedAt: new Date().toISOString() })
+    const inherit = repoInheritancePatch(task, conversation, repo)
+    if (inherit) await w.store.patchTask(task.id, { ...inherit, updatedAt: new Date().toISOString() })
   }
   await w.store.logEvents([event(task.id, label, 'session', {
     to: conversation, detail: `${conv.harness} · historical`,
