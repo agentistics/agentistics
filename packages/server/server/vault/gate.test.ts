@@ -139,6 +139,8 @@ describe('§2.4 — every row of the table', () => {
     test(`${action}: asks ${row.code || row.gesture ? 'the proof' : 'nothing'}${row.code && !row.gesture && row.grant ? ', reusable for 5 min' : row.code || row.gesture ? ', fresh' : ''}`, async () => {
       // ENTREGA.GARANTIDA §2.3.1: a DEDICATED gate (`requireDeliveryOwner`), never this generic one — covered in delivery-owner.test.ts.
       if (action === 'delivery-owner') { expect(await requireVaultStepUp(action, S)).toMatchObject({ ok: false, code: 'bad-request' }); return }
+      // NAVEGADOR S4b: dedicated too (`requireBrowserUnlockOwner`) — covered in browser-unlock-owner.test.ts.
+      if (action === 'browser-unlock') { expect(await requireVaultStepUp(action, S)).toMatchObject({ ok: false, code: 'bad-request' }); return }
       if (action === 'personal-grant') return // VAULT.UI2: loopback needs no proof, a phone needs its passkey — see the dedicated describe below
       if (!row.code && !row.gesture) {
         expect((await requireVaultStepUp(action, S)).ok).toBe(true)

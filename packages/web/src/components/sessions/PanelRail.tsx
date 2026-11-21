@@ -72,7 +72,7 @@
  * the pointer's current position; the clamp-and-commit-and-write happens once, in the pure layer.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { railTooltipShown } from '../../lib/railTooltip'
 import { createPortal } from 'react-dom'
 import { ArrowDown, Eye, EyeOff, MoreHorizontal } from 'lucide-react'
@@ -354,8 +354,12 @@ export function PanelRail({
             : panelTitle(id, pt)
           const busy = activity?.has(id) === true
           return (
+            <Fragment key={id}>
+            {id === 'browser' && visible.length > 1 && (
+              /* THE BROWSER IS THE PERSON'S, NOT THE SESSION'S (prototype b1-open): a hairline sets it apart from the panels about the session. */
+              <span role="separator" aria-orientation="horizontal" data-rail-separator style={{ width: iconPx - 10, height: 1, margin: '4px 0', background: 'var(--border)', flexShrink: 0 }} />
+            )}
             <button
-              key={id}
               type="button"
               role="tab"
               aria-selected={on}
@@ -403,6 +407,7 @@ export function PanelRail({
                 }} />
               )}
             </button>
+            </Fragment>
           )
         })}
         {overflow.length > 0 && (

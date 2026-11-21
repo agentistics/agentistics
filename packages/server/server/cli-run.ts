@@ -103,6 +103,7 @@ export const THROWAWAY_ENV_KEEP: Readonly<Record<string, string>> = {
   XDG_CACHE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
   XDG_DATA_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
   XDG_STATE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
+  PLAYWRIGHT_BROWSERS_PATH: 'read-only location of the browser executables (browser-bin.ts); holds no store, config or secret',
 }
 export const isThrowawayEnvDrop = (key: string): boolean => THROWAWAY_ENV_DROP.includes(key) || /^KIMI_.*HOME$/.test(key)
 

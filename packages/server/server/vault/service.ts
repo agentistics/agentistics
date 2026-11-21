@@ -1219,6 +1219,7 @@ export async function openFromFile(path: string, purpose: string, name: string):
  */
 export type VaultAuditType =
   | 'delivery.owner-proof'
+  | 'browser.owner-proof'
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.auto-lock-extended' | 'vault.recovered' | 'vault.recover-failed'

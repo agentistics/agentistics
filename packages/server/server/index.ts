@@ -114,6 +114,11 @@ import {
   createShellInputState, shellInputExists, shellInputAtCapacity, type ShellInputState,
 } from './sessions/shell-input-web'
 import { wsInputOriginOk } from './sessions/input-protocol'
+// NAVEGADOR S4: the person's input onto a browser tab. TYPE only here — the module (and the browser host
+// behind it) is loaded by the `/api/browser/input` route before the upgrade, which sets `browserInputMod`;
+// a socket of that kind cannot exist before that import has resolved.
+import type { BrowserInputState } from './browser/browser-input-web'
+let browserInputMod: typeof import('./browser/browser-input-web') | null = null
 // Type only: the module itself reaches `cli-start` → `@agentistics/tui/control` → Ink, and is
 // loaded by dynamic import inside the two /api/fleet handlers.
 import {
@@ -375,6 +380,8 @@ type WSData = {
   engineSocket?: EngineSocketState
   /** The tab's multiplexed push channel (`stream-mux.ts`) — a fifth, disjoint kind. */
   streamMux?: MuxState
+  /** NAVEGADOR S4: the person's input onto a browser tab (`browser/browser-input-web.ts`) — a sixth. */
+  browserInput?: BrowserInputState
 }
 
 // Shared WS + request handlers, so the binary can bind the SAME logic to two ports below:
@@ -382,18 +389,21 @@ type WSData = {
 const _wsHandlers = {
   open(ws: ServerWebSocket<WSData>) {
     if (ws.data.streamMux) return
+    if (ws.data.browserInput) { browserInputMod?.openBrowserInputSocket(ws); return }
     if (ws.data.fleetInput) { openInputSocket(ws); return }
     if (ws.data.shellInput) { openShellInputSocket(ws); return }
     if (ws.data.engineSocket) { openEngineSocket(ws.data.engineSocket, ws); return }
   },
   message(ws: ServerWebSocket<WSData>, msg: string | Buffer) {
     if (ws.data.streamMux) { onMuxMessage(ws.data.streamMux, ws, msg); return }
+    if (ws.data.browserInput) { browserInputMod?.onBrowserInputMessage(ws, msg); return }
     if (ws.data.fleetInput) { onInputMessage(ws, msg); return }
     if (ws.data.shellInput) { onShellInputMessage(ws, msg); return }
     if (ws.data.engineSocket) { onEngineSocketMessage(ws.data.engineSocket, msg); return }
   },
   close(ws: ServerWebSocket<WSData>, code?: number, reason?: string) {
     if (ws.data.streamMux) { closeMux(ws.data.streamMux); return }
+    if (ws.data.browserInput) { browserInputMod?.closeBrowserInputSocket(ws); return }
     if (ws.data.fleetInput) { closeInputSocket(ws); return }
     if (ws.data.shellInput) { closeShellInputSocket(ws); return }
     if (ws.data.engineSocket) { closeEngineSocket(ws.data.engineSocket, code ?? 1005, reason ?? ''); return }
@@ -1280,6 +1290,20 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const json = { ...CORS_HEADERS, 'Content-Type': 'application/json' }
       try {
         const { handleVaultHttp } = await import('./vault/http')
+        // NAVEGADOR S4b: a KNOWN session may not even ASK for the browser-unlock proof — it would raise a
+        // Hello / Touch ID dialog on the person's desk. Same socket hint as the padlock route; the proof
+        // itself is still what decides for everyone else (an unidentified caller goes on to the vault).
+        if ((url.pathname === '/api/vault/browser-unlock' || url.pathname === '/api/vault/personal-browser') && req.method === 'POST') {
+          const [{ identifyCaller }, { processSessionHub }, { browserUnlockEarlyRefusal }] = await Promise.all([
+            import('./browser/browser-caller-proc'), import('./sessions/session-hub'), import('./browser/browser-caller'),
+          ])
+          const sessionPids = new Set<number>()
+          for (const r of processSessionHub()?.last()?.sessions ?? []) if (typeof r.pid === 'number') sessionPids.add(r.pid)
+          const ip = server.requestIP(req)
+          const who = identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
+          const early = await browserUnlockEarlyRefusal(req, who, json)
+          if (early) return early
+        }
         // SECRETS.4 §2.4: a 'read' grant is bound to THIS session (the session cookie; a local profile
         // with no sign-in has one session) and travels in a header, never a cookie, so it cannot ride
         // along on a forged request.
@@ -3908,6 +3932,138 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       })
     }
 
+    // NAVEGADOR S1+S2 — the browser host: status, the session's verbs and the person's own browser.
+    // `/api/browser` is a `localShell` prefix in capability-guard.ts (refused before auth on an exposed
+    // profile); `browserAllowed` applies the person's switch HERE, before any route — a hidden button is
+    // not a closed door. Who may drive which browser is `browser-gate.ts`'s `decideDriver`.
+    if (url.pathname === '/api/browser' || url.pathname.startsWith('/api/browser/')) {
+      const jsonOut = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+        status, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      })
+      const { browserAllowed } = await import('./browser/browser-gate')
+      if (!browserAllowed(CAPS.localShell, (await readPreferences()).browserEnabled)) {
+        return jsonOut({ ok: false, error: 'browser_disabled', sentence: 'The built-in browser is turned off on this machine (Settings).' }, 403)
+      }
+      const browserOpts = { dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT] }
+      // S4/F1: WHO is calling, from the SOCKET (peer → /proc/net/tcp → pid → process tree), never from the body.
+      const identify = async () => {
+        const [{ identifyCaller }, { processSessionHub }] = await Promise.all([import('./browser/browser-caller-proc'), import('./sessions/session-hub')])
+        const sessionPids = new Set<number>()
+        for (const r of processSessionHub()?.last()?.sessions ?? []) if (typeof r.pid === 'number') sessionPids.add(r.pid)
+        const ip = server.requestIP(req)
+        return identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
+      }
+
+      // S4 — the live screen (SSE; rides the tab's stream-mux socket). Reading never starts a browser.
+      if (url.pathname === '/api/browser/stream') {
+        if (req.method !== 'GET') return jsonOut({ error: 'method_not_allowed' }, 405)
+        const { parseStreamOwner, parseStreamTab, parseViewerViewport, browserStreamTarget, browserStreamAtCapacity, openBrowserStream } = await import('./browser/browser-stream-web')
+        const owner = parseStreamOwner(url.searchParams.get('owner'))
+        const tab = parseStreamTab(url.searchParams.get('tab'))
+        if (!owner || tab === false) return jsonOut({ ok: false, error: 'bad_request' }, 400)
+        // S10 r3: the person's own browser is read by the person only — their owner grant (the vault proof) first,
+        // the socket as an extra refusal. The mux replays the subscription with the grant its `sub` carried.
+        if (owner.kind === 'personal') {
+          const [{ streamDoor }, { vaultHttpSession }, { vaultLang }] = await Promise.all([import('./browser/personal-doors'), import('./vault/http'), import('./vault/service')])
+          const refused = await streamDoor({ owner, req, session: vaultHttpSession('local'), caller: identify, lang: vaultLang() === 'pt' ? 'pt' : 'en' })
+          if (refused) return jsonOut(refused.body, refused.status)
+        }
+        const key = browserStreamTarget(browserOpts, owner)
+        if (!key) return jsonOut({ ok: false, error: 'no_browser', sentence: 'This browser is not open.' }, 404)
+        if (browserStreamAtCapacity(browserOpts)) return jsonOut({ ok: false, error: 'too_many_streams' }, 503)
+        return new Response(openBrowserStream(browserOpts, key, tab, req.signal, (await import('./browser/browser-stream-web')).streamBoundsFor((await import('./stream-mux')).muxReplayed.has(req)), parseViewerViewport(url.searchParams)), {
+          headers: { ...CORS_HEADERS, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+        })
+      }
+
+      // S4 — the person's input (WS). Same Origin (CSWSH), NOT a session (socket-identified, fail-closed),
+      // a live browser, the ceiling. The padlock itself is checked per event inside the channel.
+      if (url.pathname === '/api/browser/input') {
+        const mod = await import('./browser/browser-input-web')
+        const { parseStreamOwner, parseStreamTab, browserStreamTarget } = await import('./browser/browser-stream-web')
+        const { callerRefusal } = await import('./browser/browser-caller')
+        const owner = parseStreamOwner(url.searchParams.get('owner'))
+        const tab = parseStreamTab(url.searchParams.get('tab'))
+        if (!owner || tab === false) return jsonOut({ ok: false, error: 'bad_request' }, 400)
+        if (!wsInputOriginOk({ origin: req.headers.get('origin'), host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })) {
+          return jsonOut({ ok: false, error: 'forbidden_origin' }, 403)
+        }
+        // A session's own browser keeps the socket check (a session may not drive the person's padlock); the person's
+        // own browser is decided by their grant first and the socket only as an extra refusal (`inputDoor` below).
+        const refused = owner.kind === 'personal' ? null : callerRefusal(await identify())
+        if (refused) return jsonOut({ ok: false, error: refused.error, sentence: refused.sentence, ...(refused.why ? { why: refused.why } : {}) }, refused.status)
+        // S10 r3: the personal owner's input socket needs the grant too — carried as a sub-protocol, never in the URL.
+        let acceptProtocol = false
+        if (owner.kind === 'personal') {
+          const [{ inputDoor }, { vaultHttpSession }, { vaultLang }] = await Promise.all([import('./browser/personal-doors'), import('./vault/http'), import('./vault/service')])
+          const denied = await inputDoor({ owner, req, session: vaultHttpSession('local'), caller: identify, lang: vaultLang() === 'pt' ? 'pt' : 'en' })
+          if (denied) return jsonOut(denied.body, denied.status)
+          acceptProtocol = true
+        }
+        if (!browserStreamTarget(browserOpts, owner)) return jsonOut({ ok: false, error: 'no_browser', sentence: 'This browser is not open.' }, 404)
+        if (mod.browserInputAtCapacity()) return jsonOut({ ok: false, error: 'too_many_streams' }, 503)
+        browserInputMod = mod
+        const { INPUT_ACCEPT_PROTOCOL } = await import('./browser/personal-doors')
+        if (server.upgrade(req, { data: { browserInput: mod.createBrowserInputState(browserOpts, owner, tab) }, ...(acceptProtocol ? { headers: { 'Sec-WebSocket-Protocol': INPUT_ACCEPT_PROTOCOL } } : {}) })) return
+        return jsonOut({ ok: false, error: 'upgrade_failed' }, 500)
+      }
+
+      try {
+        const [{ browserRoute, browserRouteDeps }, { verifySessionIdentity }, { processSessionHub }] = await Promise.all([
+          import('./browser/browser-web'), import('./sessions/session-identity'), import('./sessions/session-hub'),
+        ])
+        let body: unknown = undefined
+        if (req.method === 'POST') {
+          const parsed = await readJsonLimited<unknown>(req, LIMITS.bodyBytes)
+          if (!parsed.ok) return jsonOut({ ok: false, error: parsed.error }, parsed.error === 'too_large' ? 413 : 400)
+          body = parsed.value
+        }
+        const sessionLive = (id: string): boolean | undefined => {
+          const row = processSessionHub()?.last()?.sessions.find(r => r.id === id)
+          if (!row) return undefined
+          return row.status === 'running' ? true : row.status === 'exited' || row.status === 'lost' ? false : undefined
+        }
+        // S3: a session's call may be HELD by the padlock (up to its harness's measured tool timeout − 5 s,
+        // at most 10 min) — past the server's 60 s idle timeout, which would cut it with no answer.
+        if (req.method === 'POST' && url.pathname.startsWith('/api/browser/session/')) (server as { timeout?: (r: Request, s: number) => void }).timeout?.(req, 11 * 60)
+        const harnessOf = (id: string) => {
+          const h = processSessionHub()?.last()?.sessions.find(r => r.id === id)?.harness
+          return typeof h === 'string' ? (h as import('@agentistics/core').HarnessId) : undefined
+        }
+        const audit = (ev: { action: 'browser.lock' | 'browser.unlock'; managedId: string }) =>
+          void writeAudit({ action: ev.action, ip: clientIp, targetId: ev.managedId })
+        // F1: only the padlock route needs the caller; it is read once, before the route decides.
+        // S10/F2: the personal routes read it too — the person's browser is the person's, by the socket.
+        const lockCaller = url.pathname === '/api/browser/lock' || url.pathname.startsWith('/api/browser/personal/') ? await identify() : null
+        // S4b: an unlock spends the person's single-use vault grant (header, never a URL), bound to the same
+        // HTTP session the vault route minted it for, on loopback only. The socket check stays as a hint.
+        const ownerProof = async (managedId: string) => {
+          const [gate, { vaultHttpSession, loopbackRequest }, { vaultLang }, { ownerProofRefusal }] = await Promise.all([
+            import('./vault/gate'), import('./vault/http'), import('./vault/service'), import('./browser/browser-lock'),
+          ])
+          const ctx = { session: vaultHttpSession('local'), loopback: loopbackRequest(req, server.requestIP(req)?.address ?? null, { requireOrigin: true }) }
+          const used = gate.consumeBrowserUnlockGrant(req.headers.get('x-agentop-owner-grant'), ctx, managedId)
+          if (used.ok) return used
+          const setup = used.code === 'grant-invalid' && (await gate.ownerProofAvailable().catch(() => null)) === false
+          return ownerProofRefusal(used.code, vaultLang() === 'pt' ? 'pt' : 'en', setup)
+        }
+        // S10 r3: the person's own browser (verbs AND status) answers to the owner's grant; the HTTP session is the vault's.
+        const [{ requestHasPersonalGrant }, { vaultHttpSession: httpSession }, { vaultLang: lang }] = await Promise.all([import('./browser/personal-doors'), import('./vault/http'), import('./vault/service')])
+        const deps = browserRouteDeps({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT], sessionLive }, verifySessionIdentity, {
+          harnessOf, audit, ownerProof, ...(lockCaller ? { caller: () => lockCaller } : {}),
+          personalGrant: () => requestHasPersonalGrant(req, httpSession('local')),
+          lang: () => (lang() === 'pt' ? 'pt' : 'en'),
+        })
+        const answer = await browserRoute(req.method, url.pathname, body, deps)
+        if (!answer) return jsonOut({ error: 'not_found' }, 404)
+        return jsonOut(answer.body, answer.status)
+      } catch (err) {
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        console.error(safe.logLine)
+        return jsonOut(safe.body, 500)
+      }
+    }
+
     // THE PER-SESSION UTILITY SHELL. Two gates and a refusal, all of them enforced HERE and not
     // only in the UI: a hidden button is not a closed door, and this endpoint is what actually
     // spawns `$SHELL` on the host.
@@ -4449,6 +4605,10 @@ telemetryTick()
 setInterval(telemetryTick, 6 * 60 * 60 * 1000).unref?.()
 // Which ports this data dir's server listens on, beside its lock — so a CLI bounce from this data dir
 // restarts THIS server on its own ports, never whatever answers on the default one (`server-ports.ts`).
+// NAVEGADOR S1: clean up browsers/profiles a previous server left behind (by saved PID, identity
+// checked). Off the startup path, and a no-op where no browser ever ran.
+void import('./browser/browser-web').then(m => m.scheduleBrowserSweep({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT] }))
+  .catch(() => {})
 void import('./server-ports').then(m => m.recordServerPorts(AGENTISTICS_DATA_DIR, { pid: process.pid, port: PORT, webPort: WEB_PORT }))
   .catch(err => console.error('[boot] could not record the server ports:', err instanceof Error ? err.message : String(err)))
 

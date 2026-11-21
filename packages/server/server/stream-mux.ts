@@ -25,7 +25,7 @@
  */
 
 /** The streaming routes a subscription may name. Exact path match; query strings pass through. */
-const MUX_EXACT = new Set(['/api/events', '/api/data-stream', '/api/fleet/chat-stream', '/api/fleet/stream', '/api/shell/stream'])
+const MUX_EXACT = new Set(['/api/events', '/api/data-stream', '/api/fleet/chat-stream', '/api/fleet/stream', '/api/shell/stream', '/api/browser/stream'])
 const MUX_NATIVE = /^\/api\/runtime\/sessions\/[^/]+\/stream$/
 
 /** Most subscriptions one socket may hold. A page holds a handful; the ceiling bounds a misbehaving one. */
@@ -40,7 +40,7 @@ export function muxPathAllowed(url: string): boolean {
 }
 
 export type MuxClientMessage =
-  | { op: 'sub'; sid: number; url: string; lastEventId?: string }
+  | { op: 'sub'; sid: number; url: string; lastEventId?: string; grant?: string }
   | { op: 'unsub'; sid: number }
 
 /** PURE: one client message, validated — or null. */
@@ -53,7 +53,9 @@ export function parseMuxMessage(raw: string): MuxClientMessage | null {
   if (o.op === 'unsub') return { op: 'unsub', sid: o.sid }
   if (o.op !== 'sub' || typeof o.url !== 'string' || !muxPathAllowed(o.url)) return null
   const lastEventId = typeof o.lastEventId === 'string' && o.lastEventId.length <= 256 && !/[\r\n\0]/.test(o.lastEventId) ? o.lastEventId : undefined
-  return { op: 'sub', sid: o.sid, url: o.url, ...(lastEventId ? { lastEventId } : {}) }
+  // S10 r3: the person's personal-browser grant rides the subscription FRAME (never the URL) and is replayed as a header.
+  const grant = typeof o.grant === 'string' && /^[A-Za-z0-9_-]{16,200}$/.test(o.grant) ? o.grant : undefined
+  return { op: 'sub', sid: o.sid, url: o.url, ...(lastEventId ? { lastEventId } : {}), ...(grant ? { grant } : {}) }
 }
 
 export interface SseFrame { event: string; data: string; id?: string; retry?: number }
@@ -126,16 +128,32 @@ export function createMuxState(upgrade: Request, dispatch: MuxState['dispatch'])
   return { origin: new URL(upgrade.url).origin, headers, dispatch, subs: new Map(), closed: false }
 }
 
-interface Sink { send(data: string): unknown }
+interface Sink { send(data: string): unknown; getBufferedAmount?(): number }
+
+/**
+ * Back-pressure (NAVEGADOR S4): while the socket holds more than this unsent, a subscription stops
+ * READING its route's body. The route's stream then fills, and a route that cares (the browser screen)
+ * sees `desiredSize <= 0` and keeps only its newest frame instead of queueing behind a slow tab.
+ */
+export const MUX_HIGH_WATER = 1 << 20
+const DRAIN_POLL_MS = 15
 
 function emit(ws: Sink, m: MuxServerMessage) { try { ws.send(JSON.stringify(m)) } catch { /* socket gone */ } }
 
-async function runSub(st: MuxState, ws: Sink, sid: number, url: string, lastEventId: string | undefined, ac: AbortController) {
+/** Requests the mux replays itself (an in-process GET) — a handler may tell them from a direct client's. */
+export const muxReplayed = new WeakSet<Request>()
+
+async function runSub(st: MuxState, ws: Sink, sid: number, url: string, lastEventId: string | undefined, ac: AbortController, grant?: string) {
   const headers = new Headers(st.headers)
   if (lastEventId) headers.set('last-event-id', lastEventId)
+  // Whatever the upgrade carried, a grant header is ONLY what this subscription's own frame said.
+  headers.delete('x-agentop-personal-grant')
+  if (grant) headers.set('x-agentop-personal-grant', grant)
   let res: Response | undefined
   try {
-    res = await st.dispatch(new Request(st.origin + url, { method: 'GET', headers, signal: ac.signal }))
+    const replay = new Request(st.origin + url, { method: 'GET', headers, signal: ac.signal })
+    muxReplayed.add(replay)
+    res = await st.dispatch(replay)
   } catch {
     res = undefined
   }
@@ -157,6 +175,9 @@ async function runSub(st: MuxState, ws: Sink, sid: number, url: string, lastEven
       const { done, value } = await reader.read()
       if (done) break
       feed(dec.decode(value, { stream: true }))
+      while (!ac.signal.aborted && (ws.getBufferedAmount?.() ?? 0) > MUX_HIGH_WATER) {
+        await new Promise(r => setTimeout(r, DRAIN_POLL_MS))
+      }
     }
   } catch { /* cancelled or the route threw — either way the stream is over */ }
   if (ac.signal.aborted) return
@@ -177,7 +198,7 @@ export function onMuxMessage(st: MuxState, ws: Sink, raw: string | Buffer): void
   if (st.subs.size >= MUX_MAX_SUBS) { emit(ws, { sid: m.sid, t: 'fail', status: 503 }); return }
   const ac = new AbortController()
   st.subs.set(m.sid, ac)
-  void runSub(st, ws, m.sid, m.url, m.lastEventId, ac)
+  void runSub(st, ws, m.sid, m.url, m.lastEventId, ac, m.grant)
 }
 
 export function closeMux(st: MuxState): void {

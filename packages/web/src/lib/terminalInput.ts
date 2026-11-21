@@ -187,3 +187,78 @@ export function interactionBlock(state: FleetRowState): InteractionBlock {
       return null
   }
 }
+
+// ---- NAVEGADOR S4: the person's input onto a BROWSER screen (`WS /api/browser/input`) ----------------
+//
+// The same honesty as the terminal's keystroke channel — one message, one ack, no local echo (the page
+// draws the result, read back over `/api/browser/stream`) — with the browser's three ops. Coordinates go
+// out NORMALIZED (0–1 over the picture) so the server maps them onto the viewport it actually has. The
+// padlock is decided by the SERVER per event; `browserInputOpen` only keeps the client from offering
+// what will be refused.
+
+export type BrowserLockMode = 'locked' | 'unlocked' | 'none'
+
+/** May the person's pointer/keys go to this screen? Session browser: only unlocked; personal: always. */
+export function browserInputOpen(lock: BrowserLockMode): boolean {
+  return lock !== 'locked'
+}
+
+/** A point on the picture → normalized coordinates, or null outside it (never clamped onto the page). */
+export function normalizePoint(clientX: number, clientY: number, rect: { left: number; top: number; width: number; height: number }): { x: number; y: number } | null {
+  if (!(rect.width > 0) || !(rect.height > 0)) return null
+  const x = (clientX - rect.left) / rect.width
+  const y = (clientY - rect.top) / rect.height
+  if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) return null
+  return { x: Math.round(x * 10_000) / 10_000, y: Math.round(y * 10_000) / 10_000 }
+}
+
+/** Pointer moves are sampled to at most this many a second (spec §1.6). */
+export const MOVE_MAX_PER_SECOND = 30
+
+/**
+ * Should this `move` be sent? Only with a button held (a drag) or when hover is explicitly wanted, and
+ * no more often than `MOVE_MAX_PER_SECOND`. Returns the new "last sent" time, or null to drop it.
+ */
+export function sampleMove(input: { now: number; lastSentAt: number; buttons: number; hover: boolean }): number | null {
+  if (input.buttons === 0 && !input.hover) return null
+  if (input.now - input.lastSentAt < 1000 / MOVE_MAX_PER_SECOND) return null
+  return input.now
+}
+
+/** DOM modifier flags → CDP's bit set (Alt 1, Ctrl 2, Meta 4, Shift 8). */
+export function cdpModifiers(e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): number {
+  return (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0)
+}
+
+export type BrowserInputOut =
+  | { seq: number; op: 'pointer'; type: 'down' | 'up' | 'move' | 'wheel'; x: number; y: number; button?: 'left' | 'middle' | 'right' | 'none'; clicks?: number; deltaX?: number; deltaY?: number; mods?: number }
+  | { seq: number; op: 'key'; type: 'down' | 'up'; key: string; code: string; text?: string; mods?: number }
+  | { seq: number; op: 'text'; text: string }
+  /** NAVEGADOR S11: the floating A1 window's back / forward / reload — the person's, so only while unlocked. */
+  | { seq: number; op: 'history'; action: 'back' | 'forward' | 'reload' }
+
+const DOM_BUTTON = ['left', 'middle', 'right'] as const
+
+/** A DOM mouse button index → the wire's name (`none` for anything else). */
+export function pointerButton(button: number): 'left' | 'middle' | 'right' | 'none' {
+  return DOM_BUTTON[button] ?? 'none'
+}
+
+/**
+ * Which keydowns go to the page. The editor's own chords (Ctrl/Cmd+Shift+…) and the OS/app keys are
+ * never swallowed — the same rule the terminal panel keeps — and a composition (IME) goes as `text`.
+ */
+export function browserKeyGoesToPage(e: { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; isComposing?: boolean }): boolean {
+  if (e.isComposing) return false
+  if (e.metaKey) return false
+  if (e.ctrlKey && e.shiftKey) return false
+  return e.key.length > 0 && e.key.length <= 32
+}
+
+/** Tracks acks by seq: what is in flight, and the last refusal (to say "locked" in words). */
+export interface BrowserAckState { inFlight: number; lastRefusal: string | null }
+
+export function browserAckReducer(state: BrowserAckState, ev: { type: 'sent' } | { type: 'ack'; ok: boolean; reason?: string }): BrowserAckState {
+  if (ev.type === 'sent') return { ...state, inFlight: state.inFlight + 1 }
+  return { inFlight: Math.max(0, state.inFlight - 1), lastRefusal: ev.ok ? null : (ev.reason ?? 'error') }
+}

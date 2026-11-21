@@ -16,7 +16,7 @@
  *   merge    1 the PR is being opened · 2 the PR exists · 3 the PR is merged
  *   ci       not here — `cardPercent` derives it from the CI signal
  */
-import type { SessionMeta } from '@agentistics/core'
+import { isBrowserTool, type HarnessId, type SessionMeta } from '@agentistics/core'
 import type { LiveStage } from './task-live'
 
 /** What one session's transcript says it DID. Each field is null when the transcript was not read for it. */
@@ -32,17 +32,19 @@ export interface SessionActivity {
 }
 
 const EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] as const
-const BROWSER_TOOL = /^mcp__(playwright|claude-in-chrome|claude_browser|computer-use|chrome|browser)/i
+
+/** The native harness has no adapter and no transcript format of its own yet: read it in Claude's (MCP) spelling. */
+const adapterHarness = (h?: SessionMeta['harness']): HarnessId => (h && h !== 'agentistics' ? h : 'claude')
 
 /** PURE: a session's activity off its stored meta; `undefined` when no meta exists (nothing was read — no signal at all). */
-export function sessionActivityOf(meta: Pick<SessionMeta, 'tool_counts' | 'git_commits' | 'test_runs'> | null | undefined): SessionActivity | undefined {
+export function sessionActivityOf(meta: Pick<Partial<SessionMeta>, 'harness'> & Pick<SessionMeta, 'tool_counts' | 'git_commits' | 'test_runs'> | null | undefined): SessionActivity | undefined {
   if (!meta) return undefined
   const counts = meta.tool_counts ?? {}
   return {
     edits: EDIT_TOOLS.reduce((n, t) => n + (counts[t] ?? 0), 0),
     tests: typeof meta.test_runs === 'number' ? meta.test_runs : null,
     commits: typeof meta.git_commits === 'number' ? meta.git_commits : null,
-    browser: Object.keys(counts).some(k => BROWSER_TOOL.test(k) && (counts[k] ?? 0) > 0),
+    browser: Object.keys(counts).some(k => isBrowserTool(adapterHarness(meta.harness), k) !== null && (counts[k] ?? 0) > 0),
   }
 }
 

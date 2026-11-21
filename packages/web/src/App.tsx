@@ -1,5 +1,8 @@
 import { EngineSurfaceButtons } from './components/EngineSurfaceButtons'
 import { EngineSurfaceHost } from './components/EngineSurfaceHost'
+import { BrowserDrawer } from './components/browser/BrowserDrawer'
+import { BrowserWindows } from './components/browser/BrowserWindows'
+import { setBrowserDrawerOpen } from './lib/browserDrawer'
 import { setEngineSurfaceLang } from './lib/engineSurfaceHost'
 import { EngineSurfaceIndicators } from './components/EngineSurfaceIndicator'
 import { ActionNotice } from './components/sessions/ActionNotice'
@@ -178,6 +181,7 @@ import { bootDeadlineMs, bootRetryDelayMs, bootSlowLine, bootWatchdog, fetchJson
 import { sinceUpdate, useFinaleActive } from './lib/finaleGate'
 import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from './lib/bootSplash'
 import { ASIDE_Z } from './lib/zLayers'
+import { GlobeSearchIcon } from './lib/panelIcons'
 
 /**
  * What the SESSIONS filter bar may filter by — narrower than the dashboard's on purpose: a fleet
@@ -4308,6 +4312,7 @@ export default function AppLayout() {
               badge: lang === 'pt' ? 'NOVO' : 'NEW',
             }] : []),
             { key: 'plan-usage', label: lang === 'pt' ? 'Uso dos planos' : 'Plan usage', icon: Gauge, onClick: requestPlanUsagePopup },
+            { key: 'browser', label: lang === 'pt' ? 'Navegador' : 'Browser', icon: GlobeSearchIcon, onClick: () => setBrowserDrawerOpen(true) },
             { key: 'hardware', label: 'Hardware', icon: Cpu, onClick: () => setHardwareOpen(true) },
             { key: 'theme', label: lang === 'pt' ? 'Tema' : 'Theme', icon: theme === 'dark' ? Sun : Moon, value: theme === 'dark' ? (lang === 'pt' ? 'Escuro' : 'Dark') : (lang === 'pt' ? 'Claro' : 'Light'),
               onClick: () => setTheme(theme === 'dark' ? 'light' : 'dark'), keepOpen: true },
@@ -4347,6 +4352,9 @@ export default function AppLayout() {
       <CheckinModalHost lang={lang === 'pt' ? 'pt' : 'en'} />
       <AwayDialogHost />
       <EngineSurfaceHost />
+      <BrowserDrawer lang={lang === 'pt' ? 'pt' : 'en'} />
+      {/* NAVEGADOR S11: the floating browsers (A1/B1) belong to the app, so they follow the person across pages. */}
+      <BrowserWindows lang={lang === 'pt' ? 'pt' : 'en'} />
 
       {/* VAULT.PERSONAL §10: the one unlock any screen can ask for (ensureVaultOpen), and — on this
           computer — the phones waiting for approval. */}
