@@ -33,9 +33,11 @@ export interface AreaRailProps {
   initialTreeOpen?: boolean
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  /** False when the bar is docked in the layout rather than drawn over the page: no outside-press fold. */
+  overlay?: boolean
 }
 
-export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSettings, initialTreeOpen = false, open, onOpenChange }: AreaRailProps) {
+export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSettings, initialTreeOpen = false, open, onOpenChange, overlay = true }: AreaRailProps) {
   const navigate = useNavigate()
   const pt = lang === 'pt'
   const [localOpen, setLocalOpen] = useState(initialTreeOpen)
@@ -57,6 +59,27 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
   const previousPath = useRef(pathname)
   useEffect(() => { if (previousPath.current !== pathname) { previousPath.current = pathname; setTreeOpen(false) } }, [pathname])
   useEscapeOwner(treeOpen, () => { setTreeOpen(false); toggleRef.current?.focus() })
+  // Outside press: while the bar is open OVER the page, a press anywhere else folds it back, and
+  // the click that press produces is swallowed so it never reaches what was underneath. `inside`
+  // is set by React's capture on the nav, which also sees portalled children (React events bubble
+  // through portals), so a popup the bar opens never counts as "outside".
+  const inside = useRef(false)
+  useEffect(() => {
+    if (!treeOpen || !overlay) return
+    inside.current = false
+    const onDown = (e: PointerEvent) => {
+      const was = inside.current
+      inside.current = false
+      if (was || navRef.current?.contains(e.target as Node)) return
+      setTreeOpen(false)
+      const swallow = (ev: Event) => { ev.stopPropagation(); ev.preventDefault(); cleanup() }
+      const timer = setTimeout(() => cleanup(), 400)
+      const cleanup = () => { clearTimeout(timer); window.removeEventListener('click', swallow, true) }
+      window.addEventListener('click', swallow, true)
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [treeOpen, overlay])
   const go = (to: string) => { rememberAreaPath(to); (onNavigate ?? navigate)(to) }
   const treeLabel = pt ? 'Expandir' : 'Expand'
   const closeLabel = pt ? 'Recolher' : 'Collapse'
@@ -79,6 +102,7 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
         aria-label={pt ? 'Áreas do app' : 'App areas'}
         data-area-rail
         data-open={treeOpen ? 'true' : 'false'}
+        onPointerDownCapture={() => { inside.current = true }}
         style={{
           position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: treeOpen ? 260 : 1,
           width: treeOpen ? AREA_RAIL_OPEN_W : AREA_RAIL_W, boxSizing: 'border-box',

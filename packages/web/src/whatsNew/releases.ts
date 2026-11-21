@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.221.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Menu lateral: quando ele está aberto por cima da página, clicar fora dele (ou apertar Esc) o recolhe. O clique usado para fechar não aciona o que estava embaixo.',
+        en: 'Side menu: when it is open over the page, clicking outside it (or pressing Esc) folds it back. The click that closes it does not trigger whatever was underneath.',
+      },
+    ],
+  },
   '2.221.0': {
     features: [
       {
