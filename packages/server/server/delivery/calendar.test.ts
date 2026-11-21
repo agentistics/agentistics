@@ -89,7 +89,7 @@ describe('the app\'s own releases are not the user\'s versions', () => {
   test('readCalendarSources never reads the update feed: app releases available, no records/tags -> 0 versions', async () => {
     const { mock } = await import('bun:test')
     let asked = 0
-    mock.module('../version', () => ({ getVersionInfo: async () => { asked++; return { current: '2.217.1', latest: '2.217.1', releases: APP_RELEASES } } }))
+    mock.module('../version', () => ({ CURRENT_VERSION: '2.217.1', compareVersions: () => 0, getVersionInfo: async () => { asked++; return { current: '2.217.1', latest: '2.217.1', releases: APP_RELEASES } } }))
     const { readCalendarSources, calendarFrom } = await import('./calendar')
     const src = await readCalendarSources()
     expect(asked).toBe(0)
