@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.221.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Ao reabrir uma conversa do Codex, do OpenCode ou de harnesses ACP, mensagens enviadas por outras sessões ou pelo próprio harness não aparecem mais como se fossem suas.',
+        en: 'Reopening a Codex, OpenCode or ACP harness conversation no longer shows messages sent by other sessions or by the harness itself as if they were yours.',
+      },
+      {
+        pt: 'Correções de estabilidade do motor.',
+        en: 'Engine stability fixes.',
+      },
+    ],
+  },
   '2.221.1': {
     features: [],
     fixes: [
