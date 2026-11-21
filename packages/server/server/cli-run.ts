@@ -1,5 +1,5 @@
 import { hostWhich } from './host-which'
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { freemem, homedir, hostname, tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
@@ -7,7 +7,7 @@ import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
 import { CURRENT_VERSION } from './version'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
-import { blockedPorts, forwardPorts, netnsArgv, netnsNotice, probeNetns, startSlirp, stopSlirp } from './run-netns'
+import { blockedPorts, hiddenDirs, hostAddresses, forwardPorts, netnsArgv, netnsNotice, probeNetns, startSlirp, stopSlirp } from './run-netns'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
 export { SEED_ALLOW }
@@ -266,9 +266,11 @@ function usage(): string {
        agentop run --rm --serve [--seed-from <staging> | --seed-real] [--cwd <worktree>] [--ttl 2h] [--name x] [-- <server command...>]
        --serve with no command runs the installed agentop; use --cwd with an explicit checkout command to serve that checkout.
        Env: AGENTISTICS_*/AGENTOP_* switches (and leaked GIT_* vars) are dropped; --keep-env NAME re-allows one (never a store/config path).
-       Network: a run gets its own network namespace (own loopback; internet via slirp4netns), so NO program in it can reach the real server
-       (:47291/:47292); --serve ports are forwarded to the host's 127.0.0.1. Where namespaces are unavailable it falls back to the CLI-only guard
-       and says so; --no-netns asks for that fallback (debugging).
+       Network: a run gets its own user/net/mount/pid namespaces (own loopback; internet via slirp4netns). New connections to ANY address of
+       this host (every interface, the default gateway, 10.0.2.2) are rejected whatever the port, so the real server (:47291/:47292) is not
+       reachable directly or through a local proxy; the real server's unix sockets and tmux dir are hidden and its pid is not visible.
+       Not covered: another machine that proxies to the real server, and a root-owned process outside the run. --serve ports are forwarded
+       to the host's 127.0.0.1. Where namespaces are unavailable it falls back to the CLI-only guard and says so; --no-netns asks for that.
        agentop run ls
        agentop run stop <name>`
 }
@@ -400,6 +402,7 @@ export function pruneStaleRuns(): Set<number> {
     if (!state || typeof state.name !== 'string' || typeof state.home !== 'string') continue
     if (runIsLive(state)) { held.add(state.apiPort); held.add(state.webPort); continue }
     if (!state.home.startsWith(stateRoot() + sep)) continue // never delete a home outside the run registry
+    stopSlirp(state.slirpPid)
     rmSync(state.home, { recursive: true, force: true })
     removeRunTmp(state.tmp)
     releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)
@@ -731,8 +734,8 @@ async function startRun(options: RunOptions): Promise<number> {
   try {
     const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0, keep: options.keepEnv, serve: options.serve })
     keptEnv = keptEnvOf(env, process.env, options.keepEnv)
-    systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await commandExists('systemd-run')
-    const runArgv = netns.mode === 'netns' ? netnsArgv(argv, process.getuid!(), process.getgid!(), blockedPorts()) : argv
+    systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await systemdScopeWorks()
+    const runArgv = netns.mode === 'netns' ? netnsArgv(argv, process.getuid!(), process.getgid!(), blockedPorts(), hostAddresses(), hiddenDirs(realDataDir(), process.getuid!())) : argv
     const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...runArgv] : runArgv
     child = spawn(systemd ? 'systemd-run' : runArgv[0]!, systemd ? childArgs : runArgv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
     state.pid = child.pid
@@ -765,6 +768,11 @@ async function startRun(options: RunOptions): Promise<number> {
   })().catch(error => { console.error(`agentop run: network setup failed (${error instanceof Error ? error.message : String(error)})`) })
   // One shared promise: a signal handler and the normal exit path both call this, and the second
   // caller must wait for the first one's removal instead of exiting the process under it.
+  // The command sits behind `unshare --fork` (it ignores SIGTERM), so a signal goes to EVERYTHING in the run: the whole scope (systemd) or the whole process group.
+  const signalRun = (sig: NodeJS.Signals) => {
+    if (systemd) spawnSync('systemctl', ['--user', 'kill', '--signal', sig, unit], { stdio: 'ignore', timeout: 5000 })
+    try { process.kill(systemd ? child.pid! : -child.pid!, sig) } catch { try { process.kill(child.pid!, sig) } catch {} }
+  }
   let cleaning: Promise<void> | undefined
   const cleanup = () => (cleaning ??= slirpTask.then(() => stopState(state)))
   // The command's end is recorded in the log BEFORE any cleanup line, so whoever reads run.log (the ambiente flow) can name the exit code.
@@ -772,7 +780,7 @@ async function startRun(options: RunOptions): Promise<number> {
     child.once('exit', (status, sig) => { console.log(status !== null ? `exit ${status}` : `exit signal ${sig}`); resolve(status ?? (sig ? 1 : 0)) })
     child.once('error', () => { console.log('exit 1'); resolve(1) })
   })
-  const signal = async (sig: NodeJS.Signals) => { try { process.kill(child.pid!, sig) } catch {} ; await childExit; await cleanup(); process.exit(128 + (sig === 'SIGINT' ? 2 : 15)) }
+  const signal = async (sig: NodeJS.Signals) => { signalRun(sig); await childExit; await cleanup(); process.exit(128 + (sig === 'SIGINT' ? 2 : 15)) }
   process.once('SIGINT', () => void signal('SIGINT'))
   process.once('SIGTERM', () => void signal('SIGTERM'))
   // The run is tied to whoever started it. A session's pane hangs up its process group when the
@@ -781,7 +789,7 @@ async function startRun(options: RunOptions): Promise<number> {
   // scopes still active after their session ended). A parent that died outright reparents us: same.
   process.once('SIGHUP', () => void signal('SIGTERM'))
   const parentWatch = watchParent(process.ppid, () => process.ppid, () => void signal('SIGTERM'))
-  const ttlTimer = setTimeout(() => { try { process.kill(child.pid!, 'SIGTERM') } catch {} }, parseTtl(options.ttl) * 1000)
+  const ttlTimer = setTimeout(() => signalRun('SIGTERM'), parseTtl(options.ttl) * 1000)
   const code = await childExit
   clearTimeout(ttlTimer)
   clearInterval(parentWatch)
@@ -800,6 +808,13 @@ export function watchParent(initial: number, current: () => number, onGone: () =
   }, everyMs)
   t.unref?.()
   return t
+}
+
+/** A scope can only be created when the user bus answers: inside a pid namespace (a nested run) systemd-run is installed but the bus refuses the peer. */
+async function systemdScopeWorks(): Promise<boolean> {
+  if (!await commandExists('systemd-run')) return false
+  const probe = spawn('systemd-run', ['--user', '--scope', '--quiet', '--', 'true'], { stdio: 'ignore' })
+  return await new Promise(resolve => { probe.once('exit', code => resolve(code === 0)); probe.once('error', () => resolve(false)) })
 }
 
 async function commandExists(command: string): Promise<boolean> {

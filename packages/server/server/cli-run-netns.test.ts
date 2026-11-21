@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { networkInterfaces } from 'node:os'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { probeNetns } from './run-netns'
+import { hostAddresses, probeNetns } from './run-netns'
 
 // Integration: a REAL `agentop run --rm` from this checkout. Skipped (with the reason) where the host cannot isolate.
 const decision = probeNetns(false)
@@ -17,17 +18,20 @@ const listener = Bun.listen({ hostname: '0.0.0.0', port: 0, socket: {
 } })
 afterAll(() => listener.stop(true))
 
-async function inRun(script: string, extra: string[] = []): Promise<string> {
+// A killed process whose parent never waits stays a zombie (kill -0 still succeeds); it is dead for this purpose.
+const running = (pid: number): boolean => { try { return !/^\d+ \(.*\) [ZX]/.test(readFileSync(`/proc/${pid}/stat`, 'utf8')) } catch { return false } }
+const allHostAddrs = hostAddresses().filter(a => !a.startsWith('fe80') && a !== lanIp)
+async function inRun(script: string, extra: string[] = [], envExtra: Record<string, string> = {}): Promise<string> {
   const proc = Bun.spawn([process.execPath, CLI, 'run', '--rm', ...extra, '--', 'sh', '-c', script], {
     stdout: 'pipe', stderr: 'pipe',
-    env: { ...process.env, AGENTISTICS_RUN_NETNS_EXTRA_PORTS: String(listener.port), AGENTISTICS_RUN_NO_WAIT: '1', AGENTISTICS_FLOWS: '' },
+    env: { ...process.env, AGENTISTICS_RUN_NETNS_EXTRA_PORTS: String(listener.port), AGENTISTICS_RUN_NO_WAIT: '1', AGENTISTICS_FLOWS: '', AGENTISTICS_HEAVY_JOB: '1', ...envExtra },
   })
   const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
   await proc.exited
   return out + '\n' + err
 }
 
-const probe = (host: string, port: number) => `printf '%s ' '${host}:${port}'; curl -g -sS -m 3 -o /dev/null -w '%{http_code}\\n' 'http://${host}:${port}/' 2>/dev/null || true`
+const probe = (host: string, port: number) => `printf '%s %s\\n' '${host}:${port}' "$(curl -g -sS -m 3 -o /dev/null -w '%{http_code}' 'http://${host}:${port}/' 2>/dev/null)"`
 const codeOf = (out: string, target: string) => new RegExp(`^${target.replace(/[.[\]]/g, '\\$&')} (\\d+)$`, 'm').exec(out)?.[1]
 
 describe.skipIf(skipReason !== null)(`RUN.ISOLAMENTO-REDE: a real network block${skipReason ? ` (skipped: ${skipReason})` : ''}`, () => {
@@ -57,7 +61,7 @@ describe.skipIf(skipReason !== null)(`RUN.ISOLAMENTO-REDE: a real network block$
         try { const c = await Bun.connect({ hostname: '127.0.0.1', port: ${P}, socket: { data() {}, open() {} } }); console.log('bun open'); c.end() } catch (e) { console.log('bun', e.code ?? 'error') }
       })()`
     const proc = Bun.spawn([process.execPath, CLI, 'run', '--rm', '--', process.execPath, '-e', js], {
-      stdout: 'pipe', stderr: 'pipe', env: { ...process.env, AGENTISTICS_RUN_NETNS_EXTRA_PORTS: String(P), AGENTISTICS_RUN_NO_WAIT: '1', AGENTISTICS_FLOWS: '' },
+      stdout: 'pipe', stderr: 'pipe', env: { ...process.env, AGENTISTICS_RUN_NETNS_EXTRA_PORTS: String(P), AGENTISTICS_RUN_NO_WAIT: '1', AGENTISTICS_FLOWS: '', AGENTISTICS_HEAVY_JOB: '1' },
     })
     const out = await new Response(proc.stdout).text()
     await proc.exited
@@ -84,5 +88,61 @@ describe.skipIf(skipReason !== null)(`RUN.ISOLAMENTO-REDE: a real network block$
     if (!online) return
     const out = await inRun(`curl -sS -m 10 -o /dev/null -w 'https %{http_code}\\n' https://registry.npmjs.org/`)
     expect(out).toMatch(/^https 200$/m)
+  }, 60_000)
+
+  // B1 (QA r1): `tailscale serve :8443 -> 127.0.0.1:47292` reached the real server through the NAT because the rule was by PORT.
+  // A stand-in PROXY on another port of 0.0.0.0 that forwards to the blocked port must be unreachable BY ITS ADDRESS too.
+  test('a local PROXY on another port that forwards to the blocked port is unreachable too (destination, not port)', async () => {
+    const proxy = Bun.listen({ hostname: '0.0.0.0', port: 0, socket: {
+      async open(s) {
+        const up = await Bun.connect({ hostname: '127.0.0.1', port: listener.port, socket: { data(_u, d) { s.write(d); s.end() }, close() {}, error() {} } })
+        up.write('GET / HTTP/1.0\r\n\r\n')
+      }, data() {}, close() {}, error() {},
+    } })
+    try {
+      const Q = proxy.port
+      const hosts = ['127.0.0.1', ...(lanIp ? [lanIp] : []), ...allHostAddrs]
+      const probes = hosts.map(h => probe(h.includes(':') ? `[${h}]` : h, Q)).join('; ')
+      const outside = await inRun(probes, ['--no-netns'])
+      expect(outside).toContain(`127.0.0.1:${Q} 200`) // control: the proxy works when nothing blocks it
+      const out = await inRun(probes)
+      for (const h of hosts) { const k = `${h.includes(':') ? `[${h}]` : h}:${Q}`; expect(codeOf(out, k)).toBe('000') }
+    } finally { proxy.stop(true) }
+  }, 120_000)
+
+  // R1
+  test('the real server\'s unix sockets (data dir run/ + structured/) and its pid are not visible from inside', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agdir-'))
+    mkdirSync(join(dir, 'run')); mkdirSync(join(dir, 'structured'))
+    const sock = join(dir, 'run', 'runtime.sock')
+    const srv = Bun.listen({ unix: sock, socket: { open(s) { s.end() }, data() {}, close() {}, error() {} } })
+    try {
+      const script = `[ -e '${sock}' ] && echo SOCK-VISIBLE || echo SOCK-HIDDEN; kill -0 ${process.pid} 2>/dev/null && echo PID-SIGNALABLE || echo PID-GONE; [ -d /proc/${process.pid} ] && echo PID-LISTED || echo PID-UNLISTED`
+      const env = { AGENTISTICS_DIR: dir }
+      const open = await inRun(script, ['--no-netns'], env)
+      expect(open).toContain('SOCK-VISIBLE'); expect(open).toContain('PID-SIGNALABLE') // control
+      const out = await inRun(script, [], env)
+      expect(out).toContain('SOCK-HIDDEN'); expect(out).toContain('PID-GONE'); expect(out).toContain('PID-UNLISTED')
+    } finally { srv.stop(true); rmSync(dir, { recursive: true, force: true }) }
+  }, 120_000)
+
+  // R2.2
+  test('slirp4netns dies with its launcher even when the launcher is SIGKILLed (--exit-fd)', async () => {
+    const name = `exitfd-${process.pid}`
+    const proc = Bun.spawn([process.execPath, CLI, 'run', '--rm', '--name', name, '--', 'sleep', '30'], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, AGENTISTICS_RUN_NO_WAIT: '1', AGENTISTICS_FLOWS: '', AGENTISTICS_HEAVY_JOB: '1' } })
+    const stateFile = join(process.env.HOME!, '.cache', 'agentistics-throwaway', `${name}.json`)
+    let slirpPid = 0, runPid = 0
+    for (let i = 0; i < 200 && !slirpPid; i++) { try { const s = JSON.parse(readFileSync(stateFile, 'utf8')); slirpPid = s.slirpPid ?? 0; runPid = s.pid ?? 0 } catch {} ; await Bun.sleep(100) }
+    try {
+      expect(slirpPid).toBeGreaterThan(0)
+      proc.kill('SIGKILL')
+      let gone = false
+      for (let i = 0; i < 50 && !gone; i++) { gone = !running(slirpPid); if (!gone) await Bun.sleep(100) }
+      expect(gone).toBe(true)
+    } finally {
+      if (slirpPid > 1) try { process.kill(slirpPid, 'SIGKILL') } catch {}
+      const stop = Bun.spawnSync([process.execPath, CLI, 'run', 'stop', name], { env: { ...process.env, AGENTISTICS_FLOWS: '', AGENTISTICS_HEAVY_JOB: '1' } }); void stop
+      if (runPid > 1) try { process.kill(runPid, 'SIGKILL') } catch {}
+    }
   }, 60_000)
 })
