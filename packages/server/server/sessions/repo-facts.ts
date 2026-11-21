@@ -49,6 +49,12 @@ export interface RepoFacts {
   /** `org/repo` from the remote, else the main checkout's folder name. Absent outside a repo. */
   repo?: string
   /**
+   * The remote's normalized, lowercase HOST (`github.com`). Absent when there is no remote or it
+   * names no host (a local path) — and on a row recorded before this field existed, which is read
+   * as "host unknown", never as a different host.
+   */
+  host?: string
+  /**
    * The MAIN checkout's folder name — `agentistics` even when asked from inside one of its
    * worktrees. Absent outside a repository.
    *
@@ -188,7 +194,10 @@ export function decideRepoFacts(o: {
   // actually named after.
   const at = root ? { root, rootPath } : {}
   const named = normalizeGitRemote(o.remote)
-  if (named) return { repo: repoShortName(named), worktree, ...at }
+  if (named) {
+    const host = named.split('/')[0]!.toLowerCase()
+    return { repo: repoShortName(named), ...(host ? { host } : {}), worktree, ...at }
+  }
   return root ? { repo: root, ...at, worktree } : { worktree }
 }
 

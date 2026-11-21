@@ -51,6 +51,12 @@ describe('decideRepoFacts', () => {
     })
   })
 
+  it('carries the normalized HOST of the remote, and none for a remote with no host', () => {
+    expect(decideRepoFacts({ remote: 'git@GitLab.com:o/r.git', gitDir: '/r/.git', commonDir: '/r/.git' }))
+      .toMatchObject({ repo: 'o/r', host: 'gitlab.com' })
+    expect(decideRepoFacts({ remote: '/some/local/path', gitDir: '/r/.git', commonDir: '/r/.git' }).host).toBeUndefined()
+  })
+
   it('ignores a remote git cannot key on, rather than inventing a name from it', () => {
     expect(decideRepoFacts({
       remote: '/some/local/path', gitDir: '/r/.git', commonDir: '/r/.git',
