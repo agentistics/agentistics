@@ -78,6 +78,8 @@ export interface LeaderWorker {
 
 export interface LeaderView {
   id: string
+  /** The tasks this leader declared it leads besides its own filing (`session-roles.ts` `leads`), with their titles. */
+  leads?: { id: string; title: string }[]
   title: string
   harness: string
   model: string | null
@@ -252,8 +254,9 @@ export function describeLive(o: {
     const awaiting = [r, ...workers].filter(x => x.state === 'waiting-approval').map(x => ({ id: x.id, title: x.title }))
     const pubs = workers.flatMap(w => { const d = pieceOf.get(w.id); return d && d.publishEta.kind === 'estimate' ? [d.publishEta.atMs] : [] })
     const taskId = [...pieceOf.values()].find(d => d.sessionIds.includes(r.id))?.taskId ?? o.reply.sessionTasks?.[r.id] ?? null
+    const led = (o.leadsOf?.get(r.id) ?? []).map(id => ({ id, title: all.find(d => d.taskId === id)?.taskTitle ?? id }))
     return {
-      id: r.id, title: r.title, harness: r.harness, model: r.observedModel ?? r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null,
+      id: r.id, ...(led.length ? { leads: led } : {}), title: r.title, harness: r.harness, model: r.observedModel ?? r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null,
       state: r.state, createdMs: r.createdMs ?? null, taskId, taskTitle: r.task ?? null,
       currentAction: lastLine(r.lastLines, lang, titleOf),
       publishEtaMs: pubs.length ? Math.max(...pubs) : null,

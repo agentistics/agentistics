@@ -151,13 +151,15 @@ export function stagePercent(stage: LiveStage, step: number | null | undefined, 
 }
 
 /** PURE: the percent line of a card — from the CI signal in CI, from the reported step elsewhere; null = hide. */
-export function cardPercent(d: Pick<LiveDeliveryRecord, 'stage' | 'ci' | 'step'>, pt: Pt): StagePercent | null {
+export function cardPercent(d: Pick<LiveDeliveryRecord, 'stage' | 'ci' | 'step' | 'displayStage'>, pt: Pt): StagePercent | null {
   if (d.stage === 'ci') {
     if (!d.ci) return null
     const step = !d.ci.mergedMain ? 1 : !d.ci.releaseGreen ? 2 : 3
     return stagePercent('ci', step, pt, d.ci.tagPublished)
   }
-  return stagePercent(d.stage, d.step, pt)
+  const p = stagePercent(d.stage, d.step, pt)
+  // "Sem líder": nobody is reading the changes, so the step line says what the piece is really doing — waiting for a leader.
+  return p && d.displayStage === 'no-leader' ? { ...p, label: pt ? 'aguardando um líder' : 'waiting for a leader' } : p
 }
 
 const SIGNAL_WORD: Record<string, { pt: string; en: string }> = {

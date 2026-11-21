@@ -41,6 +41,15 @@ describe('the Live reads the leadership link', () => {
   })
 })
 
+describe('the Líderes panel lists the led tasks', () => {
+  test('a leader that declared B carries it (with the card title) in its view; one that declared nothing carries none', () => {
+    const v = describeLive({ reply: reply([d({})]), rows: [row('L', 'working', { task: 'A' })], leaderIds: new Set(['L']), leadsOf: new Map([['L', ['B']]]), nowMs: NOW })
+    expect(v.leaders[0]!.leads).toEqual([{ id: 'B', title: 'Navegador' }])
+    const w = describeLive({ reply: reply([d({})]), rows: [row('L', 'working', { task: 'A' })], leaderIds: new Set(['L']), nowMs: NOW })
+    expect(w.leaders[0]!.leads).toBeUndefined()
+  })
+})
+
 describe('waiting publication leaves the leader review', () => {
   const taskId = 'tp'
   const old = '2026-11-12T10:00:00.000Z'
@@ -55,5 +64,11 @@ describe('waiting publication leaves the leader review', () => {
   test('board status pr_merge is the merge stage', () => { expect(stage('pr_merge')).toBe('merge') })
   test('a wrongly stored stage on the pr_merge status cannot put it back in the leader review', () => { expect(stage('pr_merge', undefined, () => 'leader')).toBe('merge') })
   test('a stale revisao_lider record under a pr_merge board status follows the board', () => { expect(stage('pr_merge', { phase: 'revisao_lider' })).toBe('merge') })
+  test('a stale `executando` record under a pr_merge board status is not hidden: it follows the board', () => {
+    expect(stage('pr_merge', { phase: 'executando' })).toBe('merge')
+  })
+  test('control: `executando` under a running board status stays running-without-session (hidden)', () => {
+    expect(stage('in_progress', { phase: 'executando' })).toBeUndefined()
+  })
   test('control: a real review stays in the leader review', () => { expect(stage('in_review', { phase: 'revisao_lider' })).toBe('leader') })
 })

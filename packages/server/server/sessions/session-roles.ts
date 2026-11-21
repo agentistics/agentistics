@@ -23,7 +23,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
-  isLiveState, isSessionRole, isSessionRoleRequest, parseRoleOrigin, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, stripRolePrefix, titleForRole,
+  isLiveState, isSessionRole, normalizeGitRemote, isSessionRoleRequest, parseRoleOrigin, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, stripRolePrefix, titleForRole,
   type HarnessId, type RoleLang, type RoleOrigin, type SessionRole,
 } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
@@ -184,8 +184,8 @@ export interface RoleDeps {
   /** Who started this managed session (the registry's parentSessionId), if anyone. */
   taskOf?: (rowId: string) => Promise<string | undefined>
   parentOf: (rowId: string) => Promise<string | undefined>
-  /** Does the task exist, and in which repository? Absent = not wired (declaring a lead is then refused). */
-  taskInfoOf?: (taskId: string) => Promise<{ exists: boolean; repo?: string }>
+  /** Does the task exist, and which repositories does it touch (its free-text `repo` plus the git remotes of its sessions)? Absent = not wired (declaring a lead is then refused). */
+  taskInfoOf?: (taskId: string) => Promise<TaskRepoInfo>
   /** A session declared LEADER leaves its parent's team (`team-links.ts`, rule 2). Absent = not wired. */
   leaveTeam?: (rowId: string) => Promise<boolean>
   /** Write a retire request on the predecessor (`retire-runner.ts` carries it out). Absent = not wired. */
@@ -476,6 +476,28 @@ export async function markCallerVerified(
   return ok
 }
 
+/** What the board knows about a task's repository: the free-text `Task.repo` and the raw git remotes of the sessions filed on it (task + subtasks). */
+export interface TaskRepoInfo { exists: boolean; repo?: string; remotes?: readonly string[] }
+
+/**
+ * A task's repository SET, normalized: `Task.repo` is free text ("blpsoares/agentistics", "agentistics/agentistics", a URL) so it is
+ * never compared as a string. A bare `owner/name` is GitHub shorthand; anything else goes through the one remote normalizer. The
+ * session remotes are the truth the CLAUDE.md names (`Task.repo` is only inherited once at creation). Empty = the task has no repository.
+ */
+export function taskRepoKeys(info: Pick<TaskRepoInfo, 'repo' | 'remotes'>): Set<string> {
+  const out = new Set<string>()
+  const add = (raw: string | undefined) => {
+    const t = (raw ?? '').trim()
+    if (!t) return
+    const bare = /^[\w.-]+\/[\w.-]+$/.test(t) && !t.includes('@') ? `github.com/${t}` : t
+    const k = normalizeGitRemote(bare).toLowerCase()
+    if (k) out.add(k)
+  }
+  add(info.repo)
+  for (const r of info.remotes ?? []) add(r)
+  return out
+}
+
 export interface LeadRequest { ref?: string; add?: readonly string[]; remove?: readonly string[] }
 export type LeadReply =
   | { ok: true; key: string; id: string; title: string; leads: string[]; changed: boolean; message: string }
@@ -490,6 +512,8 @@ const LEAD_MESSAGES: Record<string, string> = {
   no_task: 'The leader must be filed on a task of its own before it can lead another.',
   no_such_task: 'No task with that id exists.',
   other_project: 'That task belongs to another repository than the leader\'s own task.',
+  no_repo_target: 'That task has no repository; set the task\'s repo first.',
+  no_repo_own: 'The leader\'s own task has no repository; set the task\'s repo first.',
   not_wired: 'Task lookup is not available here.',
 }
 
@@ -523,11 +547,15 @@ export function leadOp(senderId: string | null, req: LeadRequest, deps: RoleDeps
       if (!deps.taskInfoOf) return fail('not_wired')
       const filing = await deps.taskOf?.(t.id).catch(() => undefined)
       if (!filing) return fail('no_task')
-      const mine = await deps.taskInfoOf(filing).catch(() => ({ exists: false } as { exists: boolean; repo?: string }))
+      const mine = taskRepoKeys(await deps.taskInfoOf(filing).catch(() => ({ exists: false } as TaskRepoInfo)))
       for (const id of add) {
-        const info = await deps.taskInfoOf(id).catch(() => ({ exists: false } as { exists: boolean; repo?: string }))
+        const info = await deps.taskInfoOf(id).catch(() => ({ exists: false } as TaskRepoInfo))
         if (!info.exists) return fail('no_such_task')
-        if (info.repo && mine.repo && info.repo !== mine.repo) return fail('other_project')
+        // FAIL CLOSED: a task with no repository information proves nothing, so it can be led by nobody until its repo is set.
+        const theirs = taskRepoKeys(info)
+        if (theirs.size === 0) return { ...fail('other_project'), message: LEAD_MESSAGES.no_repo_target! }
+        if (mine.size === 0) return { ...fail('other_project'), message: LEAD_MESSAGES.no_repo_own! }
+        if (![...theirs].some(k => mine.has(k))) return fail('other_project')
       }
     }
     return serial(deps.dataDir, async (): Promise<LeadReply> => {
@@ -538,9 +566,15 @@ export function leadOp(senderId: string | null, req: LeadRequest, deps: RoleDeps
       const next = [...new Set([...before, ...add])].filter(x => !remove.has(x))
       const leads = { ...(doc.leads ?? {}) }
       delete leads[t.id]
+      // Prune the entries of sessions that are gone for good (only when the fleet was actually read: an empty read proves nothing).
+      if (rows.length > 0) {
+        const alive = new Set(rows.flatMap(r => [sessionIdentityKey(r), r.id]))
+        for (const k of Object.keys(leads)) if (k !== key && !alive.has(k)) delete leads[k]
+      }
       if (next.length) leads[key] = next; else delete leads[key]
       const changed = next.length !== before.length || next.some(x => !before.includes(x))
-      if (changed) await writeRolesDoc(deps.dataDir, { ...doc, leads })
+      const dirty = JSON.stringify(leads) !== JSON.stringify(doc.leads ?? {})
+      if (dirty) await writeRolesDoc(deps.dataDir, { ...doc, leads })
       return { ok: true, key, id: t.id, title: t.title, leads: next, changed, message: changed ? `Leads: ${next.join(', ') || 'no extra task'}.` : 'Nothing changed.' }
     })
   })()
@@ -555,6 +589,14 @@ export function leadsOfRows(doc: Pick<RolesDoc, 'roles' | 'leads'>, rows: readon
     if (l && l.length) out.set(r.id, l)
   }
   return out
+}
+
+/** The person's read: every leader that currently leads extra tasks (only rows still holding the role). */
+export async function listLeads(deps: RoleDeps): Promise<{ ok: true; leaders: { id: string; title: string; state: string; leads: string[] }[] }> {
+  const rows = await deps.rows().catch(() => [] as FleetRowForGroups[])
+  const doc = await loadRoles(deps)
+  const led = leadsOfRows(doc, rows)
+  return { ok: true, leaders: rows.filter(r => led.has(r.id)).map(r => ({ id: r.id, title: r.title, state: r.state ?? '', leads: [...led.get(r.id)!] })) }
 }
 
 export function leadStatus(out: LeadReply): number {
@@ -626,8 +668,16 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
     },
     handoffGate: handoffGateFor,
     taskInfoOf: async taskId => {
-      const t = (await (await import('./task-source')).loadTaskBoard()).book.tasks.find(x => x.id === taskId)
-      return t ? { exists: true, ...(t.repo ? { repo: String(t.repo) } : {}) } : { exists: false }
+      const w = await (await import('./task-source')).loadTaskWorld()
+      const t = w.book.tasks.find(x => x.id === taskId)
+      if (!t) return { exists: false }
+      const remotes = new Set<string>()
+      for (const r of w.rollupRows) {
+        if (r.taskId !== taskId || !r.conversationId) continue
+        const g = w.metas.get(r.conversationId)?.git_remote
+        if (g) remotes.add(g)
+      }
+      return { exists: true, ...(t.repo ? { repo: String(t.repo) } : {}), remotes: [...remotes] }
     },
   }
 }
