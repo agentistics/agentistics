@@ -159,14 +159,16 @@ export function classifyCaller(i: CallerInput): CallerVerdict {
 }
 
 /** The refusal a verdict earns on a person-only route (`null` = proceed). */
-export function callerRefusal(v: CallerVerdict): { status: 403; error: 'session_cannot_unlock' | 'caller_unidentified'; sentence: string; why?: string } | null {
+export function callerRefusal(v: CallerVerdict, act: 'padlock' | 'profiles' = 'padlock'): { status: 403; error: 'session_cannot_unlock' | 'caller_unidentified'; sentence: string; why?: string } | null {
   if (v.kind === 'person') return null
   if (v.kind === 'session') {
-    return { status: 403, error: 'session_cannot_unlock', sentence: 'Only the person can change this browser\'s padlock; a session cannot unlock it.' }
+    return { status: 403, error: 'session_cannot_unlock', sentence: act === 'profiles'
+      ? 'Only the person can delete browser profiles; a session cannot.'
+      : 'Only the person can change this browser\'s padlock; a session cannot unlock it.' }
   }
   return {
     status: 403, error: 'caller_unidentified', why: v.reason,
-    sentence: 'Could not confirm that this request comes from the person (not from a session), so the padlock was not changed. Use the agentistics screen.',
+    sentence: `Could not confirm that this request comes from the person (not from a session), so ${act === 'profiles' ? 'no profile was deleted' : 'the padlock was not changed'}. Use the agentistics screen.`,
   }
 }
 

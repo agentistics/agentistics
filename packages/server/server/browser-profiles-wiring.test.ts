@@ -24,14 +24,19 @@ beforeAll(async () => {
   writeFileSync(join(home, '.agentistics', 'preferences.json'), JSON.stringify({ archiveMode: 'off' }))
   server = Bun.spawn([process.execPath, join(import.meta.dir, 'index.ts')], {
     env: { ...process.env, HOME: home, AGENTISTICS_ENGINE: '0', AGENTISTICS_EXPOSURE: 'local', SERVE_STATIC: '', PORT: String(port) },
-    stdout: 'ignore', stderr: 'ignore',
+    stdout: 'ignore', stderr: 'pipe',
   })
+  // Drained while it runs (a full pipe would stall the server); read only when it fails to come up.
+  const stderrText = new Response(server.stderr as ReadableStream).text()
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
     try { if ((await fetch(`http://127.0.0.1:${port}/api/health`)).ok) return } catch { /* not up yet */ }
     await Bun.sleep(200)
   }
-  throw new Error('server did not come up')
+  server.kill()
+  const err = await stderrText
+  // A fresh worktree without engine-slot.generated.ts (`bun run stub`) is the usual cause; show it.
+  throw new Error(`server did not come up\n${err.slice(-2000)}`)
 }, 40_000)
 
 afterAll(() => {

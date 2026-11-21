@@ -111,6 +111,14 @@ export default function BrowserSettings() {
         />
       </PrefRow>
 
+      <Divider />
+
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6 }}>
+        {pt
+          ? 'O servidor é quem decide: com o navegador desligado, /api/browser responde 403. Esconder o botão não fecharia a porta.'
+          : 'The server is what decides: with the browser off, /api/browser answers 403. Hiding the button would not close the door.'}
+      </div>
+
       {enabled === true && status && exe && prof && (
         <>
           <Divider />
@@ -160,11 +168,6 @@ export default function BrowserSettings() {
           <b style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{h.name}</b> — {h.text}
         </div>
       ))}
-      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.6, marginTop: 8 }}>
-        {pt
-          ? 'O servidor é quem decide: com o navegador desligado, /api/browser responde 403. Esconder o botão não fecharia a porta.'
-          : 'The server is what decides: with the browser off, /api/browser answers 403. Hiding the button would not close the door.'}
-      </div>
     </>
   )
 }

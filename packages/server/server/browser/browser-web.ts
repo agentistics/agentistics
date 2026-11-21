@@ -235,7 +235,7 @@ export async function browserRoute(method: string, pathname: string, body: unkno
     // PERSON-ONLY, fail-closed, like the padlock: a session, a forged proof and a caller the socket cannot
     // identify are all refused (the personal profile holds the person's cookies and logins).
     const caller = deps.caller ? deps.caller() : { kind: 'unknown' as const, reason: 'no-peer' as const }
-    const refused = callerRefusal(caller)
+    const refused = callerRefusal(caller, 'profiles')
     if (refused) {
       return { status: refused.status, body: { ok: false, error: refused.error, sentence: refused.sentence, ...(refused.why ? { why: refused.why } : {}) } }
     }

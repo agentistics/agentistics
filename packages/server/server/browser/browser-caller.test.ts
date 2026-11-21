@@ -144,6 +144,14 @@ describe('callerRefusal', () => {
     expect(callerRefusal({ kind: 'person', via: 'process', pid: 1 })).toBeNull()
     expect(callerRefusal({ kind: 'person', via: 'remote' })).toBeNull()
   })
+  test('the profiles door says "profiles", never "padlock"', () => {
+    const s = callerRefusal({ kind: 'session', pid: 1, managedId: 'x' }, 'profiles')!
+    const u = callerRefusal({ kind: 'unknown', reason: 'no-proc' }, 'profiles')!
+    expect(s.error).toBe('session_cannot_unlock')
+    expect(s.sentence).toContain('profiles')
+    expect(u.sentence).toContain('no profile was deleted')
+    for (const r of [s, u]) expect(r.sentence).not.toContain('padlock')
+  })
 })
 
 describe('personalCallerRefusal (F2 of the S10 QA: the own browser of the person)', () => {
