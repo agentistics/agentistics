@@ -184,7 +184,7 @@ export interface RoleDeps {
   /** Who started this managed session (the registry's parentSessionId), if anyone. */
   taskOf?: (rowId: string) => Promise<string | undefined>
   parentOf: (rowId: string) => Promise<string | undefined>
-  /** Does the task exist, and which repositories does it touch (its free-text `repo` plus the git remotes of its sessions)? Absent = not wired (declaring a lead is then refused). */
+  /** Does the task exist, and which repositories does it touch (its free-text `repo` only)? Absent = not wired (declaring a lead is then refused). */
   taskInfoOf?: (taskId: string) => Promise<TaskRepoInfo>
   /** A session declared LEADER leaves its parent's team (`team-links.ts`, rule 2). Absent = not wired. */
   leaveTeam?: (rowId: string) => Promise<boolean>
@@ -476,31 +476,31 @@ export async function markCallerVerified(
   return ok
 }
 
-/** What the board knows about a task's repository: the free-text `Task.repo` and the raw git remotes of the sessions filed on it (task + subtasks). */
-export interface TaskRepoInfo { exists: boolean; repo?: string; remotes?: readonly string[] }
+/** What the board knows about a task's repository: ONLY the free-text `Task.repo`. Session remotes never count (filing a session is easy and unproven). */
+export interface TaskRepoInfo { exists: boolean; repo?: string }
+
+/** A task's repository, normalized to `host/owner/name` (lowercase). `Task.repo` is free text: a bare `owner/name` is GitHub shorthand, anything else goes through the one remote normalizer. `''` = no repository. */
+export function taskRepoKey(info: Pick<TaskRepoInfo, 'repo'>): string {
+  const t = (info.repo ?? '').trim()
+  if (!t) return ''
+  const bare = /^[\w.-]+\/[\w.-]+$/.test(t) && !t.includes('@') ? `github.com/${t}` : t
+  return normalizeGitRemote(bare).toLowerCase()
+}
 
 /**
- * A task's repository SET, normalized: `Task.repo` is free text ("blpsoares/agentistics", "agentistics/agentistics", a URL) so it is
- * never compared as a string. A bare `owner/name` is GitHub shorthand; anything else goes through the one remote normalizer. The
- * session remotes are the truth the CLAUDE.md names (`Task.repo` is only inherited once at creation). Empty = the task has no repository.
+ * Same repository = same host (both carry one) AND same NAME; the owner MAY differ (a transferred repository).
+ * `ownerDiffers` is true when it matched only thanks to that tolerance.
  */
-export function taskRepoKeys(info: Pick<TaskRepoInfo, 'repo' | 'remotes'>): Set<string> {
-  const out = new Set<string>()
-  const add = (raw: string | undefined) => {
-    const t = (raw ?? '').trim()
-    if (!t) return
-    const bare = /^[\w.-]+\/[\w.-]+$/.test(t) && !t.includes('@') ? `github.com/${t}` : t
-    const k = normalizeGitRemote(bare).toLowerCase()
-    if (k) out.add(k)
-  }
-  add(info.repo)
-  for (const r of info.remotes ?? []) add(r)
-  return out
+export function sameRepo(a: string, b: string): { same: boolean; ownerDiffers: boolean } {
+  const pa = a.split('/'), pb = b.split('/')
+  if (pa.length < 3 || pb.length < 3) return { same: false, ownerDiffers: false }
+  const same = pa[0] === pb[0] && pa[pa.length - 1] === pb[pb.length - 1]
+  return { same, ownerDiffers: same && a !== b }
 }
 
 export interface LeadRequest { ref?: string; add?: readonly string[]; remove?: readonly string[] }
 export type LeadReply =
-  | { ok: true; key: string; id: string; title: string; leads: string[]; changed: boolean; message: string }
+  | { ok: true; key: string; id: string; title: string; leads: string[]; changed: boolean; message: string; note?: 'owner_differs' }
   | { ok: false; code: string; message: string; matches?: string[] }
 
 const LEAD_MESSAGES: Record<string, string> = {
@@ -543,19 +543,22 @@ export function leadOp(senderId: string | null, req: LeadRequest, deps: RoleDeps
     const add = [...new Set((req.add ?? []).map(x => x.trim()).filter(Boolean))]
     const remove = new Set((req.remove ?? []).map(x => x.trim()).filter(Boolean))
     const writing = add.length > 0 || remove.size > 0
+    let ownerDiffers = false
     if (add.length > 0) {
       if (!deps.taskInfoOf) return fail('not_wired')
       const filing = await deps.taskOf?.(t.id).catch(() => undefined)
       if (!filing) return fail('no_task')
-      const mine = taskRepoKeys(await deps.taskInfoOf(filing).catch(() => ({ exists: false } as TaskRepoInfo)))
+      const mine = taskRepoKey(await deps.taskInfoOf(filing).catch(() => ({ exists: false } as TaskRepoInfo)))
       for (const id of add) {
         const info = await deps.taskInfoOf(id).catch(() => ({ exists: false } as TaskRepoInfo))
         if (!info.exists) return fail('no_such_task')
         // FAIL CLOSED: a task with no repository information proves nothing, so it can be led by nobody until its repo is set.
-        const theirs = taskRepoKeys(info)
-        if (theirs.size === 0) return { ...fail('other_project'), message: LEAD_MESSAGES.no_repo_target! }
-        if (mine.size === 0) return { ...fail('other_project'), message: LEAD_MESSAGES.no_repo_own! }
-        if (![...theirs].some(k => mine.has(k))) return fail('other_project')
+        const theirs = taskRepoKey(info)
+        if (!theirs) return { ...fail('other_project'), message: LEAD_MESSAGES.no_repo_target! }
+        if (!mine) return { ...fail('other_project'), message: LEAD_MESSAGES.no_repo_own! }
+        const m = sameRepo(mine, theirs)
+        if (!m.same) return fail('other_project')
+        if (m.ownerDiffers) ownerDiffers = true
       }
     }
     return serial(deps.dataDir, async (): Promise<LeadReply> => {
@@ -575,7 +578,7 @@ export function leadOp(senderId: string | null, req: LeadRequest, deps: RoleDeps
       const changed = next.length !== before.length || next.some(x => !before.includes(x))
       const dirty = JSON.stringify(leads) !== JSON.stringify(doc.leads ?? {})
       if (dirty) await writeRolesDoc(deps.dataDir, { ...doc, leads })
-      return { ok: true, key, id: t.id, title: t.title, leads: next, changed, message: changed ? `Leads: ${next.join(', ') || 'no extra task'}.` : 'Nothing changed.' }
+      return { ok: true, key, id: t.id, title: t.title, leads: next, changed, message: changed ? `Leads: ${next.join(', ') || 'no extra task'}.` : 'Nothing changed.', ...(ownerDiffers ? { note: 'owner_differs' as const } : {}) }
     })
   })()
 }
@@ -671,13 +674,7 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
       const w = await (await import('./task-source')).loadTaskWorld()
       const t = w.book.tasks.find(x => x.id === taskId)
       if (!t) return { exists: false }
-      const remotes = new Set<string>()
-      for (const r of w.rollupRows) {
-        if (r.taskId !== taskId || !r.conversationId) continue
-        const g = w.metas.get(r.conversationId)?.git_remote
-        if (g) remotes.add(g)
-      }
-      return { exists: true, ...(t.repo ? { repo: String(t.repo) } : {}), remotes: [...remotes] }
+      return { exists: true, ...(t.repo ? { repo: String(t.repo) } : {}) }
     },
   }
 }

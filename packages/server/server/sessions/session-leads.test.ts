@@ -9,13 +9,12 @@ beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'leads-')) })
 afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
 
 interface Row { id: string; title: string; state: string; conversationId?: string }
-const tasks: Record<string, { repo?: string; remotes?: string[] }> = {
+const tasks: Record<string, { repo?: string }> = {
   A: { repo: 'github.com/o/r' }, B: { repo: 'github.com/o/r' }, X: { repo: 'github.com/o/other' },
-  // The owner's own example (21/11): Motor and Navegador. Task.repo is free text and differs; the sessions' git remotes agree.
-  MOTOR: { repo: 'blpsoares/agentistics', remotes: ['git@github.com:agentistics/agentistics.git'] },
-  NAV: { repo: 'agentistics/agentistics', remotes: ['https://github.com/Agentistics/agentistics'] },
-  JARVIS: { repo: 'agentistics-workspace', remotes: ['github.com/blpsoares/workspace'] },
-  EMPTY: {}, EMPTY2: { remotes: [] },
+  // The owner's example (21/11): Motor and Navegador; the repository was transferred, so the owner differs and the name agrees.
+  MOTOR: { repo: 'blpsoares/agentistics' }, NAV: { repo: 'agentistics/agentistics' },
+  JARVIS: { repo: 'agentistics/agentistics-workspace' }, PRONT: { repo: 'blpsoares/prontuario' },
+  EMPTY: {},
 }
 const filed: Record<string, string> = { L: 'A', L2: 'A', W: 'A', LM: 'MOTOR', LE: 'EMPTY' }
 function deps(rows: Row[], extra: Partial<RoleDeps> = {}): RoleDeps {
@@ -69,31 +68,48 @@ describe('declaring leadership', () => {
   })
 })
 
-describe('a task repository is a SET, not a string (r2 blocker)', () => {
-  test("the owner's example: Motor (blpsoares/agentistics) leads Navegador (agentistics/agentistics)", async () => {
+describe('a task repository is Task.repo only: same host + same name, owner may differ (r3)', () => {
+  test("the owner's example: Motor leads Navegador, with an owner_differs note (kills the owner-compared mutant)", async () => {
     await withRoles({ LM: 'leader' })
-    expect(await leadOp('LM', { add: ['NAV'] }, deps(rows()))).toMatchObject({ ok: true, leads: ['NAV'] })
+    expect(await leadOp('LM', { add: ['NAV'] }, deps(rows()))).toMatchObject({ ok: true, leads: ['NAV'], note: 'owner_differs' })
+  })
+  test('the same owner and name carries no note', async () => {
+    await withRoles({ L: 'leader' })
+    const out = await leadOp('L', { add: ['B'] }, deps(rows()))
+    expect(out).toMatchObject({ ok: true })
+    expect((out as { note?: string }).note).toBeUndefined()
   })
   test('ssh, https, case and .git are the same repository', async () => {
     await withRoles({ LM: 'leader' })
-    const d = deps(rows(), { taskInfoOf: async id => (id === 'MOTOR' ? { exists: true, remotes: ['git@github.com:Org/Repo.git'] } : { exists: true, remotes: ['https://github.com/org/repo'] }) })
+    const d = deps(rows(), { taskInfoOf: async id => ({ exists: true, repo: id === 'MOTOR' ? 'git@github.com:Org/Repo.git' : 'https://github.com/org/repo' }) })
     expect(await leadOp('LM', { add: ['NAV'] }, d)).toMatchObject({ ok: true })
   })
-  test('another project (no shared repository in either set) is still refused', async () => {
+  test('another name is another project (Motor -> Jarvis, Motor -> Prontuario)', async () => {
     await withRoles({ LM: 'leader' })
     expect(await leadOp('LM', { add: ['JARVIS'] }, deps(rows()))).toMatchObject({ ok: false, code: 'other_project' })
+    expect(await leadOp('LM', { add: ['PRONT'] }, deps(rows()))).toMatchObject({ ok: false, code: 'other_project' })
   })
-  test('FAIL CLOSED: a target task with no repository at all is refused, with the way forward', async () => {
+  test('another host with the same name is another project', async () => {
     await withRoles({ LM: 'leader' })
-    for (const id of ['EMPTY', 'EMPTY2']) {
-      const out = await leadOp('LM', { add: [id] }, deps(rows()))
-      expect(out).toMatchObject({ ok: false, code: 'other_project' })
-      expect(!out.ok && out.message).toContain('has no repository; set the task')
-    }
+    const d = deps(rows(), { taskInfoOf: async id => ({ exists: true, repo: id === 'MOTOR' ? 'github.com/a/x' : 'gitlab.com/a/x' }) })
+    expect(await leadOp('LM', { add: ['NAV'] }, d)).toMatchObject({ ok: false, code: 'other_project' })
   })
-  test('FAIL CLOSED: a leader whose own filed task has no repository cannot lead anything', async () => {
+  test('BYPASS: session remotes do not count; the info carries only the repo, so filing sessions proves nothing', async () => {
+    await withRoles({ LM: 'leader' })
+    const d = deps(rows(), { taskInfoOf: async id => ({ exists: true, repo: tasks[id]?.repo, remotes: ['github.com/blpsoares/prontuario'] } as never) })
+    expect(await leadOp('LM', { add: ['PRONT'] }, d)).toMatchObject({ ok: false, code: 'other_project' })
+  })
+  test('FAIL CLOSED: a target task with no repository is refused, with the way forward', async () => {
+    await withRoles({ LM: 'leader' })
+    const out = await leadOp('LM', { add: ['EMPTY'] }, deps(rows()))
+    expect(out).toMatchObject({ ok: false, code: 'other_project' })
+    expect(!out.ok && out.message).toContain('has no repository; set the task')
+  })
+  test("FAIL CLOSED: a leader's own task without a repository gets its own sentence (kills the own-guard mutant)", async () => {
     await withRoles({ LE: 'leader' })
-    expect(await leadOp('LE', { add: ['NAV'] }, deps(rows()))).toMatchObject({ ok: false, code: 'other_project' })
+    const out = await leadOp('LE', { add: ['NAV'] }, deps(rows()))
+    expect(out).toMatchObject({ ok: false, code: 'other_project' })
+    expect(!out.ok && out.message).toContain("The leader's own task has no repository")
   })
 })
 
