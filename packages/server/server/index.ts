@@ -2862,8 +2862,14 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         })
         return json(out, out.ok ? 200 : 404)
       }
-      const FIELDS = ['title', 'detail', 'priority', 'type', 'dueDate', 'startDate'] as const
+      const FIELDS = ['title', 'detail', 'priority', 'type', 'dueDate', 'startDate', 'repo'] as const
       if (FIELDS.some(f => typeof body[f] === 'string') || Array.isArray(body.labels)) {
+        // An unusable repository is refused with a sentence (422), never as the bare 404 a missing task gets.
+        if (typeof body.repo === 'string') {
+          const { normalizeTaskRepo } = await import('./sessions/task-repo')
+          const r = normalizeTaskRepo(body.repo)
+          if (!r.ok) return json({ error: 'bad_repo', message: r.reason }, 422)
+        }
         const ok = await mod.editTask(ref, {
           ...Object.fromEntries(FIELDS.filter(f => typeof body[f] === 'string').map(f => [f, body[f] as string])),
           ...(Array.isArray(body.labels)

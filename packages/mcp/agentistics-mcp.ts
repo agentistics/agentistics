@@ -552,7 +552,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_edit",
     description:
-      "Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`. An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
+      "Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`, `repo` (the task's repository: `owner/name`, `host/owner/name` or an https/ssh git URL, stored as `owner/name`; empty string clears it; a local path, spaces or garbage is refused with a sentence — use it when the repository moved or was inherited wrong; subtasks carry no repo). An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {
@@ -564,6 +564,7 @@ const TOOLS: Tool[] = [
         dueDate: { type: "string" },
         startDate: { type: "string" },
         labels: { type: "array", items: { type: "string" } },
+        repo: { type: "string", description: "owner/name, host/owner/name or a git URL; empty string clears it." },
         actor: { type: "string" },
       },
       required: ["ref"],
@@ -1597,7 +1598,7 @@ async function callTool(
         const a = args as any;
         const ref = encodeURIComponent(String(a?.ref ?? ""));
         const patch: Record<string, unknown> = {};
-        for (const f of ["title", "detail", "priority", "type", "dueDate", "startDate", "actor"]) {
+        for (const f of ["title", "detail", "priority", "type", "dueDate", "startDate", "repo", "actor"]) {
           if (typeof a?.[f] === "string") patch[f] = a[f];
         }
         if (Array.isArray(a?.labels)) patch.labels = a.labels;
