@@ -17,6 +17,12 @@
  * refuses when it differs. A refusal of that kind is re-captured and re-judged at once (bounded).
  * The same dialog still on screen after `NOQ_REPEAT_MS` is answered again (M2: a keystroke that did not
  * land, or the identical question asked twice between two polls) — never sooner.
+ *
+ * EVERY VERDICT HAS A KEY (r5, F1): a refusal (a multi-line command, an unreadable shape) is typed under
+ * the same identity check as an approval — before r5 its key was '' and the host saw every refusal as
+ * stale, so the "No" was never typed and the session stayed stuck. A dialog in a no-questions session the
+ * policy cannot answer at all is SURFACED once (`surface`: the answers log, a bell notice, the session's
+ * leader) as "needs you" — the one case that still waits for a person, and never silently.
  */
 import { appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -49,6 +55,12 @@ export interface NoqDeps {
   registryMode?(id: string): Promise<string | undefined>
   /** Diagnostics (an unknown mode is logged once per session). */
   log?(message: string): void
+  /**
+   * A no-questions session shows a dialog the policy cannot answer safely (an unknown shape, a question
+   * that is not a Yes/No permission prompt). Called ONCE per dialog: it must reach a person or the
+   * session's leader as "needs you" — the one case that still waits, and it may never wait silently (F1).
+   */
+  surface?(id: string, text: string, why: string): Promise<void> | void
   now?: () => number
   home?: string
 }
@@ -60,6 +72,7 @@ export function createNoqRunner(deps: NoqDeps) {
   const seenMode = new Map<string, string>()
   const pending = new Map<string, { text: string; atMs: number }>()
   const warned = new Set<string>()
+  const surfaced = new Map<string, string>()
   const now = deps.now ?? Date.now
   return {
     /** One poll's rows. Resolves when every answer of this poll has been sent and recorded. */
@@ -72,6 +85,7 @@ export function createNoqRunner(deps: NoqDeps) {
         if (chip) seenMode.set(v.id, chip)
         if (v.activity !== 'waiting-approval') {
           mem.lastKey.delete(v.id)
+          surfaced.delete(v.id)
           const p = pending.get(v.id)
           if (p) {
             pending.delete(v.id)
@@ -87,19 +101,34 @@ export function createNoqRunner(deps: NoqDeps) {
         let d: NoqDecision = { action: 'skip', why: 'unread' }
         let out: { ok: boolean; message: string; stale?: boolean } = { ok: false, message: '' }
         let answered = false
+        let frame: string[] = []
         for (let attempt = 0; attempt < 2; attempt++) {
-          const frame = (await deps.capture?.(v.id).catch(() => null)) ?? v.approvalLines ?? []
+          frame = (await deps.capture?.(v.id).catch(() => null)) ?? v.approvalLines ?? []
           d = decideNoqAnswer({
             harness: v.harness, mode, cwd: v.cwd, frame, dialogOptions: v.dialogOptions,
           }, { home: deps.home ?? '/root' })
           if (d.action === 'skip') break
-          const key = noqDialogKey(frame) || frame.join('\n')
+          // Every answer — a refusal as much as an approval — is typed only under the dialog's key (F1).
+          const key = noqDialogKey(frame)
+          if (!key) { d = { action: 'skip', why: 'no-key' }; break }
           if (attempt === 0 && !shouldAnswer(mem, v.id, key, now())) break
           if (attempt > 0) mem.lastKey.set(v.id, { key, atMs: now(), ok: false })
           out = await deps.answer(v.id, d.choice, key).catch((e: unknown) => ({ ok: false, message: String(e) }))
           noteAnswerResult(mem, v.id, out.ok)
           answered = true
           if (!out.stale) break
+        }
+        if (d.action === 'skip' && mode === 'no-questions' && d.why !== 'mode') {
+          // Nobody is there to answer and the policy may not: say so ONCE per dialog, never silently.
+          const tail = frame.map(l => l.replace(/\x1b\[[0-9;:?]*[A-Za-z]/g, '').trimEnd()).filter(Boolean).slice(-12)
+          const key = `${d.why}\n${tail.join('\n')}`
+          if (surfaced.get(v.id) !== key) {
+            surfaced.set(v.id, key)
+            const text = `Autonomous session ${v.id.slice(0, 8)} needs you: it shows a dialog the no-questions policy cannot answer safely (${d.why}). Open it and answer.`
+            deps.log?.(`noq: ${text}`)
+            await Promise.resolve(deps.surface?.(v.id, text, d.why)).catch(() => undefined)
+          }
+          continue
         }
         if (!answered || d.action === 'skip' || out.stale) continue
         const rec: NoqAnswerRecord = {
@@ -140,6 +169,13 @@ export async function defaultNoqDeps(): Promise<NoqDeps> {
       return { ...r, stale }
     },
     prompt: async (id, text) => host.promptSession ? host.promptSession(id, text) : { ok: false, message: 'no host' },
+    surface: async (id, text, why) => {
+      await appendFile(file, JSON.stringify({ at: new Date().toISOString(), id, decision: 'needs-you', why, message: text }) + '\n', { mode: 0o600 })
+      broadcastNotification({ type: 'warning', title: `Autonomous session ${id.slice(0, 8)} needs you`, message: text })
+      // The session's leader hears it too, in its own conversation (the same path a session message takes).
+      const parent = (await (await import('./registry')).readRegistry()).find(m => m.id === id)?.parentSessionId
+      if (parent && host.promptSession) await host.promptSession(parent, `[agentistics · no-questions] ${text}`).catch(() => undefined)
+    },
     record: async r => {
       await appendFile(file, JSON.stringify(r) + '\n', { mode: 0o600 })
       broadcastNotification({

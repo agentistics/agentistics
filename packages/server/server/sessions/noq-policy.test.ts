@@ -7,8 +7,13 @@ import type { SessionSnapshot } from './sessions-host'
 
 const HOME = '/home/u'
 const CWD = '/home/u/agentistics/.worktrees/wt'
-/** Every path is itself (no links), and the worktree is on `mybranch`. */
-const FS: NoqFs = { realpath: p => p, isSymlink: () => false, branch: () => 'mybranch' }
+/** Every path is itself (no links) except git metadata, which does not exist; the cwd is a linked worktree on `mybranch`. */
+const FS: NoqFs = {
+  realpath: p => (/(^|\/)(\.git|\.worktrees|\.claude\/worktrees)$/.test(p) ? null : p),
+  isSymlink: () => false,
+  branch: () => 'mybranch',
+  repo: () => ({ kind: 'linked', worktrees: [CWD] }),
+}
 const ENV = { home: HOME, fs: FS }
 const OPTIONS = [
   { number: 1, label: 'Yes', selected: true },
