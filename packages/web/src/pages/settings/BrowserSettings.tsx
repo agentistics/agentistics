@@ -72,7 +72,7 @@ export default function BrowserSettings() {
   const deleteProfiles = useCallback(async () => {
     setBusy(true)
     try {
-      const r = await fetch('/api/browser/profiles/delete', { method: 'POST' })
+      const r = await fetch('/api/browser/profiles/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       const body = await r.json().catch(() => ({})) as { ok?: boolean; removed?: number; sentence?: string }
       setNotice(r.ok
         ? (pt ? `${body.removed ?? 0} perfil(is) apagado(s).` : `${body.removed ?? 0} profile(s) deleted.`)

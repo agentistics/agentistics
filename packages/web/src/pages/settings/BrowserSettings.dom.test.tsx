@@ -39,7 +39,7 @@ beforeEach(() => {
     if (url === '/api/preferences') return Response.json(prefs)
     if (url === '/api/session') return Response.json({ capabilities: { localShell: true } })
     if (url === '/api/browser/status') return statusCode === 200 ? Response.json(status) : Response.json({ error: 'browser_disabled' }, { status: statusCode })
-    if (url === '/api/browser/profiles/delete') { deletes++; return Response.json(deleteAnswer.body, { status: deleteAnswer.status }) }
+    if (url === '/api/browser/profiles/delete') { deletes++; if (init?.body !== '{}') return Response.json({ ok: false, error: 'invalid_json' }, { status: 400 }); return Response.json(deleteAnswer.body, { status: deleteAnswer.status }) }
     return Response.json({})
   }) as typeof fetch
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
@@ -82,7 +82,7 @@ describe('the switch', () => {
 describe('the numbers', () => {
   test('per-browser PSS, the total, the server\'s thresholds and the executable with how it was found', async () => {
     status.live = [
-      { key: 'a', owner: { kind: 'session', managedId: 'abcdef123456' }, memory: { basis: 'pss', bytes: 400 * MB, action: 'ok' } },
+      { key: 'a', owner: { kind: 'session', managedId: 'agentop-abcdef123456' }, memory: { basis: 'pss', bytes: 400 * MB, action: 'ok' } },
       { key: 'personal', owner: { kind: 'personal' }, memory: { basis: 'pss', bytes: 950 * MB, action: 'trim' } },
     ]
     await mount()
@@ -90,6 +90,7 @@ describe('the numbers', () => {
     expect(nums).toEqual(['400 MB PSS', '950 MB PSS'])
     expect(host.querySelector('[data-browser-total]')!.textContent).toBe('1.3 GB')
     expect(text()).toContain('above 900 MB')
+    expect(text()).toContain('Session abcdef12')
     expect(text()).toContain('above 1.2 GB')
     expect(text()).toContain('/x/chrome-headless-shell')
     expect(text()).toContain('found in the Playwright cache')

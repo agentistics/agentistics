@@ -31,7 +31,7 @@ export function memoryLines(live: BrowserLiveView[], pt: boolean): MemoryLine[] 
   return live.map((b) => {
     const label = b.owner.kind === 'personal'
       ? (pt ? 'Navegador pessoal' : 'Personal browser')
-      : `${pt ? 'Sessão' : 'Session'} ${b.owner.managedId.slice(0, 8)}`
+      : `${pt ? 'Sessão' : 'Session'} ${b.owner.managedId.replace(/^agentop-/, '').slice(0, 8)}`
     const m = b.memory
     const value = !m || m.bytes === null
       ? (pt ? 'ainda sem medida' : 'not measured yet')
