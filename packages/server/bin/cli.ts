@@ -32,6 +32,13 @@ if (command === 'run') {
   process.exit(await runRun(args))
 }
 
+// RUN.CLI-SERVIDOR-REAL: inside an `agentop run` no CLI verb may reach the real server (47291/47292), and a run
+// without --serve has no server of its own to talk to. A no-op outside a run.
+{
+  const { installThrowawayFetchGuard } = await import('../server/cli-run.ts')
+  installThrowawayFetchGuard()
+}
+
 // RES.1 — declare this process to the governor. Bun makes its processes non-dumpable, so the
 // environment the governor would read (HOME, CLAUDE_PID) is unreadable from outside; the card is how
 // it learns who owns this process. Synchronous and tiny; never throws.
