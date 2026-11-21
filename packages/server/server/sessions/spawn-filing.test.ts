@@ -414,11 +414,13 @@ describe('SPAWN.REPO — short board repository names', () => {
     })))
     expect(p.code).toBe('cwd_wrong_repo')
   })
-  test('short task repo refuses another organization with the same repository name (no owner transfer assumed)', () => {
-    expect(refused(planFiling(base({
+  test('short task repo accepts another organization with the same repository name (transfer), with a warning', () => {
+    const p = ok(planFiling(base({
       book: shortBook, taskRef: 't-short', cwd: '/home/u/workspace',
       repoOf: () => ({ remote: 'github.com/other/agentistics-workspace', worktree: true }),
-    }))).code).toBe('cwd_wrong_repo')
+    })))
+    expect(p).toMatchObject({ taskId: 't-short', crossRepo: 'other/agentistics-workspace' })
+    expect(p.warnings).toContain('owner_differs')
   })
   for (const repo of [REMOTE, 'https://github.com/agentistics/agentistics.git', 'git@github.com:agentistics/agentistics', 'ssh://git@github.com/agentistics/agentistics.git']) {
     test(`task remote retains host comparison: ${repo}`, () => {
@@ -429,24 +431,45 @@ describe('SPAWN.REPO — short board repository names', () => {
   }
 })
 
-describe('SPAWN.OWNER — the owner is part of the repository identity (no transfer assumed)', () => {
+describe('SPAWN.TRANSFER — a repository that moved owner is the same repository (same host, same name)', () => {
   for (const repo of ['blpsoares/agentistics', 'github.com/blpsoares/agentistics', 'https://github.com/blpsoares/agentistics.git', 'git@github.com:blpsoares/agentistics.git']) {
-    const otherOwnerBook = { tasks: [T('t-owner', 'Other owner', repo)], subtasks: [] }
-    test(`a checkout of the same name under another owner is refused: ${repo}`, () => {
-      expect(refused(planFiling(base({
-        book: otherOwnerBook, taskRef: 't-owner', cwd: '/home/u/workspace',
-        repoOf: () => ({ remote: REMOTE, worktree: true }),
-      }))).code).toBe('cwd_wrong_repo')
-      expect(refused(planFiling(base({ book: otherOwnerBook, taskRef: 't-owner', cwd: '/home/u/elsewhere' }))).code).toBe('cwd_wrong_repo')
-    })
-    test(`a checkout of the very same repository is accepted: ${repo}`, () => {
+    const transferredBook = { tasks: [T('t-transfer', 'Transferred repo', repo)], subtasks: [] }
+    test(`old task owner accepts the current checkout, with the owner_differs warning: ${repo}`, () => {
       const p = ok(planFiling(base({
-        book: otherOwnerBook, taskRef: 't-owner',
-        repoOf: () => ({ remote: 'github.com/blpsoares/agentistics', worktree: true }),
+        book: transferredBook, taskRef: 't-transfer',
+        repoOf: () => ({ remote: REMOTE, worktree: true }),
       })))
+      expect(p.taskId).toBe('t-transfer')
+      expect(p.crossRepo).toBe('agentistics/agentistics')
+      expect(p.warnings).toContain('owner_differs')
       expect(p.warnings).not.toContain('inherited_task_repo_mismatch')
     })
+    test(`old task owner accepts short checkout facts: ${repo}`, () => {
+      expect(ok(planFiling(base({ book: transferredBook, taskRef: 't-transfer' }))).warnings).toContain('owner_differs')
+    })
+    test(`old task owner refuses a different repository name: ${repo}`, () => {
+      expect(refused(planFiling(base({
+        book: transferredBook, taskRef: 't-transfer', cwd: '/home/u/acme',
+      }))).code).toBe('cwd_wrong_repo')
+    })
+    test(`the very same repository carries no owner warning: ${repo}`, () => {
+      const p = ok(planFiling(base({
+        book: transferredBook, taskRef: 't-transfer',
+        repoOf: () => ({ remote: 'github.com/blpsoares/agentistics', worktree: true }),
+      })))
+      expect(p.warnings).not.toContain('owner_differs')
+      expect(p.crossRepo).toBeUndefined()
+    })
   }
+  test('Motor shape: Task.repo blpsoares/agentistics, cwd agentistics/agentistics -> accepted with owner_differs; acme/other-name -> refused', () => {
+    const motor = { tasks: [T('t-motor', 'Engine completa', 'blpsoares/agentistics')], subtasks: [] }
+    const p = ok(planFiling(base({ book: motor, taskRef: 't-motor', repoOf: () => ({ remote: 'github.com/agentistics/agentistics', worktree: true }) })))
+    expect(p.warnings).toContain('owner_differs')
+    expect(p.crossRepo).toBe('agentistics/agentistics')
+    const r = refused(planFiling(base({ book: motor, taskRef: 't-motor', cwd: '/home/u/acme' })))
+    expect(r.code).toBe('cwd_wrong_repo')
+    expect(r.detail).toContain('--force')
+  })
   test('different hosts stay different even when the owner also changed', () => {
     const b = { tasks: [T('t-transfer', 'Transferred repo', 'github.com/blpsoares/agentistics')], subtasks: [] }
     expect(refused(planFiling(base({ book: b, taskRef: 't-transfer', cwd: '/home/u/gitlab' }))).code).toBe('cwd_wrong_repo')
@@ -618,11 +641,10 @@ describe('cross-repo cwd (same-org explicit cwd, --force)', () => {
   test('same owner on another host (host carried in the facts) is refused', () => {
     expect(refused(planFiling(o({ cwd: '/home/u/gitlab-host' }))).code).toBe('cwd_wrong_repo')
   })
-  test('same repo name under ANOTHER owner is refused, and --force accepts it with the note', () => {
-    expect(refused(planFiling(o({ cwd: '/home/u/other-owner' }))).code).toBe('cwd_wrong_repo')
-    const p = ok(planFiling(o({ cwd: '/home/u/other-owner', forceCwd: true })))
+  test('same repo name under ANOTHER owner is the same repository (moved): accepted with owner_differs, no --force', () => {
+    const p = ok(planFiling(o({ cwd: '/home/u/other-owner' })))
     expect(p.crossRepo).toBe('acme/agentistics')
-    expect(p.warnings).toContain('cross_repo_cwd')
+    expect(p.warnings).toContain('owner_differs')
   })
   test('--force never rescues a directory that is not a git checkout', () => {
     const p = refused(planFiling(o({ cwd: '/home/u/workspace', forceCwd: true })))

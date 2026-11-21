@@ -96,6 +96,7 @@ export const WARNING_TEXT: Record<OkPlan['warnings'][number], string> = {
   subtask_member_filed_on_group: 'The subtask is a member of a group; the session is filed on the group.',
   inherited_task_needs_subtask: "The parent's task was not filed: only leaders are filed on the task itself, so this worker starts unfiled; file it on a subtask.",
   shared_checkout_override: 'Sharing a main checkout another live session works in (--shared-cwd).',
+  owner_differs: 'The checkout belongs to another owner than the task\'s repo (the repository moved); same host and name, so it is accepted.',
   cross_repo_cwd: 'The working directory is a different repository than the task\'s (same organisation, or --force); metrics follow the session\'s own git remote.',
   inherited_task_repo_mismatch: 'The working directory is outside the inherited task repository; the session is still filed on that task. Pass --task explicitly to require a matching repository.',
 }

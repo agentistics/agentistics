@@ -245,10 +245,12 @@ describe('cross-repo cwd through the REAL repoFacts (git remotes, no injected fa
     const d = withRemote('https://gitlab.com/agentistics/agentistics-engine.git')
     expect(await plan(d)).toMatchObject({ ok: false, code: 'cwd_wrong_repo' })
   })
-  test('same name, another owner is refused; --force accepts with the note', async () => {
+  test('same name, another owner (moved repository) is accepted with owner_differs; another name is refused', async () => {
     const d = withRemote('https://github.com/acme/agentistics.git')
-    expect(await plan(d)).toMatchObject({ ok: false, code: 'cwd_wrong_repo' })
-    expect(await plan(d, true)).toMatchObject({ ok: true, crossRepo: 'acme/agentistics' })
+    expect(await plan(d)).toMatchObject({ ok: true, crossRepo: 'acme/agentistics', warnings: expect.arrayContaining(['owner_differs']) })
+    const e = withRemote('https://github.com/acme/other-name.git')
+    expect(await plan(e)).toMatchObject({ ok: false, code: 'cwd_wrong_repo' })
+    expect(await plan(e, true)).toMatchObject({ ok: true, crossRepo: 'acme/other-name' })
   })
   test('--force on a directory that is not a git checkout is refused', async () => {
     const plain = realpathSync(mkdtempSync(join(tmpdir(), 'sfio-plain-')))
