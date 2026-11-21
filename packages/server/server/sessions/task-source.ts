@@ -173,6 +173,9 @@ async function readSeededBook(store: TaskStore, registryRows: readonly ManagedSe
   }
   return book
 }
+/** The board's store at the machine's own tasks file: the ONE place the file name meets the store (also the sweep's way in). */
+export const openTaskStore = (): TaskStore => createTaskStore(TASKS_FILE)
+
 
 /**
  * The board and the fleet, WITHOUT the consolidate store.
@@ -186,7 +189,7 @@ export async function loadTaskBoard(): Promise<{
   registryRows: ManagedSession[]
   rollupRows: ManagedSession[]
 }> {
-  const store = createTaskStore(TASKS_FILE)
+  const store = openTaskStore()
   const registryRows = await readRegistry()
   const book = await readSeededBook(store, registryRows)
   // No metas here (see this function's note): the rows carry the FILING, which is all these callers read.
@@ -194,7 +197,7 @@ export async function loadTaskBoard(): Promise<{
 }
 
 export async function loadTaskWorld(): Promise<TaskWorld> {
-  const store = createTaskStore(TASKS_FILE)
+  const store = openTaskStore()
   const registryRows = await readRegistry()
   const [book, metas] = await Promise.all([
     readSeededBook(store, registryRows),

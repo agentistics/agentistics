@@ -4309,7 +4309,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       await writePreferences({ finishedTasks: next })
       if (done) {
         const { markTask } = await import('./sessions/task-web')
-        await markTask(task, 'done', 'cockpit').catch(() => false)
+        // S2a: a finish that would raise the piece past the guard is REFUSED by the store (the result says why); the
+        // cockpit's own `finishedTasks` hide switch above is a view preference, not an authorization.
+        const { unattributedContext } = await import('./delivery/guard')
+        await markTask(task, 'done', 'cockpit', { guard: unattributedContext() }).catch(() => false)
       }
       return { ok: true, message: done ? s.sessTaskFinished(task) : s.sessTaskReopened(task) }
     },

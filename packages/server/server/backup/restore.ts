@@ -26,7 +26,9 @@ import { promisify } from 'util'
 import { createHash } from 'crypto'
 import { createReadStream, existsSync } from 'fs'
 import { mkdir, readdir, readFile, rm, stat, writeFile, copyFile } from 'fs/promises'
-import { dirname, join, relative } from 'path'
+import { basename, dirname, join, relative } from 'path'
+import { guardPathsOf, ruleAState } from '../delivery/guard-host'
+import { withGuardTransaction } from '../delivery/guard-transaction'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { safeReadJson } from '../utils'
 import { decodeManifest, MANIFEST_NAME, type BackupManifest, type DecodedManifest } from './manifest'
@@ -38,6 +40,18 @@ import {
 } from './restore-plan'
 
 const run = promisify(execFile)
+
+/** Restore cannot fabricate evidence/checkpoints: while rule A is on it refuses to replace either guarded book. */
+export const isGuardedBook = (target: string): boolean => { const name = basename(target); return name === 'tasks.json' || name === 'deliveries.json' }
+export const GUARD_RESTORE_REFUSED = 'guard_restore_refused'
+export const GUARD_RESTORE_REFUSAL = {
+  en: 'Nothing was restored: the delivery guarantee (rule A) is on, and a backup cannot replace the task board or the delivery records — that would bring back progress nobody authorized here. Restore the other files from the backup and re-create the board or delivery records through the board, MCP or CLI (the guarantee guide for this refusal lives in docs/delivery-store-guard.md).',
+  pt: 'Nada foi restaurado: a garantia de entrega (regra A) está ligada, e um backup não pode substituir o quadro de tarefas nem os registros de entrega — isso traria de volta um avanço que ninguém autorizou aqui. Restaure os demais arquivos do backup e recrie o quadro ou os registros de entrega pelo quadro, MCP ou CLI (o guia desta recusa está em docs/delivery-store-guard.md).',
+} as const
+/** The failure sentence in the reader's language (the same sentence on every door: CLI, web job, API). */
+export function restoreReason(r: { reason: string; reasonPt?: string }, lang: 'en' | 'pt'): string {
+  return lang === 'pt' && r.reasonPt ? r.reasonPt : r.reason
+}
 
 /**
  * Where the resume bookkeeping lives — derived from the `$HOME` being restored INTO, not from this
@@ -169,7 +183,7 @@ export interface RestoreMetricsOptions {
 
 export type RestoreMetricsResult =
   | { ok: true; written: number; skipped: number; manifest: BackupManifest }
-  | { ok: false; reason: string }
+  | { ok: false; reason: string; code?: string; reasonPt?: string }
 
 export async function restoreMetrics(opts: RestoreMetricsOptions): Promise<RestoreMetricsResult> {
   const log = opts.onLine ?? (() => {})
@@ -210,6 +224,17 @@ export async function restoreMetrics(opts: RestoreMetricsOptions): Promise<Resto
     }
 
     const actions = planMetrics(staged, localMtime)
+    // S2a (QA r2 F1/N6): the guarded books are decided ONCE, BEFORE a single byte of the restore is written, and the whole
+    // write runs in the same lock scope as that decision (the full envelope while rule A is shadow/on; the base — no lock —
+    // while it is off). Rule A on refuses the WHOLE restore in a sentence, in both languages, on every door.
+    const books = actions.filter(a => a.kind !== 'skip' && a.kind !== 'merge').map(a => join(opts.homeDir, a.redirectTo ?? a.rel)).filter(isGuardedBook)
+    if (!books.length) return await writeAll()
+    const anchor = guardPathsOf(basename(books[0]!) === 'tasks.json' ? { tasksFile: books[0]! } : { deliveriesFile: books[0]! })
+    return await withGuardTransaction(anchor.paths, async () => {
+      if (await ruleAState(anchor.dir) === 'on') return { ok: false as const, code: GUARD_RESTORE_REFUSED, reason: GUARD_RESTORE_REFUSAL.en, reasonPt: GUARD_RESTORE_REFUSAL.pt }
+      return writeAll()
+    })
+    async function writeAll(): Promise<RestoreMetricsResult> {
     let written = 0
     let skipped = 0
 
@@ -259,6 +284,7 @@ export async function restoreMetrics(opts: RestoreMetricsOptions): Promise<Resto
 
     log(`${written} written, ${skipped} skipped`)
     return { ok: true, written, skipped, manifest }
+    }
   } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : String(e) }
   } finally {

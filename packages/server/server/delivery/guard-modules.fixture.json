@@ -1,0 +1,1157 @@
+{
+  "base": "c5e28cd6336e7a975d735e3122b675024a8ea204",
+  "modules": {
+    "agentop/bin/agentop.js": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "agentop/scripts/postinstall.js": [
+      "module:fs"
+    ],
+    "core/src/gitTestEnv.ts": [
+      "module:fs"
+    ],
+    "mcp/agent-audit.ts": [
+      "module:fs"
+    ],
+    "mcp/evidence-args.ts": [
+      "module:fs"
+    ],
+    "mcp/session-proof.ts": [
+      "module:fs"
+    ],
+    "server/bin/cli.ts": [
+      "module:child_process"
+    ],
+    "server/scripts/assert-official-engine.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/scripts/backfill-compaction.ts": [
+      "module:fs"
+    ],
+    "server/scripts/bench-clients-seam.ts": [
+      "global:Bun",
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/scripts/e2e-link-crosstalk.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/scripts/e2e-native-chat.ts": [
+      "module:fs"
+    ],
+    "server/scripts/embed-dist.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/scripts/engine-slot.ts": [
+      "module:fs"
+    ],
+    "server/scripts/ensure-type-stub.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/scripts/frozen-paths-check.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/scripts/live-memory-measure.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/scripts/projections-parity.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/scripts/push-guard-action.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/scripts/push-guard-check.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/scripts/qa-clients-seam.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/scripts/reconcile-dry-run.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/scripts/reconcile-r8-evidence.ts": [
+      "global:Bun"
+    ],
+    "server/scripts/record-web.ts": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "server/scripts/res1-leak-probe.ts": [
+      "global:Bun"
+    ],
+    "server/scripts/seed-demo.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/account-credentials.ts": [
+      "module:fs"
+    ],
+    "server/server/account-home.ts": [
+      "module:fs"
+    ],
+    "server/server/account-login.ts": [
+      "global:Bun",
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "server/server/account-roots.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/adapters/antigravity.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/adapters/codex.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/adapters/copilot.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/adapters/file-memo.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/adapters/gemini.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/adapters/kimi.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/adapters/opencode-v2.ts": [
+      "module:fs"
+    ],
+    "server/server/adapters/opencode.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/agent-metrics.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/agy-mcp.ts": [
+      "global:Bun"
+    ],
+    "server/server/antigravity-usage.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/archive.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/audit.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/autostart.ts": [
+      "global:Bun",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/backup-routes.ts": [
+      "module:fs"
+    ],
+    "server/server/backup/backup-store.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/backup/backup.ts": [
+      "module:child_process",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/backup/github-cli.ts": [
+      "module:child_process"
+    ],
+    "server/server/backup/github-restore.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/backup/github-store.ts": [
+      "module:fs"
+    ],
+    "server/server/backup/github-upload.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/backup/repo-probe.ts": [
+      "module:child_process",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/backup/restore.ts": [
+      "module:child_process",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/briefing-installer.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/chat-drivers/cli-detect.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/chat-drivers/codex.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/chat-drivers/copilot.ts": [
+      "global:Bun",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/chat-drivers/gemini.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/chat-tty.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/checkin.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/claude-usage.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/clean/clean-io.ts": [
+      "global:Bun",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/clean/clean-suggest.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/clean/clean-web.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/cli-backup.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/cli-doctor.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/cli-events.ts": [
+      "global:Bun"
+    ],
+    "server/server/cli-hooks.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/cli-journal.ts": [
+      "module:fs"
+    ],
+    "server/server/cli-run.ts": [
+      "global:Bun",
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/cli-start.ts": [
+      "global:Bun",
+      "module:child_process",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/cli-status.ts": [
+      "global:Bun"
+    ],
+    "server/server/cli-stream.ts": [
+      "global:Bun"
+    ],
+    "server/server/cli-uninstall.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/cli-vault.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/code-editor.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/codex-sessions.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/config.ts": [
+      "module:fs"
+    ],
+    "server/server/consolidate.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/copilot-sessions.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/data-snapshot.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/data.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/default-claude-root.ts": [
+      "module:fs"
+    ],
+    "server/server/delivery/activation.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/delivery/capture.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/delivery/classify-declare.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/delivery/classify-host.ts": [
+      "module:child_process"
+    ],
+    "server/server/delivery/evidence-cli.ts": [
+      "module:fs"
+    ],
+    "server/server/delivery/guard-integrity.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/delivery/guards-lock-order.worker.ts": [
+      "module:fs"
+    ],
+    "server/server/delivery/guards-store.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/delivery/host.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/delivery/store.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/disk-picker.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/env-config.ts": [
+      "module:fs"
+    ],
+    "server/server/events/desktop.ts": [
+      "global:Bun",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/events/event-store.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/events/mobile-push.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/events/peer-client.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/events/producer-status.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/events/subscription-store.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/exec-in-place.ts": [
+      "module:fs"
+    ],
+    "server/server/experimental-boot.ts": [
+      "module:fs"
+    ],
+    "server/server/flows/ambiente-host.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/flows/host-ops.ts": [
+      "module:child_process",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/flows/owner-ledger.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/flows/perf-watch.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/flows/pipeline-host.ts": [
+      "module:child_process"
+    ],
+    "server/server/flows/stalled-host.ts": [
+      "module:child_process"
+    ],
+    "server/server/fs-folders.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/gemini-sessions.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/git-fs.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/git-stats-cache.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/git.ts": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "server/server/hardware-probe.ts": [
+      "global:Bun",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/harness-accounts.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/health.ts": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "server/server/helper-hotswap.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/host-allow.ts": [
+      "global:Bun"
+    ],
+    "server/server/host-which.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/index.ts": [
+      "global:Bun",
+      "module:bun",
+      "module:fs/promises"
+    ],
+    "server/server/journal/backfill.ts": [
+      "global:Bun",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/journal/import-journal-index.ts": [
+      "module:fs"
+    ],
+    "server/server/journal/import.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/journal/journal-budget-ingest.child.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/journal/journal.ts": [
+      "module:fs"
+    ],
+    "server/server/journal/schema.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/journal/shadow.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/jsonl.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/kimi-mcp.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/live-sessions.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/macos-processes-io.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/mcp-admin.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/mcp-check.ts": [
+      "global:Bun"
+    ],
+    "server/server/mcp-launch.ts": [
+      "module:fs"
+    ],
+    "server/server/mcp-tools.ts": [
+      "global:Bun"
+    ],
+    "server/server/mem-log.ts": [
+      "global:Bun"
+    ],
+    "server/server/memory-service.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/model-catalog.ts": [
+      "global:Bun",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/native-bind.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/nay-sessions.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/notifications-store.ts": [
+      "global:Bun"
+    ],
+    "server/server/opencode-auth-web.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/opencode-auth.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/opencode-mcp.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/opencode-usage.ts": [
+      "module:fs"
+    ],
+    "server/server/parse-cache.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/plan-history.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/plan-limits.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/port-holder.ts": [
+      "global:Bun"
+    ],
+    "server/server/preferences.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/projections/store.ts": [
+      "module:fs"
+    ],
+    "server/server/resources/cli-resources.ts": [
+      "global:Bun"
+    ],
+    "server/server/resources/governor-daemon.ts": [
+      "global:Bun"
+    ],
+    "server/server/resources/heavy-io.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/resources/helpers.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/resources/proc-card.ts": [
+      "module:fs"
+    ],
+    "server/server/resources/proc-read.ts": [
+      "module:fs"
+    ],
+    "server/server/restart-pending-io.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/run-seed.ts": [
+      "module:fs"
+    ],
+    "server/server/runtime-socket.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/secure-origin.ts": [
+      "global:Bun"
+    ],
+    "server/server/server-ownership-io.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/server-ports.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/server-restart-io.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/account-switch-io.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/account-transcript-roots.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/artifact-list.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/artifact-web.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/attachment-web.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/auto-switch-io.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/backend-tmux.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/chat-read-memo.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/chat-search-web.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/chat-stream.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/chat-tail.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/claude-trust.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/cli-session.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/codex-capabilities.ts": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/codex-chat.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/codex-thread-log.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/composer-message.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/conversation-resume-lock.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/dependency-probe.ts": [
+      "global:Bun"
+    ],
+    "server/server/sessions/dir-scan.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/disk-index.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/editor-fs.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/editor-web.ts": [
+      "global:Bun"
+    ],
+    "server/server/sessions/file-lock.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/fixtures/fake-structured-agent.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/fixtures/fixture-guard.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/fleet-resize.ts": [
+      "global:Bun"
+    ],
+    "server/server/sessions/fleet-web.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/gemini-family-io.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/github-prs.ts": [
+      "global:Bun"
+    ],
+    "server/server/sessions/handoff-artifacts.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/handoff-hint.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/handoff-relay-io.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/handoff-usage.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/harness-agents-io.ts": [
+      "global:Bun"
+    ],
+    "server/server/sessions/harness-defaults.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/harness-install.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/harness-sessions.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/harness-skills.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/harness-transcript.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/harness-version.ts": [
+      "global:Bun"
+    ],
+    "server/server/sessions/kill-escalate.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/login-env.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/memory-probe.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/native-notes.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/nay-persona.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/nay-web.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/opencode-chat-io.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/opencode-limit.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/opencode-run-log.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/opencode-store.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/opencode-v2-api.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/orphan-review-notice.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/pane-activity.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/pending-prompts.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/proc-liveness.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/process-conversation.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/real-contained.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/registry.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/relay-worker.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/release-squash.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/sessions/release-tags.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/sessions/repo-facts.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/retire-runner.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/review-clean.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/session-identity.ts": [
+      "module:child_process",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/session-reaper-io.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/session-roles.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/sessions-host.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/shell-backend.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/shell-store.ts": [
+      "global:Bun"
+    ],
+    "server/server/sessions/shell-tmux.ts": [
+      "global:Bun"
+    ],
+    "server/server/sessions/spawn-context.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/spawn-filing-io.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/specification-skills.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/step-web.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/structured-durable.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/sessions/structured-relay.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/sessions/subagents-web.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/task-files.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/task-forecast-cache.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/task-store.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/task-web.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/tmux-launch.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/transcript-fork.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/transcript-run.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/sessions/transcript-window.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/user-path.ts": [
+      "module:fs"
+    ],
+    "server/server/sessions/work-children.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/workflows-web.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/single-instance.ts": [
+      "module:child_process",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/spawn-env.ts": [
+      "global:Bun",
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/sse.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/static-cache.ts": [
+      "global:Bun"
+    ],
+    "server/server/subagent-metrics.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/tags-local-store.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/telemetry.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "server/server/transcript-fold.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/transcript-state.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/upgrade-web.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/upgrade.ts": [
+      "global:Bun",
+      "module:child_process",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/utils.ts": [
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/vault/__fixtures__/hardening-probe.ts": [
+      "module:fs"
+    ],
+    "server/server/vault/boot.ts": [
+      "module:fs"
+    ],
+    "server/server/vault/bundle-io.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/vault/grants.ts": [
+      "module:fs"
+    ],
+    "server/server/vault/hardening.ts": [
+      "module:fs"
+    ],
+    "server/server/vault/io.ts": [
+      "global:Bun",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/vault/machine-secrets-host.ts": [
+      "module:fs"
+    ],
+    "server/server/vault/machine-secrets.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/vault/personal.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/vault/rekey.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/vault/service.ts": [
+      "global:Bun",
+      "module:fs",
+      "module:fs/promises"
+    ],
+    "server/server/vault/sleep-watch.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/vault/socket.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/server/vault/whole-file.ts": [
+      "module:fs"
+    ],
+    "server/server/version.ts": [
+      "module:fs"
+    ],
+    "server/server/workflow-metrics.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/workflow-store.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/wsl-ports-io.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "server/test/fixtures/preferences.lock-test-child.ts": [
+      "module:fs/promises"
+    ],
+    "tui/scripts/preview.tsx": [
+      "global:Bun"
+    ],
+    "web/e2e/queued-actions.ts": [
+      "module:fs"
+    ],
+    "web/e2e/usage-r2.ts": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "web/e2e/vault-bulk-qa.ts": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "web/e2e/vault-expiry-nay.ts": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "web/preview/opencode-trava-form/shoot.ts": [
+      "module:fs"
+    ],
+    "web/preview/plan-usage/qa.ts": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "web/preview/sessions-list/shoot.ts": [
+      "module:fs"
+    ],
+    "web/qa/menu-rail-expande.ts": [
+      "module:fs/promises"
+    ],
+    "web/qa/terminal-provisioning.ts": [
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "web/scripts/gen-brand-assets.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "web/src/lib/engineSurfaces.ts": [
+      "computed:a0af9f865bf637e6736817f4ce552e4cdf7b8c36ea75bc254c1d1f0af744b5bf"
+    ],
+    "web/vite.config.ts": [
+      "module:fs"
+    ],
+    "../scripts/composer-task-engine-qa.ts": [
+      "computed:b131b17adbc847c507b4d03290f79329c31c5506fdef2d95653756274a2e508b",
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "../scripts/composer-task-ui-qa.ts": [
+      "module:fs/promises"
+    ],
+    "../scripts/dev/chat-activity-shots.mjs": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "../scripts/dev/fila-prioridade-shots.mjs": [
+      "computed:e967338df03f9da9472591d96ddf84f099ef55ba26eb2fe8f716634cf3a655d3",
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/dev/vidro-real-shots.mjs": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "../scripts/metrics-journal-probe.ts": [
+      "computed:bd962dbf2bfa5551b80398ccf44890317388dae3d8ab57270fbe9bd63e9e5721",
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/baseline.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/budget.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/clients.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/engine-map/bench.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/engine-map/check.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/engine-map/sync.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/fake-claude.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/fleet.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/idle-cpu.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/measure.ts": [
+      "global:Bun"
+    ],
+    "../scripts/perf/profile-server.ts": [
+      "global:Bun",
+      "module:bun",
+      "module:fs"
+    ],
+    "../scripts/perf/qa-browser.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/qa-longtasks.ts": [
+      "module:fs"
+    ],
+    "../scripts/perf/qa-profile.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/rebuild-bench.ts": [
+      "module:fs"
+    ],
+    "../scripts/perf/server-harness.ts": [
+      "global:Bun",
+      "module:bun"
+    ],
+    "../scripts/perf/soak.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/startup.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/storm.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/synth-harnesses.ts": [
+      "module:fs/promises"
+    ],
+    "../scripts/perf/synth-home.ts": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "../scripts/perf/ui-budget.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/precommit.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "../scripts/test-orphans.ts": [
+      "module:fs"
+    ]
+  }
+}

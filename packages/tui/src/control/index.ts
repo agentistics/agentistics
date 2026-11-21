@@ -63,7 +63,7 @@ function inkStdout(): NodeJS.WriteStream {
       if (prop === 'write') return writeFrame
       // Read against the TARGET so a getter (`columns`) sees the real stream as `this`, and bind
       // methods for the same reason — `on('resize', …)` must register on the stream, not the proxy.
-      const value = Reflect.get(target, prop, target)
+      const value = (target as unknown as Record<PropertyKey, unknown>)[prop]
       return typeof value === 'function' ? value.bind(target) : value
     },
   })
