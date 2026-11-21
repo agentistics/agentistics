@@ -127,11 +127,14 @@ async function startHubProducer(log: (line: string) => void): Promise<DaemonProd
       const producer = made.producer
       // One consume at a time, in poll order: the plan's memory only ever moves forward one poll.
       let queue: Promise<void> = Promise.resolve()
+      // NOQ.TRAVA: a no-questions session that hits a permission prompt is answered here, never left waiting.
+      const noq = await import('../sessions/noq-runner').then(async m => m.createNoqRunner(await m.defaultNoqDeps())).catch(() => null)
       // BACKGROUND demand: nobody is looking at this one, so the hub may idle slower (PERF.SLOW).
       off = hub.subscribe(snap => {
         queue = queue.then(async () => {
           if (!running) return
           try {
+            if (noq) for (const r of await noq.consume(snap)) log(`[noq] ${r.decision} ${r.id.slice(0, 8)} · ${r.rule} · ${r.command.slice(0, 80)}`)
             const t: ProducerTick = await producer.consume(snap)
             await beat.beat(t.unavailable)
             for (const e of t.written) log(`[events] ${e.kind} · ${e.label ?? e.cwd}`)

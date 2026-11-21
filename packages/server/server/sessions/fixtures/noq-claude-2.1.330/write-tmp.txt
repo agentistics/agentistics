@@ -1,0 +1,45 @@
+
+ ▐▛███▛█   Claude Code v2.1.330
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   /tmp/noq-qa-r4-probe · /rc
+
+  Updated: 30 features, 282 fixes, 134 other changes
+  code.claude.com/docs/en/changelog for details
+
+
+❯ Use the Write tool to create the file /home/mithrandir/noq-qa-r4-probe-DO-NOT-CREATE.txt with the content hi. Do
+  nothing else.
+
+● Write(~/noq-qa-r4-probe-DO-NOT-CREATE.txt)
+  ⎿  Rejected write to ~/noq-qa-r4-probe-DO-NOT-CREATE.txt
+      1 hi
+
+❯ Now use the Write tool to create /tmp/noq-qa-r4-other/sub/dir/file.txt with content hi, and then use the Edit tool on
+  existing.txt changing old to new. Write first.
+
+● Write(/tmp/noq-qa-r4-other/sub/dir/file.txt)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Create file
+ ../noq-qa-r4-other/sub/dir/file.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 hi
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create file.txt?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend
+
+
+
+
+
+
+
+
+
+
+
+

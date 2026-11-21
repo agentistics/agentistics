@@ -4772,7 +4772,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       return { ok: false, message: s.sessStepStuck }
     },
 
-    async answerSession(id: string, choice?: number, text?: string, choices?: readonly number[]): Promise<ActionResult> {
+    async answerSession(id: string, choice?: number, text?: string, choices?: readonly number[], expect?: (frame: readonly string[]) => boolean): Promise<ActionResult> {
       const s = S()
       const backend = await resolveBackend()
       const blocked = await backend.unavailable()
@@ -4785,6 +4785,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // DRIVER: no screen is read and no keystroke is sent. The same refusals as the screen path.
       const stated = backend.attentionOf?.(id)
       if (stated !== undefined) {
+        // A frame check cannot be honoured without a frame: refused rather than typed blind.
+        if (expect) return { ok: false, message: s.sessChoiceGone }
         const out = answerStructured(stated, choice, text, choices)
         if (!out.ok) {
           return { ok: false, message: out.why === 'not-asking' ? s.sessNotAsking
@@ -4808,6 +4810,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (!rules || !dialogOnScreen(rules, frame)) {
         return { ok: false, message: s.sessNotAsking }
       }
+      // The caller judged ONE dialog (the no-questions runner): this frame must still be it.
+      if (expect && !expect(frame)) return { ok: false, message: s.sessChoiceGone }
 
       // What is on the screen RIGHT NOW, not what was drawn up to a poll ago.
       const read = readDialog(frame, markerReadOptions(managed.harness))
@@ -5624,9 +5628,9 @@ export async function runStart(codeStart?: CodeStart): Promise<StartResult> {
     // SS-06: a NATIVE session's question is the policy's, answered through the code host — after
     // re-reading that the SAME question is still pending (a stale list must not answer a new one).
     const answerTmux = host.answerSession?.bind(host)
-    host.answerSession = async (id, choice, text, choices) => {
+    host.answerSession = async (id, choice, text, choices, expect) => {
       if (!id.startsWith('ses_')) {
-        return answerTmux ? answerTmux(id, choice, text, choices) :  { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
+        return answerTmux ? answerTmux(id, choice, text, choices, expect) :  { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
       }
       const recent = await code.recentSessions?.(20).catch(() => null)
       const ask = recent && recent.ok ? recent.sessions.find(r => r.sessionId === id)?.ask : undefined

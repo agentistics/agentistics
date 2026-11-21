@@ -108,6 +108,7 @@ export const THROWAWAY_ENV_KEEP: Readonly<Record<string, string>> = {
   XDG_DATA_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
   XDG_STATE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
   PLAYWRIGHT_BROWSERS_PATH: 'read-only location of the browser executables (browser-bin.ts); holds no store, config or secret',
+  AGENTISTICS_HOME: 'read only by noq-policy as a path a no-questions session may never write to; it relocates nothing',
 }
 /**
  * RUN.FLOWS-HERDADO: the AGENTISTICS_* names (and the session identity) a run KEEPS from its parent, each with its reason.
