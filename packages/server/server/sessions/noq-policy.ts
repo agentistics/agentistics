@@ -353,7 +353,7 @@ function touchesData(arg: string, c: Ctx): boolean {
   return dataDirs(c.home).some(d => insideOrEqual(abs, d) || insideOrEqual(real, d) || insideOrEqual(real, c.fs.realpath(d) ?? d))
 }
 
-const PROTECTED_TMP = /^(\.|tmux-|agentistics|agentop|systemd-|ssh-|snap|pulse-|dbus-)/
+const PROTECTED_TMP = /^(\.|tmux-|claude-|agentistics|agentop|systemd-|ssh-|snap|pulse-|dbus-)/
 /** git metadata and worktree homes, as a path SEGMENT of what lies below the base a write is allowed in. */
 const GIT_META = /(^|\/)(\.git|\.worktrees)(\/|$)|(^|\/)\.claude\/worktrees(\/|$)/
 

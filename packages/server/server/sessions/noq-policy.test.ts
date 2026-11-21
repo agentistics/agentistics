@@ -146,7 +146,7 @@ describe('the allow-list', () => {
     ['agentop run -- bun test a.test.ts', 'agentop'], ['agentop run --rm -- bun test --timeout 1 a', 'agentop'],
     ['agentop run --rm -- bun test /home/u/other/a.test.ts', 'agentop'], ['agentop run --rm -- bun test ../a', 'agentop'],
     [`rm -rf ${CWD}`, 'write-outside'], ['rm -rf .', 'write-outside'], ['rm -rf /home/u/agentistics', 'write-outside'],
-    ['rm -rf /home/u/agentistics/.worktrees', 'write-outside'], ['rm -rf /tmp/tmux-1000', 'write-outside'], ['rm -rf /tmp/.X11-unix', 'write-outside'],
+    ['rm -rf /home/u/agentistics/.worktrees', 'write-outside'], ['rm -rf /tmp/tmux-1000', 'write-outside'], ['rm -rf /tmp/claude-1000', 'write-outside'], ['rm -rf /tmp/claude-1000/x/tasks', 'write-outside'], ['rm -rf /tmp/.X11-unix', 'write-outside'],
     ['rm -rf /tmp/agentistics-heavy.lock', 'write-outside'], ['rm -rf ../x', 'write-outside'], ['rm', 'write-outside'],
     ['rm --no-preserve-root -rf x', 'not-allowed'], ['rmdir -p a/b', 'not-allowed'], ['cp -l /home/u/.bashrc x', 'not-allowed'],
     ['cp -s /home/u/.bashrc x', 'not-allowed'], ['cp /home/u/.ssh/id_rsa x', 'write-outside'], ['cp -t /home/u a', 'not-allowed'],
