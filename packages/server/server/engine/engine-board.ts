@@ -69,7 +69,7 @@ export function createEngineBoard(d: BoardDeps): EngineBoard {
         : await d.patchSubtask(p.id, { ...cols, ...blocked })
       if (r.ok) return ok(r)
       const m = r.message ?? 'refused'
-      return no(m === 'unknown_status' ? 400 : m === 'no_such_subtask' ? 404 : 422, m, r)
+      return no(m === 'unknown_status' ? 400 : m === 'no_such_subtask' ? 404 : 422, m, r)  // a guard refusal is a 422 with its code as `m`
     }),
     comment: (ref, c) => guarded(async () => {
       const r = await d.addComment(ref, { author: c.author, body: c.body, ...(c.subtaskId ? { subtaskId: c.subtaskId } : {}) })
@@ -80,7 +80,7 @@ export function createEngineBoard(d: BoardDeps): EngineBoard {
       const r = await d.markTask(ref, s.status, s.actor, { ...(s.reason ? { reason: s.reason } : {}), ...(s.blockedBy ? { blockedBy: s.blockedBy } : {}), ...(s.allowOpenSubtasks === true ? { allowOpenSubtasks: true } : {}) })
       if (r.ok) return ok(r)
       const m = r.message ?? 'refused'
-      return no(m === 'unknown_status' ? 400 : m === 'blocked_needs_reason' || m === 'done_needs_session' || m === 'open_subtasks' ? 422 : 404, m, r)
+      return no(m === 'unknown_status' ? 400 : m === 'blocked_needs_reason' || m === 'done_needs_session' || m === 'open_subtasks' || (r as { guard?: unknown }).guard ? 422 : 404, m, r)
     }),
     claim: (ref, c) => guarded(async () => {
       const r = c.release
@@ -112,6 +112,7 @@ export function createEngineBoard(d: BoardDeps): EngineBoard {
 /** The real board: `task-web` and the chat's attachment store, loaded on first use. */
 export function hostEngineBoard(lang: () => 'en' | 'pt'): EngineBoard {
   const tw = () => import('../sessions/task-web')
+  const guardMod = () => import('../delivery/guard')
   const aw = () => import('../sessions/attachment-web')
   return createEngineBoard({
     listTasks: async () => (await tw()).listTasks(),
@@ -120,10 +121,11 @@ export function hostEngineBoard(lang: () => 'en' | 'pt'): EngineBoard {
     taskActivity: async o => (await tw()).taskActivity(o),
     createTask: async o => (await tw()).createTask(o),
     addSubtask: async (ref, title, o) => (await tw()).addSubtask(ref, title, o),
-    patchSubtask: async (id, patch) => (await tw()).patchSubtask(id, patch as never),
-    setSubtaskDone: async (id, done) => (await tw()).setSubtaskDone(id, done) as Promise<{ ok: boolean; message?: string }>,
+    patchSubtask: async (id, patch) => (await tw()).patchSubtask(id, patch as never, (await guardMod()).unattributedContext()),
+    setSubtaskDone: async (id, done) => (await tw()).setSubtaskDone(id, done, (await guardMod()).unattributedContext()) as Promise<{ ok: boolean; message?: string }>,
     addComment: async (ref, o) => (await tw()).addComment(ref, o),
-    markTask: async (ref, to, actor, o) => (await tw()).markTask(ref, to as never, actor, o),
+    // S2a: the engine's board writes carry a (principal-blind) guard context; guard A binds them like every other door.
+    markTask: async (ref, to, actor, o) => (await tw()).markTask(ref, to as never, actor, { ...o, guard: (await guardMod()).unattributedContext() }),
     claimTask: async o => (await tw()).claimTask(o),
     releaseTask: async o => (await tw()).releaseTask(o),
     storeAttachment: async (f, sessionId) => (await aw()).storeAttachment(lang(), f, sessionId),

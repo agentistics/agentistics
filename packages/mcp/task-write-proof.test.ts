@@ -17,6 +17,23 @@ const ID = 's-proof-test'
 const KEY = Buffer.alloc(32, 9) // a throwaway test key, not a credential
 const WANT = { id: ID, token: sessionProofToken(KEY, ID) }
 
+test('S2B-8 MCP preserves the 409 guard_busy code and sentence for comments and reads', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-guard-busy-'))
+  const api = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ error: 'guard_busy', code: 'guard_busy', sentence: 'another agentop process is writing the board; retry', sentencePt: 'outro processo está escrevendo; tente de novo' }, { status: 409 }) })
+  const transport = new StdioClientTransport({ command: process.execPath, args: [join(import.meta.dir, 'agentistics-mcp.ts')], env: { ...gitTestEnv(), HOME: dir, AGENTISTICS_DIR: dir, AGENTISTICS_API: `http://127.0.0.1:${api.port}` } as Record<string, string>, stderr: 'pipe' })
+  const client = new Client({ name: 'guard-busy', version: '1' })
+  try {
+    await client.connect(transport)
+    for (const [name, args] of [['agentistics_task_comment', { ref: 't1', body: 'hello' }], ['agentistics_task_statuses', {}], ['agentistics_task', { ref: 't1' }]] as const) {
+      const out = await client.callTool({ name, arguments: args })
+      expect(out.isError).toBe(true)
+      expect(JSON.stringify(out)).toContain('HTTP 409')
+      expect(JSON.stringify(out)).toContain('guard_busy')
+      expect(JSON.stringify(out)).toContain('retry')
+    }
+  } finally { await client.close(); api.stop(true); rmSync(dir, { recursive: true, force: true }) }
+}, 30_000)
+
 /** Every board-writing tool, with arguments that make it write. Several tools have more than one write path. */
 const CALLS: Array<[string, Record<string, unknown>]> = [
   ['agentistics_task_create', { title: 'T' }],

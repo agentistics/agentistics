@@ -2,7 +2,7 @@
  * delivery/store.ts — the delivery records (one per subtask), `<dataDir>/deliveries.json`.
  *
  * Several processes write it (the server, a `agentop flow gate` in a CLI, an engine timer), so every
- * write is read-modify-write UNDER the cross-process `withFileLock` and lands by an atomic rename — a
+ * write is read-modify-write UNDER the cross-process ordered guard locks and lands by an atomic rename — a
  * reader never sees half a file.
  *
  * The file is NEVER "repaired" by overwriting it. Two ways a read can come back short, and a write must not turn
@@ -14,10 +14,17 @@
  *     `preserved` and written back with the rest.
  */
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { GuardBusy, GuardLockOrderError, withGuardLocks } from './guard-locks'
+import { inGuardTransaction, peekRuleA, serializeGuardWrite } from './guard-transaction'
+import { deliveryRaises, deliveryTamper, phaseRank, GuardRefused, type GuardContext } from './guard'
+import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from './guard-host'
 import { withFileLock } from '../sessions/file-lock'
-import { defaultGuardLockPaths, withGuardLocks } from './guard-locks'
-import { isPhase, type DeliveryRecord } from './machine'
+import { isPhase, isPureAdoption, type DeliveryRecord } from './machine'
+import { createGuardsStore, type GuardsDoc, type GuardsStore } from './guards-store'
+import { deliveryReadRule, deliveryHasJournal } from './activation'
+import type { TamperView } from './guard'
+import { semanticallyChanged, stampActivity, type ActivityStamp } from './custody'
 
 export interface DeliveryDoc {
   version: 1
@@ -30,6 +37,8 @@ export interface DeliveryDoc {
 
 const SAFE_ID = /^[A-Za-z0-9_.:-]{1,120}$/
 const isRec = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+const protectedFloor = (r: TamperView | undefined): boolean => !!r && (!!r.evidence?.length || !!r.evidenceHistory?.length
+  || phaseRank(r.phase) >= 1 || (r.history ?? []).some(h => isRec(h) && (phaseRank(String(h.from)) >= 1 || phaseRank(String(h.to)) >= 1)))
 
 /** A write was refused because the file on disk could not be read; the bytes were kept as `backup`. */
 export class DeliveryStoreUnreadable extends Error {
@@ -84,7 +93,11 @@ export interface DeliveryStore {
   readStrict(): Promise<DeliveryDoc>
   get(subtaskId: string): Promise<DeliveryRecord | null>
   /** Read-modify-write under the lock. `fn` returns the value to hand back; mutations to `doc` are persisted. Throws `DeliveryStoreUnreadable` when the file cannot be read. */
-  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>, options?: { evidence?: boolean; guardsPath?: string }): Promise<T>
+  /**
+   * `guard` (S2a, optional): who is asking. A write that RAISES a record's phase rank (revisao_lider and beyond) without one is
+   * refused by the store when the guarantee is on (`GuardRefused`, before a byte lands).
+   */
+  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>, options?: { evidence?: boolean; guardsPath?: string; guard?: GuardContext; stamp?: ActivityStamp | readonly ActivityStamp[] }): Promise<T>
 }
 
 export function defaultDeliveriesPath(): string {
@@ -94,9 +107,39 @@ export function defaultDeliveriesPath(): string {
   return join(dir, 'deliveries.json')
 }
 
-export function createDeliveryStore(path = defaultDeliveriesPath()): DeliveryStore {
+async function materializeDelivery(path: string, serialized: string): Promise<void> {
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(tmp, serialized, { mode: 0o600 })
+  await rename(tmp, path)
+}
+
+/** Caller holds deliveries → guards. A rule move must resolve this commit before moving the rule. */
+export async function rollForwardDelivery(path: string, floorStore: GuardsStore, guardDoc: GuardsDoc): Promise<GuardsDoc> {
+  if (guardDoc.pendingDelivery !== undefined) {
+    await materializeDelivery(path, guardDoc.pendingDelivery)
+    const { pendingDelivery: _pending, ...recovered } = guardDoc
+    await floorStore.write(recovered)
+    return recovered
+  }
+  return guardDoc
+}
+
+export function createDeliveryStore(path = defaultDeliveriesPath(), opts: {
+  guard?: GuardWiring
+  /** In-process fault injection after the journal seal, before data rename; never read from a request. */
+  afterFloorSeal?: () => void | Promise<void>
+} = {}): DeliveryStore {
+  const anchor = guardPathsOf({ deliveriesFile: path })
   /** `missing` (no file yet) is an empty book; `unreadable` is NOT an empty book. */
   const readState = async (strict = false): Promise<{ kind: 'ok'; doc: DeliveryDoc } | { kind: 'missing' } | { kind: 'unreadable'; why: string }> => {
+    // A sealed journal is the committed logical document even if the process died before the data rename.
+    // Readers need no write lock; the next writer materializes it under deliveries → guards.
+    try {
+      if (await deliveryReadRule(anchor.paths.guards) !== 'off') {
+        const pending = (await createGuardsStore(anchor.paths.guards).read()).pendingDelivery
+        if (pending !== undefined) return { kind: 'ok', doc: parseDeliveryDocStrict(pending) }
+      }
+    } catch (e) { console.warn('[guard] delivery read falls back to ledger:', e instanceof Error ? e.message : String(e)) }
     let text: string
     try { text = await readFile(path, 'utf8') } catch (e) {
       return (e as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'missing' } : { kind: 'unreadable', why: e instanceof Error ? e.message.split('\n')[0]! : String(e) }
@@ -124,8 +167,26 @@ export function createDeliveryStore(path = defaultDeliveriesPath()): DeliverySto
     },
     async get(id) { return (await read()).deliveries[id] ?? null },
     async update(fn, options) {
+      if (options?.guardsPath && resolve(options.guardsPath) !== resolve(anchor.paths.guards)) throw new GuardLockOrderError('guardsPath must be the guard file beside this delivery store')
       await mkdir(dirname(path), { recursive: true })
-      const write = async () => {
+      const write = async (held?: { contended: boolean }, base = false) => {
+        const materialize = (serialized: string) => materializeDelivery(path, serialized)
+        const floorStore = createGuardsStore(anchor.paths.guards)
+        // Deterministic roll-forward, including a crash after rename but before journal removal.
+        if (!base) await rollForwardDelivery(path, floorStore, await floorStore.read())
+        else {
+          // OFF keeps its ordinary delivery lock. Only a present journal needs the later guards lock.
+          // Read again after taking it; activation cannot interleave while the delivery lock is held.
+          let guardDoc: GuardsDoc | undefined
+          try { if (await deliveryHasJournal(anchor.paths.guards)) guardDoc = await floorStore.read() }
+          catch (e) { if (await ruleAState(anchor.dir) !== 'off') throw e }
+          if (guardDoc?.pendingDelivery !== undefined) {
+            if (held?.contended) throw new GuardBusy('deliveries')
+            const recover = async () => { await rollForwardDelivery(path, floorStore, await floorStore.read()) }
+            if (options?.evidence && options.guardsPath) await recover()
+            else await withGuardLocks(['guards'], recover, { paths: anchor.paths, alreadyHeld: ['deliveries'] })
+          }
+        }
         const s = await readState(!!options?.evidence)
         if (s.kind === 'unreadable') {
           // Keep the bytes (once per distinct file state) and refuse: an empty document must never replace them.
@@ -135,16 +196,99 @@ export function createDeliveryStore(path = defaultDeliveriesPath()): DeliverySto
           throw new DeliveryStoreUnreadable(path, kept, s.why)
         }
         const doc = s.kind === 'ok' ? s.doc : { version: 1 as const, deliveries: {} }
+        // Snapshot every protected binding before the callback; the evidence option cannot disable detection.
+        const phasesBefore = structuredClone(doc.deliveries)
         const value = await fn(doc)
-        const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
-        await writeFile(tmp, serializeDeliveryDoc(doc), { mode: 0o600 })
-        await rename(tmp, path)
+        // S7a (§5.1): the piece-activity stamp lands in the SAME write as the action it describes — never a second best-effort write,
+        // so no crash can leave an action without its stamp. Only a SEMANTIC change stamps: an empty or idempotent patch (which still
+        // refreshes `updatedAt`) is not an action.
+        for (const st of options?.stamp ? (Array.isArray(options.stamp) ? options.stamp : [options.stamp]) : []) {
+          const after = doc.deliveries[st.key]
+          if (after && (st.when?.() ?? true) && semanticallyChanged(phasesBefore[st.key], after)) stampActivity(after, st.actor, st.at)
+        }
+        // Judge exactly the representation the serializer will persist, including promoted preserved records.
+        const serialized = serializeDeliveryDoc(doc)
+        const final = parseDeliveryDocStrict(serialized)
+        const floorRule = base ? 'off' : await ruleAState(anchor.dir)
+        const floors = floorRule === 'off' ? {} : (await floorStore.read()).deliveryFloors ?? {}
+        const commit = async () => {
+          if (floorRule !== 'off') {
+            // Seal floor + full pending bytes together. One atomic sealed rename commits both logically;
+            // after a crash readers see the journal and the next writer rolls it forward before any mutation.
+            const guardDoc = await floorStore.read()
+            const next = { ...(guardDoc.deliveryFloors ?? {}) }
+            for (const [id, r] of Object.entries({ ...phasesBefore, ...final.deliveries })) {
+              const old = next[id]
+              // Board-only adoptions carry no authorization. Their release/re-adoption must not acquire a tombstone.
+              // Keep any older evidence or ranked history, including floors sealed by older builds.
+              if (isPureAdoption(r) && !protectedFloor(old)) { delete next[id]; continue }
+              const items = new Map((old?.evidence ?? []).map(i => [i.id, i]))
+              for (const i of r.evidence ?? []) if (!items.has(i.id)) items.set(i.id, i)
+              const extend = (was: readonly unknown[] = [], now: readonly unknown[] = []) => was.every((e, i) => JSON.stringify(e) === JSON.stringify(now[i])) ? now : was
+              next[id] = { taskId: r.taskId, phase: old?.phase && phaseRank(old.phase) >= phaseRank(r.phase) ? old.phase : r.phase, revision: Math.max(old?.revision ?? 0, r.revision), history: extend(old?.history, r.history), evidenceHistory: extend(old?.evidenceHistory, r.evidenceHistory), evidence: [...items.values()] }
+            }
+            await floorStore.write({ ...guardDoc, deliveryFloors: next, pendingDelivery: serialized })
+            await opts.afterFloorSeal?.()
+          }
+          await materialize(serialized)
+          if (floorRule !== 'off') {
+            const { pendingDelivery: _pending, ...committed } = await floorStore.read()
+            await floorStore.write(committed)
+          }
+        }
+        const raised = deliveryRaises(phasesBefore, final.deliveries)
+        const retreats = Object.entries(final.deliveries).flatMap(([key, r]) => {
+          const before = phasesBefore[key]
+          return before && phaseRank(r.phase) < phaseRank(before.phase) ? [{ key, rank: phaseRank(r.phase), fromPhase: before.phase }] : []
+        })
+        const tampered = [
+          ...deliveryTamper(phasesBefore, final.deliveries, !!options?.guard),
+          ...deliveryTamper(Object.fromEntries(Object.entries(floors).filter(([id]) => {
+            const before = phasesBefore[id], after = final.deliveries[id]
+            if (after && isPureAdoption(after) && !protectedFloor(floors[id])) return false
+            if (JSON.stringify(before) === JSON.stringify(after)) return false
+            // A retreat (including its appended history/revision) does not reclaim lost authorization.
+            // The direct before/after tamper check above still protects existing history and evidence.
+            if (before && after && after.phase !== before.phase && phaseRank(after.phase) <= phaseRank(before.phase)) return false
+            return true
+          })), final.deliveries, true),
+        ]
+        if (base) {
+          // Rule off when the write started. Nothing protected changed → the base write. Otherwise re-read the rule under
+          // the deliveries lock (the activation takes it first). A rule that moved mid-write fails closed: the callback is
+          // not re-run (it may have effects outside the document) — the caller retries under the guarded lock set.
+          if ((!raised.length && !tampered.length) || await ruleAState(anchor.dir) === 'off') { await commit(); return value }
+          throw new GuardBusy('guards')
+        }
+        if (tampered.length) {
+          const rule = await ruleAState(anchor.dir)
+          if (rule === 'on') throw new GuardRefused(tampered[0]!)
+          if (rule === 'shadow') for (const t of tampered) console.warn(`[guard] would_refuse ${t.code} ${t.piece}`)
+        }
+        if (!raised.length && (!retreats.length || !options?.guard)) { await commit(); return value }
+        // `withFileLock` goes ahead WITHOUT the lock after its wait; a guard never does (§2.6.1).
+        if (held?.contended) throw new GuardBusy('deliveries')
+        await guardedWrite({
+          raised, retreats, ctx: options?.guard, paths: anchor.paths, wiring: opts.guard,
+          locks: [], alreadyHeld: ['deliveries', 'guards'],
+          recordOf: async key => final.deliveries[key] ?? null,
+          stateOf: r => ({ boardStatus: '', boardStage: '', phase: final.deliveries[r.key]?.phase ?? null }),
+          writeDocuments: commit,
+        })
         return value
       }
-      // Evidence mutations may never proceed without a contended lock.
+      // Both policy and records are read only after deliveries and guards are held.
+      const paths = anchor.paths
+      if (inGuardTransaction(paths)) return serializeGuardWrite(paths, 'deliveries', () => write())
+      const guarded = () => withGuardLocks(['deliveries', 'guards'], () => write(), { paths })
+      // A write carrying a custody stamp (only built when rule C is on) is fail-closed whatever rule A says (S7a N1, §2.6.1): it never
+      // goes ahead after the lock wait with another holder still on the file, and the stamp never rides a write that did.
+      const stamped = Array.isArray(options?.stamp) ? options.stamp.length > 0 : options?.stamp !== undefined
+      if (stamped || await peekRuleA(paths) !== 'off') return guarded()
+      // Rule A off (N2): exactly the base's locking — the evidence path's fail-closed locks, otherwise `withFileLock`.
       return options?.evidence
-        ? withGuardLocks(options.guardsPath ? ['deliveries', 'guards'] : ['deliveries'], write, { paths: { ...defaultGuardLockPaths(), deliveries: path, ...(options.guardsPath ? { guards: options.guardsPath } : {}) } })
-        : withFileLock(path, write)
+        ? withGuardLocks(options.guardsPath ? ['deliveries', 'guards'] : ['deliveries'], () => write(undefined, true), { paths })
+        : withFileLock(path, held => write(held, true))
     },
   }
 }

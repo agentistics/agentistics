@@ -32,7 +32,7 @@ export function runningSessionIds(registry: ManagedSession[], backend: BackendSe
 }
 
 export interface StagedFact { prompt?: string; harness?: string; model?: string; effort?: string; account?: string; cwd?: string }
-export interface SubtaskFact { id: string; taskId: string; title: string; status: string; groupMember: boolean; parentGroupId?: string; staged?: StagedFact; blockedBy: string[]; /** The TASK's Agentask priority (urgent|high|medium|low) — a subtask has none of its own. */ priority?: string }
+export interface SubtaskFact { id: string; taskId: string; title: string; status: string; groupMember: boolean; parentGroupId?: string; /** B4: set ONLY when the sweep's ledger names this piece (never from the flag in the file) — a placeholder is never work, queued or staged. */ restoredBy?: 'guard'; staged?: StagedFact; blockedBy: string[]; /** The TASK's Agentask priority (urgent|high|medium|low) — a subtask has none of its own. */ priority?: string }
 /** What the Fila tab shows beside a queued piece, read from the board in one place (same source as the card). */
 export interface QueueExtras {
   taskTitle: string
@@ -443,6 +443,8 @@ const RELEASE_SEARCH_COMPARES = 150
 export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): Promise<GateVerdict> {
   try {
     switch (name) {
+      // S2a: `evidencia` needs the classification host (checkout + git), which the SERVICE holds; it never reaches here.
+      case 'evidencia': return no('the evidencia gate is decided by the delivery service (it reads the piece\'s checkout and evidence)', ['evidência anexada'])
       case 'predispatch': return judgePredispatch(await f.subtask(r.subtaskId))
       case 'vaga': {
         const sub = await f.subtask(r.subtaskId)
@@ -613,6 +615,11 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
   }
 }
 
+/** B4 r2 (PURE over a ledger reader): `restoredBy` reaches the delivery facts only when the sweep's LEDGER names the piece; the file's flag alone never does. */
+export async function placeholderFact(store: { placeholderOf(id: string): Promise<unknown | null> }, s: { id: string; restoredBy?: string }): Promise<{ restoredBy?: 'guard' }> {
+  return s.restoredBy === 'guard' && await store.placeholderOf(s.id) ? { restoredBy: 'guard' } : {}
+}
+
 /** The machine's facts. Imports are lazy: the CLI must not load the server to run one gate. */
 export function defaultGateFacts(): GateFacts {
   const run = async (cmd: string, cwd: string, args: string[]) => {
@@ -638,7 +645,7 @@ export function defaultGateFacts(): GateFacts {
       if (!s) return null
       const st = s.stagedSession as (StagedFact & { prompt: string }) | undefined
       const taskRow = w.book.tasks.find(t => t.id === s.taskId)
-      return { id: s.id, taskId: s.taskId, title: s.title, status: s.status, groupMember: Boolean(s.parentGroupId), ...(s.parentGroupId ? { parentGroupId: s.parentGroupId } : {}), blockedBy: s.blockedBy ?? [], priority: (await import('../sessions/task-model')).migratePriority(taskRow?.priority), ...(st ? { staged: { prompt: st.prompt, harness: st.harness, model: st.model, effort: st.effort, account: st.account, cwd: st.cwd } } : {}) }
+      return { id: s.id, taskId: s.taskId, title: s.title, status: s.status, groupMember: Boolean(s.parentGroupId), ...(s.parentGroupId ? { parentGroupId: s.parentGroupId } : {}), ...(await placeholderFact(w.store, s)), blockedBy: s.blockedBy ?? [], priority: (await import('../sessions/task-model')).migratePriority(taskRow?.priority), ...(st ? { staged: { prompt: st.prompt, harness: st.harness, model: st.model, effort: st.effort, account: st.account, cwd: st.cwd } } : {}) }
     },
     sessions: async () => {
       const [{ readRegistry }, { readRolesDoc, roleOfRow }, { AGENTISTICS_DATA_DIR }] = await Promise.all([import('../sessions/registry'), import('../sessions/session-roles'), import('../config')])

@@ -522,7 +522,7 @@ export async function start(
     role: handoffKeepsRole ? 'worker' : cmd.handoff ? 'leader' : spawnRole({ explicit: cmd.role, leaderPrefix: !!cmd.label && hasRolePrefix(cmd.label), hasParent: !!parentSessionIdForPlan }),
     ...(cmd.handoff ? { handoffOf: parentSessionIdForPlan, ...(handoffKeepsRole ? { handoffKeepsRole: true } : {}) } : {}),
     taskRef: cmd.taskId ?? cmd.task, subtaskRef: cmd.subtask, folderRef: cmd.folder,
-    cwd: cmd.cwd, sharedCwd: cmd.sharedCwd, callerSessionId: verifiedCaller,
+    cwd: cmd.cwd, sharedCwd: cmd.sharedCwd, forceCwd: cmd.force, callerSessionId: verifiedCaller,
   })
   if (!filing.ok) { reportFilingRefusal(filing, cmd.json ?? false); return 1 }
   // ORQ.H3 `passagem-sem-sujo`: a leader hand-off waits for the task's uncommitted work to be saved.
@@ -876,7 +876,7 @@ export async function batch(
       const p = await planSpawnFilingSafe({
         liveIds,
         role: spawnRole({ explicit: spec.role, leaderPrefix: !!spec.name && hasRolePrefix(spec.name), hasParent: !!callerId }),
-        taskRef, subtaskRef: cmd.subtask, folderRef: spec.folder, cwd: spec.cwd, sharedCwd: cmd.sharedCwd,
+        taskRef, subtaskRef: cmd.subtask, folderRef: spec.folder, cwd: spec.cwd, sharedCwd: cmd.sharedCwd, forceCwd: cmd.force,
         callerSessionId: verifiedCaller, harness: spec.harness,
         // Earlier specs of this batch already occupy their directories.
         extraLiveCwds: plans.map(x => x.cwd),

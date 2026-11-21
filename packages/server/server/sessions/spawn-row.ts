@@ -38,10 +38,12 @@ export function spawnSessionFilingRequest(req: {
   taskId?: string | undefined
   subtaskId?: string | undefined
   cwd: string
+  force?: boolean | undefined
 }): SpawnFilingRequest {
   return {
     role: spawnRole({ explicit: req.role, leaderPrefix: !!req.label && hasRolePrefix(req.label), hasParent: !!req.parentSessionId, handoff: req.handoff && !req.handoffKeepsRole }),
     taskRef: req.taskId, subtaskRef: req.subtaskId, cwd: req.cwd,
+    ...(req.force ? { forceCwd: true } : {}),
     harness: req.harness,
     callerSessionId: req.parentVerified || req.handoff ? req.parentSessionId : undefined,
     ...(req.switchFrom ? { handoffOf: req.switchFrom, handoffKeepsRole: true } : req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId, ...(req.handoffKeepsRole ? { handoffKeepsRole: true } : {}) } : {}),
@@ -67,6 +69,7 @@ export function filingJson(plan: OkPlan): {
   subtaskId: string | null
   folder: { id: string; path: string; source: OkPlan['folderSource'] } | null
   cwd: string
+  crossRepo?: string
   role: 'worker' | 'leader' | null
   warnings: OkPlan['warnings']
 } {
@@ -75,6 +78,7 @@ export function filingJson(plan: OkPlan): {
     subtaskId: plan.subtaskId ?? null,
     folder: plan.folderId ? { id: plan.folderId, path: plan.folderPath ?? plan.folderId, source: plan.folderSource } : null,
     cwd: plan.cwd,
+    ...(plan.crossRepo ? { crossRepo: plan.crossRepo } : {}),
     role: plan.role ?? null,
     warnings: plan.warnings,
   }
@@ -92,5 +96,7 @@ export const WARNING_TEXT: Record<OkPlan['warnings'][number], string> = {
   subtask_member_filed_on_group: 'The subtask is a member of a group; the session is filed on the group.',
   inherited_task_needs_subtask: "The parent's task was not filed: only leaders are filed on the task itself, so this worker starts unfiled; file it on a subtask.",
   shared_checkout_override: 'Sharing a main checkout another live session works in (--shared-cwd).',
+  owner_differs: 'The checkout belongs to another owner than the task\'s repo (the repository moved); same host and name, so it is accepted.',
+  cross_repo_cwd: 'The working directory is a different repository than the task\'s (same organisation, or --force); metrics follow the session\'s own git remote.',
   inherited_task_repo_mismatch: 'The working directory is outside the inherited task repository; the session is still filed on that task. Pass --task explicitly to require a matching repository.',
 }

@@ -176,6 +176,9 @@ async function readCwdFromJsonl(filePath: string): Promise<string | null> {
 // ---------------------------------------------------------------------------
 
 import type { ProcStatSample } from './hardware-pure'
+/** r8 D: a malformed %-escape in a path is a client error (400), never a 500. */
+function safeDecodePath(s: string): string | null { try { return decodeURIComponent(s) } catch { return null } }
+
 const serverProcStatsMap = new Map<number, ProcStatSample>()
 
 // ---------------------------------------------------------------------------
@@ -623,7 +626,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // PLAN.LIMITS — the 5-hour and weekly windows each harness account last reported, with the
     // plan registered in Settings → Billing. Reads only what the host already stored.
     if (url.pathname === '/api/plan-limits' && req.method === 'GET') {
-      const [{ planLimitsPayload, sampleLivePlanSessions, planAccountKey }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
+      const [{ planLimitsPayload, sampleLivePlanSessions, planAccountKey, fleetLiveSessions }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
       const now = Date.now()
       let liveSessions: import('@agentistics/core').LivePlanSession[] = []
       // USO.CARREGANDO: the data build is only for the live burn sample — never wait for the whole of it.
@@ -644,7 +647,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         return sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByAccount, working)
       })(), PLAN_LIMITS_DATA_WAIT_MS)
       liveSessions = sampled ?? []
-      const body = await planLimitsPayload(prefs.billing, now, liveSessions)
+      // Peek only (see above): the running fleet sessions hold slots even when idle or waiting.
+      const { processSessionHub: hubOf } = await import('./sessions/session-hub')
+      const fleetLive = await fleetLiveSessions(hubOf()?.last()?.sessions ?? [])
+      const body = await planLimitsPayload(prefs.billing, now, liveSessions, fleetLive)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
     }
     // The tab's push streams over ONE WebSocket (`stream-mux.ts`): a browser's ~6 HTTP/1.1
@@ -751,7 +757,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -780,7 +786,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -823,7 +829,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -896,7 +902,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
-        return json(safe.body, 500)
+        return json(safe.body, safe.status ?? 500)
       }
     }
 
@@ -955,7 +961,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -1013,7 +1019,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
-        return new Response(JSON.stringify(safe.body), { status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
+        return new Response(JSON.stringify(safe.body), { status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
       }
     }
 
@@ -1033,7 +1039,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
-        return new Response(JSON.stringify(safe.body), { status: 500, headers })
+        return new Response(JSON.stringify(safe.body), { status: safe.status ?? 500, headers })
       }
     }
 
@@ -1048,7 +1054,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -1173,7 +1179,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1312,7 +1318,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
-        return new Response(JSON.stringify(safe.body), { status: 500, headers: json })
+        return new Response(JSON.stringify(safe.body), { status: safe.status ?? 500, headers: json })
       }
     }
 
@@ -1328,7 +1334,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1345,7 +1351,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1364,7 +1370,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1407,7 +1413,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: false })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1437,7 +1443,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: false })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1488,7 +1494,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: false })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1508,7 +1514,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1531,7 +1537,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1556,7 +1562,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1611,7 +1617,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1801,8 +1807,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1841,8 +1848,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
     }
@@ -1895,8 +1903,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -1959,7 +1968,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
-        return json(safe.body, 500)
+        return json(safe.body, safe.status ?? 500)
       }
     }
 
@@ -2360,7 +2369,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json({ ok }, ok ? 200 : 400)
     }
     if (url.pathname.startsWith('/api/tasks/statuses/') && req.method === 'POST') {
-      const id = decodeURIComponent(url.pathname.slice('/api/tasks/statuses/'.length))
+      const id = safeDecodePath(url.pathname.slice('/api/tasks/statuses/'.length))
+      if (id === null) return json({ error: 'bad_path', message: 'The address contains an invalid %-escape; send the id URL-encoded.' }, 400)
       const body = await req.json().catch(() => ({})) as { label?: string; color?: string; stage?: string }
       const { editStatus } = await import('./sessions/task-web')
       const out = await editStatus(id, {
@@ -2372,7 +2382,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(out, out.ok ? 200 : (out.message === 'no_such_status' ? 404 : out.message === 'status_stage_in_use' ? 422 : 400))
     }
     if (url.pathname.startsWith('/api/tasks/statuses/') && req.method === 'DELETE') {
-      const id = decodeURIComponent(url.pathname.slice('/api/tasks/statuses/'.length))
+      const id = safeDecodePath(url.pathname.slice('/api/tasks/statuses/'.length))
+      if (id === null) return json({ error: 'bad_path', message: 'The address contains an invalid %-escape; send the id URL-encoded.' }, 400)
       const { deleteStatus } = await import('./sessions/task-web')
       const out = await deleteStatus(id)
       // `protected`/`in_use` are 422, the same shape `blocked_needs_reason`/`done_needs_session`
@@ -2399,7 +2410,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json({ ok }, ok ? 200 : 400)
     }
     if (url.pathname.startsWith('/api/tasks/types/') && req.method === 'POST') {
-      const id = decodeURIComponent(url.pathname.slice('/api/tasks/types/'.length))
+      const id = safeDecodePath(url.pathname.slice('/api/tasks/types/'.length))
+      if (id === null) return json({ error: 'bad_path', message: 'The address contains an invalid %-escape; send the id URL-encoded.' }, 400)
       const body = await req.json().catch(() => ({})) as { label?: string; color?: string }
       const { editType } = await import('./sessions/task-web')
       const out = await editType(id, {
@@ -2409,7 +2421,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(out, out.ok ? 200 : (out.message === 'no_such_type' ? 404 : 400))
     }
     if (url.pathname.startsWith('/api/tasks/types/') && req.method === 'DELETE') {
-      const id = decodeURIComponent(url.pathname.slice('/api/tasks/types/'.length))
+      const id = safeDecodePath(url.pathname.slice('/api/tasks/types/'.length))
+      if (id === null) return json({ error: 'bad_path', message: 'The address contains an invalid %-escape; send the id URL-encoded.' }, 400)
       const { deleteType } = await import('./sessions/task-web')
       const out = await deleteType(id)
       // `in_use` is 422 like the status routes; `no_such_type` stays 404.
@@ -2442,7 +2455,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         ])
         const body = req.method === 'GET' ? {} : await req.json().catch(() => ({})) as Record<string, unknown>
         const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
-        const out = await evidenceRequest(req.method, decodeURIComponent(evidenceRoute[1]!), Object.fromEntries(url.searchParams), body, {
+        const evidenceRef = safeDecodePath(evidenceRoute[1]!)
+        if (evidenceRef === null) return json({ error: 'bad_path', message: 'The address contains an invalid %-escape; send the id URL-encoded.' }, 400)
+        const out = await evidenceRequest(req.method, evidenceRef, Object.fromEntries(url.searchParams), body, {
           service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token), mode: readOwnerProofMode, browser,
           consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
         })
@@ -2450,11 +2465,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       } catch (err) {
         const safe = safeError(err, { verbose: false })
         console.error(safe.logLine)
-        return json(safe.body, 500)
+        return json(safe.body, safe.status ?? 500)
       }
     }
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'GET') {
-      const ref = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
+      const ref = safeDecodePath(url.pathname.slice('/api/tasks/'.length))
+      if (ref === null) return json({ error: 'bad_path', message: 'The address contains an invalid %-escape; send the id URL-encoded.' }, 400)
       const { showTask } = await import('./sessions/task-web')
       const found = await showTask(ref, taskFilterOf(url))
       if (!found) return json({ error: 'no_such_task' }, 404)
@@ -2478,7 +2494,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // A task file, by its own id. Separate from the task routes because a download is addressed by
     // the FILE and a caller holding a file id has no reason to know which task it hangs off.
     if (url.pathname.startsWith('/api/task-files/')) {
-      const fileId = decodeURIComponent(url.pathname.slice('/api/task-files/'.length))
+      const fileId = safeDecodePath(url.pathname.slice('/api/task-files/'.length))
+      if (fileId === null) return json({ error: 'bad_path', message: 'The address contains an invalid %-escape; send the id URL-encoded.' }, 400)
       const mod = await import('./sessions/task-web')
       if (req.method === 'DELETE') {
         const { evidenceDeleteRequest } = await import('./delivery/evidence-delete')
@@ -2520,15 +2537,32 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'DELETE') {
-      const ref = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
+      const ref = safeDecodePath(url.pathname.slice('/api/tasks/'.length))
+      if (ref === null) return json({ error: 'bad_path', message: 'The address contains an invalid %-escape; send the id URL-encoded.' }, 400)
       const { deleteTask } = await import('./sessions/task-web')
-      const { evidenceDeleteRequest } = await import('./delivery/evidence-delete')
-      const result = await evidenceDeleteRequest(() => deleteTask(ref))
+      // r7 (re-QA r5 F1): who is asking, for the store's accepted-member rule. The body (the MCP carries its session proof there) is optional.
+      const delBody = await req.json().catch(() => ({})) as Record<string, unknown>
+      const delClaim = delBody.session as { id?: unknown } | undefined | null
+      const delCtx: import('./delivery/guard').GuardContext = {
+        principal: delClaim && typeof delClaim === 'object' && typeof delClaim.id === 'string' ? { kind: 'session', id: delClaim.id, via: 'token' } : { kind: 'unattributed' },
+      }
+      const [{ deleteTaskRequest }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
+        import('./delivery/web'), import('./sessions/session-identity'), import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
+      ])
+      const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+      const result = await deleteTaskRequest(ref, delBody, delCtx, {
+        del: (r, c) => deleteTask(r, c),
+        principalDeps: {
+          verify: (id, token) => verifySessionIdentity(id, token), mode: readOwnerProofMode, browser,
+          consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+        },
+      })
       return json(result.body, result.status)
     }
 
     if (url.pathname.startsWith('/api/tasks/') && req.method === 'POST') {
-      const rest = decodeURIComponent(url.pathname.slice('/api/tasks/'.length))
+      const rest = safeDecodePath(url.pathname.slice('/api/tasks/'.length))
+      if (rest === null) return json({ error: 'bad_path', message: 'The address contains an invalid %-escape; send the id URL-encoded.' }, 400)
       // `<ref>/comments`, `<ref>/subtasks`, `<ref>/files`, `<ref>` (status/edit). The ref may itself
       // contain slashes only if someone named a task that way, so the VERB is taken from the tail.
       const slash = rest.lastIndexOf('/')
@@ -2574,6 +2608,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
 
       const body = await req.json().catch(() => ({})) as Record<string, unknown>
+      // ENTREGA.GARANTIDA S2a: who is asking, for the STORE's guard. Guard A binds every principal alike, so the context needs
+      // the principal's KIND and never a vault grant (a status move must not burn a single-use grant): a session the screen
+      // above already verified (a forged one was refused 403 before this line), else `unattributed`.
+      const sessionClaim = body.session as { id?: unknown } | undefined | null
+      const guardCtx: import('./delivery/guard').GuardContext = {
+        principal: sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string'
+          ? { kind: 'session', id: sessionClaim.id, via: 'token' }
+          : { kind: 'unattributed' },
+      }
       // S0d.6 (QA F6): a write that SPEAKS AS THE OWNER (an owner comment created/edited/removed, a thread sent "as the
       // person") needs the owner principal — the same resolution as `/api/deliveries` (grant → session → legacy browser).
       const ownerGate = async (pieceKey: string, move: string) => {
@@ -2766,16 +2809,52 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
       if (verb === 'subtasks') {
         if (typeof body.id === 'string') {
-          if (body.remove === true) return json({ ok: await mod.removeSubtask(body.id) })
+          // r7 (re-QA r5 F4): the path's task must be the subtask's own.
+          const pathCheck = await mod.subtaskPathCheck(ref, body.id)
+          if (pathCheck !== 'ok') return json({ ok: false, reason: pathCheck === 'wrong_task' ? 'subtask_not_in_task' : 'no_such_task', message: pathCheck === 'wrong_task' ? `subtask ${body.id} does not belong to task ${ref}` : `task ${ref} does not exist` }, pathCheck === 'wrong_task' ? 422 : 404)
+          if (body.dismissPlaceholder === true) {
+            // B4/r5: the placeholder-only door (the MCP and CLI use it too). The accepted-member rule runs FIRST, in the one request door `removeSubtaskRequest`
+            // (a header owner is never proof for an accepted piece); a placeholder is dismissed by its leader or the owner, never a general remove.
+            const [{ removeSubtaskRequest }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
+              import('./delivery/web'), import('./sessions/session-identity'), import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
+            ])
+            const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+            const reply = await removeSubtaskRequest(body.id, body, guardCtx, {
+              remove: async (sid, ctx) => { const out = await mod.dismissPlaceholder(sid, ctx); return out.ok ? true : out },
+              principalDeps: {
+                verify: (id, token) => verifySessionIdentity(id, token), mode: readOwnerProofMode, browser,
+                consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+              },
+              legacyOwnerGate: async () => { const denied = await ownerGate(body.id as string, 'subtask:dismiss'); return denied ? { status: denied.status, body: denied.body } : null },
+            })
+            const missing = reply.status === 422 && (reply.body as { reason?: string }).reason === 'no_such_subtask'
+            return json(reply.body, missing ? 404 : reply.status)
+          }
+          if (body.remove === true) {
+            // B4/r4: placeholder → leader or owner; an ACCEPTED member → only an owner proof that is not a browser header; one door, `removeSubtaskRequest`.
+            const [{ removeSubtaskRequest }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
+              import('./delivery/web'), import('./sessions/session-identity'), import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
+            ])
+            const browser = browserFactsOf(req, server.requestIP(req)?.address ?? null, { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+            const reply = await removeSubtaskRequest(body.id, body, guardCtx, {
+              remove: (sid, ctx) => mod.removeSubtask(sid, ctx),
+              principalDeps: {
+                verify: (id, token) => verifySessionIdentity(id, token), mode: readOwnerProofMode, browser,
+                consumeGrant: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: 'http:local', loopback: browser.loopbackPeer }, scope),
+              },
+              legacyOwnerGate: async () => { const denied = await ownerGate(body.id as string, 'subtask:dismiss'); return denied ? { status: denied.status, body: denied.body } : null },
+            })
+            return json(reply.body, reply.status)
+          }
           // A bare `{id, done}` is the tick; anything else is a column edit. Both land on
           // `patchSubtask`, which derives `done` from `status` so the two cannot disagree.
           // `done_needs_session`/`invalid_group`/`subtask_has_sessions`/`group_field_conflict` are
           // 422, the same shape `sessions`'s `blocked` answers with above — each names a piece of
           // work this request cannot do, not a resource that is missing. `no_such_subtask` stays
           // 404: the id named nothing.
-          if (typeof body.done === 'boolean' && Object.keys(body).length === 2) {
-            const result = await mod.setSubtaskDone(body.id, body.done)
-            return json(result, result.ok ? 200 : (result.message === 'done_needs_session' ? 422 : 404))
+          if (typeof body.done === 'boolean' && Object.keys(body).filter(k => k !== 'session').length === 2) {
+            const result = await mod.setSubtaskDone(body.id, body.done, guardCtx)
+            return json(result, result.ok ? 200 : 'guard' in result ? result.guard.status : (result.message === 'done_needs_session' ? 422 : 404))
           }
           // A staged session draft (t-918cc82233): `null` clears, an object is validated HERE before
           // the write — a malformed one (no prompt, a relative cwd) is refused outright (400) rather
@@ -2813,11 +2892,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
               ? { parentGroupId: body.parentGroupId }
               : body.parentGroupId === null ? { parentGroupId: null } : {}),
             ...(stagedSessionPatch !== undefined ? { stagedSession: stagedSessionPatch } : {}),
-          })
+          }, guardCtx)
           return json(
             result,
             result.ok
               ? 200
+              // ENTREGA.GARANTIDA S2a: the store's guard refused (or could not take its locks) — its own status (422 / 409).
+              : 'guard' in result ? result.guard.status
               // `unknown_status` is 400, the same class `bad_status` is at the task level above —
               // the request never named a real status. Everything else here names a piece of work
               // the request cannot do, not a resource that is missing, hence 422; `no_such_subtask`
@@ -2925,6 +3006,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           ...(Array.isArray(body.blockedBy)
             ? { blockedBy: body.blockedBy.filter((v): v is string => typeof v === 'string') }
             : {}),
+          guard: guardCtx,
         },
       )
       // 400, not 404: `unknown_status` is the same class of error `bad_status` above already is —
@@ -2934,6 +3016,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // understood — it is missing the one thing that status cannot be recorded without. A 4xx a
       // caller can act on, with a code that says so.
       return json(out, out.ok ? 200
+        : out.guard ? out.guard.status
         : out.message === 'unknown_status' ? 400
         : (out.message === 'blocked_needs_reason' || out.message === 'done_needs_session' || out.message === 'open_subtasks') ? 422 : 404)
     }
@@ -3066,8 +3149,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3230,7 +3314,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify({ ok: false, ...safe.body }), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3270,8 +3354,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3315,8 +3400,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3429,8 +3515,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3471,8 +3558,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3516,8 +3604,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3552,8 +3641,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3586,8 +3676,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3684,8 +3775,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3733,8 +3825,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify(safeError(err, { verbose: PROFILE === 'local' }).body), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify(safe.body), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3759,8 +3852,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ files: [], ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ files: [], ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3782,8 +3876,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3827,8 +3922,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -3871,8 +3967,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           },
         })
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, ...safeError(err, { verbose: PROFILE === 'local' }).body }), {
-          status: 500,
+        const safe = safeError(err, { verbose: PROFILE === 'local' })
+        return new Response(JSON.stringify({ ok: false, ...safe.body }), {
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -4412,7 +4509,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -4456,7 +4553,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error(safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -4532,7 +4629,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const safe = safeError(err, { verbose: PROFILE === 'local' })
         console.error('[/api/data]', safe.logLine)
         return new Response(JSON.stringify(safe.body), {
-          status: 500,
+          status: safe.status ?? 500,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
@@ -4573,8 +4670,15 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 }
 
 async function handleCompressed(req: Request, server: Server<WSData>): Promise<Response | undefined> {
-  const res = await handleRequest(req, server)
-  return res ? compressResponse(req, res) : res
+  try {
+    const res = await handleRequest(req, server)
+    return res ? compressResponse(req, res) : res
+  } catch (err) {
+    const safe = safeError(err, { verbose: false })
+    console.error(safe.logLine)
+    const CORS_HEADERS = corsHeadersFor(req.headers.get('origin'), ALLOWED_ORIGINS, !SERVE_STATIC)
+    return new Response(JSON.stringify(safe.body), { status: safe.status ?? 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } })
+  }
 }
 
 await bootstrapServer()

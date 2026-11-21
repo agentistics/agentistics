@@ -118,9 +118,18 @@ describe('engine-api 1.31: the owner\'s own session (openOwnerSession)', () => {
     expect(log).toContain('kill:v-1')
   })
 
-  test('stop un-mutes THEN ends the session (it then shows among the ended ones, reopenable)', async () => {
+  test('stop un-mutes THEN ends an owner session this engine opened (it then shows among the ended ones, reopenable)', async () => {
     const { d, log } = odeps()
-    await createDelegateMembers(d).stop('v-1')
+    const m = createDelegateMembers(d)
+    await m.openOwnerSession(ownReq)
+    log.length = 0
+    await m.stop('v-1')
     expect(log).toEqual(['mute:v-1:false', 'kill:v-1'])
+  })
+
+  test('stop of a session it did NOT open (a delegated worker) only ends it: the mute its owner set stays', async () => {
+    const { d, log } = odeps()
+    await createDelegateMembers(d).stop('w-9')
+    expect(log).toEqual(['kill:w-9'])
   })
 })
