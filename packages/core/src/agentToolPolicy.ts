@@ -334,3 +334,25 @@ export function neverRouteFor(method: string, path: string): NeverRoute | null {
   }
   return null
 }
+
+/** The prefix of every tool an ENGINE declares (`EngineManifest.mcpTools`, engine-api 1.30). */
+export const ENGINE_TOOL_PREFIX = 'agentistics_x_'
+
+export function isEngineToolName(name: string): boolean {
+  return name.startsWith(ENGINE_TOOL_PREFIX)
+}
+
+/**
+ * The policy of an engine-declared tool, from what the engine DECLARED: R = read, W = reversible write (audited
+ * like any other W tool). Engine tools can never be `D` — the declaration has no such value. Both need host power.
+ */
+export function engineToolPolicy(tool: { risk: 'R' | 'W'; method: string; path: string }): AgentToolPolicy {
+  return {
+    risk: tool.risk === 'W' ? 'W' : 'R',
+    reason: 'declared by the engine in its manifest',
+    routes: [`${tool.method} ${tool.path}`],
+    capability: 'localShell',
+    host: true,
+    allowance: null,
+  }
+}

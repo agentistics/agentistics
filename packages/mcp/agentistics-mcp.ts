@@ -23,6 +23,7 @@ import {
   toolsForGate,
 } from "./session-tokens.js";
 import { createAgentAuditSink } from "./agent-audit.js";
+import { createEngineTools } from "./engine-tools.js";
 import { taskCommentRequest } from "./task-comment-args.js";
 import { sessionProof, withTaskWriteProof } from "./session-proof.js";
 import { evidenceRequestOf } from "./evidence-args.js";
@@ -1203,8 +1204,11 @@ const TOOLS: Tool[] = [
 /** Exported for the session-context parity test; the live list remains the single MCP registry. */
 export const MCP_TOOL_NAMES = TOOLS.map(tool => tool.name)
 
+// Tools an engine declares (engine-api 1.30): listed from the server, proxied to its declared route.
+const engineTools = createEngineTools({ api: API });
+
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const tools = toolsForGate(TOOLS, await nativeVisibleNow());
+  const tools = [...toolsForGate(TOOLS, await nativeVisibleNow()), ...(await engineTools.mcpTools())];
   const flowsOn = await flowsVisibleNow();
   return { tools: flowsOn ? tools : tools.filter(tool => !tool.name.startsWith("agentistics_flow_")) };
 });
@@ -1238,6 +1242,8 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
   const { name, arguments: args } = req.params;
 
   try {
+    const viaEngine = await engineTools.call(name, args as Record<string, unknown> | undefined, sessionProof(process.env));
+    if (viaEngine) return viaEngine;
     switch (name) {
       // ------------------------------------------------------------ the ALM (task board)
       case "agentistics_tasks": {

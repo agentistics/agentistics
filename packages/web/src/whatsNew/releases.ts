@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.221.0': {
+    features: [
+      {
+        pt: 'Agentes: quando o motor oferece ferramentas próprias, elas aparecem para os assistentes pelo MCP do agentistics, com o mesmo registro de auditoria das outras ações.',
+        en: 'Agents: when the engine offers tools of its own, assistants get them through the agentistics MCP, with the same audit trail as every other action.',
+      },
+    ],
+    fixes: [],
+  },
   '2.220.0': {
     features: [
       {

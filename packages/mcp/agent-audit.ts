@@ -168,7 +168,7 @@ export interface ToolAuditRecord {
   at: string
   actor: AuditActor
   /** `null` when the name was not a known tool — a caller-chosen string is not written verbatim. */
-  tool: AgentToolName | null
+  tool: string | null
   risk: AgentToolRisk | null
   targets: string[]
   targetsOmitted?: number
@@ -193,8 +193,16 @@ export function isKnownTool(name: string): name is AgentToolName {
   return Object.prototype.hasOwnProperty.call(AGENT_TOOL_POLICY, name)
 }
 
+/** Engine-declared tools (`engine-tools.ts` fills it on every list): name → the risk the engine declared. */
+const engineRisks = new Map<string, AgentToolRisk>()
+export function setEngineToolRisks(risks: Record<string, AgentToolRisk>): void {
+  engineRisks.clear()
+  for (const [n, r] of Object.entries(risks)) engineRisks.set(n, r)
+}
+
 export function riskOf(name: string): AgentToolRisk | null {
-  return isKnownTool(name) ? AGENT_TOOL_POLICY[name].risk : null
+  if (isKnownTool(name)) return AGENT_TOOL_POLICY[name].risk
+  return engineRisks.get(name) ?? null
 }
 
 export interface ToolCallInput {
@@ -207,14 +215,14 @@ export interface ToolCallInput {
 }
 
 export function buildToolAuditRecord(input: ToolCallInput): ToolAuditRecord {
-  const known = isKnownTool(input.name)
+  const known = isKnownTool(input.name) || engineRisks.has(input.name)
   const { targets, omitted } = targetsOf(input.args)
   return {
     v: 1,
     kind: 'tool',
     at: input.at.toISOString(),
     actor: actorOf(input.client, input.args, input.naySession),
-    tool: known ? (input.name as AgentToolName) : null,
+    tool: known ? input.name : null,
     risk: riskOf(input.name),
     targets,
     ...(omitted > 0 ? { targetsOmitted: omitted } : {}),
