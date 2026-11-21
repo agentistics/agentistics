@@ -115,22 +115,18 @@ export interface StartDeps {
   verify: (id: unknown, token: unknown) => Promise<string | null>
   roleOf: (managedId: string) => Promise<'leader' | 'worker' | undefined>
   now: () => number
-  /** The request is the person's dashboard (`dashboardRequest`). */
-  dashboard: boolean
 }
 
 export async function requestStart(store: NayCallStore, surface: CallSurfaceRef | null, body: unknown, deps: StartDeps): Promise<StartReply> {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { ok: false, error: 'bad_request' }
   const o = body as { session?: { id?: unknown; token?: unknown } }
-  if (o.session !== undefined) {
-    // An agent: a verified LEADER only. A claimed session never falls back to the dashboard branch.
-    const sender = await deps.verify(o.session?.id, o.session?.token)
-    if (!sender) return { ok: false, error: 'unverified_sender' }
-    if ((await deps.roleOf(sender)) !== 'leader') return { ok: false, error: 'leader_only' }
-  } else if (!deps.dashboard) {
-    // No session proof AND not the dashboard: a direct client with nothing to show.
-    return { ok: false, error: 'unverified_sender' }
-  }
+  // H1: this route is FOR AGENTS and the proof is MANDATORY. The person never POSTs here (the dashboard's own
+  // button presses the surface locally), and browser headers are forgeable by any local client — so "no proof,
+  // but it looks like the dashboard" is NOT an identity and is not accepted. A verified LEADER only.
+  if (o.session === undefined || o.session === null) return { ok: false, error: 'unverified_sender' }
+  const sender = await deps.verify(o.session.id, o.session.token)
+  if (!sender) return { ok: false, error: 'unverified_sender' }
+  if ((await deps.roleOf(sender)) !== 'leader') return { ok: false, error: 'leader_only' }
   const now = deps.now()
   const view = callView(store, surface, now)
   if (!view.available) return { ok: false, error: 'no_voice' }
@@ -186,10 +182,10 @@ export async function handleStateWrite(req: Request, store: NayCallStore, ctx: O
   return { body: out, status: out.ok ? 200 : 400 }
 }
 
-/** POST /api/nay-call/start — the dashboard, or a verified leader session. */
-export async function handleStart(req: Request, store: NayCallStore, surface: CallSurfaceRef | null, ctx: OriginCtx, deps: Omit<StartDeps, 'dashboard'>): Promise<{ body: unknown; status: number }> {
+/** POST /api/nay-call/start — a verified leader session ONLY (no dashboard path: headers are not identity). */
+export async function handleStart(req: Request, store: NayCallStore, surface: CallSurfaceRef | null, ctx: OriginCtx, deps: StartDeps): Promise<{ body: unknown; status: number }> {
   const read = await readSmall(req, START_MAX_BYTES)
   if (!read.ok) return { body: { ok: false, error: read.status === 413 ? 'too_large' : 'bad_request' }, status: read.status }
-  const out = await requestStart(store, surface, read.value, { ...deps, dashboard: dashboardOf(req, ctx) })
+  const out = await requestStart(store, surface, read.value, deps)
   return { body: out, status: startStatus(out) }
 }

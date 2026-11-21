@@ -10,7 +10,9 @@ const surfaces = [
 ]
 const surface = callSurfaceFrom(surfaces)
 const T0 = 1_000_000
-const deps = (over: Partial<StartDeps> = {}, now = T0): StartDeps => ({ verify: async () => null, roleOf: async () => undefined, now: () => now, dashboard: true, ...over })
+const LEADER = { session: { id: 'm', token: 't' } }
+const leaderDeps = (over: Partial<StartDeps> = {}, now = T0): StartDeps => ({ verify: async () => 'm', roleOf: async () => 'leader', now: () => now, ...over })
+const deps = (over: Partial<StartDeps> = {}, now = T0): StartDeps => ({ verify: async () => null, roleOf: async () => undefined, now: () => now, ...over })
 
 describe('callSurfaceFrom', () => {
   test('the same surface the button picks: composer + phone; none without voice', () => {
@@ -44,9 +46,9 @@ describe('parseReport / callView', () => {
 describe('requestStart', () => {
   const fresh = () => { const s = newNayCallStore(); acceptReport(s, { active: false }, T0); return s }
 
-  test('the dashboard (no session field, browser provenance) can start; the next browser report collects it exactly once', async () => {
+  test('a verified leader can start; the next browser report collects it exactly once', async () => {
     const store = fresh()
-    const out = await requestStart(store, surface, {}, deps())
+    const out = await requestStart(store, surface, LEADER, leaderDeps())
     expect(out).toMatchObject({ ok: true, already: false })
     expect(callView(store, surface, T0).startRequested).toBe(true)
     expect(acceptReport(store, { active: false }, T0 + 100)).toEqual({ ok: true, start: true })
@@ -54,18 +56,18 @@ describe('requestStart', () => {
   })
   test('a request nobody collected in time is forgotten', async () => {
     const store = fresh()
-    await requestStart(store, surface, {}, deps())
+    await requestStart(store, surface, LEADER, leaderDeps())
     expect(acceptReport(store, { active: false }, T0 + REQUEST_TTL_MS + 1)).toEqual({ ok: true, start: false })
   })
   test('a call already active is reported, not restarted', async () => {
     const store = newNayCallStore(); acceptReport(store, { active: true, parked: false, sessionId: 's' }, T0)
-    expect(await requestStart(store, surface, {}, deps())).toMatchObject({ ok: true, already: true })
+    expect(await requestStart(store, surface, LEADER, leaderDeps())).toMatchObject({ ok: true, already: true })
     expect(store.requestedAt).toBeNull()
   })
   test('refused with no voice, and with no browser open (never queued)', async () => {
-    expect(await requestStart(fresh(), null, {}, deps())).toEqual({ ok: false, error: 'no_voice' })
+    expect(await requestStart(fresh(), null, LEADER, leaderDeps())).toEqual({ ok: false, error: 'no_voice' })
     const empty = newNayCallStore()
-    expect(await requestStart(empty, surface, {}, deps())).toEqual({ ok: false, error: 'no_browser' })
+    expect(await requestStart(empty, surface, LEADER, leaderDeps())).toEqual({ ok: false, error: 'no_browser' })
     expect(empty.requestedAt).toBeNull()
   })
   test('a session must prove itself and be a leader; a worker may not ring the owner', async () => {
@@ -74,17 +76,17 @@ describe('requestStart', () => {
     expect(await requestStart(fresh(), surface, body, deps({ verify: async () => 'm', roleOf: async () => 'worker' }))).toEqual({ ok: false, error: 'leader_only' })
     expect(await requestStart(fresh(), surface, body, deps({ verify: async () => 'm', roleOf: async () => 'leader' }))).toMatchObject({ ok: true })
   })
-  test('no session field is NOT proof of being the person: a direct client without provenance is refused', async () => {
+  test('H1: no session proof is refused — there is no "looks like the dashboard" path (headers are forgeable)', async () => {
     const store = fresh()
-    expect(await requestStart(store, surface, {}, deps({ dashboard: false }))).toEqual({ ok: false, error: 'unverified_sender' })
+    for (const b of [{}, { session: null }]) expect(await requestStart(store, surface, b, leaderDeps())).toEqual({ ok: false, error: 'unverified_sender' })
     expect(store.requestedAt).toBeNull()
   })
   test('a claimed session never falls back to the dashboard branch, even with browser headers', async () => {
     const store = fresh()
     const body = { session: { id: 'm', token: 'bad' } }
-    expect(await requestStart(store, surface, body, deps({ dashboard: true }))).toEqual({ ok: false, error: 'unverified_sender' })
-    expect(await requestStart(store, surface, body, deps({ dashboard: true, verify: async () => 'm', roleOf: async () => 'worker' }))).toEqual({ ok: false, error: 'leader_only' })
-    expect(await requestStart(store, surface, { session: null }, deps({ dashboard: true }))).toMatchObject({ ok: false })
+    expect(await requestStart(store, surface, body, deps())).toEqual({ ok: false, error: 'unverified_sender' })
+    expect(await requestStart(store, surface, body, deps({ verify: async () => 'm', roleOf: async () => 'worker' }))).toEqual({ ok: false, error: 'leader_only' })
+    expect(await requestStart(store, surface, { session: null }, deps())).toMatchObject({ ok: false })
     expect(store.requestedAt).toBeNull()
   })
   test('a non-object body is a bad request, never read as {}', async () => {
@@ -93,11 +95,11 @@ describe('requestStart', () => {
   })
   test('M2: a PARKED call is returned to (queued, collected once), like the button; an on-screen one is `already`', async () => {
     const parked = newNayCallStore(); acceptReport(parked, { active: true, parked: true, sessionId: 's', since: 1 }, T0)
-    expect(await requestStart(parked, surface, {}, deps())).toMatchObject({ ok: true, already: false })
+    expect(await requestStart(parked, surface, LEADER, leaderDeps())).toMatchObject({ ok: true, already: false })
     expect(acceptReport(parked, { active: true, parked: true, sessionId: 's', since: 1 }, T0 + 100)).toEqual({ ok: true, start: true })
     expect(acceptReport(parked, { active: true, parked: true, sessionId: 's', since: 1 }, T0 + 200)).toEqual({ ok: true, start: false })
     const onScreen = newNayCallStore(); acceptReport(onScreen, { active: true, parked: false, sessionId: 's' }, T0)
-    expect(await requestStart(onScreen, surface, {}, deps())).toMatchObject({ ok: true, already: true })
+    expect(await requestStart(onScreen, surface, LEADER, leaderDeps())).toMatchObject({ ok: true, already: true })
     expect(acceptReport(onScreen, { active: true, parked: false, sessionId: 's' }, T0 + 100)).toEqual({ ok: true, start: false })
   })
   test('status codes', () => {
@@ -147,7 +149,7 @@ describe('dashboardRequest (the vault predicate itself)', () => {
 
 describe('route handlers (real Requests)', () => {
   const live = () => { const s = newNayCallStore(); acceptReport(s, { active: false }, T0); return s }
-  const base = { verify: async () => null, roleOf: async () => undefined, now: () => T0 } as Omit<StartDeps, 'dashboard'>
+  const base = { verify: async () => null, roleOf: async () => undefined, now: () => T0 } as StartDeps
 
   test('H1: POST start with no proof and no browser provenance is refused (401), nothing queued', async () => {
     const store = live()
@@ -190,11 +192,11 @@ describe('route handlers (real Requests)', () => {
       expect(store.report?.sessionId).toBeNull()
     }
   })
-  test('the dashboard (same-origin) can start', async () => {
+  test('H1: a forged-perfect dashboard request WITHOUT session proof is still 401, nothing queued', async () => {
     const store = live()
-    const r = await handleStart(req('POST', '/api/nay-call/start', '{}', dash), store, surface, ctx, base)
-    expect(r.status).toBe(200)
-    expect(store.requestedAt).toBe(T0)
+    const r = await handleStart(req('POST', '/api/nay-call/start', '{}', dash), store, surface, ctx, { ...base, verify: async () => 'm', roleOf: async () => 'leader' })
+    expect(r.status).toBe(401)
+    expect(store.requestedAt).toBeNull()
   })
   test('M1: PUT state without browser provenance is 403 and changes nothing (cannot forge a call or steal a start)', async () => {
     const store = live()
