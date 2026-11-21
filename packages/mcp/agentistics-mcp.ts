@@ -463,6 +463,11 @@ const TOOLS: Tool[] = [
           description:
             "Create this subtask as a GROUP instead of an ordinary subtask. Only meaningful together with `title` (creation) — a group's shape cannot be changed afterwards.",
         },
+        dismissPlaceholder: {
+          type: "boolean",
+          description:
+            "With `id`: dismiss a PLACEHOLDER the guard sweep restored after a raw delete (its title says \"restored by the guard sweep\"). Only the task leader or the owner may; it is NOT a general remove — a real subtask is refused (`not_a_placeholder`). The sweep will not re-create a dismissed one.",
+        },
         parentGroupId: {
           type: "string",
           description:
@@ -1362,6 +1367,10 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         // false -> "todo" (the same transition the bare tick makes). A `status` that contradicts it is
         // REFUSED, never half-applied. The route validates group membership against the post-patch state, so
         // `parentGroupId` + done is two writes in order: join first, then close.
+        if (a?.id !== undefined && a?.dismissPlaceholder === true) {
+          const body = await apiSend("POST", `/api/tasks/${encodeURIComponent(String(a?.ref))}/subtasks`, { id: a.id, dismissPlaceholder: true });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
         const wantsDone = typeof a?.done === "boolean" ? (a.done as boolean) : undefined;
         const doneStatus = wantsDone === undefined ? undefined : wantsDone ? "done" : "todo";
         if (a?.id !== undefined && doneStatus !== undefined && named.length > 0 && typeof a?.status === "string" && (wantsDone ? a.status !== "done" : a.status === "done")) {

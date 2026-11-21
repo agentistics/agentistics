@@ -217,7 +217,7 @@ test('S2B-5 health has one sweep-loop WARN, full ids, own EN/PT sentence and off
   for (const id of ids) expect(issues[0].description).toContain(id)
   expect(issues[0].description).not.toContain('owner turned')
   expect(issues[0].description).toContain('escritor desconhecido')
-  expect(issues[0].guide).toBe('agentop flow guarantee off a')
+  expect(issues[0].guide).not.toContain('guarantee off') // r3: per-kind guide
 })
 test('S2B-4 migration missing makes ON report-only even with caller activation facts', async () => {
   const w = await world('on', [['p1']], false)

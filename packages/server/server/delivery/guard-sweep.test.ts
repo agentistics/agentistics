@@ -108,7 +108,7 @@ describe('§3.5.17 forged state against the real storage', () => {
       if (delivery) expect((await w.store.get('p1'))!.history.at(-1)).toMatchObject({ to: 'executando', actor: 'flow:sweep' })
       const said = (await comments(w, 'p1')).join('\n')
       expect(said).toContain('guard sweep reverted p1')
-      expect(said).toContain('agentop flow guarantee off a')
+      expect(said).toContain('only reverts raw file writes')
       expect(said).toContain('varredura do guarda reverteu p1')
     })
   }
@@ -274,7 +274,7 @@ describe('bounded chunks, breaker, loop guard', () => {
     for (const id of ids) expect((await w.store.get(id))!.phase).toBe('executando')
   })
 
-  test('a piece reverted twice in 24 h is BLOCKED (externo), the WARN names `guarantee off`, the third forge is not a silent revert', async () => {
+  test('a piece reverted twice in 24 h is BLOCKED (externo), the WARN says how to release it (r4: no longer `guarantee off`), the third forge is not a silent revert', async () => {
     const w = await world('on')
     await writeCheckpoint(w, cp('p1', { rank: 0, boardStatus: 'in_progress', boardStage: 'running', phase: 'executando', auth: [{ kind: 'grandfathered', at: ISO }] }))
     forgeDelivery(w, 'p1', record('p1', 'executando'))
@@ -288,9 +288,9 @@ describe('bounded chunks, breaker, loop guard', () => {
     expect((await comments(w, 'p1')).join(' ')).toContain('an unknown writer keeps moving this piece')
     const rec = (await w.store.get('p1'))!
     expect(rec.phase).toBe('bloqueado')
-    expect(w.logs.join('\n')).toContain('agentop flow guarantee off a')
+    expect(w.logs.join('\n')).toContain('only reverts raw file writes')
     const doc = await w.guards.read()
-    expect(sweepWarnings(doc.sweep, w.clock.now).join(' ')).toContain('agentop flow guarantee off a')
+    expect(sweepWarnings(doc.sweep, w.clock.now).join(' ')).toContain('only reverts raw writes')
   })
 
   test('reverts older than 24 h do not count: the loop window expires', async () => {

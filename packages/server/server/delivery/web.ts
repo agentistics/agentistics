@@ -205,3 +205,71 @@ export async function deliveryRequest(method: string, path: string, body: Record
     default: return { status: 400, body: { error: 'bad_action', sentence: 'action must be one of phase, gate, block, unblock, dequeue, queue-answer, approve, configure, step, stage, stage-run, merge' } }
   }
 }
+
+type RemoveOutcome = boolean | { ok: false; reason: string; message: string }
+
+/**
+ * `POST /api/tasks/<ref>/subtasks { id, remove: true }` (r4). The ONE place that decides who may remove what over REST:
+ *  - a placeholder is dismissed by its leader or by the owner (the legacy browser owner is accepted there, as before);
+ *  - an ACCEPTED member is removed only with an owner proof that does not come from client-sent headers: the vault grant
+ *    (a `required`-mode owner is exactly that). The `legacy-browser` heuristic (own Origin + Sec-Fetch-Site) is refused 403 `owner_proof_required`;
+ *  - a store refusal (`GuardRefused`, e.g. `guard_context_required`) is a 4xx with its sentence, never a 500.
+ */
+export async function removeSubtaskRequest(
+  id: string, body: Record<string, unknown>, ctx: import('./guard').GuardContext,
+  d: { remove: (id: string, ctx: import('./guard').GuardContext) => Promise<RemoveOutcome>; principalDeps: PrincipalDeps; legacyOwnerGate: () => Promise<WebReply | null> },
+): Promise<WebReply> {
+  try {
+    let removed: RemoveOutcome
+    try { removed = await d.remove(id, ctx) } catch (e) {
+      // r7: a GROUP holding an accepted member is refused by the store; it follows the same owner-proof ladder as an accepted member.
+      if (e instanceof GuardRefused && e.code === 'accepted_members') removed = { ok: false, reason: 'member_accepted', message: e.message }
+      else throw e
+    }
+    if (typeof removed === 'object' && ctx.principal.kind === 'unattributed') {
+      if (removed.reason === 'member_accepted') {
+        const who = await resolveRequestPrincipal(body, { pieceKey: id, move: 'subtask:dismiss' }, d.principalDeps)
+        if (!who.ok) return who.reply
+        if ((who.principal.kind === 'owner' && who.principal.via === 'legacy-browser') || (who.mode === 'required' && who.principal.kind === 'unattributed')) {
+          return { status: 403, body: { ok: false, reason: 'owner_proof_required', message: 'This piece was accepted: only the owner may remove it, and the owner proof must come from the vault (a fresh grant, or the "required" owner-proof mode); a browser header is not proof. Turn on the owner proof and retry.' } }
+        }
+        if (who.principal.kind === 'owner') removed = await d.remove(id, { principal: who.principal })
+      } else if (removed.reason === 'placeholder_protected' && (await d.legacyOwnerGate()) === null) {
+        removed = await d.remove(id, { principal: { kind: 'owner', via: 'legacy-browser' } })
+      }
+    }
+    return typeof removed === 'object' ? { status: 422, body: removed } : { status: 200, body: { ok: removed } }
+  } catch (e) {
+    if (e instanceof GuardRefused) return { status: e.status, body: { ok: false, reason: e.code, message: e.message, messagePt: e.messagePt } }
+    throw e
+  }
+}
+
+/**
+ * `DELETE /api/tasks/<ref>` (r7, re-QA r5 F1). A task holding an ACCEPTED member is deleted only by the owner with a vault proof
+ * (the store refuses everyone else with `accepted_members` — this door only turns that into the right HTTP answer and resolves the
+ * owner proof). Same ladder as `removeSubtaskRequest`: a session or no proof → 422; a forged session → 403 `unverified_sender`;
+ * a browser-header owner → 403 `owner_proof_required`.
+ */
+export async function deleteTaskRequest(
+  ref: string, body: Record<string, unknown>, ctx: import('./guard').GuardContext,
+  d: { del: (ref: string, ctx: import('./guard').GuardContext) => Promise<boolean>; principalDeps: PrincipalDeps },
+): Promise<WebReply> {
+  const { evidenceDeleteRequest } = await import('./evidence-delete')
+  const attempt = async (c: import('./guard').GuardContext): Promise<WebReply> => {
+    try { return await evidenceDeleteRequest(() => d.del(ref, c)) }
+    catch (e) {
+      if (e instanceof GuardRefused) return { status: e.status, body: { ok: false, reason: e.code, message: e.message, messagePt: e.messagePt } }
+      throw e
+    }
+  }
+  const first = await attempt(ctx)
+  if (first.status !== 422 || (first.body as { reason?: string }).reason !== 'accepted_members' || ctx.principal.kind !== 'unattributed') return first
+  const who = await resolveRequestPrincipal(body, { pieceKey: ref, move: 'task:delete' }, d.principalDeps)
+  if (!who.ok) return who.reply
+  if ((who.principal.kind === 'owner' && who.principal.via === 'legacy-browser') || (who.mode === 'required' && who.principal.kind === 'unattributed')) {
+    return { status: 403, body: { ok: false, reason: 'owner_proof_required', message: 'This task holds accepted pieces: only the owner may delete it, and the owner proof must come from the vault (a fresh grant, or the "required" owner-proof mode); a browser header is not proof.' } }
+  }
+  if (who.principal.kind === 'owner') return attempt({ principal: who.principal })
+  return first
+}

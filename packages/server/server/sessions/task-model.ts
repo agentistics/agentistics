@@ -461,6 +461,8 @@ export type TaskThread = TaskThreadRecord
  * `status` is `done`. See docs/superpowers/specs/2026-09-10-task-session-hierarchy-design.md §4.2.
  */
 export interface Subtask {
+  /** B4: set ONLY by the guard sweep on a placeholder it restored after a raw delete. Never work: no queue hands it out; a leader/owner dismisses it by removing it. */
+  restoredBy?: 'guard'
   /** An external revert loop blocks the piece with an auditable reason. */
   blockedReason?: string
   /** Explicit composer registration, persisted for retry/restart deduplication and MCP readers. */

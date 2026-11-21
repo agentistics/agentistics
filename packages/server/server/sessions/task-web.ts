@@ -669,7 +669,19 @@ Promise<{ ok: boolean; reason?: string }> {
   return { ok: true }
 }
 
-export async function deleteTask(ref: string): Promise<boolean> {
+/**
+ * r7 (re-QA r5 F4): the `<ref>` of `POST /api/tasks/<ref>/subtasks` must be the task the subtask belongs to. `ok` also for an id that names
+ * no subtask (the door answers that itself); `no_such_task` / `wrong_task` are refused by the route, so a leader of T cannot act on T2's piece through T's path.
+ */
+export async function subtaskPathCheck(ref: string, subtaskId: string): Promise<'ok' | 'no_such_task' | 'wrong_task'> {
+  const w = await loadTaskWorld()
+  const task = findTask(ref, w.book.tasks)
+  if (!task) return 'no_such_task'
+  const found = w.book.subtasks.find(t => t.id === subtaskId)
+  return found && found.taskId !== task.id ? 'wrong_task' : 'ok'
+}
+
+export async function deleteTask(ref: string, guard?: GuardContext): Promise<boolean> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return false
@@ -677,7 +689,7 @@ export async function deleteTask(ref: string): Promise<boolean> {
     const removed = await remove()
     if (removed) await deleteTaskFiles(task.id)
     return removed
-  }, held))
+  }, held), guard ? { guard } : undefined)
   if (!ok) return false
   // The bytes go with the record. The SESSIONS do not — see `TaskStore.removeTask`.
   // And the NAME leaves `preferences.finishedTasks`, which is the other place the migration reads
@@ -1163,11 +1175,72 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
   return { ok: true }
 }
 
-export async function removeSubtask(subtaskId: string): Promise<boolean> {
-  const w = await loadTaskWorld()
+type PlaceholderReply = { ok: true } | { ok: false; reason: 'placeholder_protected' | 'not_a_placeholder' | 'no_such_subtask' | 'member_accepted' | 'owner_proof_required'; message: string }
+interface DismissDeps {
+  isTaskLeader?: (sessionId: string, taskId: string) => Promise<boolean>
+  /** Test seam: the world the door reads (default: the real one). */
+  world?: () => Promise<{ store: import('./task-store').TaskStore; book: import('./task-model').TaskBook; registryRows: ReadonlyArray<{ id: string; taskId?: string }> }>
+  /** Test seam: the effective role of a registry row (default: `effectiveRole`). */
+  roleOf?: (row: never) => Promise<string>
+}
+
+/**
+ * B4: the ONE door that dismisses a placeholder (REST `dismissPlaceholder: true`, MCP `agentistics_task_subtask`, CLI `task subtask dismiss`).
+ * A piece is a placeholder ONLY when the sweep's ledger says so (`store.placeholderOf`); the `restoredBy` flag in tasks.json is a label.
+ * Not a general remove: a real piece is refused (`not_a_placeholder`).
+ */
+export async function dismissPlaceholder(subtaskId: string, guard?: GuardContext, deps: DismissDeps = {}): Promise<PlaceholderReply> {
+  const w = await (deps.world ?? loadTaskWorld)()
+  const found = w.book.subtasks.find(t => t.id === subtaskId)
+  if (!found) return { ok: false, reason: 'no_such_subtask', message: `subtask ${subtaskId} does not exist` }
+  const { mayDismissPlaceholder, isLeaderOfTask, PLACEHOLDER_PROTECTED_MESSAGE, NOT_A_PLACEHOLDER_MESSAGE } = await import('./placeholder-dismiss')
+  if (!(await w.store.placeholderOf(subtaskId))) return { ok: false, reason: 'not_a_placeholder', message: NOT_A_PLACEHOLDER_MESSAGE }
+  // r5 (re-QA r4 D1/D2): an ACCEPTED member is judged by the SAME rule as `removeSubtask`, BEFORE the leader/owner placeholder rule (the door is placeholder-only, so a non-placeholder is still `not_a_placeholder`): no session removes it, and the owner needs the vault.
+  if (await w.store.acceptedMemberOf(subtaskId)) {
+    const refused = await removeAcceptedMember(w.store, subtaskId, guard)
+    return refused ?? { ok: true }
+  }
+  const may = await mayDismissPlaceholder({
+    principal: guard?.principal, taskId: found.taskId,
+    isTaskLeader: deps.isTaskLeader ?? (async (sid, tid) => isLeaderOfTask(w.registryRows.find(r => r.id === sid), tid, deps.roleOf ?? (async row => String(await (await import('./session-roles')).effectiveRole(row as never))))),
+  })
+  if (!may || !guard) return { ok: false, reason: 'placeholder_protected', message: PLACEHOLDER_PROTECTED_MESSAGE }
+  const done = await w.store.removeSubtask(subtaskId, { dismissPlaceholder: guard })
+  return done ? { ok: true } : { ok: false, reason: 'not_a_placeholder', message: NOT_A_PLACEHOLDER_MESSAGE }
+}
+
+/**
+ * The ONE rule for an ACCEPTED member, shared by `removeSubtask` and `dismissPlaceholder` (r5): only an owner whose proof is the vault removes it
+ * (recorded as `ownerRemoved`); a session is `member_accepted`; a legacy-browser owner (two client-sent headers) is `owner_proof_required`. Null = removed.
+ */
+async function removeAcceptedMember(store: import('./task-store').TaskStore, subtaskId: string, guard?: GuardContext): Promise<{ ok: false; reason: 'member_accepted' | 'owner_proof_required'; message: string } | null> {
+  if (guard?.principal.kind !== 'owner') return { ok: false, reason: 'member_accepted', message: MEMBER_ACCEPTED_MESSAGE }
+  // r4 A1: the legacy-browser owner is two client-sent headers; for a piece that was ACCEPTED that is not proof.
+  if (guard.principal.via !== 'vault-credential') return { ok: false, reason: 'owner_proof_required', message: OWNER_PROOF_REQUIRED_MESSAGE }
+  await store.removeSubtask(subtaskId, { ownerRemoval: guard })
+  return null
+}
+
+export const MEMBER_ACCEPTED_MESSAGE = 'This subtask is an accepted member of a group (it carries an acceptance checkpoint); the piece was accepted, so only the owner may remove it.'
+
+export const OWNER_PROOF_REQUIRED_MESSAGE = 'This subtask is an accepted member of a group: the piece was accepted, so only the owner may remove it, and the owner proof must come from the vault (a fresh grant, or the "required" owner-proof mode) — a browser header is not proof. Turn on the owner proof in Settings → Vault, or confirm the vault dialog, and retry.'
+
+export async function removeSubtask(subtaskId: string, guard?: GuardContext, deps: DismissDeps = {}): Promise<boolean | { ok: false; reason: 'placeholder_protected' | 'not_a_placeholder' | 'no_such_subtask' | 'member_accepted' | 'owner_proof_required'; message: string }> {
+  const w = await (deps.world ?? loadTaskWorld)()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
   if (!found) return false
-  await w.store.removeSubtask(subtaskId)
+  // r3: an ACCEPTED member (done, per the group's sealed checkpoint) is removed only by the owner (no session, a proven owner principal).
+  // The owner's removal is recorded in the guard ledger so the sweep neither restores it nor reports it as missing.
+  if (await w.store.acceptedMemberOf(subtaskId)) {
+    const refused = await removeAcceptedMember(w.store, subtaskId, guard)
+    return refused ?? true
+  }
+  // B4: a piece the sweep's LEDGER names is dismissed by the task leader or the owner — and only by them. The flag in the file is not consulted.
+  if (await w.store.placeholderOf(subtaskId)) {
+    const out = await dismissPlaceholder(subtaskId, guard, deps)
+    return out.ok ? true : out
+  }
+  await w.store.removeSubtask(subtaskId, guard ? { guard } : undefined)
   return true
 }
 

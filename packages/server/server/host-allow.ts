@@ -277,7 +277,14 @@ export function badRequestTarget(rawUrl: string, hostHeader: string | null): Res
     )
   }
   try {
-    new URL(rawUrl)
+    const parsed = new URL(rawUrl)
+    // A malformed %-escape on an /api path makes every route's `decodeURIComponent` throw (a 500).
+    // Answered here, once, for every route: the address is the caller's mistake, not a server fault.
+    if (parsed.pathname.startsWith('/api/')) {
+      try { decodeURIComponent(parsed.pathname) } catch {
+        return respond('bad_path', 'The address contains an invalid %-escape; send the id URL-encoded.')
+      }
+    }
     return null
   } catch {
     return respond(

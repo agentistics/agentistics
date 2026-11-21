@@ -15,7 +15,7 @@
  * (`member_removed` / `member_moved_out`) and an unaccepted member that lifts it reverted; one that does not is reported.
  *
  * LOOP GUARD: a piece reverted twice inside 24 h is moved to `blocked` (`externo: an unknown writer keeps moving this piece`)
- * instead of being reverted a third time in silence, and the WARN names the escape (`agentop flow guarantee off a`).
+ * instead of being reverted a third time in silence, and the WARN says how to release it.
  */
 import { isRealProgressStatus } from '@agentistics/core'
 import { phaseRank, stageRank, type BoardSlice } from './guard'
@@ -29,13 +29,24 @@ type PieceCheckpoint = PieceCheckpointLike
 export const SWEEP_LOOP_WINDOW_MS = 24 * 3600_000
 export const SWEEP_LOOP_LIMIT = 2
 /**
- * R5-5: a group of an OLD store (no `members` record) that keeps reporting `no_member_baseline` for longer than this — 60 ticks of
- * the minute tick — raises a health WARN. The report alone lived only in a tick's actions and one log line per minute.
+ * R5-5: a group of an OLD store (no `members` record) that keeps reporting `no_member_baseline` for longer than this — 60 minutes of
+ * consecutive reports (a clock, not a tick count) — raises a health WARN. The report alone lived only in a tick's actions and one log line per minute.
  */
 export const SWEEP_NO_BASELINE_WARN_MS = 60 * 60_000
+/**
+ * B2 (r6 re-QA): a member forged above its accepted status and then carried by a GUARDED write stays only REPORTED (`unaccepted_member`;
+ * it is reverted only when it lifts its group). Reported for longer than this — 60 MINUTES of consecutive unaccepted reports, a clock and not a tick count — raises a health WARN.
+ * Declared residual risk: the report never repairs it, a person does.
+ */
+export const SWEEP_UNACCEPTED_WARN_MS = 60 * 60_000
+/** B1: why a blocked piece (or the group it holds down) stays blocked, and what the person does. One sentence per language. */
+export const LOOP_RELEASE = 'a blocked piece stays blocked until a person sets its status back on the board (the sweep never unblocks it); the sweep only reverts raw writes, so move it through the board'
+export const LOOP_RELEASE_PT = 'uma peça bloqueada continua bloqueada até uma pessoa devolver o status no quadro (a varredura nunca desbloqueia); a varredura só reverte escritas cruas, então mova pelo quadro'
+/** Marks a subtask the sweep RESTORED after a raw delete (B4): never handed out as work; a leader or the owner dismisses it by removing it. */
+export const RESTORED_BY_GUARD = 'guard' as const
 /** The one sentence every revert and every loop WARN carries, so a person whose hand edits keep being reverted knows how to stop it. */
-export const SWEEP_ESCAPE = 'to stop the sweep from reverting: agentop flow guarantee off a'
-export const SWEEP_ESCAPE_PT = 'para o varredor parar de reverter: agentop flow guarantee off a'
+export const SWEEP_ESCAPE = 'the sweep only reverts raw file writes: make the change through the board, MCP or CLI'
+export const SWEEP_ESCAPE_PT = 'a varredura só reverte escritas cruas no arquivo: faça a mudança pelo quadro, MCP ou CLI'
 export const LOOP_BLOCK_TEXT = `an unknown writer keeps moving this piece (${SWEEP_ESCAPE})`
 
 export type SweepReason = 'above_checkpoint' | 'evidence_stale' | 'no_checkpoint' | 'member_removed' | 'member_moved_out'
@@ -87,7 +98,7 @@ export interface SweepRevert {
    * deleted member, writes a PLACEHOLDER under the same id carrying only what the accepted record holds (id, status, group): the
    * group's status is a pure function of its members, so this is the one way to bring the derived status back to its checkpoint.
    */
-  restore?: { parentGroupId: string; placeholder?: { taskId: string; title: string } }
+  restore?: { parentGroupId: string; /** B3: the GROUP's task — a member moved to another task by a raw writer comes back to this one. */ taskId: string; crossTask?: boolean; placeholder?: { taskId: string; title: string; description: string } }
   /** The views whose signatures must still hold when the chunk applies (default: `key` alone). */
   checkKeys?: string[]
 }
@@ -97,14 +108,39 @@ export interface SweepMemory {
   reverts: Record<string, string[]>; plans?: Record<string, string>; catchUpFailures?: Record<string, string>; warning?: string
   /** R5-5: since when each member of an OLD group (no `members` record) has been reported `no_member_baseline`, tick after tick. */
   noBaselineSince?: Record<string, string>
+  /** B2: since when each member has been reported `unaccepted_member`, tick after tick (a forge carried by a guarded write). */
+  unacceptedSince?: Record<string, string>
   /** R5-1: groups whose accepted members a raw writer removed or moved out, kept as a health WARN for 24 h. */
-  memberAlerts?: Record<string, { at: string; text: string }>
+  memberAlerts?: Record<string, { at: string; text: string; actions?: string[] }>
+  /**
+   * B4 r2: THE LEDGER of every placeholder the sweep restored — the only authority for "this piece is a placeholder". Written by the
+   * sweep (and marked dismissed by the dismissal door) under the guards lock, in the sealed guards.json; the `restoredBy` flag in
+   * tasks.json is only a label and is never trusted on its own.
+   */
+  placeholders?: Record<string, PlaceholderRecord>
+  /** B4 r2: pieces carrying `restoredBy: 'guard'` with NO ledger record (a raw write put the mark there): id → first seen, WARNed for 24 h. */
+  forgedMarks?: Record<string, string>
+  /** Members the OWNER removed through the general door (their group's accepted record still names them): never restored, never reported. */
+  ownerRemoved?: Record<string, { groupId: string; at: string }>
+  /** Accepted (`done`) members gone from the board with NO owner record (a raw write): id → group and first-seen. Reported every tick; never restored, the group is never raised for it. */
+  acceptedMissing?: Record<string, { groupId: string; at: string }>
+}
+/** One restoration the sweep made: which piece, in which group and task, when, under which random id; `dismissedAt` once a leader/owner removed it. */
+export interface PlaceholderRecord { groupId: string; taskId: string; restoredAt: string; restorationId: string; dismissedAt?: string }
+/** PURE. The placeholder record that makes a piece a placeholder: present and not dismissed. Anything else is a real piece. */
+export const activePlaceholder = (memory: SweepMemory | undefined, id: string): PlaceholderRecord | null => {
+  const r = memory?.placeholders?.[id]
+  return r && !r.dismissedAt ? r : null
 }
 export const emptyMemory = (): SweepMemory => ({ reverts: {} })
 
 /** A group whose accepted member statuses should be (re)recorded: its derived rank is inside what its checkpoint authorizes. */
 export interface SweepBaseline { key: string; members: AcceptedMembers }
 export interface SweepPlan { reverts: SweepRevert[]; catchUps: SweepCatchUp[]; memory: SweepMemory; baselines: SweepBaseline[]; reports: string[] }
+
+export const placeholderTitle = (id: string) => `[${id}] removed by an unknown writer; restored by the guard sweep from the accepted record | removida por um escritor desconhecido; restaurada pela varredura do guarda`
+/** B4: what the restored placeholder tells the person (and any worker that opens it). It is NOT work: the task leader or the owner removes it. */
+export const PLACEHOLDER_NOTES = 'NOT A TASK: a raw write deleted this subtask and the guard sweep restored an empty placeholder (only its id, status and group) so the group does not close by accident. Nobody should work on it. To dismiss it, the task leader or the owner removes this subtask (the placeholder doors: MCP agentistics_task_subtask with dismissPlaceholder: true and the subtask id; CLI agentop task subtask dismiss <task> <subtask>; REST POST /api/tasks/<task>/subtasks {id, dismissPlaceholder: true}; or the remove button of the board); the guard will not re-create it. | NÃO É TAREFA: uma escrita crua apagou esta subtarefa e a varredura do guarda restaurou um espaço reservado vazio (só id, status e grupo) para o grupo não fechar sem querer. Ninguém deve trabalhar nele. Para dispensar, o líder da tarefa ou o dono remove esta subtarefa (as portas de dispensa: MCP agentistics_task_subtask com dismissPlaceholder: true e o id da subtarefa; CLI agentop task subtask dismiss <tarefa> <subtarefa>; REST POST /api/tasks/<tarefa>/subtasks {id, dismissPlaceholder: true}; ou o botão de remover do quadro); o guarda não a recria.'
 
 const statusRankIn = (statuses: BoardSlice['statuses'], id: string | undefined): number => {
   if (!id) return 0
@@ -162,11 +198,31 @@ export function planSweep(o: { pieces: readonly PieceView[]; checkpoints: Readon
   const at = new Date(o.now).toISOString()
   const memberAlerts = Object.fromEntries(Object.entries(o.memory.memberAlerts ?? {}).filter(([, v]) => o.now - Date.parse(v.at) < SWEEP_LOOP_WINDOW_MS))
   if (Object.keys(memberAlerts).length) memory.memberAlerts = memberAlerts
+  if (o.memory.placeholders && Object.keys(o.memory.placeholders).length) memory.placeholders = o.memory.placeholders
+  const forgedMarks = Object.fromEntries(Object.entries(o.memory.forgedMarks ?? {}).filter(([, at]) => o.now - Date.parse(at) < SWEEP_LOOP_WINDOW_MS))
+  if (Object.keys(forgedMarks).length) memory.forgedMarks = forgedMarks
+  if (o.memory.ownerRemoved && Object.keys(o.memory.ownerRemoved).length) memory.ownerRemoved = o.memory.ownerRemoved
+  const acceptedMissing: Record<string, { groupId: string; at: string }> = {}
   const noBaselineSince: Record<string, string> = {}
+  const unacceptedSince: Record<string, string> = {}
   // R5-1: a baselined group whose derived rank is above its checkpoint because accepted members were deleted or moved out. Every
   // member left on the board may match what was accepted, so nothing else would repair it: the missing members are put back.
   const byKey = new Map(o.pieces.map(p => [p.key, p] as const))
   const movedOut = new Set<string>()
+  // An ACCEPTED (`done`) member that vanished with no owner record was deleted by a raw writer: it can never be restored (done never
+  // returns), so it is reported every tick and the group is not touched.
+  for (const [key, c] of Object.entries(o.checkpoints)) {
+    const byOwner = ownerAuthorized(c.auth) || (c.by as { kind?: string } | undefined)?.kind === 'owner'
+    if (!c.members || byOwner) continue
+    for (const [id, acc] of Object.entries(c.members)) {
+      if (acc.status !== 'done' || o.memory.ownerRemoved?.[id]) continue
+      const v = byKey.get(id)
+      if (v && v.boardStatus !== null) continue
+      reports.push(`sweep report ${id}: accepted_member_missing`)
+      acceptedMissing[id] = o.memory.acceptedMissing?.[id] ?? { groupId: key, at }
+    }
+  }
+  if (Object.keys(acceptedMissing).length) memory.acceptedMissing = acceptedMissing
   for (const [key, c] of Object.entries(o.checkpoints)) {
     if (!c.members || ownerAuthorized(c.auth) || (c.by as { kind?: string } | undefined)?.kind === 'owner') continue
     const gv = byKey.get(key)
@@ -175,6 +231,7 @@ export function planSweep(o: { pieces: readonly PieceView[]; checkpoints: Readon
     if (groupNow <= checkpointRank(c, o.statuses)) continue
     for (const [id, acc] of Object.entries(c.members)) {
       const mv = byKey.get(id)
+      if (o.memory.ownerRemoved?.[id]) continue
       if (mv?.checkpointKey === key || (mv && mv.boardStatus === null) || !o.statuses.some(s => s.id === acc.status)) continue
       // Only a member whose accepted status can lower the derived one is restored (a done or a non-real status never can).
       const accRank = statusRankIn(o.statuses, acc.status)
@@ -184,10 +241,11 @@ export function planSweep(o: { pieces: readonly PieceView[]; checkpoints: Readon
       if (mv) movedOut.add(id)
       const stamps = [...recent(memory.reverts[id], o.now), at]
       memory.reverts[id] = stamps
+      const crossTask = !!mv && mv.taskId !== gv.taskId
       reverts.push({
-        key: id, taskId: mv?.taskId ?? gv.taskId, subtaskId: id, reason: mv ? 'member_moved_out' : 'member_removed',
+        key: id, taskId: gv.taskId, subtaskId: id, reason: mv ? 'member_moved_out' : 'member_removed',
         board: { to, clearCi: (mv?.ciRank ?? 0) > statusRankIn(o.statuses, to) },
-        restore: { parentGroupId: key, ...(mv ? {} : { placeholder: { taskId: gv.taskId, title: `[${id}] removed by an unknown writer; restored by the guard sweep from the accepted record | removida por um escritor desconhecido; restaurada pela varredura do guarda` } }) },
+        restore: { parentGroupId: key, taskId: gv.taskId, ...(crossTask ? { crossTask: true } : {}), ...(mv ? {} : { placeholder: { taskId: gv.taskId, title: placeholderTitle(id), description: PLACEHOLDER_NOTES } }) },
         checkKeys: mv ? [key, id] : [key],
         ...(stamps.length >= SWEEP_LOOP_LIMIT ? { loop: true } : {}), count: stamps.length,
       })
@@ -221,6 +279,7 @@ export function planSweep(o: { pieces: readonly PieceView[]; checkpoints: Readon
       // it lifts the group above its checkpoint, otherwise reported every tick. It is never written into the record by the sweep.
       if (!(reason === 'above_checkpoint' && (p.groupRank ?? 0) > rank && boardNow > rank)) {
         reports.push(`sweep report ${p.key}: unaccepted_member`)
+        unacceptedSince[p.key] = o.memory.unacceptedSince?.[p.key] ?? at
         continue
       }
     }
@@ -264,27 +323,56 @@ export function planSweep(o: { pieces: readonly PieceView[]; checkpoints: Readon
     baselines.push({ key, members: Object.fromEntries(ms.map(m => [m.key, { status: m.boardStatus!, at }])) })
   }
   if (Object.keys(noBaselineSince).length) memory.noBaselineSince = noBaselineSince
+  if (Object.keys(unacceptedSince).length) memory.unacceptedSince = unacceptedSince
   return { reverts, catchUps, memory, baselines, reports }
 }
 
+/** Per-kind guidance for every sweep WARN (r3): none of them points at turning the whole guard off. */
+export const GUIDE_FORGED_MARK = 'Nothing to do: the forged restoredBy flag is removed on the next guarded write and the piece is a real piece meanwhile.'
+export const GUIDE_LOOP = 'A person sets the blocked piece back on the board (the sweep never unblocks it); find out which writer keeps moving it.'
+export const GUIDE_BREAKER = 'The sweep is report-only until the burst stops; find which writer rewrote the board in bulk, then repair the listed pieces.'
+export const GUIDE_MEMBER_RESTORED = 'The sweep restores the member from the accepted record; if the empty placeholder is not wanted, the task leader or the owner dismisses it (agentop task subtask dismiss <task> <subtask> / MCP agentistics_task_subtask dismissPlaceholder).'
+export const GUIDE_NO_BASELINE = 'Repair the group by hand: compare its members with what was accepted; the sweep only reports this old group.'
+export const GUIDE_UNACCEPTED = 'Check the member and set its status back by hand; the sweep never reverts it unless it lifts its group. If it is an empty placeholder, dismiss it (agentop task subtask dismiss <task> <subtask>).'
+export const GUIDE_ACCEPTED_MISSING = 'Only the owner may remove an accepted piece: find which raw writer deleted it. Nothing is restored automatically.'
+
+/** A health WARN with a STRUCTURED id (B6): the id is built from data (group id + action), never parsed back out of the text. */
+export interface SweepIssue { id: string; title: string; text: string; guide: string }
+
 /**
  * Pure: what health shows as a WARN — the pieces the loop guard has stopped inside the window (until they stay quiet for a day), the
- * groups whose accepted members a raw writer removed or moved out (R5-1, 24 h), and old-store members reported `no_member_baseline`
- * for longer than `SWEEP_NO_BASELINE_WARN_MS` (R5-5).
+ * groups whose accepted members a raw writer removed or moved out (R5-1, 24 h), old-store members reported `no_member_baseline`
+ * for longer than `SWEEP_NO_BASELINE_WARN_MS` (R5-5) and members reported `unaccepted_member` for longer than `SWEEP_UNACCEPTED_WARN_MS` (B2).
  */
-export function sweepWarnings(memory: SweepMemory | undefined, now: number): string[] {
+export function sweepIssues(memory: SweepMemory | undefined, now: number): SweepIssue[] {
   const pieces = Object.entries(memory?.reverts ?? {})
     .filter(([, v]) => recent(v, now).length >= SWEEP_LOOP_LIMIT)
     .map(([key]) => key)
   const stuck = Object.entries(memory?.noBaselineSince ?? {}).filter(([, since]) => now - Date.parse(since) >= SWEEP_NO_BASELINE_WARN_MS).map(([key]) => key)
-  const alerts = Object.values(memory?.memberAlerts ?? {}).filter(v => now - Date.parse(v.at) < SWEEP_LOOP_WINDOW_MS).map(v => v.text)
+  const unaccepted = Object.entries(memory?.unacceptedSince ?? {}).filter(([, since]) => now - Date.parse(since) >= SWEEP_UNACCEPTED_WARN_MS).map(([key]) => key)
+  const forged = Object.entries(memory?.forgedMarks ?? {}).filter(([, at]) => now - Date.parse(at) < SWEEP_LOOP_WINDOW_MS).map(([id]) => id)
+  const missing = Object.entries(memory?.acceptedMissing ?? {})
   return [
-    ...(pieces.length ? [`sweep-loop: ${pieces.join(', ')} — an unknown writer keeps moving these pieces; um escritor desconhecido continua movendo estas peças; ${SWEEP_ESCAPE}`] : []),
-    ...(memory?.warning ? [memory.warning] : []),
-    ...alerts,
-    ...(stuck.length ? [`sweep no_member_baseline: ${stuck.join(', ')} — a group forged before the guard was turned on is only reported, never repaired; repair it by hand. Um grupo forjado antes de ligar a guarda é só relatado, nunca reparado; repare à mão. ${SWEEP_ESCAPE}`] : []),
+    ...forged.map(id => ({ id: `sweep-forged-restore-mark:${id}`, title: `A subtask carries a guard restoration mark the sweep never made / Uma subtarefa traz uma marca de restauração que a varredura nunca fez`, guide: GUIDE_FORGED_MARK,
+      text: `sweep forged_restore_mark: ${id} — it is marked restoredBy: guard but the sweep's own ledger has no restoration for it, so it is treated as a REAL piece (normal rules, never dismissed as a placeholder) and the mark is removed on the next guarded write. Ela está marcada restoredBy: guard mas o livro da varredura não tem restauração para ela: é tratada como peça REAL e a marca é removida na próxima escrita guardada. ${SWEEP_ESCAPE}` })),
+    ...(pieces.length ? [{ id: 'sweep-loop', title: 'The delivery sweep blocked repeated external moves', guide: GUIDE_LOOP,
+      text: `sweep-loop: ${pieces.join(', ')} — an unknown writer keeps moving these pieces; um escritor desconhecido continua movendo estas peças; ${LOOP_RELEASE} | ${LOOP_RELEASE_PT}` }] : []),
+    ...(memory?.warning ? [{ id: 'sweep-breaker', title: 'The delivery sweep breaker tripped / O disjuntor da varredura disparou', guide: GUIDE_BREAKER, text: memory.warning }] : []),
+    ...Object.entries(memory?.memberAlerts ?? {}).filter(([, v]) => now - Date.parse(v.at) < SWEEP_LOOP_WINDOW_MS).map(([group, v]) => ({
+      id: `sweep-members:${group}:${[...new Set(v.actions ?? [])].sort().join('+') || 'restored'}`,
+      title: `The delivery sweep restored members of group ${group}`, guide: GUIDE_MEMBER_RESTORED, text: v.text,
+    })),
+    ...(stuck.length ? [{ id: 'sweep-no-member-baseline', title: 'A delivery group forged before the guard was turned on is only reported', guide: GUIDE_NO_BASELINE,
+      text: `sweep no_member_baseline: ${stuck.join(', ')} — a group forged before the guard was turned on is only reported, never repaired; repair it by hand. Um grupo forjado antes de ligar a guarda é só relatado, nunca reparado; repare à mão. ${SWEEP_ESCAPE}` }] : []),
+    ...missing.map(([id, m]) => ({ id: `sweep-accepted-member-missing:${id}`, title: `An accepted member of group ${m.groupId} disappeared from the board / Um membro aceito do grupo ${m.groupId} sumiu do quadro`, guide: GUIDE_ACCEPTED_MISSING,
+      text: `sweep accepted_member_missing: ${id} — an accepted (done) member of group ${m.groupId} was deleted by an unknown writer; it is never restored (done never returns) and the group is not raised because of it. Um membro aceito (done) do grupo ${m.groupId} foi apagado por um escritor desconhecido; ele não é restaurado e o grupo não sobe por causa disso. Only the owner may remove an accepted piece | só o dono pode remover uma peça aceita.` })),
+    ...(unaccepted.length ? [{ id: 'sweep-unaccepted-member', title: 'A group member nobody accepted keeps being reported', guide: GUIDE_UNACCEPTED,
+      text: `sweep unaccepted_member: ${unaccepted.join(', ')} — a member a raw writer created or forged (and a guarded write then carried) has been reported for over an hour; it is never reverted unless it lifts its group, so a person must check and repair it by hand. Um membro criado ou forjado por escritor cru (e depois carregado por escrita guardada) é relatado há mais de uma hora; só é revertido se levantar o grupo, então uma pessoa deve conferir e reparar à mão. ${SWEEP_ESCAPE}` }] : []),
   ]
 }
+
+/** The same warnings as plain text (for callers and tests that only read sentences). */
+export const sweepWarnings = (memory: SweepMemory | undefined, now: number): string[] => sweepIssues(memory, now).map(i => i.text)
 
 /** Historical maxima cannot authorize a new jump after an authorized retreat. */
 export function checkpointRank(cp: Pick<PieceCheckpoint, 'rank' | 'boardStatus' | 'phase'> | undefined, statuses: BoardSlice['statuses']): number {
