@@ -2,14 +2,19 @@
  * noq-runner.ts — the IO half of `noq-policy.ts`: answers a no-questions session's permission prompt.
  *
  * Attached to the server's ONE fleet hub (`events/daemon.ts`). For each row whose dialog the policy
- * decides, it answers through the host (`answerSession`, which re-reads the screen first), records the
- * answer in `noq-answers.jsonl` + a notification (never silent), and — for a refusal — types the reason
- * for the model once the dialog has closed. Sessions outside no-questions are not touched.
+ * decides, it answers through the host (`answerSession`, which re-reads the screen first) and records the
+ * answer in `noq-answers.jsonl` + a notification (never silent). A refusal's reason is typed for the model
+ * only on a LATER poll, once the row no longer shows a dialog — never blind after a timer.
+ *
+ * THE MODE must be the session's CURRENT one: the live chip, else the last chip this runner SAW for the
+ * row, else the registry's recorded (chip-set) mode. The mode a session STARTED in is not enough — a
+ * person may have cycled it to `default` since — and an unknown mode is left to the person (logged once).
+ * A dialog already answered successfully is never answered again; only a new frame is evaluated.
  */
 import { appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { SessionSnapshot } from './sessions-host'
-import { decideNoqAnswer, shouldAnswer, type NoqDecision, type NoqMemory } from './noq-policy'
+import { decideNoqAnswer, noteAnswerResult, shouldAnswer, type NoqDecision, type NoqMemory } from './noq-policy'
 
 export interface NoqAnswerRecord {
   at: string
@@ -27,24 +32,45 @@ export interface NoqDeps {
   answer(id: string, choice: number): Promise<{ ok: boolean; message: string }>
   prompt(id: string, text: string): Promise<{ ok: boolean; message: string }>
   record(r: NoqAnswerRecord): Promise<void> | void
-  /** The mode the session was STARTED in (registry). A permission dialog's footer hides the mode chip, so the frame often cannot say. */
-  startMode?(id: string): Promise<string | undefined>
+  /** The registry's CURRENT mode for the row (what the chip last set). Never the start mode alone. */
+  registryMode?(id: string): Promise<string | undefined>
+  /** Diagnostics (an unknown mode is logged once per session). */
+  log?(message: string): void
   now?: () => number
   home?: string
-  sleep?: (ms: number) => Promise<void>
 }
+
+const PENDING_MS = 120_000
 
 export function createNoqRunner(deps: NoqDeps) {
   const mem: NoqMemory = { lastKey: new Map() }
+  const seenMode = new Map<string, string>()
+  const pending = new Map<string, { text: string; atMs: number }>()
+  const warned = new Set<string>()
   const now = deps.now ?? Date.now
-  const sleep = deps.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)))
   return {
     /** One poll's rows. Resolves when every answer of this poll has been sent and recorded. */
     async consume(snap: SessionSnapshot): Promise<NoqAnswerRecord[]> {
       const done: NoqAnswerRecord[] = []
+      const live = new Set<string>()
       for (const v of snap.sessions) {
-        if (v.activity !== 'waiting-approval') continue
-        const mode = v.mode?.canonical ?? await deps.startMode?.(v.id).catch(() => undefined)
+        live.add(v.id)
+        const chip = v.mode?.canonical
+        if (chip) seenMode.set(v.id, chip)
+        if (v.activity !== 'waiting-approval') {
+          mem.lastKey.delete(v.id)
+          const p = pending.get(v.id)
+          if (p) {
+            pending.delete(v.id)
+            if (now() - p.atMs < PENDING_MS) await deps.prompt(v.id, p.text).catch(() => undefined)
+          }
+          continue
+        }
+        const mode = chip ?? seenMode.get(v.id) ?? await deps.registryMode?.(v.id).catch(() => undefined)
+        if (!mode) {
+          if (!warned.has(v.id)) { warned.add(v.id); deps.log?.(`noq: ${v.id.slice(0, 8)} shows a dialog and its current mode is unknown; left to the person`) }
+          continue
+        }
         const d: NoqDecision = decideNoqAnswer({
           harness: v.harness, mode, cwd: v.cwd,
           approvalLines: v.approvalLines, dialogOptions: v.dialogOptions,
@@ -52,17 +78,16 @@ export function createNoqRunner(deps: NoqDeps) {
         if (d.action === 'skip') continue
         if (!shouldAnswer(mem, v.id, (v.approvalLines ?? []).join('\n'), now())) continue
         const out = await deps.answer(v.id, d.choice).catch((e: unknown) => ({ ok: false, message: String(e) }))
+        noteAnswerResult(mem, v.id, out.ok)
         const rec: NoqAnswerRecord = {
           at: new Date(now()).toISOString(), id: v.id, command: d.command, decision: d.action,
           choice: d.choice, rule: d.rule, reason: d.reason, ok: out.ok, message: out.message,
         }
-        if (out.ok && d.action === 'deny') {
-          await sleep(1500)
-          await deps.prompt(v.id, d.reason).catch(() => undefined)
-        }
+        if (out.ok && d.action === 'deny') pending.set(v.id, { text: d.reason, atMs: now() })
         await Promise.resolve(deps.record(rec)).catch(() => undefined)
         done.push(rec)
       }
+      for (const id of [...pending.keys()]) if (!live.has(id)) pending.delete(id)
       return done
     },
   }
@@ -77,7 +102,8 @@ export async function defaultNoqDeps(): Promise<NoqDeps> {
   const file = join(AGENTISTICS_DATA_DIR, 'noq-answers.jsonl')
   return {
     home: HOME_DIR,
-    startMode: async id => (await (await import('./registry')).readRegistry()).find(m => m.id === id)?.mode,
+    registryMode: async id => (await (await import('./registry')).readRegistry()).find(m => m.id === id)?.mode,
+    log: m => console.warn(m),
     answer: async (id, choice) => {
       if (!host.answerSession) return { ok: false, message: 'no host' }
       const r = await host.answerSession(id, choice, '')
