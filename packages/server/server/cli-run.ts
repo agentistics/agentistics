@@ -1,7 +1,7 @@
 import { hostWhich } from './host-which'
 import { execFileSync, spawn } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { freemem, homedir, tmpdir } from 'node:os'
+import { freemem, homedir, hostname, tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
@@ -34,7 +34,7 @@ export type ThrowawayState = {
   command: string[]
 }
 
-type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[]; serve: boolean; seedFrom: string | null; seedReal: boolean; cwd: string | null }
+type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[]; serve: boolean; seedFrom: string | null; seedReal: boolean; cwd: string | null; keepEnv: string[] }
 
 /** A Unix socket path (sun_path) holds 108 bytes including the NUL; Chrome/tmux sockets live under TMPDIR. */
 export const SOCKET_PATH_MAX = 107
@@ -76,7 +76,7 @@ export function removeRunTmp(path: string | undefined): void {
  */
 export const THROWAWAY_ENV_DROP: readonly string[] = [
   'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'GEMINI_CLI_HOME', 'COPILOT_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR',
-  'OPENCODE_CONFIG_CONTENT', 'KIMI_DIR', 'AGENTISTICS_FLOWS', 'AGENTISTICS_DATA_DIR',
+  'OPENCODE_CONFIG_CONTENT', 'KIMI_DIR', 'AGENTISTICS_DATA_DIR',
   // The store itself: journal, archive and the git-stats cache are resolved from their own variables, not only from AGENTISTICS_DIR.
   'AGENTISTICS_JOURNAL_DIR', 'AGENTISTICS_ARCHIVE_DIR', 'AGENTISTICS_GIT_STATS_CACHE_FILE',
   // Harness homes the server reads (config.ts, account-roots.ts).
@@ -88,8 +88,13 @@ export const THROWAWAY_ENV_DROP: readonly string[] = [
   // R1: read through an injected `env` object (opencode-paths.ts, account-login.ts), invisible to a `process.env.X` grep.
   'OPENCODE_DB', 'OPENCODE_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
   // A leaked git hook environment would point the run's git at the owner's real repository / index.
-  'GIT_DIR', 'GIT_INDEX_FILE',
+  'GIT_DIR', 'GIT_INDEX_FILE', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_CONFIG_PARAMETERS',
+  'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
 ]
+/** Every GIT_CONFIG_* (GLOBAL, SYSTEM, NOSYSTEM, COUNT, KEY_n, VALUE_n, ...): a hook leaks them and they redirect the run's git to the real config. */
+const isGitConfigLeak = (key: string): boolean => /^GIT_CONFIG_/i.test(key)
+/** The git variables dropped from a run (a hook leaks them; they point git at the real checkout). `--keep-env` may keep one explicitly. */
+const isGitLeak = (key: string): boolean => THROWAWAY_ENV_DROP.some(k => k === key.toUpperCase() && k.startsWith('GIT_')) || isGitConfigLeak(key)
 /** Path-moving variables the server reads that a run deliberately KEEPS, each with its reason (the lint test requires every one to be here or in the drop list). */
 export const THROWAWAY_ENV_KEEP: Readonly<Record<string, string>> = {
   XDG_RUNTIME_DIR: 'systemd --user scope and the tmux socket dir live there; the run does not own it',
@@ -97,7 +102,6 @@ export const THROWAWAY_ENV_KEEP: Readonly<Record<string, string>> = {
   TMPDIR: 'overwritten by buildThrowawayEnv to the run tmp',
   VOLTA_HOME: 'toolchain location, re-set explicitly from the real one so shims resolve',
   AGENTISTICS_DIR: 'overwritten by buildThrowawayEnv to <home>/.agentistics',
-  GIT_COMMON_DIR: 'a git variable, not a store path; the fixtures scrub it through gitEnv()',
   FIXTURE_DIR: 'test-only fixture location, never set in a run',
   XDG_CONFIG_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
   XDG_CACHE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
@@ -105,14 +109,133 @@ export const THROWAWAY_ENV_KEEP: Readonly<Record<string, string>> = {
   XDG_STATE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
   PLAYWRIGHT_BROWSERS_PATH: 'read-only location of the browser executables (browser-bin.ts); holds no store, config or secret',
 }
-export const isThrowawayEnvDrop = (key: string): boolean => THROWAWAY_ENV_DROP.includes(key) || /^KIMI_.*HOME$/.test(key)
+/**
+ * RUN.FLOWS-HERDADO: the AGENTISTICS_* names (and the session identity) a run KEEPS from its parent, each with its reason.
+ * Everything else under those prefixes is a behaviour switch of the REAL app (`AGENTISTICS_FLOWS`, `_PROVIDER`, `_ADAPTER_CHAT`,
+ * `_JOURNAL`, `_MULTI_ACCOUNT`, `_EXPERIMENTAL_APPLIED`, ...) and is dropped: a managed session carries them in its environment,
+ * and a throwaway server that inherited them ran the real destructive flows against real paths (21/11: 15 real worktrees removed).
+ * A prefix rule, not a hand list, so the next switch is dropped by having been added. `--keep-env NAME` re-allows one.
+ */
+export const THROWAWAY_ENV_ALLOW: Readonly<Record<string, string>> = {
+  AGENTISTICS_HEAVY_JOB: 'the machine heavy-lock marker; a nested agentop heavy/run must not take the lock again',
+  AGENTISTICS_RUN_TMP_TAG: 'test seam that names the run tmp dir; touches nothing real',
+  AGENTISTICS_RUN_NO_WAIT: 'run memory-guard knob; only shortens the launcher wait',
+  AGENTISTICS_RUN_MIN_AVAILABLE_MB: 'run memory-guard knob; a threshold, no behaviour switch',
+  AGENTISTICS_RUN_WAIT_MAX_SEC: 'run memory-guard knob; a threshold, no behaviour switch',
+  AGENTISTICS_ADMISSION_RESERVE_MB: 'memory admission threshold; a number, not a behaviour switch',
+  AGENTISTICS_REAPER: 'a protective narrower (=0 switches the reaper off); dropping it would turn the reaper ON in the run',
+  AGENTISTICS_GOVERNOR: 'a protective narrower (=0 switches the governor kills off); dropping it would turn them ON in the run',
+  AGENTISTICS_AUTO_RECONCILE: 'a protective narrower (=0 switches auto-reconcile off); dropping it would turn it ON in the run',
+  AGENTISTICS_NO_UPDATE_CHECK: 'a protective narrower; keeps the run from checking or installing updates',
+  AGENTISTICS_BROWSER_BIN: 'location of the browser executable the QA drives; holds no store, config or secret',
+  AGENTISTICS_BROWSER_NO_SANDBOX: 'browser launch flag for containers; no real resource',
+  AGENTISTICS_LANG: 'language of the CLI output only',
+}
+/** A behaviour switch of the real app (or the identity of the real session) that a run must not inherit. */
+export const isThrowawaySwitch = (key: string): boolean => /^(AGENTISTICS|AGENTOP)_/i.test(key) && !Object.hasOwn(THROWAWAY_ENV_ALLOW, key)
+export const isThrowawayEnvDrop = (key: string): boolean => THROWAWAY_ENV_DROP.includes(key) || /^KIMI_.*HOME$/.test(key) || isThrowawaySwitch(key) || isGitLeak(key)
 
-export function buildThrowawayEnv(home: string, name: string, apiPort: number, webPort: number, source: NodeJS.ProcessEnv = process.env, opts: { tmp?: string; heavyHeld?: boolean } = {}): NodeJS.ProcessEnv {
+/** Canonical host text: lower case, brackets kept, trailing dots removed (`LOCALHOST.` is `localhost`). */
+const normaliseHost = (host: string): string => host.toLowerCase().replace(/\.+$/, '')
+
+/**
+ * Does this URL host name THIS machine (loopback in any spelling, the unspecified address, or the machine's own hostname)?
+ * `new URL` already canonicalises numeric IPv4 forms (`127.1`, `2130706433`, `0x7f000001`) and IPv6 forms, so this reads the
+ * canonical text: `localhost`/`*.localhost`, 127.0.0.0/8, 0.0.0.0, `[::1]`, `[::]`, `[::ffff:7f..:..]` and the own hostname.
+ */
+export function isOwnMachineHost(rawHost: string, ownHostname: string = hostname()): boolean {
+  const host = normaliseHost(rawHost)
+  if (!host) return false
+  if (host === 'localhost' || host.endsWith('.localhost')) return true
+  const own = normaliseHost(ownHostname)
+  if (own && host === own) return true
+  if (host.startsWith('[')) {
+    const inner = host.slice(1, -1)
+    if (inner === '::1' || inner === '::') return true
+    const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(inner)
+    if (mapped) { const hi = parseInt(mapped[1]!, 16); return hi >> 8 === 127 || (hi === 0 && parseInt(mapped[2]!, 16) === 0) }
+    const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(inner)
+    return dotted ? isOwnMachineHost(dotted[1]!, '') : false
+  }
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host)
+  if (!v4) return false
+  return Number(v4[1]) === 127 || host === '0.0.0.0'
+}
+
+/**
+ * RUN.CLI-SERVIDOR-REAL: why a call the agentop CLI is about to make must NOT go out from inside a run, else null.
+ * SCOPE: this guards the agentop CLI process only (its `fetch` and `WebSocket`); it is not a network block for other processes
+ * a run starts (a script, `curl`, a raw socket can still reach 47291/47292).
+ * The real server sits on 47291/47292 and a CLI verb that fell back to it listed real sessions and could write to the real
+ * store; a run with no `--serve` has no server of its own, so its own ports are refused with a sentence rather than left to fail.
+ * Every loopback spelling counts (see `isOwnMachineHost`) over http, https, ws and wss.
+ */
+export function throwawayFetchRefusal(env: Record<string, string | undefined>, input: string, ownHostname: string = hostname()): string | null {
+  if (!env.AGENTISTICS_THROWAWAY) return null
+  let url: URL
+  try { url = new URL(input) } catch { return null }
+  if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) return null
+  if (!isOwnMachineHost(url.hostname, ownHostname)) return null
+  const port = Number(url.port)
+  if (isRealAgentopPort(port)) return `inside an agentop run: refusing to reach the real agentop server on :${port}`
+  const own = [env.AGENTISTICS_THROWAWAY_API_PORT, env.AGENTISTICS_THROWAWAY_WEB_PORT].map(Number)
+  if (own.includes(port) && env.AGENTISTICS_THROWAWAY_SERVE !== '1') return 'inside an agentop run without --serve: no server to talk to'
+  return null
+}
+
+/** Installs the guard above in front of this process's `fetch` and `WebSocket`; a no-op outside a run. It guards the agentop CLI only. */
+export function installThrowawayFetchGuard(env: Record<string, string | undefined> = process.env): void {
+  if (!env.AGENTISTICS_THROWAWAY) return
+  const real = globalThis.fetch
+  const guarded = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const target = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const refusal = throwawayFetchRefusal(env, target)
+    if (refusal) { console.error(refusal); return Promise.reject(new Error(refusal)) }
+    return real(input, init)
+  }) as typeof fetch
+  globalThis.fetch = Object.assign(guarded, real)
+  const RealWebSocket = globalThis.WebSocket
+  if (RealWebSocket) {
+    globalThis.WebSocket = new Proxy(RealWebSocket, {
+      construct(target, args, newTarget) {
+        const refusal = throwawayFetchRefusal(env, String(args[0]))
+        if (refusal) { console.error(refusal); throw new Error(refusal) }
+        return Reflect.construct(target, args, newTarget)
+      },
+    })
+  }
+}
+
+/** Names `buildThrowawayEnv` always sets itself: keeping one would be printed and then overwritten. */
+const THROWAWAY_OVERWRITTEN = /^(HOME|USERPROFILE|PORT|WEB_PORT|SERVE_STATIC|TMPDIR|TMUX_TMPDIR|XDG_.+|AGENTISTICS_DIR|AGENTISTICS_EXPERIMENTAL|AGENTISTICS_SERVER_FOREGROUND|AGENTISTICS_THROWAWAY(_.*)?)$/i
+/** Names that move or point at the store, a config or a home (agentistics' own `*_DIR/_HOME/_PATH/_FILE`, and the drop list's harness homes). */
+const THROWAWAY_MOVES_STORE = (name: string): boolean =>
+  /^AGENTISTICS_(DIR|HOME)$/i.test(name) || /^AGENTISTICS_.*(_DIR|_HOME|_PATH|_FILE)$/i.test(name) || (THROWAWAY_ENV_DROP.includes(name) && !isGitLeak(name)) || /^KIMI_.*HOME$/.test(name)
+
+/**
+ * `--keep-env NAME` may re-allow a behaviour switch or a leaked git variable, never a variable that moves the run's store or
+ * config, nor one the run overwrites. Returns the sentence that says why not, or null when the name may be kept.
+ */
+export function throwawayKeepRefusal(name: string): string | null {
+  if (!/^[A-Z][A-Z0-9_]*$/.test(name)) return '--keep-env needs a variable name such as AGENTISTICS_FLOWS'
+  if (THROWAWAY_OVERWRITTEN.test(name)) return `${name} cannot be kept: the run sets it itself, so keeping it would change nothing`
+  if (THROWAWAY_MOVES_STORE(name)) return `${name} cannot be kept: it moves the run's store or config, and those stay isolated`
+  if (!isThrowawaySwitch(name) && !isGitLeak(name)) return `${name} cannot be kept: it is not a variable the run drops`
+  return null
+}
+export const throwawayKeepable = (name: string): boolean => throwawayKeepRefusal(name) === null
+
+/** The names of `keep` that really reach the child with the parent's own value; what `run` prints is derived from the env it built, never from the request. */
+export function keptEnvOf(env: NodeJS.ProcessEnv, source: NodeJS.ProcessEnv, keep: readonly string[]): string[] {
+  return keep.filter(k => throwawayKeepable(k) && source[k] !== undefined && env[k] === source[k])
+}
+
+export function buildThrowawayEnv(home: string, name: string, apiPort: number, webPort: number, source: NodeJS.ProcessEnv = process.env, opts: { tmp?: string; heavyHeld?: boolean; keep?: readonly string[]; serve?: boolean } = {}): NodeJS.ProcessEnv {
   const tmp = opts.tmp ?? UNSET_RUN_TMP
   // Volta shims locate their toolchains relative to HOME unless VOLTA_HOME is set.
   // Capture the original installation before isolating HOME, or a shim may resolve itself.
   const voltaHome = source.VOLTA_HOME || join(source.HOME || source.USERPROFILE || homedir(), '.volta')
-  const inherited = Object.fromEntries(Object.entries(source).filter(([k]) => !isThrowawayEnvDrop(k) && !/^XDG_(CONFIG|DATA|STATE|CACHE)_HOME$/.test(k)))
+  const inherited = Object.fromEntries(Object.entries(source).filter(([k]) => (!isThrowawayEnvDrop(k) || (opts.keep?.includes(k) && throwawayKeepable(k)) === true) && !/^XDG_(CONFIG|DATA|STATE|CACHE)_HOME$/.test(k)))
   return {
     ...inherited,
     XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local', 'share'),
@@ -122,6 +245,8 @@ export function buildThrowawayEnv(home: string, name: string, apiPort: number, w
     PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1',
     AGENTISTICS_SERVER_FOREGROUND: '1', AGENTISTICS_EXPERIMENTAL: '0',
     TMUX_TMPDIR: tmp, TMPDIR: tmp, AGENTISTICS_THROWAWAY: name,
+    // RUN.CLI-SERVIDOR-REAL: the CLI inside the run reads these (see `throwawayFetchRefusal`).
+    AGENTISTICS_THROWAWAY_SERVE: opts.serve ? '1' : '0', AGENTISTICS_THROWAWAY_API_PORT: String(apiPort), AGENTISTICS_THROWAWAY_WEB_PORT: String(webPort),
     // The run already holds (or inherits) the machine heavy lock: children must not take it again
     // (`insideHeavyLock` reads this, so a nested `agentop heavy`/`agentop run` does not deadlock).
     ...(opts.heavyHeld ? { AGENTISTICS_HEAVY_JOB: '1' } : {}),
@@ -133,10 +258,12 @@ export function readState(name: string): ThrowawayState | null {
 }
 
 function usage(): string {
-  return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] -- <command...>
+  return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] [--keep-env NAME]... -- <command...>
        agentop run --rm [--ttl 2h] [--port-offset N] [--name x]
        agentop run --rm --serve [--seed-from <staging> | --seed-real] [--cwd <worktree>] [--ttl 2h] [--name x] [-- <server command...>]
        --serve with no command runs the installed agentop; use --cwd with an explicit checkout command to serve that checkout.
+       Env: AGENTISTICS_*/AGENTOP_* switches (and leaked GIT_* vars) are dropped; --keep-env NAME re-allows one (never a store/config path).
+       Network: inside a run the agentop CLI refuses the real server (:47291/:47292); other processes a run starts are NOT network-isolated.
        agentop run ls
        agentop run stop <name>`
 }
@@ -171,6 +298,7 @@ export function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { act
   let seedFrom: string | null = null
   let seedReal = false
   let cwd: string | null = null
+  const keepEnv: string[] = []
   let command: string[] = []
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
@@ -179,6 +307,13 @@ export function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { act
     if (arg === '--serve') { serve = true; continue }
     if (arg === '--seed-real') { seedReal = true; continue }
     if (arg === '--seed-from') { seedFrom = args[++i] ?? ''; continue }
+    if (arg === '--keep-env') {
+      const name = args[++i] ?? ''
+      const why = throwawayKeepRefusal(name)
+      if (why) throw new Error(why)
+      keepEnv.push(name)
+      continue
+    }
     if (arg === '--cwd') { cwd = args[++i] ?? ''; continue }
     if (arg === '--name') { name = safeName(args[++i] ?? ''); continue }
     if (arg === '--ttl') { ttl = args[++i] ?? ''; parseTtl(ttl); continue }
@@ -193,7 +328,7 @@ export function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { act
   if (!remove) throw new Error('agentop run requires --rm (throwaway runs are always explicit)')
   if ((seedFrom !== null || seedReal || cwd !== null) && !serve) throw new Error('--seed-from, --seed-real and --cwd only apply with --serve')
   if (seedFrom !== null && seedReal) throw new Error('--seed-from and --seed-real are exclusive')
-  return { name, ttl, portOffset, remove, command, serve, seedFrom, seedReal, cwd }
+  return { name, ttl, portOffset, remove, command, serve, seedFrom, seedReal, cwd, keepEnv }
 }
 
 type ThrowawayPorts = { apiPort: number; webPort: number; reservationPaths: string[] }
@@ -580,9 +715,11 @@ async function startRun(options: RunOptions): Promise<number> {
   state.tmp = tmp
   let child: ReturnType<typeof spawn>
   let systemd = false
+  let keptEnv: string[] = []
   const unit = `agentistics-throwaway-${options.name}.scope`
   try {
-    const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0 })
+    const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0, keep: options.keepEnv, serve: options.serve })
+    keptEnv = keptEnvOf(env, process.env, options.keepEnv)
     systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await commandExists('systemd-run')
     const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...argv] : argv
     child = spawn(systemd ? 'systemd-run' : argv[0]!, systemd ? childArgs : argv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
@@ -599,6 +736,7 @@ async function startRun(options: RunOptions): Promise<number> {
   console.log(`  home: ${home}`)
   console.log(`  stop: agentop run stop ${options.name}`)
   if (serveBuildNoticeResult) console.log(serveBuildNoticeResult.summary)
+  if (keptEnv.length) console.log(`  kept env: ${keptEnv.join(', ')}`)
 
   // One shared promise: a signal handler and the normal exit path both call this, and the second
   // caller must wait for the first one's removal instead of exiting the process under it.
