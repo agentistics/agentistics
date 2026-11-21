@@ -206,3 +206,62 @@ describe('only leaders are filed on the task itself', () => {
     }
   })
 })
+
+describe('cross-repo explicit cwd through the IO layer', () => {
+  const mk = (repo: string) => async (d: string) => ({ repo, worktree: true, missing: !existsSync(d) })
+  const task = { ...T('t-x', 'Spans repos'), repo: 'agentistics/agentistics' }
+  const b = { tasks: [task], subtasks: [S('s-x', 't-x', 'Slice')] }
+  const o = (d: string, repo: string) => ({ ...common, book: b, repoFacts: mk(repo), rows: [], liveIds: new Set<string>(), role: 'worker' as const, taskRef: 't-x', subtaskRef: 's-x', cwd: d })
+  test('same-org other repo is accepted and says so; other org needs --force and says so', async () => {
+    const d = gitDir()
+    const same = await planSpawnFiling(o(d, 'agentistics/agentistics-engine'))
+    expect(same).toMatchObject({ ok: true, crossRepo: 'agentistics/agentistics-engine' })
+    expect(await planSpawnFiling(o(d, 'acme/thing'))).toMatchObject({ ok: false, code: 'cwd_wrong_repo' })
+    expect(await planSpawnFiling({ ...o(d, 'acme/thing'), forceCwd: true })).toMatchObject({ ok: true, crossRepo: 'acme/thing' })
+  })
+  test('the web/fleet request carries force through to the planner', async () => {
+    const d = gitDir()
+    const req = spawnSessionFilingRequest({ cwd: d, taskId: 't-x', subtaskId: 's-x', role: 'worker', force: true })
+    expect(await planSpawnFiling({ ...common, book: b, repoFacts: mk('acme/thing'), rows: [], liveIds: new Set<string>(), ...req })).toMatchObject({ ok: true, crossRepo: 'acme/thing' })
+  })
+})
+
+describe('cross-repo cwd through the REAL repoFacts (git remotes, no injected facts)', () => {
+  const task = { ...T('t-h', 'Spans repos'), repo: 'github.com/agentistics/agentistics' }
+  const b = { tasks: [task], subtasks: [S('s-h', 't-h', 'Slice')] }
+  const withRemote = (url?: string): string => {
+    const d = gitDir()
+    if (url) gitClean(['-C', d, 'remote', 'add', 'origin', url])
+    return d
+  }
+  const o = (d: string, force = false) => ({ ...common, book: b, repoFacts: undefined, rows: [], liveIds: new Set<string>(), role: 'worker' as const, taskRef: 't-h', subtaskRef: 's-h', cwd: d, ...(force ? { forceCwd: true } : {}) })
+  const plan = (d: string, force = false) => planSpawnFiling({ ...o(d, force), repoFacts: undefined } as never)
+
+  test('same owner, same host: accepted with the note', async () => {
+    const d = withRemote('https://github.com/agentistics/agentistics-engine.git')
+    expect(await plan(d)).toMatchObject({ ok: true, crossRepo: 'agentistics/agentistics-engine' })
+  })
+  test('same owner on ANOTHER host is refused', async () => {
+    const d = withRemote('https://gitlab.com/agentistics/agentistics-engine.git')
+    expect(await plan(d)).toMatchObject({ ok: false, code: 'cwd_wrong_repo' })
+  })
+  test('same name, another owner (moved repository) is accepted with owner_differs; another name is refused', async () => {
+    const d = withRemote('https://github.com/acme/agentistics.git')
+    expect(await plan(d)).toMatchObject({ ok: true, crossRepo: 'acme/agentistics', warnings: expect.arrayContaining(['owner_differs']) })
+    const e = withRemote('https://github.com/acme/other-name.git')
+    expect(await plan(e)).toMatchObject({ ok: false, code: 'cwd_wrong_repo' })
+    expect(await plan(e, true)).toMatchObject({ ok: true, crossRepo: 'acme/other-name' })
+  })
+  test('--force on a directory that is not a git checkout is refused', async () => {
+    const plain = realpathSync(mkdtempSync(join(tmpdir(), 'sfio-plain-')))
+    dirs.push(plain)
+    expect(await plan(plain, true)).toMatchObject({ ok: false, code: 'cwd_not_a_checkout' })
+  })
+  test('a checkout whose remote is a local path never gets an invented owner', async () => {
+    const d = withRemote('/srv/git/agentistics/agentistics-engine')
+    const r = await plan(d, true)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.crossRepo).not.toContain('git/')
+  })
+})
+

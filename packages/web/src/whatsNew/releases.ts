@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.224.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uso dos planos: as vagas livres agora descontam as sessões que já estão rodando em cada conta, e a lista de sessões vivas deixa de vir vazia.',
+        en: 'Plan usage: free slots now subtract the sessions already running on each account, and the live sessions list is no longer empty.',
+      },
+      {
+        pt: 'Abrir uma sessão de tarefa num repositório irmão da mesma organização (ou no mesmo repositório depois de mudar de dono) passa a funcionar, com um aviso; outro repositório continua recusado, e --force agora vale de verdade.',
+        en: 'Starting a task session in a sibling repository of the same organization (or the same repository after an owner move) now works, with a note; another repository is still refused, and --force now really applies.',
+      },
+    ],
+  },
   '2.224.0': {
     features: [
       {
