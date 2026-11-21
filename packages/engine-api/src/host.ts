@@ -231,6 +231,8 @@ export type EngineAuditAction =
   // not open, and one whose migration failed. meta names the purpose and the logical name ONLY —
   // never a value, a length or a fragment. Written to the machine's own `vault/audit.jsonl`.
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
+  // NAVEGADOR S3 (host-only, additive): the person locked/unlocked a session's browser padlock.
+  | 'browser.lock' | 'browser.unlock'
 
 /** Mirrors the host's audit input. The host's builder still redacts secret-shaped fields. */
 export interface EngineAuditEvent {

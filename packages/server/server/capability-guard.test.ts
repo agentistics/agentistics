@@ -198,6 +198,15 @@ test('a shell route nobody has written yet is guarded by having been ADDED', () 
   expect(routeCapability('/api/shell/not-written-yet')).toBe('localShell')
 })
 
+test('THE BROWSER HOST rides localShell, by prefix (NAVEGADOR)', () => {
+  // It starts Chromium on this machine and (from S2) drives it; status and every future route are
+  // guarded by the one prefix entry.
+  expect(routeCapability('/api/browser')).toBe('localShell')
+  expect(routeCapability('/api/browser/status')).toBe('localShell')
+  expect(routeCapability('/api/browser/not-written-yet')).toBe('localShell')
+  expect(routeCapability('/api/browsers-elsewhere')).toBeNull()
+})
+
 test('the prefix does not swallow a neighbouring path', () => {
   // `/api/shells-of-someone-else` is not under `/api/shell`, and a prefix that matched it would be
   // guarding a route nobody registered — which reads as security and is an accident.

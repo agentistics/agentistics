@@ -119,6 +119,8 @@ import { bandModel } from '../../lib/modelDisplay'
 import { handleComposerDrop } from '../../lib/mentionInsert'
 import { REPO_DRAG_MIME, readRepoDrag } from '../../lib/repoDrag'
 import { useNavigate } from 'react-router-dom'
+import { SessionBrowserBlock, SessionBrowserOverlay, useSessionBrowser } from '../browser/SessionBrowser'
+import { anchorItemPosition } from '../../lib/browserCard'
 import { readComposerMenuFolded, visibleComposerMenuGroups, writeComposerMenuFolded, type ComposerMenuGroupId } from '../../lib/composerMenuGroups'
 import { useFleet } from '../../lib/fleet'
 import {
@@ -2329,6 +2331,20 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     [chatActivityOn, turns, firstShown, showWorking, composing],
   )
   const liveActivity = chatActivityOn && activityItems[activityItems.length - 1]?.type === 'activity' && showWorking && !composing
+  // NAVEGADOR S5 — the session's browser card: ONE per session, after the item holding its first browser call
+  // (or at the end while the host says a browser is live). `browserAt` = the rendered item it follows; -1 = first.
+  const sessionBrowser = useSessionBrowser(session.id, turns)
+  const browserAt = useMemo(() => {
+    if (sessionBrowser.anchor === null) return null
+    const rel = sessionBrowser.anchor - firstShown
+    if (chatActivityOn) return anchorItemPosition(activityItems, rel)
+    const n = turns.length - firstShown
+    return rel < 0 || n === 0 ? -1 : Math.min(rel, n - 1)
+  }, [sessionBrowser.anchor, firstShown, chatActivityOn, activityItems, turns.length])
+  const openVault = useCallback(() => navigate('/vault'), [navigate])
+  const browserBlock = browserAt === null ? null : (
+    <SessionBrowserBlock managedId={session.id} lang={lang} model={sessionBrowser} onOpenVault={openVault} title={session.title} />
+  )
   // Rendered per turn exactly as before; shared by both paths so the flag changes grouping only.
   const renderTurn = (t: ChatTurn, i: number) => (
             <Fragment key={i}>
@@ -2673,6 +2689,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       }}
       onDrop={onDrop}
     >
+      <SessionBrowserOverlay managedId={session.id} lang={lang} model={sessionBrowser} onOpenVault={openVault} title={session.title} />
       <div
         ref={scrollRef}
         onScroll={onScroll}
@@ -2734,13 +2751,16 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             }}>{payload.older}</p>
           )}
 
+          {browserAt === -1 && browserBlock}
           {chatActivityOn
-            ? activityItems.map(item => item.type === 'turn'
+            ? activityItems.map((item, k) => [item.type === 'turn'
               ? renderTurn(item.turn, firstShown + item.index)
-              : <ToolActivity key={item.group.key} group={item.group} lang={lang} variant="live" />)
+              : <ToolActivity key={item.group.key} group={item.group} lang={lang} variant="live" />,
+            k === browserAt ? <Fragment key="session-browser">{browserBlock}</Fragment> : null])
             : turns.slice(firstShown).map((t, j) => {
               const silent = silentRuns.get(j)
-              return silent ? <ToolActivity key={silent.key} group={silent} lang={lang} variant="live" /> : renderTurn(t, firstShown + j)
+              return [silent ? <ToolActivity key={silent.key} group={silent} lang={lang} variant="live" /> : renderTurn(t, firstShown + j),
+                j === browserAt ? <Fragment key="session-browser">{browserBlock}</Fragment> : null]
             })}
           {placedAttention.after.map((m, j) => <AttentionMarkLine key={`am-end-${j}`} mark={m} pt={pt} />)}
 

@@ -6,7 +6,7 @@ type Lang = 'pt' | 'en'
 const ORANGE = 'var(--anthropic-orange)'
 const ORANGE_DIM = 'var(--anthropic-orange-dim)'
 
-export function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGoTo, onMinimize, onClose, canClose = true, responsive = false, frameRef, children }: {
+export function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGoTo, onMinimize, onClose, canClose = true, responsive = false, frameRef, actions, dockLabel, dockTitle, dockIconOnly = false, resizable = true, children }: {
   win: NayWindow
   lang: Lang
   title: string
@@ -21,6 +21,15 @@ export function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGo
   canClose?: boolean
   frameRef?: Ref<HTMLDivElement>
   responsive?: boolean
+  /** Controls drawn BEFORE the dock button (the browser window's padlock / full screen — NAVEGADOR S11). */
+  actions?: ReactNode
+  /** The dock button's word and tooltip when it is not the Nay panel ("Voltar para a conversa/barra"). */
+  dockLabel?: string
+  dockTitle?: string
+  /** Phone: the dock button is its icon alone (the word becomes its accessible name). */
+  dockIconOnly?: boolean
+  /** False while a window is full screen or sized by the phone: no grip. */
+  resizable?: boolean
   children: ReactNode
 }) {
   const pt = lang === 'pt'
@@ -75,8 +84,9 @@ export function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGo
       }}>
         <PictureInPicture2 size={13} color="var(--text-tertiary)" style={{ flexShrink: 0 }} />
         <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-        {onDock && <LabelButton icon={<ArrowDownToLine size={13} />} label={pt ? 'Acoplar' : 'Dock'}
-          title={pt ? 'Voltar esta sessão para o painel do chat' : 'Put this session back in the chat panel'} onClick={onDock} />}
+        {actions}
+        {onDock && <LabelButton icon={<ArrowDownToLine size={13} />} label={dockLabel ?? (pt ? 'Acoplar' : 'Dock')} iconOnly={dockIconOnly}
+          title={dockTitle ?? (pt ? 'Voltar esta sessão para o painel do chat' : 'Put this session back in the chat panel')} onClick={onDock} />}
         {onGoTo && <LabelButton icon={<SquareArrowOutUpRight size={13} />} label={pt ? 'Ir para a sessão' : 'Go to session'}
           title={pt ? 'Abrir esta sessão na tela de Sessões' : 'Open this session in the Sessions workspace'} onClick={onGoTo} />}
         <IconButton label={pt ? 'Minimizar' : 'Minimize'} onClick={onMinimize} isMobile={mobile} largeTarget={mobile}><Minus size={14} /></IconButton>
@@ -85,34 +95,40 @@ export function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGo
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {children}
       </div>
-      <div onPointerDown={startResize} title={pt ? 'Arraste para redimensionar' : 'Drag to resize'} style={{
+      {resizable && <div onPointerDown={startResize} title={pt ? 'Arraste para redimensionar' : 'Drag to resize'} style={{
         position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, cursor: 'nwse-resize',
         background: 'linear-gradient(135deg, transparent 50%, var(--border) 50%)',
-      }} />
+      }} />}
     </div>
   )
 }
 
-/** A shared icon control; mobile targets use the existing projected tap area. */
-export function IconButton({ label, onClick, isMobile, largeTarget = false, children }: { label: string; onClick: () => void; isMobile: boolean; largeTarget?: boolean; children: ReactNode }) {
+/**
+ * A shared icon control; mobile targets use the existing projected tap area. `tone` marks a TOGGLE's state
+ * (the browser padlock): `framed` = a quiet outline, `on` = the orange "you have it" state. Absent = plain.
+ */
+export function IconButton({ label, onClick, isMobile, largeTarget = false, tone, pressed, disabled = false, children }: { label: string; onClick: () => void; isMobile: boolean; largeTarget?: boolean; tone?: 'framed' | 'on'; pressed?: boolean; disabled?: boolean; children: ReactNode }) {
   return (
-    <button onClick={onClick} aria-label={label} title={label} className={isMobile && !largeTarget ? 'ag-tap-icon' : undefined} style={{
+    <button type="button" onClick={onClick} aria-label={label} title={label} aria-pressed={pressed} disabled={disabled} className={isMobile && !largeTarget ? 'ag-tap-icon' : undefined} style={{
       width: largeTarget ? 44 : 30, height: largeTarget ? 44 : 30, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      border: 'none', borderRadius: 7, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer',
+      border: tone === 'on' ? `1px solid ${ORANGE}` : tone === 'framed' ? '1px solid var(--border-strong, var(--border))' : 'none', borderRadius: 7,
+      background: tone === 'on' ? ORANGE_DIM : tone === 'framed' ? 'var(--bg-elevated)' : 'transparent',
+      color: tone === 'on' ? 'var(--anthropic-orange-light, var(--anthropic-orange))' : tone === 'framed' ? 'var(--text-primary)' : 'var(--text-secondary)',
+      cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.6 : 1, boxSizing: 'border-box',
     }}>{children}</button>
   )
 }
 
 /** A control whose action must be unmistakable: an icon AND a word, orange-outlined (red to end). */
-export function LabelButton({ icon, label, title, onClick, danger }: { icon: ReactNode; label: string; title: string; onClick: () => void; danger?: boolean }) {
+export function LabelButton({ icon, label, title, onClick, danger, iconOnly = false }: { icon: ReactNode; label: string; title: string; onClick: () => void; danger?: boolean; iconOnly?: boolean }) {
   const tone = danger ? 'var(--accent-red, #ef4444)' : ORANGE
   return (
-    <button onClick={onClick} title={title} style={{
-      display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, padding: '4px 9px', borderRadius: 7,
+    <button type="button" onClick={onClick} title={title} aria-label={iconOnly ? label : undefined} style={{
+      display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, padding: iconOnly ? '4px 12px' : '4px 9px', borderRadius: 7,
       border: `1px solid ${tone}`, background: danger ? 'rgba(239, 68, 68, 0.1)' : ORANGE_DIM, color: tone, cursor: 'pointer',
       fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap',
     }}>
-      {icon}{label}
+      {icon}{iconOnly ? null : label}
     </button>
   )
 }

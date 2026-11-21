@@ -90,7 +90,7 @@ export type TabPanelId =
   | 'search' | 'live' | 'gallery' | 'skills' | 'agents' | 'forks' | 'workflows' | 'mcps' | 'prs' | 'tasks'
   | 'metrics' | 'calendar' | 'livedelivery'
 
-export type PanelId = TabPanelId | 'studio' | 'cli' | 'shell' | 'hardware'
+export type PanelId = TabPanelId | 'studio' | 'cli' | 'shell' | 'hardware' | 'browser'
 
 /** In the READING ORDER the rail and the bottom bar fall back to for a panel neither has ever
  *  explicitly ordered — the same order `ArtifactsAside`'s own tab strip used to draw its tabs in,
@@ -98,7 +98,7 @@ export type PanelId = TabPanelId | 'studio' | 'cli' | 'shell' | 'hardware'
  *  default occupants) appended after them. */
 export const PANEL_IDS: readonly PanelId[] = [
   'search', 'live', 'gallery', 'skills', 'agents', 'forks', 'workflows', 'mcps', 'prs', 'tasks', 'metrics', 'calendar', 'livedelivery',
-  'studio', 'hardware', 'cli', 'shell',
+  'studio', 'hardware', 'cli', 'shell', 'browser',
 ]
 
 export function isTabPanelId(v: unknown): v is TabPanelId {
@@ -107,7 +107,7 @@ export function isTabPanelId(v: unknown): v is TabPanelId {
 }
 
 export function isPanelId(v: unknown): v is PanelId {
-  return isTabPanelId(v) || v === 'studio' || v === 'cli' || v === 'shell' || v === 'hardware'
+  return isTabPanelId(v) || v === 'studio' || v === 'cli' || v === 'shell' || v === 'hardware' || v === 'browser'
 }
 
 /** Where a panel's ICON/TAB lives. `'hidden'`: reachable from neither the rail nor the bottom band —
@@ -130,7 +130,7 @@ export type SlotId = 'right' | 'bottom'
 export const DEFAULT_PLACEMENT: Record<PanelId, Placement> = {
   search: 'rail', live: 'rail', gallery: 'rail', skills: 'rail', agents: 'rail', forks: 'rail', workflows: 'rail',
   mcps: 'rail', prs: 'rail', tasks: 'rail', metrics: 'rail', calendar: 'rail', livedelivery: 'rail', studio: 'rail', hardware: 'rail',
-  cli: 'bottom', shell: 'bottom',
+  cli: 'bottom', shell: 'bottom', browser: 'rail',
 }
 
 function defaultOrder(): Record<PanelId, number> {
@@ -574,6 +574,8 @@ export interface PanelGates {
   editorEnabled: boolean
   shellEnabled: boolean
   relayed: boolean
+  /** A phone has no rail: the person's browser is its full-screen drawer there, never a slot panel (NAVEGADOR S10). */
+  phone?: boolean
 }
 
 /** May this panel ever be shown, given what the server/session actually allows right now? The ten
@@ -584,6 +586,7 @@ function gateOpen(panel: PanelId, gates: PanelGates): boolean {
   if (panel === 'studio') return gates.editorEnabled
   if (panel === 'cli') return !gates.relayed
   if (panel === 'shell') return gates.shellEnabled && !gates.relayed
+  if (panel === 'browser') return !gates.relayed && gates.phone !== true
   return true
 }
 

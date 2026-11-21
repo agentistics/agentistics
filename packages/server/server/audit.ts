@@ -62,6 +62,9 @@ export type AuditAction =
   // not open, and one whose migration failed. meta names the purpose and the logical name ONLY —
   // never a value, a length or a fragment. Written to the machine's own `vault/audit.jsonl`.
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
+  // NAVEGADOR S3: the person handed a session's browser back to the model (lock) or took it (unlock).
+  // targetId = the managed session; never a URL, a page or an input.
+  | 'browser.lock' | 'browser.unlock'
 
 export interface AuditEvent {
   action: AuditAction
