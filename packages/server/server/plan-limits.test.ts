@@ -256,13 +256,17 @@ test('waiting fleet payload has no live sessions and uses plan burn alone for sl
   const withUnbilled = await planLimitsPayload(undefined, now, [
     ...measured, { id: 'unbilled', harness: 'codex', account: 'default', model: 'unknown', burnPctPerHour: 0 },
   ])
-  expect(withUnbilled.freeSlotsByHarness).toEqual(baseline.freeSlotsByHarness)
-  expect(withUnbilled.budgets[0]?.liveSessions).toEqual(baseline.budgets[0]?.liveSessions)
+  // PLAN-LIMITS.VIVOS: an unbilled (idle/waiting) session is alive: it holds a slot and is listed on its
+  // account row, but its zero burn never dilutes the measured average.
+  expect(withUnbilled.budgets[0]?.burnPctPerHour).toBe(baseline.budgets[0]?.burnPctPerHour)
+  expect(withUnbilled.freeSlotsByHarness.codex).toBeLessThanOrEqual(baseline.freeSlotsByHarness.codex!)
+  expect(withUnbilled.budgets[0]?.liveSessions.map(s => s.id)).toEqual(['measured', 'unbilled'])
   expect(withUnbilled.liveSessions.map(s => s.id)).toEqual(['measured', 'unbilled'])
   const onlyUnbilled = await planLimitsPayload(undefined, now, [
     { id: 'unbilled', harness: 'codex', account: 'default', model: 'unknown', burnPctPerHour: 0 },
   ])
-  expect(onlyUnbilled.freeSlotsByHarness).toEqual(body.freeSlotsByHarness)
+  expect(onlyUnbilled.freeSlotsByHarness.codex).toBeLessThanOrEqual(body.freeSlotsByHarness.codex!)
+  expect(onlyUnbilled.budgets[0]?.liveSessions.map(s => s.id)).toEqual(['unbilled'])
 })
 
 test('plan limits handler peeks at working fleet identities without reading the hub', () => {
@@ -1526,5 +1530,68 @@ describe('CONTAS.TROCADAS: real root outranks the registered account', () => {
     expect(launchConfigRoot({}, { CLAUDE_CONFIG_DIR: '/x' })).toBe('/x')
     expect(launchConfigRoot({ unsetEnv: ['CLAUDE_CONFIG_DIR'] }, { CLAUDE_CONFIG_DIR: '/x' })).toBeNull()
     expect(launchConfigRoot({}, {})).toBeNull()
+  })
+})
+
+// ── PLAN-LIMITS.VIVOS: a waiting worker is alive and holds a slot ───────────────────────────────
+describe('PLAN-LIMITS.VIVOS: live sessions per account from the fleet', () => {
+  const setup = async () => {
+    const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+    __setHarnessAccountsForTest(store)
+    await store.bind(null, { harness: 'claude', key: 'principal', label: 'Principal' })
+    await store.bind(join(dir, 'vini-root'), { harness: 'claude', key: 'vini', label: 'Vini' })
+    const b = (await store.readAccounts()).bindings
+    const A = b['claude:']!, B = b[`claude:${join(dir, 'vini-root')}`]!
+    const now = Date.now()
+    // Two readings 3 h apart with a slow climb: UNDER pace, so suggestedParallel is 2.
+    for (const [account, at, pct] of [[A, now - 3 * 3_600_000, 0], [B, now - 3 * 3_600_000, 0], [A, now, 1], [B, now, 1]] as const) await ingestPlanLimits({
+      harness: 'claude', account, plan: 'Max', updatedAt: at, source: 'claude-stream',
+      windows: [{ kind: '5h', usedPct: pct, resetsAt: now + 3_600_000 }, { kind: 'week', usedPct: pct, resetsAt: now + 6 * 86_400_000 }],
+    })
+    return { A, B, now }
+  }
+  const row = (id: string, status = 'running', activity: string | undefined = 'waiting') => ({ id, harness: 'claude', status, activity })
+  const run = async (rows: ReturnType<typeof row>[], reg: { id: string; accountId?: string; createdAt: string }[]) => {
+    const { A, B, now } = await setup()
+    __setManagedLookupForTest(async () => reg.map(r => ({ harness: 'claude', ...r, accountId: r.accountId === 'A' ? A : r.accountId === 'B' ? B : undefined })))
+    const { fleetLiveSessions } = await import('./plan-limits')
+    const body = await planLimitsPayload(undefined, now, [], await fleetLiveSessions(rows))
+    const of = (acc: string) => body.budgets.find(b => b.account === acc)!
+    return { body, a: of(A), b: of(B) }
+  }
+  const T = '2026-11-21T00:00:00Z'
+
+  test('1 live on A and 2 on B are listed per account and discounted from freeSlots', async () => {
+    const reg = [{ id: 'w1', accountId: 'A', createdAt: T }, { id: 'w2', accountId: 'B', createdAt: T }, { id: 'w3', accountId: 'B', createdAt: T }]
+    const { body, a, b } = await run([row('w1'), row('w2', 'running', 'working'), row('w3')], reg)
+    expect(a.suggestedParallel).toBe(2)
+    expect(a.liveSessions.map(s => s.id)).toEqual(['w1'])
+    expect(b.liveSessions.map(s => s.id).sort()).toEqual(['w2', 'w3'])
+    expect(a.freeSlots).toBe(1)
+    expect(b.freeSlots).toBe(0)
+    expect(body.freeSlotsByAccount[a.account]).toBe(1)
+    expect(body.freeSlotsByAccount[b.account]).toBe(0)
+    expect(body.freeSlotsByHarness.claude).toBe(1)
+    expect(body.liveSessions.map(s => s.id).sort()).toEqual(['w1', 'w2', 'w3'])
+  })
+
+  test('exited, lost and unregistered rows do not hold a slot', async () => {
+    const reg = [{ id: 'w1', accountId: 'A', createdAt: T }, { id: 'x1', accountId: 'A', createdAt: T }, { id: 'x2', accountId: 'A', createdAt: T }, { id: 'x3', accountId: 'A', createdAt: T }]
+    const { a } = await run([row('w1'), row('x1', 'exited', 'exited'), row('x2', 'lost', undefined), row('x3', 'running', 'exited')], reg)
+    expect(a.liveSessions.map(s => s.id)).toEqual(['w1'])
+    expect(a.freeSlots).toBe(1)
+  })
+
+  test('a leader counts as a live session like any worker', async () => {
+    const reg = [{ id: 'lead', accountId: 'A', createdAt: T }]
+    const { a } = await run([row('lead')], reg)
+    expect(a.liveSessions.map(s => s.id)).toEqual(['lead'])
+  })
+
+  test('a session with no known account is counted on the harness default account', async () => {
+    const { a, body } = await run([row('anon')], [])
+    expect(a.liveSessions.map(s => s.id)).toEqual(['anon'])
+    expect(a.freeSlots).toBe(1)
+    expect(body.liveSessions.map(s => s.id)).toEqual(['anon'])
   })
 })

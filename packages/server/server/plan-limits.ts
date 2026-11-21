@@ -774,6 +774,25 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
   }
 }
 
+/** A running fleet session, as far as plan limits need it. */
+export interface FleetLiveSession { id: string; harness: HarnessId; conversationId?: string; model?: string; account?: string }
+
+/** The fleet rows that hold a slot: running, and not exited. Their account is the registry's answer for the row. */
+export async function fleetLiveSessions(
+  rows: readonly { id: string; harness?: string; conversationId?: string; status: string; activity?: string; model?: string }[],
+): Promise<FleetLiveSession[]> {
+  const registry = await readAccounts().catch((): AccountsFile => ({ version: 2, accounts: [], bindings: {}, segments: {} }))
+  const managed = await managedLookup().catch(() => [])
+  const out: FleetLiveSession[] = []
+  for (const r of rows) {
+    if (r.status !== 'running' || r.activity === 'exited' || !r.harness || !isHarnessId(r.harness)) continue
+    const own = resolveSessionAccount(managed, { id: r.id, ...(r.conversationId ? { conversationId: r.conversationId } : {}) })
+    out.push({ id: r.id, harness: r.harness, ...(r.conversationId ? { conversationId: r.conversationId } : {}), ...(r.model ? { model: r.model } : {}),
+      ...(own ? { account: canonicalAccountId(registry, own) } : {}) })
+  }
+  return out
+}
+
 export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string; yieldsTo?: string; unassignedLive: number; agentUse?: AgentUseView }
 
 export interface PlanLimitsPayload {
@@ -803,8 +822,18 @@ export interface PlanLimitsPayload {
 export async function planLimitsPayload(
   billingIn: Parameters<typeof withPlanLabel>[1],
   nowMs = Date.now(),
-  liveSessions: readonly LivePlanSession[] = [],
+  sampledLive: readonly LivePlanSession[] = [],
+  fleetLive: readonly FleetLiveSession[] = [],
 ): Promise<PlanLimitsPayload> {
+  // PLAN-LIMITS.VIVOS: the sample above only holds sessions that WORK or burn tokens; a worker that
+  // waits is alive and holds a slot. The fleet's running sessions are folded in (burn 0, so they
+  // never dilute the measured average), each once whatever id the sample knew it by.
+  const known = new Set(sampledLive.map(s => s.id))
+  const liveSessions: readonly LivePlanSession[] = [
+    ...sampledLive,
+    ...fleetLive.filter(f => ![f.id, ...(f.conversationId ? [f.conversationId] : [])].some(i => known.has(i)))
+      .map((f): LivePlanSession => ({ id: f.id, model: f.model ?? '', burnPctPerHour: 0, harness: f.harness, ...(f.account ? { account: f.account } : {}) })),
+  ]
   await syncPlanLimitsFromFile()
   const registry = await readAccounts().catch((): AccountsFile => ({ version: 2, accounts: [], bindings: {}, segments: {} }))
   await maybeMigrateDefault(registry)
@@ -918,7 +947,13 @@ export async function planLimitsPayload(
           : { ...(p.freeSlots !== undefined ? { freeSlots: p.freeSlots } : {}), ...(p.suggestedParallel !== undefined ? { suggestedParallel: p.suggestedParallel } : {}) }),
       }
     }) : undefined
-    return { ...budget, ...planPace(l, nowMs, past, planSessions, segmentOf(l.account)), ...availability,
+    // Every live session of this account (burning or not) holds a slot: the row lists them all and
+    // freeSlots never exceeds what the suggested parallelism leaves after them.
+    const mineLive = [...resolvedSessions.filter(s => belongsTo(s, l)), ...unassigned].map(({ harness: _h, account: _a, ...x }) => x)
+    const pace = planPace(l, nowMs, past, planSessions, segmentOf(l.account))
+    const capped = { ...pace, liveSessions: mineLive as typeof pace.liveSessions,
+      freeSlots: Math.min(pace.freeSlots, Math.max(0, pace.suggestedParallel - mineLive.length)) }
+    return { ...budget, ...capped, ...availability,
       ...(!availability.spawnable ? { freeSlots: 0, suggestedParallel: 0 } : {}),
       ...(scopes ? { scopes } : {}),
       account: l.account, accountLabel: labelOf(l.harness, l.account), unassignedLive: unassigned.length,
