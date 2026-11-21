@@ -24,6 +24,7 @@ import { conversationOwners } from './task-conversations'
 import { historicalLinkId, nativeLinkId, type HistoricalSession, type NativeSessionLink, type NativeSessionUsage } from './task-model'
 import { sanitizeNativeUsage } from './task-native'
 import { planConversationFiling } from './task-historical'
+import { normalizeTaskRepo } from './task-repo'
 import { buildTaskDetail, buildTaskList, findTask, rowsOfTask, subtaskHasSession } from './task-report'
 import { planDeliveryEvidence, type DeliveryEvidence } from './task-evidence'
 import { buildBoardOverview, type BoardOverview } from './task-overview'
@@ -521,12 +522,17 @@ export async function editTask(
     dueDate?: string
     startDate?: string
     labels?: string[]
+    /** The task's repository (`owner/name` or a git URL); `''` clears it. An unusable one refuses the whole edit. */
+    repo?: string
     actor?: string
   },
 ): Promise<boolean> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return false
+  const repoEdit = patch.repo !== undefined ? normalizeTaskRepo(patch.repo) : undefined
+  if (repoEdit && !repoEdit.ok) return false
+  const nextRepo = repoEdit?.ok ? repoEdit.repo : undefined
   const now = new Date().toISOString()
   // An UNKNOWN priority word is refused rather than coerced: `migratePriority` would read it as
   // `none`, which is a real answer ("nobody has said") and would silently overwrite a real one.
@@ -544,6 +550,7 @@ export async function editTask(
     ...(priority !== undefined ? { priority } : {}),
     ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate.trim() } : {}),
     ...(patch.startDate !== undefined ? { startDate: patch.startDate.trim() } : {}),
+    ...(nextRepo !== undefined ? { repo: nextRepo } : {}),
     ...(patch.labels !== undefined
       ? { labels: patch.labels.map(l => l.trim()).filter(Boolean) }
       : {}),
@@ -557,6 +564,9 @@ export async function editTask(
   }
   if (nextType !== undefined && nextType !== (task.type ?? '')) {
     changes.push(event(task.id, actor, 'type', { from: task.type ?? '', to: nextType }))
+  }
+  if (nextRepo !== undefined && nextRepo !== (task.repo ?? '')) {
+    changes.push(event(task.id, actor, 'repo', { from: task.repo ?? '', to: nextRepo }))
   }
   await w.store.logEvents(changes)
   return true
