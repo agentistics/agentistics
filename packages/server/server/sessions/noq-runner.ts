@@ -27,6 +27,8 @@ export interface NoqDeps {
   answer(id: string, choice: number): Promise<{ ok: boolean; message: string }>
   prompt(id: string, text: string): Promise<{ ok: boolean; message: string }>
   record(r: NoqAnswerRecord): Promise<void> | void
+  /** The mode the session was STARTED in (registry). A permission dialog's footer hides the mode chip, so the frame often cannot say. */
+  startMode?(id: string): Promise<string | undefined>
   now?: () => number
   home?: string
   sleep?: (ms: number) => Promise<void>
@@ -42,8 +44,9 @@ export function createNoqRunner(deps: NoqDeps) {
       const done: NoqAnswerRecord[] = []
       for (const v of snap.sessions) {
         if (v.activity !== 'waiting-approval') continue
+        const mode = v.mode?.canonical ?? await deps.startMode?.(v.id).catch(() => undefined)
         const d: NoqDecision = decideNoqAnswer({
-          harness: v.harness, mode: v.mode?.canonical, cwd: v.cwd,
+          harness: v.harness, mode, cwd: v.cwd,
           approvalLines: v.approvalLines, dialogOptions: v.dialogOptions,
         }, deps.home)
         if (d.action === 'skip') continue
@@ -74,6 +77,7 @@ export async function defaultNoqDeps(): Promise<NoqDeps> {
   const file = join(AGENTISTICS_DATA_DIR, 'noq-answers.jsonl')
   return {
     home: HOME_DIR,
+    startMode: async id => (await (await import('./registry')).readRegistry()).find(m => m.id === id)?.mode,
     answer: async (id, choice) => {
       if (!host.answerSession) return { ok: false, message: 'no host' }
       const r = await host.answerSession(id, choice, '')

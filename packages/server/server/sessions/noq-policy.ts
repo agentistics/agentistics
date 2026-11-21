@@ -6,8 +6,8 @@
  * session sat on "THIS SESSION IS ASKING" forever. The fleet already reads the dialog (`approvalLines`,
  * `dialogOptions`); this decides the answer:
  *
- *  - `approve` — the command stays inside the session's directory (or /tmp) and trips no deny rule;
- *  - `deny` — a deny rule matched, or a path escapes the allowed directories. The model is told WHY
+ *  - `approve` — everything that trips no deny rule (owner decision: workers legitimately write outside the cwd);
+ *  - `deny` — a deny rule matched. The model is told WHY
  *    in one sentence typed after the dialog closes, so it retries differently instead of stalling;
  *  - `skip` — not our business (another mode, another harness, not a Yes/No permission prompt). The
  *    session keeps waiting for a person exactly as before.
@@ -26,7 +26,7 @@ export interface NoqDialog {
   dialogOptions?: ReadonlyArray<{ number: number; label: string }>
 }
 
-export type NoqRule = 'inside-cwd' | 'rm-outside' | 'force-push' | 'agentistics-port' | 'agentop-upgrade' | 'kill-by-name' | 'path-outside'
+export type NoqRule = 'allowed' | 'rm-outside' | 'force-push' | 'agentistics-port' | 'agentop-upgrade' | 'kill-by-name' | 'agentistics-write'
 
 export type NoqDecision =
   | { action: 'skip'; why: string }
@@ -41,20 +41,25 @@ export function dialogCommand(lines: readonly string[]): string {
   return clean.slice(head + 1, q).filter(Boolean).join('\n')
 }
 
-const ALLOWED_ROOTS = ['/tmp', '/dev/null', '/usr', '/bin', '/opt']
+const ALLOWED_ROOTS = ['/tmp']
 
 function inside(path: string, root: string): boolean {
   return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep)
 }
 
-function allowedPath(p: string, cwd: string, home: string): boolean {
-  const abs = p.startsWith('~') ? resolve(home, p.slice(2)) : resolve(cwd, p)
-  return inside(abs, resolve(cwd)) || ALLOWED_ROOTS.some(r => inside(abs, r))
+/**
+ * Where a recursive rm may reach: the cwd, /tmp, the throwaway cache, the PARENT project of a worktree
+ * (`<project>/.worktrees/<name>` → `<project>`) and any `AGENTISTICS_NOQ_RM_ROOTS` (colon-separated).
+ */
+export function rmRoots(cwd: string, home: string, extra: readonly string[] = []): string[] {
+  const m = cwd.match(/^(.*?)\/\.(?:claude\/)?worktrees\//)
+  const fromEnv = (process.env.AGENTISTICS_NOQ_RM_ROOTS ?? '').split(':').filter(Boolean)
+  return [resolve(cwd), ...ALLOWED_ROOTS, resolve(home, '.cache/agentistics-throwaway'), ...(m ? [m[1]!] : []), ...fromEnv, ...extra]
 }
 
-/** Absolute (`/x`, `~/x`) path tokens of a command — what it names outside any quoting subtlety. */
-function absolutePaths(text: string): string[] {
-  return [...text.matchAll(/(?:^|[\s='"(:])((?:~|\/)[^\s'"`;|&<>()]*)/g)].map(m => m[1]!).filter(p => p.length > 1 || p === '~')
+function allowedPath(p: string, cwd: string, home: string, extra: readonly string[]): boolean {
+  const abs = p.startsWith('~') ? resolve(home, p.slice(2)) : resolve(cwd, p)
+  return rmRoots(cwd, home, extra).some(r => inside(abs, r))
 }
 
 function segments(text: string): string[] {
@@ -65,7 +70,7 @@ function tokens(seg: string): string[] {
   return seg.split(/\s+/).map(t => t.replace(/^['"]|['"]$/g, '')).filter(Boolean)
 }
 
-export function denyRule(command: string, cwd: string, home = '/root'): { rule: NoqRule; reason: string } | null {
+export function denyRule(command: string, cwd: string, home = '/root', extraRoots: readonly string[] = []): { rule: NoqRule; reason: string } | null {
   if (/\b4729[12]\b/.test(command)) {
     return { rule: 'agentistics-port', reason: 'Autonomous mode: ports 47291/47292 belong to agentistics; do not touch them. Use a throwaway server on another port.' }
   }
@@ -76,6 +81,10 @@ export function denyRule(command: string, cwd: string, home = '/root'): { rule: 
     return { rule: 'kill-by-name', reason: 'Autonomous mode: do not kill processes by name; kill only the PID you saved.' }
   }
   for (const seg of segments(command)) {
+    if (/(^|[\s='"(:/])(~|\$HOME|\$\{HOME\}|\/home\/[^/\s]+)\/\.agentistics(\/|\s|['"]|$)/.test(seg)
+      && (/>/.test(seg) || /(^|\s)(tee|cp|mv|rm|touch|truncate|dd|ln|install|chmod|rmdir)\s/.test(seg) || /sed\s+(-\w*i|--in-place)/.test(seg))) {
+      return { rule: 'agentistics-write', reason: 'Autonomous mode: never write directly into ~/.agentistics; go through agentop or the API.' }
+    }
     const t = tokens(seg)
     const i = t.findIndex((x, n) => x === 'git' && (t[n + 1] === 'push' || t.slice(n + 1, n + 4).includes('push')))
     if (i >= 0) {
@@ -93,7 +102,7 @@ export function denyRule(command: string, cwd: string, home = '/root'): { rule: 
       const recursive = args.some(a => /^-[a-zA-Z]*[rR]/.test(a) || a === '--recursive')
       if (recursive) {
         const targets = args.filter(a => !a.startsWith('-'))
-        const bad = targets.length === 0 || targets.some(a => /[$*`]/.test(a) || !allowedPath(a, cwd, home))
+        const bad = targets.length === 0 || targets.some(a => /[$*`]|(^|\/)\.\.(\/|$)/.test(a) || !allowedPath(a, cwd, home, extraRoots))
         if (bad) return { rule: 'rm-outside', reason: 'Autonomous mode: recursive rm only inside the session directory or /tmp, with explicit absolute paths.' }
       }
     }
@@ -101,10 +110,8 @@ export function denyRule(command: string, cwd: string, home = '/root'): { rule: 
   return null
 }
 
-const PATH_REASON = 'Autonomous mode: run it without heredoc / without cd in a compound command; use absolute paths inside the working directory or git -C.'
-
 /** The answer for one dialog. `home` is injected so the rule is testable. */
-export function decideNoqAnswer(d: NoqDialog, home = '/root'): NoqDecision {
+export function decideNoqAnswer(d: NoqDialog, home = '/root', extraRoots: readonly string[] = []): NoqDecision {
   if (d.harness !== 'claude') return { action: 'skip', why: 'harness' }
   if (d.mode !== 'no-questions') return { action: 'skip', why: 'mode' }
   const opts = d.dialogOptions ?? []
@@ -113,11 +120,9 @@ export function decideNoqAnswer(d: NoqDialog, home = '/root'): NoqDecision {
   if (!yes || !no) return { action: 'skip', why: 'not-a-permission-prompt' }
   const command = dialogCommand(d.approvalLines ?? [])
   if (!command) return { action: 'skip', why: 'no-command' }
-  const deny = denyRule(command, d.cwd, home)
+  const deny = denyRule(command, d.cwd, home, extraRoots)
   if (deny) return { action: 'deny', choice: no.number, rule: deny.rule, command, reason: deny.reason }
-  const outside = absolutePaths(command).find(p => !allowedPath(p, d.cwd, home))
-  if (outside) return { action: 'deny', choice: no.number, rule: 'path-outside', command, reason: PATH_REASON }
-  return { action: 'approve', choice: yes.number, rule: 'inside-cwd', command, reason: 'inside the session directory' }
+  return { action: 'approve', choice: yes.number, rule: 'allowed', command, reason: 'not on the deny list' }
 }
 
 export interface NoqMemory { lastKey: Map<string, { key: string; atMs: number }> }

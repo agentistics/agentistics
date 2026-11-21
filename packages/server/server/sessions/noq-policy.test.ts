@@ -5,9 +5,9 @@ import type { SessionSnapshot } from './sessions-host'
 
 const CWD = '/home/u/proj/.worktrees/wt'
 const OPTIONS = [
-  { number: 1, label: 'Yes' },
-  { number: 2, label: 'Yes, and always allow (shift+tab)' },
-  { number: 3, label: 'No, and tell Claude what to do differently (esc)' },
+  { number: 1, label: 'Yes', selected: true },
+  { number: 2, label: 'Yes, and always allow (shift+tab)', selected: false },
+  { number: 3, label: 'No, and tell Claude what to do differently (esc)', selected: false },
 ]
 const screen = (cmd: string) => [
   '╭────────────────╮', '│ Bash command   │', '│                │', ...cmd.split('\n').map(l => `│   ${l}   │`), '│                │',
@@ -20,16 +20,16 @@ const dialog = (cmd: string, over: Partial<NoqDialog> = {}): NoqDialog => ({
 describe('decideNoqAnswer', () => {
   test('approves a command inside the cwd (heredoc included) with the plain Yes', () => {
     const d = decideNoqAnswer(dialog(`cat > ${CWD}/a.txt <<'EOF'\nhi\nEOF`))
-    expect(d).toMatchObject({ action: 'approve', choice: 1, rule: 'inside-cwd' })
+    expect(d).toMatchObject({ action: 'approve', choice: 1, rule: 'allowed' })
   })
-  test('refuses cd outside the project in a compound command, with a reason for the model', () => {
-    const d = decideNoqAnswer(dialog('cd /home/u/other && git worktree remove x'))
-    expect(d).toMatchObject({ action: 'deny', choice: 3, rule: 'path-outside' })
-    expect((d as { reason: string }).reason).toContain('git -C')
+  test('approves legitimate work outside the cwd (reports, sibling worktrees, cd in compound)', () => {
+    expect(decideNoqAnswer(dialog('cat > /home/u/ws/leader/r.md')).action).toBe('approve')
+    expect(decideNoqAnswer(dialog('cd /home/u/other && git worktree remove x')).action).toBe('approve')
   })
-  test('relative paths stay inside; ~ resolves against home', () => {
-    expect(decideNoqAnswer(dialog('ls src && bun test x.ts'), '/home/u').action).toBe('approve')
-    expect(decideNoqAnswer(dialog('cat ~/.ssh/id_rsa'), '/home/u').action).toBe('deny')
+  test('refuses with a typed reason when a deny rule matches', () => {
+    const d = decideNoqAnswer(dialog('rm -rf /home/u/other'))
+    expect(d).toMatchObject({ action: 'deny', choice: 3, rule: 'rm-outside' })
+    expect((d as { reason: string }).reason.length).toBeGreaterThan(10)
   })
   test('skips another mode, another harness, and a dialog that is not Yes/No', () => {
     expect(decideNoqAnswer(dialog('ls', { mode: 'default' })).action).toBe('skip')
@@ -47,6 +47,15 @@ describe('deny list — one rule per case', () => {
     expect(denyRule('rm -rf /tmp/x', CWD)).toBeNull()
     expect(denyRule(`rm -rf ${CWD}/dist`, CWD)).toBeNull()
     expect(denyRule('rm file.txt', CWD)).toBeNull()
+    expect(denyRule('rm -rf /home/u/.cache/agentistics-throwaway/x', CWD, '/home/u')).toBeNull()
+    expect(denyRule('rm -rf /home/u/proj/other-wt', CWD, '/home/u')).toBeNull() // parent project
+    expect(denyRule('rm -rf /home/u/extra/x', CWD, '/home/u', ['/home/u/extra'])).toBeNull()
+  })
+  test('direct writes into ~/.agentistics', () => {
+    expect(denyRule('echo x > ~/.agentistics/prefs.json', CWD, '/home/u')?.rule).toBe('agentistics-write')
+    expect(denyRule('rm /home/u/.agentistics/a', CWD, '/home/u')?.rule).toBe('agentistics-write')
+    expect(denyRule('cat ~/.agentistics/a', CWD, '/home/u')).toBeNull()
+    expect(denyRule('echo x > ~/agentistics-workspace/a', CWD, '/home/u')).toBeNull()
   })
   test('force push to main/dev, including a bare force push', () => {
     expect(denyRule('git push --force origin main', CWD)?.rule).toBe('force-push')
@@ -82,11 +91,11 @@ describe('shouldAnswer — no one-shot latch', () => {
   })
 })
 
-function snap(rows: Array<Partial<SessionSnapshot['sessions'][number]> & { id: string }>): SessionSnapshot {
+function snap(rows: Array<Record<string, unknown> & { id: string }>): SessionSnapshot {
   return { sessions: rows.map(r => ({ cwd: CWD, harness: 'claude', activity: 'waiting-approval', status: 'running', ...r })), attention: 0, rang: [], polledAtMs: 0 } as unknown as SessionSnapshot
 }
 const row = (id: string, cmd: string, canonical = 'no-questions') => ({
-  id, mode: canonical !== 'none' ? { id: 'bypass', label: 'bypass', canonical } : undefined, approvalLines: screen(cmd), dialogOptions: OPTIONS,
+  id, mode: canonical !== 'none' ? { id: 'bypass', label: 'bypass', canonical: canonical as 'no-questions' } : undefined, approvalLines: screen(cmd), dialogOptions: OPTIONS,
 })
 
 describe('runner', () => {
@@ -119,6 +128,16 @@ describe('runner', () => {
     expect(h.sent).toEqual([['s1', 3]])
     expect(h.prompts[0]![1]).toContain('Autonomous mode')
     expect(h.records[0]).toMatchObject({ decision: 'deny', rule: 'kill-by-name' })
+  })
+  test('uses the mode the session was started in when the dialog frame shows no mode chip', async () => {
+    const h = harness()
+    const r = createNoqRunner({
+      answer: async (id, c) => { h.sent.push([id, c]); return { ok: true, message: 'ok' } },
+      prompt: async () => ({ ok: true, message: '' }), record: () => {}, sleep: async () => {}, home: '/home/u',
+      startMode: async id => (id === 's1' ? 'no-questions' : 'default'),
+    })
+    await r.consume(snap([row('s1', 'ls', 'none'), row('s2', 'ls', 'none')]))
+    expect(h.sent).toEqual([['s1', 1]])
   })
   test('a default-mode session is untouched', async () => {
     const h = harness()
