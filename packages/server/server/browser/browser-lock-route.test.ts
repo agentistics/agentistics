@@ -345,6 +345,9 @@ describe('S12 — POST /api/browser/profiles/delete', () => {
     const r = await del(f)
     expect(r?.status).toBeGreaterThanOrEqual(400)
     expect(asked).toBe(0)
+    // The refusal names this door ("profiles"), never the padlock sentence.
+    expect((r?.body as any).sentence).toContain('profiles')
+    expect((r?.body as any).sentence).not.toContain('padlock')
   })
   test('a caller the socket cannot identify (or none wired) is refused, fail-closed', async () => {
     let asked = 0
@@ -354,6 +357,7 @@ describe('S12 — POST /api/browser/profiles/delete', () => {
     const r = await del(f)
     expect(r?.status).toBe(403)
     expect(asked).toBe(0)
+    expect((r?.body as any).sentence).toContain('no profile was deleted')
   })
   test('GET is not allowed', async () => {
     expect((await browserRoute('GET', '/api/browser/profiles/delete', {}, fixture().deps))?.status).toBe(405)
