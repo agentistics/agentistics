@@ -255,7 +255,14 @@
  * `GET /api/engine/mcp-tools` and the MCP server proxies calls to the declared route. `checkEngine` refuses a bad
  * name, a path outside the prefix, a duplicate, or tools with no `/api/engine/x` route. Additive only.
  */
-export const ENGINE_API_VERSION = '1.30.0'
+/**
+ * 1.31.0 — `EngineFleet.openOwnerSession` (optional), `EngineOwnerSessionSpawn` / `EngineOwnerSessionResult`: an engine
+ * opens a managed session that is the OWNER's own (no consent list, no `requestedBy`, no task), with its own opening
+ * context and MCP servers, spoken to through a handle that types the owner's words WITHOUT the surface header, and ended
+ * with `fleet.stop` — so it appears among the ended sessions and reopens with its whole conversation. Additive only: a
+ * host that predates it offers no such member, and an engine built against 1.30 never asks.
+ */
+export const ENGINE_API_VERSION = '1.31.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

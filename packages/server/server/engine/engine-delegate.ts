@@ -14,7 +14,7 @@
  * The functions are injected (`DelegateDeps`), so the rules are tested without a fleet.
  */
 import { markEngineOpened } from './structured-handle'
-import type { EngineDelegateRefusal, EngineDelegateSpawn, EngineDelegateSpawnResult, EngineFleet, HarnessId } from '@agentistics/engine-api'
+import type { EngineDelegateRefusal, EngineDelegateSpawn, EngineDelegateSpawnResult, EngineFleet, EngineOwnerSessionRefusal, EngineOwnerSessionSpawn, EngineOwnerSessionResult, HarnessId, StructuredSessionHandle } from '@agentistics/engine-api'
 
 export interface DelegateDeps {
   /** Harnesses installed here (`startableHarnesses`). */
@@ -25,6 +25,16 @@ export interface DelegateDeps {
   file(taskId: string, sessionId: string, subtaskId?: string): Promise<{ ok: boolean; reason?: string }>
   kill(id: string): Promise<void>
   chat(id: string): Promise<{ turns: Array<{ role: 'user' | 'assistant'; text: string }>; live: boolean; unavailable?: unknown }>
+  /**
+   * engine-api 1.31 — the OWNER's own session an engine opens (`openOwnerSession`). Absent = a host that cannot open one (`openOwnerSession` then refuses `unavailable`).
+   * `spawn` starts it STRUCTURED-only with the engine's own context and MCP, no consent list, no task, the row marked `origin: 'engine'`;
+   * `handle` is the door on it (the owner's words typed without the surface header); `mute` keeps it from ringing the bell while the engine is talking to it.
+   */
+  ownerSession?: {
+    spawn(body: { harness: string; cwd: string; model: string; effort?: string; label: string; lang?: 'en' | 'pt'; ownerSession: { instructions?: { text: string; block: string }; mcp?: EngineOwnerSessionSpawn['mcp'] } }): Promise<{ ok: boolean; message: string; id?: string; code?: string }>
+    handle(id: string): StructuredSessionHandle | null
+    mute(id: string, on: boolean): Promise<void>
+  }
 }
 
 /**
@@ -36,7 +46,11 @@ function refused(code: EngineDelegateRefusal, sentence: string): EngineDelegateS
   return { ok: false, code, sentence }
 }
 
-export type DelegateMembers = Required<Pick<EngineFleet, 'delegateHarnesses' | 'delegateSpawn' | 'lastReply' | 'stop'>>
+export type DelegateMembers = Required<Pick<EngineFleet, 'delegateHarnesses' | 'delegateSpawn' | 'lastReply' | 'stop' | 'openOwnerSession'>>
+
+function ownerRefused(code: EngineOwnerSessionRefusal, sentence: string): EngineOwnerSessionResult {
+  return { ok: false, code, sentence }
+}
 
 export function createDelegateMembers(d: DelegateDeps): DelegateMembers {
   return {
@@ -86,16 +100,52 @@ export function createDelegateMembers(d: DelegateDeps): DelegateMembers {
         return { ok: false, reason: 'unreadable' }
       }
     },
+    async openOwnerSession(req: EngineOwnerSessionSpawn): Promise<EngineOwnerSessionResult> {
+      const v = d.ownerSession
+      if (!v) return ownerRefused('unavailable', 'This host cannot open an owner session.')
+      // The owner's own session: no consent list (the owner started it through the engine), but the harness must be installed here.
+      if (!(await d.startable().catch(() => [] as readonly string[])).includes(req.harness)) {
+        return ownerRefused('unavailable', `${req.harness} is not installed on this machine, so no session of it can be opened.`)
+      }
+      const out = await v.spawn({
+        harness: req.harness, cwd: req.cwd, model: req.model, label: req.label,
+        ...(req.effort ? { effort: req.effort } : {}), ...(req.lang ? { lang: req.lang } : {}),
+        ownerSession: { ...(req.instructions ? { instructions: req.instructions } : {}), ...(req.mcp ? { mcp: req.mcp } : {}) },
+      }).catch((e: unknown) => ({ ok: false, message: e instanceof Error ? e.message : String(e) } as { ok: boolean; message: string; id?: string; code?: string }))
+      if (!out.ok || !out.id) return ownerRefused(out.code === 'memory_budget' ? 'memory_budget' : 'refused', out.message)
+      const session = v.handle(out.id)
+      if (!session) {
+        await d.kill(out.id).catch(() => {})
+        return ownerRefused('refused', 'The owner session started but could not be reached, so it was stopped.')
+      }
+      await v.mute(out.id, true).catch(() => {}) // best effort: a session the engine is talking to must not ring the bell on every reply
+      return { ok: true, managedId: out.id, session }
+    },
     async stop(managedId) {
+      await d.ownerSession?.mute(managedId, false).catch(() => {})
       await d.kill(managedId).catch(() => {})
     },
   }
 }
 
 /** The real members, over the fleet's own functions, loaded on first use. */
-export function hostDelegateMembers(lang: () => 'en' | 'pt'): DelegateMembers {
+export function hostDelegateMembers(lang: () => 'en' | 'pt', ownerHandle?: (id: string) => StructuredSessionHandle | null): DelegateMembers {
   const fleet = () => import('../sessions/fleet-web')
   return createDelegateMembers({
+    ...(ownerHandle ? { ownerSession: {
+      spawn: async b => (await fleet()).runFleetSpawn(b.lang ?? lang(), {
+        harness: b.harness, cwd: b.cwd, model: b.model, label: b.label, ...(b.effort ? { effort: b.effort } : {}),
+      }, { ownerSession: b.ownerSession as never }),
+      handle: ownerHandle,
+      mute: async (id, on) => {
+        const [{ muteAtSpawn }, { planMute }, { updatePreferences }, { readRegistry }] = await Promise.all([
+          import('../sessions/session-notify-web'), import('@agentistics/core'), import('../preferences'), import('../sessions/registry'),
+        ])
+        if (on) { await muteAtSpawn(id); return }
+        const row = (await readRegistry().catch(() => [])).find(r => r.id === id)
+        await updatePreferences(cur => ({ mutedSessions: [id, ...(row?.conversationId ? [row.conversationId] : [])].reduce((m, k) => planMute(m, k, false), cur.mutedSessions ?? []) }))
+      },
+    } } : {}),
     startable: async () => {
       const host = await (await fleet()).hostForFleet(lang())
       return host.startableHarnesses ? (await host.startableHarnesses()).map(o => o.id) : []
