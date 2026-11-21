@@ -1589,9 +1589,25 @@ describe('PLAN-LIMITS.VIVOS: live sessions per account from the fleet', () => {
   })
 
   test('a session with no known account is counted on the harness default account', async () => {
-    const { a, body } = await run([row('anon')], [])
+    const { a, b, body } = await run([row('anon')], [])
     expect(a.liveSessions.map(s => s.id)).toEqual(['anon'])
     expect(a.freeSlots).toBe(1)
     expect(body.liveSessions.map(s => s.id)).toEqual(['anon'])
+    // Leader decision: ONLY the default account is discounted, never every account of the harness.
+    expect(b.liveSessions.map(s => s.id)).toEqual([])
+    expect(b.freeSlots).toBe(2)
+    expect(b.unassignedLive).toBe(0)
+  })
+
+  test('a session that is both a burner sample and a fleet row is counted once', async () => {
+    const { A, B, now } = await setup()
+    __setManagedLookupForTest(async () => [{ harness: 'claude', id: 'w1', createdAt: T, accountId: A }])
+    const { fleetLiveSessions } = await import('./plan-limits')
+    const fleet = await fleetLiveSessions([row('w1')])
+    const sample = [{ id: 'w1', model: 'claude-opus-5', burnPctPerHour: 2, harness: 'claude' as const, account: A }]
+    const body = await planLimitsPayload(undefined, now, sample, fleet)
+    expect(body.liveSessions.filter(s => s.id === 'w1').length).toBe(1)
+    expect(body.budgets.find(b => b.account === A)!.liveSessions.filter(s => s.id === 'w1').length).toBe(1)
+    expect(body.budgets.find(b => b.account === B)!.liveSessions.length).toBe(0)
   })
 })

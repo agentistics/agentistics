@@ -948,7 +948,9 @@ export async function planLimitsPayload(
       }
     }) : undefined
     // Every live session of this account (burning or not) holds a slot: the row lists them all and
-    // freeSlots never exceeds what the suggested parallelism leaves after them.
+    // freeSlots never exceeds what the suggested parallelism leaves after them. Deliberately
+    // min(old, max(0, suggested − live)), not suggested − live: rows that are on hold or over pace
+    // already report 0 free slots, and that must stay 0 whatever the live count is.
     const mineLive = [...resolvedSessions.filter(s => belongsTo(s, l)), ...unassigned].map(({ harness: _h, account: _a, ...x }) => x)
     const pace = planPace(l, nowMs, past, planSessions, segmentOf(l.account))
     const capped = { ...pace, liveSessions: mineLive as typeof pace.liveSessions,

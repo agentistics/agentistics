@@ -25,5 +25,5 @@ test('the HTTP route samples cached data only, and bounds the entire optional li
   expect(route).toContain('loadDataSnapshot()')
   expect(route.indexOf('withinOrNull(')).toBeLessThan(route.indexOf('readLocalLiveSnapshot('))
   expect(route.indexOf('PLAN_LIMITS_DATA_WAIT_MS)')).toBeGreaterThan(route.indexOf('sampleLivePlanSessions(data.sessions'))
-  expect(route).toContain('await planLimitsPayload(prefs.billing, now, liveSessions)')
+  expect(route).toContain('await planLimitsPayload(prefs.billing, now, liveSessions, fleetLive)')
 })
