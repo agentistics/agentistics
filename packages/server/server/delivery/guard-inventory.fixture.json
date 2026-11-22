@@ -1,0 +1,1141 @@
+{
+  "base": "1b1c8a941",
+  "contexts": {
+    "server/server/delivery/service.ts": [
+      "ac8ce8340e66cddb3ce94ab7a721a1123098b8b89bdfdca0854d57beb0c987be",
+      "2c96add48fd04684ea40403299eca26288539579865252daa8a0ccd9d1668df2",
+      "0d3c6ef2e5d47181385ebf74c621f9308e37b39dde35712576f6edac6aead373",
+      "4d2a6727d9adb4879c12893dd4e4a05ecd007819ca8ae69865c31353c3559d7c",
+      "2cff284f23d6a58ed570f346e32885f97107bde1263cf2da7cafc069a67429e9",
+      "1305f786418b184ee0be4dfd5bb864886b6fe924d625966c63df156db09057b0",
+      "f3ee77ec656fd2d11846f9b35f9917220cd2853d21e622a862abdd0117c7b6f3",
+      "60cd8176e52730f67bfc71fb1157760a3f7059a355ee8852383da4d19165da25",
+      "831f82c5c628c774e637a7e6d9d09ea868de857d0fe3d6ad87fc419648e6b7e1",
+      "f74cc7f058ad905869fd8b3b35d86b83ce9d3f48b62e42cb34e5df0cd38dd776",
+      "2d40cb05fc21b2aae0b51af644907642daad474015ed410ba8db311d818e739c",
+      "42474da69dc9153f18af74b9dc35b5e04c857731bf364909a694f0e21692a50d",
+      "39a4fcd4c0ff1fa5f23ceefa7cfad3fdb85a8cdb91934ae16aa972d68c77a31f",
+      "383571c27f1ab5fb540340abc5a09f1805f1f469f9a35169c7b8038b1d843058",
+      "b61866eaf4f9ad46c4101f2bb2e7fb84300e3844e910e21ae185a4cb8e1ed4fa",
+      "921e84f32e317490c0393d8768e3748671d6dc11ed0487a48e26b45aa9376365",
+      "1408db407a3f82fe991eefe49ba0047f735dc7c1c9b86347c448792e50b1c078",
+      "e59499dd625f6dfdaba28c955c51281c352e14832c02c0b1ad7fb2e1a8023400",
+      "d89aa39d6b9ef625b040ae87882e1d8568076dd5dc39247888825be37594d544",
+      "98aae25fc3633aa7feafe3707beae3195ebd446ab5b385ac7b29212e2eeaf2bf",
+      "51c51373678aa40e0506d63416d6b4a916c3d37b67046b1101b47e94c9780e17",
+      "270b15f5202a1ae2359acd1b6c95f339702e325a3bb1842392515d7b33e127e7",
+      "bc36ca272e8763e59211c3aca6168c0e7224123eac8b2d49d3b92ac29361b432",
+      "26901b95621edae29c7e9554b9bd66bd53f96cc713943695fa3c302728aec91c",
+      "236018eafc9b5f47aec166c3d2d761a6e0a396b362a51e32267a235c57ed561f",
+      "32e45a8c70ab5679b1e425e2877931e78f5761d4924146af57ef37e4ff25f9c6",
+      "06dac4983563ab538c2e42d0ed72737a25b0ed9fafd86dcb02de43e77281baf2",
+      "56136dcf535fe651914277bfc7beaa3eb88558c58589960d3becb54ddb5664a9",
+      "a2546e71509a056646451e4453c143589129ccccd6e31171e2c89db2e667c4b8",
+      "1cc53c92036059d33fe275dc22029decb17540e421f0f43f1bfca7bb27e003d9",
+      "6dcbd59ff19f3914c3c1b28dcaf89c0d91953fd4efbb949ac08d8e360ac10dc9",
+      "2f74a1f82b6f7de6b698d21b982f0aefd2c32140fa54047c9214836f0523c64f",
+      "d54ce938b37c02d150c11ecf18a4a5572356a757526ea71182fcd23313abb95d",
+      "f0f4b91c2188512449f786f109450f55908dd63106b8c3cc6f453ecda9cdeea0",
+      "f79762f77dc7b4ee12cfe791dd87c23ec951e500550754bf8a8068afb8141c4c",
+      "f0a95cac3379f31753069aca3dbb24f00cdf00db2bff5bdbfce43cb7bd9d02cc",
+      "91f3fe73404bef877eddca1fb0278e2f9100a4c13853030646c8b503938b36b0",
+      "3b4b466343cf8c4dc911f160f1bb2bb5917fc2a1ecdac5f935073f0cdaec1c5e",
+      "9d6b516a756f46857d3286f0b79db5324f856e950421d58a95ea72667127ee26",
+      "0540ca74b5329a54ed1a05dc11657353f6214e13827e9c86cdf5c101057d0e80",
+      "9e2ea15351432cee137e4e2e4bdb49b6932890ca04aa86c0a421512d4709521b",
+      "711a465afc8e109f45a3d47ef3c4272b3e27187420c7145a53f57a862eb3a112",
+      "711a465afc8e109f45a3d47ef3c4272b3e27187420c7145a53f57a862eb3a112",
+      "9084b42e9cdc2146cdbe8ffac7a6306565aed87670ee4a274fb0a993d6a0c2e1",
+      "2d11a8059f6bd4cd0798cb04d8cb04b978544efb3a5bee1c9fbbeb568d36c5fb",
+      "747adb895291be448e0aca32d4f30f86a82712fd62e3e826c3f69260ad13c410",
+      "67dee4a09aea2da0db18238520b940bfeac14d22101bb6963a00e53238e31769",
+      "e3e3dfe1bf61c0483a3b3a51ceeefce82645a8854c95a140a43c9958d2cd742e",
+      "9cc7a2e8c187a2696314947d7883c71c7deea6cbb997e6bee05b46f15910bc0c",
+      "a5762739c3a726430848030de35f388326cab633ab7351e2284535d933dfc943",
+      "86addff25bebc5fae7e0bb48664c54e3491033d990dd36e55a17034c6214e112",
+      "1048fa52ec047b434ad2f5c7c5216950f0d7aa38b435a9b010139a0d9e8f7ce0",
+      "6e59ac033089a6145a8cfa9199b8ab489e96cc13851906e4cd0305304cae8f03",
+      "0ed837e9c70e080f46cc2b80e776a3ca49c1eda5c7a48210c90e1ea95b3fa88c",
+      "c5e53fd2cc4281317c116dfd5e6c039b41348f2d7fb3faf289cb85f4bb328d17",
+      "7b6e1b1c639b14f3ef17351b91cd8c2bf704ac68586ec58b1d9345d54b410c81",
+      "c5e53fd2cc4281317c116dfd5e6c039b41348f2d7fb3faf289cb85f4bb328d17"
+    ],
+    "server/server/flows/composer-task.ts": [
+      "308c3536eb92ef2ab53bf5ebbc1e40fcc0311a820aa43f98fdb95eb8d2406d1c"
+    ],
+    "server/server/harness-accounts.ts": [
+      "9a06c4281560deccd28ac1acdc0312c925342d8cac2065b979d5c37dc71ee35c"
+    ],
+    "server/server/sessions/auto-switch-io.ts": [
+      "ceeae9daecf0afadd78a07fe19296c48668623ade086b8ef799ca7007d407a19",
+      "a5dd722a1786725fd52b26ac5630397c563c7b5c4368f85f0af9e0b8810d8286",
+      "f645a965b179b42b942c6e2bf67524e877f17051445ae4f7016f28fc6614c7bb",
+      "73f8f93ba51a9a266a329251c95e1c60cbefbf83e775431cf3b33e8c9df085b9",
+      "7a8da1aae94481448c20e531e70e5b7695a1df3f71c211e75216584707cbe99e",
+      "73f8f93ba51a9a266a329251c95e1c60cbefbf83e775431cf3b33e8c9df085b9"
+    ],
+    "server/server/sessions/cli-session.ts": [
+      "ee99be93c10cfece384128ad3efbe4a36e730e8ef94a6783ad3541de2bbb1bd0"
+    ],
+    "server/server/sessions/review-clean.ts": [
+      "c908839f276b934c3f5303e711816ac10d3c653425713ab155a49844c47542e7",
+      "f2434bd076d6aa05eaadf1d9cf31fb448fb603258b5d502ef48cd2dba6bfd2d5"
+    ],
+    "server/server/sessions/task-source.ts": [
+      "952c774ae9478520bd01286e1c364abbdf0c321edec8f364676a6aa476f48361",
+      "fc4bee491c04083a48ab673163d3b7718d043ea8a78ef24bf7050fc3b56dad64"
+    ],
+    "server/server/sessions/task-web.ts": [
+      "de027c1afa801080df7c9b07d510d5842907c5a2559bf3e34bc4c52bf6f847ea",
+      "1a220c0dc9311ea74a016fe0b0b9294153ac0bb8fc16c3700aed1af3b3e260f5",
+      "f4ecff5496f2886f05fdf6c95452147e22582ef6aa7b3cdeac8faa9d0c07f342",
+      "42fbf30f99c6d69eb247fce896c76978d03ba5c069c94cfc4840aa9b5b91d5ac",
+      "d4ed97f870a79cde00b33bd9b791dff1f9ddb798c92051a82250d08bbd6947c4",
+      "e11656734b9b07fc75505ec437359a38d541eea1099828fba99af115ca2c5092",
+      "01c23b7581934aad4cb6fe053aa8cb0479dd8d6cd1d30a898ab8c51bb4900dbd",
+      "eec55ce8dff38c4baef61dd25061f9687fcd74e6e4e545757be7f9af2c7fa389",
+      "b3010a7eda111a1b4bb2ccad3b3e4594f59c3ba2e50ca488d24c4532e6335e77",
+      "cd8ac388d25bb99c66a7110a4111dc8dd24568ff1ef995a27d82d37344e03892",
+      "6c1009d6ae6300789fb516c8e5d2576cd36dbf54a6c12c0597820a77303bd118",
+      "591a9d97550e60521cf3a526dc7b2018ba1f5cde4d8926b65745ebd984ca894e",
+      "49e4fcbf72e9482d562379ccb0de1a72ff52949073763a69207eff5a45ce7250"
+    ]
+  },
+  "writers": {
+    "agentop/scripts/postinstall.js": [
+      "a7481a24bfa197ff26f32221a374f4f856f9f088c0fb1195851e134e019730bf"
+    ],
+    "mcp/agent-audit.ts": [
+      "dfddc10762ca431e940e77bc15cc860a4e5cd0574917e90b6c3d3ffa545323d7",
+      "573cc359a7098a1286c00989daf6bdfdef0ca78f41981bed99d55d01808e3343",
+      "0554f77a3461589132a4b2508628fa13c59a82943c4901c0733020cbdbb02aa4",
+      "13514d8032dcefccd3ce81f588eb57a3dde0f7f7a929e819121b860ccaff80a9"
+    ],
+    "server/scripts/backfill-compaction.ts": [
+      "1b341cd4f3a8ebc67eef4af53021e112268c695c3a980076cb07150fc9f583e3"
+    ],
+    "server/scripts/bench-clients-seam.ts": [
+      "72380448204fdf1178f67e6924ca6d7369899df4ca864a6d7417309dccb6fb9e",
+      "86c9ffecabd084ae88544aecf27a7c244ea10e146dd2802a5b4f867a9e627a02",
+      "ad07cfc8d2977c24aa667fb7925395e6726f61097530339ac04646f59b4a7ece",
+      "2d337c4afc32300798843da4c18569b854f82b5c58999efa3b4ee4601e3b1ae0",
+      "d2ee8ac081b786366dd6905085120c7c8ec4472fc8867d7d7f58c0e99cbfcb74",
+      "4f5c850f2b69b0d74f7f61f0702e9891f60027a39f55818f68a9d923f92f7b78",
+      "25f6b1f9bfca63d57c3ccb582c0bbc5d8140d1ef950d848c5a1c07d0f297316e",
+      "1e32103fa09b6a422a789a4e32ab6f9da8439fd94cc573f1c887f6171bedfb10"
+    ],
+    "server/scripts/e2e-link-crosstalk.ts": [
+      "9363094f4f9788eeea5f3755f69301b9e9a430e5cb267e8b9d986fd7bf7f7571",
+      "d2d14b37788673bc2d3fbd16aea42a5c20fd176a95438906cbf769154aeb95ab",
+      "e46e276eff9e6b255893701d6cbbd81f5e4a9b7a99671f048e6130030e747ec0"
+    ],
+    "server/scripts/e2e-native-chat.ts": [
+      "5fb24a1b6f308b5ec1e98561f6fb11a6577a65faf3471887974eed3f0d0c1831",
+      "f80838af73ade5635df0329a86fa46a3c170c2696a9116d5508cf43b9f4f76b2",
+      "f688219ae121889ae6ae10b2b01258fb3f13ac894bd376e64b7fdbf074ef355d"
+    ],
+    "server/scripts/embed-dist.ts": [
+      "c89c0e21eb316e6431a3c606e8d504002e27605d147c90d5b5c86d435098e01e"
+    ],
+    "server/scripts/engine-slot.ts": [
+      "2b09d51accf0a775ee2f3c416a65483d6a2898b972609899b47aa54167886de7"
+    ],
+    "server/scripts/ensure-type-stub.ts": [
+      "c7cbaa31325b1f6adff6478fb93df6563c375257cf204c74e86b7fc99ab785c2"
+    ],
+    "server/scripts/live-memory-measure.ts": [
+      "07c7653c75437f250fcb4a6cec3f1d10dbcb0ba299ccf832a72b4e81c09f6012",
+      "68bceb9c2522693bdcdf91b4f09d3823016d03ef58692819c1b1840dcb55ef81"
+    ],
+    "server/scripts/projections-parity.ts": [
+      "9739b47b7574259a4985187622c1f9a99e40c2f304947e4dbc9d574652a3e776",
+      "b1abe53ebdb39e0c669e2f658b18c19b33ba42e91f0cfa6afa05f93587fab7e3"
+    ],
+    "server/scripts/push-guard-action.ts": [
+      "24682d24691948029f5f81a12b5c675ffdbdd52c05c488bb72d3aa5154ca6ae1"
+    ],
+    "server/scripts/qa-clients-seam.ts": [
+      "737da307eadd0f532a4951b50a465c22692fcea74486ea9610cd16155782d1ee",
+      "69586b12c4bc9c6bcce8c15bd6809ec085db4c2ed578fc32fd2af6a082e86ce0",
+      "898d61688ecb3e6b4428feab0b2374de4962dbb9522bd7641cae4011ba411897",
+      "aa9b3b8347abf5d74f611dd33376744253e8cfa2c93db1840dff28b904dd85c5"
+    ],
+    "server/scripts/reconcile-dry-run.ts": [
+      "9db031e8d256067aad0c499f12af9bd77d5f53af27b2a9c02fc96cbda6082a89",
+      "5458162a6bdb9a8757184cf6351c495b0f3d60a8ad4770dfc9f4492bfff6bb18"
+    ],
+    "server/scripts/record-web.ts": [
+      "742e507e744cb1111cdad022a574f295b60eefe7e72d1aac155739c144ccf658",
+      "ffeb364b66f3d1dbfecb7fed77a7c4fc44aaf3a3baec7d6a9695b4ae3412ccc0",
+      "742e507e744cb1111cdad022a574f295b60eefe7e72d1aac155739c144ccf658"
+    ],
+    "server/scripts/seed-demo.ts": [
+      "94a79a55c5ebb40997fb650f82e3bdcbcc2bdad89e3cf025b6b5d462b2bd39f8",
+      "5bcf785f19cc158dd47359ae9c96bf71e2f87a5f30c89eddecbb7b6f7902db05",
+      "70be17c2056fea7e107240747048b0785412d121288d64b61d047f1372a78a72",
+      "a764e221f04b2514a1e1dfafa3c52e293c99c548f5427111d027b4c4eef1f0c2"
+    ],
+    "server/server/account-login.ts": [
+      "fd40e702ddbecd93cceaa65ec9e7ae8955db4779f64d1b5e92a5130a8072f821",
+      "db7f986000c8f0ce35b2730141459c7b9931e230cd24998c8f19e3b83d6d0c87",
+      "ffd5cca0039fc46e6fcd5541fcdd7e4189ae6703a71ad7069f005a33f2e849bd",
+      "ad84b985da18fc8f451e610c1c3ab545711c4c4e6712f856dbe8458a27e15ff2",
+      "e31f3af698a67b1acb57681ed5a157fca81029fac90e0a2ce67843dc2a60bb79"
+    ],
+    "server/server/account-roots.ts": [
+      "ec18ceecb8ac57531f7e18db6eeb53d77650131fe498a60dd476c7bc1d25dc22",
+      "b0c6faf96bc277f519609958e3ae08f50291d2169006d84e37f305c99d73a4b0"
+    ],
+    "server/server/archive.ts": [
+      "0b4713fcba262f70f2a3f7a1aa3cf2695ac51ab4fe5f9d6e94d3871bd3143958",
+      "76c9f53fd14936fe67e7f9d5b26714c2cb7e0306e93270e08e4e2f24dd746c9e",
+      "ac884542fc2ff1ca82080daa33c48eb559f6a26c2f571e94875cdd50eaf753e8"
+    ],
+    "server/server/audit.ts": [
+      "fa2c384255c804ad04ce16214db19f6c012b3a1608ed3dbaace61810c95dfb01"
+    ],
+    "server/server/autostart.ts": [
+      "91013d55f090e212f1ba50066f50d5006b1d136ed33743d2dfde976d49eedf18",
+      "8b273237048d26594129cee4cc9aac694b9b51c92548baa4090145a996f4e13f",
+      "62f4657506f54858e86a5692156f788076617cfff020c1d887e129a52febe983",
+      "872cb3759cddd56b17e00549c12c1de3099472f4530e87f93ae0b223dcbf9853",
+      "83b24f6d2138b384e4917e14a6d12f78ef547a5341d6dc5acb78cd45c8973cf1",
+      "7ef5f68af35084d2128702ac946c4fa943ce31fbe46dd7a1b056aeb05053fff5",
+      "b5658ccc0320b9af1fd37ee1dc8d386b240f159d56bc4793835202c9a22441e0",
+      "f7f5fb9bf2997533b87bcd2faae729a5f44d76a7bffa6e2fa29b88bee75a40f9",
+      "5b98ec90a7f0fccf266847223e05abb2eee3d364f1bb079770f334e9f549071a"
+    ],
+    "server/server/backup/backup-store.ts": [
+      "8c746c25b414a8808d958569310fb3d80a16e1f8561338a1b0672d36e65efb82",
+      "76ce8d7a0009e1ad2d58cf6a4f9517ffe9793fe2129571ffaadc608db87ff8db"
+    ],
+    "server/server/backup/backup.ts": [
+      "be063c13432ba3acbf401836f864865840e7a25b95f3034ebc88a55b799ea6c4",
+      "470c3662def09ea452eea4a1659206d8389d02d0c4e8527d3fe12f15b9b3c917",
+      "63cb97f07223934e9f05556f530485e2300108b9074928d8f59aac6a979dab7f",
+      "d9c9b435ca8335f19c0bab8e2d5453be5aa7dc4d03350a9d63dac01fa73305eb",
+      "a412132a1d7522ddd1ad073af6d53c1d0b1693be8eb5f5d37579d88c0420d597",
+      "a31843b761c304c02686947627114b9d0726035bc7a7dc1f968cbb23faa187e5",
+      "a36056df5920f18427551a1e6e7dd87b60873b9aac55c41afc8d09f0fe1c799c"
+    ],
+    "server/server/backup/github-restore.ts": [
+      "6c63991682b921a9b99ba55d364dd3349dbfa2ae026e65140d9b78514d117834"
+    ],
+    "server/server/backup/github-store.ts": [
+      "da3c58301b9be4958b59bea88e9afaab5461d734e72723a282ef09dcce13138c"
+    ],
+    "server/server/backup/github-upload.ts": [
+      "8ae3dd516e5926d6e4b8bfc2fa32d4e4e0d0c0da94f050fa1157d93358e67b8a",
+      "43475e585246092d97f03390b26f698ad263f3f17730ee650c8296232b01092f"
+    ],
+    "server/server/backup/repo-probe.ts": [
+      "6bd6dee4a9bafc671f279f19c1dacc7fefb52b476325bc90bd591fb1024d38d9",
+      "6bd6dee4a9bafc671f279f19c1dacc7fefb52b476325bc90bd591fb1024d38d9",
+      "6bd6dee4a9bafc671f279f19c1dacc7fefb52b476325bc90bd591fb1024d38d9"
+    ],
+    "server/server/backup/restore.ts": [
+      "67583f7521abc079df1eb223fed6c2d76875595eb8b87ef9594a6361edcc742a",
+      "5fd015482655a1854154c0dfffafb7ccf934b032a8bea28877dfc47e456069e5",
+      "38ea64ce4c6eea556a3f6d635392afcfde173d551e45b2f247d40398ce84f193",
+      "52471f1eb1594bc84c0c7ddcf1ea7173825d459653c7fefeccba315a5402d1df",
+      "67583f7521abc079df1eb223fed6c2d76875595eb8b87ef9594a6361edcc742a",
+      "26a70fd38ba546f81d418ed6edd31984e7f46883d62e8c8164b64dc2b6733696",
+      "629c7a96e2f52116ba9a2a6c005acf1127758916566151a0d631896f6a84c85f",
+      "629c7a96e2f52116ba9a2a6c005acf1127758916566151a0d631896f6a84c85f",
+      "629c7a96e2f52116ba9a2a6c005acf1127758916566151a0d631896f6a84c85f"
+    ],
+    "server/server/briefing-installer.ts": [
+      "cda0e0765188562abbee24079620cdbac4393a95a9bda7aafd9da3d89ef71c3e",
+      "5ffc9a6ada6892ceee81c90d69e6d8e0a33b114bd3adc86ef024cdd16e1ddbb1",
+      "e7619f1c9a41137c3b9f374d5ec2576283e6ef08cb330970480a4bf41f227806",
+      "963e81c8aebbbb5f154f27756e4c0fb71e291da1217c3658ad758f9f42712198",
+      "e87d0f817ffbcc7692e13e825e8a825601fedc94f583350634aca250663feae6",
+      "7d0389b53ffaab3038f230b449af63cb2844813e2ba0b511ba8f0267578937bd",
+      "8c78792def42f2cc5146c6c73dc8b9ca7e005c980f24c452e0719f3124902432"
+    ],
+    "server/server/chat-drivers/copilot.ts": [
+      "d70a974edfeab88fe9ea00b2e81cd07e9aff38774293e1649db8f6a26368254e"
+    ],
+    "server/server/chat-drivers/gemini.ts": [
+      "ea6208f0a8dd2137edc984796d7acbe17736889de45fba0cb72d842182a6ceda"
+    ],
+    "server/server/chat-tty.ts": [
+      "5c2707e1f3d0569b66d623f8c6ab542da481c6bb86f3f64d132c29bf627b1e75",
+      "5a58e57fa067660545b7666903bfb59e4e7d6d1aa43c0f4ea2d28d230145386f",
+      "763be4ac321bccb102e084d9f5ee6d266448d44f21758be5f2d3764e7ee9fcbc",
+      "afccb2965820710baf29236994b38ac812449dfe75a0360fa8eaab9337405ea9"
+    ],
+    "server/server/clean/clean-io.ts": [
+      "7d80f66dfad46a2b8bd17d2507ac1b9fdc02ace673d91ee9d6ea7334b87be9dd"
+    ],
+    "server/server/clean/clean-suggest.ts": [
+      "8adace3783ed55502429de02489c3e32851a4c65e55cefaae9c3d237cde0b30c"
+    ],
+    "server/server/cli-backup.ts": [
+      "33827dcf786fb0f3fdabf6a6f9456033f3b9de93a8fbf57b9a2fc246368ca591",
+      "a598b13c61027646e8c929633835f32947676f9ce8e3fc10f2cd83cb96270d70",
+      "8629e930ebf50a36396a9dd8a27857c7bd81fd4dceef5d8057da613f746b5706",
+      "76e63dfd5fc92a9659d141235151598c6628c4eacb1cf1ccd3171c437cb03a66"
+    ],
+    "server/server/cli-hooks.ts": [
+      "3cbfd55908f61fba808e6410860ee1d7e5367e89d5968d67482a5faab1de018d",
+      "237540081e2e9987ed4b7b45108caa751486fc6acdbd2fc68d8d1d6fff933872",
+      "93308947f3fa5f178b22a28bcb6cc95acbf9cda7988be7b9031a2473c921a023"
+    ],
+    "server/server/cli-journal.ts": [
+      "12257e41ec26339182b5dde6b861961b3ae8282beaf2721257a77c9e1abca782"
+    ],
+    "server/server/cli-run.ts": [
+      "52b5ef4da41894f93ebd7e4c2baed7e36d99c6eb4b7dcb349509228a60f0dd68",
+      "d7b295d269fc342664cb9fa26b02df556774f155ef7c246e9203eaa4a114102d",
+      "2733e4986e59572dbcba44dce09f462572dc2217e72a808217185a5360d7fd5d",
+      "2733e4986e59572dbcba44dce09f462572dc2217e72a808217185a5360d7fd5d",
+      "61ad89aab52c6cc3cf80b71b0f65661d87330076f78e1d4364fff39276387029",
+      "19580bc7bcd7709c040b3e76c11f723ffa12b4ca47d092fc4e6ed6c7b6b8f4fa",
+      "c1db70b50e603139f401eb73038f070d66e219a79fdc8b8a0265dd42aa99809f",
+      "ff8c8464d4e0b966a0438c2016d4ac74f7048f400719eba675b6093a7973f7bc",
+      "3be0b497337cf3f43dea15fa244368c25108783568d8a9491fd9a6b368faf2ca",
+      "580a6ab3a158e8ea4f34e181b879866a379c2ebeafe27e8b7514253fba450613",
+      "3be0b497337cf3f43dea15fa244368c25108783568d8a9491fd9a6b368faf2ca",
+      "35b0d7bcb9cb748b62871bd48c90b280d99703ec0f11e158c194d3eb30c3b852",
+      "74c1d2abab7c0d1e0475aed8e09e0ec2cc9b469afe947624f5e3129229bcae71",
+      "07f772ea00d47a78eb3181c9d65313299b633accbcbd70a6f258d4de28a519f5",
+      "2111f327e0772bb3c3298a416ecc2dbf86d84918e6c3fba4a6b57eec54ec7b5b",
+      "f7fd8da5a0b20941dfaa184f78fce12571cc9747bce5caaf8a5196d3ba1150a8",
+      "2ceb2b0eb4b75f106aa84b004bf69e67205bc53d19c6b8847c3014f3e16eb015",
+      "e78999c0896e6dfa8a2ce96bbf399b3b20cd824dbbb9af3e71c83f497c06a3f2",
+      "8b0fc930647e68a7e29f9bc13ee2940c93fe47658bf66f6a254170bdfac1371e"
+    ],
+    "server/server/cli-start.ts": [
+      "c7b785ea59113af0912f5412825911fe44c8daf8ddc2b8f73dafe58cd47da1c3"
+    ],
+    "server/server/cli-uninstall.ts": [
+      "d3135c846030a70eebfdcca8b52df7d3fb0cfbd7ed9e35c540d41cf29ba33565",
+      "2762d3018ec0545c7f606ccf765cf2fd247e4a9f89cd6ae4349a6ddb775a9232"
+    ],
+    "server/server/cli-vault.ts": [
+      "e1c5590eb702df6521a28d2c18d644917eaedd3ca3ef69a95fc10c2d96007070",
+      "cc00de4f8c9cb06a3b2d25f3d6a4446e3ad83fddaccbea2fa1ff77ca85aeaa62"
+    ],
+    "server/server/code-editor.ts": [
+      "9a9f2e63d090053cc6d634e622c43e802c65d7cfbbcd43012aef8f2c689784e9",
+      "0468a49e555dd5ce139db12f535508ef5ab45f791c05c2849d4e31e19225edc5"
+    ],
+    "server/server/consolidate.ts": [
+      "696d90f8cd8d124f5f8ce64afc6070a5b1f0d66a1dab23110ef8a67de545838d"
+    ],
+    "server/server/data-snapshot.ts": [
+      "3a7393a6b8dc075265339d1748c1001b2a2f06874ad32942f35a368a6ccd6edd",
+      "ea8a9f5da207742db8274aa8ec726e4220c05440bf48ef74fd824cd45040f9bf"
+    ],
+    "server/server/delivery/capture.ts": [
+      "6d1b8078c2ae83da12bf1d7137cdbb1c0bbff6ed46472b8fc4cf1f237214ab5d"
+    ],
+    "server/server/delivery/guard-integrity.ts": [
+      "9db694ad3b44a3a594771fb4a47b8d80fdba272480be7580ffa8434e1f42b414",
+      "aaeaa30d72cf4b62f577da1f71fef38b68a542b9b2622e9cd4f0cbdba1176eab"
+    ],
+    "server/server/delivery/guards-lock-order.worker.ts": [
+      "4c62c1d9d4c438960c4daa6952d0e26b809ccd4b136281b40e50b4372e4c1e82",
+      "c18d1f945d58269c849e9ef12bf2d9bf01bc43d99f90852522596af3ce4d5990",
+      "43ea4bb3e7df0914e48575975e9130161d18a4f8003208bea1e1ed9692aafd20",
+      "4af1dd53cbdae9c37d57480b381ad5c3926ed9398dbff6ec7f93b60dd51bfaaa",
+      "9ab5198feb0f9579a498db37b0a250b898ff3c83af259649ad5b7b35aeb4e7cf",
+      "9c8d5bf2b5398fbb0e348a4827d45935fe379430129d265bf0a1c5c864e8ebea"
+    ],
+    "server/server/delivery/guards-store.ts": [
+      "fcce8181d4ad7b888881123a317723d9b53f423a3588191a8cdf4f33a1513db7"
+    ],
+    "server/server/delivery/host.ts": [
+      "4a26ac43ac474ac7a47af2c2675d7431c7373e6b5fe7e8f0a3661fb161ecb571",
+      "b26e707a004b02e9e090f93eecd92de02f79039b3354e8ab44ceb59dfe4b2ca1"
+    ],
+    "server/server/delivery/owner-mode.ts": [
+      "5cc94e1c7c4489c297b97b5b49b903f8c6c678da39a621bbf1a977d9ee875ddd"
+    ],
+    "server/server/engine/engine-sockets.ts": [
+      "6e9d82a76488e5cede6a2f70dfc5e7a771e972adaef56b2210b290837d790430"
+    ],
+    "server/server/engine/structured-handle.ts": [
+      "ade1f53a8715ec3d3ae55205fba0d607997d959401d04d6354d170cb2dfb0901"
+    ],
+    "server/server/env-config.ts": [
+      "85c1b6d21c75f544ff6f07547dd708f6aa510f111d905e1cb252774e584d8abb",
+      "0c82c8b1ce5e09c0a09597a56b1f5146cce5120207eb69d20f9aea3d65d1c2eb",
+      "0fc097c0d166879df8201412c4085d3e45132840779cc2141acf99838682cd79"
+    ],
+    "server/server/events/event-store.ts": [
+      "4e2a713089d66afc4845493de29301ee0ec0853b2a6de811ebb51a63b978f68f",
+      "2babdfe36d7f085563c6b39888333ee5e73d614dd8ceb19c6195c927d0ab4d72",
+      "585f6806cfb0f1cbcaaa3d45435169b9f67f630604d8082c2d3b2452bde88f22",
+      "7f8a592a4ee7c4998fa3a20061ef2fde5b358b163cce6227b4d218a7e23c6a6a",
+      "3f3cb484ad0719b5abb886bac1f38b582704391c81c47188274a6d73b95995f4"
+    ],
+    "server/server/events/mobile-push.ts": [
+      "a1c8614f4810bab963c9d65179a383c1aedf0ecfb2f2d31ee534a5bedfc4427a",
+      "6389ffe4a26e41e41541b886873e0b1121f10fa04b129863ffb159508c60c6cf"
+    ],
+    "server/server/events/producer-status.ts": [
+      "0f3e9baeb0b40e60d7693b1f9e36d84dfabccf98c17fd62c4762a963fdfc10f7",
+      "d84673ffd676648c4b3591b93ec423c047e913740078284e97f6bc249e707f1b",
+      "78f281a3d96364001b2b58413a6ab51c819f6eee9bc457f647b09767c1c225e0"
+    ],
+    "server/server/events/subscription-store.ts": [
+      "28bcdc85b55af8335e60bf68c36995b6503c8e315178422143ef756e690ae94a",
+      "3d9245be28df957847d4b1dc1fdb06f112468fa62184e3697da299dc4c581fb9"
+    ],
+    "server/server/flows/ambiente-host.ts": [
+      "2b0339a278abbc74cde4b884972442144de8b83c8478c7bf2ab82146d7c37aad",
+      "10ee939d1f4dc4f25fda6d1cbb549afce7f3b33259c6756ccd1be911cb646ca7",
+      "34c23b282eda4090cdfe1ea0754846b28a03b2a098aef54b6dde1eb914fe1728",
+      "57741db77c37096b64bbf39cef446490257eaf68d2fa144c9513a7d91dbbf6d0",
+      "253390abfdbb2b55112b5acde2a1297dc48d8995ed10fd4455503e12085eab0b",
+      "b30e01d2f5addef7f318227fc38e82039dfb9bf5986457e4a64710c0ac8d7f78",
+      "971cdbf57051310470362c486cea014cd710c64329eb84d54bdcdd7597ad066f",
+      "76a8eea27a7e10351aa4f4c93835da8b0a2c71c3955537de21490a5f7248425e"
+    ],
+    "server/server/flows/owner-ledger.ts": [
+      "fd31f2b806b36ff566c1a2340211aff74bd0612435126113a51de1b1c41b026a",
+      "a79f9a32e3dc5d7c7e6e0b632aa40105854021df0dc3d47b92481566731ed9a2"
+    ],
+    "server/server/harness-accounts.ts": [
+      "894c2cf73ceb9e6648e8b8b9fc7d2d8181fdc0c988791fbd5f2a57b01d48b26a",
+      "6a2c4d1e9e851fd295b4393de2d90b6af8776554ce6355343326969a2c8717e4",
+      "b1b6b48bac60b6378978c613c960b5f80b7b8e7e6fd03020c7c5ee8c56e0c0a1"
+    ],
+    "server/server/health.ts": [
+      "f8b4103cf43065517ebd4460467d6a6a3f78345fd9f9a9e3fde1b9486f5d3769"
+    ],
+    "server/server/journal/backfill.ts": [
+      "11ce61b07ffd93957f3615e16bbf98752246fd3b4c738ba85e6aaeff0fbbac0d",
+      "97703e07438adca06071df6669f1cb0ea806005406de31b7383fb4ff5f871c63"
+    ],
+    "server/server/journal/import.ts": [
+      "d39d29b6ad141fc685668d1d0810eb12485c1db0be0511ec327f94f0503155d6",
+      "039f7262d46dbb2c96aebc550873b331854d97475681fd03907ee12a77eb5661"
+    ],
+    "server/server/journal/shadow.ts": [
+      "9ecfca4370589320addb01ed43c1ccd8c984831b4c89a827a313b8ced9165b6f",
+      "55c6c7e3b3bf4222c5587b6206a18be794d9b8e65edde014ee0a25051e05cf2b",
+      "cea994a9efce0d150843e3c907ec43d48e59e0ebed8ea972aca1a8efe46ff476",
+      "166e08dc758ce57cfad8b54d1adb6e2da53f41c6e9e40838634537d43abc5235",
+      "009589a5e6961c38ce0e1bd4297692b6330ef686270f8e56d88da97034ebd147"
+    ],
+    "server/server/kimi-mcp.ts": [
+      "cb5e81aa8f8011ee049b1ec0b085c153305691e3e4d79452ca94038e83577587",
+      "721caf3ef7ef3042c766bae1130bdf9b7b172a595d562acb499bd87a803189e7"
+    ],
+    "server/server/memory-service.ts": [
+      "d9ffcf76d6fa578aa77295c803957989a9356fd0eeedd558180b637832eb517f"
+    ],
+    "server/server/notifications-store.ts": [
+      "8743fc5c81bda26b55314e6e70e0e64eb9b50ff213499cda9fe1e808bd80ff89"
+    ],
+    "server/server/opencode-auth.ts": [
+      "3d5a669638bb031f85812674bb4cba732e2ef12ccfe016d229bbc8c9d677e132",
+      "f08719fb1169485ab52246e0208ede872d3fedd00f9f5e8a501951a67d3d9215",
+      "011747efbd6afafe47fc5c6844f7d94c856c4994a9847ecf4800777ec6ab950a",
+      "cacedaf991a99779e20b6a49a6cfec3095d93240264aeca3172202d9f4c1e3a1"
+    ],
+    "server/server/opencode-mcp.ts": [
+      "1f2b0170dd2710cd30c47d337fda1d52758009c441f955e9e2f39f3b0744c239",
+      "840ebee57d3a55d97f2d3cf4d959d8722a771ac8603a900e38099c67e80a76b3"
+    ],
+    "server/server/plan-history.ts": [
+      "f41715370336d13c871830797e9e8e2313fd0d6fdd3aaedaa2f4eaacdd5a7f97",
+      "9cabcde452fb5e547bc605be2324327e96f3211cc34dee6bb5e725c25ff90e83"
+    ],
+    "server/server/plan-limits.ts": [
+      "b23e5e16f06d5992a3d0207642566cd62f9f11ca7daa2a2b6487ef300c56aaae"
+    ],
+    "server/server/preferences.ts": [
+      "2fb3f3f495db91a00743ccd155352677059125d614be213854ad2d4a0a84845a",
+      "752d9cefe98bdb10c91ade32a167a44345e8d4d9ddc413fe558f4379df4ba41f",
+      "2c7cae0f6f704210b79e467170c4e8d8f8544730064603b83ad7b156be91eddc",
+      "24643cf711fb5b28585a61c06426b9604e6349d9143a2e3b70150f69a8832c34",
+      "ce4dc756ba3d95b0b05633fbe2050a35c61807f6f4a80bf6c2c04574acfd5d56",
+      "1e83127f0ec9847953d17fac6a67f30d65f8a7edea15da8b4e29db26a1e94257",
+      "1e83127f0ec9847953d17fac6a67f30d65f8a7edea15da8b4e29db26a1e94257",
+      "4acf7086ccb2c4fe989290a67545986a4d3b74e306ea6075152d75340ccc925e"
+    ],
+    "server/server/resources/heavy-io.ts": [
+      "dd8580d25e2e1844a96604a2fd19bb2bf983c35032aadbd778d480066a4df968",
+      "34f6bdf5440aad1945d320bda9ae57c2e4a3d9fbfe4a75f4bf4d6b8a067953a2",
+      "d4331fab426edd7adfb0fec293e51e09b9e6958fd8c5113adec433320b097eec",
+      "551b62ddb24c70c416a8176004ec72fe66a8125a5263d5114e039428d09974f2",
+      "d33b8d41e7aef8a9ca73bc87465e075c6b623c4f71f6c4cbe108ce0e1717a28a",
+      "5133033dd06d3e80ed2ce8c42e0c4e15c232b85819ccb1d5d768477f890feece",
+      "dd8580d25e2e1844a96604a2fd19bb2bf983c35032aadbd778d480066a4df968"
+    ],
+    "server/server/resources/helpers.ts": [
+      "13a987f24d8e8852f906a1b31fd1c4fdd366e174f48fadd9cacef308213d957b",
+      "eeeffa62e38f35bdf011b8a113fe13d3f46235f265eeefc4ff8c81e3579d1c4e"
+    ],
+    "server/server/resources/proc-card.ts": [
+      "3221f5c4bfc861124d0e3f50f4a8d1b2955eadc7b5e479ea5d53ef39f7179b4b",
+      "1d0fc209e7fa011b2e4506ef5a65991064deeb06be316b18d01af8e1729ba05f",
+      "2d55273d23a6f673acd506c05c0f474b2d200ec8df30e03fbca7fd865a9eba1e"
+    ],
+    "server/server/run-seed.ts": [
+      "6d9e2479af43120129220270d957749635c7b8364436146ccd67aa4dc55411d6",
+      "08c7b00953226e3406f88cd6a50611b25f3af4f932ac6192edab898bd41f341c",
+      "7e4d802902c7f3ff217acc3c6b6927a009e28a26824ba32d0ba778cb909f7f23"
+    ],
+    "server/server/runtime-socket.ts": [
+      "1238ffdd6aa38af929220d3860a9f2e6bbf51aaf3a7ef46411b01e831887dc51",
+      "ebe8de94ca24ae2f7ab21faf727dab07cb5715ed5a04478c77490c606c557d0b"
+    ],
+    "server/server/server-ports.ts": [
+      "c39fb391704c472222c4e320d04e358e5cf21196ed6d2066d195e85a7add006c",
+      "0126d3140ea4b0ee5f3a31a2ea903931c11ccf3f033fa48ffea3be5ad0c7f6dd"
+    ],
+    "server/server/sessions/account-switch-io.ts": [
+      "cb638bf41976169a10839b5c91bf8f730bb4d572f1a4a672ca3a4e04dcf8c297",
+      "98c01c5a26d6fd0e13d62af3225a63d43eb2972c72be9fa47e6fa10cee7c28f3"
+    ],
+    "server/server/sessions/attachment-web.ts": [
+      "ca5fd99ced4728bd911815039e8608a0d4fa63967fc5419f928a90b49e2d8f65",
+      "963cd32b92a8b0349385a833d3058aae89a5013eb39f81eb316390a80698e0f3"
+    ],
+    "server/server/sessions/auto-switch-io.ts": [
+      "2f9803124eeb8d6154d0b5477a9b321d425b25f0be50d838f2fa8e8878bb6f63",
+      "8705a47343770936ac4379b4dd218da4925dac9ab6745baed9e3e6ff3502b492",
+      "7e1ef251b7712c23a55578e5b0d45a39800482a1d50388748c8c387c1a1bfe5a"
+    ],
+    "server/server/sessions/backend-tmux.ts": [
+      "6c070f619191e7f940321cc593b42b57c7cdeff114f693e56d400fa22df2317e",
+      "9b09a0eda40b079e8f7920546bb44fa719eee05c8def6df0545a2df09bd31d83"
+    ],
+    "server/server/sessions/claude-trust.ts": [
+      "9fc718ce4e054dfc9850d37ef665b9c6f807cdc4f5fae2a095354438783fcac1",
+      "47bc501c7e85db6090f72923768c9428af078c888e0718e98bd871b833f7569e",
+      "aca211b38838019732a6a2a80cdd2b0d578fe82d87efb15067d82ac9a7ce5f28",
+      "b2b6d27794130d124cd0144cc9f2cd4e13b8b2a88257a495095b79e3ba4cff32",
+      "47bc501c7e85db6090f72923768c9428af078c888e0718e98bd871b833f7569e",
+      "313c66f1ac6b0ddc7d80defec23fc7ca951a03246b12bfad08f31b1a175decc2",
+      "d8cd54a8dcaf88332a8a97a6d9c161614ce03eaec71499352db76d8add34f55e"
+    ],
+    "server/server/sessions/composer-message.ts": [
+      "a596c2fcc2f2bc2099aa2dccf9d635646fc54ae20bf8c79a7ee765e793bfc567",
+      "b33d8a31207bfd89ea521f1f4087cc4ad11de720f0a0fdbd794c5f2bfe603a60",
+      "9b7be6133472a9b06c9d2545d3884ffc57f4c2db4dcc7969ed1b74f77b2d9b05",
+      "e7b4147f4bcb71bd66624b860850a2cb6b17617128b92c4607adf0d882566659"
+    ],
+    "server/server/sessions/conversation-resume-lock.ts": [
+      "b617d0edf00897ba6503d71250054eed4c3e12cf0c97f80b940c107eed12a1ba",
+      "c57c03dfaeff471cc7c97822dc03b641c52ffd91e289e5e4e3ddb9c368d8d6eb",
+      "f7cab2de07a7ed9287c7ef0f4cd56818f04f0dea30d08ede1f4b409c98facef8",
+      "870d5b59b59a85a1c3846ccd773146b5c7b1d2f6b2b7d18c4bc146a8a7f1132a",
+      "61dd7f768600f70a4413369df56d1037fcefe4f968398d0d63e08a93b0989391",
+      "c57c03dfaeff471cc7c97822dc03b641c52ffd91e289e5e4e3ddb9c368d8d6eb"
+    ],
+    "server/server/sessions/disk-index.ts": [
+      "777c9c753ebb113da5c9ce45215e1b04a55579da566c481970d31a84f974e38c",
+      "e1042354928d775f8fabc17e8c1193199304a21682f3911d9e022f5f950da8ef",
+      "5f48babb0de2c772f12dd127b34acbaefdb98dd17f0df1978ca47977a1b879ca"
+    ],
+    "server/server/sessions/editor-fs.ts": [
+      "e50d0bf89feb63bc981a1bff8c9a9c17fda31ea9c621315dd7ac0497ade237eb",
+      "62a0ab4e4b12e3758bc9d5ac4810081ef02e6b994cc2293c6325883c6c24bc1b",
+      "c8b9fd7c52311cba076ec02d2ce4441d215840f496d7b322e70702936e0ce1b3"
+    ],
+    "server/server/sessions/file-lock.ts": [
+      "52738d437039de72a042d888dc6f4a5c4929f441b6d85b086066d43c1f853210",
+      "2852f30a619b6f51fd6d763c995d2bd01a8453f2914d05f238c5a88a9a8f3e0e",
+      "43ba120198a0289b1beb7a2ad16e31f3661077b57a365d8496deb4bfd5d97c58",
+      "6b11785dbcb1288121995ad8aa14c0ce3d6b27b864f650adb30a4fbfda7ff178",
+      "7bb5380a74c669ec59479edb8f621a7aaca0629b5d97241ed3086ce132c88c90"
+    ],
+    "server/server/sessions/fixtures/fake-structured-agent.ts": [
+      "7b02332409a5040a244ca79f1010ebe2e37a27f061049f6e15ffc874087358be"
+    ],
+    "server/server/sessions/gemini-family-io.ts": [
+      "2839047a1815e63e0bc63e0e1e05e159fb1e110afc7e31e3d0397d91f1502b9b"
+    ],
+    "server/server/sessions/handoff-usage.ts": [
+      "439749f542bad1f0d5512349d14db2bd95980b24198513d1d1969f94dd9b477d",
+      "b94484bdb045d5ee3ca95c42f468d3a10eef1d4d8feaf73116191a095f02f746"
+    ],
+    "server/server/sessions/harness-install.ts": [
+      "0969ff3cb9d0d63053f291538c25932571f3885f32afe4a1662066d1c8fe9070"
+    ],
+    "server/server/sessions/login-env.ts": [
+      "d7b9739753ecf6dc4f32dfc07dba3a419f3ae752e2694e0886c4bf71689cb3f0"
+    ],
+    "server/server/sessions/native-notes.ts": [
+      "2a7d9c0077b1757f975441fa47ac5f048691fff7f6254255cd5468e54081483f",
+      "cf017b395de5ba85eaf491ce3559216ec24d05a87f667c98f36fbc555aaaf0fb"
+    ],
+    "server/server/sessions/opencode-limit.ts": [
+      "487bfdf3fad5b6b983f2b2c85aeb700890cec4396410c1a58cf87aa8116cd47c"
+    ],
+    "server/server/sessions/opencode-run-log.ts": [
+      "77205c0afff27e186a690d752fb74d94fb717362c41f7153739055a2f20db259"
+    ],
+    "server/server/sessions/orphan-review-notice.ts": [
+      "cb5ebb203bed64867646429cde5f91792b093759b7279f12304983b88be617fd",
+      "ad7872e0f83a73595eadbd58128f7ef46c4f005e629aea4d712d74917362c346"
+    ],
+    "server/server/sessions/pending-prompts.ts": [
+      "63e23bd8250948680d556ea13966e1d72a705f03e9ef0493a30a0126f95c596a",
+      "de865f26f2ee5593d4d5c8b6c146079560787c1cd1e29781005bd6a51f578abd",
+      "f346c59e8e4f2131e336116915f1cec66b2de16a1aeb1f6a82cfbcee51e2218c"
+    ],
+    "server/server/sessions/registry.ts": [
+      "c8ae8c386d41c0caa63e13d359a92c102bcd2db7588adfa19780dbd2644d7a62",
+      "771219e62924c3922d89dd3e0740789fecaa1c73f22b64ebc413de1f548c487f",
+      "ed3bd29788e7e08dcea7da136ae4e12120139503a3c249f5bd7b44222c2d0b1b",
+      "894096f242186d18d783d279c03462b1bbdbda24458a9b214911ad254e0de372"
+    ],
+    "server/server/sessions/release-squash.ts": [
+      "c724d835a147e28a6ec581617a36447d4b2ce0fbeb81953dc76d7087696d7fe2"
+    ],
+    "server/server/sessions/review-clean.ts": [
+      "0739391e50459fa9db873c9e72bbf47307fd589cbc5fb3b394cb89ce25a7463a",
+      "7fe13d0f991e68fc730367fddd4fca97d1aef003ad8da206d1e5a0479f4c6eb1"
+    ],
+    "server/server/sessions/session-identity.ts": [
+      "1e1a5dd3dcf68121425aa2e3d5f4d70ab4b32ade0c0208a862afb922adb315ec"
+    ],
+    "server/server/sessions/session-roles.ts": [
+      "52938d2686b4414a380e59f3a8bc8e942974184196395709bfe8f41019276400",
+      "59fb51f398aaf1e6cce1543b334194d05f57e8a33bd181c0ade9a1b5f80a0efe",
+      "081775692a1f4d295850cffa098c7c93fda60b45f4d00cea1b11457f556ae649",
+      "02d866f19345d7efc5b976b8c9ddce6d4a1a802af9983b19991ef01065928e17",
+      "0e2d692a37d14a62f209f32b2a326714542e5ad4bae956a2f4ce6b63595e1a0c",
+      "3ab7ecbdd7c896528b600c6c7274638f9475f1f4927142a71190191dcf94559a"
+    ],
+    "server/server/sessions/shell-store.ts": [
+      "2296e8e37b762eda43d4e5295075ef75931d953d4e069a3a33f02fec41cbe437"
+    ],
+    "server/server/sessions/spawn-context.ts": [
+      "7ec6ff89aaae5314b9bdb0be1eddc5ba95bab1c250a3fcc88e4a1fdc4e71ddd2",
+      "edd603fc1f0adc8749bdd3ae971aab966422d571acc6ff01f4cfe221f0fde096"
+    ],
+    "server/server/sessions/structured-durable.ts": [
+      "2bae3da5c2bacffdf302e51a1d90c2c9f112a3adfdc324a55fcc06c76769cdf3",
+      "07537452385a679f06d4c531a76b1c4974f2f413bf96754a7ea696802c22625a",
+      "0eb9272bb0c709d15c68e322a74499245f1fa007b412324a42d1b350e4404474",
+      "adf442ea25e7e8345f9ae02fdf7d9065a14ae545746014eb5e89351d3dfd89bc",
+      "187fb43122b204c89120762de1c2feda6fa0c50a8da884c71842a073feff0a1c",
+      "9283d87754ae3a41f8772214573876994b9bd6d5ce9ffdce64f53d850f5dc3d1",
+      "5f9054d03e361cbfb6689ab4f4f5845f1ee60a31280bb81e615abbeb97d096d4",
+      "b74719eea552f59686d6e878794d5358a3e0b1b667d8aa95d85c3da9ecb1f01f"
+    ],
+    "server/server/sessions/structured-relay.ts": [
+      "302688fa95e6a17f7d0d62487342f9c6b664767c4e5ebed2f65a30840164d292",
+      "cdeed2a71796cb2f8f71f0c0291ae66e3f6a6c52dbed6986c3bef6eab60ff7a7",
+      "788ae042aa496aa500b14ede1767595b320d4fc143f0888526ad09e9496df556",
+      "ffc6a3f6cf831b6cc6671063f98d929aa048e0bbbab450c20591dd2f17476997",
+      "613b6de2a01cda2d1ec356650c34dbbb6b25db2827c1b7846cbc9924f4be3cc4",
+      "2a275e1f776670ee240cf6142ce1aedb5da756e9a0a64e9f8d41a5f31bfdaf4f",
+      "64a2bec046a8048425d688bd00cf3426bba8d96f07b86604c803ce41a15e5eab",
+      "207345116b95b720f8fabfe7d766eb6adf5686c7306bd2d78d4f497d150e4a6b",
+      "64a2bec046a8048425d688bd00cf3426bba8d96f07b86604c803ce41a15e5eab",
+      "d159916412395c3d61c075e94818e32e43684110fad19430c5a49cc1aac276fb"
+    ],
+    "server/server/sessions/task-files.ts": [
+      "d4afd406a020dcf78effb6b81abfc13e984f9b546507508f11f7af762bebf04d",
+      "c1242153d060dc0e22a9828c0eef63ef4a328f0115205c1f1c918ca074c3193e",
+      "954e6edcbf23e990e7c6246aa03e9020c6dcd494c42a152adcbef937a7fcff83"
+    ],
+    "server/server/sessions/task-forecast-cache.ts": [
+      "679e5df40c7f9243c935725660e28bd5a988ee85484dff0de8b3743e3e9cab25",
+      "5ab2c19773e62f171ee51171545ac7c6d8df0f68bfd4159f1023b2ce9d5b115f"
+    ],
+    "server/server/sessions/tmux-launch.ts": [
+      "4d60697e450011ba01fdd34a9ad86327fa36c42550c7c2e5a9fab0fbf036ed35"
+    ],
+    "server/server/sessions/transcript-window.ts": [
+      "cb18a57127472e0db7cff2e68c29bc41d894ca92b7b73623c51aa70925c85e82"
+    ],
+    "server/server/single-instance.ts": [
+      "d659d42042b217a8a62640b3a2a1fa71845ecb8dc244582afdec90bbcd7b0f6e",
+      "c2da07fbaef242193cc7bacacbeec9c626ce9a7898cd999580866d934fb7cb60",
+      "52e5abbe37281baa052138653526978883216f0411c82e5b1e66ba4f7a23bfac",
+      "4f56f6a56ad0a72a733e820200d8e83bc96674f291e7d9d5f2c137dccdadb337",
+      "5676b03c94d66b464d935d57bb1023bcf36b9921dd9702a340b420f7df5bbb0a"
+    ],
+    "server/server/tags-local-store.ts": [
+      "9f5665ca072d03a064ce27d511300a13ac0db7cf3ba038ba64f0565b34e06171",
+      "d282ae0b842d672a573dd11459e01ca997993722ca4559e53e3dfa6d28c5aa42",
+      "5fff47abe3e2059509f90cadbcc36bab0eb64cb5f3f3530be42a9d44cd739376"
+    ],
+    "server/server/telemetry.ts": [
+      "a69c07e7fe2001bafda446f13b3206a3357422016ac8094c1ad0a2122c8154cd",
+      "039f7262d46dbb2c96aebc550873b331854d97475681fd03907ee12a77eb5661"
+    ],
+    "server/server/transcript-fold.ts": [
+      "d7205544666a8289e304ee8a37d39f2d8ab713d6db2c8a2f4c614faf850fcf56"
+    ],
+    "server/server/transcript-state.ts": [
+      "f78a01a9fc302ba6992679403138170b8b2e2c3b618ff40c50f0bcb1da8ab356"
+    ],
+    "server/server/upgrade.ts": [
+      "c2d9b5328a7c68f8e91017c9000469bd0c80d7531f59e56130e4a000734f3472",
+      "1f6b4f0f6b9038efee502ef6cade0384e8b4e36f54d85f0b84a4141fe622f5c2",
+      "395a4b7ed844d7b5964fe909321786ffc6be24aa165e53a2d706a10956082aad",
+      "849865c1274781bf928882874d6cf9a50eb7013c8cfaf34556bf6aaa4ab8de83",
+      "76da73863cc17f2c8c2e4e30636f917d0195094eb2afb6bb2b45ae9a3bf748ce",
+      "02dffc1d44eca99bcc49cc2570c5dd39c72f69d3c000c434434d53db0603a08d",
+      "69b01d5e800c97655c1f8ed3c14172286f1aec1709aa9f33d025f4f0a3184854",
+      "89d3ef19188f2701dd9ac4b87fc89f80e06b70f1fb0be761b3b67c5de7d1a84e",
+      "f49dabe71acecc01ff12064ce62ba731cf19bf49a119a4be837059e6c60ec877",
+      "89d3ef19188f2701dd9ac4b87fc89f80e06b70f1fb0be761b3b67c5de7d1a84e",
+      "0f052442024509e070a1c600d45d303ba3659b02999073852a468dee9ac19c7f",
+      "cc454900c47ddc18619e90a56df64d701321e7e3d47264693200864cac315024",
+      "600bbbe91ede639d443fcfe798f175dc679e7ff0f77497f5bcc71c9f21c86c81",
+      "faf68937f255f9b0985509855053f2ae592a0c56dbbb399d6f353c0e930f3be9",
+      "ac0839e8aa986b81b469e832ae110f1403eacc69583dab952e8bea904214755f",
+      "ac64b869435043d1e9e2b105878ac19b3d92dc540dbb1c34c31a7fe4cb2edbde",
+      "ed7abb09297b87d89f961866b949a551f0d602e91eeb42d9011fa978f06de8f0",
+      "1fdc49c93809dbc7e7290d80e5ba1c45299b98df767b2e66ced02cf658b5caaa",
+      "1fdc49c93809dbc7e7290d80e5ba1c45299b98df767b2e66ced02cf658b5caaa",
+      "84143f29c6013d2f9eaab0ac9e302ea75789499e37bd112573e43ca988a1d070",
+      "211e999dd296e9de1428f9f22ebeac53d6afee59f62bf8e688bba9a52f020a76",
+      "1fdc49c93809dbc7e7290d80e5ba1c45299b98df767b2e66ced02cf658b5caaa",
+      "67767e6c7473fe301c973e8d0806a818dc030972f254e1e13af76639ccb3ca97",
+      "6d18ee619d5a3a241404ee6db3c7577cf26044072395948ed7eda7892b2794ce",
+      "1fdc49c93809dbc7e7290d80e5ba1c45299b98df767b2e66ced02cf658b5caaa",
+      "d940177f324a24ba6aa92e455dd4e5d2fb44d2db4527d0993a031a01776662d3",
+      "6d18ee619d5a3a241404ee6db3c7577cf26044072395948ed7eda7892b2794ce"
+    ],
+    "server/server/vault/bundle-io.ts": [
+      "4bdd1ec183f336c43150769128e4a98e35892862becdefe0ce449e97e46c5340",
+      "bcaabedb10f141c227994341d8bc343aeb58ce3e8ef92e520e515725d79b0cda",
+      "b8fc0aaa80aa0423663bdfc8afa8006eee869fbcbad0720be6e528be8b1950cf"
+    ],
+    "server/server/vault/gate.ts": [
+      "c170ffb4e4ba569613160fb7ef7f9349532ffebdae7aa10a3d68988a2bd9187c",
+      "e53de9ad7bab13190673fce54fa0e0678349d5c86e1047651b289272668b5631",
+      "01e0861bb6d5715abad03758cc4f5afba97e655880e8c83be91965254c6a62f7"
+    ],
+    "server/server/vault/grants.ts": [
+      "8e80f4e9b8bd0111c66fbc4c4ba968e7fff811064754cf919cde7ee6bf64f408"
+    ],
+    "server/server/vault/io.ts": [
+      "8b551bdbba47f4eab010d38894e9e053ab9f7ba361725a54aefaaa2f1641523a",
+      "86220d362a320c6322a9c4c48d0052dd2bcf649dd5c0b3164d293b412360f072",
+      "1199b09cc774ff5f564d68aafa4ba8357a594bd447c179d4e512d4308f3db91b",
+      "9e1c9aaadad34d475d7f0f3d2fb3fa915c3328a55d389be779b70fd272f92ec7",
+      "81d319f23320f6db497fc5e0594148a1448d44cfd26d8695dd7b7f669f3cc7aa",
+      "f72ce2243f1fb788bf6b15986fb9116cc998ada05b193cd136504ad768443c95",
+      "a97b3183ffd71b33748d0108eb80de0bff213bbaf68c94b2787315cb12eb2402",
+      "e3206e0f1a8138b6523c8644b73c4726897c7981c0f1a82ed276df077af833ce",
+      "11f3fe1cd24f34633eb460ac206a6bc063ff603b05364a581528dd252c7cd219",
+      "0c45c2d28cdac13bb626a5e8b2e9e9e519b274a86bf136e88ed9491417a5378c"
+    ],
+    "server/server/vault/machine-secrets.ts": [
+      "39848fa5e361cdbbaf21f6018b274813083bab96e6d132fa903ff21ac9e7d1af",
+      "3a018af29b2cce7d5a8bc436a26e8e206527a324e88488b2a5304a234c86e507",
+      "fbb3cc72face6270d32cf89826e61a790815197efd83923c8ba61eed8fdead58",
+      "c86e43acd61543e242d5b6d40efa5a3a3997944b6c48dfbbc4a95614527ba509",
+      "28d27ca4ca6b3ee153aed148c4520f3fb61b3884682dd5f01587fc100f6c3bee",
+      "33484e223cb6c7d6873f002c231db714f7aa683c71c76da3330f9f891e7cf32f"
+    ],
+    "server/server/vault/personal.ts": [
+      "2c05347f69797769fd07116dfb06689bcc844f47d3655409251a5d78ca0ecaf9",
+      "d21994ccf2bdc63c47a7079903a425a14d01fdb7a8619a3f57ca1ef9802109bc",
+      "0fc0d1166776851d42d6d19b056e4299261d9586ebb70b353a858f2f135e31a9",
+      "782c23b82ca437d611a7638fbb23d4dbaa01876d2bf1568b1c11b22e41790e5c",
+      "043cc61c56a5ca45e3858bfdc05e7126e9949d129ae0a030accda5b9bc2592da",
+      "42462b59a96391c7c0710fcfb2cbbb953be91795717fa1367c1fdf0b35ff49c4"
+    ],
+    "server/server/vault/rekey.ts": [
+      "75a0c56ab75f83e499ab18d68f6661676c22374440d413d3242d44434dd3d7e3",
+      "e9d0e8305cc7e8881f7dc4e77dceae80dc8f432d71d79a2642d125119e7aa49c",
+      "5dde6647e8c6b5dcbee7a7be79aab154a38742f6e5fc38804945f4e54794315b",
+      "23cc196ade70c7274e3846ee09c09784675d314b18d6e687f7081731a1eefe46",
+      "d32894e2a841c81b72b6852b12d1b22fe7c298ddc637b172519a8c1bed69653b"
+    ],
+    "server/server/vault/service.ts": [
+      "8896e9a4e0c5a38d00f703906fabf9e0124a47a452acd47e05e108e4e4c96e19",
+      "82eefbfa74b777443f1368be97b809a1ecff2e10be9e60c335f02744d1eaf999",
+      "cf1ad215e534cfc67233e1648494ff5640c32e149ae905974870fa300a917d96",
+      "cf1ad215e534cfc67233e1648494ff5640c32e149ae905974870fa300a917d96",
+      "b692eab4e4bdb8f8006da15a623425e739c6f645cf11d316dc389bf80333b627",
+      "ea62ce95559a385fba4301d9fa914509078e3d6acc44baccffb0eb589e50509c",
+      "fbe181414944918de74b0d6c51d9d586af8de19d0fe5b7d31d4c748e6910dcf0"
+    ],
+    "server/server/vault/socket.ts": [
+      "5a17b077adcc93509cf7e9bc9ff0d805899e0faba5b3caaa9de9ecf87963cdc9"
+    ],
+    "server/server/version.ts": [
+      "d577d9753340d71293a450575cd19e2efb5ad2b61359f9fb197329e0b0e26392"
+    ],
+    "server/server/workflow-store.ts": [
+      "09caf842fecc4763648a0a70370b4d8e5072889b7fc739169852e81fadcff976"
+    ],
+    "server/test/fixtures/preferences.lock-test-child.ts": [
+      "790abc4a4ef348c18f31795a9868e550e196643ccb9b6d798e070513e864eda3"
+    ],
+    "tui/src/components/Primitives.tsx": [
+      "c7fcceb3df3b28a06c3e62a1b473e0dc841d737f7909c8a8f7182b53f976a37f",
+      "70b9a06102ad4f62d593d10e52822045536541440dd58f0e942e8e845a05b082",
+      "88d1e0886288949d3400a74869700bd566d0db8baec1e9096877a18f24a74259"
+    ],
+    "tui/src/control/Chrome.tsx": [
+      "2cc71b504b50ecaf07ceb77e0e66a364837682b64a651789c0b6a36681f146df",
+      "0c441d3cf278d92ae74f87aee0835bfcd50c16369845535f4e46836a490a4180",
+      "b1f1c984cafe732cde1eed992f5863220de0493f65bbc4f682a77ed2a398976a",
+      "31bee36d2e8521b304f58983a5429ac8209f48f4359e23a9ffb99b8691f31c36",
+      "681b957ded33aa0cb60099ebb1317334d2b09234356cba09be07b71751c2c04d",
+      "b66dc71e5228a4f3b58e280ffa8762e6b341be36f2ba8bfe988550c0abaacce6"
+    ],
+    "tui/src/control/HelpOverlay.tsx": [
+      "bc3d96896d2df0931e0b50ccc76c3acf50c1439e1f643bdc0060ba376ab3df41",
+      "bc3d96896d2df0931e0b50ccc76c3acf50c1439e1f643bdc0060ba376ab3df41",
+      "efc50b405cf85916847d61e1666b8a29f3c9a13cac0dac2ce2bb718d1e6fe891",
+      "816c2b940b0a08ca2218ae41a66a534893f4242052e8a775787cbccc831c3cf2"
+    ],
+    "tui/src/control/Menu.tsx": [
+      "26fdcae3cec6baafc522239a30ccfd6fa9c828640d48b4fb87b924b74c368970",
+      "37cd96121984eca2604ac69c8698da40321f0210f05542b7dd3cc24cd53cdca2"
+    ],
+    "tui/src/control/Output.tsx": [
+      "e7d341cc5f4b4ce631e1e71a71ce902d52c1a9a4a94a30ed913cee3b9bdf2cd4"
+    ],
+    "tui/src/control/Prompt.tsx": [
+      "5455b9341ac34109309cf901e71b4d9a8ba21b4b05f3147a0ea8616b9f113b06",
+      "ab7b36b539a7d8e298a4e30840cdea7b65b57d9139e1d49e41db5a8ef4747d72"
+    ],
+    "tui/src/control/Surface.tsx": [
+      "e2a73ee2678be6536fdb22fb9697240a9e58a85dccc0a44605cda508b6142e0c"
+    ],
+    "tui/src/control/TaskChoice.tsx": [
+      "5204f7981fd5a582b9270bfc312a0056d2f66a1d078410385c6a2024a0349aeb",
+      "81de3f8e4dfbf0f1161a63ea6ce6438fb6f3da3ea88be50ed8e7b1010ad32171",
+      "f13a5e78954563b2a6313869ec0f8ebe46db86c7c6936acdae2fc24ae2b8b216",
+      "12f8af9a4e634583653a2cec3979632df3ace8122be095c4ccf385545a5cc591"
+    ],
+    "tui/src/control/chrome.ts": [
+      "1f06fa5a6b1423dab0e5d18cd16c8e25fcbf18f62cb209b07cb55b0cad41af24",
+      "9fb87a778740d4f1080beb53a58ea887519a61fd5165f42545310a793fccb202",
+      "9c28e15eafd3da3523bb7f3a6c8ec500f3d1dee8a85261a93a1ed95747c6ef6f",
+      "a0c15cf73c2a39f691eceb3835149de1de0d19573e59a720fd84195fea1425f5",
+      "939b19e164d886f0319ed88ce35aab971c7f3a48011a6536ebed026068005406",
+      "b74ea069cde9074f822bdec3032b9b6f2192189315537a75711843faacebec6d",
+      "d8426603cdccfe1f5d0eac5099ba93e8db45cf458cf5e33da85d9ad20b49e282"
+    ],
+    "tui/src/control/surface.ts": [
+      "4ff2ea16f3a12c55e3ca830c313f2f384685e96df027266dad5fe8456d98b063",
+      "4556b36176b3424c7546ea9060df605e8dba7f7d939f643e7ec5b0d0f800dfe3"
+    ],
+    "tui/src/control/tabs/Backup.tsx": [
+      "739f5498d9f8e68d44c59998b062d459f5deae7604f9a368108de649720f877b",
+      "53e84a8579cd8cd9b8295752bc0d6103cf520b8b07c85185e1a5a8debb7d4454",
+      "d76b567acacd0db53d23a383012a3de02b220ee19acbc639e992dd1a5e835735",
+      "59e3900fd52b4559a6e17c7b2aa28d3feaaa90b0b5e05644fdbd38150158f1ba",
+      "0b8389d465f8e4971cae91bfa77af8446507f73bf0bbafbd9c3b1975a0b900e5",
+      "ebb945e0ea9b29559fc8454699bb45cf8c92870cbdcc72d22c70d3bd945a52f0",
+      "6003cc0ea56082669b43efc67ae70d0530012ab9ce7520aefe28bcbed820424b",
+      "7d732b9f82593febee54b9740a151a7564faf04f5769c8140c3aabcf29026b59",
+      "d09c0864cfad465cb225f2a3e7eff0e78468d209ff4cd4637e15474a328202b0",
+      "1345c4e407df2f782745ca829d8ae388afbcece5c62a3f99404319c06c4e10cb",
+      "eee117eb338b67beddae3be4b93f5eb7c076fda109f97e24c7d2f4ad4f20a065",
+      "cb6c61e18950c2f577dd101c4e0740dff2d5ccb5be2be8c59b9fbee7d4f3bf59",
+      "1fc4fef26bdec3b28ea061d2c03b91dc618d1fa4bd097bbfa44862a4b3cfff77",
+      "dfdcfddf85e2bf14fd603601b5a225e0cf0dcd9c1e5a371809d6a61426194a86",
+      "add41f8d74e104b45434542bc2036d61dcd4d1f869aa9661230a11b94dac482a",
+      "c512bfc64ecffecb5f0c227f955ff479309cb0a6925228f0fd4f1134b79af84f",
+      "d718405e0db467cd750679c1bcd0396cb4d92b7f459c09bdc21aba80d71ca64a",
+      "b07c71f41f877e3d7e108366fbfce4c653d1e4451ab0924b694632b1089cedd0",
+      "b49a8e7f406f6b15d8e3850bc6a27f713722026c4777ba5bb209840cf39057b1",
+      "ca0b8c8373b9a8b1ad6aa090bfd7defd3395b8c846d62490436a436970440ba6",
+      "a1d23fed748900971d60b4f195d25340ba692fe66b2d66c4d7d78d3fabdf604e",
+      "4622bc2f6e1f01b49c12199622a0e10249660b517c672a12211a6a40fc94fc05"
+    ],
+    "tui/src/control/tabs/Logs.tsx": [
+      "f20390256d938f372157ff8a6deebd6f06f3ce32ab861f9636e3ff92e2ecdb93"
+    ],
+    "tui/src/control/tabs/Services.tsx": [
+      "e3b8c776a7861cd021fb4d5474384845654a8df01c2167a09c56cc39feedb984",
+      "e785224ded3c830257f4602d460fcaa5a6a305311396a54058e0d873eedca966",
+      "e3b8c776a7861cd021fb4d5474384845654a8df01c2167a09c56cc39feedb984",
+      "cfede90c0f5a823ffe0b55ce3a7c82a18e16997dc67a5505bc88430dbe53bc89",
+      "20a3d5654d998f1a3231d3ec20c7e5e5d60e9c55a2c552ee649b251c0d0ab8f4",
+      "381180b44c45f7b18bb895369f44442e551ed2b3a134329476635a7e17f35394",
+      "94e0f52a061efb7e76da3d68729c4deac182cd34048af9f3514733c10352679d"
+    ],
+    "tui/src/control/tabs/SessionWizard.tsx": [
+      "9cec436cd950ee89814425c4293d6a098a701981687f920a78ea9abedd74658b",
+      "cf68e20007014cc76e445ff89c27fdb3cdddd1002e225d91716282c246780c53",
+      "d1390a8d5dd060641ba7913aff23114d8d85c9037fb1775e760a6d41a433e987",
+      "8e83a15bf8b797eb992cb4aba82508cda9a270b6f09a0c524971d414177e6bc8",
+      "9610564501dc8f920f66ad29caac58bae11b8075050e07938705fa66a76bf326",
+      "44cc28164b0be2ce0ae09aa0ded1d9abeac719247b3be7c9c762f5e2cacd0bb9",
+      "7041d0d9e608bdb10101116378039a2e592e0b11b5d602c5131eb76179c85894",
+      "287f8e9f8f208f4ed317722179acd7481112b692b8c8ad0bd865055f1a4e614d",
+      "06ec5c3fc96edafef5f10583dd3046ea014bd89f1644adf43bf7a0cafc6b788c",
+      "8f61e00dbd8f8ecee1e8a87b48ba23327a83c42b95b8fcfde70c551a103f114b",
+      "c4a3d749a0fc7feee11960daa2bf0e16bf64ebc709bd3bd9483729c799606c0b",
+      "36814b5980934464d757d774d5981dc6ea1a47ba41332721df136f879d66dac7",
+      "143cedbf2064da0ab19892c3af1bc5fefb45308bf3b28d8dfe5e8c02d483a94d",
+      "031defae8fbe824c823568cc0d7aa82af98dfde95ed78759cdd3c9c6178198cb",
+      "478441d508bd912f7c70ff5adf7a73982ef31d34e9720f8b3a21b59b9e53500d",
+      "fd6dcb9565cf75f0993252538312292755dcc763955b96a1e6f26fb00f27c25e",
+      "b524c9fcf4a4e7ccd2133c1d7bf822e2e18bfb8fe402abc5580b61ae09bc16f9"
+    ],
+    "tui/src/control/tabs/Sessions.tsx": [
+      "56e71b65b28d55985c2e3ae09ec47823a4aa68b87e88ea884e87ee4c521d6bad",
+      "8ab464339f537981c2db7589012b192f06c7dfacfb66a60c2a7798900e900593",
+      "ed06d351896e5e0287d22e7ef6fdd098f5c2561f892a5d24e93ebf93f9bc95c2",
+      "5a60718d72156a6a267afd27e5f6f6400a2c42c7a18fb671d83d76943cfb4da6",
+      "9936b8d6f4186739e1d45f26d716a7082c245624120c9de447825fe8764dda3e",
+      "77b213dd0c56461ddc48b7391d087d9010f7dae61548d9fb3b5a8c25dded7903",
+      "04c32925f5a1f56be2cfcb7a41b2bd646eb743d1c5f5140403d451365a0d5d9d",
+      "4e7016fd92563ae57e95970dbf3fd61015bde35843d4c3c47018e9222b75bad6",
+      "4fb5689ab5e66c5d8cb42674b1616710acb641faa0627383f8205be9a786cea3",
+      "c68d3bd70a47111f9cba8bdeaa20588b649edc6578e7c8a627760648f59a1e5f",
+      "d2de753ddeeabbf18f4ee439635f0111c6a9c0416607c1eff8729497e240cd5f",
+      "0ea2abac0351d90453359ab569317fe5c5e362e0062e0516d42cad2389c2b649",
+      "76ee1e46d0d1ef5a9fd17d2845f3e54c44608a04566bf3bb539a50cc1a5f0e94",
+      "edc653850c80f30cd15c8d1328f56ec2ab61699783f8fb63bffdb3651dd48aec",
+      "edc653850c80f30cd15c8d1328f56ec2ab61699783f8fb63bffdb3651dd48aec",
+      "bcbf3437ae5616d2f1c7465596a2845673c47b125c8e7099cfaf0f4404944d19",
+      "34f222f2ce3ebcafdacb3ac5c6fc71e148658105f5c3154645b109b63cebd127",
+      "b3dbf7f7393d6c7c818e16b0022754b13cabf845fefbe3df3d69b541f49d318f",
+      "160d75392a5a1f2a51eba23fb5625ff7d53bfb4629a8145ed3a97e6f4b14c873",
+      "70bf7e864e0db407800b643bb596103074af9ed47e9b69cb8b490a22606f231d",
+      "2f913f76941f04198a8dbc0595d34f68f2110e5ca3b694a2002adc1a61f96597",
+      "34f222f2ce3ebcafdacb3ac5c6fc71e148658105f5c3154645b109b63cebd127",
+      "67ae98c28a944741ac500eea47261ec1f14d7d4258e0d4ff19f025918f34a082",
+      "68c4d71c8cad7541dbc5e2cf4a31286ba1383f585870e3326c4f67d354633516",
+      "256d1d36fa9ff3a5ac6b06e195a71b9e52aeb62603464263a13d6f4ed05924e4",
+      "8e6ef4a5cc999eeb60384cb385bf8047c64618eeffbbef7329ae74c70838287e",
+      "58c16dba82ac84aa3e8882843cac7b3623d9017ec58604787edd3673a7106837",
+      "87f2d68b99d4dd07eab315abc21171cf682153027664ba01ad9d18c5be66d0bc"
+    ],
+    "tui/src/control/tabs/Static.tsx": [
+      "a97c8ef6bba49fc9ad15a4c2acc62239e9856ed66ab4bbc9fdc9a2f70222c6db",
+      "e3b642582489aa6e75b0d2332cbbe09dc6dc13c67edf9d66f8db548413ae1379",
+      "78e36cfd5e127d645f80d87754d8816db6d3e3e02a7c78189cd57ed5844af434",
+      "a1fe039cca1db4ad5231c79fd7fde7b2b3ca4cc87a21216930cfa7e1b840a324"
+    ],
+    "tui/src/screens/Overview.tsx": [
+      "7da25f9bd5ef5e4e5b5e2536370330e97506ac5e4fb3ccb274334b3624b22ec0"
+    ],
+    "vault/src/atomic.ts": [
+      "5f4de29ad7de18f3a51b4b034ec05a9f0851f6842e1fe9f09aae73c7e4c5abd3",
+      "5a17b66ef37c694c3b0f276e670c42c3ad0924b004cfb6968d8d500eaecac3ed",
+      "44cde274999fae732555e185e57697941af2793292f479e8d14bbac860cbc947"
+    ],
+    "vault/src/migrate.ts": [
+      "86e5dca39aaf44269fe60656834e9e4811cbac7b647fa42e9182bbc4721ecc82",
+      "b271d9f4bb6f571ccfd42b4b62db6b588f7a026a518c8cbef5d2d868e3a3d77e",
+      "e6d7ab351957f1fcefd9cb8b4d6426bcc8a1a51ba9d512b65622a7c2ecb3158e"
+    ],
+    "vault/src/protectors/dpapi.ts": [
+      "f2635968288e1f134f1a2177384a9d1f6f30cec69473be9f879e4e32ef8dac3d"
+    ],
+    "vault/src/protectors/fido2.ts": [
+      "990b8fa7a67b00169258655bd80d2de02c1ce751ee834a93c0c6930be0a4904c"
+    ],
+    "vault/src/protectors/hello.ts": [
+      "f03637c1a1c9d6469d9c41d3560bd10a7e666052a16a8bd7ca9e5c8ce512bbee"
+    ],
+    "vault/src/protectors/passphrase.ts": [
+      "95fd0be6c56076091965cba3b1f86e2d88831eb32c865afc893fa744a0bb24ee"
+    ],
+    "vault/src/protectors/systemd-creds.ts": [
+      "c6087a97329ca27281e0efac9e0c3f3c22accb847f35050fd4a51f00352e6a66"
+    ],
+    "vault/src/protectors/touchid.ts": [
+      "15e622edc96f53d79b4709995da71eace32da76daf70e27261444a600cbc3662"
+    ],
+    "vault/src/protectors/vault-password.ts": [
+      "fc31626baf28afdcd350e3af74e3ae59aa0c5697cb6f6c03bba26f610b80c445"
+    ],
+    "vault/src/recovery.ts": [
+      "21148a74695c8dc7a11f72d20d5594acec8f9182ec1a88bc9314ca93438bb60b",
+      "8a67fa94da7c38229cdbc232ad2caaa5a4dd51532287298a1a64b574198eb789"
+    ],
+    "vault/src/vault.ts": [
+      "31a83ab34470fa1183cee5046cd0d60a2af252e1e82f799336aec156f9efe227",
+      "af760efb57cc202616769f220d73b0f84c7aef193f29983e38c99449013b3af1",
+      "bb1eb758b67732f0328ea95f1e6458d89eff227f12878d6b29573af5a15ad7ed",
+      "4a78724240e85a03e116acd051d3bd7205bad0ae2d161d64482ed94404159bff"
+    ],
+    "vscode/src/streams.ts": [
+      "3af7eff0512c73a7d5e7f6b93ae6601112fd060392de7f3e89f0945f2b364908",
+      "85496505c54ac972060b2c12dfcf33fddfe4c3c2f48557b7b24377e2e3892a56"
+    ],
+    "web/e2e/queued-actions.ts": [
+      "2a35fa231185b2c87c1075eaad6221ff970b682da892ae6cbdaa218491f237a6"
+    ],
+    "web/e2e/usage-r2.ts": [
+      "ffbf3d2d49940b6ed75a56fb4b1842323f32407b34dbf5c63e74c7ff8cfafba5"
+    ],
+    "web/preview/plan-usage/qa.ts": [
+      "9ef28105c031101ea2ec1f31cf107c6ded58593c6344bb2bfec435dbed21a315"
+    ],
+    "web/qa/terminal-provisioning.ts": [
+      "27527a26fb17b5e1f6c8dee4b4ba2acad7049e5832c7ff3fa06ac41dde462e04",
+      "9e2003f8e2a9dad17e2054fa065c62e6c512cf455059cb621b8f06b3859914fb",
+      "f3dd9e2ef675cc646708e81be7c0f60e9f9d6da45e0419e140277daae07f69c0",
+      "8f0f3c281380e7d073480a4cd49379bb4c84c75c355c12e9e0f2056f70b51af3"
+    ],
+    "web/scripts/gen-brand-assets.ts": [
+      "6e715ebc19fd31c13a3e5a4ef3b0ae135f149f95ddef893e67373e2150e772be",
+      "3b67d305bf98d49e9fadcb54df6a3f23e928ebf8422ce9ca160df661a7a12047",
+      "099ec759f4b22443c5ef0410fa8e00d7a957ff3fbc02c612db5082092aae6a8f"
+    ],
+    "web/src/components/InstallModal.tsx": [
+      "56df25d98ccdc551d3cc43184ea8202297a9d42c0ba0603f5074c5f6cbed1c3d"
+    ],
+    "web/src/components/PDFExportModal.tsx": [
+      "cbb922c24de5c4052097a37edadaf2160efb801b00f24ea1668eb2eae31bb2d2",
+      "21af2799e1111326c6fd96daf6e082af443debd834aff06453cd625abd445e47",
+      "968869407aecc77681c978a59a9f447b67c0fe99e80d84354e72d00792db4af5",
+      "37b053c4fbf7d721571cc2d5741875a95054cf6924aaba0c06df0e942bb11243",
+      "047ad8b4016f909c0def90583c8714905a314fce72b0589d0b523b7d00e9aa63"
+    ],
+    "web/src/components/PlanUsageFootButton.tsx": [
+      "4bffc6cee6abb3f47c3565736d65f43be46815cb2ff6c5a9ca1c9e509f5a93dd"
+    ],
+    "web/src/components/SessionTerminal.tsx": [
+      "b7b6779ff43faa40fc413cb1ddb91412c306802a566579b5b46957f68d6472e0"
+    ],
+    "web/src/components/calendar/DeliveryCalendar.tsx": [
+      "99c3c34b495ab2c5da06f8502526168a6372cc6bb85d6751ba72affcf3b1f56a",
+      "09f070c6aece4c8ca01253132b07a68b9097c29997ab6f863bd5b478c1e695a7",
+      "99d13e9983fcf37ee8c19c42f2c9d8f1ed6ce55e8d8c7be1fd20b45a7c833839",
+      "5b1832be8603323c986cce68c8954db23860593d6274b9630e3ee98a9a9546da"
+    ],
+    "web/src/components/nay/NayDock.tsx": [
+      "0e25b3592f2889ac4cf29fdbfee6d0b40d6aec9a8c1c9634f0088ca677841312",
+      "787592133e0fee70e8f7d5eda631190f12e87306e96bc19c9f28c101a53f38c5",
+      "89cb8f056cbdcb33ffd5c52cd8cc6c27617af6b3e0f72e4e2153f59457979a1f"
+    ],
+    "web/src/components/sessions/ChatBubble.tsx": [
+      "8f23bf6bbbf400fb270915630342991896ae2a74bceade171dfab339b6ee9f16"
+    ],
+    "web/src/components/sessions/HandoffWarning.tsx": [
+      "f5a4d2719f6fe09fb2d5f68058722edd456f7e061a8d1b6ae8233150fe33cfd6",
+      "f5a4d2719f6fe09fb2d5f68058722edd456f7e061a8d1b6ae8233150fe33cfd6",
+      "b97a43d23bd53d5a2465426acfabf62db6e3c6d0d4d991319c42cdfe3d8d6e50",
+      "b97a43d23bd53d5a2465426acfabf62db6e3c6d0d4d991319c42cdfe3d8d6e50"
+    ],
+    "web/src/components/sessions/MarkdownPreview.tsx": [
+      "c77e87a05e76df3952d825eece0e20cbcb844da512e62372942661881bfdb243",
+      "c77e87a05e76df3952d825eece0e20cbcb844da512e62372942661881bfdb243"
+    ],
+    "web/src/components/sessions/OpenInTerminalPane.tsx": [
+      "b8581eaa5d8958bc27af3b70ac3c6a04f83475751d2fe0bed7e716ce09a523bd"
+    ],
+    "web/src/components/tasks/SessionTasksTab.tsx": [
+      "1f2c5ffda87bf03b078694a3919d030d0736688cd7e4029e1884f8956d9f2306"
+    ],
+    "web/src/components/tasks/livePip.tsx": [
+      "d0fe5d49c79bd53c8d17086279fd611c607836959d99e0c1bda0f6d9e39a9d0f"
+    ],
+    "web/src/hooks/useNativeSession.ts": [
+      "7c49f5d8d9ba7a799a2d5486b5e516a0652c765a71084c20e7629e850067b88f"
+    ],
+    "web/src/lib/eventStream.ts": [
+      "330b5bb046a361fb63297ddd1cb0385d60c324ca78dd527b3d201c984991eb0e"
+    ],
+    "web/src/lib/streamMux.ts": [
+      "281e2f8a79fbcb17157592fb88626a90431bc1ef83ef4bc7466174b924d7f581"
+    ],
+    "web/src/pages/settings/InstallSettings.tsx": [
+      "49ebc954a856eef89a48abfed8b24407a63d416a83f303f3b628afc639e72b42"
+    ],
+    "../scripts/composer-task-engine-qa.ts": [
+      "64066934c973962c9a355872f555d63e673013e985493dc1d408edba83db5033",
+      "3b84b168d19fdf959788f30c199c24acfd0e270526d49d1d84dc69b994ebb696"
+    ],
+    "../scripts/dev/chat-activity-shots.mjs": [
+      "ed42e01160ed2ed9f305b755e39ef96d478fa1701a315965d503e997233b5558"
+    ],
+    "../scripts/dev/fila-prioridade-shots.mjs": [
+      "dae95840075e81c26288794599da0d815e95d7949e2a2be28b5b648b6b476ab1"
+    ],
+    "../scripts/dev/vidro-real-shots.mjs": [
+      "2a2c8bdc5d754bf66172b467b330ae15ab86fa9c6d846218ce872ff2cd0e3fa3",
+      "2bf071f3d7107853194ea21ce579a6e12685a149d692180af90bbd2460452309",
+      "a9ac0878cffa521d21d225dac91419627637af74b3c7ffa977495c75215a0215",
+      "70ecf2a66d1d77194048198d9151413348b308d5b6eee87ec54b6df700045d96",
+      "9129b3a0128b205067f74742c4513cba1df5b5090dbde2f048a756243f2b2a9a",
+      "a4d255c3ed6fd0a83c119a7d993f169929265da6b3e398e2a6c3c9b1af99e803"
+    ],
+    "../scripts/metrics-journal-probe.ts": [
+      "c47c568df1fd8dd5e72bb381b1c5f2fada7dc8a982fcb84541279de64ffbea6d",
+      "5b12b4a49c86fe51e156ef0584a9379d5597157102095863b283a8004fb3b372",
+      "bd6a6cf0bc4224d65d2c3b05ee54fbc45588d256bb45620641d69b06cf076fc6"
+    ],
+    "../scripts/perf/baseline.ts": [
+      "8958c77ee3c1a1fbd51a424539450e292ac33f5e940fa7e2ab2c38ae7b6e9628",
+      "6b155c6639f9cba1df178c614ba54eb2c54491ee783045fb664b6be0a3fa1b1a",
+      "359a40753ed680c97b85146397f18fd6484a4a07e8dc413a8d9fdb3355ce602f",
+      "a1fc59b3f88d9b553d255ac7c6afb00fa32c978a41d6aff0d00ebff5c1d2da88"
+    ],
+    "../scripts/perf/budget.ts": [
+      "8958c77ee3c1a1fbd51a424539450e292ac33f5e940fa7e2ab2c38ae7b6e9628",
+      "1fdd04b87e164d5d31f65d3d011ae0989e0066baa23d9d66b79ee6c75c5d5b97",
+      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96"
+    ],
+    "../scripts/perf/clients.ts": [
+      "fc1dc5b8a10a01ad22b4a55e73c579046abf75961c34eb59147a994177229e3b"
+    ],
+    "../scripts/perf/engine-map/bench.ts": [
+      "440440d0b8bed7a9aa7c360d7e0f283fa03a6cf885a5ef631f264b0c9dd669b4",
+      "7ea230f0088c731968064c8a70387df56a36de2980161629916d4346a8401dbe"
+    ],
+    "../scripts/perf/engine-map/check.ts": [
+      "fa9dcb7cff82229d533f6885ec34e5437587cc86eacba96a106fb25fccbae303"
+    ],
+    "../scripts/perf/engine-map/sync.ts": [
+      "525ef4e394c0dda0004ce802afedb32faa121bbb1fad085f5583419a0b0a30a5"
+    ],
+    "../scripts/perf/fake-claude.ts": [
+      "d7597d12d63468d37f009506997e9de7786445b56c26a740f06a15ed564fb0cb",
+      "596b7a460c4cd1559a39de3a883ddc42f4fee226f1836747118427579e284478"
+    ],
+    "../scripts/perf/fleet.ts": [
+      "1742f16265dab38c626af9c2b6d1458b0975be300c588332e11f1ed25bf10d1d"
+    ],
+    "../scripts/perf/idle-cpu.ts": [
+      "025af96d511dc66753de46da859f0e7c134bb002196e52ab53a519c6f4efb128"
+    ],
+    "../scripts/perf/profile-server.ts": [
+      "4093b0749213bf375ffeaa899931b73146d9584e2f9f0cbb292211d8c07647d9",
+      "4180464a70c89a0bb4a2ec01bfdf5b9d94c6a5750140812e39268bd3f7a8f3d3"
+    ],
+    "../scripts/perf/qa-browser.ts": [
+      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96",
+      "57fbf3deb3bee0ae871e7e374d18abd2bfb01124f483bb5a00656dda85662bb5"
+    ],
+    "../scripts/perf/qa-profile.ts": [
+      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96",
+      "57fbf3deb3bee0ae871e7e374d18abd2bfb01124f483bb5a00656dda85662bb5",
+      "131c18794077a3ae4e0214c604b2299a50d36bd5148b0418b066663c6ae34485"
+    ],
+    "../scripts/perf/rebuild-bench.ts": [
+      "5f699d0f843b6356a18ae4deaf830caaf0e72300b2254c093fcd03bf192279c7",
+      "efef1a0ca5948471b326a60a9a72f55065ba2af9ebf9ab83f53403e232848647",
+      "c7c16b0c9d5210417d98fa51c2b9fd275cfcbf299bfa05fd2a88203d55f1b0a6"
+    ],
+    "../scripts/perf/soak.ts": [
+      "ab812fe7817ca5ffdd445b832bd004d30840837f7b91f299ddd5a9f6b0d7f9c2"
+    ],
+    "../scripts/perf/startup.ts": [
+      "73b6d8629778592e93c3e96566ab5cd15d90183d8acd784fd29a0ddc0fe81de5",
+      "de5a18f28e60ef99252eeb8d713670edcd353075334384f22b7ac61d971a3dbd",
+      "e7119cbccd7e24f8aaf3863b557443570556becfeff4b83bf04edbff5aa2c8c5",
+      "5e4c83b191f73abf34bd8dc1a0d4b217c21387023cbc88968a60dd84d64ebea0",
+      "3355251327a24934a4ae34d599daa4f34cd2eb78260536164f556de5d8fd2ac1"
+    ],
+    "../scripts/perf/storm.ts": [
+      "578715fdd461336071a977dfe2da3cc2645965ee15fc12338c79d6c88446ab2b",
+      "33e0105ff5394d7f4bace420eaa3dbd2fb62b67bcc2336413370d0801b5cc693",
+      "ce92a22c9ad510aaeb1d8053f7001eda77d266b294771417dc611742a83f5de0"
+    ],
+    "../scripts/perf/ui-budget.ts": [
+      "8958c77ee3c1a1fbd51a424539450e292ac33f5e940fa7e2ab2c38ae7b6e9628",
+      "977c763b9fed0bc6538d5b1f6e72557f723830ab201814ba4fccfa475e0b73e7",
+      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96",
+      "32b933050abc7c3da532858233bfee7595bcd7fd5029351e86a9d675361857a4"
+    ]
+  }
+}

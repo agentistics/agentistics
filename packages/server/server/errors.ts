@@ -12,9 +12,15 @@ import { randomBytes } from 'node:crypto'
 export function safeError(
   err: unknown,
   opts: { verbose: boolean },
-): { body: { error: string; ref: string }; logLine: string } {
+): { status?: number; body: { error: string; ref: string; code?: string; sentence?: string; sentencePt?: string }; logLine: string } {
   const message = err instanceof Error ? err.message : String(err)
   const ref = randomBytes(6).toString('hex')
+  // Keep the error renderer independent of file-lock/writer capabilities. GuardBusy's stable wire identity is enough.
+  if (err instanceof Error && 'code' in err && err.code === 'guard_busy' && 'status' in err && err.status === 409) return {
+    status: 409,
+    body: { error: 'guard_busy', code: 'guard_busy', ref, sentence: err.message, sentencePt: 'outro processo do agentop está escrevendo no quadro; tente de novo' },
+    logLine: `[error ${ref}] ${message}`,
+  }
   return {
     body: { error: opts.verbose ? message : 'internal_error', ref },
     logLine: `[error ${ref}] ${message}`,

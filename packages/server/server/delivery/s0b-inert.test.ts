@@ -1,7 +1,7 @@
 /**
  * S0b changes NOTHING a user can see: with no guarantees.json the product behaves exactly as today.
  * The proof is two-fold — behaviour (the real stores read/write byte-for-byte as before and create no new file)
- * and structure (nothing on the product's write path imports the new modules yet; the hooks arrive in S2a).
+ * and structure (the S2a hooks mediate writes; stores never activate rules by themselves).
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
@@ -40,14 +40,19 @@ describe('no guarantees.json → today\'s behaviour', () => {
     expect(existsSync(join(dir, 'guarantees.json'))).toBe(false)
   })
 
-  test('STRUCTURE: the two stores and the task/delivery doors do not import the new modules in this slice', () => {
+  test('STRUCTURE S2a: doors use guarded stores; stores do not activate rules or write intents directly', () => {
     const SERVER = join(import.meta.dir, '..')
     for (const f of ['delivery/web.ts', 'delivery/host.ts', 'index.ts']) {
       const src = readFileSync(join(SERVER, f), 'utf8')
       expect(src, f).not.toMatch(/guard-locks|guards-store|['"]\.\/activation['"]|delivery\/activation/)
     }
-    // S1c: stores now lock evidence deletes; no activation, checkpoint or intent writes are introduced.
-    for (const f of ['delivery/store.ts', 'sessions/task-store.ts']) expect(readFileSync(join(SERVER, f), 'utf8')).not.toMatch(/applyGuardedWrite|beginIntent|commitIntent|delivery\/activation/)
+    // S2a: authenticated activation reads (including stage mirror restoration) are allowed; rule changes are not.
+    for (const f of ['delivery/store.ts', 'sessions/task-store.ts']) {
+      const src = readFileSync(join(SERVER, f), 'utf8')
+      expect(src).not.toMatch(/applyGuardedWrite|beginIntent|commitIntent|\bsetState\s*\(/)
+      expect(src).toMatch(/guardedWrite/)
+      expect(src).toMatch(/guard-transaction/)
+    }
     const svc = readFileSync(join(SERVER, 'delivery/service.ts'), 'utf8')
     expect(svc).not.toMatch(/applyGuardedWrite|withGuardLocks|['"]\.\/activation['"]|beginIntent|commitIntent/)
     expect(svc).toMatch(/import \{ createGuardsStore, defaultGuardsPath \} from '\.\/guards-store'/)

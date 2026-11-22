@@ -44,4 +44,14 @@ describe('parseTaskArgs', () => {
     expect(parseTaskArgs(['--help'])).toEqual({ kind: 'help' })
     expect(parseTaskArgs(['help'])).toEqual({ kind: 'help' })
   })
+
+  it('parses `edit <ref> --repo <value>`, joining a spaced name and a spaced value', () => {
+    expect(parseTaskArgs(['edit', 'Engine', 'completa', '--repo', 'agentistics/agentistics'])).toEqual({ kind: 'edit', ref: 'Engine completa', repo: 'agentistics/agentistics' })
+    expect(parseTaskArgs(['edit', 'T', '--repo', ''])).toEqual({ kind: 'edit', ref: 'T', repo: '' })
+  })
+
+  it('refuses `edit` without a ref or without --repo', () => {
+    expect(parseTaskArgs(['edit', 'T']).kind).toBe('error')
+    expect(parseTaskArgs(['edit', '--repo', 'a/b']).kind).toBe('error')
+  })
 })

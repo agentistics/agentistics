@@ -16,18 +16,24 @@
  *     `stage` (it is not in its status whitelist), this file is one it never opens, and `restoreStatusStages`
  *     puts the stages back.
  *
- * No locking here: the caller holds the guards lock through `withGuardLocks` (a guarantee change is a guards-set
- * write). Writes are atomic, 0600, and never replace an unreadable file.
+ * `setState` takes the full tasks → deliveries → guards envelope itself (S2a r3, QA N2/N5): a rule move can never land
+ * inside a writer's decision. `writeStatusStages` is called under the guards lock by its caller (status-stage-sync).
+ * Writes are atomic, 0600, and never replace an unreadable file.
  *
  * S0d.2 (QA F2): the file is SEALED (`guard-integrity.ts`). Deleted, hand-edited or unsealed reads as TAMPERED: the
  * rules then come from the authenticated mirror `setState` keeps in guards.json (`rulesWhenTampered`), with a WARN —
  * never "every rule off" in silence, and a forged `on` / forged owner log line is not believed.
  */
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { STATUS_STAGES } from '@agentistics/core'
 import { unsealed, verdictFor, writeSealed, type TamperReason } from './guard-integrity'
 import { createGuardsStore, keepUnreadableCopy, type GuardsDoc } from './guards-store'
+import { defaultGuardLockPaths, type GuardLockPaths } from './guard-locks'
+import { withGuardEnvelope } from './guard-transaction'
+import { parseDeliveryDocStrict, rollForwardDelivery } from './store'
+import { deliveryTamper, phaseRank, type TamperView } from './guard'
+import { isPureAdoption } from './machine'
 
 export const RULE_IDS = ['a', 'b', 'c', 'd'] as const
 export type RuleId = (typeof RULE_IDS)[number]
@@ -37,7 +43,7 @@ export type RuleState = 'off' | 'shadow' | 'on'
 const STAGE_SET: ReadonlySet<string> = new Set(STATUS_STAGES)
 
 export interface RuleEntry { state: RuleState; since?: string; build: string }
-export interface GuaranteeChange { rule: RuleId; from: RuleState; to: RuleState; via: OwnerVia; at: string; build: string }
+export interface GuaranteeChange { rule: RuleId; from: RuleState; to: RuleState; via: OwnerVia; at: string; build: string; reconciledFloors?: { dropped: string[]; climbed?: string[]; createdRanked?: string[]; reason: string } }
 export interface GuaranteesDoc {
   rules: Partial<Record<RuleId, RuleEntry>>
   statusStages?: Record<string, string>
@@ -79,6 +85,10 @@ export const ruleState = (doc: GuaranteesDoc, rule: RuleId): RuleState => doc.ru
 /** PURE. `guarantee-off: <rule>, by <via>` for each rule whose latest recorded move is an owner's `off`. */
 export function guaranteeWarnings(doc: GuaranteesDoc): string[] {
   const out: string[] = []
+  if (ruleState(doc, 'a') !== 'on') {
+    const latest = [...(doc.log ?? [])].reverse().find(c => c.rule === 'a' && (c.to === 'on' || c.reconciledFloors))
+    if (latest?.reconciledFloors) out.push(`guarantee-reseal: a at ${latest.at}; dropped: ${latest.reconciledFloors.dropped.join(', ')}; climbed: ${(latest.reconciledFloors.climbed ?? []).join(', ')}; created ranked: ${(latest.reconciledFloors.createdRanked ?? []).join(', ')}`)
+  }
   for (const r of RULE_IDS) {
     if (ruleState(doc, r) !== 'off') continue
     const last = [...(doc.log ?? [])].reverse().find(c => c.rule === r)
@@ -157,7 +167,47 @@ export function defaultGuaranteesPath(dataDir = process.env.AGENTISTICS_DIR ?? j
   return join(dataDir, 'guarantees.json')
 }
 
-export function createGuaranteesStore(path = defaultGuaranteesPath()): GuaranteesStore {
+// Read optimization ONLY. Writers continue to load and authenticate policy under their locks.
+// The inode/ctime stamp observes another process's atomic rename or deletion without reading policy bytes per read.
+const deliveryRules = new Map<string, { stamp: string; state: RuleState }>()
+const deliveryJournals = new Map<string, { stamp: string; pending: boolean }>()
+/** OFF journal detection shares the read policy cache's stat-keyed strategy; absence reads no guards bytes. */
+export async function deliveryHasJournal(guardsPath: string): Promise<boolean> {
+  let stamp: string
+  try { const s = await stat(guardsPath); stamp = `${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}` }
+  catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; stamp = 'absent' }
+  const cached = deliveryJournals.get(guardsPath)
+  if (cached?.stamp === stamp) return cached.pending
+  const pending = stamp !== 'absent' && (await createGuardsStore(guardsPath).read()).pendingDelivery !== undefined
+  if (deliveryJournals.size >= 256) deliveryJournals.delete(deliveryJournals.keys().next().value!)
+  deliveryJournals.set(guardsPath, { stamp, pending })
+  return pending
+}
+const policyPath = defaultGuaranteesPath
+/** S7a: authenticated rule C state (custody) — the same document and seal as rule A, read at the data directory `dir`. */
+export async function ruleCState(dir: string): Promise<RuleState> {
+  const { doc } = await createGuaranteesStore(policyPath(dir)).read()
+  return ruleState(doc, 'c')
+}
+export async function deliveryReadRule(guardsPath: string): Promise<RuleState> {
+  const path = policyPath(dirname(guardsPath))
+  let stamp: string
+  try { const s = await stat(path); stamp = `${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}` }
+  catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; stamp = 'absent' }
+  const cached = deliveryRules.get(path)
+  if (cached?.stamp === stamp) return cached.state
+  const { doc, warn, tampered } = await createGuaranteesStore(path).read()
+  if (warn) console.warn(`[guard] ${warn}`)
+  const state = ruleState(doc, 'a')
+  // A tampered policy uses a mirror: do not cache a state whose mirror can change independently.
+  if (!tampered) {
+    if (deliveryRules.size >= 256) deliveryRules.delete(deliveryRules.keys().next().value!)
+    deliveryRules.set(path, { stamp, state })
+  }
+  return state
+}
+
+export function createGuaranteesStore(path = policyPath()): GuaranteesStore {
   const guards = createGuardsStore(join(dirname(path), 'guards.json'))
   /** The authenticated mirror, or `'tampered'` when guards.json itself cannot be trusted. */
   const mirror = async (): Promise<GuardsDoc | 'tampered'> => { try { return await guards.read() } catch { return 'tampered' } }
@@ -181,7 +231,23 @@ export function createGuaranteesStore(path = defaultGuaranteesPath()): Guarantee
   return {
     path,
     async read() { const { doc, warn, tampered } = await load(); return { doc, ...(warn ? { warn } : {}), ...(tampered ? { tampered } : {}) } },
-    async setState(rule, to, { check, facts }) {
+    async setState(rule, to, ctx) {
+      // QA r2 N2/N5: a rule move takes the FULL envelope (tasks → deliveries → guards). A writer that read the rule as
+      // `off` holds its own file lock while it writes, so the switch can never land in the middle of that write; and the
+      // read-modify-write of guards.json / guarantees.json below can never interleave with a guarded write's checkpoint.
+      const paths = defaultGuardLockPaths(dirname(path))
+      return withGuardEnvelope(paths, () => moveRule(rule, to, ctx, paths))
+    },
+    async writeStatusStages(statuses) {
+      const { doc, warn } = await load()
+      if (warn) throw new Error('guarantees.json is unreadable or tampered; the stage mirror was not written')
+      const m: Record<string, string> = {}
+      for (const s of statuses) if (s.stage !== undefined && STAGE_SET.has(s.stage)) m[s.id] = s.stage
+      await save({ ...doc, statusStages: m })
+    },
+  }
+  async function moveRule(rule: RuleId, to: RuleState, { check, facts }: { check: OwnerCheck; facts: ActivationFacts }, paths: GuardLockPaths): Promise<MoveResult> {
+    {
       // A tampered file is not a refusal for the OWNER: their proven move re-seals from the effective (mirrored) state.
       const { doc, warn, tampered } = await load()
       if (warn && !tampered) return { ok: false, code: 'guarantees_unreadable' }
@@ -200,18 +266,34 @@ export function createGuaranteesStore(path = defaultGuaranteesPath()): Guarantee
       // The authenticated mirror FIRST: a crash between the two leaves guarantees.json at its older, still-sealed state.
       let g: GuardsDoc
       try { g = await guards.read() } catch { return { ok: false, code: 'guards_unreadable' } }
+      g = await rollForwardDelivery(paths.deliveries, guards, g)
+      if (rule === 'a' && from === 'off' && to === 'shadow') {
+        // OFF explicitly permits restoring the ledger. Shadow starts with that ledger's floors, with an audit
+        // of every lost floor; it cannot authorize ON until a fresh shadow period has elapsed.
+        let deliveries: ReturnType<typeof parseDeliveryDocStrict>['deliveries']
+        try { deliveries = parseDeliveryDocStrict(await readFile(paths.deliveries, 'utf8')).deliveries }
+        catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; deliveries = {} }
+        const dropped = Object.entries(g.deliveryFloors ?? {}).filter(([id, floor]) => {
+          const now = deliveries[id]
+          return !now || now.taskId !== floor.taskId || deliveryTamper({ [id]: floor }, { [id]: now }, true).length > 0
+            || (floor.evidence ?? []).some(item => !(now.evidence ?? []).some(i => JSON.stringify(i) === JSON.stringify(item)))
+        }).map(([id]) => id)
+        const climbed = Object.entries(deliveries).filter(([id, r]) => {
+          const old = g.deliveryFloors?.[id]
+          const rank = old?.phase === undefined ? Math.max(0, ...(old?.history ?? []).map(h => isRec(h) ? phaseRank(String(h.to)) : 0)) : phaseRank(old.phase)
+          return old && phaseRank(r.phase) > rank
+        }).map(([id]) => id)
+        const createdRanked = Object.entries(deliveries).filter(([id, r]) => !g.deliveryFloors?.[id] && phaseRank(r.phase) >= 1).map(([id]) => id)
+        const deliveryFloors = Object.fromEntries(Object.entries(deliveries).filter(([, r]) => !isPureAdoption(r)).map(([id, r]) => [id, { taskId: r.taskId, phase: r.phase, revision: r.revision, history: r.history ?? [], evidenceHistory: r.evidenceHistory ?? [], evidence: r.evidence ?? [] }]))
+        g = { ...g, deliveryFloors }
+        log[log.length - 1] = { ...log[log.length - 1]!, reconciledFloors: { dropped, reason: 'off-to-shadow: re-sealed from the present delivery ledger after OFF permitted restore or edits', climbed, createdRanked } }
+      }
       if (tampered) await keepUnreadableCopy(path) // the owner's re-seal replaces the bytes: one copy stays for a person to read
       await guards.write({ ...g, rules: Object.fromEntries(Object.entries(rules).map(([k, e]) => [k, e!.state])) })
       await save({ ...doc, rules, log })
+      deliveryRules.delete(path)
       return { ok: true }
-    },
-    async writeStatusStages(statuses) {
-      const { doc, warn } = await load()
-      if (warn) throw new Error('guarantees.json is unreadable or tampered; the stage mirror was not written')
-      const m: Record<string, string> = {}
-      for (const s of statuses) if (s.stage !== undefined && STAGE_SET.has(s.stage)) m[s.id] = s.stage
-      await save({ ...doc, statusStages: m })
-    },
+    }
   }
 }
 

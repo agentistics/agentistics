@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.225.0': {
+    features: [
+      {
+        pt: 'Entrega garantida: aprovações agora têm prova, a base de tarefas ganhou uma proteção contra gravações indevidas, é possível provar que uma peça entrou num release e os relógios de custódia ficam registrados.',
+        en: 'Guaranteed delivery: approvals now carry proof, the task store has a guard against improper writes, you can prove a piece is included in a release, and custody clocks are recorded.',
+      },
+      {
+        pt: 'Rodadas de teste pelo terminal ficam isoladas do seu app real: não herdam as chaves de comportamento do app e não alcançam o servidor de verdade.',
+        en: 'Test runs started from the command line are now isolated from your real app: they no longer inherit its behaviour switches or reach the real server.',
+      },
+      {
+        pt: 'O modo autônomo responde aos pedidos de permissão com uma lista positiva do que é permitido, e avisa quando não consegue responder.',
+        en: 'Autonomous mode answers permission prompts using a positive allow-list, and tells you when it cannot.',
+      },
+      {
+        pt: 'Tarefas: troque o repositório de uma tarefa com `agentop task edit <ref> --repo`, pelo MCP ou pela API.',
+        en: "Tasks: change a task's repository with `agentop task edit <ref> --repo`, the MCP or the API.",
+      },
+    ],
+    fixes: [
+      {
+        pt: 'A limpeza automática agora também gira rodadas e vereditos antigos, em vez de deixá-los acumular.',
+        en: 'Automatic cleanup now also rotates old runs and verdicts instead of letting them pile up.',
+      },
+    ],
+  },
   '2.224.2': {
     features: [],
     fixes: [

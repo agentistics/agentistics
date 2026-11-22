@@ -8,6 +8,8 @@ import { blockedPiecesOf, type BlockedSubtaskFact, type GateFacts, type SessionF
 import { PHASE_STATUS, type DeliveryCi, type DeliveryRecord, type Phase } from './machine'
 import { deliveryHostOps } from './host-ops'
 import { emitEvent } from './host'
+import { GuardRefused } from './guard'
+import { deliveryRequest } from './web'
 
 /** What a legacy piece's delivery declared: the commit that is the head of each of these PRs (the fakes' `head<n>000…`), the only way a batch PR proves anything. */
 const DECLARED = (...prs: number[]) => async () => ({ branches: [], shas: [], heads: prs.map(n => ({ branch: `fix/p${n}`, sha: `head${n}`.padEnd(12, '0') })) })
@@ -2953,5 +2955,56 @@ describe('FILIACAO.TOAST — an automatic publish the board refuses goes to the 
     await h.svc.tick()
     expect(h.calls.session.filter(s => s.id === 'leader' && s.text.includes('nenhuma sessão'))).toHaveLength(1)
     expect(h.calls.owner.some(o => o.text.includes('nenhuma sessão'))).toBe(false)
+  })
+})
+
+describe('S2a r7 notes — a refused piece never aborts the rest of a reconcile (R7-1, R7-4/M7)', () => {
+  const PUBLIC = 'agentistics/agentistics'
+  const batchPr = (number: number, body: string, oid: string) => ({ number, title: `release ${number}`, body, mergedAt: '2026-11-06T00:00:00Z', headRefName: `release-${number}`, headRefOid: `head${number}`.padEnd(12, '0'), mergeCommit: { oid } })
+  const GREEN = { tags: [{ name: 'v2.201.1', commit: { sha: 'tag2011' } }], releaseRuns: [{ databaseId: 3, status: 'completed', conclusion: 'success', headSha: 'tag2011', updatedAt: '2026-11-07T04:00:00Z' }] }
+  const ageH = (h: number) => new Date(Date.parse('2026-11-07T02:00:00Z') - h * 3600_000).toISOString()
+  const two = [{ id: 's1', taskId: 't1', title: 's1', status: 'in_review', updatedAt: ageH(2) }, { id: 's2', taskId: 't1', title: 's2', status: 'in_review', updatedAt: ageH(2) }]
+  const LEADER = { sessions: [{ id: 'leader', harness: 'claude', model: 'claude-opus-5-5', role: 'leader', alive: true, cwd: '/r', worktree: false, rootPath: '/r', taskId: 't1' }] }
+  const hints = async (id: string) => (id === 's1' ? { branches: [], shas: [], heads: [{ branch: 'fix/p1', sha: 'head1'.padEnd(12, '0') }] } : { branches: [], shas: [], heads: [{ branch: 'fix/p2', sha: 'head2'.padEnd(12, '0') }] })
+  /** A store whose writes REFUSE every change that touches the piece `bad`, as the store guard does for a tampered piece. */
+  const refusing = (bad: string) => {
+    const store = createDeliveryStore(join(dir, 'deliveries.json'))
+    const original = store.update.bind(store)
+    store.update = ((fn: Parameters<typeof original>[0], options: Parameters<typeof original>[1]) => original(async doc => {
+      const value = await fn(doc)
+      if (doc.deliveries[bad]) throw new GuardRefused({ code: 'evidence_binding_protected', piece: bad, message: 'write refused', messagePt: 'escrita recusada', missing: [] })
+      return value
+    }, options)) as typeof store.update
+    return store
+  }
+  const world = (store: ReturnType<typeof createDeliveryStore>, extra: Partial<DeliveryDeps> = {}) => harness({ status: 'in_review', ...LEADER, batchPrs: { [PUBLIC]: [batchPr(1, 'lists s1', 'a1'.padEnd(40, '0')), batchPr(2, 'lists s2', 'a2'.padEnd(40, '0'))] }, ...GREEN }, { store, pieceHints: hints, reviewPieces: async () => two, ...extra })
+
+  test('R7-1 a MANUAL reconcile apply isolates the refused piece and still moves its sibling', async () => {
+    const h = world(refusing('s1'))
+    const out = await h.svc.reconcile({ apply: true }, 'leader')
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    expect(out.entries.find(e => e.subtaskId === 's1')).toMatchObject({ applied: false })
+    expect(out.entries.find(e => e.subtaskId === 's1')!.reason).toContain('evidence_binding_protected')
+    expect(out.entries.find(e => e.subtaskId === 's2')).toMatchObject({ to: 'publicado', applied: true })
+    expect((await h.svc.get('s2'))!.phase).toBe('publicado')
+  })
+
+  test('R7-4/M7 the AUTO reconcile (no tickActions from the caller) isolates per piece too: the second proven piece moves in the same tick', async () => {
+    const h = world(refusing('s1'), { autoReconcile: () => true, autoReconcileAwait: true } as never)
+    const tick = await h.svc.tick()
+    expect(tick.actions.join(' ')).toContain('guard-refused s1: evidence_binding_protected')
+    expect((await h.svc.get('s2'))!.phase).toBe('publicado')
+  })
+
+  test('R7-1 the reconcile route answers code + sentence (EN/PT) for a refusal and safeError for anything else, never a throw', async () => {
+    const refusal = new GuardRefused({ code: 'evidence_binding_protected', piece: 'p1', message: 'write refused', messagePt: 'recusada', missing: [] })
+    const viaService = async (error: unknown) => deliveryRequest('POST', '/api/deliveries/reconcile', { apply: true }, { verify: async () => null, service: { reconcile: async () => { throw error } } as never })
+    const guard = await viaService(refusal)
+    expect(guard.status).toBe(422)
+    expect(guard.body).toMatchObject({ ok: false, error: 'evidence_binding_protected', sentence: 'write refused', sentencePt: 'recusada' })
+    const other = await viaService(new Error('boom /secret/path'))
+    expect(other.status).toBe(500)
+    expect(JSON.stringify(other.body)).not.toContain('/secret/path')
   })
 })

@@ -188,14 +188,16 @@ export async function runHealthChecks(): Promise<HealthIssue[]> {
   } catch { /* a health check never breaks the others */ }
   // S0d.2: the guard's own files carry a seal; a deleted / edited / unsealed one is WARNed, never silently "off".
   try {
-    const [{ createGuaranteesStore, guaranteeWarnings }, { createGuardsStore, GuardsUnreadable }, { defaultGuardLockPaths }, { analyzeGuardIntegrity }, { dirname, join }] = await Promise.all([
+    const [{ createGuaranteesStore, guaranteeWarnings, ruleState }, { createGuardsStore, GuardsUnreadable }, { defaultGuardLockPaths }, { analyzeGuardIntegrity }, { dirname, join }] = await Promise.all([
       import('./delivery/activation'), import('./delivery/guards-store'), import('./delivery/guard-locks'), import('./delivery/owner-health'), import('node:path'),
     ])
     const dir = dirname(defaultGuardLockPaths().tasks)
     const g = await createGuaranteesStore(join(dir, 'guarantees.json')).read()
     let guardsTamper: string | undefined
-    try { await createGuardsStore(join(dir, 'guards.json')).read() } catch (e) { guardsTamper = e instanceof GuardsUnreadable ? (e.tampered ?? e.why) : 'unreadable' }
-    analyzeGuardIntegrity({ ...(g.warn ? { guaranteesWarn: g.warn } : {}), ...(guardsTamper ? { guardsTamper } : {}), offWarnings: guaranteeWarnings(g.doc) }, issues)
+    let guardsSweep: import('./delivery/sweep-plan').SweepMemory | undefined
+    let migrationMissing = false
+    try { const doc = await createGuardsStore(join(dir, 'guards.json')).read(); guardsSweep = doc.sweep; migrationMissing = ruleState(g.doc, 'a') === 'on' && !doc.migrations?.a } catch (e) { guardsTamper = e instanceof GuardsUnreadable ? (e.tampered ?? e.why) : 'unreadable' }
+    analyzeGuardIntegrity({ ...(g.warn ? { guaranteesWarn: g.warn } : {}), ...(guardsTamper ? { guardsTamper } : {}), offWarnings: [...guaranteeWarnings(g.doc), ...(migrationMissing ? ['sweep-skipped: migration_missing — migration has not authorized the sweep; a migração ainda não autorizou a varredura'] : []) ], sweepIssues: (await import('./delivery/sweep-plan')).sweepIssues(guardsSweep, Date.now()) }, issues)
   } catch { /* a health check never breaks the others */ }
 
   // Determine which harnesses are active so Claude-specific checks can be

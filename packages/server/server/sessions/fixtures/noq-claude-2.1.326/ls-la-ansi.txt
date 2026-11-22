@@ -1,0 +1,45 @@
+
+[31m ▐[40m▛███▛█[39m[49m   [1mClaude Code[0m[39m[49m [2m[37mv2.1.326[0m[39m[49m
+[31m▝▜[40m█████[49m█▀[39m  [2m[37mHaiku 5.5 · Claude Max[0m[39m[49m
+[31m ▝▝   ▝▝ [39m  [2m[37m/tmp/noq-r4-probe · [0m[32m[49m/rc[39m
+
+
+[37m[40m❯ [97mRun exactly this bash command with the description "List files in the worktree": ls -la[39m
+
+[2m[37m[49m●[0m[39m[49m Listing files
+[2m[37m  ⎿  $ ls -la[0m[39m[49m
+
+[97m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m [1m[97mBash command[0m[39m[49m
+ [1mTip: auto mode handles these prompts for you — choose "switch to auto mode" below[0m[39m[49m
+ [2m[37mList files in the worktree[0m[39m[49m
+[30m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+[39m ls -la
+[30m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+[39m Do you want to proceed?
+ [97m❯[39m [2m[37m1. [0m[97m[49mYes[39m
+   [2m[37m2. [0m[39m[49mYes, and always allow access to [1m/tmp/noq-r4-probe[0m[39m[49m from this project
+   [2m[37m3. [0m[39m[49mYes, and switch to auto mode[2m[37m · auto mode handles these prompts for you[0m[39m[49m
+   [2m[37m4. [0m[39m[49mNo
+
+ [2m[37mEsc to cancel · Tab to amend[0m[39m[49m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

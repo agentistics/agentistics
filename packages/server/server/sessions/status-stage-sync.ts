@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path'
 import { isStatusStage, planStatusStages, type TaskStatusDef } from '@agentistics/core'
 import { createGuaranteesStore } from '../delivery/activation'
 import { withGuardLocks } from '../delivery/guard-locks'
+import { inGuardTransaction } from '../delivery/guard-transaction'
 import type { TaskStore } from './task-store'
 import type { TaskBook } from './task-model'
 
@@ -22,9 +23,10 @@ export const mirrorPathFor = (tasksFile: string): string => join(dirname(tasksFi
 export async function writeStatusStageMirror(tasksFile: string, statuses: readonly TaskStatusDef[]): Promise<boolean> {
   const dir = dirname(tasksFile)
   try {
-    await withGuardLocks(['guards'], () => createGuaranteesStore(mirrorPathFor(tasksFile)).writeStatusStages(statuses), {
-      paths: { tasks: tasksFile, deliveries: join(dir, 'deliveries.json'), guards: join(dir, 'guards.json') },
-    })
+    const paths = { tasks: tasksFile, deliveries: join(dir, 'deliveries.json'), guards: join(dir, 'guards.json') }
+    const write = () => createGuaranteesStore(mirrorPathFor(tasksFile)).writeStatusStages(statuses)
+    if (inGuardTransaction(paths)) await write()
+    else await withGuardLocks(['guards'], write, { paths })
     return true
   } catch { return false }
 }

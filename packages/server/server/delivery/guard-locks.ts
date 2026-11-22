@@ -59,14 +59,20 @@ export interface GuardLockOptions {
   onBusy?: 'throw' | 'skip'
 }
 
-const heldHere = new AsyncLocalStorage<readonly GuardLockName[]>()
+interface LockScope { names: readonly GuardLockName[]; active: boolean; parent?: LockScope }
+const heldHere = new AsyncLocalStorage<LockScope>()
+function heldNames(): readonly GuardLockName[] {
+  let scope = heldHere.getStore()
+  while (scope && !scope.active) scope = scope.parent
+  return scope?.names ?? []
+}
 const rank = (n: GuardLockName) => GUARD_LOCK_ORDER.indexOf(n)
 
 function assertOrder(names: readonly GuardLockName[], alreadyHeld: readonly GuardLockName[]): void {
   for (let i = 1; i < names.length; i++) {
     if (rank(names[i]!) <= rank(names[i - 1]!)) throw new GuardLockOrderError(`${names[i]} requested after ${names[i - 1]}`)
   }
-  const outer = heldHere.getStore() ?? []
+  const outer = heldNames()
   const maxHeld = Math.max(-1, ...outer.map(rank), ...alreadyHeld.map(rank))
   for (const n of names) {
     if (rank(n) <= maxHeld) throw new GuardLockOrderError(`${n} requested while holding ${GUARD_LOCK_ORDER[maxHeld]}`)
@@ -100,9 +106,11 @@ export async function withGuardLocks<T>(names: readonly GuardLockName[], fn: () 
     }
     taken.push(h)
   }
+  const scope: LockScope = { names: [...heldNames(), ...names], active: true, parent: heldHere.getStore() }
   try {
-    return await heldHere.run([...(heldHere.getStore() ?? []), ...names], fn)
+    return await heldHere.run(scope, fn)
   } finally {
+    scope.active = false
     await releaseAll()
   }
 }

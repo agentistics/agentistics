@@ -57,7 +57,11 @@ export interface MessageDeps {
   /** Record the mirror comment on the board. */
   comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string; message?: { to: string; kind: MessageKind; intermediate?: boolean } }) => Promise<{ ok: boolean }>
   /** `handback` from a session filed on a subtask: move that subtask in_progress → in_review. */
-  handbackSubtask?: (subtaskId: string) => Promise<void>
+  /**
+   * Move the subtask to review. ENTREGA.GARANTIDA S2a: resolves `{ held }` — the guard's own sentence — when the store REFUSED
+   * the move (the piece lacks the evidence its change needs); the handback itself is still delivered and recorded.
+   */
+  handbackSubtask?: (subtaskId: string, senderId?: string) => Promise<void | { held: string; code: string; missing: string[] }>
   /**
    * SESSÕES.FECHAR — a DELIVERED handback, as the `session.handback` event of the engine's flows bus (the engine records
    * it as the worker's handback evidence and, when `fechar-entregue` is enabled, closes the worker once it is stopped,
@@ -81,7 +85,7 @@ export function handbackFlowEvent(senderId: string, to: string, at: number, file
 }
 
 export type MessageReply =
-  | { ok: true; to: string; kind: MessageKind; delivered: true; message: string; mirrored: boolean; /** FLUXO.AVISOS 8: read as one slice of a longer piece. */ intermediate?: boolean }
+  | { ok: true; to: string; kind: MessageKind; delivered: true; message: string; mirrored: boolean; /** FLUXO.AVISOS 8: read as one slice of a longer piece. */ intermediate?: boolean; /** S2a: the move to review was REFUSED (handback held): its code and what is missing. */ held?: { code: string; missing: string[] } }
   | { ok: false; code: string; message: string; matches?: string[] }
 
 const MESSAGES: Record<string, string> = {
@@ -151,6 +155,7 @@ export async function sendSessionMessage(
   noteMessageTo(target.id, t, { from: senderId, kind })
 
   let mirrored = false
+  let held: { held: string; code: string; missing: string[] } | undefined
   // FLUXO.AVISOS 8: an `awaiting` handback — or one whose text says it is part N of M — is one slice of a longer piece. It is
   // recorded and delivered, but it does not move the subtask to review and is not listed as delivered in the check-in.
   const verdict = kind === 'handback' ? judgeHandback(body, awaiting) : { intermediate: false } as HandbackVerdict
@@ -165,13 +170,18 @@ export async function sendSessionMessage(
       message: { to: target.id, kind, ...(verdict.intermediate ? { intermediate: true } : {}) },
     }).catch(() => ({ ok: false }))
     mirrored = res.ok
-    if (kind === 'handback' && !verdict.intermediate && filed.subtaskId && deps.handbackSubtask) await deps.handbackSubtask(filed.subtaskId).catch(() => {})
+    if (kind === 'handback' && !verdict.intermediate && filed.subtaskId && deps.handbackSubtask) {
+      // The comment is already recorded; a refusal by the store's guard HOLDS the move (the subtask stays where it was).
+      const moved = await deps.handbackSubtask(filed.subtaskId, senderId).catch(() => undefined)
+      if (moved) held = moved
+    }
   }
   // The engine reads `awaiting` as "do not close this worker between phases": an inferred slice is sent the same way.
   const eventAwaiting = awaiting || (verdict.source === 'inferred' ? `progress: ${verdict.marker}`.slice(0, AWAITING_MAX) : '')
   if (kind === 'handback' && deps.handbackEvent) void deps.handbackEvent(handbackFlowEvent(senderId, target.id, t, filed, { text: body.slice(0, HANDBACK_TEXT_MAX), ...(eventAwaiting ? { awaiting: eventAwaiting } : {}) })).catch(() => {})
   const note = verdict.source === 'inferred' && verdict.marker ? ` ${intermediateNote(verdict.marker)}` : ''
-  return { ok: true, to: target.id, kind, delivered: true, message: `${sent.message ?? 'Delivered.'}${note}`, mirrored, ...(verdict.intermediate ? { intermediate: true } : {}) }
+  const heldNote = held ? ` Handback held: the piece stays where it was — ${held.held}` : ''
+  return { ok: true, to: target.id, kind, delivered: true, message: `${sent.message ?? 'Delivered.'}${note}${heldNote}`, mirrored, ...(verdict.intermediate ? { intermediate: true } : {}), ...(held ? { held: { code: held.code, missing: held.missing } } : {}) }
 }
 
 export function messageStatus(out: MessageReply): number {
@@ -212,13 +222,16 @@ export async function defaultMessageDeps(): Promise<MessageDeps> {
       const res = await addComment(taskId, c)
       return { ok: res.ok }
     },
-    handbackSubtask: async subtaskId => {
+    handbackSubtask: async (subtaskId, senderId) => {
       const tw = await import('./task-web')
       const { statusAfterHandback } = await import('./task-model')
       const w = await (await import('./task-source')).loadTaskWorld()
       const sub = w.book.subtasks.find(s => s.id === subtaskId)
       const next = sub ? statusAfterHandback(sub.status) : null
-      if (next) await tw.patchSubtask(subtaskId, { status: next })
+      if (!next) return
+      // The handback is the SESSION's act: a proven session context, never the owner's (guard A binds it like everyone).
+      const out = await tw.patchSubtask(subtaskId, { status: next }, senderId ? { principal: { kind: 'session', id: senderId, via: 'token' } } : { principal: { kind: 'unattributed' } })
+      if (!out.ok && 'guard' in out) return { held: out.guard.message, code: out.guard.code, missing: out.guard.missing }
     },
     handbackEvent: async event => {
       const { flowsExperimentalOn } = await import('../native-gate')

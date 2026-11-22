@@ -1,0 +1,1247 @@
+{
+  "base": "01981f49d",
+  "writers": {
+    "../scripts/dev/chat-activity-shots.mjs": [
+      "e4038a7ba2f39ec861e4b4ccac94891957770f903f33b8e7961060754ac7032d"
+    ],
+    "../scripts/dev/fila-prioridade-shots.mjs": [
+      "43466364397bc57f0095cc3bafaeba9ffa8edae49669cba21c7e10dbbbf082d1"
+    ],
+    "../scripts/dev/vidro-real-shots.mjs": [
+      "12e2bd9ef2a9f7209d1de7119a53cf8bd6cf84acdd945c22809f9d428e85c687",
+      "2ecb1727f17fe56fbc7890c4c0005c732f46e77f7d704ae18e7d4263744e9215",
+      "5bc9c8b45476a5a8198163bfb2e85e99824b20eb995f762b99803b395b3a2b70",
+      "851c81c36b9c1cf3c8191d73753ebc59ccce2f66dd9382a6dcb861d5e8fc1404",
+      "be3ef946b3c1107b3d4a9fe6f7e0a6d08891f32ca5ef34a55a25b20cd55d34b6",
+      "d502531cb86778a24fd92caf3273329c6dd14ab28c2321722971f894bae82800",
+      "dc8858bd45c6a65a9c11838d27d9032c7551f001737f6864c1941ef2c4cdb00d",
+      "f90792e15ca3704c76d013661e62c06bf504f1111dd9c0612b9187ba14ec0600"
+    ],
+    "../scripts/perf/engine-map/bench.ts": [
+      "9cc1822219d0d421c3f6e4509b1d46137a861e48dc7ad605ebd751ae7c1c8bcd",
+      "ad3376b2bbfea5bd2f0804a0616f6019b690620f1fbd4e0f9ff5136789a85988"
+    ],
+    "../scripts/perf/engine-map/sync.ts": [
+      "265b1d4a4f2cc56cd494ce2abe0320aa1bead203ee92e658845ff116c1932e42"
+    ],
+    "../scripts/perf/profile-server.ts": [
+      "7a0868bd4e6314c755f257c20ce4784bc4dae101ed2250813213182f08fcc267"
+    ],
+    "../scripts/perf/server-harness.ts": [
+      "3082c368084a668e553be99346b55aeb052c5dcd90c4330fe65f860650a9d50e"
+    ],
+    "../scripts/precommit.ts": [
+      "3e6bfbd9972318a01d9f099f6b4f4679152bf9b089d1ef6fe9daf3d728a02a98",
+      "73c5872412bb315922efbce52516cf8e01ecd5724a917cb9d6107db781b7eb46"
+    ],
+    "agentop/bin/agentop.js": [
+      "b75d9699b9ccd6237365b86151d80353daaa211567958aec0e612a0fd7d47086"
+    ],
+    "server/bin/cli.ts": [
+      "26b11a41eaa00acbf13997f300f7b858b09b6c585c1fb211bc0b5dc92736f6eb",
+      "b8bbe8c3c62d894d6e030a8df85a9a0570fc3e151727427f01038c2dc19f94cb"
+    ],
+    "server/scripts/assert-official-engine.ts": [
+      "601dbb5acd6ede037495a242ba09f5b5946aae444bddfd1f320fd69d0482c2d1"
+    ],
+    "server/scripts/bench-clients-seam.ts": [
+      "0fbddb4cb75c5419f00103aa922789b36eba3b9770256d19d30451ffc3d338b0",
+      "27ad2bf22d25444ce8d2d4f770656737d4d80bcef2467e93d5988dece6e226c9",
+      "3b26904ae78e08cd3a494c36ed70c5a184279d0fae85d67af74df4020fa3685b",
+      "a45a41e373e1f69abbdd471b40f633336164d8ca5d3d5cdf9db9a0c614602043"
+    ],
+    "server/scripts/e2e-link-crosstalk.ts": [
+      "d2eaa1da7ea97b07394de11ce8c548568bc103b06d110b0fa79af15c5379ac7b"
+    ],
+    "server/scripts/ensure-type-stub.ts": [
+      "62e2f4fdfc8dca64d90dd317d89ef58874538f11045ec33d9099835c911e9f62"
+    ],
+    "server/scripts/frozen-paths-check.ts": [
+      "afdaff9d74ede41344e5c0a1c707992ed166663748429a701fad2e4fcf49a1ff"
+    ],
+    "server/scripts/push-guard-action.ts": [
+      "487337eb110a9188338722bd18b0937a3e944deb4df771b6c63380348ec2a1ad"
+    ],
+    "server/scripts/push-guard-check.ts": [
+      "40343af2bc14a67ebb344a689b6363fe6509eb947cc4d3bde8e4716c3b822af0"
+    ],
+    "server/scripts/record-web.ts": [
+      "433bb182336383e34bc4a137a9d7a2961feeac62424ec9aa7c948a31a5bc98b9",
+      "779c99a8bfe634bb293b5e5bacb038680a7bb8b7a6d574c75480b02dbf05ec18",
+      "ef79ba9b0b5add7a14a27d62c2e93126a9be20dfccba388efb63815fe0ff558d"
+    ],
+    "server/server/account-login.ts": [
+      "336efcc30efd55d93323f14f1307a77e8447201126d424332871b473d951bd0c",
+      "89f5ba0ec9bc3826b32e94ba87836ff6cdfe20a9713cb62a5104563fdca86070",
+      "ab8e73d7cd9339147237a3abbf58b46c235f35083f6d74f0d7c6896779d71904",
+      "b7c7bfaf988bc7423e933407a0d345fbe58722250b6286df96b8aa524c5d15a4",
+      "df9f0af49ef6489ca6b696b1ac9e61551993c47c3b91a6ea175cb5e9718f63c2",
+      "fc4ffd140d5340a99f13e27bb636bb149ef7d7f710d9442a3a2fdfe2b2e31867"
+    ],
+    "server/server/account-roots.ts": [
+      "41f808e667114f72522f1d581a61949b5921c20af820a61eee09d882d4100641"
+    ],
+    "server/server/agy-mcp.ts": [
+      "0cf3a6c47909ad3e224b62f856de59a77eeef5c59a2e02de44e00aa8f03de27e"
+    ],
+    "server/server/autostart.ts": [
+      "0d338b92adda9f75e36c305f48853bf70997a95bb37c837ac0cc228d1ef443f4"
+    ],
+    "server/server/backup/backup.ts": [
+      "3aeee2d00057f0182439d87513e5d9900473cadd2f784e7f55b6597ab9fe2d9d",
+      "3d070b5f74b4c18a24f055745b91b0fd400770cf16a818d5ed4e5043c07bbcf6"
+    ],
+    "server/server/backup/restore.ts": [
+      "50603126541cb6755aa8f5ec92d7d44f486956c1f7e8c555ea1a034b3068650a",
+      "5ff25f467b085fac4b7035dc94505f1fcd431a66dbfccb750dcde5ce8e904b18",
+      "7e840686ba7fe220da5fc4b85cfb4d3dc151877ff9e755ab3429691e661566bf"
+    ],
+    "server/server/chat-drivers/cli-detect.ts": [
+      "929a3762aa64bcc0ecdf3fb6db4dbc5dd4cebfba5edc52f10db4e6986af41771"
+    ],
+    "server/server/chat-drivers/codex.ts": [
+      "4f388879ac9607457aa74d7f5784d6ab9b8601fcbcbc2d9df4e0fef39d3b0b0b",
+      "7f65377dea0aa0581e1a7102fb76cfb7e3de4a707be399aeebe3d412b37f80e0",
+      "93151ad178b1569fc964f617ad3a015b0724e0d88b843fae3dac923df3b7f9d5"
+    ],
+    "server/server/chat-drivers/copilot.ts": [
+      "3a7e3c42a86e95c75b54df518b6b3eb7b1066daf7b6855754be287c11ef6e0ab"
+    ],
+    "server/server/chat-drivers/gemini.ts": [
+      "1c48b5c73feceb16c2545a1fdebc5ef1cd89c8b7abeb675d7675ee86a5d67736",
+      "4f388879ac9607457aa74d7f5784d6ab9b8601fcbcbc2d9df4e0fef39d3b0b0b",
+      "e15bda1c8cd707251bce713d0ee97cfa7cda3be24e2039acbe2803e77c0622bb"
+    ],
+    "server/server/chat-tty.ts": [
+      "160b97d7a2599063ff08ae3b9c8b5a8b19ec683f71440e6edba17cf0af989d6b",
+      "378ce55f70626f0690107ebb37744a60e3f219845bf1c3c448ebe6f1ddee3c98",
+      "4b12da8df0a84a06f1cd7e82b86ffc957ade7843196afccd93d26d217637fb79",
+      "9c72c41872b181e0e3f6fa14b048f54b9c6f007cd2e125699e21a8111f192afe",
+      "c5196b42f9ba928c7829fd467d3c9d7e97b9e78b967829b74abb39ed7505f56b"
+    ],
+    "server/server/clean/clean-io.ts": [
+      "b23c5c2094088297a51d78456306faaedf841e15c98a7bc8056a7d6a01d507cb",
+      "d310d94469a2d68ee7b56b12e1ac28593839ddf19be8bddaff40a1b62d4a6e49"
+    ],
+    "server/server/clean/clean-web.ts": [
+      "a370ebd61d59b6567984f8fe559e23871e803909ead8b9d902c7edb7aae81a78"
+    ],
+    "server/server/cli-backup.ts": [
+      "3a53d671473b3d632e94e90634f2e3e7363d21e05c57019fd3cb91b173949236",
+      "ce58d18d9d9c0471d12b9873e8bde1430c67029a03798c08609da7bb82b98638"
+    ],
+    "server/server/cli-doctor.ts": [
+      "39509c6e9ea9a9b510c8fd4bf6a8e07d12e03a983c4b0e57c5c371acd09add98"
+    ],
+    "server/server/cli-run.ts": [
+      "16f1159ea3730bb5262bc69505400cb43490e925227883caafb5bb3d12733b9c",
+      "476a9375693728eb5685b6d991426e184e24132e1cd3132012fde0e0e2a8b173",
+      "6590df11df73b81bca24dc6532ffef84038a38f133dbfb40fc475cb79f6adb65",
+      "7c810b967bab6fc79166858d78b156f25a673395cc8297bf0dc07db624f5fe28",
+      "95b08669275a63248df6ebd8ec33c0c17271108d7a5959c0820e2723ba9343f2",
+      "a2b943d1656e24dc5ad5b3529d99ad2bf0e5dd73619828a40381819c8169b091"
+    ],
+    "server/server/cli-start.ts": [
+      "15b623eb03a936d9858b6be0ba0ebfbda62151ed34c158a62f1d5dfc4ab23715",
+      "17f95ebc6efaf74bd588e188e4476e389541cdb71a003b06ad00a5c360871b98",
+      "2bc7683965042c1bcb9de225e6c40fb451112bfc66251d4b4aed8ded56271505",
+      "756ba55db2a15d13d1fd9796c19b2fdc05b2900d779d11c52b2d7cd93eb1a421",
+      "7c41d85ab4ec5aa752b3aff1e3533ef27ebb9aec48abf8d5842f1c6fec9bbc76",
+      "9064aaff4520fb4721939e61fec5a6d68d3514d311a6fbbb4ece784ffca3897c",
+      "dc782553e32eb6d1b3cbe12335ed0cc3450b27ef136d492284fcb9612cab1860",
+      "e95e9380dd17f89822743f4fe5a0d6c8615bea2ec33c2575c5d6fc10ec2eaec7",
+      "f4991af0d0d5eaa96678b66e44910eeab33f64ad155f8a3044a3047b5f05aae2",
+      "fdeb87b10d3385a708d7db4b4a5d01472feb597c59054a6e00b097f17a6be7ac"
+    ],
+    "server/server/cli-status.ts": [
+      "f4991af0d0d5eaa96678b66e44910eeab33f64ad155f8a3044a3047b5f05aae2"
+    ],
+    "server/server/cli-stream.ts": [
+      "d9d07f22b9308f27506eb8c0972e68c46f2092855b529e87fd1750588c6f07de"
+    ],
+    "server/server/code-editor.ts": [
+      "3c062fe368bdcf392dd497c07bdf0b9564e76bc81dfb2dd072327950ca8d6bc0",
+      "5d0676e2737666fb5cc9621e626cc2aa39246628513ab6a12722d1bf191806ee"
+    ],
+    "server/server/delivery/classify-host.ts": [
+      "a8f7a87df4fe117c1e0be5c993c81b082db0d3e718c0f7f4bf2e55c473bb91d3"
+    ],
+    "server/server/events/desktop.ts": [
+      "f589ef787b88a70bddb7954148bc2109220263ccf7b79b776cc204cc2833c7ee"
+    ],
+    "server/server/flows/ambiente-host.ts": [
+      "943040487168eba705b3077ae14455a064ceff34e1c6f37030a7e5d3822d949f"
+    ],
+    "server/server/hardware-probe.ts": [
+      "1102bec407cb373be911ac86028411a0df65e5eeebe7a142919908ddf18e7209",
+      "a3af82af4e2c5717897d701e08114360a65cda60cb3d2b9805af350137827ac2"
+    ],
+    "server/server/helper-hotswap.ts": [
+      "62450eb1912bb66f6265a57163a7c94442331cfcb87e2d01aa6c8104daaf8438"
+    ],
+    "server/server/host-allow.ts": [
+      "e039c9d7923966ba838b0a679a2327e35214e4ac2399e09673cabe05ff937b97"
+    ],
+    "server/server/journal/backfill.ts": [
+      "dda89c5f04c8149445374a8de0181cddef10569bd3cfc702e9dbea4a435592c9"
+    ],
+    "server/server/journal/schema.ts": [
+      "4f6d9ba120d1b55d7ac4bd3919d67c9e00b4d7942aeefdeb1c144bb46668c72b"
+    ],
+    "server/server/macos-processes-io.ts": [
+      "ac2603aa90a3d82a15636cde4437d1ded515ced497499abcaec2897b391cadc7"
+    ],
+    "server/server/mcp-admin.ts": [
+      "1247e2681bfba7dc37272f1a5bd5e90181011f4885cad4a49461ea8e1a460e60",
+      "7273386eea08f1a77bb1594859e54828bd70bf2aa0856f7cc9a6149c996575c0"
+    ],
+    "server/server/mcp-check.ts": [
+      "c1af1f3b6a8d678bde2d38a8da266713df5a37f55bb811cb2c774f780ad0e6d0"
+    ],
+    "server/server/mcp-tools.ts": [
+      "bd4c7406bcc1043dbe27bf5f1795aececd9c93a65932684c1a19913d6e37525c"
+    ],
+    "server/server/model-catalog.ts": [
+      "75068608013044e2720ff264eadf47f349d92f40faa3453ad1b9aeeed04c803a"
+    ],
+    "server/server/native-bind.ts": [
+      "f5eae40270a80054b4b3eadb57345363da3982102f2126f456093ff4d38a46c2"
+    ],
+    "server/server/port-holder.ts": [
+      "7e83308c4b160ca4d50028e6db79ffd3e43122f102b6edb6375dc18ce90e0fbd"
+    ],
+    "server/server/resources/heavy-io.ts": [
+      "000faaee10d6f9408ac4da280098672b6c23184bc30c580b913c2f675edd4849",
+      "c2467a81ca04b1d14234daa4cb92aef593f0f23ba5ab2fbb4fb0e415cc057850",
+      "f7b96f643718b04bac1cd2a4568fc58467fc3bb1dfea2cbd9eb371e0d25764f5"
+    ],
+    "server/server/restart-pending-io.ts": [
+      "9f636f5f26445d811bb340573188df94580a40f75966aafa65c7da023917a1de"
+    ],
+    "server/server/secure-origin.ts": [
+      "0e978a95b80539b22427c50a026b0e0937e9f4a910c8e77b3cc277be752fa4cb"
+    ],
+    "server/server/server-ownership-io.ts": [
+      "4563303190cf257fbb5d2e3bc644c2dd9d50b7543cd436c8392e9754660a4d42"
+    ],
+    "server/server/sessions/backend-tmux.ts": [
+      "1b4a42ac2e9d10fa431566a07c6ee534a4c6800a520f8a4fab832133bf7329d6",
+      "53ea42ae8b0cd2a55501bf614a82e89bfe26e53c7fc3d1496211783f7d3179d4",
+      "9f6a436c3951e58df8521541b740c80a791bb7865b1a9e9f9c75ed542efa228e"
+    ],
+    "server/server/sessions/cli-session.ts": [
+      "276619ad76c19f4468c31e1443f80443e7b9e37a0c7646931db03d0d05b08425"
+    ],
+    "server/server/sessions/dependency-probe.ts": [
+      "e80cfde6e6f65f04ca5e69d59b83ccbc09fe5bd65209df7a18918c48841c96ba"
+    ],
+    "server/server/sessions/editor-fs.ts": [
+      "118bcdef65c4798dfc49573782902074cb00e1888ad04081e711ecfe80f4ee9f",
+      "33cd85673c825ad9f0ed37c0279b19970a26604b904063a0758762f27fd4583b"
+    ],
+    "server/server/sessions/fleet-resize.ts": [
+      "0b856d4f92165365ef3d2dce0e590fe63b90d7d88e6523d99789e17784752f8d"
+    ],
+    "server/server/sessions/github-prs.ts": [
+      "61642404de71c4f8c5c6caea1d6915c90ae82abce481f7d27c09385e63a88373"
+    ],
+    "server/server/sessions/harness-agents-io.ts": [
+      "f9cff99e373c71c1799d05913dba3bbdc48c118a084daedea7c236a76234a627"
+    ],
+    "server/server/sessions/harness-install.ts": [
+      "37658746cd35c60b3ccce8ed4c1ab06336a0abc365c5215778fe0531dbc2b1ee",
+      "383b95244cd716253b8d92e98e03ceb3a8de1ee9185544bccf33794cc567b138"
+    ],
+    "server/server/sessions/harness-version.ts": [
+      "1ddf92ef27da06e499e95ef72f63b8c546977e355599e8104d2d6d486a745711"
+    ],
+    "server/server/sessions/login-env.ts": [
+      "a7f2698f5ae69bfbabc1efb9c4d46020b17aae099af003b77f4bc0e0fb2958d5"
+    ],
+    "server/server/sessions/noq-runner.ts": [
+      "819dcc72abfce5440b057f8798ceafe508bb11a90f9a3f66519a78f5e6ffb533",
+      "60a0f291cd0dcaba496f4f4af8a46ef6e297a4c8091981ad633049d66cb04a2f"
+    ],
+    "server/server/sessions/release-squash.ts": [
+      "2e00f60de63e65f2a99dc5ae62c28faa364db45cc4410e92e448e519234e5376",
+      "b0964524b3246bb8b8f585a53e327766fad0fdc7f4b44ca2d508f52e62dbb544",
+      "d127f173372915e8965eb507857f573dfaa9503348651ad3d8fcd2dd73a183c3",
+      "efc5f2a78628f6f29892749a63555ea3740472933840525b2fcc2f7f59bc928b"
+    ],
+    "server/server/sessions/release-tags.ts": [
+      "c21468b222a735f74f10fd61b49218a3eb3c48ac221ec735ad80e243a48d2199"
+    ],
+    "server/server/sessions/repo-facts.ts": [
+      "4a8a0db09ada2b2e4c97feb938f133f23f7fed1ae3652e82dd0b6c836399d6d3"
+    ],
+    "server/server/sessions/session-identity.ts": [
+      "f350cb910d6ffa7bffde774cb8ef6439a2530f3cc240e221304d196a43bb5796"
+    ],
+    "server/server/sessions/shell-tmux.ts": [
+      "9f3047920477740a433056982f421a550cdb323e454ba798c10a52058fd92bff"
+    ],
+    "server/server/sessions/structured-durable.ts": [
+      "9d0d7052bcb611fe7fcc6b8dd853cd6f4b1a223f71ea1ea677c3d301bf869a01"
+    ],
+    "server/server/sessions/structured-relay.ts": [
+      "2fa2b17a85302f2f591ccd7529cfa1d69adde09242ff967a14ec33f54b2604d5"
+    ],
+    "server/server/sessions/transcript-run.ts": [
+      "2dd58a232052f2912b3e0e85f20a04fc19e5d172b04c34722e84175fd632aa77",
+      "56ba41acc6fd8ec68d1434015e31dd4664ef8c6ee9515efcc620e3b83d2ae5b1"
+    ],
+    "server/server/single-instance.ts": [
+      "51590eba30987412a64ddedf917a900fd3604d8f9871ae1fb670e4de4b099718"
+    ],
+    "server/server/sse.ts": [
+      "70178a6d64904cf99d0ff6040fb6cc417ce5768f67d28587217f76e5484628d1"
+    ],
+    "server/server/upgrade-web.ts": [
+      "6b6f35cd6e79e83825b3268aeceda21e401302189174e8b0661ae5fc1ae3dd6b"
+    ],
+    "server/server/upgrade.ts": [
+      "114966562edb3220fc532de1f8bfa2685fe02a8e2421ef7264f64c5869a829aa",
+      "588d45787e78ff7e3ee2af8d6b52e2ead38f3c17baaa431a757cf032707beeab",
+      "5ca04f370994b55862530c618bd25fad6f214fe087c545b533e10be34f0f3c04",
+      "7acce4a90c279f746dc5ad8fc49e5d34863932c43e752ca6c1f40ce0f065633d",
+      "f4991af0d0d5eaa96678b66e44910eeab33f64ad155f8a3044a3047b5f05aae2"
+    ],
+    "server/server/vault/io.ts": [
+      "534008e5a2c5f5dd803185ff8e7d3a5e1b7fb18ca54ae1966d3361cdb7723c80",
+      "b9053440d2becb623bd5976711cbe9ebc273202b2715eedf19bff81faedbdd49"
+    ],
+    "server/server/vault/machine-secrets.ts": [
+      "35940c557c69456a5a52be9552c32efcb8e71f2a28dee74d2ae4a82b2eaa7417"
+    ],
+    "server/server/vault/sleep-watch.ts": [
+      "16ab7ecf304398ef995e007fd8a96bc880c823689d25afadced8bd85a414c914",
+      "cdc8d1d3cdb28ad8c0fb00fef7f1c0712dfdef1ba3a83bd4140a26f79e766ea5"
+    ],
+    "server/server/wsl-ports-io.ts": [
+      "20701753711909dde3f522d831eb37a1fdde336984f5f7df899061bd1a4b50f6"
+    ],
+    "web/e2e/usage-r2.ts": [
+      "979bd5baab4450bb8d1bbeb4a28e8b924fbe118cfd4e61738536905e54b995a9"
+    ],
+    "web/e2e/vault-bulk-qa.ts": [
+      "76c0763088a25057cd0047d444a3a62e2dd37bb9a7f5369d886f7b5d17b97692"
+    ],
+    "web/e2e/vault-expiry-nay.ts": [
+      "d832ab012a6690bb9728b2c5476400a91e0b5040510257f8ea2f3c261a810093"
+    ],
+    "web/preview/plan-usage/qa.ts": [
+      "c8c4a49e061d91d105249debf93f35c49f502ca304a4affe1814aa4d1e0be3e6"
+    ],
+    "web/qa/terminal-provisioning.ts": [
+      "a75cc5f106803c296e86e7537904086c3b8472ea04c769dcfc9eb95514a63ac9"
+    ],
+    "web/scripts/gen-brand-assets.ts": [
+      "16c224d12e25f514d3a53f616e9b77d192899a227481de667e60f16dce3dfcfd"
+    ],
+    "server/server/browser/browser-host.ts": [
+      "6e40dcf1f39e374e2fa4d0c7d34365dff8390f962011992dd92412acec27c406",
+      "e64e36557bd080176508918a4ff472cd2a231cf6b681017a4fde4d5224a410e5",
+      "6877b356752d1df16b301968329882f1b98b21d0068ea1e5facecbfbaa0709d9",
+      "a32e0f9507b6b7b99a8c46f8b227c5402b59309b77f211764c3bdf8b2f271d3f",
+      "07d524bf706909af1d94d158a6fd50337f5be9fa5ed1c399a2901e38304c85d4"
+    ],
+    "server/server/delivery/release-proof.ts": [
+      "ed537fb2b15920303cfc63b38d719476036f922ff0b58de2543adc18a3644554",
+      "5fa38a6950bbbca96384c771d754798d5411590803466eed6cd6c5391aa47d62",
+      "a16281092c999587a8cdede3fbe214811b25639a62e204023e8063d2215b35d9"
+    ],
+    "web/src/hooks/useBrowserScreen.ts": [
+      "1b1e2ece8ee3f08a54457b2cc8bd52439d2edd849901ca65bd2a7d04f9b84c61"
+    ],
+    "web/src/lib/streamMux.ts": [
+      "d9c70cf524de3527bf81bc01a55903cb2d9b1e19a125ef5f52a8404a922a0f16"
+    ],
+    "server/server/durable-file.ts": [
+      "5ead73af05ea9b357b805dece9b525a1d7b8887ca2a31427f4f03acaf86ea91e",
+      "0929006f6219843a0773d178fc8c537dad3aaa231da77a8426f553e519eb0105",
+      "f6d30afe277a6750ef6c81d7f698127d9787680f6c16971a90b60572da008c62",
+      "aaada9daf0342f61eadf559469c502a11da2a0cac291fc7342ff82eacee879a7",
+      "2d765437baed23ff6c97ee5d0ebfe846ec9d9c24e6c8f0d82bde8a065de96826",
+      "b4bfdd6fb2b3f927959b45d055b6050decd56eeaff52bc7c47d395a6edf5a3d4",
+      "f283d91759c98d3a986f66f5e9e3f1aed0729002fe3a7d6d53dea21b34047a10",
+      "4f61fa2f6992dc273af88bcdf42f99125cf5450820e7e6548278f361e980fb01",
+      "b2b339d9861e71c5c800c3321407babc8d73ad10fdf3146f27c09da60d7a4930"
+    ]
+  },
+  "reach": {
+    "../scripts/composer-task-engine-qa.ts": [
+      "text:.agentistics",
+      "text:tasks.json",
+      "text:tasks.json",
+      "text:tasks.json"
+    ],
+    "../scripts/dev/fila-prioridade-shots.mjs": [
+      "ident:AGENTISTICS_DIR",
+      "ident:AGENTISTICS_DIR",
+      "text:deliveries.json"
+    ],
+    "../scripts/dev/vidro-real-shots.mjs": [
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics",
+      "text:.agentistics"
+    ],
+    "../scripts/perf/baseline.ts": [
+      "text:.agentistics",
+      "text:.agentistics"
+    ],
+    "../scripts/perf/budget.ts": [
+      "text:.agentistics",
+      "text:.agentistics"
+    ],
+    "../scripts/perf/profile-server.ts": [
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics"
+    ],
+    "../scripts/perf/qa-browser.ts": [
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics"
+    ],
+    "../scripts/perf/qa-profile.ts": [
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics"
+    ],
+    "../scripts/perf/rebuild-bench.ts": [
+      "text:.agentistics",
+      "text:.agentistics"
+    ],
+    "../scripts/perf/server-harness.ts": [
+      "text:.agentistics"
+    ],
+    "../scripts/perf/startup.ts": [
+      "text:.agentistics",
+      "text:.agentistics"
+    ],
+    "../scripts/perf/ui-budget.ts": [
+      "text:.agentistics",
+      "text:.agentistics",
+      "text:.agentistics"
+    ],
+    "core/src/nay.ts": [
+      "text:/.agentistics/nay-chat"
+    ],
+    "engine-api/src/floor.ts": [
+      "text:.agentistics"
+    ],
+    "mcp/agent-audit.ts": [
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics"
+    ],
+    "mcp/session-proof.ts": [
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics",
+      "text:AGENTISTICS_DIR"
+    ],
+    "server/bin/cli.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "text:\nUsage: agentop [command] [options]\n\nBare `agentop` on a terminal opens the control center (services, setup, logs, help).\nWithout a terminal it prints this help. `--help` always prints it.\n\nCommands:\n  start         Same control center as bare agentop (non-interactive: runs like 'server')\n  setup         Interactive first-run wizard (history consent, start on boot)\n  server        Start the web dashboard + background daemon (non-interactive)\n                (--bg detaches it)\n  restart       Restart a running mode's service so it picks up new code/config\n  status        Show services + health\n  tui           Alias for 'start' — the metrics dashboard is its 'dashboard' tab\n  watch         Start the background metrics daemon only\n  heavy         Run a heavy job (tsc -b, a full test suite, a build) through the machine-wide slot:\n                'agentop heavy -- <cmd>' waits its turn, shows its queue position, runs, exits with\n                the command's code. Slot 1 is /tmp/agentistics-heavy.lock (the manual flock)\n  run           Run a command or throwaway server with isolated HOME, ports and process scope\n                ('run --rm'; 'run ls' and 'run stop <name>' manage active throwaways).\n                TMPDIR is a short /tmp/agr-<id> (sockets stay under 108 bytes). A command run holds\n                the heavy slot and sets AGENTISTICS_HEAVY_JOB=1: nested 'agentop heavy' is a no-op,\n                but a raw 'flock /tmp/agentistics-heavy.lock' inside would block — skip it there\n  resources     Print the agentop processes on this machine, what each costs, and the alerts\n  session       Start / list / attach assistant sessions (tmux-backed; --bg detaches);\n                'session ls' prints the cockpit's table of what is running\n  task          the delivery board: what each piece of work cost, in how many rounds\n                and across how many sessions ('task ls | show | deliver | abandon')\n  tasks         review cleanup ('tasks limpar-revisao', dry-run by default)\n  hooks         Teach Claude Code to run work in parallel through agentop\n                (installs a skill + SessionStart/Stop hooks; explicit, reversible)\n  briefing      Install or remove agentistics onboarding skills/instruction blocks\n  events        Be told when a session starts waiting, blocks on a permission prompt or\n                exits — in an inbox, in another Claude session, and on your desktop\n                ('events watch' to subscribe, 'events status' to see who is watching)\n  experimental  Turn every experimental feature on or off ('experimental enable|disable|status')\n  away          Autonomous mode — sessions decide and proceed without asking permission ('away on|off|status')\n  journal       The durable event journal: a read-only look ('journal status') and the\n                historical import of this machine's history into it ('journal import')\n__ENGINE_VERBS__\n  mcp           Serve the agentistics MCP over stdio (what assistants launch; registered\n                for you when agentop server starts)\n  vault         Secrets at rest: status / init / unlock / lock / enroll / recover / rekey / add-passphrase / reset\n                (every secret agentop stores is encrypted — never plain text)\n  upgrade       Upgrade agentop to the latest version\n  uninstall     Remove agentop (service, shell hook, binary); your data is asked separately\n  autostart     Start a mode with the system (systemd user service on Linux)\n  check-update  Print a notice if a newer version is available (else silent);\n                a release marked [critical] says so louder (auto-install is opt-in)\n  clean         List worktrees agentop's projects accumulated, with sizes: merged and clean\n                ones, and node_modules untouched for 30 days, are removed on confirmation\n                (--yes). Uncommitted work and branches are never touched. --json, --repo <path>.\n  doctor        Run the exposure preflight; add --exposed to check against the\n                strict public bar before opening a tunnel\n\nOptions:\n  --help, -h       Show this help message\n  --version, -v    Show current version\n  --port <n>       Port for the web server (default: 47291)  [server, start]\n  --bg             Start detached in the background (logs to ~/.agentistics)  [server only]\n\nControl center:\n  agentop            (on a terminal)\n  agentop start\n    One full-screen application, in the terminal's alternate buffer — it adds nothing to\n    your scrollback. Tabs: Services (start/stop/restart this machine or the\n    Docker machine; enable a boot service), Setup (the history-preservation consent), Logs, Cheat sheet, Help,\n    Contribute. Picking \"foreground\" closes it and starts the server in this terminal.\n    Non-interactive stdin runs like 'agentop server'.\n\nRestart:\n  agentop restart [server|watch|machine|--all] [--rebuild] [--cache]\n    Restart a running mode so it picks up new code (after an upgrade/pull) or config.\n    server/watch bounce the systemd user service; machine restarts its container.\n    --all bounces every service currently up (local + machine), non-interactively.\n    --rebuild recreates the Docker image/container (machine) instead of just bouncing\n    it — use it to pick up new code in Docker deployments (native server: use bun bin / upgrade).\n    A --rebuild builds the image from SCRATCH (no Docker cache), so it cannot hand you back the\n    image it just replaced. That is slow — several minutes — so:\n      --cache      reuse Docker's layer cache instead (the fast path)\n\nSetup:\n  agentop setup\n    Interactive wizard: the history-preservation consent and the start-on-boot offer.\n    The control center's Setup tab asks the same questions.\n\nClaude Code integration:\n  agentop hooks <install|uninstall|status> [--hook-only|--skill-only]\n    Two things, both explicit and both reversible:\n      skill  ~/.claude/skills/agentop-parallel-sessions/SKILL.md — WHAT Claude needs to know\n             to split independent work across several assistants and start them with\n             `agentop session batch`. Loaded by Claude only when the task matches it, so it\n             costs nothing on a session that never parallelises.\n      hook   a SessionStart entry in ~/.claude/settings.json — FACTS a static file cannot\n             hold: which agentop sessions are running now, which one is blocked on a\n             permission prompt, which task can be reopened here. Prints nothing when there\n             is nothing running.\n    A hook infers nothing; it is a shell command on an event. The inference is Claude's,\n    reading what the skill teaches and what the hook injected. `uninstall` removes exactly\n    what `install` wrote, and every other key in settings.json is left untouched.\n\nUpdates:\n  agentop upgrade\n    Download the latest binary and restart whatever services are running. Only installs a\n    release published for this platform/arch, verifies the download (size, executable magic\n    and the new binary's own --version) before swapping it in, keeps the previous binary at\n    <binary>.bak and restores it if anything fails. Exits non-zero when the install was\n    refused/rolled back or a service could not be restarted onto the new version.\n  agentop check-update\n    Silent when up to date. Answers from ~/.agentistics/version-cache.json and refreshes it\n    in a detached process, so it never delays a shell prompt. An OPTIONAL update prints a\n    banner; a CRITICAL update (its GitHub release notes contain a \"[critical]\" line outside\n    code fences) prints a louder one telling you to run `agentop upgrade`. Unattended install\n    is OPT-IN: set AGENTISTICS_AUTO_UPGRADE=1 to let a critical release install itself in a\n    detached background process, logged to ~/.agentistics/auto-upgrade.log.\n\nAutostart:\n  agentop autostart <mode> <enable|disable|status>\n    mode ∈ { server, watch, machine }\n    enable   Register + start the service at boot (also adds a terminal\n             update-check hook to ~/.bashrc)\n    disable  Stop and remove the service\n    status   Show enabled/active state (omit mode to list all)\n    Manager: systemd user units on Linux, launchd user agents on macOS, or pm2 anywhere it is\n    installed (never chosen by default — it is your process list). None of them needs root, and\n    each names the one step it cannot take for you so a reboot really does bring the service\n    back: linger on systemd, login-not-boot on launchd, `pm2 save` + `pm2 startup` on pm2.\n\nExamples:\n  agentop start\n  agentop setup\n  agentop server\n  agentop server --port 4000\n  agentop restart server\n  agentop watch\n  agentop upgrade\n  agentop check-update\n  agentop autostart server enable\n  agentop autostart status\n  agentop hooks install\n  agentop hooks status\n",
+      "text:.agentistics"
+    ],
+    "server/scripts/bench-clients-seam.ts": [
+      "ident:AGENTISTICS_DIR"
+    ],
+    "server/scripts/e2e-link-crosstalk.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/scripts/projections-parity.ts": [
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics"
+    ],
+    "server/scripts/qa-clients-seam.ts": [
+      "ident:AGENTISTICS_DIR"
+    ],
+    "server/scripts/reconcile-dry-run.ts": [
+      "ident:AGENTISTICS_DIR",
+      "ident:AGENTISTICS_DIR",
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics",
+      "text:.agentistics",
+      "text:deliveries.json",
+      "text:refusing: run it inside `agentop run --rm` (or set AGENTISTICS_DIR to an EMPTY THROWAWAY directory) — never against the real ~/.agentistics",
+      "text:tasks.json"
+    ],
+    "server/scripts/reconcile-r8-evidence.ts": [
+      "text:fixture/tasks.json"
+    ],
+    "server/scripts/seed-demo.ts": [
+      "text:.agentistics",
+      "text:.agentistics",
+      "text:.agentistics",
+      "text:.agentistics-demo-home"
+    ],
+    "server/server/account-credentials.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/account-login.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/account-roots.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/audit.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/autostart.ts": [
+      "text:.agentistics",
+      "text:.agentistics",
+      "text:.agentistics",
+      "text:/com.agentistics.",
+      "text:com.agentistics.",
+      "text:com.agentistics.agentop-",
+      "text:com.agentistics.agentop-",
+      "text:com.agentistics.agentop-"
+    ],
+    "server/server/backup-routes.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/backup/backup-plan.ts": [
+      "text:.agentistics/accounts.json",
+      "text:.agentistics/accounts/",
+      "text:.agentistics/agentop-server.log",
+      "text:.agentistics/archive",
+      "text:.agentistics/artifacts",
+      "text:.agentistics/attachment-sends.jsonl",
+      "text:.agentistics/attachments",
+      "text:.agentistics/audit.jsonl",
+      "text:.agentistics/auto-upgrade.log",
+      "text:.agentistics/backups",
+      "text:.agentistics/briefing-state.json",
+      "text:.agentistics/cache.db",
+      "text:.agentistics/claude-chat",
+      "text:.agentistics/composer-messages",
+      "text:.agentistics/content",
+      "text:.agentistics/conversation-resumes",
+      "text:.agentistics/event-subscriptions.json",
+      "text:.agentistics/events-producer.json",
+      "text:.agentistics/events.jsonl",
+      "text:.agentistics/forecast-anchors.json",
+      "text:.agentistics/git-stats.db",
+      "text:.agentistics/github-backup.",
+      "text:.agentistics/handoff-quota-rates.json",
+      "text:.agentistics/harness-install.log",
+      "text:.agentistics/heavy",
+      "text:.agentistics/helpers.json",
+      "text:.agentistics/ingest",
+      "text:.agentistics/journal.db",
+      "text:.agentistics/journal.db.backfill.json",
+      "text:.agentistics/journal.db.import.json",
+      "text:.agentistics/journal.db.stamps.json",
+      "text:.agentistics/journal.db.status.json",
+      "text:.agentistics/login-env.json",
+      "text:.agentistics/managed-sessions.json",
+      "text:.agentistics/mcp-credentials",
+      "text:.agentistics/mobile-push-subscriptions.json",
+      "text:.agentistics/mobile-push-vapid.sealed",
+      "text:.agentistics/nay-chat",
+      "text:.agentistics/noq-answers.jsonl",
+      "text:.agentistics/notifications.json",
+      "text:.agentistics/pending-prompts.json",
+      "text:.agentistics/perf",
+      "text:.agentistics/plan-history.json",
+      "text:.agentistics/plan-limits.json",
+      "text:.agentistics/projections.db",
+      "text:.agentistics/provider-keys",
+      "text:.agentistics/restore-state.json",
+      "text:.agentistics/run",
+      "text:.agentistics/runtime",
+      "text:.agentistics/server.lock",
+      "text:.agentistics/session-context",
+      "text:.agentistics/sessions/",
+      "text:.agentistics/structured",
+      "text:.agentistics/tags.json",
+      "text:.agentistics/task-files",
+      "text:.agentistics/tasks.json",
+      "text:.agentistics/telemetry.json",
+      "text:.agentistics/upgrade-failure.json",
+      "text:.agentistics/upgrade-progress.json",
+      "text:.agentistics/upgrade.lock",
+      "text:.agentistics/vault",
+      "text:.agentistics/version-cache.json",
+      "text:.agentistics/workflows",
+      "text:A legacy copy of the agentistics preferences that sits under the Claude directory and may still hold a legacy `team.token` bearer token written by an older version. The staged `.agentistics/preferences.json` travels instead (see ALWAYS); this copy is not staged, so it would carry the token verbatim.",
+      "text:nothing — `.agentistics/preferences.json` is the authoritative copy",
+      "text:referring into `.agentistics/content`. Not carried either: that content is itself a `secret` ",
+      "text:.agentistics/browser"
+    ],
+    "server/server/backup/backup-store.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/backup/backup.ts": [
+      "text:.agentistics-filelist-",
+      "text:.agentistics/preferences.json"
+    ],
+    "server/server/backup/github-restore.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/backup/github-store.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/backup/github-upload.ts": [
+      "text:.agentistics/sessions/"
+    ],
+    "server/server/backup/restore-plan.ts": [
+      "text:.agentistics/archive/stats-cache/stats-cache.json",
+      "text:.agentistics/preferences.json"
+    ],
+    "server/server/backup/restore.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:guardPathsOf",
+      "ident:guardPathsOf",
+      "text:.agentistics",
+      "text:.agentistics/restore-staging",
+      "text:deliveries.json",
+      "text:tasks.json",
+      "text:tasks.json"
+    ],
+    "server/server/benchmark/routes.ts": [
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE"
+    ],
+    "server/server/briefing-installer.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/chat-tty.ts": [
+      "text:# agentistics — Nay chat\n\nThis workspace connects to the agentistics analytics dashboard via MCP tools.\nThe agentistics server must be running at http://localhost:47291.\n\n---\n\n## Your identity — read this first\n\nYou are **Nay**, the built-in analytics assistant for **agentistics**.\nYou are NOT a generic AI assistant. When asked \"who are you?\", \"what are you?\", \"quem é você?\", or similar, always introduce yourself as:\n\n> **Nay** — assistente de analytics integrada ao agentistics. Analiso uso do Claude Code: custos, tokens, sessões, projetos e métricas de produtividade. Posso criar layouts personalizados no dashboard e gerar relatórios em PDF.\n\nNever describe yourself as \"Claude\" or \"an AI assistant created by Anthropic\" in response to identity questions.\n\n---\n\n## CRITICAL behavior rules\n\n**Rule 1 — Never answer from memory or from the conversation history.**\nFor EVERY question, regardless of what was discussed before, call the relevant tools to get fresh data.\nEven if a prior message mentions \"embark was the most expensive\", call agentistics_projects again to answer a follow-up question about tokens.\n\n**Rule 2 — Never describe what you are about to do. Never ask for permission.**\nCall tools immediately. Do not write \"I will analyze...\", \"Let me check...\", \"Aguarde...\", \"Com base no relatório acima...\". Just call the tool and respond with the actual result.\nAll tools in this workspace are pre-approved — never ask \"may I\", \"please confirm\", \"preciso de sua permissão\", or any similar phrasing. Just act.\n\n**Rule 3 — Never reference \"the Nay agent\" or \"the report above\" as a source.**\nYou have direct tool access. Use it. If you need data, call the tool.\n\n**Rule 4 — Add a navigation button ONLY when you actually called a tool and are presenting its data.**\n\nAdd ONE button when the response contains data fetched from a tool:\n- Costs for a specific project → [→ Ver custos](/costs?projects=PROJECT_PATH)\n- Sessions for a specific project → [→ Ver projetos](/?projects=PROJECT_PATH)\n- Multiple projects → [→ Ver custos](/costs?projects=PATH1|PATH2)\n- Generic cost breakdown → [→ Ver custos](/costs)\n- Generic projects overview → [→ Ver projetos](/)\n- A repository rather than a folder → [→ Ver repositórios](/repositories)\n- Created/modified a layout → [→ Abrir layout](/custom)\n- General dashboard stats → [→ Dashboard](/)\n\nDo NOT add any button when:\n- The response is conversational (greetings, clarifications, questions, confirmations)\n- No tool was called\n- The user asked about you / your capabilities / preferences\n\nThe PROJECT_PATH must be the exact `path` field returned by agentistics_projects. At most ONE button per response.\n\n---\n\n## \"How much have I spent talking to you?\" — Nay's own sessions\n\nYour conversation sessions (chats with you, Nay) are stored in the project at path:\n`~/.agentistics/nay-chat`\n\nWhen the user asks \"how much have I spent talking to you?\", \"quanto gastei conversando com você?\", \"what did our conversation cost?\", or similar questions about the cost of Nay specifically:\n1. Call agentistics_projects\n2. Find the project whose `path` contains `nay-chat`\n3. Report the cost, tokens, and sessions for that project only\n\nFor questions about total Claude Code usage across ALL projects, use agentistics_summary or all projects from agentistics_projects.\n\n---\n\n## Tool call protocol\n\n| Question type | Tools to call |\n|--------------|--------------|\n| Any metrics question | agentistics_summary first, then specific tool |\n| \"Which project spent most tokens/money?\" | agentistics_projects |\n| \"Most expensive session?\" | agentistics_sessions |\n| \"Cost breakdown by model?\" | agentistics_costs |\n| \"Build a layout\" | agentistics_component_catalog then agentistics_build_layout |\n| \"Generate/export a PDF report\" | agentistics_export_pdf |\n| \"What tags exist / cost of tag X?\" | agentistics_tags, then agentistics_tag_detail |\n| \"Cost/usage by repository?\" | agentistics_repos |\n| Any follow-up question | Call tools again — never rely on prior conversation |\n\n---\n\n## Available MCP tools\n\n| Tool | Purpose |\n|------|---------|\n| agentistics_summary | All-time totals: tokens, cost, sessions, streak, cache hit rate |\n| agentistics_projects | Per-project breakdown with token/cost/session counts |\n| agentistics_sessions | Recent sessions with duration, model, cost |\n| agentistics_costs | Model pricing breakdown and cache savings |\n| agentistics_component_catalog | Available dashboard components and their IDs |\n| agentistics_get_layouts | Current custom page layouts |\n| agentistics_build_layout | Create a complete layout with ordered components |\n| agentistics_add_component | Add a single component to an existing layout |\n| agentistics_remove_component | Remove a component by its instance ID |\n| agentistics_create_layout | Create a new empty named layout |\n| agentistics_set_active_layout | Switch which layout is shown on /custom |\n| agentistics_delete_layout | Delete a layout permanently |\n| agentistics_export_pdf | Generate PDF — returns a [⬇ Download PDF](pdf:URL) button link |\n| agentistics_tags | List all tags with aggregate sessions/cost/tokens |\n| agentistics_tag_detail | Full detail for one tag: breakdown + top projects/models/harnesses/repos/members |\n| agentistics_repos | Repository breakdown by normalized git remote |\n| agentistics_session_groups | The user's session folders/groups and which sessions each holds |\n| agentistics_session_group_create | Create a folder (group), optionally filing sessions into it |\n| agentistics_session_group_edit | Add/remove a session, rename, nest or delete a folder |\n| agentistics_session_notify | Mute/unmute (or read) a session's notifications — delivery only, never its waiting state |\n| agentistics_tasks / agentistics_task | The task board, and one delivery in detail |\n| agentistics_task_create / agentistics_task_edit / agentistics_task_status | Create a delivery, edit it, move its status |\n\nYou run as a session inside the agentistics sessions workspace: the person may be looking at you\nbeside their other sessions. Organising sessions (folders, groups, filing) is part of your job —\nuse the session-group tools directly when asked.\n\n---\n\n## PDF report generation\n\nWhen the user asks for a PDF report, ask what date range they want if not specified:\n> \"Qual período? 7 dias, 30 dias, 90 dias, ou tudo?\"\n\nThen call agentistics_export_pdf with the matching range (\"7d\", \"30d\", \"90d\", or \"all\").\nThe tool returns a `[⬇ Download PDF](pdf:URL)` link — include it exactly as returned. Do not modify or reformat it.\n\n---\n\n## Layout building rules\n\nThe custom page uses a 12-column grid. Component default sizes (from the catalog):\n- KPI cards (kpi.*): w=3, h=3 — fit 4 per row\n- Wide charts (activity.chart, tools.metrics, tools.agents, sessions.*): w=8–12, h=6–8\n- Medium panels (costs.budget, costs.cache, activity.heatmap, activity.hours): w=6–8, h=6–7\n- Full-width (costs.models, sessions.highlights, sessions.recent): w=12, h=6–8\n- Projects panels: projects.top w=7 h=7, projects.languages w=5 h=6\n\nAlways call agentistics_component_catalog before building any layout to get the exact IDs and default sizes.\nOrder componentIds thoughtfully: KPI cards first, then charts, then tables.\n\n---\n\n## Response format\n\n- Bold key numbers. Use tables for comparisons. Always include units ($, k tokens, %).\n- Under 200 words unless a detailed breakdown is explicitly requested.\n- Match the language the user writes in (Portuguese or English).\n- Never fabricate numbers — if a tool returns no data, say so.\n- Add a navigation button only when presenting tool data (see Rule 4). Never add buttons for conversational replies.\n\nAvailable routes: / (home), /projects, /costs, /tools, /custom\n\nFilter query params (append to route when result is project-specific):\n- ?projects=PATH — filter by one project path (exact value from agentistics_projects)\n- ?projects=PATH1|PATH2 — filter by multiple projects (pipe-separated)\n",
+      "text:.agentistics"
+    ],
+    "server/server/checkin.ts": [
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/claude-usage.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/cli-backup.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/cli-events.ts": [
+      "text:Usage:\n  agentop events watch   [--task <name>] [--session <id|label>] [--on <states>]\n                         [--notify <claude-session>] [--desktop] [--note <text>] [--json]\n  agentop events unwatch <id> | --all\n  agentop events status  [--json]\n  agentop events tail    [-n <count>] [--since <offset:seq>] [--task <name>] [--on <states>]\n                         [--follow] [--json]\n  agentop events run     [--once]\n  agentop events test    [--notify <claude-session>] [--desktop]\n\nKnow what your sessions are doing without watching them.\n\n  A transition — a session starting to wait, blocking on a permission prompt, or exiting — is\n  written to an append-only inbox (~/.agentistics/events.jsonl) and, if something subscribed,\n  delivered to a Claude Code session over its own messaging socket and/or to your desktop.\n\n  watch    register a subscription. It is a FILE, not a process: whichever producer is up\n           delivers it, so it survives a reboot and does not need you to keep a terminal open.\n  tail     read the inbox. --since takes the cursor --json prints, so a session that was not\n           running reads exactly what it missed.\n  status   who is producing, what is subscribed, which desktop channel this machine has.\n  run      run the producer in the foreground (when you do not run `agentop server`).\n  test     deliver a probe through the real channels, so a broken one is found before it matters.\n\nStates for --on: working, waiting, waiting-approval, exited, turn-end\n                 (default: waiting, waiting-approval, exited)\n\nTwo sources feed the inbox. agentop's own five-second monitor reads the SCREEN, so it works for\nevery harness it manages; a Claude Code `Stop` hook (`agentop hooks install`) reports the end of\na Claude turn exactly and instantly. The same turn seen by both is written once.\n\nEvents report facts. Nothing in this channel answers a permission prompt, and a session blocked on\none is reported as waiting on a person."
+    ],
+    "server/server/cli-experimental.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/cli-run.ts": [
+      "ident:AGENTISTICS_DIR",
+      "ident:AGENTISTICS_DIR",
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics",
+      "text:.agentistics",
+      "text:.agentistics",
+      "text:.agentistics",
+      "text:AGENTISTICS_DELIVERIES_FILE",
+      "text:AGENTISTICS_TASKS_FILE",
+      "text:overwritten by buildThrowawayEnv to <home>/.agentistics"
+    ],
+    "server/server/cli-start.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "text:.agentistics"
+    ],
+    "server/server/cli-uninstall.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/cli-vault.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR",
+      "text:Added. A container mounting ~/.agentistics opens this vault with `agentop vault unlock`.\n",
+      "text:Adicionado. Um contêiner que monta ~/.agentistics abre este cofre com `agentop vault unlock`.\n",
+      "text:As chaves de provedor (~/.agentistics/provider-keys) pertencem ao motor e não são tocadas aqui; as seladas com este cofre não abrem mais — cadastre-as de novo com `agentop provider key set <provider>`. As seladas à máquina (provider-keys/machine) não dependem deste cofre.\n",
+      "text:Provider keys (~/.agentistics/provider-keys) belong to the engine and are not touched here; the ones sealed with this vault no longer open — re-enter them with `agentop provider key set <provider>`. Keys sealed to the machine (provider-keys/machine) do not depend on this vault.\n"
+    ],
+    "server/server/config.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DIR",
+      "ident:AGENTISTICS_TASKS_FILE",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR",
+      "ident:TASKS_FILE",
+      "text:.agentistics",
+      "text:tasks.json"
+    ],
+    "server/server/data-dir.ts": [
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics",
+      "text:.agentistics"
+    ],
+    "server/server/data.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/delivery/activation.ts": [
+      "ident:AGENTISTICS_DIR",
+      "ident:defaultGuaranteesPath",
+      "ident:defaultGuaranteesPath",
+      "ident:defaultGuardLockPaths",
+      "ident:defaultGuardLockPaths",
+      "text:.agentistics",
+      "text:guarantees.json",
+      "text:guards.json"
+    ],
+    "server/server/delivery/evidence-delete.ts": [
+      "ident:defaultDeliveriesPath",
+      "ident:defaultDeliveriesPath",
+      "ident:defaultGuardLockPaths",
+      "ident:defaultGuardLockPaths",
+      "ident:defaultGuardsPath",
+      "ident:defaultGuardsPath"
+    ],
+    "server/server/delivery/gates.ts": [
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/delivery/guard-host.ts": [
+      "ident:AGENTISTICS_DELIVERIES_FILE",
+      "ident:AGENTISTICS_TASKS_FILE",
+      "ident:defaultGuardLockPaths",
+      "ident:defaultGuardLockPaths",
+      "ident:guardPathsOf",
+      "text:deliveries.json",
+      "text:guarantees.json",
+      "text:guards.json",
+      "text:tasks.json"
+    ],
+    "server/server/delivery/guard-integrity.ts": [
+      "text:guarantees.json",
+      "text:guards.json"
+    ],
+    "server/server/delivery/guard-locks.ts": [
+      "ident:AGENTISTICS_DELIVERIES_FILE",
+      "ident:AGENTISTICS_DIR",
+      "ident:AGENTISTICS_TASKS_FILE",
+      "ident:defaultGuardLockPaths",
+      "ident:defaultGuardLockPaths",
+      "text:.agentistics",
+      "text:deliveries.json",
+      "text:guards.json",
+      "text:tasks.json"
+    ],
+    "server/server/delivery/guards-lock-order.worker.ts": [
+      "text:deliveries.json",
+      "text:guards.json",
+      "text:tasks.json"
+    ],
+    "server/server/delivery/guards-store.ts": [
+      "ident:AGENTISTICS_DIR",
+      "ident:defaultGuardsPath",
+      "ident:defaultGuardsPath",
+      "ident:defaultGuardsPath",
+      "text:.agentistics",
+      "text:guards.json"
+    ],
+    "server/server/delivery/host.ts": [
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics"
+    ],
+    "server/server/delivery/integrity-status.ts": [
+      "ident:defaultGuardLockPaths",
+      "ident:defaultGuardLockPaths",
+      "text:guarantees.json",
+      "text:guards.json"
+    ],
+    "server/server/delivery/service.ts": [
+      "ident:defaultGuardsPath",
+      "ident:defaultGuardsPath",
+      "ident:defaultGuardsPath",
+      "ident:guardPathsOf",
+      "ident:guardPathsOf",
+      "ident:guardPathsOf",
+      "ident:guardPathsOf"
+    ],
+    "server/server/delivery/store.ts": [
+      "ident:AGENTISTICS_DELIVERIES_FILE",
+      "ident:AGENTISTICS_DELIVERIES_FILE",
+      "ident:AGENTISTICS_DIR",
+      "ident:defaultDeliveriesPath",
+      "ident:defaultDeliveriesPath",
+      "ident:guardPathsOf",
+      "ident:guardPathsOf",
+      "text:.agentistics",
+      "text:deliveries.json"
+    ],
+    "server/server/engine/load.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/events/event-store.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/events/mobile-push.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/events/notifier.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/events/producer-status.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/events/subscription-store.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/experimental-boot.ts": [
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics"
+    ],
+    "server/server/flows/ambiente-host.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "text:.agentistics"
+    ],
+    "server/server/flows/host-ops.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/flows/owner-ledger.ts": [
+      "ident:AGENTISTICS_DIR",
+      "text:.agentistics"
+    ],
+    "server/server/flows/perf-watch.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/harness-accounts.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/health.ts": [
+      "ident:defaultGuardLockPaths",
+      "ident:defaultGuardLockPaths",
+      "text:guarantees.json",
+      "text:guards.json"
+    ],
+    "server/server/idle-servers.ts": [
+      "text:/.agentistics",
+      "text:AGENTISTICS_DIR"
+    ],
+    "server/server/index.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE"
+    ],
+    "server/server/live-sessions.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DIR",
+      "ident:AGENTISTICS_DIR",
+      "ident:AGENTISTICS_DIR"
+    ],
+    "server/server/mcp-registration.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/notifications-store.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/plan-history.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/plan-limits.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/preferences.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/projections/store.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/resources/heavy-io.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/resources/helpers.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/server-ownership-io.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/server-ports.ts": [
+      "text:.agentistics"
+    ],
+    "server/server/service-manager.ts": [
+      "text:com.agentistics."
+    ],
+    "server/server/sessions/attachment-web.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/auto-switch-io.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/backend-tmux.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/cli-session.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE"
+    ],
+    "server/server/sessions/composer-message.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/conversation-resume-lock.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/disk-index.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/fleet-web.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/handoff-usage.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/harness-install.ts": [
+      "text:.agentistics"
+    ],
+    "server/server/sessions/login-env.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/native-fleet.ts": [
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/noq-policy.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "text:.agentistics",
+      "text:Autonomous mode: never touch ~/.agentistics directly; go through agentop or the API."
+    ],
+    "server/server/sessions/noq-runner.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/pending-prompts.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/process-conversation.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/review-clean.ts": [
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE",
+      "text:.agentistics-review-clean-"
+    ],
+    "server/server/sessions/session-identity.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/session-roles.ts": [
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/shell-store.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/spawn-context.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/spawn-spec.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/status-stage-sync.ts": [
+      "ident:mirrorPathFor",
+      "ident:mirrorPathFor",
+      "ident:mirrorPathFor",
+      "text:deliveries.json",
+      "text:guarantees.json",
+      "text:guards.json"
+    ],
+    "server/server/sessions/structured-durable.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/task-files.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/task-forecast-cache.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/sessions/task-source.ts": [
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE"
+    ],
+    "server/server/sessions/task-store.ts": [
+      "ident:guardPathsOf",
+      "ident:guardPathsOf",
+      "text:guarantees.json"
+    ],
+    "server/server/sessions/task-web.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DIR",
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE",
+      "ident:TASKS_FILE",
+      "ident:defaultDeliveriesPath",
+      "ident:defaultDeliveriesPath",
+      "text:.agentistics"
+    ],
+    "server/server/sessions/tmux-socket.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "text:.agentistics"
+    ],
+    "server/server/tags-local-store.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/telemetry.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "text:https://telemetry.agentistics.com.br/v1/ping"
+    ],
+    "server/server/uninstall-plan.ts": [
+      "text:agentop uninstall — remove agentop from this machine\n\nUsage:\n  agentop uninstall [--yes] [--keep-data]\n  agentop uninstall --help\n\nStops and disables the autostart service, removes the update-check hook from your shell rc, on WSL\nremoves the Windows logon task / Startup script, and removes the agentop binary.\n\nYour data in ~/.agentistics is asked about SEPARATELY (default: keep). --yes skips the first\nconfirmation only; it never deletes your data. --keep-data does not even ask.\n"
+    ],
+    "server/server/upgrade.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "text:com.agentistics.agentop-server"
+    ],
+    "server/server/vault/boot.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/vault/gate.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR",
+      "text:~/.agentistics/vault/totp-seed.sealed"
+    ],
+    "server/server/vault/inventory.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR"
+    ],
+    "server/server/vault/ops.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR",
+      "ident:DEFAULT_AGENTISTICS_DATA_DIR",
+      "text:~/.agentistics/github-backup.sealed"
+    ],
+    "server/server/vault/service.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "text:.agentistics/github-backup.",
+      "text:.agentistics/provider-keys"
+    ],
+    "server/server/version.ts": [
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR"
+    ],
+    "tui/src/control/content.ts": [
+      "text:Instalar sozinho é opt-in: defina AGENTISTICS_AUTO_UPGRADE=1 para uma release crítica se instalar em background, com log em ~/.agentistics/auto-upgrade.log.",
+      "text:Silencioso quando está atualizado. Responde a partir de ~/.agentistics/version-cache.json e atualiza esse cache num processo desanexado, então nunca atrasa o prompt do shell.",
+      "text:Silent when up to date. Answers from ~/.agentistics/version-cache.json and refreshes it in a detached process, so it never delays a shell prompt.",
+      "text:Sobe desanexado em background, com log em ~/.agentistics — só no server",
+      "text:Start detached in the background, logs to ~/.agentistics — server only",
+      "text:Unattended install is opt-in: set AGENTISTICS_AUTO_UPGRADE=1 to let a critical release install itself in the background, logged to ~/.agentistics/auto-upgrade.log.",
+      "text:o mesmo, desanexado — log em ~/.agentistics",
+      "text:same, detached — logs to ~/.agentistics"
+    ],
+    "tui/src/control/i18n.ts": [
+      "text:Transcripts already mirrored into ~/.agentistics/archive.",
+      "text:Transcripts que já foram espelhados em ~/.agentistics/archive."
+    ],
+    "vault/src/sentences.ts": [
+      "text:). Os segredos em ~/.agentistics não podem mais ser lidos nesta máquina. Nada foi apagado. Cadastre-os de novo com: ",
+      "text:). The secrets in ~/.agentistics cannot be read on this machine any more. Nothing was deleted. Re-enter them with: "
+    ],
+    "web/e2e/vault-expiry-nay.ts": [
+      "text:/fixture/.agentistics/nay-chat"
+    ],
+    "web/preview/billing/shoot.ts": [
+      "text:/.agentistics/leader/shots/billing-simple"
+    ],
+    "web/preview/sessions-list/shoot.ts": [
+      "text:/.agentistics/leader/shots/sessions-list-ad"
+    ],
+    "web/src/App.tsx": [
+      "text:~/.agentistics/sessions/<harness>/<id>.json (arquivo local — revive sessões que o Claude já apagou).",
+      "text:~/.agentistics/sessions/<harness>/<id>.json (local store — revives sessions Claude already deleted)."
+    ],
+    "web/src/components/ArchiveConsentModal.tsx": [
+      "text:Agentistics can preserve your history locally in ~/.agentistics — across Claude Code, Codex, Gemini, and Copilot. The data never leaves your machine.",
+      "text:O Agentistics pode preservar seu histórico localmente em ~/.agentistics — para Claude Code, Codex, Gemini e Copilot. Os dados nunca saem da sua máquina."
+    ],
+    "web/src/components/RecentSessions.tsx": [
+      "text:.agentistics/nay-chat"
+    ],
+    "web/src/hooks/useChatHarnesses.ts": [
+      "text:A conexão com o agentistics caiu durante a instalação, que pode ter continuado. Feche, aguarde um pouco e confira se o assistente aparece; se não, tente de novo (detalhes em ~/.agentistics/harness-install.log).",
+      "text:The connection to agentistics dropped during the install, which may have kept going. Close, wait a moment and check whether the assistant shows up; if not, try again (details in ~/.agentistics/harness-install.log)."
+    ],
+    "web/src/lib/benchmarkFormat.ts": [
+      "text:stored tokens per session (~/.agentistics/sessions)",
+      "text:tokens guardados por sessão (~/.agentistics/sessions)"
+    ],
+    "web/src/lib/harness.ts": [
+      "text:~/.agentistics/journal (the canonical event journal)",
+      "text:~/.agentistics/runtime/sessions.db (the session store)"
+    ],
+    "web/src/lib/messageAttachments.ts": [
+      "text:/.agentistics/attachments/"
+    ],
+    "web/src/lib/vaultText.ts": [
+      "text:A copy of ~/.agentistics read somewhere else: a backup file, a synced folder that swept your home directory, a pendrive, a disk image, a laptop’s disk read from another system, a support bundle, a file pasted into a shared transcript. Each is a blob that opens only on this machine, under this account.",
+      "text:Uma cópia de ~/.agentistics lida em outro lugar: um arquivo de backup, uma pasta sincronizada que levou seu diretório pessoal, um pendrive, uma imagem de disco, o disco de um notebook lido em outro sistema, um pacote de suporte, um arquivo colado em uma conversa compartilhada. Cada uma é um bloco que só abre nesta máquina, nesta conta."
+    ],
+    "web/src/pages/settings/BackupSettings.tsx": [
+      "text:Desmarcado, você cola um token — ele substitui a credencial guardada hoje. Fica em ~/.agentistics/github-backup.json com permissão 0600, nunca é devolvido por uma rota e está na lista de exclusão do próprio backup.",
+      "text:Desmarcado, você cola um token. Ele fica em ~/.agentistics/github-backup.json com permissão 0600, nunca é devolvido por uma rota e está na lista de exclusão do próprio backup. Um token fine-grained alcança só este repositório — mais estreito que o do gh, que carrega todos os escopos do seu login.",
+      "text:Transcripts already mirrored into ~/.agentistics/archive.",
+      "text:Transcripts que já foram espelhados em ~/.agentistics/archive.",
+      "text:Unchecked, you paste a token — it replaces the credential stored today. It lives in ~/.agentistics/github-backup.json at mode 0600, is never returned by a route, and is on the backup’s own exclusion list.",
+      "text:Unchecked, you paste a token. It lives in ~/.agentistics/github-backup.json at mode 0600, is never returned by a route, and is on the backup’s own exclusion list. A fine-grained token reaches only this repository — narrower than gh’s, which carries every scope your login has."
+    ],
+    "web/src/pages/settings/SessionsSettings.tsx": [
+      "text:Claude Code deletes transcripts older than 30 days on every startup. Choose how Agentistics preserves your history (everything stays local in ~/.agentistics).",
+      "text:O Claude Code apaga transcripts com mais de 30 dias a cada inicialização. Escolha como o Agentistics preserva seu histórico (tudo fica local em ~/.agentistics)."
+    ],
+    "web/src/whatsNew/releases.ts": [
+      "text:Flows (experimental): work folders of sessions that are already published and have no changes are removed on their own; files such as .env or backups keep the folder, and an .agentistics-keep file protects any folder.",
+      "text:Fluxos (experimental): pastas de trabalho de sessões já publicadas e sem mudanças são apagadas sozinhas; arquivos como .env ou backups fazem a pasta ficar, e um arquivo .agentistics-keep protege qualquer pasta."
+    ]
+  }
+}
