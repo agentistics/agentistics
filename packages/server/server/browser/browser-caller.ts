@@ -200,9 +200,9 @@ export function personalCallerRefusal(v: CallerVerdict, lang: 'en' | 'pt' = 'en'
  * proof — it would raise a Hello / Touch ID dialog on the person's desk. Returns the 403 to send (body
  * cancelled, so nothing is read), or `null` to go on to the vault (the proof still decides for everyone else).
  */
-export async function browserUnlockEarlyRefusal(req: { body?: { cancel(): Promise<unknown> } | null }, who: CallerVerdict, headers: Record<string, string>): Promise<Response | null> {
+export async function browserUnlockEarlyRefusal(req: { body?: { cancel(): Promise<unknown> } | null }, who: CallerVerdict, headers: Record<string, string>, act: 'padlock' | 'profiles' = 'padlock'): Promise<Response | null> {
   if (who.kind !== 'session') return null
   await req.body?.cancel().catch(() => {})
-  const r = callerRefusal(who)!
+  const r = callerRefusal(who, act)!
   return new Response(JSON.stringify({ ok: false, code: r.error, sentence: r.sentence }), { status: 403, headers: { ...headers, 'Cache-Control': 'no-store' } })
 }

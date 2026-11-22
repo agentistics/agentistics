@@ -178,6 +178,14 @@ describe('S4c — the early door on POST /api/vault/browser-unlock', () => {
     expect(r!.headers.get('Cache-Control')).toBe('no-store')
     expect(cancelled).toBe(1)
   })
+  test('the profiles door names the profiles, not the padlock', async () => {
+    const r = await browserUnlockEarlyRefusal({ body: null }, { kind: 'session', pid: 7, managedId: null }, H, 'profiles')
+    const body = await r!.json() as { sentence: string }
+    expect(body.sentence).toContain('delete browser profiles')
+    expect(body.sentence).not.toContain('padlock')
+    const src = await Bun.file(new URL('../index.ts', import.meta.url)).text()
+    expect(src).toContain("url.pathname === '/api/vault/browser-profiles' ? 'profiles' : 'padlock'")
+  })
   test('the person and an unidentified caller go on to the vault (the proof decides)', async () => {
     const req = { body: null }
     expect(await browserUnlockEarlyRefusal(req, { kind: 'person', via: 'process', pid: 1 }, H)).toBeNull()

@@ -1304,7 +1304,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           for (const r of processSessionHub()?.last()?.sessions ?? []) if (typeof r.pid === 'number') sessionPids.add(r.pid)
           const ip = server.requestIP(req)
           const who = identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
-          const early = await browserUnlockEarlyRefusal(req, who, json)
+          const early = await browserUnlockEarlyRefusal(req, who, json, url.pathname === '/api/vault/browser-profiles' ? 'profiles' : 'padlock')
           if (early) return early
         }
         // SECRETS.4 §2.4: a 'read' grant is bound to THIS session (the session cookie; a local profile
