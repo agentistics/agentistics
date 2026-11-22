@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hostAddresses, probeNetns } from './run-netns'
@@ -214,5 +214,63 @@ describe.skipIf(skipReason !== null)(`RUN.ISOLAMENTO-REDE: a real network block$
       const stop = Bun.spawnSync([process.execPath, CLI, 'run', 'stop', name], { env: { ...process.env, AGENTISTICS_FLOWS: '', AGENTISTICS_HEAVY_JOB: '1' } }); void stop
       if (runPid > 1) try { process.kill(runPid, 'SIGKILL') } catch {}
     }
+  }, 60_000)
+
+  // r4 N2: the socket is RECREATED at the same path after the launch (an agent restart). The old file-level cover is undone by the unlink; a hidden DIRECTORY is not.
+  const recreated = async (extra: string[]): Promise<string> => {
+    const dir = mkdtempSync('/tmp/ssh-XXXXXXr4')
+    const sock = join(dir, `agent.${process.pid}`)
+    const flag = join(tmpdir(), `r4flag-${process.pid}-${extra.length}`)
+    const listen = () => Bun.listen({ unix: sock, socket: { open() {}, data() {}, close() {}, error() {} } })
+    let srv = listen()
+    const script = `echo before; ${connectJs(sock)}; i=0; while [ ! -e '${flag}' ] && [ $i -lt 100 ]; do i=$((i+1)); sleep 0.1; done; echo after; ${connectJs(sock)}`
+    const run = inRun(script, extra)
+    try {
+      await Bun.sleep(3500)
+      srv.stop(true); rmSync(sock, { force: true }); srv = listen()
+      writeFileSync(flag, '1')
+      return await run
+    } finally { srv.stop(true); rmSync(dir, { recursive: true, force: true }); rmSync(flag, { force: true }) }
+  }
+  test('N2: an ssh-agent socket recreated AFTER the launch stays unreachable (the directory is hidden, not the file); control: without the namespace it connects', async () => {
+    expect(await recreated(['--no-netns'])).toMatch(/after\nCONNECTED/)
+    const out = await recreated([])
+    expect(out).toMatch(/before\nREFUSED/); expect(out).toMatch(/after\nREFUSED/); expect(out).not.toContain('CONNECTED')
+  }, 120_000)
+  test('N2 (mutant guard): an ssh-agent under /tmp/ssh-* is hidden even though SSH_AUTH_SOCK points elsewhere', async () => {
+    const dir = mkdtempSync('/tmp/ssh-XXXXXXr4b')
+    const sock = join(dir, `agent.${process.pid}`)
+    const srv = Bun.listen({ unix: sock, socket: { open() {}, data() {}, close() {}, error() {} } })
+    try {
+      expect(await inRun(connectJs(sock), ['--no-netns'], { SSH_AUTH_SOCK: '' })).toContain('CONNECTED')
+      const out = await inRun(connectJs(sock), [], { SSH_AUTH_SOCK: '' })
+      expect(out).toContain('REFUSED'); expect(out).not.toContain('CONNECTED')
+    } finally { srv.stop(true); rmSync(dir, { recursive: true, force: true }) }
+  }, 120_000)
+
+  // r4 N1: the WSL interop channel runs a Windows executable OUTSIDE every namespace (curl.exe reached the real server, wsl.exe reached the host's Linux root)
+  const interop = existsSync('/proc/sys/fs/binfmt_misc/WSLInterop') || existsSync('/proc/sys/fs/binfmt_misc/WSLInterop-late')
+  test.skipIf(!interop)('N1: cmd.exe, curl.exe and wsl.exe cannot be run from inside; control: they run without the namespace', async () => {
+    const wsl = Bun.spawnSync(['sh', '-c', 'command -v wsl.exe'], { stdout: 'pipe' }).stdout.toString().trim()
+    const script = `echo WSL_INTEROP=[$WSL_INTEROP]; for e in /mnt/c/Windows/System32/cmd.exe /mnt/c/Windows/System32/curl.exe ${wsl || '/mnt/c/Windows/System32/wsl.exe'}; do case $e in *wsl.exe) a="-e echo ESCAPED";; *cmd.exe) a="/c echo ESCAPED";; *) a="--version";; esac; out=$(timeout 8 $e $a 2>/dev/null); echo "$(basename $e) rc=$? out=[$(echo $out | head -c 40)]"; done`
+    const control = await inRun(script, ['--no-netns'])
+    expect(control).toMatch(/cmd\.exe rc=0 out=\[ESCAPED/)
+    const out = await inRun(script)
+    expect(out).toContain('WSL_INTEROP=[]')
+    expect(out).not.toContain('ESCAPED')
+    expect(out).not.toMatch(/(cmd|curl|wsl)\.exe rc=0/)
+  }, 120_000)
+
+  // r4 N4: the slirp API socket (add_hostfwd 0.0.0.0 would publish a port on the LAN) is not visible from inside
+  test('N4: no slirp control socket is visible inside the run, from /tmp or the runtime dir', async () => {
+    const out = await inRun(`n=0; for d in /tmp "\${XDG_RUNTIME_DIR:-/nonexistent}" /run/user/*; do n=$((n + $(find "$d" -maxdepth 3 -path '*agr-ctl-*' -name 'slirp.sock' 2>/dev/null | wc -l))); done; echo slirp-sockets=$n; ls -d /run/user/*/agr-ctl-* "\${XDG_RUNTIME_DIR:-/nonexistent}"/agr-ctl-* 2>/dev/null | wc -l`)
+    expect(out).toMatch(/^slirp-sockets=0$/m)
+    expect(out).toMatch(/^0$/m)
+  }, 60_000)
+
+  // r4 N3 (live): benchmark / reserved ranges are rejected on the spot, whatever exists on the host now
+  test('N3: 198.18/15 (a docker bridge in a non-private pool) and 240/4 are rejected at once', async () => {
+    const out = await inRun(`for a in 198.18.250.77 198.19.250.77 240.1.2.3; do printf '%s %s\\n' $a "$(curl -sS -m 4 -o /dev/null http://$a:48555/ >/dev/null 2>&1; echo $?)"; done`)
+    for (const a of ['198.18.250.77', '198.19.250.77', '240.1.2.3']) expect(out).toMatch(new RegExp(`^${a.replace(/\./g, '\\.')} 7$`, 'm'))
   }, 60_000)
 })

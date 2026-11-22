@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { createConnection, isIP } from 'node:net'
 import { homedir, networkInterfaces } from 'node:os'
@@ -65,14 +65,21 @@ export type NetnsHardening = {
   blind?: readonly string[]
   /** Environment variables removed before the command runs (they point at the user bus / agents that are hidden). */
   unsetEnv?: readonly string[]
+  /**
+   * /run is replaced by an EMPTY tmpfs (N1/N2): every socket the host keeps there (docker, containerd, dbus, WSL interop, the user
+   * runtime dir) is gone, and one RECREATED later by its owner cannot come back because the path does not exist in this mount
+   * namespace. Only the entries listed in `keepUnderRun` are bound back (resolver state).
+   */
+  freshRun?: boolean
+  keepUnderRun?: readonly string[]
 }
 
 /**
  * Ranges rejected as a WHOLE (not a snapshot of the addresses that exist at launch): a docker bridge, a VPN or a compose network
  * created AFTER the launch lands in one of these, and a forwarder bound there would reach the real server through the NAT.
  */
-export const BLOCKED_V4_RANGES: readonly string[] = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', '169.254.0.0/16']
-export const BLOCKED_V6_RANGES: readonly string[] = ['fc00::/7', 'fe80::/10']
+export const BLOCKED_V4_RANGES: readonly string[] = ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '169.254.0.0/16', '172.16.0.0/12', '192.0.0.0/24', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4', '240.0.0.0/4']
+export const BLOCKED_V6_RANGES: readonly string[] = ['fc00::/7', 'fe80::/10', 'ff00::/8']
 
 const v4ToInt = (a: string): number => a.split('.').reduce((n, o) => n * 256 + Number(o), 0)
 function v6ToBig(a: string): bigint {
@@ -117,7 +124,13 @@ export function netnsInnerScript(uid: number, gid: number, ports: readonly numbe
   steps.push(`nft add rule inet agrun out tcp dport '{ ${set} }' reject with tcp reset`)
   // The real store read-only FIRST (a non-recursive bind would otherwise cover the tmpfs mounted below it).
   for (const d of hardening.readOnly ?? []) steps.push(`mount --bind ${shq(d)} ${shq(d)}`, `mount -o remount,bind,ro ${shq(d)}`)
-  for (const d of hide) steps.push(`mount -t tmpfs -o mode=0700 tmpfs ${shq(d)}`)
+  if (hardening.freshRun) {
+    steps.push('T=$(mktemp -d /tmp/agr-oldrun.XXXXXX)', 'mount --rbind /run "$T"', 'mount -t tmpfs -o mode=0755 tmpfs /run')
+    for (const k of hardening.keepUnderRun ?? []) if (/^\/run\/[\w./-]+$/.test(k) && !k.includes('..')) steps.push(`mkdir -p ${shq(k)}`, `mount --rbind "$T"${shq(k.slice(4))} ${shq(k)}`)
+    steps.push('umount -l "$T"', 'rmdir "$T"')
+  }
+  // a hidden dir under /run was just emptied away with the rest of /run: recreate its mount point first
+  for (const d of hide) steps.push(...(hardening.freshRun && d.startsWith('/run/') ? [`mkdir -p ${shq(d)}`] : []), `mount -t tmpfs -o mode=0700 tmpfs ${shq(d)}`)
   for (const f of hardening.blind ?? []) steps.push(`mount --bind /dev/null ${shq(f)}`)
   const unset = (hardening.unsetEnv ?? []).filter(n => /^[A-Za-z_][A-Za-z0-9_]*$/.test(n))
   return [
@@ -184,14 +197,82 @@ export function socketCandidates(uid: number, home: string, dataDir: string, env
   return out.filter(f => { try { return statSync(f).isSocket() && !(rt && (f === rt || f.startsWith(rt + '/'))) } catch { return false } })
 }
 
+/**
+ * Directories that hold (or will hold) agent / X / WSL-interop sockets. Hidden as DIRECTORIES under an empty tmpfs, never file by file:
+ * a socket its owner recreates (an ssh-agent or gpg-agent restart) lands in a path that still resolves to the empty tmpfs.
+ * `/tmp/tmux-<uid>` is created when absent so a tmux server started later lives in a directory the run cannot see.
+ */
+export function socketDirs(uid: number, home: string, tmpRoot = '/tmp', mntRoot = '/mnt'): string[] {
+  const ls = (d: string): string[] => { try { return readdirSync(d).map(n => join(d, n)) } catch { return [] } }
+  const isDir = (d: string): boolean => { try { return statSync(d).isDirectory() } catch { return false } }
+  const out = [...ls(tmpRoot).filter(n => /\/ssh-[^/]+$/.test(n)), join(tmpRoot, '.X11-unix'), join(tmpRoot, '.ICE-unix'), join(home, '.gnupg'), join(home, '.ssh', 'agent')]
+  // Windows drives mounted by WSL: the interop executables (cmd.exe, curl.exe, wsl.exe) live under <drive>/Windows
+  for (const d of ls(mntRoot)) out.push(join(d, 'Windows'))
+  return out.filter(isDir)
+}
+
+/** Keeps resolver state visible after /run is replaced (a systemd-resolved stub, resolvconf). */
+export const RUN_KEEP: readonly string[] = ['/run/systemd/resolve', '/run/resolvconf']
+
 /** IO. Everything the inner script must cover besides the network: see NetnsHardening. Resolved to real paths, de-duplicated. */
-export function netnsHardening(realDataDir: string, uid: number, home: string = homedir(), env: Record<string, string | undefined> = process.env): { hide: string[]; hardening: NetnsHardening } {
+export function netnsHardening(realDataDir: string, uid: number, home: string = homedir(), env: Record<string, string | undefined> = process.env, extraHide: readonly string[] = [], tmpRoot = '/tmp'): { hide: string[]; hardening: NetnsHardening } {
   const real = (p: string): string => { try { return realpathSync(p) } catch { return p } }
-  const hide = [...new Set([...hiddenDirs(realDataDir, uid), ...(runtimeDirOf(uid, env) ? [runtimeDirOf(uid, env)!] : [])].map(real))]
-  const covered = (f: string): boolean => hide.some(h => f === h || f.startsWith(h + '/'))
+  const isDir = (d: string): boolean => { try { return statSync(d).isDirectory() } catch { return false } }
+  const freshRun = isDir('/run')
+  const rt = runtimeDirOf(uid, env)
+  const hide = [...new Set([...hiddenDirs(realDataDir, uid), ...(rt ? [rt] : []), ...socketDirs(uid, home, tmpRoot), ...extraHide].map(real))]
+  const covered = (f: string): boolean => hide.some(h => f === h || f.startsWith(h + '/')) || (freshRun && f.startsWith('/run/'))
   const blind = [...new Set(socketCandidates(uid, home, realDataDir, env).map(real))].filter(f => !covered(f))
   const readOnly = (() => { try { return statSync(realDataDir).isDirectory() ? [real(realDataDir)] : [] } catch { return [] } })()
-  return { hide, hardening: { readOnly, blind, unsetEnv: ['DBUS_SESSION_BUS_ADDRESS', 'SSH_AUTH_SOCK', 'GPG_AGENT_INFO', 'DOCKER_HOST'] } }
+  return { hide, hardening: { readOnly, blind, freshRun, keepUnderRun: RUN_KEEP.filter(isDir), unsetEnv: ['DBUS_SESSION_BUS_ADDRESS', 'SSH_AUTH_SOCK', 'GPG_AGENT_INFO', 'DOCKER_HOST', 'WSL_INTEROP', 'WSL2_GUI_APPS_ENABLED'] } }
+}
+
+/**
+ * N4: a directory for the slirp API socket the run cannot reach. It lives inside the user runtime dir when there is one (that dir is
+ * replaced by an empty tmpfs inside the run, so this run AND every sibling run's control socket are invisible, however late they were
+ * created); otherwise in /tmp, where the caller hides it explicitly. Returns where it is and whether the runtime dir covers it.
+ */
+export function createCtlDir(uid: number, env: Record<string, string | undefined> = process.env): { dir: string; covered: boolean } {
+  const rt = runtimeDirOf(uid, env)
+  if (rt) { try { return { dir: mkdtempSync(join(rt, 'agr-ctl-')), covered: true } } catch {} }
+  return { dir: mkdtempSync('/tmp/agr-ctl-'), covered: false }
+}
+export function removeCtlDir(dir: string | undefined): void {
+  if (!dir || dir.includes('..') || !/\/agr-ctl-[A-Za-z0-9]+$/.test(dir)) return
+  try { rmSync(dir, { recursive: true, force: true }) } catch {}
+}
+
+/**
+ * N3: a host address that appears AFTER launch and lies outside every blocked range (a public address a VPN or a bridge adds). The
+ * launcher polls the host's addresses and, for each new one, adds the same reject rules inside the run's network namespace
+ * (`nsenter -U -n`: the launcher owns the outer user namespace, the run's command does not). PURE: the nft rules for `addrs`.
+ */
+export function hostBlockRules(addrs: readonly string[]): string[] {
+  const rules: string[] = []
+  for (const [fam, ok] of [['ip', 4], ['ip6', 6]] as const) {
+    const l = addrs.filter(a => isIP(a) === ok)
+    if (!l.length) continue
+    const set = `{ ${l.join(', ')} }`
+    rules.push(`add rule inet agrun out ${fam} daddr ${set} ct state new meta l4proto tcp reject with tcp reset`,
+      `add rule inet agrun out ${fam} daddr ${set} ct state new meta l4proto udp udp dport != 53 reject`,
+      `add rule inet agrun out ${fam} daddr ${set} ct state new meta l4proto != { tcp, udp } drop`)
+  }
+  return rules
+}
+/** PURE. Which of `now` still need a rule: not loopback, not in a blocked range, not already ruled. */
+export function newHostAddrs(now: readonly string[], known: ReadonlySet<string>): string[] {
+  return [...new Set(now)].filter(a => isIP(a) && !known.has(a) && a !== '127.0.0.1' && a !== '::1' && !inRanges(a, BLOCKED_V4_RANGES) && !inRanges(a, BLOCKED_V6_RANGES))
+}
+/** IO. One poll: rule every new host address in the namespace of `pid`. `run` and `list` are seams. Returns the addresses ruled. */
+export function pollHostAddresses(pid: number, known: Set<string>, list: () => string[] = hostAddresses,
+  run: (argv: string[]) => boolean = argv => spawnSync(argv[0]!, argv.slice(1), { stdio: 'ignore', timeout: 3000 }).status === 0): string[] {
+  const fresh = newHostAddrs(list(), known)
+  const done: string[] = []
+  for (const a of fresh) {
+    const ok = hostBlockRules([a]).every(r => run(['nsenter', '-U', '--preserve-credentials', '-n', '-t', String(pid), '--', 'nft', ...r.split(' ').filter(Boolean)]))
+    if (ok) { known.add(a); done.push(a) }
+  }
+  return done
 }
 
 /**

@@ -7,7 +7,7 @@ import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
 import { CURRENT_VERSION } from './version'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
-import { blockedPorts, netnsHardening, hostAddresses, forwardPorts, netnsArgv, netnsNotice, probeNetns, startSlirp, stopSlirp } from './run-netns'
+import { blockedPorts, createCtlDir, netnsHardening, hostAddresses, forwardPorts, netnsArgv, netnsNotice, pollHostAddresses, probeNetns, removeCtlDir, startSlirp, stopSlirp } from './run-netns'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
 export { SEED_ALLOW }
@@ -32,6 +32,8 @@ export type ThrowawayState = {
   pid?: number
   /** slirp4netns serving this run's network namespace (see run-netns.ts); signalled only while it still is a slirp4netns. */
   slirpPid?: number
+  /** Directory holding the slirp API socket (N4): hidden from the run; removed with it. */
+  ctl?: string
   unit?: string
   startedAt: string
   command: string[]
@@ -267,14 +269,18 @@ function usage(): string {
        --serve with no command runs the installed agentop; use --cwd with an explicit checkout command to serve that checkout.
        Env: AGENTISTICS_*/AGENTOP_* switches (and leaked GIT_* vars) are dropped; --keep-env NAME re-allows one (never a store/config path).
        Network: a run gets its own user/net/mount/pid namespaces (own loopback; internet via slirp4netns). New connections to every private /
-       link-local range (10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16, fc00::/7, fe80::/10), to every address of this host and to its
-       gateways are rejected whatever the port, so the real server (:47291/:47292) is not reachable directly, through a local proxy, or through
-       an address created after the run started. Hidden inside: the real server's unix sockets and tmux dir, the whole user runtime dir
-       (user D-Bus / systemd --user, cc-socks, gpg), the system bus, the Docker/containerd/podman sockets, ssh/gpg agent sockets; the real
-       data dir (~/.agentistics) is read-only; its pid is not visible.
-       Not covered: another machine that proxies to the real server, a root-owned process outside the run, ~/.claude and other real files on
-       disk (--rm does not isolate the disk), and group-granted access that does not go through a socket (supplementary groups cannot be
-       dropped in an unprivileged namespace). --serve ports are forwarded to the host's 127.0.0.1. Where namespaces are unavailable it falls
+       link-local / reserved range (10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16, 198.18/15, 240/4, fc00::/7, fe80::/10, ...), to every
+       address of this host and to its gateways are rejected whatever the port, so the real server (:47291/:47292) is not reachable directly,
+       through a local proxy, or through an address created after the run started (a public one is ruled within ~1 s by the launcher).
+       Hidden inside: all of /run (the Docker/containerd/podman/system-bus sockets, the WSL interop channel, the user runtime dir with
+       D-Bus / systemd --user / cc-socks / gpg: a socket recreated later cannot come back), the Windows directories of /mnt/<drive>, the
+       real server's unix sockets and tmux dir, /tmp/ssh-* /.X11-unix, ~/.gnupg and ~/.ssh/agent; WSL .exe programs cannot be started;
+       the real data dir (~/.agentistics) is read-only; its pid is not visible.
+       Not covered: another machine that proxies to the real server, a root-owned process outside the run, a socket created later in a NEW
+       directory under /tmp, ~/.claude, ~/.claude.json, ~/.bashrc, ~/.local/bin/agentop, ~/.config/systemd/user and other real files on disk
+       (--rm does not isolate the disk: writing them can run code outside the run at the next trigger), and group-granted access that does
+       not go through a socket (supplementary groups cannot be dropped in an unprivileged namespace). Without a systemd scope the 2G memory
+       cap is off (said at launch). --serve ports are forwarded to the host's 127.0.0.1. Where namespaces are unavailable it falls
        back to the CLI-only guard and says so; --no-netns asks for that.
        agentop run ls
        agentop run stop <name>`
@@ -410,6 +416,7 @@ export function pruneStaleRuns(): Set<number> {
     stopSlirp(state.slirpPid)
     rmSync(state.home, { recursive: true, force: true })
     removeRunTmp(state.tmp)
+    removeCtlDir(state.ctl)
     releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)
     rmSync(statePath(state.name), { force: true })
   }
@@ -520,6 +527,7 @@ export async function stopState(state: ThrowawayState): Promise<void> {
   if (process.platform === 'linux') await reapRunOwned(state.home)
   rmSync(state.home, { recursive: true, force: true })
   removeRunTmp(state.tmp)
+  removeCtlDir(state.ctl)
   stopSlirp(state.slirpPid)
   releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)
   rmSync(statePath(state.name), { force: true })
@@ -732,15 +740,22 @@ async function startRun(options: RunOptions): Promise<number> {
   if (notice) console.error(notice)
   const tmp = createRunTmp()
   state.tmp = tmp
+  // N4: the slirp API socket (add_hostfwd on 0.0.0.0, ...) lives where the run cannot see it: inside the runtime dir the run replaces with an empty tmpfs.
+  const ctl = netns.mode === 'netns' ? createCtlDir(process.getuid!()) : null
+  if (ctl) state.ctl = ctl.dir
   let child: ReturnType<typeof spawn>
   let systemd = false
+  let memoryCapOff: string | null = null
   let keptEnv: string[] = []
   const unit = `agentistics-throwaway-${options.name}.scope`
   try {
     const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0, keep: options.keepEnv, serve: options.serve })
     keptEnv = keptEnvOf(env, process.env, options.keepEnv)
-    systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await systemdScopeWorks()
-    const hard = netns.mode === 'netns' ? netnsHardening(realDataDir(), process.getuid!()) : null
+    const scope = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR ? await systemdScopeWorks() : 'absent'
+    systemd = scope === 'ok'
+    const scopeLine = scopeNotice(scope)
+    if (scopeLine) { console.error(scopeLine); memoryCapOff = scopeLine }
+    const hard = netns.mode === 'netns' ? netnsHardening(realDataDir(), process.getuid!(), undefined, undefined, ctl && !ctl.covered ? [ctl.dir] : []) : null
     const runArgv = hard ? netnsArgv(argv, process.getuid!(), process.getgid!(), blockedPorts(), hostAddresses(), hard.hide, hard.hardening) : argv
     const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...runArgv] : runArgv
     child = spawn(systemd ? 'systemd-run' : runArgv[0]!, systemd ? childArgs : runArgv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
@@ -749,6 +764,7 @@ async function startRun(options: RunOptions): Promise<number> {
     writeFileSync(statePath(options.name), JSON.stringify(state, null, 2), { mode: 0o600 })
   } catch (error) {
     removeRunTmp(tmp)
+    removeCtlDir(ctl?.dir)
     throw error
   }
   console.log(`throwaway ${options.name}`)
@@ -756,15 +772,21 @@ async function startRun(options: RunOptions): Promise<number> {
   console.log(`  web:  http://localhost:${webPort}`)
   console.log(`  home: ${home}`)
   console.log(`  stop: agentop run stop ${options.name}`)
+  if (memoryCapOff) console.log(`  memory cap: OFF (no systemd scope; the ${options.ttl} TTL timer still applies)`)
   if (serveBuildNoticeResult) console.log(serveBuildNoticeResult.summary)
   if (keptEnv.length) console.log(`  kept env: ${keptEnv.join(', ')}`)
 
   // Started WITHOUT awaiting: a command that dies at once must still reach `childExit` below; cleanup waits for this task so no slirp is orphaned.
   const slirpTask: Promise<void> = netns.mode !== 'netns' ? Promise.resolve() : (async () => {
-    const slirp = await startSlirp(child.pid!, join(tmp, 'slirp.sock'), () => child.exitCode === null && child.signalCode === null)
+    const slirp = await startSlirp(child.pid!, join(ctl!.dir, 'slirp.sock'), () => child.exitCode === null && child.signalCode === null)
     if ('error' in slirp) { if (child.exitCode === null && child.signalCode === null) console.error(`agentop run: the run has its own loopback but no outside network (${slirp.error})`) }
     else {
       state.slirpPid = slirp.pid
+      // N3: a host address created after launch (outside every blocked range) gets its reject rules within one poll.
+      const known = new Set(hostAddresses())
+      const watch = setInterval(() => { if (child.exitCode !== null || child.signalCode !== null) return clearInterval(watch); pollHostAddresses(child.pid!, known) }, 1000)
+      watch.unref?.()
+      child.once('exit', () => clearInterval(watch))
       writeFileSync(statePath(options.name), JSON.stringify(state, null, 2), { mode: 0o600 })
       if (options.serve) {
         const failed = await forwardPorts(slirp.socket, [apiPort, webPort])
@@ -816,13 +838,18 @@ export function watchParent(initial: number, current: () => number, onGone: () =
   return t
 }
 
+/** N5: the one line said when the memory cap could not be applied; null when there is nothing to say (scope ok, or no systemd at all). */
+export function scopeNotice(scope: 'ok' | 'absent' | 'failed'): string | null {
+  return scope === 'failed' ? 'agentop run: the systemd scope could not be created (probe failed or timed out): the 2G memory cap is OFF for this run; only the TTL timer bounds it.' : null
+}
+
 /** A scope can only be created when the user bus answers: inside a pid namespace (a nested run) systemd-run is installed but the bus refuses the peer. */
-async function systemdScopeWorks(): Promise<boolean> {
-  if (!await commandExists('systemd-run')) return false
+async function systemdScopeWorks(): Promise<'ok' | 'absent' | 'failed'> {
+  if (!await commandExists('systemd-run')) return 'absent'
   const probe = spawn('systemd-run', ['--user', '--scope', '--quiet', '--', 'true'], { stdio: 'ignore' })
   // Bounded: with no reachable user manager (a run inside a run, whose runtime dir is an empty tmpfs) systemd-run can sit waiting for a bus.
   const timer = setTimeout(() => { try { probe.kill('SIGKILL') } catch {} }, 4000)
-  return await new Promise(resolve => { probe.once('exit', code => { clearTimeout(timer); resolve(code === 0) }); probe.once('error', () => { clearTimeout(timer); resolve(false) }) })
+  return await new Promise(resolve => { probe.once('exit', code => { clearTimeout(timer); resolve(code === 0 ? 'ok' : 'failed') }); probe.once('error', () => { clearTimeout(timer); resolve('failed') }) })
 }
 
 async function commandExists(command: string): Promise<boolean> {
