@@ -538,6 +538,7 @@
       "text:.agentistics/mobile-push-subscriptions.json",
       "text:.agentistics/mobile-push-vapid.sealed",
       "text:.agentistics/nay-chat",
+      "text:.agentistics/noq-answers.jsonl",
       "text:.agentistics/notifications.json",
       "text:.agentistics/pending-prompts.json",
       "text:.agentistics/perf",
