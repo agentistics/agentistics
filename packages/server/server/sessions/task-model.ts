@@ -745,7 +745,9 @@ export function isRepoInherited(t: Pick<Task, 'repo' | 'repoSource'>): boolean {
   return !!t.repo && t.repoSource !== 'explicit'
 }
 
-/** What filing a session writes onto a task: only when the task has NO repo (an existing one, explicit or not, is never overwritten), stamped with its provenance. */
+/**
+ * What filing a session writes onto a task: ATTRIBUTION ONLY (`repoSource: 'inherited'`, never explicit) — it grants no
+ * leadership (`isRepoInherited` never counts for leading) and no write right. Only when the task has NO repo (an existing one, explicit or not, is never overwritten), stamped with its provenance. */
 export function repoInheritancePatch(
   task: Pick<Task, 'repo'>, fromSession: string, repo: string | undefined,
 ): { repo: string; repoSource: 'inherited'; repoFromSession: string } | null {

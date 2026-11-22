@@ -22,6 +22,7 @@ import { DatePicker } from '../DatePicker'
 import {
   PRIORITY, priorityLabel, button, field, fmtDateTime, fmtStamp, pill, statusStyle,
 } from './board'
+import { OpenVaultButton } from '../browser/OpenVaultButton'
 import { BlockedDialog } from './BlockedDialog'
 import { boardCopy, statusLabel, type Lang } from './copy'
 import { chipStyle, ChipSelect } from './ChipSelect'
@@ -100,7 +101,7 @@ function LinksList({ id, task, lang, onChanged }: {
  * The task's repository (D7). Only the PERSON writes it: saving asks the vault for a one-time confirmation (password,
  * Windows Hello or Touch ID) through the same proof the delivery approval uses. A session can never change it.
  */
-function RepoEditor({ id, task, lang, onChanged }: {
+export function RepoEditor({ id, task, lang, onChanged }: {
   id: string
   task: TaskRecord
   lang: Lang
@@ -112,12 +113,13 @@ function RepoEditor({ id, task, lang, onChanged }: {
   const [value, setValue] = useState(current)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [openVault, setOpenVault] = useState(false)
   const save = async () => {
     if (busy || value.trim() === current) return
-    setBusy(true); setError(null)
+    setBusy(true); setError(null); setOpenVault(false)
     const out = await setTaskRepo(id, value.trim(), pt)
     setBusy(false)
-    if (out.ok) await onChanged(); else setError(out.message)
+    if (out.ok) await onChanged(); else { setError(out.message); setOpenVault(out.openVault === true) }
   }
   return (
     <div style={{ display: 'grid', gap: 9, padding: 2 }}>
@@ -135,7 +137,12 @@ function RepoEditor({ id, task, lang, onChanged }: {
         className="ag-tap" style={{ ...button(isMobile, 'primary'), justifySelf: 'start' }} disabled={busy || value.trim() === current}
         onClick={() => void save()}
       >{busy ? (pt ? 'Confirmando…' : 'Confirming…') : (pt ? 'Salvar repositório' : 'Save repository')}</button>
-      {error && <div role="alert" style={{ fontSize: 11.5, color: 'var(--accent-red)' }}>{error}</div>}
+      {error && (
+        <div role="alert" data-repo-refusal style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 11.5, color: 'var(--accent-red)' }}>
+          <span style={{ flex: 1, minWidth: 0 }}>{error}</span>
+          {openVault && <OpenVaultButton pt={pt} mobile={isMobile} />}
+        </div>
+      )}
     </div>
   )
 }

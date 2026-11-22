@@ -25,6 +25,7 @@ import { displayUrl, setBrowserLock, type LockOutcome } from '../../lib/browserC
 
 export const CARD_H_DESKTOP = 330
 export const CARD_H_MOBILE = 290
+import { OpenVaultButton } from './OpenVaultButton'
 const ORANGE = 'var(--anthropic-orange)'
 
 export interface BrowserSessionCardProps {
@@ -119,10 +120,7 @@ export function BrowserSessionCard({ managedId, lang, maximized, onToggleMax, on
           <div role="alert" data-browser-refusal style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', borderTop: '1px solid var(--border)', fontSize: 12, lineHeight: 1.5, color: 'var(--text-primary)', background: 'var(--bg-elevated)', flexShrink: 0 }}>
             <span style={{ flex: 1, minWidth: 0 }}>{refusal.sentence}</span>
             {refusal.openVault && (
-              <button type="button" onClick={onOpenVault} style={{
-                flexShrink: 0, padding: '4px 10px', borderRadius: 7, border: `1px solid ${ORANGE}`, background: 'var(--anthropic-orange-dim)',
-                color: ORANGE, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', minHeight: mobile ? 44 : undefined,
-              }}>{pt ? 'Abrir o Cofre' : 'Open the Vault'}</button>
+              <OpenVaultButton pt={pt} mobile={mobile} onOpen={onOpenVault} />
             )}
           </div>
         )}

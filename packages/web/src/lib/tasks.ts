@@ -19,6 +19,7 @@ import {
 import { getDateRangeFilter } from '../hooks/useData'
 import { filingUrl } from './nativeSession'
 import { isNativeSessionId } from './sessionRoute'
+import { refusalOpensVault } from './browserCard'
 import { postWithOwnerProof, readableRefusal, refusalText, type OwnerCall } from './ownerProof'
 import type { ChatAttachmentRef, CommentKind, CommentTarget, TaskThreadRecord, ThreadDelivery } from '@agentistics/core'
 export type { ThreadDelivery } from '@agentistics/core'
@@ -720,7 +721,7 @@ export async function editTask(ref: string, patch: TaskFieldPatch): Promise<bool
  * single-use grant scoped to THIS task (`task-repo:<id>` / `edit`, the same `postWithOwnerProof` the delivery
  * approval and the browser unlock use) and repeats the SAME request with it. `''` clears. `ref` must be the task id.
  */
-export async function setTaskRepo(ref: string, repo: string, pt = pagePt()): Promise<{ ok: true } | { ok: false; message: string }> {
+export async function setTaskRepo(ref: string, repo: string, pt = pagePt()): Promise<{ ok: true } | { ok: false; message: string; openVault?: boolean }> {
   let res: OwnerCall | null = null
   try { res = await postWithOwnerProof(`/api/tasks/${encodeURIComponent(ref)}`, { repo, actor: 'you' }, { pieceKey: `task-repo:${ref}`, move: 'edit' }, undefined, pt) } catch { res = null }
   if (res && res.status < 400) return { ok: true }
@@ -728,7 +729,8 @@ export async function setTaskRepo(ref: string, repo: string, pt = pagePt()): Pro
   const message = (typeof body.message === 'string' && body.message.trim() ? body.message : null)
     ?? readableRefusal(body, pt, res?.status)
     ?? (pt ? 'O servidor recusou a alteração.' : 'The server refused the change.')
-  return { ok: false, message }
+  const code = typeof body.error === 'string' ? body.error : ''
+  return { ok: false, message, ...(refusalOpensVault(code, body.action as { kind?: unknown } | undefined) ? { openVault: true } : {}) }
 }
 
 /** PURE. The error toast for a refused (or unanswered) task edit — the words, in the page's language. */

@@ -48,3 +48,10 @@ describe('setTaskRepo (D7: the person writes it, with the vault grant scoped to 
     expect(await setTaskRepo('t-1', 'o/r', false)).toEqual({ ok: false, message: 'Only the person sets a task\'s repository, from the task screen.' })
   })
 })
+
+test('R3: owner_proof_unavailable / an open-vault action marks the refusal openVault; person-only does not', async () => {
+  mock(() => ({ status: 403, body: { error: 'owner_proof_unavailable', message: 'open it', action: { kind: 'open-vault', path: '/vault' } } }), () => ({ status: 200, body: {} }))
+  expect(await setTaskRepo('t-1', 'o/r', false)).toEqual({ ok: false, message: 'open it', openVault: true })
+  mock(() => ({ status: 403, body: { error: 'repo_person_only', message: 'no' } }), () => ({ status: 200, body: {} }))
+  expect(await setTaskRepo('t-1', 'o/r', false)).toEqual({ ok: false, message: 'no' })
+})
