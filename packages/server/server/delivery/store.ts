@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path'
 import { withFileLock } from '../sessions/file-lock'
 import { defaultGuardLockPaths, withGuardLocks } from './guard-locks'
 import { isPhase, type DeliveryRecord } from './machine'
+import { durableWrite } from '../durable-file'
 
 export interface DeliveryDoc {
   version: 1
@@ -136,9 +137,7 @@ export function createDeliveryStore(path = defaultDeliveriesPath()): DeliverySto
         }
         const doc = s.kind === 'ok' ? s.doc : { version: 1 as const, deliveries: {} }
         const value = await fn(doc)
-        const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
-        await writeFile(tmp, serializeDeliveryDoc(doc), { mode: 0o600 })
-        await rename(tmp, path)
+        await durableWrite(path, serializeDeliveryDoc(doc), 0o600)
         return value
       }
       // Evidence mutations may never proceed without a contended lock.

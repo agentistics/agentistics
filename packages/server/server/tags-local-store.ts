@@ -25,6 +25,7 @@ import { rename, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from './config'
 import { TAG_SOURCE_TYPES, type TagSource, type TagWindow } from './tags-resolve'
+import { durableWrite } from './durable-file'
 
 export interface TagDoc {
   _id: string
@@ -174,9 +175,7 @@ export function createLocalTagStore(file: string): TagStore {
   async function writeAll(tags: TagDoc[]): Promise<void> {
     await quarantineCorrupt()
     await mkdir(dirname(file), { recursive: true })
-    const tmp = `${file}.tmp`
-    await writeFile(tmp, JSON.stringify({ version: 1, tags } satisfies TagsFile, null, 2))
-    await rename(tmp, file)
+    await durableWrite(file, JSON.stringify({ version: 1, tags } satisfies TagsFile, null, 2))
   }
 
   /** Serialise a read-modify-write against the file. `changed: false` means the callback decided
