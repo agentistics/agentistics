@@ -73,4 +73,14 @@ export function productionSources(dir: string, base: string): string[] {
   return out.sort()
 }
 
+/**
+ * The gitignored BUILD OUTPUTS of THIS repo, as paths relative to `packages/`. They exist on disk only in a job that has built
+ * (the release job), are not source, and a bundle site is not a writer someone added. `productionSources` itself still scans
+ * any `dist`/`build`/`target`/`*.generated` it is pointed at (guard-r4/r5 pin that), so the repo-wide scans filter these exact
+ * paths instead of the scanner going blind to shipped directories.
+ */
+export function isBuildOutput(rel: string): boolean {
+  return rel.startsWith('web/dist/') || rel === 'server/server/embedded-dist.generated.ts' || rel === 'server/server/engine-slot.generated.ts'
+}
+
 export const read = (base: string, rel: string): string => readFileSync(join(base, rel), 'utf8')
