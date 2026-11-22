@@ -1,4 +1,8 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { applyExperimentalFromDisk } from './experimental-boot'
 import { buildThrowawayEnv, isThrowawayEnvDrop, isThrowawaySwitch, keptEnvOf, parseArgs, throwawayFetchRefusal, THROWAWAY_ENV_ALLOW } from './cli-run'
 
 const REAL = { HOME: '/real', PATH: '/bin' }
@@ -93,7 +97,7 @@ describe('RUN.ISOLAMENTO r2: the help states the real scope', () => {
 
 describe('RUN.FLOWS-HERDADO: behaviour switches of the real app never reach a run', () => {
   test('AGENTISTICS_FLOWS inherited from the parent is gone from the child env', () => {
-    expect(build({ AGENTISTICS_FLOWS: '1' }).AGENTISTICS_FLOWS).toBeUndefined()
+    expect(build({ AGENTISTICS_FLOWS: '1' }).AGENTISTICS_FLOWS).toBe('0')
   })
   test('every other feature switch the app applies is gone too, and the "applied" bookkeeping with them', () => {
     const switches = ['AGENTISTICS_ADAPTER_CHAT', 'AGENTISTICS_PROVIDER', 'AGENTISTICS_PROJECTIONS', 'AGENTISTICS_JOURNAL',
@@ -161,5 +165,22 @@ describe('RUN.CLI-SERVIDOR-REAL: the CLI inside a run addresses the run, never t
   test('without --serve the run\'s own port is refused with a sentence', () => {
     expect(throwawayFetchRefusal(plain, 'http://127.0.0.1:48100/api/fleet')).toBe('inside an agentop run without --serve: no server to talk to')
     expect(throwawayFetchRefusal(plain, 'http://localhost:48101/')).toBe('inside an agentop run without --serve: no server to talk to')
+  })
+})
+
+describe('QA 2.225.0 R1: a copied store cannot switch the flows back on', () => {
+  test('preferences with experimental + autonomous mode on: the run\'s server still boots with FLOWS 0', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agr-flows-r1-'))
+    try {
+      writeFileSync(join(dir, 'preferences.json'), JSON.stringify({ experimental: true, away: { on: true, since: new Date().toISOString() } }))
+      const env: Record<string, string | undefined> = { ...build({}), AGENTISTICS_DIR: dir }
+      expect(env.AGENTISTICS_FLOWS).toBe('0')
+      applyExperimentalFromDisk(env)
+      expect(env.AGENTISTICS_FLOWS).toBe('0')
+      // Control: without the run's explicit 0 the same store turns them on (this is the hole R1 closes).
+      const bare: Record<string, string | undefined> = { AGENTISTICS_DIR: dir }
+      applyExperimentalFromDisk(bare)
+      expect(bare.AGENTISTICS_FLOWS).toBe('1')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 })

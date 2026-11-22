@@ -238,6 +238,10 @@ export function buildThrowawayEnv(home: string, name: string, apiPort: number, w
   const voltaHome = source.VOLTA_HOME || join(source.HOME || source.USERPROFILE || homedir(), '.volta')
   const inherited = Object.fromEntries(Object.entries(source).filter(([k]) => (!isThrowawayEnvDrop(k) || (opts.keep?.includes(k) && throwawayKeepable(k)) === true) && !/^XDG_(CONFIG|DATA|STATE|CACHE)_HOME$/.test(k)))
   return {
+    // QA 2.225.0 R1: an explicit 0, so a copied store whose preferences say experimental/away cannot
+    // switch the destructive flows back on at boot (applyExperimentalFromDisk honours an explicit value).
+    // `--keep-env AGENTISTICS_FLOWS` (in `inherited`) still wins on purpose.
+    AGENTISTICS_FLOWS: '0',
     ...inherited,
     XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local', 'share'),
     XDG_STATE_HOME: join(home, '.local', 'state'), XDG_CACHE_HOME: join(home, '.cache'),
