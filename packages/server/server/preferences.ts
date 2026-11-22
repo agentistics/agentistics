@@ -9,6 +9,7 @@ import type { SessionGroupingId } from '@agentistics/tui/control'
 // same `server -> tui` direction, and the same single-source rule as `SessionGroupingId`: a scope
 // added there fails this build until it is handled, rather than being silently un-persistable.
 import { SEARCH_SCOPES, type SearchScope } from '@agentistics/tui/control/search-scope'
+import { durableWrite } from './durable-file'
 
 // Preferences live in the writable ~/.agentistics dir. The legacy location under CLAUDE_DIR
 // is read-only in Docker (host ~/.claude mounted :ro), which silently broke persistence and
@@ -608,9 +609,7 @@ let _tmpSeq = 0
  *  every account on it. */
 async function writeFileAtomic(path: string, text: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
-  const tmp = `${path}.tmp-${process.pid}-${++_tmpSeq}-${Math.random().toString(36).slice(2, 8)}`
-  await writeFile(tmp, text, { encoding: 'utf-8', mode: 0o600 })
-  await rename(tmp, path)
+  await durableWrite(path, text, 0o600)
   await chmod(path, 0o600).catch(() => { /* a filesystem that refuses chmod (DrvFs) keeps its own mode */ })
 }
 

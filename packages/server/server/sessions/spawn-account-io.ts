@@ -4,8 +4,11 @@
  * plan-limits budgets. Every door (`/api/fleet/new`, `agentop session start|batch`, every reopen)
  * reads its context here, so none of them can grow a second idea of which accounts exist.
  */
+import { stat } from 'node:fs/promises'
 import { featureOn, type HarnessId } from '@agentistics/core'
 import { readAccounts, type AccountsFile } from '../harness-accounts'
+import { resolveChatTranscriptPath } from './chat-tail'
+import { storeDirOf } from './account-transcript-roots'
 import {
   decideRecordedAccount, decideSpawnAccount, routerPicks, spawnAccountMessage, type SpawnAccountContext, type SpawnAccountDecision, type SpawnAccountRefusal, type SpawnAccountRow,
 } from './spawn-account'
@@ -70,6 +73,49 @@ export async function spawnAccountContext(
   } catch {
     return { enabled: true, accounts }
   }
+}
+
+/**
+ * The account a closed conversation LIVES on, found from its transcript when the registry row that
+ * said so is gone (2026-11 disk fault: the account existed only in the lost registry, and reopening
+ * a conversation stored under a second login's root failed with "No conversation found" because it
+ * was resumed on the default one). Exact by conversation id — a hit in a root IS that conversation.
+ * `undefined`: it lives in the default store, or nowhere we can read — the default rule then applies.
+ * Claude only: it is the harness whose resolver walks account roots by id.
+ */
+export async function accountOfConversation(
+  harness: HarnessId, cwd: string, conversationId: string,
+  deps: { file?: AccountsFile; resolve?: typeof resolveChatTranscriptPath; mtime?: (path: string) => Promise<number> } = {},
+): Promise<string | undefined> {
+  if (harness !== 'claude') return undefined
+  const resolve = deps.resolve ?? resolveChatTranscriptPath
+  const mtime = deps.mtime ?? (async (p: string) => (await stat(p)).mtimeMs)
+  try {
+    // An account switch COPIES the transcript, so one id can live in several stores and only the
+    // newest keeps growing: the NEWEST copy decides (same rule as `newestTranscript`), never the first hit.
+    const hits: { account: string | undefined; at: number }[] = []
+    const defaultHit = await resolve(cwd, conversationId)
+    if (defaultHit) hits.push({ account: undefined, at: await mtime(defaultHit).catch(() => -1) })
+    const file = deps.file ?? await readAccounts()
+    for (const a of file.accounts) {
+      if (a.harness !== 'claude' || !a.root || a.retired) continue
+      const dir = storeDirOf('claude', a.root)
+      const hit = dir ? await resolve(cwd, conversationId, dir) : null
+      if (hit) hits.push({ account: a.id, at: await mtime(hit).catch(() => -1) })
+    }
+    let best: (typeof hits)[number] | undefined
+    for (const h of hits) if (!best || h.at > best.at) best = h
+    return best?.account
+  } catch { /* unreadable registry or store: default rule */ }
+  return undefined
+}
+
+/** The account a reopen runs on: the recorded one, else the root whose store holds the transcript. ONE helper for every door. */
+export async function accountForReopen(
+  recorded: string | undefined, harness: HarnessId, cwd: string, conversationId: string,
+  deps: Parameters<typeof accountOfConversation>[3] = {},
+): Promise<string | undefined> {
+  return recorded ?? await accountOfConversation(harness, cwd, conversationId, deps)
 }
 
 /**

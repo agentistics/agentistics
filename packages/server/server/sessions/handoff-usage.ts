@@ -15,6 +15,7 @@ import type { ManagedSession } from './types'
 import type { IntegrationRegistry } from '@agentistics/engine-api'
 import type { HandoffQuotaRate } from './handoff-panel'
 import { claudeBilledReplies, geminiBilledReplies, nativeQuotaSources, nativeQuotaHarnesses, type NativeQuotaRoots } from './handoff-artifacts'
+import { durableWrite } from '../durable-file'
 
 export interface BilledReply { harness: HarnessId; conversationId: string; account?: string; at: number; costUSD: number | null; model?: string }
 export const replyKey = (harness: string, id: string) => `${harness}:${id}`
@@ -262,9 +263,7 @@ export async function readQuotaRates(path = RATE_PATH): Promise<Record<string, H
 }
 export async function saveQuotaRates(rates: Record<string, HandoffQuotaRate>): Promise<void> {
   await mkdir(AGENTISTICS_DATA_DIR, { recursive: true })
-  const tmp = `${RATE_PATH}.${process.pid}.tmp`
-  await writeFile(tmp, JSON.stringify(rates))
-  await rename(tmp, RATE_PATH)
+  await durableWrite(RATE_PATH, JSON.stringify(rates))
 }
 export function countBilledReplies(replies: readonly BilledReply[]): Map<string, number> {
   const counts = new Map<string, number>()
