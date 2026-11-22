@@ -55,9 +55,10 @@ describe('deliveries.json: new code → v2.210.1 writer → intact (§2.7)', () 
     const guards = createGuardsStore(join(dir, 'guards.json'))
     const cp = { key: 'p', rank: 1, boardStatus: 'in_review', boardStage: 'leader', phase: null, revision: 1, headSha: null, auth: [], by: {}, at: T, transitionId: 'tr' } as unknown as PieceCheckpoint
     await guards.write(commitIntent(beginIntent(emptyGuards(), cp, T), 'p', 'tr'))
-    const before = ['guarantees.json', 'guards.json'].map(f => readFileSync(join(dir, f), 'utf8'))
     const file = join(dir, 'deliveries.json')
     await createDeliveryStore(file).update(doc => { doc.deliveries.x = newDelivery({ subtaskId: 'x', taskId: 't', at: T }) })
+    // Snapshot AFTER this build writes its durable round floor; the captured OLD writer must preserve it too.
+    const before = ['guarantees.json', 'guards.json'].map(f => readFileSync(join(dir, f), 'utf8'))
     await oldWriterRoundTrip(file, readFileSync(file, 'utf8'))
     expect(['guarantees.json', 'guards.json'].map(f => readFileSync(join(dir, f), 'utf8'))).toEqual(before)
     expect(readdirSync(dir).filter(n => n.includes('guards') && n.includes('tmp'))).toEqual([])

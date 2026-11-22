@@ -548,6 +548,9 @@ const ALWAYS: string[] = [
   '.agentistics/notifications.json',
   // The local security-event log (`audit.ts`): a record of what happened on this machine.
   '.agentistics/audit.jsonl',
+  // NOQ.TRAVA: every answer the no-questions runner typed into a session for the person, with its
+  // reason (`sessions/noq-runner.ts`). A record of decisions made on their behalf; nothing regenerates it.
+  '.agentistics/noq-answers.jsonl',
   // The event channel's subscriptions: which task, which transitions, who is notified, the note a
   // person wrote on each. That is CONFIGURATION somebody sat down and made — it exists in no other
   // file and nothing regenerates it — and it was missing from the backup until

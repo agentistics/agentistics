@@ -3,6 +3,7 @@ import { createDeliveryStore, defaultDeliveriesPath } from './store'
 import { createGuardsStore, defaultGuardsPath } from './guards-store'
 import { defaultGuardLockPaths, withGuardLocks } from './guard-locks'
 import { GuardBusy } from './guard-locks'
+import { inGuardTransaction } from './guard-transaction'
 
 export class EvidenceInUse extends Error {
   readonly code = 'evidence_in_use'
@@ -31,7 +32,7 @@ export async function withEvidenceDeletion<T>(
   paths = { ...defaultGuardLockPaths(), deliveries: defaultDeliveriesPath(), guards: defaultGuardsPath() },
 ): Promise<T> {
   if (!held.tasks) throw new GuardBusy('tasks')
-  return withGuardLocks(['deliveries', 'guards'], async () => {
+  const run = async () => {
     try {
       const book = await createDeliveryStore(paths.deliveries).readStrict()
       // A downgraded/unknown record may carry references this binary cannot interpret.
@@ -51,5 +52,6 @@ export async function withEvidenceDeletion<T>(
       throw new EvidenceInUse()
     }
     return remove()
-  }, { paths, alreadyHeld: ['tasks'] })
+  }
+  return inGuardTransaction(paths) ? run() : withGuardLocks(['deliveries', 'guards'], run, { paths, alreadyHeld: ['tasks'] })
 }

@@ -24,6 +24,7 @@ export function activitySentence(e: ActivityEventLike, lang: Lang): string {
     case 'comment': return pt ? 'comentou' : 'comment'
     case 'step': return pt ? `avançou para o passo ${e.to ?? '?'}` : `moved to step ${e.to ?? '?'}`
     case 'type': return pt ? 'mudou o tipo' : 'changed the type'
+    case 'repo': return pt ? `mudou o repositório ${e.from || '—'} → ${e.to || '—'}` : `set repository ${e.from || '—'} → ${e.to || '—'}`
     case 'create': return pt ? 'criou a tarefa' : 'created the task'
     // Never a raw kind in pt: a kind this board has no words for still gets a sentence.
     default: return pt ? 'atualizou a tarefa' : e.kind
