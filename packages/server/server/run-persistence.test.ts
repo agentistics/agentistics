@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { HOME_WRITABLE_CARVEOUTS, homeOf, nodeModulesDirs, outsideNodeModules, homeReadOnlySteps, homeScope, netnsInnerScript, netnsNotice, persistenceGuard, probeNetns, repoCarveOuts } from './run-netns'
 
 /**
@@ -28,7 +29,7 @@ function fakeHome(): { home: string; repo: string } {
   writeFileSync(join(repo, 'a.txt'), 'a'); git(repo, 'add', 'a.txt')
   return { home, repo }
 }
-const git = (cwd: string, ...a: string[]) => Bun.spawnSync(['git', '-C', cwd, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { stdout: 'pipe', stderr: 'pipe', env: Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))) })
+const git = (cwd: string, ...a: string[]) => Bun.spawnSync(['git', '-C', cwd, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { stdout: 'pipe', stderr: 'pipe', env: gitTestEnv() })
 
 async function inRun(script: string, protect: string[], extra: string[] = [], cwd?: string): Promise<string> {
   const proc = Bun.spawn([process.execPath, CLI, 'run', '--rm', ...extra, '--', 'sh', '-c', script], {

@@ -113,7 +113,7 @@ export function readableRefusal(body: { error?: unknown; sentence?: unknown; mes
 export function ownerProofSentence(code: string, pt: boolean): string {
   const known = refusalSentence(code, pt)
   if (known) return known
-  switch (code) {
+  switch (code.replace(/_/g, '-')) {
     case 'owner-proof-unavailable': return pt ? 'O cofre só tem proteção silenciosa. Adicione uma senha ou Windows Hello / Touch ID ao cofre.' : 'The vault has silent protection only. Add a password or Windows Hello / Touch ID to the vault.'
     case 'locked': return pt ? 'Destranque o cofre para confirmar que é você.' : 'Unlock the vault to confirm it is you.'
     case 'stepup-frozen': return pt ? 'O cofre está congelado. Veja o aviso no cofre.' : 'The vault is frozen. See the notice in the vault.'

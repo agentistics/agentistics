@@ -32,7 +32,7 @@ const vaultButton = (h: HTMLElement) => Array.from(h.querySelectorAll('button'))
 
 test('owner_proof_unavailable shows the sentence AND the Open-the-Vault action, which goes to /vault', async () => {
   const host = await mount({ error: 'owner_proof_unavailable', message: 'Abra o Cofre e crie uma senha.', action: { kind: 'open-vault', path: '/vault' } })
-  expect(host.querySelector('[data-repo-refusal]')!.textContent).toContain('Abra o Cofre e crie uma senha.')
+  expect(host.querySelector('[data-repo-refusal]')!.textContent).toContain('O cofre só tem proteção silenciosa')
   const b = vaultButton(host)
   expect(b).toBeDefined()
   let pops = 0
