@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hostAddresses, probeNetns } from './run-netns'
@@ -124,6 +124,76 @@ describe.skipIf(skipReason !== null)(`RUN.ISOLAMENTO-REDE: a real network block$
       const out = await inRun(script, [], env)
       expect(out).toContain('SOCK-HIDDEN'); expect(out).toContain('PID-GONE'); expect(out).toContain('PID-UNLISTED')
     } finally { srv.stop(true); rmSync(dir, { recursive: true, force: true }) }
+  }, 120_000)
+
+  // r3 R1: refused at once (exit 7) means the REJECT rule matched; a timeout (28) means nothing stopped the packet. 203.0.113.1 (TEST-NET-3, public range) is the control.
+  test('R1: connections to an address in a private range that does not exist on the host (a bridge created later) are rejected on the spot', async () => {
+    const out = await inRun(`for a in 172.31.250.77 192.168.250.77 10.250.250.77 100.100.250.77 169.254.250.77; do printf '%s %s\\n' $a "$(curl -sS -m 4 -o /dev/null http://$a:48555/ >/dev/null 2>&1; echo $?)"; done; printf 'control %s\\n' "$(curl -sS -m 2 -o /dev/null http://203.0.113.1:48555/ >/dev/null 2>&1; echo $?)"`)
+    for (const a of ['172.31.250.77', '192.168.250.77', '10.250.250.77', '100.100.250.77', '169.254.250.77']) expect(out).toMatch(new RegExp(`^${a.replace(/\./g, '\\.')} 7$`, 'm'))
+    expect(out).toMatch(/^control (28|7)$/m) // a public address is not rejected by the firewall: it times out (or is unroutable), never matches by accident
+  }, 60_000)
+
+  // r3 B1
+  const userManager = Bun.spawnSync(['systemd-run', '--user', '--quiet', '--pipe', '--wait', 'true'], { stdout: 'ignore', stderr: 'ignore' }).exitCode === 0
+  test.skipIf(!userManager)('B1: the user systemd manager / D-Bus is unreachable (systemd-run --user and systemctl --user fail; the control without the namespace works)', async () => {
+    const script = `systemd-run --user --quiet --pipe --wait true >/dev/null 2>&1; echo run=$?; systemctl --user is-system-running >/dev/null 2>&1; echo ctl=$?; echo bus=[$DBUS_SESSION_BUS_ADDRESS]; ls -A "\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" | wc -l | sed 's/^/entries=/'`
+    const control = await inRun(script, ['--no-netns'])
+    expect(control).toContain('run=0')
+    const out = await inRun(script)
+    expect(out).toMatch(/^run=[1-9]\d*$/m)
+    expect(out).toMatch(/^ctl=[1-9]\d*$/m)
+    expect(out).toContain('bus=[]')
+    expect(out).toContain('entries=0')
+  }, 120_000)
+
+  const connectJs = (path: string) => `bun -e "require('node:net').connect('${path}').on('connect',()=>{console.log('CONNECTED');process.exit(0)}).on('error',e=>{console.log('REFUSED '+e.code);process.exit(0)})"`
+  test('B1 (stand-in, works even when this test itself runs inside a run): sockets in the user runtime dir (bus, cc-socks) vanish and the bus variable is unset', async () => {
+    const rt = mkdtempSync(join(tmpdir(), 'xdg-rt-'))
+    mkdirSync(join(rt, 'cc-socks'))
+    const socks = [join(rt, 'bus'), join(rt, 'cc-socks', '1.sock')].map(p => Bun.listen({ unix: p, socket: { open() {}, data() {}, close() {}, error() {} } }))
+    try {
+      const script = `echo bus=[$DBUS_SESSION_BUS_ADDRESS]; ${connectJs(join(rt, 'bus'))}; ${connectJs(join(rt, 'cc-socks', '1.sock'))}`
+      const env = { XDG_RUNTIME_DIR: rt, DBUS_SESSION_BUS_ADDRESS: `unix:path=${rt}/bus` }
+      const control = await inRun(script, ['--no-netns'], env)
+      expect(control.match(/CONNECTED/g)).toHaveLength(2)
+      const out = await inRun(script, [], env)
+      expect(out).not.toContain('CONNECTED'); expect(out.match(/REFUSED/g)).toHaveLength(2); expect(out).toContain('bus=[]')
+    } finally { for (const s of socks) s.stop(true); rmSync(rt, { recursive: true, force: true }) }
+  }, 120_000)
+
+  // r3 B2 / R2: a unix socket standing in for an engine / agent. Container engines are probed for real where they exist.
+  test('B2/R2: an ssh-agent style socket in /tmp and SSH_AUTH_SOCK are unreachable inside, reachable outside', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ssh-XXXXXXqa'))
+    const sock = join(dir, `agent.${process.pid}`)
+    const srv = Bun.listen({ unix: sock, socket: { open() {}, data() {}, close() {}, error() {} } })
+    try {
+      const script = `echo agent=[$SSH_AUTH_SOCK]; ${connectJs(sock)}`
+      const control = await inRun(script, ['--no-netns'], { SSH_AUTH_SOCK: sock })
+      expect(control).toContain('CONNECTED')
+      const out = await inRun(script, [], { SSH_AUTH_SOCK: sock })
+      expect(out).toContain('REFUSED'); expect(out).not.toContain('CONNECTED'); expect(out).toContain('agent=[]')
+    } finally { srv.stop(true); rmSync(dir, { recursive: true, force: true }) }
+  }, 120_000)
+  test.skipIf(!existsSync('/var/run/docker.sock') && !existsSync('/run/docker.sock'))('B2: the Docker engine socket is unreachable inside (docker group members would otherwise own the host)', async () => {
+    const script = `${connectJs('/var/run/docker.sock')}; ${connectJs('/run/docker.sock')}; docker ps >/dev/null 2>&1; echo docker=$?`
+    const out = await inRun(script)
+    expect(out).not.toContain('CONNECTED')
+    expect(out).toMatch(/^docker=[1-9]\d*$/m)
+  }, 120_000)
+
+  // r3 R2: the real store dir is not writable from inside (a bind of it, read-only), and the control outside is writable
+  test('R2: the real data dir is read-only inside the run', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agdir-'))
+    mkdirSync(join(dir, 'run'))
+    try {
+      const script = `( : > '${dir}/zz-probe' ) 2>/dev/null && echo WRITABLE || echo READONLY`
+      const control = await inRun(script, ['--no-netns'], { AGENTISTICS_DIR: dir })
+      expect(control).toContain('WRITABLE')
+      rmSync(join(dir, 'zz-probe'), { force: true })
+      const out = await inRun(script, [], { AGENTISTICS_DIR: dir })
+      expect(out).toContain('READONLY')
+      expect(existsSync(join(dir, 'zz-probe'))).toBe(false)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
   }, 120_000)
 
   // R2.2

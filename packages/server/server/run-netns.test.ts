@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { isIP } from 'node:net'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs, pruneStaleRuns, stateRoot, statePath, stopState } from './cli-run'
-import { decideNetns, hiddenDirs, hostAddresses, hostfwdRequests, NETNS_BLOCKED_PORTS, NETNS_MARKER, netnsArgv, netnsInnerScript, netnsNotice, slirpArgv, stopSlirp, type NetnsInputs } from './run-netns'
+import { BLOCKED_V4_RANGES, decideNetns, hiddenDirs, hostAddresses, inRanges, netnsHardening, socketCandidates, hostfwdRequests, NETNS_BLOCKED_PORTS, NETNS_MARKER, netnsArgv, netnsInnerScript, netnsNotice, slirpArgv, stopSlirp, type NetnsInputs } from './run-netns'
 
 const OK: NetnsInputs = { noNetns: false, platform: 'linux', binaries: { unshare: true, setpriv: true, slirp4netns: true, nft: true, ip: true, sh: true }, usernsWorks: true }
 
@@ -101,11 +101,33 @@ describe('RUN.ISOLAMENTO-REDE: the test seam can only ADD blocked ports', () => 
 describe('RUN.ISOLAMENTO-REDE r2: blocking BY DESTINATION (B1), hiding the real sockets (R1), no orphan slirp (R2)', () => {
   const addrs = ['172.23.255.165', '100.109.247.39', '10.255.255.254', 'fd7a:115c:a1e0::1501:f729', 'fe80::1']
   const script = netnsInnerScript(1000, 1001, NETNS_BLOCKED_PORTS, addrs, ['/h/.agentistics/run', "/tmp/tmux-1000"])
-  test('every host address AND the slirp gateway are rejected on any port, per family, for NEW connections only', () => {
-    expect(script).toMatch(/ip daddr '\{ 10\.0\.2\.2, 172\.23\.255\.165, 100\.109\.247\.39, 10\.255\.255\.254 \}' ct state new meta l4proto tcp reject with tcp reset/)
-    expect(script).toMatch(/ip6 daddr '\{ fd7a:115c:a1e0::1501:f729, fe80::1 \}' ct state new meta l4proto tcp reject with tcp reset/)
+  test('whole private ranges AND the enumerated public host addresses are rejected on any port, per family, for NEW connections only', () => {
+    // 172.23/100.109/10.255 are covered by their RANGE (an interval set refuses an overlapping single address); fe80::1 and fd7a are v6 ranges
+    expect(script).toMatch(/ip daddr '\{ 10\.0\.0\.0\/8, 172\.16\.0\.0\/12, 192\.168\.0\.0\/16, 100\.64\.0\.0\/10, 169\.254\.0\.0\/16 \}' ct state new meta l4proto tcp reject with tcp reset/)
+    expect(script).toMatch(/ip6 daddr '\{ fc00::\/7, fe80::\/10 \}' ct state new meta l4proto tcp reject with tcp reset/)
     expect(script).toContain('udp dport != 53 reject')
     expect(script).toMatch(/l4proto != '\{ tcp, udp \}' drop/)
+  })
+  test('R1: an address created AFTER launch (docker bridge, compose net, VPN) falls in a blocked range even though it was never enumerated', () => {
+    for (const a of ['172.31.250.1', '172.16.0.1', '172.17.0.1', '10.99.1.1', '192.168.200.5', '100.64.0.9', '100.127.255.1', '169.254.1.1', '10.0.2.2', '10.0.2.3'])
+      expect(inRanges(a, BLOCKED_V4_RANGES)).toBe(true)
+    for (const a of ['8.8.8.8', '172.15.255.255', '172.32.0.1', '192.167.1.1', '100.63.255.255', '100.128.0.1', '11.0.0.1']) expect(inRanges(a, BLOCKED_V4_RANGES)).toBe(false)
+    expect(inRanges('fd7a:115c:a1e0::1', ['fc00::/7'])).toBe(true)
+    expect(inRanges('fdff::1', ['fc00::/7'])).toBe(true)
+    expect(inRanges('fe80::1', ['fe80::/10'])).toBe(true)
+    expect(inRanges('febf::1', ['fe80::/10'])).toBe(true)
+    expect(inRanges('fec0::1', ['fe80::/10'])).toBe(false)
+    expect(inRanges('2001:db8::1', ['fc00::/7', 'fe80::/10'])).toBe(false)
+  })
+  test('a PUBLIC host address (not in any range) is still enumerated, and one a range covers is not repeated (nft refuses overlapping intervals)', () => {
+    const s = netnsInnerScript(1, 1, NETNS_BLOCKED_PORTS, ['203.0.113.7', '172.23.0.5', '2001:db8::5'])
+    expect(s).toMatch(/ip daddr '\{ [^}]*169\.254\.0\.0\/16, 203\.0\.113\.7 \}'/)
+    expect(s).not.toContain('172.23.0.5')
+    expect(s).toMatch(/ip6 daddr '\{ fc00::\/7, fe80::\/10, 2001:db8::5 \}'/)
+  })
+  test('the run\'s own slirp address is the one exception, and it comes before the reject rules', () => {
+    expect(script.indexOf('ip daddr 10.0.2.100 accept')).toBeGreaterThan(-1)
+    expect(script.indexOf('ip daddr 10.0.2.100 accept')).toBeLessThan(script.indexOf('reject with tcp reset'))
   })
   test('the 47291/47292 rule stays as a second layer, and every rule precedes the exec', () => {
     expect(script).toMatch(/tcp dport '\{ 47291, 47292 \}' reject with tcp reset/)
@@ -134,6 +156,67 @@ describe('RUN.ISOLAMENTO-REDE r2: blocking BY DESTINATION (B1), hiding the real 
     const base = mkdtempSync(join(tmpdir(), 'hd-'))
     mkdirSync(join(base, 'run'))
     try { expect(hiddenDirs(base, 999999)).toEqual([join(base, 'run')]) } finally { rmSync(base, { recursive: true, force: true }) }
+  })
+  test('hiddenDirs names run/, structured/ AND the tmux dir when each exists (QA2/QA5: dropping any one must fail here)', () => {
+    const base = mkdtempSync(join(tmpdir(), 'hd-'))
+    const uid = 4200000 + (process.pid % 90000)
+    const tmux = `/tmp/tmux-${uid}`
+    mkdirSync(join(base, 'run')); mkdirSync(join(base, 'structured')); mkdirSync(tmux)
+    try { expect(hiddenDirs(base, uid)).toEqual([join(base, 'run'), join(base, 'structured'), tmux]) }
+    finally { rmSync(base, { recursive: true, force: true }); rmSync(tmux, { recursive: true, force: true }) }
+  })
+  test('hostAddresses includes the default gateway(s) (QA1: the Windows side of WSL can proxy to the real server)', () => {
+    const text = Bun.spawnSync(['ip', 'route', 'show', 'default']).stdout.toString()
+    const gws = [...text.matchAll(/\bvia\s+(\S+)/g)].map(m => m[1]!).filter(a => isIP(a) !== 0)
+    const got = hostAddresses()
+    for (const g of gws) expect(got).toContain(g)
+  })
+  test('B1: the whole user runtime dir (user D-Bus, systemd manager, cc-socks, gpg) becomes an empty tmpfs, and DBUS_SESSION_BUS_ADDRESS is unset before the command', () => {
+    const rt = mkdtempSync(join(tmpdir(), 'rt-'))
+    try {
+      const { hide, hardening } = netnsHardening('/nonexistent-data-dir', process.getuid!(), '/nonexistent-home', { XDG_RUNTIME_DIR: rt })
+      expect(hide).toContain(rt)
+      const s = netnsInnerScript(1000, 1000, NETNS_BLOCKED_PORTS, [], hide, hardening)
+      expect(s).toContain(`mount -t tmpfs -o mode=0700 tmpfs '${rt}'`)
+      expect(s).toMatch(/unset [^\n]*DBUS_SESSION_BUS_ADDRESS/)
+      expect(s.indexOf('unset ')).toBeLessThan(s.indexOf('unshare --user'))
+    } finally { rmSync(rt, { recursive: true, force: true }) }
+  })
+  test('B2/R2: container-engine, system-bus and agent sockets are covered by /dev/null (connect then fails) and agent env vars are unset', () => {
+    const { hardening } = netnsHardening('/nonexistent-data-dir', process.getuid!(), '/nonexistent-home', { XDG_RUNTIME_DIR: '/nonexistent-rt' })
+    const s = netnsInnerScript(1000, 1000, NETNS_BLOCKED_PORTS, [], [], { blind: ['/run/docker.sock', '/run/dbus/system_bus_socket'], unsetEnv: hardening.unsetEnv })
+    expect(s).toContain("mount --bind /dev/null '/run/docker.sock'")
+    expect(s).toContain("mount --bind /dev/null '/run/dbus/system_bus_socket'")
+    for (const v of ['SSH_AUTH_SOCK', 'DOCKER_HOST', 'DBUS_SESSION_BUS_ADDRESS']) expect(hardening.unsetEnv).toContain(v)
+  })
+  test('socketCandidates finds a real unix socket at the engine paths / agent dirs / the data dir, and nothing that is not a socket', () => {
+    const base = mkdtempSync(join(tmpdir(), 'sc-'))
+    mkdirSync(join(base, 'data', 'sub'), { recursive: true }); mkdirSync(join(base, 'home', '.gnupg'), { recursive: true })
+    const sockA = join(base, 'data', 'sub', 'x.sock'), sockB = join(base, 'home', '.gnupg', 'S.gpg-agent'), sockC = join(base, 'agent.sock')
+    const srv = [sockA, sockB, sockC].map(p => Bun.listen({ unix: p, socket: { open() {}, data() {}, close() {}, error() {} } }))
+    writeFileSync(join(base, 'data', 'plain.sock'), 'not a socket')
+    try {
+      const got = socketCandidates(process.getuid!(), join(base, 'home'), join(base, 'data'), { SSH_AUTH_SOCK: sockC, XDG_RUNTIME_DIR: '/nonexistent-rt' })
+      expect(got).toContain(sockA); expect(got).toContain(sockB); expect(got).toContain(sockC)
+      expect(got).not.toContain(join(base, 'data', 'plain.sock'))
+    } finally { for (const s of srv) s.stop(true); rmSync(base, { recursive: true, force: true }) }
+  })
+  test('R2: the real store dir is bound read-only BEFORE the hidden tmpfs go on top of its children', () => {
+    const s = netnsInnerScript(1, 1, NETNS_BLOCKED_PORTS, [], ["/d/run"], { readOnly: ['/d'] })
+    expect(s).toContain("mount --bind '/d' '/d' && mount -o remount,bind,ro '/d'")
+    expect(s.indexOf("remount,bind,ro '/d'")).toBeLessThan(s.indexOf("tmpfs '/d/run'"))
+  })
+  test('netnsHardening covers the data dir read-only and does not bind a socket that a hidden dir already covers', () => {
+    const base = mkdtempSync(join(tmpdir(), 'nh-'))
+    mkdirSync(join(base, 'run'))
+    const sock = join(base, 'run', 'runtime.sock')
+    const srv = Bun.listen({ unix: sock, socket: { open() {}, data() {}, close() {}, error() {} } })
+    try {
+      const { hide, hardening } = netnsHardening(base, process.getuid!(), join(base, 'nohome'), { XDG_RUNTIME_DIR: '/nonexistent-rt' })
+      expect(hardening.readOnly).toEqual([realpathSync(base)])
+      expect(hide).toContain(realpathSync(join(base, 'run')))
+      expect(hardening.blind).not.toContain(realpathSync(sock))
+    } finally { srv.stop(true); rmSync(base, { recursive: true, force: true }) }
   })
   test('slirp dies with its launcher (--exit-fd on the pipe it is given as fd 3)', () => {
     const a = slirpArgv(1, '/s')

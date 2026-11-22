@@ -1,8 +1,8 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, readFileSync, readlinkSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { createConnection, isIP } from 'node:net'
-import { networkInterfaces } from 'node:os'
+import { homedir, networkInterfaces } from 'node:os'
 import { hostWhich } from './host-which'
 
 /**
@@ -58,40 +58,76 @@ export function netnsNotice(d: NetnsDecision): string | null {
   return `agentop run: network NOT isolated (${d.reason}); only the agentop CLI refuses the real server on :${NETNS_BLOCKED_PORTS.join('/:')}, other programs in this run can still reach it.`
 }
 
+export type NetnsHardening = {
+  /** Directories made read-only (a bind of themselves): the real store must not be writable from inside. */
+  readOnly?: readonly string[]
+  /** Socket files covered by /dev/null (connect then fails): container engines, agents. */
+  blind?: readonly string[]
+  /** Environment variables removed before the command runs (they point at the user bus / agents that are hidden). */
+  unsetEnv?: readonly string[]
+}
+
+/**
+ * Ranges rejected as a WHOLE (not a snapshot of the addresses that exist at launch): a docker bridge, a VPN or a compose network
+ * created AFTER the launch lands in one of these, and a forwarder bound there would reach the real server through the NAT.
+ */
+export const BLOCKED_V4_RANGES: readonly string[] = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', '169.254.0.0/16']
+export const BLOCKED_V6_RANGES: readonly string[] = ['fc00::/7', 'fe80::/10']
+
+const v4ToInt = (a: string): number => a.split('.').reduce((n, o) => n * 256 + Number(o), 0)
+function v6ToBig(a: string): bigint {
+  const [head, tail = ''] = a.split('::')
+  const h = head ? head.split(':') : []
+  const t = tail ? tail.split(':') : []
+  const parts = a.includes('::') ? [...h, ...Array(8 - h.length - t.length).fill('0'), ...t] : h
+  return parts.reduce((n, p) => (n << 16n) + BigInt(parseInt(p || '0', 16)), 0n)
+}
+/** PURE. Is `addr` inside one of the CIDR `ranges` (same family)? */
+export function inRanges(addr: string, ranges: readonly string[]): boolean {
+  const fam = isIP(addr)
+  for (const r of ranges) {
+    const [base, bitsText] = r.split('/') as [string, string]
+    if (isIP(base) !== fam) continue
+    const bits = Number(bitsText)
+    if (fam === 4) { const sh = 32 - bits; if (v4ToInt(addr) >>> sh === v4ToInt(base) >>> sh) return true }
+    else if (fam === 6) { const sh = BigInt(128 - bits); if (v6ToBig(addr) >> sh === v6ToBig(base) >> sh) return true }
+  }
+  return false
+}
+
 /**
  * PURE. The script run as the namespace's root: wait for slirp's tap0, bring lo up, install the firewall, then drop into a
  * nested user namespace mapped to the real uid and exec the command. No tap0 within ~10 s (slirp failed) is not fatal: the
  * run keeps its own loopback, which is the part that protects the real server.
  */
-export function netnsInnerScript(uid: number, gid: number, ports: readonly number[] = NETNS_BLOCKED_PORTS, hostAddrs: readonly string[] = [], hide: readonly string[] = []): string {
+export function netnsInnerScript(uid: number, gid: number, ports: readonly number[] = NETNS_BLOCKED_PORTS, hostAddrs: readonly string[] = [], hide: readonly string[] = [], hardening: NetnsHardening = {}): string {
   const set = ports.join(', ')
-  const v4 = [...new Set([SLIRP_GATEWAY, ...hostAddrs.filter(a => isIP(a) === 4)])]
-  const v6 = [...new Set(hostAddrs.filter(a => isIP(a) === 6))]
-  const steps = ['nft add table inet agrun', `nft add chain inet agrun out '{ type filter hook output priority 0 ; policy accept ; }'`]
-  // BY DESTINATION: any NEW connection to an address of the host itself (the real server answers on all of them and any
-  // local proxy forwards to it) is rejected whatever the port. `ct state new` keeps the replies of `--serve` working.
+  // Whole private / link-local ranges first; an enumerated host address only when no range already covers it (nft refuses overlapping intervals).
+  const v4 = [...BLOCKED_V4_RANGES, ...new Set(hostAddrs.filter(a => isIP(a) === 4 && !inRanges(a, BLOCKED_V4_RANGES)))]
+  const v6 = [...BLOCKED_V6_RANGES, ...new Set(hostAddrs.filter(a => isIP(a) === 6 && !inRanges(a, BLOCKED_V6_RANGES)))]
+  const steps = ['nft add table inet agrun', `nft add chain inet agrun out '{ type filter hook output priority 0 ; policy accept ; }'`,
+    // the run's own slirp address (its --serve server answering itself) is not "the host"
+    `nft add rule inet agrun out ip daddr ${SLIRP_GUEST_ADDR} accept`]
   for (const [fam, list] of [['ip', v4], ['ip6', v6]] as const) {
-    if (!list.length) continue
     const l = `{ ${list.join(', ')} }`
     steps.push(`nft add rule inet agrun out ${fam} daddr '${l}' ct state new meta l4proto tcp reject with tcp reset`)
     steps.push(`nft add rule inet agrun out ${fam} daddr '${l}' ct state new meta l4proto udp udp dport != 53 reject`)
     steps.push(`nft add rule inet agrun out ${fam} daddr '${l}' ct state new meta l4proto != '{ tcp, udp }' drop`)
   }
-  // Second layer: the real ports on ANY destination.
   steps.push(`nft add rule inet agrun out tcp dport '{ ${set} }' reject with tcp reset`)
-  // Mount namespace (ours): the real server's unix sockets and tmux sockets are covered by empty tmpfs mounts.
+  // The real store read-only FIRST (a non-recursive bind would otherwise cover the tmpfs mounted below it).
+  for (const d of hardening.readOnly ?? []) steps.push(`mount --bind ${shq(d)} ${shq(d)}`, `mount -o remount,bind,ro ${shq(d)}`)
   for (const d of hide) steps.push(`mount -t tmpfs -o mode=0700 tmpfs ${shq(d)}`)
+  for (const f of hardening.blind ?? []) steps.push(`mount --bind /dev/null ${shq(f)}`)
+  const unset = (hardening.unsetEnv ?? []).filter(n => /^[A-Za-z_][A-Za-z0-9_]*$/.test(n))
   return [
     'i=0',
     'p=',  // a TERM during the setup (before the command exists) must end the run
     'trap \'if [ -n "$p" ]; then kill -TERM "$p" 2>/dev/null; else exit 143; fi\' TERM INT HUP',
-    // `ip`, never /sys/class/net: sysfs was mounted by the OLD network namespace and keeps listing ITS interfaces.
     'while ! ip link show tap0 >/dev/null 2>&1 && [ "$i" -lt 200 ]; do i=$((i+1)); sleep 0.05; done',
     'ip link set lo up',
     `${steps.join(' && ')} || { echo "agentop run: could not install the network firewall; refusing to start" >&2; exit 126; }`,
-    // `unshare --fork` leaves SIGINT/SIGTERM IGNORED in its child (and an async job ignores INT/QUIT), so the command is started through
-    // `env --default-signal`. pid 1 of the run's pid namespace also ignores every signal it has no handler for, so the command must NOT be pid 1:
-    // this shell stays pid 1, forwards TERM/INT/HUP to it (TTL, `run stop`, a hung-up session) and returns its status.
+    ...(unset.length ? [`unset ${unset.join(' ')}`] : []),
     'exec 3<&0',
     `env --default-signal=INT,TERM,QUIT,HUP unshare --user --map-user=${uid} --map-group=${gid} -- "$@" <&3 3<&- &`,
     'p=$!',
@@ -128,12 +164,42 @@ export function hiddenDirs(realDataDir: string, uid: number): string[] {
   return [join(realDataDir, 'run'), join(realDataDir, 'structured'), `/tmp/tmux-${uid}`].filter(d => { try { return statSync(d).isDirectory() } catch { return false } })
 }
 
+/** The hidden-directory list for the user's runtime dir: the whole `/run/user/<uid>` (user D-Bus, systemd manager, cc-socks, gpg) is replaced by an empty tmpfs. */
+export function runtimeDirOf(uid: number, env: Record<string, string | undefined> = process.env): string | null {
+  const d = env.XDG_RUNTIME_DIR || `/run/user/${uid}`
+  try { return statSync(d).isDirectory() ? d : null } catch { return null }
+}
+
+/** Socket paths that are only ever a way OUT of the run: container engines (root on the host), the system bus, agents. */
+export function socketCandidates(uid: number, home: string, dataDir: string, env: Record<string, string | undefined> = process.env): string[] {
+  const out = ['/run/docker.sock', '/var/run/docker.sock', '/run/containerd/containerd.sock', '/run/podman/podman.sock', '/run/crio/crio.sock', '/run/dbus/system_bus_socket', '/run/systemd/private']
+  const ls = (d: string): string[] => { try { return readdirSync(d).map(n => join(d, n)) } catch { return [] } }
+  if (env.SSH_AUTH_SOCK) out.push(env.SSH_AUTH_SOCK)
+  for (const d of ls('/tmp').filter(n => /\/ssh-[^/]+$/.test(n))) out.push(...ls(d).filter(n => /\/agent\./.test(n)))
+  out.push(...ls(join(home, '.gnupg')).filter(n => /\/S\./.test(n)), ...ls(join(home, '.ssh', 'agent')))
+  // any unix socket the real store keeps one or two levels down (the server's own, an agent's)
+  for (const a of ls(dataDir)) { if (a.endsWith('.sock')) out.push(a); else for (const b of ls(a)) if (b.endsWith('.sock')) out.push(b) }
+  // not under the tmpfs'd runtime dir (already empty there)
+  const rt = runtimeDirOf(uid, env)
+  return out.filter(f => { try { return statSync(f).isSocket() && !(rt && (f === rt || f.startsWith(rt + '/'))) } catch { return false } })
+}
+
+/** IO. Everything the inner script must cover besides the network: see NetnsHardening. Resolved to real paths, de-duplicated. */
+export function netnsHardening(realDataDir: string, uid: number, home: string = homedir(), env: Record<string, string | undefined> = process.env): { hide: string[]; hardening: NetnsHardening } {
+  const real = (p: string): string => { try { return realpathSync(p) } catch { return p } }
+  const hide = [...new Set([...hiddenDirs(realDataDir, uid), ...(runtimeDirOf(uid, env) ? [runtimeDirOf(uid, env)!] : [])].map(real))]
+  const covered = (f: string): boolean => hide.some(h => f === h || f.startsWith(h + '/'))
+  const blind = [...new Set(socketCandidates(uid, home, realDataDir, env).map(real))].filter(f => !covered(f))
+  const readOnly = (() => { try { return statSync(realDataDir).isDirectory() ? [real(realDataDir)] : [] } catch { return [] } })()
+  return { hide, hardening: { readOnly, blind, unsetEnv: ['DBUS_SESSION_BUS_ADDRESS', 'SSH_AUTH_SOCK', 'GPG_AGENT_INFO', 'DOCKER_HOST'] } }
+}
+
 /**
  * PURE. The argv that runs `argv` inside the namespaces (user, net, mount, pid). `setpriv --pdeathsig` instead of `unshare --kill-child`:
  * util-linux 2.37's --kill-child leaves SIGTERM/SIGINT IGNORED in the child (measured: SigIgn 0x4002), so nothing in the run could be stopped.
  */
-export function netnsArgv(argv: readonly string[], uid: number, gid: number, ports: readonly number[] = NETNS_BLOCKED_PORTS, hostAddrs: readonly string[] = [], hide: readonly string[] = []): string[] {
-  return ['unshare', '--map-root-user', '--net', '--mount', '--pid', '--fork', '--mount-proc', '--', 'env', '--default-signal=INT,TERM,QUIT,HUP', 'setpriv', '--pdeathsig', 'SIGKILL', 'sh', '-c', netnsInnerScript(uid, gid, ports, hostAddrs, hide), NETNS_MARKER, ...argv]
+export function netnsArgv(argv: readonly string[], uid: number, gid: number, ports: readonly number[] = NETNS_BLOCKED_PORTS, hostAddrs: readonly string[] = [], hide: readonly string[] = [], hardening: NetnsHardening = {}): string[] {
+  return ['unshare', '--map-root-user', '--net', '--mount', '--pid', '--fork', '--mount-proc', '--', 'env', '--default-signal=INT,TERM,QUIT,HUP', 'setpriv', '--pdeathsig', 'SIGKILL', 'sh', '-c', netnsInnerScript(uid, gid, ports, hostAddrs, hide, hardening), NETNS_MARKER, ...argv]
 }
 
 /**

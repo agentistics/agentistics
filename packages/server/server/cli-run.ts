@@ -7,7 +7,7 @@ import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
 import { CURRENT_VERSION } from './version'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
-import { blockedPorts, hiddenDirs, hostAddresses, forwardPorts, netnsArgv, netnsNotice, probeNetns, startSlirp, stopSlirp } from './run-netns'
+import { blockedPorts, netnsHardening, hostAddresses, forwardPorts, netnsArgv, netnsNotice, probeNetns, startSlirp, stopSlirp } from './run-netns'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
 export { SEED_ALLOW }
@@ -266,11 +266,16 @@ function usage(): string {
        agentop run --rm --serve [--seed-from <staging> | --seed-real] [--cwd <worktree>] [--ttl 2h] [--name x] [-- <server command...>]
        --serve with no command runs the installed agentop; use --cwd with an explicit checkout command to serve that checkout.
        Env: AGENTISTICS_*/AGENTOP_* switches (and leaked GIT_* vars) are dropped; --keep-env NAME re-allows one (never a store/config path).
-       Network: a run gets its own user/net/mount/pid namespaces (own loopback; internet via slirp4netns). New connections to ANY address of
-       this host (every interface, the default gateway, 10.0.2.2) are rejected whatever the port, so the real server (:47291/:47292) is not
-       reachable directly or through a local proxy; the real server's unix sockets and tmux dir are hidden and its pid is not visible.
-       Not covered: another machine that proxies to the real server, and a root-owned process outside the run. --serve ports are forwarded
-       to the host's 127.0.0.1. Where namespaces are unavailable it falls back to the CLI-only guard and says so; --no-netns asks for that.
+       Network: a run gets its own user/net/mount/pid namespaces (own loopback; internet via slirp4netns). New connections to every private /
+       link-local range (10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16, fc00::/7, fe80::/10), to every address of this host and to its
+       gateways are rejected whatever the port, so the real server (:47291/:47292) is not reachable directly, through a local proxy, or through
+       an address created after the run started. Hidden inside: the real server's unix sockets and tmux dir, the whole user runtime dir
+       (user D-Bus / systemd --user, cc-socks, gpg), the system bus, the Docker/containerd/podman sockets, ssh/gpg agent sockets; the real
+       data dir (~/.agentistics) is read-only; its pid is not visible.
+       Not covered: another machine that proxies to the real server, a root-owned process outside the run, ~/.claude and other real files on
+       disk (--rm does not isolate the disk), and group-granted access that does not go through a socket (supplementary groups cannot be
+       dropped in an unprivileged namespace). --serve ports are forwarded to the host's 127.0.0.1. Where namespaces are unavailable it falls
+       back to the CLI-only guard and says so; --no-netns asks for that.
        agentop run ls
        agentop run stop <name>`
 }
@@ -735,7 +740,8 @@ async function startRun(options: RunOptions): Promise<number> {
     const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0, keep: options.keepEnv, serve: options.serve })
     keptEnv = keptEnvOf(env, process.env, options.keepEnv)
     systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await systemdScopeWorks()
-    const runArgv = netns.mode === 'netns' ? netnsArgv(argv, process.getuid!(), process.getgid!(), blockedPorts(), hostAddresses(), hiddenDirs(realDataDir(), process.getuid!())) : argv
+    const hard = netns.mode === 'netns' ? netnsHardening(realDataDir(), process.getuid!()) : null
+    const runArgv = hard ? netnsArgv(argv, process.getuid!(), process.getgid!(), blockedPorts(), hostAddresses(), hard.hide, hard.hardening) : argv
     const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...runArgv] : runArgv
     child = spawn(systemd ? 'systemd-run' : runArgv[0]!, systemd ? childArgs : runArgv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
     state.pid = child.pid
@@ -814,7 +820,9 @@ export function watchParent(initial: number, current: () => number, onGone: () =
 async function systemdScopeWorks(): Promise<boolean> {
   if (!await commandExists('systemd-run')) return false
   const probe = spawn('systemd-run', ['--user', '--scope', '--quiet', '--', 'true'], { stdio: 'ignore' })
-  return await new Promise(resolve => { probe.once('exit', code => resolve(code === 0)); probe.once('error', () => resolve(false)) })
+  // Bounded: with no reachable user manager (a run inside a run, whose runtime dir is an empty tmpfs) systemd-run can sit waiting for a bus.
+  const timer = setTimeout(() => { try { probe.kill('SIGKILL') } catch {} }, 4000)
+  return await new Promise(resolve => { probe.once('exit', code => { clearTimeout(timer); resolve(code === 0) }); probe.once('error', () => { clearTimeout(timer); resolve(false) }) })
 }
 
 async function commandExists(command: string): Promise<boolean> {
