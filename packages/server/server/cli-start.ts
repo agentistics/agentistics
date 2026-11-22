@@ -3114,7 +3114,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     const { newestRowOfConversation } = await import('./sessions/spawn-account-io')
     const recorded = previous ?? newestRowOfConversation(await readRegistry(), req.sessionId, harness)
     // CONTA.TROCA — a switch names the account it copied the conversation into; nothing else may.
-    const recordedAccountId = req.switchToAccount ?? recorded?.accountId
+    const { accountForReopen } = await import('./sessions/spawn-account-io')
+    const recordedAccountId = req.switchToAccount ?? await accountForReopen(recorded?.accountId, harness, req.cwd, req.sessionId)
     if (recordedAccountId || req.callerVerified) {
       const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
       const { spawnAccountMessage } = await import('./sessions/spawn-account')
@@ -3148,7 +3149,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       queue: false,
       ...(req.prompt ? { prompt: req.prompt } : {}),
       ...(req.label ? { label: req.label } : {}),
-      ...(recorded ? { inherit: req.switchToAccount ? { ...recorded, accountId: req.switchToAccount } : recorded } : {}),
+      ...(recorded ? { inherit: recordedAccountId && recordedAccountId !== recorded.accountId ? { ...recorded, accountId: recordedAccountId } : recorded } : recordedAccountId ? { accountId: recordedAccountId } : {}),
       attach: req.attach,
       ...(recorded?.task ? { task: recorded.task } : {}),
       // A TAKEOVER just ENDED the process this spawn replaces (`endProcess` above) — the net memory

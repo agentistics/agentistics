@@ -50,7 +50,7 @@ import { addSession, newSessionId, patchSession, readRegistry, removeSession, re
 import { callerHoldsIdentity, callerProof, callerSessionFromTree, type CallerProof } from './session-identity'
 import { spawnParentLink } from './team-links'
 import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
-import { handoffAccountChoice, newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
+import { accountForReopen, handoffAccountChoice, newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
 import { liveIdsOf, planReopenCwd, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
@@ -1165,7 +1165,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       const id = newSessionId()
       const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
       // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
-      const account = await recordedSpawnAccount(m.accountId, { agentCaller, harness: m.harness })
+      const account = await recordedSpawnAccount(await accountForReopen(m.accountId, m.harness, m.cwd, row.resumeId), { agentCaller, harness: m.harness })
       if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); return }
       const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...(await autonomousLaunch(m.harness, inheritedLaunch(m, m.harness), m.away === true)), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
       if (!planned.ok) { skipped.push(m.id); return }
@@ -1544,7 +1544,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
     // one it never ran has no record and reopens in the default root, as before. Decided BEFORE the
     // holder is closed: a removed account must refuse while the user still has their assistant.
     const previous = newestRowOfConversation(await readRegistry(), live.sessionId)
-    const account = await recordedSpawnAccount(previous?.accountId, { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
+    const account = await recordedSpawnAccount(await accountForReopen(previous?.accountId, live.harness, live.cwd, live.sessionId), { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
     if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
     const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...(await autonomousLaunch(live.harness, inheritedLaunch(previous, live.harness), previous?.away === true)), ...(logFile ? { logFile } : {}), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
     if (planned.ok && planned.plan.modeNeedsProtocol) { console.error(`Cannot reopen ${live.sessionId}: terminal cannot apply ${planned.plan.modeNeedsProtocol} approval mode`); return 1 }

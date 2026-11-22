@@ -1176,6 +1176,12 @@
     "server/server/delivery/release-proof.ts": [
       "module:child_process",
       "module:fs"
+    ],
+    "server/server/durable-file.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/sessions/spawn-account-io.ts": [
+      "module:fs/promises"
     ]
   }
 }

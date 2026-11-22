@@ -20,7 +20,7 @@
 
 import type { HoldObservation } from './retire-plan'
 import { randomBytes } from 'node:crypto'
-import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   isLiveState, isSessionRole, isSessionRoleRequest, parseRoleOrigin, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, stripRolePrefix, titleForRole,
@@ -28,6 +28,7 @@ import {
 } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
 import { withFileLock } from './file-lock'
+import { durableWrite } from '../durable-file'
 
 export const SESSION_ROLES_FILE = 'session-roles.json'
 
@@ -105,20 +106,11 @@ export async function rolesDocUnreadable(dataDir: string): Promise<boolean> {
 export async function writeRolesDoc(dataDir: string, doc: RolesDoc): Promise<void> {
   const file = join(dataDir, SESSION_ROLES_FILE)
   await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-  const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
-  try {
-    const fh = await open(tmp, 'w', 0o600)
-    try { await fh.writeFile(`${JSON.stringify(doc, null, 2)}\n`, 'utf-8'); await fh.sync() } finally { await fh.close() }
-    await rename(tmp, file)
-  } catch (e) {
-    await rm(tmp, { force: true }).catch(() => {})
-    throw e
-  }
-  try { const d = await open(dirname(file), 'r'); try { await d.sync() } finally { await d.close() } } catch { /* no directory fsync here */ }
+  await durableWrite(file, `${JSON.stringify(doc, null, 2)}\n`, 0o600) // fsyncs the file AND the directory
 }
 
-/** `session-roles.json.<pid>[.<rand>].tmp` left by a process killed mid-write. */
-const ROLE_TMP = /^session-roles\.json\.\d+(?:\.[0-9a-f]+)?\.tmp$/
+/** `session-roles.json.<pid>[.<rand>].tmp` (older writers) or `session-roles.json.tmp.<pid>.<n>` (durableWrite), left by a killed process. */
+const ROLE_TMP = /^session-roles\.json(?:\.\d+(?:\.[0-9a-f]+)?\.tmp|\.tmp\.\d+\.\d+)$/
 
 /** Server start: remove role-document temp files older than `maxAgeMs` (a live write is milliseconds). Never throws. */
 export async function cleanStaleRoleTmps(dataDir: string, maxAgeMs = 60 * 60 * 1000, now = Date.now()): Promise<number> {

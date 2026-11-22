@@ -3,8 +3,9 @@
  * (delivery store), guards.json (sealed), guarantees.json; the real service `tick()` drives the sweep. A checkpoint is written
  * through the real guards store; the "forger" is a raw file write — what an older binary or a hand edit does.
  */
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import * as fs from 'node:fs/promises'
+import { __setDurableOpsForTest } from '../durable-file'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -264,9 +265,10 @@ describe('bounded chunks, breaker, loop guard', () => {
     const del = JSON.parse(readFileSync(w.paths.deliveries, 'utf8'))
     for (const id of ids) del.deliveries[id].phase = 'revisao_lider'
     writeFileSync(w.paths.deliveries, JSON.stringify(del))
+    // The board and the delivery book are written through `durableWrite`, whose rename is the injectable seam (dev #1494).
     const original = fs.rename, renamed: string[] = []
-    const spy = spyOn(fs, 'rename').mockImplementation(((from: any, to: any) => { renamed.push(String(to)); return (original as any)(from, to) }) as typeof fs.rename)
-    try { await w.svc.tick() } finally { spy.mockRestore() }
+    __setDurableOpsForTest({ rename: (async (from: any, to: any) => { renamed.push(String(to)); return (original as any)(from, to) }) as typeof fs.rename })
+    try { await w.svc.tick() } finally { __setDurableOpsForTest(null) }
     expect(renamed.filter(p => p === w.paths.tasks)).toHaveLength(3)
     expect(renamed.filter(p => p === w.paths.deliveries)).toHaveLength(3)
     const book = await w.tasks.read()

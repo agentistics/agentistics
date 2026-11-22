@@ -299,6 +299,7 @@ maybeSpawnWatcher()
 // the first request that happens to reach a reserved prefix. `loadEngine` never throws.
 // DSL.TIPO-SESSAO: temp files of the role document left by a process killed mid-write (older than 1 h).
 void import('./sessions/session-roles').then(m => m.cleanStaleRoleTmps(AGENTISTICS_DATA_DIR)).catch(() => {})
+void import('./durable-file').then(async m => { const { TASKS_FILE, MANAGED_SESSIONS_FILE } = await import('./config'); const { dirname } = await import('node:path'); for (const d of new Set([AGENTISTICS_DATA_DIR, dirname(TASKS_FILE), dirname(MANAGED_SESSIONS_FILE)])) await m.sweepStaleDurableTmps(d) }).catch(() => {})
 void loadEngine().then(st => {
   if (st.present) console.log(`[engine] ${st.manifest.name} ${st.manifest.version} (api ${st.manifest.apiVersion})`)
   // Event-triggered flows (DSL.GATILHOS): their timers run in the SERVER process only, never in a CLI
