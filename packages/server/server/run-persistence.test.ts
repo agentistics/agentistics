@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { HOME_WRITABLE_CARVEOUTS, homeOf, homeReadOnlySteps, homeScope, netnsInnerScript, netnsNotice, persistenceGuard, probeNetns, repoCarveOuts } from './run-netns'
+import { HOME_WRITABLE_CARVEOUTS, homeOf, nodeModulesDirs, outsideNodeModules, homeReadOnlySteps, homeScope, netnsInnerScript, netnsNotice, persistenceGuard, probeNetns, repoCarveOuts } from './run-netns'
 
 /**
  * RUN.ISOLAMENTO-PERSISTENCIA: from inside `agentop run --rm` the REAL home is read-only (except named carve-outs), so a process cannot
@@ -67,15 +67,37 @@ describe('RUN.ISOLAMENTO-PERSISTENCIA: the mount plan (pure)', () => {
     expect(on.indexOf(`mount -o remount,bind,ro '/home/u'`)).toBeLessThan(on.indexOf(`mount --bind '/home/u/.agentistics'`))
     expect(netnsInnerScript(1000, 1000, [47291], [], [], {})).not.toContain('--rbind')
   })
-  test('the carve-outs are the run home, the bun install cache and the worktree + its common git dir — nothing else of the home', () => {
-    expect(HOME_WRITABLE_CARVEOUTS).toEqual(['.bun/install/cache'])
+  test('the carve-outs are the run home and the worktree + its common git dir — nothing else of the home, and NOT the shared bun cache', () => {
+    expect(HOME_WRITABLE_CARVEOUTS).toEqual([])
     const { home, repo } = fakeHome()
     mkdirSync(join(home, '.bun/install/cache'), { recursive: true })
+    mkdirSync(join(repo, 'node_modules/.bun/x'), { recursive: true }); mkdirSync(join(repo, 'packages/a/node_modules'), { recursive: true })
     const runHome = join(home, '.cache', 'run-x'); mkdirSync(runHome, { recursive: true })
     const [g] = persistenceGuard(runHome, [repo], home, {})
-    expect(g!.writable.slice().sort()).toEqual([runHome, join(home, '.bun/install/cache'), repo, join(repo, '.git')].sort())
-    expect(g!.masked).toEqual([join(repo, '.git', 'hooks'), join(repo, '.git', 'config')])
-    expect(g!.writable.some(p => /\.claude|\.local\/bin|\.config|\.bashrc|\.ssh/.test(p))).toBe(false)
+    expect(g!.writable.slice().sort()).toEqual([runHome, repo, join(repo, '.git')].sort())
+    expect(g!.masked.slice().sort()).toEqual([join(repo, '.git', 'hooks'), join(repo, '.git', 'config'), join(repo, 'node_modules'), join(repo, 'packages/a/node_modules')].sort())
+    expect(g!.writable.some(p => /\.claude|\.local\/bin|\.config|\.bashrc|\.ssh|\.bun/.test(p))).toBe(false)
+  })
+  test('nodeModulesDirs finds the hardlink farms, never descends into one, skips .git', () => {
+    const d = tmp()
+    for (const p of ['node_modules/a/node_modules', 'packages/x/node_modules', '.git/node_modules', 'a/b/c/d/e/f/node_modules']) mkdirSync(join(d, p), { recursive: true })
+    expect(nodeModulesDirs(d).sort()).toEqual([join(d, 'node_modules'), join(d, 'packages/x/node_modules')].sort())
+  })
+  test('outsideNodeModules covers farms of a cwd that is outside every guarded home, and none inside one', () => {
+    const inHome = fakeHome(); const away = tmp()
+    mkdirSync(join(away, 'node_modules'), { recursive: true }); mkdirSync(join(inHome.repo, 'node_modules'), { recursive: true })
+    const guards = [{ home: inHome.home, writable: [], masked: [] }]
+    expect(outsideNodeModules([away, inHome.repo], guards)).toEqual([join(away, 'node_modules')])
+  })
+  test('QM3: homeOf is the passwd home, whatever $HOME says (a throwaway HOME must not become the protected home)', () => {
+    const saved = process.env.HOME
+    try {
+      process.env.HOME = '/tmp/definitely-not-the-account-home'
+      const fromPasswd = readFileSync('/etc/passwd', 'utf8').split('\n').find(l => l.split(':')[2] === String(process.getuid?.()))?.split(':')[5]
+      if (fromPasswd) expect(homeOf()).toBe(fromPasswd)
+      else expect(homeOf()).not.toBe('/tmp/definitely-not-the-account-home')
+      expect(homeOf()).not.toBe(process.env.HOME)
+    } finally { if (saved === undefined) delete process.env.HOME; else process.env.HOME = saved }
   })
   test('the seam adds protected trees and cannot remove the real home', () => {
     const { home } = fakeHome()
@@ -151,6 +173,24 @@ describe.skipIf(skipReason !== null)(`RUN.ISOLAMENTO-PERSISTENCIA: live, inside 
     expect(existsSync(join(home, 'work', 'sibling'))).toBe(false)
     expect(existsSync(join(home, '.local/bin/rel'))).toBe(false)
     expect(readFileSync(join(home, '.bashrc'), 'utf8')).toBe('orig\n')
+  }, 60_000)
+
+  test('B1: a file with a second hard link OUTSIDE the worktree cannot be written through node_modules; the outside name is unchanged', async () => {
+    const { home, repo } = fakeHome()
+    mkdirSync(join(repo, 'node_modules'), { recursive: true })
+    const outside = join(tmp(), 'twin.txt'); writeFileSync(outside, 'orig\n')
+    linkSync(outside, join(repo, 'node_modules', 'shared.txt'))
+    const out = await inRun(`echo evil >> node_modules/shared.txt 2>&1; echo "nm rc=$?"; echo evil > node_modules/new.txt 2>&1; echo "new rc=$?"; echo ok > fine.txt && echo "wt ok"`, [home], [], repo)
+    expect(out).toMatch(/^nm rc=[1-9]/m); expect(out).toMatch(/^new rc=[1-9]/m); expect(out).toMatch(/Read-only file system/); expect(out).toContain('wt ok')
+    expect(readFileSync(outside, 'utf8')).toBe('orig\n')
+    expect(existsSync(join(repo, 'node_modules', 'new.txt'))).toBe(false)
+  }, 60_000)
+
+  test('the run gets a PRIVATE bun cache, and the shared one is not writable', async () => {
+    const { home } = fakeHome()
+    const out = await inRun(`echo "cache=$BUN_INSTALL_CACHE_DIR home=$HOME"; [ -w '${REAL_HOME}/.bun/install/cache' ] && echo SHARED-WRITABLE || echo shared-ro`, [home])
+    expect(out).not.toContain('SHARED-WRITABLE')
+    expect(out).toMatch(/cache=(\S+)\/\.cache\/bun-install home=\1\n/)
   }, 60_000)
 
   test('a bun install and a bun test still run inside (the run home and the worktree are enough)', async () => {

@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { createConnection, isIP } from 'node:net'
 import { homedir, networkInterfaces, userInfo } from 'node:os'
@@ -243,8 +243,37 @@ export function socketDirs(uid: number, home: string, tmpRoot = '/tmp', mntRoot 
 /** Keeps resolver state visible after /run is replaced (a systemd-resolved stub, resolvconf). */
 export const RUN_KEEP: readonly string[] = ['/run/systemd/resolve', '/run/resolvconf']
 
-/** Real-home paths a run legitimately writes (listed in `agentop run --help`): the bun install cache a `bun install` fills. */
-export const HOME_WRITABLE_CARVEOUTS: readonly string[] = ['.bun/install/cache']
+/**
+ * Real-home paths a run legitimately writes: NONE. The bun install cache used to be one, but bun installs `node_modules` by HARDLINK from
+ * it (nlink up to 32, shared with every other worktree), so a write through the carve-out changed code the owner runs elsewhere. A run
+ * gets a private cache in its own throwaway home instead (`BUN_INSTALL_CACHE_DIR`, set by `buildThrowawayEnv`).
+ */
+export const HOME_WRITABLE_CARVEOUTS: readonly string[] = []
+
+/**
+ * IO. Every `node_modules` directory at or under `root` (bounded depth, never descending into one, `.git` skipped). They are the
+ * hardlink farm of the bun cache: the same inode is named in the cache and in other worktrees, so a path-based read-only mount of
+ * the OTHER names does not protect it. Returned as real paths.
+ */
+export function nodeModulesDirs(root: string, maxDepth = 4): string[] {
+  const out: string[] = []
+  const walk = (dir: string, depth: number): void => {
+    let names: string[]
+    try { names = readdirSync(dir) } catch { return }
+    for (const n of names) {
+      if (n === '.git') continue
+      const p = join(dir, n)
+      let st: ReturnType<typeof statSync>
+      try { st = lstatSync(p) } catch { continue }
+      if (!st.isDirectory()) continue
+      if (n === 'node_modules') { out.push(p); continue }
+      if (depth < maxDepth) walk(p, depth + 1)
+    }
+  }
+  walk(root, 0)
+  try { if (lstatSync(join(root, 'node_modules')).isDirectory() && !out.includes(join(root, 'node_modules'))) out.push(join(root, 'node_modules')) } catch {}
+  return out
+}
 
 /**
  * IO. The git work tree `cwd` is in and its common git dir, for the writable carve-out (a `git commit` in the worktree writes objects, refs,
@@ -261,7 +290,8 @@ export function repoCarveOuts(cwd: string, home: string): { writable: string[]; 
   const commonAbs = common ? real(common.startsWith('/') ? common : join(cwd, common)) : ''
   if (homeScope(home, real(top)) !== 'inside') return { writable: [], masked: [] } // the home itself (or a repo above it): opening it would defeat the guard
   const writable = [real(top), ...(commonAbs ? [commonAbs] : [])].filter(p => homeScope(home, p) === 'inside')
-  return { writable, masked: commonAbs ? [join(commonAbs, 'hooks'), join(commonAbs, 'config')].filter(existsSync) : [] }
+  // node_modules is the bun cache's hardlink farm (shared inodes): read-only, so no write reaches another worktree or the cache
+  return { writable, masked: [...(commonAbs ? [join(commonAbs, 'hooks'), join(commonAbs, 'config')].filter(existsSync) : []), ...nodeModulesDirs(real(top)).map(real)] }
 }
 
 /**
@@ -277,6 +307,21 @@ export function persistenceGuard(runHome: string, cwds: readonly string[], home:
     const writable = [real(runHome), ...HOME_WRITABLE_CARVEOUTS.map(c => join(h, c)).filter(existsSync).map(real), ...repos.flatMap(r => r.writable)]
     return { home: h, writable: writable.filter(p => homeScope(h, p) === 'inside'), masked: repos.flatMap(r => r.masked) }
   })
+}
+
+/**
+ * IO. `node_modules` farms under a cwd's repo (or the cwd itself) that sit OUTSIDE every guarded home: the home mounts do not reach them,
+ * and a hardlink from the bun cache is just as shared there. They are bound read-only like the real store.
+ */
+export function outsideNodeModules(cwds: readonly string[], guards: readonly HomeGuard[]): string[] {
+  const real = (p: string): string => { try { return realpathSync(p) } catch { return p } }
+  const out = new Set<string>()
+  for (const c of cwds) {
+    const r = real(c)
+    const top = (() => { try { return spawnSync('git', ['-C', r, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 5000, env: Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))) }).stdout.trim() } catch { return '' } })()
+    for (const d of nodeModulesDirs(real(top || r)).map(real)) if (!guards.some(g => homeScope(g.home, d) !== 'outside')) out.add(d)
+  }
+  return [...out]
 }
 
 /** The account's home as the system records it: `$HOME` may be a throwaway (a run started from inside a run), the passwd entry may not. */

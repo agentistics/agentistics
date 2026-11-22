@@ -7,7 +7,7 @@ import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
 import { CURRENT_VERSION } from './version'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
-import { blockedPorts, createCtlDir, netnsHardening, persistenceGuard, hostAddresses, forwardPorts, netnsArgv, netnsNotice, pollHostAddresses, probeNetns, removeCtlDir, startSlirp, stopSlirp } from './run-netns'
+import { blockedPorts, createCtlDir, netnsHardening, outsideNodeModules, persistenceGuard, hostAddresses, forwardPorts, netnsArgv, netnsNotice, pollHostAddresses, probeNetns, removeCtlDir, startSlirp, stopSlirp } from './run-netns'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
 export { SEED_ALLOW }
@@ -245,6 +245,8 @@ export function buildThrowawayEnv(home: string, name: string, apiPort: number, w
     ...inherited,
     XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local', 'share'),
     XDG_STATE_HOME: join(home, '.local', 'state'), XDG_CACHE_HOME: join(home, '.cache'),
+    // a PRIVATE bun cache: the shared one is the source of hardlinks into every worktree's node_modules (RUN.ISOLAMENTO-PERSISTENCIA r2)
+    BUN_INSTALL_CACHE_DIR: join(home, '.cache', 'bun-install'),
     ...(source.VOLTA_HOME || existsSync(voltaHome) ? { VOLTA_HOME: voltaHome } : {}),
     HOME: home, USERPROFILE: home, AGENTISTICS_DIR: join(home, '.agentistics'),
     PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1',
@@ -279,10 +281,16 @@ function usage(): string {
        Persistence: the REAL home is read-only inside the run (writing ~/.claude/skills, ~/.local/bin, ~/.config/systemd/user, ~/.bashrc,
        ~/.ssh, ~/.gitconfig by absolute path fails with EROFS; the run's own HOME is a throwaway). Writable carve-outs, and why: the run's
        own home and tmp (scratch), the git worktree you run from (or --cwd) with its common git dir (so git commit works; its hooks/ and
-       config stay read-only), ~/.bun/install/cache (bun install). Anything else outside the home (/tmp/<name>) is unchanged.
+       config stay read-only). bun's hardlinks: bun fills node_modules by HARDLINK from ~/.bun/install/cache, so one inode is named in the
+       shared cache and in other worktrees; therefore the shared cache is read-only, every node_modules under the worktree is read-only, and
+       BUN_INSTALL_CACHE_DIR points at a private cache in the run home. To install inside, do it in a fresh directory (a copy in the run
+       home or /tmp) with \`bun install --backend=copyfile\`; \`bun install\` over the read-only node_modules finds it up to date or fails.
+       Remaining surface: any OTHER writable file with several hard links (nlink>1) is shared with its other names (not scanned at launch).
+       Anything else outside the home (/tmp/<name>) is unchanged.
        Not covered: another machine that proxies to the real server, a root-owned process outside the run, a socket created later in a NEW
        directory under /tmp, files outside the home and inside the carve-outs above (the worktree's own files, e.g. .husky, package.json
-       scripts, run when the owner next uses it), and group-granted access that does not go through a socket (supplementary groups cannot be dropped in an unprivileged namespace). Without a systemd scope the 2G memory
+       scripts, .claude/settings*.json hooks, and the husky "prepare" step, which prints a harmless "could not write config" because .git/config is
+       read-only, run when the owner next uses it), and group-granted access that does not go through a socket (supplementary groups cannot be dropped in an unprivileged namespace). Without a systemd scope the 2G memory
        cap is off (said at launch). --serve ports are forwarded to the host's 127.0.0.1. Where namespaces are unavailable it falls
        back to the CLI-only guard and says so; --no-netns asks for that.
        agentop run ls
@@ -758,7 +766,10 @@ async function startRun(options: RunOptions): Promise<number> {
     systemd = scope === 'ok'
     const scopeLine = scopeNotice(scope)
     if (scopeLine) { console.error(scopeLine); memoryCapOff = scopeLine }
-    const hard = netns.mode === 'netns' ? netnsHardening(realDataDir(), process.getuid!(), undefined, undefined, ctl && !ctl.covered ? [ctl.dir] : [], undefined, persistenceGuard(home, [process.cwd(), ...(options.cwd ? [serveCwdOk(options.cwd) ?? options.cwd] : [])])) : null
+    const runCwds = [process.cwd(), ...(options.cwd ? [serveCwdOk(options.cwd) ?? options.cwd] : [])]
+    const guards = netns.mode === 'netns' ? persistenceGuard(home, runCwds) : []
+    const hard = netns.mode === 'netns' ? netnsHardening(realDataDir(), process.getuid!(), undefined, undefined, ctl && !ctl.covered ? [ctl.dir] : [], undefined, guards) : null
+    if (hard) hard.hardening.readOnly = [...new Set([...(hard.hardening.readOnly ?? []), ...outsideNodeModules(runCwds, guards)])]
     const runArgv = hard ? netnsArgv(argv, process.getuid!(), process.getgid!(), blockedPorts(), hostAddresses(), hard.hide, hard.hardening) : argv
     const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...runArgv] : runArgv
     child = spawn(systemd ? 'systemd-run' : runArgv[0]!, systemd ? childArgs : runArgv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
