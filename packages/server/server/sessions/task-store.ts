@@ -697,7 +697,13 @@ export function createTaskStore(file: string): TaskStore {
     bookMemo.delete(file)
     await mkdir(dirname(file), { recursive: true })
     if (corrupt) {
-      await rename(file, `${file}.corrupt-${Date.now()}`).catch(() => {})
+      // Same rule as the registry: bytes we could not set aside are the only record of the board, so a
+      // failed rename ABORTS the write (`corrupt` stays set and the next write retries it).
+      const aside = `${file}.corrupt-${Date.now()}`
+      try { await rename(file, aside) } catch (err) {
+        console.error('[tasks] unreadable board at', file, 'could not be backed up — write aborted')
+        throw new Error(`refusing to overwrite an unreadable board at ${file}: ${String(err)}`)
+      }
       corrupt = false
     }
     const text = JSON.stringify(book, null, 2)

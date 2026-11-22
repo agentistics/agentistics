@@ -28,6 +28,7 @@ import {
 } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
 import { withFileLock } from './file-lock'
+import { durableWrite } from '../durable-file'
 
 export const SESSION_ROLES_FILE = 'session-roles.json'
 
@@ -105,13 +106,9 @@ export async function rolesDocUnreadable(dataDir: string): Promise<boolean> {
 export async function writeRolesDoc(dataDir: string, doc: RolesDoc): Promise<void> {
   const file = join(dataDir, SESSION_ROLES_FILE)
   await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-  const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
   try {
-    const fh = await open(tmp, 'w', 0o600)
-    try { await fh.writeFile(`${JSON.stringify(doc, null, 2)}\n`, 'utf-8'); await fh.sync() } finally { await fh.close() }
-    await rename(tmp, file)
+    await durableWrite(file, `${JSON.stringify(doc, null, 2)}\n`, 0o600)
   } catch (e) {
-    await rm(tmp, { force: true }).catch(() => {})
     throw e
   }
   try { const d = await open(dirname(file), 'r'); try { await d.sync() } finally { await d.close() } } catch { /* no directory fsync here */ }

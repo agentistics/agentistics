@@ -80,7 +80,7 @@ export interface TaskWorld {
  * already in the book may have been renamed or delivered since, and re-upserting the derived
  * record would undo that.
  */
-async function ensureLegacyTasks(store: TaskStore, rows: readonly ManagedSession[], book: TaskBook): Promise<boolean> {
+export async function ensureLegacyTasks(store: TaskStore, rows: readonly ManagedSession[], book: TaskBook): Promise<boolean> {
   const finished = await readPreferences()
     .then(p => p.finishedTasks ?? [])
     .catch(() => [] as string[])

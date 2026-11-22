@@ -12,21 +12,26 @@ import { basename, dirname } from 'node:path'
 
 let seq = 0
 
+/** The fs calls the ordering depends on, injectable so a test can SPY on the order (fsync before rename, dir after). */
+const realOps = { open, rename, rm }
+let ops: typeof realOps = realOps
+export function __setDurableOpsForTest(o: Partial<typeof realOps> | null): void { ops = o ? { ...realOps, ...o } : realOps }
+
 /** Write `data` to `file` so that a crash leaves either the old bytes or the complete new ones. */
-export async function durableWrite(file: string, data: string): Promise<void> {
+export async function durableWrite(file: string, data: string, mode?: number): Promise<void> {
   const tmp = `${file}.tmp.${process.pid}.${(seq += 1)}`
   try {
-    const fh = await open(tmp, 'w')
+    const fh = await ops.open(tmp, 'w', mode)
     try {
       await fh.writeFile(data, 'utf8')
       await fh.sync()
     } finally {
       await fh.close()
     }
-    await rename(tmp, file)
+    await ops.rename(tmp, file)
     await fsyncDir(dirname(file))
   } catch (err) {
-    await rm(tmp, { force: true }).catch(() => {})
+    await ops.rm(tmp, { force: true }).catch(() => {})
     throw err
   }
 }
@@ -34,7 +39,7 @@ export async function durableWrite(file: string, data: string): Promise<void> {
 /** fsync a directory so the rename itself is durable. Best effort: some platforms refuse it. */
 async function fsyncDir(dir: string): Promise<void> {
   try {
-    const fh = await open(dir, 'r')
+    const fh = await ops.open(dir, 'r')
     try { await fh.sync() } finally { await fh.close() }
   } catch { /* Windows/NFS cannot fsync a directory; the file data is already synced */ }
 }
@@ -78,13 +83,16 @@ export async function hasQuarantine(file: string): Promise<boolean> {
 
 /** Raise the owner-visible alert for a quarantined state file. Lazy import keeps this module pure of the server. */
 const alertedFiles = new Set<string>()
+type AlertSink = (n: { type: 'warning' | 'error'; title: string; message: string }) => void
+let alertSink: AlertSink | null = null
+export function __setAlertSinkForTest(sink: AlertSink | null): void { alertSink = sink; alertedFiles.clear() }
 export async function alertQuarantined(file: string, restored: boolean): Promise<void> {
   if (alertedFiles.has(file)) return
   alertedFiles.add(file)
   console.error(`[durable] ${file} was unreadable and was quarantined; ${restored ? 'restored from the last good copy' : 'NO good copy — starting empty'}`)
   try {
-    const { broadcastNotification } = await import('./sse')
-    broadcastNotification({
+    const send: AlertSink = alertSink ?? (await import('./sse')).broadcastNotification as AlertSink
+    send({
       type: restored ? 'warning' : 'error',
       title: restored ? 'State file recovered from backup' : 'State file lost',
       message: `${basename(file)} was unreadable (disk fault?). ${restored ? 'Restored from the last good copy; recent changes may be missing.' : 'No good copy was found; it restarted empty. Restore from an agentop backup.'}`,
@@ -92,3 +100,15 @@ export async function alertQuarantined(file: string, restored: boolean): Promise
   } catch { /* alerting never fails a read */ }
 }
 
+
+/** `writeFile(path, data, { mode })` that also fsyncs — for callers whose rename is a separate, injectable step. */
+export async function writeFileSynced(path: string, data: string, o: { mode?: number } = {}): Promise<void> {
+  const fh = await open(path, 'w', o.mode)
+  try { await fh.writeFile(data, 'utf8'); await fh.sync() } finally { await fh.close() }
+}
+
+/** `rename` followed by an fsync of the directory, so the rename itself survives a crash. */
+export async function renameSynced(from: string, to: string): Promise<void> {
+  await rename(from, to)
+  await fsyncDir(dirname(to))
+}

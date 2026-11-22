@@ -100,6 +100,14 @@ export async function accountOfConversation(
   return undefined
 }
 
+/** The account a reopen runs on: the recorded one, else the root whose store holds the transcript. ONE helper for every door. */
+export async function accountForReopen(
+  recorded: string | undefined, harness: HarnessId, cwd: string, conversationId: string,
+  deps: Parameters<typeof accountOfConversation>[3] = {},
+): Promise<string | undefined> {
+  return recorded ?? await accountOfConversation(harness, cwd, conversationId, deps)
+}
+
 /**
  * A reopen's account: the record's own. No record and no agent caller → the default root, with no
  * registry read. `agentCaller` is true only for a VERIFIED session identity.
