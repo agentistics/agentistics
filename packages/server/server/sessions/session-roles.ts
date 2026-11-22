@@ -186,8 +186,6 @@ export interface RoleDeps {
   parentOf: (rowId: string) => Promise<string | undefined>
   /** Does the task exist, and which repositories does it touch (its free-text `repo` only)? Absent = not wired (declaring a lead is then refused). */
   taskInfoOf?: (taskId: string) => Promise<TaskRepoInfo>
-  /** The repository (`owner/name`) of the session's own working directory, as `repo-facts` resolves it. */
-  cwdRepoOf?: (rowId: string) => Promise<string | undefined>
   repoOfRow?: (rowId: string) => Promise<string | undefined>
   /** A session declared LEADER leaves its parent's team (`team-links.ts`, rule 2). Absent = not wired. */
   leaveTeam?: (rowId: string) => Promise<boolean>
@@ -510,8 +508,6 @@ export function sameRepo(a: string, b: string): { same: boolean; ownerDiffers: b
 
 // Named constants: these are lead-reply codes the dashboard never renders (not notification or chat-note codes).
 const OWNER_DIFFERS = 'owner_differs' as const
-const NOT_OWN_TASK = 'not_own_task' as const
-const REPO_NOT_OWN_CWD = 'repo_not_own_cwd' as const
 
 export interface LeadRequest { ref?: string; add?: readonly string[]; remove?: readonly string[] }
 export type LeadReply =
@@ -529,8 +525,6 @@ const LEAD_MESSAGES: Record<string, string> = {
   other_project: 'That task belongs to another repository than the leader\'s own task.',
   no_repo_target: 'That task has no repository; set the task\'s repo first.',
   repo_not_explicit: 'The task repository was not set explicitly.',
-  not_own_task: 'A session may change the repository only of the task it is filed on as leader; the person can change any: agentop task edit <task> --repo <owner/name> from your own terminal, or the task screen.',
-  repo_not_own_cwd: 'Only the person can set a repository other than the one this session is working in: run agentop task edit <task> --repo <owner/name> from your own terminal, or use the task screen.',
   no_repo_own: 'The leader\'s own task has no repository; set the task\'s repo first.',
   not_wired: 'Task lookup is not available here.',
 }
@@ -574,7 +568,7 @@ export function leadOp(senderId: string | null, req: LeadRequest, deps: RoleDeps
       // A repo copied from a filed session (any session, any cwd) or a legacy one with no provenance proves nothing.
       const notExplicit = (i: TaskRepoInfo, ref: string): LeadReply => ({
         ...fail('repo_not_explicit'),
-        message: `The repository of task "${i.title ?? ref}" (${ref}) was not set explicitly, so it cannot be used to lead. Set it first: agentop task edit ${ref} --repo <owner/name>.`,
+        message: `The repository of task "${i.title ?? ref}" (${ref}) was not set explicitly, so it cannot be used to lead. Ask the person to set it on the task screen (a session cannot).`,
       })
       for (const id of add) {
         const info = await deps.taskInfoOf(id).catch(() => ({ exists: false } as TaskRepoInfo))
@@ -631,23 +625,6 @@ export async function listLeads(deps: RoleDeps): Promise<{ ok: true; leaders: { 
   return { ok: true, leaders: rows.filter(r => led.has(r.id)).map(r => ({ id: r.id, title: r.title, state: r.state ?? '', leads: [...led.get(r.id)!] })) }
 }
 
-/**
- * Who may write a task's EXPLICIT repository. The person (no verified session) any task; a verified SESSION only the
- * task it is filed on, and only as a declared leader — otherwise a leader could set another task's repository to its
- * own and then lead it. `null` = allowed. Fail closed on anything unreadable.
- */
-export async function repoWriteRefusal(sender: string | null, taskId: string, deps: RoleDeps, value: string): Promise<{ code: 'not_own_task' | 'repo_not_own_cwd'; message: string } | null> {
-  if (sender === null) return null
-  const refuse = { code: NOT_OWN_TASK, message: LEAD_MESSAGES.not_own_task! }
-  const filing = await deps.taskOf?.(sender).catch(() => undefined)
-  if (!filing || filing !== taskId) return refuse
-  const row = (await deps.rows().catch(() => [] as FleetRowForGroups[])).find(r => r.id === sender)
-  if (!row || roleOfRow((await loadRoles(deps)).roles, row) !== 'leader') return refuse
-  // A repository a SESSION writes must be a verifiable fact — the repository of its own working directory — never a declaration.
-  const own = await deps.cwdRepoOf?.(sender).catch(() => undefined)
-  if (!own || !value || own.toLowerCase() !== value.toLowerCase()) return { code: REPO_NOT_OWN_CWD, message: LEAD_MESSAGES.repo_not_own_cwd! }
-  return null
-}
 
 export function leadStatus(out: LeadReply): number {
   if (out.ok) return 200
@@ -717,11 +694,6 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
       return probeHold(row ?? { id: rowId }, engine()?.holds ?? null)
     },
     handoffGate: handoffGateFor,
-    cwdRepoOf: async rowId => {
-      const cwd = (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)?.cwd
-      if (!cwd) return undefined
-      return (await (await import('./repo-facts')).repoFacts(cwd).catch(() => undefined))?.repo
-    },
     taskInfoOf: async taskId => {
       const w = await (await import('./task-source')).loadTaskWorld()
       const t = w.book.tasks.find(x => x.id === taskId)

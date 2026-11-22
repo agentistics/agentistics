@@ -510,17 +510,14 @@ The agentistics dashboard provides a dedicated MCP Management interface (in Sett
 
 - [Nay chat](./nay.md) — the built-in assistant; a Nay conversation is a managed session with every tool allowed
 - [Data sources](./data-sources.md) — what `/api/data` returns and how it's computed
+## Who may write a task's repository (LIVE.LIDER-MULTITAREFA r7, D7)
 
-## Who may write a task's repository (LIVE.LIDER-MULTITAREFA r6)
-
-Leading a task requires an EXPLICIT repository on both the leader's own task and the target. A **session** may
-write a task's repository only when (a) the task is the one it is filed on as declared leader and (b) the value
-equals the repository of its OWN working directory as `repo-facts` resolves it — a verifiable fact, not a
-declaration. Anything else answers 403 `repo_not_own_cwd` / `not_own_task`; the person sets it with
-`agentop task edit <task> --repo <owner/name>` from their own terminal or the task screen.
-
-Who is asking is read from the process tree / socket, never from what the request omits: the CLI looks for a managed
-session among its ancestors (`env -u AGENTOP_MANAGED_ID` changes nothing), and REST without a `session` body uses the
-browser padlock's socket classifier (`browser-caller.ts`). Stated limits: where there is no /proc (macOS, Windows) the
-socket cannot be read and REST falls back to the body, so a `curl` from a session there passes as the person; a
-process reparented to init (double fork/setsid) leaves its session's tree.
+Leading a task requires an EXPLICIT repository on both the leader's own task and the target. **A session never writes
+a task's repository** — REST, MCP and CLI alike answer 403 `repo_person_only`: "Only the person sets a task's
+repository, from the task screen." A same-user agent chooses its own environment and process tree and can even
+`git remote set-url` its own cwd, so neither the process tree, the socket classifier nor "the repository of its own
+cwd" is a barrier for a write. The barrier is a proof only the person can give: the task screen asks the vault
+(`POST /api/vault/delivery-owner`, scope `task-repo:<task id>` / `edit`) and sends the single-use grant in
+`X-Agentop-Owner-Grant` (loopback + Origin, 5 minutes, spent once). No grant: 403 `owner_proof_required`. The CLI has
+no person path (nothing secret separates the person's shell from an agent's): `agentop task edit --repo` is refused
+with the same sentence. The leading rule is unchanged: both sides explicit, same repository host+name, owner may differ.

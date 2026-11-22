@@ -569,7 +569,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_edit",
     description:
-      "Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`, `repo` (the task's repository: `owner/name`, `host/owner/name` or an https/ssh git URL, stored as `owner/name`; empty string clears it; a local path, spaces or garbage is refused with a sentence — use it when the repository moved or was inherited wrong; subtasks carry no repo). An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
+      "Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`, `repo` (the task's repository — a SESSION CANNOT SET IT: it is refused with 403 repo_person_only; only the person sets it, from the task screen. Ask the person; subtasks carry no repo). An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {

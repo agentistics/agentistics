@@ -38,6 +38,10 @@
  * forever, even after `agentop session open` or `git worktree add` put it back. Negatives therefore
  * expire (`NEGATIVE_TTL_MS`), which costs one re-probe a minute for a directory genuinely outside a
  * repository, and nothing at all for one that is missing — that case never spawns git.
+ *
+ * NOT A SECURITY FACT (D7): this answers ATTRIBUTION only (which repository a session belongs to). A same-user agent can
+ * `git remote set-url` its own cwd, so nothing here may authorise a write; the task repository is the person's
+ * (`task-repo-gate.ts`).
  */
 
 import { stat } from 'node:fs/promises'

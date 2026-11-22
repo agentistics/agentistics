@@ -25,8 +25,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Autonomous mode answers permission prompts using a positive allow-list, and tells you when it cannot.',
       },
       {
-        pt: 'Tarefas: troque o repositório de uma tarefa com `agentop task edit <ref> --repo`, pelo MCP ou pela API.',
-        en: "Tasks: change a task's repository with `agentop task edit <ref> --repo`, the MCP or the API.",
+        pt: 'Tarefas: defina o repositório de uma tarefa na tela da tarefa (pede sua confirmação pelo cofre); sessões não podem alterá-lo.',
+        en: "Tasks: set a task's repository on the task screen (you confirm with the vault); sessions cannot change it.",
       },
     ],
     fixes: [

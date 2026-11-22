@@ -715,6 +715,22 @@ export async function editTask(ref: string, patch: TaskFieldPatch): Promise<bool
   return false
 }
 
+/**
+ * D7: the task's repository is the PERSON's — a session can never write it. The write asks the vault for the owner's
+ * single-use grant scoped to THIS task (`task-repo:<id>` / `edit`, the same `postWithOwnerProof` the delivery
+ * approval and the browser unlock use) and repeats the SAME request with it. `''` clears. `ref` must be the task id.
+ */
+export async function setTaskRepo(ref: string, repo: string, pt = pagePt()): Promise<{ ok: true } | { ok: false; message: string }> {
+  let res: OwnerCall | null = null
+  try { res = await postWithOwnerProof(`/api/tasks/${encodeURIComponent(ref)}`, { repo, actor: 'you' }, { pieceKey: `task-repo:${ref}`, move: 'edit' }, undefined, pt) } catch { res = null }
+  if (res && res.status < 400) return { ok: true }
+  const body = res?.body ?? {}
+  const message = (typeof body.message === 'string' && body.message.trim() ? body.message : null)
+    ?? readableRefusal(body, pt, res?.status)
+    ?? (pt ? 'O servidor recusou a alteração.' : 'The server refused the change.')
+  return { ok: false, message }
+}
+
 /** PURE. The error toast for a refused (or unanswered) task edit — the words, in the page's language. */
 export function editRefusalNotice(res: { status: number; body: Record<string, unknown> } | null, pt: boolean): { type: 'error'; title: string; message: string } {
   return {

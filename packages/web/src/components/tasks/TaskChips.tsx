@@ -31,7 +31,7 @@ import { StatusChip } from './StatusChip'
 import { DurationCellView } from './SubtaskDurationCell'
 import { rowButtonStyle } from './SubtaskActionsMenu'
 import {
-  addLink, deleteTask, editTask, markTask, removeLink, setBlockedBy, useTaskList,
+  addLink, deleteTask, editTask, markTask, removeLink, setBlockedBy, setTaskRepo, useTaskList,
   useTaskTypes,
   type TaskDetail, type TaskListRow, type TaskRecord, type TaskStatus,
 } from '../../lib/tasks'
@@ -92,6 +92,50 @@ function LinksList({ id, task, lang, onChanged }: {
         onChange={e => setUrl(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter') void add() }}
       />
+    </div>
+  )
+}
+
+/**
+ * The task's repository (D7). Only the PERSON writes it: saving asks the vault for a one-time confirmation (password,
+ * Windows Hello or Touch ID) through the same proof the delivery approval uses. A session can never change it.
+ */
+function RepoEditor({ id, task, lang, onChanged }: {
+  id: string
+  task: TaskRecord
+  lang: Lang
+  onChanged: () => Promise<void> | void
+}) {
+  const isMobile = useIsMobile()
+  const pt = lang === 'pt'
+  const current = task.repo ?? ''
+  const [value, setValue] = useState(current)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const save = async () => {
+    if (busy || value.trim() === current) return
+    setBusy(true); setError(null)
+    const out = await setTaskRepo(id, value.trim(), pt)
+    setBusy(false)
+    if (out.ok) await onChanged(); else setError(out.message)
+  }
+  return (
+    <div style={{ display: 'grid', gap: 9, padding: 2 }}>
+      <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+        {pt ? 'Só você define o repositório; pede sua confirmação pelo cofre. Deixe vazio para limpar.' : 'Only you set the repository; it asks you to confirm with the vault. Leave empty to clear.'}
+      </div>
+      <input
+        style={field(isMobile)} value={value} disabled={busy}
+        placeholder={pt ? 'dono/nome ou URL git' : 'owner/name or git URL'}
+        aria-label={pt ? 'Repositório' : 'Repository'}
+        onChange={e => setValue(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') void save() }}
+      />
+      <button
+        className="ag-tap" style={{ ...button(isMobile, 'primary'), justifySelf: 'start' }} disabled={busy || value.trim() === current}
+        onClick={() => void save()}
+      >{busy ? (pt ? 'Confirmando…' : 'Confirming…') : (pt ? 'Salvar repositório' : 'Save repository')}</button>
+      {error && <div role="alert" style={{ fontSize: 11.5, color: 'var(--accent-red)' }}>{error}</div>}
     </div>
   )
 }
@@ -301,6 +345,16 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
           render={() => <LinksList id={id} task={task} lang={lang} onChanged={reload} />}
         >
           {linkCount > 0 ? <><Link2 size={12} />{h.links.replace('{n}', String(linkCount))}</> : h.addLink}
+        </PanelMenu>
+
+        <PanelMenu
+          title={lang === 'pt' ? 'Repositório' : 'Repository'}
+          width={320}
+          triggerClassName="ag-tap"
+          triggerStyle={{ ...pillStyle(), cursor: 'pointer', ...(!task.repo ? { color: 'var(--text-tertiary)' } : {}) }}
+          render={() => <RepoEditor id={id} task={task} lang={lang} onChanged={reload} />}
+        >
+          {task.repo ? task.repo : (lang === 'pt' ? '+ repositório' : '+ repository')}
         </PanelMenu>
 
         <PanelMenu

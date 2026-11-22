@@ -246,13 +246,29 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão não verificada', message: 'Só uma sessão iniciada pelo agentistics pode definir papéis de sessão; esta chamada não conseguiu provar de qual sessão vem.' },
     en: { title: 'Unverified session', message: 'Only a session started by agentistics can set session roles; this request could not prove which session it comes from.' },
   },
-  not_own_task: {
-    pt: { title: 'Repositório só na própria tarefa', message: 'Uma sessão só pode mudar o repositório da tarefa em que está filiada como líder; só a pessoa muda o de qualquer tarefa.' },
-    en: { title: 'Repository only on its own task', message: 'A session may change the repository only of the task it is filed on as leader; only the person can change any task.' },
+  accepted_members: {
+    pt: { title: 'Grupo com membros aceitos', message: 'Um grupo com membros já aceitos não pode ser alterado desta forma.' },
+    en: { title: 'Group has accepted members', message: 'A group whose members are already accepted cannot be changed this way.' },
   },
-  repo_not_own_cwd: {
-    pt: { title: 'Repositório só pela pessoa', message: 'Uma sessão só pode gravar o repositório do próprio diretório; qualquer outro, só a pessoa: agentop task edit <tarefa> --repo <dono/nome> no seu terminal, ou a tela da tarefa.' },
-    en: { title: 'Repository set by the person', message: 'A session may write only the repository of its own working directory; any other is the person\'s: agentop task edit <task> --repo <owner/name> from your terminal, or the task screen.' },
+  evidence_binding_protected: {
+    pt: { title: 'Evidência protegida', message: 'A evidência ligada a esta entrega está protegida e não pode ser alterada por aqui.' },
+    en: { title: 'Evidence is protected', message: 'The evidence bound to this delivery is protected and cannot be changed here.' },
+  },
+  guard_context_required: {
+    pt: { title: 'Contexto da verificação ausente', message: 'Esta mudança precisa passar pela verificação da entrega e não pode ser gravada direto.' },
+    en: { title: 'Check context missing', message: 'This change has to go through the delivery check and cannot be written directly.' },
+  },
+  guard_unverified: {
+    pt: { title: 'Mudança não verificada', message: 'A verificação da entrega não conseguiu confirmar esta mudança, então ela não foi gravada.' },
+    en: { title: 'Change not verified', message: 'The delivery check could not confirm this change, so it was not saved.' },
+  },
+  sweep_changed: {
+    pt: { title: 'A entrega mudou durante a varredura', message: 'Algo mudou enquanto a varredura rodava; ela tenta de novo sozinha.' },
+    en: { title: 'Delivery changed during the sweep', message: 'Something changed while the sweep was running; it will retry on its own.' },
+  },
+  repo_person_only: {
+    pt: { title: 'Repositório só pela pessoa', message: 'Só a pessoa define o repositório de uma tarefa, na tela da tarefa.' },
+    en: { title: 'Repository set by the person', message: 'Only the person sets a task\'s repository, from the task screen.' },
   },
   'tasks.thread_resolved': {
     pt: { title: 'Tópico resolvido', message: 'O tópico foi movido para Resolvidos.' },

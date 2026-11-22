@@ -2964,16 +2964,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           const { normalizeTaskRepo } = await import('./sessions/task-repo')
           const r = normalizeTaskRepo(body.repo)
           if (!r.ok) return json({ error: 'bad_repo', message: r.reason }, 422)
-          // The repository a person writes is what counts for leading: a SESSION may write it only on the task it leads as its own filing.
-          const [{ repoEditGate }, { verifySessionIdentity }] = await Promise.all([import('./sessions/task-repo-gate'), import('./sessions/session-identity')])
-          const caller = async () => {
-            const [{ identifyCaller }, { processSessionHub }] = await Promise.all([import('./browser/browser-caller-proc'), import('./sessions/session-hub')])
-            const sessionPids = new Set<number>()
-            for (const row of processSessionHub()?.last()?.sessions ?? []) if (typeof row.pid === 'number') sessionPids.add(row.pid)
-            const ip = server.requestIP(req)
-            return identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
-          }
-          const refused = await repoEditGate(body, ref, verifySessionIdentity, r.repo, caller)
+          // D7: a SESSION never writes a task's repository; the person does, with the owner's single-use vault grant (loopback + Origin).
+          const [{ repoEditGate }, { verifySessionIdentity }, gateMod, { vaultHttpSession, loopbackRequest }, { vaultLang }] = await Promise.all([
+            import('./sessions/task-repo-gate'), import('./sessions/session-identity'), import('./vault/gate'), import('./vault/http'), import('./vault/service'),
+          ])
+          const loopback = loopbackRequest(req, server.requestIP(req)?.address ?? null, { requireOrigin: true })
+          const refused = await repoEditGate({
+            body, ref, verify: verifySessionIdentity, grant: req.headers.get('x-agentop-owner-grant'),
+            consume: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: vaultHttpSession('local'), loopback }, scope),
+            proofAvailable: () => gateMod.ownerProofAvailable(), lang: vaultLang() === 'pt' ? 'pt' : 'en',
+          })
           if (refused) return json(refused.body, refused.status)
         }
         const ok = await mod.editTask(ref, {
