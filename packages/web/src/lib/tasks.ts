@@ -20,7 +20,7 @@ import { getDateRangeFilter } from '../hooks/useData'
 import { filingUrl } from './nativeSession'
 import { isNativeSessionId } from './sessionRoute'
 import { refusalOpensVault } from './browserCard'
-import { postWithOwnerProof, readableRefusal, refusalText, type OwnerCall } from './ownerProof'
+import { ownerProofSentence, postWithOwnerProof, readableRefusal, refusalText, type OwnerCall } from './ownerProof'
 import type { ChatAttachmentRef, CommentKind, CommentTarget, TaskThreadRecord, ThreadDelivery } from '@agentistics/core'
 export type { ThreadDelivery } from '@agentistics/core'
 
@@ -726,10 +726,13 @@ export async function setTaskRepo(ref: string, repo: string, pt = pagePt()): Pro
   try { res = await postWithOwnerProof(`/api/tasks/${encodeURIComponent(ref)}`, { repo, actor: 'you' }, { pieceKey: `task-repo:${ref}`, move: 'edit' }, undefined, pt) } catch { res = null }
   if (res && res.status < 400) return { ok: true }
   const body = res?.body ?? {}
-  const message = (typeof body.message === 'string' && body.message.trim() ? body.message : null)
+  const code = typeof body.error === 'string' ? body.error : ''
+  // The vault's own refusals are worded here, in the page's language (the server words them in the vault's), as the padlock does.
+  const vaultWords = code.startsWith('owner') || code.startsWith('grant') ? ownerProofSentence(code, pt) : null
+  const message = vaultWords
+    ?? (typeof body.message === 'string' && body.message.trim() ? body.message : null)
     ?? readableRefusal(body, pt, res?.status)
     ?? (pt ? 'O servidor recusou a alteração.' : 'The server refused the change.')
-  const code = typeof body.error === 'string' ? body.error : ''
   return { ok: false, message, ...(refusalOpensVault(code, body.action as { kind?: unknown } | undefined) ? { openVault: true } : {}) }
 }
 

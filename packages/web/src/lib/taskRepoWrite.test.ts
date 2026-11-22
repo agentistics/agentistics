@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { setTaskRepo } from './tasks'
+import { ownerProofSentence } from './ownerProof'
 
 const realFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = realFetch })
@@ -51,7 +52,14 @@ describe('setTaskRepo (D7: the person writes it, with the vault grant scoped to 
 
 test('R3: owner_proof_unavailable / an open-vault action marks the refusal openVault; person-only does not', async () => {
   mock(() => ({ status: 403, body: { error: 'owner_proof_unavailable', message: 'open it', action: { kind: 'open-vault', path: '/vault' } } }), () => ({ status: 200, body: {} }))
-  expect(await setTaskRepo('t-1', 'o/r', false)).toEqual({ ok: false, message: 'open it', openVault: true })
+  expect(await setTaskRepo('t-1', 'o/r', false)).toEqual({ ok: false, message: ownerProofSentence('owner_proof_unavailable', false), openVault: true })
   mock(() => ({ status: 403, body: { error: 'repo_person_only', message: 'no' } }), () => ({ status: 200, body: {} }))
   expect(await setTaskRepo('t-1', 'o/r', false)).toEqual({ ok: false, message: 'no' })
+})
+
+test('a vault refusal is worded in the page language, not the server sentence (the padlock does the same)', async () => {
+  mock(() => ({ status: 403, body: { error: 'owner_proof_unavailable', message: 'The vault has silent protection only.', action: { kind: 'open-vault' } } }), () => ({ status: 200, body: {} }))
+  const out = await setTaskRepo('t-1', 'o/r', true)
+  expect(out).toEqual({ ok: false, message: ownerProofSentence('owner_proof_unavailable', true), openVault: true })
+  expect(ownerProofSentence('owner_proof_unavailable', true)).not.toBe(ownerProofSentence('owner_proof_unavailable', false))
 })
