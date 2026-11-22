@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { join, dirname, normalize, isAbsolute, relative } from 'node:path'
 import { digest, localImports, moduleCapabilities, rawWriters, storeReach } from './guard-ast.testing'
-import { productionSources, read } from './lint-scan.testing'
+import { isBuildOutput, productionSources, read } from './lint-scan.testing'
 
 export interface Inventory { base: string; contexts: Record<string, string[]>; writers: Record<string, string[]> }
 export function inventoryGrowth(actual: Readonly<Record<string, readonly string[]>>, baseline: Readonly<Record<string, readonly string[]>>): string[] {
@@ -42,7 +42,7 @@ export function r3Inventory(): ReachInventory {
 
 /** Every production module of the repo (packages + scripts), as `doors.lint.test.ts` scans them. */
 export function scannedSources(pkgs: string): string[] {
-  return [...productionSources(pkgs, pkgs), ...productionSources(join(pkgs, '..', 'scripts'), pkgs)]
+  return [...productionSources(pkgs, pkgs), ...productionSources(join(pkgs, '..', 'scripts'), pkgs)].filter(rel => !isBuildOutput(rel))
 }
 export const GUARDED_STORES = new Set(['server/server/sessions/task-store.ts', 'server/server/delivery/store.ts'])
 

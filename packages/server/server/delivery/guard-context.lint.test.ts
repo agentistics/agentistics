@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
-import { productionSources, read } from './lint-scan.testing'
+import { isBuildOutput, productionSources, read } from './lint-scan.testing'
 import { carryingContext, missingContext, missingContextSites } from './guard-sites.testing'
 import { historicInventory, inventoryGrowth } from './guard-inventory.testing'
 
@@ -9,7 +9,7 @@ describe('GuardContext call sites (pinned historical identities, only shrinking)
   test('every new or changed site must pass a context', () => {
     const actual: Record<string, string[]> = {}
     let carrying = 0
-    for (const rel of productionSources(join(PKGS, 'server'), PKGS)) {
+    for (const rel of productionSources(join(PKGS, 'server'), PKGS).filter(r => !isBuildOutput(r))) {
       const src = read(PKGS, rel); actual[rel] = missingContextSites(src); carrying += carryingContext(src)
     }
     expect(inventoryGrowth(actual, historicInventory().contexts)).toEqual([])
