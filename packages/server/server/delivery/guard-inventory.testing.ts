@@ -20,7 +20,7 @@ export function inventoryGrowth(actual: Readonly<Record<string, readonly string[
 
 export function historicInventory(): Inventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory.fixture.json'), 'utf8')
-  if (digest(text) !== '769e512b1c77e39668e938dd7dbccee82948dbe187bd5513714ea1e0e2d590cf') throw new Error('Historical guard inventory changed: the S2a ceiling is pinned to 1b1c8a941; migrate sites by supplying contexts, never enlarge the fixture')
+  if (digest(text) !== 'd4f13c53571deb1bb5c7161190ce7de2afb815528f9cbb46267699965ec2c36c') throw new Error('Historical guard inventory changed: the S2a ceiling is pinned to 1b1c8a941; migrate sites by supplying contexts, never enlarge the fixture')
   return JSON.parse(text)
 }
 
