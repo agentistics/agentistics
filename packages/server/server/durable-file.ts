@@ -53,10 +53,13 @@ export function bakPath(file: string): string { return `${file}.bak` }
  * than `everyMs`. A 20 MB board is therefore doubled at most once per interval, not per comment.
  * Never throws: a failed backup must not fail the write it protects.
  */
-export async function refreshLastGood(file: string, data: string, now = Date.now(), everyMs = BAK_EVERY_MS): Promise<boolean> {
+export async function refreshLastGood(file: string, data: string, now = Date.now(), everyMs = BAK_EVERY_MS, isEmpty = false): Promise<boolean> {
   try {
     const st = await stat(bakPath(file)).catch(() => null)
     if (st && now - st.mtimeMs < everyMs) return false
+    // An EMPTY state (nothing in it) never replaces a copy that holds data: that is how the one good
+    // copy was lost once a read came back empty by mistake.
+    if (isEmpty && st && st.size > data.length) return false
     await durableWrite(bakPath(file), data)
     return true
   } catch (err) {
@@ -71,6 +74,17 @@ export async function readLastGood(file: string, valid: (text: string) => boolea
     const text = await readFile(bakPath(file), 'utf8')
     return valid(text) ? text : null
   } catch { return null }
+}
+
+/**
+ * The state file is MISSING or EMPTY (0 bytes / whitespace — the classic ext4 crash result) while a valid
+ * last-good copy exists: that is a loss, not a fresh install. Returns the copy's text (and says which
+ * it was) or null when this really is nothing to recover (no file and no copy, or a non-empty file).
+ */
+export async function recoverVanished(file: string, text: string | null, valid: (t: string) => boolean): Promise<{ good: string; empty: boolean } | null> {
+  if (text !== null && text.trim()) return null
+  const good = await readLastGood(file, valid)
+  return good === null ? null : { good, empty: text !== null }
 }
 
 /** True when `<file>.corrupt-*` siblings exist: this state was lost once, so "empty" is not "new". */
@@ -111,4 +125,23 @@ export async function writeFileSynced(path: string, data: string, o: { mode?: nu
 export async function renameSynced(from: string, to: string): Promise<void> {
   await rename(from, to)
   await fsyncDir(dirname(to))
+}
+
+/**
+ * Server start: remove `<name>.tmp.<pid>.<n>` temp files `durableWrite` left behind when its process was
+ * killed mid-write (a board temp is 20 MB). Only files older than `maxAgeMs` whose pid is not ours.
+ * Never throws; returns how many it removed.
+ */
+export async function sweepStaleDurableTmps(dir: string, maxAgeMs = 10 * 60_000, now = Date.now(), ownPid = process.pid): Promise<number> {
+  let removed = 0
+  const names = await readdir(dir).catch(() => [] as string[])
+  for (const name of names) {
+    const m = /\.tmp\.(\d+)\.\d+$/.exec(name)
+    if (!m || Number(m[1]) === ownPid) continue
+    const path = `${dir}/${name}`
+    const st = await stat(path).catch(() => null)
+    if (!st?.isFile() || now - st.mtimeMs < maxAgeMs) continue
+    if (await rm(path, { force: true }).then(() => true, () => false)) removed++
+  }
+  return removed
 }

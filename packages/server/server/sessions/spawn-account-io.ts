@@ -4,6 +4,7 @@
  * plan-limits budgets. Every door (`/api/fleet/new`, `agentop session start|batch`, every reopen)
  * reads its context here, so none of them can grow a second idea of which accounts exist.
  */
+import { stat } from 'node:fs/promises'
 import { featureOn, type HarnessId } from '@agentistics/core'
 import { readAccounts, type AccountsFile } from '../harness-accounts'
 import { resolveChatTranscriptPath } from './chat-tail'
@@ -84,18 +85,27 @@ export async function spawnAccountContext(
  */
 export async function accountOfConversation(
   harness: HarnessId, cwd: string, conversationId: string,
-  deps: { file?: AccountsFile; resolve?: typeof resolveChatTranscriptPath } = {},
+  deps: { file?: AccountsFile; resolve?: typeof resolveChatTranscriptPath; mtime?: (path: string) => Promise<number> } = {},
 ): Promise<string | undefined> {
   if (harness !== 'claude') return undefined
   const resolve = deps.resolve ?? resolveChatTranscriptPath
+  const mtime = deps.mtime ?? (async (p: string) => (await stat(p)).mtimeMs)
   try {
-    if (await resolve(cwd, conversationId)) return undefined
+    // An account switch COPIES the transcript, so one id can live in several stores and only the
+    // newest keeps growing: the NEWEST copy decides (same rule as `newestTranscript`), never the first hit.
+    const hits: { account: string | undefined; at: number }[] = []
+    const defaultHit = await resolve(cwd, conversationId)
+    if (defaultHit) hits.push({ account: undefined, at: await mtime(defaultHit).catch(() => -1) })
     const file = deps.file ?? await readAccounts()
     for (const a of file.accounts) {
-      if (a.harness !== 'claude' || !a.root) continue
+      if (a.harness !== 'claude' || !a.root || a.retired) continue
       const dir = storeDirOf('claude', a.root)
-      if (dir && await resolve(cwd, conversationId, dir)) return a.id
+      const hit = dir ? await resolve(cwd, conversationId, dir) : null
+      if (hit) hits.push({ account: a.id, at: await mtime(hit).catch(() => -1) })
     }
+    let best: (typeof hits)[number] | undefined
+    for (const h of hits) if (!best || h.at > best.at) best = h
+    return best?.account
   } catch { /* unreadable registry or store: default rule */ }
   return undefined
 }

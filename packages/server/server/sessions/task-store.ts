@@ -19,7 +19,7 @@
  */
 
 import { mkdir, readFile, rename, stat } from 'node:fs/promises'
-import { alertQuarantined, durableWrite, hasQuarantine, readLastGood, refreshLastGood } from '../durable-file'
+import { alertQuarantined, durableWrite, hasQuarantine, readLastGood, recoverVanished, refreshLastGood } from '../durable-file'
 import { dirname } from 'node:path'
 import { isStatusStage, isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import { withFileLock } from './file-lock'
@@ -619,12 +619,19 @@ export function createTaskStore(file: string): TaskStore {
   }
 
   async function readUncached(): Promise<TaskBook> {
-    let text: string
+    let text: string | null
     try {
       text = await readFile(file, 'utf8')
     } catch {
-      corrupt = false
-      return EMPTY_BOOK()
+      text = null
+    }
+    if (text === null || !text.trim()) {
+      // Missing or 0 bytes: a fresh install has no `.bak` either; one that does lost its file.
+      const lost = await recoverVanished(file, text, t => { try { parseBook(t); return true } catch { return false } })
+      if (!lost) { corrupt = false; return EMPTY_BOOK() }
+      corrupt = lost.empty // an empty file is quarantined by the next write; a missing one has nothing to move
+      void alertOnce(true)
+      return parseBook(lost.good)
     }
     try {
       const book = parseBook(text)
@@ -708,7 +715,7 @@ export function createTaskStore(file: string): TaskStore {
     }
     const text = JSON.stringify(book, null, 2)
     await durableWrite(file, text)
-    await refreshLastGood(file, text)
+    await refreshLastGood(file, text, Date.now(), undefined, book.tasks.length === 0 && book.subtasks.length === 0)
     for (const fn of [...bookWriteListeners]) { try { fn() } catch { /* a listener never fails a write */ } }
   }
 

@@ -23,7 +23,7 @@
  */
 
 import { mkdir, readFile, rename, stat } from 'node:fs/promises'
-import { alertQuarantined, durableWrite, readLastGood, refreshLastGood } from '../durable-file'
+import { alertQuarantined, durableWrite, readLastGood, recoverVanished, refreshLastGood } from '../durable-file'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { MANAGED_SESSIONS_FILE } from '../config'
@@ -386,14 +386,20 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
       return fresh(parsedMemo.sanitized)
     }
     parsedMemo = null
-    let text: string
+    let text: string | null
     try {
       text = await readFile(file, 'utf-8')
     } catch {
-      corrupt = false
-      return [] // absent (first run, or never written to) — an empty registry, not an error
+      text = null
     }
-    if (!text.trim()) { corrupt = false; return [] }
+    if (text === null || !text.trim()) {
+      // Missing or 0 bytes: a fresh install has no `.bak` either; one that does lost its file.
+      const lost = await recoverVanished(file, text, t => { try { return Array.isArray(JSON.parse(t)) } catch { return false } })
+      if (!lost) { corrupt = false; return [] }
+      corrupt = lost.empty // an empty file is moved aside by the next write; a missing one has nothing to move
+      void alertQuarantined(file, true)
+      return (JSON.parse(lost.good) as unknown[]).map(sanitize).filter((x): x is ManagedSession => x !== null)
+    }
     try {
       const parsed = JSON.parse(text)
       if (!Array.isArray(parsed)) throw new Error('managed-sessions.json is not an array')
@@ -455,7 +461,7 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
     // makes rare, and which the next poll repairs.
     const text = `${JSON.stringify(list, null, 2)}\n`
     await durableWrite(file, text)
-    await refreshLastGood(file, text)
+    await refreshLastGood(file, text, Date.now(), undefined, list.length === 0)
   }
 
   // Chains `fn` behind whatever is already queued, so its read and write run as one atomic step
