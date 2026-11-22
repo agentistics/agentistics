@@ -2,7 +2,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { createConnection, isIP } from 'node:net'
-import { homedir, networkInterfaces } from 'node:os'
+import { homedir, networkInterfaces, userInfo } from 'node:os'
 import { hostWhich } from './host-which'
 
 /**
@@ -55,7 +55,7 @@ export function decideNetns(i: NetnsInputs): NetnsDecision {
 /** The one line a run prints when the network is NOT isolated (also when `--no-netns` asked for that); null when it is isolated. */
 export function netnsNotice(d: NetnsDecision): string | null {
   if (d.mode === 'netns') return null
-  return `agentop run: network NOT isolated (${d.reason}); only the agentop CLI refuses the real server on :${NETNS_BLOCKED_PORTS.join('/:')}, other programs in this run can still reach it.`
+  return `agentop run: network NOT isolated (${d.reason}); only the agentop CLI refuses the real server on :${NETNS_BLOCKED_PORTS.join('/:')}, other programs in this run can still reach it. Persistence is NOT prevented either: the real home (~/.claude/skills, ~/.local/bin, ~/.bashrc, ...) stays writable by absolute path.`
 }
 
 export type NetnsHardening = {
@@ -72,6 +72,30 @@ export type NetnsHardening = {
    */
   freshRun?: boolean
   keepUnderRun?: readonly string[]
+  /**
+   * RUN.ISOLAMENTO-PERSISTENCIA: the user's REAL home is bound read-only (recursively visible, top mount ro) so nothing in the run can
+   * write ~/.claude/skills, ~/.local/bin, ~/.config/systemd/user, ~/.bashrc, ~/.ssh ... by ABSOLUTE path (the run's own HOME is a
+   * throwaway, but a path is a path). Only `writable` is re-opened read-write; `masked` is made read-only again inside them (a repo's
+   * hooks/config: code the owner's next `git commit` would execute).
+   */
+  homeReadOnly?: readonly HomeGuard[]
+}
+export type HomeGuard = { home: string; writable: readonly string[]; masked: readonly string[] }
+
+/** PURE. Every writable/masked path must be the home itself or inside it; a path outside needs no mount (and one that is the home or above it would defeat the point). */
+export function homeScope(home: string, p: string): 'inside' | 'home' | 'outside' {
+  if (p === home) return 'home'
+  return p.startsWith(home.endsWith('/') ? home : home + '/') && !p.includes('/../') ? 'inside' : 'outside'
+}
+
+/** PURE. The mount steps for `homeReadOnly`. Order matters: home ro, then the carve-outs rw, then the masks ro again. */
+export function homeReadOnlySteps(h: HomeGuard): string[] {
+  const steps = [`mount --rbind ${shq(h.home)} ${shq(h.home)}`, `mount -o remount,bind,ro ${shq(h.home)}`]
+  const inside = (l: readonly string[]) => [...new Set(l)].filter(p => homeScope(h.home, p) === 'inside').sort((a, b) => a.length - b.length)
+  const writable = inside(h.writable)
+  for (const w of writable) steps.push(`mount --rbind ${shq(w)} ${shq(w)}`, `mount -o remount,bind,rw ${shq(w)}`)
+  for (const m of inside(h.masked)) if (writable.some(w => m === w || m.startsWith(w + '/'))) steps.push(`mount --rbind ${shq(m)} ${shq(m)}`, `mount -o remount,bind,ro ${shq(m)}`)
+  return steps
 }
 
 /**
@@ -122,7 +146,9 @@ export function netnsInnerScript(uid: number, gid: number, ports: readonly numbe
     steps.push(`nft add rule inet agrun out ${fam} daddr '${l}' ct state new meta l4proto != '{ tcp, udp }' drop`)
   }
   steps.push(`nft add rule inet agrun out tcp dport '{ ${set} }' reject with tcp reset`)
-  // The real store read-only FIRST (a non-recursive bind would otherwise cover the tmpfs mounted below it).
+  // The real home read-only FIRST, with its few writable carve-outs; everything below mounts on top of it.
+  for (const g of hardening.homeReadOnly ?? []) steps.push(...homeReadOnlySteps(g))
+  // The real store read-only (a non-recursive bind would otherwise cover the tmpfs mounted below it).
   for (const d of hardening.readOnly ?? []) steps.push(`mount --bind ${shq(d)} ${shq(d)}`, `mount -o remount,bind,ro ${shq(d)}`)
   if (hardening.freshRun) {
     steps.push('T=$(mktemp -d /tmp/agr-oldrun.XXXXXX)', 'mount --rbind /run "$T"', 'mount -t tmpfs -o mode=0755 tmpfs /run')
@@ -136,10 +162,13 @@ export function netnsInnerScript(uid: number, gid: number, ports: readonly numbe
   return [
     'i=0',
     'p=',  // a TERM during the setup (before the command exists) must end the run
+    // the working directory pins the mounts it was entered through: re-enter it after the mounts below, or a relative path (../../.claude) walks AROUND them
+    'd=$PWD',
     'trap \'if [ -n "$p" ]; then kill -TERM "$p" 2>/dev/null; else exit 143; fi\' TERM INT HUP',
     'while ! ip link show tap0 >/dev/null 2>&1 && [ "$i" -lt 200 ]; do i=$((i+1)); sleep 0.05; done',
     'ip link set lo up',
     `${steps.join(' && ')} || { echo "agentop run: could not install the network firewall; refusing to start" >&2; exit 126; }`,
+    'cd -- "$d" || { echo "agentop run: could not re-enter the working directory" >&2; exit 126; }',
     ...(unset.length ? [`unset ${unset.join(' ')}`] : []),
     'exec 3<&0',
     `env --default-signal=INT,TERM,QUIT,HUP unshare --user --map-user=${uid} --map-group=${gid} -- "$@" <&3 3<&- &`,
@@ -214,8 +243,51 @@ export function socketDirs(uid: number, home: string, tmpRoot = '/tmp', mntRoot 
 /** Keeps resolver state visible after /run is replaced (a systemd-resolved stub, resolvconf). */
 export const RUN_KEEP: readonly string[] = ['/run/systemd/resolve', '/run/resolvconf']
 
+/** Real-home paths a run legitimately writes (listed in `agentop run --help`): the bun install cache a `bun install` fills. */
+export const HOME_WRITABLE_CARVEOUTS: readonly string[] = ['.bun/install/cache']
+
+/**
+ * IO. The git work tree `cwd` is in and its common git dir, for the writable carve-out (a `git commit` in the worktree writes objects, refs,
+ * the index and logs under the common dir). `hooks` and `config` of the common dir are masked read-only again: they are code / settings the
+ * owner's next git command in that repo would run. Nothing when `cwd` is not in a repo, or when the repo root is the home (or above it).
+ */
+export function repoCarveOuts(cwd: string, home: string): { writable: string[]; masked: string[] } {
+  const real = (p: string): string => { try { return realpathSync(p) } catch { return p } }
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')))
+  const git = (a: string[]): string => { try { return spawnSync('git', ['-C', cwd, ...a], { encoding: 'utf8', env, timeout: 5000 }).stdout.trim() } catch { return '' } }
+  const top = git(['rev-parse', '--show-toplevel'])
+  if (!top) return { writable: [], masked: [] }
+  const common = git(['rev-parse', '--git-common-dir'])
+  const commonAbs = common ? real(common.startsWith('/') ? common : join(cwd, common)) : ''
+  if (homeScope(home, real(top)) !== 'inside') return { writable: [], masked: [] } // the home itself (or a repo above it): opening it would defeat the guard
+  const writable = [real(top), ...(commonAbs ? [commonAbs] : [])].filter(p => homeScope(home, p) === 'inside')
+  return { writable, masked: commonAbs ? [join(commonAbs, 'hooks'), join(commonAbs, 'config')].filter(existsSync) : [] }
+}
+
+/**
+ * IO. The `homeReadOnly` hardening for a run: the real home, minus the run's own dir, the worktrees it works in and the listed caches.
+ * Test seam: `AGENTISTICS_RUN_EXTRA_PROTECTED_HOMES=/tmp/a:/tmp/b` protects those directories exactly like the home (a test cannot
+ * write the real ~/.claude); it can only ADD a protected tree, never remove one.
+ */
+export function persistenceGuard(runHome: string, cwds: readonly string[], home: string = homeOf(), env: Record<string, string | undefined> = process.env): HomeGuard[] {
+  const real = (p: string): string => { try { return realpathSync(p) } catch { return p } }
+  const extra = (env.AGENTISTICS_RUN_EXTRA_PROTECTED_HOMES ?? '').split(':').filter(d => d.startsWith('/') && !d.includes('/../') && existsSync(d)).map(real)
+  return [...new Set([real(home), ...extra])].map(h => {
+    const repos = cwds.map(c => repoCarveOuts(c, h))
+    const writable = [real(runHome), ...HOME_WRITABLE_CARVEOUTS.map(c => join(h, c)).filter(existsSync).map(real), ...repos.flatMap(r => r.writable)]
+    return { home: h, writable: writable.filter(p => homeScope(h, p) === 'inside'), masked: repos.flatMap(r => r.masked) }
+  })
+}
+
+/** The account's home as the system records it: `$HOME` may be a throwaway (a run started from inside a run), the passwd entry may not. */
+export function homeOf(): string {
+  // passwd first: Bun's userInfo() (like homedir()) follows $HOME, which inside a run is the throwaway.
+  try { const line = readFileSync('/etc/passwd', 'utf8').split('\n').find(l => l.split(':')[2] === String(process.getuid?.())); const h = line?.split(':')[5]; if (h && h.startsWith('/')) return h } catch {}
+  try { return userInfo().homedir } catch { return homedir() }
+}
+
 /** IO. Everything the inner script must cover besides the network: see NetnsHardening. Resolved to real paths, de-duplicated. */
-export function netnsHardening(realDataDir: string, uid: number, home: string = homedir(), env: Record<string, string | undefined> = process.env, extraHide: readonly string[] = [], tmpRoot = '/tmp'): { hide: string[]; hardening: NetnsHardening } {
+export function netnsHardening(realDataDir: string, uid: number, home: string = homedir(), env: Record<string, string | undefined> = process.env, extraHide: readonly string[] = [], tmpRoot = '/tmp', homeReadOnly?: readonly HomeGuard[]): { hide: string[]; hardening: NetnsHardening } {
   const real = (p: string): string => { try { return realpathSync(p) } catch { return p } }
   const isDir = (d: string): boolean => { try { return statSync(d).isDirectory() } catch { return false } }
   const freshRun = isDir('/run')
@@ -224,7 +296,7 @@ export function netnsHardening(realDataDir: string, uid: number, home: string = 
   const covered = (f: string): boolean => hide.some(h => f === h || f.startsWith(h + '/')) || (freshRun && f.startsWith('/run/'))
   const blind = [...new Set(socketCandidates(uid, home, realDataDir, env).map(real))].filter(f => !covered(f))
   const readOnly = (() => { try { return statSync(realDataDir).isDirectory() ? [real(realDataDir)] : [] } catch { return [] } })()
-  return { hide, hardening: { readOnly, blind, freshRun, keepUnderRun: RUN_KEEP.filter(isDir), unsetEnv: ['DBUS_SESSION_BUS_ADDRESS', 'SSH_AUTH_SOCK', 'GPG_AGENT_INFO', 'DOCKER_HOST', 'WSL_INTEROP', 'WSL2_GUI_APPS_ENABLED'] } }
+  return { hide, hardening: { homeReadOnly, readOnly, blind, freshRun, keepUnderRun: RUN_KEEP.filter(isDir), unsetEnv: ['DBUS_SESSION_BUS_ADDRESS', 'SSH_AUTH_SOCK', 'GPG_AGENT_INFO', 'DOCKER_HOST', 'WSL_INTEROP', 'WSL2_GUI_APPS_ENABLED'] } }
 }
 
 /**

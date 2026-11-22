@@ -7,7 +7,7 @@ import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
 import { CURRENT_VERSION } from './version'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
-import { blockedPorts, createCtlDir, netnsHardening, hostAddresses, forwardPorts, netnsArgv, netnsNotice, pollHostAddresses, probeNetns, removeCtlDir, startSlirp, stopSlirp } from './run-netns'
+import { blockedPorts, createCtlDir, netnsHardening, persistenceGuard, hostAddresses, forwardPorts, netnsArgv, netnsNotice, pollHostAddresses, probeNetns, removeCtlDir, startSlirp, stopSlirp } from './run-netns'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
 export { SEED_ALLOW }
@@ -276,10 +276,13 @@ function usage(): string {
        D-Bus / systemd --user / cc-socks / gpg: a socket recreated later cannot come back), the Windows directories of /mnt/<drive>, the
        real server's unix sockets and tmux dir, /tmp/ssh-* /.X11-unix, ~/.gnupg and ~/.ssh/agent; WSL .exe programs cannot be started;
        the real data dir (~/.agentistics) is read-only; its pid is not visible.
+       Persistence: the REAL home is read-only inside the run (writing ~/.claude/skills, ~/.local/bin, ~/.config/systemd/user, ~/.bashrc,
+       ~/.ssh, ~/.gitconfig by absolute path fails with EROFS; the run's own HOME is a throwaway). Writable carve-outs, and why: the run's
+       own home and tmp (scratch), the git worktree you run from (or --cwd) with its common git dir (so git commit works; its hooks/ and
+       config stay read-only), ~/.bun/install/cache (bun install). Anything else outside the home (/tmp/<name>) is unchanged.
        Not covered: another machine that proxies to the real server, a root-owned process outside the run, a socket created later in a NEW
-       directory under /tmp, ~/.claude, ~/.claude.json, ~/.bashrc, ~/.local/bin/agentop, ~/.config/systemd/user and other real files on disk
-       (--rm does not isolate the disk: writing them can run code outside the run at the next trigger), and group-granted access that does
-       not go through a socket (supplementary groups cannot be dropped in an unprivileged namespace). Without a systemd scope the 2G memory
+       directory under /tmp, files outside the home and inside the carve-outs above (the worktree's own files, e.g. .husky, package.json
+       scripts, run when the owner next uses it), and group-granted access that does not go through a socket (supplementary groups cannot be dropped in an unprivileged namespace). Without a systemd scope the 2G memory
        cap is off (said at launch). --serve ports are forwarded to the host's 127.0.0.1. Where namespaces are unavailable it falls
        back to the CLI-only guard and says so; --no-netns asks for that.
        agentop run ls
@@ -755,7 +758,7 @@ async function startRun(options: RunOptions): Promise<number> {
     systemd = scope === 'ok'
     const scopeLine = scopeNotice(scope)
     if (scopeLine) { console.error(scopeLine); memoryCapOff = scopeLine }
-    const hard = netns.mode === 'netns' ? netnsHardening(realDataDir(), process.getuid!(), undefined, undefined, ctl && !ctl.covered ? [ctl.dir] : []) : null
+    const hard = netns.mode === 'netns' ? netnsHardening(realDataDir(), process.getuid!(), undefined, undefined, ctl && !ctl.covered ? [ctl.dir] : [], undefined, persistenceGuard(home, [process.cwd(), ...(options.cwd ? [serveCwdOk(options.cwd) ?? options.cwd] : [])])) : null
     const runArgv = hard ? netnsArgv(argv, process.getuid!(), process.getgid!(), blockedPorts(), hostAddresses(), hard.hide, hard.hardening) : argv
     const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...runArgv] : runArgv
     child = spawn(systemd ? 'systemd-run' : runArgv[0]!, systemd ? childArgs : runArgv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
