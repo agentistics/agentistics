@@ -10,6 +10,36 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.226.0': {
+    features: [
+      {
+        pt: 'Painel Live: um líder que conduz várias tarefas ao mesmo tempo agora aparece em cada uma delas.',
+        en: 'Live board: a leader running several tasks at once now shows up on each of them.',
+      },
+      {
+        pt: 'Navegador: agora é possível apagar os perfis salvos, com confirmação pelo cofre.',
+        en: 'Browser: you can now delete saved profiles, confirmed through the vault.',
+      },
+      {
+        pt: 'Tarefas: o repositório de uma tarefa é definido por você na tela da tarefa (com confirmação pelo cofre); as sessões não podem alterá-lo.',
+        en: "Tasks: a task's repository is set by you on the task screen (confirmed through the vault); sessions cannot change it.",
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Rodadas de teste não alcançam mais o seu app real pela rede, nem alteram arquivos da sua pasta pessoal.',
+        en: 'Test runs can no longer reach your real app over the network, nor change files in your home folder.',
+      },
+      {
+        pt: 'Uma sessão renomeada não mostra mais o nome duas vezes na conversa.',
+        en: 'A renamed session no longer shows its name twice in the chat.',
+      },
+      {
+        pt: 'Menu lateral: quando ele está aberto por cima da página, clicar fora dele (ou apertar Esc) o recolhe. O clique usado para fechar não aciona o que estava embaixo.',
+        en: 'Side menu: when it is open over the page, clicking outside it (or pressing Esc) folds it back. The click that closes it does not trigger whatever was underneath.',
+      },
+    ],
+  },
   '2.225.0': {
     features: [
       {
