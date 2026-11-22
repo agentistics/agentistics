@@ -167,6 +167,19 @@ describe('2 · a resume with no `replaces` takes the conversation\'s recorded ac
 describe('2b · a reopen whose registry row is gone finds the account holding the transcript', () => {
   /** A signed-out second account whose root holds <uuid>.jsonl, and no registry row for it. */
   let lostRoot = ''
+  // The reopen plans a real spawn, which needs the harness CLI on PATH: a stub, so the test does not
+  // depend on the machine having `claude` installed (CI does not — the spawn never reached the backend).
+  let pathBefore: string | undefined
+  beforeAll(() => {
+    const bin = join(dir, 'bin2b')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(bin, 'claude'), 0o755)
+    pathBefore = process.env.PATH
+    process.env.PATH = `${bin}:${pathBefore ?? ''}`
+    resetHarnessAvailability()
+  })
+  afterAll(() => { process.env.PATH = pathBefore; resetHarnessAvailability() })
   async function lostRowConversation(): Promise<string> {
     const conversationId = crypto.randomUUID()
     const root = lostRoot = join(dir, `r_lost_${conversationId.slice(0, 6)}`)
