@@ -23,7 +23,7 @@ export const openSessionWord = (pt: boolean): string => (pt ? 'abrir sessão' : 
 
 export function sessionLinks(c: LiveCard, fleet: readonly FleetRow[], leaders: readonly LeaderRecord[]): SessionLink[] {
   const byId = new Map(fleet.map(r => [r.id, r]))
-  const ids = [...new Set([...c.agents.map(a => a.id), ...c.d.sessionIds])]
+  const ids = [...new Set([...c.agents.map(a => a.id), ...c.d.sessionIds, ...(c.d.linkSessionIds ?? [])])]
   const leaderIds = new Set(leaders.map(l => l.id))
   const out: SessionLink[] = []
   const seen = new Set<string>()

@@ -161,18 +161,15 @@ async function runMark(ref: string, to: TaskStatus, json: boolean): Promise<numb
 }
 
 async function runEdit(ref: string, repo: string, json: boolean): Promise<number> {
+  // D7: there is no person path in the CLI — nothing secret separates the person's shell from an agent's — so the
+  // CLI never writes a task's repository, whoever runs it. The value is still checked so a typo is reported first.
   const { normalizeTaskRepo } = await import('./task-repo')
   const r = normalizeTaskRepo(repo)
   if (!r.ok) { console.error(r.reason); return 1 }
-  const { resolveCliPrincipal, realCliAuth } = await import('../delivery/cli-principal')
-  const { actorOf } = await import('../delivery/principal')
-  const who = await resolveCliPrincipal(process.env, false, { pieceKey: ref, move: 'edit:repo' }, await realCliAuth())
-  const { editTask } = await import('./task-web')
-  const ok = await editTask(ref, { repo: r.repo, actor: actorOf(who.principal) })
-  if (!ok) { console.error(`No task matches "${ref}". \`agentop task ls\` lists them.`); return 1 }
-  if (json) console.log(JSON.stringify({ ok: true, ref, repo: r.repo }))
-  else console.log(r.repo ? `"${ref}" repository is now ${r.repo}.` : `"${ref}" repository cleared.`)
-  return 0
+  const { REPO_PERSON_ONLY } = await import('./task-repo-gate')
+  if (json) console.log(JSON.stringify({ ok: false, error: 'repo_person_only', message: REPO_PERSON_ONLY }))
+  else console.error(REPO_PERSON_ONLY)
+  return 1
 }
 
 function printHelp(): void {
@@ -181,7 +178,7 @@ function printHelp(): void {
   agentop task                 list every task with its rollup
   agentop task show <id|name>  one task, its attempts side by side
   agentop task deliver <ref>   mark it done, and attach the git evidence
-  agentop task edit <ref> --repo <owner/name|git url>   set the task's repository ('' clears it)
+  agentop task edit <ref> --repo …   refused: only the person sets a task's repository, from the task screen
   agentop task abandon <ref>   mark it given up on (no evidence attached)
   agentop task evidence add|ls|rm --subtask S …   the proof a piece needs before review (see: agentop task evidence help)
   agentop evidence capture <url> [--out f]            capture an API response in the shape api-capture evidence accepts

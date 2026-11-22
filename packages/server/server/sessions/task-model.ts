@@ -355,6 +355,14 @@ export interface Task {
   /** `normalizeGitRemote` key, when the work belongs to one repository. */
   repo?: string
   /**
+   * WHO wrote `repo`. `explicit` = a person/creation said it; `inherited` = a filed session's cwd/remote wrote it
+   * (`repoInheritancePatch`). ABSENT with a `repo` = a legacy task: read as inherited from an unknown session, the
+   * conservative reading (`isRepoInherited`). The leader rule never lets a repo inherited from the leader's own cwd count.
+   */
+  repoSource?: 'explicit' | 'inherited'
+  /** For an inherited repo: the session id (or conversation id) whose cwd/remote wrote it. */
+  repoFromSession?: string
+  /**
    * Tasks that must finish before this one can proceed — Jira's "is blocked by".
    *
    * Ids, never titles: a title is renameable and a dependency that silently detaches on a rename is
@@ -730,6 +738,21 @@ export interface TaskBook {
 /** The id of the ONE historical link a conversation can hold. */
 export function historicalLinkId(conversationId: string): string {
   return `hist:${conversationId}`
+}
+
+/** Does the task's repo come from a filed session (or from a legacy write nobody can vouch for)? `false` for no repo or an explicit one. */
+export function isRepoInherited(t: Pick<Task, 'repo' | 'repoSource'>): boolean {
+  return !!t.repo && t.repoSource !== 'explicit'
+}
+
+/**
+ * What filing a session writes onto a task: ATTRIBUTION ONLY (`repoSource: 'inherited'`, never explicit) — it grants no
+ * leadership (`isRepoInherited` never counts for leading) and no write right. Only when the task has NO repo (an existing one, explicit or not, is never overwritten), stamped with its provenance. */
+export function repoInheritancePatch(
+  task: Pick<Task, 'repo'>, fromSession: string, repo: string | undefined,
+): { repo: string; repoSource: 'inherited'; repoFromSession: string } | null {
+  if (task.repo || !repo) return null
+  return { repo, repoSource: 'inherited', repoFromSession: fromSession }
 }
 
 function shortHex(input: string): string {

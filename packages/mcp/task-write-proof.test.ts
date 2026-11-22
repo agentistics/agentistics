@@ -53,6 +53,8 @@ const CALLS: Array<[string, Record<string, unknown>]> = [
   ['agentistics_task_claim', { ref: 't1', by: 'me' }],
   ['agentistics_task_claim', { ref: 't1', by: 'me', release: true }],
   ['agentistics_task_edit', { ref: 't1', title: 'New' }],
+  // R2 (live-lider r8): a REPO edit carries the proof too, so a session is told `repo_person_only`, never `owner_proof_*`.
+  ['agentistics_task_edit', { ref: 't1', repo: 'o/r' }],
   ['agentistics_task_session', { ref: 't1', sessionId: 'x' }],
   ['agentistics_task_session', { detach: 'x' }],
   ['agentistics_task_delete', { ref: 't1' }],

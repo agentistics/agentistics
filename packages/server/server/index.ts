@@ -2140,6 +2140,20 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }, await defaultRoleDeps())
       return json(out, roleStatus(out))
     }
+    // LEADERSHIP — the tasks a declared leader leads besides its own filing (`sessions/session-roles.ts` `leadOp`).
+    if (url.pathname === '/api/session-leads' && (req.method === 'POST' || req.method === 'GET')) {
+      const body = (req.method === 'POST' ? await req.json().catch(() => ({})) : { ref: url.searchParams.get('ref') ?? undefined }) as { ref?: unknown; add?: unknown; remove?: unknown; session?: unknown; lang?: unknown }
+      const { verifySessionIdentity } = await import('./sessions/session-identity')
+      const { leadOp, leadStatus, listLeads, roleSenderFromBody, defaultRoleDeps } = await import('./sessions/session-roles')
+      const who = await roleSenderFromBody(body, verifySessionIdentity, body.lang === 'pt' ? 'pt' : 'en')
+      if (!who.ok) return json(who, 403)
+      // The person's read with no reference: every leader that leads extra tasks (`agentop session leads`).
+      if (who.sender === null && req.method === 'GET' && !body.ref) return json(await listLeads(await defaultRoleDeps()))
+      const strs = (v: unknown) => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : typeof v === 'string' ? [v] : []
+      const out = await leadOp(who.sender, { ...(typeof body.ref === 'string' && body.ref ? { ref: body.ref } : {}), add: strs(body.add), remove: strs(body.remove) }, await defaultRoleDeps())
+      if (out.ok && out.changed) void import('./sessions/fleet-web').then(m => m.kickFleet(out.id)).catch(() => {})
+      return json(out, leadStatus(out))
+    }
     // TEAMS — the person takes a session out of its leader's team, or moves it into another leader's
     // (`sessions/team-links.ts`). A leader is never moved into a team; a session proof is refused.
     if (url.pathname === '/api/session-team' && req.method === 'POST') {
@@ -2950,6 +2964,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           const { normalizeTaskRepo } = await import('./sessions/task-repo')
           const r = normalizeTaskRepo(body.repo)
           if (!r.ok) return json({ error: 'bad_repo', message: r.reason }, 422)
+          // D7: a SESSION never writes a task's repository; the person does, with the owner's single-use vault grant (loopback + Origin).
+          const [{ repoEditGate }, { verifySessionIdentity }, gateMod, { vaultHttpSession, loopbackRequest }, { vaultLang }] = await Promise.all([
+            import('./sessions/task-repo-gate'), import('./sessions/session-identity'), import('./vault/gate'), import('./vault/http'), import('./vault/service'),
+          ])
+          const loopback = loopbackRequest(req, server.requestIP(req)?.address ?? null, { requireOrigin: true })
+          const refused = await repoEditGate({
+            body, ref, verify: verifySessionIdentity, grant: req.headers.get('x-agentop-owner-grant'),
+            consume: (token, scope) => gateMod.consumeDeliveryGrant(token, { session: vaultHttpSession('local'), loopback }, scope),
+            proofAvailable: () => gateMod.ownerProofAvailable(), lang: vaultLang() === 'pt' ? 'pt' : 'en',
+          })
+          if (refused) return json(refused.body, refused.status)
         }
         const ok = await mod.editTask(ref, {
           ...Object.fromEntries(FIELDS.filter(f => typeof body[f] === 'string').map(f => [f, body[f] as string])),
