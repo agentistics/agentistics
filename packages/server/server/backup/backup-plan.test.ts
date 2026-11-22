@@ -113,7 +113,9 @@ test('regenerable and runtime files are excluded', () => {
   expect(excludeFor('.agentistics/cache.db-wal')?.reason).toBe('regenerable')
   expect(excludeFor('.agentistics/agentop-server.log')?.reason).toBe('regenerable')
   expect(excludeFor('.claude/shell-snapshots/x.sh')?.reason).toBe('regenerable')
-  expect(excludeFor('.agentistics/managed-sessions.json')?.reason).toBe('runtime')
+  expect(excludeFor('.agentistics/managed-sessions.json')).toBeNull()
+  expect(excludeFor('.agentistics/tasks.json.bak')?.reason).toBe('regenerable')
+  expect(excludeFor('.agentistics/managed-sessions.json.tmp.42.1')?.reason).toBe('regenerable')
   expect(excludeFor('.agentistics/managed-sessions.json.corrupt-123')?.reason).toBe('regenerable')
 })
 

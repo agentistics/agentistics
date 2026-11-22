@@ -50,7 +50,7 @@ import { addSession, newSessionId, patchSession, readRegistry, removeSession, re
 import { callerHoldsIdentity, callerProof, callerSessionFromTree, type CallerProof } from './session-identity'
 import { spawnParentLink } from './team-links'
 import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
-import { handoffAccountChoice, newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
+import { accountOfConversation, handoffAccountChoice, newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
 import { liveIdsOf, planReopenCwd, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
@@ -1165,7 +1165,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       const id = newSessionId()
       const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
       // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
-      const account = await recordedSpawnAccount(m.accountId, { agentCaller, harness: m.harness })
+      const account = await recordedSpawnAccount(m.accountId ?? await accountOfConversation(m.harness, m.cwd, row.resumeId), { agentCaller, harness: m.harness })
       if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); return }
       const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...(await autonomousLaunch(m.harness, inheritedLaunch(m, m.harness), m.away === true)), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
       if (!planned.ok) { skipped.push(m.id); return }

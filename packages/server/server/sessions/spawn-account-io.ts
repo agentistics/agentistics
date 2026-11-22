@@ -6,6 +6,8 @@
  */
 import { featureOn, type HarnessId } from '@agentistics/core'
 import { readAccounts, type AccountsFile } from '../harness-accounts'
+import { resolveChatTranscriptPath } from './chat-tail'
+import { storeDirOf } from './account-transcript-roots'
 import {
   decideRecordedAccount, decideSpawnAccount, routerPicks, spawnAccountMessage, type SpawnAccountContext, type SpawnAccountDecision, type SpawnAccountRefusal, type SpawnAccountRow,
 } from './spawn-account'
@@ -70,6 +72,32 @@ export async function spawnAccountContext(
   } catch {
     return { enabled: true, accounts }
   }
+}
+
+/**
+ * The account a closed conversation LIVES on, found from its transcript when the registry row that
+ * said so is gone (2026-11 disk fault: the account existed only in the lost registry, and reopening
+ * a conversation stored under a second login's root failed with "No conversation found" because it
+ * was resumed on the default one). Exact by conversation id — a hit in a root IS that conversation.
+ * `undefined`: it lives in the default store, or nowhere we can read — the default rule then applies.
+ * Claude only: it is the harness whose resolver walks account roots by id.
+ */
+export async function accountOfConversation(
+  harness: HarnessId, cwd: string, conversationId: string,
+  deps: { file?: AccountsFile; resolve?: typeof resolveChatTranscriptPath } = {},
+): Promise<string | undefined> {
+  if (harness !== 'claude') return undefined
+  const resolve = deps.resolve ?? resolveChatTranscriptPath
+  try {
+    if (await resolve(cwd, conversationId)) return undefined
+    const file = deps.file ?? await readAccounts()
+    for (const a of file.accounts) {
+      if (a.harness !== 'claude' || !a.root) continue
+      const dir = storeDirOf('claude', a.root)
+      if (dir && await resolve(cwd, conversationId, dir)) return a.id
+    }
+  } catch { /* unreadable registry or store: default rule */ }
+  return undefined
 }
 
 /**
