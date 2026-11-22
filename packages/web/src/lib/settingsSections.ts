@@ -1,7 +1,7 @@
 /** Which settings sections a viewer can see. UX-only gate — the server enforces real authz. */
 export type SettingsSectionId =
   | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'pricing' | 'install' | 'whatsnew'
-  | 'chat' | 'providers' | 'memory' | 'notifications' | 'backup'
+  | 'chat' | 'browser' | 'providers' | 'memory' | 'notifications' | 'backup'
 
 export type SettingsGroup = 'personal'
 
@@ -11,6 +11,8 @@ export interface SettingsViewer {
    *  entirely, so the section has nothing to offer. `undefined` (not yet loaded) shows it —
    *  hiding a section on a slow fetch is worse than showing one that is briefly empty. */
   localChat?: boolean
+  /** `CAPS.localShell` — the profile that gates the host-power browser, like the shell. `false` hides the section. */
+  localShell?: boolean
   /** `GET /api/engine`'s `manifest.provides.nativeRuntime` (UI.2). `false` — a community build, no
    *  engine — means there is no native runtime to hold provider credentials for. `undefined` (not yet
    *  loaded) shows the section, the same reading `localChat` gets. */
@@ -35,6 +37,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'chat', labelEn: 'Chat', labelPt: 'Chat', group: 'personal' },
   // Runtime provider credentials (Anthropic, OpenAI, OpenRouter, DeepSeek, LiteLLM, 9Router,
   // Ollama) — a machine-local secret store, same reason `connection`/`chat` are host-only.
+  { id: 'browser', labelEn: 'Browser', labelPt: 'Navegador', group: 'personal' },
   { id: 'providers', labelEn: 'Providers', labelPt: 'Provedores', group: 'personal' },
   { id: 'memory', labelEn: 'Memory', labelPt: 'Memória', group: 'personal' },
 ]
@@ -43,6 +46,7 @@ export function visibleSettingsSections(v: SettingsViewer): SettingsSection[] {
   return SETTINGS_SECTIONS.filter(s => {
     switch (s.id) {
       case 'chat': return v.localChat !== false
+      case 'browser': return v.localShell !== false
       case 'memory':
       case 'providers': return v.nativeRuntime === true
       default: return true

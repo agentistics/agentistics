@@ -1299,7 +1299,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // NAVEGADOR S4b: a KNOWN session may not even ASK for the browser-unlock proof — it would raise a
         // Hello / Touch ID dialog on the person's desk. Same socket hint as the padlock route; the proof
         // itself is still what decides for everyone else (an unidentified caller goes on to the vault).
-        if ((url.pathname === '/api/vault/browser-unlock' || url.pathname === '/api/vault/personal-browser') && req.method === 'POST') {
+        if ((url.pathname === '/api/vault/browser-unlock' || url.pathname === '/api/vault/personal-browser' || url.pathname === '/api/vault/browser-profiles') && req.method === 'POST') {
           const [{ identifyCaller }, { processSessionHub }, { browserUnlockEarlyRefusal }] = await Promise.all([
             import('./browser/browser-caller-proc'), import('./sessions/session-hub'), import('./browser/browser-caller'),
           ])
@@ -1307,7 +1307,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           for (const r of processSessionHub()?.last()?.sessions ?? []) if (typeof r.pid === 'number') sessionPids.add(r.pid)
           const ip = server.requestIP(req)
           const who = identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
-          const early = await browserUnlockEarlyRefusal(req, who, json)
+          const early = await browserUnlockEarlyRefusal(req, who, json, url.pathname === '/api/vault/browser-profiles' ? 'profiles' : 'padlock')
           if (early) return early
         }
         // SECRETS.4 §2.4: a 'read' grant is bound to THIS session (the session cookie; a local profile
@@ -4188,9 +4188,21 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         }
         const audit = (ev: { action: 'browser.lock' | 'browser.unlock'; managedId: string }) =>
           void writeAudit({ action: ev.action, ip: clientIp, targetId: ev.managedId })
+        // S12 r4: "Delete profiles" spends the owner's single-use `browser-profiles` grant (the socket is only a hint).
+        const profilesProof = async () => {
+          const [gate, { vaultHttpSession, loopbackRequest }, { vaultLang }, { ownerProofRefusal }] = await Promise.all([
+            import('./vault/gate'), import('./vault/http'), import('./vault/service'), import('./browser/browser-lock'),
+          ])
+          const ctx = { session: vaultHttpSession('local'), loopback: loopbackRequest(req, server.requestIP(req)?.address ?? null, { requireOrigin: true }) }
+          const used = gate.consumeBrowserProfilesGrant(req.headers.get('x-agentop-owner-grant'), ctx)
+          if (used.ok) return used
+          const setup = used.code === 'grant-invalid' && (await gate.ownerProofAvailable().catch(() => null)) === false
+          return ownerProofRefusal(used.code, vaultLang() === 'pt' ? 'pt' : 'en', setup, 'profiles')
+        }
         // F1: only the padlock route needs the caller; it is read once, before the route decides.
         // S10/F2: the personal routes read it too — the person's browser is the person's, by the socket.
-        const lockCaller = url.pathname === '/api/browser/lock' || url.pathname.startsWith('/api/browser/personal/') ? await identify() : null
+        // S12: "Delete profiles" is person-only too (it removes the personal profile's cookies and logins).
+        const lockCaller = (await import('./browser/personal-doors')).routeNeedsCaller(url.pathname) ? await identify() : null
         // S4b: an unlock spends the person's single-use vault grant (header, never a URL), bound to the same
         // HTTP session the vault route minted it for, on loopback only. The socket check stays as a hint.
         const ownerProof = async (managedId: string) => {
@@ -4206,7 +4218,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // S10 r3: the person's own browser (verbs AND status) answers to the owner's grant; the HTTP session is the vault's.
         const [{ requestHasPersonalGrant }, { vaultHttpSession: httpSession }, { vaultLang: lang }] = await Promise.all([import('./browser/personal-doors'), import('./vault/http'), import('./vault/service')])
         const deps = browserRouteDeps({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT], sessionLive }, verifySessionIdentity, {
-          harnessOf, audit, ownerProof, ...(lockCaller ? { caller: () => lockCaller } : {}),
+          harnessOf, audit, ownerProof, profilesProof, ...(lockCaller ? { caller: () => lockCaller } : {}),
           personalGrant: () => requestHasPersonalGrant(req, httpSession('local')),
           lang: () => (lang() === 'pt' ? 'pt' : 'en'),
         })
