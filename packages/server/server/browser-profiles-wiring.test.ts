@@ -63,7 +63,10 @@ describe('index.ts reads the caller for POST /api/browser/profiles/delete', () =
     const body = (await res.json()) as { why?: string; error?: string }
     // Not the route's own fail-closed fallback: that is what a path missing from the caller list produces.
     expect(body.why).not.toBe('no-peer')
-    if (res.status === 403) expect(body.error).toMatch(/session_cannot_unlock|caller_unidentified/)
+    expect(res.ok).toBe(false)
+    // Inside an agentop session the socket resolves to a session (session_cannot_unlock); on a bare runner (CI) it
+    // resolves to the person, who still has no grant, so the owner-proof refusal answers instead. Both keep it shut.
+    if (res.status === 403) expect(body.error).toMatch(/session_cannot_unlock|caller_unidentified|owner_proof_(required|local_only|unavailable|scope)/)
   })
 
   it('r4: from this machine\'s own socket with NO owner grant the live door still answers 403 (the grant, not the socket, is the proof)', async () => {
