@@ -26,8 +26,11 @@
  *   ORPHAN           now − leaderAbsentSince > N (N = 4 h by default, `preferences.delivery.orphanAfterHours`, 1–48).
  *
  * Custody is per PIECE, never filing (`conversationOwners` is not touched), and an AUTHORIZATION of the actor — it is never a
- * substitute for evidence or proof. This slice (S7a) owns the clocks, the plan and the queue; `leads()` accepting the custodian,
- * wake routing, check-in and the SessionStart discovery are S7b.
+ * substitute for evidence or proof. S7a owns the clocks, the plan and the queue; S7b adds the authority: `leads()` accepts the
+ * custodian (rule C `on` only), wakes for a piece in custody route to the custodian, the check-in lists the caller's custody and its
+ * project's queue (`custodyViewFor`), and a leader starting in a project DISCOVERS that queue in its SessionStart context
+ * (`custodyDiscoverySection`). Discovery is information, never authority: the custody is the tick's ASSIGNMENT, announced by a
+ * message; a SessionStart context is never changed after the fact.
  */
 
 /** Phases at which the absence clock runs: a running stage (rank 0) and ranks 1–3. Queued, blocked and published never accrue it. */
@@ -79,7 +82,16 @@ export interface CustodyPiece {
  * What the plan reads of a session row. `lastSeenMs`, `lastTranscriptAt` and `status` are carried ONLY so a test (and the
  * mutation control) can prove they are ignored; no rule reads them.
  */
-export interface CustodySession { id: string; alive: boolean; role?: string; taskId?: string; status?: string; lastSeenMs?: number; lastTranscriptAt?: string }
+export interface CustodySession {
+  id: string; alive: boolean; role?: string; taskId?: string; status?: string; lastSeenMs?: number; lastTranscriptAt?: string
+  /**
+   * S7b (§5.4.8): when the session STARTED, and the project of its own task. A leader that started in the project within N is a
+   * project-leader candidate even before its first piece action — that is how a leader starting into a queued project is assigned
+   * on the next tick. Absent = the session's start says nothing (only piece activity makes it a candidate, as in S7a).
+   */
+  startedAt?: string
+  project?: string
+}
 
 export interface CustodyPatch {
   key: string
@@ -127,6 +139,14 @@ export function planCustody(input: CustodyInput): CustodyPlan {
     const at = Math.min(ms(p.leaderActivityAt)!, now)
     const m = cands.get(p.project) ?? cands.set(p.project, new Map()).get(p.project)!
     m.set(by, Math.max(m.get(by) ?? 0, at))
+  }
+  // S7b (§5.4.8): a live leader that STARTED in the project within N is a candidate too (its start is its freshness). Ranked by
+  // the same rule (most recent activity or start, then smaller id); the S7a activity candidates are untouched.
+  for (const s of sessions) {
+    if (!s.alive || s.role !== 'leader' || !s.project || !fresh(s.startedAt)) continue
+    const at = Math.min(ms(s.startedAt)!, now)
+    const m = cands.get(s.project) ?? cands.set(s.project, new Map()).get(s.project)!
+    m.set(s.id, Math.max(m.get(s.id) ?? 0, at))
   }
   const bestFor = (project: string, not: ReadonlySet<string>): string | null => {
     if (!project) return null
@@ -292,4 +312,47 @@ export function assignmentText(a: CustodyAssignment, titles: ReadonlyMap<string,
   return `[from flow custódia · peças sem líder]\n${a.keys.length} peça(s) do projeto ${a.project || '?'} ficaram sem líder há mais de N horas e passaram para a sua custódia: ${list}.\n`
     + `Custódia autoriza você a conduzir a peça (aprovar os portões do líder, declarar o release); NÃO substitui evidência nem prova — subir de fase continua exigindo as duas. Se o líder original voltar a agir na peça, a custódia termina.\n`
     + `${a.keys.length} piece(s) of project ${a.project || '?'} have had no leader for over N hours and are now in your custody: ${list}. Custody lets you drive them (approve the leader gates, declare the release); it is not evidence or proof.`
+}
+
+// ── S7b: what a session reads of the custody (check-in, SessionStart discovery) ─────────────────────────────────────────────
+
+export interface CustodyViewPiece { key: string; taskId: string; phase: string; project: string; since: string }
+export interface CustodyView {
+  /** Pieces whose custody this session holds. */
+  held: CustodyViewPiece[]
+  /** Pieces waiting in the queue of the session's project (`custody.sessionId === null`). */
+  queue: CustodyViewPiece[]
+}
+type ViewRecord = { subtaskId: string; taskId: string; phase: string; custody?: Custody | null }
+/** PURE. The custody a session holds and the queue of its project(s). `projects` empty = no queue (an unknown project sees none). */
+export function custodyViewFor(records: readonly ViewRecord[], sessionId: string, projects: ReadonlySet<string>): CustodyView {
+  const view: CustodyView = { held: [], queue: [] }
+  for (const r of records) {
+    const c = r.custody
+    if (!c || !custodyEligible(r.phase)) continue
+    const piece = { key: r.subtaskId, taskId: r.taskId, phase: r.phase, project: c.project, since: c.since }
+    if (c.sessionId && c.sessionId === sessionId) view.held.push(piece)
+    else if (c.sessionId === null && c.project && projects.has(c.project)) view.queue.push(piece)
+  }
+  const order = (a: CustodyViewPiece, b: CustodyViewPiece) => (a.since < b.since ? -1 : a.since > b.since ? 1 : a.key < b.key ? -1 : 1)
+  view.held.sort(order); view.queue.sort(order)
+  return view
+}
+const list = (ps: readonly CustodyViewPiece[]) => ps.map(p => `${p.key} (${p.phase})`).join(', ')
+/** PURE. The check-in line for the caller's custody and queue. '' when there is nothing. */
+export function custodyCheckinLine(v: CustodyView): string {
+  const lines: string[] = []
+  if (v.held.length) lines.push(`Peças sem líder sob a SUA custódia (conduza-as; custódia não é evidência): ${list(v.held)}.`)
+  if (v.queue.length) lines.push(`Fila do líder do projeto (peças sem líder esperando um líder vivo do projeto): ${list(v.queue)}.`)
+  return lines.length ? `\n${lines.join('\n')}` : ''
+}
+/**
+ * PURE. The SessionStart discovery section for a leader starting in a project with queued orphan pieces. '' when the queue is empty.
+ * It states that discovery grants nothing: the next tick assigns the custody and says so in a message — that message wins.
+ */
+export function custodyDiscoverySection(queue: readonly CustodyViewPiece[]): string {
+  if (!queue.length) return ''
+  return `Orphan pieces queued in your project (no live leader for over N hours): ${list(queue)}. `
+    + 'This is DISCOVERY only — you do not hold them yet. The next custody tick assigns them to a live project leader and messages it; '
+    + 'only that assignment message gives you custody (and custody lets you drive the piece, never replaces evidence or proof).'
 }

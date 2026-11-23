@@ -143,6 +143,15 @@ export async function withOwnerRequests<T extends { role?: string; taskId?: stri
   } catch { return i }
 }
 
+/**
+ * ENTREGA.GARANTIDA S7b (§5.2.4): a LEADER's briefing lists the orphan pieces queued in its project (rule C on only). Discovery,
+ * computed once here at the start — the custody itself is the tick's assignment message. Never throws.
+ */
+export async function withCustodyQueue<T extends { sessionId?: string; role?: string; taskId?: string }>(i: T): Promise<T & { custodyQueue?: string }> {
+  if (i.role !== 'leader' || !i.taskId) return i
+  try { return await (await import('../delivery/host')).withCustodyDiscovery(i) } catch { return i }
+}
+
 export interface WithPassagemDeps {
   /** The manual hand-off file the leader cited (`--handoff-file`), only to say it went unchecked. */
   handoffFile?: string

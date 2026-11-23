@@ -38,6 +38,11 @@ export interface CheckinDeps {
   /** F5.b: the three groups (engine view `fechamento`, from handbacks.json + verdicts.jsonl); null = flows off or an older engine. */
   readFechamento?: () => Promise<Fechamento | null>
   readCheckinMcpConfigs: (cwd: string) => Promise<unknown>
+  /**
+   * ENTREGA.GARANTIDA S7b (§5.2.3): the check-in line naming the orphan pieces this leader holds in custody and its project's
+   * queue ('' = none, or rule C not on). Read from the delivery store, the same field the wakes and `leads()` read.
+   */
+  readCustody?: (leaderId: string) => Promise<string>
 }
 
 // Board kinds are open-ended. Ignore check-in reports (our own feedback) and filter
@@ -106,6 +111,13 @@ const defaultDeps: CheckinDeps = {
     const { engine } = await import('./engine/load')
     const view = await engine()?.flows?.read?.('entregues-abertos', {}).catch(() => null)
     return Array.isArray(view) ? view as DeliveredOpen[] : []
+  },
+  readCustody: async leaderId => {
+    const taskId = (await deps.readRegistry().catch(() => [])).find(r => r.id === leaderId)?.taskId
+    const { readCustodyView } = await import('./delivery/host')
+    const { custodyCheckinLine } = await import('./delivery/custody')
+    const view = await readCustodyView({ sessionId: leaderId, ...(taskId ? { taskId } : {}) })
+    return view ? custodyCheckinLine(view) : ''
   },
   readFechamento: async () => {
     const { flowsExperimentalOn } = await import('./native-gate')
@@ -263,9 +275,11 @@ export function fechamentoLines(f: Fechamento, autonomous = false): string {
 async function autonomousFor(row: { away?: boolean }, now = Date.now()): Promise<boolean> {
   return sessionAwayState(parseAwayState((await deps.readPreferences()).away), row.away, now) !== null
 }
-async function promptForLeader(c: CheckinConfig, autonomous: boolean): Promise<string> {
+/** S7b: the leader's custody line ('' on any failure — a check-in is never lost to it). */
+const custodyLineOf = async (leaderId: string): Promise<string> => (await (deps.readCustody?.(leaderId) ?? Promise.resolve('')).catch(() => '')) ?? ''
+async function promptForLeader(c: CheckinConfig, autonomous: boolean, leaderId: string): Promise<string> {
   const groups = await (deps.readFechamento?.() ?? Promise.resolve(null)).catch(() => null)
-  const prompt = promptFor(c, autonomous) + (groups ? fechamentoLines(groups, autonomous) : deliveredOpenLine(await (deps.readDeliveredOpen?.() ?? Promise.resolve([])).catch(() => [])))
+  const prompt = promptFor(c, autonomous) + (groups ? fechamentoLines(groups, autonomous) : deliveredOpenLine(await (deps.readDeliveredOpen?.() ?? Promise.resolve([])).catch(() => []))) + await custodyLineOf(leaderId)
   return autonomous ? `${prompt}\nAUTONOMOUS MODE — decide within the authorisations, record the decision, and never ask the owner; anything urgent goes as an away notice.` : prompt
 }
 export function due(s: CheckinState, now: number): boolean { return s.nextRunAt !== null && s.nextRunAt <= now && !pausedNow(s, now) }
@@ -314,6 +328,9 @@ async function fingerprint(row: { id: string; cwd: string }, state: CheckinState
   if (enabled.has('limits')) inputs.limits = await deps.readCheckinLimits(now)
   if (enabled.has('releases')) inputs.release = await deps.readCheckinRelease()
   if (enabled.has('mcp-configs')) inputs.mcp = await deps.readCheckinMcpConfigs(row.cwd)
+  // S7b: a new custody (or queue) is a change worth a round; absent when there is none, so no existing fingerprint moves.
+  const custody = await custodyLineOf(row.id)
+  if (custody) inputs.custody = custody
   return createHash('sha256').update(stable(inputs)).digest('hex')
 }
 /** Legacy agendas equal to the built-in config were automatic; preserve all other choices. */
@@ -488,7 +505,7 @@ export async function fireDue(now = Date.now()): Promise<string[]> {
         emit(publicState((await allStored())[state.session]!))
         continue
       }
-      const next = await promptForLeader(state, autonomous).then(text => deps.runFleetAction('pt', { action: 'prompt', id: row.id, text })).catch(() => ({ ok: false }))
+      const next = await promptForLeader(state, autonomous, row.id).then(text => deps.runFleetAction('pt', { action: 'prompt', id: row.id, text })).catch(() => ({ ok: false }))
       await updateStored(all => {
         const latest = all[state.session] ?? state
         const updated = { ...latest, ...(next.ok ? { fingerprint: currentFingerprint, lastFiredAt: now, pending: true } : {}) }
@@ -513,7 +530,7 @@ export async function runNow(session: string, now = Date.now()): Promise<boolean
   try {
     const state = await stateFor(row.conversationId ?? row.id, now)
     const currentFingerprint = await fingerprint(row, state, rows, now)
-    const result = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state, await autonomousFor(row, now)) })
+    const result = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state, await autonomousFor(row, now), row.id) })
     if (!result.ok) return false
     await updateStored(all => { all[state.session] = { ...all[state.session], ...state, fingerprint: currentFingerprint, lastFiredAt: now, nextRunAt: nextRun(now, state), pending: true } })
     emit(publicState((await allStored())[state.session]!))
