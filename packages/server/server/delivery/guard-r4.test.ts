@@ -16,6 +16,7 @@ import { GuardRefused } from './guard'
 import { withGuardEnvelope } from './guard-transaction'
 import { defaultGuardLockPaths } from './guard-locks'
 import { productionSources } from './lint-scan.testing'
+import { unattributedContext } from './guard'
 
 const ctx = { principal: { kind: 'unattributed' as const } }
 const at = new Date(T).toISOString()
@@ -27,8 +28,8 @@ async function world(run: (s: any) => Promise<void>) {
     const w = makeWorld(root)
     const deps = { sessions: async () => w.sessions, git: execGit }
     const tasks = createTaskStore(join(root, 'tasks.json'), { guard: { deps, now: () => T } })
-    await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: at, updatedAt: at } as never)
-    await tasks.upsertSubtask(sub('in_progress'))
+    await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: at, updatedAt: at } as never, unattributedContext())
+    await tasks.upsertSubtask(sub('in_progress'), unattributedContext())
     const g = createGuaranteesStore(join(root, 'guarantees.json'))
     const check = async () => ({ ok: true as const, via: 'legacy-browser' as const })
     const facts = (now: string) => ({ now, build: 'test', capabilities: ['S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'], migrated: ['a'], unexplainedWouldRefuse: 0 }) as never
@@ -146,7 +147,7 @@ test('OFF explicit envelope retains the base bytes and creates no floor book', a
     const store = createDeliveryStore(join(root, 'deliveries.json'))
     await withGuardEnvelope(defaultGuardLockPaths(root), () => store.update(doc => {
       doc.deliveries.p1 = newDelivery({ taskId: 't1', subtaskId: 'p1', at })
-    }))
+    }, { guard: unattributedContext() }))
     expect(existsSync(join(root, 'guards.json'))).toBe(false)
     expect(existsSync(join(root, 'guard-integrity.key'))).toBe(false)
   } finally { rmSync(root, { recursive: true, force: true }) }

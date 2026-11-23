@@ -63,11 +63,11 @@ describe('handoffAccountChoice (CONTA.AUTO B)', () => {
     const { handoffAccountChoice } = await import('./spawn-account-io')
     const { readAccounts } = await import('../harness-accounts')
     const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => ({ key: 'default', label: 'x' }) })
-    await store.update(second, { available: false })
+    await store.patchAccount(second, { available: false })
     budgets = [row(home, { fiveHourPct: 97 }), row(second, { fiveHourPct: 5 })]
     expect((await handoffAccountChoice({ harness: 'claude', agentCaller: true }))?.id).not.toBe(second)
     expect(await handoffAccountChoice({ harness: 'claude', agentCaller: false })).toMatchObject({ id: second, room: true }) // the OWNER may use it
-    await store.update(second, { available: true })
+    await store.patchAccount(second, { available: true })
     void readAccounts
   })
 })

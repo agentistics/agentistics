@@ -31,7 +31,7 @@ async function setup(probe: (h: string, root: string | null) => Promise<AccountI
   // A healthy login holds a credential in its folder (`account-credentials.ts` reads only its shape).
   await writeFile(join(root, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'test-not-a-token' } }))
   const { account } = await store.bind(root, { harness: 'claude', ...NAYARA })
-  await store.update(account.id, { nickname: 'Nayara', available: false })
+  await store.patchAccount(account.id, { nickname: 'Nayara', available: false })
   return { store, root, id: account.id, tick: (ms: number) => { clock += ms } }
 }
 

@@ -16,6 +16,7 @@ import { forbiddenCapabilities } from './guard-ast.testing'
 import { newDelivery } from './machine'
 import { GuardRefused, flowContext } from './guard'
 import { deliveryRequest } from './web'
+import { unattributedContext } from './guard'
 
 const T = Date.parse('2026-11-13T10:00:00Z')
 const check = async () => ({ ok: true as const, via: 'legacy-browser' as const })
@@ -224,17 +225,17 @@ test('R6-5 OFF writes with no journal parse no guards after warmup and observe a
     const path = join(root, 'deliveries.json'), store = createDeliveryStore(path)
     const g = createGuaranteesStore(join(root, 'guarantees.json')), guards = createGuardsStore(join(root, 'guards.json'))
     await g.setState('a', 'off', { check, facts: facts() })
-    await store.update(() => undefined)
+    await store.update(() => undefined, { guard: unattributedContext() })
     const original = fs.readFile, reads: string[] = []
     const spy = spyOn(fs, 'readFile').mockImplementation(((path: any, ...args: any[]) => { reads.push(String(path)); return (original as any)(path, ...args) }) as typeof fs.readFile)
     try {
-      for (let i = 0; i < 5; i++) await store.update(() => undefined)
+      for (let i = 0; i < 5; i++) await store.update(() => undefined, { guard: unattributedContext() })
       expect(reads).toContain(path)
       // Policy authentication already probes the sibling seal once per write; the journal adds no reads/parses.
       expect(reads.filter(p => p === join(root, 'guards.json'))).toEqual(Array(5).fill(join(root, 'guards.json')))
       const r = newDelivery({ subtaskId: 'p1', taskId: 't1', at: new Date(T).toISOString() })
       await guards.write({ ...await guards.read(), pendingDelivery: JSON.stringify({ version: 1, deliveries: { p1: r } }) })
-      await store.update(d => { expect(d.deliveries.p1).toBeDefined() })
+      await store.update(d => { expect(d.deliveries.p1).toBeDefined() }, { guard: unattributedContext() })
       expect((await guards.read()).pendingDelivery).toBeUndefined()
     } finally { spy.mockRestore() }
   } finally { rmSync(root, { recursive: true, force: true }) }

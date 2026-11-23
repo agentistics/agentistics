@@ -22,6 +22,7 @@ import { resolveCustodyProjects } from './custody-project'
 import { lockFile } from '../sessions/file-lock'
 import { createTaskStore } from '../sessions/task-store'
 import { createSessionRegistry } from '../sessions/registry'
+import { unattributedContext } from './guard'
 
 const MIN = 60_000
 const H = 3600_000
@@ -263,7 +264,7 @@ describe('F4 — the stamp is part of the action\'s own write; the board\'s own 
     live(w, 'L1')
     const before = readFileSync(w.path, 'utf8')
     const { store } = w.reload()
-    await expect(store.update(doc => { doc.deliveries.p1!.versionTarget = '5.0.0'; throw new Error('crash mid-write') }, { stamp: { key: 'p1', actor: 'L1', at: iso(T0 + N) } })).rejects.toThrow('crash mid-write')
+    await expect(store.update(doc => { doc.deliveries.p1!.versionTarget = '5.0.0'; throw new Error('crash mid-write') }, { guard: unattributedContext(), stamp: { key: 'p1', actor: 'L1', at: iso(T0 + N) } })).rejects.toThrow('crash mid-write')
     expect(readFileSync(w.path, 'utf8')).toBe(before)
   })
   test('a refused transition is not a piece action (no stamp)', async () => {
@@ -329,7 +330,7 @@ describe('F5 — the project of a piece: Task.repo → the piece\'s sessions →
   }
   const fixture = async () => {
     const tasks = createTaskStore(join(root, 'tasks.json'))
-    const t = (id: string, repo?: string) => tasks.upsertTask({ id, title: id, status: 'in_progress', createdAt: iso(T0), updatedAt: iso(T0), ...(repo ? { repo } : {}) } as never)
+    const t = (id: string, repo?: string) => tasks.upsertTask({ id, title: id, status: 'in_progress', createdAt: iso(T0), updatedAt: iso(T0), ...(repo ? { repo } : {}) } as never, unattributedContext())
     await t('t-r', 'git@github.com:acme/app.git'); await t('t-s'); await t('t-f'); await t('t-g'); await t('t-m')
     const reg = createSessionRegistry(join(root, 'managed-sessions.json'))
     const add = (o: Record<string, unknown>) => reg.add({ harness: 'claude', cwd: '/nowhere', createdAt: iso(T0), ...o } as never)

@@ -10,12 +10,13 @@ import { createGuardsStore } from './guards-store'
 import { fileInUse } from './evidence-world.testing'
 import { evidenceRequest } from './evidence-web'
 import { evidenceRequestOf } from '../../../mcp/evidence-args'
+import { unattributedContext } from './guard'
 
 async function world(run: (w: any) => Promise<void>) {
   const root = mkdtempSync(join(tmpdir(), 'evidence-races-'))
   try {
     const store = createDeliveryStore(join(root, 'deliveries.json'))
-    await store.update(doc => { doc.deliveries.p1 = newDelivery({ taskId: 't1', subtaskId: 'p1', phase: 'fila', at: 't' }) })
+    await store.update(doc => { doc.deliveries.p1 = newDelivery({ taskId: 't1', subtaskId: 'p1', phase: 'fila', at: 't' }) }, { guard: unattributedContext() })
     const files = new Map(); let n = 0
     const hooks: { create?: () => Promise<void> } = {}
     const svc = createDeliveryService({ store, facts: { sessions: async () => [] }, now: () => 0, guardsPath: join(root, 'guards.json'),

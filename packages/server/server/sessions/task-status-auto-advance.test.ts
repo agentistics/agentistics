@@ -33,9 +33,9 @@ test('review refuses open top-level subtasks; explicit override preserves all 74
       createdAt: '2026-11-09T10:00:00Z', updatedAt: '2026-11-09T10:00:00Z' }))
     const { writeFile } = await import('node:fs/promises')
     await writeFile(cfg.TASKS_FILE, JSON.stringify({ ...await store.read(), subtasks: children }))
-    const refused = await web.markTask('t-review', 'in_review', 'test')
+    const refused = await web.markTask('t-review', 'in_review', 'test', { guard: { principal: { kind: 'unattributed' } } })
     const before = (await web.showTask('t-review')).task
-    const allowed = await web.markTask('t-review', 'in_review', 'test', { allowOpenSubtasks: true })
+    const allowed = await web.markTask('t-review', 'in_review', 'test', { allowOpenSubtasks: true, guard: { principal: { kind: 'unattributed' } } })
     const after = (await web.showTask('t-review')).task
     console.log(JSON.stringify({ refused: refused.message, open: refused.openSubtaskIds.length, before: before.task.status,
       allowed: allowed.ok, after: after.task.status, children: after.subtasks.length,
@@ -48,7 +48,7 @@ test('open group members alone do not prevent parent review', async () => {
   const out = await run(`
     ${task('t-review', "status: 'in_progress',")}
     ${subtask('member', 't-review', "parentGroupId: 'group',")}
-    console.log(JSON.stringify(await web.markTask('t-review', 'in_review', 'test')))
+    console.log(JSON.stringify(await web.markTask('t-review', 'in_review', 'test', { guard: { principal: { kind: 'unattributed' } } })))
   `)
   expect(out).toMatchObject({ ok: true })
 })
@@ -122,7 +122,7 @@ test('(a) subtask moved to in_progress advances a `todo` parent task to in_progr
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
-    const result = await web.patchSubtask('s1', { status: 'in_progress' })
+    const result = await web.patchSubtask('s1', { status: 'in_progress' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({
       result, subtaskStatus: after.subtasks[0].status, taskStatus: after.tasks[0].status,
@@ -137,7 +137,7 @@ test('(a) subtask moved to in_progress advances a `backlog` parent task to in_pr
   const out = await run(`
     ${task('t1', "status: 'backlog',")}
     ${subtask('s1', 't1')}
-    const result = await web.patchSubtask('s1', { status: 'in_progress' })
+    const result = await web.patchSubtask('s1', { status: 'in_progress' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ result, taskStatus: after.tasks[0].status }))
   `)
@@ -150,7 +150,7 @@ test('(b) subtask moved to in_progress on an already-in_progress task leaves the
   const out = await run(`
     ${task('t1', "status: 'in_progress',")}
     ${subtask('s1', 't1')}
-    const result = await web.patchSubtask('s1', { status: 'in_progress' })
+    const result = await web.patchSubtask('s1', { status: 'in_progress' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({
       result, taskStatus: after.tasks[0].status, taskStartedAt: after.tasks[0].startedAt ?? null,
@@ -174,7 +174,7 @@ test('(b2) a patch that repeats the status a subtask already had never re-stamps
   const out = await run(`
     ${task('t1', "status: 'in_progress', startedAt: '2026-09-19T10:00:00.000Z',")}
     ${subtask('s1', 't1', "status: 'in_progress', startedAt: '2026-09-19T10:00:00.000Z',")}
-    const result = await web.patchSubtask('s1', { status: 'in_progress' })
+    const result = await web.patchSubtask('s1', { status: 'in_progress' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({
       result, taskUpdatedAt: after.tasks[0].updatedAt, taskStartedAt: after.tasks[0].startedAt,
@@ -196,7 +196,7 @@ for (const parentStatus of ['blocked', 'in_review', 'done', 'abandoned']) {
     const out = await run(`
       ${task('t1', `status: '${parentStatus}',`)}
       ${subtask('s1', 't1')}
-      const result = await web.patchSubtask('s1', { status: 'in_progress' })
+      const result = await web.patchSubtask('s1', { status: 'in_progress' }, { principal: { kind: 'unattributed' } })
       const after = await store.read()
       console.log(JSON.stringify({ result, taskStatus: after.tasks[0].status }))
     `)
@@ -210,8 +210,8 @@ test('(d) a subtask moving back to todo never reverts the parent task it had adv
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
-    await web.patchSubtask('s1', { status: 'in_progress' })
-    const result = await web.patchSubtask('s1', { status: 'todo' })
+    await web.patchSubtask('s1', { status: 'in_progress' }, { principal: { kind: 'unattributed' } })
+    const result = await web.patchSubtask('s1', { status: 'todo' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({
       result, subtaskStatus: after.subtasks[0].status, taskStatus: after.tasks[0].status,
@@ -233,8 +233,8 @@ test('(d) a subtask moving from done back to blocked never reverts the parent ta
     ${subtask('s1', 't1')}
     ${subtask('s2', 't1')}
     ${session('sess1', "taskId: 't1', subtaskId: 's1',")}
-    await web.patchSubtask('s1', { status: 'done' })
-    const result = await web.patchSubtask('s1', { status: 'blocked' })
+    await web.patchSubtask('s1', { status: 'done' }, { principal: { kind: 'unattributed' } })
+    const result = await web.patchSubtask('s1', { status: 'blocked' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({
       result, subtaskStatus: after.subtasks.find(s => s.id === 's1').status, taskStatus: after.tasks[0].status,
@@ -252,7 +252,7 @@ test('(e) a group member moved to in_progress advances the parent task exactly l
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
-    const result = await web.patchSubtask('m1', { status: 'in_progress' })
+    const result = await web.patchSubtask('m1', { status: 'in_progress' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const member = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, memberStatus: member.status, taskStatus: after.tasks[0].status }))
@@ -272,7 +272,7 @@ test('done-fast-path: a subtask skipping straight from todo to done (done_needs_
     ${subtask('s1', 't1')}
     ${subtask('s2', 't1')}
     ${session('sess1', "taskId: 't1', subtaskId: 's1',")}
-    const result = await web.patchSubtask('s1', { status: 'done' })
+    const result = await web.patchSubtask('s1', { status: 'done' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({
       result, subtaskStatus: after.subtasks.find(s => s.id === 's1').status, taskStatus: after.tasks[0].status,
@@ -290,7 +290,7 @@ test('(f) setSubtaskDone (the tick fast path) advances the parent task too — s
     ${subtask('s1', 't1')}
     ${subtask('s2', 't1')}
     ${session('sess1', "taskId: 't1', subtaskId: 's1',")}
-    const result = await web.setSubtaskDone('s1', true)
+    const result = await web.setSubtaskDone('s1', true, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({
       result, subtaskStatus: after.subtasks.find(s => s.id === 's1').status, taskStatus: after.tasks[0].status,
@@ -307,7 +307,7 @@ test('a patch that never touches status does not trigger the nudge, even for a s
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1', "status: 'in_progress',")}
-    const result = await web.patchSubtask('s1', { dueDate: '2026-09-20' })
+    const result = await web.patchSubtask('s1', { dueDate: '2026-09-20' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ result, taskStatus: after.tasks[0].status, taskUpdatedAt: after.tasks[0].updatedAt }))
   `)

@@ -18,6 +18,7 @@ beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'evidence-doors-')); forget
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
 import { T, b64, enc, fileInUse, makeWorld, png, shot } from './evidence-world.testing'
+import { unattributedContext } from './guard'
 const world = () => makeWorld(root)
 
 describe('add — everything the server computes, nothing the caller says', () => {
@@ -105,7 +106,7 @@ describe('§3.5.11 uniqueness is persisted', () => {
   test('the same bytes re-attached to the SAME piece at a later revision → evidence_reused; a fresh capture is fine', async () => {
     const { svc } = world()
     await svc.evidenceAdd('p1', shot(1280, 8), 'worker')
-    await createDeliveryStore(join(root, 'deliveries.json')).update(doc => { doc.deliveries.p1!.revision = 2 })
+    await createDeliveryStore(join(root, 'deliveries.json')).update(doc => { doc.deliveries.p1!.revision = 2 }, { guard: unattributedContext() })
     expect(await svc.evidenceAdd('p1', shot(1280, 8), 'worker')).toMatchObject({ ok: false, status: 409, code: 'evidence_reused' })
     expect((await svc.evidenceAdd('p1', shot(1280, 9), 'worker')).ok).toBe(true)
   })

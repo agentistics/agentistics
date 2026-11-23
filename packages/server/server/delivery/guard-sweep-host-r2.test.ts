@@ -6,6 +6,7 @@ import { expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { unattributedContext } from './guard'
 
 test('CU1 catch-up through the production board effect', async () => {
   // The production host binds its default paths at import time. Isolate those imports and policy from other suites.
@@ -30,8 +31,8 @@ test('CU1 catch-up through the production board effect', async () => {
   const def = (id: string, label: string, stage: string, order: number, prot = false) => ({ id, label, color: '#112233', protected: prot, order, stage }) as never
   const tasks = createTaskStore(join(dir, 'tasks.json'))
   await tasks.seedStatuses([def('todo', 'To do', 'queue', 0, true), def('in_progress', 'In progress', 'running', 1, true), def('blocked', 'Blocked', 'blocked', 2, true), def('done', 'Done', 'published', 3, true), def('in_review', 'In review', 'leader', 4)])
-  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
-  await tasks.upsertSubtask({ id: 'p1', taskId: 't1', title: 'p1', done: false, status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
+  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
+  await tasks.upsertSubtask({ id: 'p1', taskId: 't1', title: 'p1', done: false, status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
   const g = createGuaranteesStore(join(dir, 'guarantees.json'))
   const facts = (now: number) => ({ now: new Date(now).toISOString(), build: 'qa', capabilities: ['S0', 'S1', 'S2', 'S3'], migrated: ['a'], unexplainedWouldRefuse: 0 }) as never
   const check = async () => ({ ok: true as const, via: 'legacy-browser' as const })

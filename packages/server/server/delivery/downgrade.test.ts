@@ -9,6 +9,7 @@ import { loadV2210, oldBoardRoundTrip } from '../sessions/task-store-v2210.fixtu
 import { createTaskStore } from '../sessions/task-store'
 import { createGuaranteesStore, restoreStatusStages, type OwnerCheck } from './activation'
 import { beginIntent, commitIntent, createGuardsStore, emptyGuards, type PieceCheckpoint } from './guards-store'
+import { unattributedContext } from './guard'
 
 let dir: string
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'downgrade-')) })
@@ -27,7 +28,7 @@ describe('deliveries.json: new code → v2.210.1 writer → intact (§2.7)', () 
       a.verification = { jobId: 'vj-1', strength: 'strong' }
       doc.deliveries['s-a'] = a as never
       doc.deliveries['s-b'] = newDelivery({ subtaskId: 's-b', taskId: 't1', at: T })
-    })
+    }, { guard: unattributedContext() })
     const written = readFileSync(file, 'utf8')
     const after = await oldWriterRoundTrip(file, written, doc => { doc.deliveries['s-b']!.touchedByOld = true })
     const a = JSON.parse(after).deliveries['s-a']
@@ -43,7 +44,7 @@ describe('deliveries.json: new code → v2.210.1 writer → intact (§2.7)', () 
   test('WHY activation is a separate file: a top-level field in deliveries.json is dropped by the old writer', async () => {
     const file = join(dir, 'deliveries.json')
     const store = createDeliveryStore(file)
-    await store.update(doc => { doc.deliveries['s-a'] = newDelivery({ subtaskId: 's-a', taskId: 't1', at: T }) })
+    await store.update(doc => { doc.deliveries['s-a'] = newDelivery({ subtaskId: 's-a', taskId: 't1', at: T }) }, { guard: unattributedContext() })
     const withTop = JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), guaranteedSince: T })
     const after = await oldWriterRoundTrip(file, withTop)
     expect(JSON.parse(after).guaranteedSince).toBeUndefined()
@@ -56,7 +57,7 @@ describe('deliveries.json: new code → v2.210.1 writer → intact (§2.7)', () 
     const cp = { key: 'p', rank: 1, boardStatus: 'in_review', boardStage: 'leader', phase: null, revision: 1, headSha: null, auth: [], by: {}, at: T, transitionId: 'tr' } as unknown as PieceCheckpoint
     await guards.write(commitIntent(beginIntent(emptyGuards(), cp, T), 'p', 'tr'))
     const file = join(dir, 'deliveries.json')
-    await createDeliveryStore(file).update(doc => { doc.deliveries.x = newDelivery({ subtaskId: 'x', taskId: 't', at: T }) })
+    await createDeliveryStore(file).update(doc => { doc.deliveries.x = newDelivery({ subtaskId: 'x', taskId: 't', at: T }) }, { guard: unattributedContext() })
     // Snapshot AFTER this build writes its durable round floor; the captured OLD writer must preserve it too.
     const before = ['guarantees.json', 'guards.json'].map(f => readFileSync(join(dir, f), 'utf8'))
     await oldWriterRoundTrip(file, readFileSync(file, 'utf8'))
@@ -67,7 +68,7 @@ describe('deliveries.json: new code → v2.210.1 writer → intact (§2.7)', () 
   test('the captured fixture agrees with the REAL parser on today\'s documents (a drifted fixture would test nothing)', async () => {
     const file = join(dir, 'deliveries.json')
     const store = createDeliveryStore(file)
-    await store.update(doc => { for (const i of [1, 2, 3]) doc.deliveries[`s${i}`] = newDelivery({ subtaskId: `s${i}`, taskId: 't', at: T }) })
+    await store.update(doc => { for (const i of [1, 2, 3]) doc.deliveries[`s${i}`] = newDelivery({ subtaskId: `s${i}`, taskId: 't', at: T }) }, { guard: unattributedContext() })
     const old = parseV2210(readFileSync(file, 'utf8'))
     expect(Object.keys(old.deliveries).sort()).toEqual(Object.keys((await store.read()).deliveries).sort())
   })

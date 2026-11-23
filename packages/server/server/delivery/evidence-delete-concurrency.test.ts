@@ -7,6 +7,7 @@ import { createDeliveryStore } from './store'
 import { withEvidenceDeletion } from './evidence-delete'
 import { withGuardLocks } from './guard-locks'
 import { lockFile } from '../sessions/file-lock'
+import { unattributedContext } from './guard'
 
 test('injected deletion port runs before mutation under tasks, concurrent writer completes without inversion/deadlock', async () => {
   const root = await mkdtemp(join(tmpdir(), 'evidence-delete-concurrent-'))
@@ -14,7 +15,7 @@ test('injected deletion port runs before mutation under tasks, concurrent writer
   try {
     const store = createTaskStore(paths.tasks)
     const at = new Date().toISOString()
-    await store.upsertTask({ id: 't1', title: 'T', status: 'todo', createdAt: at, updatedAt: at } as never)
+    await store.upsertTask({ id: 't1', title: 'T', status: 'todo', createdAt: at, updatedAt: at } as never, unattributedContext())
     let entered!: () => void, proceed!: () => void
     const portEntered = new Promise<void>(r => { entered = r })
     const continueDelete = new Promise<void>(r => { proceed = r })
@@ -30,7 +31,7 @@ test('injected deletion port runs before mutation under tasks, concurrent writer
         entered(); await continueDelete
         return mutate()
       }, held, paths)
-    })
+    }, { guard: unattributedContext() })
     // Also observe early port failures: the old post-write callback receives no mutate function.
     const first = await Promise.race([portEntered.then(() => 'entered'), deletion.then(() => 'deleted', () => 'failed')])
     expect(first).toBe('entered')

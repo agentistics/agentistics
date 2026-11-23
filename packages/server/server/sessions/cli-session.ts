@@ -81,6 +81,7 @@ import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, 
 import { ensureClaudeProjectTrusted } from './claude-trust'
 import type { BackendInitialPrompt, BackendSpawn, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 import { structuredOnlyNotice } from './spawn-error'
+import { unattributedContext } from '../delivery/guard'
 
 /**
  * The initial-prompt argument for `backend.spawn`, with the harness's screen RULES attached so the
@@ -809,7 +810,7 @@ async function resolveTaskAndAttempts(
   if (!task) {
     // A task a batch is starting is `in_progress` by construction: sessions are about to run.
     task = { id: newTaskId(), title: cmd.task, status: 'in_progress', createdAt: now, updatedAt: now }
-    await store.upsertTask(task)
+    await store.upsertTask(task, unattributedContext())
   }
   const created: Task = task
 

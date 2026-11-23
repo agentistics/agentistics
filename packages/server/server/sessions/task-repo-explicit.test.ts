@@ -3,6 +3,7 @@ import { addSession } from './registry'
 import { defaultRoleDeps, leadOp, writeRolesDoc, type RoleDeps, type TaskRepoInfo } from './session-roles'
 import { createTask, editTask } from './task-web'
 import { loadTaskWorld } from './task-source'
+import { unattributedContext } from '../delivery/guard'
 
 // r5: INHERITED NEVER COUNTS FOR LEADING. Both the leader's own filing task and the target must carry an EXPLICIT repository.
 
@@ -73,8 +74,8 @@ describe('REAL wiring (defaultRoleDeps over the real board and registry) — M1b
 
   test('M1b: inherited repos refuse through the real deps; once the person writes both, it leads (200, owner_differs)', async () => {
     const { a, b, lid, deps, store } = await setup()
-    await store.patchTask(a.id, { repo: 'blpsoares/agentistics', repoSource: 'inherited', repoFromSession: 'x' })
-    await store.patchTask(b.id, { repo: 'agentistics/agentistics', repoSource: 'inherited', repoFromSession: 'y' })
+    await store.patchTask(a.id, { repo: 'blpsoares/agentistics', repoSource: 'inherited', repoFromSession: 'x' }, { guard: unattributedContext() })
+    await store.patchTask(b.id, { repo: 'agentistics/agentistics', repoSource: 'inherited', repoFromSession: 'y' }, { guard: unattributedContext() })
     expect(await leadOp(lid, { add: [b.id] }, deps)).toMatchObject({ ok: false, code: 'repo_not_explicit' })
     expect(await editTask(a.id, { repo: 'blpsoares/agentistics' })).toBe(true)
     // only the own side is explicit now: the target still refuses
@@ -85,7 +86,7 @@ describe('REAL wiring (defaultRoleDeps over the real board and registry) — M1b
 
   test('every explicit write stamps repoSource explicit and clears repoFromSession', async () => {
     const { a, store } = await setup()
-    await store.patchTask(a.id, { repo: 'o/seed', repoSource: 'inherited', repoFromSession: 'sess' })
+    await store.patchTask(a.id, { repo: 'o/seed', repoSource: 'inherited', repoFromSession: 'sess' }, { guard: unattributedContext() })
     expect(await editTask(a.id, { repo: 'o/said' })).toBe(true)
     const t = (await loadTaskWorld()).book.tasks.find(x => x.id === a.id)!
     expect(t.repoSource).toBe('explicit')
@@ -95,7 +96,7 @@ describe('REAL wiring (defaultRoleDeps over the real board and registry) — M1b
   test('M4: an INHERITED write never overwrites an explicit repository', async () => {
     const { a, store } = await setup()
     expect(await editTask(a.id, { repo: 'o/said' })).toBe(true)
-    await store.patchTask(a.id, { repo: 'o/copied', repoSource: 'inherited', repoFromSession: 'z' })
+    await store.patchTask(a.id, { repo: 'o/copied', repoSource: 'inherited', repoFromSession: 'z' }, { guard: unattributedContext() })
     const t = (await loadTaskWorld()).book.tasks.find(x => x.id === a.id)!
     expect(t).toMatchObject({ repo: 'o/said', repoSource: 'explicit' })
   })

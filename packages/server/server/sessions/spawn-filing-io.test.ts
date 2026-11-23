@@ -11,6 +11,7 @@ import { TASKS_FILE } from '../config'
 import { planFleetSpawn } from './fleet-spawn'
 import type { ManagedSession } from './types'
 import type { Subtask, Task } from './task-model'
+import { unattributedContext } from '../delivery/guard'
 
 // A git hook exports GIT_DIR & co.; a temp repo must not resolve to the hooked one.
 for (const k of Object.keys(process.env)) if (k.startsWith('GIT_') && k !== 'GIT_TERMINAL_PROMPT') delete process.env[k]
@@ -109,9 +110,9 @@ describe('planSpawnFiling (IO layer)', () => {
     const task = T('t-sfio-web', 'Web blocked regression')
     const blocker = S('s-sfio-blocker', task.id, 'Blocker')
     const blocked = S('s-sfio-blocked', task.id, 'Blocked', { blockedBy: [blocker.id] })
-    await store.upsertTask(task)
-    await store.upsertSubtask(blocker)
-    await store.upsertSubtask(blocked)
+    await store.upsertTask(task, unattributedContext())
+    await store.upsertSubtask(blocker, unattributedContext())
+    await store.upsertSubtask(blocked, unattributedContext())
     const decision = planFleetSpawn({ harness: 'claude', cwd: process.cwd(), taskId: task.id, subtaskId: blocked.id }, [{ id: 'claude', supportsModel: true, efforts: [] }])
     expect(decision.ok).toBe(true)
     if (!decision.ok) throw new Error('unexpected fleet refusal')
@@ -166,9 +167,9 @@ describe('attachAfterSpawn', () => {
     const task = T('t-sfio-delivery', 'Requested delivery')
     const other = T('t-sfio-other-delivery', 'Other delivery')
     const subtask = S('s-sfio-other-delivery', other.id, 'Other subtask')
-    await store.upsertTask(task)
-    await store.upsertTask(other)
-    await store.upsertSubtask(subtask)
+    await store.upsertTask(task, unattributedContext())
+    await store.upsertTask(other, unattributedContext())
+    await store.upsertSubtask(subtask, unattributedContext())
     await addSession({ ...row('sfio-wrong-delivery', process.cwd()), task: task.title, taskId: task.id, subtaskId: subtask.id })
     try {
       expect(await attachAfterSpawn({ taskId: task.id, subtaskId: subtask.id }, 'sfio-wrong-delivery'))
