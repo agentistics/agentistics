@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.227.0': {
+  '2.228.0': {
     features: [
       {
         pt: 'Navegador: ele sempre abre numa página inicial (por padrão, o Google; você muda em Ajustes → Navegador) — nada de tela vazia, e cada aba nova abre nela também.',
