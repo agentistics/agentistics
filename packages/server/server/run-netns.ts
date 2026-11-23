@@ -293,7 +293,9 @@ export function repoCarveOuts(cwd: string, home: string): { writable: string[]; 
   // node_modules is the bun cache's hardlink farm (shared inodes): read-only, so no write reaches another worktree or the cache
   // refs/replace and info/ (info/grafts) rewrite the history EVERY worktree of the repo sees: read-only too. refs/replace is created empty when
   // absent (git tolerates it) because a path that does not exist cannot be bind-mounted, and git would create it on the first `git replace`.
-  if (commonAbs) { try { mkdirSync(join(commonAbs, 'refs', 'replace'), { recursive: true }) } catch {} }
+  // info/ is created the same way: a common dir without it (git init makes info/exclude, a hand-built or pruned one may not) would leave
+  // nothing to mask, and the run could create info/ and plant info/grafts in the writable common dir.
+  if (commonAbs) { for (const d of [join('refs', 'replace'), 'info']) { try { mkdirSync(join(commonAbs, d), { recursive: true }) } catch {} } }
   const commonMasks = commonAbs ? ['hooks', 'config', 'info', join('refs', 'replace')].map(n => join(commonAbs, n)).filter(existsSync) : []
   return { writable, masked: [...commonMasks, ...nodeModulesDirs(real(top)).map(real)] }
 }

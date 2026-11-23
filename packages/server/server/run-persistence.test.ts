@@ -98,6 +98,13 @@ describe('RUN.ISOLAMENTO-PERSISTENCIA: the mount plan (pure)', () => {
     expect(r.masked).toContain(join(repo, '.git', 'info'))
     expect(existsSync(join(repo, '.git', 'refs', 'replace'))).toBe(true)
   })
+  test('RS2: info/ is created when ABSENT so it can be masked (grafts cannot be planted in a common dir that lacks it)', () => {
+    const { home, repo } = fakeHome()
+    rmSync(join(repo, '.git', 'info'), { recursive: true, force: true })
+    const r = repoCarveOuts(repo, home)
+    expect(existsSync(join(repo, '.git', 'info'))).toBe(true)
+    expect(r.masked).toContain(join(repo, '.git', 'info'))
+  })
   test('R3: the help says plainly that .husky/_ is writable like the rest of the worktree, and what the farm coverage is', () => {
     const src = readFileSync(new URL('./cli-run.ts', import.meta.url), 'utf8')
     expect(src).toMatch(/\.husky\/_ is WRITABLE/)
@@ -208,6 +215,15 @@ describe.skipIf(skipReason !== null)(`RUN.ISOLAMENTO-PERSISTENCIA: live, inside 
     expect(out).toContain('commit ok')
     expect(existsSync(join(repo, '.git', 'info', 'grafts'))).toBe(false)
     expect(existsSync(join(repo, '.git', 'refs', 'replace', 'deadbeef'))).toBe(false)
+  }, 60_000)
+
+  test('RS2: inside a run, info/grafts cannot be planted even when the common dir had no info/', async () => {
+    const { home, repo } = fakeHome()
+    rmSync(join(repo, '.git', 'info'), { recursive: true, force: true })
+    const out = await inRun(`mkdir -p .git/info 2>&1; echo evil > .git/info/grafts 2>&1; echo "grafts rc=$?"; echo c > c.txt; git add c.txt && git -c user.email=t@t -c user.name=t commit -q -m ok && echo "commit ok"`, [home], [], repo)
+    expect(out).toMatch(/^grafts rc=[1-9]/m)
+    expect(out).toContain('commit ok')
+    expect(existsSync(join(repo, '.git', 'info', 'grafts'))).toBe(false)
   }, 60_000)
 
   test('M8: a cwd OUTSIDE every guarded home has its node_modules read-only inside the run (outsideNodeModules is wired into the launch)', async () => {
