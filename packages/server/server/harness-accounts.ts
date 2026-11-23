@@ -679,7 +679,7 @@ export function createHarnessAccounts(options: {
         await write(data)
       })
     },
-    update,
+    patchAccount: update,
     /** Retire: invisible to agents, history and billing kept. Re-binding the same login un-retires it. */
     async retire(id: string): Promise<HarnessAccount | null> {
       return serial(async () => {
@@ -757,7 +757,7 @@ export const currentHarnessAccounts = (harnesses: readonly HarnessId[]) => store
 export const listHarnessAccounts = (harnesses?: readonly HarnessId[]) => store.list(harnesses)
 export const setAccountAvailable = (harness: HarnessId, key: string, available: boolean) => store.setAvailable(harness, key, available)
 export const retireAccount = (id: string) => store.retire(id)
-export const updateAccount = (id: string, patch: AccountPatch) => store.update(id, patch)
+export const updateAccount = (id: string, patch: AccountPatch) => store.patchAccount(id, patch)
 export const markLoginExpired = (id: string, at: number) => store.markLoginExpired(id, at)
 export const clearLoginExpired = (id: string) => store.clearLoginExpired(id)
 

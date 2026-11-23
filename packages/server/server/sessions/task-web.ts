@@ -50,7 +50,7 @@ import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './
 import { withEvidenceDeletion } from '../delivery/evidence-delete'
 import type { TaskDetail, TaskListRow } from './task-report'
 import { onBookWrite } from './task-store'
-import { GuardRefused, type GuardContext } from '../delivery/guard'
+import { GuardRefused, unattributedContext, type GuardContext } from '../delivery/guard'
 import { GuardBusy } from '../delivery/guard-locks'
 import { JOURNAL_STAMPS_PATH, MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
 
@@ -507,7 +507,7 @@ export async function createTask(o: { title: string; detail?: string; type?: str
     // Only a KNOWN type sticks — an unknown one is dropped, like a task nobody classified.
     ...(o.type && isKnownTypeId(o.type, w.book.types) ? { type: o.type } : {}),
   }
-  await w.store.upsertTask(task)
+  await w.store.upsertTask(task, unattributedContext())
   return task
 }
 
@@ -555,7 +555,7 @@ export async function editTask(
       ? { labels: patch.labels.map(l => l.trim()).filter(Boolean) }
       : {}),
     updatedAt: now,
-  })
+  }, { guard: unattributedContext() })
   if (!ok) return false
   const changes: TaskEvent[] = []
   const actor = patch.actor?.trim() || 'you'
@@ -899,7 +899,7 @@ export async function addSubtask(
     id, taskId: task.id, title: t,
     status: 'todo', done: false, createdAt: now, updatedAt: now,
     ...(o.isGroup === true ? { isGroup: true } : {}),
-  })
+  }, unattributedContext())
   return id
 }
 
@@ -992,11 +992,11 @@ async function guardedDoor<R>(run: () => Promise<R>): Promise<R | GuardReply> {
 }
 
 /** Every door's write goes through here so a refusal by the store is an ANSWER, never a thrown 500. */
-export async function patchSubtask(subtaskId: string, patch: Parameters<typeof patchSubtaskInner>[2], guard?: GuardContext) {
+export async function patchSubtask(subtaskId: string, patch: Parameters<typeof patchSubtaskInner>[2], guard: GuardContext) {
   return guardedDoor(() => patchSubtaskInner(subtaskId, guard, patch))
 }
 
-async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefined, patch: {
+async function patchSubtaskInner(subtaskId: string, guard: GuardContext, patch: {
   title?: string
   status?: TaskStatus
   dueDate?: string
@@ -1174,7 +1174,7 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
     // STATUS forward (below): a task already `in_progress` still needs its `startedAt` filled the
     // first time real work is actually observed anywhere under it.
     if (startsNow && !parent.startedAt) {
-      await w.store.patchTask(parent.id, { startedAt: now, updatedAt: now })
+      await w.store.patchTask(parent.id, { startedAt: now, updatedAt: now }, { guard: guard })
     }
 
     // See `statusAfterSubtaskProgress` — a subtask (or group member, §F.1) that actually STARTS
@@ -1285,7 +1285,7 @@ export async function removeSubtask(subtaskId: string, guard?: GuardContext, dep
 }
 
 /** The tick, expressed as what it means: a move to `done`, or back to `todo`. */
-export async function setSubtaskDone(subtaskId: string, done: boolean, guard?: GuardContext): Promise<
+export async function setSubtaskDone(subtaskId: string, done: boolean, guard: GuardContext): Promise<
   {
     ok: true
   } | {
@@ -1390,7 +1390,7 @@ export async function setBlockedBy(ref: string, ids: readonly string[]): Promise
   if (!task) return false
   const known = new Set(w.book.tasks.map(t => t.id))
   const clean = [...new Set(ids)].filter(id => id !== task.id && known.has(id))
-  return await w.store.patchTask(task.id, { blockedBy: clean, updatedAt: new Date().toISOString() })
+  return await w.store.patchTask(task.id, { blockedBy: clean, updatedAt: new Date().toISOString() }, { guard: unattributedContext() })
 }
 
 /** Attach a link. Refused unless it is http(s) — see `sanitizeLink`. */
@@ -1411,7 +1411,7 @@ export async function addLink(
   return await w.store.patchTask(task.id, {
     links: [...(task.links ?? []), link],
     updatedAt: new Date().toISOString(),
-  })
+  }, { guard: unattributedContext() })
 }
 
 export async function removeLink(ref: string, linkId: string): Promise<boolean> {
@@ -1421,7 +1421,7 @@ export async function removeLink(ref: string, linkId: string): Promise<boolean> 
   return await w.store.patchTask(task.id, {
     links: (task.links ?? []).filter(l => l.id !== linkId),
     updatedAt: new Date().toISOString(),
-  })
+  }, { guard: unattributedContext() })
 }
 
 /**
@@ -1543,20 +1543,20 @@ export async function attachSession(
   // from the SAME `task` object resolved from `ref` above: attaching never renames or moves the
   // task itself, so it is still that task's current status.
   const advanced = statusAfterAttach(task.status)
-  if (advanced) await markTask(task.id, advanced, row.label || sessionId)
+  if (advanced) await markTask(task.id, advanced, row.label || sessionId, { guard: unattributedContext() })
   // The same forward-only nudge for the subtask the session is now filed on (never downgrades
   // done / in_review / blocked). `patchSubtask` also moves the parent task if still unstarted.
   if (plan.subtaskId) {
     const sub = w.book.subtasks.find(s => s.id === plan.subtaskId)
     const next = sub ? statusAfterAttach(sub.status) : null
-    if (next) await patchSubtask(plan.subtaskId, { status: next })
+    if (next) await patchSubtask(plan.subtaskId, { status: next }, unattributedContext())
     if (sub?.ownerRequest) {
       const { effectiveRole } = await import('./session-roles')
       const current = (await w.store.read()).subtasks.find(s => s.id === sub.id)
       if (current) {
         const now = new Date().toISOString()
         await w.store.upsertSubtask({ ...current, startedAt: current.startedAt ?? now, startDate: current.startDate ?? current.startedAt ?? now,
-          assignee: await effectiveRole(row) === 'worker' ? 'worker' : 'leader' })
+          assignee: await effectiveRole(row) === 'worker' ? 'worker' : 'leader' }, unattributedContext())
       }
     }
   }
@@ -1570,7 +1570,7 @@ export async function attachSession(
     const { repoFacts } = await import('./repo-facts')
     const facts = await repoFacts(row.cwd, row.repo).catch(() => null)
     const repo = facts?.repo
-    if (repo) await w.store.patchTask(task.id, { repo, updatedAt: new Date().toISOString() })
+    if (repo) await w.store.patchTask(task.id, { repo, updatedAt: new Date().toISOString() }, { guard: unattributedContext() })
   }
   await w.store.logEvents([event(task.id, row.label || sessionId, 'session', {
     to: sessionId, detail: row.harness,
@@ -1671,7 +1671,7 @@ export async function attachConversation(
 
   const label = sessionLabel(conv.meta) || conversation
   const advanced = statusAfterAttach(task.status)
-  if (advanced) await markTask(task.id, advanced, label)
+  if (advanced) await markTask(task.id, advanced, label, { guard: unattributedContext() })
 
   // The meta names where the conversation ran, which is all a purged row would have told us. Live git
   // first (the directory may well still exist), then the store's own remote — the same order
@@ -1680,7 +1680,7 @@ export async function attachConversation(
     const { repoFacts } = await import('./repo-facts')
     const facts = await repoFacts(conv.meta.project_path ?? '').catch(() => null)
     const repo = facts?.repo || (conv.meta.git_remote ? repoShortName(conv.meta.git_remote) : '')
-    if (repo) await w.store.patchTask(task.id, { repo, updatedAt: new Date().toISOString() })
+    if (repo) await w.store.patchTask(task.id, { repo, updatedAt: new Date().toISOString() }, { guard: unattributedContext() })
   }
   await w.store.logEvents([event(task.id, label, 'session', {
     to: conversation, detail: `${conv.harness} · historical`,
@@ -1785,13 +1785,13 @@ export async function fileNativeSession(o: {
     : undefined
   const label = link.label ?? o.sessionId
   const advanced = statusAfterAttach(task.status)
-  if (advanced) await markTask(task.id, advanced, label)
+  if (advanced) await markTask(task.id, advanced, label, { guard: unattributedContext() })
   if (plan.subtaskId) {
     const sub = w.book.subtasks.find(s => s.id === plan.subtaskId)
     if (sub?.ownerRequest) {
       const now = new Date().toISOString()
       await w.store.upsertSubtask({ ...sub, status: statusAfterAttach(sub.status) ?? sub.status,
-        startedAt: sub.startedAt ?? now, startDate: sub.startDate ?? now, assignee: 'worker', updatedAt: now })
+        startedAt: sub.startedAt ?? now, startDate: sub.startDate ?? now, assignee: 'worker', updatedAt: now }, unattributedContext())
     }
   }
   await w.store.logEvents([event(task.id, label, 'session', { to: o.sessionId, detail: 'agentistics · native' })])
@@ -1846,20 +1846,20 @@ export type MarkOptions = {
   allowOpenSubtasks?: boolean
   /** Blocking task ids to set as part of the same move — the other way to answer "why". */
   blockedBy?: readonly string[]
-  /** ENTREGA.GARANTIDA S2a: who is asking. Optional; without it a move that raises a piece's rank is refused when the guarantee is on. */
-  guard?: GuardContext
+  /** ENTREGA.GARANTIDA S2c: who is asking. REQUIRED — a door that cannot say passes `unattributedContext()`, and a move that raises a piece's rank from it is refused when the guarantee is on. */
+  guard: GuardContext
 }
 export type MarkResult = { ok: boolean; evidence?: DeliveryEvidence; message?: string; openSubtaskIds?: string[]; guard?: GuardInfo }
 
-export async function markTask(ref: string, to: TaskStatus, actor?: string, o: MarkOptions = {}): Promise<MarkResult> {
+export async function markTask(ref: string, to: TaskStatus, actor: string | undefined, o: MarkOptions): Promise<MarkResult> {
   return guardedDoor(() => markTaskInner(ref, to, actor, o))
 }
 
 async function markTaskInner(
   ref: string,
   to: TaskStatus,
-  actor?: string,
-  o: MarkOptions = {},
+  actor: string | undefined,
+  o: MarkOptions,
 ): Promise<MarkResult> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
@@ -1899,7 +1899,7 @@ async function markTaskInner(
       await w.store.patchTask(task.id, {
         blockedBy: [...new Set(o.blockedBy.filter(id => id !== task.id))],
         updatedAt: now,
-      })
+      }, { guard: o.guard })
     }
   }
   /*
@@ -1935,7 +1935,7 @@ async function markTaskInner(
     // The reason belongs to THIS block. Leaving `blocked` clears it: a sentence that outlived its
     // block reads as current, which is worse than none.
     ...(to === 'blocked' ? { blockedReason: reason } : { blockedReason: '' }),
-  }, { allowOpenSubtasks: o.allowOpenSubtasks, ...(o.guard ? { guard: o.guard } : {}) })
+  }, { allowOpenSubtasks: o.allowOpenSubtasks, guard: o.guard })
   if (!moved) return { ok: false, message: to === 'in_review' ? 'open_subtasks' : 'no_such_task' }
   // Attempts only ever settle when the TASK settles. An in-progress task leaves them running.
   if (done || to === 'abandoned') {
@@ -2170,7 +2170,7 @@ export async function deleteType(id: string): Promise<
  * FLUXO.ENTREGA-DSL — the delivery flow writes the CI · publicando signal onto the subtask (`null` clears it).
  * Flow-only: no route lets a person set it, because the Live moves a card to Publicado on it.
  */
-export async function setSubtaskCi(subtaskId: string, ci: Subtask['ci'] | null, guard?: GuardContext): Promise<boolean> {
+export async function setSubtaskCi(subtaskId: string, ci: Subtask['ci'] | null, guard: GuardContext): Promise<boolean> {
   const w = await loadTaskWorld()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
   if (!found) return false

@@ -10,6 +10,7 @@ import { deliveryHostOps } from './host-ops'
 import { emitEvent } from './host'
 import { GuardRefused } from './guard'
 import { deliveryRequest } from './web'
+import { unattributedContext } from './guard'
 
 /** What a legacy piece's delivery declared: the commit that is the head of each of these PRs (the fakes' `head<n>000…`), the only way a batch PR proves anything. */
 const DECLARED = (...prs: number[]) => async () => ({ branches: [], shas: [], heads: prs.map(n => ({ branch: `fix/p${n}`, sha: `head${n}`.padEnd(12, '0') })) })
@@ -262,7 +263,7 @@ describe('delivery service', () => {
           humanGates: [], approvals: {}, skips: [], history: [], createdAt: '2026-11-07T01:00:00Z', updatedAt: '2026-11-07T01:00:00Z',
           ...(phase === 'fila' ? { queueHold: { kind: 'nao', reason: 'opened by hand; do not duplicate', at: '2026-11-07T01:00:00Z', actor: 'leader' } } : {}),
         }
-      })
+      }, { guard: unattributedContext() })
       for (let tick = 0; tick <= 48; tick++) {
         expect(wakes((await h.svc.tick()).actions)).toEqual([])
         h.advance(10 * 60_000)
@@ -281,7 +282,7 @@ describe('delivery service', () => {
         ...(shape === 'held' ? { queueHold: { kind: 'nao', reason: 'deliberate hold', at, actor: 'leader' } } : {}),
         ...(shape === 'dequeued' ? { dequeued: { at, reason: 'opened by hand', actor: 'leader' } } : {}),
       }
-      await createDeliveryStore(join(dir, 'deliveries.json')).update(doc => { doc.deliveries.s1 = record })
+      await createDeliveryStore(join(dir, 'deliveries.json')).update(doc => { doc.deliveries.s1 = record }, { guard: unattributedContext() })
       expect(wakes((await h.svc.tick()).actions)).toEqual([])
     })
 
@@ -311,7 +312,7 @@ describe('delivery service', () => {
           humanGates: [], approvals: {}, skips: [], history: [], createdAt: at, updatedAt: at,
           ...(shape === 'expired schedule' ? { queueHold: { kind: 'agendar', until: at, reason: 'expired', at, actor: 'leader' } } : {}),
         }
-      })
+      }, { guard: unattributedContext() })
       expect(wakes((await h.svc.tick()).actions)).toEqual(['request-wake leader:p-1'])
     })
 
@@ -459,7 +460,7 @@ describe('delivery service', () => {
     test('QA r2: a reservation orphaned by a crash (pendingAt, no send) does not hold the 30-minute window', async () => {
       const h = harness({}, { requests: async () => [req()] })
       const store = createDeliveryStore(join(dir, 'deliveries.json'))
-      await store.update(x => { (x.requestReminders ??= {})['p-1'] = { pendingAt: new Date(Date.parse('2026-11-07T01:00:00Z')).toISOString(), leaderSessionId: 'leader' } })
+      await store.update(x => { (x.requestReminders ??= {})['p-1'] = { pendingAt: new Date(Date.parse('2026-11-07T01:00:00Z')).toISOString(), leaderSessionId: 'leader' } }, { guard: unattributedContext() })
       h.w.sessions = [...h.w.sessions.map(s => (s.id === 'leader' ? { ...s, alive: false } : s)), successor]
       expect((await h.svc.tick()).actions).toContain('request-wake leader-b:p-1')
     })
@@ -1358,7 +1359,7 @@ describe('BLOQUEIO.ORFAO — a board-blocked piece with no delivery record is ch
     await walkToQa(h.svc)
     expect((await h.svc.block('s1', 'externo', 'preso', 'leader')).ok).toBe(true)
     // a record written by an older build: the flow history is real, the marker was never cleared
-    await createDeliveryStore(join(dir, 'deliveries.json')).update(d => { d.deliveries.s1!.adopted = 'board' })
+    await createDeliveryStore(join(dir, 'deliveries.json')).update(d => { d.deliveries.s1!.adopted = 'board' }, { guard: unattributedContext() })
     h.w.blocked = []
     h.w.status = 'abandoned'
     await h.svc.tick()
@@ -1821,7 +1822,7 @@ describe('PUBLICADO.MANIFESTO r2 — the sha, the batch write, the blocked piece
     const real = createDeliveryStore(join(dir, 'deliveries.json'))
     let writes = 0
     let failAt = 1
-    const flaky = { path: real.path, read: () => real.read(), get: (id: string) => real.get(id), update: <T>(fn: (doc: Parameters<typeof real.update>[0] extends (d: infer D) => unknown ? D : never) => T | Promise<T>) => { writes += 1; if (writes === failAt) return Promise.reject(new Error('EIO: disk full')); return real.update(fn as never) as Promise<T> } }
+    const flaky = { path: real.path, read: () => real.read(), get: (id: string) => real.get(id), update: <T>(fn: (doc: Parameters<typeof real.update>[0] extends (d: infer D) => unknown ? D : never) => T | Promise<T>) => { writes += 1; if (writes === failAt) return Promise.reject(new Error('EIO: disk full')); return real.update(fn as never, { guard: unattributedContext() }) as Promise<T> } }
     const h = harness({ status: 'in_review' }, { store: flaky as never })
     const r = await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1', 's2'] }, 'leader')
     expect(!r.ok && r.code).toBe('store_erro')
@@ -1837,7 +1838,7 @@ describe('PUBLICADO.MANIFESTO r2 — the sha, the batch write, the blocked piece
   test('the whole batch lands in a single write (one store.update for the declaration)', async () => {
     const real = createDeliveryStore(join(dir, 'deliveries.json'))
     let writes = 0
-    const counting = { path: real.path, read: () => real.read(), get: (id: string) => real.get(id), update: <T>(fn: (doc: Parameters<typeof real.update>[0] extends (d: infer D) => unknown ? D : never) => T | Promise<T>) => { writes += 1; return real.update(fn as never) as Promise<T> } }
+    const counting = { path: real.path, read: () => real.read(), get: (id: string) => real.get(id), update: <T>(fn: (doc: Parameters<typeof real.update>[0] extends (d: infer D) => unknown ? D : never) => T | Promise<T>) => { writes += 1; return real.update(fn as never, { guard: unattributedContext() }) as Promise<T> } }
     const h = harness({ status: 'in_review' }, { store: counting as never })
     await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1', 's2'] }, 'leader')
     expect(writes).toBe(1)
@@ -1896,7 +1897,7 @@ describe('PUBLICADO.MANIFESTO independent r2 QA regressions', () => {
       update: async fn => {
         writes += 1
         if (writes === 3) throw new Error('EIO: injected third store write')
-        return real.update(fn)
+        return real.update(fn, { guard: unattributedContext() })
       },
     }
     const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG }, { store: flaky })
@@ -1967,7 +1968,7 @@ describe('PUBLICADO.MANIFESTO independent r2 QA regressions', () => {
   test('QA: a failed commit preserves existing ci records and all effects', async () => {
     const real = createDeliveryStore(join(dir, 'deliveries.json'))
     let fail = false
-    const flaky: typeof real = { ...real, update: fn => fail ? Promise.reject(new Error('EIO: commit refused')) : real.update(fn) }
+    const flaky: typeof real = { ...real, update: fn => fail ? Promise.reject(new Error('EIO: commit refused')) : real.update(fn, { guard: unattributedContext() }) }
     const h = harness({ status: 'in_review' }, { store: flaky })
     await h.svc.release(RELEASE, 'leader')
     const before = await real.read()
@@ -2149,7 +2150,7 @@ describe('PUBLICADO.MANIFESTO r4 — bounded polling and transition effects', ()
   test('a failed gated declaration writes no asked stamp and rings no bell', async () => {
     const real = createDeliveryStore(join(dir, 'deliveries.json'))
     let fail = false
-    const store: typeof real = { ...real, update: fn => fail ? Promise.reject(new Error('EIO')) : real.update(fn) }
+    const store: typeof real = { ...real, update: fn => fail ? Promise.reject(new Error('EIO')) : real.update(fn, { guard: unattributedContext() }) }
     const h = harness({ status: 'in_review', autonomous: false, tags: TAG, releaseRuns: [GREEN] }, { store })
     await h.svc.ensure('s1')
     await h.svc.configure('s1', { humanGates: ['publicado'] }, 'leader')
@@ -2222,7 +2223,7 @@ describe('FLUXO.CICLO-COMPLETO — no stage after the review depends on someone 
     const store = createDeliveryStore(join(dir, 'deliveries.json'))
     const h = harness({ commitPulls: { abc123: [{ number: 9, state: 'closed', merged_at: '2026-11-07T03:00:00Z', merge_commit_sha: 'merge1', head: { sha: 'abc123', ref: 'feat/y' } }] }, pr: { number: 9, state: 'MERGED', headRefOid: 'abc123', mergeCommit: { oid: 'merge1' } } }, { store })
     await toReview(h)
-    await store.update(doc => { delete doc.deliveries.s1!.branch })
+    await store.update(doc => { delete doc.deliveries.s1!.branch }, { guard: unattributedContext() })
     const t = await h.svc.tick()
     expect(t.actions).toContain('merge-detected s1:#9')
   })

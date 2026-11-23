@@ -7,6 +7,7 @@ import { commentTargetPhrase, planCommentTarget } from './task-comment'
 import { createTaskStore } from './task-store'
 import { buildTaskDetail, buildTaskList } from './task-report'
 import type { Subtask, Task } from './task-model'
+import { unattributedContext } from '../delivery/guard'
 
 const sub = (id: string, taskId: string, over: Partial<Subtask> = {}): Subtask => ({
   id, taskId, title: `T ${id}`, done: false, status: 'todo',
@@ -75,8 +76,8 @@ describe('migration — an old comment stays on the task', () => {
   it('deleting a subtask re-homes its comments onto the task instead of losing them', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'agentop-cmt-'))
     const s = createTaskStore(join(dir, 'tasks.json'))
-    await s.upsertTask(task)
-    await s.upsertSubtask(sub('l', 't-1'))
+    await s.upsertTask(task, unattributedContext())
+    await s.upsertSubtask(sub('l', 't-1'), unattributedContext())
     await s.addComment({ id: 'c-1', taskId: 't-1', subtaskId: 'l', author: 'me', body: 'x', createdAt: 'a' })
     await s.removeSubtask('l')
     const c = (await s.read()).comments

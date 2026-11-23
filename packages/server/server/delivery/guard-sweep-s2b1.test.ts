@@ -19,6 +19,7 @@ import { analyzeGuardIntegrity } from './owner-health'
 const mayDismissPlaceholder = async (o: { principal: unknown; taskId: string; isTaskLeader: (s: string, t: string) => Promise<boolean> }) => (await import('../sessions/placeholder-dismiss')).mayDismissPlaceholder(o as never)
 import { planNext } from '../sessions/task-next'
 import { findTask } from '../sessions/task-report'
+import { unattributedContext } from './guard'
 
 const T = Date.parse('2026-11-13T10:00:00Z')
 const ISO = new Date(T).toISOString()
@@ -41,9 +42,9 @@ async function world(subs: Array<[string, Record<string, unknown>?]> = [['p1']],
   const deps = { sessions: async () => sessions, git: execGit }
   const tasks: TaskStore = createTaskStore(paths.tasks, { guard: { deps, now: () => clock.now } })
   await tasks.seedStatuses(DEFS)
-  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
-  for (const [id, extra] of subs) await tasks.upsertSubtask(subtask(id, extra))
-  for (let i = 0; i < quiet; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
+  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
+  for (const [id, extra] of subs) await tasks.upsertSubtask(subtask(id, extra), unattributedContext())
+  for (let i = 0; i < quiet; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
   const store = createDeliveryStore(paths.deliveries, { guard: { deps, now: () => clock.now } })
   const board: any = { comment: async () => undefined, subtaskFinished: async () => false, setPhaseStatus: async () => ({ ok: true }) }
   const logs: string[] = []
@@ -335,7 +336,7 @@ test('r2 a forged mark on a piece of the ledger-less board leaves it a real piec
   const { defaultGateFacts } = await import('./gates')
   const store = createTaskStore(TASKS_FILE)
   await store.seedStatuses(DEFS)
-  await store.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
+  await store.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
   const guards = createGuardsStore(join(TASKS_FILE, '..', 'guards.json'))
   const doc = await guards.read()
   await guards.write({ ...doc, sweep: { reverts: {}, placeholders: { ph: { groupId: 'g', taskId: 't1', restoredAt: ISO, restorationId: 'r-1' } } } })

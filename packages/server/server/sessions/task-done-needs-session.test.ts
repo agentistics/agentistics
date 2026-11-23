@@ -70,7 +70,7 @@ test('setSubtaskDone refuses a subtask with NO session filed under it', async ()
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
-    const result = await web.setSubtaskDone('s1', true)
+    const result = await web.setSubtaskDone('s1', true, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ result, status: after.subtasks[0].status, done: after.subtasks[0].done }))
   `)
@@ -82,7 +82,7 @@ test('setSubtaskDone succeeds once a session is filed under THAT subtask', async
     ${task('t1')}
     ${subtask('s1', 't1')}
     ${session('sess1', "taskId: 't1', subtaskId: 's1',")}
-    const result = await web.setSubtaskDone('s1', true)
+    const result = await web.setSubtaskDone('s1', true, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ result, status: after.subtasks[0].status, done: after.subtasks[0].done }))
   `)
@@ -91,7 +91,7 @@ test('setSubtaskDone succeeds once a session is filed under THAT subtask', async
 
 test('patchSubtask refuses an unknown subtask id', async () => {
   const out = await run(`
-    const result = await web.patchSubtask('nope', { status: 'done' })
+    const result = await web.patchSubtask('nope', { status: 'done' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ result }))
   `)
   expect(out).toEqual({ result: { ok: false, message: 'no_such_subtask' } })
@@ -105,7 +105,7 @@ test('patchSubtask does not re-trigger the check on a patch that is not a move I
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1', "status: 'done', done: true,")}
-    const result = await web.patchSubtask('s1', { dueDate: '2026-09-20' })
+    const result = await web.patchSubtask('s1', { dueDate: '2026-09-20' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ result, dueDate: after.subtasks[0].dueDate }))
   `)
@@ -116,7 +116,7 @@ test('patchSubtask allows moving to a non-done status with no session at all', a
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
-    const result = await web.patchSubtask('s1', { status: 'in_progress' })
+    const result = await web.patchSubtask('s1', { status: 'in_progress' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ result, status: after.subtasks[0].status }))
   `)
@@ -126,7 +126,7 @@ test('patchSubtask allows moving to a non-done status with no session at all', a
 test('markTask refuses `done` on a task with zero sessions anywhere under it — and writes nothing', async () => {
   const out = await run(`
     ${task('t1')}
-    const result = await web.markTask('t1', 'done')
+    const result = await web.markTask('t1', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     const after = await store.read()
     console.log(JSON.stringify({ result, status: after.tasks[0].status }))
   `)
@@ -137,7 +137,7 @@ test('markTask allows `done` on a task with a session filed DIRECTLY under it', 
   const out = await run(`
     ${task('t1')}
     ${session('sess1', "taskId: 't1',")}
-    const result = await web.markTask('t1', 'done')
+    const result = await web.markTask('t1', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     const after = await store.read()
     console.log(JSON.stringify({ ok: result.ok, status: after.tasks[0].status }))
   `)
@@ -149,7 +149,7 @@ test('markTask allows `done` when the only session is filed under one of its SUB
     ${task('t1')}
     ${subtask('s1', 't1')}
     ${session('sess1', "taskId: 't1', subtaskId: 's1',")}
-    const result = await web.markTask('t1', 'done')
+    const result = await web.markTask('t1', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     const after = await store.read()
     console.log(JSON.stringify({ ok: result.ok, status: after.tasks[0].status }))
   `)
@@ -159,7 +159,7 @@ test('markTask allows `done` when the only session is filed under one of its SUB
 test('markTask does not re-trigger the check on an already-done task, even once its sessions are gone', async () => {
   const out = await run(`
     ${task('t1', "status: 'done',")}
-    const result = await web.markTask('t1', 'done')
+    const result = await web.markTask('t1', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     console.log(JSON.stringify({ ok: result.ok }))
   `)
   expect(out).toEqual({ ok: true })
@@ -178,7 +178,7 @@ test('setSubtaskDone reaches `done` on a group MEMBER with NO session filed unde
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
-    const result = await web.setSubtaskDone('m1', true)
+    const result = await web.setSubtaskDone('m1', true, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, status: row.status, done: row.done }))
@@ -190,7 +190,7 @@ test('setSubtaskDone STILL refuses a GROUP itself with no session filed on it �
   const out = await run(`
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
-    const result = await web.setSubtaskDone('g1', true)
+    const result = await web.setSubtaskDone('g1', true, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'g1')
     console.log(JSON.stringify({ result, status: row.status, done: row.done }))
@@ -202,7 +202,7 @@ test('setSubtaskDone still refuses an ordinary LOOSE subtask with no session —
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
-    const result = await web.setSubtaskDone('s1', true)
+    const result = await web.setSubtaskDone('s1', true, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 's1')
     console.log(JSON.stringify({ result, status: row.status, done: row.done }))
@@ -224,7 +224,7 @@ test('patchSubtask REFUSES leaving a group and going `done` in ONE call when the
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
-    const result = await web.patchSubtask('m1', { parentGroupId: '', status: 'done' })
+    const result = await web.patchSubtask('m1', { parentGroupId: '', status: 'done' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, status: row.status, done: row.done, parentGroupId: row.parentGroupId ?? null }))
@@ -240,7 +240,7 @@ test('patchSubtask control: leaving a group with NO status change still succeeds
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
-    const result = await web.patchSubtask('m1', { parentGroupId: '' })
+    const result = await web.patchSubtask('m1', { parentGroupId: '' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, parentGroupId: row.parentGroupId ?? null }))
@@ -253,7 +253,7 @@ test('patchSubtask control: `status: done` on an existing, still-current group m
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
-    const result = await web.patchSubtask('m1', { status: 'done' })
+    const result = await web.patchSubtask('m1', { status: 'done' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, status: row.status, done: row.done, parentGroupId: row.parentGroupId ?? null }))

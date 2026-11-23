@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { validComposerTask } from '@agentistics/core'
 import type { Subtask } from '../sessions/task-model'
+import { unattributedContext } from '../delivery/guard'
 import type { TaskStore } from '../sessions/task-store'
 import { isOwnerComposerRequest, ownerMessageTarget, prepareOwnerRequestFlows } from './owner-message'
 
@@ -118,7 +119,7 @@ async function registerLocked(req: Request & { text?: string; messageId?: string
     priority: req.asTask.priority, assignee: placedCard?.assignee ?? 'leader', notes: text,
     ...(req.asTask.dueDate ? { dueDate: req.asTask.dueDate } : {}),
     ownerRequest: request,
-  })
+  }, unattributedContext())
   if (!subtask?.ownerRequest) return { ok: false, message: pt ? 'A tarefa de destino não existe mais.' : 'The destination task no longer exists.' }
   if (subtask.ownerRequest.text !== text) return { ok: false, message: pt ? 'Esta identificação de mensagem já foi usada com outro texto.' : 'This message id was already used with different text.' }
   const r = subtask.ownerRequest

@@ -89,11 +89,11 @@ export const MAX_EVENTS = 2000
 
 export interface TaskStore {
   read(): Promise<TaskBook>
-  /** `guard` (S2a, optional): who is asking — a write that RAISES a piece's rank without one is refused when the guarantee is on. */
-  upsertTask(task: Task, guard?: GuardContext): Promise<void>
+  /** `guard` (S2c, REQUIRED): who is asking — a write that RAISES a piece's rank from an unaccepted principal is refused when the guarantee is on. */
+  upsertTask(task: Task, guard: GuardContext): Promise<void>
   upsertAttempt(attempt: Attempt): Promise<void>
   /** False when no record carries that id — never a silent success. */
-  patchTask(id: string, patch: TaskPatch, o?: { allowOpenSubtasks?: boolean; guard?: GuardContext }): Promise<boolean>
+  patchTask(id: string, patch: TaskPatch, o: { allowOpenSubtasks?: boolean; guard: GuardContext }): Promise<boolean>
   patchAttempt(id: string, patch: AttemptPatch): Promise<boolean>
   addComment(c: TaskComment): Promise<void>
   /**
@@ -112,9 +112,9 @@ export interface TaskStore {
   upsertThread(t: TaskThread): Promise<void>
   updateThread(id: string, fn: (t: TaskThread) => TaskThread): Promise<boolean>
   updateComment(id: string, fn: (c: TaskComment) => TaskComment): Promise<boolean>
-  upsertSubtask(t: Subtask, guard?: GuardContext): Promise<void>
+  upsertSubtask(t: Subtask, guard: GuardContext): Promise<void>
   /** Atomic insert/adopt by message id; retries and adoption never overwrite progress. */
-  registerComposerSubtask(t: Subtask, guard?: GuardContext): Promise<Subtask | null>
+  registerComposerSubtask(t: Subtask, guard: GuardContext): Promise<Subtask | null>
   /** `dismissPlaceholder`: a leader/owner removing a guard placeholder (B4) — the write records the removal and raises nothing. */
   removeSubtask(id: string, opts?: { dismissPlaceholder?: GuardContext; ownerRemoval?: GuardContext; guard?: GuardContext }): Promise<boolean>
   /** r3: the group this piece is an ACCEPTED (`done`) member of, per the sealed group checkpoint; null for any other piece (or an unreadable guards.json). */

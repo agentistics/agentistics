@@ -16,6 +16,7 @@ import { analyzeGuardIntegrity } from './owner-health'
 import { flowContext } from './guard'
 import { guardSweep } from './sweep'
 import { inGuardTransaction } from './guard-transaction'
+import { unattributedContext } from './guard'
 
 const T = Date.parse('2026-11-13T10:00:00Z')
 const ISO = new Date(T).toISOString()
@@ -37,9 +38,9 @@ async function world(rule: 'off' | 'shadow' | 'on', subs: Array<[string, Record<
   const deps = { sessions: async () => sessions, git: execGit }
   const tasks: TaskStore = createTaskStore(paths.tasks, { guard: { deps, now: () => clock.now } })
   await tasks.seedStatuses(DEFS)
-  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
-  for (const [id, extra] of subs) await tasks.upsertSubtask(subtask(id, extra))
-  for (let i = 0; i < 40; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
+  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
+  for (const [id, extra] of subs) await tasks.upsertSubtask(subtask(id, extra), unattributedContext())
+  for (let i = 0; i < 40; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
   const store = createDeliveryStore(paths.deliveries, { guard: { deps, now: () => clock.now } })
   const board: any = { comment: async () => undefined, subtaskFinished: async () => false, setPhaseStatus: async () => ({ ok: true }) }
   const logs: string[] = []
@@ -156,7 +157,7 @@ for (const [label, ctx] of [['owner', OWNER], ['session', SESSION]] as const) {
 
 test('R2-B1 the no_checkpoint breaker trips: health (sweepWarnings + the migration line) must WARN, not only a log line', async () => {
   const w = await world('on')
-  for (const id of ['x1', 'x2', 'x3', 'x4', 'x5', 'x6']) await w.tasks.upsertSubtask(subtask(id))
+  for (const id of ['x1', 'x2', 'x3', 'x4', 'x5', 'x6']) await w.tasks.upsertSubtask(subtask(id), unattributedContext())
   forgeBoard(w, s => ['x1', 'x2', 'x3', 'x4', 'x5', 'x6'].includes(s.id), { status: 'in_review' })
   const out = await w.svc.tick()
   const doc = await w.guards.read()
@@ -203,7 +204,7 @@ test('R2-S1 safety-net memory survives only while the plan repeats: legit-lookin
 
 test('R2-3 breaker has its own bilingual health warning and one deduped leader notice', async () => {
   const w = await world('on')
-  for (let i = 0; i < 6; i++) await w.tasks.upsertSubtask(subtask(`x${i}`))
+  for (let i = 0; i < 6; i++) await w.tasks.upsertSubtask(subtask(`x${i}`), unattributedContext())
   forgeBoard(w, s => s.id.startsWith('x'), { status: 'done' })
   await w.svc.tick(); await w.svc.tick()
   const warnings = sweepWarnings((await w.guards.read()).sweep, T)
@@ -224,7 +225,7 @@ test('R2-4/R3-2 checkpointed forgeries are repaired, never counted by the no_che
   const w = await world('on')
   for (let i = 0; i < 3; i++) {
     const key = `x${i}`
-    await w.tasks.upsertSubtask(subtask(key))
+    await w.tasks.upsertSubtask(subtask(key), unattributedContext())
     await writeCp(w, cp(key, { rank: 0, boardStatus: 'in_progress', boardStage: 'running', phase: null, auth: [] }))
   }
   forgeBoard(w, s => s.id.startsWith('x'), { status: 'done' })
@@ -236,7 +237,7 @@ test('R2-4/R3-2 checkpointed forgeries are repaired, never counted by the no_che
 
 test('R2-6 leaving blocked clears the reason on a normal member write and a sweep repair', async () => {
   const w = await world('on', GROUP)
-  await w.tasks.upsertSubtask({ ...(await sub(w, 'm1')), status: 'blocked', blockedReason: 'externo: old' })
+  await w.tasks.upsertSubtask({ ...(await sub(w, 'm1')), status: 'blocked', blockedReason: 'externo: old' }, unattributedContext())
   await w.tasks.upsertSubtask({ ...(await sub(w, 'm1')), status: 'in_progress' }, OWNER)
   expect((await sub(w, 'm1')).blockedReason).toBeUndefined()
   forgeBoard(w, s => s.id === 'm1', { blockedReason: 'externo: old' })

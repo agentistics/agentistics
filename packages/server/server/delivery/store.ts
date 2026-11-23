@@ -94,10 +94,10 @@ export interface DeliveryStore {
   get(subtaskId: string): Promise<DeliveryRecord | null>
   /** Read-modify-write under the lock. `fn` returns the value to hand back; mutations to `doc` are persisted. Throws `DeliveryStoreUnreadable` when the file cannot be read. */
   /**
-   * `guard` (S2a, optional): who is asking. A write that RAISES a record's phase rank (revisao_lider and beyond) without one is
-   * refused by the store when the guarantee is on (`GuardRefused`, before a byte lands).
+   * `guard` (S2c, REQUIRED): who is asking. A write that RAISES a record's phase rank (revisao_lider and beyond) from a principal the
+   * rule does not accept is refused by the store when the guarantee is on (`GuardRefused`, before a byte lands). The compiler is the inventory.
    */
-  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>, options?: { evidence?: boolean; guardsPath?: string; guard?: GuardContext; stamp?: ActivityStamp | readonly ActivityStamp[] }): Promise<T>
+  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>, options: { evidence?: boolean; guardsPath?: string; guard: GuardContext; stamp?: ActivityStamp | readonly ActivityStamp[] }): Promise<T>
 }
 
 export function defaultDeliveriesPath(): string {

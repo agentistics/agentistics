@@ -67,7 +67,7 @@ export function defaultDeliveryBoard(): DeliveryBoard {
       const { normalizeStagedSession } = await import('@agentistics/core')
       const normalized = normalizeStagedSession(draft)
       if (!normalized) return { ok: false, message: 'bad_staged_session: a staged session needs a prompt (and an absolute cwd, when given)' }
-      const out = await (await web()).patchSubtask(subtaskId, { stagedSession: normalized })
+      const out = await (await web()).patchSubtask(subtaskId, { stagedSession: normalized }, flowContext())
       return out.ok ? { ok: true } : { ok: false, message: out.message }
     },
   }
