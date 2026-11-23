@@ -160,6 +160,10 @@ describe('reopen: the NEWEST copy of a conversation wins', () => {
     expect(await run({ default: 1, '/r/b/projects': 2 })).toBe('B')
     expect(await run({ default: 5, '/r/b/projects': 2 })).toBeUndefined()
   })
+  it('an mtime TIE keeps the first hit (the default root): identical copies, no flip to a later account', async () => {
+    expect(await run({ default: 5, '/r/b/projects': 5 })).toBeUndefined()
+    expect(await run({ '/r/b/projects': 4, '/r/c/projects': 4 })).toBe('B')
+  })
   it('id in three roots; a retired account is skipped even when newest', async () => {
     expect(await run({ default: 1, '/r/b/projects': 2, '/r/c/projects': 3 })).toBe('C')
     expect(await run({ '/r/b/projects': 2, '/r/r/projects': 99 })).toBe('B')
@@ -254,5 +258,50 @@ describe('role document temp sweep matches durableWrite names', () => {
     for (const n of ['session-roles.json.tmp.4242.1', 'session-roles.json.4242.tmp', 'session-roles.json']) await writeFile(join(d, n), 'x')
     for (const n of ['session-roles.json.tmp.4242.1', 'session-roles.json.4242.tmp']) await utimes(join(d, n), old, old)
     expect(await cleanStaleRoleTmps(d)).toBe(2)
+  })
+})
+
+describe('an emptied ledger and its last-good copy', () => {
+  const age = async (f: string) => { const old = new Date(Date.now() - 3_600_000); await utimes(bakPath(f), old, old) }
+
+  for (const aged of [true, false]) it(`registry: an EXPLICIT removal of the last row renews the .bak (${aged ? 'old' : 'fresh'} copy), so a lost file stays empty (QA repro)`, async () => {
+    const d = await dir(); const f = join(d, 'managed-sessions.json')
+    const reg = createSessionRegistry(f)
+    await reg.add({ id: 'abc', harness: 'claude', cwd: '/tmp', createdAt: '2026-11-22T00:00:00.000Z' })
+    if (aged) await age(f)
+    await reg.remove('abc')
+    await rm(f)
+    expect(await createSessionRegistry(f).read()).toEqual([])
+  })
+  it('registry: emptied while the file was gone (not an explicit removal) keeps the OLDER .bak', async () => {
+    const d = await dir(); const f = join(d, 'managed-sessions.json')
+    const reg = createSessionRegistry(f)
+    await reg.add({ id: 'abc', harness: 'claude', cwd: '/tmp', createdAt: '2026-11-22T00:00:00.000Z' })
+    await age(f)
+    await rm(f) // lost; read() restores from the copy, the removal then empties it over a missing file
+    __setAlertSinkForTest(() => {})
+    await createSessionRegistry(f).remove('abc')
+    expect(await readFile(bakPath(f), 'utf8')).toContain('abc')
+  })
+  for (const aged of [true, false]) it(`board: an EXPLICIT removal of the last task renews the .bak (${aged ? 'old' : 'fresh'} copy)`, async () => {
+    const d = await dir(); const f = join(d, 'tasks.json')
+    const s = createTaskStore(f)
+    await s.upsertTask(task('t1'))
+    if (aged) await age(f)
+    await s.removeTask('t1')
+    await rm(f)
+    __setAlertSinkForTest(() => {})
+    expect((await createTaskStore(f).read()).tasks).toEqual([])
+  })
+  it('board: emptied while the file was gone keeps the OLDER .bak', async () => {
+    const d = await dir(); const f = join(d, 'tasks.json')
+    const s = createTaskStore(f)
+    await s.upsertTask(task('t1'))
+    await age(f)
+    await rm(f)
+    __setAlertSinkForTest(() => {})
+    await createTaskStore(f).removeTask('t1')
+    // (the tombstone also names t1, so read the TASKS, not the text)
+    expect((JSON.parse(await readFile(bakPath(f), 'utf8')) as { tasks: { id: string }[] }).tasks.map(t => t.id)).toEqual(['t1'])
   })
 })

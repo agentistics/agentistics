@@ -19,7 +19,7 @@
  */
 
 import { mkdir, readFile, rename, stat } from 'node:fs/promises'
-import { alertQuarantined, durableWrite, hasQuarantine, readLastGood, recoverVanished, refreshLastGood, sweepStaleDurableTmps } from '../durable-file'
+import { alertQuarantined, durableWrite, emptiesExistingLedger, hasQuarantine, readLastGood, recoverVanished, refreshLastGood, sweepStaleDurableTmps } from '../durable-file'
 import { dirname, join } from 'node:path'
 import { isStatusStage, isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import { inGuardTransaction, peekRuleA, RuleNoLongerOff, serializeGuardWrite, withGuardEnvelope } from '../delivery/guard-transaction'
@@ -866,8 +866,10 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
       corrupt = false
     }
     const text = JSON.stringify(book, null, 2)
+    const isEmpty = book.tasks.length === 0 && book.subtasks.length === 0
+    const removedAll = await emptiesExistingLedger(file, text, isEmpty)
     await durableWrite(file, text)
-    await refreshLastGood(file, text, Date.now(), undefined, book.tasks.length === 0 && book.subtasks.length === 0)
+    await refreshLastGood(file, text, Date.now(), undefined, isEmpty && !removedAll, removedAll)
     for (const fn of [...bookWriteListeners]) { try { fn() } catch { /* a listener never fails a write */ } }
   }
 
