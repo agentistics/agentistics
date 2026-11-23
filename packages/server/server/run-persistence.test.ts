@@ -76,7 +76,7 @@ describe('RUN.ISOLAMENTO-PERSISTENCIA: the mount plan (pure)', () => {
     const runHome = join(home, '.cache', 'run-x'); mkdirSync(runHome, { recursive: true })
     const [g] = persistenceGuard(runHome, [repo], home, {})
     expect(g!.writable.slice().sort()).toEqual([runHome, repo, join(repo, '.git')].sort())
-    expect(g!.masked.slice().sort()).toEqual([join(repo, '.git', 'hooks'), join(repo, '.git', 'config'), join(repo, 'node_modules'), join(repo, 'packages/a/node_modules')].sort())
+    expect(g!.masked.slice().sort()).toEqual([join(repo, '.git', 'hooks'), join(repo, '.git', 'config'), join(repo, '.git', 'info'), join(repo, '.git', 'refs', 'replace'), join(repo, 'node_modules'), join(repo, 'packages/a/node_modules')].sort())
     expect(g!.writable.some(p => /\.claude|\.local\/bin|\.config|\.bashrc|\.ssh|\.bun/.test(p))).toBe(false)
   })
   test('nodeModulesDirs finds the hardlink farms, never descends into one, skips .git', () => {
@@ -89,6 +89,20 @@ describe('RUN.ISOLAMENTO-PERSISTENCIA: the mount plan (pure)', () => {
     mkdirSync(join(away, 'node_modules'), { recursive: true }); mkdirSync(join(inHome.repo, 'node_modules'), { recursive: true })
     const guards = [{ home: inHome.home, writable: [], masked: [] }]
     expect(outsideNodeModules([away, inHome.repo], guards)).toEqual([join(away, 'node_modules')])
+  })
+  test('R3: refs/replace and info/ of the common git dir are masked (they rewrite history for every worktree), and refs/replace exists so it can be', () => {
+    const { home, repo } = fakeHome()
+    rmSync(join(repo, '.git', 'refs', 'replace'), { recursive: true, force: true })
+    const r = repoCarveOuts(repo, home)
+    expect(r.masked).toContain(join(repo, '.git', 'refs', 'replace'))
+    expect(r.masked).toContain(join(repo, '.git', 'info'))
+    expect(existsSync(join(repo, '.git', 'refs', 'replace'))).toBe(true)
+  })
+  test('R3: the help says plainly that .husky/_ is writable like the rest of the worktree, and what the farm coverage is', () => {
+    const src = readFileSync(new URL('./cli-run.ts', import.meta.url), 'utf8')
+    expect(src).toMatch(/\.husky\/_ is WRITABLE/)
+    expect(src).toMatch(/refs\/replace/); expect(src).toMatch(/info\/grafts/)
+    expect(src).toMatch(/node_modules farm of a repo OTHER than the one you run from[^]*NOT covered/i)
   })
   test('QM3: homeOf is the passwd home, whatever $HOME says (a throwaway HOME must not become the protected home)', () => {
     const saved = process.env.HOME
@@ -185,6 +199,27 @@ describe.skipIf(skipReason !== null)(`RUN.ISOLAMENTO-PERSISTENCIA: live, inside 
     expect(out).toMatch(/^nm rc=[1-9]/m); expect(out).toMatch(/^new rc=[1-9]/m); expect(out).toMatch(/Read-only file system/); expect(out).toContain('wt ok')
     expect(readFileSync(outside, 'utf8')).toBe('orig\n')
     expect(existsSync(join(repo, 'node_modules', 'new.txt'))).toBe(false)
+  }, 60_000)
+
+  test('R3: inside a run, refs/replace and info/grafts of the common dir cannot be written, while a normal commit still works', async () => {
+    const { home, repo } = fakeHome()
+    const out = await inRun(`git replace HEAD~0 HEAD 2>&1 | head -1; mkdir -p .git/refs/replace/x 2>&1; echo "mkdir rc=$?"; echo evil > .git/refs/replace/deadbeef 2>&1; echo "replace rc=$?"; echo evil > .git/info/grafts 2>&1; echo "grafts rc=$?"; echo c > c.txt; git add c.txt && git -c user.email=t@t -c user.name=t commit -q -m ok && echo "commit ok"`, [home], [], repo)
+    for (const k of ['replace', 'grafts']) expect(out).toMatch(new RegExp(`^${k} rc=[1-9]`, 'm'))
+    expect(out).toContain('commit ok')
+    expect(existsSync(join(repo, '.git', 'info', 'grafts'))).toBe(false)
+    expect(existsSync(join(repo, '.git', 'refs', 'replace', 'deadbeef'))).toBe(false)
+  }, 60_000)
+
+  test('M8: a cwd OUTSIDE every guarded home has its node_modules read-only inside the run (outsideNodeModules is wired into the launch)', async () => {
+    const { home } = fakeHome()
+    const away = tmp(); expect(git(away, 'init', '-q').exitCode).toBe(0)
+    mkdirSync(join(away, 'node_modules'), { recursive: true }); mkdirSync(join(away, 'pkgs/a/node_modules'), { recursive: true })
+    const twin = join(tmp(), 'twin.txt'); writeFileSync(twin, 'orig\n'); linkSync(twin, join(away, 'node_modules', 'shared.txt'))
+    const out = await inRun(`echo evil >> node_modules/shared.txt 2>&1; echo "nm rc=$?"; echo x > node_modules/new 2>&1; echo "new rc=$?"; echo x > pkgs/a/node_modules/n 2>&1; echo "nested rc=$?"; echo ok > fine.txt && echo "wt ok"`, [home], [], away)
+    for (const k of ['nm', 'new', 'nested']) expect(out).toMatch(new RegExp(`^${k} rc=[1-9]`, 'm'))
+    expect(out).toContain('wt ok')
+    expect(readFileSync(twin, 'utf8')).toBe('orig\n')
+    expect(existsSync(join(away, 'node_modules', 'new'))).toBe(false)
   }, 60_000)
 
   test('the run gets a PRIVATE bun cache, and the shared one is not writable', async () => {
