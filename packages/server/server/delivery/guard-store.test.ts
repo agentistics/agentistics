@@ -24,7 +24,7 @@ import { T, makeWorld, shot, png } from './evidence-world.testing'
 import { buildEvidenceItem } from './evidence'
 import { createTaskStore } from '../sessions/task-store'
 import type { Subtask } from '../sessions/task-model'
-import { unattributedContext } from './guard'
+import { flowContext, unattributedContext } from './guard'
 
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'guard-store-')); forgetClassifyCache() })
@@ -117,7 +117,7 @@ describe('§3.5.1–3 the board hook: a status that raises a piece is refused wi
   }
   test('a TASK with no subtasks is a piece too (patchTask → in_review is refused)', async () => {
     const { tasks } = await setup()
-    await tasks.removeSubtask('p1', { guard: unattributedContext() }); await tasks.removeSubtask('p2', { guard: unattributedContext() })
+    await tasks.removeSubtask('p1', { guard: flowContext() }); await tasks.removeSubtask('p2', { guard: flowContext() })
     const before = bytes()
     const e = await refusal(() => tasks.patchTask('t1', { status: 'in_review' }, { guard: ctx }))
     expect(e.code).toBe('evidence_required'); expect(bytes()).toEqual(before)
@@ -311,9 +311,9 @@ describe('the delivery hook (phase raises)', () => {
   test('F4: deleting the last child exposes a protected task piece', async () => {
     const { tasks } = await setup()
     expect(await tasks.patchTask('t1', { status: 'in_review' }, { guard: unattributedContext(), allowOpenSubtasks: true })).toBe(true)
-    await tasks.removeSubtask('p1', { guard: unattributedContext() })
+    await tasks.removeSubtask('p1', { guard: flowContext() })
     const before = bytes()
-    await refusal(() => tasks.removeSubtask('p2', { guard: unattributedContext() }))
+    await refusal(() => tasks.removeSubtask('p2', { guard: flowContext() }))
     expect(bytes()).toEqual(before)
   })
   test('F7: adjustment invalidates old evidence even at the same HEAD', async () => {
@@ -333,7 +333,7 @@ describe('the delivery hook (phase raises)', () => {
     await tasks.upsertSubtask(sub('g', { isGroup: true } as never), unattributedContext())
     await tasks.upsertSubtask(sub('m', { parentGroupId: 'g', status: 'in_review' } as never), unattributedContext())
     const before = bytes()
-    await refusal(() => tasks.removeSubtask('g', { guard: unattributedContext() }))
+    await refusal(() => tasks.removeSubtask('g', { guard: flowContext() }))
     expect(bytes()).toEqual(before)
   })
   test('no evidence → evidence_required, deliveries.json byte-identical', async () => {

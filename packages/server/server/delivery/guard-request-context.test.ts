@@ -18,7 +18,7 @@ describe('guardContextOfRequest', () => {
   test('a forged session (right id, wrong token) gets NO session principal: refused 403', async () => {
     const out = await guardContextOfRequest({ session: { id: 's1', token: 'forged' } }, { verify })
     expect(out.ok).toBe(false)
-    if (!out.ok) expect(out.reply.status).toBe(403)
+    if (!out.ok) { expect(out.reply.status).toBe(403); expect((out.reply.body as { error: string }).error).toBe('unverified_sender') }
   })
 
   test('a claim with no token, or a non-object claim, is refused too', async () => {
