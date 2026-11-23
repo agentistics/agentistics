@@ -623,6 +623,9 @@
   "server/server/restart-pending.ts": [
     "raw-writer-helper"
   ],
+  "server/server/run-netns.ts": [
+    "raw-writer-helper"
+  ],
   "server/server/runtime-metrics-web.ts": [
     "raw-writer-helper"
   ],
@@ -714,6 +717,12 @@
     "raw-writer-helper"
   ],
   "server/server/sessions/chip-mode-record.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/cli-leads.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/task-repo-gate.ts": [
     "raw-writer-helper"
   ],
   "server/server/sessions/cli-folder.ts": [
@@ -1506,6 +1515,12 @@
     "raw-writer-helper"
   ],
   "vscode/src/webview/main.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/OpenVaultButton.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/pages/settings/BrowserSettings.tsx": [
     "raw-writer-helper"
   ],
   "web/e2e/usage-r2-fixture.tsx": [

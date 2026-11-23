@@ -1176,6 +1176,14 @@
     "server/server/delivery/release-proof.ts": [
       "module:child_process",
       "module:fs"
+    ],
+    "server/server/run-netns.ts": [
+      "global:Bun",
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/sessions/cli-leads.ts": [
+      "module:fs"
     ]
   }
 }

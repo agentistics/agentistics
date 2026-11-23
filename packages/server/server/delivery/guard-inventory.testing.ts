@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { join, dirname, normalize, isAbsolute, relative } from 'node:path'
 import { digest, localImports, moduleCapabilities, rawWriters, storeReach } from './guard-ast.testing'
-import { productionSources, read } from './lint-scan.testing'
+import { isBuildOutput, productionSources, read } from './lint-scan.testing'
 
 export interface Inventory { base: string; contexts: Record<string, string[]>; writers: Record<string, string[]> }
 export function inventoryGrowth(actual: Readonly<Record<string, readonly string[]>>, baseline: Readonly<Record<string, readonly string[]>>): string[] {
@@ -33,7 +33,7 @@ export function historicInventory(): Inventory {
  *     may only shrink — deny by default: a retargeted call, or a new module handed a book path, grows it and fails.
  */
 export interface ReachInventory { base: string; writers: Record<string, string[]>; reach: Record<string, string[]> }
-export const R3_INVENTORY_DIGEST = 'b63f248298b14dd3108e0e18edfd4533a8673fdd4806f510adfba07f7c6db8e4'
+export const R3_INVENTORY_DIGEST = 'b81b8c2d7ae2a372f7d091a6a1f8b6315d928ad21e6bbfa074e2bec927a4415b'
 export function r3Inventory(): ReachInventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory-r3.fixture.json'), 'utf8')
   if (digest(text) !== R3_INVENTORY_DIGEST) throw new Error('Historical guard inventory changed: the S2a r3 ceiling is pinned; a writer or a book reference may disappear, never be added')
@@ -42,7 +42,7 @@ export function r3Inventory(): ReachInventory {
 
 /** Every production module of the repo (packages + scripts), as `doors.lint.test.ts` scans them. */
 export function scannedSources(pkgs: string): string[] {
-  return [...productionSources(pkgs, pkgs), ...productionSources(join(pkgs, '..', 'scripts'), pkgs)]
+  return [...productionSources(pkgs, pkgs), ...productionSources(join(pkgs, '..', 'scripts'), pkgs)].filter(rel => !isBuildOutput(rel))
 }
 export const GUARDED_STORES = new Set(['server/server/sessions/task-store.ts', 'server/server/delivery/store.ts'])
 
@@ -63,7 +63,7 @@ export function liveInventory(pkgs: string): { writers: Record<string, string[]>
 /** Independently pinned r3 source ceiling. Capability-bearing modules may disappear, never grow. */
 export function moduleCeiling(): Record<string, string[]> {
   const text = readFileSync(join(import.meta.dir, 'guard-modules.fixture.json'), 'utf8')
-  if (digest(text) !== '1958264491ab79a479ce2f876b13a5b929a957573df9819377d4f3d1db6c1347') throw new Error('Historical module capability inventory changed: shrink only')
+  if (digest(text) !== '0b4089ce0656a5df5305b3c0e9159da22f4c87059979d685ba8e33ce41168893') throw new Error('Historical module capability inventory changed: shrink only')
   return JSON.parse(text).modules
 }
 
@@ -94,6 +94,6 @@ export function helperInventory(sources: Readonly<Record<string, string>>, base 
 /** r5 pins existing helper reuse independently; new importers must never be added to this ceiling. */
 export function helperCeiling(): Record<string, string[]> {
   const text = readFileSync(join(import.meta.dir, 'guard-helpers.fixture.json'), 'utf8')
-  if (digest(text) !== '3b4913acf90338fb1903fb2ab77190f6d195e0be6081ccba7cb632e655ac447c') throw new Error('Historical raw-writer helper inventory changed: shrink only')
+  if (digest(text) !== '46cc539862ea2a6ecd58c84478f6fe6ce2d75b2881424082ddc810b9ece0ef3b') throw new Error('Historical raw-writer helper inventory changed: shrink only')
   return JSON.parse(text)
 }

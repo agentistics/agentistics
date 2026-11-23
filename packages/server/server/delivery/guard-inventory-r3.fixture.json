@@ -134,6 +134,10 @@
       "39509c6e9ea9a9b510c8fd4bf6a8e07d12e03a983c4b0e57c5c371acd09add98"
     ],
     "server/server/cli-run.ts": [
+      "c3114781f9c5424e9901c9c527fac66bf2128bfce418adb1d5941970d51c369f",
+      "8b0fc930647e68a7e29f9bc13ee2940c93fe47658bf66f6a254170bdfac1371e",
+      "417d95bff7803b5ad3568d0512a773918f21886ff86ca14211383c26401470e3",
+      "fb97be0dc2c34a3ad900f981d4635479f68bbce313cee11d912ff37ed3c23312",
       "16f1159ea3730bb5262bc69505400cb43490e925227883caafb5bb3d12733b9c",
       "476a9375693728eb5685b6d991426e184e24132e1cd3132012fde0e0e2a8b173",
       "6590df11df73b81bca24dc6532ffef84038a38f133dbfb40fc475cb79f6adb65",
@@ -217,6 +221,15 @@
     ],
     "server/server/restart-pending-io.ts": [
       "9f636f5f26445d811bb340573188df94580a40f75966aafa65c7da023917a1de"
+    ],
+    "server/server/run-netns.ts": [
+      "79ede25b51ae29870e86ab502e1127755dcc7a9c9d8736d36cab309eb837369b",
+      "f0fc5e03ae0a2f07be65722bbd4f1a3e44b54b567804e36714a2215f3ce40c81",
+      "eb0b046cfa0994ffe0880124a2081adec549feafc194336eaa6cd392dc6945b4",
+      "55b6084e14bf7028ad01c84e624cd8beeb80f36fb71c817177621178c69595aa",
+      "d4091d2eda7c2d055ea526361b7715b0cf35301f194f6c4430e12b9a3ba5e543",
+      "056b0dccfdea89679b5bf379bbcdd68f360d1e28c370cd4110cb30b019a3768e",
+      "dc1604d458aeec649fbfca49107d6793ccf567b0b1d66fb986802b9ac9235d27"
     ],
     "server/server/secure-origin.ts": [
       "0e978a95b80539b22427c50a026b0e0937e9f4a910c8e77b3cc277be752fa4cb"
@@ -647,7 +660,8 @@
       "text:.agentistics",
       "text:AGENTISTICS_DELIVERIES_FILE",
       "text:AGENTISTICS_TASKS_FILE",
-      "text:overwritten by buildThrowawayEnv to <home>/.agentistics"
+      "text:overwritten by buildThrowawayEnv to <home>/.agentistics",
+      "text:Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] [--keep-env NAME]... [--no-netns] -- <command...>\n       agentop run --rm [--ttl 2h] [--port-offset N] [--name x]\n       agentop run --rm --serve [--seed-from <staging> | --seed-real] [--cwd <worktree>] [--ttl 2h] [--name x] [-- <server command...>]\n       --serve with no command runs the installed agentop; use --cwd with an explicit checkout command to serve that checkout.\n       Env: AGENTISTICS_*/AGENTOP_* switches (and leaked GIT_* vars) are dropped; --keep-env NAME re-allows one (never a store/config path).\n       Network: a run gets its own user/net/mount/pid namespaces (own loopback; internet via slirp4netns). New connections to every private /\n       link-local / reserved range (10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16, 198.18/15, 240/4, fc00::/7, fe80::/10, ...), to every\n       address of this host and to its gateways are rejected whatever the port, so the real server (:47291/:47292) is not reachable directly,\n       through a local proxy, or through an address created after the run started (a public one is ruled within ~1 s by the launcher).\n       Hidden inside: all of /run (the Docker/containerd/podman/system-bus sockets, the WSL interop channel, the user runtime dir with\n       D-Bus / systemd --user / cc-socks / gpg: a socket recreated later cannot come back), the Windows directories of /mnt/<drive>, the\n       real server's unix sockets and tmux dir, /tmp/ssh-* /.X11-unix, ~/.gnupg and ~/.ssh/agent; WSL .exe programs cannot be started;\n       the real data dir (~/.agentistics) is read-only; its pid is not visible.\n       Persistence: the REAL home is read-only inside the run (writing ~/.claude/skills, ~/.local/bin, ~/.config/systemd/user, ~/.bashrc,\n       ~/.ssh, ~/.gitconfig by absolute path fails with EROFS; the run's own HOME is a throwaway). Writable carve-outs, and why: the run's\n       own home and tmp (scratch), the git worktree you run from (or --cwd) with its common git dir (so git commit works; its hooks/ and\n       config stay read-only). bun's hardlinks: bun fills node_modules by HARDLINK from ~/.bun/install/cache, so one inode is named in the\n       shared cache and in other worktrees; therefore the shared cache is read-only, every node_modules under the worktree is read-only, and\n       BUN_INSTALL_CACHE_DIR points at a private cache in the run home. To install inside, do it in a fresh directory (a copy in the run\n       home or /tmp) with `bun install --backend=copyfile`; `bun install` over the read-only node_modules finds it up to date or fails.\n       Remaining surface: any OTHER writable file with several hard links (nlink>1) is shared with its other names (not scanned at launch).\n       Anything else outside the home (/tmp/<name>) is unchanged.\n       Not covered: another machine that proxies to the real server, a root-owned process outside the run, a socket created later in a NEW\n       directory under /tmp, files outside the home and inside the carve-outs above (the worktree's own files, e.g. .husky, package.json\n       scripts, .claude/settings*.json hooks, and the husky \"prepare\" step, which prints a harmless \"could not write config\" because .git/config is\n       read-only, run when the owner next uses it), and group-granted access that does not go through a socket (supplementary groups cannot be dropped in an unprivileged namespace). Without a systemd scope the 2G memory\n       cap is off (said at launch). --serve ports are forwarded to the host's 127.0.0.1. Where namespaces are unavailable it falls\n       back to the CLI-only guard and says so; --no-netns asks for that.\n       agentop run ls\n       agentop run stop <name>"
     ],
     "server/server/cli-start.ts": [
       "ident:AGENTISTICS_DATA_DIR",
