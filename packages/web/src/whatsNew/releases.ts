@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.227.0': {
+    features: [
+      {
+        pt: 'Nova sessão: o primeiro passo já vem com o assistente, o modelo, o esforço e o modo da última sessão que você criou. Os demais passos e o título começam vazios.',
+        en: 'New session: the first step now comes pre-filled with the assistant, model, effort and mode of the last session you created. The other steps and the title start empty.',
+      },
+    ],
+    fixes: [],
+  },
   '2.226.0': {
     features: [
       {

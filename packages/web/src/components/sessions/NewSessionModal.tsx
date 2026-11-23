@@ -47,6 +47,7 @@ import { CREATE_URL, NATIVE_HARNESS_ID, createBody, filingSentence, messagesUrl,
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { clearWizard, orphanWizard, readWizardSnapshot, saveWizardSnapshot } from '../../lib/newSessionWizardStore'
 import { HarnessMark } from './HarnessMark'
+import { readLastChoice, rememberLastChoice, usableLastChoice } from '../../lib/lastSessionChoice'
 import { TaskPicker } from '../tasks/TaskPicker'
 import { boardCopy } from '../tasks/copy'
 import { useFleet } from '../../lib/fleet'
@@ -176,11 +177,25 @@ export function NewSessionModal({
   // Prefer a PRESET's own harness when this machine can actually start it; otherwise pre-select the
   // only assistant there is — a one-item picker is a question with one answer. Runs whenever the
   // list changes rather than only once, so a slow first fetch still resolves it the moment it lands.
+  // Step 1 only: the LAST session the person created seeds the assistant, provider, model, effort and
+  // mode — once, and only when nothing more specific (a restored wizard, a preset) already chose.
+  // Every other answer, and the title, starts empty. An assistant no longer offered falls through.
+  const lastApplied = useRef(false)
   useEffect(() => {
     if (harnesses === null) return
+    const last = !restored && !initialPreset?.harness && !lastApplied.current
+      ? usableLastChoice(readLastChoice(), harnesses) : null
+    if (last) {
+      lastApplied.current = true
+      if (last.nativeProvider) setNativeProvider(last.nativeProvider)
+      if (last.model && !initialPreset?.model) setModel(last.model)
+      if (last.effort && !initialPreset?.effort) setEffort(last.effort)
+      if (last.mode !== 'default') { setMode(last.mode); setModePicked(true) }
+    }
     setHarness(h => h
       ?? (restored?.harnessId ? harnesses.find(x => x.id === restored.harnessId) ?? null : null)
       ?? (initialPreset?.harness ? harnesses.find(x => x.id === initialPreset.harness) ?? null : null)
+      ?? (last ? harnesses.find(x => x.id === last.harnessId) ?? null : null)
       ?? (harnesses.length === 1 ? harnesses[0]! : null))
   }, [harnesses])
   const [cwd, setCwd] = useState(restored?.cwd ?? '')
@@ -597,6 +612,15 @@ export function NewSessionModal({
     return created ? { taskId: created.id } : null
   }
 
+  /** The person's create succeeded: remember step 1 for next time (the only writer of that choice). */
+  function remember(): void {
+    if (!harness) return
+    rememberLastChoice({
+      harnessId: harness.id, nativeProvider: isNative ? nativeProvider : '', model, effort,
+      mode: modePicked ? mode : 'default',
+    })
+  }
+
   async function startNative() {
     setBusy(true)
     setNotice(null)
@@ -631,6 +655,7 @@ export function NewSessionModal({
           pushNotification({ type: 'warning', code: 'sessions.native_first_message', meta: { note: body?.sentence ?? refusalSentence(body, res.status, lang) } })
         }
       }
+      remember()
       const unfiled = filingSentence(json.filing, lang)
       if (unfiled) pushNotification({ type: 'warning', code: 'sessions.native_unfiled', meta: { note: unfiled } })
       setBusy(false)
@@ -697,6 +722,7 @@ export function NewSessionModal({
         // Forced through despite the budget — surfaced through the persisted notification store
         // (never silently), the same "already-localized sentence, meta-carried" pattern
         // `hardware.pressure` uses for its own server-computed sentence.
+        remember()
         const note = forcedNote(json)
         if (note) pushNotification({ type: 'success', code: 'sessions.forced_start', meta: { note } })
         // Still `busy` — the button keeps saying it is working, because it is.

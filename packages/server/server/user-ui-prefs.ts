@@ -73,6 +73,8 @@ export const USER_UI_PREF_REGISTRY = {
   // ---- new keys: under preferences.json `ui.<key>` on a machine ----
   taskBoard: { machine: 'ui', maxBytes: MEDIUM },
   sessionsAside: { machine: 'ui', maxBytes: MEDIUM },
+  /** Step 1 of the last session the person created (assistant, provider, model, effort, mode). */
+  newSessionLast: { machine: 'ui', maxBytes: SMALL },
   floatingPanels: { machine: 'ui', maxBytes: LARGE },
   panelSlots: { machine: 'ui', maxBytes: MEDIUM },
   shellBand: { machine: 'ui', maxBytes: SMALL },
