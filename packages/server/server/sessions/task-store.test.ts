@@ -198,8 +198,8 @@ describe('the board around a task', () => {
     const { s } = await store()
     await s.upsertTask(task('t-1'), unattributedContext())
     await s.addComment({ id: 'c-1', taskId: 't-1', author: 'me', body: 'hi', createdAt: 'x' })
-    expect(await s.removeTask('nope')).toBe(false)
-    expect(await s.removeTask('t-1')).toBe(true)
+    expect(await s.removeTask('nope', undefined, { guard: unattributedContext() })).toBe(false)
+    expect(await s.removeTask('t-1', undefined, { guard: unattributedContext() })).toBe(true)
     const book = await s.read()
     expect([book.tasks.length, book.comments.length]).toEqual([0, 0])
   })
@@ -242,7 +242,7 @@ describe('a deleted task stays deleted', () => {
     // `ensureLegacyTasks` runs on every read and re-created it from the same name.
     const { s } = await store()
     await s.upsertTask(task('legacy-abc'), unattributedContext())
-    await s.removeTask('legacy-abc')
+    await s.removeTask('legacy-abc', undefined, { guard: unattributedContext() })
     const book = await s.read()
     expect(book.tasks).toEqual([])
     expect(book.tombstones).toEqual(['legacy-abc'])
@@ -251,7 +251,7 @@ describe('a deleted task stays deleted', () => {
   it('creating the name again lifts the tombstone — it was a delete, not a ban', async () => {
     const { s } = await store()
     await s.upsertTask(task('legacy-abc'), unattributedContext())
-    await s.removeTask('legacy-abc')
+    await s.removeTask('legacy-abc', undefined, { guard: unattributedContext() })
     await s.clearTombstone('legacy-abc')
     expect((await s.read()).tombstones).toEqual([])
   })
@@ -335,8 +335,8 @@ describe('a subtask is a row, not a checkbox', () => {
       id: 's-1', taskId: 't-1', title: 'x', status: 'todo', done: false,
       createdAt: 'a', updatedAt: 'b',
     }, unattributedContext())
-    expect(await s.removeSubtask('nope')).toBe(false)
-    expect(await s.removeSubtask('s-1')).toBe(true)
+    expect(await s.removeSubtask('nope', { guard: unattributedContext() })).toBe(false)
+    expect(await s.removeSubtask('s-1', { guard: unattributedContext() })).toBe(true)
     expect((await s.read()).subtasks).toEqual([])
   })
 })
@@ -446,7 +446,7 @@ describe('setRanks and the activity log', () => {
     const { s } = await store()
     await s.upsertTask(task('t-1'), unattributedContext())
     await s.logEvents([{ id: 'e-1', taskId: 't-1', at: 'now', actor: 'me', kind: 'status' }])
-    await s.removeTask('t-1')
+    await s.removeTask('t-1', undefined, { guard: unattributedContext() })
     expect((await s.read()).events).toEqual([])
   })
 
@@ -524,7 +524,7 @@ describe('setRanks and the activity log', () => {
       await s.upsertTask(task('t-2'), unattributedContext())
       await s.fileHistorical(link('c1', 't-1'))
       await s.fileHistorical(link('c2', 't-2'))
-      await s.removeTask('t-1')
+      await s.removeTask('t-1', undefined, { guard: unattributedContext() })
       expect((await s.read()).historicalSessions.map(h => h.id)).toEqual(['hist:c2'])
     })
 
@@ -533,7 +533,7 @@ describe('setRanks and the activity log', () => {
       await s.upsertTask(task('t-1'), unattributedContext())
       await s.upsertSubtask(subtask('s-1', 't-1'), unattributedContext())
       await s.fileHistorical(link('c1', 't-1', { subtaskId: 's-1' }))
-      await s.removeSubtask('s-1')
+      await s.removeSubtask('s-1', { guard: unattributedContext() })
       const [h] = (await s.read()).historicalSessions
       expect(h!.taskId).toBe('t-1')
       expect(h!.subtaskId).toBeUndefined()
@@ -600,8 +600,8 @@ describe('setRanks and the activity log', () => {
       await s.upsertSubtask(subtask('s-1', 't-2'), unattributedContext())
       await s.fileNative(nlink('ses_a', 't-1'))
       await s.fileNative(nlink('ses_b', 't-2', { subtaskId: 's-1' }))
-      await s.removeTask('t-1')
-      await s.removeSubtask('s-1')
+      await s.removeTask('t-1', undefined, { guard: unattributedContext() })
+      await s.removeSubtask('s-1', { guard: unattributedContext() })
       expect((await s.read()).nativeSessions.map(n => [n.sessionId, n.taskId, n.subtaskId])).toEqual([['ses_b', 't-2', undefined]])
     })
   })

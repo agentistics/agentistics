@@ -270,7 +270,7 @@ test('removeSubtask on a GROUP clears parentGroupId on its former members — th
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
     ${subtask('m2', 't1', "parentGroupId: 'g1',")}
-    const removed = await web.removeSubtask('g1')
+    const removed = await web.removeSubtask('g1', { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const ids = after.subtasks.map(s => s.id).sort()
     const m1 = after.subtasks.find(s => s.id === 'm1')
@@ -296,7 +296,7 @@ test('removeSubtask on a GROUP leaves an UNRELATED group\'s members alone', asyn
     ${subtask('g2', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
     ${subtask('m2', 't1', "parentGroupId: 'g2',")}
-    await web.removeSubtask('g1')
+    await web.removeSubtask('g1', { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const m2 = after.subtasks.find(s => s.id === 'm2')
     console.log(JSON.stringify({ m2ParentGroupId: m2.parentGroupId ?? null }))

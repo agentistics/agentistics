@@ -721,7 +721,7 @@ export async function subtaskPathCheck(ref: string, subtaskId: string): Promise<
   return found && found.taskId !== task.id ? 'wrong_task' : 'ok'
 }
 
-export async function deleteTask(ref: string, guard?: GuardContext): Promise<boolean> {
+export async function deleteTask(ref: string, guard: GuardContext): Promise<boolean> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return false
@@ -729,7 +729,7 @@ export async function deleteTask(ref: string, guard?: GuardContext): Promise<boo
     const removed = await remove()
     if (removed) await deleteTaskFiles(task.id)
     return removed
-  }, held), guard ? { guard } : undefined)
+  }, held), { guard })
   if (!ok) return false
   // The bytes go with the record. The SESSIONS do not — see `TaskStore.removeTask`.
   // And the NAME leaves `preferences.finishedTasks`, which is the other place the migration reads
@@ -1229,7 +1229,7 @@ interface DismissDeps {
  * A piece is a placeholder ONLY when the sweep's ledger says so (`store.placeholderOf`); the `restoredBy` flag in tasks.json is a label.
  * Not a general remove: a real piece is refused (`not_a_placeholder`).
  */
-export async function dismissPlaceholder(subtaskId: string, guard?: GuardContext, deps: DismissDeps = {}): Promise<PlaceholderReply> {
+export async function dismissPlaceholder(subtaskId: string, guard: GuardContext, deps: DismissDeps = {}): Promise<PlaceholderReply> {
   const w = await (deps.world ?? loadTaskWorld)()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
   if (!found) return { ok: false, reason: 'no_such_subtask', message: `subtask ${subtaskId} does not exist` }
@@ -1245,7 +1245,7 @@ export async function dismissPlaceholder(subtaskId: string, guard?: GuardContext
     isTaskLeader: deps.isTaskLeader ?? (async (sid, tid) => isLeaderOfTask(w.registryRows.find(r => r.id === sid), tid, deps.roleOf ?? (async row => String(await (await import('./session-roles')).effectiveRole(row as never))))),
   })
   if (!may || !guard) return { ok: false, reason: 'placeholder_protected', message: PLACEHOLDER_PROTECTED_MESSAGE }
-  const done = await w.store.removeSubtask(subtaskId, { dismissPlaceholder: guard })
+  const done = await w.store.removeSubtask(subtaskId, { guard, dismissPlaceholder: guard })
   return done ? { ok: true } : { ok: false, reason: 'not_a_placeholder', message: NOT_A_PLACEHOLDER_MESSAGE }
 }
 
@@ -1257,7 +1257,7 @@ async function removeAcceptedMember(store: import('./task-store').TaskStore, sub
   if (guard?.principal.kind !== 'owner') return { ok: false, reason: 'member_accepted', message: MEMBER_ACCEPTED_MESSAGE }
   // r4 A1: the legacy-browser owner is two client-sent headers; for a piece that was ACCEPTED that is not proof.
   if (guard.principal.via !== 'vault-credential') return { ok: false, reason: 'owner_proof_required', message: OWNER_PROOF_REQUIRED_MESSAGE }
-  await store.removeSubtask(subtaskId, { ownerRemoval: guard })
+  await store.removeSubtask(subtaskId, { guard, ownerRemoval: guard })
   return null
 }
 
@@ -1265,7 +1265,7 @@ export const MEMBER_ACCEPTED_MESSAGE = 'This subtask is an accepted member of a 
 
 export const OWNER_PROOF_REQUIRED_MESSAGE = 'This subtask is an accepted member of a group: the piece was accepted, so only the owner may remove it, and the owner proof must come from the vault (a fresh grant, or the "required" owner-proof mode) — a browser header is not proof. Turn on the owner proof in Settings → Vault, or confirm the vault dialog, and retry.'
 
-export async function removeSubtask(subtaskId: string, guard?: GuardContext, deps: DismissDeps = {}): Promise<boolean | { ok: false; reason: 'placeholder_protected' | 'not_a_placeholder' | 'no_such_subtask' | 'member_accepted' | 'owner_proof_required'; message: string }> {
+export async function removeSubtask(subtaskId: string, guard: GuardContext, deps: DismissDeps = {}): Promise<boolean | { ok: false; reason: 'placeholder_protected' | 'not_a_placeholder' | 'no_such_subtask' | 'member_accepted' | 'owner_proof_required'; message: string }> {
   const w = await (deps.world ?? loadTaskWorld)()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
   if (!found) return false
@@ -1280,7 +1280,7 @@ export async function removeSubtask(subtaskId: string, guard?: GuardContext, dep
     const out = await dismissPlaceholder(subtaskId, guard, deps)
     return out.ok ? true : out
   }
-  await w.store.removeSubtask(subtaskId, guard ? { guard } : undefined)
+  await w.store.removeSubtask(subtaskId, { guard })
   return true
 }
 

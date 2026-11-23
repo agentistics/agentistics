@@ -79,7 +79,7 @@ describe('migration — an old comment stays on the task', () => {
     await s.upsertTask(task, unattributedContext())
     await s.upsertSubtask(sub('l', 't-1'), unattributedContext())
     await s.addComment({ id: 'c-1', taskId: 't-1', subtaskId: 'l', author: 'me', body: 'x', createdAt: 'a' })
-    await s.removeSubtask('l')
+    await s.removeSubtask('l', { guard: unattributedContext() })
     const c = (await s.read()).comments
     expect(c).toHaveLength(1)
     expect(c[0]!.subtaskId).toBeUndefined()

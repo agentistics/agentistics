@@ -2528,10 +2528,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { deleteTask } = await import('./sessions/task-web')
       // r7 (re-QA r5 F1): who is asking, for the store's accepted-member rule. The body (the MCP carries its session proof there) is optional.
       const delBody = await req.json().catch(() => ({})) as Record<string, unknown>
-      const delClaim = delBody.session as { id?: unknown } | undefined | null
-      const delCtx: import('./delivery/guard').GuardContext = {
-        principal: delClaim && typeof delClaim === 'object' && typeof delClaim.id === 'string' ? { kind: 'session', id: delClaim.id, via: 'token' } : { kind: 'unattributed' },
-      }
+      const delOut = await (await import('./delivery/request-deps')).guardContextOfRequest(delBody)
+      if (!delOut.ok) return json(delOut.reply.body, delOut.reply.status)
+      const delCtx: import('./delivery/guard').GuardContext = delOut.ctx
       const [{ deleteTaskRequest }, { verifySessionIdentity }, { readOwnerProofMode }, { browserFactsOf }, gateMod] = await Promise.all([
         import('./delivery/web'), import('./sessions/session-identity'), import('./delivery/owner-mode'), import('./delivery/browser-facts'), import('./vault/gate'),
       ])
@@ -2594,15 +2593,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
 
       const body = await req.json().catch(() => ({})) as Record<string, unknown>
-      // ENTREGA.GARANTIDA S2a: who is asking, for the STORE's guard. Guard A binds every principal alike, so the context needs
-      // the principal's KIND and never a vault grant (a status move must not burn a single-use grant): a session the screen
-      // above already verified (a forged one was refused 403 before this line), else `unattributed`.
-      const sessionClaim = body.session as { id?: unknown } | undefined | null
-      const guardCtx: import('./delivery/guard').GuardContext = {
-        principal: sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string'
-          ? { kind: 'session', id: sessionClaim.id, via: 'token' }
-          : { kind: 'unattributed' },
-      }
+      // ENTREGA.GARANTIDA S2a/S2c.1: who is asking, for the STORE's guard. Guard A binds every principal alike, so the context needs
+      // the principal's KIND and never a vault grant (a status move must not burn a single-use grant). A `body.session` claim becomes a
+      // session principal ONLY when its token proves it; a claim that does not prove itself is refused 403 here, and a request with
+      // no claim is the person's own (`unattributed`).
+      const guardOut = await (await import('./delivery/request-deps')).guardContextOfRequest(body)
+      if (!guardOut.ok) return json(guardOut.reply.body, guardOut.reply.status)
+      const guardCtx: import('./delivery/guard').GuardContext = guardOut.ctx
       // S0d.6 (QA F6): a write that SPEAKS AS THE OWNER (an owner comment created/edited/removed, a thread sent "as the
       // person") needs the owner principal — the same resolution as `/api/deliveries` (grant → session → legacy browser).
       const ownerGate = async (pieceKey: string, move: string) => {

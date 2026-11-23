@@ -20,7 +20,7 @@ import { createDeliveryStore } from './store'
 import { T, makeWorld } from './evidence-world.testing'
 import { createTaskStore, type TaskStore } from '../sessions/task-store'
 import type { Subtask, Task } from '../sessions/task-model'
-import { markTask, patchSubtask, setSubtaskCi, setSubtaskDone } from '../sessions/task-web'
+import { deleteTask, markTask, patchSubtask, removeSubtask, setSubtaskCi, setSubtaskDone } from '../sessions/task-web'
 
 /** Never called. Every line below must FAIL to compile; `@ts-expect-error` turns "it compiles" into the failure. */
 export async function requiredAtEveryDoor(tasks: TaskStore, deliveries: ReturnType<typeof createDeliveryStore>, task: Task, sub: Subtask) {
@@ -48,6 +48,18 @@ export async function requiredAtEveryDoor(tasks: TaskStore, deliveries: ReturnTy
   await markTask('t1', 'done', 'me')
   // @ts-expect-error markTask's options must carry the guard
   await markTask('t1', 'done', 'me', {})
+  // @ts-expect-error removeSubtask needs the options object carrying a guard
+  await tasks.removeSubtask('s1')
+  // @ts-expect-error removeSubtask's options must carry the guard
+  await tasks.removeSubtask('s1', {})
+  // @ts-expect-error removeTask needs the options object carrying a guard
+  await tasks.removeTask('t1')
+  // @ts-expect-error removeTask's options must carry the guard
+  await tasks.removeTask('t1', undefined, {})
+  // @ts-expect-error deleteTask needs a GuardContext
+  await deleteTask('t1')
+  // @ts-expect-error the web removeSubtask needs a GuardContext
+  await removeSubtask('s1')
 }
 
 let root: string

@@ -31,7 +31,7 @@ test('injected deletion port runs before mutation under tasks, concurrent writer
         entered(); await continueDelete
         return mutate()
       }, held, paths)
-    })
+    }, { guard: unattributedContext() })
     // Also observe early port failures: the old post-write callback receives no mutate function.
     const first = await Promise.race([portEntered.then(() => 'entered'), deletion.then(() => 'deleted', () => 'failed')])
     expect(first).toBe('entered')
