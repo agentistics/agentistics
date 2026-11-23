@@ -569,7 +569,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_edit",
     description:
-      "Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`, `repo` (the task's repository: `owner/name`, `host/owner/name` or an https/ssh git URL, stored as `owner/name`; empty string clears it; a local path, spaces or garbage is refused with a sentence — use it when the repository moved or was inherited wrong; subtasks carry no repo). An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
+      "Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`, `repo` (the task's repository — a SESSION CANNOT SET IT: it is refused with 403 repo_person_only; only the person sets it, from the task screen. Ask the person; subtasks carry no repo). An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {
@@ -855,6 +855,20 @@ const TOOLS: Tool[] = [
         ref: { type: "string", description: "A session reference (managed id, conversation id, exact title or unique id prefix). Omit for your own session." },
         role: { type: "string", enum: ["leader", "worker", "auto"], description: "The role to set. Omit to read it." },
         retirePredecessor: { type: "string", description: "A leader taking over can pass the previous leader on the SAME task (managed id, conversation id, exact title or unique id prefix); the server closes it once its current turn ends, and within 10 minutes at most even if it keeps being nudged, then files it in the finished folder — but never while something live the engine runs is using it: the reply then carries `retire.held` and the close waits for that to end. Only for your own session declared leader; otherwise the role still changes and the reply says why the retire was refused." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_session_leads",
+    description:
+      "Declare which TASKS a leader leads, besides the one its session is filed on (the filing is a single cost bucket, so a leader that also runs a second task would otherwise leave that task's cards in the Live column \"No leader\"). `add` / `remove` take task ids; with neither it just reads the leader's declared tasks. Only a session declared LEADER can lead (agentistics_session_role first); you may change only your OWN leads (the person may address any leader with `ref`); the leader must be filed on a task of its own, and a task of another repository is refused (`other_project`). Leadership counts only while the session is live and still a leader: when it closes the cards go back to \"No leader\", unless a successor declared with retirePredecessor inherits the leads. It never moves cost: rollups stay on the single filing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "A session reference (managed id, conversation id, exact title or unique id prefix). Omit for your own session." },
+        add: { type: "array", items: { type: "string" }, description: "Task ids to lead." },
+        remove: { type: "array", items: { type: "string" }, description: "Task ids to stop leading." },
       },
       required: [],
     },
@@ -1782,6 +1796,16 @@ async function callTool(
       case "agentistics_session_role": {
         const a = args as any;
         const body = await apiSend("POST", "/api/session-roles", sessionRoleBody(a, sessionProof(process.env)));
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_leads": {
+        const a = args as any;
+        const list = (v: unknown) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+        const body = await apiSend("POST", "/api/session-leads", {
+          ...(typeof a?.ref === "string" && a.ref ? { ref: a.ref } : {}),
+          add: list(a?.add), remove: list(a?.remove),
+          session: sessionProof(process.env) ?? null,
+        });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_session_hold": {

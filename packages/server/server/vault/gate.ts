@@ -659,7 +659,7 @@ export function deliveryGrantHash(token: string): string { return createHash('sh
  * The two OWNER grant classes. Same shape, same single-use store, but the class is in the MAC'd payload: a
  * `delivery` grant never unlocks a browser and a `browser-unlock` grant never stands for a delivery move.
  */
-type OwnerGrantClass = 'delivery' | 'browser-unlock'
+type OwnerGrantClass = 'delivery' | 'browser-unlock' | 'browser-profiles'
 
 function mintOwnerGrant(cls: OwnerGrantClass, session: string, scope: DeliveryScope, nowMs = _now()): string {
   const nonce = randomBytes(12).toString('hex')
@@ -707,6 +707,14 @@ function browserScope(managedId: string): DeliveryScope { return { pieceKey: `br
 export function consumeBrowserUnlockGrant(token: string | null | undefined, ctx: { session: string; loopback?: boolean }, managedId: string, nowMs = _now()): DeliveryGrantUse {
   if (!managedId) return { ok: false, code: 'grant-invalid' }
   return consumeOwnerGrant('browser-unlock', token, ctx, browserScope(managedId), nowMs)
+}
+
+/** NAVEGADOR S12 r4: the one scope "Delete profiles" is bound to (the personal profile's cookies and logins). */
+const PROFILES_SCOPE: DeliveryScope = { pieceKey: 'browser:profiles', move: 'delete' }
+
+/** Spend a `browser-profiles` grant (single-use, ≤ 5 min, loopback or the CLI socket, this HTTP session). */
+export function consumeBrowserProfilesGrant(token: string | null | undefined, ctx: { session: string; loopback?: boolean }, nowMs = _now()): DeliveryGrantUse {
+  return consumeOwnerGrant('browser-profiles', token, ctx, PROFILES_SCOPE, nowMs)
 }
 
 function ownerProofUnavailable(): Refusal {
@@ -772,6 +780,27 @@ export async function requireBrowserUnlockOwner(ctx: GateContext, managedId: str
   if (!proven.ok) return proven.code === 'owner-proof-unavailable' ? browserProofNoVault() : proven
   const grant = mintOwnerGrant('browser-unlock', ctx.session, browserScope(managedId))
   vaultAudit({ type: 'browser.owner-proof', purpose: deliveryGrantHash(grant), name: managedId })
+  return { ok: true, grant }
+}
+
+function profilesProofNoVault(): Refusal {
+  return refused('owner-proof-unavailable', vaultLang() === 'pt'
+    ? 'Para apagar os perfis do navegador, o agentistics precisa confirmar que é você. Abra o Cofre e crie uma senha (ou ative o Windows Hello / Touch ID); depois tente de novo.'
+    : 'To delete the browser profiles, agentistics needs to confirm it is you. Open the Vault and set a password (or turn on Windows Hello / Touch ID), then try again.')
+}
+
+/**
+ * NAVEGADOR S12 r4 — the person's proof before "Delete profiles". Same primitive as the padlock unlock (fresh
+ * `proveGesture`), minting a single-use `browser-profiles` grant. The socket check is only a hint: a same-user
+ * agent that escapes the process tree (`systemd-run --user`, `setsid -f env -i`) looks like the person.
+ */
+export async function requireBrowserProfilesOwner(ctx: GateContext): Promise<GateResult> {
+  if (!ctx.loopback && !fromSocket(ctx)) return ownerProofLocalOnly()
+  if ((await vaultStatus()).state === 'uninitialized') return profilesProofNoVault()
+  const proven = await proveOwnerFresh()
+  if (!proven.ok) return proven.code === 'owner-proof-unavailable' ? profilesProofNoVault() : proven
+  const grant = mintOwnerGrant('browser-profiles', ctx.session, PROFILES_SCOPE)
+  vaultAudit({ type: 'browser.owner-proof', purpose: deliveryGrantHash(grant), name: 'profiles-delete' })
   return { ok: true, grant }
 }
 

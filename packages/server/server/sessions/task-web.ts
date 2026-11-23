@@ -35,7 +35,7 @@ import { readPreferences, writePreferences } from '../preferences'
 import {
   isGroupMember, legacyTaskId, marksStart, migratePriority, newCommentId, newEventId, newFileId,
   newLinkId, newSubtaskId, newTaskId, statusAfterAllSubtasksDone, statusAfterAttach, statusAfterHandback,
-  statusAfterSubtaskProgress, subtaskDone,
+  repoInheritancePatch, statusAfterSubtaskProgress, subtaskDone,
   type Subtask, type Task, type TaskEvent, type TaskStatus,
 } from './task-model'
 import { boardProgress, DEFAULT_LEASE_MS, planNext } from './task-next'
@@ -435,10 +435,11 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
   // answer from one source. A fleet that cannot be read costs the agent state, never the line.
   let rows: FleetRowLite[] = []
   let leaderIds = new Set<string>()
+  let leadsOf = new Map<string, readonly string[]>()
   let fleetRead: 'ok' | 'unknown' = 'ok'
   try {
     const { readLiveFleet } = await import('./fleet-web')
-    const { listRoles, defaultRoleDeps, roleOfRow, rolesDocUnreadable } = await import('./session-roles')
+    const { loadRoles, defaultRoleDeps, roleOfRow, rolesDocUnreadable, leadsOfRows } = await import('./session-roles')
     const { registryUnreadable } = await import('./registry')
     const fleet = await readLiveFleet('en')
     rows = fleet.map(r => ({
@@ -455,21 +456,23 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
     // Checked BEFORE listRoles: loading a corrupt document rewrites it as an empty one, after which
     // the check would see a healthy file and a lost leader would read as "no leader".
     const rolesUnreadable = await rolesDocUnreadable((await import('../config')).AGENTISTICS_DATA_DIR)
-    const roles = await listRoles(await defaultRoleDeps())
+    const rolesDoc = await loadRoles(await defaultRoleDeps())
+    const roles = rolesDoc.roles
     leaderIds = new Set(fleet.filter(r => roleOfRow(roles, r) === 'leader').map(r => r.id))
+    leadsOf = new Map(leadsOfRows(rolesDoc, fleet))
     if (rolesUnreadable || await registryUnreadable()) fleetRead = 'unknown'
   } catch { fleetRead = 'unknown' /* no fleet: preserve uncertainty; never claim a leader is absent */ }
   const reply = await replyPromise
   const { liveRuntimeFacts } = await import('./live-runtime')
   const runtime = await liveRuntimeFacts(nowMs).catch(() => ({}))
-  const view = describeLive({ reply, rows, leaderIds, nowMs, filters, runtime, fleetRead })
+  const view = describeLive({ reply, rows, leaderIds, leadsOf, nowMs, filters, runtime, fleetRead })
   // A card with no live leader for over N hours is told ONCE (bell). At most every 10 min, over the UNFILTERED line, and only
   // when the fleet was read (an unreadable fleet must never read as "no leader"). Fire and forget: never slows or fails the read.
   if (fleetRead === 'ok' && nowMs - lastOrphanSweepMs > ORPHAN_SWEEP_EVERY_MS) {
     lastOrphanSweepMs = nowMs
     void (async () => {
       const [{ sweepOrphanReviews, orphanHours, leaderLiveOf }, { AGENTISTICS_DATA_DIR }] = await Promise.all([import('./orphan-review-notice'), import('../config')])
-      const all = describeLive({ reply, rows, leaderIds, nowMs, filters: { tab: 'all', period: 'all' }, runtime, fleetRead })
+      const all = describeLive({ reply, rows, leaderIds, leadsOf, nowMs, filters: { tab: 'all', period: 'all' }, runtime, fleetRead })
       await sweepOrphanReviews({
         cards: all.deliveries.map(d => ({ key: d.key, title: d.title, stage: d.stage, stageSinceMs: d.stageSinceMs, old: d.old === true, ...(d.leaderAvailability ? { leaderAvailability: d.leaderAvailability } : {}) })),
         nowMs, dataDir: AGENTISTICS_DATA_DIR, leaderLive: leaderLiveOf(all.leaders), hours: orphanHours(process.env.AGENTISTICS_ORPHAN_REVIEW_HOURS),
@@ -550,7 +553,9 @@ export async function editTask(
     ...(priority !== undefined ? { priority } : {}),
     ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate.trim() } : {}),
     ...(patch.startDate !== undefined ? { startDate: patch.startDate.trim() } : {}),
-    ...(nextRepo !== undefined ? { repo: nextRepo } : {}),
+    // A repository written by an EDIT is said by somebody on purpose: provenance `explicit`, and the session it may once
+    // have been copied from is forgotten. Only an explicit repository counts for leading (`leadOp`).
+    ...(nextRepo !== undefined ? { repo: nextRepo, repoSource: 'explicit' as const, repoFromSession: '' } : {}),
     ...(patch.labels !== undefined
       ? { labels: patch.labels.map(l => l.trim()).filter(Boolean) }
       : {}),
@@ -1569,8 +1574,8 @@ export async function attachSession(
   if (!task.repo) {
     const { repoFacts } = await import('./repo-facts')
     const facts = await repoFacts(row.cwd, row.repo).catch(() => null)
-    const repo = facts?.repo
-    if (repo) await w.store.patchTask(task.id, { repo, updatedAt: new Date().toISOString() })
+    const inherit = repoInheritancePatch(task, sessionId, facts?.repo)
+    if (inherit) await w.store.patchTask(task.id, { ...inherit, updatedAt: new Date().toISOString() })
   }
   await w.store.logEvents([event(task.id, row.label || sessionId, 'session', {
     to: sessionId, detail: row.harness,
@@ -1680,7 +1685,8 @@ export async function attachConversation(
     const { repoFacts } = await import('./repo-facts')
     const facts = await repoFacts(conv.meta.project_path ?? '').catch(() => null)
     const repo = facts?.repo || (conv.meta.git_remote ? repoShortName(conv.meta.git_remote) : '')
-    if (repo) await w.store.patchTask(task.id, { repo, updatedAt: new Date().toISOString() })
+    const inherit = repoInheritancePatch(task, conversation, repo)
+    if (inherit) await w.store.patchTask(task.id, { ...inherit, updatedAt: new Date().toISOString() })
   }
   await w.store.logEvents([event(task.id, label, 'session', {
     to: conversation, detail: `${conv.harness} · historical`,

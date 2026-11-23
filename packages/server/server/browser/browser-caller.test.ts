@@ -144,6 +144,14 @@ describe('callerRefusal', () => {
     expect(callerRefusal({ kind: 'person', via: 'process', pid: 1 })).toBeNull()
     expect(callerRefusal({ kind: 'person', via: 'remote' })).toBeNull()
   })
+  test('the profiles door says "profiles", never "padlock"', () => {
+    const s = callerRefusal({ kind: 'session', pid: 1, managedId: 'x' }, 'profiles')!
+    const u = callerRefusal({ kind: 'unknown', reason: 'no-proc' }, 'profiles')!
+    expect(s.error).toBe('session_cannot_unlock')
+    expect(s.sentence).toContain('profiles')
+    expect(u.sentence).toContain('no profile was deleted')
+    for (const r of [s, u]) expect(r.sentence).not.toContain('padlock')
+  })
 })
 
 describe('personalCallerRefusal (F2 of the S10 QA: the own browser of the person)', () => {
@@ -169,6 +177,14 @@ describe('S4c — the early door on POST /api/vault/browser-unlock', () => {
     expect(await r!.json()).toMatchObject({ ok: false, code: 'session_cannot_unlock' })
     expect(r!.headers.get('Cache-Control')).toBe('no-store')
     expect(cancelled).toBe(1)
+  })
+  test('the profiles door names the profiles, not the padlock', async () => {
+    const r = await browserUnlockEarlyRefusal({ body: null }, { kind: 'session', pid: 7, managedId: null }, H, 'profiles')
+    const body = await r!.json() as { sentence: string }
+    expect(body.sentence).toContain('delete browser profiles')
+    expect(body.sentence).not.toContain('padlock')
+    const src = await Bun.file(new URL('../index.ts', import.meta.url)).text()
+    expect(src).toContain("url.pathname === '/api/vault/browser-profiles' ? 'profiles' : 'padlock'")
   })
   test('the person and an unidentified caller go on to the vault (the proof decides)', async () => {
     const req = { body: null }

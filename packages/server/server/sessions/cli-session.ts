@@ -113,6 +113,10 @@ const USAGE = `Usage:
   agentop session retire <id|name> [--cancel] [--quiet-for 60s] [--deadline 30m] [--folder <folder>] [--json]
   agentop session folders [--json]
   agentop session rename <id|name> "label"
+  agentop session leads  [<id|name>] [--add <task>] [--remove <task>] [--json]
+                                  The tasks a declared LEADER leads besides the one it is filed on
+                                  (the Live uses this link, not the cost filing). No arguments: list
+                                  every leader's. Same server rules as agentistics_session_leads.
   agentop session switch-account <id|name> [<account-id>] [--harness <h>] [--resend]
                                   Continue the session on another account of its harness (no
                                   account: list the ones it can move to). --resend re-sends the
@@ -389,6 +393,7 @@ async function runSessionCommand(argv: string[]): Promise<number> {
     }
     case 'note': return patch(cmd.ref, { note: cmd.text }, 'annotated', backend)
     case 'switch-account': return switchAccount(cmd, backend)
+    case 'leads': return (await import('./cli-leads')).leadsCommand(cmd)
   }
 }
 

@@ -1,5 +1,5 @@
 import { hostWhich } from './host-which'
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { freemem, homedir, hostname, tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
@@ -7,6 +7,7 @@ import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
 import { CURRENT_VERSION } from './version'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
+import { blockedPorts, createCtlDir, netnsHardening, outsideNodeModules, persistenceGuard, hostAddresses, forwardPorts, netnsArgv, netnsNotice, pollHostAddresses, probeNetns, removeCtlDir, startSlirp, stopSlirp } from './run-netns'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
 export { SEED_ALLOW }
@@ -29,12 +30,16 @@ export type ThrowawayState = {
   /** Short per-run TMPDIR/TMUX_TMPDIR (see `createRunTmp`); removed with the run. */
   tmp?: string
   pid?: number
+  /** slirp4netns serving this run's network namespace (see run-netns.ts); signalled only while it still is a slirp4netns. */
+  slirpPid?: number
+  /** Directory holding the slirp API socket (N4): hidden from the run; removed with it. */
+  ctl?: string
   unit?: string
   startedAt: string
   command: string[]
 }
 
-type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[]; serve: boolean; seedFrom: string | null; seedReal: boolean; cwd: string | null; keepEnv: string[] }
+type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[]; serve: boolean; seedFrom: string | null; seedReal: boolean; cwd: string | null; keepEnv: string[]; noNetns: boolean }
 
 /** A Unix socket path (sun_path) holds 108 bytes including the NUL; Chrome/tmux sockets live under TMPDIR. */
 export const SOCKET_PATH_MAX = 107
@@ -165,8 +170,8 @@ export function isOwnMachineHost(rawHost: string, ownHostname: string = hostname
 
 /**
  * RUN.CLI-SERVIDOR-REAL: why a call the agentop CLI is about to make must NOT go out from inside a run, else null.
- * SCOPE: this guards the agentop CLI process only (its `fetch` and `WebSocket`); it is not a network block for other processes
- * a run starts (a script, `curl`, a raw socket can still reach 47291/47292).
+ * SCOPE: this guards the agentop CLI process only (its `fetch` and `WebSocket`). The REAL block for every other process is the
+ * run's own network namespace (`run-netns.ts`); this guard remains as the fallback where namespaces are unavailable (`--no-netns`).
  * The real server sits on 47291/47292 and a CLI verb that fell back to it listed real sessions and could write to the real
  * store; a run with no `--serve` has no server of its own, so its own ports are refused with a sentence rather than left to fail.
  * Every loopback spelling counts (see `isOwnMachineHost`) over http, https, ws and wss.
@@ -245,6 +250,8 @@ export function buildThrowawayEnv(home: string, name: string, apiPort: number, w
     ...inherited,
     XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local', 'share'),
     XDG_STATE_HOME: join(home, '.local', 'state'), XDG_CACHE_HOME: join(home, '.cache'),
+    // a PRIVATE bun cache: the shared one is the source of hardlinks into every worktree's node_modules (RUN.ISOLAMENTO-PERSISTENCIA r2)
+    BUN_INSTALL_CACHE_DIR: join(home, '.cache', 'bun-install'),
     ...(source.VOLTA_HOME || existsSync(voltaHome) ? { VOLTA_HOME: voltaHome } : {}),
     HOME: home, USERPROFILE: home, AGENTISTICS_DIR: join(home, '.agentistics'),
     PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1',
@@ -263,12 +270,34 @@ export function readState(name: string): ThrowawayState | null {
 }
 
 function usage(): string {
-  return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] [--keep-env NAME]... -- <command...>
+  return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] [--keep-env NAME]... [--no-netns] -- <command...>
        agentop run --rm [--ttl 2h] [--port-offset N] [--name x]
        agentop run --rm --serve [--seed-from <staging> | --seed-real] [--cwd <worktree>] [--ttl 2h] [--name x] [-- <server command...>]
        --serve with no command runs the installed agentop; use --cwd with an explicit checkout command to serve that checkout.
        Env: AGENTISTICS_*/AGENTOP_* switches (and leaked GIT_* vars) are dropped; --keep-env NAME re-allows one (never a store/config path).
-       Network: inside a run the agentop CLI refuses the real server (:47291/:47292); other processes a run starts are NOT network-isolated.
+       Network: a run gets its own user/net/mount/pid namespaces (own loopback; internet via slirp4netns). New connections to every private /
+       link-local / reserved range (10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16, 198.18/15, 240/4, fc00::/7, fe80::/10, ...), to every
+       address of this host and to its gateways are rejected whatever the port, so the real server (:47291/:47292) is not reachable directly,
+       through a local proxy, or through an address created after the run started (a public one is ruled within ~1 s by the launcher).
+       Hidden inside: all of /run (the Docker/containerd/podman/system-bus sockets, the WSL interop channel, the user runtime dir with
+       D-Bus / systemd --user / cc-socks / gpg: a socket recreated later cannot come back), the Windows directories of /mnt/<drive>, the
+       real server's unix sockets and tmux dir, /tmp/ssh-* /.X11-unix, ~/.gnupg and ~/.ssh/agent; WSL .exe programs cannot be started;
+       the real data dir (~/.agentistics) is read-only; its pid is not visible.
+       Persistence: the REAL home is read-only inside the run (writing ~/.claude/skills, ~/.local/bin, ~/.config/systemd/user, ~/.bashrc,
+       ~/.ssh, ~/.gitconfig by absolute path fails with EROFS; the run's own HOME is a throwaway). Writable carve-outs, and why: the run's
+       own home and tmp (scratch), the git worktree you run from (or --cwd) with its common git dir (so git commit works; its hooks/ and
+       config stay read-only). bun's hardlinks: bun fills node_modules by HARDLINK from ~/.bun/install/cache, so one inode is named in the
+       shared cache and in other worktrees; therefore the shared cache is read-only, every node_modules under the worktree is read-only, and
+       BUN_INSTALL_CACHE_DIR points at a private cache in the run home. To install inside, do it in a fresh directory (a copy in the run
+       home or /tmp) with \`bun install --backend=copyfile\`; \`bun install\` over the read-only node_modules finds it up to date or fails.
+       Remaining surface: any OTHER writable file with several hard links (nlink>1) is shared with its other names (not scanned at launch).
+       Anything else outside the home (/tmp/<name>) is unchanged.
+       Not covered: another machine that proxies to the real server, a root-owned process outside the run, a socket created later in a NEW
+       directory under /tmp, files outside the home and inside the carve-outs above (the worktree's own files, e.g. .husky, package.json
+       scripts, .claude/settings*.json hooks, and the husky "prepare" step, which prints a harmless "could not write config" because .git/config is
+       read-only, run when the owner next uses it), and group-granted access that does not go through a socket (supplementary groups cannot be dropped in an unprivileged namespace). Without a systemd scope the 2G memory
+       cap is off (said at launch). --serve ports are forwarded to the host's 127.0.0.1. Where namespaces are unavailable it falls
+       back to the CLI-only guard and says so; --no-netns asks for that.
        agentop run ls
        agentop run stop <name>`
 }
@@ -303,6 +332,7 @@ export function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { act
   let seedFrom: string | null = null
   let seedReal = false
   let cwd: string | null = null
+  let noNetns = false
   const keepEnv: string[] = []
   let command: string[] = []
   for (let i = 0; i < args.length; i++) {
@@ -310,6 +340,7 @@ export function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { act
     if (arg === '--') { command = args.slice(i + 1); break }
     if (arg === '--rm') { remove = true; continue }
     if (arg === '--serve') { serve = true; continue }
+    if (arg === '--no-netns') { noNetns = true; continue }
     if (arg === '--seed-real') { seedReal = true; continue }
     if (arg === '--seed-from') { seedFrom = args[++i] ?? ''; continue }
     if (arg === '--keep-env') {
@@ -333,7 +364,7 @@ export function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { act
   if (!remove) throw new Error('agentop run requires --rm (throwaway runs are always explicit)')
   if ((seedFrom !== null || seedReal || cwd !== null) && !serve) throw new Error('--seed-from, --seed-real and --cwd only apply with --serve')
   if (seedFrom !== null && seedReal) throw new Error('--seed-from and --seed-real are exclusive')
-  return { name, ttl, portOffset, remove, command, serve, seedFrom, seedReal, cwd, keepEnv }
+  return { name, ttl, portOffset, remove, command, serve, seedFrom, seedReal, cwd, keepEnv, noNetns }
 }
 
 type ThrowawayPorts = { apiPort: number; webPort: number; reservationPaths: string[] }
@@ -398,8 +429,10 @@ export function pruneStaleRuns(): Set<number> {
     if (!state || typeof state.name !== 'string' || typeof state.home !== 'string') continue
     if (runIsLive(state)) { held.add(state.apiPort); held.add(state.webPort); continue }
     if (!state.home.startsWith(stateRoot() + sep)) continue // never delete a home outside the run registry
+    stopSlirp(state.slirpPid)
     rmSync(state.home, { recursive: true, force: true })
     removeRunTmp(state.tmp)
+    removeCtlDir(state.ctl)
     releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)
     rmSync(statePath(state.name), { force: true })
   }
@@ -510,6 +543,8 @@ export async function stopState(state: ThrowawayState): Promise<void> {
   if (process.platform === 'linux') await reapRunOwned(state.home)
   rmSync(state.home, { recursive: true, force: true })
   removeRunTmp(state.tmp)
+  removeCtlDir(state.ctl)
+  stopSlirp(state.slirpPid)
   releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)
   rmSync(statePath(state.name), { force: true })
   console.log(`removed ${state.home}`)
@@ -716,23 +751,39 @@ async function startRun(options: RunOptions): Promise<number> {
     inside,
   }) ? (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'heavy', '--'] : [process.execPath, 'heavy', '--']) : []
   const argv = options.command.length ? [...heavyPrefix, ...options.command] : (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'server'] : [process.execPath, 'server'])
+  const netns = probeNetns(options.noNetns)
+  const notice = netnsNotice(netns)
+  if (notice) console.error(notice)
   const tmp = createRunTmp()
   state.tmp = tmp
+  // N4: the slirp API socket (add_hostfwd on 0.0.0.0, ...) lives where the run cannot see it: inside the runtime dir the run replaces with an empty tmpfs.
+  const ctl = netns.mode === 'netns' ? createCtlDir(process.getuid!()) : null
+  if (ctl) state.ctl = ctl.dir
   let child: ReturnType<typeof spawn>
   let systemd = false
+  let memoryCapOff: string | null = null
   let keptEnv: string[] = []
   const unit = `agentistics-throwaway-${options.name}.scope`
   try {
     const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0, keep: options.keepEnv, serve: options.serve })
     keptEnv = keptEnvOf(env, process.env, options.keepEnv)
-    systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await commandExists('systemd-run')
-    const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...argv] : argv
-    child = spawn(systemd ? 'systemd-run' : argv[0]!, systemd ? childArgs : argv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
+    const scope = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR ? await systemdScopeWorks() : 'absent'
+    systemd = scope === 'ok'
+    const scopeLine = scopeNotice(scope)
+    if (scopeLine) { console.error(scopeLine); memoryCapOff = scopeLine }
+    const runCwds = [process.cwd(), ...(options.cwd ? [serveCwdOk(options.cwd) ?? options.cwd] : [])]
+    const guards = netns.mode === 'netns' ? persistenceGuard(home, runCwds) : []
+    const hard = netns.mode === 'netns' ? netnsHardening(realDataDir(), process.getuid!(), undefined, undefined, ctl && !ctl.covered ? [ctl.dir] : [], undefined, guards) : null
+    if (hard) hard.hardening.readOnly = [...new Set([...(hard.hardening.readOnly ?? []), ...outsideNodeModules(runCwds, guards)])]
+    const runArgv = hard ? netnsArgv(argv, process.getuid!(), process.getgid!(), blockedPorts(), hostAddresses(), hard.hide, hard.hardening) : argv
+    const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...runArgv] : runArgv
+    child = spawn(systemd ? 'systemd-run' : runArgv[0]!, systemd ? childArgs : runArgv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
     state.pid = child.pid
     if (systemd) state.unit = unit
     writeFileSync(statePath(options.name), JSON.stringify(state, null, 2), { mode: 0o600 })
   } catch (error) {
     removeRunTmp(tmp)
+    removeCtlDir(ctl?.dir)
     throw error
   }
   console.log(`throwaway ${options.name}`)
@@ -740,19 +791,43 @@ async function startRun(options: RunOptions): Promise<number> {
   console.log(`  web:  http://localhost:${webPort}`)
   console.log(`  home: ${home}`)
   console.log(`  stop: agentop run stop ${options.name}`)
+  if (memoryCapOff) console.log(`  memory cap: OFF (no systemd scope; the ${options.ttl} TTL timer still applies)`)
   if (serveBuildNoticeResult) console.log(serveBuildNoticeResult.summary)
   if (keptEnv.length) console.log(`  kept env: ${keptEnv.join(', ')}`)
 
+  // Started WITHOUT awaiting: a command that dies at once must still reach `childExit` below; cleanup waits for this task so no slirp is orphaned.
+  const slirpTask: Promise<void> = netns.mode !== 'netns' ? Promise.resolve() : (async () => {
+    const slirp = await startSlirp(child.pid!, join(ctl!.dir, 'slirp.sock'), () => child.exitCode === null && child.signalCode === null)
+    if ('error' in slirp) { if (child.exitCode === null && child.signalCode === null) console.error(`agentop run: the run has its own loopback but no outside network (${slirp.error})`) }
+    else {
+      state.slirpPid = slirp.pid
+      // N3: a host address created after launch (outside every blocked range) gets its reject rules within one poll.
+      const known = new Set(hostAddresses())
+      const watch = setInterval(() => { if (child.exitCode !== null || child.signalCode !== null) return clearInterval(watch); pollHostAddresses(child.pid!, known) }, 1000)
+      watch.unref?.()
+      child.once('exit', () => clearInterval(watch))
+      writeFileSync(statePath(options.name), JSON.stringify(state, null, 2), { mode: 0o600 })
+      if (options.serve) {
+        const failed = await forwardPorts(slirp.socket, [apiPort, webPort])
+        if (failed.length) console.error(`agentop run: could not forward port(s) ${failed.join(', ')} to the host; the served URL is reachable only from inside the run`)
+      }
+    }
+  })().catch(error => { console.error(`agentop run: network setup failed (${error instanceof Error ? error.message : String(error)})`) })
   // One shared promise: a signal handler and the normal exit path both call this, and the second
   // caller must wait for the first one's removal instead of exiting the process under it.
+  // The command sits behind `unshare --fork` (it ignores SIGTERM), so a signal goes to EVERYTHING in the run: the whole scope (systemd) or the whole process group.
+  const signalRun = (sig: NodeJS.Signals) => {
+    if (systemd) spawnSync('systemctl', ['--user', 'kill', '--signal', sig, unit], { stdio: 'ignore', timeout: 5000 })
+    try { process.kill(systemd ? child.pid! : -child.pid!, sig) } catch { try { process.kill(child.pid!, sig) } catch {} }
+  }
   let cleaning: Promise<void> | undefined
-  const cleanup = () => (cleaning ??= stopState(state))
+  const cleanup = () => (cleaning ??= slirpTask.then(() => stopState(state)))
   // The command's end is recorded in the log BEFORE any cleanup line, so whoever reads run.log (the ambiente flow) can name the exit code.
   const childExit = new Promise<number>(resolve => {
     child.once('exit', (status, sig) => { console.log(status !== null ? `exit ${status}` : `exit signal ${sig}`); resolve(status ?? (sig ? 1 : 0)) })
     child.once('error', () => { console.log('exit 1'); resolve(1) })
   })
-  const signal = async (sig: NodeJS.Signals) => { try { process.kill(child.pid!, sig) } catch {} ; await childExit; await cleanup(); process.exit(128 + (sig === 'SIGINT' ? 2 : 15)) }
+  const signal = async (sig: NodeJS.Signals) => { signalRun(sig); await childExit; await cleanup(); process.exit(128 + (sig === 'SIGINT' ? 2 : 15)) }
   process.once('SIGINT', () => void signal('SIGINT'))
   process.once('SIGTERM', () => void signal('SIGTERM'))
   // The run is tied to whoever started it. A session's pane hangs up its process group when the
@@ -761,7 +836,7 @@ async function startRun(options: RunOptions): Promise<number> {
   // scopes still active after their session ended). A parent that died outright reparents us: same.
   process.once('SIGHUP', () => void signal('SIGTERM'))
   const parentWatch = watchParent(process.ppid, () => process.ppid, () => void signal('SIGTERM'))
-  const ttlTimer = setTimeout(() => { try { process.kill(child.pid!, 'SIGTERM') } catch {} }, parseTtl(options.ttl) * 1000)
+  const ttlTimer = setTimeout(() => signalRun('SIGTERM'), parseTtl(options.ttl) * 1000)
   const code = await childExit
   clearTimeout(ttlTimer)
   clearInterval(parentWatch)
@@ -780,6 +855,20 @@ export function watchParent(initial: number, current: () => number, onGone: () =
   }, everyMs)
   t.unref?.()
   return t
+}
+
+/** N5: the one line said when the memory cap could not be applied; null when there is nothing to say (scope ok, or no systemd at all). */
+export function scopeNotice(scope: 'ok' | 'absent' | 'failed'): string | null {
+  return scope === 'failed' ? 'agentop run: the systemd scope could not be created (probe failed or timed out): the 2G memory cap is OFF for this run; only the TTL timer bounds it.' : null
+}
+
+/** A scope can only be created when the user bus answers: inside a pid namespace (a nested run) systemd-run is installed but the bus refuses the peer. */
+async function systemdScopeWorks(): Promise<'ok' | 'absent' | 'failed'> {
+  if (!await commandExists('systemd-run')) return 'absent'
+  const probe = spawn('systemd-run', ['--user', '--scope', '--quiet', '--', 'true'], { stdio: 'ignore' })
+  // Bounded: with no reachable user manager (a run inside a run, whose runtime dir is an empty tmpfs) systemd-run can sit waiting for a bus.
+  const timer = setTimeout(() => { try { probe.kill('SIGKILL') } catch {} }, 4000)
+  return await new Promise(resolve => { probe.once('exit', code => { clearTimeout(timer); resolve(code === 0 ? 'ok' : 'failed') }); probe.once('error', () => { clearTimeout(timer); resolve('failed') }) })
 }
 
 async function commandExists(command: string): Promise<boolean> {

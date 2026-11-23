@@ -1,6 +1,124 @@
 {
   "base": "c5e28cd6336e7a975d735e3122b675024a8ea204",
   "modules": {
+    "../scripts/composer-task-engine-qa.ts": [
+      "computed:b131b17adbc847c507b4d03290f79329c31c5506fdef2d95653756274a2e508b",
+      "global:Bun",
+      "module:fs/promises"
+    ],
+    "../scripts/composer-task-ui-qa.ts": [
+      "module:fs/promises"
+    ],
+    "../scripts/dev/chat-activity-shots.mjs": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "../scripts/dev/fila-prioridade-shots.mjs": [
+      "computed:e967338df03f9da9472591d96ddf84f099ef55ba26eb2fe8f716634cf3a655d3",
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/dev/vidro-real-shots.mjs": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "../scripts/metrics-journal-probe.ts": [
+      "computed:bd962dbf2bfa5551b80398ccf44890317388dae3d8ab57270fbe9bd63e9e5721",
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/baseline.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/budget.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/clients.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/engine-map/bench.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/engine-map/check.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/engine-map/sync.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/fake-claude.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/fleet.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/idle-cpu.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/measure.ts": [
+      "global:Bun"
+    ],
+    "../scripts/perf/profile-server.ts": [
+      "global:Bun",
+      "module:bun",
+      "module:fs"
+    ],
+    "../scripts/perf/qa-browser.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/qa-longtasks.ts": [
+      "module:fs"
+    ],
+    "../scripts/perf/qa-profile.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/rebuild-bench.ts": [
+      "module:fs"
+    ],
+    "../scripts/perf/server-harness.ts": [
+      "global:Bun",
+      "module:bun"
+    ],
+    "../scripts/perf/soak.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/startup.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/storm.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/perf/synth-harnesses.ts": [
+      "module:fs/promises"
+    ],
+    "../scripts/perf/synth-home.ts": [
+      "module:child_process",
+      "module:fs/promises"
+    ],
+    "../scripts/perf/ui-budget.ts": [
+      "global:Bun",
+      "module:fs"
+    ],
+    "../scripts/precommit.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "../scripts/test-orphans.ts": [
+      "module:fs"
+    ],
     "agentop/bin/agentop.js": [
       "module:child_process",
       "module:fs"
@@ -195,6 +313,20 @@
     "server/server/briefing-installer.ts": [
       "module:fs/promises"
     ],
+    "server/server/browser/browser-bin.ts": [
+      "module:fs"
+    ],
+    "server/server/browser/browser-caller-proc.ts": [
+      "module:fs"
+    ],
+    "server/server/browser/browser-host.ts": [
+      "global:Bun",
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/browser/browser-web.ts": [
+      "module:fs"
+    ],
     "server/server/chat-drivers/cli-detect.ts": [
       "global:Bun",
       "module:fs"
@@ -332,10 +464,17 @@
       "module:fs",
       "module:fs/promises"
     ],
+    "server/server/delivery/release-proof.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
     "server/server/delivery/store.ts": [
       "module:fs/promises"
     ],
     "server/server/disk-picker.ts": [
+      "module:fs/promises"
+    ],
+    "server/server/durable-file.ts": [
       "module:fs/promises"
     ],
     "server/server/env-config.ts": [
@@ -570,6 +709,11 @@
       "module:child_process",
       "module:fs"
     ],
+    "server/server/run-netns.ts": [
+      "global:Bun",
+      "module:child_process",
+      "module:fs"
+    ],
     "server/server/run-seed.ts": [
       "module:fs"
     ],
@@ -626,6 +770,9 @@
     ],
     "server/server/sessions/claude-trust.ts": [
       "module:fs/promises"
+    ],
+    "server/server/sessions/cli-leads.ts": [
+      "module:fs"
     ],
     "server/server/sessions/cli-session.ts": [
       "global:Bun",
@@ -827,6 +974,9 @@
     ],
     "server/server/sessions/shell-tmux.ts": [
       "global:Bun"
+    ],
+    "server/server/sessions/spawn-account-io.ts": [
+      "module:fs/promises"
     ],
     "server/server/sessions/spawn-context.ts": [
       "module:fs/promises"
@@ -1040,148 +1190,6 @@
     ],
     "web/vite.config.ts": [
       "module:fs"
-    ],
-    "../scripts/composer-task-engine-qa.ts": [
-      "computed:b131b17adbc847c507b4d03290f79329c31c5506fdef2d95653756274a2e508b",
-      "global:Bun",
-      "module:fs/promises"
-    ],
-    "../scripts/composer-task-ui-qa.ts": [
-      "module:fs/promises"
-    ],
-    "../scripts/dev/chat-activity-shots.mjs": [
-      "module:child_process",
-      "module:fs/promises"
-    ],
-    "../scripts/dev/fila-prioridade-shots.mjs": [
-      "computed:e967338df03f9da9472591d96ddf84f099ef55ba26eb2fe8f716634cf3a655d3",
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/dev/vidro-real-shots.mjs": [
-      "module:child_process",
-      "module:fs/promises"
-    ],
-    "../scripts/metrics-journal-probe.ts": [
-      "computed:bd962dbf2bfa5551b80398ccf44890317388dae3d8ab57270fbe9bd63e9e5721",
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/baseline.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/budget.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/clients.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/engine-map/bench.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/engine-map/check.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/engine-map/sync.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/fake-claude.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/fleet.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/idle-cpu.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/measure.ts": [
-      "global:Bun"
-    ],
-    "../scripts/perf/profile-server.ts": [
-      "global:Bun",
-      "module:bun",
-      "module:fs"
-    ],
-    "../scripts/perf/qa-browser.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/qa-longtasks.ts": [
-      "module:fs"
-    ],
-    "../scripts/perf/qa-profile.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/rebuild-bench.ts": [
-      "module:fs"
-    ],
-    "../scripts/perf/server-harness.ts": [
-      "global:Bun",
-      "module:bun"
-    ],
-    "../scripts/perf/soak.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/startup.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/storm.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/perf/synth-harnesses.ts": [
-      "module:fs/promises"
-    ],
-    "../scripts/perf/synth-home.ts": [
-      "module:child_process",
-      "module:fs/promises"
-    ],
-    "../scripts/perf/ui-budget.ts": [
-      "global:Bun",
-      "module:fs"
-    ],
-    "../scripts/precommit.ts": [
-      "module:child_process",
-      "module:fs"
-    ],
-    "../scripts/test-orphans.ts": [
-      "module:fs"
-    ],
-    "server/server/browser/browser-bin.ts": [
-      "module:fs"
-    ],
-    "server/server/browser/browser-caller-proc.ts": [
-      "module:fs"
-    ],
-    "server/server/browser/browser-host.ts": [
-      "global:Bun",
-      "module:child_process",
-      "module:fs"
-    ],
-    "server/server/browser/browser-web.ts": [
-      "module:fs"
-    ],
-    "server/server/delivery/release-proof.ts": [
-      "module:child_process",
-      "module:fs"
-    ],
-    "server/server/durable-file.ts": [
-      "module:fs/promises"
-    ],
-    "server/server/sessions/spawn-account-io.ts": [
-      "module:fs/promises"
     ]
   }
 }

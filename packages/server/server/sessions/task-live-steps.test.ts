@@ -104,9 +104,9 @@ describe('qa', () => {
 })
 
 describe('leader and merge read the delivery record only', () => {
-  test('without a record there is no signal', () => {
-    expect(deriveStep(facts({ stage: 'leader' }))).toBeNull()
-    expect(deriveStep(facts({ stage: 'merge' }))).toBeNull()
+  test('without a record the board status is the only signal: step 1 (r2: every column shows a percent)', () => {
+    expect(deriveStep(facts({ stage: 'leader' }))).toEqual({ step: 1, signal: 'stage' })
+    expect(deriveStep(facts({ stage: 'merge' }))).toEqual({ step: 1, signal: 'stage' })
   })
   test('leader: 1 stage · 2 deletions gate · 3 decision recorded', () => {
     expect(deriveStep(facts({ stage: 'leader', rec: { phase: 'revisao_lider' } }))).toEqual({ step: 1, signal: 'stage' })
@@ -201,12 +201,18 @@ describe('buildLive: the card gets its percent from signals alone', () => {
     const comments = [{ id: 'c', taskId: 't1', subtaskId: 'a', author: 'x', body: 'old', kind: 'handback', createdAt: iso(NOW - 10 * H) }]
     expect(run([sess('s1', { activity: act({ edits: 1 }) })], { comments }).step).toBe(2)
   })
-  test('a legacy piece in review (no record) has nothing observable: no step, no line', () => {
+  test('a legacy piece in review (no record): the board status IS the evidence — step 1 of its stage, so the card shows a percent (LIVE.LIDER r2)', () => {
     const d = run([sess('s1', { endedAt: iso(NOW - H) })], { status: 'in_review' })
     expect(d.stage).toBe('leader')
-    expect(d.step).toBeNull()
-    expect(d.stepSource).toBeNull()
-    expect(cardPercent(d as never, true)).toBeNull()
+    expect(d.step).toBe(1)
+    expect(d.stepSource).toBe('signals')
+    expect(d.stepSignal).toBe('stage')
+    expect(cardPercent(d as never, true)).not.toBeNull()
+  })
+  test('the pieces filed sessions are offered as links even when they have ended (the card links to what is in the fleet)', () => {
+    const d = run([sess('s1', { endedAt: iso(NOW - H) })], { status: 'in_review' })
+    expect(d.sessionIds).toEqual([])
+    expect(d.linkSessionIds).toEqual(['s1'])
   })
   test('a delivery record in revisao_lider with a recorded review reads step 3 of the leader stage', () => {
     const deliveries = new Map<string, LiveDeliveryFacts>([['a', { phase: 'revisao_lider', review: { at: iso(NOW - 1000) } } as LiveDeliveryFacts]])

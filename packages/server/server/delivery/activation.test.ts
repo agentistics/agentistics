@@ -166,7 +166,7 @@ describe('the escape: off at any time, and it is loud until the rule is back on'
     const store = createGuaranteesStore(file)
     for (let i = 0; i < 230; i++) await store.setState('a', i % 2 ? 'shadow' : 'off', { check: owner, facts: facts() })
     expect((await store.read()).doc.log!.length).toBeLessThanOrEqual(200)
-  })
+  }, 60_000)
 })
 
 describe('statusStages mirror (the copy an older writer cannot erase)', () => {

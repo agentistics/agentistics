@@ -221,6 +221,7 @@ function LeaderCard({ l, open, onToggle, runtime, accountLabels, nowMs, pt, titl
             <div data-live-leader-body style={{ display: 'grid', gap: 1 }}>
               <span data-live-pill="runtime" style={{ display: 'block', fontSize: 10.5, color: MUTED, padding: '5px 0 3px 16px', overflowWrap: 'anywhere' }}>{facts}</span>
               {action && <span style={{ display: 'flex', gap: 5, fontSize: 10.5, color: MUTED, padding: '0 0 3px 16px', overflowWrap: 'anywhere' }}><CornerDownRight size={11} aria-hidden style={{ flexShrink: 0, marginTop: 1 }} /><span>{action}</span></span>}
+              {(l.leads ?? []).map(t => <span key={t.id} data-live-leader-leads={t.id} style={{ fontSize: 11.5, color: MUTED, padding: '2px 0 2px 16px', overflowWrap: 'anywhere' }}>{pt ? 'Lidera também' : 'Also leads'}: {shortTitle(t.title, 60)}</span>)}
               {l.workers.length === 0 && <span style={{ fontSize: 11.5, color: MUTED, padding: '4px 0 4px 16px' }}>{pt ? 'Nenhum worker vivo agora.' : 'No live worker right now.'}</span>}
               <div style={{ display: 'grid', gap: 1, paddingLeft: 10 }}>
                 {l.workers.map(w => {

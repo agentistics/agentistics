@@ -70,7 +70,7 @@ There are **38 tools** (`packages/mcp/agentistics-mcp.ts`, the `TOOLS` array). B
 |------|-------|
 | **Task board (ALM)** — 20 | `agentistics_live_delivery`, `agentistics_delivery_calendar` (BETA — the Delivery calendar: dates, versions, ETAs, renewals; read-only, `format: "ics"`), `agentistics_tasks`, `agentistics_task`, `agentistics_task_create`, `agentistics_task_edit`, `agentistics_task_status`, `agentistics_task_statuses`, `agentistics_task_status_edit`, `agentistics_task_types`, `agentistics_task_type_edit`, `agentistics_task_comment`, `agentistics_task_subtask`, `agentistics_task_link`, `agentistics_task_blocked_by`, `agentistics_task_next`, `agentistics_task_claim`, `agentistics_task_activity`, `agentistics_task_session`, `agentistics_task_delete` |
 | **Session groups** — 3 | `agentistics_session_groups`, `agentistics_session_group_create`, `agentistics_session_group_edit` |
-| **Session role** — 1 | `agentistics_session_role` — get/set a session's role (leader \| worker \| auto); a leader gets the `[ LEADER ] - ` title prefix and the briefing's leader line. A session sets its own role, or its children's. |
+| **Session role** — 2 | `agentistics_session_leads` — declare which extra tasks a leader leads (the Live link, never cost; own session, leader only, same repository), `agentistics_session_role` — get/set a session's role (leader \| worker \| auto); a leader gets the `[ LEADER ] - ` title prefix and the briefing's leader line. A session sets its own role, or its children's. |
 | **Metrics** — 6 | `agentistics_summary`, `agentistics_harnesses`, `agentistics_projects`, `agentistics_sessions`, `agentistics_costs`, `agentistics_repos` |
 | **Custom layouts** — 8 | `agentistics_component_catalog`, `agentistics_get_layouts`, `agentistics_build_layout`, `agentistics_add_component`, `agentistics_remove_component`, `agentistics_create_layout`, `agentistics_set_active_layout`, `agentistics_delete_layout` |
 | **PDF export** — 1 | `agentistics_export_pdf` |
@@ -510,3 +510,14 @@ The agentistics dashboard provides a dedicated MCP Management interface (in Sett
 
 - [Nay chat](./nay.md) — the built-in assistant; a Nay conversation is a managed session with every tool allowed
 - [Data sources](./data-sources.md) — what `/api/data` returns and how it's computed
+## Who may write a task's repository (LIVE.LIDER-MULTITAREFA r7, D7)
+
+Leading a task requires an EXPLICIT repository on both the leader's own task and the target. **A session never writes
+a task's repository** — REST, MCP and CLI alike answer 403 `repo_person_only`: "Only the person sets a task's
+repository, from the task screen." A same-user agent chooses its own environment and process tree and can even
+`git remote set-url` its own cwd, so neither the process tree, the socket classifier nor "the repository of its own
+cwd" is a barrier for a write. The barrier is a proof only the person can give: the task screen asks the vault
+(`POST /api/vault/delivery-owner`, scope `task-repo:<task id>` / `edit`) and sends the single-use grant in
+`X-Agentop-Owner-Grant` (loopback + Origin, 5 minutes, spent once). No grant: 403 `owner_proof_required`. The CLI has
+no person path (nothing secret separates the person's shell from an agent's): `agentop task edit --repo` is refused
+with the same sentence. The leading rule is unchanged: both sides explicit, same repository host+name, owner may differ.

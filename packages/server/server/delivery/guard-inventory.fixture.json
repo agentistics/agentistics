@@ -98,10 +98,109 @@
       "cd8ac388d25bb99c66a7110a4111dc8dd24568ff1ef995a27d82d37344e03892",
       "6c1009d6ae6300789fb516c8e5d2576cd36dbf54a6c12c0597820a77303bd118",
       "591a9d97550e60521cf3a526dc7b2018ba1f5cde4d8926b65745ebd984ca894e",
-      "49e4fcbf72e9482d562379ccb0de1a72ff52949073763a69207eff5a45ce7250"
+      "49e4fcbf72e9482d562379ccb0de1a72ff52949073763a69207eff5a45ce7250",
+      "94fccd5c43fc152060072fb724d0ff5031a96eeb9d41c5dd58172cb153a53ca8",
+      "c394a6834485259c3f1b355333ffc0e994984469e08acf26be62a850296fc696",
+      "76067c0d1bc3cf097d47a4a0f360ee5872af938850e00ed3313142bc3cf66060"
     ]
   },
   "writers": {
+    "../scripts/composer-task-engine-qa.ts": [
+      "64066934c973962c9a355872f555d63e673013e985493dc1d408edba83db5033",
+      "3b84b168d19fdf959788f30c199c24acfd0e270526d49d1d84dc69b994ebb696"
+    ],
+    "../scripts/dev/chat-activity-shots.mjs": [
+      "ed42e01160ed2ed9f305b755e39ef96d478fa1701a315965d503e997233b5558"
+    ],
+    "../scripts/dev/fila-prioridade-shots.mjs": [
+      "dae95840075e81c26288794599da0d815e95d7949e2a2be28b5b648b6b476ab1"
+    ],
+    "../scripts/dev/vidro-real-shots.mjs": [
+      "2a2c8bdc5d754bf66172b467b330ae15ab86fa9c6d846218ce872ff2cd0e3fa3",
+      "2bf071f3d7107853194ea21ce579a6e12685a149d692180af90bbd2460452309",
+      "a9ac0878cffa521d21d225dac91419627637af74b3c7ffa977495c75215a0215",
+      "70ecf2a66d1d77194048198d9151413348b308d5b6eee87ec54b6df700045d96",
+      "9129b3a0128b205067f74742c4513cba1df5b5090dbde2f048a756243f2b2a9a",
+      "a4d255c3ed6fd0a83c119a7d993f169929265da6b3e398e2a6c3c9b1af99e803"
+    ],
+    "../scripts/metrics-journal-probe.ts": [
+      "c47c568df1fd8dd5e72bb381b1c5f2fada7dc8a982fcb84541279de64ffbea6d",
+      "5b12b4a49c86fe51e156ef0584a9379d5597157102095863b283a8004fb3b372",
+      "bd6a6cf0bc4224d65d2c3b05ee54fbc45588d256bb45620641d69b06cf076fc6"
+    ],
+    "../scripts/perf/baseline.ts": [
+      "8958c77ee3c1a1fbd51a424539450e292ac33f5e940fa7e2ab2c38ae7b6e9628",
+      "6b155c6639f9cba1df178c614ba54eb2c54491ee783045fb664b6be0a3fa1b1a",
+      "359a40753ed680c97b85146397f18fd6484a4a07e8dc413a8d9fdb3355ce602f",
+      "a1fc59b3f88d9b553d255ac7c6afb00fa32c978a41d6aff0d00ebff5c1d2da88"
+    ],
+    "../scripts/perf/budget.ts": [
+      "8958c77ee3c1a1fbd51a424539450e292ac33f5e940fa7e2ab2c38ae7b6e9628",
+      "1fdd04b87e164d5d31f65d3d011ae0989e0066baa23d9d66b79ee6c75c5d5b97",
+      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96"
+    ],
+    "../scripts/perf/clients.ts": [
+      "fc1dc5b8a10a01ad22b4a55e73c579046abf75961c34eb59147a994177229e3b"
+    ],
+    "../scripts/perf/engine-map/bench.ts": [
+      "440440d0b8bed7a9aa7c360d7e0f283fa03a6cf885a5ef631f264b0c9dd669b4",
+      "7ea230f0088c731968064c8a70387df56a36de2980161629916d4346a8401dbe"
+    ],
+    "../scripts/perf/engine-map/check.ts": [
+      "fa9dcb7cff82229d533f6885ec34e5437587cc86eacba96a106fb25fccbae303"
+    ],
+    "../scripts/perf/engine-map/sync.ts": [
+      "525ef4e394c0dda0004ce802afedb32faa121bbb1fad085f5583419a0b0a30a5"
+    ],
+    "../scripts/perf/fake-claude.ts": [
+      "d7597d12d63468d37f009506997e9de7786445b56c26a740f06a15ed564fb0cb",
+      "596b7a460c4cd1559a39de3a883ddc42f4fee226f1836747118427579e284478"
+    ],
+    "../scripts/perf/fleet.ts": [
+      "1742f16265dab38c626af9c2b6d1458b0975be300c588332e11f1ed25bf10d1d"
+    ],
+    "../scripts/perf/idle-cpu.ts": [
+      "025af96d511dc66753de46da859f0e7c134bb002196e52ab53a519c6f4efb128"
+    ],
+    "../scripts/perf/profile-server.ts": [
+      "4093b0749213bf375ffeaa899931b73146d9584e2f9f0cbb292211d8c07647d9",
+      "4180464a70c89a0bb4a2ec01bfdf5b9d94c6a5750140812e39268bd3f7a8f3d3"
+    ],
+    "../scripts/perf/qa-browser.ts": [
+      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96",
+      "57fbf3deb3bee0ae871e7e374d18abd2bfb01124f483bb5a00656dda85662bb5"
+    ],
+    "../scripts/perf/qa-profile.ts": [
+      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96",
+      "57fbf3deb3bee0ae871e7e374d18abd2bfb01124f483bb5a00656dda85662bb5",
+      "131c18794077a3ae4e0214c604b2299a50d36bd5148b0418b066663c6ae34485"
+    ],
+    "../scripts/perf/rebuild-bench.ts": [
+      "5f699d0f843b6356a18ae4deaf830caaf0e72300b2254c093fcd03bf192279c7",
+      "efef1a0ca5948471b326a60a9a72f55065ba2af9ebf9ab83f53403e232848647",
+      "c7c16b0c9d5210417d98fa51c2b9fd275cfcbf299bfa05fd2a88203d55f1b0a6"
+    ],
+    "../scripts/perf/soak.ts": [
+      "ab812fe7817ca5ffdd445b832bd004d30840837f7b91f299ddd5a9f6b0d7f9c2"
+    ],
+    "../scripts/perf/startup.ts": [
+      "73b6d8629778592e93c3e96566ab5cd15d90183d8acd784fd29a0ddc0fe81de5",
+      "de5a18f28e60ef99252eeb8d713670edcd353075334384f22b7ac61d971a3dbd",
+      "e7119cbccd7e24f8aaf3863b557443570556becfeff4b83bf04edbff5aa2c8c5",
+      "5e4c83b191f73abf34bd8dc1a0d4b217c21387023cbc88968a60dd84d64ebea0",
+      "3355251327a24934a4ae34d599daa4f34cd2eb78260536164f556de5d8fd2ac1"
+    ],
+    "../scripts/perf/storm.ts": [
+      "578715fdd461336071a977dfe2da3cc2645965ee15fc12338c79d6c88446ab2b",
+      "33e0105ff5394d7f4bace420eaa3dbd2fb62b67bcc2336413370d0801b5cc693",
+      "ce92a22c9ad510aaeb1d8053f7001eda77d266b294771417dc611742a83f5de0"
+    ],
+    "../scripts/perf/ui-budget.ts": [
+      "8958c77ee3c1a1fbd51a424539450e292ac33f5e940fa7e2ab2c38ae7b6e9628",
+      "977c763b9fed0bc6538d5b1f6e72557f723830ab201814ba4fccfa475e0b73e7",
+      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96",
+      "32b933050abc7c3da532858233bfee7595bcd7fd5029351e86a9d675361857a4"
+    ],
     "agentop/scripts/postinstall.js": [
       "a7481a24bfa197ff26f32221a374f4f856f9f088c0fb1195851e134e019730bf"
     ],
@@ -1040,102 +1139,6 @@
     ],
     "web/src/pages/settings/InstallSettings.tsx": [
       "49ebc954a856eef89a48abfed8b24407a63d416a83f303f3b628afc639e72b42"
-    ],
-    "../scripts/composer-task-engine-qa.ts": [
-      "64066934c973962c9a355872f555d63e673013e985493dc1d408edba83db5033",
-      "3b84b168d19fdf959788f30c199c24acfd0e270526d49d1d84dc69b994ebb696"
-    ],
-    "../scripts/dev/chat-activity-shots.mjs": [
-      "ed42e01160ed2ed9f305b755e39ef96d478fa1701a315965d503e997233b5558"
-    ],
-    "../scripts/dev/fila-prioridade-shots.mjs": [
-      "dae95840075e81c26288794599da0d815e95d7949e2a2be28b5b648b6b476ab1"
-    ],
-    "../scripts/dev/vidro-real-shots.mjs": [
-      "2a2c8bdc5d754bf66172b467b330ae15ab86fa9c6d846218ce872ff2cd0e3fa3",
-      "2bf071f3d7107853194ea21ce579a6e12685a149d692180af90bbd2460452309",
-      "a9ac0878cffa521d21d225dac91419627637af74b3c7ffa977495c75215a0215",
-      "70ecf2a66d1d77194048198d9151413348b308d5b6eee87ec54b6df700045d96",
-      "9129b3a0128b205067f74742c4513cba1df5b5090dbde2f048a756243f2b2a9a",
-      "a4d255c3ed6fd0a83c119a7d993f169929265da6b3e398e2a6c3c9b1af99e803"
-    ],
-    "../scripts/metrics-journal-probe.ts": [
-      "c47c568df1fd8dd5e72bb381b1c5f2fada7dc8a982fcb84541279de64ffbea6d",
-      "5b12b4a49c86fe51e156ef0584a9379d5597157102095863b283a8004fb3b372",
-      "bd6a6cf0bc4224d65d2c3b05ee54fbc45588d256bb45620641d69b06cf076fc6"
-    ],
-    "../scripts/perf/baseline.ts": [
-      "8958c77ee3c1a1fbd51a424539450e292ac33f5e940fa7e2ab2c38ae7b6e9628",
-      "6b155c6639f9cba1df178c614ba54eb2c54491ee783045fb664b6be0a3fa1b1a",
-      "359a40753ed680c97b85146397f18fd6484a4a07e8dc413a8d9fdb3355ce602f",
-      "a1fc59b3f88d9b553d255ac7c6afb00fa32c978a41d6aff0d00ebff5c1d2da88"
-    ],
-    "../scripts/perf/budget.ts": [
-      "8958c77ee3c1a1fbd51a424539450e292ac33f5e940fa7e2ab2c38ae7b6e9628",
-      "1fdd04b87e164d5d31f65d3d011ae0989e0066baa23d9d66b79ee6c75c5d5b97",
-      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96"
-    ],
-    "../scripts/perf/clients.ts": [
-      "fc1dc5b8a10a01ad22b4a55e73c579046abf75961c34eb59147a994177229e3b"
-    ],
-    "../scripts/perf/engine-map/bench.ts": [
-      "440440d0b8bed7a9aa7c360d7e0f283fa03a6cf885a5ef631f264b0c9dd669b4",
-      "7ea230f0088c731968064c8a70387df56a36de2980161629916d4346a8401dbe"
-    ],
-    "../scripts/perf/engine-map/check.ts": [
-      "fa9dcb7cff82229d533f6885ec34e5437587cc86eacba96a106fb25fccbae303"
-    ],
-    "../scripts/perf/engine-map/sync.ts": [
-      "525ef4e394c0dda0004ce802afedb32faa121bbb1fad085f5583419a0b0a30a5"
-    ],
-    "../scripts/perf/fake-claude.ts": [
-      "d7597d12d63468d37f009506997e9de7786445b56c26a740f06a15ed564fb0cb",
-      "596b7a460c4cd1559a39de3a883ddc42f4fee226f1836747118427579e284478"
-    ],
-    "../scripts/perf/fleet.ts": [
-      "1742f16265dab38c626af9c2b6d1458b0975be300c588332e11f1ed25bf10d1d"
-    ],
-    "../scripts/perf/idle-cpu.ts": [
-      "025af96d511dc66753de46da859f0e7c134bb002196e52ab53a519c6f4efb128"
-    ],
-    "../scripts/perf/profile-server.ts": [
-      "4093b0749213bf375ffeaa899931b73146d9584e2f9f0cbb292211d8c07647d9",
-      "4180464a70c89a0bb4a2ec01bfdf5b9d94c6a5750140812e39268bd3f7a8f3d3"
-    ],
-    "../scripts/perf/qa-browser.ts": [
-      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96",
-      "57fbf3deb3bee0ae871e7e374d18abd2bfb01124f483bb5a00656dda85662bb5"
-    ],
-    "../scripts/perf/qa-profile.ts": [
-      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96",
-      "57fbf3deb3bee0ae871e7e374d18abd2bfb01124f483bb5a00656dda85662bb5",
-      "131c18794077a3ae4e0214c604b2299a50d36bd5148b0418b066663c6ae34485"
-    ],
-    "../scripts/perf/rebuild-bench.ts": [
-      "5f699d0f843b6356a18ae4deaf830caaf0e72300b2254c093fcd03bf192279c7",
-      "efef1a0ca5948471b326a60a9a72f55065ba2af9ebf9ab83f53403e232848647",
-      "c7c16b0c9d5210417d98fa51c2b9fd275cfcbf299bfa05fd2a88203d55f1b0a6"
-    ],
-    "../scripts/perf/soak.ts": [
-      "ab812fe7817ca5ffdd445b832bd004d30840837f7b91f299ddd5a9f6b0d7f9c2"
-    ],
-    "../scripts/perf/startup.ts": [
-      "73b6d8629778592e93c3e96566ab5cd15d90183d8acd784fd29a0ddc0fe81de5",
-      "de5a18f28e60ef99252eeb8d713670edcd353075334384f22b7ac61d971a3dbd",
-      "e7119cbccd7e24f8aaf3863b557443570556becfeff4b83bf04edbff5aa2c8c5",
-      "5e4c83b191f73abf34bd8dc1a0d4b217c21387023cbc88968a60dd84d64ebea0",
-      "3355251327a24934a4ae34d599daa4f34cd2eb78260536164f556de5d8fd2ac1"
-    ],
-    "../scripts/perf/storm.ts": [
-      "578715fdd461336071a977dfe2da3cc2645965ee15fc12338c79d6c88446ab2b",
-      "33e0105ff5394d7f4bace420eaa3dbd2fb62b67bcc2336413370d0801b5cc693",
-      "ce92a22c9ad510aaeb1d8053f7001eda77d266b294771417dc611742a83f5de0"
-    ],
-    "../scripts/perf/ui-budget.ts": [
-      "8958c77ee3c1a1fbd51a424539450e292ac33f5e940fa7e2ab2c38ae7b6e9628",
-      "977c763b9fed0bc6538d5b1f6e72557f723830ab201814ba4fccfa475e0b73e7",
-      "63b90a59fc4df5785a67f05ffc7c7fd37a4148e5d7b0278932be5445e9f90e96",
-      "32b933050abc7c3da532858233bfee7595bcd7fd5029351e86a9d675361857a4"
     ]
   }
 }

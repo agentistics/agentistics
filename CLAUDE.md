@@ -3388,6 +3388,15 @@ changes a person can notice belong there — `features` and `fixes`, 3–8 short
 PT and EN, no refactors/tests/internal items. A version with no entry announces nothing.
 
 
+## The built-in browser — see docs/browser.md
+
+A Chromium the server starts on demand (`packages/server/server/browser/`): a session's browser the model
+drives through the `agentistics_browser_*` MCP tools (locked by default; only the person unlocks, with a
+vault proof) and the person's own browser in the right bar. Limits, PSS watcher, profiles and per-harness
+support are in `docs/browser.md`; every number is a constant in `browser-spec.ts`, and Settings → Browser
+(`BrowserSettings.tsx`) reads them from `GET /api/browser/status` rather than restating them. The switch
+`browserEnabled` is enforced in `index.ts` before `/api/browser/*`, never only in the UI.
+
 ## Clients on the adapter seam (F1.3)
 
 See `docs/f1-3-clients.md`. Browser, VS Code and cockpit consume fleet snapshots/deltas through

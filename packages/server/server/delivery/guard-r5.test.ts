@@ -10,7 +10,8 @@ import { effectiveSubtasks } from '../sessions/task-report'
 import { boardRaises } from './guard'
 import * as ast from './guard-ast.testing'
 import { helperInventory, inventoryGrowth } from './guard-inventory.testing'
-import { productionSources } from './lint-scan.testing'
+import { isBuildOutput, productionSources } from './lint-scan.testing'
+import { scannedSources } from './guard-inventory.testing'
 import { makeWorld, shot, T } from './evidence-world.testing'
 import { execGit, forgetClassifyCache } from './classify-host'
 import { newDelivery } from './machine'
@@ -177,4 +178,23 @@ test('O5 existing helper imports via workspace or absolute paths also need a mod
     }
     expect(helperInventory(sources, '/repo/packages')['server/server/new.ts'], spec).toEqual(['raw-writer-helper'])
   }
+})
+
+test('O5 the release job build outputs of this repo are not source, and only those exact paths', () => {
+  for (const rel of ['web/dist/assets/index-abc.js', 'server/server/embedded-dist.generated.ts', 'server/server/engine-slot.generated.ts']) expect(isBuildOutput(rel), rel).toBe(true)
+  for (const rel of ['server/server/other.generated.ts', 'server/dist/x.js', 'server/server/data.ts', 'web/src/dist/x.ts']) expect(isBuildOutput(rel), rel).toBe(false)
+})
+
+test('O5 the repo-wide scan skips the built web bundle and the generated stubs but keeps real sources and other dist dirs', () => {
+  const root = mkdtempSync(join(tmpdir(), 'guard-release-'))
+  try {
+    const raw = "import fs from 'node:fs'; fs.writeFileSync(p, data)"
+    const pkgs = join(root, 'packages')
+    mkdirSync(join(root, 'scripts'), { recursive: true })
+    for (const f of ['web/dist/assets/y.js', 'server/server/embedded-dist.generated.ts', 'server/server/engine-slot.generated.ts', 'server/server/a.ts', 'mcp/dist/z.js']) {
+      mkdirSync(join(pkgs, f, '..'), { recursive: true })
+      writeFileSync(join(pkgs, f), raw)
+    }
+    expect(scannedSources(pkgs)).toEqual(['mcp/dist/z.js', 'server/server/a.ts'])
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })

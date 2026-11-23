@@ -50,7 +50,7 @@ export interface LiveDeliveryRecord {
   leaderAvailabilityReasonCode?: 'fleet-unreadable' | 'no-live-leader'
   /** Same current-round start and ordinal as the server/MCP projection. */
   round?: { number: number; startedAtMs: number | null }
-  sessionIds: string[]; harnesses: string[]; models: string[]; eta: LiveEta
+  sessionIds: string[]; linkSessionIds?: string[]; harnesses: string[]; models: string[]; eta: LiveEta
   efforts?: string[]; workMs?: number | null; trail?: StageVisit[]
   stageEta?: LiveStageEta; publishEta?: LivePublishEta; block?: LiveBlock | null
   /** The Agentask priority (urgent | high | medium | low); a subtask inherits its task's. Absent from an older server = low. */
@@ -81,6 +81,8 @@ export interface LeaderWorker {
 /** Mirror of the server's `LeaderView` (`task-live-view.ts`). Leaders are never deliveries. */
 export interface LeaderRecord {
   id: string; title: string; harness: string; model: string | null; effort?: string | null; accountId?: string | null; state: string
+  /** Tasks this leader declared it leads besides its own filing. */
+  leads?: { id: string; title: string }[]
   createdMs?: number | null; taskId?: string | null; taskTitle?: string | null
   currentAction: string | null; publishEtaMs?: number | null
   workers: LeaderWorker[]

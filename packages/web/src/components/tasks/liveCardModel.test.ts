@@ -7,6 +7,7 @@ import {
 import { rollPlan } from './LiveOdometer'
 import { cardPills, filterCards, joinLive, LIVE_STAGES, type LiveAgent, type LiveDeliveryRecord, type RuntimeFacts } from './liveDeliveryModel'
 import type { FleetRow } from '../../lib/fleet'
+import { sessionLinks } from './liveSessionLinks'
 
 const NOW = 2_000_000_000_000
 const MIN = 60_000, H = 3600_000
@@ -423,5 +424,25 @@ describe('the filter bar choices are saved like the column preferences', () => {
     expect(readViewPrefs({ getItem: () => JSON.stringify({ tab: 'x', period: '30d', sort: 'nope' }) })).toEqual({ tab: 'active', period: '30d', sort: 'priority' })
     expect(readViewPrefs({ getItem: () => 'not json' })).toEqual({ tab: 'active', period: '24h', sort: 'priority' })
     expect(readViewPrefs(null)).toEqual({ tab: 'active', period: '24h', sort: 'priority' })
+  })
+})
+
+describe('LIVE.LIDER r2: review / no-leader cards carry the same percent and session link as the other columns', () => {
+  test('a "Sem líder" card shows its percent, and says it waits for a leader (never "reading the changes")', () => {
+    const p = cardPercent({ stage: 'leader', displayStage: 'no-leader', ci: null, step: 1 }, true)
+    expect(p).toMatchObject({ pct: 0, step: 1, of: 3, label: 'aguardando um líder' })
+    expect(cardPercent({ stage: 'leader', displayStage: 'no-leader', ci: null, step: 1 }, false)?.label).toBe('waiting for a leader')
+  })
+  test('control: a leader review with a leader keeps the stage step label', () => {
+    expect(cardPercent({ stage: 'leader', ci: null, step: 1 }, true)?.label).toBe('lendo as mudanças')
+  })
+  test('the open-session link also covers sessions that ended but are still in the fleet (reopenable)', () => {
+    const c = card({ stage: 'leader', sessionIds: [], linkSessionIds: ['gone'] }, [row('gone', 'exited' as FleetRow['state'])])
+    expect(sessionLinks(c, [row('gone', 'exited' as FleetRow['state'])], [])).toEqual([{ role: 'author', id: 'gone' }])
+  })
+  test('a card with no session in the fleet has no link and keeps the existing empty-state word', () => {
+    const c = card({ stage: 'leader', sessionIds: [], linkSessionIds: ['nowhere'] }, [])
+    expect(sessionLinks(c, [], [])).toEqual([])
+    expect(cardStateWord(c, true)).toBe('sem agente vivo')
   })
 })

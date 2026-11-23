@@ -1,5 +1,50 @@
 {
+  "../scripts/perf/baseline.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/perf/budget.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/perf/clients.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/perf/fleet.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/perf/idle-cpu.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/perf/measure.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/perf/qa-browser.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/perf/qa-profile.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/perf/soak.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/perf/startup.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/perf/storm.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/perf/ui-budget.ts": [
+    "raw-writer-helper"
+  ],
+  "../scripts/test-preload.ts": [
+    "raw-writer-helper"
+  ],
   "mcp/agentistics-mcp.ts": [
+    "raw-writer-helper"
+  ],
+  "mcp/browser-tools.ts": [
+    "raw-writer-helper"
+  ],
+  "mcp/engine-tools.ts": [
     "raw-writer-helper"
   ],
   "server/bin/cli.ts": [
@@ -156,6 +201,18 @@
     "raw-writer-helper"
   ],
   "server/server/briefing-installer.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/browser/browser-host.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/browser/browser-input-web.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/browser/browser-stream-web.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/browser/browser-web.ts": [
     "raw-writer-helper"
   ],
   "server/server/chat-drivers/claude.ts": [
@@ -347,6 +404,9 @@
   "server/server/delivery/web.ts": [
     "raw-writer-helper"
   ],
+  "server/server/durable-file.ts": [
+    "raw-writer-helper"
+  ],
   "server/server/engine/cli.ts": [
     "raw-writer-helper"
   ],
@@ -363,6 +423,9 @@
     "raw-writer-helper"
   ],
   "server/server/engine/load.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/engine/present-turns.ts": [
     "raw-writer-helper"
   ],
   "server/server/engine/reuse-surface.ts": [
@@ -539,6 +602,9 @@
   "server/server/native-sessions.ts": [
     "raw-writer-helper"
   ],
+  "server/server/nay-call.ts": [
+    "raw-writer-helper"
+  ],
   "server/server/nay-sessions.ts": [
     "raw-writer-helper"
   ],
@@ -621,6 +687,9 @@
     "raw-writer-helper"
   ],
   "server/server/restart-pending.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/run-netns.ts": [
     "raw-writer-helper"
   ],
   "server/server/runtime-metrics-web.ts": [
@@ -717,6 +786,9 @@
     "raw-writer-helper"
   ],
   "server/server/sessions/cli-folder.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/cli-leads.ts": [
     "raw-writer-helper"
   ],
   "server/server/sessions/cli-parse.ts": [
@@ -836,6 +908,15 @@
   "server/server/sessions/harness-version.ts": [
     "raw-writer-helper"
   ],
+  "server/server/sessions/hold-guard.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/hold-state-web.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/hold-state.ts": [
+    "raw-writer-helper"
+  ],
   "server/server/sessions/index.ts": [
     "raw-writer-helper"
   ],
@@ -845,13 +926,22 @@
   "server/server/sessions/input-web.ts": [
     "raw-writer-helper"
   ],
+  "server/server/sessions/kill-door.ts": [
+    "raw-writer-helper"
+  ],
   "server/server/sessions/kill-escalate.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/kill-guard.ts": [
     "raw-writer-helper"
   ],
   "server/server/sessions/link-sessions.ts": [
     "raw-writer-helper"
   ],
   "server/server/sessions/live-claims.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/live-fleet-rows.ts": [
     "raw-writer-helper"
   ],
   "server/server/sessions/live-runtime.ts": [
@@ -864,6 +954,9 @@
     "raw-writer-helper"
   ],
   "server/server/sessions/native-fleet.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/native-notes.ts": [
     "raw-writer-helper"
   ],
   "server/server/sessions/nay-web.ts": [
@@ -912,6 +1005,9 @@
     "raw-writer-helper"
   ],
   "server/server/sessions/registry.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/release-squash.ts": [
     "raw-writer-helper"
   ],
   "server/server/sessions/release-tags.ts": [
@@ -1104,6 +1200,9 @@
     "raw-writer-helper"
   ],
   "server/server/sessions/task-reopen.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/task-repo-gate.ts": [
     "raw-writer-helper"
   ],
   "server/server/sessions/task-report.ts": [
@@ -1640,6 +1739,33 @@
   "web/src/components/benchmark/BenchTasks.tsx": [
     "raw-writer-helper"
   ],
+  "web/src/components/browser/BrowserAddressBar.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserDrawer.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserFollowChip.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserPanel.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserScreen.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserSessionCard.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/BrowserWindows.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/OpenVaultButton.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/browser/SessionBrowser.tsx": [
+    "raw-writer-helper"
+  ],
   "web/src/components/calendar/AgendaView.tsx": [
     "raw-writer-helper"
   ],
@@ -1647,6 +1773,9 @@
     "raw-writer-helper"
   ],
   "web/src/components/calendar/CalendarFilters.tsx": [
+    "raw-writer-helper"
+  ],
+  "web/src/components/calendar/CronogramaTree.tsx": [
     "raw-writer-helper"
   ],
   "web/src/components/calendar/DayView.tsx": [
@@ -2039,6 +2168,9 @@
   "web/src/components/vault/VaultExpiryNotice.tsx": [
     "raw-writer-helper"
   ],
+  "web/src/hooks/useBrowserScreen.ts": [
+    "raw-writer-helper"
+  ],
   "web/src/hooks/useData.ts": [
     "raw-writer-helper"
   ],
@@ -2054,13 +2186,25 @@
   "web/src/hooks/useNativeSession.ts": [
     "raw-writer-helper"
   ],
+  "web/src/hooks/useNayCallReport.ts": [
+    "raw-writer-helper"
+  ],
   "web/src/hooks/useNotificationStream.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/hooks/usePersonalBrowser.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/hooks/usePersonalInput.ts": [
     "raw-writer-helper"
   ],
   "web/src/hooks/usePlanBasis.ts": [
     "raw-writer-helper"
   ],
   "web/src/hooks/useProjectedDerived.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/hooks/useSessionBrowserCard.ts": [
     "raw-writer-helper"
   ],
   "web/src/hooks/useTerminalStream.ts": [
@@ -2088,6 +2232,15 @@
     "raw-writer-helper"
   ],
   "web/src/lib/boardActivity.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/lib/browserCard.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/lib/browserPersonal.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/lib/browserStream.ts": [
     "raw-writer-helper"
   ],
   "web/src/lib/chatFeed.ts": [
@@ -2132,6 +2285,9 @@
   "web/src/lib/nativeFleetRow.ts": [
     "raw-writer-helper"
   ],
+  "web/src/lib/nayCall.ts": [
+    "raw-writer-helper"
+  ],
   "web/src/lib/nayNotifyStore.ts": [
     "raw-writer-helper"
   ],
@@ -2151,6 +2307,9 @@
     "raw-writer-helper"
   ],
   "web/src/lib/repoTasks.ts": [
+    "raw-writer-helper"
+  ],
+  "web/src/lib/rowMenuCascade.ts": [
     "raw-writer-helper"
   ],
   "web/src/lib/sessionActions.ts": [
@@ -2282,6 +2441,9 @@
   "web/src/pages/settings/BillingSettings.tsx": [
     "raw-writer-helper"
   ],
+  "web/src/pages/settings/BrowserSettings.tsx": [
+    "raw-writer-helper"
+  ],
   "web/src/pages/settings/ChatSettings.tsx": [
     "raw-writer-helper"
   ],
@@ -2346,153 +2508,6 @@
     "raw-writer-helper"
   ],
   "web/src/pages/usage/usageView.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/baseline.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/budget.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/clients.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/fleet.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/idle-cpu.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/measure.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/qa-browser.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/qa-profile.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/soak.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/startup.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/storm.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/perf/ui-budget.ts": [
-    "raw-writer-helper"
-  ],
-  "../scripts/test-preload.ts": [
-    "raw-writer-helper"
-  ],
-  "mcp/browser-tools.ts": [
-    "raw-writer-helper"
-  ],
-  "mcp/engine-tools.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/browser/browser-host.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/browser/browser-input-web.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/browser/browser-stream-web.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/browser/browser-web.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/engine/present-turns.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/nay-call.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/sessions/hold-guard.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/sessions/hold-state-web.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/sessions/hold-state.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/sessions/kill-door.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/sessions/kill-guard.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/sessions/live-fleet-rows.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/sessions/release-squash.ts": [
-    "raw-writer-helper"
-  ],
-  "web/src/components/browser/BrowserAddressBar.tsx": [
-    "raw-writer-helper"
-  ],
-  "web/src/components/browser/BrowserDrawer.tsx": [
-    "raw-writer-helper"
-  ],
-  "web/src/components/browser/BrowserFollowChip.tsx": [
-    "raw-writer-helper"
-  ],
-  "web/src/components/browser/BrowserPanel.tsx": [
-    "raw-writer-helper"
-  ],
-  "web/src/components/browser/BrowserScreen.tsx": [
-    "raw-writer-helper"
-  ],
-  "web/src/components/browser/BrowserSessionCard.tsx": [
-    "raw-writer-helper"
-  ],
-  "web/src/components/browser/BrowserWindows.tsx": [
-    "raw-writer-helper"
-  ],
-  "web/src/components/browser/SessionBrowser.tsx": [
-    "raw-writer-helper"
-  ],
-  "web/src/components/calendar/CronogramaTree.tsx": [
-    "raw-writer-helper"
-  ],
-  "web/src/hooks/useBrowserScreen.ts": [
-    "raw-writer-helper"
-  ],
-  "web/src/hooks/useNayCallReport.ts": [
-    "raw-writer-helper"
-  ],
-  "web/src/hooks/usePersonalBrowser.ts": [
-    "raw-writer-helper"
-  ],
-  "web/src/hooks/usePersonalInput.ts": [
-    "raw-writer-helper"
-  ],
-  "web/src/hooks/useSessionBrowserCard.ts": [
-    "raw-writer-helper"
-  ],
-  "web/src/lib/browserCard.ts": [
-    "raw-writer-helper"
-  ],
-  "web/src/lib/browserPersonal.ts": [
-    "raw-writer-helper"
-  ],
-  "web/src/lib/browserStream.ts": [
-    "raw-writer-helper"
-  ],
-  "web/src/lib/nayCall.ts": [
-    "raw-writer-helper"
-  ],
-  "web/src/lib/rowMenuCascade.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/durable-file.ts": [
-    "raw-writer-helper"
-  ],
-  "server/server/sessions/native-notes.ts": [
     "raw-writer-helper"
   ]
 }
