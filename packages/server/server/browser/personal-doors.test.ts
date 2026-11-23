@@ -73,7 +73,7 @@ describe('index.ts really asks at every personal door (the r2 survivors R4 and R
   })
   test('the route deps carry the grant check and the caller is read for personal/* and the status', () => {
     expect(browserBlock).toMatch(/personalGrant:\s*\(\)\s*=>\s*requestHasPersonalGrant\(/)
-    expect(browserBlock).toMatch(/startsWith\('\/api\/browser\/personal\/'\)/)
+    expect(browserBlock).toMatch(/routeNeedsCaller\(url\.pathname\)/)
   })
   test('the early vault door also covers the personal-browser proof (a known session may not even ask)', () => {
     expect(src).toMatch(/\/api\/vault\/personal-browser/)

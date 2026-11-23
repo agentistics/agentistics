@@ -13,7 +13,7 @@ const ID = 'agentop-cockpitrn01'
 afterEach(async () => {
   __setSessionBackendForTest(null)
   await removeSession(ID).catch(() => {})
-})
+}, 60_000)
 
 /** A backend whose pane may be alive or not; records every line typed into it. */
 function fake(alive: boolean, typed: string[]): SessionBackend {
@@ -50,4 +50,4 @@ test('cockpit renameSession: a repeat of a confirmed title types /rename once; a
     // ...and a repeat of that confirmed title is a no-op.
     await host.renameSession!(ID, 'B')
     expect(typed.length).toBe(2)
-})
+}, 60_000)

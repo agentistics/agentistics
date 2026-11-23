@@ -35,6 +35,7 @@ export default function SettingsPage() {
 
   const viewer: SettingsViewer = {
     localChat: ctx.capabilities?.localChat,
+    localShell: ctx.capabilities?.localShell,
     ...(nativeRuntime !== null ? { nativeRuntime } : {}),
   }
 

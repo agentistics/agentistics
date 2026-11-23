@@ -13,7 +13,7 @@ import type { Protector, ProtectorId, UnwrapResult } from '@agentistics/vault'
 import { __resetVaultForTests, __setVaultClockForTests, ensureVaultOpen, lockVault, vaultDir } from './service'
 import {
   ACTION_KIND_OF, REMOTE_ROWS, VAULT_ACTION_ROWS, __resetGateForTests, acceptSetupCode, beginRecoveryKey, confirmRecoveryKey,
-  consumeBrowserUnlockGrant, consumeDeliveryGrant, deliveryGrantHash, enrolPresence, grantValid, mintGrant, mintSetupCode,
+  consumeBrowserProfilesGrant, consumeBrowserUnlockGrant, consumeDeliveryGrant, requireBrowserProfilesOwner, deliveryGrantHash, enrolPresence, grantValid, mintGrant, mintSetupCode,
   recoverWithWords, requireBrowserUnlockOwner, requireDeliveryOwner, requireVaultStepUp, rowFor, setAuthPolicy,
 } from './gate'
 import { currentVaultPassword, withVaultPassword } from './password-context'
@@ -239,5 +239,39 @@ describe('the `browser-unlock` grant: ONE browser, single-use, ≤ 5 min, loopba
     expect(log).toContain(deliveryGrantHash(r.grant))
     expect(log).not.toContain(r.grant)
     expect(log).not.toContain(PW)
+  })
+})
+
+describe('S12 r4 — the `browser-profiles` grant ("Delete profiles")', () => {
+  const prof = async (): Promise<string> => { const r = await requireBrowserProfilesOwner(S); if (!r.ok || !r.grant) throw new Error(JSON.stringify(r)); return r.grant }
+  test('asks the fresh proof every time; a cancelled gesture mints nothing', async () => {
+    await withHello()
+    const g0 = hello.gestures
+    await prof(); await prof()
+    expect(hello.gestures - g0).toBe(2)
+    hello.cancel = true
+    expect((await requireBrowserProfilesOwner(S)).ok).toBe(false)
+  })
+  test('single-use (mutant: grant reused), 5 min, this session, loopback only', async () => {
+    await withHello()
+    const g = await prof()
+    expect(consumeBrowserProfilesGrant(g, { session: 'http:other', loopback: true })).toEqual({ ok: false, code: 'grant-invalid' })
+    expect(consumeBrowserProfilesGrant(g, { session: S.session })).toEqual({ ok: false, code: 'owner-proof-local-only' })
+    expect(consumeBrowserProfilesGrant(g, S, T + 5 * 60_000 + 1)).toEqual({ ok: false, code: 'grant-invalid' })
+    expect(consumeBrowserProfilesGrant(g, S)).toEqual({ ok: true, grantId: deliveryGrantHash(g) })
+    expect(consumeBrowserProfilesGrant(g, S)).toEqual({ ok: false, code: 'grant-invalid' })
+  })
+  test('classes never stand for each other: an unlock grant does not delete, a profiles grant does not unlock', async () => {
+    await withHello()
+    const unlock = await mint()
+    expect(consumeBrowserProfilesGrant(unlock, S)).toEqual({ ok: false, code: 'grant-invalid' })
+    const g = await prof()
+    expect(consumeBrowserUnlockGrant(g, S, ID)).toEqual({ ok: false, code: 'grant-invalid' })
+    expect(consumeBrowserProfilesGrant(g, S).ok).toBe(true)
+  })
+  test('no token / forged token never spend', async () => {
+    await withHello()
+    expect(consumeBrowserProfilesGrant(null, S)).toEqual({ ok: false, code: 'grant-invalid' })
+    expect(consumeBrowserProfilesGrant('x.y', S)).toEqual({ ok: false, code: 'grant-invalid' })
   })
 })

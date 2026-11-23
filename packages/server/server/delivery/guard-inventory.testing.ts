@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { join, dirname, normalize, isAbsolute, relative } from 'node:path'
 import { digest, localImports, moduleCapabilities, rawWriters, storeReach } from './guard-ast.testing'
-import { productionSources, read } from './lint-scan.testing'
+import { isBuildOutput, productionSources, read } from './lint-scan.testing'
 
 export interface Inventory { base: string; contexts: Record<string, string[]>; writers: Record<string, string[]> }
 export function inventoryGrowth(actual: Readonly<Record<string, readonly string[]>>, baseline: Readonly<Record<string, readonly string[]>>): string[] {
@@ -20,7 +20,7 @@ export function inventoryGrowth(actual: Readonly<Record<string, readonly string[
 
 export function historicInventory(): Inventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory.fixture.json'), 'utf8')
-  if (digest(text) !== '769e512b1c77e39668e938dd7dbccee82948dbe187bd5513714ea1e0e2d590cf') throw new Error('Historical guard inventory changed: the S2a ceiling is pinned to 1b1c8a941; migrate sites by supplying contexts, never enlarge the fixture')
+  if (digest(text) !== 'e5670f8578499142a4ab25ddc2948260abd350213b625af2ddae6f3e06271f6b') throw new Error('Historical guard inventory changed: the S2a ceiling is pinned to 1b1c8a941; migrate sites by supplying contexts, never enlarge the fixture')
   return JSON.parse(text)
 }
 
@@ -33,7 +33,7 @@ export function historicInventory(): Inventory {
  *     may only shrink — deny by default: a retargeted call, or a new module handed a book path, grows it and fails.
  */
 export interface ReachInventory { base: string; writers: Record<string, string[]>; reach: Record<string, string[]> }
-export const R3_INVENTORY_DIGEST = '1a01fe28717c2bcf056dd42c4982319580b3eebb55b5f58e53d859becf43146a'
+export const R3_INVENTORY_DIGEST = '9b272007c0ef256b8496c631d0578d5401ecb0770afb5a04d73d80340cbcfb59'
 export function r3Inventory(): ReachInventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory-r3.fixture.json'), 'utf8')
   if (digest(text) !== R3_INVENTORY_DIGEST) throw new Error('Historical guard inventory changed: the S2a r3 ceiling is pinned; a writer or a book reference may disappear, never be added')
@@ -42,7 +42,7 @@ export function r3Inventory(): ReachInventory {
 
 /** Every production module of the repo (packages + scripts), as `doors.lint.test.ts` scans them. */
 export function scannedSources(pkgs: string): string[] {
-  return [...productionSources(pkgs, pkgs), ...productionSources(join(pkgs, '..', 'scripts'), pkgs)]
+  return [...productionSources(pkgs, pkgs), ...productionSources(join(pkgs, '..', 'scripts'), pkgs)].filter(rel => !isBuildOutput(rel))
 }
 export const GUARDED_STORES = new Set(['server/server/sessions/task-store.ts', 'server/server/delivery/store.ts'])
 
@@ -63,7 +63,7 @@ export function liveInventory(pkgs: string): { writers: Record<string, string[]>
 /** Independently pinned r3 source ceiling. Capability-bearing modules may disappear, never grow. */
 export function moduleCeiling(): Record<string, string[]> {
   const text = readFileSync(join(import.meta.dir, 'guard-modules.fixture.json'), 'utf8')
-  if (digest(text) !== 'fc9c1b62c5d98c3a44b23cf022c74ab7eb9b9283c61afa88eb00f7815ad6096e') throw new Error('Historical module capability inventory changed: shrink only')
+  if (digest(text) !== 'c4e921341b5f3e5f2b4f18db5abba3de3bf45c8a0d80286baed4843e933666b9') throw new Error('Historical module capability inventory changed: shrink only')
   return JSON.parse(text).modules
 }
 
@@ -94,6 +94,6 @@ export function helperInventory(sources: Readonly<Record<string, string>>, base 
 /** r5 pins existing helper reuse independently; new importers must never be added to this ceiling. */
 export function helperCeiling(): Record<string, string[]> {
   const text = readFileSync(join(import.meta.dir, 'guard-helpers.fixture.json'), 'utf8')
-  if (digest(text) !== 'eeb77624cec6e5434e4eb9aa9b7ad3d736c37743ed436a865dc186588c000a68') throw new Error('Historical raw-writer helper inventory changed: shrink only')
+  if (digest(text) !== '05c419527eb7dba385080c9c532ef50eb79715041e72e97ede723735b3bdbbd5') throw new Error('Historical raw-writer helper inventory changed: shrink only')
   return JSON.parse(text)
 }

@@ -115,13 +115,14 @@ export function deriveStep(f: StepFacts): DerivedStep | null {
       return { step: 1, signal: 'session' }
     }
     case 'leader': {
-      if (!f.rec) return null
+      // No record: the board status itself is the evidence the piece entered this stage (every column carries a percent).
+      if (!f.rec) return { step: 1, signal: 'stage' }
       if (f.rec.review && since(f.rec.review.at, f.sinceMs)) return { step: 3, signal: 'review' }
       if (gateOk(f.rec, 'delecoes', f.sinceMs)) return { step: 2, signal: 'deletions-gate' }
       return { step: 1, signal: 'stage' }
     }
     case 'merge': {
-      if (!f.rec) return null
+      if (!f.rec) return { step: 1, signal: 'stage' }
       if (f.rec.mergeSha || gateOk(f.rec, 'mergeado', f.sinceMs)) return { step: 3, signal: 'merged' }
       if (f.rec.pr) return { step: 2, signal: 'pr' }
       return { step: 1, signal: 'stage' }

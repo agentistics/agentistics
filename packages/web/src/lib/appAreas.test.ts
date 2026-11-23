@@ -66,7 +66,7 @@ describe('every router path is in the registry or explicitly unlisted', () => {
     const paths = [...src.matchAll(/<Route\s+path="([^"]+)"/g)].map(m => m[1]!)
       .filter(p => !p.includes('*'))
     const nested = new Set(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup',
-      'harnesses', 'pricing', 'billing', 'install', 'whatsnew', 'live', 'chat', 'vault', 'providers', 'memory', 'teams'])
+      'harnesses', 'pricing', 'billing', 'install', 'whatsnew', 'live', 'chat', 'browser', 'vault', 'providers', 'memory', 'teams'])
     for (const p of paths) {
       const abs = '/' + p.replace(/:\w+/g, 'x')
       const known = areaOfPath(abs) !== null || UNLISTED_ROUTES.includes(p) || nested.has(p)

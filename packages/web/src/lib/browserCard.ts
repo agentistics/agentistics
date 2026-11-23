@@ -162,6 +162,17 @@ export async function requestBrowserUnlockGrant(managedId: string): Promise<Owne
 
 const UNAVAILABLE = new Set(['owner_proof_unavailable', 'owner-proof-unavailable'])
 
+/** Does this refusal ask to be answered by opening the Vault? The ONE rule the padlock and the repository editor share. */
+export function refusalOpensVault(code: string, action?: { kind?: unknown } | null): boolean {
+  return UNAVAILABLE.has(code) || action?.kind === 'open-vault'
+}
+
+/** Client-side navigation to the Vault (a router is not required of whoever mounts the caller). */
+export function openVaultPage(): void {
+  window.history.pushState({}, '', '/vault')
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 /** The words for a refused padlock change — ours for the proof codes, else the server's sentence. */
 export function lockRefusalSentence(code: string, serverSentence: string | undefined, pt: boolean): string {
   if (UNAVAILABLE.has(code)) {
@@ -197,5 +208,5 @@ export async function setBrowserLock(
   const code = typeof r.body.error === 'string' ? r.body.error : 'failed'
   const sentence = typeof r.body.sentence === 'string' ? r.body.sentence : undefined
   const action = r.body.action as { kind?: unknown } | undefined
-  return { ok: false, code, sentence: lockRefusalSentence(code, sentence, pt), openVault: UNAVAILABLE.has(code) || action?.kind === 'open-vault' }
+  return { ok: false, code, sentence: lockRefusalSentence(code, sentence, pt), openVault: refusalOpensVault(code, action) }
 }

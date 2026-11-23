@@ -120,6 +120,8 @@ export type SessionCommand =
   | { kind: 'note'; ref: string; text: string }
   /** CONTA.TROCA: move a session to another account of its harness. No account: list the options. */
   | { kind: 'switch-account'; ref: string; accountId?: string; harness?: string; resend?: boolean; json?: boolean }
+  /** LIVE.LIDER: the tasks a leader leads besides its filing. No ref, no --add/--remove: list every leader's. */
+  | { kind: 'leads'; ref?: string; add: string[]; remove: string[]; json?: boolean }
   | { kind: 'help' }
   | { kind: 'error'; message: string }
 
@@ -276,6 +278,23 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     const ref = argv[1]
     if (!ref) return { kind: 'error', message: `Usage: agentop session ${head} <ses_…>  (native Agentistics sessions)` }
     return { kind: head, ref }
+  }
+
+  if (head === 'leads') {
+    const usage = 'Usage: agentop session leads [<id|name>] [--add <task-id>]... [--remove <task-id>]... [--json]'
+    const add: string[] = []; const remove: string[] = []; let ref: string | undefined
+    const rest = argv.slice(1)
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i]!
+      if (a === '--json') continue
+      if (a === '--add' || a === '--remove') {
+        const v = rest[++i]
+        if (!v || v.startsWith('--')) return { kind: 'error', message: usage }
+        ;(a === '--add' ? add : remove).push(v)
+      } else if (a.startsWith('--') || ref) return { kind: 'error', message: usage }
+      else ref = a
+    }
+    return { kind: 'leads', ...(ref ? { ref } : {}), add, remove, ...(jsonFlag ? { json: true } : {}) }
   }
 
   if (head === 'switch-account') {

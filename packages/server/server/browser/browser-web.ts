@@ -88,6 +88,8 @@ export interface RouteHost {
   stop(key: string, reason: StopReason): Promise<void>
   actionHost(key: string): ActionHost | null
   status(): Promise<unknown>
+  /** S12: remove the profile folders; refused (`browser_live`) while any browser is live. */
+  deleteProfiles?(): { ok: true; removed: number } | { ok: false; error: 'browser_live'; live: number; sentence: string }
 }
 
 export interface RouteDeps {
@@ -121,6 +123,11 @@ export interface RouteDeps {
    * minted by the vault proof)? The person's own browser answers only to it; ABSENT = no proof = refused.
    */
   personalGrant?: () => boolean
+  /**
+   * S12 r4: spend the person's single-use vault grant for "Delete profiles" (`X-Agentop-Owner-Grant`, minted by
+   * `POST /api/vault/browser-profiles`). ABSENT = no proof possible = refused (fail-closed).
+   */
+  profilesProof?: () => Promise<OwnerProofVerdict>
   /** The language of the refusal sentences (the vault's, so one setting speaks everywhere). */
   lang?: () => 'en' | 'pt'
 }
@@ -225,6 +232,30 @@ export async function browserRoute(method: string, pathname: string, body: unkno
   if (pathname === '/api/browser/status') {
     if (method !== 'GET') return { status: 405, body: { error: 'method_not_allowed' } }
     return { status: 200, body: withoutPersonal(withLocks(await deps.host.status(), deps), deps.personalGrant?.() === true) }
+  }
+  // S12: "Delete profiles" — the person's act (a session is refused, as for the padlock), refused in words
+  // while any browser is live.
+  if (pathname === '/api/browser/profiles/delete') {
+    if (method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } }
+    // PERSON-ONLY, fail-closed, like the padlock: a session, a forged proof and a caller the socket cannot
+    // identify are all refused (the personal profile holds the person's cookies and logins).
+    const caller = deps.caller ? deps.caller() : { kind: 'unknown' as const, reason: 'no-peer' as const }
+    const refused = callerRefusal(caller, 'profiles')
+    if (refused) {
+      return { status: refused.status, body: { ok: false, error: refused.error, sentence: refused.sentence, ...(refused.why ? { why: refused.why } : {}) } }
+    }
+    if (!deps.host.deleteProfiles) return { status: 501, body: { ok: false, error: 'unsupported' } }
+    // The socket above is a hint (a same-user agent can escape it); the owner's single-use vault grant is the proof.
+    // (A live browser answering 409 below spends the grant; the UI disables the button while one is live.)
+    const proof: OwnerProofVerdict = deps.profilesProof
+      ? await deps.profilesProof()
+      : ownerProofRefusal('grant-invalid', deps.lang?.() ?? 'en', false, 'profiles')
+    if (!proof.ok) {
+      const { ok: _ok, status, ...rest } = proof
+      return { status, body: { ok: false, ...rest } }
+    }
+    const r = deps.host.deleteProfiles()
+    return r.ok ? { status: 200, body: r } : { status: 409, body: r }
   }
   if (pathname === '/api/browser/lock') {
     if (method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } }
@@ -340,7 +371,7 @@ export function browserLocks(opts: BrowserWebOpts): BrowserLocks {
 export function browserRouteDeps(
   opts: BrowserWebOpts,
   verify: RouteDeps['verify'],
-  extra: { harnessOf?: RouteDeps['harnessOf']; audit?: RouteDeps['audit']; caller?: RouteDeps['caller']; ownerProof?: RouteDeps['ownerProof']; personalGrant?: RouteDeps['personalGrant']; lang?: RouteDeps['lang'] } = {},
+  extra: { harnessOf?: RouteDeps['harnessOf']; audit?: RouteDeps['audit']; caller?: RouteDeps['caller']; ownerProof?: RouteDeps['ownerProof']; personalGrant?: RouteDeps['personalGrant']; profilesProof?: RouteDeps['profilesProof']; lang?: RouteDeps['lang'] } = {},
 ): RouteDeps {
   const h = browserHost(opts)
   return {
@@ -352,6 +383,7 @@ export function browserRouteDeps(
     caller: extra.caller,
     ownerProof: extra.ownerProof,
     personalGrant: extra.personalGrant,
+    profilesProof: extra.profilesProof,
     lang: extra.lang,
     sessionLive: opts.sessionLive,
     run: async (ah, args) => {
