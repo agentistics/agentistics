@@ -4217,8 +4217,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         }
         // S10 r3: the person's own browser (verbs AND status) answers to the owner's grant; the HTTP session is the vault's.
         const [{ requestHasPersonalGrant }, { vaultHttpSession: httpSession }, { vaultLang: lang }] = await Promise.all([import('./browser/personal-doors'), import('./vault/http'), import('./vault/service')])
+        const { homeUrlOf } = await import('./browser/browser-web')
+        const homeUrl = homeUrlOf((await readPreferences()).browserHomeUrl)
         const deps = browserRouteDeps({ dataDir: AGENTISTICS_DATA_DIR, agentisticsPorts: [PORT, WEB_PORT], sessionLive }, verifySessionIdentity, {
           harnessOf, audit, ownerProof, profilesProof, ...(lockCaller ? { caller: () => lockCaller } : {}),
+          homeUrl: () => homeUrl,
           personalGrant: () => requestHasPersonalGrant(req, httpSession('local')),
           lang: () => (lang() === 'pt' ? 'pt' : 'en'),
         })

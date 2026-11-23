@@ -11,7 +11,7 @@
  * absent until S11 gives it somewhere to go (a control with nowhere to go is not drawn).
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDownToLine, Lock, PictureInPicture2, Plus, X } from 'lucide-react'
+import { ArrowDownToLine, Lock, Minus, PictureInPicture2, X } from 'lucide-react'
 import { LabelButton } from '../nay/NayWindowFrame'
 import { dockBrowser, updateBrowserWindows, useBrowserPlace } from '../../lib/browserWindows'
 import { TabDot, TabStripView, type TabStripItem } from '../sessions/SessionTabStrip'
@@ -25,7 +25,7 @@ import { openEventStream } from '../../lib/streamMux'
 import { requestPersonalGrant, unlockSentence, usePersonalGrant, type AskGrant } from '../../lib/personalGrant'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { browserWatching } from '../../lib/browserStream'
-import { normalizeAddress, type PostFn } from '../../lib/browserPersonal'
+import { closePersonalBrowser, minimizePersonalBrowser, normalizeAddress, restoredSentence, type PostFn } from '../../lib/browserPersonal'
 
 export interface BrowserPanelProps {
   lang: 'pt' | 'en'
@@ -47,6 +47,14 @@ export interface BrowserPanelProps {
   askGrant?: AskGrant
   /** S11: "Flutuar" in the header (the app-level window). Absent = no button. */
   onFloat?: () => void
+  /**
+   * "Minimizar navegador": hide the component, Chromium and its tabs keep running. Defaults to `onClose` (the
+   * caller's way of hiding the panel). When `controls` already carries a minimize (the right slot's trio), no
+   * second button is drawn — that one is wired to the same verb by the page.
+   */
+  onMinimize?: () => void
+  /** Injected in tests: skip the "open on mount" call (the default page / the restored tabs). */
+  autoOpen?: boolean
   /** S11: drawn INSIDE the floating window — the window frame is the header, and it never shows the placeholder. */
   headless?: boolean
 }
@@ -71,11 +79,11 @@ function useDocumentVisible(): boolean {
 export function BrowserPanel(props: BrowserPanelProps) {
   const place = useBrowserPlace('personal')
   if (props.headless || place === 'docked') return <BrowserPanelLive {...props} />
-  const { lang, onClose, hideCloseButton, controls } = props
+  const { lang, onClose, hideCloseButton, controls, onMinimize, post } = props
   const pt = lang === 'pt'
   return (
     <div data-browser-panel data-browser-floating={place} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0, background: 'var(--bg-card)' }}>
-      <PanelHeader pt={pt} onClose={onClose} hideCloseButton={hideCloseButton} controls={controls} />
+      <PanelHeader pt={pt} onClose={onClose} onMinimize={onMinimize} post={post} hideCloseButton={hideCloseButton} controls={controls} />
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
         <span style={{ color: 'var(--text-tertiary)' }}><PictureInPicture2 size={28} aria-hidden /></span>
         <div style={{ fontSize: 13, fontWeight: 650, color: 'var(--text-primary)' }}>{place === 'minimized' ? (pt ? 'Navegador minimizado' : 'Browser minimized') : (pt ? 'Navegador flutuando' : 'Browser floating')}</div>
@@ -88,8 +96,12 @@ export function BrowserPanel(props: BrowserPanelProps) {
   )
 }
 
-function PanelHeader({ pt, onClose, hideCloseButton, controls, onFloat }: { pt: boolean; onClose: () => void; hideCloseButton?: boolean; controls?: ReactNode; onFloat?: () => void }) {
+function PanelHeader({ pt, onClose, onMinimize, post, hideCloseButton, controls, onFloat }: { pt: boolean; onClose: () => void; onMinimize?: () => void; post?: PostFn; hideCloseButton?: boolean; controls?: ReactNode; onFloat?: () => void }) {
   const mobile = useIsMobile()
+  // Two different verbs: "Fechar" ends the browser (every tab, the Chromium); "Minimizar" only hides the component.
+  const closeBrowser = () => { void closePersonalBrowser(pt, post); onClose() }
+  const minimizeBrowser = () => { void minimizePersonalBrowser(pt, post); (onMinimize ?? onClose)() }
+  const btn = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: mobile ? 44 : 26, height: mobile ? 44 : 22, flexShrink: 0, borderRadius: 6, padding: 0, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer' } as const
   return (
     <header style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minWidth: 0, padding: mobile ? '8px 12px' : '10px 12px', borderBottom: '1px solid var(--border)', minHeight: mobile ? 44 : undefined, boxSizing: 'border-box' }}>
       <span style={{ color: 'var(--anthropic-orange)', display: 'inline-flex', flexShrink: 0 }}><GlobeSearchIcon size={15} /></span>
@@ -104,10 +116,18 @@ function PanelHeader({ pt, onClose, hideCloseButton, controls, onFloat }: { pt: 
           fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer',
         }}><PictureInPicture2 size={13} aria-hidden />{pt ? 'Flutuar' : 'Float'}</button>
       )}
+      {!controls && (
+        <button
+          type="button" className="ag-tap-icon" data-browser-minimize onClick={minimizeBrowser}
+          title={pt ? 'Minimizar navegador — continua rodando, as abas voltam quando você abrir' : 'Minimize browser — it keeps running, the tabs are there when you reopen'}
+          aria-label={pt ? 'Minimizar navegador' : 'Minimize browser'} style={btn}
+        ><Minus size={13} /></button>
+      )}
       {!hideCloseButton && (
         <button
-          type="button" className="ag-tap-icon" onClick={onClose} title={pt ? 'Fechar' : 'Close'} aria-label={pt ? 'Fechar o navegador' : 'Close the browser'}
-          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: mobile ? 44 : 26, height: mobile ? 44 : 22, flexShrink: 0, borderRadius: 6, padding: 0, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+          type="button" className="ag-tap-icon" data-browser-close onClick={closeBrowser}
+          title={pt ? 'Fechar navegador — fecha todas as abas' : 'Close browser — closes every tab'}
+          aria-label={pt ? 'Fechar navegador' : 'Close browser'} style={btn}
         ><X size={13} /></button>
       )}
       {controls}
@@ -115,7 +135,7 @@ function PanelHeader({ pt, onClose, hideCloseButton, controls, onFloat }: { pt: 
   )
 }
 
-function BrowserPanelLive({ lang, onClose, hideCloseButton, controls, onOpenVault, openStream, post, liveOverride, tabsOverride, askGrant, onFloat, headless }: BrowserPanelProps) {
+function BrowserPanelLive({ lang, onClose, onMinimize, autoOpen, hideCloseButton, controls, onOpenVault, openStream, post, liveOverride, tabsOverride, askGrant, onFloat, headless }: BrowserPanelProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
   const visible = useDocumentVisible()
@@ -143,6 +163,26 @@ function BrowserPanelLive({ lang, onClose, hideCloseButton, controls, onOpenVaul
   const [unlockRefusal, setUnlockRefusal] = useState<{ sentence: string; openVault: boolean } | null>(null)
   const [proving, setProving] = useState(false)
   const [listOpen, setListOpen] = useState(false)
+  // Never an empty browser: opening it asks the server for the person's browser — the live one as it was, the tabs
+  // of one stopped while minimized (said in words), or the default page. Once per unlock.
+  const [notice, setNotice] = useState<string | null>(null)
+  const [opening, setOpening] = useState(false)
+  const openedFor = useRef<string | null>(null)
+  const shouldOpen = autoOpen ?? liveOverride === undefined
+  const openBrowser = async () => {
+    setOpening(true)
+    const r = await act('open')
+    setOpening(false)
+    if (!r.ok) { if (!r.needsUnlock) setRefusal(r.sentence); return }
+    if (r.restored && r.restored > 0) setNotice(restoredSentence(r.restored, pt))
+    refresh()
+  }
+  useEffect(() => {
+    if (!unlocked || !shouldOpen || openedFor.current === grant) return
+    openedFor.current = grant
+    void openBrowser()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unlocked, grant, shouldOpen])
 
   const prove = async () => {
     setProving(true); setUnlockRefusal(null)
@@ -215,7 +255,7 @@ function BrowserPanelLive({ lang, onClose, hideCloseButton, controls, onOpenVaul
 
   return (
     <div data-browser-panel style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0, background: 'var(--bg-card)' }}>
-      {!headless && <PanelHeader pt={pt} onClose={onClose} hideCloseButton={hideCloseButton} controls={controls} onFloat={onFloat} />}
+      {!headless && <PanelHeader pt={pt} onClose={onClose} onMinimize={onMinimize} post={post} hideCloseButton={hideCloseButton} controls={controls} onFloat={onFloat} />}
       {!unlocked ? (
         <div data-browser-locked style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
           <span style={{ color: 'var(--text-tertiary)' }}><Lock size={28} aria-hidden /></span>
@@ -270,6 +310,12 @@ function BrowserPanelLive({ lang, onClose, hideCloseButton, controls, onOpenVaul
         onForward={() => void run('forward', activeId ? { tab: activeId } : {})}
         onReload={() => void run('reload', activeId ? { tab: activeId } : {})}
       />
+      {notice && (
+        <div role="status" data-browser-restored style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, lineHeight: 1.5, color: 'var(--text-primary)', background: 'var(--bg-elevated)', flexShrink: 0 }}>
+          <span style={{ flex: 1, minWidth: 0 }}>{notice}</span>
+          <button type="button" className="ag-tap-icon" aria-label={pt ? 'Dispensar aviso' : 'Dismiss'} onClick={() => setNotice(null)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: mobile ? 44 : 22, height: mobile ? 44 : 22, flexShrink: 0, border: 'none', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}><X size={13} /></button>
+        </div>
+      )}
       {refusal && (
         <div role="alert" data-browser-refusal style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, lineHeight: 1.5, color: 'var(--text-primary)', background: 'var(--bg-elevated)', flexShrink: 0 }}>{refusal}</div>
       )}
@@ -278,14 +324,13 @@ function BrowserPanelLive({ lang, onClose, hideCloseButton, controls, onOpenVaul
       ) : (
         <div data-browser-empty style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
           <span style={{ color: 'var(--text-tertiary)' }}><GlobeSearchIcon size={28} /></span>
-          <div style={{ fontSize: 13, fontWeight: 650, color: 'var(--text-primary)' }}>{pt ? 'Abrir uma página' : 'Open a page'}</div>
-          <div style={{ fontSize: 12, lineHeight: 1.5, maxWidth: 280 }}>
-            {pt ? 'Digite um endereço acima. As abas ficam aqui, ao lado da conversa.' : 'Type an address above. Your tabs stay here, next to the conversation.'}
-          </div>
-          <button
-            type="button" disabled={busy} onClick={() => void newTab()}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: mobile ? 44 : 30, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border-strong, var(--border))', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-          ><Plus size={13} aria-hidden />{pt ? 'Nova aba em branco' : 'New blank tab'}</button>
+          <div style={{ fontSize: 13, fontWeight: 650, color: 'var(--text-primary)' }}>{opening ? (pt ? 'Abrindo o navegador…' : 'Opening the browser…') : (pt ? 'O navegador ainda não abriu' : 'The browser has not opened yet')}</div>
+          {!opening && (
+            <button
+              type="button" data-browser-open disabled={busy} onClick={() => void openBrowser()}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: mobile ? 44 : 30, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border-strong, var(--border))', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+            >{pt ? 'Abrir a página inicial' : 'Open the home page'}</button>
+          )}
         </div>
       )}
       </>)}

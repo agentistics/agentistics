@@ -37,6 +37,9 @@ export default function BrowserSettings({ askProfilesGrant }: { askProfilesGrant
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [home, setHome] = useState('')
+  const [homeSaved, setHomeSaved] = useState('')
+  const [homeError, setHomeError] = useState<string | null>(null)
 
   const loadStatus = useCallback(async () => {
     try {
@@ -48,11 +51,12 @@ export default function BrowserSettings({ askProfilesGrant }: { askProfilesGrant
   useEffect(() => {
     void (async () => {
       const [prefs, session] = await Promise.all([
-        fetch('/api/preferences').then(r => (r.ok ? r.json() : {}) as Promise<{ browserEnabled?: boolean }>).catch(() => ({}) as { browserEnabled?: boolean }),
+        fetch('/api/preferences').then(r => (r.ok ? r.json() : {}) as Promise<{ browserEnabled?: boolean; browserHomeUrl?: string }>).catch(() => ({}) as { browserEnabled?: boolean; browserHomeUrl?: string }),
         fetch('/api/session').then(r => (r.ok ? r.json() : {}) as Promise<{ capabilities?: { localShell?: boolean } }>).catch(() => ({}) as { capabilities?: { localShell?: boolean } }),
       ])
       // Absent reads as ON (`browser-gate.ts`); only an explicit false is off.
       const on = prefs.browserEnabled !== false
+      setHome(prefs.browserHomeUrl ?? ''); setHomeSaved(prefs.browserHomeUrl ?? '')
       setEnabled(on)
       setCapable(session.capabilities?.localShell !== false)
       if (on) await loadStatus()
@@ -98,6 +102,20 @@ export default function BrowserSettings({ askProfilesGrant }: { askProfilesGrant
     }
   }, [pt, loadStatus, askProfilesGrant])
 
+  const saveHome = useCallback(async () => {
+    const t = home.trim()
+    if (t === homeSaved) return
+    if (t !== '' && !/^https?:\/\/[^\s]+$/i.test(t)) {
+      setHomeError(pt ? 'Use um endereço completo, começando com http:// ou https://.' : 'Use a full address starting with http:// or https://.')
+      return
+    }
+    setHomeError(null)
+    try {
+      await fetch('/api/preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ browserHomeUrl: t === '' ? null : t }) })
+      setHomeSaved(t)
+    } catch { setHomeError(pt ? 'Não foi possível salvar.' : 'Could not save.') }
+  }, [home, homeSaved, pt])
+
   const lines = status ? memoryLines(status.live, pt) : []
   const total = status ? totalBytes(status.live) : null
   const exe = status ? executableLine(status.executable, pt) : null
@@ -124,6 +142,20 @@ export default function BrowserSettings({ askProfilesGrant }: { askProfilesGrant
           label={pt ? 'Habilitar o navegador' : 'Enable the browser'}
         />
       </PrefRow>
+
+      {enabled === true && (
+        <PrefRow
+          label={pt ? 'Página inicial do seu navegador' : 'Home page of your browser'}
+          sub={homeError ?? (pt ? 'Abre quando o seu navegador não tem nenhuma aba, e em cada aba nova. Vazio = https://www.google.com.' : 'Opens when your browser has no tab, and in every new tab. Empty = https://www.google.com.')}
+        >
+          <input
+            type="url" data-browser-home value={home} placeholder="https://www.google.com"
+            aria-label={pt ? 'Página inicial do navegador' : 'Browser home page'}
+            onChange={e => setHome(e.target.value)} onBlur={() => void saveHome()} onKeyDown={e => { if (e.key === 'Enter') void saveHome() }}
+            style={{ width: 240, maxWidth: '100%', boxSizing: 'border-box', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border-strong, var(--border))', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 13 }}
+          />
+        </PrefRow>
+      )}
 
       <Divider />
 

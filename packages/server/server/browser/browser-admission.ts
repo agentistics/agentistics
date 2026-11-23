@@ -31,6 +31,8 @@ export interface LiveBrowserView {
   phase: 'starting' | 'live'
   viewers: number
   lastActivityMs: number
+  /** The person's browser is minimized (nobody sees it): the first one to go when memory is short. */
+  minimized?: boolean
 }
 
 export interface AdmissionInput {
@@ -71,7 +73,12 @@ export function decideAdmission(input: AdmissionInput): AdmissionDecision {
   if (after > MAX_LIVE_BROWSERS) return { ok: false, reason: 'live-ceiling' }
 
   if (input.memAvailable === null) return { ok: true, ...(evict ? { evict } : {}), memory: 'unmeasured' }
-  if (input.memAvailable < MIN_AVAILABLE_BYTES) return { ok: false, reason: 'low-memory', memAvailable: input.memAvailable }
+  if (input.memAvailable < MIN_AVAILABLE_BYTES) {
+    // A minimized personal browser is the cheapest thing to give up: its tabs are kept and come back on reopen.
+    const mini = input.owner.kind === 'session' && !evict ? input.live.find(b => b.owner.kind === 'personal' && b.minimized && b.phase === 'live' && b.viewers === 0) : undefined
+    if (mini) return { ok: true, evict: mini.key, memory: 'ok' }
+    return { ok: false, reason: 'low-memory', memAvailable: input.memAvailable }
+  }
   return { ok: true, ...(evict ? { evict } : {}), memory: 'ok' }
 }
 

@@ -44,9 +44,9 @@ export function normalizeAddress(input: string, pt: boolean): AddressResult {
 }
 
 /** `tab`: the tab a verb acted on or opened (`tab_new` answers the new tab's id). `needsUnlock`: the owner's grant is missing or no longer valid. */
-export type PersonalOutcome = { ok: true; tab?: string } | { ok: false; sentence: string; needsUnlock?: boolean }
+export type PersonalOutcome = { ok: true; tab?: string; restored?: number; wasStopped?: boolean } | { ok: false; sentence: string; needsUnlock?: boolean }
 
-export type PersonalAction = 'navigate' | 'back' | 'forward' | 'reload' | 'tab_new' | 'tab_select' | 'tab_close' | 'close'
+export type PersonalAction = 'navigate' | 'back' | 'forward' | 'reload' | 'tab_new' | 'tab_select' | 'tab_close' | 'close' | 'minimize' | 'open'
 
 /** Server refusal codes the panel knows, said in Portuguese (the server's own sentences are English). */
 function ptSentenceFor(error: unknown, reason: unknown): string | null {
@@ -89,11 +89,36 @@ export async function personalAct(action: PersonalAction, args: Record<string, u
   try {
     const r = await post(`/api/browser/personal/${action}`, args)
     const ok = r.status < 400 && !(r.body && typeof r.body === 'object' && (r.body as { ok?: unknown }).ok === false)
-    if (ok) { const tab = r.body && typeof r.body === 'object' ? (r.body as { tab?: unknown }).tab : undefined; return typeof tab === 'string' ? { ok: true, tab } : { ok: true } }
+    if (ok) {
+      const b = r.body && typeof r.body === 'object' ? r.body as { tab?: unknown; restored?: unknown; wasStopped?: unknown } : {}
+      return {
+        ok: true,
+        ...(typeof b.tab === 'string' ? { tab: b.tab } : {}),
+        ...(typeof b.restored === 'number' ? { restored: b.restored } : {}),
+        ...(typeof b.wasStopped === 'boolean' ? { wasStopped: b.wasStopped } : {}),
+      }
+    }
     // The server no longer knows this grant (it restarted, expired, was revoked): forget it, so the panel asks again.
     if (r.body && typeof r.body === 'object' && (r.body as { error?: unknown }).error === 'personal_proof_required') { clearPersonalGrant(); return { ok: false, sentence: personalFailure(r.status, r.body, pt), needsUnlock: true } }
     return { ok: false, sentence: personalFailure(r.status, r.body, pt) }
   } catch {
     return { ok: false, sentence: pt ? 'O servidor não respondeu.' : 'The server did not answer.' }
   }
+}
+
+/** "Minimizar navegador": the component goes, Chromium and its tabs keep running (idle ones are stopped after 30 min, tab list kept). */
+export function minimizePersonalBrowser(pt: boolean, post?: PostFn): Promise<PersonalOutcome> {
+  return personalAct('minimize', {}, pt, post)
+}
+
+/** "Fechar navegador": every tab closed and the Chromium stopped; the tab list is gone. */
+export function closePersonalBrowser(pt: boolean, post?: PostFn): Promise<PersonalOutcome> {
+  return personalAct('close', {}, pt, post)
+}
+
+/** Said to the person when their tabs came back after the browser had been stopped while minimized. */
+export function restoredSentence(restored: number, pt: boolean): string {
+  return pt
+    ? `O navegador estava minimizado há muito tempo e foi parado para liberar memória. Reabri ${restored} ${restored === 1 ? 'aba' : 'abas'} (as páginas foram recarregadas).`
+    : `The browser had been minimized for a long time and was stopped to free memory. I reopened ${restored} ${restored === 1 ? 'tab' : 'tabs'} (the pages were reloaded).`
 }
