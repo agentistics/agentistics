@@ -4,11 +4,10 @@
  * plan-limits budgets. Every door (`/api/fleet/new`, `agentop session start|batch`, every reopen)
  * reads its context here, so none of them can grow a second idea of which accounts exist.
  */
-import { stat } from 'node:fs/promises'
 import { featureOn, type HarnessId } from '@agentistics/core'
 import { readAccounts, type AccountsFile } from '../harness-accounts'
 import { resolveChatTranscriptPath } from './chat-tail'
-import { storeDirOf } from './account-transcript-roots'
+import { storeDirOf, transcriptMtimeMs } from './account-transcript-roots'
 import {
   decideRecordedAccount, decideSpawnAccount, routerPicks, spawnAccountMessage, type SpawnAccountContext, type SpawnAccountDecision, type SpawnAccountRefusal, type SpawnAccountRow,
 } from './spawn-account'
@@ -89,7 +88,7 @@ export async function accountOfConversation(
 ): Promise<string | undefined> {
   if (harness !== 'claude') return undefined
   const resolve = deps.resolve ?? resolveChatTranscriptPath
-  const mtime = deps.mtime ?? (async (p: string) => (await stat(p)).mtimeMs)
+  const mtime = deps.mtime ?? transcriptMtimeMs
   try {
     // An account switch COPIES the transcript, so one id can live in several stores and only the
     // newest keeps growing: the NEWEST copy decides (same rule as `newestTranscript`), never the first hit.

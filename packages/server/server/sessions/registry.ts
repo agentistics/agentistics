@@ -23,7 +23,7 @@
  */
 
 import { mkdir, readFile, rename, stat } from 'node:fs/promises'
-import { alertQuarantined, durableWrite, readLastGood, recoverVanished, refreshLastGood } from '../durable-file'
+import { alertQuarantined, durableWrite, readLastGood, recoverVanished, refreshLastGood, sweepStaleDurableTmps } from '../durable-file'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { MANAGED_SESSIONS_FILE } from '../config'
@@ -346,6 +346,8 @@ function sanitizeRepo(raw: unknown): { repo?: ManagedSession['repo'] } {
 }
 
 export function createSessionRegistry(file: string, deps: { lock?: typeof withFileLock } = {}): SessionRegistry {
+  // Temp files a killed writer left in the data dir (other pid, older than 10 min) are removed once per registry.
+  void sweepStaleDurableTmps(dirname(file)).catch(() => {})
   const lock = deps.lock ?? withFileLock
   // One in-process writer. Each write appends to this chain, so read-modify-write sequences run
   // strictly one after another even when several requests land at once.

@@ -13,7 +13,7 @@
 
 import { loadTaskWorld } from './task-source'
 import { buildTaskDetail, buildTaskList, findTask, type AttemptView } from './task-report'
-import { markTask } from './task-web'
+import { guardInfoOf, markTask } from './task-web'
 import { parseTaskArgs, type TaskCommand } from './task-parse'
 import type { TaskStatus } from './task-model'
 import type { AttemptRollup } from './task-rollup'
@@ -120,7 +120,12 @@ async function runMark(ref: string, to: TaskStatus, json: boolean): Promise<numb
   const { resolveCliPrincipal, realCliAuth } = await import('../delivery/cli-principal')
   const { actorOf } = await import('../delivery/principal')
   const who = await resolveCliPrincipal(process.env, false, { pieceKey: ref, move: `mark:${to}` }, await realCliAuth())
-  const out = await markTask(ref, to, actorOf(who.principal))
+  const out = await markTask(ref, to, actorOf(who.principal), { guard: { principal: who.principal } })
+  if (!out.ok && out.guard) {
+    // ENTREGA.GARANTIDA S2a: the STORE's guard refused the move (nothing was written). Same sentence as REST and MCP; exit 2.
+    console.error(json ? JSON.stringify({ ok: false, error: out.guard.code, sentence: out.guard.message, sentencePt: out.guard.messagePt, missing: out.guard.missing }, null, 2) : out.guard.message)
+    return 2
+  }
   if (!out.ok) {
     // `unknown_status` is new: the status vocabulary is an editable list now
     // (`@agentistics/core`'s `taskStatus.ts`), and `abandoned` in particular is no longer seeded by
@@ -155,15 +160,32 @@ async function runMark(ref: string, to: TaskStatus, json: boolean): Promise<numb
   return 0
 }
 
+async function runEdit(ref: string, repo: string, json: boolean): Promise<number> {
+  const { normalizeTaskRepo } = await import('./task-repo')
+  const r = normalizeTaskRepo(repo)
+  if (!r.ok) { console.error(r.reason); return 1 }
+  const { resolveCliPrincipal, realCliAuth } = await import('../delivery/cli-principal')
+  const { actorOf } = await import('../delivery/principal')
+  const who = await resolveCliPrincipal(process.env, false, { pieceKey: ref, move: 'edit:repo' }, await realCliAuth())
+  const { editTask } = await import('./task-web')
+  const ok = await editTask(ref, { repo: r.repo, actor: actorOf(who.principal) })
+  if (!ok) { console.error(`No task matches "${ref}". \`agentop task ls\` lists them.`); return 1 }
+  if (json) console.log(JSON.stringify({ ok: true, ref, repo: r.repo }))
+  else console.log(r.repo ? `"${ref}" repository is now ${r.repo}.` : `"${ref}" repository cleared.`)
+  return 0
+}
+
 function printHelp(): void {
   console.log(`agentop task — the tasks your sessions are filed under.
 
   agentop task                 list every task with its rollup
   agentop task show <id|name>  one task, its attempts side by side
   agentop task deliver <ref>   mark it done, and attach the git evidence
+  agentop task edit <ref> --repo <owner/name|git url>   set the task's repository ('' clears it)
   agentop task abandon <ref>   mark it given up on (no evidence attached)
   agentop task evidence add|ls|rm --subtask S …   the proof a piece needs before review (see: agentop task evidence help)
   agentop evidence capture <url> [--out f]            capture an API response in the shape api-capture evidence accepts
+  agentop task subtask dismiss <task> <subtask> [--owner]   dismiss a PLACEHOLDER the guard sweep restored (task leader or owner; nothing else)
   agentop task refile [--apply]  file workers that were filed on a task alone on the piece they
                                reported on (dry run without --apply; safe to run again)
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
@@ -189,11 +211,43 @@ async function runRefile(apply: boolean, json: boolean): Promise<number> {
   return 0
 }
 
+/**
+ * `agentop task subtask dismiss <task> <subtask> [--owner] [--json]` — the placeholder-only door (B4). The principal is what this process
+ * PROVES (a leader session by its process tree; `--owner` after the vault proof); the server door refuses anything that is not a placeholder.
+ */
+export async function runSubtaskDismiss(argv: string[], deps: { dismiss?: typeof import('./task-web').dismissPlaceholder; principal?: (owner: boolean, piece: string) => Promise<{ kind: string; [k: string]: unknown }> } = {}): Promise<number> {
+  const json = argv.includes('--json')
+  const pos = argv.filter(a => !a.startsWith('--'))
+  if (pos.length < 2) { console.error('usage: agentop task subtask dismiss <task> <subtask> [--owner] [--json]'); return 2 }
+  const subtaskId = pos[1]!
+  const principal = deps.principal
+    ? await deps.principal(argv.includes('--owner'), subtaskId)
+    : (await (async () => {
+      const { resolveCliPrincipal, realCliAuth } = await import('../delivery/cli-principal')
+      return (await resolveCliPrincipal(process.env, argv.includes('--owner'), { pieceKey: subtaskId, move: 'subtask:dismiss' }, await realCliAuth())).principal
+    })())
+  const { dismissPlaceholder } = await import('./task-web')
+  const out = await (deps.dismiss ?? dismissPlaceholder)(subtaskId, { principal: principal as never })
+  if (json) console.log(JSON.stringify(out, null, 2))
+  else console.log(out.ok ? `${subtaskId} dismissed.` : out.message)
+  return out.ok ? 0 : 1
+}
+
 export async function runTask(argv: string[]): Promise<number> {
+  try { return await runTaskInner(argv) } catch (e) {
+    const info = guardInfoOf(e)
+    if (!info) throw e
+    console.error(argv.includes('--json') ? JSON.stringify({ ok: false, error: info.code, sentence: info.message, sentencePt: info.messagePt }, null, 2) : `${info.code}: ${info.message}`)
+    return 2
+  }
+}
+
+async function runTaskInner(argv: string[]): Promise<number> {
   // FLUXO.ENTREGA-DSL P4: the pre-dispatch (staged session) of a subtask.
   // ENTREGA.GARANTIDA S1c: the evidence a piece needs before review (`add|ls|rm`).
   if (argv[0] === 'evidence') return (await import('../delivery/cli')).runDeliveryCli(['task-evidence', ...argv.slice(1)])
   if (argv[0] === 'stage') return (await import('../delivery/cli')).runDeliveryCli(['task-stage', ...argv.slice(1)])
+  if (argv[0] === 'subtask' && argv[1] === 'dismiss') return await runSubtaskDismiss(argv.slice(2))
   if (argv[0] === 'refile') return await runRefile(argv.includes('--apply'), argv.includes('--json'))
   const cmd: TaskCommand = parseTaskArgs(argv)
   switch (cmd.kind) {
@@ -202,6 +256,7 @@ export async function runTask(argv: string[]): Promise<number> {
     case 'ls': return await runLs(cmd.json === true)
     case 'show': return await runShow(cmd.ref, cmd.json === true)
     case 'deliver': return await runMark(cmd.ref, 'done', cmd.json === true)
+    case 'edit': return await runEdit(cmd.ref, cmd.repo, cmd.json === true)
     case 'abandon': return await runMark(cmd.ref, 'abandoned', cmd.json === true)
   }
 }

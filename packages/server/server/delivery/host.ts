@@ -9,6 +9,7 @@ import { execGit } from './classify-host'
 import { createDeliveryStore } from './store'
 import { PHASE_STATUS, type DeliveryRecord, type Phase } from './machine'
 import { boardReviewTargets } from './review-board'
+import { flowContext } from './guard'
 
 /** Uses the same pedidos view as the leader briefing and the existing MCP flow reader. */
 export async function readOwnerRequests(): Promise<import('./service').OwnerRequestFact[] | null> {
@@ -48,13 +49,13 @@ export function defaultDeliveryBoard(): DeliveryBoard {
       }
       // A TASK-level piece (BLOQUEIO.ORFAO: a blocked task with no subtasks) is keyed by the task id and moves the task itself.
       if (await isTaskPiece(subtaskId)) {
-        const moved = await m.markTask(subtaskId, id as never, 'flow:entrega')
+        const moved = await m.markTask(subtaskId, id as never, 'flow:entrega', { guard: flowContext() })
         return moved.ok ? { ok: true } : { ok: false, message: moved.message }
       }
-      const out = await m.patchSubtask(subtaskId, { status: id as never })
+      const out = await m.patchSubtask(subtaskId, { status: id as never }, flowContext())
       return out.ok ? { ok: true } : { ok: false, message: out.message }
     },
-    async setCi(subtaskId, ci) { await (await web()).setSubtaskCi(subtaskId, ci) },
+    async setCi(subtaskId, ci) { await (await web()).setSubtaskCi(subtaskId, ci, flowContext()) },
     async logStep(taskId, subtaskId, step, actor) { await (await web()).logSubtaskStep(taskId, subtaskId, step, actor) },
     async comment(taskId, subtaskId, body) { await (await web()).addComment(taskId, { author: 'flow:entrega', body, ...(subtaskId === taskId ? {} : { subtaskId }) }) },
     async subtaskFinished(subtaskId) {
@@ -274,13 +275,37 @@ async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Pr
   const task = book.tasks.find(t => t.id === subtaskId)
   if (book.subtasks.some(s => (task ? s.taskId === task.id : s.parentGroupId === subtaskId) && !subtaskDone(s.status))) return { ok: false, message: 'this piece has open subtasks; decide them first' }
   const out = task
-    ? await m.markTask(subtaskId, to, 'flow:antigas')
-    : await m.patchSubtask(subtaskId, { status: to as never })
-  return out.ok ? { ok: true } : { ok: false, message: out.message ?? 'board refused the change' }
+    ? await m.markTask(subtaskId, to, 'flow:antigas', { guard: flowContext() })
+    : await m.patchSubtask(subtaskId, { status: to as never }, flowContext())
+  return out.ok ? { ok: true } : { ok: false, message: ('guard' in out && out.guard ? out.guard.message : out.message) ?? 'board refused the change' }
+}
+
+/**
+ * S7a (§5.2.6): the PROJECT of each piece — see `custody-project.ts` (Task.repo → the repo of the piece's sessions → the sidebar
+ * folder → unknown). ONE read of the board, the registry and the folders; the rule itself is pure and tested there.
+ */
+export async function custodyProjectsOf(pieces: ReadonlyArray<{ taskId: string; subtaskId: string }>): Promise<ReadonlyMap<string, string>> {
+  const [{ loadTaskWorld }, { readRegistry }, { resolveCustodyProjects }, prefs] = await Promise.all([import('../sessions/task-source'), import('../sessions/registry'), import('./custody-project'), import('../preferences')])
+  const { book } = await loadTaskWorld()
+  const registry = await readRegistry().catch(() => [])
+  const groups = ((await prefs.readPreferences().catch(() => ({}))) as { sessionGroups?: { groups: never[] } }).sessionGroups ?? { groups: [] }
+  return resolveCustodyProjects({
+    pieces,
+    taskRepos: new Map(book.tasks.map(t => [t.id, (t as { repo?: string }).repo ?? ''] as const)),
+    sessions: registry.map(r => ({ id: r.id, conversationId: r.conversationId, taskId: r.taskId, subtaskId: r.subtaskId, repo: r.repo?.repo })),
+    groups: groups as never,
+  })
 }
 
 let cached: DeliveryService | null = null
 /** The process's delivery service (one store path, one set of deps). */
+/** The sweep's board: imported only when a tick runs it, so a CLI verb that never ticks loads none of the task store. */
+function lazySweep(): NonNullable<DeliveryDeps['sweep']> {
+  return {
+    tasks: async () => (await import('../sessions/task-source')).openTaskStore(),
+  }
+}
+
 export function deliveryService(overrides: Partial<DeliveryDeps> = {}): DeliveryService {
   if (cached && Object.keys(overrides).length === 0) return cached
   const store = overrides.store ?? createDeliveryStore()
@@ -301,6 +326,10 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
     oldPieces: async () => (await import('../sessions/task-web')).liveAntigaPieces(),
     autoReconcile: () => autoReconcileEnabled,
     proofStore: proofCacheFile(),
+    // S2b: the guard sweep reads and repairs the board itself (rule A shadow/on only; off does nothing).
+    sweep: lazySweep(),
+    // S7a: the custody clocks (rule C only; off does nothing).
+    custody: { tasks: async () => (await import('../sessions/task-source')).openTaskStore(), projectsOf: custodyProjectsOf, orphanAfterHours: async () => ((await (await import('../preferences')).readPreferences()) as { delivery?: { orphanAfterHours?: unknown } }).delivery?.orphanAfterHours },
     log: line => console.log(line),
     ...overrides,
   })

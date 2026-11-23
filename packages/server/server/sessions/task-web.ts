@@ -24,6 +24,7 @@ import { conversationOwners } from './task-conversations'
 import { historicalLinkId, nativeLinkId, type HistoricalSession, type NativeSessionLink, type NativeSessionUsage } from './task-model'
 import { sanitizeNativeUsage } from './task-native'
 import { planConversationFiling } from './task-historical'
+import { normalizeTaskRepo } from './task-repo'
 import { buildTaskDetail, buildTaskList, findTask, rowsOfTask, subtaskHasSession } from './task-report'
 import { planDeliveryEvidence, type DeliveryEvidence } from './task-evidence'
 import { buildBoardOverview, type BoardOverview } from './task-overview'
@@ -49,6 +50,8 @@ import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './
 import { withEvidenceDeletion } from '../delivery/evidence-delete'
 import type { TaskDetail, TaskListRow } from './task-report'
 import { onBookWrite } from './task-store'
+import { GuardRefused, type GuardContext } from '../delivery/guard'
+import { GuardBusy } from '../delivery/guard-locks'
 import { JOURNAL_STAMPS_PATH, MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
 
 export interface TaskListReply {
@@ -519,12 +522,17 @@ export async function editTask(
     dueDate?: string
     startDate?: string
     labels?: string[]
+    /** The task's repository (`owner/name` or a git URL); `''` clears it. An unusable one refuses the whole edit. */
+    repo?: string
     actor?: string
   },
 ): Promise<boolean> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return false
+  const repoEdit = patch.repo !== undefined ? normalizeTaskRepo(patch.repo) : undefined
+  if (repoEdit && !repoEdit.ok) return false
+  const nextRepo = repoEdit?.ok ? repoEdit.repo : undefined
   const now = new Date().toISOString()
   // An UNKNOWN priority word is refused rather than coerced: `migratePriority` would read it as
   // `none`, which is a real answer ("nobody has said") and would silently overwrite a real one.
@@ -542,6 +550,7 @@ export async function editTask(
     ...(priority !== undefined ? { priority } : {}),
     ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate.trim() } : {}),
     ...(patch.startDate !== undefined ? { startDate: patch.startDate.trim() } : {}),
+    ...(nextRepo !== undefined ? { repo: nextRepo } : {}),
     ...(patch.labels !== undefined
       ? { labels: patch.labels.map(l => l.trim()).filter(Boolean) }
       : {}),
@@ -555,6 +564,9 @@ export async function editTask(
   }
   if (nextType !== undefined && nextType !== (task.type ?? '')) {
     changes.push(event(task.id, actor, 'type', { from: task.type ?? '', to: nextType }))
+  }
+  if (nextRepo !== undefined && nextRepo !== (task.repo ?? '')) {
+    changes.push(event(task.id, actor, 'repo', { from: task.repo ?? '', to: nextRepo }))
   }
   await w.store.logEvents(changes)
   return true
@@ -697,7 +709,19 @@ Promise<{ ok: boolean; reason?: string }> {
   return { ok: true }
 }
 
-export async function deleteTask(ref: string): Promise<boolean> {
+/**
+ * r7 (re-QA r5 F4): the `<ref>` of `POST /api/tasks/<ref>/subtasks` must be the task the subtask belongs to. `ok` also for an id that names
+ * no subtask (the door answers that itself); `no_such_task` / `wrong_task` are refused by the route, so a leader of T cannot act on T2's piece through T's path.
+ */
+export async function subtaskPathCheck(ref: string, subtaskId: string): Promise<'ok' | 'no_such_task' | 'wrong_task'> {
+  const w = await loadTaskWorld()
+  const task = findTask(ref, w.book.tasks)
+  if (!task) return 'no_such_task'
+  const found = w.book.subtasks.find(t => t.id === subtaskId)
+  return found && found.taskId !== task.id ? 'wrong_task' : 'ok'
+}
+
+export async function deleteTask(ref: string, guard?: GuardContext): Promise<boolean> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return false
@@ -705,7 +729,7 @@ export async function deleteTask(ref: string): Promise<boolean> {
     const removed = await remove()
     if (removed) await deleteTaskFiles(task.id)
     return removed
-  }, held))
+  }, held), guard ? { guard } : undefined)
   if (!ok) return false
   // The bytes go with the record. The SESSIONS do not — see `TaskStore.removeTask`.
   // And the NAME leaves `preferences.finishedTasks`, which is the other place the migration reads
@@ -946,7 +970,33 @@ export async function addSubtask(
  * it always passes here, because every top-level item that just reached `done` already needed a
  * session filed on IT to get there).
  */
-export async function patchSubtask(subtaskId: string, patch: {
+/**
+ * ENTREGA.GARANTIDA S2a — what a door answers when the STORE's guard refuses a write (`GuardRefused`, before a byte of either
+ * document landed) or cannot take its locks (`GuardBusy`). One shape for REST, MCP and CLI, so all three say the same sentence.
+ */
+export interface GuardInfo { code: string; message: string; messagePt: string; missing: string[]; piece: string; status: 422 | 409 }
+export type GuardReply = { ok: false; message: string; guard: GuardInfo }
+
+export function guardInfoOf(e: unknown): GuardInfo | null {
+  if (e instanceof GuardRefused) return { code: e.code, message: e.message, messagePt: e.messagePt, missing: e.missing, piece: e.piece, status: 422 }
+  if (e instanceof GuardBusy) return { code: e.code, message: e.message, messagePt: 'outro processo do agentop está escrevendo no quadro; tente de novo', missing: [], piece: '', status: 409 }
+  return null
+}
+
+async function guardedDoor<R>(run: () => Promise<R>): Promise<R | GuardReply> {
+  try { return await run() } catch (e) {
+    const info = guardInfoOf(e)
+    if (!info) throw e
+    return { ok: false, message: info.code, guard: info }
+  }
+}
+
+/** Every door's write goes through here so a refusal by the store is an ANSWER, never a thrown 500. */
+export async function patchSubtask(subtaskId: string, patch: Parameters<typeof patchSubtaskInner>[2], guard?: GuardContext) {
+  return guardedDoor(() => patchSubtaskInner(subtaskId, guard, patch))
+}
+
+async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefined, patch: {
   title?: string
   status?: TaskStatus
   dueDate?: string
@@ -1083,6 +1133,7 @@ export async function patchSubtask(subtaskId: string, patch: {
     ...found,
     ...(patch.title?.trim() ? { title: patch.title.trim() } : {}),
     status,
+    ...(status !== 'blocked' ? { blockedReason: undefined } : {}),
     done: subtaskDone(status),
     // An empty string CLEARS the column — that is how a date is removed, and it is why these are
     // not filtered out the way an empty title is. `startedAt`/`deliveredAt` are NEVER taken from
@@ -1113,7 +1164,7 @@ export async function patchSubtask(subtaskId: string, patch: {
       ? { stagedSession: patch.stagedSession ?? undefined }
       : {}),
     updatedAt: now,
-  })
+  }, guard)
 
   const parent = w.book.tasks.find(t => t.id === found.taskId)
   if (parent) {
@@ -1137,7 +1188,7 @@ export async function patchSubtask(subtaskId: string, patch: {
     // before this subtask's own write landed.
     if (patch.status !== undefined && status !== found.status) {
       const advanced = statusAfterSubtaskProgress(parent.status, status)
-      if (advanced) await markTask(parent.id, advanced, found.title || found.id)
+      if (advanced) await markTaskInner(parent.id, advanced, found.title || found.id, { guard })
     }
 
     // ALL of the task's TOP-LEVEL subtasks (loose subtasks and groups; a group's own MEMBERS never
@@ -1152,7 +1203,7 @@ export async function patchSubtask(subtaskId: string, patch: {
         .map(s => (s.id === found.id ? { ...s, status, parentGroupId: nextParentGroupId } : s))
         .filter(s => s.taskId === found.taskId && !isGroupMember(s))
       const allDone = statusAfterAllSubtasksDone(parent.status, topLevel)
-      if (allDone) await markTask(parent.id, allDone, found.title || found.id)
+      if (allDone) await markTaskInner(parent.id, allDone, found.title || found.id, { guard })
     }
   }
 
@@ -1164,16 +1215,77 @@ export async function patchSubtask(subtaskId: string, patch: {
   return { ok: true }
 }
 
-export async function removeSubtask(subtaskId: string): Promise<boolean> {
-  const w = await loadTaskWorld()
+type PlaceholderReply = { ok: true } | { ok: false; reason: 'placeholder_protected' | 'not_a_placeholder' | 'no_such_subtask' | 'member_accepted' | 'owner_proof_required'; message: string }
+interface DismissDeps {
+  isTaskLeader?: (sessionId: string, taskId: string) => Promise<boolean>
+  /** Test seam: the world the door reads (default: the real one). */
+  world?: () => Promise<{ store: import('./task-store').TaskStore; book: import('./task-model').TaskBook; registryRows: ReadonlyArray<{ id: string; taskId?: string }> }>
+  /** Test seam: the effective role of a registry row (default: `effectiveRole`). */
+  roleOf?: (row: never) => Promise<string>
+}
+
+/**
+ * B4: the ONE door that dismisses a placeholder (REST `dismissPlaceholder: true`, MCP `agentistics_task_subtask`, CLI `task subtask dismiss`).
+ * A piece is a placeholder ONLY when the sweep's ledger says so (`store.placeholderOf`); the `restoredBy` flag in tasks.json is a label.
+ * Not a general remove: a real piece is refused (`not_a_placeholder`).
+ */
+export async function dismissPlaceholder(subtaskId: string, guard?: GuardContext, deps: DismissDeps = {}): Promise<PlaceholderReply> {
+  const w = await (deps.world ?? loadTaskWorld)()
+  const found = w.book.subtasks.find(t => t.id === subtaskId)
+  if (!found) return { ok: false, reason: 'no_such_subtask', message: `subtask ${subtaskId} does not exist` }
+  const { mayDismissPlaceholder, isLeaderOfTask, PLACEHOLDER_PROTECTED_MESSAGE, NOT_A_PLACEHOLDER_MESSAGE } = await import('./placeholder-dismiss')
+  if (!(await w.store.placeholderOf(subtaskId))) return { ok: false, reason: 'not_a_placeholder', message: NOT_A_PLACEHOLDER_MESSAGE }
+  // r5 (re-QA r4 D1/D2): an ACCEPTED member is judged by the SAME rule as `removeSubtask`, BEFORE the leader/owner placeholder rule (the door is placeholder-only, so a non-placeholder is still `not_a_placeholder`): no session removes it, and the owner needs the vault.
+  if (await w.store.acceptedMemberOf(subtaskId)) {
+    const refused = await removeAcceptedMember(w.store, subtaskId, guard)
+    return refused ?? { ok: true }
+  }
+  const may = await mayDismissPlaceholder({
+    principal: guard?.principal, taskId: found.taskId,
+    isTaskLeader: deps.isTaskLeader ?? (async (sid, tid) => isLeaderOfTask(w.registryRows.find(r => r.id === sid), tid, deps.roleOf ?? (async row => String(await (await import('./session-roles')).effectiveRole(row as never))))),
+  })
+  if (!may || !guard) return { ok: false, reason: 'placeholder_protected', message: PLACEHOLDER_PROTECTED_MESSAGE }
+  const done = await w.store.removeSubtask(subtaskId, { dismissPlaceholder: guard })
+  return done ? { ok: true } : { ok: false, reason: 'not_a_placeholder', message: NOT_A_PLACEHOLDER_MESSAGE }
+}
+
+/**
+ * The ONE rule for an ACCEPTED member, shared by `removeSubtask` and `dismissPlaceholder` (r5): only an owner whose proof is the vault removes it
+ * (recorded as `ownerRemoved`); a session is `member_accepted`; a legacy-browser owner (two client-sent headers) is `owner_proof_required`. Null = removed.
+ */
+async function removeAcceptedMember(store: import('./task-store').TaskStore, subtaskId: string, guard?: GuardContext): Promise<{ ok: false; reason: 'member_accepted' | 'owner_proof_required'; message: string } | null> {
+  if (guard?.principal.kind !== 'owner') return { ok: false, reason: 'member_accepted', message: MEMBER_ACCEPTED_MESSAGE }
+  // r4 A1: the legacy-browser owner is two client-sent headers; for a piece that was ACCEPTED that is not proof.
+  if (guard.principal.via !== 'vault-credential') return { ok: false, reason: 'owner_proof_required', message: OWNER_PROOF_REQUIRED_MESSAGE }
+  await store.removeSubtask(subtaskId, { ownerRemoval: guard })
+  return null
+}
+
+export const MEMBER_ACCEPTED_MESSAGE = 'This subtask is an accepted member of a group (it carries an acceptance checkpoint); the piece was accepted, so only the owner may remove it.'
+
+export const OWNER_PROOF_REQUIRED_MESSAGE = 'This subtask is an accepted member of a group: the piece was accepted, so only the owner may remove it, and the owner proof must come from the vault (a fresh grant, or the "required" owner-proof mode) — a browser header is not proof. Turn on the owner proof in Settings → Vault, or confirm the vault dialog, and retry.'
+
+export async function removeSubtask(subtaskId: string, guard?: GuardContext, deps: DismissDeps = {}): Promise<boolean | { ok: false; reason: 'placeholder_protected' | 'not_a_placeholder' | 'no_such_subtask' | 'member_accepted' | 'owner_proof_required'; message: string }> {
+  const w = await (deps.world ?? loadTaskWorld)()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
   if (!found) return false
-  await w.store.removeSubtask(subtaskId)
+  // r3: an ACCEPTED member (done, per the group's sealed checkpoint) is removed only by the owner (no session, a proven owner principal).
+  // The owner's removal is recorded in the guard ledger so the sweep neither restores it nor reports it as missing.
+  if (await w.store.acceptedMemberOf(subtaskId)) {
+    const refused = await removeAcceptedMember(w.store, subtaskId, guard)
+    return refused ?? true
+  }
+  // B4: a piece the sweep's LEDGER names is dismissed by the task leader or the owner — and only by them. The flag in the file is not consulted.
+  if (await w.store.placeholderOf(subtaskId)) {
+    const out = await dismissPlaceholder(subtaskId, guard, deps)
+    return out.ok ? true : out
+  }
+  await w.store.removeSubtask(subtaskId, guard ? { guard } : undefined)
   return true
 }
 
 /** The tick, expressed as what it means: a move to `done`, or back to `todo`. */
-export async function setSubtaskDone(subtaskId: string, done: boolean): Promise<
+export async function setSubtaskDone(subtaskId: string, done: boolean, guard?: GuardContext): Promise<
   {
     ok: true
   } | {
@@ -1181,11 +1293,11 @@ export async function setSubtaskDone(subtaskId: string, done: boolean): Promise<
     message:
       | 'no_such_subtask' | 'done_needs_session' | 'invalid_group' | 'subtask_has_sessions'
       | 'group_field_conflict' | 'subtask_in_group' | 'unknown_status'
-  }
+  } | GuardReply
 > {
   // Only ever passes `status`, so `group_field_conflict`/`subtask_in_group` cannot actually fire
   // through this path — the union member exists to match `patchSubtask`'s own return type exactly.
-  return await patchSubtask(subtaskId, { status: done ? 'done' : 'todo' })
+  return await patchSubtask(subtaskId, { status: done ? 'done' : 'todo' }, guard)
 }
 
 /** The bytes land FIRST. A failed write must leave no record claiming the file exists. */
@@ -1727,19 +1839,28 @@ export async function reportNativeSessionUsage(sessionId: string, raw: NativeSes
   return w.store.reportNativeUsage(sessionId, usage)
 }
 
-export async function markTask(
+export type MarkOptions = {
+  /** Why, in the blocker's own words. Required by `blocked` unless a blocking TASK is named. */
+  reason?: string
+  /** Explicit caller decision after seeing the still-open top-level pieces. */
+  allowOpenSubtasks?: boolean
+  /** Blocking task ids to set as part of the same move — the other way to answer "why". */
+  blockedBy?: readonly string[]
+  /** ENTREGA.GARANTIDA S2a: who is asking. Optional; without it a move that raises a piece's rank is refused when the guarantee is on. */
+  guard?: GuardContext
+}
+export type MarkResult = { ok: boolean; evidence?: DeliveryEvidence; message?: string; openSubtaskIds?: string[]; guard?: GuardInfo }
+
+export async function markTask(ref: string, to: TaskStatus, actor?: string, o: MarkOptions = {}): Promise<MarkResult> {
+  return guardedDoor(() => markTaskInner(ref, to, actor, o))
+}
+
+async function markTaskInner(
   ref: string,
   to: TaskStatus,
   actor?: string,
-  o: {
-    /** Why, in the blocker's own words. Required by `blocked` unless a blocking TASK is named. */
-    reason?: string
-    /** Explicit caller decision after seeing the still-open top-level pieces. */
-    allowOpenSubtasks?: boolean
-    /** Blocking task ids to set as part of the same move — the other way to answer "why". */
-    blockedBy?: readonly string[]
-  } = {},
-): Promise<{ ok: boolean; evidence?: DeliveryEvidence; message?: string; openSubtaskIds?: string[] }> {
+  o: MarkOptions = {},
+): Promise<MarkResult> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return { ok: false, message: 'no_such_task' }
@@ -1814,7 +1935,7 @@ export async function markTask(
     // The reason belongs to THIS block. Leaving `blocked` clears it: a sentence that outlived its
     // block reads as current, which is worse than none.
     ...(to === 'blocked' ? { blockedReason: reason } : { blockedReason: '' }),
-  }, { allowOpenSubtasks: o.allowOpenSubtasks })
+  }, { allowOpenSubtasks: o.allowOpenSubtasks, ...(o.guard ? { guard: o.guard } : {}) })
   if (!moved) return { ok: false, message: to === 'in_review' ? 'open_subtasks' : 'no_such_task' }
   // Attempts only ever settle when the TASK settles. An in-progress task leaves them running.
   if (done || to === 'abandoned') {
@@ -2049,14 +2170,14 @@ export async function deleteType(id: string): Promise<
  * FLUXO.ENTREGA-DSL — the delivery flow writes the CI · publicando signal onto the subtask (`null` clears it).
  * Flow-only: no route lets a person set it, because the Live moves a card to Publicado on it.
  */
-export async function setSubtaskCi(subtaskId: string, ci: Subtask['ci'] | null): Promise<boolean> {
+export async function setSubtaskCi(subtaskId: string, ci: Subtask['ci'] | null, guard?: GuardContext): Promise<boolean> {
   const w = await loadTaskWorld()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
   if (!found) return false
   const next: Subtask = { ...found, updatedAt: found.updatedAt }
   if (ci) next.ci = ci
   else delete next.ci
-  await w.store.upsertSubtask(next)
+  await w.store.upsertSubtask(next, guard)
   return true
 }
 

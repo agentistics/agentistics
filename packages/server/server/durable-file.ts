@@ -8,12 +8,21 @@
  * means a file that still comes back unreadable costs minutes of work, not the whole history.
  */
 import { open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import * as fsp from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 
 let seq = 0
 
-/** The fs calls the ordering depends on, injectable so a test can SPY on the order (fsync before rename, dir after). */
-const realOps = { open, rename, rm }
+/**
+ * The fs calls the ordering depends on, injectable so a test can SPY on the order (fsync before rename, dir after).
+ * Resolved through the module namespace at CALL time, so a `spyOn(fs, 'rename')` elsewhere (the delivery guard
+ * sweep counts the board's renames) still observes a durable write.
+ */
+const realOps = {
+  open: (...a: Parameters<typeof open>) => fsp.open(...a),
+  rename: (...a: Parameters<typeof rename>) => fsp.rename(...a),
+  rm: (...a: Parameters<typeof rm>) => fsp.rm(...a),
+}
 let ops: typeof realOps = realOps
 export function __setDurableOpsForTest(o: Partial<typeof realOps> | null): void { ops = o ? { ...realOps, ...o } : realOps }
 

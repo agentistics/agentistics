@@ -17,16 +17,12 @@
  */
 
 import { execFile, spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { gitEnv } from './release-repos'
+import { proveInclusion } from '../delivery/release-proof'
 
 const GIT_TIMEOUT_MS = 20_000
 /** A diff larger than this is not worth proving (it is a rename/format sweep, not a piece of work). */
 const MAX_DIFF = 2 << 20
-/** The reverse-apply proof is tried on this many of the newest releases. */
-const REVERSE_APPLY_TAGS = 3
 const MAX_TAGS = 12
 /** `squashTagOf` walks every release newer than the commit; this only bounds a pathological history. */
 const MAX_WALK_TAGS = 600
@@ -120,30 +116,6 @@ async function candidates(dir: string, sha: string, release: string): Promise<{ 
   return { ids, diffs }
 }
 
-/**
- * Is every change of `diff` already present in the tree of `tag`? A squash that folded SEVERAL branches into one
- * commit matches no single patch-id, but its tree still holds each branch's change: the diff applies in REVERSE
- * onto that tree, against a throwaway index (nothing in the repository is touched).
- */
-async function treeHoldsDiff(dir: string, tag: string, diff: string): Promise<boolean> {
-  const tmp = mkdtempSync(join(tmpdir(), 'rel-squash-'))
-  const env = gitEnv({ GIT_INDEX_FILE: join(tmp, 'index') })
-  try {
-    const read = await new Promise<boolean>(resolve => {
-      execFile('git', ['-C', dir, 'read-tree', tag], { env, timeout: GIT_TIMEOUT_MS, windowsHide: true }, err => resolve(!err))
-    })
-    if (!read) return false
-    return await new Promise<boolean>(resolve => {
-      const p = spawn('git', ['-C', dir, 'apply', '-R', '--check', '--cached'], { env, windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'] })
-      const t = setTimeout(() => p.kill(), GIT_TIMEOUT_MS)
-      p.on('error', () => { clearTimeout(t); resolve(false) })
-      p.on('close', code => { clearTimeout(t); resolve(code === 0) })
-      p.stdin.on('error', () => {})
-      p.stdin.end(diff)
-    })
-  } finally { rmSync(tmp, { recursive: true, force: true }) }
-}
-
 /** Every `v<x.y.z>` tag, newest version first, with the tag's own date (seconds). Kept for a few minutes. */
 interface DatedTags { at: number; tags: { tag: string; atSec: number }[] }
 const datedTagLists = new Map<string, DatedTags>()
@@ -193,22 +165,16 @@ export async function squashTagOf(sha: string, dir: string, repoKey: string, now
 
 /**
  * Is the work of `sha` inside a release tag of this repository, though the commit itself is not? Any failure is "no".
- * This is the Live's yes/no (unchanged since 2.200): a patch-id match on the newest releases, or — for several branches
- * squashed together — the newest releases' trees still holding the change. It never names a version.
+ * Compatibility wrapper for the Live's yes/no: prove inclusion against each recent tag's exact commit.
+ * It never names a version; final-tree confirmation rejects reverted changes.
  */
 export async function squashPublishedIn(sha: string, dir: string, repoKey: string, nowMs = Date.now()): Promise<boolean> {
   if (!HEX.test(sha)) return false
-  if (!(await run(dir, ['cat-file', '-e', `${sha}^{commit}`])).ok) return false
   const tags = await newestTags(dir, repoKey, nowMs)
-  if (tags.length === 0) return false
-  const cand = await candidates(dir, sha, tags[0]!)
-  if (cand.ids.length > 0) {
-    for (let i = 0; i < Math.min(tags.length, MAX_TAGS); i++) {
-      const ids = await idsOfTag(dir, repoKey, tags[i]!, tags[i + 1] ?? null)
-      if (cand.ids.some(c => ids.has(c))) return true
-    }
+  for (const tag of tags.slice(0, MAX_TAGS)) {
+    const target = await run(dir, ['rev-parse', '--verify', `${tag}^{commit}`])
+    if (target.ok && await proveInclusion({ dir, repoKey, pieceShas: [sha], target: target.out.trim() })) return true
   }
-  for (const diff of cand.diffs) for (const tag of tags.slice(0, REVERSE_APPLY_TAGS)) if (await treeHoldsDiff(dir, tag, diff)) return true
   return false
 }
 

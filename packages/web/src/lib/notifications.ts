@@ -246,6 +246,26 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão não verificada', message: 'Só uma sessão iniciada pelo agentistics pode definir papéis de sessão; esta chamada não conseguiu provar de qual sessão vem.' },
     en: { title: 'Unverified session', message: 'Only a session started by agentistics can set session roles; this request could not prove which session it comes from.' },
   },
+  accepted_members: {
+    pt: { title: 'Grupo com membros aceitos', message: 'Um grupo com membros já aceitos não pode ser alterado desta forma.' },
+    en: { title: 'Group has accepted members', message: 'A group whose members are already accepted cannot be changed this way.' },
+  },
+  evidence_binding_protected: {
+    pt: { title: 'Evidência protegida', message: 'A evidência ligada a esta entrega está protegida e não pode ser alterada por aqui.' },
+    en: { title: 'Evidence is protected', message: 'The evidence bound to this delivery is protected and cannot be changed here.' },
+  },
+  guard_context_required: {
+    pt: { title: 'Contexto da verificação ausente', message: 'Esta mudança precisa passar pela verificação da entrega e não pode ser gravada direto.' },
+    en: { title: 'Check context missing', message: 'This change has to go through the delivery check and cannot be written directly.' },
+  },
+  guard_unverified: {
+    pt: { title: 'Mudança não verificada', message: 'A verificação da entrega não conseguiu confirmar esta mudança, então ela não foi gravada.' },
+    en: { title: 'Change not verified', message: 'The delivery check could not confirm this change, so it was not saved.' },
+  },
+  sweep_changed: {
+    pt: { title: 'A entrega mudou durante a varredura', message: 'Algo mudou enquanto a varredura rodava; ela tenta de novo sozinha.' },
+    en: { title: 'Delivery changed during the sweep', message: 'Something changed while the sweep was running; it will retry on its own.' },
+  },
   'tasks.thread_resolved': {
     pt: { title: 'Tópico resolvido', message: 'O tópico foi movido para Resolvidos.' },
     en: { title: 'Topic resolved', message: 'The topic was moved to Resolved.' },
