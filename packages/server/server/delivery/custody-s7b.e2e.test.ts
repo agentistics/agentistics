@@ -202,6 +202,23 @@ describe('§5.4.7 — filing invariant: custody never moves the custodian\'s con
   })
 })
 
+describe('S7b.1 — a custodian whose session ended stops being honoured at once (no wait for the tick)', () => {
+  test('L2 acts while alive; the moment its session ends leads() refuses it and wakes go elsewhere; the next tick reassigns', async () => {
+    const w = await established()
+    w.clock.now = T0 + N + 20 * MIN
+    // control: alive custodian configures
+    expect((await w.svc().configure('p1', { versionTarget: '1.0.0' }, 'L2')).ok).toBe(true)
+    // L2 dies — NO tick runs in between
+    w.fleet.rows = [row('L1', 't-p1', false), row('L2', 't-p2', false), row('L5', 't-p5', true, 'leader', iso(w.clock.now))]
+    const refused = await w.svc().configure('p1', { versionTarget: '1.0.1' }, 'L2')
+    expect(refused).toMatchObject({ ok: false, status: 403, code: 'so_o_lider' })
+    expect(w.read('p1').versionTarget).toBe('1.0.0')
+    w.messages.length = 0
+    expect((await w.svc().block('p1', 'externo', 'vendor', 'owner')).ok).toBe(true)
+    expect(w.messages.filter(m => m.text.startsWith('[entrega p1]')).map(m => m.to)).not.toContain('L2')
+  })
+})
+
 describe('§5.2.3 — wakes for a piece in custody go to the custodian', () => {
   test('a block wake on the orphan reaches L2, never the absent L1', async () => {
     const w = await established()
