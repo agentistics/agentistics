@@ -144,7 +144,7 @@ import { applyAccountToPlan } from './sessions/account-plan'
 import { ensureClaudeProjectTrusted } from './sessions/claude-trust'
 import { prependContext } from './sessions/agentistics-context'
 import { rootIfLeader } from './sessions/team-links'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './sessions/spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withCustodyQueue, withPassagem, writeContextFile } from './sessions/spawn-context'
 import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor, storedRoleFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
@@ -2272,7 +2272,7 @@ export async function spawnManaged(req: {
   const relay = handoffParentRow
     ? await import('./sessions/handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
-  const ctx = buildSpawnContext(await withPassagem(await withOwnerRequests({
+  const ctx = buildSpawnContext(await withPassagem(await withCustodyQueue(await withOwnerRequests({
       ...(relay ? { handoffRelay: relay.section } : {}),
       ...(req.handoff ? { handoffTakeover: true } : {}),
       ...(await resolveContextAway(away)),
@@ -2283,7 +2283,7 @@ export async function spawnManaged(req: {
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
       ...storedContextRole,
-    }), !!req.handoff))
+    })), !!req.handoff))
   const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
   const planned = planSpawn({
     harness: req.harness,

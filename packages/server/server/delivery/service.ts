@@ -314,13 +314,26 @@ export function createDeliveryService(deps: DeliveryDeps) {
     }
   }
 
-  /** The owner (no session proof), the flow engine itself, the recorded leader, or a leader session of this delivery's task. */
+  /**
+   * S7b: is rule C `on`? Custody grants authority and reroutes wakes ONLY then — `off` and `shadow` never wrote a custody, and a
+   * custody field found on a record under them (left over, or forged by hand) changes no door. An unreadable state reads as off.
+   */
+  const custodyOn = async (): Promise<boolean> => (await ruleCState(dirname(d.store.path)).catch(() => 'off' as const)) === 'on'
+  /** S7b (§5.2.2): the session holding custody of this piece, when rule C is on. */
+  const custodianOf = async (r: DeliveryRecord): Promise<string | null> => (r.custody?.sessionId && (await custodyOn()) ? r.custody.sessionId : null)
+  /** S7b (§5.2.3): who is woken for a piece — the custodian while it holds custody, else the recorded leader. */
+  const wakeTarget = async (r: DeliveryRecord): Promise<string | undefined> => (await custodianOf(r)) ?? r.leaderSessionId
+
+  /** The owner (no session proof), the flow engine itself, the recorded leader, the piece's custodian, or a leader session of this delivery's task. */
   const leads = async (r: DeliveryRecord, actor: string): Promise<boolean> => {
     // `actor` here was RESOLVED from a principal (delivery/principal.ts): `owner` means a proven owner or the legacy
     // browser, `unattributed` ("no proof") is never the owner, and a body can no longer claim either name.
     if (actor === 'unattributed') return false
     if (actor === 'owner' || actor.startsWith('flow:')) return true
     if (r.leaderSessionId && actor === r.leaderSessionId) return true
+    // S7b (§5.2.2): the custodian passes `leads()` for THIS piece — an authorization of the actor, never evidence or proof (the
+    // store guard still binds every rank raise). Rule C on only.
+    if (r.custody?.sessionId && actor === r.custody.sessionId && (await custodyOn())) return true
     const sessions = await d.facts.sessions().catch(() => [])
     return sessions.some(x => x.id === actor && x.role === 'leader' && x.taskId === r.taskId)
   }
@@ -357,8 +370,10 @@ export function createDeliveryService(deps: DeliveryDeps) {
 
   /** Types into the leader's composer. true = delivered; a failed wake is a warning AND false, so a cadence is never stamped for it. */
   const wake = async (r: DeliveryRecord, text: string, warnings: string[]): Promise<boolean> => {
-    if (!r.leaderSessionId) { warnings.push('no leader recorded on this delivery — nobody was woken'); return false }
-    if (!(await d.notify.session(r.leaderSessionId, `[entrega ${r.subtaskId}] ${text}`).catch(() => false))) { warnings.push(`the leader ${r.leaderSessionId} could not be woken`); return false }
+    // S7b: a piece in custody wakes its custodian, never the absent leader.
+    const to = await wakeTarget(r)
+    if (!to) { warnings.push('no leader recorded on this delivery — nobody was woken'); return false }
+    if (!(await d.notify.session(to, `[entrega ${r.subtaskId}] ${text}`).catch(() => false))) { warnings.push(`the leader ${to} could not be woken`); return false }
     return true
   }
 
@@ -963,7 +978,10 @@ export function createDeliveryService(deps: DeliveryDeps) {
 
     // ---- validate everything first
     const sessions = await d.facts.sessions().catch(() => [])
-    const leaderTask = sessions.find(x => x.id === actor && x.role === 'leader')?.taskId
+    // S7b: a custodian declares the release of the ORPHAN's task, not of its own: its leader task is not the expected one then.
+    let holdsCustody = false
+    for (const id of ids) if ((await d.store.get(id))?.custody?.sessionId === actor) { holdsCustody = await custodyOn(); break }
+    const leaderTask = holdsCustody ? undefined : sessions.find(x => x.id === actor && x.role === 'leader')?.taskId
     let expectedTask = leaderTask
     const plan: Array<{ id: string; have: DeliveryRecord | null; taskId: string; subStatus?: string }> = []
     for (const id of ids) {
@@ -1689,7 +1707,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
           if (tries < BOARD_MOVE_MAX_TRIES) { await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) c.block.boardMoveTries = tries }); continue }
           await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) { delete c.block.boardMovePending; delete c.block.boardMoveTries } })
           const text = `[entrega ${r.subtaskId}] a peça foi adiada, mas o quadro recusou mover o cartão para a fila (${tries} tentativas): ele continua em Bloqueado no quadro e o fluxo parou de tentar. Mova-o à mão.`
-          const reached = r.leaderSessionId ? await d.notify.session(r.leaderSessionId, text).catch(() => false) : false
+          const to = await wakeTarget(r)
+          const reached = to ? await d.notify.session(to, text).catch(() => false) : false
           if (!reached) await d.notify.owner(`Peça ${r.subtaskId} adiada, mas o quadro recusou mover o cartão: continua em Bloqueado.`, 'aviso').catch(() => undefined)
           actions.push(`requeue-gave-up ${r.subtaskId}`)
           continue
@@ -1791,7 +1810,10 @@ export function createDeliveryService(deps: DeliveryDeps) {
       try {
         const r = doc.deliveries[n.subtaskId]!
         const recordedAlive = r.leaderSessionId && sessions?.some(s => s.id === r.leaderSessionId && s.alive) ? r.leaderSessionId : null
-        const leader = (sessions ? leaderFor(sessions, r.taskId, r.subtaskId) : null) ?? recordedAlive
+        // S7b (§5.2.3): a piece in custody is nudged to its LIVE custodian first (the tick reassigns a dead one).
+        const custodian = await custodianOf(r)
+        const custodianAlive = custodian && sessions?.some(s => s.id === custodian && s.alive) ? custodian : null
+        const leader = custodianAlive ?? (sessions ? leaderFor(sessions, r.taskId, r.subtaskId) : null) ?? recordedAlive
         if (!leader) { nobody.push(n.subtaskId); continue }
         const list = batches.get(leader) ?? []
         list.push(n)
@@ -2225,7 +2247,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
     envelope: fn => withGuardEnvelope(c.paths ?? lockPaths(), fn),
     ...(c.tasks ? { board: async () => { const b = await (await c.tasks!()).read(); return { comments: b.comments } } } : {}),
     store: d.store as never,
-    sessions: async () => { const rows = await d.facts.sessions().catch(() => null); return rows ? rows.map(s => ({ id: s.id, alive: s.alive, ...(s.role ? { role: s.role } : {}), ...(s.taskId ? { taskId: s.taskId } : {}) })) : null },
+    sessions: async () => { const rows = await d.facts.sessions().catch(() => null); return rows ? rows.map(s => ({ id: s.id, alive: s.alive, ...(s.role ? { role: s.role } : {}), ...(s.taskId ? { taskId: s.taskId } : {}), ...(s.createdAt ? { startedAt: s.createdAt } : {}) })) : null },
     projectsOf: c.projectsOf,
     orphanAfterHours: c.orphanAfterHours,
     notify: (sessionId, text) => d.notify.session(sessionId, text, ''),
@@ -2291,11 +2313,14 @@ export function createDeliveryService(deps: DeliveryDeps) {
     const titles = new Map((blocked ?? []).map(b => [b.id, b.title] as const))
     const batches = new Map<string, Array<{ r: DeliveryRecord; kind: 'wake' | 'defer' | 'convert'; text: string }>>()
     const orphans: Array<{ r: DeliveryRecord; kind: 'wake' | 'defer' | 'convert' }> = []
+    // S7b (§5.2.3): a blocked piece still in custody is chased at its custodian, never at the absent leader.
+    const custodyTicking = await custodyOn()
     const enqueue = (r: DeliveryRecord, kind: 'wake' | 'defer' | 'convert', text: string) => {
-      if (!r.leaderSessionId) { orphans.push({ r, kind }); return }
-      const list = batches.get(r.leaderSessionId) ?? []
+      const to = (custodyTicking && r.custody?.sessionId) || r.leaderSessionId
+      if (!to) { orphans.push({ r, kind }); return }
+      const list = batches.get(to) ?? []
       list.push({ r, kind, text })
-      batches.set(r.leaderSessionId, list)
+      batches.set(to, list)
     }
     for (const a of planWatch(records, { nowMs: d.now(), autonomous, dependencyDone: r => finished.get(r.subtaskId) === true })) {
       try {

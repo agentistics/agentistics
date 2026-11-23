@@ -62,6 +62,12 @@ export function planOf(o: { now: number; orphanMs: number; records: readonly Del
     // stamp left by a custodian that lost the piece, never masks (or anchors) the absence of the piece's own leader.
     // Liveness is NOT part of eligibility (r5, N5): a co-leader that acted and died still anchors the absence at ITS instant; presence
     // is judged by planCustody. Remaining limit (S7b): eligibility reads the fleet registry, so a PURGED co-leader row stops being eligible.
+    // KNOWN LIMIT (S7a r5 → S7b, kept on purpose): a co-leader's eligibility is read from its registry ROW (role + task). If the row
+    // is PURGED before any tick saw its death, its decision/block no longer anchors and the absence falls back to an older stamp.
+    // S7b did not change this: §5.4 has no acceptance item for it, and closing it needs the author's verified role and task written
+    // on the comment itself (a board-schema change, not custody authority). The window is narrow: the first tick after the death
+    // PERSISTS `leaderAbsentSince` from that comment (a non-null absence is never recomputed), so only a death AND a purge with no
+    // tick in between (server down across the purge) reaches it.
     const eligible = (by: string): boolean => by === r.leaderSessionId || by === r.custody?.sessionId || o.fleet.some(s => s.id === by && s.role === 'leader' && s.taskId === r.taskId)
     const b = o.board ? boardActivityOf({ key: r.subtaskId, taskId: r.taskId }, o.board, eligible) : null
     const own = r.leaderActivityAt && r.leaderActivityBy && eligible(r.leaderActivityBy) ? r : null
@@ -76,7 +82,30 @@ export function planOf(o: { now: number; orphanMs: number; records: readonly Del
       ...(r.custody ? { custody: r.custody } : {}), ...(r.custodyLog ? { custodyLog: r.custodyLog } : {}),
     })
   }
-  return planCustody({ now: o.now, orphanMs: o.orphanMs, pieces, sessions: o.fleet })
+  return planCustody({ now: o.now, orphanMs: o.orphanMs, pieces, sessions: withLeaderProjects(o.fleet, o.projects) })
+}
+
+/**
+ * S7b (§5.4.8): the pieces whose project the tick asks for — the records, plus the OWN TASK of every live leader that says when it
+ * started (as a task-level pseudo-piece `{taskId, subtaskId: taskId}`), so a leader that just started in a project can be its
+ * candidate. A task-level key coincides only with a task-level piece of the same task, whose project is the same answer.
+ */
+export function projectQueries(records: readonly DeliveryRecord[], fleet: readonly CustodySession[]): Array<{ taskId: string; subtaskId: string }> {
+  const out = records.map(r => ({ taskId: r.taskId, subtaskId: r.subtaskId }))
+  const seen = new Set(out.map(p => p.subtaskId))
+  for (const s of fleet) {
+    if (!s.alive || s.role !== 'leader' || !s.taskId || !s.startedAt || seen.has(s.taskId)) continue
+    seen.add(s.taskId)
+    out.push({ taskId: s.taskId, subtaskId: s.taskId })
+  }
+  return out
+}
+/** PURE. The fleet with each started leader's project (from its own task), as `planCustody` reads it. */
+export function withLeaderProjects(fleet: readonly CustodySession[], projects: ReadonlyMap<string, string>): CustodySession[] {
+  return fleet.map(s => {
+    const project = s.startedAt && s.taskId && s.role === 'leader' ? projects.get(s.taskId) : undefined
+    return project ? { ...s, project } : s
+  })
 }
 
 /** A busy envelope SKIPS the tick (§2.6.1): nothing is decided or written without the locks. */
@@ -91,7 +120,7 @@ export async function custodyTick(d: CustodyDeps, actions: string[]): Promise<vo
 
   if (rule === 'shadow') {
     const records = Object.values((await d.store.read()).deliveries)
-    const projects = await d.projectsOf(records.map(r => ({ taskId: r.taskId, subtaskId: r.subtaskId })))
+    const projects = await d.projectsOf(projectQueries(records, fleet))
     const plan = planOf({ now: d.now(), orphanMs, records, projects, board: (await d.board?.().catch(() => null)) ?? null, fleet })
     for (const a of plan.actions) actions.push(`custody would-${a.replace(/^custody-/, '')}`)
     return
@@ -104,7 +133,7 @@ export async function custodyTick(d: CustodyDeps, actions: string[]): Promise<vo
   try {
     committed = await d.envelope(async () => {
       const records = Object.values((await d.store.read()).deliveries)
-      const projects = await d.projectsOf(records.map(r => ({ taskId: r.taskId, subtaskId: r.subtaskId })))
+      const projects = await d.projectsOf(projectQueries(records, fleet))
       const board = (await d.board?.().catch(() => null)) ?? null
       const at = new Date(d.now()).toISOString()
       // The facts above took time (the project and board reads): judge the documents as they are NOW, not as they were first read.
