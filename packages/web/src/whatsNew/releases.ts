@@ -27,6 +27,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [
       {
+        pt: 'Limpeza automática: cópias antigas são compactadas e guardadas; os logs do servidor passam a rotacionar.',
+        en: 'Automatic cleanup: old copies are compressed and kept; server logs now rotate.',
+      },
+      {
         pt: 'Rodadas de teste não alcançam mais o seu app real pela rede, nem alteram arquivos da sua pasta pessoal.',
         en: 'Test runs can no longer reach your real app over the network, nor change files in your home folder.',
       },
