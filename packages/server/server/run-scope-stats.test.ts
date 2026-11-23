@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { cgroupDirOf, foldScopeSample, parseScopeSample, readScopeSample, scopeStatsLine, type ScopeSample } from './run-scope-stats'
+import { cgroupDirOf, scopeDirOf, watchScope, foldScopeSample, parseScopeSample, readScopeSample, scopeStatsLine, type ScopeSample } from './run-scope-stats'
 
 const MB = 1024 * 1024
 const GB = 1024 * MB
@@ -72,5 +72,22 @@ describe('RUN.LENTIDAO-SUITE — what a run cost, said at its end', () => {
       expect(readScopeSample(scope)).toEqual({ cpuUsec: 42, memoryPeakBytes: MB, capHits: null, oomKills: null, swapPeakBytes: null })
       expect(readScopeSample(join(dir, 'gone.scope'))).toEqual(parseScopeSample({}))
     } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+})
+
+describe('the scope is resolved by UNIT NAME, never from the spawned child', () => {
+  test('scopeDirOf accepts only a ControlGroup that ends in the unit', () => {
+    const cg = '/user.slice/user-1000.slice/user@1000.service/app.slice/u-x.scope\n'
+    expect(scopeDirOf(cg, 'u-x.scope')).toBe('/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/u-x.scope')
+    expect(scopeDirOf('/app.slice/agentop-server.service', 'u-x.scope')).toBeNull()
+    expect(scopeDirOf('', 'u-x.scope')).toBeNull()
+    expect(scopeDirOf('/a/../u-x.scope', 'u-x.scope')).toBeNull()
+  })
+  test('watchScope keeps asking until the unit answers, and an unreadable scope is null, not a throw', () => {
+    let calls = 0
+    const w = watchScope('u-x.scope', 10_000, () => (++calls < 3 ? null : '/nonexistent/dir'))
+    expect(scopeStatsLine(w.stop(), 1000, 1 << 30)).toBeNull()
+    expect(calls).toBeGreaterThanOrEqual(2)
+    expect(watchScope('u-y.scope', 10_000, () => null).stop()).toBeNull()
   })
 })

@@ -14,6 +14,7 @@
  * samples (every few seconds): a lower bound, said as a peak because it is the highest value seen.
  * Every field is `null` when it could not be read — an unmeasured value is never printed as a zero.
  */
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -113,20 +114,33 @@ export function readScopeSample(dir: string): ScopeSample {
   })
 }
 
+/** PURE. The cgroup v2 directory for a `systemctl show -p ControlGroup --value` answer ("/user.slice/.../x.scope"), or null. */
+export function scopeDirOf(controlGroup: string, unit: string, root = '/sys/fs/cgroup'): string | null {
+  const path = controlGroup.trim()
+  if (!path.startsWith('/') || path.split('/').includes('..') || !path.endsWith(`/${unit}`)) return null
+  return root + path
+}
+
+/** IO. The real cgroup directory of `unit` (empty ControlGroup = not started yet or already gone), or null. Never throws, never hangs (2 s). */
+export function resolveUnitDir(unit: string): string | null {
+  try {
+    const r = spawnSync('systemctl', ['--user', 'show', '-p', 'ControlGroup', '--value', unit], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] })
+    return r.status === 0 ? scopeDirOf(r.stdout ?? '', unit) : null
+  } catch { return null }
+}
+
 /**
- * IO. Samples the scope `unit` (e.g. `agentistics-throwaway-x.scope`) that `pid` runs in, every `everyMs`
- * until `stop()`, which returns the folded sample. `systemd-run --scope` moves itself into the scope a
- * moment AFTER it is spawned, so the directory is resolved on each tick until the pid's cgroup path ends
- * in `/<unit>` — reading earlier would sample the launcher's own cgroup. Never resolved: `stop` says null.
+ * IO. Samples the scope `unit` (e.g. `agentistics-throwaway-x.scope`) every `everyMs` until `stop()`, which
+ * returns the folded sample. The directory is asked of systemd by UNIT NAME (`resolve`) and NEVER read from
+ * the spawned child's /proc cgroup: that child is `systemd-run`, which stays in the LAUNCHER's cgroup while
+ * the command runs in the scope (QA 2026-11-23: the line never printed). Resolved on each tick until it
+ * answers; the last sample before the scope vanishes is kept. Never resolved: `stop` says null.
  */
-export function watchScope(pid: number, unit: string, everyMs = 1000): { stop: () => ScopeSample | null } {
+export function watchScope(unit: string, everyMs = 1000, resolve: (unit: string) => string | null = resolveUnitDir): { stop: () => ScopeSample | null } {
   let dir: string | null = null
   let acc: ScopeSample | null = null
   const tick = () => {
-    if (!dir) {
-      const d = cgroupDirOf(readOr(`/proc/${pid}/cgroup`) ?? '')
-      if (d?.endsWith(`/${unit}`)) dir = d
-    }
+    if (!dir) dir = resolve(unit)
     if (dir) acc = foldScopeSample(acc, readScopeSample(dir))
   }
   tick()

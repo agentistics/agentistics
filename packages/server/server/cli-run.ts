@@ -830,7 +830,7 @@ async function startRun(options: RunOptions): Promise<number> {
   // The command's end is recorded in the log BEFORE any cleanup line, so whoever reads run.log (the ambiente flow) can name the exit code.
   // RUN.LENTIDAO-SUITE: what the run cost (cpu over wall, memory peak vs the cap, cap hits, swap), said when it ends.
   const startedMs = Date.now()
-  const scopeWatch = systemd && child.pid ? watchScope(child.pid, unit) : null
+  const scopeWatch = systemd && child.pid ? watchScope(unit, 500) : null
   const childExit = new Promise<number>(resolve => {
     child.once('exit', (status, sig) => {
       const stats = scopeStatsLine(scopeWatch?.stop() ?? null, Date.now() - startedMs, RUN_MEMORY_MAX_BYTES)
