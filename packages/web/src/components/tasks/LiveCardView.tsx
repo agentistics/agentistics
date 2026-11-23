@@ -72,7 +72,7 @@ export function LiveCardView(p: LiveCardViewProps) {
   const last = describeLastAction(d.lastAction, pt ? 'pt' : 'en', titleOf)
   const ctx = [d.subtaskId ? d.taskTitle : null, p.leaderName ? `${pt ? 'líder' : 'leader'} ${p.leaderName}` : null].filter(Boolean).join(' · ')
   const stageColor = STAGE_LABEL[d.stage].color
-  const pct = cardPercent(d, pt)
+  const pct = cardPercent({ stage: d.stage, ci: d.ci, step: d.step, displayStage: c.displayStage }, pt)
   const ci = d.stage === 'ci' && d.ci ? ciChecklist(d.ci, pt) : null
   const queue = queued ? queueLines(d, pt, (h, a) => accountDisplayName(p.accountLabels, h, a)) : null
 

@@ -134,6 +134,8 @@ export interface LiveDelivery {
   startedAtMs: number | null
   /** Registry ids of the sessions that have not ended — what the browser joins to the fleet. */
   sessionIds: string[]
+  /** Every session filed on this piece (live or ended, newest first, at most 4): the browser links the ones the fleet still carries. */
+  linkSessionIds?: string[]
   harnesses: string[]
   models: string[]
   eta: LiveEta
@@ -261,6 +263,8 @@ const CLOSED_WORD = /abandon|cancel|closed|encerr|descart|arquiv|won'?t|wont/i
 export function stageOfPieceStatus(
   status: string, statusLabel?: (id: string) => string | undefined, statusStage?: (id: string) => StatusStage | undefined,
 ): LiveStage | null {
+  // `pr_merge` is the delivery machine's own status id: approved and waiting for publication, never "Revisão do líder".
+  if (status === 'pr_merge') return 'merge'
   const stored = statusStage?.(status)
   if (stored !== undefined) return stored === 'none' ? null : stored
   return stageOfStatus(status, statusStage ? undefined : statusLabel?.(status))
@@ -1115,6 +1119,8 @@ export function buildLive(o: {
       if (closedNow) { rec = undefined; stage = null }
       else if (boardStage === 'blocked' && lateOpen) { rec = undefined; stage = 'blocked'; fromReview = true }
       else if (lateOpen && (boardStage === 'running' || boardStage === 'queue')) { rec = undefined; stage = boardStage }
+      else if (rec.phase === 'revisao_lider' && boardStage === 'merge') stage = 'merge' // approved, waiting publication: the board is ahead of a stale record
+      else if (rec.phase === 'executando' && boardStage === 'merge') { rec = undefined; stage = 'merge' } // a stale "running" record must not hide a piece the board already sent to publication
       else if (rec.phase === 'revisao_lider' && boardStage === 'leader') {
         const subj = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
         if (o.uncheckedWhy?.get(id) !== 'no-repos' && legacyShaGroups(p, eventsBySubject.get(subj)).some(g => g.every(sha => o.publishedShas?.has(sha)))) { rec = undefined; stage = 'published' }
@@ -1243,6 +1249,7 @@ export function buildLive(o: {
       round,
       startedAtMs,
       sessionIds: liveSessions.map(s => s.id),
+      linkSessionIds: [...new Set(p.sessions.slice().sort((a, b) => (b.startMs ?? 0) - (a.startMs ?? 0)).map(s => s.id))].slice(0, 4),
       harnesses: [...new Set(liveSessions.concat(p.sessions).map(s => s.harness))],
       models: [...new Set(liveSessions.concat(p.sessions).map(s => s.model).filter((m): m is string => !!m))],
       efforts: [...new Set(liveSessions.concat(p.sessions).map(s => s.effort).filter((m): m is string => !!m))],

@@ -51,13 +51,8 @@ export interface BrowserPanelProps {
   headless?: boolean
 }
 
+import { OpenVaultButton } from './OpenVaultButton'
 const ORANGE = 'var(--anthropic-orange)'
-
-/** Client-side navigation to the Vault (a router is not required of whoever mounts the panel). */
-function openVaultPage(): void {
-  window.history.pushState({}, '', '/vault')
-  window.dispatchEvent(new PopStateEvent('popstate'))
-}
 
 function useDocumentVisible(): boolean {
   const [v, setV] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
@@ -237,10 +232,7 @@ function BrowserPanelLive({ lang, onClose, hideCloseButton, controls, onOpenVaul
             <div role="alert" data-browser-refusal style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'center', padding: '8px 12px', borderRadius: 8, fontSize: 12, lineHeight: 1.5, color: 'var(--text-primary)', background: 'var(--bg-elevated)', maxWidth: 340 }}>
               <span style={{ minWidth: 0 }}>{unlockRefusal.sentence}</span>
               {unlockRefusal.openVault && (
-                <button type="button" data-browser-open-vault onClick={onOpenVault ?? openVaultPage} style={{
-                  flexShrink: 0, padding: '4px 10px', borderRadius: 7, border: `1px solid ${ORANGE}`, background: 'var(--anthropic-orange-dim)',
-                  color: ORANGE, fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', minHeight: mobile ? 44 : undefined,
-                }}>{pt ? 'Abrir o Cofre' : 'Open the Vault'}</button>
+                <OpenVaultButton pt={pt} mobile={mobile} onOpen={onOpenVault} marker />
               )}
             </div>
           )}

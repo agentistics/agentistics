@@ -266,6 +266,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'A entrega mudou durante a varredura', message: 'Algo mudou enquanto a varredura rodava; ela tenta de novo sozinha.' },
     en: { title: 'Delivery changed during the sweep', message: 'Something changed while the sweep was running; it will retry on its own.' },
   },
+  repo_person_only: {
+    pt: { title: 'Repositório só pela pessoa', message: 'Só a pessoa define o repositório de uma tarefa, na tela da tarefa.' },
+    en: { title: 'Repository set by the person', message: 'Only the person sets a task\'s repository, from the task screen.' },
+  },
   'tasks.thread_resolved': {
     pt: { title: 'Tópico resolvido', message: 'O tópico foi movido para Resolvidos.' },
     en: { title: 'Topic resolved', message: 'The topic was moved to Resolved.' },

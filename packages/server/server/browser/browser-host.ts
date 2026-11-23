@@ -38,7 +38,7 @@ import { admissionSentence, decideAdmission, type AdmissionRefusal, type LiveBro
 import { browserBinSentence, findBrowserBin, type BrowserBin } from './browser-bin'
 import {
   KILL_GRACE_MS, MAX_LIVE_BROWSERS, MAX_PERSONAL_BROWSERS, MAX_SESSION_BROWSERS, MAX_TABS_PERSONAL, MAX_TABS_SESSION,
-  MIN_AVAILABLE_BYTES, START_TIMEOUT_MS, WATCH_INTERVAL_MS, browserArgv, descendants, idleExpired, memoryVerdict,
+  MIN_AVAILABLE_BYTES, PSS_KILL_BYTES, PSS_TRIM_BYTES, RSS_FALLBACK_FACTOR, START_TIMEOUT_MS, WATCH_INTERVAL_MS, browserArgv, descendants, idleExpired, memoryVerdict,
   ownerKey, parseSmapsRollup, planOrphanSweep, planUnrecordedOrphans, ppidFromStat, profileDirFor, scopeUnitName,
   mustCloseNewTarget, scopeWrap, statusLabel, statusTitle, statusUrl, tabToTrim, urlBlockReason, validManagedId, needsResolve, resolvedBlockReason,
   startTimeFromStat,
@@ -183,7 +183,9 @@ export interface BrowserStatus {
   executable: BrowserBin & { sentence: string }
   live: BrowserSummary[]
   ceilings: { live: number; session: number; personal: number; tabsSession: number; tabsPersonal: number }
-  memory: { available: number | null; minAvailable: number; measured: boolean }
+  memory: { available: number | null; minAvailable: number; measured: boolean; trimBytes: number; killBytes: number; rssFallbackFactor: number }
+  /** The profile folders on disk (S12): what "Delete profiles" would remove. Live browsers hold theirs. */
+  profiles: { count: number }
   scope: { available: boolean }
   /** The last few stops and why — what the card/panel says when a browser is gone. */
   recentStops: { key: string; reason: StopReason; at: number }[]
@@ -839,6 +841,27 @@ export class BrowserHost {
     return { pss: pssOk && any ? pss : null, rss: any ? rss : null }
   }
 
+  private profileDirs(): string[] {
+    const dirs: string[] = []
+    try { for (const n of readdirSync(join(this.d.root, 'sessions'))) dirs.push(join(this.d.root, 'sessions', n)) } catch { /* none */ }
+    if (existsSync(join(this.d.root, 'personal'))) dirs.push(join(this.d.root, 'personal'))
+    return dirs
+  }
+
+  /**
+   * S12 — "Delete profiles": remove every profile folder (cookies, caches). REFUSED while any browser is
+   * live or starting — a profile a running Chromium holds is not ours to pull — and says so in words.
+   */
+  deleteProfiles(): { ok: true; removed: number } | { ok: false; error: 'browser_live'; live: number; sentence: string } {
+    const live = this.entries.size
+    if (live > 0) {
+      return { ok: false, error: 'browser_live', live, sentence: 'A browser is open right now. Close it (or wait for it to close) before deleting profiles.' }
+    }
+    const dirs = this.profileDirs()
+    for (const dir of dirs) this.removeProfile(dir)
+    return { ok: true, removed: dirs.length }
+  }
+
   // ------------------------------------------------------------------------------- the orphan sweep
 
   /** Stop recorded browsers no live host owns (by saved PID, identity checked) and delete every profile
@@ -895,7 +918,8 @@ export class BrowserHost {
       executable: { ...bin, sentence: browserBinSentence(bin) },
       live: [...this.entries.values()].map(e => this.summary(e)),
       ceilings: { live: MAX_LIVE_BROWSERS, session: MAX_SESSION_BROWSERS, personal: MAX_PERSONAL_BROWSERS, tabsSession: MAX_TABS_SESSION, tabsPersonal: MAX_TABS_PERSONAL },
-      memory: { available: mem, minAvailable: MIN_AVAILABLE_BYTES, measured: mem !== null },
+      memory: { available: mem, minAvailable: MIN_AVAILABLE_BYTES, measured: mem !== null, trimBytes: PSS_TRIM_BYTES, killBytes: PSS_KILL_BYTES, rssFallbackFactor: RSS_FALLBACK_FACTOR },
+      profiles: { count: this.profileDirs().length },
       scope: { available: this.scopeOk() },
       recentStops: [...this.recentStops],
       lastSweep: this.lastSweep,

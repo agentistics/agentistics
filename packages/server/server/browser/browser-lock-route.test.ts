@@ -46,6 +46,7 @@ function fixture(over: Partial<RouteDeps> = {}) {
     caller: () => ({ kind: 'person', via: 'process', pid: 1 }),
     // S4b: and the person carries a valid vault proof, unless a test says otherwise (the S4b tests below do).
     ownerProof: async () => ({ ok: true, grantId: 'g' }),
+    profilesProof: async () => ({ ok: true, grantId: 'p' }),
     ...over,
   }
   return { deps, ran, audits, advance, live, locks }
@@ -323,5 +324,73 @@ describe('S4b — an unlock owes the person\'s vault proof; who the process look
     }
     expect(ownerProofRefusal('grant-scope', 'en', false).error).toBe('owner_proof_scope')
     expect(ownerProofRefusal('owner-proof-local-only', 'en', true).error).toBe('owner_proof_local_only')
+  })
+})
+
+describe('S12 — POST /api/browser/profiles/delete', () => {
+  const del = (f: ReturnType<typeof fixture>) => browserRoute('POST', '/api/browser/profiles/delete', {}, f.deps)
+  test('the person gets the host answer: 200 when removed, 409 with a sentence when live', async () => {
+    const ok = fixture()
+    ok.deps.host.deleteProfiles = () => ({ ok: true, removed: 2 })
+    expect(await del(ok)).toEqual({ status: 200, body: { ok: true, removed: 2 } })
+    const live = fixture()
+    live.deps.host.deleteProfiles = () => ({ ok: false, error: 'browser_live', live: 1, sentence: 'A browser is open right now.' })
+    const r = await del(live)
+    expect(r?.status).toBe(409)
+    expect((r?.body as any).error).toBe('browser_live')
+  })
+  test('a session is refused and the host is never asked', async () => {
+    let asked = 0
+    const f = fixture({ caller: () => ({ kind: 'session', pid: 4242, managedId: 'aaa' }) })
+    f.deps.host.deleteProfiles = () => { asked++; return { ok: true, removed: 1 } }
+    const r = await del(f)
+    expect(r?.status).toBeGreaterThanOrEqual(400)
+    expect(asked).toBe(0)
+    // The refusal names this door ("profiles"), never the padlock sentence.
+    expect((r?.body as any).sentence).toContain('profiles')
+    expect((r?.body as any).sentence).not.toContain('padlock')
+  })
+  test('a caller the socket cannot identify (or none wired) is refused, fail-closed', async () => {
+    let asked = 0
+    const f = fixture()
+    delete (f.deps as { caller?: unknown }).caller
+    f.deps.host.deleteProfiles = () => { asked++; return { ok: true, removed: 1 } }
+    const r = await del(f)
+    expect(r?.status).toBe(403)
+    expect(asked).toBe(0)
+    expect((r?.body as any).sentence).toContain('no profile was deleted')
+  })
+  test('r4: no owner grant → 403 with the vault sentence and the host is never asked; a spent/forged grant is refused the same way', async () => {
+    let asked = 0
+    const f = fixture({ profilesProof: async () => ownerProofRefusal('grant-invalid', 'en', false, 'profiles') })
+    f.deps.host.deleteProfiles = () => { asked++; return { ok: true, removed: 1 } }
+    const r = await del(f)
+    expect(r?.status).toBe(403)
+    expect((r?.body as any).error).toBe('owner_proof_required')
+    expect((r?.body as any).sentence).toContain('delete the profiles')
+    expect((r?.body as any).sentence).not.toContain('take over')
+    expect(asked).toBe(0)
+    delete (f.deps as { profilesProof?: unknown }).profilesProof // not wired = fail-closed
+    expect((await del(f))?.status).toBe(403)
+    expect(asked).toBe(0)
+  })
+  test('r4: the proof is spent once per delete; a second delete with the same (already spent) grant is refused', async () => {
+    let spendable = true
+    const f = fixture({ profilesProof: async () => { if (spendable) { spendable = false; return { ok: true, grantId: 'p' } } return ownerProofRefusal('grant-invalid', 'pt', false, 'profiles') } })
+    f.deps.host.deleteProfiles = () => ({ ok: true, removed: 1 })
+    expect((await del(f))?.status).toBe(200)
+    const again = await del(f)
+    expect(again?.status).toBe(403)
+    expect((again?.body as any).sentence).toContain('nenhum perfil foi apagado')
+  })
+  test('r4: a session is refused BEFORE the proof is spent', async () => {
+    let spent = 0
+    const f = fixture({ caller: () => ({ kind: 'session', pid: 4242, managedId: 'aaa' }), profilesProof: async () => { spent++; return { ok: true, grantId: 'p' } } })
+    f.deps.host.deleteProfiles = () => ({ ok: true, removed: 1 })
+    expect((await del(f))?.status).toBeGreaterThanOrEqual(400)
+    expect(spent).toBe(0)
+  })
+  test('GET is not allowed', async () => {
+    expect((await browserRoute('GET', '/api/browser/profiles/delete', {}, fixture().deps))?.status).toBe(405)
   })
 })
