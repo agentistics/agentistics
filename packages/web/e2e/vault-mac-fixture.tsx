@@ -8,7 +8,4 @@ const initial = { state: 'open', wrappers: ['keychain'], presence: false, presen
   unlockMethods: [{ id: 'touchid', advanced: false, gestures: { enroll: 1, unlock: 1 } }, { id: 'password', advanced: false, gestures: { enroll: 0, unlock: 0 } }],
   recoveryCreatedAt: null, autoLockMinutes: 30, gates: {}, setupCode: { owed: false }, loopback: true,
 } as unknown as VaultView
-// For before/after QA, the author can temporarily supply the baseline component beside the real one.
-const path = '/src/components/vault/VaultFlows.baseline.tsx'
-const Wizard = location.search.includes('baseline') ? (await import(/* @vite-ignore */ path)).EnrolWizard : EnrolWizard
-createRoot(document.getElementById('root')!).render(<Wizard lang="pt" isMobile={innerWidth < 768} initial={initial} steps={['presence', 'recovery']} fixedKind="touchid" onClose={() => {}} />)
+createRoot(document.getElementById('root')!).render(<EnrolWizard lang="pt" isMobile={innerWidth < 768} initial={initial} steps={['presence', 'recovery']} fixedKind="touchid" onClose={() => {}} />)

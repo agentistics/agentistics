@@ -1508,7 +1508,7 @@ async function commitHeldPresence(
     if (!presenceFile) return
     try {
       if (priorPresence) await writePrivateAtomic(secretFs(), presenceFile, priorPresence)
-      else await secretFs().unlink(presenceFile)
+      else await realProtectorIo().removeFile(presenceFile)
     } catch { /* best effort: the file is unreferenced by vault.json either way */ }
   }
   const prep = await prepareRekey({ dek: o.dek, kid: o.kid }, h.next, [recFile])
