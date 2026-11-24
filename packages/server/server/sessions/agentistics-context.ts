@@ -58,6 +58,11 @@ export interface ContextInput {
   ownerRequests?: string
   /** ORQ.H2: the hand-off GENERATED from the board for this successor, delivered as a system item. */
   passagem?: string
+  /**
+   * ENTREGA.GARANTIDA S7b (§5.2.4): the orphan pieces queued in this leader's project, computed ONCE at its start
+   * (`withCustodyDiscovery`). Discovery only — the custody tick's assignment message is what gives custody. Leaders only.
+   */
+  custodyQueue?: string
 }
 
 /** One line, stated once: who wins when two instructions disagree. */
@@ -134,6 +139,7 @@ export function contextText(i: ContextInput): string {
   const lines = [
     CONTEXT_HEADER,
     ...(i.ownerRequests && i.role === 'leader' ? [i.ownerRequests] : []),
+    ...(i.custodyQueue && i.role === 'leader' ? [i.custodyQueue] : []),
     `You are running inside agentistics, an app that manages and measures coding-assistant sessions. Session: ${i.sessionId}. Project folder: ${i.cwd}.`,
     PRECEDENCE_LINE,
     'Tools — the "agentistics" MCP server gives you:',

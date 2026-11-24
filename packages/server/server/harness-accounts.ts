@@ -10,6 +10,7 @@ import { defaultClaudeConfigDir } from './default-claude-root'
 import { withFileLock } from './sessions/file-lock'
 import { ISOLATION_ENV } from './account-isolation'
 import { runClaudeInLoginContext } from './account-login'
+import { durableWrite } from './durable-file'
 
 export interface HarnessAccount {
   id: string
@@ -444,9 +445,7 @@ export function createHarnessAccounts(options: {
   }
   async function write(data: AccountsFile): Promise<void> {
     await mkdir(dirname(options.file), { recursive: true })
-    const tmp = `${options.file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
-    await writeFile(tmp, JSON.stringify(data), { mode: 0o600 })
-    await rename(tmp, options.file)
+    await durableWrite(options.file, JSON.stringify(data), 0o600)
   }
   const writeBackup = options.writeBackup ?? ((path: string, raw: string) => writeFile(path, raw, { mode: 0o600, flag: 'wx' }))
   const backedUp = new Set<string>()
@@ -679,7 +678,7 @@ export function createHarnessAccounts(options: {
         await write(data)
       })
     },
-    update,
+    patchAccount: update,
     /** Retire: invisible to agents, history and billing kept. Re-binding the same login un-retires it. */
     async retire(id: string): Promise<HarnessAccount | null> {
       return serial(async () => {
@@ -757,7 +756,7 @@ export const currentHarnessAccounts = (harnesses: readonly HarnessId[]) => store
 export const listHarnessAccounts = (harnesses?: readonly HarnessId[]) => store.list(harnesses)
 export const setAccountAvailable = (harness: HarnessId, key: string, available: boolean) => store.setAvailable(harness, key, available)
 export const retireAccount = (id: string) => store.retire(id)
-export const updateAccount = (id: string, patch: AccountPatch) => store.update(id, patch)
+export const updateAccount = (id: string, patch: AccountPatch) => store.patchAccount(id, patch)
 export const markLoginExpired = (id: string, at: number) => store.markLoginExpired(id, at)
 export const clearLoginExpired = (id: string) => store.clearLoginExpired(id)
 

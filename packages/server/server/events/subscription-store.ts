@@ -16,6 +16,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { EMPTY_STORE, parseStore, type Subscription, type SubscriptionStore } from './subscriptions'
+import { durableWrite } from '../durable-file'
 
 export const SUBSCRIPTIONS_FILE =
   process.env.AGENTISTICS_EVENT_SUBSCRIPTIONS_FILE ?? join(AGENTISTICS_DATA_DIR, 'event-subscriptions.json')
@@ -38,7 +39,5 @@ export async function writeSubscriptionStore(
   file = SUBSCRIPTIONS_FILE,
 ): Promise<void> {
   await mkdir(dirname(file), { recursive: true })
-  const tmp = `${file}.agentop-tmp`
-  await writeFile(tmp, `${JSON.stringify(store, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
-  await rename(tmp, file)
+  await durableWrite(file, `${JSON.stringify(store, null, 2)}\n`, 0o600)
 }

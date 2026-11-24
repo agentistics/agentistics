@@ -76,10 +76,10 @@ test('a subtask starting stamps the parent task startedAt, once, and a later sub
     ${task('t1')}
     ${subtask('s1', 't1')}
     ${subtask('s2', 't1')}
-    await web.patchSubtask('s1', { status: 'in_progress' })
+    await web.patchSubtask('s1', { status: 'in_progress' }, { principal: { kind: 'unattributed' } })
     const mid = await store.read()
     const firstStamp = mid.tasks[0].startedAt
-    await web.patchSubtask('s2', { status: 'in_progress' })
+    await web.patchSubtask('s2', { status: 'in_progress' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({
       firstStamp, unchanged: after.tasks[0].startedAt === firstStamp,
@@ -100,7 +100,7 @@ test('a subtask starting stamps the parent task startedAt, once, and a later sub
 test("the task's own direct transition to in_progress stamps startedAt too, with no subtasks involved at all", async () => {
   const out = await run(`
     ${task('t1')}
-    const result = await web.markTask('t1', 'in_progress')
+    const result = await web.markTask('t1', 'in_progress', undefined, { guard: { principal: { kind: 'unattributed' } } })
     const after = await store.read()
     console.log(JSON.stringify({ ok: result.ok, startedAt: after.tasks[0].startedAt ?? null }))
   `)
@@ -131,12 +131,12 @@ test('a subtask reaching done stamps its OWN deliveredAt, once', async () => {
     ${subtask('s1', 't1')}
     ${subtask('s2', 't1')}
     ${session('sess1', "taskId: 't1', subtaskId: 's1',")}
-    await web.patchSubtask('s1', { status: 'done' })
+    await web.patchSubtask('s1', { status: 'done' }, { principal: { kind: 'unattributed' } })
     const mid = await store.read()
     const firstStamp = mid.subtasks.find(s => s.id === 's1').deliveredAt
     // Leaving and re-entering done must never slide the figure forward.
-    await web.patchSubtask('s1', { status: 'todo' })
-    await web.patchSubtask('s1', { status: 'done' })
+    await web.patchSubtask('s1', { status: 'todo' }, { principal: { kind: 'unattributed' } })
+    await web.patchSubtask('s1', { status: 'done' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const finalStamp = after.subtasks.find(s => s.id === 's1').deliveredAt
     console.log(JSON.stringify({ firstStamp, finalStamp, unchanged: firstStamp === finalStamp }))
@@ -157,13 +157,13 @@ test('ALL top-level subtasks done (a GROUP counted as ONE item, never per-member
     ${session('sess1', "taskId: 't1', subtaskId: 's1',")}
     ${session('sess2', "taskId: 't1', subtaskId: 'g1',")}
     // s1 done — the group g1 is not, so the task must NOT auto-deliver yet.
-    await web.patchSubtask('s1', { status: 'done' })
+    await web.patchSubtask('s1', { status: 'done' }, { principal: { kind: 'unattributed' } })
     const mid = await store.read()
     const midStatus = mid.tasks[0].status
     // The group's MEMBER (m1) is left at 'todo' on purpose: a member is exempt from
     // done_needs_session and NEVER counts as a separate top-level item, so its being
     // undone must not stand in the way of the group itself closing.
-    const groupResult = await web.patchSubtask('g1', { status: 'done' })
+    const groupResult = await web.patchSubtask('g1', { status: 'done' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({
       midStatus, groupResult,
@@ -190,7 +190,7 @@ test('a group whose MEMBERS are all done but whose own status is not never auto-
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
     // A member reaches 'done' with NO session at all — exempt from done_needs_session by design.
-    const result = await web.patchSubtask('m1', { status: 'done' })
+    const result = await web.patchSubtask('m1', { status: 'done' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({
       ok: result.ok, taskStatus: after.tasks[0].status, groupStatus: after.subtasks.find(s => s.id === 'g1').status,
@@ -208,7 +208,7 @@ test('a task with NO subtasks stamps deliveredAt on the ordinary manual done mov
   const out = await run(`
     ${task('t1')}
     ${session('sess1', "taskId: 't1',")}
-    const result = await web.markTask('t1', 'done')
+    const result = await web.markTask('t1', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     const after = await store.read()
     console.log(JSON.stringify({ ok: result.ok, status: after.tasks[0].status, deliveredAt: after.tasks[0].deliveredAt ?? null }))
   `)
@@ -222,10 +222,10 @@ test('deliveredAt is frozen: re-marking an already-delivered task done again nev
   const out = await run(`
     ${task('t1')}
     ${session('sess1', "taskId: 't1',")}
-    await web.markTask('t1', 'done')
+    await web.markTask('t1', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     const mid = await store.read()
     const firstStamp = mid.tasks[0].deliveredAt
-    const result = await web.markTask('t1', 'done')
+    const result = await web.markTask('t1', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     const after = await store.read()
     console.log(JSON.stringify({ ok: result.ok, unchanged: after.tasks[0].deliveredAt === firstStamp }))
   `)
@@ -246,8 +246,8 @@ test('the auto-complete path goes through the SAME done_needs_session gate as a 
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
-    const subtaskResult = await web.patchSubtask('s1', { status: 'done' })
-    const taskResult = await web.markTask('t1', 'done')
+    const subtaskResult = await web.patchSubtask('s1', { status: 'done' }, { principal: { kind: 'unattributed' } })
+    const taskResult = await web.markTask('t1', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     const after = await store.read()
     console.log(JSON.stringify({
       subtaskResult, taskResult, taskStatus: after.tasks[0].status, subtaskStatus: after.subtasks[0].status,
@@ -265,7 +265,7 @@ test('once a session legitimizes the subtask done move, the auto-path succeeds t
     ${task('t1')}
     ${subtask('s1', 't1')}
     ${session('sess1', "taskId: 't1', subtaskId: 's1',")}
-    const subtaskResult = await web.patchSubtask('s1', { status: 'done' })
+    const subtaskResult = await web.patchSubtask('s1', { status: 'done' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ subtaskResult, taskStatus: after.tasks[0].status }))
   `)

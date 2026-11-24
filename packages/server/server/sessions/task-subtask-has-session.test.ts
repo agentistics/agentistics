@@ -178,10 +178,10 @@ test('REAL CASE: a conversation MOVED from X to Y — X joins a group and can be
     ${subtask('Y', 'T')}
     ${session('old', '2026-09-10T10:00:00.000Z', "conversationId: 'C', taskId: 'T', subtaskId: 'X',")}
     ${session('new', '2026-09-12T10:00:00.000Z', "conversationId: 'C', taskId: 'T', subtaskId: 'Y',")}
-    const xDone = await web.patchSubtask('X', { status: 'done' })
-    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' })
-    const yJoin = await web.patchSubtask('Y', { parentGroupId: 'G' })
-    const yDone = await web.patchSubtask('Y', { status: 'done' })
+    const xDone = await web.patchSubtask('X', { status: 'done' }, { principal: { kind: 'unattributed' } })
+    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' }, { principal: { kind: 'unattributed' } })
+    const yJoin = await web.patchSubtask('Y', { parentGroupId: 'G' }, { principal: { kind: 'unattributed' } })
+    const yDone = await web.patchSubtask('Y', { status: 'done' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ xDone, xJoin, yJoin, yDone, xGroup: after.subtasks.find(s => s.id === 'X').parentGroupId ?? null }))
   `)
@@ -203,7 +203,7 @@ test('a reopen that did not inherit the filing leaves the old row standing — X
     ${subtask('X', 'T')}
     ${session('old', '2026-09-10T10:00:00.000Z', "conversationId: 'C', taskId: 'T', subtaskId: 'X',")}
     ${session('reopen', '2026-09-12T10:00:00.000Z', "conversationId: 'C', task: 'T',")}
-    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' })
+    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ xJoin }))
   `)
   expect(out.xJoin).toEqual({ ok: false, message: 'subtask_has_sessions' })
@@ -216,7 +216,7 @@ test('a conversation UNFILED by a detach frees the subtask its old row still nam
     ${subtask('X', 'T')}
     ${session('old', '2026-09-10T10:00:00.000Z', "conversationId: 'C', taskId: 'T', subtaskId: 'X',")}
     ${session('detached', '2026-09-12T10:00:00.000Z', "conversationId: 'C', taskId: '',")}
-    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' })
+    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ xJoin }))
   `)
   expect(out.xJoin).toEqual({ ok: true })
@@ -231,7 +231,7 @@ test('a conversation moved to ANOTHER task no longer counts on the subtask it le
     ${subtask('Q', 'OTHER')}
     ${session('old', '2026-09-10T10:00:00.000Z', "conversationId: 'C', taskId: 'T', subtaskId: 'X',")}
     ${session('new', '2026-09-12T10:00:00.000Z', "conversationId: 'C', taskId: 'OTHER', subtaskId: 'Q',")}
-    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' })
+    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ xJoin }))
   `)
   expect(out.xJoin).toEqual({ ok: true })
@@ -244,9 +244,9 @@ test('a HISTORICAL link on X counts — and unlocks done', async () => {
     ${subtask('X', 'T')}
     ${subtask('W', 'T')}
     ${historical('HC', 'T', 'X', '2026-09-12T10:00:00.000Z')}
-    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' })
-    const xDone = await web.patchSubtask('X', { status: 'done' })
-    const wDone = await web.patchSubtask('W', { status: 'done' })
+    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' }, { principal: { kind: 'unattributed' } })
+    const xDone = await web.patchSubtask('X', { status: 'done' }, { principal: { kind: 'unattributed' } })
+    const wDone = await web.patchSubtask('W', { status: 'done' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ xJoin, xDone, wDone }))
   `)
   expect(out.xJoin).toEqual({ ok: false, message: 'subtask_has_sessions' })
@@ -262,8 +262,8 @@ test('a superseded registry row on X plus a NEWER historical link on Y: X has no
     ${subtask('Y', 'T')}
     ${session('old', '2026-09-10T10:00:00.000Z', "conversationId: 'C', taskId: 'T', subtaskId: 'X',")}
     ${historical('C', 'T', 'Y', '2026-09-15T10:00:00.000Z')}
-    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' })
-    const yJoin = await web.patchSubtask('Y', { parentGroupId: 'G' })
+    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' }, { principal: { kind: 'unattributed' } })
+    const yJoin = await web.patchSubtask('Y', { parentGroupId: 'G' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ xJoin, yJoin }))
   `)
   expect(out.xJoin).toEqual({ ok: true })
@@ -277,8 +277,8 @@ test('rows with NO conversation link keep counting exactly as before', async () 
     ${subtask('X', 'T')}
     ${session('a', '2026-09-10T10:00:00.000Z', "taskId: 'T', subtaskId: 'X',")}
     ${session('b', '2026-09-12T10:00:00.000Z', "taskId: 'T', subtaskId: 'X',")}
-    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' })
-    const xDone = await web.patchSubtask('X', { status: 'done' })
+    const xJoin = await web.patchSubtask('X', { parentGroupId: 'G' }, { principal: { kind: 'unattributed' } })
+    const xDone = await web.patchSubtask('X', { status: 'done' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ xJoin, xDone }))
   `)
   expect(out.xJoin).toEqual({ ok: false, message: 'subtask_has_sessions' })
@@ -295,9 +295,9 @@ test('re-marking done: a subtask whose only row is history reads as sessionless,
     ${subtask('Y', 'T')}
     ${session('old', '2026-09-10T10:00:00.000Z', "conversationId: 'C', taskId: 'T', subtaskId: 'X',")}
     ${session('new', '2026-09-12T10:00:00.000Z', "conversationId: 'C', taskId: 'T', subtaskId: 'Y',")}
-    const uncheck = await web.setSubtaskDone('X', false)
-    const recheck = await web.setSubtaskDone('X', true)
-    const taskDone = await web.markTask('T', 'done')
+    const uncheck = await web.setSubtaskDone('X', false, { principal: { kind: 'unattributed' } })
+    const recheck = await web.setSubtaskDone('X', true, { principal: { kind: 'unattributed' } })
+    const taskDone = await web.markTask('T', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     console.log(JSON.stringify({ uncheck, recheck, taskDone: taskDone.ok }))
   `)
   expect(out.uncheck).toEqual({ ok: true })

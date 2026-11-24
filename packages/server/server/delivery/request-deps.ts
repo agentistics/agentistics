@@ -37,6 +37,24 @@ export async function taskAuthorField(
   return authorFieldAs(raw, move, ref, known, body, text && isReservedActor(text) && known !== 'keep' ? await depsOf() : { verify: async () => null, mode: async () => 'legacy' as const })
 }
 
+/**
+ * The store's `GuardContext` for a `/api/tasks*` write (S2c.1). A `body.session` claim is a CLAIM: it becomes a session
+ * principal only when its token proves it (`verifySessionIdentity`); a claim that does not prove itself is REFUSED 403 — it
+ * never degrades to the person's (unattributed) context, which would let a forged id act as an anonymous request. No claim
+ * at all is the person's own request: `unattributed`.
+ */
+export async function guardContextOfRequest(
+  body: Record<string, unknown>, io: RequestDepsIo = {},
+): Promise<{ ok: true; ctx: import('./guard').GuardContext } | { ok: false; reply: WebReply }> {
+  const claim = body.session as { id?: unknown; token?: unknown } | undefined | null
+  if (claim === undefined || claim === null) return { ok: true, ctx: { principal: { kind: 'unattributed' } } }
+  const { verifySessionIdentity } = await import('../sessions/session-identity')
+  const verify = io.verify ?? ((id: unknown, token: unknown) => verifySessionIdentity(id, token))
+  const id = typeof claim === 'object' ? await verify(claim.id, claim.token) : null
+  if (id) return { ok: true, ctx: { principal: { kind: 'session', id, via: 'token' } } }
+  return { ok: false, reply: { status: 403, body: { error: 'session_unverified', message: 'The session identity in this request could not be verified; the write was refused.' } } }
+}
+
 export type OpenKnown = 'keep' | { kind: 'session'; id: string; via: 'token' } | undefined
 
 /**

@@ -67,7 +67,7 @@ export function defaultDeliveryBoard(): DeliveryBoard {
       const { normalizeStagedSession } = await import('@agentistics/core')
       const normalized = normalizeStagedSession(draft)
       if (!normalized) return { ok: false, message: 'bad_staged_session: a staged session needs a prompt (and an absolute cwd, when given)' }
-      const out = await (await web()).patchSubtask(subtaskId, { stagedSession: normalized })
+      const out = await (await web()).patchSubtask(subtaskId, { stagedSession: normalized }, flowContext())
       return out.ok ? { ok: true } : { ok: false, message: out.message }
     },
   }
@@ -222,9 +222,8 @@ function proofCacheFile(): { load(): Promise<unknown>; save(doc: unknown): Promi
     async save(doc) {
       const fs = await import('node:fs/promises')
       const p = await path()
-      const tmp = `${p}.${process.pid}.tmp`
-      await fs.writeFile(tmp, JSON.stringify(doc), { mode: 0o600 })
-      await fs.rename(tmp, p)
+      const { durableWrite } = await import('../durable-file')
+      await durableWrite(p, JSON.stringify(doc), 0o600)
     },
   }
 }
@@ -296,6 +295,44 @@ export async function custodyProjectsOf(pieces: ReadonlyArray<{ taskId: string; 
     sessions: registry.map(r => ({ id: r.id, conversationId: r.conversationId, taskId: r.taskId, subtaskId: r.subtaskId, repo: r.repo?.repo })),
     groups: groups as never,
   })
+}
+
+/**
+ * ENTREGA.GARANTIDA S7b (§5.2.3–4) — what a SESSION reads of the custody: the check-in lists the pieces it holds and its project's
+ * queue, and a leader STARTING in a project discovers that queue in its SessionStart context. Two channels, deliberately apart:
+ *   DISCOVERY   computed once, at the session's start, from the store; information only, it grants nothing, and the context is
+ *               never changed afterwards;
+ *   ASSIGNMENT  the custody tick (`custody-tick.ts`) assigns the piece and MESSAGES the custodian. That is the authority `leads()`
+ *               and the wakes read; when the two disagree (the queue moved after the start), the assignment wins.
+ * Rule C `on` only: `off`/`shadow` and any read failure yield nothing. The decision is `custody.ts` (pure); this only reads (the
+ * records through the service, never a write). It lives here rather than in a module of its own because every importer of a
+ * store-capable module is pinned by the writer-ceiling lint (`doors.lint.test.ts`).
+ */
+export interface CustodyViewDeps {
+  /** Where `guarantees.json` lives (the data dir). Default: the delivery store's own directory. */
+  dataDir?: string
+  records?(): Promise<readonly DeliveryRecord[]>
+  /** The project resolver the tick uses (`custodyProjectsOf`). */
+  projectsOf?(pieces: ReadonlyArray<{ taskId: string; subtaskId: string }>): Promise<ReadonlyMap<string, string>>
+}
+/** The custody `sessionId` holds and the queue of its own task's project. `null` = rule C is not on, or nothing could be read. */
+export async function readCustodyView(who: { sessionId: string; taskId?: string }, deps: CustodyViewDeps = {}): Promise<import('./custody').CustodyView | null> {
+  try {
+    const [{ dirname }, { ruleCState }, { custodyViewFor }] = await Promise.all([import('node:path'), import('./guard-host'), import('./custody')])
+    const dataDir = deps.dataDir ?? dirname(createDeliveryStore().path)
+    if ((await ruleCState(dataDir)) !== 'on') return null
+    const records = deps.records ? await deps.records() : await deliveryService().list()
+    const projectsOf = deps.projectsOf ?? custodyProjectsOf
+    const project = who.taskId ? (await projectsOf([{ taskId: who.taskId, subtaskId: who.taskId }])).get(who.taskId) ?? '' : ''
+    return custodyViewFor(records, who.sessionId, new Set(project ? [project] : []))
+  } catch { return null }
+}
+/** S7b (§5.2.4): a LEADER's SessionStart context gains the queue of its project. Anything else, or nothing queued: unchanged. */
+export async function withCustodyDiscovery<T extends { sessionId?: string; role?: string; taskId?: string }>(i: T, deps: CustodyViewDeps = {}): Promise<T & { custodyQueue?: string }> {
+  if (i.role !== 'leader' || !i.taskId) return i
+  const view = await readCustodyView({ sessionId: i.sessionId ?? '', taskId: i.taskId }, deps)
+  const section = view ? (await import('./custody')).custodyDiscoverySection(view.queue) : ''
+  return section ? { ...i, custodyQueue: section } : i
 }
 
 let cached: DeliveryService | null = null

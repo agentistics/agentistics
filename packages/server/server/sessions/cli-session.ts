@@ -38,7 +38,7 @@ import { SPAWN_SPECS, planSpawn } from './spawn-spec'
 import { spawnCapabilities } from './codex-capabilities'
 import { readHarnessVersion } from './harness-version'
 import { spawnGate, UNPROVEN_SESSION, verifyBornRole } from './spawn-gate'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withCustodyQueue, withPassagem, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { isRenameNoop, renameInHarness, renameMessage, renameOutcomeRecord } from './rename'
@@ -50,7 +50,7 @@ import { addSession, newSessionId, patchSession, readRegistry, removeSession, re
 import { callerHoldsIdentity, callerProof, callerSessionFromTree, type CallerProof } from './session-identity'
 import { spawnParentLink } from './team-links'
 import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
-import { handoffAccountChoice, newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
+import { accountForReopen, handoffAccountChoice, newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
 import { liveIdsOf, planReopenCwd, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
@@ -81,6 +81,7 @@ import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, 
 import { ensureClaudeProjectTrusted } from './claude-trust'
 import type { BackendInitialPrompt, BackendSpawn, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 import { structuredOnlyNotice } from './spawn-error'
+import { unattributedContext } from '../delivery/guard'
 
 /**
  * The initial-prompt argument for `backend.spawn`, with the harness's screen RULES attached so the
@@ -590,7 +591,7 @@ export async function start(
   const relay = handoffParentRow
     ? await import('./handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
-  const ctx = buildSpawnContext(await withPassagem(await withOwnerRequests({ ...(relay ? { handoffRelay: relay.section } : {}), ...(cmd.handoff ? { handoffTakeover: true } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) }), !!cmd.handoff, cmd.handoffFile ? { handoffFile: cmd.handoffFile } : {}))
+  const ctx = buildSpawnContext(await withPassagem(await withCustodyQueue(await withOwnerRequests({ ...(relay ? { handoffRelay: relay.section } : {}), ...(cmd.handoff ? { handoffTakeover: true } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })), !!cmd.handoff, cmd.handoffFile ? { handoffFile: cmd.handoffFile } : {}))
   // PLAN.ACCOUNTS D3 — one decision for every door (`spawn-account.ts`). An agent is asking when
   // this command runs inside a pane that can prove its identity.
   const agentCaller = await callerHoldsIdentity(callerSessionId())
@@ -809,7 +810,7 @@ async function resolveTaskAndAttempts(
   if (!task) {
     // A task a batch is starting is `in_progress` by construction: sessions are about to run.
     task = { id: newTaskId(), title: cmd.task, status: 'in_progress', createdAt: now, updatedAt: now }
-    await store.upsertTask(task)
+    await store.upsertTask(task, unattributedContext())
   }
   const created: Task = task
 
@@ -1170,7 +1171,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       const id = newSessionId()
       const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
       // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
-      const account = await recordedSpawnAccount(m.accountId, { agentCaller, harness: m.harness })
+      const account = await recordedSpawnAccount(await accountForReopen(m.accountId, m.harness, m.cwd, row.resumeId), { agentCaller, harness: m.harness })
       if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); return }
       const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...(await autonomousLaunch(m.harness, inheritedLaunch(m, m.harness), m.away === true)), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
       if (!planned.ok) { skipped.push(m.id); return }
@@ -1549,7 +1550,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
     // one it never ran has no record and reopens in the default root, as before. Decided BEFORE the
     // holder is closed: a removed account must refuse while the user still has their assistant.
     const previous = newestRowOfConversation(await readRegistry(), live.sessionId)
-    const account = await recordedSpawnAccount(previous?.accountId, { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
+    const account = await recordedSpawnAccount(await accountForReopen(previous?.accountId, live.harness, live.cwd, live.sessionId), { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
     if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
     const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...(await autonomousLaunch(live.harness, inheritedLaunch(previous, live.harness), previous?.away === true)), ...(logFile ? { logFile } : {}), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
     if (planned.ok && planned.plan.modeNeedsProtocol) { console.error(`Cannot reopen ${live.sessionId}: terminal cannot apply ${planned.plan.modeNeedsProtocol} approval mode`); return 1 }

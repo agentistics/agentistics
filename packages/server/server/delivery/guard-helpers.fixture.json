@@ -2503,5 +2503,11 @@
   ],
   "web/src/lib/rowMenuCascade.ts": [
     "raw-writer-helper"
+  ],
+  "server/server/durable-file.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/sessions/native-notes.ts": [
+    "raw-writer-helper"
   ]
 }

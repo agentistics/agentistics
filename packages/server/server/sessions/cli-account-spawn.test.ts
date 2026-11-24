@@ -36,7 +36,7 @@ beforeAll(async () => {
   homeId = (await store.bind(null, { harness: 'claude', key: 'org:home', label: 'home' })).account.id
   secondId = (await store.bind(secondRoot(), { harness: 'claude', key: 'org:two', label: 'two' })).account.id
   // The default root's account is OFF for agents.
-  await store.update(homeId, { available: false })
+  await store.patchAccount(homeId, { available: false })
 })
 afterAll(() => {
   if (savedFlag === undefined) delete process.env.AGENTISTICS_MULTI_ACCOUNT

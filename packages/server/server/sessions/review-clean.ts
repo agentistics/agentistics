@@ -5,6 +5,7 @@ import { TASKS_FILE } from '../config'
 import { loadTaskWorld } from './task-source'
 import { newCommentId, type TaskComment } from './task-model'
 import { ownerIntent } from '../flows/owner-intent'
+import { unattributedContext } from '../delivery/guard'
 
 export interface ReviewCleanEntry {
   taskId: string; taskTitle: string; subtaskId: string | null; subtaskTitle: string | null; status: string
@@ -87,10 +88,10 @@ export async function runReviewClean(argv: readonly string[]): Promise<number> {
       const currentRecord = e.subtaskId ? (await deliveryStore.get(e.subtaskId)) : null
       const currentComments = world.book.comments.filter(c => c.taskId === e.taskId && (c.subtaskId ?? null) === (e.subtaskId ?? null))
       if (currentStatus !== e.status || currentSessions.length > 0 || hasStructuralProof(currentRecord, currentComments)) { skipped.push(`${e.taskId}${e.subtaskId ? `/${e.subtaskId}` : ''}`); continue }
-      if (e.subtaskId) { if (!currentSub || currentSub.status === 'abandoned') continue; await world.store.upsertSubtask({ ...currentSub, status: 'abandoned', updatedAt: new Date().toISOString() }) }
-      else { if (!currentTask || currentTask.status === 'abandoned') continue; await world.store.patchTask(currentTask.id, { status: 'abandoned', updatedAt: new Date().toISOString() }) }
+      if (e.subtaskId) { if (!currentSub || currentSub.status === 'abandoned') continue; await world.store.upsertSubtask({ ...currentSub, status: 'abandoned', updatedAt: new Date().toISOString() }, unattributedContext()) }
+      else { if (!currentTask || currentTask.status === 'abandoned') continue; await world.store.patchTask(currentTask.id, { status: 'abandoned', updatedAt: new Date().toISOString() }, { guard: unattributedContext() }) }
       if (e.subtaskId && currentRecord && !currentRecord.dequeued) {
-        await deliveryStore.update(doc => { const rec = doc.deliveries[e.subtaskId!]; if (rec && !rec.dequeued) rec.dequeued = { at: new Date().toISOString(), actor: 'agentop tasks limpar-revisao', reason: 'owner conversation, not work' } })
+        await deliveryStore.update(doc => { const rec = doc.deliveries[e.subtaskId!]; if (rec && !rec.dequeued) rec.dequeued = { at: new Date().toISOString(), actor: 'agentop tasks limpar-revisao', reason: 'owner conversation, not work' } }, { guard: unattributedContext() })
       }
       const c: TaskComment = { id: newCommentId(), taskId: e.taskId, ...(e.subtaskId ? { subtaskId: e.subtaskId } : {}), author: 'agentop tasks limpar-revisao', body: `abandoned: ${e.reason}. Canonical piece: ${e.taskId}${e.subtaskId ? `/${e.subtaskId}` : ''}`, createdAt: new Date().toISOString() }
       await world.store.addComment(c); changed++

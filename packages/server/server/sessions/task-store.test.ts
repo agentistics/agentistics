@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createTaskStore } from './task-store'
 import type { Subtask, Task } from './task-model'
+import { unattributedContext } from '../delivery/guard'
 
 const task = (id: string, over: Partial<Task> = {}): Task => ({
   id,
@@ -34,11 +35,11 @@ async function store() {
 describe('createTaskStore', () => {
   it('checks review blockers inside the write lock, including direct store callers', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t1', { status: 'in_progress' }))
-    await s.upsertSubtask(subtask('s1', 't1', { status: 'blocked' }))
-    expect(await s.patchTask('t1', { status: 'in_review' })).toBe(false)
+    await s.upsertTask(task('t1', { status: 'in_progress' }), unattributedContext())
+    await s.upsertSubtask(subtask('s1', 't1', { status: 'blocked' }), unattributedContext())
+    expect(await s.patchTask('t1', { status: 'in_review' }, { guard: unattributedContext() })).toBe(false)
     expect((await s.read()).tasks[0]!.status).toBe('in_progress')
-    expect(await s.patchTask('t1', { status: 'in_review' }, { allowOpenSubtasks: true })).toBe(true)
+    expect(await s.patchTask('t1', { status: 'in_review' }, { guard: unattributedContext(), allowOpenSubtasks: true })).toBe(true)
   })
   it('reads an empty book when the file does not exist', async () => {
     const { s } = await store()
@@ -50,14 +51,14 @@ describe('createTaskStore', () => {
 
   it('round-trips a task', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
+    await s.upsertTask(task('t-1'), unattributedContext())
     expect((await s.read()).tasks.map(t => t.id)).toEqual(['t-1'])
   })
 
   it('upsert replaces by id rather than appending a second record', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1', { title: 'first' }))
-    await s.upsertTask(task('t-1', { title: 'second' }))
+    await s.upsertTask(task('t-1', { title: 'first' }), unattributedContext())
+    await s.upsertTask(task('t-1', { title: 'second' }), unattributedContext())
     const book = await s.read()
     expect(book.tasks).toHaveLength(1)
     expect(book.tasks[0]!.title).toBe('second')
@@ -70,9 +71,9 @@ describe('createTaskStore', () => {
     // `read()` silently dropped it. Found live while wiring `SubtaskActionsMenu`'s "Blocked by"
     // step: the API response never carried the field at all despite the file on disk holding it.
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
-    await s.upsertSubtask(subtask('s-1', 't-1'))
-    await s.upsertSubtask(subtask('s-2', 't-1', { blockedBy: ['s-1'] }))
+    await s.upsertTask(task('t-1'), unattributedContext())
+    await s.upsertSubtask(subtask('s-1', 't-1'), unattributedContext())
+    await s.upsertSubtask(subtask('s-2', 't-1', { blockedBy: ['s-1'] }), unattributedContext())
     const found = (await s.read()).subtasks.find(t => t.id === 's-2')
     expect(found?.blockedBy).toEqual(['s-1'])
   })
@@ -89,13 +90,13 @@ describe('createTaskStore', () => {
 
   it('patch reports false for an id nobody carries, never a silent success', async () => {
     const { s } = await store()
-    expect(await s.patchTask('nope', { status: 'done' })).toBe(false)
+    expect(await s.patchTask('nope', { status: 'done' }, { guard: unattributedContext() })).toBe(false)
   })
 
   it('patch stamps updatedAt so a later sync can order writes', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
-    await s.patchTask('t-1', { status: 'done', updatedAt: '2026-09-05T11:00:00.000Z' })
+    await s.upsertTask(task('t-1'), unattributedContext())
+    await s.patchTask('t-1', { status: 'done', updatedAt: '2026-09-05T11:00:00.000Z' }, { guard: unattributedContext() })
     const [t] = (await s.read()).tasks
     expect(t!.status).toBe('done')
     expect(t!.updatedAt).toBe('2026-09-05T11:00:00.000Z')
@@ -114,7 +115,7 @@ describe('createTaskStore', () => {
     const { file, s } = await store()
     await writeFile(file, '{ this is not json', 'utf8')
     await s.read()
-    await s.upsertTask(task('t-1'))
+    await s.upsertTask(task('t-1'), unattributedContext())
     // The bad bytes still exist: a parse failure must never become permanent data loss.
     const names = await readdir(dirname(file))
     expect(names.some(n => n.includes('corrupt'))).toBe(true)
@@ -144,7 +145,7 @@ describe('createTaskStore', () => {
 
   it('serialises concurrent writes without losing one', async () => {
     const { s } = await store()
-    await Promise.all([s.upsertTask(task('t-1')), s.upsertTask(task('t-2')), s.upsertTask(task('t-3'))])
+    await Promise.all([s.upsertTask(task('t-1'), unattributedContext()), s.upsertTask(task('t-2'), unattributedContext()), s.upsertTask(task('t-3'), unattributedContext())])
     expect((await s.read()).tasks.map(t => t.id).sort()).toEqual(['t-1', 't-2', 't-3'])
   })
 })
@@ -152,7 +153,7 @@ describe('createTaskStore', () => {
 describe('the board around a task', () => {
   it('round-trips a comment, a subtask and a file record', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
+    await s.upsertTask(task('t-1'), unattributedContext())
     await s.addComment({
       id: 'c-1', taskId: 't-1', author: 'claude:3f5f', body: 'spec written',
       createdAt: '2026-09-05T10:00:00.000Z',
@@ -160,7 +161,7 @@ describe('the board around a task', () => {
     await s.upsertSubtask({
       id: 's-1', taskId: 't-1', title: 'write the spec', done: false, status: 'todo',
       createdAt: '2026-09-05T10:00:00.000Z', updatedAt: '2026-09-05T10:00:00.000Z',
-    })
+    }, unattributedContext())
     await s.addFile({
       id: 'f-1', taskId: 't-1', name: 'spec.md', size: 120, kind: 'spec',
       createdAt: '2026-09-05T10:00:00.000Z',
@@ -186,8 +187,8 @@ describe('the board around a task', () => {
       id: 's-1', taskId: 't-1', title: 'x',
       createdAt: '2026-09-05T10:00:00.000Z', updatedAt: '2026-09-05T10:00:00.000Z',
     }
-    await s.upsertSubtask({ ...base, done: false, status: 'todo' })
-    await s.upsertSubtask({ ...base, done: true, status: 'done', updatedAt: '2026-09-05T11:00:00.000Z' })
+    await s.upsertSubtask({ ...base, done: false, status: 'todo' }, unattributedContext())
+    await s.upsertSubtask({ ...base, done: true, status: 'done', updatedAt: '2026-09-05T11:00:00.000Z' }, unattributedContext())
     const list = (await s.read()).subtasks
     expect(list).toHaveLength(1)
     expect(list[0]!.done).toBe(true)
@@ -195,10 +196,10 @@ describe('the board around a task', () => {
 
   it('removing a task takes its board with it and reports false for an unknown id', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
+    await s.upsertTask(task('t-1'), unattributedContext())
     await s.addComment({ id: 'c-1', taskId: 't-1', author: 'me', body: 'hi', createdAt: 'x' })
-    expect(await s.removeTask('nope')).toBe(false)
-    expect(await s.removeTask('t-1')).toBe(true)
+    expect(await s.removeTask('nope', undefined, { guard: unattributedContext() })).toBe(false)
+    expect(await s.removeTask('t-1', undefined, { guard: unattributedContext() })).toBe(true)
     const book = await s.read()
     expect([book.tasks.length, book.comments.length]).toEqual([0, 0])
   })
@@ -222,7 +223,7 @@ describe('the legacy migration and a task that was marked done', () => {
     await s.upsertTask({
       id: 't-real', title: 'ship it', status: 'done',
       createdAt: '2026-09-05T10:00:00.000Z', updatedAt: '2026-09-05T10:00:00.000Z',
-    })
+    }, unattributedContext())
     const { legacyTaskId, migrateLegacyTasks } = await import('./task-model')
     const book = await s.read()
     const knownIds = new Set(book.tasks.map(t => t.id))
@@ -240,8 +241,8 @@ describe('a deleted task stays deleted', () => {
     // The reported bug: deleting the task the migration had created did nothing visible, because
     // `ensureLegacyTasks` runs on every read and re-created it from the same name.
     const { s } = await store()
-    await s.upsertTask(task('legacy-abc'))
-    await s.removeTask('legacy-abc')
+    await s.upsertTask(task('legacy-abc'), unattributedContext())
+    await s.removeTask('legacy-abc', undefined, { guard: unattributedContext() })
     const book = await s.read()
     expect(book.tasks).toEqual([])
     expect(book.tombstones).toEqual(['legacy-abc'])
@@ -249,8 +250,8 @@ describe('a deleted task stays deleted', () => {
 
   it('creating the name again lifts the tombstone — it was a delete, not a ban', async () => {
     const { s } = await store()
-    await s.upsertTask(task('legacy-abc'))
-    await s.removeTask('legacy-abc')
+    await s.upsertTask(task('legacy-abc'), unattributedContext())
+    await s.removeTask('legacy-abc', undefined, { guard: unattributedContext() })
     await s.clearTombstone('legacy-abc')
     expect((await s.read()).tombstones).toEqual([])
   })
@@ -297,7 +298,7 @@ describe('a subtask is a row, not a checkbox', () => {
       dueDate: '2026-09-12', startDate: '2026-09-06',
       startedAt: '2026-09-06T10:00:00.000Z', sessionId: 'sess-1', notes: 'waiting on the API',
       createdAt: 'a', updatedAt: 'b',
-    })
+    }, unattributedContext())
     const t = (await s.read()).subtasks[0]!
     expect([t.status, t.dueDate, t.startedAt, t.sessionId, t.notes])
       .toEqual(['blocked', '2026-09-12', '2026-09-06T10:00:00.000Z', 'sess-1', 'waiting on the API'])
@@ -333,9 +334,9 @@ describe('a subtask is a row, not a checkbox', () => {
     await s.upsertSubtask({
       id: 's-1', taskId: 't-1', title: 'x', status: 'todo', done: false,
       createdAt: 'a', updatedAt: 'b',
-    })
-    expect(await s.removeSubtask('nope')).toBe(false)
-    expect(await s.removeSubtask('s-1')).toBe(true)
+    }, unattributedContext())
+    expect(await s.removeSubtask('nope', { guard: unattributedContext() })).toBe(false)
+    expect(await s.removeSubtask('s-1', { guard: unattributedContext() })).toBe(true)
     expect((await s.read()).subtasks).toEqual([])
   })
 })
@@ -346,7 +347,7 @@ describe('claimTask / releaseTask — the lease', () => {
 
   it('gives the task to the FIRST asker and refuses the second, naming the holder', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
+    await s.upsertTask(task('t-1'), unattributedContext())
     const first = await s.claimTask({ id: 't-1', by: 'agent-a', nowMs: NOW, leaseMs: LEASE })
     expect(first.ok).toBe(true)
     const second = await s.claimTask({ id: 't-1', by: 'agent-b', nowMs: NOW, leaseMs: LEASE })
@@ -357,7 +358,7 @@ describe('claimTask / releaseTask — the lease', () => {
   it('decides under the lock: two simultaneous claims cannot both succeed', async () => {
     // The reason this lives in the store rather than as a read-then-patch in the caller.
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
+    await s.upsertTask(task('t-1'), unattributedContext())
     const [a, b] = await Promise.all([
       s.claimTask({ id: 't-1', by: 'agent-a', nowMs: NOW, leaseMs: LEASE }),
       s.claimTask({ id: 't-1', by: 'agent-b', nowMs: NOW, leaseMs: LEASE }),
@@ -367,7 +368,7 @@ describe('claimTask / releaseTask — the lease', () => {
 
   it('hands an EXPIRED claim to the next asker — a dead agent does not hold a task forever', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
+    await s.upsertTask(task('t-1'), unattributedContext())
     await s.claimTask({ id: 't-1', by: 'agent-a', nowMs: NOW, leaseMs: LEASE })
     const later = await s.claimTask({ id: 't-1', by: 'agent-b', nowMs: NOW + LEASE + 1, leaseMs: LEASE })
     expect(later.ok).toBe(true)
@@ -376,7 +377,7 @@ describe('claimTask / releaseTask — the lease', () => {
 
   it('lets the HOLDER re-claim, which is how a lease is refreshed', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
+    await s.upsertTask(task('t-1'), unattributedContext())
     await s.claimTask({ id: 't-1', by: 'agent-a', nowMs: NOW, leaseMs: LEASE })
     const again = await s.claimTask({ id: 't-1', by: 'agent-a', nowMs: NOW + 1000, leaseMs: LEASE })
     expect(again.ok).toBe(true)
@@ -385,7 +386,7 @@ describe('claimTask / releaseTask — the lease', () => {
 
   it('takes over only when asked to explicitly', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
+    await s.upsertTask(task('t-1'), unattributedContext())
     await s.claimTask({ id: 't-1', by: 'agent-a', nowMs: NOW, leaseMs: LEASE })
     const forced = await s.claimTask({
       id: 't-1', by: 'a-person', nowMs: NOW, leaseMs: LEASE, takeover: true,
@@ -395,7 +396,7 @@ describe('claimTask / releaseTask — the lease', () => {
 
   it('refuses a release by someone who is not the holder', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
+    await s.upsertTask(task('t-1'), unattributedContext())
     await s.claimTask({ id: 't-1', by: 'agent-a', nowMs: NOW, leaseMs: LEASE })
     expect(await s.releaseTask({ id: 't-1', by: 'agent-b' })).toMatchObject({ ok: false, reason: 'other' })
     expect(await s.releaseTask({ id: 't-1', by: 'agent-b', force: true })).toMatchObject({ ok: true })
@@ -421,8 +422,8 @@ describe('claimTask / releaseTask — the lease', () => {
 describe('setRanks and the activity log', () => {
   it('writes several ranks in one pass and leaves the rest alone', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
-    await s.upsertTask(task('t-2'))
+    await s.upsertTask(task('t-1'), unattributedContext())
+    await s.upsertTask(task('t-2'), unattributedContext())
     await s.setRanks([{ id: 't-1', rank: 'b' }])
     const book = await s.read()
     expect(book.tasks.find(t => t.id === 't-1')!.rank).toBe('b')
@@ -443,9 +444,9 @@ describe('setRanks and the activity log', () => {
 
   it('takes the log down with the task it belongs to', async () => {
     const { s } = await store()
-    await s.upsertTask(task('t-1'))
+    await s.upsertTask(task('t-1'), unattributedContext())
     await s.logEvents([{ id: 'e-1', taskId: 't-1', at: 'now', actor: 'me', kind: 'status' }])
-    await s.removeTask('t-1')
+    await s.removeTask('t-1', undefined, { guard: unattributedContext() })
     expect((await s.read()).events).toEqual([])
   })
 
@@ -509,30 +510,30 @@ describe('setRanks and the activity log', () => {
 
     it('other writes never drop the collection (a whole-book write carries it)', async () => {
       const { s } = await store()
-      await s.upsertTask(task('t-1'))
+      await s.upsertTask(task('t-1'), unattributedContext())
       await s.fileHistorical(link('c1', 't-1'))
-      await s.upsertTask(task('t-2'))
-      await s.patchTask('t-1', { priority: 'high' })
+      await s.upsertTask(task('t-2'), unattributedContext())
+      await s.patchTask('t-1', { priority: 'high' }, { guard: unattributedContext() })
       await s.logEvents([{ id: 'e', taskId: 't-1', at: 'now', actor: 'me', kind: 'x' }])
       expect((await s.read()).historicalSessions.map(h => h.id)).toEqual(['hist:c1'])
     })
 
     it('takes a task\'s links with the task, frees the conversation, and keeps other tasks\'', async () => {
       const { s } = await store()
-      await s.upsertTask(task('t-1'))
-      await s.upsertTask(task('t-2'))
+      await s.upsertTask(task('t-1'), unattributedContext())
+      await s.upsertTask(task('t-2'), unattributedContext())
       await s.fileHistorical(link('c1', 't-1'))
       await s.fileHistorical(link('c2', 't-2'))
-      await s.removeTask('t-1')
+      await s.removeTask('t-1', undefined, { guard: unattributedContext() })
       expect((await s.read()).historicalSessions.map(h => h.id)).toEqual(['hist:c2'])
     })
 
     it('a removed subtask sends its historical conversations back to the delivery, not into limbo', async () => {
       const { s } = await store()
-      await s.upsertTask(task('t-1'))
-      await s.upsertSubtask(subtask('s-1', 't-1'))
+      await s.upsertTask(task('t-1'), unattributedContext())
+      await s.upsertSubtask(subtask('s-1', 't-1'), unattributedContext())
       await s.fileHistorical(link('c1', 't-1', { subtaskId: 's-1' }))
-      await s.removeSubtask('s-1')
+      await s.removeSubtask('s-1', { guard: unattributedContext() })
       const [h] = (await s.read()).historicalSessions
       expect(h!.taskId).toBe('t-1')
       expect(h!.subtaskId).toBeUndefined()
@@ -570,10 +571,10 @@ describe('setRanks and the activity log', () => {
 
     it('survives every other write; a move keeps the usage; unfile by id or session id', async () => {
       const { s } = await store()
-      await s.upsertTask(task('t-1'))
+      await s.upsertTask(task('t-1'), unattributedContext())
       await s.fileNative({ ...nlink('ses_a', 't-1'), usage: usage(0.25, '2026-10-03T01:00:00.000Z') })
-      await s.upsertTask(task('t-2'))
-      await s.patchTask('t-1', { priority: 'high' })
+      await s.upsertTask(task('t-2'), unattributedContext())
+      await s.patchTask('t-1', { priority: 'high' }, { guard: unattributedContext() })
       const out = await s.fileNative(nlink('ses_a', 't-2'))
       expect(out.replaced?.taskId).toBe('t-1')
       const [n] = (await s.read()).nativeSessions
@@ -594,13 +595,13 @@ describe('setRanks and the activity log', () => {
 
     it('a task removal takes its native links; a subtask removal sends them to the delivery', async () => {
       const { s } = await store()
-      await s.upsertTask(task('t-1'))
-      await s.upsertTask(task('t-2'))
-      await s.upsertSubtask(subtask('s-1', 't-2'))
+      await s.upsertTask(task('t-1'), unattributedContext())
+      await s.upsertTask(task('t-2'), unattributedContext())
+      await s.upsertSubtask(subtask('s-1', 't-2'), unattributedContext())
       await s.fileNative(nlink('ses_a', 't-1'))
       await s.fileNative(nlink('ses_b', 't-2', { subtaskId: 's-1' }))
-      await s.removeTask('t-1')
-      await s.removeSubtask('s-1')
+      await s.removeTask('t-1', undefined, { guard: unattributedContext() })
+      await s.removeSubtask('s-1', { guard: unattributedContext() })
       expect((await s.read()).nativeSessions.map(n => [n.sessionId, n.taskId, n.subtaskId])).toEqual([['ses_b', 't-2', undefined]])
     })
   })
@@ -609,27 +610,27 @@ describe('setRanks and the activity log', () => {
 describe('createTaskStore read memo', () => {
   it('serves the same frozen book until the file changes, then re-reads', async () => {
     const { file, s } = await store()
-    await s.upsertTask(task('a'))
+    await s.upsertTask(task('a'), unattributedContext())
     const first = await s.read()
     expect(await s.read()).toBe(first)
     expect(() => { (first.tasks as Task[]).push(task('x')) }).toThrow()
-    await s.upsertTask(task('b'))
+    await s.upsertTask(task('b'), unattributedContext())
     const second = await s.read()
     expect(second).not.toBe(first)
     expect(second.tasks.map(t => t.id).sort()).toEqual(['a', 'b'])
     // A write from ANOTHER process (same path, new bytes) is seen through the stamp.
     const other = createTaskStore(file)
-    await other.upsertTask(task('c'))
+    await other.upsertTask(task('c'), unattributedContext())
     expect((await s.read()).tasks.map(t => t.id).sort()).toEqual(['a', 'b', 'c'])
   })
 
   it('shares one parse between instances of the same file, and any write invalidates it', async () => {
     const { file, s } = await store()
-    await s.upsertTask(task('a'))
+    await s.upsertTask(task('a'), unattributedContext())
     const other = createTaskStore(file)
     const first = await s.read()
     expect(await other.read()).toBe(first)
-    await other.upsertTask(task('b'))
+    await other.upsertTask(task('b'), unattributedContext())
     const after = await s.read()
     expect(after).not.toBe(first)
     expect(after.tasks.map(t => t.id).sort()).toEqual(['a', 'b'])

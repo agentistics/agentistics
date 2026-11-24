@@ -16,6 +16,7 @@ import { addSession, removeSession } from './registry'
 import { start } from './cli-session'
 import type { SessionBackend } from './types'
 import { isolateAgentEnv } from './agent-env.testing'
+import { unattributedContext } from '../delivery/guard'
 
 // A spawn door reads AGENTOP_*/AGENTISTICS_* from the shell it runs in (inside a managed session: the caller's identity and the feature
 // switches): every test starts from a bare agent environment and gets it back.
@@ -31,8 +32,8 @@ describe('batch — the registry row brackets the spawn', () => {
   beforeAll(async () => {
     const store = createTaskStore(TASKS_FILE)
     const now = '2026-10-16T00:00:00Z'
-    await store.upsertTask({ id: 't-s4row', title: 'S4 row task', status: 'in_progress', createdAt: now, updatedAt: now })
-    await store.upsertSubtask({ id: 's-s4row', taskId: 't-s4row', title: 'S4 row subtask', done: false, status: 'todo', createdAt: now, updatedAt: now })
+    await store.upsertTask({ id: 't-s4row', title: 'S4 row task', status: 'in_progress', createdAt: now, updatedAt: now }, unattributedContext())
+    await store.upsertSubtask({ id: 's-s4row', taskId: 't-s4row', title: 'S4 row subtask', done: false, status: 'todo', createdAt: now, updatedAt: now }, unattributedContext())
   })
 
   test('the row exists BEFORE the pane is spawned, and is removed when the spawn fails', async () => {
@@ -193,8 +194,8 @@ describe('batch — the registry row brackets the spawn', () => {
       const subtaskTitle = 'M2 filing parity subtask'
       const now = '2026-10-16T00:00:00Z'
       const store = createTaskStore(TASKS_FILE)
-      await store.upsertTask({ id: taskId, title: taskTitle, status: 'in_progress', createdAt: now, updatedAt: now })
-      await store.upsertSubtask({ id: subtaskId, taskId, title: subtaskTitle, done: false, status: 'todo', createdAt: now, updatedAt: now })
+      await store.upsertTask({ id: taskId, title: taskTitle, status: 'in_progress', createdAt: now, updatedAt: now }, unattributedContext())
+      await store.upsertSubtask({ id: subtaskId, taskId, title: subtaskTitle, done: false, status: 'todo', createdAt: now, updatedAt: now }, unattributedContext())
       const rows: Array<Record<string, unknown>> = []
       const mk = () => ({ ...(fake([])), spawn: async (req: { id: string }) => { const r = (await readRegistry()).find(m => m.id === req.id); rows.push({ task: r?.task, taskId: r?.taskId, subtaskId: r?.subtaskId }); throw new Error('pane refused') } }) as unknown as SessionBackend
       await quiet(() => start({ kind: 'start', harness: 'claude', background: true, prompt: 'x', cwd: d, force: true, task: taskTitle, subtask: subtaskTitle } as Parameters<typeof start>[0], mk()))

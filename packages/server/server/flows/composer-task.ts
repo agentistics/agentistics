@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { validComposerTask } from '@agentistics/core'
 import type { Subtask } from '../sessions/task-model'
+import { unattributedContext } from '../delivery/guard'
 import type { TaskStore } from '../sessions/task-store'
 import { isOwnerComposerRequest, ownerMessageTarget, prepareOwnerRequestFlows } from './owner-message'
 
@@ -90,7 +91,7 @@ async function registerLocked(req: Request & { text?: string; messageId?: string
     const linked = await d.pedido?.(request.pedidoId, target.taskId)
     const after = await store.read()
     await Promise.all(after.subtasks.filter(s => s.id !== keepId && !linked?.linkedSubtaskIds.includes(s.id) && !beforeEvent.has(s.id) && s.taskId === target.taskId &&
-      (s.ownerRequest?.pedidoId === request.pedidoId || s.ownerRequest?.messageId === request.messageId || (!s.ownerRequest && s.title.includes(request.pedidoId)))).map(s => store.removeSubtask(s.id)))
+      (s.ownerRequest?.pedidoId === request.pedidoId || s.ownerRequest?.messageId === request.messageId || (!s.ownerRequest && s.title.includes(request.pedidoId)))).map(s => store.removeSubtask(s.id, { guard: unattributedContext() })))
   }
   /** The flow's card can land after the first sweep; a failed registration sweeps again once it settles. */
   const failAndSweep = async () => { await rollbackEventCards(); await sleep(200); await rollbackEventCards() }
@@ -118,7 +119,7 @@ async function registerLocked(req: Request & { text?: string; messageId?: string
     priority: req.asTask.priority, assignee: placedCard?.assignee ?? 'leader', notes: text,
     ...(req.asTask.dueDate ? { dueDate: req.asTask.dueDate } : {}),
     ownerRequest: request,
-  })
+  }, unattributedContext())
   if (!subtask?.ownerRequest) return { ok: false, message: pt ? 'A tarefa de destino não existe mais.' : 'The destination task no longer exists.' }
   if (subtask.ownerRequest.text !== text) return { ok: false, message: pt ? 'Esta identificação de mensagem já foi usada com outro texto.' : 'This message id was already used with different text.' }
   const r = subtask.ownerRequest
@@ -135,7 +136,7 @@ async function registerLocked(req: Request & { text?: string; messageId?: string
     // A link can commit before its response fails. The canonical document decides whether it landed.
     const recorded = await d.pedido?.(r.pedidoId, target.taskId)
     if (!(recorded?.state === 'linked' && recorded.taskId === target.taskId && recorded.linkedSubtaskIds.length === 1 && recorded.linkedSubtaskIds[0] === subtask.id)) {
-      if (!recorded?.linkedSubtaskIds.includes(subtask.id)) await store.removeSubtask(subtask.id)
+      if (!recorded?.linkedSubtaskIds.includes(subtask.id)) await store.removeSubtask(subtask.id, { guard: unattributedContext() })
       await failAndSweep()
       return { ok: false, message: pt ? 'Não foi possível concluir o registro da tarefa. Tente enviar novamente.' : 'Task registration could not finish. Retry sending.' }
     }

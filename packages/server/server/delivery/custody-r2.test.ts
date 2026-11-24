@@ -7,6 +7,7 @@ import { boardActivityOf, orphanMsOf, planCustody, semanticallyChanged, type Cus
 import { planOf } from './custody-tick'
 import { createDeliveryStore } from './store'
 import { newDelivery } from './machine'
+import { unattributedContext } from './guard'
 
 const MIN = 60_000
 const H = 3600_000
@@ -104,16 +105,16 @@ describe('F4 — the stamp rides the action\'s own write', () => {
   }
   test('a semantic change stamps in the same write; a timestamp-only update does not; a refusing `when` does not', async () => {
     const { store, read } = open()
-    await store.update(doc => { doc.deliveries.p1!.updatedAt = iso(T0 + MIN) }, { stamp: { key: 'p1', actor: 'L1', at: iso(T0 + MIN) } })
+    await store.update(doc => { doc.deliveries.p1!.updatedAt = iso(T0 + MIN) }, { guard: unattributedContext(), stamp: { key: 'p1', actor: 'L1', at: iso(T0 + MIN) } })
     expect(read().leaderActivityAt).toBeUndefined()
-    await store.update(doc => { doc.deliveries.p1!.versionTarget = '1.0.0' }, { stamp: { key: 'p1', actor: 'L1', at: iso(T0 + 2 * MIN), when: () => false } })
+    await store.update(doc => { doc.deliveries.p1!.versionTarget = '1.0.0' }, { guard: unattributedContext(), stamp: { key: 'p1', actor: 'L1', at: iso(T0 + 2 * MIN), when: () => false } })
     expect(read().leaderActivityAt).toBeUndefined()
-    await store.update(doc => { doc.deliveries.p1!.versionTarget = '2.0.0' }, { stamp: { key: 'p1', actor: 'L1', at: iso(T0 + 3 * MIN) } })
+    await store.update(doc => { doc.deliveries.p1!.versionTarget = '2.0.0' }, { guard: unattributedContext(), stamp: { key: 'p1', actor: 'L1', at: iso(T0 + 3 * MIN) } })
     expect(read()).toMatchObject({ versionTarget: '2.0.0', leaderActivityAt: iso(T0 + 3 * MIN), leaderActivityBy: 'L1' })
   })
   test('no stamp option = the write is byte for byte what it always was', async () => {
     const { store, read } = open()
-    await store.update(doc => { doc.deliveries.p1!.versionTarget = '2.0.0' })
+    await store.update(doc => { doc.deliveries.p1!.versionTarget = '2.0.0' }, { guard: unattributedContext() })
     expect('leaderActivityAt' in read()).toBe(false)
   })
 })

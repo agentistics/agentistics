@@ -16,6 +16,7 @@ import { historicalRows } from './task-historical'
 import { nativeRows } from './task-native'
 import { withNativeAliases } from './native-id-alias'
 import type { BoardRow, ManagedSession } from './types'
+import { unattributedContext } from '../delivery/guard'
 import {
   CORE_TYPE_ID, calcCost, coreStatusMigration, planInReviewAdd, planStatusMigration, planTypeMigration, sessionCostUSD as costByModel,
   type SessionMeta,
@@ -80,10 +81,13 @@ export interface TaskWorld {
  * already in the book may have been renamed or delivered since, and re-upserting the derived
  * record would undo that.
  */
-async function ensureLegacyTasks(store: TaskStore, rows: readonly ManagedSession[], book: TaskBook): Promise<boolean> {
+export async function ensureLegacyTasks(store: TaskStore, rows: readonly ManagedSession[], book: TaskBook): Promise<boolean> {
   const finished = await readPreferences()
     .then(p => p.finishedTasks ?? [])
     .catch(() => [] as string[])
+  // A board that was quarantined once is not a fresh install: re-importing the legacy names would
+  // refill it with stale `legacy-*` items beside whatever was restored.
+  if (await store.wasQuarantined()) return false
   const names = rows.map(r => r.task).filter((t): t is string => Boolean(t))
   if (names.length === 0 && finished.length === 0) return false
 
@@ -100,7 +104,7 @@ async function ensureLegacyTasks(store: TaskStore, rows: readonly ManagedSession
   let wrote = false
   for (const t of migrateLegacyTasks({ names, finished, now })) {
     if (knownIds.has(t.id) || knownTitles.has(t.title) || buried.has(t.id)) continue
-    await store.upsertTask(t)
+    await store.upsertTask(t, unattributedContext())
     wrote = true
   }
   return wrote
@@ -140,7 +144,7 @@ async function ensureTypesSeeded(store: TaskStore, book: TaskBook): Promise<bool
   // matches nothing once rewritten, so it is idempotent and runs on every load for free.
   for (const t of book.tasks) {
     const m = coreStatusMigration(t)
-    if (m) { await store.patchTask(t.id, m); wrote = true }
+    if (m) { await store.patchTask(t.id, m, { guard: unattributedContext() }); wrote = true }
   }
   if (book.typesSeeded || book.types.length > 0) return wrote
   const plan = planTypeMigration({

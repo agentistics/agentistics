@@ -15,8 +15,10 @@
  *    paid deliberately, and `omittedSecrets()` is what lets the restore NAME each one and the
  *    command that re-establishes it. Nothing here goes missing in silence.
  *  - `regenerable` — a cache or a log. It rebuilds itself and costs megabytes.
- *  - `runtime` — true on the old machine and false on the new one. `managed-sessions.json` names
- *    tmux sessions that will not exist; restoring it produces a fleet of rows pointing at nothing.
+ *  - `runtime` — true on the old machine and false on the new one (a live socket, a pid file).
+ *    `managed-sessions.json` is NOT one: its tmux names die, but the row also holds the label, note,
+ *    task, account and conversation id a `lost` session is reopened from — 3.8 MB lost in the
+ *    2026-11 disk fault with no copy anywhere.
  *
  * `backup-plan.test.ts` greps this file and re-probes every credential path, so a rule deleted in
  * a refactor fails the build rather than shipping a leak.
@@ -411,6 +413,14 @@ const REGENERABLE: ExcludeRule[] = [
     why: 'Quarantined copies the registry wrote when it could not parse a file.',
   },
   {
+    pattern: '.json.bak', match: 'contains', reason: 'regenerable',
+    why: 'The rotated last-good copy a state file keeps next to itself; the backup holds the live file.',
+  },
+  {
+    pattern: '.tmp.', match: 'contains', reason: 'regenerable',
+    why: 'Half-written temp files (`<file>.tmp.<pid>.<n>`) from an interrupted durable write.',
+  },
+  {
     pattern: '.tmp-', match: 'contains', reason: 'regenerable',
     why: 'Half-written temp files from an interrupted atomic write.',
   },
@@ -463,10 +473,6 @@ const RUNTIME: ExcludeRule[] = [
     why: 'The 14-day, 5-minute plan-meter history behind Usage > History. Built from the same readings as '
       + '`plan-limits.json`, it refills from the next readings; the points belong to THIS machine\'s accounts '
       + 'and their reset windows at the moment they were taken.',
-  },
-  {
-    pattern: '.agentistics/managed-sessions.json', match: 'prefix', reason: 'runtime',
-    why: 'Names tmux sessions that will not exist on the new machine. Restoring it yields rows pointing at nothing.',
   },
   // Written by the ENGINE, not by this tree, so `backup-coverage.lint.test.ts` (a grep over the
   // server's own source) cannot see it — `backup-plan.test.ts` pins this row instead.
@@ -572,6 +578,9 @@ const ALWAYS: string[] = [
   // working for one, and reproducible from nothing: the sessions it measures survive, but which
   // work they were FOR does not exist anywhere else. Tens of KB.
   '.agentistics/tasks.json',
+  // The session REGISTRY: label, note, task, account and conversation id of every managed session —
+  // what a `lost` row is reopened from. Its tmux names die with the machine; the rest does not.
+  '.agentistics/managed-sessions.json',
   // The files attached to those tasks — specs, plans, screenshots pasted into a comment. Same
   // argument as `attachments` above: user content, referenced by records that DO travel, and gone
   // for good if the machine is. It grows, which is an argument for watching it in the size

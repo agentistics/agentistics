@@ -88,8 +88,7 @@ A piece whose leader stopped acting returns to the project leader's queue. The d
 (`planCustody`); `custody-tick.ts` reads the facts, writes the patches in ONE `deliveries.json` write per tick and tells
 each custodian. Rule C `off` (the default) does nothing at all: no read, no stamp, no clock, no message — a test builds the
 same history with and without the custody step wired and compares the bytes. `shadow` reports (`custody would-…`) and writes
-nothing. `on` applies. S7b (`leads()` accepting the custodian, wake routing, check-in, SessionStart) and S7c (UI, verbs) are
-NOT in this slice.
+nothing. `on` applies. S7b's authority is the section below; S7c (UI, verbs) is not built yet.
 
 Three separate clocks. **Liveness** (the row is alive) is necessary, never sufficient. **Piece activity**
 (`record.leaderActivityAt/By`) is the last task-scoped board action of a leader or custodian on the piece — a guarded
@@ -115,6 +114,30 @@ assignment or its own last piece action and loses custody when it dies or goes q
 on the piece again, or `publicado`, ends custody (every change is in `custodyLog`, capped). Custody is an authorization of the
 actor, never evidence or proof — guard A/B still judge every rank raise. `custodyView` says `no-leader` only while
 now − leaderAbsentSince ≤ N.
+
+### S7b — custody authority (spec §5.2.2–4, acceptance §5.4.6–8)
+
+Everything below needs rule C `on`. Under `off`/`shadow` a custody field on a record (left over, or written by hand) changes
+no door — `custody-s7b.e2e.test.ts` forges one and proves it per door.
+
+- **`leads()` accepts the custodian of THAT piece** (`service.ts`), so it may configure the piece, lift a leader-owned block,
+  answer for it and declare its release (the release check no longer pins a custodian to its own task's pieces). It is still
+  an authorization of the actor: raising the piece into review with no evidence is refused `evidence_required` like anyone's.
+  Custody never touches filing (`conversationOwners`).
+- **Wakes route to the custodian**: `wake()`, the blocked-piece batches, the review nudge (a live custodian first) and the
+  "board refused the requeue" notice read `custody.sessionId` before `leaderSessionId`.
+- **Check-in**: the leader's round lists the pieces it holds in custody and its project's queue (`custodyCheckinLine`), and a
+  new custody is never idle-skipped (it joins the round's fingerprint only when present, so no existing fingerprint moves).
+- **Discovery vs assignment (§5.2.4).** A LEADER that starts in a project whose queue holds orphan pieces reads them in its
+  SessionStart context (`custodyQueue`, computed once at the spawn by `withCustodyDiscovery`). Discovery grants nothing. The
+  next tick ASSIGNS the custody and messages the leader — that assignment is the authority `leads()` and the wakes read, and it
+  wins whenever the two disagree; the start context is never changed afterwards. To make that "next tick" real, a live leader
+  that STARTED within N in the project (its own task's project) is a project-leader candidate as well as one with piece
+  activity — a decision S7b took because §5.4.8 requires a fresh leader to be assigned before it has acted on anything; a leader
+  older than N with no piece activity is still never a candidate.
+- **Known limit kept**: a co-leader's eligibility is read from its registry row; if that row is purged before any tick saw its
+  death, its decision/block stops anchoring the absence (see the comment in `custody-tick.ts`). Not closed here: §5.4 has no
+  acceptance item for it, and it needs the author's verified role and task stored on the comment.
 
 ### S7a r2 — what the independent QA changed (F1–F6)
 
