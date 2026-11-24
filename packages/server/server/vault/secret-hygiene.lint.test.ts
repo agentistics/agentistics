@@ -57,6 +57,8 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _enrolSeed: 'a NEW TOTP seed while it is being enrolled (§2.5): ≤ 10 min, served once, zeroed on confirm/expiry/restart',
     _flow: 'a deadline (ms) + the session it belongs to, after which the wizard\'s one verified code stops standing for later steps; no key material', _enrolWrong: 'a wrong-code counter for one enrolment',
     _heldPresence: 'the presence KEK + the NEXT data key between the wizard\'s presence step and its confirmed recovery key (leader decision 2026-10-02): ≤ 10 min, bound to one session, zeroed on lock/expiry/commit',
+    _presenceCommitActive: 'a boolean setup-transaction mutex, with no key, words or user data; prevents another request from replacing recovery entropy during an authorized save',
+    _heldEpoch: 'a numeric lock/replacement generation, with no key or user data; a failed save may restore its bounded proof only if this generation is unchanged',
     _setupProof: 'a deadline (ms) + the session that already spent the setup code; never the code itself',
     _gestures: 'how many presence prompts of one request were answered (counts only, for the page\'s progress line)',
     _setup: 'the one-time SETUP code a page needs for a FIRST enrolment (review S2): 8 digits, 10 min, single use; authorises, decrypts nothing',

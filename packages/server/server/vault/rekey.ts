@@ -84,7 +84,8 @@ let _crashAt: string | null = null
 export function __rekeyCrashAtForTests(point: string | null): void { _crashAt = point }
 function maybeCrash(point: string): void { if (_crashAt === point) { _crashAt = null; throw new Error(`injected crash at ${point}`) } }
 
-export type Prepared = { ok: true; files: string[] } | { ok: false; reason: string }
+export type RekeyFailure = 'rekey-read-failed' | 'rekey-open-failed' | 'rekey-verify-failed' | 'vault-write-failed'
+export type Prepared = { ok: true; files: string[] } | { ok: false; code: RekeyFailure; reason: string }
 
 /**
  * Phase 1. Re-seal every record of `oldKid` under the new key to `<file>.rekey`, each verified from
@@ -95,16 +96,17 @@ export async function prepareRekey(
   /** Files the CALLER will stage as `<file>.rekey` before the commit (the recovery wrapper): journaled now, so a crash at any point finishes or rolls them back with the rest. */
   extra: string[] = [],
 ): Promise<Prepared> {
-  const files = await findSealedUnder(dataRoot(), old.kid)
-  await writeJournal({ v: 1, phase: 'prepared', oldKid: old.kid, newKid: next.kid, files: [...files, ...extra] })
+  let files: string[] = []
   const staged: string[] = []
   try {
+    files = await findSealedUnder(dataRoot(), old.kid)
+    await writeJournal({ v: 1, phase: 'prepared', oldKid: old.kid, newKid: next.kid, files: [...files, ...extra] })
     for (const f of files) {
       const raw = await secretFs().readFile(f)
       const head = raw ? parseSealed(new TextDecoder().decode(raw)) : null
-      if (!raw || !head) return fail(`${f} could not be read`)
+      if (!raw || !head) return fail(`${f} could not be read`, 'rekey-read-failed')
       const o = openRecord({ dek: old.dek, kid: old.kid, purpose: head.purpose, name: head.name, bytes: raw })
-      if (!o.ok) return fail(`${f} did not open under the current key (${o.code})`)
+      if (!o.ok) return fail(`${f} did not open under the current key (${o.code})`, 'rekey-open-failed')
       try {
         const sealed = sealToBytes({ dek: next.dek, kid: next.kid, purpose: head.purpose, name: head.name, plaintext: o.plaintext })
         await writePrivateAtomic(secretFs(), f + REKEY_SUFFIX, sealed)
@@ -114,7 +116,7 @@ export async function prepareRekey(
         const v = back ? openRecord({ dek: next.dek, kid: next.kid, purpose: head.purpose, name: head.name, bytes: back }) : null
         const same = v?.ok === true && v.plaintext.length === o.plaintext.length && v.plaintext.every((b, i) => b === o.plaintext[i])
         if (v?.ok) v.plaintext.fill(0)
-        if (!same) return fail(`${f} did not read back under the new key`)
+        if (!same) return fail(`${f} did not read back under the new key`, 'rekey-verify-failed')
       } finally { o.plaintext.fill(0) }
     }
     return { ok: true, files }
@@ -123,11 +125,11 @@ export async function prepareRekey(
     return fail((err as Error)?.message ?? 'the records could not be re-sealed')
   }
 
-  async function fail(reason: string): Promise<Prepared> {
+  async function fail(reason: string, code: RekeyFailure = 'vault-write-failed'): Promise<Prepared> {
     for (const s of staged) await secretFs().unlink(s).catch(() => {})
     for (const e of extra) await secretFs().unlink(e + REKEY_SUFFIX).catch(() => {})
     await dropJournal()
-    return { ok: false, reason }
+    return { ok: false, code, reason }
   }
 }
 

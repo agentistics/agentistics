@@ -56,6 +56,7 @@ export const PRESENCE_DETAILS = [
   'device-error', 'no-credential-id', 'not-touched', 'no-hmac-output', 'file-missing', 'file-damaged',
   // COFRE.DESBLOQUEIO (2026-11-07): Touch ID / the Mac's password, and the vault's own password.
   'touchid-unavailable', 'touchid-not-set-up', 'touchid-locked', 'keychain-failed',
+  'touchid-auth-failed', 'touchid-no-interaction', 'touchid-helper-failed', 'touchid-file-write-failed', 'touchid-file-read-failed',
   'password-required', 'password-wrong', 'password-weak',
 ] as const
 export type PresenceDetail = typeof PRESENCE_DETAILS[number]
@@ -85,6 +86,11 @@ const DETAIL_TEXT: Record<PresenceDetail, { en: string; pt: string }> = {
   'touchid-not-set-up': { en: 'this Mac has no login password set up', pt: 'este Mac não tem senha de login configurada' },
   'touchid-locked': { en: 'Touch ID is locked after too many tries; use the Mac password', pt: 'o Touch ID travou depois de muitas tentativas; use a senha do Mac' },
   'keychain-failed': { en: 'the macOS Keychain did not keep the key; the details are in the agentop log', pt: 'o Keychain do macOS não guardou a chave; os detalhes estão no log do agentop' },
+  'touchid-auth-failed': { en: 'the Mac did not accept the fingerprint or password; retry with the Mac login password', pt: 'o Mac não aceitou a digital ou a senha; tente com a senha de login do Mac' },
+  'touchid-no-interaction': { en: 'macOS could not show the confirmation; sign in to this Mac and retry', pt: 'o macOS não conseguiu mostrar a confirmação; entre na sua conta neste Mac e tente de novo' },
+  'touchid-helper-failed': { en: 'the Mac confirmation program could not run; reopen Agentistics and retry', pt: 'o programa de confirmação do Mac não iniciou; reabra o Agentistics e tente de novo' },
+  'touchid-file-write-failed': { en: 'the Mac confirmation file could not be saved; check free space and write permission, then retry', pt: 'o arquivo de confirmação do Mac não pôde ser salvo; confira espaço e permissão para gravar e tente de novo' },
+  'touchid-file-read-failed': { en: 'the Mac confirmation file could not be read; check read permission and retry', pt: 'o arquivo de confirmação do Mac não pôde ser lido; confira a permissão de leitura e tente de novo' },
   'password-required': { en: 'type the vault password', pt: 'digite a senha do cofre' },
   'password-wrong': { en: 'that is not the vault password', pt: 'essa não é a senha do cofre' },
   'password-weak': { en: 'the password does not meet the rules', pt: 'a senha não cumpre as regras' },

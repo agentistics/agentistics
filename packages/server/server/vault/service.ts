@@ -32,7 +32,7 @@ import {
   makeHandle, parseVaultJson, RUNNER_VAULT_DIR, type RunnerHandle,
   helloProtector, fido2Protector, effectiveUnlockPolicy, unlockNeedsCode, finishRetirement, recoveryProtector, hasPresence, isPresenceId, presenceCode,
   presenceSentence, AutoLockClock, AUTO_LOCK_DEFAULT_MIN, WEBAUTHN_BRIDGE_VERIFIED,
-  touchIdProtector, vaultPasswordProtector, unlockMethodsFor, FIDO2_TOOL_PATHS, passwordFailure, type UnlockMethodOffer,
+  touchIdProtector, touchIdFailureSentence, vaultPasswordProtector, unlockMethodsFor, FIDO2_TOOL_PATHS, passwordFailure, type UnlockMethodOffer,
 } from '@agentistics/vault'
 import { checkVaultPassword } from '@agentistics/core'
 import { currentVaultPassword } from './password-context'
@@ -757,7 +757,7 @@ function presenceRefusal(s: Extract<OpenState, { state: 'locked' | 'protector-lo
   if (pw === 'password-wrong') { notePasswordResult(false); return passwordPaused() ?? passwordRefusal('password-wrong') }
   const code = presenceCode(s.reason)
   const word = presenceWord(s.protector)
-  if (code) return { ok: false, code, sentence: presenceSentence(code, vaultLang(), word, s.reason) }
+  if (code) return { ok: false, code, sentence: s.protector === 'touchid' ? touchIdFailureSentence(s.reason, vaultLang()) : presenceSentence(code, vaultLang(), word, s.reason) }
   return s.state === 'protector-lost' ? refused('protector-lost', lostSentence(s)) : refused('locked', sentence('locked'))
 }
 
