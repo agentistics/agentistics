@@ -8,6 +8,56 @@ import { readHeavyState } from './heavy-io'
 const MB = 1024 * 1024
 
 describe('heavy job resident memory', () => {
+  test.skipIf(process.platform !== 'linux' || !Bun.which('flock'))('shows a manual holder and waiter, without counting an agentop flock child twice', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'heavy-waiters-'))
+    const lock = join(dir, 'agentistics-heavy.lock')
+    const ready = join(dir, 'ready')
+    const release = join(dir, 'release')
+    const acquired = join(dir, 'acquired')
+    const stateDir = join(dir, 'state')
+    const holder = Bun.spawn(['flock', lock, process.execPath, '-e', 'await Bun.write(process.argv[1], "ready"); while (!await Bun.file(process.argv[2]).exists()) await Bun.sleep(10)', ready, release], { stdout: 'ignore', stderr: 'ignore' })
+    let waiter: ReturnType<typeof Bun.spawn> | undefined
+    try {
+      const deadline = Date.now() + 4000
+      while (await readFile(ready, 'utf8').catch(() => '') !== 'ready') {
+        if (Date.now() > deadline) throw new Error('holder did not acquire fixture lock')
+        await Bun.sleep(10)
+      }
+      waiter = Bun.spawn(['flock', lock, process.execPath, '-e', 'await Bun.write(process.argv[1], "ready"); await Bun.sleep(60000)', acquired], { stdout: 'ignore', stderr: 'ignore' })
+      await Bun.sleep(30)
+      const manual = await readHeavyState(stateDir, dir)
+      expect(manual.running.some(r => r.pid === holder.pid && r.manual)).toBe(true)
+      expect(manual.waiting.filter(w => w.pid === waiter!.pid && w.manual)).toHaveLength(1)
+      await mkdir(join(stateDir, 'waiting'), { recursive: true })
+      await writeFile(join(stateDir, 'waiting', `${process.pid}.json`), JSON.stringify({
+        pid: process.pid, sinceMs: Date.now(), command: 'agentop fixture', flockPid: waiter.pid,
+      }))
+      const owned = await readHeavyState(stateDir, dir)
+      expect(owned.waiting.filter(w => w.pid === waiter!.pid)).toHaveLength(0)
+      expect(owned.waiting.filter(w => w.pid === process.pid)).toHaveLength(1)
+      await writeFile(release, 'release')
+      await holder.exited
+      while (await readFile(acquired, 'utf8').catch(() => '') !== 'ready') {
+        if (Date.now() > deadline) throw new Error('queued flock did not acquire fixture lock')
+        await Bun.sleep(10)
+      }
+      const running = await readHeavyState(stateDir, dir)
+      expect(running.running.filter(r => r.pid === waiter!.pid)).toHaveLength(1)
+      expect(running.running.find(r => r.pid === waiter!.pid)?.manual).toBe(false)
+      expect(running.running.find(r => r.pid === waiter!.pid)?.command).toBe('agentop fixture')
+      expect(running.waiting).toHaveLength(0)
+    } finally {
+      const { readProcTable } = await import('./proc-read')
+      const { heavyTreePids } = await import('./heavy')
+      for (const pid of heavyTreePids([holder.pid, ...(waiter ? [waiter.pid] : [])], readProcTable(Date.now(), true) ?? []).reverse()) {
+        try { process.kill(pid, 'SIGTERM') } catch { /* exited */ }
+      }
+      if (waiter) await waiter.exited
+      await holder.exited
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   test.skipIf(process.platform !== 'linux' || !Bun.which('flock'))('does not scan descriptors for an open but unlocked file', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'heavy-unlocked-'))
     const handle = await open(join(dir, 'agentistics-heavy.lock'), 'w')
@@ -77,6 +127,7 @@ describe('heavy job resident memory', () => {
           expect(state.running).toHaveLength(1)
           expect(state.running[0]!.pid).toBe(child.pid)
           expect(state.running[0]!.usedBytes!).toBeGreaterThan(64 * MB)
+          if (mode !== 'fork') expect(state.running[0]!.manual).toBe(true)
           expect(state.waiting).toHaveLength(0)
         } finally {
           // flock's child inherits the lock; terminate its measured tree before removing the fixture.

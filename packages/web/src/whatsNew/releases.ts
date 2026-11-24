@@ -10,6 +10,13 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.228.0': {
+    features: [],
+    fixes: [{
+      pt: 'A fila de testes pesados não deixa mais rodadas iniciadas pelo agentop esperando sem avançar e mostra quem ocupa a vaga manualmente.',
+      en: 'Heavy test queue no longer starves jobs started through agentop and shows manual lock holders.',
+    }],
+  },
   '2.226.0': {
     features: [
       {
