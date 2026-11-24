@@ -622,7 +622,8 @@ export async function envCliIo(): Promise<{
     // Fails closed: inside a session with no readable key the token is empty, so it never verifies.
     proof: async env => {
       const id = env.AGENTOP_MANAGED_ID
-      if (!id) return undefined
+      if (id === undefined) return undefined          // ABSENT = outside a session
+      if (id === '') return { id: '', token: '' }     // PRESENT but empty = a session that cannot prove itself
       try {
         const { sessionToken, SESSION_IDENTITY_KEY_FILE } = await import('../sessions/session-identity')
         const key = Buffer.from(readFileSync(SESSION_IDENTITY_KEY_FILE, 'utf8').trim(), 'hex')
@@ -632,7 +633,7 @@ export async function envCliIo(): Promise<{
     local: async (method, path, body) => {
       const web = await import('../env-web')
       const req = new Request(`http://localhost${path}`, { method, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}), headers: { 'Content-Type': 'application/json' } } : {}) })
-      const out = await web.handleEnvRequest(req, new URL(req.url), await defaultEnvDeps(async () => (process.env.AGENTOP_MANAGED_ID ? 'session' : 'person')))
+      const out = await web.handleEnvRequest(req, new URL(req.url), await defaultEnvDeps(async () => (process.env.AGENTOP_MANAGED_ID !== undefined ? 'session' : 'person')))
       return { status: out?.status ?? 404, body: out?.body ?? { error: 'not_found' } }
     },
   }

@@ -923,7 +923,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_env_status",
     description:
-      "Where a worker's environment would run, and why. Reports whether Docker is installed/running (`docker`, with its Engine API version), the operating system and whether Docker is validated there, the backend decision (`docker` or the isolated `namespace`, with `reason`, a plain-language `line` and an optional `suggest`: `use-docker` or `install-docker`), the choice that applied and the scope it came from (session > project > all), the catalogue image the project would use, and — only when Docker is missing — the install hint. Everything is behind the experimental `docker-env` flag (`flag: false` = nothing is offered). Pass `session` and `project` (the main checkout's path or git remote) to read the answer for that session/project; `needs` lists tools the project requires in the image (e.g. [\"git\"]). Read-only.",
+      "Where a worker's environment would run, and why. Reports whether Docker is installed/running (`docker`, with its Engine API version), the operating system and whether Docker is validated there, the backend decision (`docker` or the isolated `namespace`, with `reason`, a plain-language `line` and an optional `suggest`: `use-docker` or `install-docker`), the choice that applied and the scope it came from (session > project > all), the catalogue image the project would use, and — only when Docker is missing — the install hint. Everything is behind the experimental `docker-env` flag (flag off = this tool is refused `flag_off`). Pass `session` and `project` (the main checkout's path or git remote) to read the answer for that session/project; `needs` lists tools the project requires in the image (e.g. [\"git\"]). Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1911,7 +1911,7 @@ async function callTool(
         // FAIL CLOSED: inside a session whose proof cannot be produced (identity key unreadable), sending the
         // request WITHOUT `session` would read to the server as "no claim" — refuse here instead.
         const proof = sessionProof(process.env);
-        if (!proof && (process.env.AGENTOP_MANAGED_ID || ancestorSession())) {
+        if (!proof && (process.env.AGENTOP_MANAGED_ID !== undefined || ancestorSession())) {
           throw new Error("agentistics_env_use refused: this session could not prove who it is (its identity key is unavailable), so it cannot choose where environments run. Ask the person or a leader session.");
         }
         const body = await apiSend("POST", "/api/env/use", {

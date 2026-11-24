@@ -2,8 +2,8 @@
  * `/api/env` — DOCKER.AMBIENTES S1: which backend a worker's environment runs on, the scoped choice, and the
  * install hint. One source for the CLI (`agentop env`) and the MCP tools (`agentistics_env_*`).
  *
- * Everything is behind the `docker-env` flag. With the flag off GET status still answers (so a person can see WHY
- * nothing is offered) and every write is refused `flag_off`. S1 creates no container, volume or image.
+ * Everything is behind the `docker-env` flag. With the flag off EVERY route answers 409 `flag_off` (reads included;
+ * `agentop env status` says "off" locally). S1 creates no container, volume or image.
  *
  *   GET  /api/env/status?session=<id>&project=<key>&needs=a,b&image=<key>
  *   GET  /api/env/install-hint[?os=linux|wsl2|macos|windows]
@@ -146,6 +146,16 @@ export async function envGrant(body: unknown, deps: EnvDeps): Promise<EnvWriteRe
   return { ok: false, error: 'grant_not_available' }
 }
 
+/**
+ * WHO is calling, from the connection's verdict. A REMOTE peer (LAN opt-in) is a network address, not a person: it
+ * counts as the person for a write only with the owner's grant (the same one the personal-browser padlock uses).
+ */
+export function envCallerFrom(verdict: { kind: string; via?: string }, hasOwnerGrant: boolean): 'person' | 'session' | 'unknown' {
+  if (verdict.kind === 'session') return 'session'
+  if (verdict.kind !== 'person') return 'unknown'
+  return verdict.via === 'remote' && !hasOwnerGrant ? 'unknown' : 'person'
+}
+
 export function envStatusCode(r: { ok: boolean; error?: string }): number {
   if (r.ok) return 200
   switch (r.error) {
@@ -160,6 +170,11 @@ export function envStatusCode(r: { ok: boolean; error?: string }): number {
 /** Dispatch for index.ts. Returns `null` for a path/method this module does not own. */
 export async function handleEnvRequest(req: Request, url: URL, deps: EnvDeps): Promise<{ status: number; body: unknown } | null> {
   const p = url.pathname
+  // Flag off: the whole surface answers as disabled — reads included (the person sees WHY via `agentop env status`,
+  // which says off locally). Only the paths this module owns are answered; anything else stays `null`.
+  const owned = (p === '/api/env/status' || p === '/api/env/install-hint') ? req.method === 'GET'
+    : (p === '/api/env/use' || p === '/api/env/grant') ? req.method === 'POST' : false
+  if (owned && !deps.flag()) return { status: 409, body: { ok: false, error: 'flag_off' } }
   if (p === '/api/env/status' && req.method === 'GET') {
     const q = url.searchParams
     const needs = (q.get('needs') ?? '').split(',').map(s => s.trim()).filter(Boolean)

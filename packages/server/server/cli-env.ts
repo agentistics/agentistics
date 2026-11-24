@@ -155,6 +155,7 @@ export async function runEnv(args: readonly string[], deps: EnvCliDeps = {}): Pr
     if (cmd.query.needs?.length) q.set('needs', cmd.query.needs.join(','))
     if (cmd.query.image) q.set('image', cmd.query.image)
     const r = await call('GET', `/api/env/status?${q}`)
+    if (r.body?.error === 'flag_off') { log('docker-env flag: off (agentop experimental enable, or AGENTISTICS_DOCKER_ENV=1)'); return 0 }
     if (r.status !== 200) { error(`refused: ${r.body?.error ?? r.status}`); return 1 }
     if (cmd.json) { log(JSON.stringify(r.body, null, 2)); return 0 }
     for (const line of describeStatus(r.body as EnvStatus)) log(line)
@@ -163,6 +164,7 @@ export async function runEnv(args: readonly string[], deps: EnvCliDeps = {}): Pr
   }
   if (cmd.kind === 'install-hint') {
     const r = await call('GET', `/api/env/install-hint${cmd.os ? `?os=${encodeURIComponent(cmd.os)}` : ''}`)
+    if (r.body?.error === 'flag_off') { log('docker-env flag: off (agentop experimental enable, or AGENTISTICS_DOCKER_ENV=1)'); return 0 }
     if (r.status !== 200) { error(`refused: ${r.body?.error ?? r.status} (use linux, wsl2, macos or windows)`); return 1 }
     if (cmd.json) { log(JSON.stringify(r.body, null, 2)); return 0 }
     for (const line of describeInstall(r.body.hint, r.body.detectedOs)) log(line)

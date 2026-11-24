@@ -1166,7 +1166,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const sessionPids = new Set<number>()
         for (const r of processSessionHub()?.last()?.sessions ?? []) if (typeof r.pid === 'number') sessionPids.add(r.pid)
         const ip = server.requestIP(req)
-        return (await identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })).kind
+        const verdict = await identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
+        // A remote peer is the person only with the owner's grant (the personal-browser padlock's own proof).
+        const [{ requestHasPersonalGrant }, { vaultHttpSession }] = await Promise.all([import('./browser/personal-doors'), import('./vault/http')])
+        return web.envCallerFrom(verdict, requestHasPersonalGrant(req, vaultHttpSession('local')))
       }
       const out = await web.handleEnvRequest(req, url, await (await import('./flows/host-ops')).defaultEnvDeps(envCaller))
       if (out) return json(out.body, out.status)
