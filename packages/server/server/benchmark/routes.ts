@@ -81,6 +81,9 @@ function sessionStatements(s: BenchmarkSources): Statement[] {
     else out.set(key, { ...prev, ids: [...prev.ids, ...ids], leader: prev.leader || leader })
   }
   for (const r of s.registry) {
+    // a session LABELLED leader (its own label or the event inbox's) never authors a piece and its cost is not the piece's
+    // (the board's `leader` flag keeps its role: it is counted as the piece's leader)
+    if (isLeaderLabel(r.label) || !!s.eventLeaderIds?.has(r.id)) continue
     const says = !!r.subtaskId || r.taskId === ''
     const key = r.conversationId ? `c:${r.conversationId}` : `r:${r.id}`
     const at = ms(r.createdAt) ?? 0
@@ -246,10 +249,13 @@ async function readSources(): Promise<BenchmarkSources> {
 }
 
 /** Managed id -> conversation: the event inbox (older lines first, so the newest wins), then every registry row. */
-async function archivedConversations(registry: BenchmarkSources['registry']): Promise<{ conversations: Map<string, ArchivedConversation>; eventLeaderIds: Set<string> }> {
+export async function archivedConversations(
+  registry: BenchmarkSources['registry'],
+  readEvents: () => Promise<readonly { id?: string; conversationId?: string; harness?: string; label?: string }[]> = readAllEvents,
+): Promise<{ conversations: Map<string, ArchivedConversation>; eventLeaderIds: Set<string> }> {
   const out = new Map<string, ArchivedConversation>()
   const eventLeaderIds = new Set<string>()
-  for (const e of await readAllEvents().catch(() => [])) {
+  for (const e of await readEvents().catch(() => [])) {
     if (e.conversationId && e.id) out.set(e.id, { conversationId: e.conversationId, harness: e.harness ?? '' })
     if (e.id && isLeaderLabel(e.label)) eventLeaderIds.add(e.id)
   }

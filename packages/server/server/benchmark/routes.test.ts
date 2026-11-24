@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { MetricFilters, MetricItem, TimeBucket } from '@agentistics/core'
 import { calcCost } from '@agentistics/core'
 import { buildObserved, type Observed, type ObservedSession } from '@agentistics/core/benchmark'
-import { buildObservedFromSources, handleBenchmarkRequest, type BenchmarkSources } from './routes'
+import { archivedConversations, buildObservedFromSources, handleBenchmarkRequest, type BenchmarkSources } from './routes'
 
 describe('benchmark HTTP read routes', () => {
   const observed = { label: 'observed-biased' as const, deliveries: 1 } as never
@@ -413,6 +413,32 @@ describe('BENCHMARK.LACUNAS: archived sessions, model, handback time, review rou
     })).history!.tasks.flatMap(t => t.subtasks).some(x => x.id === 'P')
     expect(piece(new Set(['w-p']))).toBe(false)
     expect(piece()).toBe(true)
+  })
+  test('the event inbox: a "[ LÍDER ]" label makes its id a leader; a worker that merely mentions the leader stays a worker', async () => {
+    const ev = [
+      { id: 'e-lead', conversationId: 'c1', harness: 'claude', label: '[ LÍDER ] - Motor' },
+      { id: 'e-lead2', conversationId: 'c2', harness: 'claude', label: '[ leader ] Engine' },
+      { id: 'e-qa', conversationId: 'c3', harness: 'claude', label: 'QA do líder' },
+      { id: 'e-w', conversationId: 'c4', harness: 'claude', label: 'Sem líder r2' },
+      { id: 'e-none', conversationId: 'c5', harness: 'claude' },
+    ]
+    const r = await archivedConversations([], async () => ev)
+    expect([...r.eventLeaderIds].sort()).toEqual(['e-lead', 'e-lead2'])
+    expect(r.conversations.size).toBe(5)
+  })
+  test('a registry session labelled leader (no flag) filed on the piece is no author and its cost is not the piece\'s', () => {
+    const piece = (label?: string, eventLeaderIds?: ReadonlySet<string>) => buildObservedFromSources(full({
+      comments: archived.book.comments as never, conversations: archived.conversations, eventLeaderIds,
+      registry: [row('m-live', 'Q', { conversationId: 'c-q', model: 'claude-opus-5' }), row('m-lead', 'P', { conversationId: 'c-l', model: 'claude-opus-5', ...(label ? { label } : {}) })],
+      metas: new Map([['c-p', meta('c-p')], ['c-q', meta('c-q', { model: 'claude-opus-5' })], ['c-l', meta('c-l', { model: 'claude-opus-5' })]]) as never,
+    })).history!.tasks.flatMap(t => t.subtasks).find(x => x.id === 'P')!
+    const worker = piece()
+    expect(worker.sessions).toBe(2)
+    for (const p of [piece('[ LÍDER ] - Recuperação'), piece(undefined, new Set(['m-lead']))]) {
+      expect(p.sessions).toBe(1)
+      expect(p.model).toBe('sonnet')
+      expect(p.costUSD).toBeCloseTo(sonnetCost, 6)
+    }
   })
   test('without the comment the piece has no session and is not a piece of the history: nothing is invented', () => {
     const h = buildObservedFromSources(full({ conversations: archived.conversations })).history!
