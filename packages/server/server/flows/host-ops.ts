@@ -262,7 +262,7 @@ export interface DockerProbeDeps {
   desktopMount(): boolean
 }
 export type DockerKind = 'wsl2-desktop' | 'desktop' | 'native' | 'none'
-export interface DockerState { present: boolean; running: boolean; version: string | null; kind: DockerKind }
+export interface DockerState { present: boolean; running: boolean; version: string | null; kind: DockerKind; /** Engine API version, `null` while the daemon does not answer. */ apiVersion: string | null }
 
 export function defaultDockerProbeDeps(): DockerProbeDeps {
   return {
@@ -282,15 +282,17 @@ export function defaultDockerProbeDeps(): DockerProbeDeps {
 export async function detectDocker(deps: DockerProbeDeps = defaultDockerProbeDeps()): Promise<DockerState> {
   const client = await deps.docker(['version', '--format', '{{.Client.Version}}'])
   // A missing binary is the only "absent": an installed client with no daemon still answers with its own version.
-  if (!client) return { present: false, running: false, version: null, kind: 'none' }
+  if (!client) return { present: false, running: false, version: null, kind: 'none', apiVersion: null }
   const clientVersion = client.stdout.trim()
   const server = await deps.docker(['version', '--format', '{{.Server.Version}}'])
   const serverVersion = server && server.code === 0 ? server.stdout.trim() : ''
   const running = serverVersion.length > 0
+  const api = running ? await deps.docker(['version', '--format', '{{.Server.APIVersion}}']) : null
+  const apiVersion = api && api.code === 0 && /^\d+(\.\d+)+$/.test(api.stdout.trim()) ? api.stdout.trim() : null
   const os = running ? (await deps.docker(['info', '--format', '{{.OperatingSystem}}']))?.stdout.trim() ?? '' : ''
   const desktop = /docker desktop/i.test(os) || (!running && deps.desktopMount())
   const kind: DockerKind = desktop ? (deps.isWsl() ? 'wsl2-desktop' : 'desktop') : 'native'
-  return { present: true, running, version: serverVersion || clientVersion || null, kind }
+  return { present: true, running, version: serverVersion || clientVersion || null, kind, apiVersion }
 }
 
 /** The read-only `docker-detectar` host op. */
@@ -566,6 +568,71 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
         const paths = stdout.split(/\n(?=worktree )/).map(x => x.match(/^worktree (.+)$/m)?.[1]).filter((x): x is string => Boolean(x))
         return { ok: true, dryRun: true, cwd, worktrees: paths.map(path => ({ path, wouldRemove: false, why: 'deletion is disabled in v1' })) }
       } catch (error) { return refuse(`could not list worktrees: ${String(error)}`, ['readable git worktree']) }
+    },
+  }
+}
+
+// ── DOCKER.AMBIENTES S1 — the IO behind `/api/env` and `agentop env` ──────────────────────────────────────────────
+// Lives HERE on purpose: this module is already in the raw-writer inventory (`delivery/guard-helpers.fixture.json`,
+// shrink-only), whereas `env-web.ts` and `cli-env.ts` stay pure and receive these functions by injection, so no new
+// module becomes an importer of the preference writer.
+import type { EnvDeps } from '../env-web'
+import { platformOf } from '../env-web'
+import { featureOn } from '@agentistics/core'
+
+export async function defaultEnvDeps(): Promise<EnvDeps> {
+  const { readPreferences, updatePreferences } = await import('../preferences')
+  const isWsl = process.platform === 'linux' && (Boolean(process.env.WSL_DISTRO_NAME) || (() => { try { return /microsoft/i.test(readFileSync('/proc/version', 'utf8')) } catch { return false } })())
+  let last: DockerState = { present: false, running: false, version: null, kind: 'none', apiVersion: null }
+  return {
+    flag: () => featureOn('docker-env'),
+    detect: async () => (last = await detectDocker()),
+    platform: () => platformOf({ platform: process.platform, isWsl }, last),
+    readPrefs: async () => readPreferences(),
+    writePrefs: async mutate => { await updatePreferences(cur => mutate(cur) as never) },
+    verify: async (id, token) => (await import('../sessions/session-identity')).verifySessionIdentity(id, token),
+    roleOf: async managedId => {
+      const { readRegistry } = await import('../sessions/registry')
+      const { storedRoleFor } = await import('../sessions/session-roles')
+      const row = (await readRegistry()).find(m => m.id === managedId || m.conversationId === managedId)
+      return storedRoleFor([row?.conversationId, row?.id, managedId])
+    },
+    now: () => Date.now(),
+  }
+}
+
+/** What `agentop env` needs from the machine, injected into the pure `cli-env.ts`. */
+export async function envCliIo(): Promise<{
+  port: number
+  cwdProject: () => Promise<string | undefined>
+  proof: (env: Record<string, string | undefined>) => Promise<{ id: string; token: string } | undefined>
+  local: (method: 'GET' | 'POST', path: string, body?: unknown) => Promise<{ status: number; body: unknown }>
+}> {
+  const { PORT } = await import('../config')
+  return {
+    port: PORT,
+    // The main checkout (common git dir's parent), so a worktree shares its project's key.
+    cwdProject: async () => {
+      try {
+        const common = (await exec('git', ['-C', process.cwd(), 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeout: 4000, env: gitEnv() })).stdout.trim()
+        return common.endsWith('/.git') ? common.slice(0, -'/.git'.length) : common || undefined
+      } catch { return undefined }
+    },
+    // Fails closed: inside a session with no readable key the token is empty, so it never verifies.
+    proof: async env => {
+      const id = env.AGENTOP_MANAGED_ID
+      if (!id) return undefined
+      try {
+        const { sessionToken, SESSION_IDENTITY_KEY_FILE } = await import('../sessions/session-identity')
+        const key = Buffer.from(readFileSync(SESSION_IDENTITY_KEY_FILE, 'utf8').trim(), 'hex')
+        return key.length === 32 ? { id, token: sessionToken(key, id) } : { id, token: '' }
+      } catch { return { id, token: '' } }
+    },
+    local: async (method, path, body) => {
+      const web = await import('../env-web')
+      const req = new Request(`http://localhost${path}`, { method, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}), headers: { 'Content-Type': 'application/json' } } : {}) })
+      const out = await web.handleEnvRequest(req, new URL(req.url), await defaultEnvDeps())
+      return { status: out?.status ?? 404, body: out?.body ?? { error: 'not_found' } }
     },
   }
 }

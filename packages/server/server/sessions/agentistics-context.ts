@@ -92,6 +92,9 @@ const TOOL_GROUPS = {
   Metrics: ['agentistics_live_delivery', 'agentistics_delivery_calendar', 'agentistics_benchmark_observed', 'agentistics_summary', 'agentistics_costs', 'agentistics_projects', 'agentistics_repos', 'agentistics_harnesses', 'agentistics_plan_limits', 'agentistics_tags', 'agentistics_tag_detail', 'agentistics_flow_run', 'agentistics_flow_status', 'agentistics_wait', 'agentistics_nay_call'],
   // COFRE.DESBLOQUEIO: how the vault is protected (never what it holds) — read-only, not listed in the briefing.
   Vault: ['agentistics_vault_status'],
+  // DOCKER.AMBIENTES S1: where a worker's environment runs (status, scoped choice, install hint) — behind the
+  // `docker-env` flag, so not listed in the briefing; the tools stay discoverable through the MCP.
+  Env: ['agentistics_env_status', 'agentistics_env_use', 'agentistics_env_install'],
   // NAVEGADOR S1-S3: status, the session's own browser verbs and the padlock — not listed in the briefing until
   // the visible card (S5) arrives; the tools stay discoverable through the MCP.
   Browser: [

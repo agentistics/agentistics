@@ -1155,6 +1155,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await handleMemoryRequest(req, url, await liveMemoryDeps())
       return json(out.body, out.status)
     }
+    // DOCKER.AMBIENTES S1: backend decision, scoped choice, install hint (`env-web.ts`). `capability-guard.ts` has
+    // already refused it on an exposed profile; writes are the person's or a verified leader's.
+    if (url.pathname.startsWith('/api/env/')) {
+      const web = await import('./env-web')
+      const out = await web.handleEnvRequest(req, url, await (await import('./flows/host-ops')).defaultEnvDeps())
+      if (out) return json(out.body, out.status)
+    }
     if (url.pathname === '/api/experimental' && (req.method === 'GET' || req.method === 'PUT')) {
       // GET: what this server booted with. PUT `{ enabled }`: the switch used by the `agentop experimental` command — it
       // persists the preference and applies it to this process WITHOUT a restart (`experimental-web.ts`).

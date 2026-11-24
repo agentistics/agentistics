@@ -319,3 +319,11 @@ test('F14: /api/benchmark reads the board, the registry and the token store, so 
   expect(routeCapability('/api/benchmark/anything-added-later')).toBe('localShell')
   expect(routeCapability('/api/benchmarks-neighbour')).toBeNull()
 })
+
+test('DOCKER.AMBIENTES: /api/env and every verb under it is host power (localShell), refused on an exposed profile', () => {
+  for (const p of ['/api/env', '/api/env/status', '/api/env/use', '/api/env/grant', '/api/env/install', '/api/env/anything-added-later']) {
+    expect(routeCapability(p)).toBe('localShell')
+  }
+  expect(routeCapability('/api/environment')).toBeNull()
+  expect(capabilityDenied('localShell', publicCaps)?.status).toBe(403)
+})

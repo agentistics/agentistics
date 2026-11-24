@@ -91,6 +91,10 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_session_role',
   'agentistics_session_leads',
   'agentistics_session_away',
+  // DOCKER.AMBIENTES S1 (3)
+  'agentistics_env_status',
+  'agentistics_env_use',
+  'agentistics_env_install',
   'agentistics_session_hold',
   'agentistics_nay_call',
   'agentistics_session_switch_account',
@@ -263,6 +267,18 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_nay_call: {
     ...GROUPS, risk: 'W', routes: ['GET /api/nay-call', 'POST /api/nay-call/start'],
     reason: 'reads the Call Nay button\'s state and asks the owner\'s open dashboard to place the call; refused without an open dashboard or a call surface, and only a verified LEADER session may start one',
+  },
+  agentistics_env_status: {
+    ...GROUPS, risk: 'R', routes: ['GET /api/env/status'],
+    reason: 'reads whether Docker is installed/running, which backend a worker\'s environment would use and why; nothing is started or changed',
+  },
+  agentistics_env_install: {
+    ...GROUPS, risk: 'R', routes: ['GET /api/env/install'],
+    reason: 'returns the per-system steps, cost and official page for installing Docker; it installs nothing and runs nothing',
+  },
+  agentistics_env_use: {
+    ...GROUPS, risk: 'W', routes: ['POST /api/env/use'],
+    reason: 'records which backend (Docker or the isolated namespace) runs a scope\'s environments, for one session, one project or all; reversible with one more call; the server accepts it only from the person or a verified LEADER session',
   },
   agentistics_session_away: {
     ...GROUPS, risk: 'W', routes: ['GET /api/away', 'PUT /api/away', 'PUT /api/away/session', 'POST /api/away/notice'],

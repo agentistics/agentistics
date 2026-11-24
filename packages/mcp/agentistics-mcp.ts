@@ -921,6 +921,45 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_env_status",
+    description:
+      "Where a worker's environment would run, and why. Reports whether Docker is installed/running (`docker`, with its Engine API version), the operating system and whether Docker is validated there, the backend decision (`docker` or the isolated `namespace`, with `reason`, a plain-language `line` and an optional `suggest`: `use-docker` or `install-docker`), the choice that applied and the scope it came from (session > project > all), the catalogue image the project would use, and — only when Docker is missing — the install hint. Everything is behind the experimental `docker-env` flag (`flag: false` = nothing is offered). Pass `session` and `project` (the main checkout's path or git remote) to read the answer for that session/project; `needs` lists tools the project requires in the image (e.g. [\"git\"]). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        session: { type: "string", description: "A session's managed id: read the choice that applies to it." },
+        project: { type: "string", description: "A project key (main checkout path or normalized git remote)." },
+        needs: { type: "array", items: { type: "string" }, description: "Tools the project's image must carry, e.g. [\"git\"]." },
+        image: { type: "string", description: "The catalogue key the project's env.yml names." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_env_use",
+    description:
+      "Choose the backend that runs worker environments: `docker` or `namespace` (the isolated `agentop run --rm`, which is also what declining means). `scope` is `session` (only that session — omit `target` to mean your own), `project` (`target` = the project key) or `all` (default); the MOST SPECIFIC scope wins. Behind the experimental `docker-env` flag (refused `flag_off` otherwise). Only the person or a verified LEADER session may choose: a worker is refused (`leader_only`). It records a preference only — nothing is started, installed or removed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        backend: { type: "string", enum: ["docker", "namespace"] },
+        scope: { type: "string", enum: ["session", "project", "all"], description: "Default all." },
+        target: { type: "string", description: "Session id (scope=session) or project key (scope=project)." },
+      },
+      required: ["backend"],
+    },
+  },
+  {
+    name: "agentistics_env_install",
+    description:
+      "How to install Docker on a given operating system: what to install, what it costs (estimates are marked as such), numbered steps, the official page and whether Docker is validated there yet. Defaults to this machine's system; `os` (linux | wsl2 | macos | windows) previews another. It NEVER installs anything or runs a command — it is the text and the link a person follows. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { os: { type: "string", enum: ["linux", "wsl2", "macos", "windows"] } },
+      required: [],
+    },
+  },
+  {
     name: "agentistics_nay_call",
     description:
       "The \"Call Nay\" button of the Nay chat button's right-click pop, for agents — the same source as the button. `action: \"status\"` (default) reports `available` (a call surface is announced by the engine: false on a community build, with the kill switch, or with an engine without a call surface — then the button does not exist), `browser` (a dashboard tab answered in the last 20 s), and `call` = {active, parked, sessionId, since} — the call in progress, the one the top-bar pill shows; `call` is null when no browser is reporting (unknown, NOT \"no call\"). `action: \"start\"` asks the owner's open dashboard to press the same button (a new call on the open or newest Nay conversation, or \"back to the call\" when one is parked); it is refused with `no_call_surface` or `no_browser` (never queued for later), and only a LEADER session may start one (`leader_only`) because it starts a live call in the owner's dashboard. Returns `already: true` when a call is already active.",
@@ -1848,6 +1887,31 @@ async function callTool(
           ...(a.note !== undefined ? { note: a.note } : {}),
           ...(a.maxWorkers !== undefined ? { maxWorkers: a.maxWorkers } : {}),
           ...(a.topCaps !== undefined ? { topCaps: a.topCaps } : {}),
+          session: sessionProof(process.env),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_env_status": {
+        const a = args as any;
+        const q = new URLSearchParams();
+        if (typeof a?.session === "string") q.set("session", a.session);
+        if (typeof a?.project === "string") q.set("project", a.project);
+        if (Array.isArray(a?.needs)) q.set("needs", a.needs.join(","));
+        if (typeof a?.image === "string") q.set("image", a.image);
+        const body = await apiGet(`/api/env/status?${q}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_env_install": {
+        const a = args as any;
+        const body = await apiGet(`/api/env/install${typeof a?.os === "string" ? `?os=${encodeURIComponent(a.os)}` : ""}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_env_use": {
+        const a = args as any;
+        const body = await apiSend("POST", "/api/env/use", {
+          backend: a?.backend,
+          ...(a?.scope !== undefined ? { scope: a.scope } : {}),
+          ...(a?.target !== undefined ? { target: a.target } : {}),
           session: sessionProof(process.env),
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };

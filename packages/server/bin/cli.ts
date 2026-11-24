@@ -457,6 +457,8 @@ if (command === 'experimental') {
   process.exit(await runExperimental(args))
 }
 
+if (command === 'env') process.exit(await (await import('../server/cli-env.ts')).runEnv(args, { io: await (await import('../server/flows/host-ops.ts')).envCliIo() }))
+
 if (command === 'journal') process.exit(await (await import('../server/cli-journal.ts')).runJournal(args))
 
 if (command === 'vault') {
