@@ -518,37 +518,28 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
 
   test('items are the comparisons with their score, a coloured bar and the verdict word; only the two unmeasured ones keep the seal and have no bar', () => {
     expect(html.match(/data-testid="benchmark-item"/g)!.length).toBe(4)       // the prototype's four cards
-    expect(html.match(/data-testid="benchmark-seal"/g)!.length).toBe(2)
-    expect(html.match(/data-testid="benchmark-item-bar"/g)!.length).toBe(2)
-    expect(html.match(/data-testid="benchmark-item-score"/g)!.length).toBe(2)
-    expect(html.match(/data-unmeasured="yes"/g)!.length).toBe(2)
+    // cost and time are 2 of the 4 dimensions: the comparison cards carry no score and no bar, only "sem dados suficientes"
+    expect(html.match(/data-testid="benchmark-seal"/g)!.length).toBe(4)
+    expect(html.match(/data-testid="benchmark-item-bar"/g)).toBeNull()
+    expect(html.match(/data-testid="benchmark-item-score"/g)).toBeNull()
     expect(html).toContain('1 rodada de QA × 2+ rodadas')
     expect(html).toContain('1 sessão × 5+ sessões')
     const list = html.split('data-testid="benchmark-list"')[1]!.split('</nav>')[0]!
     const items = list.split('data-testid="benchmark-item"').slice(1)
-    expect(items[0]).toContain('Não compensou')
-    expect(items[0]).toContain('data-testid="benchmark-item-bar" data-tone="bad"')
-    expect(items[0]).toContain('background:var(--accent-red)')
-    const at = (needle: string) => items[0]!.indexOf(needle)
-    expect(at('benchmark-item-bar')).toBeGreaterThan(0)
-    expect(at('benchmark-item-bar')).toBeLessThan(at('>Não compensou<'))     // the prototype's order: name + score, bar, word, sample
-    expect(at('>Não compensou<')).toBeLessThan(at('<small'))
+    expect(items[0]).toContain('sem dados suficientes')
+    expect(items[0]).not.toContain('Não compensou')
     for (const un of items.slice(2)) { expect(un).not.toContain('role="img"'); expect(un).toContain('sem medição') }
   })
 
   test('the bars are back, in each state, with the colour of their result', () => {
     const hero = html.split('data-testid="benchmark-hero"')[1]!.split('data-testid="benchmark-parts"')[0]!
-    expect(hero).toContain('data-tone="bad"')
-    expect(hero).toContain('>Não compensou<')
-    expect(hero).toContain('de 100')
-    expect(hero).toContain('0 · não compensou')
-    expect(hero).toContain('50 · empate')
-    expect(hero).toContain('100 · compensou')
-    expect(hero).toContain('height:16px')                  // the big bar
-    expect(hero).toContain('background:var(--accent-red)')
+    // 2 of 4 dimensions measured: no verdict word, no score; the badge says what IS measured
+    expect(hero).toContain('Sem dados suficientes')
+    expect(hero).toContain('Só custo e tempo medidos')
+    expect(hero).not.toContain('Resultado firme')
+    expect(hero).not.toContain('de 100')
     const parts = html.split('data-testid="benchmark-parts"')[1]!.split('data-testid="benchmark-tasks"')[0]!
-    expect(parts).toContain('De onde vêm os 25 pontos')
-    expect(parts).toContain('conta só o que foi medido')
+    expect(parts).not.toContain('De onde vêm os')
     for (const t of ['cost', 'time']) {
       const tile = html.split(`data-testid="part-${t}"`)[1]!.split('data-testid="part-')[0]!
       expect(tile).toContain(`data-testid="bar-${t}" data-tone="bad"`)
@@ -565,8 +556,7 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     const tasks = html.split('data-testid="benchmark-tasks"')[1]!.split('data-testid="benchmark-buckets"')[0]!
     expect(tasks).toContain('Compensou?')
     expect(tasks).toContain('class="bm-cp" data-testid="benchmark-task-verdict" data-tone="bad"')
-    expect(tasks).toContain('background:var(--accent-red)')
-    expect(render('en', { ...observed, history } as unknown as Observed)).toContain('Did not pay off')
+    expect(render('en', { ...observed, history } as unknown as Observed)).toContain('Only cost and time measured')
   })
 
   test('list: the two slots with no data yet say "sem medição" and why; "Novo benchmark" sits where the prototype has it, active; clicking says why nothing is created yet', () => {
@@ -574,7 +564,8 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     expect(list).toContain('Sonnet × Opus')
     expect(list).toContain('Entre harnesses')
     expect(list.match(/sem medição/g)!.length).toBe(2)
-    expect(list).toContain('não foram conferidas contra a fonte de cada provedor')
+    expect(list).toContain('poucas peças para comparar')
+    expect(list).toContain('mínimo 3')
     const btn = list.split('data-testid="benchmark-new"')[1]!.split('</button>')[0]!
     expect(btn).not.toContain('disabled')
     expect(btn).not.toContain('cursor:not-allowed')
@@ -607,7 +598,7 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
       expect(h).not.toContain('benchmark-buckets-empty')
     }
     const hh = render('pt', { ...observed, history } as unknown as Observed, { initialSelected: 'harnesses' })
-    expect(hh).toContain('não foram conferidas contra a fonte de cada provedor')
+    expect(hh).toContain('Nenhum harness é comparado ainda')
     const en = render('en', { ...observed, history } as unknown as Observed, { initialSelected: 'models' })
     expect(en).toContain('No data yet')
     expect(en).toContain('Not enough tasks in this benchmark yet.')
@@ -696,15 +687,14 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     expect(hero).not.toContain('Indício, não prova')       // the prototype has no honesty caption under the sentence
     expect(hero).toContain('2,5× mais custo, 4× mais tempo')
     expect(hero).not.toContain('benchmark-caption')
-    expect(hero).toContain('role="img"')
-    expect(hero).toContain('25<small')
+    expect(hero).not.toContain('25<small')        // no score while fewer than 3 dimensions are measured
     expect(hero).toContain('Por que esse resultado?')
     expect(hero).not.toMatch(/<details[^>]* open/)
     // the prototype's disclosure: exactly three paragraphs, no facts list, "Baseado em" last
     const open = hero.split('Por que esse resultado?')[1]!.split('</details>')[0]!
     expect(open).not.toContain('benchmark-facts')
-    expect(open.match(/<p[ >]/g)).toHaveLength(3)
-    expect(open.lastIndexOf('Baseado em')).toBeGreaterThan(open.indexOf('A nota fica'))
+    expect(open.match(/<p[ >]/g)).toHaveLength(2)        // the measured-dimensions line, then "Baseado em"
+    expect(open.lastIndexOf('Baseado em')).toBeGreaterThan(open.indexOf('2 de 4 dimensões medidas'))
     expect(open).not.toMatch(/Cobertura por harness|experimento controlado|Qualidade final/)
   })
 

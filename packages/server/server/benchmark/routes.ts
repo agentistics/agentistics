@@ -1,12 +1,14 @@
 import type { MetricInput, MetricFilters, MetricMove, SessionMeta } from '@agentistics/core'
 import { buildMetricItems, sessionModelUsage } from '@agentistics/core'
-import { buildHistory, buildObserved, qaRoundsFromLabels, sessionCost, type HistoryPieceInput, type ObservedSession } from '@agentistics/core/benchmark'
+import { buildHistory, buildObserved, qaRoundsFromLabels, reviewRoundsFromHistory, sessionCost, type HistoryPieceInput, type ObservedSession } from '@agentistics/core/benchmark'
 import type { SessionRole } from '@agentistics/core/benchmark'
 import { TASKS_FILE } from '../config'
 import { createTaskStore } from '../sessions/task-store'
 import { readRegistry } from '../sessions/registry'
 import { createDeliveryStore } from '../delivery/store'
 import { loadConsolidated } from '../consolidate'
+import { readAllEvents } from '../events/event-store'
+import { archivedLinks, type ArchivedComment, type ArchivedConversation } from './archived-links'
 
 export interface BenchmarkRouteDeps {
   observed: (filters?: MetricFilters) => Promise<ReturnType<typeof buildObserved>>
@@ -18,9 +20,13 @@ export interface BenchmarkSources {
   nowMs: number
   book: {
     tasks: readonly { id: string; title: string; status?: string }[]
-    subtasks: readonly { id: string; taskId: string; title: string; status: string; createdAt: string; updatedAt?: string; startedAt?: string; deliveredAt?: string }[]
+    subtasks: readonly { id: string; taskId: string; title: string; status: string; createdAt: string; updatedAt?: string; startedAt?: string; deliveredAt?: string; provenance?: { at: string } }[]
     historicalSessions: readonly { conversationId: string; harness: string; subtaskId?: string; linkedAt: string }[]
+    /** The board's comments: a session's own comments name the piece it worked on (see `archived-links.ts`). */
+    comments?: readonly ArchivedComment[]
   }
+  /** Managed session id -> conversation, for sessions that left the live registry (event inbox). */
+  conversations?: ReadonlyMap<string, ArchivedConversation>
   /** `managed-sessions.json` rows (a subset of ManagedSession). */
   registry: readonly {
     id: string; harness: string; createdAt: string; conversationId?: string; subtaskId?: string; taskId?: string; model?: string; leader?: boolean; label?: string
@@ -29,7 +35,7 @@ export interface BenchmarkSources {
   metas: ReadonlyMap<string, SessionMeta>
   /** `deliveries.json`: the delivery flow's records, with their phase history. */
   deliveries: Readonly<Record<string, {
-    subtaskId: string; phase: string; createdAt?: string; leaderSessionId?: string; authorSessionId?: string; qaSessionId?: string
+    subtaskId: string; phase: string; createdAt?: string; leaderSessionId?: string; authorSessionId?: string; qaSessionId?: string; authorModel?: string; qaModel?: string
     history: readonly { from: string; to: string; at: string; detail?: string }[]
   }>>
 }
@@ -83,7 +89,23 @@ function sessionStatements(s: BenchmarkSources): Statement[] {
   for (const h of s.book.historicalSessions) {
     put(`c:${h.conversationId}`, { conversationId: h.conversationId, id: `hist:${h.conversationId}`, harness: h.harness, subtaskId: h.subtaskId ?? null, at: ms(h.linkedAt) ?? 0, ids: [], leader: false }, [], false)
   }
+  // Sessions that LEFT the registry: filed where their own comments say, only when nothing live or historical already filed the conversation.
+  const leaderIds = new Set<string>([...s.registry.filter(r => r.leader).map(r => r.id), ...Object.values(s.deliveries).flatMap(d => d.leaderSessionId ? [d.leaderSessionId] : [])])
+  for (const l of archivedLinks({
+    comments: s.book.comments ?? [], conversations: s.conversations ?? new Map(), leaderIds, subtasks: new Set(s.book.subtasks.map(x => x.id)),
+  })) {
+    const key = `c:${l.conversationId}`
+    if ((out.get(key)?.at ?? -1) >= 0) continue
+    put(key, { conversationId: l.conversationId, id: l.sessionId, harness: l.harness, subtaskId: l.subtaskId, at: l.atMs, ids: [], leader: false }, [l.sessionId], false)
+  }
   return [...out.values()].filter(x => x.subtaskId)
+}
+
+/** The model a session spent most tokens on: the pieces are compared by who wrote them. */
+function dominantModel(turns: readonly [string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }][]): string | null {
+  let best: string | null = null, bw = -1
+  for (const [m, u] of turns) { const w = u.inputTokens + u.outputTokens + u.cacheReadInputTokens + u.cacheCreationInputTokens; if (w > bw) { best = m; bw = w } }
+  return best
 }
 
 /** PURE: the whole read model over plain data. Every figure comes from a record named in `Observed.origin`. */
@@ -91,6 +113,7 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
   const taskTitle = new Map(s.book.tasks.map(t => [t.id, t.title]))
   const statements = sessionStatements(s)
   const bySubtask = new Map<string, ObservedSession[]>()
+  const sessionModels = new Map<ObservedSession, string | null>()
   const pieceFacts = new Map<string, { lines: number | null; startMs: number | null; labels: string[] }>()
 
   for (const st of statements) {
@@ -101,6 +124,7 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
     const row = s.registry.find(r => st.ids.includes(r.id) && r.model)
     const rowModel = row?.model
     let cost: ObservedSession['cost']
+    let model: string | null = null
     if (meta && hasUsage) {
       // model_usage (several models) wins; otherwise the meta's own model, then the registry row's
       const turns = sessionModelUsage(meta, rowModel).map(([model, u]) => ({
@@ -111,6 +135,7 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
           ...(u.cacheCreation5mInputTokens !== undefined ? { cacheWrite5m: u.cacheCreation5mInputTokens } : {}),
         },
       }))
+      model = dominantModel(sessionModelUsage(meta, rowModel))
       cost = turns.length
         ? sessionCost(turns)
         : { costUSD: null, missing: 'price', basis: 'table×tokens', priceTable: sessionCost([]).priceTable }
@@ -118,11 +143,14 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
       cost = { costUSD: null, missing: 'tokens', basis: 'table×tokens', priceTable: sessionCost([]).priceTable }
     }
     const rec = s.deliveries[st.subtaskId!]
+    // no usage: the model the record or the registry row states for it
+    model ??= rowModel ?? (rec?.authorSessionId !== undefined && st.ids.includes(rec.authorSessionId) ? rec.authorModel : rec?.qaSessionId !== undefined && st.ids.includes(rec.qaSessionId) ? rec.qaModel : undefined) ?? meta?.model ?? null
     const role: SessionRole = st.leader || (rec?.leaderSessionId !== undefined && st.ids.includes(rec.leaderSessionId)) ? 'leader'
       : rec?.authorSessionId !== undefined && st.ids.includes(rec.authorSessionId) ? 'worker'
       : rec?.qaSessionId !== undefined && st.ids.includes(rec.qaSessionId) ? 'qa'
       : 'unknown'
     const session: ObservedSession = { id: st.id, subtaskId: st.subtaskId, harness: st.harness, role, cost, hasTokens: hasUsage }
+    sessionModels.set(session, model)
     bySubtask.set(st.subtaskId!, [...(bySubtask.get(st.subtaskId!) ?? []), session])
     // what the piece's sessions changed (size) and when the first one started (wall-clock start)
     const acc = pieceFacts.get(st.subtaskId!) ?? { lines: null, startMs: null, labels: [] as string[] }
@@ -176,13 +204,16 @@ export function buildObservedFromSources(s: BenchmarkSources, observedFilters?: 
   const pieces: HistoryPieceInput[] = s.book.subtasks.filter(sub => sub.status === 'done' || sub.status === 'in_review').map(sub => {
     const facts = pieceFacts.get(sub.id)
     const it = itemOf.get(sub.id)
-    const sessions = (bySubtask.get(sub.id) ?? []).map(x => ({ id: x.id, harness: x.harness, costUSD: x.cost.costUSD }))
+    const sessions = (bySubtask.get(sub.id) ?? []).map(x => ({ id: x.id, harness: x.harness, costUSD: x.cost.costUSD, model: sessionModels.get(x) ?? null, role: x.role }))
+    const moves = (s.deliveries[sub.id]?.history ?? []).flatMap(m => { const at = ms(m.at); return at === null ? [] : [{ to: m.to, atMs: at }] }).sort((a, b) => a.atMs - b.atMs)
+    // the end of a piece nobody published: the handback (its first move into review), then the provenance stamped at handback/kill
+    const handbackMs = moves.find(m => m.to === 'revisao_lider' || m.to === 'qa')?.atMs ?? ms(sub.provenance?.at)
     const active = it && historyComplete.has(sub.id) ? ACTIVE.reduce((a, b) => a + it.stageMs[b], 0) : 0
     return {
       id: sub.id, taskId: sub.taskId, title: sub.title, status: sub.status, sessions, lines: facts?.lines ?? null,
       startMs: ms(sub.startedAt) ?? facts?.startMs ?? ms(sub.createdAt),
-      endMs: ms(sub.deliveredAt) ?? (sub.status === 'done' ? ms(sub.updatedAt) : null),
-      qaRounds: it && historyKnown.has(sub.id) && it.qaResult !== 'pending' ? it.qaRejections + 1 : qaRoundsFromLabels(facts?.labels ?? []),
+      endMs: ms(sub.deliveredAt) ?? (sub.status === 'done' ? ms(sub.updatedAt) : null) ?? handbackMs,
+      qaRounds: it && historyKnown.has(sub.id) && it.qaResult !== 'pending' ? it.qaRejections + 1 : qaRoundsFromLabels(facts?.labels ?? []) ?? reviewRoundsFromHistory(moves),
       activeMs: active > 0 ? active : null,
     }
   })
@@ -203,7 +234,16 @@ async function readSources(): Promise<BenchmarkSources> {
     byConversation.set(m.session_id, m)
     if (m.native_session_id && !byConversation.has(m.native_session_id)) byConversation.set(m.native_session_id, m)
   }
-  return { nowMs: Date.now(), book, registry, metas: byConversation, deliveries: deliveries.deliveries as BenchmarkSources['deliveries'] }
+  const conversations = await archivedConversations(registry)
+  return { nowMs: Date.now(), book: book as BenchmarkSources['book'], registry, metas: byConversation, deliveries: deliveries.deliveries as BenchmarkSources['deliveries'], conversations }
+}
+
+/** Managed id -> conversation: the event inbox (older lines first, so the newest wins), then every registry row. */
+async function archivedConversations(registry: BenchmarkSources['registry']): Promise<Map<string, ArchivedConversation>> {
+  const out = new Map<string, ArchivedConversation>()
+  for (const e of await readAllEvents().catch(() => [])) if (e.conversationId && e.id) out.set(e.id, { conversationId: e.conversationId, harness: e.harness ?? '' })
+  for (const r of registry) if (r.conversationId) out.set(r.id, { conversationId: r.conversationId, harness: r.harness })
+  return out
 }
 
 /** Reads only the local stores already used by the server. Missing usage remains unmeasured. */

@@ -10,8 +10,8 @@
  */
 import type { Compared, HistoryBucket, HistoryComparison, HistorySubtaskRow, HistoryTaskRow, Observed, ObservedHistory, ScoreType, Verdict, VerdictResult } from '@agentistics/core/benchmark'
 import { percentile } from '@agentistics/core'
-import type { ComparisonKey, TaskSides } from '@agentistics/core/benchmark'
-import { pointTone, scoreOf, scoreTone, taskScore, vezes, firmness, type Ratios } from './benchmarkScore'
+import { COMPARISON_SIDES, type ComparisonKey, type TaskSides } from '@agentistics/core/benchmark'
+import { MIN_MEASURED_TYPES, measuredTypes, pointTone, scoreOf, scoreTone, taskScore, vezes, firmness, type Ratios, type ScoreTypeKey } from './benchmarkScore'
 import { METRIC_LABEL, fmtInterval, fmtValue, harnessState, nf, cardCoverage, cardHeadline, cardSubline, type Lang, type MetricKey, type Money } from './benchmarkFormat'
 
 export type Tone = 'good' | 'bad' | 'tie' | 'none'
@@ -94,10 +94,13 @@ export function entriesOf(observed: Observed | null, experiments: readonly Exper
   const cmp = observed?.history ? comparisonsOf(observed.history, lang) : []
   if (cmp.length) {
     const seals: Entry[] = cmp.map(c => {
-      const score = comparisonScore(c).score, tone: Tone = score === null ? 'none' : pointTone(score)
-      return { id: c.id, kind: 'comparison', name: c.name, sample: c.sample, score, tone, word: score === null ? (pt ? 'observado' : 'observed') : wordOf(tone, lang), experiment: null, comparison: c }
+      const score = comparisonVerdictScore(c), tone: Tone = score === null ? 'none' : pointTone(score)
+      // fewer than 3 of the 4 types measured: no verdict word, the card says so
+      const word = !comparisonEnough(c) ? (pt ? 'sem dados suficientes' : 'not enough data') : score === null ? (pt ? 'observado' : 'observed') : wordOf(tone, lang)
+      return { id: c.id, kind: 'comparison', name: c.name, sample: c.sample, score, tone, word, experiment: null, comparison: c }
     })
-    return [...seals, ...experiments.map(e => experimentEntry(e, lang)), ...unmeasuredEntries(lang)]
+    const have = new Set(cmp.map(c => c.id))
+    return [...seals, ...experiments.map(e => experimentEntry(e, lang)), ...unmeasuredEntries(lang, observed?.history ?? null, have)]
   }
   const list: Entry[] = [{
     id: 'observed', kind: 'history', name: pt ? 'Histórico observado' : 'Observed history',
@@ -112,14 +115,29 @@ export function entriesOf(observed: Observed | null, experiments: readonly Exper
  * The approved prototype's list has two more cards than the history can fill today: a model comparison and "between
  * harnesses". They are shown as what they are — not measured, with the reason — and never with a number.
  */
-export function unmeasuredEntries(lang: Lang): Entry[] {
+export function unmeasuredEntries(lang: Lang, history: ObservedHistory | null = null, have: ReadonlySet<string> = new Set()): Entry[] {
   const pt = lang === 'pt'
   const mk = (id: string, name: string, reason: string): Entry => ({ id, kind: 'unmeasured', name, sample: reason, reason, score: null, tone: 'none', word: pt ? 'sem medição' : 'not measured', experiment: null })
   return [
-    mk('models', 'Sonnet × Opus', pt ? 'o histórico por peça ainda não é separado por modelo' : 'the per-piece history is not split by model yet'),
-    mk('harnesses', pt ? 'Entre harnesses' : 'Between harnesses', pt ? 'as métricas de cada harness ainda não foram conferidas contra a fonte de cada provedor' : 'each harness\'s metrics have not been checked against each provider\'s source yet'),
+    ...(have.has('models') ? [] : [mk('models', 'Sonnet × Opus', groupReason('models', history, lang))]),
+    ...(have.has('harnesses') ? [] : [mk('harnesses', pt ? 'Entre harnesses' : 'Between harnesses', groupReason('harnesses', history, lang))]),
   ]
 }
+
+/** Why a model / harness comparison is not drawn: the counts of pieces on each side and the minimum, never a design excuse. */
+export function groupReason(key: 'models' | 'harnesses', history: ObservedHistory | null, lang: Lang): string {
+  const pt = lang === 'pt'
+  const rows = history?.tasks.flatMap(t => t.subtasks) ?? []
+  const { a, b } = COMPARISON_SIDES[key]
+  const nA = rows.filter(a).length, nB = rows.filter(b).length
+  const names = key === 'models' ? ['Sonnet', 'Opus'] : ['Claude Code', 'Codex']
+  if (!rows.length) return pt ? 'ainda não há peça entregue com sessão vinculada' : 'there is no delivered piece with a linked session yet'
+  return pt
+    ? `poucas peças para comparar: ${names[0]} ${nA} × ${names[1]} ${nB} (mínimo ${GROUP_MIN_PIECES} de cada lado, no mesmo tamanho)`
+    : `too few pieces to compare: ${names[0]} ${nA} × ${names[1]} ${nB} (minimum ${GROUP_MIN_PIECES} on each side, within the same size)`
+}
+/** Mirrors core's `GROUP_MIN` for the sentence only; the comparison itself is built on the server. */
+const GROUP_MIN_PIECES = 3
 
 /** Per-harness coverage as counts only (sessions with a measured cost); null when no session was recorded. */
 export function harnessCoverageLine(observed: Observed | null, lang: Lang): string | null {
@@ -159,9 +177,10 @@ function noneHero(lang: Lang, say: string, why: string[]): Hero {
 export function heroOf(entry: Entry, observed: Observed | null, lang: Lang, money: Money = { currency: 'USD' }): Hero {
   const pt = lang === 'pt'
   if (entry.kind === 'unmeasured') {
+    const why = groupReason(entry.id === 'harnesses' ? 'harnesses' : 'models', observed?.history ?? null, lang)
     return noneHero(lang, entry.id === 'harnesses'
-      ? (pt ? 'Nenhum harness é comparado ainda: as métricas de cada harness não foram conferidas contra a fonte de cada provedor.' : 'No harness is compared yet: each harness\'s metrics have not been checked against each provider\'s source.')
-      : (pt ? 'Ainda não há comparação por modelo: o histórico por peça não é separado por modelo.' : 'There is no comparison by model yet: the per-piece history is not split by model.'),
+      ? (pt ? `Nenhum harness é comparado ainda: ${why}.` : `No harness is compared yet: ${why}.`)
+      : (pt ? `Ainda não há comparação por modelo: ${why}.` : `There is no comparison by model yet: ${why}.`),
     [])
   }
   if (entry.kind === 'comparison' && entry.comparison && observed?.history) return comparisonHero(entry.comparison, observed, lang, money)
@@ -256,7 +275,7 @@ export function partsOf(entry: Entry, observed: Observed | null, lang: Lang, mon
         const cov = pt ? `${subs.length} de ${observed.history.pieces} peças com QA` : `${subs.length} of ${observed.history.pieces} pieces with QA`
         const extra: PartRow[] = [
           { key: 'rework-rate', label: pt ? 'Peças com 2+ rodadas de QA' : 'Pieces with 2+ QA rounds', value: `${nf(reworked / subs.length * 100, lang, 0)}%`, sub: `${reworked} ${pt ? 'de' : 'of'} ${subs.length} · ${cov}`, measured: true },
-          { key: 'rework-rounds', label: pt ? 'Rodadas de QA, mediana' : 'QA rounds, median', value: rounds === null ? '—' : nf(rounds, lang, 1), sub: pt ? 'lido do rótulo das sessões de QA (indicativo)' : 'read from the QA sessions\' labels (indicative)', measured: rounds !== null },
+          { key: 'rework-rounds', label: pt ? 'Rodadas de QA, mediana' : 'QA rounds, median', value: rounds === null ? '—' : nf(rounds, lang, 1), sub: pt ? 'lido do rótulo das sessões de QA ou do histórico de fases (indicativo)' : 'read from the QA sessions\' labels or the phase history (indicative)', measured: rounds !== null },
         ]
         return { type, name, question, pct: null, points: null, max: null, tone: 'none', state: 'history', word: pt ? 'só histórico' : 'history only', rows: extra }
       }
@@ -380,7 +399,7 @@ function experimentEntry(e: ExperimentView, lang: Lang): Entry {
 
 export type { Compared }
 export interface Comparison {
-  id: 'qa' | 'sessions'; name: string; aShort: string; bShort: string; sample: string
+  id: ComparisonKey; name: string; aShort: string; bShort: string; sample: string
   nA: number; nB: number
   cost: Compared | null; wall: Compared | null
   /** QA comparison: how many more sessions; sessions comparison: the rework rate of each side. */
@@ -391,11 +410,13 @@ export interface Comparison {
  * The comparisons the observed history supports. They are BUILT ON THE SERVER (core `buildComparisons`, carried
  * by HTTP and the MCP tool alike); this only gives each one its words. An older server that sends none shows none.
  */
-export function comparisonWords(lang: Lang): Record<HistoryComparison['key'], { name: string; a: string; b: string }> {
+export function comparisonWords(lang: Lang): Record<ComparisonKey, { name: string; a: string; b: string }> {
   const pt = lang === 'pt'
   return {
     qa: { name: pt ? '1 rodada de QA × 2+ rodadas' : '1 QA round × 2+ rounds', a: pt ? '1 rodada de QA' : '1 QA round', b: pt ? '2+ rodadas de QA' : '2+ QA rounds' },
     sessions: { name: pt ? '1 sessão × 5+ sessões' : '1 session × 5+ sessions', a: pt ? '1 sessão' : '1 session', b: pt ? '5+ sessões' : '5+ sessions' },
+    models: { name: 'Sonnet × Opus', a: 'Sonnet', b: 'Opus' },
+    harnesses: { name: 'Claude Code × Codex', a: 'Claude Code', b: 'Codex' },
   }
 }
 export function comparisonsOf(h: ObservedHistory, lang: Lang): Comparison[] {
@@ -412,6 +433,22 @@ export function comparisonRatios(c: Comparison): Ratios {
   return { cost: c.cost ? 1 / c.cost.ratio : null, time: c.wall ? 1 / c.wall.ratio : null }
 }
 export const comparisonScore = (c: Comparison) => scoreOf(comparisonRatios(c))
+/** The observed history has a verdict only when at least 3 of the 4 types are measured; below that it has numbers, not a verdict. */
+export const comparisonEnough = (c: Comparison): boolean => measuredTypes(comparisonRatios(c)).length >= MIN_MEASURED_TYPES
+export const comparisonVerdictScore = (c: Comparison): number | null => comparisonEnough(c) ? comparisonScore(c).score : null
+
+const TYPE_WORD: Record<ScoreTypeKey, { pt: string; en: string }> = {
+  quality: { pt: 'qualidade', en: 'quality' }, cost: { pt: 'custo', en: 'cost' }, time: { pt: 'tempo', en: 'time' }, reliability: { pt: 'confiabilidade', en: 'reliability' },
+}
+const joinWords = (xs: string[], and: string) => xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} ${and} ${xs[xs.length - 1]}`
+/** "Só custo medido" / "Só custo e tempo medidos": the badge that replaces "Resultado firme" while the verdict has too few dimensions. */
+export function measuredBadge(c: Comparison, lang: Lang): string {
+  const pt = lang === 'pt'
+  const got = measuredTypes(comparisonRatios(c))
+  if (!got.length) return pt ? 'Nenhuma dimensão medida' : 'No dimension measured'
+  const names = got.map(k => TYPE_WORD[k][pt ? 'pt' : 'en'])
+  return pt ? `Só ${joinWords(names, 'e')} ${got.length === 1 ? 'medido' : 'medidos'}` : `Only ${joinWords(names, 'and')} measured`
+}
 
 const times = (r: number, lang: Lang) => `${nf(r >= 1 ? r : 1 / r, lang, 1)}×`
 /** B ÷ A as it is (0,6× is cheaper, 1,7× is dearer): a tile or a pair never hides the direction behind an inversion. */
@@ -433,18 +470,21 @@ function comparisonSentence(c: Comparison, lang: Lang): string {
 function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Money): Hero {
   const pt = lang === 'pt'
   const h = observed.history!
-  const sc = comparisonScore(c).score
+  const enough = comparisonEnough(c)
+  const sc = comparisonVerdictScore(c)
   const tone: Tone = sc === null ? 'none' : pointTone(sc)
   const fm = firmness(comparisonRatios(c))
+  const nMeasured = measuredTypes(comparisonRatios(c)).length
   const alt = { equal: pt ? 'pesos iguais' : 'equal weights', quality: pt ? 'Qualidade valendo mais' : 'Quality weighted higher', costTime: pt ? 'Custo e Tempo valendo mais' : 'Cost and Time weighted higher' }
   return {
-    tone, word: sc === null ? (pt ? 'Sem dados ainda' : 'No data yet') : wordOf(tone, lang), delta: null, score: sc,
-    firm: sc === null ? null : fm.changes.length === 0 ? { ok: true, text: pt ? 'Resultado firme' : 'Firm result' } : { ok: false, text: pt ? 'Depende do que você valoriza' : 'Depends on what you value' },
+    tone, word: !enough ? (pt ? 'Sem dados suficientes' : 'Not enough data') : sc === null ? (pt ? 'Sem dados ainda' : 'No data yet') : wordOf(tone, lang), delta: null, score: sc,
+    firm: !enough ? (nMeasured === 0 ? null : { ok: false, text: measuredBadge(c, lang) }) : sc === null ? null : fm.changes.length === 0 ? { ok: true, text: pt ? 'Resultado firme' : 'Firm result' } : { ok: false, text: pt ? 'Depende do que você valoriza' : 'Depends on what you value' },
     range: null,
     say: comparisonSentence(c, lang),
     disclosure: pt ? 'Por que esse resultado?' : 'Why this result?',
     // The approved prototype's disclosure: why the verdict, the firmness sentence, then "Baseado em". Nothing else.
     why: [
+      ...(!enough ? [pt ? `${nMeasured} de 4 dimensões medidas; o veredito pede pelo menos ${MIN_MEASURED_TYPES}. Os números abaixo são o que se observou, não um veredito.` : `${nMeasured} of 4 dimensions measured; a verdict needs at least ${MIN_MEASURED_TYPES}. The figures below are what was observed, not a verdict.`] : []),
       ...(sc === null ? [] : [
         tone === 'good' ? (pt ? 'A nota fica acima do empate.' : 'The score is above the tie.')
           : tone === 'bad' ? (pt ? 'A nota fica abaixo do empate.' : 'The score is below the tie.')
@@ -484,7 +524,7 @@ function partsOfComparison(c: Comparison, lang: Lang, money: Money, withoutDurat
     ? { ...tile('rework', third.sessions, n => sessionsWord(n, lang), pt ? 'Sessões por peça' : 'Sessions per piece'), name: pt ? 'Sessões por peça' : 'Sessions per piece', question: pt ? 'Quantas sessões gastou?' : 'How many sessions did it take?' }
     : third.rateA !== null && third.rateB !== null
       ? { type: 'rework', name: pt ? TYPE_META.rework.pt : TYPE_META.rework.en, question: pt ? TYPE_META.rework.qpt : TYPE_META.rework.qen, pct: null, points: null, max: null, tone: 'none', state: 'history',
-        big: `${pct0(third.rateA, lang)} → ${pct0(third.rateB, lang)}`, word: seal, rows: [{ key: 'rate', label: pt ? '2+ rodadas de QA' : '2+ QA rounds', value: `${pct0(third.rateA, lang)} → ${pct0(third.rateB, lang)}`, sub: pt ? 'entre as peças com QA (lido do rótulo das sessões, indicativo)' : 'among pieces with QA (read from session labels, indicative)', measured: true }] }
+        big: `${pct0(third.rateA, lang)} → ${pct0(third.rateB, lang)}`, word: seal, rows: [{ key: 'rate', label: pt ? '2+ rodadas de QA' : '2+ QA rounds', value: `${pct0(third.rateA, lang)} → ${pct0(third.rateB, lang)}`, sub: pt ? 'entre as peças com revisão (rótulo das sessões ou histórico de fases, indicativo)' : 'among pieces with review (session labels or phase history, indicative)', measured: true }] }
       : none('rework', pt ? 'sem dados suficientes' : 'not enough data')
   return [
     none('quality', pt ? 'defeito escapado e peça reaberta não são registrados' : 'escaped defects and reopened pieces are not recorded'),
@@ -498,7 +538,7 @@ function partsOfComparison(c: Comparison, lang: Lang, money: Money, withoutDurat
 }
 
 /** Which comparison's sides the per-task pairs read: the selected comparison, else the QA one (the history entry of an older server). */
-export const comparisonLabel = (e: Entry): ComparisonKey => e.kind === 'comparison' && (e.id === 'qa' || e.id === 'sessions') ? e.id : 'qa'
+export const comparisonLabel = (e: Entry): ComparisonKey => e.kind === 'comparison' && (e.id === 'qa' || e.id === 'sessions' || e.id === 'models' || e.id === 'harnesses') ? e.id : 'qa'
 
 /** The history's session buckets in the prototype's seven columns: what no record carries yet (escaped defects, accepted first try, not reopened) stays null. */
 export function bucketsOfHistory(buckets: readonly HistoryBucket[], lang: Lang): BucketRow[] {

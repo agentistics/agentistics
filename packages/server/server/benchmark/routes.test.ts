@@ -368,3 +368,56 @@ describe('F16: a conversation belongs to the subtask of its NEWEST filing statem
     expect(o.metrics.costPerDelivery.n).toBe(1)
   })
 })
+
+describe('BENCHMARK.LACUNAS: archived sessions, model, handback time, review rounds', () => {
+  const full = (o: Partial<BenchmarkSources> & { comments?: unknown[]; registry?: unknown[] }): BenchmarkSources => {
+    const base = mini(
+      [sub('P', 'in_review'), sub('Q', 'done', { deliveredAt: iso(T0 + 9 * H) })],
+      {
+        P: rec('P', T0, [mv('fila', 'executando', T0), mv('executando', 'revisao_lider', T0 + 5 * H), mv('revisao_lider', 'ajuste', T0 + 6 * H), mv('ajuste', 'revisao_lider', T0 + 7 * H)]),
+        Q: { ...rec('Q', T0, [mv('fila', 'executando', T0), mv('executando', 'publicado', T0 + 9 * H)]), authorSessionId: 'w-q', authorModel: 'claude-opus-5-5' },
+      },
+      [row('m-live', 'Q', { conversationId: 'c-q', model: 'claude-opus-5' })],
+      [['c-p', meta('c-p')], ['c-q', meta('c-q', { model: 'claude-opus-5' })]],
+    )
+    return { ...base, ...o, book: { ...base.book, comments: o.comments as never } } as BenchmarkSources
+  }
+  const archived = full({
+    comments: [{ sessionId: 'w-p', subtaskId: 'P', createdAt: iso(T0 + 5 * H) }],
+    conversations: new Map([['w-p', { conversationId: 'c-p', harness: 'claude' }]]),
+  })
+
+  test('the piece keeps its session after the worker left the registry (filed by its own comments)', () => {
+    const h = buildObservedFromSources(archived).history!
+    const p = h.tasks[0]!.subtasks.find(x => x.id === 'P')!
+    expect(p.sessions).toBe(1)
+    expect(p.costUSD).toBeCloseTo(sonnetCost, 6)
+  })
+  test('without the comment the piece has no session and is not a piece of the history: nothing is invented', () => {
+    const h = buildObservedFromSources(full({ conversations: archived.conversations })).history!
+    expect(h.tasks.flatMap(t => t.subtasks).some(x => x.id === 'P')).toBe(false)
+  })
+  test('a conversation the live registry already files elsewhere is not taken over', () => {
+    const s = full({
+      comments: [{ sessionId: 'w-q2', subtaskId: 'P', createdAt: iso(T0 + 5 * H) }],
+      conversations: new Map([['w-q2', { conversationId: 'c-q', harness: 'claude' }]]),
+    })
+    const h = buildObservedFromSources(s).history!
+    expect(h.tasks.flatMap(t => t.subtasks).some(x => x.id === 'P')).toBe(false)
+  })
+  test('the piece model comes from the session usage (Sonnet for the archived one, Opus for the live one)', () => {
+    const subs = buildObservedFromSources(archived).history!.tasks[0]!.subtasks
+    expect(subs.find(x => x.id === 'P')!.model).toBe('sonnet')
+    expect(subs.find(x => x.id === 'Q')!.model).toBe('opus')
+  })
+  test('a piece in review ends at its handback (first move into review): it has a real duration', () => {
+    const p = buildObservedFromSources(archived).history!.tasks[0]!.subtasks.find(x => x.id === 'P')!
+    expect(p.wallMs).toBe(5 * H)
+  })
+  test('QA rounds fall back to the delivery history: two entries into review = 2 rounds, and Aceita follows done', () => {
+    const subs = buildObservedFromSources(archived).history!.tasks[0]!.subtasks
+    const p = subs.find(x => x.id === 'P')!
+    expect([p.qaRounds, p.reworked, p.accepted]).toEqual([2, true, null])
+    expect(subs.find(x => x.id === 'Q')!.accepted).toBe(true)
+  })
+})
