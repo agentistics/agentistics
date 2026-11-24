@@ -221,10 +221,20 @@ export async function removeSubtaskRequest(
 ): Promise<WebReply> {
   try {
     let removed: RemoveOutcome
-    try { removed = await d.remove(id, ctx) } catch (e) {
-      // r7: a GROUP holding an accepted member is refused by the store; it follows the same owner-proof ladder as an accepted member.
-      if (e instanceof GuardRefused && e.code === 'accepted_members') removed = { ok: false, reason: 'member_accepted', message: e.message }
-      else throw e
+    const attempt = async (c: import('./guard').GuardContext): Promise<RemoveOutcome> => {
+      try { return await d.remove(id, c) } catch (e) {
+        // r7: a GROUP holding an accepted member is refused by the store; it follows the same owner-proof ladder as an accepted member.
+        if (e instanceof GuardRefused && e.code === 'accepted_members') return { ok: false, reason: 'member_accepted', message: e.message }
+        throw e
+      }
+    }
+    try { removed = await attempt(ctx) } catch (e) {
+      // S2c.2: under rule ON the store refuses an unproven caller. A request with no claim may still be the person's own: resolve it.
+      if (!(e instanceof GuardRefused && e.code === 'guard_context_required' && ctx.principal.kind === 'unattributed')) throw e
+      const who = await resolveRequestPrincipal(body, { pieceKey: id, move: 'subtask:remove' }, d.principalDeps)
+      if (!who.ok) return who.reply
+      if (who.principal.kind !== 'owner') throw e
+      removed = await attempt({ principal: who.principal })
     }
     if (typeof removed === 'object' && ctx.principal.kind === 'unattributed') {
       if (removed.reason === 'member_accepted') {
@@ -263,7 +273,14 @@ export async function deleteTaskRequest(
       throw e
     }
   }
-  const first = await attempt(ctx)
+  let first = await attempt(ctx)
+  // S2c.2: under rule ON the store refuses an unproven caller. A request with no claim may still be the person's own: resolve it.
+  if (first.status === 422 && (first.body as { reason?: string }).reason === 'guard_context_required' && ctx.principal.kind === 'unattributed') {
+    const who = await resolveRequestPrincipal(body, { pieceKey: ref, move: 'task:delete' }, d.principalDeps)
+    if (!who.ok) return who.reply
+    if (who.principal.kind !== 'owner') return first
+    first = await attempt({ principal: who.principal })
+  }
   if (first.status !== 422 || (first.body as { reason?: string }).reason !== 'accepted_members' || ctx.principal.kind !== 'unattributed') return first
   const who = await resolveRequestPrincipal(body, { pieceKey: ref, move: 'task:delete' }, d.principalDeps)
   if (!who.ok) return who.reply

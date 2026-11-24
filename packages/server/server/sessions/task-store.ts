@@ -767,6 +767,21 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
     try { cps = (await createGuardsStore(anchor.paths.guards).read()).checkpoints } catch { return [] }
     return candidates.flatMap(s => cps[s.parentGroupId!]?.members?.[s.id]?.status === 'done' ? [{ id: s.id, groupId: s.parentGroupId! }] : [])
   }
+  /**
+   * S2c.2: under rule ON a DELETION needs a proven principal. The doors hand over `unattributed` for "no proof at all" and a
+   * missing context for "a door that forgot"; neither may remove a task or a piece. Rule off / shadow decide nothing here
+   * (`currentBase` = the rule was off when the mutation began), so deleting accepted work stays exactly as blocked as before.
+   */
+  async function requireProvenPrincipal(id: string): Promise<void> {
+    if (currentBase) return
+    if (currentGuard && currentGuard.principal.kind !== 'unattributed') return
+    if (await ruleAState(anchor.dir) !== 'on') return
+    throw new GuardRefused({
+      code: 'guard_context_required', piece: id, missing: ['a proven principal'],
+      message: `This write deletes ${id} but its caller could not prove who is asking, so the store refuses it — under the delivery guarantee a removal needs the owner or a verified session.`,
+      messagePt: `Esta escrita remove ${id} mas quem pediu não provou quem é, então o armazém recusa — com a garantia ligada, remover exige o dono ou uma sessão verificada.`,
+    })
+  }
   /** r7: only the owner whose proof is the vault may remove or reopen an ACCEPTED piece; every session, flow or header owner is refused HERE, at the write, so every door is covered. */
   const isVaultOwner = (g?: GuardContext): boolean => g?.principal.kind === 'owner' && g.principal.via === 'vault-credential'
   const acceptedRefusal = (code: 'accepted_members' | 'accepted_reopen', what: string, ids: string[]): GuardRefused => new GuardRefused({
@@ -1045,6 +1060,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         // r8 B: an individual ACCEPTED member goes only by the vault-proven owner too (with or without opts).
         const acceptedSelf = await acceptedMembers(book, t => t.id === id)
         if (acceptedSelf.length && !isVaultOwner(opts.ownerRemoval ?? opts.guard)) throw acceptedRefusal('accepted_members', `Piece ${id}`, [id])
+        await requireProvenPrincipal(id)
         dismissing = !!opts.dismissPlaceholder || !!opts.ownerRemoval || (acceptedInGroup.length > 0) || (acceptedSelf.length > 0)
         const removedGroup = opts.ownerRemoval ? book.subtasks.find(t => t.id === id)?.parentGroupId : undefined
         try {
@@ -1139,6 +1155,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         // r7 (re-QA r5 F1): a task holding an ACCEPTED member is deleted only by the owner with a vault proof; the refusal is at the store write.
         const accepted = await acceptedMembers(book, s => s.taskId === id)
         if (accepted.length && !isVaultOwner(opts.guard)) throw acceptedRefusal('accepted_members', `Task ${id}`, accepted.map(a => a.id))
+        await requireProvenPrincipal(id)
         await write({
           tasks: book.tasks.filter(t => t.id !== id),
           attempts: book.attempts.filter(a => a.taskId !== id),
@@ -1164,7 +1181,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         })
         await recordOwnerRemoval(accepted)
         return true
-      }, { tasks: !held.contended }))
+      }, { tasks: !held.contended }), opts.guard)
     },
     clearTombstone(id) {
       return enqueue(async () => {

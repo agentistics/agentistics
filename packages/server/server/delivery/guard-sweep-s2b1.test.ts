@@ -19,7 +19,7 @@ import { analyzeGuardIntegrity } from './owner-health'
 const mayDismissPlaceholder = async (o: { principal: unknown; taskId: string; isTaskLeader: (s: string, t: string) => Promise<boolean> }) => (await import('../sessions/placeholder-dismiss')).mayDismissPlaceholder(o as never)
 import { planNext } from '../sessions/task-next'
 import { findTask } from '../sessions/task-report'
-import { unattributedContext } from './guard'
+import { flowContext, unattributedContext } from './guard'
 
 const T = Date.parse('2026-11-13T10:00:00Z')
 const ISO = new Date(T).toISOString()
@@ -526,7 +526,8 @@ type RestDeps = { mode: 'legacy' | 'required'; grant?: string; browser?: { origi
 async function restRemove(w: W, id: string, d: RestDeps, body: Record<string, unknown> = {}) {
   const { removeSubtaskRequest } = await import('./web')
   return removeSubtaskRequest(id, { id, remove: true, ...body }, { principal: { kind: 'unattributed' } } as never, {
-    remove: (sid, ctx) => removeVia(w, sid, ctx),
+    // S2c.2: the door's retry on a refused unproven principal needs the store's GuardRefused to propagate, as it does in production.
+    remove: async (sid, ctx) => (await import('../sessions/task-web')).removeSubtask(sid, ctx, dismissDeps(w) as never),
     principalDeps: {
       verify: async () => null,
       mode: async () => d.mode,
@@ -884,7 +885,7 @@ test('r8 B: removing an INDIVIDUAL accepted member at the store: refused with no
 
 test('r8 B: the composer door removes the cards it just created (never accepted) without a guard', async () => {
   const w = await world([['g', { isGroup: true }], member('c1', 'in_progress')], 3)
-  expect(await w.tasks.removeSubtask('c1', { guard: unattributedContext() })).toBe(true)
+  expect(await w.tasks.removeSubtask('c1', { guard: flowContext() })).toBe(true)
 })
 
 test('r8 C: the vault owner reopens an accepted piece and moves it out of its group; a session and the header owner stay refused; the exemption covers ONLY accepted pieces', async () => {
