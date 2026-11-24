@@ -201,7 +201,7 @@ describe('browserRoute', () => {
 
   test('status is a GET', async () => {
     const f = fakeDeps()
-    expect(await browserRoute('GET', '/api/browser/status', undefined, f.deps)).toEqual({ status: 200, body: { live: [], personalAccess: false } })
+    expect(await browserRoute('GET', '/api/browser/status', undefined, f.deps)).toEqual({ status: 200, body: { live: [], personalAccess: false, personalSaved: null } })
     expect((await browserRoute('POST', '/api/browser/status', {}, f.deps))?.status).toBe(405)
   })
 })

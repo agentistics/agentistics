@@ -149,10 +149,10 @@ describe('nothing open yet', () => {
     expect(q('[data-browser-refusal]')?.textContent).toBe('That address is blocked.')
   })
 
-  test('"nova aba em branco" opens one through tab_new', async () => {
+  test('"Abrir a página inicial" asks the server to open the browser (default page), never a blank tab', async () => {
     render({ live: false })
     await act(async () => { (q('[data-browser-empty] button') as HTMLButtonElement).click() })
-    expect(posts).toEqual([['/api/browser/personal/tab_new', {}]])
+    expect(posts).toEqual([['/api/browser/personal/open', {}]])
   })
 })
 
