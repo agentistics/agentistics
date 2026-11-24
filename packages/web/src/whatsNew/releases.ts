@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.228.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Navegador da sessão: ao abrir, ao reabrir depois de fechar e ao criar uma aba nova, ele agora mostra a página inicial em vez de uma tela vazia (about:blank), igual ao seu navegador.',
+        en: 'Session browser: when it opens, reopens after being closed, or gets a new tab, it now shows the home page instead of an empty screen (about:blank), like your own browser.',
+      },
+    ],
+  },
   '2.228.0': {
     features: [
       {
