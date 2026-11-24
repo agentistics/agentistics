@@ -477,7 +477,9 @@ function comparisonHero(c: Comparison, observed: Observed, lang: Lang, money: Mo
   const nMeasured = measuredTypes(comparisonRatios(c)).length
   const alt = { equal: pt ? 'pesos iguais' : 'equal weights', quality: pt ? 'Qualidade valendo mais' : 'Quality weighted higher', costTime: pt ? 'Custo e Tempo valendo mais' : 'Cost and Time weighted higher' }
   return {
-    tone, word: !enough ? (pt ? 'Sem dados suficientes' : 'Not enough data') : sc === null ? (pt ? 'Sem dados ainda' : 'No data yet') : wordOf(tone, lang), delta: null, score: sc,
+    tone, word: !enough ? (pt ? 'Sem dados suficientes' : 'Not enough data') : sc === null ? (pt ? 'Sem dados ainda' : 'No data yet') : wordOf(tone, lang), delta: null,
+    // the hero keeps the approved structure while ANY dimension has points: the partial score is shown as it is (no verdict colour, no verdict word)
+    score: comparisonScore(c).score,
     firm: !enough ? (nMeasured === 0 ? null : { ok: false, text: measuredBadge(c, lang) }) : sc === null ? null : fm.changes.length === 0 ? { ok: true, text: pt ? 'Resultado firme' : 'Firm result' } : { ok: false, text: pt ? 'Depende do que você valoriza' : 'Depends on what you value' },
     range: null,
     say: comparisonSentence(c, lang),

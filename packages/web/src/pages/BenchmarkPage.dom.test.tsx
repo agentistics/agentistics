@@ -533,13 +533,18 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
 
   test('the bars are back, in each state, with the colour of their result', () => {
     const hero = html.split('data-testid="benchmark-hero"')[1]!.split('data-testid="benchmark-parts"')[0]!
-    // 2 of 4 dimensions measured: no verdict word, no score; the badge says what IS measured
+    // 2 of 4 dimensions measured: no verdict word; the approved hero structure stays (partial score, bar, 0/50/100 scale) and the badge says what IS measured
     expect(hero).toContain('Sem dados suficientes')
     expect(hero).toContain('Só custo e tempo medidos')
     expect(hero).not.toContain('Resultado firme')
-    expect(hero).not.toContain('de 100')
+    expect(hero).toContain('de 100')
+    expect(hero).toContain('0 · não compensou')
+    expect(hero).toContain('50 · empate')
+    expect(hero).toContain('100 · compensou')
+    expect(hero).toContain('role="img"')
     const parts = html.split('data-testid="benchmark-parts"')[1]!.split('data-testid="benchmark-tasks"')[0]!
-    expect(parts).not.toContain('De onde vêm os')
+    expect(parts).toContain('De onde vêm os')
+    expect(parts).toContain('conta só o que foi medido')
     for (const t of ['cost', 'time']) {
       const tile = html.split(`data-testid="part-${t}"`)[1]!.split('data-testid="part-')[0]!
       expect(tile).toContain(`data-testid="bar-${t}" data-tone="bad"`)
@@ -687,7 +692,7 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
     expect(hero).not.toContain('Indício, não prova')       // the prototype has no honesty caption under the sentence
     expect(hero).toContain('2,5× mais custo, 4× mais tempo')
     expect(hero).not.toContain('benchmark-caption')
-    expect(hero).not.toContain('25<small')        // no score while fewer than 3 dimensions are measured
+    expect(hero).toContain('25<small')        // the partial score keeps the hero structure; the verdict word and colour stay off
     expect(hero).toContain('Por que esse resultado?')
     expect(hero).not.toMatch(/<details[^>]* open/)
     // the prototype's disclosure: exactly three paragraphs, no facts list, "Baseado em" last

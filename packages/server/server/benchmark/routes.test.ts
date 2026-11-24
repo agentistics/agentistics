@@ -383,7 +383,7 @@ describe('BENCHMARK.LACUNAS: archived sessions, model, handback time, review rou
     return { ...base, ...o, book: { ...base.book, comments: o.comments as never } } as BenchmarkSources
   }
   const archived = full({
-    comments: [{ sessionId: 'w-p', subtaskId: 'P', createdAt: iso(T0 + 5 * H) }],
+    comments: [{ sessionId: 'w-p', subtaskId: 'P', kind: 'handback', createdAt: iso(T0 + 5 * H) }],
     conversations: new Map([['w-p', { conversationId: 'c-p', harness: 'claude' }]]),
   })
 
@@ -399,7 +399,7 @@ describe('BENCHMARK.LACUNAS: archived sessions, model, handback time, review rou
   })
   test('a conversation the live registry already files elsewhere is not taken over', () => {
     const s = full({
-      comments: [{ sessionId: 'w-q2', subtaskId: 'P', createdAt: iso(T0 + 5 * H) }],
+      comments: [{ sessionId: 'w-q2', subtaskId: 'P', kind: 'handback', createdAt: iso(T0 + 5 * H) }],
       conversations: new Map([['w-q2', { conversationId: 'c-q', harness: 'claude' }]]),
     })
     const h = buildObservedFromSources(s).history!

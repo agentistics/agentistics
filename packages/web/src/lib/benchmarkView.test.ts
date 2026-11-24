@@ -59,7 +59,9 @@ describe('an observed comparison is read with the prototype\'s point rule (margi
     expect(sc).toBeCloseTo(53.3, 0)
     expect(pointTone(sc)).toBe('good')
     expect(e).toMatchObject({ score: null, tone: 'none', word: 'sem dados suficientes' })
-    expect(heroOf(e, o, 'pt', { currency: 'USD' })).toMatchObject({ tone: 'none', word: 'Sem dados suficientes', score: null })
+    expect(heroOf(e, o, 'pt', { currency: 'USD' })).toMatchObject({ tone: 'none', word: 'Sem dados suficientes' })
+    // the approved hero structure stays: the PARTIAL score is carried, honestly, without a verdict tone
+    expect(heroOf(e, o, 'pt', { currency: 'USD' }).score).toBeCloseTo(sc, 6)
   })
 })
 
@@ -123,7 +125,8 @@ describe('observed comparisons the history already allows', () => {
   test('hero: the verdict word and N de 100, ONE sentence in the prototype mould, no caption, the rest behind a disclosure', () => {
     const e = entriesOf(obs(h), [], 'pt')[0]!
     const hero = heroOf(e, obs(h), 'pt', { currency: 'USD' })
-    expect(hero).toMatchObject({ word: 'Sem dados suficientes', tone: 'none', score: null })
+    expect(hero).toMatchObject({ word: 'Sem dados suficientes', tone: 'none' })
+    expect(hero.score).not.toBeNull()
     expect(hero.say).toBe('Com 2+ rodadas de QA: 2,5× mais custo, 4× mais tempo, 5× mais sessões.')
     expect(hero.delta).toBeNull()
     expect(hero).not.toHaveProperty('caption')
@@ -225,7 +228,7 @@ describe('BENCHMARK.LACUNAS: "firm" needs 3 of the 4 dimensions measured', () =>
     const e = sessionsEntry()
     expect(e.score).toBeNull(); expect(e.word).toBe('sem dados suficientes')
     const hero = heroOf(e, o, 'pt', { currency: 'USD' })
-    expect(hero.word).toBe('Sem dados suficientes'); expect(hero.score).toBeNull(); expect(hero.tone).toBe('none')
+    expect(hero.word).toBe('Sem dados suficientes'); expect(hero.score).not.toBeNull(); expect(hero.tone).toBe('none')
     expect(hero.firm).toEqual({ ok: false, text: 'Só custo medido' })
     expect(JSON.stringify(hero)).not.toContain('Resultado firme')
     expect(hero.why.join('\n')).toContain('1 de 4 dimensões medidas')

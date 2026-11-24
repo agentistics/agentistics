@@ -8,7 +8,7 @@ import { readRegistry } from '../sessions/registry'
 import { createDeliveryStore } from '../delivery/store'
 import { loadConsolidated } from '../consolidate'
 import { readAllEvents } from '../events/event-store'
-import { archivedLinks, type ArchivedComment, type ArchivedConversation } from './archived-links'
+import { archivedLinks, type ArchivedComment, type AuthorshipProof, type ArchivedConversation } from './archived-links'
 
 export interface BenchmarkRouteDeps {
   observed: (filters?: MetricFilters) => Promise<ReturnType<typeof buildObserved>>
@@ -36,6 +36,8 @@ export interface BenchmarkSources {
   /** `deliveries.json`: the delivery flow's records, with their phase history. */
   deliveries: Readonly<Record<string, {
     subtaskId: string; phase: string; createdAt?: string; leaderSessionId?: string; authorSessionId?: string; qaSessionId?: string; authorModel?: string; qaModel?: string
+    /** Evidence the session filed for this piece (`by` = managed id). */
+    evidence?: readonly { by?: string }[]
     history: readonly { from: string; to: string; at: string; detail?: string }[]
   }>>
 }
@@ -90,9 +92,11 @@ function sessionStatements(s: BenchmarkSources): Statement[] {
     put(`c:${h.conversationId}`, { conversationId: h.conversationId, id: `hist:${h.conversationId}`, harness: h.harness, subtaskId: h.subtaskId ?? null, at: ms(h.linkedAt) ?? 0, ids: [], leader: false }, [], false)
   }
   // Sessions that LEFT the registry: filed where their own comments say, only when nothing live or historical already filed the conversation.
-  const leaderIds = new Set<string>([...s.registry.filter(r => r.leader).map(r => r.id), ...Object.values(s.deliveries).flatMap(d => d.leaderSessionId ? [d.leaderSessionId] : [])])
+  const isLeaderLabel = (l?: string): boolean => !!l && /\[\s*(l[ií]der|leader)\s*\]/i.test(l)
+  const leaderIds = new Set<string>([...s.registry.filter(r => r.leader || isLeaderLabel(r.label)).map(r => r.id), ...Object.values(s.deliveries).flatMap(d => d.leaderSessionId ? [d.leaderSessionId] : [])])
+  const proofs: AuthorshipProof[] = Object.values(s.deliveries).flatMap(d => [d.authorSessionId, d.qaSessionId, ...(d.evidence ?? []).map(e => e.by)].flatMap(id => id ? [{ sessionId: id, subtaskId: d.subtaskId }] : []))
   for (const l of archivedLinks({
-    comments: s.book.comments ?? [], conversations: s.conversations ?? new Map(), leaderIds, subtasks: new Set(s.book.subtasks.map(x => x.id)),
+    comments: s.book.comments ?? [], conversations: s.conversations ?? new Map(), leaderIds, proofs, subtasks: new Set(s.book.subtasks.map(x => x.id)),
   })) {
     const key = `c:${l.conversationId}`
     if ((out.get(key)?.at ?? -1) >= 0) continue
