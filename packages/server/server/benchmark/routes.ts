@@ -70,7 +70,8 @@ const ADOPTION = /^\s*adotad/i
 
 interface Statement { conversationId: string | null; id: string; harness: string; subtaskId: string | null; at: number; ids: string[]; leader: boolean }
 
-const isLeaderLabel = (l?: string): boolean => !!l && /\[\s*(l[ií]der|leader)\s*\]/i.test(l)
+/** A leader wears the label at the START of its title ("[ LÍDER ] - X"); the words anywhere else ("Revisar [ LÍDER ] antigo") name a worker. */
+export const isLeaderLabel = (l?: string): boolean => !!l && /^\s*\[\s*(l[ií]der|leader)\s*\]/i.test(l)
 
 /** PURE: one session per conversation, filed where its NEWEST filing statement says (a row with an empty `taskId` un-files it). */
 function sessionStatements(s: BenchmarkSources): Statement[] {

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { MetricFilters, MetricItem, TimeBucket } from '@agentistics/core'
 import { calcCost } from '@agentistics/core'
 import { buildObserved, type Observed, type ObservedSession } from '@agentistics/core/benchmark'
-import { archivedConversations, buildObservedFromSources, handleBenchmarkRequest, type BenchmarkSources } from './routes'
+import { archivedConversations, isLeaderLabel, buildObservedFromSources, handleBenchmarkRequest, type BenchmarkSources } from './routes'
 
 describe('benchmark HTTP read routes', () => {
   const observed = { label: 'observed-biased' as const, deliveries: 1 } as never
@@ -426,6 +426,19 @@ describe('BENCHMARK.LACUNAS: archived sessions, model, handback time, review rou
     expect([...r.eventLeaderIds].sort()).toEqual(['e-lead', 'e-lead2'])
     expect(r.conversations.size).toBe(5)
   })
+  test('the leader label counts only at the START of the title, in both readers', async () => {
+    const cases: [string, boolean][] = [
+      ['[ LÍDER ] - Motor', true], ['[ LEADER ] Engine', true], ['  [ LÍDER ] - y', true],
+      ['QA do líder', false], ['Sem líder r2', false], ['LEADER.SWITCH estudo', false],
+      ['[ LEADERBOARD ] teste', false], ['Liderança técnica', false],
+      ['Revisar [ LÍDER ] antigo', false], ['QA do [ LEADER ] x', false],
+    ]
+    for (const [label, leader] of cases) {
+      expect(isLeaderLabel(label)).toBe(leader)
+      const r = await archivedConversations([], async () => [{ id: 'p', conversationId: 'pc', label }])
+      expect(r.eventLeaderIds.has('p')).toBe(leader)
+    }
+  })
   test('a registry session labelled leader (no flag) filed on the piece is no author and its cost is not the piece\'s', () => {
     const piece = (label?: string, eventLeaderIds?: ReadonlySet<string>) => buildObservedFromSources(full({
       comments: archived.book.comments as never, conversations: archived.conversations, eventLeaderIds,
@@ -438,6 +451,10 @@ describe('BENCHMARK.LACUNAS: archived sessions, model, handback time, review rou
       expect(p.sessions).toBe(1)
       expect(p.model).toBe('sonnet')
       expect(p.costUSD).toBeCloseTo(sonnetCost, 6)
+    }
+    // the registry reader obeys the same anchor: a title that merely mentions the label is a worker and keeps its session
+    for (const [label, leader] of [['[ LÍDER ] - X', true], ['[ LEADER ] Engine', true], ['  [ LÍDER ] - y', true], ['Revisar [ LÍDER ] antigo', false], ['QA do [ LEADER ] x', false]] as const) {
+      expect(piece(label).sessions).toBe(leader ? 1 : 2)
     }
   })
   test('without the comment the piece has no session and is not a piece of the history: nothing is invented', () => {
