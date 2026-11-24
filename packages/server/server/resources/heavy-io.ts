@@ -12,15 +12,37 @@
  */
 
 import { hostWhich } from '../host-which'
+import { unlinkSync } from 'node:fs'
 import { mkdir, readdir, readFile, readlink, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { FLOCK_BUSY_CODE, flockHolders, heavyAttempts, heavyWaitLine, heavyLockPath, heavySlots, heavyTreePids, mergeHeavyJobs, parseFlockArgv, queuePosition, type HeavyRunning, type HeavyWaiter } from './heavy'
+import { FLOCK_BUSY_CODE, flockHolders, heavyAttempts, heavyFlockArgs, heavyWaitLine, heavyLockPath, heavySlots, heavyTreePids, mergeHeavyJobs, parseFlockArgv, queuePosition, type HeavyRunning, type HeavyWaiter } from './heavy'
 import { stat } from 'node:fs/promises'
 import { pidAlive, readProcTable, type ProcStatRow } from './proc-read'
 import { parseMeminfo } from '../sessions/memory-budget'
 
 export const HEAVY_DIR = join(AGENTISTICS_DATA_DIR, 'heavy')
+
+// Exec keeps flock's PID (and therefore queue accounting). The detached group also contains this
+// watchdog and the wrapped command. Reparenting means the owner died without running its handlers.
+// The watchdog opens no lock FD; a normal flock exit lets it leave without holding the slot open.
+const PARENT_WATCHDOG = `
+owner=$1
+shift
+group=$$
+(
+  while :; do
+    read -r pid comm state parent rest < /proc/$group/stat 2>/dev/null || exit 0
+    [ "$state" = Z ] && exit 0
+    if [ "$parent" != "$owner" ]; then
+      kill -KILL -"$group"
+      exit 0
+    fi
+    sleep 0.1
+  done
+) </dev/null >/dev/null 2>&1 &
+exec "$@"
+`
 
 export type { HeavyRunning } from './heavy'
 export interface HeavyState {
@@ -155,7 +177,7 @@ export async function readHeavyState(dir = HEAVY_DIR, lockDir = '/tmp'): Promise
  * `agentop heavy [--] <cmd…>` — run one heavy job through the slot. Returns the command's exit code.
  * `say` prints the queue state to stderr (stdout belongs to the command).
  */
-export async function runHeavy(argv: string[], say: (line: string) => void, dir = HEAVY_DIR): Promise<number> {
+export async function runHeavy(argv: string[], say: (line: string) => void, dir = HEAVY_DIR, lockDir = '/tmp'): Promise<number> {
   const cmd = argv[0] === '--' ? argv.slice(1) : argv
   if (cmd.length === 0) { say('usage: agentop heavy -- <command> [args…]'); return 2 }
   const flock = hostWhich('flock')
@@ -170,8 +192,29 @@ export async function runHeavy(argv: string[], say: (line: string) => void, dir 
   const waitFile = join(dir, 'waiting', `${process.pid}.json`)
   const runFile = join(dir, 'running', `${process.pid}.json`)
   await writeFile(waitFile, JSON.stringify(me))
-  const cleanup = () => { void unlink(waitFile).catch(() => {}); void unlink(runFile).catch(() => {}) }
+  let activeChild: ReturnType<typeof Bun.spawn> | undefined
+  let signalExit: number | undefined
+  const cleanup = () => {
+    if (activeChild) {
+      try { process.kill(-activeChild.pid, 'SIGKILL') } catch { /* already exited */ }
+    }
+    // exit handlers cannot await filesystem IO.
+    for (const file of [waitFile, runFile]) { try { unlinkSync(file) } catch { /* absent */ } }
+  }
+  const cancel = (code: number) => {
+    if (signalExit !== undefined) return
+    signalExit = code
+    cleanup()
+    // Reap our direct flock child before exiting; exit's synchronous fallback cannot await it.
+    void Promise.resolve(activeChild?.exited).then(() => process.exit(code))
+  }
+  const onTerm = () => cancel(143)
+  const onInt = () => cancel(130)
+  const onHup = () => cancel(129)
   process.on('exit', cleanup)
+  process.on('SIGTERM', onTerm)
+  process.on('SIGINT', onInt)
+  process.on('SIGHUP', onHup)
   let lastLine = ''
   const reportWaiting = (state: HeavyState) => {
     const { position, of } = queuePosition(state.waiting, process.pid, pidAlive)
@@ -181,11 +224,12 @@ export async function runHeavy(argv: string[], say: (line: string) => void, dir 
   }
   try {
     for (;;) {
-      const state = await readHeavyState(dir)
+      const state = await readHeavyState(dir, lockDir)
       const { position } = queuePosition(state.waiting, process.pid, pidAlive)
       for (const { slot, blocking } of heavyAttempts(position, state.slots)) {
         if (blocking) reportWaiting(state)
-        const child = Bun.spawn([flock, ...(!blocking ? ['-n', '-E', String(FLOCK_BUSY_CODE)] : []), heavyLockPath(slot), ...cmd], {
+        const child = activeChild = Bun.spawn(['sh', '-c', PARENT_WATCHDOG, 'agentop-heavy-watch', String(process.pid), flock, ...heavyFlockArgs({ slot, blocking }, cmd, lockDir)], {
+          detached: true,
           stdio: ['inherit', 'inherit', 'inherit'],
           env: { ...process.env, AGENTISTICS_HEAVY_JOB: '1' },
         })
@@ -198,7 +242,7 @@ export async function runHeavy(argv: string[], say: (line: string) => void, dir 
           while (!finished) {
             await Promise.race([child.exited, Bun.sleep(2000)])
             if (finished) break
-            const current = await readHeavyState(dir)
+            const current = await readHeavyState(dir, lockDir)
             if (current.running.some(r => r.pid === child.pid)) break
             reportWaiting(current)
           }
@@ -207,6 +251,10 @@ export async function runHeavy(argv: string[], say: (line: string) => void, dir 
           await unlink(waitFile).catch(() => {})
         }
         const code = await child.exited
+        // Stop the watchdog even when flock already exited; wrapped descendants share this group.
+        try { process.kill(-child.pid, 'SIGKILL') } catch { /* group already gone */ }
+        activeChild = undefined
+        if (signalExit !== undefined) process.exit(signalExit)
         if (blocking || code !== FLOCK_BUSY_CODE) return code
         // Busy: back in the queue at the same place, and the next slot is tried.
         await unlink(runFile).catch(() => {})
@@ -217,5 +265,9 @@ export async function runHeavy(argv: string[], say: (line: string) => void, dir 
     }
   } finally {
     cleanup()
+    process.off('exit', cleanup)
+    process.off('SIGTERM', onTerm)
+    process.off('SIGINT', onInt)
+    process.off('SIGHUP', onHup)
   }
 }

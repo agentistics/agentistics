@@ -93,6 +93,11 @@ export function queuePosition(waiters: HeavyWaiter[], pid: number, alive: (pid: 
 /** The exit code `flock -n -E <code>` returns when the slot is busy. Chosen high and unusual. */
 export const FLOCK_BUSY_CODE = 254
 
+/** The actual flock argv used by runHeavy, shared by quick probes and the blocking head. */
+export function heavyFlockArgs(attempt: { slot: number; blocking: boolean }, cmd: string[], lockDir = '/tmp'): string[] {
+  return [...(attempt.blocking ? [] : ['-n', '-E', String(FLOCK_BUSY_CODE)]), heavyLockPath(attempt.slot, lockDir), ...cmd]
+}
+
 /** Only the agentop head joins the kernel waiters after a quick pass over the allowed slots. */
 export function heavyAttempts(position: number, slots: number): { slot: number; blocking: boolean }[] {
   if (position !== 1) return []

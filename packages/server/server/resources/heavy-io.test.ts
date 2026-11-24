@@ -3,9 +3,111 @@ import * as fs from 'node:fs/promises'
 import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readHeavyState } from './heavy-io'
+import { readHeavyState, runHeavy } from './heavy-io'
 
 const MB = 1024 * 1024
+
+async function until(check: () => Promise<boolean>, description: string) {
+  const deadline = Date.now() + 4000
+  while (!await check()) {
+    if (Date.now() > deadline) throw new Error(description)
+    await Bun.sleep(20)
+  }
+}
+
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGKILL', 'exit'] as const) {
+  test.skipIf(process.platform !== 'linux' || !Bun.which('flock'))(`cancelled blocked runHeavy never executes after ${signal}`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'heavy-cancel-'))
+    const marker = join(dir, 'cancelled-command-ran')
+    const ready = join(dir, 'holder-ready')
+    const release = join(dir, 'release')
+    const state = join(dir, 'state')
+    // Hold every possible private slot so the head must reach the blocking attempt on slot zero.
+    const locks = Array.from({ length: 4 }, (_, slot) => slot === 0 ? join(dir, 'agentistics-heavy.lock') : join(dir, `agentistics-heavy.${slot}.lock`))
+    const holder = Bun.spawn([...locks.flatMap(lock => ['flock', lock]), process.execPath, '-e',
+      'await Bun.write(process.argv[1], "ready"); while (!await Bun.file(process.argv[2]).exists()) await Bun.sleep(10)', ready, release], { stdout: 'ignore', stderr: 'ignore' })
+    let parent: ReturnType<typeof Bun.spawn> | undefined
+    let flockPid: number | undefined
+    try {
+      await until(() => Bun.file(ready).exists(), 'holder did not acquire private locks')
+      parent = Bun.spawn([process.execPath, '-e',
+        `import { runHeavy } from ${JSON.stringify(join(import.meta.dir, 'heavy-io.ts'))}; ${signal === 'exit' ? 'setInterval(async () => { if (await Bun.file(process.argv[3] + "/exit-now").exists()) process.exit(23) }, 10);' : ''} process.exit(await runHeavy([process.execPath, '-e', 'await Bun.write(process.argv[1], "ran")', process.argv[1]], () => {}, process.argv[2], process.argv[3]))`,
+        marker, state, dir], { stdout: 'ignore', stderr: 'inherit' })
+      const waitingFile = join(state, 'waiting', `${parent.pid}.json`)
+      await until(async () => {
+        const entry = await readFile(waitingFile, 'utf8').then(JSON.parse).catch(() => null)
+        flockPid = entry?.flockPid
+        return !!flockPid
+      }, 'runHeavy did not enter blocking flock')
+      if (signal === 'exit') await writeFile(join(dir, 'exit-now'), 'exit')
+      else parent.kill(signal)
+      const code = await parent.exited
+      if (signal === 'exit') expect(code).toBe(23)
+      else if (signal !== 'SIGKILL') expect(code).toBe(128 + { SIGTERM: 15, SIGINT: 2, SIGHUP: 1 }[signal])
+      // Give the abrupt-parent-death watchdog time before freeing the lock.
+      await Bun.sleep(350)
+      await writeFile(release, 'release')
+      await holder.exited
+      await Bun.sleep(200)
+      expect(await Bun.file(marker).exists()).toBe(false)
+      const status = await readFile(`/proc/${flockPid}/stat`, 'utf8').catch(() => '')
+      expect(status === '' || /^\d+ \(.*\) Z /.test(status)).toBe(true)
+      if (signal !== 'SIGKILL' && signal !== 'exit') expect(status).toBe('')
+      if (signal !== 'SIGKILL') expect(await Bun.file(waitingFile).exists()).toBe(false)
+    } finally {
+      const { readProcTable } = await import('./proc-read')
+      const { heavyTreePids } = await import('./heavy')
+      for (const pid of heavyTreePids([holder.pid, ...(parent ? [parent.pid] : []), ...(flockPid ? [flockPid] : [])], readProcTable(Date.now(), true) ?? []).reverse()) {
+        try { process.kill(pid, 'SIGKILL') } catch { /* exited */ }
+      }
+      if (parent) await parent.exited
+      await holder.exited
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 15000)
+}
+
+test.skipIf(process.platform !== 'linux' || !Bun.which('flock'))('normal completion removes its queue files and every lifecycle handler', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'heavy-handlers-'))
+  const events = ['exit', 'SIGTERM', 'SIGINT', 'SIGHUP'] as const
+  const before = events.map(event => process.listeners(event))
+  try {
+    expect(await runHeavy([process.execPath, '-e', 'process.exit(7)'], () => {}, join(dir, 'state'), dir)).toBe(7)
+    expect(events.map(event => process.listeners(event))).toEqual(before)
+    expect(await fs.readdir(join(dir, 'state', 'waiting'))).toEqual([])
+    expect(await fs.readdir(join(dir, 'state', 'running'))).toEqual([])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test.skipIf(process.platform !== 'linux' || !Bun.which('flock'))('cancelling an acquired job kills its wrapped descendants too', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'heavy-running-cancel-'))
+  const ready = join(dir, 'ready')
+  const marker = join(dir, 'ran')
+  const parent = Bun.spawn([process.execPath, '-e',
+    `import { runHeavy } from ${JSON.stringify(join(import.meta.dir, 'heavy-io.ts'))}; process.exit(await runHeavy(['sh', '-c', 'echo ready > "$1"; sleep 1; echo ran > "$2"', 'job', process.argv[1], process.argv[2]], () => {}, process.argv[3], process.argv[4]))`,
+    ready, marker, join(dir, 'state'), dir], { stdout: 'ignore', stderr: 'inherit' })
+  let descendants: number[] = []
+  try {
+    await until(() => Bun.file(ready).exists(), 'job did not acquire its private lock')
+    const { readProcTable } = await import('./proc-read')
+    const { heavyTreePids } = await import('./heavy')
+    descendants = heavyTreePids([parent.pid], readProcTable(Date.now(), true) ?? [])
+    parent.kill('SIGTERM')
+    expect(await parent.exited).toBe(143)
+    await Bun.sleep(1200)
+    expect(await Bun.file(marker).exists()).toBe(false)
+    for (const pid of descendants) {
+      const status = await readFile(`/proc/${pid}/stat`, 'utf8').catch(() => '')
+      expect(status === '' || /^\d+ \(.*\) Z /.test(status)).toBe(true)
+    }
+  } finally {
+    for (const pid of [parent.pid, ...descendants]) { try { process.kill(pid, 'SIGKILL') } catch { /* exited */ } }
+    await parent.exited
+    await rm(dir, { recursive: true, force: true })
+  }
+}, 10000)
 
 describe('heavy job resident memory', () => {
   test.skipIf(process.platform !== 'linux' || !Bun.which('flock'))('shows a manual holder and waiter, without counting an agentop flock child twice', async () => {

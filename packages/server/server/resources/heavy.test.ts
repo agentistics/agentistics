@@ -1,5 +1,14 @@
 import { expect, test } from 'bun:test'
-import { heavyAttempts, heavyWaitLine, mergeHeavyJobs, queuePosition } from './heavy'
+import { FLOCK_BUSY_CODE, heavyAttempts, heavyFlockArgs, heavyWaitLine, mergeHeavyJobs, queuePosition } from './heavy'
+
+test('runHeavy argv probes without waiting and blocks only on the final slot-zero attempt', () => {
+  const attempts = heavyAttempts(1, 2)
+  expect(attempts.map(attempt => heavyFlockArgs(attempt, ['echo', 'ok'], '/private'))).toEqual([
+    ['-n', '-E', String(FLOCK_BUSY_CODE), '/private/agentistics-heavy.lock', 'echo', 'ok'],
+    ['-n', '-E', String(FLOCK_BUSY_CODE), '/private/agentistics-heavy.1.lock', 'echo', 'ok'],
+    ['/private/agentistics-heavy.lock', 'echo', 'ok'],
+  ])
+})
 
 test('only the head tries slots, then joins blocking flock on slot zero', () => {
   expect(heavyAttempts(1, 2)).toEqual([
