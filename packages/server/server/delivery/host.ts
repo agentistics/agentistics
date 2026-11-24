@@ -222,9 +222,8 @@ function proofCacheFile(): { load(): Promise<unknown>; save(doc: unknown): Promi
     async save(doc) {
       const fs = await import('node:fs/promises')
       const p = await path()
-      const tmp = `${p}.${process.pid}.tmp`
-      await fs.writeFile(tmp, JSON.stringify(doc), { mode: 0o600 })
-      await fs.rename(tmp, p)
+      const { durableWrite } = await import('../durable-file')
+      await durableWrite(p, JSON.stringify(doc), 0o600)
     },
   }
 }

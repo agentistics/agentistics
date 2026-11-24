@@ -10,6 +10,7 @@ import { defaultClaudeConfigDir } from './default-claude-root'
 import { withFileLock } from './sessions/file-lock'
 import { ISOLATION_ENV } from './account-isolation'
 import { runClaudeInLoginContext } from './account-login'
+import { durableWrite } from './durable-file'
 
 export interface HarnessAccount {
   id: string
@@ -444,9 +445,7 @@ export function createHarnessAccounts(options: {
   }
   async function write(data: AccountsFile): Promise<void> {
     await mkdir(dirname(options.file), { recursive: true })
-    const tmp = `${options.file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
-    await writeFile(tmp, JSON.stringify(data), { mode: 0o600 })
-    await rename(tmp, options.file)
+    await durableWrite(options.file, JSON.stringify(data), 0o600)
   }
   const writeBackup = options.writeBackup ?? ((path: string, raw: string) => writeFile(path, raw, { mode: 0o600, flag: 'wx' }))
   const backedUp = new Set<string>()

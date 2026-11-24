@@ -22,7 +22,8 @@
  *  - a mutation that changes nothing (`remove` of an id that was never there) does not write at all.
  */
 
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat } from 'node:fs/promises'
+import { alertQuarantined, durableWrite, readLastGood, recoverVanished, refreshLastGood, sweepStaleDurableTmps } from '../durable-file'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { MANAGED_SESSIONS_FILE } from '../config'
@@ -36,9 +37,6 @@ import { HoldError, observeHoldNow } from './hold-guard'
 import type { HoldObservation } from './retire-plan'
 
 export { HoldError }
-
-/** Distinguishes two writes from the SAME process; the pid distinguishes the processes. */
-let writeSeq = 0
 
 /**
  * A short, lowercase id that is safe as a tmux session name.
@@ -348,6 +346,8 @@ function sanitizeRepo(raw: unknown): { repo?: ManagedSession['repo'] } {
 }
 
 export function createSessionRegistry(file: string, deps: { lock?: typeof withFileLock } = {}): SessionRegistry {
+  // Temp files a killed writer left in the data dir (other pid, older than 10 min) are removed once per registry.
+  void sweepStaleDurableTmps(dirname(file)).catch(() => {})
   const lock = deps.lock ?? withFileLock
   // One in-process writer. Each write appends to this chain, so read-modify-write sequences run
   // strictly one after another even when several requests land at once.
@@ -388,14 +388,20 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
       return fresh(parsedMemo.sanitized)
     }
     parsedMemo = null
-    let text: string
+    let text: string | null
     try {
       text = await readFile(file, 'utf-8')
     } catch {
-      corrupt = false
-      return [] // absent (first run, or never written to) — an empty registry, not an error
+      text = null
     }
-    if (!text.trim()) { corrupt = false; return [] }
+    if (text === null || !text.trim()) {
+      // Missing or 0 bytes: a fresh install has no `.bak` either; one that does lost its file.
+      const lost = await recoverVanished(file, text, t => { try { return Array.isArray(JSON.parse(t)) } catch { return false } })
+      if (!lost) { corrupt = false; return [] }
+      corrupt = lost.empty // an empty file is moved aside by the next write; a missing one has nothing to move
+      void alertQuarantined(file, true)
+      return (JSON.parse(lost.good) as unknown[]).map(sanitize).filter((x): x is ManagedSession => x !== null)
+    }
     try {
       const parsed = JSON.parse(text)
       if (!Array.isArray(parsed)) throw new Error('managed-sessions.json is not an array')
@@ -412,7 +418,9 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
       // sure the write that follows quarantines these bytes instead of erasing them.
       corrupt = true
       console.error('[session] ignoring unreadable session registry at', file)
-      return []
+      const good = await readLastGood(file, t => { try { return Array.isArray(JSON.parse(t)) } catch { return false } })
+      void alertQuarantined(file, good !== null)
+      return good !== null ? (JSON.parse(good) as unknown[]).map(sanitize).filter((x): x is ManagedSession => x !== null) : []
     }
   }
 
@@ -453,16 +461,9 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
     // 6 Sep. With a unique path each writer publishes a COMPLETE list by an atomic rename, so the
     // worst case degrades from a destroyed registry to one lost update — which the lock already
     // makes rare, and which the next poll repairs.
-    const tmp = `${file}.tmp.${process.pid}.${(writeSeq += 1)}`
-    try {
-      await writeFile(tmp, `${JSON.stringify(list, null, 2)}\n`, 'utf-8')
-      await rename(tmp, file)
-    } catch (err) {
-      // Never leave the scratch file behind: it is named after this process and nothing would ever
-      // come back for it.
-      await rm(tmp, { force: true }).catch(() => {})
-      throw err
-    }
+    const text = `${JSON.stringify(list, null, 2)}\n`
+    await durableWrite(file, text)
+    await refreshLastGood(file, text, Date.now(), undefined, list.length === 0)
   }
 
   // Chains `fn` behind whatever is already queued, so its read and write run as one atomic step

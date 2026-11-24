@@ -8,6 +8,7 @@
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { durableWrite } from '../durable-file'
 
 export const NATIVE_NOTES_FILE = 'native-session-notes.json'
 
@@ -28,9 +29,7 @@ export async function writeNativeNote(dataDir: string, id: string, note: string)
   else notes[id] = text
   const file = join(dataDir, NATIVE_NOTES_FILE)
   await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-  const tmp = `${file}.${process.pid}.tmp`
-  await writeFile(tmp, `${JSON.stringify(notes, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 })
-  await rename(tmp, file)
+  await durableWrite(file, `${JSON.stringify(notes, null, 2)}\n`, 0o600)
 }
 
 /** The rows with their notes: a note the row already carries is never overwritten. */

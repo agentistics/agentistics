@@ -18,7 +18,8 @@
  * merges with whatever the other process wrote in between.
  */
 
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat } from 'node:fs/promises'
+import { alertQuarantined, durableWrite, hasQuarantine, readLastGood, recoverVanished, refreshLastGood, sweepStaleDurableTmps } from '../durable-file'
 import { dirname, join } from 'node:path'
 import { isStatusStage, isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import { inGuardTransaction, peekRuleA, RuleNoLongerOff, serializeGuardWrite, withGuardEnvelope } from '../delivery/guard-transaction'
@@ -91,6 +92,8 @@ export const MAX_EVENTS = 2000
 
 export interface TaskStore {
   read(): Promise<TaskBook>
+  /** True when this book was lost once (`<file>.corrupt-*` exists): an empty book is then not a fresh install. */
+  wasQuarantined(): Promise<boolean>
   /** `guard` (S2c, REQUIRED): who is asking — a write that RAISES a piece's rank from an unaccepted principal is refused when the guarantee is on. */
   upsertTask(task: Task, guard: GuardContext): Promise<void>
   upsertAttempt(attempt: Attempt): Promise<void>
@@ -622,6 +625,8 @@ export type TaskDeletionPort = (remove: () => Promise<boolean>, held: { tasks: b
 const directDeletion: TaskDeletionPort = remove => remove()
 
 export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}): TaskStore {
+  // Temp files a killed writer left beside the board (other pid, older than 10 min) are removed once per store.
+  void sweepStaleDurableTmps(dirname(file)).catch(() => {})
   // One in-process writer. Each mutation appends to this chain, so read-modify-write sequences run
   // strictly one after another even when several land at once.
   let queue: Promise<unknown> = Promise.resolve()
@@ -649,16 +654,44 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
   }
 
   async function readUncached(): Promise<TaskBook> {
-    let text: string
+    let text: string | null
     try {
       text = await readFile(file, 'utf8')
     } catch {
-      corrupt = false
-      return EMPTY_BOOK()
+      text = null
+    }
+    if (text === null || !text.trim()) {
+      // Missing or 0 bytes: a fresh install has no `.bak` either; one that does lost its file.
+      const lost = await recoverVanished(file, text, t => { try { parseBook(t); return true } catch { return false } })
+      if (!lost) { corrupt = false; return EMPTY_BOOK() }
+      corrupt = lost.empty // an empty file is quarantined by the next write; a missing one has nothing to move
+      void alertOnce(true)
+      return parseBook(lost.good)
     }
     try {
-      const raw = JSON.parse(text) as Record<string, unknown>
+      const book = parseBook(text)
       corrupt = false
+      return book
+    } catch {
+      // Unreadable (a zero-filled file after a disk fault parses as nothing). Prefer the last good
+      // copy to an empty board: the bytes stay on disk, `corrupt` makes the next write quarantine them.
+      corrupt = true
+      const good = await readLastGood(file, t => { try { parseBook(t); return true } catch { return false } })
+      void alertOnce(good !== null)
+      return good !== null ? parseBook(good) : EMPTY_BOOK()
+    }
+  }
+
+  let alerted = false
+  function alertOnce(restored: boolean): Promise<void> {
+    if (alerted) return Promise.resolve()
+    alerted = true
+    return alertQuarantined(file, restored)
+  }
+
+  function parseBook(text: string): TaskBook {
+    {
+      const raw = JSON.parse(text) as Record<string, unknown>
       const arr = (v: unknown) => (Array.isArray(v) ? v : [])
       return {
         tasks: arr(raw.tasks).map(sanitizeTask).filter((t): t is Task => t !== null),
@@ -699,9 +732,6 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         ...(raw.typesSeeded === true || arr(raw.types).length > 0 ? { typesSeeded: true } : {}),
         ...(raw.inReviewSeeded === true ? { inReviewSeeded: true } : {}),
       }
-    } catch {
-      corrupt = true
-      return EMPTY_BOOK()
     }
   }
 
@@ -830,12 +860,18 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
     bookMemo.delete(file)
     await mkdir(dirname(file), { recursive: true })
     if (corrupt) {
-      await rename(file, `${file}.corrupt-${Date.now()}`).catch(() => {})
+      // Same rule as the registry: bytes we could not set aside are the only record of the board, so a
+      // failed rename ABORTS the write (`corrupt` stays set and the next write retries it).
+      const aside = `${file}.corrupt-${Date.now()}`
+      try { await rename(file, aside) } catch (err) {
+        console.error('[tasks] unreadable board at', file, 'could not be backed up — write aborted')
+        throw new Error(`refusing to overwrite an unreadable board at ${file}: ${String(err)}`)
+      }
       corrupt = false
     }
-    const tmp = `${file}.tmp`
-    await writeFile(tmp, JSON.stringify(book, null, 2), 'utf8')
-    await rename(tmp, file)
+    const text = JSON.stringify(book, null, 2)
+    await durableWrite(file, text)
+    await refreshLastGood(file, text, Date.now(), undefined, book.tasks.length === 0 && book.subtasks.length === 0)
     for (const fn of [...bookWriteListeners]) { try { fn() } catch { /* a listener never fails a write */ } }
   }
 
@@ -872,6 +908,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
 
   return {
     read,
+    wasQuarantined: () => hasQuarantine(file),
     registerComposerSubtask(subtask, guard) {
       return enqueue(async () => {
         const book = await read()

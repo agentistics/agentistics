@@ -36,7 +36,7 @@ describe('no guarantees.json → today\'s behaviour', () => {
     await ts.upsertTask({ id: 't1', title: 'T', status: 'done', createdAt: '2026-11-13T00:00:00Z', updatedAt: '2026-11-13T00:00:00Z' } as never, unattributedContext())
     expect((await ts.read()).tasks[0]!.status).toBe('done')
 
-    expect(readdirSync(dir).sort()).toEqual(['deliveries.json', 'tasks.json'])
+    expect(readdirSync(dir).sort()).toEqual(['deliveries.json', 'tasks.json', 'tasks.json.bak'])
     expect(existsSync(join(dir, 'guards.json'))).toBe(false)
     expect(existsSync(join(dir, 'guarantees.json'))).toBe(false)
   })

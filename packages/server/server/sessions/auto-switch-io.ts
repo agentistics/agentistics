@@ -14,6 +14,7 @@ import type { AccountBudget, HarnessId } from '@agentistics/core'
 import { switchSupported, type SwitchOption } from './account-switch'
 import { clock, decideAutoSwitch, autoSwitchWords, resumeDue, type AutoEpisode } from './auto-switch'
 import type { ManagedSession } from './types'
+import { durableWrite } from '../durable-file'
 
 export const AUTO_SWITCH_FILE = 'auto-switch.json'
 /** A tick moves at most this many sessions: a fleet-wide limit is worked through, not stampeded. */
@@ -198,9 +199,7 @@ export function fileEpisodeStore(dataDir: string): EpisodeStore {
       await withFileLock(file, async () => {
         const doc = (await read()).episodes
         fn(doc)
-        const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`
-        await writeFile(tmp, JSON.stringify({ v: 1, episodes: doc }, null, 2))
-        await rename(tmp, file)
+        await durableWrite(file, JSON.stringify({ v: 1, episodes: doc }, null, 2))
       })
     },
   }
