@@ -85,9 +85,11 @@ export function realProtectorIo(): ProtectorIo {
         proc.stdin.write(stdin)
         await proc.stdin.end()
       }
-      const timeout = setTimeout(() => { try { proc.kill() } catch { /* gone */ } }, opts?.timeoutMs ?? 30_000)
+      let timedOut = false
+      const timeout = setTimeout(() => { timedOut = true; try { proc.kill() } catch { /* gone */ } }, opts?.timeoutMs ?? 30_000)
       try {
         const [out, err, code] = await Promise.all([readAll(proc.stdout), readAll(proc.stderr), proc.exited])
+        if (timedOut) throw Object.assign(new Error('protector timed out'), { code: 'ETIMEDOUT' })
         return { code, stdout: out, stderr: new TextDecoder().decode(err) }
       } finally {
         clearTimeout(timeout)
