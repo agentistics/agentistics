@@ -31,6 +31,14 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [
       {
+        pt: 'Uma sessão com um comando em execução agora aparece como "rodando há X" na lista, em vez de "parada há X horas"; se estiver esperando a vez na fila de trabalho pesado, aparece "na fila".',
+        en: 'A session with a command running now shows "running X" in the list instead of "idle for X hours"; one waiting its turn in the heavy-job queue shows "queued".',
+      },
+      {
+        pt: 'O aviso de "sem atividade há 30 min" não dispara mais para quem está executando um comando, um teste longo ou esperando a fila de trabalho pesado.',
+        en: 'The "no activity for 30 min" alert no longer fires for a worker running a command, a long test or waiting in the heavy-job queue.',
+      },
+      {
         pt: 'Benchmark: "Resultado firme" só aparece com pelo menos 3 das 4 dimensões medidas; com menos, o cartão diz "Só custo medido" e o veredito é "Sem dados suficientes".',
         en: 'Benchmark: "Firm result" only appears with at least 3 of the 4 dimensions measured; with fewer, the card says "Only cost measured" and the verdict is "Not enough data".',
       },

@@ -9,7 +9,7 @@
  */
 
 import { resolveSessionAccount, type AccountRegistryView } from './session-account'
-import type { ConversationLinkReason, HarnessId, SessionMode } from '@agentistics/core'
+import { activityApplies, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
 import { closedRowId } from './row-conversation'
 import { capClosedConversations } from './closed-cap'
 import { matchesQuery, type SearchFields } from '@agentistics/tui/control/search-scope'
@@ -87,6 +87,14 @@ export interface SessionView {
    * which case the detail pane falls back to `lastLines` exactly as it always has.
    */
   chatTurns?: ChatTurn[]
+  /**
+   * A process of this session waits in (`waiting`) or holds (`holding`) the heavy-job lock — read ONCE per
+   * poll for the whole fleet (`heavy-lock-scan.ts`). One input of `activeEvidence`, read by the sidebar,
+   * Live and the stalled-worker alert alike. Absent = none.
+   */
+  heavyLock?: 'waiting' | 'holding'
+  /** The screen moved since the previous poll (frame digest changed). Absent = it did not / unknown. */
+  outputMoved?: true
   /**
    * The BOTTOM of the screen verbatim, present only while this session is blocked on a dialog.
    *
@@ -509,6 +517,10 @@ export function buildSessionViews(o: {
   tails?: ReadonlyMap<string, string[]>
   /** Role-tagged chat turns, keyed by session id — see `SessionView.chatTurns`. */
   chatTails?: ReadonlyMap<string, ChatTurn[]>
+  /** Heavy-lock state per row id — see `SessionView.heavyLock`. */
+  heavyLocks?: ReadonlyMap<string, 'waiting' | 'holding'>
+  /** Rows whose frame moved since the previous poll — see `SessionView.outputMoved`. */
+  outputMoved?: ReadonlySet<string>
   /** The DIALOG a blocked session is showing, keyed by session id — see `SessionView.approvalLines`. */
   approvals?: ReadonlyMap<string, string[]>
   /** The harness MODE each running session is in, keyed by row id — see `mode-spec.ts`. */
@@ -682,6 +694,8 @@ export function buildSessionViews(o: {
       ...(!finished && activity !== 'working' && o.background?.has(r.id) ? { background: true } : {}),
       ...((o.tails?.get(r.id)?.length ?? 0) > 0 ? { lastLines: o.tails!.get(r.id)! } : {}),
       ...((o.chatTails?.get(r.id)?.length ?? 0) > 0 ? { chatTurns: o.chatTails!.get(r.id)! } : {}),
+      ...(!finished && activityApplies(r.status) && o.heavyLocks?.get(r.id) ? { heavyLock: o.heavyLocks.get(r.id)! } : {}),
+      ...(!finished && activityApplies(r.status) && o.outputMoved?.has(r.id) ? { outputMoved: true as const } : {}),
       // Only while it is genuinely asking. A dialog frame carried on a row that has moved on would
       // be shown under "what you are about to confirm" for a question that is no longer open.
       ...(activity === 'waiting-approval' && (o.approvals?.get(r.id)?.length ?? 0) > 0

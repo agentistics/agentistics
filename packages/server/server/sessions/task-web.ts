@@ -12,7 +12,7 @@ import { estimateUnstartedAtMs, buildLive, legacyReviewShaPieces, type ShaPiece,
 import { readForecastAnchors, saveForecastAnchors } from './task-forecast-cache'
 import { dirsForShas } from './release-repos'
 import { firstTagContaining, publishedAmong, tagDateIn } from './release-tags'
-import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
+import { describeLive, liveRowOf, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
 import { stat } from 'node:fs/promises'
 import type { StagedSessionDraft, StatusStage, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
 import {
@@ -445,17 +445,7 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
     const { loadRoles, defaultRoleDeps, roleOfRow, rolesDocUnreadable, leadsOfRows } = await import('./session-roles')
     const { registryUnreadable } = await import('./registry')
     const fleet = await readLiveFleet('en')
-    rows = fleet.map(r => ({
-      id: r.id, title: r.title, harness: r.harness, state: r.state,
-      ...(r.model ? { model: r.model } : {}),
-      ...(r.observedModel ? { observedModel: r.observedModel } : {}),
-      ...(r.effort ? { effort: r.effort } : {}),
-      ...(r.accountId ? { accountId: r.accountId } : {}),
-      ...(r.parentSessionId ? { parentSessionId: r.parentSessionId } : {}),
-      ...(r.lastLines ? { lastLines: r.lastLines } : {}),
-      ...(r.task ? { task: r.task } : {}),
-      ...(typeof r.startedAt === 'number' ? { createdMs: r.startedAt } : {}),
-    }))
+    rows = fleet.map(r => liveRowOf(r))
     // Checked BEFORE listRoles: loading a corrupt document rewrites it as an empty one, after which
     // the check would see a healthy file and a lost leader would read as "no leader".
     const rolesUnreadable = await rolesDocUnreadable((await import('../config')).AGENTISTICS_DATA_DIR)
