@@ -506,7 +506,22 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
     ...(normalizeStagedSession(t.stagedSession) ? { stagedSession: normalizeStagedSession(t.stagedSession)! } : {}),
     // FLUXO.ENTREGA-DSL — the delivery flow's CI signal; same whitelist reason as the fields above.
     ...(t.ci && typeof t.ci === 'object' ? { ci: sanitizeCi(t.ci) } : {}),
+    // LIVE.COLUNAS-PRESAS — where the piece's work lives (`SubtaskProvenance`); same whitelist reason.
+    ...(sanitizeProvenance(t.provenance) ? { provenance: sanitizeProvenance(t.provenance)! } : {}),
   }
+}
+
+/** A provenance with nothing in it, or with a malformed member, is dropped/filtered — never repaired into a claim. */
+function sanitizeProvenance(raw: unknown): Subtask['provenance'] | null {
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as Record<string, unknown>
+  const list = (v: unknown, ok: (s: string) => boolean) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && ok(x)) : [])
+  const repos = list(p.repos, s => /^[\w.-]+\/[\w.-]+$/.test(s))
+  const branches = list(p.branches, s => s.length > 0 && s.length <= 200)
+  const commits = list(p.commits, s => /^[0-9a-f]{40}$/.test(s))
+  const at = str(p.at)
+  if (!at || repos.length + branches.length + commits.length === 0) return null
+  return { repos, branches, commits, at }
 }
 
 /** A status entry with no `id`, no `label` or an invalid `color` is dropped outright — a half-read

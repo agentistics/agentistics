@@ -113,6 +113,30 @@ describe('FLUXO.AVISOS 8: an intermediate handback is not a final one', () => {
   })
 })
 
+describe('LIVE.COLUNAS-PRESAS (flow side): the piece is stamped with its provenance BEFORE fechar-entregue can close the sender', () => {
+  test('a filed handback stamps first, then emits the event; a question or an unfiled sender stamps nothing', async () => {
+    const order: string[] = []
+    const f = fake({
+      senderTask: async () => ({ taskId: 't1', subtaskId: 's1' }),
+      stampProvenance: async id => { order.push(`stamp:${id}`) },
+      handbackEvent: async () => { order.push('event') },
+    })
+    await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'done, commit 8acbd8cd8' }, f.deps)
+    expect(order).toEqual(['stamp:child-1', 'event'])
+    order.length = 0
+    f.advance(10_000)
+    await sendSessionMessage('child-1', { to: 'parent-1', kind: 'question', body: 'which?' }, f.deps)
+    expect(order).toEqual([])
+    const g = fake({ stampProvenance: async id => { order.push(`stamp:${id}`) } })
+    await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'done' }, g.deps)
+    expect(order).toEqual([])
+  })
+  test('a stamp that fails never fails the handback', async () => {
+    const f = fake({ senderTask: async () => ({ taskId: 't1', subtaskId: 's1' }), stampProvenance: async () => { throw new Error('locked') } })
+    expect((await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'done' }, f.deps)).ok).toBe(true)
+  })
+})
+
 describe('SESSÕES.FECHAR: a delivered handback becomes the session.handback flows event', () => {
   test('handback → one event naming the sender, the target and the sender\'s task', async () => {
     const events: unknown[] = []

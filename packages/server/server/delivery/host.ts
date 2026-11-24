@@ -199,15 +199,106 @@ async function boardReviewPieces(): Promise<import('./service').ReviewPiece[]> {
     else if (r.cwd) (cwds.get(sub) ?? cwds.set(sub, new Set()).get(sub)!).add(r.cwd)
   }
   const out: import('./service').ReviewPiece[] = []
+  const subById = new Map(book.subtasks.map(x => [x.id, x]))
+  const taskById = new Map(book.tasks.map(x => [x.id, x]))
+  const { pieceProofFacts } = await import('./piece-proof-facts')
   for (const s of subs) {
     const repos = new Set<string>(recorded.get(s.id) ?? [])
     for (const cwd of cwds.get(s.id) ?? []) { const slug = await slugOfCwd(cwd); if (slug) repos.add(slug) }
     const handbackAt = lastHandback.get(s.id)
     // What its delivery declared: its HANDBACKS only. Notes and every other comment are talk about the work, never a statement of what shipped (H1).
-    const hints = hintsFromHandbacks((handbacks.get(s.id) ?? []).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(c => ({ body: c.body, ...(Date.parse(c.createdAt) ? { atMs: Date.parse(c.createdAt) } : {}) })))
-    out.push({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, hasOpenChildren: s.hasOpenChildren, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}), ...(s.createdAt ? { createdAt: s.createdAt } : {}), ...(handbackAt ? { handbackAt } : {}), repos: [...repos], hints })
+    const ordered = (handbacks.get(s.id) ?? []).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    const hints = hintsFromHandbacks(ordered.map(c => ({ body: c.body, ...(Date.parse(c.createdAt) ? { atMs: Date.parse(c.createdAt) } : {}) })))
+    // LIVE.COLUNAS-PRESAS C1: the registry is not the only witness of where the work lives — the piece's own provenance
+    // (stamped at handback/kill), the task's repository and the commits its handback declared (resolved in the product clones).
+    const facts = pieceProofFacts({
+      repos: [...repos], hints,
+      provenance: subById.get(s.id)?.provenance,
+      taskRepo: taskById.get(s.taskId)?.repo,
+      declared: await resolveDeclaredCommits(ordered.map(c => c.body)),
+    })
+    out.push({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, hasOpenChildren: s.hasOpenChildren, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}), ...(s.createdAt ? { createdAt: s.createdAt } : {}), ...(handbackAt ? { handbackAt } : {}), repos: facts.repos, hints: facts.hints })
   }
   return out
+}
+
+/**
+ * LIVE.COLUNAS-PRESAS (flow side) — the IO of `sessions/piece-provenance.ts`: stamp the piece of this registry row with where its
+ * work lives, while the row is still there. Called at the worker's handback (`session-message.ts`) and just before any kill
+ * (`registry.ts` `killAndRetireSession`). Bounded in time, never throws; read through the task world, written through the
+ * guarded `patchSubtask` door as the in-process host (`flowContext`). A test run never reaches the real board through here.
+ */
+export async function stampProvenanceOfSession(id: string, timeoutMs = 8_000): Promise<void> {
+  if (process.env.AGENTISTICS_TEST_RUNNER_PID) return
+  const work = (async () => {
+    const [{ readRegistry }, { recordPieceProvenance }, { loadTaskWorld }, { deliveredShasIn }, { existsSync }] = await Promise.all([
+      import('../sessions/registry'), import('../sessions/piece-provenance'), import('../sessions/task-source'), import('../sessions/task-live'),
+      import('node:fs'),
+    ])
+    const row = (await readRegistry()).find(m => m.id === id)
+    if (!row?.subtaskId) return
+    // A leader row (spawned as one) files no piece of its own work; its stored role is not read here (no store reach from this door).
+    const role = (row as { leader?: boolean }).leader ? 'leader' : undefined
+    await recordPieceProvenance({ ...row, ...(role ? { role } : {}) }, {
+      exists: existsSync,
+      git: async (cwd, args) => { try { return (await execGit(cwd, args)).trim() } catch { return null } },
+      repoOf: async cwd => slugOfCwd(cwd),
+      subtask: async sid => (await loadTaskWorld()).book.subtasks.find(s => s.id === sid) ?? null,
+      handbacks: async sid => (await loadTaskWorld()).book.comments.filter(c => c.subtaskId === sid && c.kind === 'handback').sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(c => c.body),
+      declared: deliveredShasIn,
+      write: async (sid, provenance) => { await (await import('../sessions/task-web')).patchSubtask(sid, { provenance }, flowContext()) },
+      now: () => new Date().toISOString(),
+    })
+  })().catch(() => undefined)
+  await Promise.race([work, new Promise(r => setTimeout(r, timeoutMs))])
+}
+
+/** short sha -> where it resolved (memo: a positive answer is permanent, a miss is asked again after 10 minutes). */
+const declaredMemo = new Map<string, { repo: string; full: string } | { missAt: number }>()
+const DECLARED_MISS_MS = 10 * 60_000
+
+/**
+ * The commits the NEWEST handback naming any declared, resolved to full ids in the PRODUCT clones this machine has (found
+ * through the sessions store, the same way the Live's own lookup finds them). A commit no clone knows yields nothing.
+ */
+async function resolveDeclaredCommits(bodies: readonly string[]): Promise<Array<{ repo: string; full: string }>> {
+  const { deliveredShasIn } = await import('../sessions/task-live')
+  let shas: string[] = []
+  for (const b of bodies) { const d = deliveredShasIn(b); if (d.length) shas = d }
+  if (shas.length === 0) return []
+  const clones = await productClones()
+  const out: Array<{ repo: string; full: string }> = []
+  for (const sha of shas) {
+    const hit = declaredMemo.get(sha)
+    if (hit && 'repo' in hit) { out.push(hit); continue }
+    if (hit && Date.now() - hit.missAt < DECLARED_MISS_MS) continue
+    let found: { repo: string; full: string } | null = null
+    for (const [repo, dir] of clones) {
+      const full = (await execGit(dir, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]).catch(() => null))?.trim()
+      if (full && /^[0-9a-f]{40}$/.test(full)) { found = { repo, full }; break }
+    }
+    if (declaredMemo.size > 5000) declaredMemo.clear()
+    declaredMemo.set(sha, found ?? { missAt: Date.now() })
+    if (found) out.push(found)
+  }
+  return out
+}
+
+/** [repo, one local clone] for each product repository this machine holds a checkout of. */
+let clonesMemo: { at: number; list: Array<[string, string]> } | null = null
+async function productClones(): Promise<Array<[string, string]>> {
+  if (clonesMemo && Date.now() - clonesMemo.at < DECLARED_MISS_MS) return clonesMemo.list
+  const [{ loadTaskWorld }, { knownRepos }, { DEFAULT_RELEASE_REPO }, { ENGINE_REPO }, { existsSync }] = await Promise.all([
+    import('../sessions/task-source'), import('../sessions/release-repos'), import('./gates'), import('./batch-proof'), import('node:fs'),
+  ])
+  const { byRemote } = knownRepos((await loadTaskWorld()).metas.values())
+  const list: Array<[string, string]> = []
+  for (const repo of [DEFAULT_RELEASE_REPO, ENGINE_REPO]) {
+    const dir = (byRemote.get(`github.com/${repo}`) ?? []).find(d => existsSync(d))
+    if (dir) list.push([repo, dir])
+  }
+  clonesMemo = { at: Date.now(), list }
+  return list
 }
 
 /** `<dataDir>/delivery-proof-cache.json`: what gh already answered, so a restart resumes the reconcile instead of starting over. A cache: never a source of truth. */

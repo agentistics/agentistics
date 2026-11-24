@@ -65,10 +65,10 @@ describe('HIGH: the Publicado period reaches the SCREEN', () => {
   test('30d: the screen\'s counts equal the MCP tool\'s', () => countsAgree('30d'))
   test('all: the Publicado tab draws what the period covers', () => expect(drawn('all')).toEqual(['p20d', 'p2h', 'p3d', 'p60d']))
   test('all: the screen\'s counts equal the MCP tool\'s', () => countsAgree('all'))
-  test('an old legacy review reaches the screen, in Tudo only', () => {
+  test('an old legacy review reaches the screen (for the "Antigas" group) but no tab\'s columns (LIVE.COLUNAS-PRESAS C2)', () => {
     const cards = screenCards('all')
-    expect(filterCards(cards, { taskIds: [], tab: 'all', period: '24h', nowMs: NOW }).map(c => c.d.key)).toContain('old')
-    for (const tab of ['active', 'queue', 'published'] as const) {
+    expect(cards.map(c => c.d.key)).toContain('old')
+    for (const tab of ['all', 'active', 'queue', 'published'] as const) {
       expect(filterCards(cards, { taskIds: [], tab, period: 'all', nowMs: NOW }).map(c => c.d.key)).not.toContain('old')
     }
   })
