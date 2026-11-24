@@ -94,8 +94,8 @@ export function entriesOf(observed: Observed | null, experiments: readonly Exper
   const cmp = observed?.history ? comparisonsOf(observed.history, lang) : []
   if (cmp.length) {
     const seals: Entry[] = cmp.map(c => {
-      const score = comparisonVerdictScore(c), tone: Tone = score === null ? 'none' : pointTone(score)
-      // fewer than 3 of the 4 types measured: no verdict word, the card says so
+      // like the hero: while ANY dimension has points the card keeps score and bar; below 3 of 4 they are neutral (no verdict colour or word)
+      const verdict = comparisonVerdictScore(c), score = comparisonScore(c).score, tone: Tone = verdict === null ? 'none' : pointTone(verdict)
       const word = !comparisonEnough(c) ? (pt ? 'sem dados suficientes' : 'not enough data') : score === null ? (pt ? 'observado' : 'observed') : wordOf(tone, lang)
       return { id: c.id, kind: 'comparison', name: c.name, sample: c.sample, score, tone, word, experiment: null, comparison: c }
     })

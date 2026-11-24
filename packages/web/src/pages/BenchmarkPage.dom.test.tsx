@@ -518,10 +518,10 @@ describe('phase 3: the list holds observed comparisons, the hero is one sentence
 
   test('items are the comparisons with their score, a coloured bar and the verdict word; only the two unmeasured ones keep the seal and have no bar', () => {
     expect(html.match(/data-testid="benchmark-item"/g)!.length).toBe(4)       // the prototype's four cards
-    // cost and time are 2 of the 4 dimensions: the comparison cards carry no score and no bar, only "sem dados suficientes"
-    expect(html.match(/data-testid="benchmark-seal"/g)!.length).toBe(4)
-    expect(html.match(/data-testid="benchmark-item-bar"/g)).toBeNull()
-    expect(html.match(/data-testid="benchmark-item-score"/g)).toBeNull()
+    // cost and time are 2 of the 4 dimensions: like the hero, the comparison cards keep the d3 score and bar, neutral, with "sem dados suficientes"
+    expect(html.match(/data-testid="benchmark-item-bar"/g)!.length).toBe(2)
+    expect(html.match(/data-testid="benchmark-item-score"/g)!.length).toBe(2)
+    expect(html.match(/data-testid="benchmark-item-bar" data-tone="none"/g)!.length).toBe(2)
     expect(html).toContain('1 rodada de QA × 2+ rodadas')
     expect(html).toContain('1 sessão × 5+ sessões')
     const list = html.split('data-testid="benchmark-list"')[1]!.split('</nav>')[0]!

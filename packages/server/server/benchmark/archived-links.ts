@@ -9,16 +9,23 @@
  * A session is filed on a piece ONLY with durable, verifiable authorship: it posted a HANDBACK comment on that subtask, or it is
  * named by the piece's delivery record (author, QA, or the session that filed evidence). Merely commenting is NOT authorship — a
  * leader comments on the pieces it coordinates. A leader is never an author (registry flag or "[ LÍDER ]" label, a delivery's
- * `leaderSessionId`, any task-level comment, a `decision` comment, comments on several subtasks), and a conversation whose managed
+ * `leaderSessionId`, a task-level comment that is not the mirror of / next to its own piece handback, a `decision` comment, comments on several subtasks), and a conversation whose managed
  * ids point at different subtasks is ambiguous. When unsure, nothing is linked: a piece with no session is "not measured", a piece
  * with somebody else's session is a wrong number.
  */
 
-export interface ArchivedComment { sessionId?: string; subtaskId?: string; kind?: string; createdAt: string }
+export interface ArchivedComment { sessionId?: string; subtaskId?: string; kind?: string; body?: string; createdAt: string }
 export interface ArchivedConversation { conversationId: string; harness: string }
 export interface ArchivedLink { sessionId: string; conversationId: string; harness: string; subtaskId: string; atMs: number }
 /** A delivery record naming a session as the author, QA or evidence filer of a piece. */
 export interface AuthorshipProof { sessionId: string; subtaskId: string }
+
+/**
+ * A worker also writes on the TASK around its own piece handback (the same handback mirrored there, a "starting" or "done" note
+ * seconds or minutes apart). Such a task-level comment is the worker's, not a coordinator's, when it is the same session's and has
+ * the same body as a piece handback or falls within this window of one. A leader's task comments are scattered over days.
+ */
+const MIRROR_WINDOW_MS = 60 * 60 * 1000
 
 const ms = (iso: string): number => { const t = Date.parse(iso); return Number.isFinite(t) ? t : 0 }
 
@@ -36,9 +43,15 @@ export function archivedLinks(i: {
   const named = new Map<string, Map<string, number>>()
   const authored = new Set<string>() // `${sessionId}|${subtaskId}`
   const coordinators = new Set<string>()
+  const pieceHandbacks = new Map<string, ArchivedComment[]>()
+  for (const c of i.comments) if (c.sessionId && c.subtaskId && c.kind === 'handback') pieceHandbacks.set(c.sessionId, [...(pieceHandbacks.get(c.sessionId) ?? []), c])
+  const mirrors = (c: ArchivedComment): boolean => (pieceHandbacks.get(c.sessionId!) ?? []).some(h =>
+    (!!c.body && h.body === c.body) || Math.abs(ms(h.createdAt) - ms(c.createdAt)) <= MIRROR_WINDOW_MS)
   for (const c of i.comments) {
     if (!c.sessionId) continue
-    // a task-level comment or a decision is a coordinator's act, wherever else it also wrote
+    // the mirrored copy of a piece handback says nothing the piece's own handback does not
+    if (!c.subtaskId && mirrors(c)) continue
+    // any other task-level comment or a decision is a coordinator's act, wherever else it also wrote
     if (!c.subtaskId || c.kind === 'decision') { coordinators.add(c.sessionId); continue }
     if (!i.subtasks.has(c.subtaskId)) continue
     const per = named.get(c.sessionId) ?? new Map<string, number>()
@@ -46,7 +59,14 @@ export function archivedLinks(i: {
     named.set(c.sessionId, per)
     if (c.kind === 'handback') authored.add(`${c.sessionId}|${c.subtaskId}`)
   }
-  for (const p of i.proofs ?? []) authored.add(`${p.sessionId}|${p.subtaskId}`)
+  // a delivery record that names a session proves authorship by itself, comment or none
+  const proven = new Map<string, Set<string>>()
+  for (const p of i.proofs ?? []) {
+    authored.add(`${p.sessionId}|${p.subtaskId}`)
+    if (!i.subtasks.has(p.subtaskId) || named.has(p.sessionId)) continue
+    proven.set(p.sessionId, (proven.get(p.sessionId) ?? new Set()).add(p.subtaskId))
+  }
+  for (const [sessionId, subs] of proven) named.set(sessionId, new Map([...subs].map(s => [s, 0] as [string, number])))
   const candidates: ArchivedLink[] = []
   for (const [sessionId, per] of named) {
     if (per.size !== 1 || i.leaderIds.has(sessionId) || coordinators.has(sessionId)) continue

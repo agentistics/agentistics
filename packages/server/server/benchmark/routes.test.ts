@@ -393,6 +393,15 @@ describe('BENCHMARK.LACUNAS: archived sessions, model, handback time, review rou
     expect(p.sessions).toBe(1)
     expect(p.costUSD).toBeCloseTo(sonnetCost, 6)
   })
+  test('a registry row labelled "[ LÍDER ]" or "[ LEADER ]" (no flag) is never filed on a piece; a plain label is', () => {
+    const piece = (label: string) => buildObservedFromSources(full({
+      comments: archived.book.comments as never, conversations: archived.conversations,
+      registry: [row('m-live', 'Q', { conversationId: 'c-q', model: 'claude-opus-5' }), row('w-p', undefined, { label })],
+    })).history!.tasks.flatMap(t => t.subtasks).some(x => x.id === 'P')
+    expect(piece('[ LÍDER ] Motor')).toBe(false)
+    expect(piece('[ LEADER ] Engine')).toBe(false)
+    expect(piece('worker spawn')).toBe(true)
+  })
   test('without the comment the piece has no session and is not a piece of the history: nothing is invented', () => {
     const h = buildObservedFromSources(full({ conversations: archived.conversations })).history!
     expect(h.tasks.flatMap(t => t.subtasks).some(x => x.id === 'P')).toBe(false)

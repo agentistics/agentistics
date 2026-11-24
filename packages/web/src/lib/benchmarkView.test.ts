@@ -58,7 +58,7 @@ describe('an observed comparison is read with the prototype\'s point rule (margi
     const sc = comparisonScore(comparisonsOf(o.history!, 'pt')[0]!).score!
     expect(sc).toBeCloseTo(53.3, 0)
     expect(pointTone(sc)).toBe('good')
-    expect(e).toMatchObject({ score: null, tone: 'none', word: 'sem dados suficientes' })
+    expect(e).toMatchObject({ tone: 'none', word: 'sem dados suficientes' }); expect(e.score).toBeCloseTo(53.3, 0)
     expect(heroOf(e, o, 'pt', { currency: 'USD' })).toMatchObject({ tone: 'none', word: 'Sem dados suficientes' })
     // the approved hero structure stays: the PARTIAL score is carried, honestly, without a verdict tone
     expect(heroOf(e, o, 'pt', { currency: 'USD' }).score).toBeCloseTo(sc, 6)
@@ -114,8 +114,8 @@ describe('observed comparisons the history already allows', () => {
     expect(es.map(e => e.id)).toEqual(['qa', 'sessions', 'models', 'harnesses'])
     // 2.5× the cost and 4× the time on side B → ratios 0.4 and 0.25 → (30·nr(.4) + 20·nr(.25)) / 50
     expect(comparisonScore(comparisonsOf(h, 'pt')[0]!).score).toBeCloseTo((30 * (100 / 3.5) + 20 * 20) / 50, 5)
-    // only 2 of the 4 dimensions are measured: no score, no verdict word
-    expect(es[0]).toMatchObject({ kind: 'comparison', tone: 'none', score: null, word: 'sem dados suficientes' })
+    // only 2 of the 4 dimensions are measured: the partial score stays (as in the hero), with no verdict tone or word
+    expect(es[0]).toMatchObject({ kind: 'comparison', tone: 'none', word: 'sem dados suficientes' }); expect(es[0]!.score).not.toBeNull()
     expect(es.slice(2).every(e => e.kind === 'unmeasured' && e.score === null && e.word === 'sem medição' && !!e.reason)).toBe(true)
     expect(es.slice(2).every(e => e.kind === 'unmeasured' && e.score === null && e.word === 'sem medição' && !!e.reason)).toBe(true)
     expect(entriesOf(obs(h), [], 'en')[0]!.word).toBe('not enough data')
@@ -226,7 +226,7 @@ describe('BENCHMARK.LACUNAS: "firm" needs 3 of the 4 dimensions measured', () =>
   const sessionsEntry = () => entriesOf(o, [], 'pt').find(e => e.id === 'sessions')!
   test('with only cost measured the verdict is "sem dados suficientes" and the badge says "só custo medido", never "Resultado firme"', () => {
     const e = sessionsEntry()
-    expect(e.score).toBeNull(); expect(e.word).toBe('sem dados suficientes')
+    expect(e.score).not.toBeNull(); expect(e.tone).toBe('none'); expect(e.word).toBe('sem dados suficientes')
     const hero = heroOf(e, o, 'pt', { currency: 'USD' })
     expect(hero.word).toBe('Sem dados suficientes'); expect(hero.score).not.toBeNull(); expect(hero.tone).toBe('none')
     expect(hero.firm).toEqual({ ok: false, text: 'Só custo medido' })

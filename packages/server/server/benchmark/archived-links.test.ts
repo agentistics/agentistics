@@ -38,8 +38,32 @@ describe('archived piece -> session links', () => {
     expect(archivedLinks({ ...k, proofs: [{ sessionId: 'x', subtaskId: 'S1' }] }).map(l => l.sessionId)).toEqual(['x'])
     expect(archivedLinks({ ...k, proofs: [{ sessionId: 'x', subtaskId: 'S2' }] })).toEqual([])
   })
-  test('a decision comment or a task-level comment disqualifies even a session with a handback', () => {
+  test('a decision comment or a task-level NOTE disqualifies even a session with a handback', () => {
     expect(archivedLinks({ ...base, comments: [hb('l', 'S1'), c('l', 'S1', undefined, 'decision')], conversations: conv({ l: 'cl' }) })).toEqual([])
-    expect(archivedLinks({ ...base, comments: [hb('l', 'S1'), c('l', undefined)], conversations: conv({ l: 'cl' }) })).toEqual([])
+    expect(archivedLinks({ ...base, comments: [hb('l', 'S1'), c('l', undefined, '2026-11-09T00:00:00.000Z')], conversations: conv({ l: 'cl' }) })).toEqual([])
+  })
+  test('a worker note on the task right next to its piece handback is still the worker; the same note days later is a coordinator', () => {
+    const near = [hb('w', 'S1', '2026-11-02T00:00:00.000Z'), c('w', undefined, '2026-11-01T23:55:00.000Z')]
+    expect(archivedLinks({ ...base, comments: near, conversations: conv({ w: 'cw' }) }).map(l => l.sessionId)).toEqual(['w'])
+    const far = [hb('w', 'S1', '2026-11-02T00:00:00.000Z'), c('w', undefined, '2026-11-02T06:00:00.000Z')]
+    expect(archivedLinks({ ...base, comments: far, conversations: conv({ w: 'cw' }) })).toEqual([])
+  })
+  test('a worker whose handback is mirrored on the TASK keeps its link (same body, or within seconds)', () => {
+    const mirrorBody = [{ ...hb('w', 'S1', '2026-11-02T00:00:00.000Z'), body: 'done' }, { ...c('w', undefined, '2026-11-02T01:00:00.000Z', 'handback'), body: 'done' }]
+    expect(archivedLinks({ ...base, comments: mirrorBody, conversations: conv({ w: 'cw' }) }).map(l => l.sessionId)).toEqual(['w'])
+    const mirrorTime = [hb('w', 'S1', '2026-11-02T00:00:00.000Z'), c('w', undefined, '2026-11-02T00:00:00.500Z', 'handback')]
+    expect(archivedLinks({ ...base, comments: mirrorTime, conversations: conv({ w: 'cw' }) }).map(l => l.sessionId)).toEqual(['w'])
+  })
+  test('a leader handback on the task that mirrors nothing on the piece stays a coordinator marker', () => {
+    const cm = [{ ...c('l', undefined, '2026-11-02T00:00:00.000Z', 'handback'), body: 'task wide' }, { ...hb('l', 'S1', '2026-11-05T00:00:00.000Z'), body: 'other' }]
+    expect(archivedLinks({ ...base, comments: cm, conversations: conv({ l: 'cl' }) })).toEqual([])
+  })
+  test('a delivery record naming a session links it on its own, with no comment at all', () => {
+    const out = archivedLinks({ ...base, comments: [], conversations: conv({ q: 'cq' }), proofs: [{ sessionId: 'q', subtaskId: 'S1' }] })
+    expect(out.map(l => [l.sessionId, l.subtaskId])).toEqual([['q', 'S1']])
+    // a leader named there, a piece the board lost, or two pieces: never
+    expect(archivedLinks({ ...base, leaderIds: new Set(['q']), comments: [], conversations: conv({ q: 'cq' }), proofs: [{ sessionId: 'q', subtaskId: 'S1' }] })).toEqual([])
+    expect(archivedLinks({ ...base, comments: [], conversations: conv({ q: 'cq' }), proofs: [{ sessionId: 'q', subtaskId: 'GONE' }] })).toEqual([])
+    expect(archivedLinks({ ...base, comments: [], conversations: conv({ q: 'cq' }), proofs: [{ sessionId: 'q', subtaskId: 'S1' }, { sessionId: 'q', subtaskId: 'S2' }] })).toEqual([])
   })
 })
