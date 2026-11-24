@@ -579,6 +579,8 @@ describe('NAVEGADOR.FECHAR-MINIMIZAR — default page, Minimizar and Fechar', ()
       act(() => { root.render(createElement(Drawer, { lang: 'pt' })) })
       act(() => drawerStore.setBrowserDrawerOpen(true))
       await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+      // The phone's button is the panel's own (lowercase "navegador"); the right slot's trio says "Minimizar Navegador".
+      expect(q('[data-browser-drawer] [data-browser-minimize]')?.getAttribute('aria-label')).toBe('Minimizar navegador')
       await click(q('[data-browser-minimize]'))
       expect(q('[data-browser-drawer]')).toBeNull()
       expect(seen.some(u => u.endsWith('/personal/minimize'))).toBe(true)

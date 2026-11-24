@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import { browserAllowed, decideDriver } from './browser-gate'
-import { browserRoute, type RouteDeps, type RouteHost } from './browser-web'
+import { DEFAULT_HOME_URL, browserRoute, homeUrlOf, type RouteDeps, type RouteHost } from './browser-web'
 import type { ActionHost } from './browser-actions'
 import type { BrowserOwner } from './browser-spec'
 
@@ -216,6 +216,15 @@ describe('the model\'s browser always shows the default page, never a blank one'
     await browserRoute('POST', '/api/browser/session/tab_new', { session: proof('aaa') }, f.deps)
     await browserRoute('POST', '/api/browser/session/tab_new', { session: proof('aaa'), url: 'https://x.example/' }, f.deps)
     expect(f.ran.map(r => r.args)).toEqual([{ action: 'tab_new', url: HOME }, { action: 'tab_new', url: 'https://x.example/' }])
+  })
+
+  test('a malformed stored home page falls back to the default through the session route', async () => {
+    for (const bad of ['https://[', 'http://', 'https:// space', 'javascript:alert(1)', '']) {
+      const f = fakeDeps({ homeUrl: () => homeUrlOf(bad) })
+      f.live.add('s-aaa')
+      await browserRoute('POST', '/api/browser/session/tab_new', { session: proof('aaa') }, f.deps)
+      expect(f.ran.map(r => r.args)).toEqual([{ action: 'tab_new', url: DEFAULT_HOME_URL }])
+    }
   })
 
   test('first open by any verb but navigate: the starting blank tab is sent to the default page first', async () => {

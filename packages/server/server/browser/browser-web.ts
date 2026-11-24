@@ -243,7 +243,15 @@ export const DEFAULT_HOME_URL = 'https://www.google.com'
 export function homeUrlOf(pref: unknown): string {
   if (typeof pref !== 'string') return DEFAULT_HOME_URL
   const t = pref.trim()
-  return /^https?:\/\/[^\s]+$/i.test(t) && t.length <= 2048 ? t : DEFAULT_HOME_URL
+  if (!/^https?:\/\/[^\s]+$/i.test(t) || t.length > 2048) return DEFAULT_HOME_URL
+  // The prefix alone accepts `https://[`, which the host then refuses as invalid and the tab stays
+  // about:blank — so the page must PARSE, as the browser host parses it, with a real host.
+  try {
+    const u = new URL(t)
+    return (u.protocol === 'http:' || u.protocol === 'https:') && u.hostname !== '' ? t : DEFAULT_HOME_URL
+  } catch {
+    return DEFAULT_HOME_URL
+  }
 }
 
 /** `null` = not a browser route this module serves (the caller answers 404). */
