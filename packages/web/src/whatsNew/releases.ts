@@ -14,6 +14,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     features: [],
     fixes: [
       {
+        pt: 'Ambientes de teste isolados: o que foi gravado numa execução isolada agora persiste de forma confiável, e a medição do escopo ficou bem mais rápida.',
+        en: 'Isolated test runs: what a run saves now persists reliably, and measuring a run scope is much faster.',
+      },
+      {
         pt: 'Desenvolvimento: a checagem antes de salvar o trabalho repete uma vez, isolado, o teste que falhou por demora da máquina, em vez de perder a rodada inteira.',
         en: 'Development: the pre-commit check retries a test that failed under machine load once, alone, instead of throwing the whole run away.',
       },
