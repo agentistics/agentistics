@@ -9,6 +9,11 @@ import { CURRENT_VERSION } from './version'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
 import { blockedPorts, createCtlDir, netnsHardening, outsideNodeModules, persistenceGuard, hostAddresses, forwardPorts, netnsArgv, netnsNotice, pollHostAddresses, probeNetns, removeCtlDir, startSlirp, stopSlirp } from './run-netns'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
+import { scopeStatsLine, watchScope } from './run-scope-stats'
+
+/** The run's memory cap (systemd `MemoryMax`), as passed and in bytes for the closing stats line. */
+export const RUN_MEMORY_MAX = '2G'
+const RUN_MEMORY_MAX_BYTES = 2 * 1024 ** 3
 
 export { SEED_ALLOW }
 const REAL_API_PORT = 47291
@@ -779,7 +784,7 @@ async function startRun(options: RunOptions): Promise<number> {
     const hard = netns.mode === 'netns' ? netnsHardening(realDataDir(), process.getuid!(), undefined, undefined, ctl && !ctl.covered ? [ctl.dir] : [], undefined, guards) : null
     if (hard) hard.hardening.readOnly = [...new Set([...(hard.hardening.readOnly ?? []), ...outsideNodeModules(runCwds, guards)])]
     const runArgv = hard ? netnsArgv(argv, process.getuid!(), process.getgid!(), blockedPorts(), hostAddresses(), hard.hide, hard.hardening) : argv
-    const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...runArgv] : runArgv
+    const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', `MemoryMax=${RUN_MEMORY_MAX}`, '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...runArgv] : runArgv
     child = spawn(systemd ? 'systemd-run' : runArgv[0]!, systemd ? childArgs : runArgv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
     state.pid = child.pid
     if (systemd) state.unit = unit
@@ -826,8 +831,15 @@ async function startRun(options: RunOptions): Promise<number> {
   let cleaning: Promise<void> | undefined
   const cleanup = () => (cleaning ??= slirpTask.then(() => stopState(state)))
   // The command's end is recorded in the log BEFORE any cleanup line, so whoever reads run.log (the ambiente flow) can name the exit code.
+  // RUN.LENTIDAO-SUITE: what the run cost (cpu over wall, memory peak vs the cap, cap hits, swap), said when it ends.
+  const startedMs = Date.now()
+  const scopeWatch = systemd && child.pid ? watchScope(unit, 500) : null
   const childExit = new Promise<number>(resolve => {
-    child.once('exit', (status, sig) => { console.log(status !== null ? `exit ${status}` : `exit signal ${sig}`); resolve(status ?? (sig ? 1 : 0)) })
+    child.once('exit', (status, sig) => {
+      const stats = scopeStatsLine(scopeWatch?.stop() ?? null, Date.now() - startedMs, RUN_MEMORY_MAX_BYTES)
+      if (stats) console.error(stats)
+      console.log(status !== null ? `exit ${status}` : `exit signal ${sig}`); resolve(status ?? (sig ? 1 : 0))
+    })
     child.once('error', () => { console.log('exit 1'); resolve(1) })
   })
   const signal = async (sig: NodeJS.Signals) => { signalRun(sig); await childExit; await cleanup(); process.exit(128 + (sig === 'SIGINT' ? 2 : 15)) }
@@ -862,7 +874,7 @@ export function watchParent(initial: number, current: () => number, onGone: () =
 
 /** N5: the one line said when the memory cap could not be applied; null when there is nothing to say (scope ok, or no systemd at all). */
 export function scopeNotice(scope: 'ok' | 'absent' | 'failed'): string | null {
-  return scope === 'failed' ? 'agentop run: the systemd scope could not be created (probe failed or timed out): the 2G memory cap is OFF for this run; only the TTL timer bounds it.' : null
+  return scope === 'failed' ? `agentop run: the systemd scope could not be created (probe failed or timed out): the ${RUN_MEMORY_MAX} memory cap is OFF for this run; only the TTL timer bounds it.` : null
 }
 
 /** A scope can only be created when the user bus answers: inside a pid namespace (a nested run) systemd-run is installed but the bus refuses the peer. */
