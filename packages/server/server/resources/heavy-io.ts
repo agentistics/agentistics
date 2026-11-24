@@ -258,7 +258,8 @@ export async function runHeavy(argv: string[], say: (line: string) => void, dir 
         // Stop the watchdog even when flock already exited; wrapped descendants share this group.
         try { process.kill(-child.pid, 'SIGKILL') } catch { /* group already gone */ }
         activeChild = undefined
-        if (signalExit !== undefined) process.exit(signalExit)
+        // A cancel's own cleanup is async; exiting here first would leave the queue files behind.
+        if (signalExit !== undefined) { await cleanup(); process.exit(signalExit) }
         if (!slotted || blocking || code !== FLOCK_BUSY_CODE) return code
         // Busy: back in the queue at the same place, and the next slot is tried.
         await unlink(runFile).catch(() => {})
