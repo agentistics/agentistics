@@ -2858,7 +2858,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           // work this request cannot do, not a resource that is missing. `no_such_subtask` stays
           // 404: the id named nothing.
           if (typeof body.done === 'boolean' && Object.keys(body).filter(k => k !== 'session').length === 2) {
-            const result = await mod.setSubtaskDone(body.id, body.done, guardCtx)
+            const result = await mod.setSubtaskDone(body.id, body.done, guardCtx, !!sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string')
             return json(result, result.ok ? 200 : 'guard' in result ? result.guard.status : (result.message === 'done_needs_session' ? 422 : 404))
           }
           // A staged session draft (t-918cc82233): `null` clears, an object is validated HERE before
@@ -3019,6 +3019,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             ? { blockedBy: body.blockedBy.filter((v): v is string => typeof v === 'string') }
             : {}),
           guard: guardCtx,
+          ...(sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string' ? { bySession: true } : {}),
         },
       )
       // 400, not 404: `unknown_status` is the same class of error `bad_status` above already is —

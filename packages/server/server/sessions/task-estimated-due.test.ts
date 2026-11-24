@@ -132,18 +132,95 @@ test('migration: open subtasks without a day get an estimate once; done ones and
 })
 
 test('calendar draws an estimated day as an approximation (low confidence, flagged), a typed one as the owner\'s date', () => {
-  const nowMs = Date.parse('2026-11-23T15:00:00Z')
   const piece = (dueEstimated: boolean) => buildCalendar({
-    nowMs, lives: [], records: [], resets: [], versions: [], releasePublishedAt: new Map(),
-    tasks: [{ id: 't1', title: 'T', status: 'in_progress' }],
-    subtasks: [{ id: 's1', taskId: 't1', title: 'S', status: 'in_progress', dueDate: '2026-11-30', ...(dueEstimated ? { dueEstimated: true } : {}) }],
-    phases: [{ taskId: 't1', subtaskId: 's1', phase: 'running', history: [] }],
-  } as never).pieces.find(p => p.subtaskId === 's1')
-  const est = piece(true), typed = piece(false)
-  if (est && typed) {
-    expect(est.dueEstimated).toBe(true)
-    expect(typed.dueEstimated).toBeUndefined()
-    expect((est.publishEta as { confidence: string }).confidence).toBe('low')
-    expect((typed.publishEta as { confidence: string }).confidence).toBe('owner')
-  }
+    nowMs: Date.parse('2026-11-24T15:00:00Z'), lives: [], resets: [],
+    records: [{ taskId: 't', subtaskId: 's', phase: 'fila' }],
+    tasks: [{ id: 't', title: 'T', status: 'in_progress' }],
+    subtasks: [{ id: 's', taskId: 't', title: 'S', status: 'todo', dueDate: '2026-11-25', ...(dueEstimated ? { dueEstimated: true } : {}) }],
+  } as never).pieces
+  // Non-vacuous: exactly one piece must be drawn, or the assertions below would not run at all.
+  const [est] = piece(true), [typed] = piece(false)
+  expect(piece(true)).toHaveLength(1)
+  expect(piece(false)).toHaveLength(1)
+  expect(est!.dueEstimated).toBe(true)
+  expect(est!.confirmed).toBe(false)
+  expect((est!.publishEta as { confidence: string }).confidence).toBe('low')
+  expect(typed!.dueEstimated).toBeUndefined()
+  expect((typed!.publishEta as { confidence: string }).confidence).not.toBe('low')
+})
+
+const closedSeed = (status: string) => `await web.createTask({ title: 'warm-up' })
+    await store.upsertTask({ id: 't-c', title: 'C', status: '${status}', createdAt: '2026-11-01T10:00:00.000Z', updatedAt: '2026-11-01T10:00:00.000Z' })
+    await store.upsertSubtask({ id: 's-c', taskId: 't-c', title: 'S', status: '${status}', done: ${status === 'done'}, createdAt: '2026-11-01T10:00:00.000Z', updatedAt: '2026-11-01T10:00:00.000Z' })`
+
+for (const status of ['done', 'abandoned']) {
+  test(`a session editing only notes/detail of a ${status} task and subtask leaves no day and no flag`, async () => {
+    const r = await run(`${closedSeed(status)}
+      const report = {}
+      await web.editTask('t-c', { detail: 'x', bySession: true }, report)
+      const reply = await web.patchSubtask('s-c', { notes: 'x', bySession: true }, { principal: { kind: 'unattributed' } })
+      const book = await store.read()
+      console.log(JSON.stringify({ report, reply, t: book.tasks.find(t => t.id === 't-c'), s: book.subtasks.find(s => s.id === 's-c') }))`)
+    expect(r.report.estimatedDue).toBeUndefined()
+    expect(r.reply.dueEstimated).toBeUndefined()
+    expect(r.t.dueDate).toBeUndefined()
+    expect(r.t.dueEstimated).toBeUndefined()
+    expect(r.s.dueDate).toBeUndefined()
+    expect(r.s.dueEstimated).toBeUndefined()
+  })
+}
+
+test('closed means done OR abandoned, one helper shared by the migration and both write paths', async () => {
+  const { isClosedStatus } = await import('./task-estimated-due')
+  expect(isClosedStatus('done')).toBe(true)
+  expect(isClosedStatus('abandoned')).toBe(true)
+  expect(isClosedStatus('todo')).toBe(false)
+  expect(isClosedStatus('in_progress')).toBe(false)
+})
+
+test('the {id, done:false} shortcut (setSubtaskDone) from a session estimates an undated open piece', async () => {
+  const r = await run(`await web.createTask({ title: 'warm-up' })
+    ${seedTask}
+    await store.upsertSubtask({ id: 's-1', taskId: 't-1', title: 'S', status: 'todo', done: false, createdAt: '2026-11-01T10:00:00.000Z', updatedAt: '2026-11-01T10:00:00.000Z' })
+    const reply = await web.setSubtaskDone('s-1', false, { principal: { kind: 'session', id: 'x', via: 'token' } }, true)
+    const person = await web.setSubtaskDone('s-1', false, { principal: { kind: 'unattributed' } })
+    const sub = (await store.read()).subtasks.find(s => s.id === 's-1')
+    console.log(JSON.stringify({ reply, person, sub }))`)
+  expect(r.reply.ok).toBe(true)
+  expect(r.reply.dueEstimated).toBe(true)
+  expect(r.reply.notice).toContain('informe dueDate')
+  expect(r.sub.dueEstimated).toBe(true)
+  expect(r.sub.dueDate).toMatch(DAY)
+})
+
+test('the owner UI path of the shortcut is NOT forced to estimate', async () => {
+  const r = await run(`await web.createTask({ title: 'warm-up' })
+    ${seedTask}
+    await store.upsertSubtask({ id: 's-1', taskId: 't-1', title: 'S', status: 'todo', done: false, createdAt: '2026-11-01T10:00:00.000Z', updatedAt: '2026-11-01T10:00:00.000Z' })
+    await web.setSubtaskDone('s-1', false, { principal: { kind: 'unattributed' } })
+    console.log(JSON.stringify((await store.read()).subtasks.find(s => s.id === 's-1')))`)
+  expect(r.dueDate).toBeUndefined()
+  expect(r.dueEstimated).toBeUndefined()
+})
+
+test('markTask by a session on an undated open task estimates it and reports; closing it or a person does not', async () => {
+  const r = await run(`await web.createTask({ title: 'warm-up' })
+    ${seedTask}
+    await store.upsertTask({ id: 't-2', title: 'P', status: 'todo', createdAt: '2026-11-01T10:00:00.000Z', updatedAt: '2026-11-01T10:00:00.000Z' })
+    await store.upsertTask({ id: 't-3', title: 'A', status: 'todo', createdAt: '2026-11-01T10:00:00.000Z', updatedAt: '2026-11-01T10:00:00.000Z' })
+    const ctx = { principal: { kind: 'session', id: 'x', via: 'token' } }
+    const s = await web.markTask('t-1', 'in_progress', undefined, { guard: ctx, bySession: true })
+    const p = await web.markTask('t-2', 'in_progress', undefined, { guard: { principal: { kind: 'unattributed' } } })
+    const a = await web.markTask('t-3', 'abandoned', undefined, { guard: ctx, bySession: true })
+    const book = await store.read()
+    const get = id => book.tasks.find(t => t.id === id)
+    console.log(JSON.stringify({ s, p, a, t1: get('t-1'), t2: get('t-2'), t3: get('t-3') }))`)
+  expect(r.s.ok).toBe(true)
+  expect(r.s.dueEstimated).toBe(true)
+  expect(r.t1.dueEstimated).toBe(true)
+  expect(r.t1.dueDate).toMatch(DAY)
+  expect(r.p.dueEstimated).toBeUndefined()
+  expect(r.t2.dueDate).toBeUndefined()
+  expect(r.a.dueEstimated).toBeUndefined()
+  expect(r.t3.dueDate).toBeUndefined()
 })

@@ -7,7 +7,7 @@
  */
 
 import { join } from 'node:path'
-import { estimateDueDay, estimatedDueNotice, needsEstimate } from './task-estimated-due'
+import { estimateDueDay, estimatedDueNotice, isClosedStatus, needsEstimate } from './task-estimated-due'
 import { estimateUnstartedAtMs, buildLive, legacyReviewShaPieces, type ShaPiece, prepareForecastHistory, FORECAST_BUCKET_MS, FORECAST_METHOD_VERSION, type ForecastHistory } from './task-live'
 import { readForecastAnchors, saveForecastAnchors } from './task-forecast-cache'
 import { dirsForShas } from './release-repos'
@@ -556,7 +556,7 @@ export async function editTask(
   // A typed day wins and clears the estimate flag; a session's edit that leaves the task with NO day gets an estimated one.
   const typedDue = patch.dueDate !== undefined ? patch.dueDate.trim() : undefined
   const standing = typedDue !== undefined ? typedDue : task.dueDate
-  const estimate = needsEstimate({ bySession: patch.bySession === true, dueDate: standing || undefined, closed: task.status === 'done' })
+  const estimate = needsEstimate({ bySession: patch.bySession === true, dueDate: standing || undefined, closed: isClosedStatus(task.status) })
   if (estimate && report) report.estimatedDue = estimatedDue()
   const dueColumns = estimate ? { dueDate: report?.estimatedDue ?? estimatedDue(), dueEstimated: true }
     : typedDue !== undefined ? { dueDate: typedDue, dueEstimated: false } : {}
@@ -1170,7 +1170,7 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
 
   // A typed day wins and clears the flag; a session's edit that leaves the piece with NO day gets an estimated one.
   const standingDue = patch.dueDate !== undefined ? patch.dueDate.trim() : found.dueDate
-  const subtaskDue = { estimated: needsEstimate({ bySession: patch.bySession === true, dueDate: standingDue || undefined, closed: subtaskDone(status) }) ? estimatedDue() : undefined }
+  const subtaskDue = { estimated: needsEstimate({ bySession: patch.bySession === true, dueDate: standingDue || undefined, closed: isClosedStatus(status) }) ? estimatedDue() : undefined }
   await w.store.upsertSubtask({
     ...found,
     ...(patch.title?.trim() ? { title: patch.title.trim() } : {}),
@@ -1328,9 +1328,9 @@ export async function removeSubtask(subtaskId: string, guard?: GuardContext, dep
 }
 
 /** The tick, expressed as what it means: a move to `done`, or back to `todo`. */
-export async function setSubtaskDone(subtaskId: string, done: boolean, guard?: GuardContext): Promise<
+export async function setSubtaskDone(subtaskId: string, done: boolean, guard?: GuardContext, bySession = false): Promise<
   {
-    ok: true
+    ok: true; dueEstimated?: true; dueDate?: string; notice?: string
   } | {
     ok: false
     message:
@@ -1340,7 +1340,8 @@ export async function setSubtaskDone(subtaskId: string, done: boolean, guard?: G
 > {
   // Only ever passes `status`, so `group_field_conflict`/`subtask_in_group` cannot actually fire
   // through this path — the union member exists to match `patchSubtask`'s own return type exactly.
-  return await patchSubtask(subtaskId, { status: done ? 'done' : 'todo' }, guard)
+  const patch = { status: done ? 'done' : 'todo', ...(bySession ? { bySession: true } : {}) }
+  return await patchSubtask(subtaskId, patch, guard)
 }
 
 /** The bytes land FIRST. A failed write must leave no record claiming the file exists. */
@@ -1892,8 +1893,10 @@ export type MarkOptions = {
   blockedBy?: readonly string[]
   /** ENTREGA.GARANTIDA S2a: who is asking. Optional; without it a move that raises a piece's rank is refused when the guarantee is on. */
   guard?: GuardContext
+  /** The move came from a verified SESSION: a task left with no due day gets an ESTIMATED one. */
+  bySession?: boolean
 }
-export type MarkResult = { ok: boolean; evidence?: DeliveryEvidence; message?: string; openSubtaskIds?: string[]; guard?: GuardInfo }
+export type MarkResult = { ok: boolean; dueEstimated?: true; dueDate?: string; notice?: string; evidence?: DeliveryEvidence; message?: string; openSubtaskIds?: string[]; guard?: GuardInfo }
 
 export async function markTask(ref: string, to: TaskStatus, actor?: string, o: MarkOptions = {}): Promise<MarkResult> {
   return guardedDoor(() => markTaskInner(ref, to, actor, o))
@@ -1971,6 +1974,8 @@ async function markTaskInner(
   // bubbles up through `patchSubtask`, and it is judged and stamped here rather than there so a
   // task moved straight from the board (never touching a subtask at all) still gets one.
   const startsNow = !task.startedAt && marksStart(task.status, to)
+  const markEstimate = needsEstimate({ bySession: o.bySession === true, dueDate: task.dueDate || undefined, closed: isClosedStatus(to) || isClosedStatus(task.status) })
+  const markDue = markEstimate ? estimatedDue() : undefined
   const moved = await w.store.patchTask(task.id, {
     status: to,
     updatedAt: now,
@@ -1981,6 +1986,7 @@ async function markTaskInner(
     ...(to === 'blocked' ? { blockedReason: reason } : { blockedReason: '' }),
   }, { allowOpenSubtasks: o.allowOpenSubtasks, ...(o.guard ? { guard: o.guard } : {}) })
   if (!moved) return { ok: false, message: to === 'in_review' ? 'open_subtasks' : 'no_such_task' }
+  if (markDue) await w.store.patchTask(task.id, { dueDate: markDue, dueEstimated: true, updatedAt: now }, { guard: o.guard })
   // Attempts only ever settle when the TASK settles. An in-progress task leaves them running.
   if (done || to === 'abandoned') {
     for (const a of w.book.attempts.filter(a => a.taskId === task.id && a.status === 'running')) {
@@ -2011,7 +2017,8 @@ async function markTaskInner(
     await writePreferences({ finishedTasks: next }).catch(() => undefined)
   }
 
-  if (!done) return { ok: true }
+  const markNotice = markDue ? estimatedDueNotice(markDue) : {}
+  if (!done) return { ok: true, ...markNotice }
 
   const rows = mine ?? rowsOfTask(task, w.rollupRows)
   const dirs = [...new Set(rows.map(r => r.cwd).filter(Boolean))]

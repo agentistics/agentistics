@@ -30,6 +30,11 @@ export function estimatedDueNotice(dueDate: string): { dueEstimated: true; dueDa
   }
 }
 
+/** PURE: the ONE definition of closed work (history, never plannable): done OR abandoned. Shared by every estimate decision and the migration. */
+export function isClosedStatus(status: string): boolean {
+  return status === 'done' || status === 'abandoned'
+}
+
 /** PURE: should the server fill a due day? Only for a session's write, only when none stands, never on closed work. */
 export function needsEstimate(o: { bySession: boolean; dueDate: string | undefined; closed?: boolean }): boolean {
   return o.bySession && !o.dueDate && o.closed !== true
@@ -40,5 +45,5 @@ export function planDueBackfill(
   subtasks: readonly { id: string; dueDate?: string; done: boolean; status: string }[], nowMs: number, etaAtMs: (nowMs: number) => number,
 ): Map<string, string> {
   const day = estimateDueDay(nowMs, etaAtMs)
-  return new Map(subtasks.filter(s => !s.dueDate && !s.done && s.status !== 'abandoned').map(s => [s.id, day] as const))
+  return new Map(subtasks.filter(s => !s.dueDate && !s.done && !isClosedStatus(s.status)).map(s => [s.id, day] as const))
 }
