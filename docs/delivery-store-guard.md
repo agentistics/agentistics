@@ -124,6 +124,9 @@ no door — `custody-s7b.e2e.test.ts` forges one and proves it per door.
   answer for it and declare its release (the release check no longer pins a custodian to its own task's pieces). It is still
   an authorization of the actor: raising the piece into review with no evidence is refused `evidence_required` like anyone's.
   Custody never touches filing (`conversationOwners`).
+  **S7b.1: only while the custodian's session is alive.** `leads()`, `wake()` and the blocked-piece chase check the fleet's
+  liveness at the moment of the call (a session the fleet does not list, or an unreadable fleet, is not alive), so a custodian whose
+  session ended is refused and bypassed at once — the next tick then reassigns the custody. The purged-registry-row limit stays.
 - **Wakes route to the custodian**: `wake()`, the blocked-piece batches, the review nudge (a live custodian first) and the
   "board refused the requeue" notice read `custody.sessionId` before `leaderSessionId`.
 - **Check-in**: the leader's round lists the pieces it holds in custody and its project's queue (`custodyCheckinLine`), and a
