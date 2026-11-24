@@ -21,6 +21,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Desenvolvimento: a checagem antes de salvar o trabalho repete uma vez, isolado, o teste que falhou por demora da máquina, em vez de perder a rodada inteira.',
         en: 'Development: the pre-commit check retries a test that failed under machine load once, alone, instead of throwing the whole run away.',
       },
+      {
+        pt: 'Navegador da sessão: o cadeado abre direto, sem pedir o cofre — ele não guarda nada seu. O navegador pessoal continua pedindo.',
+        en: "Session browser: the padlock now opens right away, without asking for the vault — it holds nothing of yours. Your personal browser still asks.",
+      },
     ],
   },
   '2.227.0': {
