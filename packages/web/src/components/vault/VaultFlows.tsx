@@ -267,7 +267,8 @@ export function EnrolWizard({ lang, isMobile, initial, steps, onClose, fixedKind
   const [words, setWords] = useState<string[] | null>(null)
   const [positions, setPositions] = useState<number[]>([])
   const [typed, setTyped] = useState<string[]>(['', '', ''])
-  const offers = wizardOffers(initial, fixedKind)
+  const [passwordFallback, setPasswordFallback] = useState(false)
+  const offers = wizardOffers(initial, passwordFallback ? 'password' : fixedKind)
   const [kind, setKind] = useState<UnlockMethodId>(fixedKind ?? offers.find(m => !m.advanced)?.id ?? offers[0]?.id ?? 'password')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const advancedId = useId()
@@ -387,6 +388,14 @@ export function EnrolWizard({ lang, isMobile, initial, steps, onClose, fixedKind
     // The recovery key is owed now: it is the LAST step (append it when this wizard did not plan it).
     if (r.recoveryOwed && !plan.slice(i + 1).includes('recovery')) setPlan(p => [...p, 'recovery'])
     await next()
+  }
+
+  const useVaultPassword = () => {
+    // Start a fresh two-step transaction. The service discards the held Mac credential when the
+    // password is submitted; neither clicking this nor closing the wizard removes any protection.
+    setPasswordFallback(true); setKind('password'); setPlan(['presence', 'recovery']); setI(0)
+    setPhase('intro'); setFinished(false); setWords(null); setPositions([]); setTyped(['', '', ''])
+    setError(null); setErrAction(null); setNeedWords(false)
   }
 
   const rotating = Boolean(view.recoveryCreatedAt)
@@ -539,6 +548,15 @@ export function EnrolWizard({ lang, isMobile, initial, steps, onClose, fixedKind
                 </button>
               </form>
             )}
+          </div>
+        )}
+
+        {error && kind === 'touchid' && wizardOffers(initial).some(m => m.id === 'password') && (
+          <div style={{ marginTop: 12 }}>
+            <Note>{t('wiz_mac_password_fallback_note')}</Note>
+            <button type="button" style={{ ...cta, background: 'transparent', color: 'var(--text-primary)', borderColor: 'var(--border)' }} disabled={busy} onClick={useVaultPassword}>
+              {t('wiz_mac_password_fallback')}
+            </button>
           </div>
         )}
 

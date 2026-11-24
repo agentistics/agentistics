@@ -315,7 +315,12 @@ export const VAULT_TEXT = {
     pt: 'Antes de mudar qualquer coisa, conferimos se {presence} funciona com o cofre. Este teste não muda nada.',
   },
   wiz_probe_go: { en: 'Test it', pt: 'Testar' },
-  wiz_failedAt: { en: 'It stopped at: {step}. Nothing before it was lost — try again to resume from there.', pt: 'Parou em: {step}. O que veio antes foi mantido — tente de novo para continuar daqui.' },
+  wiz_failedAt: { en: 'It stopped at: {step}.', pt: 'Parou em: {step}.' },
+  wiz_mac_password_fallback: { en: 'Continue without Touch ID', pt: 'Continuar sem Touch ID' },
+  wiz_mac_password_fallback_note: {
+    en: 'You can protect the vault with its own password and recovery words. Choose a password, then save and confirm the new words to finish.',
+    pt: 'Você pode proteger o cofre com uma senha própria e palavras de recuperação. Escolha a senha, depois guarde e confirme as novas palavras para concluir.',
+  },
   wiz_step_setup: { en: 'setup code', pt: 'código de configuração' },
   wiz_step_probe: { en: 'device check', pt: 'teste do dispositivo' },
   wiz_step_recovery: { en: 'recovery key', pt: 'chave de recuperação' },

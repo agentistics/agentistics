@@ -891,3 +891,32 @@ unexpected error checking it withholds output. Marker-write failures are logged 
 names or paths; the write remains best effort, so a failed write cannot guarantee offline
 withholding. The file contains no secret and is unrelated to the `/prove` action marker.
 `personal-scrub` is limited to 60 calls/min per session. Only `personal.ts`, `personal-http.ts` and `grants.ts` may use `revealField` (lint).
+
+### Mac protection setup failures
+
+Mac setup uses the system `osascript` LocalAuthentication dialog (Touch ID or the Mac login
+password), followed by a random secret written to the login Keychain through `security -i` on
+stdin. No Swift compilation, downloaded helper or terminal input is required. This remains an
+application-enforced confirmation: the Keychain item itself is not hardware-bound to Touch ID.
+
+The pending presence key stays in memory for the existing session-bound ten-minute setup window.
+Confirming the recovery words rekeys and verifies the saved records and recovery wrapper before
+committing `vault.json`; this step raises no second Mac dialog. A failure before commit keeps the
+old vault and the pending proof/words for retry. It must never allow a recovery-only retry to
+silently finish setup without the chosen presence method. Locking, expiry or choosing a
+different method discards the pending proof through the existing cleanup path.
+Recovery words generated for a pending presence transaction also remember its nonsecret key ID
+in memory. If that proof expires or is replaced before confirmation, the words are refused rather
+than being committed through the recovery-only path.
+While that transaction writes files, other setup requests wait rather than replacing its entropy.
+The held keys are detached from idle cleanup for the duration of the save; a concurrent lock prevents
+restoring a failed proof, without deleting or zeroing a credential halfway through its commit.
+
+The wizard offers **Continue without Touch ID** after a Mac setup failure, including at the
+recovery step. This restarts password setup and requires saving and confirming new recovery words;
+it does not skip proof, retain a silent wrapper after successful setup, or bypass a damaged-record
+verification failure. A storage failure can therefore also block the password attempt safely.
+Server diagnostics distinguish rekey read/open/verification, recovery verification and file writes.
+Mac helper errors log native failure output, with echoed Keychain write arguments redacted; returned
+Keychain values, passwords, recovery words and decrypted records are never logged. Native Mac GUI
+and Keychain behavior still require verification on a real Mac.
