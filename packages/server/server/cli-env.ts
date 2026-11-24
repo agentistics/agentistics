@@ -1,9 +1,9 @@
 /**
- * `agentop env status|use|install|grant` — DOCKER.AMBIENTES S1 from the terminal.
+ * `agentop env status|use|install-hint|grant` — DOCKER.AMBIENTES S1 from the terminal.
  *
  *   agentop env status [--json] [--session [id]] [--project [key]] [--needs git,…] [--image key]
  *   agentop env use docker|namespace [--session [id] | --project [key] | --all]    (default scope: --all)
- *   agentop env install [--os linux|wsl2|macos|windows] [--json]
+ *   agentop env install-hint [--os linux|wsl2|macos|windows] [--json]
  *   agentop env grant …                                                            (role gate only; the grant is S2)
  *
  * `install` is the INSTALL HINT for Docker itself — what to install on this operating system, what it costs, the
@@ -20,14 +20,14 @@ import type { EnvStatus } from './env-web'
 export type EnvCommand =
   | { kind: 'status'; json: boolean; query: { session?: string; project?: string; needs?: string[]; image?: string } }
   | { kind: 'use'; body: { backend: string; scope: 'session' | 'project' | 'all'; target?: string } }
-  | { kind: 'install'; json: boolean; os?: string }
+  | { kind: 'install-hint'; json: boolean; os?: string }
   | { kind: 'grant'; body: Record<string, unknown> }
   | { kind: 'error'; message: string }
 
 const USAGE = [
   'usage: agentop env status [--json] [--session [id]] [--project [key]] [--needs git,…] [--image key]',
   '       agentop env use docker|namespace [--session [id] | --project [key] | --all]',
-  '       agentop env install [--os linux|wsl2|macos|windows] [--json]',
+  '       agentop env install-hint [--os linux|wsl2|macos|windows] [--json]',
 ].join('\n')
 
 /** `--flag` with an optional value: the next token is the value unless it is another flag. */
@@ -40,7 +40,7 @@ export function parseEnvArgs(args: readonly string[], env: Record<string, string
   const [verb, ...rest] = args
   if (verb === undefined || verb === '--help' || verb === '-h') return { kind: 'error', message: USAGE }
   if (verb === 'grant') return { kind: 'grant', body: {} }
-  if (verb === 'install') {
+  if (verb === 'install-hint') {
     let json = false
     let os: string | undefined
     for (let i = 0; i < rest.length; i++) {
@@ -48,7 +48,7 @@ export function parseEnvArgs(args: readonly string[], env: Record<string, string
       else if (rest[i] === '--os' && rest[i + 1]) os = rest[++i]
       else return { kind: 'error', message: `unknown argument ${rest[i]}\n${USAGE}` }
     }
-    return { kind: 'install', json, ...(os ? { os } : {}) }
+    return { kind: 'install-hint', json, ...(os ? { os } : {}) }
   }
   if (verb === 'status') {
     let json = false
@@ -94,7 +94,7 @@ export function describeStatus(s: EnvStatus): string[] {
   l.push(`backend: ${s.decision.backend} (${s.decision.reason})${s.decision.line ? ` — ${s.decision.line}` : ''}`)
   l.push(`choice: ${s.choice.backend ?? 'none'} (scope: ${s.choice.source})${s.refusalStale ? ' — an earlier refusal lapsed because Docker changed' : ''}`)
   l.push(`image: ${s.image.ok ? `${s.image.key}` : `none for this project (${s.image.missing.join(', ')})`}; catalogue: ${s.catalogue.join(', ')}`)
-  if (s.decision.suggest === 'install-docker') l.push('suggestion: run `agentop env install` to see how to install Docker on this system')
+  if (s.decision.suggest === 'install-docker') l.push('suggestion: run `agentop env install-hint` to see how to install Docker on this system')
   if (s.decision.suggest === 'use-docker') l.push('suggestion: `agentop env use docker [--session|--project|--all]`, or `agentop env use namespace` to decline')
   return l
 }
@@ -161,8 +161,8 @@ export async function runEnv(args: readonly string[], deps: EnvCliDeps = {}): Pr
     const n = note(r.viaServer); if (n) log(n)
     return 0
   }
-  if (cmd.kind === 'install') {
-    const r = await call('GET', `/api/env/install${cmd.os ? `?os=${encodeURIComponent(cmd.os)}` : ''}`)
+  if (cmd.kind === 'install-hint') {
+    const r = await call('GET', `/api/env/install-hint${cmd.os ? `?os=${encodeURIComponent(cmd.os)}` : ''}`)
     if (r.status !== 200) { error(`refused: ${r.body?.error ?? r.status} (use linux, wsl2, macos or windows)`); return 1 }
     if (cmd.json) { log(JSON.stringify(r.body, null, 2)); return 0 }
     for (const line of describeInstall(r.body.hint, r.body.detectedOs)) log(line)

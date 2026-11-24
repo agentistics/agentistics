@@ -580,7 +580,7 @@ import type { EnvDeps } from '../env-web'
 import { platformOf } from '../env-web'
 import { featureOn } from '@agentistics/core'
 
-export async function defaultEnvDeps(): Promise<EnvDeps> {
+export async function defaultEnvDeps(caller?: EnvDeps['caller']): Promise<EnvDeps> {
   const { readPreferences, updatePreferences } = await import('../preferences')
   const isWsl = process.platform === 'linux' && (Boolean(process.env.WSL_DISTRO_NAME) || (() => { try { return /microsoft/i.test(readFileSync('/proc/version', 'utf8')) } catch { return false } })())
   let last: DockerState = { present: false, running: false, version: null, kind: 'none', apiVersion: null }
@@ -598,6 +598,7 @@ export async function defaultEnvDeps(): Promise<EnvDeps> {
       return storedRoleFor([row?.conversationId, row?.id, managedId])
     },
     now: () => Date.now(),
+    ...(caller ? { caller } : {}),
   }
 }
 
@@ -631,7 +632,7 @@ export async function envCliIo(): Promise<{
     local: async (method, path, body) => {
       const web = await import('../env-web')
       const req = new Request(`http://localhost${path}`, { method, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}), headers: { 'Content-Type': 'application/json' } } : {}) })
-      const out = await web.handleEnvRequest(req, new URL(req.url), await defaultEnvDeps())
+      const out = await web.handleEnvRequest(req, new URL(req.url), await defaultEnvDeps(async () => (process.env.AGENTOP_MANAGED_ID ? 'session' : 'person')))
       return { status: out?.status ?? 404, body: out?.body ?? { error: 'not_found' } }
     },
   }

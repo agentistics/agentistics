@@ -94,7 +94,7 @@ export const AGENT_TOOL_NAMES = [
   // DOCKER.AMBIENTES S1 (3)
   'agentistics_env_status',
   'agentistics_env_use',
-  'agentistics_env_install',
+  'agentistics_env_install_hint',
   'agentistics_session_hold',
   'agentistics_nay_call',
   'agentistics_session_switch_account',
@@ -272,8 +272,8 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
     ...GROUPS, risk: 'R', routes: ['GET /api/env/status'],
     reason: 'reads whether Docker is installed/running, which backend a worker\'s environment would use and why; nothing is started or changed',
   },
-  agentistics_env_install: {
-    ...GROUPS, risk: 'R', routes: ['GET /api/env/install'],
+  agentistics_env_install_hint: {
+    ...GROUPS, risk: 'R', routes: ['GET /api/env/install-hint'],
     reason: 'returns the per-system steps, cost and official page for installing Docker; it installs nothing and runs nothing',
   },
   agentistics_env_use: {

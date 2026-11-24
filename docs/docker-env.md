@@ -17,12 +17,12 @@ A suggestion never blocks, and a refusal (`namespace`) holds until Docker's stat
 ## The choice has a scope
 
 `only this session` > `this project` > `all sessions` — the most specific wins. Stored in `preferences.json`
-(`envBackend: { all?, projects?, sessions? }`). Only the person or a **verified leader** may write it; a worker is refused
+(`envBackend: { all?, projects?, sessions? }`). Only the **proven** person (the connection's own identity read from the socket, never the absence of a `session` field; no proof = `person_unproven`, 403) or a **verified leader** may write it; a worker is refused
 (`leader_only`). `agentop env use docker|namespace [--session [id] | --project [key] | --all]`.
 
 ## Installing Docker (hint only)
 
-`agentop env install [--os …]` (HTTP `GET /api/env/install`, MCP `agentistics_env_install`) prints, per system, what to
+`agentop env install-hint [--os …]` (HTTP `GET /api/env/install-hint`, MCP `agentistics_env_install_hint`) prints, per system, what to
 install, the cost, numbered steps and the official page. Linux: Docker Engine of the distribution. WSL2: Engine inside WSL.
 macOS / Windows: Docker Desktop, cost marked as an estimate, and "stays off until validated" (not measured yet). agentop
 never installs anything and never runs `sudo`; the later UI button only calls this and opens the page.
@@ -32,9 +32,9 @@ never installs anything and never runs `sudo`; the later UI button only calls th
 
 | | |
 |---|---|
-| CLI | `agentop env status [--json]`, `use`, `install` |
-| HTTP | `GET /api/env/status`, `GET /api/env/install`, `POST /api/env/use`, `POST /api/env/grant` (role gate only) |
-| MCP | `agentistics_env_status`, `agentistics_env_use`, `agentistics_env_install` |
+| CLI | `agentop env status [--json]`, `use`, `install-hint` |
+| HTTP | `GET /api/env/status`, `GET /api/env/install-hint`, `POST /api/env/use`, `POST /api/env/grant` (role gate only) |
+| MCP | `agentistics_env_status`, `agentistics_env_use`, `agentistics_env_install_hint` |
 
 `/api/env` is a `localShell` prefix in `capability-guard.ts`.
 

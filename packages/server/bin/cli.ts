@@ -131,6 +131,8 @@ Commands:
                 ('events watch' to subscribe, 'events status' to see who is watching)
   experimental  Turn every experimental feature on or off ('experimental enable|disable|status')
   away          Autonomous mode — sessions decide and proceed without asking permission ('away on|off|status')
+  env           Where worker environments run (experimental, 'docker-env' flag): 'env status', 'env use
+                docker|namespace', 'env install-hint' (how to install Docker; installs nothing)
   journal       The durable event journal: a read-only look ('journal status') and the
                 historical import of this machine's history into it ('journal import')
 __ENGINE_VERBS__

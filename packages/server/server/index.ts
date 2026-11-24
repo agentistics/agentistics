@@ -1159,7 +1159,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // already refused it on an exposed profile; writes are the person's or a verified leader's.
     if (url.pathname.startsWith('/api/env/')) {
       const web = await import('./env-web')
-      const out = await web.handleEnvRequest(req, url, await (await import('./flows/host-ops')).defaultEnvDeps())
+      // WHO is calling comes from the SOCKET (same reader the browser padlock uses), never the body: a request
+      // that merely omits `session` is not the person. `session` and `unknown` both refuse writes.
+      const envCaller = async (): Promise<'person' | 'session' | 'unknown'> => {
+        const [{ identifyCaller }, { processSessionHub }] = await Promise.all([import('./browser/browser-caller-proc'), import('./sessions/session-hub')])
+        const sessionPids = new Set<number>()
+        for (const r of processSessionHub()?.last()?.sessions ?? []) if (typeof r.pid === 'number') sessionPids.add(r.pid)
+        const ip = server.requestIP(req)
+        return (await identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })).kind
+      }
+      const out = await web.handleEnvRequest(req, url, await (await import('./flows/host-ops')).defaultEnvDeps(envCaller))
       if (out) return json(out.body, out.status)
     }
     if (url.pathname === '/api/experimental' && (req.method === 'GET' || req.method === 'PUT')) {

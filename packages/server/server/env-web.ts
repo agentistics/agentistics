@@ -6,11 +6,11 @@
  * nothing is offered) and every write is refused `flag_off`. S1 creates no container, volume or image.
  *
  *   GET  /api/env/status?session=<id>&project=<key>&needs=a,b&image=<key>
- *   GET  /api/env/install[?os=linux|wsl2|macos|windows]
+ *   GET  /api/env/install-hint[?os=linux|wsl2|macos|windows]
  *   POST /api/env/use    { backend, scope?: session|project|all, target?, session?: {id, token} }
  *   POST /api/env/grant  { … }      — role gate only in S1; the concession itself is S2 (`grant_not_available`)
  *
- * WHO MAY WRITE (`use`, `grant`): the person (no `session` field) or a VERIFIED session whose stored role is
+* WHO MAY WRITE (`use`, `grant`): the PROVEN person (the connection's own identity, `deps.caller` — absence of a `session` field is not proof) or a VERIFIED session whose stored role is
  * `leader`. A worker is refused — it would be choosing where its own environment runs (the `away.ts` rule).
  */
 import {
@@ -28,6 +28,8 @@ export interface EnvDeps {
   writePrefs: (mutate: (current: { envBackend?: EnvBackendPrefs }) => Record<string, unknown> | undefined) => Promise<void>
   verify: (id: unknown, token: unknown) => Promise<string | null>
   roleOf: (managedId: string) => Promise<'leader' | 'worker' | undefined>
+  /** WHO is calling, read from the connection itself (never the body). Absent or anything but `person` refuses a write. */
+  caller?: () => Promise<'person' | 'session' | 'unknown'>
   now: () => number
 }
 
@@ -47,7 +49,7 @@ export interface EnvStatus {
   /** True when this exact Docker state was already offered (suggestion shown once; a refusal holds until it changes). */
   offeredFor: string
   alreadyOffered: boolean
-  /** The install hint, present only when Docker is missing — the same text `GET /api/env/install` gives. */
+  /** The install hint, present only when Docker is missing — the same text `GET /api/env/install-hint` gives. */
   install?: EnvInstallHint
 }
 
@@ -92,15 +94,20 @@ export function envInstall(osParam: string | undefined, deps: EnvDeps): { ok: tr
   return { ok: true, hint: installHint(osParam), detectedOs: detected }
 }
 
-export type EnvWriteError = EnvUseError | 'flag_off' | 'unverified_sender' | 'leader_only' | 'grant_not_available'
+export type EnvWriteError = EnvUseError | 'flag_off' | 'unverified_sender' | 'leader_only' | 'person_unproven' | 'grant_not_available'
 export type EnvWriteReply =
   | { ok: true; scope: string; backend: EnvBackend; target?: string; prefs: EnvBackendPrefs }
   | { ok: false; error: EnvWriteError }
 
 /** The caller's authority: the person (no proof), or a verified leader. Returns the verified id for self-scoping. */
-async function authorise(body: unknown, deps: EnvDeps): Promise<{ ok: true; sender?: string } | { ok: false; error: 'unverified_sender' | 'leader_only' }> {
+async function authorise(body: unknown, deps: EnvDeps): Promise<{ ok: true; sender?: string } | { ok: false; error: 'unverified_sender' | 'leader_only' | 'person_unproven' }> {
   const o = (body && typeof body === 'object' ? body : {}) as { session?: { id?: unknown; token?: unknown } }
-  if (o.session === undefined) return { ok: true }
+  // No session claim is NOT "the person": the person must be PROVEN. The proof is the connection's own identity —
+  // the socket → process-tree reader the browser padlock and "delete profiles" already use for their person-only
+  // acts (`browser-caller.ts`: `session` and `unknown` both refuse, fail-closed). No `caller` dep = no proof.
+  if (o.session === undefined) {
+    return (await deps.caller?.().catch(() => 'unknown' as const)) === 'person' ? { ok: true } : { ok: false, error: 'person_unproven' }
+  }
   const sender = await deps.verify(o.session?.id, o.session?.token)
   if (!sender) return { ok: false, error: 'unverified_sender' }
   if ((await deps.roleOf(sender)) !== 'leader') return { ok: false, error: 'leader_only' }
@@ -143,7 +150,7 @@ export function envStatusCode(r: { ok: boolean; error?: string }): number {
   if (r.ok) return 200
   switch (r.error) {
     case 'unverified_sender': return 401
-    case 'leader_only': return 403
+    case 'leader_only': case 'person_unproven': return 403
     case 'flag_off': return 409
     case 'grant_not_available': return 501
     default: return 400
@@ -158,7 +165,7 @@ export async function handleEnvRequest(req: Request, url: URL, deps: EnvDeps): P
     const needs = (q.get('needs') ?? '').split(',').map(s => s.trim()).filter(Boolean)
     return { status: 200, body: await envStatus({ session: q.get('session') ?? undefined, project: q.get('project') ?? undefined, needs, image: q.get('image') ?? undefined }, deps) }
   }
-  if (p === '/api/env/install' && req.method === 'GET') {
+  if (p === '/api/env/install-hint' && req.method === 'GET') {
     await deps.detect().catch(() => undefined)
     const r = envInstall(url.searchParams.get('os') ?? undefined, deps)
     return { status: r.ok ? 200 : 400, body: r }

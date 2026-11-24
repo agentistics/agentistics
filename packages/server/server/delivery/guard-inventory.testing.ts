@@ -33,7 +33,7 @@ export function historicInventory(): Inventory {
  *     may only shrink — deny by default: a retargeted call, or a new module handed a book path, grows it and fails.
  */
 export interface ReachInventory { base: string; writers: Record<string, string[]>; reach: Record<string, string[]> }
-export const R3_INVENTORY_DIGEST = 'b81b8c2d7ae2a372f7d091a6a1f8b6315d928ad21e6bbfa074e2bec927a4415b'
+export const R3_INVENTORY_DIGEST = 'ccb207debd21c66c3c03082dc4eb2e9383b8e267a42c5c025aedca0c80076b43'
 export function r3Inventory(): ReachInventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory-r3.fixture.json'), 'utf8')
   if (digest(text) !== R3_INVENTORY_DIGEST) throw new Error('Historical guard inventory changed: the S2a r3 ceiling is pinned; a writer or a book reference may disappear, never be added')

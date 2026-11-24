@@ -321,7 +321,7 @@ test('F14: /api/benchmark reads the board, the registry and the token store, so 
 })
 
 test('DOCKER.AMBIENTES: /api/env and every verb under it is host power (localShell), refused on an exposed profile', () => {
-  for (const p of ['/api/env', '/api/env/status', '/api/env/use', '/api/env/grant', '/api/env/install', '/api/env/anything-added-later']) {
+  for (const p of ['/api/env', '/api/env/status', '/api/env/use', '/api/env/grant', '/api/env/install-hint', '/api/env/anything-added-later']) {
     expect(routeCapability(p)).toBe('localShell')
   }
   expect(routeCapability('/api/environment')).toBeNull()

@@ -94,7 +94,7 @@ const TOOL_GROUPS = {
   Vault: ['agentistics_vault_status'],
   // DOCKER.AMBIENTES S1: where a worker's environment runs (status, scoped choice, install hint) — behind the
   // `docker-env` flag, so not listed in the briefing; the tools stay discoverable through the MCP.
-  Env: ['agentistics_env_status', 'agentistics_env_use', 'agentistics_env_install'],
+  Env: ['agentistics_env_status', 'agentistics_env_use', 'agentistics_env_install_hint'],
   // NAVEGADOR S1-S3: status, the session's own browser verbs and the padlock — not listed in the briefing until
   // the visible card (S5) arrives; the tools stay discoverable through the MCP.
   Browser: [

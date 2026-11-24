@@ -27,12 +27,12 @@ describe('parseEnvArgs', () => {
     })
   })
   test('install: --os and --json; unknown arguments refused', () => {
-    expect(parseEnvArgs(['install'])).toEqual({ kind: 'install', json: false })
-    expect(parseEnvArgs(['install', '--os', 'macos', '--json'])).toEqual({ kind: 'install', json: true, os: 'macos' })
-    expect(parseEnvArgs(['install', '--now']).kind).toBe('error')
+    expect(parseEnvArgs(['install-hint'])).toEqual({ kind: 'install-hint', json: false })
+    expect(parseEnvArgs(['install-hint', '--os', 'macos', '--json'])).toEqual({ kind: 'install-hint', json: true, os: 'macos' })
+    expect(parseEnvArgs(['install-hint', '--now']).kind).toBe('error')
   })
   test('grant is recognised (the role gate lives on the server); unknown verbs and no verb give usage', () => {
-    expect(parseEnvArgs(['grant', 'repo', 'install']).kind).toBe('grant')
+    expect(parseEnvArgs(['grant', 'repo', 'install-hint']).kind).toBe('grant')
     expect(parseEnvArgs(['frob']).kind).toBe('error')
     expect(parseEnvArgs([]).kind).toBe('error')
   })
@@ -87,10 +87,10 @@ describe('runEnv', () => {
   test('status --json prints the server\'s answer; install prints the hint; the answered-locally note appears', async () => {
     const j = await run(['status', '--json'], { status: 200, body: { flag: true } })
     expect(JSON.parse(j.out[0]!)).toEqual({ flag: true })
-    const i = await run(['install'], { status: 200, body: { ok: true, hint: installHint('wsl2'), detectedOs: 'wsl2' }, viaServer: false })
+    const i = await run(['install-hint'], { status: 200, body: { ok: true, hint: installHint('wsl2'), detectedOs: 'wsl2' }, viaServer: false })
     expect(i.out.join('\n')).toContain('Docker Engine inside WSL')
-    expect(i.calls[0]).toEqual(['GET', '/api/env/install', undefined])
-    expect((await run(['install', '--os', 'zz'], { status: 400, body: { error: 'bad_os' } })).code).toBe(1)
+    expect(i.calls[0]).toEqual(['GET', '/api/env/install-hint', undefined])
+    expect((await run(['install-hint', '--os', 'zz'], { status: 400, body: { error: 'bad_os' } })).code).toBe(1)
   })
   test('no verb prints the usage and exits 0; a bad one exits 2', async () => {
     expect((await run([], { status: 200, body: {} })).code).toBe(0)

@@ -25,7 +25,7 @@ import {
 import { createAgentAuditSink } from "./agent-audit.js";
 import { createEngineTools } from "./engine-tools.js";
 import { taskCommentRequest } from "./task-comment-args.js";
-import { sessionProof, withTaskWriteProof } from "./session-proof.js";
+import { ancestorSession, sessionProof, withTaskWriteProof } from "./session-proof.js";
 import { evidenceRequestOf } from "./evidence-args.js";
 import { bookTakeoverPayload } from "./book-takeover-payload.js";
 import { HARNESS_CAPABILITIES, contextReading, nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
@@ -950,7 +950,7 @@ const TOOLS: Tool[] = [
     },
   },
   {
-    name: "agentistics_env_install",
+    name: "agentistics_env_install_hint",
     description:
       "How to install Docker on a given operating system: what to install, what it costs (estimates are marked as such), numbered steps, the official page and whether Docker is validated there yet. Defaults to this machine's system; `os` (linux | wsl2 | macos | windows) previews another. It NEVER installs anything or runs a command — it is the text and the link a person follows. Read-only.",
     inputSchema: {
@@ -1901,18 +1901,24 @@ async function callTool(
         const body = await apiGet(`/api/env/status?${q}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
-      case "agentistics_env_install": {
+      case "agentistics_env_install_hint": {
         const a = args as any;
-        const body = await apiGet(`/api/env/install${typeof a?.os === "string" ? `?os=${encodeURIComponent(a.os)}` : ""}`);
+        const body = await apiGet(`/api/env/install-hint${typeof a?.os === "string" ? `?os=${encodeURIComponent(a.os)}` : ""}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_env_use": {
         const a = args as any;
+        // FAIL CLOSED: inside a session whose proof cannot be produced (identity key unreadable), sending the
+        // request WITHOUT `session` would read to the server as "no claim" — refuse here instead.
+        const proof = sessionProof(process.env);
+        if (!proof && (process.env.AGENTOP_MANAGED_ID || ancestorSession())) {
+          throw new Error("agentistics_env_use refused: this session could not prove who it is (its identity key is unavailable), so it cannot choose where environments run. Ask the person or a leader session.");
+        }
         const body = await apiSend("POST", "/api/env/use", {
           backend: a?.backend,
           ...(a?.scope !== undefined ? { scope: a.scope } : {}),
           ...(a?.target !== undefined ? { target: a.target } : {}),
-          session: sessionProof(process.env),
+          ...(proof ? { session: proof } : {}),
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }

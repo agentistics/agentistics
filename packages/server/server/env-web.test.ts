@@ -47,7 +47,7 @@ function fake(f: Fake): void {
   process.env.FAKE_OS = f.os ?? 'Ubuntu 24.04'
 }
 
-interface World { flag?: boolean; prefs?: EnvBackendPrefs; offeredFor?: string; role?: 'leader' | 'worker'; verified?: boolean; proc?: { platform: string; isWsl: boolean } }
+interface World { flag?: boolean; prefs?: EnvBackendPrefs; offeredFor?: string; role?: 'leader' | 'worker'; verified?: boolean; caller?: 'person' | 'session' | 'unknown'; proc?: { platform: string; isWsl: boolean } }
 function deps(w: World = {}): EnvDeps & { stored: { envBackend?: EnvBackendPrefs; envBackendOfferedFor?: string; envBackendChosenAt?: string } } {
   const stored: { envBackend?: EnvBackendPrefs; envBackendOfferedFor?: string; envBackendChosenAt?: string } = { ...(w.prefs ? { envBackend: w.prefs } : {}), ...(w.offeredFor ? { envBackendOfferedFor: w.offeredFor } : {}) }
   let last: Awaited<ReturnType<typeof detectDocker>> = { present: false, running: false, version: null, kind: 'none', apiVersion: null }
@@ -55,6 +55,7 @@ function deps(w: World = {}): EnvDeps & { stored: { envBackend?: EnvBackendPrefs
   return {
     stored,
     flag: () => w.flag ?? true,
+    caller: async () => w.caller ?? 'person',
     detect: async () => (last = await detectDocker()),
     platform: () => platformOf(proc, last),
     readPrefs: async () => ({ ...stored }),
@@ -252,8 +253,8 @@ describe('the HTTP door (`handleEnvRequest`)', () => {
     fake({ running: true })
     const d = deps({ role: 'worker' })
     expect((await call('GET', '/api/env/status?session=s1&needs=bun', undefined, d))?.status).toBe(200)
-    expect((await call('GET', '/api/env/install?os=wsl2', undefined, d))?.body).toMatchObject({ ok: true, hint: { os: 'wsl2' } })
-    expect((await call('GET', '/api/env/install?os=zz', undefined, d))?.status).toBe(400)
+    expect((await call('GET', '/api/env/install-hint?os=wsl2', undefined, d))?.body).toMatchObject({ ok: true, hint: { os: 'wsl2' } })
+    expect((await call('GET', '/api/env/install-hint?os=zz', undefined, d))?.status).toBe(400)
     expect((await call('POST', '/api/env/use', { backend: 'docker', session: { id: 'W1', token: 'ok' } }, d))?.status).toBe(403)
     expect((await call('POST', '/api/env/use', { backend: 'docker', session: { id: 'W1', token: 'x' } }, d))?.status).toBe(401)
     expect((await call('POST', '/api/env/grant', {}, d))?.status).toBe(501)

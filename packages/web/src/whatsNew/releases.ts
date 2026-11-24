@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.228.0': {
+    features: [
+      {
+        pt: 'Ambientes (experimental, desligado por padrão): ao ativar o recurso, o agentistics detecta se o Docker está disponível, sugere usá-lo (ou como instalá-lo) e deixa você escolher onde os ambientes dos trabalhadores rodam — para uma sessão, um projeto ou tudo. Por enquanto só a escolha e as orientações; nada é instalado nem executado por você.',
+        en: 'Environments (experimental, off by default): when you turn the feature on, agentistics detects whether Docker is available, suggests using it (or how to install it) and lets you choose where workers\' environments run — for one session, one project or everything. For now only the choice and the guidance; nothing is installed or run for you.',
+      },
+    ],
+    fixes: [],
+  },
   '2.226.0': {
     features: [
       {
