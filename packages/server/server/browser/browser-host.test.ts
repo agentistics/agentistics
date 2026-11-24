@@ -540,6 +540,8 @@ describe('personal browser: minimize, idle stop keeps the tab list, restore, clo
     const r = await h.openPersonal(HOME)
     expect(r).toMatchObject({ ok: true, restored: 0, home: true })
     expect(env.fakes[0]!.methods).toContain('Target.createTarget')
+    // the starting about:blank tab becomes the default page — it is not left standing beside it
+    expect(env.fakes[0]!.closed).toEqual(['T0'])
     await h.stopAll()
   })
 
@@ -578,6 +580,7 @@ describe('personal browser: minimize, idle stop keeps the tab list, restore, clo
     expect((await h.status()).personalSaved).toBeNull()
     expect(env.fakes.length).toBe(2)
     expect(env.fakes[1]!.methods.filter(m => m === 'Target.createTarget').length).toBe(2)
+    expect(env.fakes[1]!.closed).toEqual(['T0'])
     await h.stopAll()
   })
 

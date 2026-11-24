@@ -21,7 +21,12 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Environments (experimental, off by default): when you turn the feature on, agentistics detects whether Docker is available, suggests using it (or how to install it) and lets you choose where workers\' environments run — for one session, one project or everything. For now only the choice and the guidance; nothing is installed or run for you.',
       },
     ],
-    fixes: [],
+    fixes: [
+      {
+        pt: 'Navegador da sessão: ao abrir, ao reabrir depois de fechar e ao criar uma aba nova, ele agora mostra a página inicial em vez de uma tela vazia (about:blank), igual ao seu navegador.',
+        en: 'Session browser: when it opens, reopens after being closed, or gets a new tab, it now shows the home page instead of an empty screen (about:blank), like your own browser.',
+      },
+    ],
   },
   '2.228.0': {
     features: [
