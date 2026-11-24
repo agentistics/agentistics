@@ -23,6 +23,23 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       },
     ],
   },
+  '2.227.0': {
+    features: [
+      {
+        pt: 'Quadro e lista de sessões agora sobrevivem a uma queda do disco: o app guarda a última cópia boa e um backup.',
+        en: 'The board and the session list now survive a disk crash: the app keeps the last good copy and a backup.',
+      },
+      {
+        pt: 'Quando um líder some, a custódia passa para o próximo, que recebe os lembretes de retomada, bloqueio e revisão.',
+        en: 'When a leader vanishes, custody passes to the next one, which gets the wake, blocked and review reminders.',
+      },
+      {
+        pt: 'Toda alteração no quadro agora registra quem a fez.',
+        en: 'Every board change now records who made it.',
+      },
+    ],
+    fixes: [],
+  },
   '2.226.0': {
     features: [
       {

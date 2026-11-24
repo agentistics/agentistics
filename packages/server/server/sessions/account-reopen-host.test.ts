@@ -28,10 +28,11 @@ import type { ManagedSession, SessionBackend } from './types'
 let dir = ''
 let savedFlag: string | undefined
 const spawned: string[] = []
+const spawnReqs: string[] = []
 
 const backend = {
   id: 'tmux', unavailable: async () => undefined,
-  spawn: async (req: { id: string }) => { spawned.push(req.id); throw new Error('pane refused') },
+  spawn: async (req: { id: string }) => { spawned.push(req.id); spawnReqs.push(JSON.stringify(req)); throw new Error('pane refused') },
   list: async () => [], capture: async () => [], kill: async () => {},
 } as unknown as SessionBackend
 
@@ -56,7 +57,7 @@ beforeAll(() => {
   // The reopen lock asks `claude agents --json`; the machine's real CLI is not part of this test.
   __setHarnessAgentsReaderForTest(async () => [])
 })
-afterEach(() => { spawned.length = 0 })
+afterEach(() => { spawned.length = 0; spawnReqs.length = 0 })
 afterAll(() => {
   __setSessionBackendForTest(null)
   __setHarnessAgentsReaderForTest(null)
@@ -80,7 +81,7 @@ describe('1 · group reopen carries the verified caller to every spawn', () => {
     await accounts(async store => {
       await store.bind(null, { harness: 'claude', key: 'org:home', label: 'home' })
       offId = (await store.bind(join(dir, 'r_off'), { harness: 'claude', key: 'org:off', label: 'off' })).account.id
-      await store.update(offId, { available: false })
+      await store.patchAccount(offId, { available: false })
     })
     const m = row({ accountId: offId, conversationId: 'c-off' })
     const s = cliStrings('en')
@@ -160,6 +161,57 @@ describe('2 · a resume with no `replaces` takes the conversation\'s recorded ac
     const out = await runFleetAction('en', { action: 'prompt', id: 'external:1', text: 'hi', confirm: true, callerVerified: true } as never)
     expect(out).toMatchObject({ ok: false, code: 'account_signed_out' })
     __setFleetHostForTest('en', null)
+  })
+})
+
+describe('2b · a reopen whose registry row is gone finds the account holding the transcript', () => {
+  /** A signed-out second account whose root holds <uuid>.jsonl, and no registry row for it. */
+  let lostRoot = ''
+  // The reopen plans a real spawn, which needs the harness CLI on PATH: a stub, so the test does not
+  // depend on the machine having `claude` installed (CI does not — the spawn never reached the backend).
+  let pathBefore: string | undefined
+  beforeAll(() => {
+    const bin = join(dir, 'bin2b')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(bin, 'claude'), 0o755)
+    pathBefore = process.env.PATH
+    process.env.PATH = `${bin}:${pathBefore ?? ''}`
+    resetHarnessAvailability()
+  })
+  afterAll(() => { process.env.PATH = pathBefore; resetHarnessAvailability() })
+  async function lostRowConversation(): Promise<string> {
+    const conversationId = crypto.randomUUID()
+    const root = lostRoot = join(dir, `r_lost_${conversationId.slice(0, 6)}`)
+    mkdirSync(join(root, 'projects', 'x'), { recursive: true })
+    writeFileSync(join(root, 'projects', 'x', `${conversationId}.jsonl`), '{}\n')
+    await accounts(async store => {
+      await store.bind(null, { harness: 'claude', key: 'org:home', label: 'home' })
+      await store.bind(root, { harness: 'claude', key: 'org:two', label: 'two' })
+      await store.bind(root, { harness: 'claude', key: 'org:three', label: 'three' })
+    })
+    return conversationId
+  }
+
+  test('host.resumeSession resolves the account from the transcript, not the default root', async () => {
+    const conversationId = await lostRowConversation()
+    const out = await createControlHost('en', NO_TERMINAL).resumeSession!({ sessionId: conversationId, harness: 'claude', cwd: dir, label: 'L', attach: false })
+    expect(out.accountRefusal).toBeUndefined()
+    expect(spawnReqs.join('')).toContain(lostRoot) // spawned in the account root that holds the transcript
+  })
+
+  test('the web reopen (POST /api/fleet/act resume on a closed row) goes through the same door', async () => {
+    const conversationId = await lostRowConversation()
+    const real = createControlHost('en', NO_TERMINAL)
+    __setFleetHostForTest('en', {
+      sessions: async () => ({ sessions: [{ id: `closed:${conversationId}`, harness: 'claude', cwd: dir, title: 'x', resume: { sessionId: conversationId } }] }),
+      resumeSession: real.resumeSession,
+    } as never)
+    try {
+      const out = await runFleetAction('en', { action: 'resume', id: `closed:${conversationId}` } as never)
+      expect('code' in out).toBe(false)
+      expect(spawnReqs.join('')).toContain(lostRoot)
+    } finally { __setFleetHostForTest('en', null) }
   })
 })
 

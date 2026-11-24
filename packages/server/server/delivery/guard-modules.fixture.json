@@ -1177,6 +1177,9 @@
       "module:child_process",
       "module:fs"
     ],
+    "server/server/durable-file.ts": [
+      "module:fs/promises"
+    ],
     "server/server/run-netns.ts": [
       "global:Bun",
       "module:child_process",

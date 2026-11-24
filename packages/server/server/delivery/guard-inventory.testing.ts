@@ -20,7 +20,7 @@ export function inventoryGrowth(actual: Readonly<Record<string, readonly string[
 
 export function historicInventory(): Inventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory.fixture.json'), 'utf8')
-  if (digest(text) !== 'd4f13c53571deb1bb5c7161190ce7de2afb815528f9cbb46267699965ec2c36c') throw new Error('Historical guard inventory changed: the S2a ceiling is pinned to 1b1c8a941; migrate sites by supplying contexts, never enlarge the fixture')
+  if (digest(text) !== 'f3ef9db48bbb7bfee031c0b706a0cb49a1b02f4c25f94e52d31d3b708b1f9e74') throw new Error('Historical guard inventory changed: the S2a ceiling is pinned to 1b1c8a941 and S2c emptied its context allowlist; supply contexts, never refill the fixture')
   return JSON.parse(text)
 }
 
@@ -33,7 +33,14 @@ export function historicInventory(): Inventory {
  *     may only shrink — deny by default: a retargeted call, or a new module handed a book path, grows it and fails.
  */
 export interface ReachInventory { base: string; writers: Record<string, string[]>; reach: Record<string, string[]> }
-export const R3_INVENTORY_DIGEST = 'b81b8c2d7ae2a372f7d091a6a1f8b6315d928ad21e6bbfa074e2bec927a4415b'
+/**
+ * DURABILITY admission (2026-11-22, #1495, leader decision recorded on t-79061d4f20): after the disk crash of 2026-11-21
+ * zero-filled the board and the session registry, `server/durable-file.ts` (`durableWrite`: fsync file -> rename ->
+ * fsync dir) became the ONE primitive for non-regenerable state; 13 modules dropped their own writeFile+rename for it,
+ * so the repo-wide raw-writer count shrinks. Its own sites (and `sessions/native-notes.ts` as a new importer) are the
+ * only entries added; the ceiling stays shrink-only from here.
+ */
+export const R3_INVENTORY_DIGEST = '8e558eac4bff8382b036e61964cf5313bb1d1516077ae7f85eae619df7a782e3'
 export function r3Inventory(): ReachInventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory-r3.fixture.json'), 'utf8')
   if (digest(text) !== R3_INVENTORY_DIGEST) throw new Error('Historical guard inventory changed: the S2a r3 ceiling is pinned; a writer or a book reference may disappear, never be added')
@@ -63,7 +70,7 @@ export function liveInventory(pkgs: string): { writers: Record<string, string[]>
 /** Independently pinned r3 source ceiling. Capability-bearing modules may disappear, never grow. */
 export function moduleCeiling(): Record<string, string[]> {
   const text = readFileSync(join(import.meta.dir, 'guard-modules.fixture.json'), 'utf8')
-  if (digest(text) !== '0b4089ce0656a5df5305b3c0e9159da22f4c87059979d685ba8e33ce41168893') throw new Error('Historical module capability inventory changed: shrink only')
+  if (digest(text) !== '621a0c21df8f3e574daa01c6ad0f509721f0308ac80a0ed534e95e12c083d73e') throw new Error('Historical module capability inventory changed: shrink only')
   return JSON.parse(text).modules
 }
 
@@ -94,6 +101,6 @@ export function helperInventory(sources: Readonly<Record<string, string>>, base 
 /** r5 pins existing helper reuse independently; new importers must never be added to this ceiling. */
 export function helperCeiling(): Record<string, string[]> {
   const text = readFileSync(join(import.meta.dir, 'guard-helpers.fixture.json'), 'utf8')
-  if (digest(text) !== '46cc539862ea2a6ecd58c84478f6fe6ce2d75b2881424082ddc810b9ece0ef3b') throw new Error('Historical raw-writer helper inventory changed: shrink only')
+  if (digest(text) !== '79e4214b782c9472676c80a7b63d40cd3721731407830b897a9cdc8aae4fdae5') throw new Error('Historical raw-writer helper inventory changed: shrink only')
   return JSON.parse(text)
 }

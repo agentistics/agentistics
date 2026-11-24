@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { withFileLock } from '../sessions/file-lock'
+import { durableWrite } from '../durable-file'
 
 export const LEDGER_MAX = 2_000
 export const DUPLICATE_WINDOW_MS = 10 * 60_000
@@ -74,9 +75,7 @@ export function createOwnerLedger(path = defaultLedgerPath()): OwnerLedger {
       await withFileLock(path, async () => {
         const doc = await readDoc(path)
         for (const scope of scopes) doc.entries[ledgerKey(scope, text)] = at
-        const tmp = `${path}.${process.pid}.tmp`
-        await writeFile(tmp, JSON.stringify({ version: 1, entries: pruneLedger(doc.entries) }) + '\n', { mode: 0o600 })
-        await rename(tmp, path)
+        await durableWrite(path, JSON.stringify({ version: 1, entries: pruneLedger(doc.entries) }) + '\n', 0o600)
       })
     },
   }

@@ -16,6 +16,7 @@ import { buildEvidenceItem, type EvidenceItem } from './evidence'
 import { execGit, forgetClassifyCache, type ClassifyDeps, type ClassifySession } from './classify-host'
 import { guardedReviewEntry } from './classify-guard'
 import { withGuardTransaction } from './guard-transaction'
+import { unattributedContext } from './guard'
 
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'classify-guard-')); forgetClassifyCache() })
@@ -46,15 +47,15 @@ function evid(kind: EvidenceItem['kind'], head: string | null, extra: Record<str
 
 async function setup() {
   const p = paths()
-  await createTaskStore(p.tasks).upsertTask({ id: 't1', title: 'T', status: 'in_progress', createdAt: T, updatedAt: T } as never)
-  await createDeliveryStore(p.deliveries).update(doc => { doc.deliveries.p1 = newDelivery({ subtaskId: 'p1', taskId: 't1', at: T }) })
+  await createTaskStore(p.tasks).upsertTask({ id: 't1', title: 'T', status: 'in_progress', createdAt: T, updatedAt: T } as never, unattributedContext())
+  await createDeliveryStore(p.deliveries).update(doc => { doc.deliveries.p1 = newDelivery({ subtaskId: 'p1', taskId: 't1', at: T }) }, { guard: unattributedContext() })
   const bytes = () => ({ t: readFileSync(p.tasks, 'utf8'), d: readFileSync(p.deliveries, 'utf8') })
   const move = (cwd: string | null, items: EvidenceItem[], over: Record<string, unknown> = {}) => withGuardTransaction(p, () => guardedReviewEntry({
     deps: deps(cwd), piece, key: 'p1', revision: 1, items, now: T, paths: p, locks: [] as const, alreadyHeld: ['tasks', 'deliveries', 'guards'] as const,
     checkpoint: { boardStatus: 'in_review', boardStage: 'leader', phase: 'revisao_lider', by: { kind: 'session', id: 's1' }, transitionId: 'tr-1' },
     writeDocuments: async () => {
-      await createTaskStore(p.tasks).upsertTask({ id: 't1', title: 'T', status: 'in_review', createdAt: T, updatedAt: T } as never)
-      await createDeliveryStore(p.deliveries).update(doc => { doc.deliveries.p1!.phase = 'revisao_lider' })
+      await createTaskStore(p.tasks).upsertTask({ id: 't1', title: 'T', status: 'in_review', createdAt: T, updatedAt: T } as never, unattributedContext())
+      await createDeliveryStore(p.deliveries).update(doc => { doc.deliveries.p1!.phase = 'revisao_lider' }, { guard: unattributedContext() })
     },
     ...over,
   }))

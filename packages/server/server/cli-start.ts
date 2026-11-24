@@ -144,7 +144,7 @@ import { applyAccountToPlan } from './sessions/account-plan'
 import { ensureClaudeProjectTrusted } from './sessions/claude-trust'
 import { prependContext } from './sessions/agentistics-context'
 import { rootIfLeader } from './sessions/team-links'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './sessions/spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withCustodyQueue, withPassagem, writeContextFile } from './sessions/spawn-context'
 import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor, storedRoleFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
@@ -2272,7 +2272,7 @@ export async function spawnManaged(req: {
   const relay = handoffParentRow
     ? await import('./sessions/handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
-  const ctx = buildSpawnContext(await withPassagem(await withOwnerRequests({
+  const ctx = buildSpawnContext(await withPassagem(await withCustodyQueue(await withOwnerRequests({
       ...(relay ? { handoffRelay: relay.section } : {}),
       ...(req.handoff ? { handoffTakeover: true } : {}),
       ...(await resolveContextAway(away)),
@@ -2283,7 +2283,7 @@ export async function spawnManaged(req: {
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
       ...storedContextRole,
-    }), !!req.handoff))
+    })), !!req.handoff))
   const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
   const planned = planSpawn({
     harness: req.harness,
@@ -3114,7 +3114,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     const { newestRowOfConversation } = await import('./sessions/spawn-account-io')
     const recorded = previous ?? newestRowOfConversation(await readRegistry(), req.sessionId, harness)
     // CONTA.TROCA — a switch names the account it copied the conversation into; nothing else may.
-    const recordedAccountId = req.switchToAccount ?? recorded?.accountId
+    const { accountForReopen } = await import('./sessions/spawn-account-io')
+    const recordedAccountId = req.switchToAccount ?? await accountForReopen(recorded?.accountId, harness, req.cwd, req.sessionId)
     if (recordedAccountId || req.callerVerified) {
       const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
       const { spawnAccountMessage } = await import('./sessions/spawn-account')
@@ -3148,7 +3149,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       queue: false,
       ...(req.prompt ? { prompt: req.prompt } : {}),
       ...(req.label ? { label: req.label } : {}),
-      ...(recorded ? { inherit: req.switchToAccount ? { ...recorded, accountId: req.switchToAccount } : recorded } : {}),
+      ...(recorded ? { inherit: recordedAccountId && recordedAccountId !== recorded.accountId ? { ...recorded, accountId: recordedAccountId } : recorded } : recordedAccountId ? { accountId: recordedAccountId } : {}),
       attach: req.attach,
       ...(recorded?.task ? { task: recorded.task } : {}),
       // A TAKEOVER just ENDED the process this spawn replaces (`endProcess` above) — the net memory

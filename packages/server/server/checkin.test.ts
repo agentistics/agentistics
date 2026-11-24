@@ -5,6 +5,7 @@ import {
   checkinAccountLimits, checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, PLAIN_REPORT_AUTONOMOUS, deliveredOpenLine, fechamentoLines, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
   runNow, checkinTick, resetCheckinSweep, type CheckinAction, type FechamentoItem, type CheckinDeps, type CheckinNeed, validateCheckinRound,
 } from './checkin'
+import { custodyCheckinLine } from './delivery/custody'
 
 let preferences: Record<string, unknown> = {}
 let fleetReads = 0
@@ -34,6 +35,7 @@ const testDeps: Partial<CheckinDeps> = {
   readCheckinLimits: async () => limits,
   readCheckinRelease: async () => release,
   readCheckinMcpConfigs: async cwd => { mcpCwds.push(cwd); return mcp },
+  readCustody: async () => '',
   newEventId: (() => 'event-1') as CheckinDeps['newEventId'],
   dataDir: '/tmp/checkin-test',
   sseClients: fakeSseClients as CheckinDeps['sseClients'],
@@ -327,6 +329,22 @@ describe('check-in agenda', () => {
     setCheckinDeps({ ...testDeps, readDeliveredOpen: async () => [{ sessionId: 'wk-1', handbackAt: 'x' }] })
     expect(await runNow(leader.conversationId, 1_000)).toBe(true)
     expect(prompts[0].text).toBe(promptFor(defaultConfig()) + deliveredOpenLine([{ sessionId: 'wk-1', handbackAt: 'x' }]))
+  })
+
+  test('ENTREGA.GARANTIDA S7b: the leader prompt carries ITS custody line; another leader\'s round does not; a new custody is not idle-skipped', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    const asked: string[] = []
+    const line = custodyCheckinLine({ held: [{ key: 's-orph', taskId: 't-x', phase: 'revisao_lider', project: 'acme/app', since: 'x' }], queue: [] })
+    expect(line).toContain('s-orph')
+    setCheckinDeps({ ...testDeps, readCustody: async id => { asked.push(id); return id === leader.id ? line : '' } })
+    expect(await runNow(leader.conversationId, 1_000)).toBe(true)
+    expect(asked).toContain(leader.id)
+    expect(prompts[0].text).toBe(promptFor(defaultConfig()) + line)
+    // control: with nothing in custody the prompt is exactly what it always was
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    expect(await runNow(leader.conversationId, 1_000)).toBe(true)
+    expect(prompts[0].text).toBe(promptFor(defaultConfig()))
+    expect(custodyCheckinLine({ held: [], queue: [] })).toBe('')
   })
 
   test('F5.b: the three groups — not saved (with the reason), still open, ready to clean — each only when it has someone', () => {

@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path'
 import type { PlanLimits } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
 import { withFileLock } from './sessions/file-lock'
+import { durableWrite } from './durable-file'
 
 /** One model group's week reading inside a point (scoped harnesses, e.g. Antigravity). */
 export interface ScopePoint { weekPct: number; weekReset?: number }
@@ -124,10 +125,8 @@ export async function flush(): Promise<void> {
     const disk = await readDisk()
     const out: Record<string, HistoryPoint[]> = {}
     for (const k of new Set([...Object.keys(disk), ...series.keys()])) out[k] = mergeSeries(disk[k] ?? [], series.get(k) ?? [])
-    const tmp = `${FILE()}.${process.pid}.tmp`
     await mkdir(dirname(FILE()), { recursive: true })
-    await writeFile(tmp, JSON.stringify({ v: 1, series: out }), { mode: 0o600 })
-    await rename(tmp, FILE())
+    await durableWrite(FILE(), JSON.stringify({ v: 1, series: out }), 0o600)
   })
 }
 

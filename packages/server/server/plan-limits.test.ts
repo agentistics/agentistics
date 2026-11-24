@@ -573,8 +573,8 @@ test('F3: a harness whose every account is off BY SCHEDULE is listed spawnable:f
   __setHarnessAccountsForTest(store)
   await store.current(['copilot'])
   const rec = (await store.list(['copilot']))[0]!
-  await store.update(rec.id, { available: false })
-  await store.update(rec.id, { agentSchedule: { enabled: true, days: {} } })
+  await store.patchAccount(rec.id, { available: false })
+  await store.patchAccount(rec.id, { agentSchedule: { enabled: true, days: {} } })
   const body = await planLimitsPayload(undefined, now, [])
   expect(body.harnesses.copilot?.spawnable).toBe(false)
   expect(body.harnesses.copilot?.unavailableReason).toContain('day off')
@@ -609,7 +609,7 @@ test('CONTAS.AGENDA-SALVAR: Agenda on + override on reads override-on and stays 
   const body = await planLimitsPayload(undefined, now, [])
   expect(body.budgets.find(b => b.account === rec.id)?.agentUse).toMatchObject({ reason: 'override-on', on: true, enabled: true, override: true })
 })
-const updateAccountForTest = (store: { update: (id: string, patch: Record<string, unknown>) => Promise<unknown> }, id: string, patch: Record<string, unknown>) => store.update(id, patch)
+const updateAccountForTest = (store: { patchAccount: (id: string, patch: Record<string, unknown>) => Promise<unknown> }, id: string, patch: Record<string, unknown>) => store.patchAccount(id, patch)
 
 // ─── C1: meter attribution + switch detection (spec §5; D1–D3 of §1) ─────────────────────────
 
@@ -811,7 +811,7 @@ test('C2: one row per visible account; off accounts only in hiddenFromAgents; sl
   const now = now0()
   const mk = async (harness: 'claude' | 'codex', n: string, patch: { available?: boolean; nickname?: string } = {}) => {
     const { account } = await store.bind(join(dir, `${harness}-${n}`), { harness, key: `${harness}-${n}`, label: `${n}@example.com` })
-    if (Object.keys(patch).length) await store.update(account.id, patch)
+    if (Object.keys(patch).length) await store.patchAccount(account.id, patch)
     await ingestPlanLimits({ harness, account: account.id, plan: harness === 'claude' ? 'Max' : 'Plus', source: harness === 'claude' ? 'claude-stream' : 'codex-rollout', updatedAt: now,
       windows: [{ kind: '5h', usedPct: 10, resetsAt: now + 3 * H }, { kind: 'week', usedPct: 30, resetsAt: now + 72 * H }] })
     return account.id
@@ -890,7 +890,7 @@ for (const harness of HARNESS_ORDER) {
       if (retired) {
         const doc = await store.readAccounts()
         writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ ...doc, accounts: doc.accounts.map(a => a.id === hidden.id ? { ...a, retired: true } : a) }))
-      } else await store.update(hidden.id, { available: false })
+      } else await store.patchAccount(hidden.id, { available: false })
       for (const [account, burn] of [[hidden.id, 10], [visible.id, 2]] as const) {
         for (const [at, used] of [[now - H, 20], [now, 20 + burn]] as const) {
           await ingestPlanLimits({ harness, account, source: 'codex-rollout', updatedAt: at,
@@ -950,7 +950,7 @@ test('N2: real external rollout lookup crosses account roots without sharing cac
   const visibleRoot = join(dir, 'visible')
   const { account: hidden } = await store.bind(hiddenRoot, { harness: 'codex', key: 'hidden', label: 'Hidden' })
   const { account: visible } = await store.bind(visibleRoot, { harness: 'codex', key: 'visible', label: 'Visible' })
-  await store.update(hidden.id, { available: false })
+  await store.patchAccount(hidden.id, { available: false })
   const id = '11111111-2222-4333-8444-555555555555'
   const day = join(visibleRoot, 'sessions', '2026', '10', '16')
   mkdirSync(day, { recursive: true })
@@ -970,7 +970,7 @@ test('L7: default legacy labels do not duplicate real #1; hidden rows do not ski
   const store = accountsWithLogin({ value: 'unused' })
   const now = now0()
   const { account: hidden } = await store.bind(join(dir, 'hidden'), { harness: 'codex', key: 'hidden', label: 'Hidden' })
-  await store.update(hidden.id, { available: false })
+  await store.patchAccount(hidden.id, { available: false })
   const { account: first } = await store.bind(join(dir, 'first'), { harness: 'codex', key: 'first', label: 'First' })
   const { account: second } = await store.bind(join(dir, 'second'), { harness: 'codex', key: 'second', label: 'Second' })
   for (const account of ['default', first.id, second.id]) await ingestPlanLimits({ harness: 'codex', account, source: 'codex-rollout', updatedAt: now,

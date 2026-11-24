@@ -33,6 +33,7 @@ import { agentUseView, type AgentUseView } from './agent-schedule-host'
 import { defaultHomeAccount, resolveSessionAccount } from './sessions/session-account'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
+import { writeFileSynced, renameSynced } from './durable-file'
 
 let filePath: string | null = null
 const FILE = (): string => filePath ?? join(AGENTISTICS_DATA_DIR, 'plan-limits.json')
@@ -317,9 +318,9 @@ let persistFailures = 0
 const PERSIST_BASE_MS = 500
 const PERSIST_MAX_MS = 30_000
 /** Test seams: the lock, the file operations and the base delay (production uses the real ones). */
-const persistHooks = { lock: withFileLock, write: writeFile, rename, baseMs: PERSIST_BASE_MS }
+const persistHooks = { lock: withFileLock, write: writeFileSynced, rename: renameSynced, baseMs: PERSIST_BASE_MS }
 export function __setPersistHooksForTest(h: Partial<typeof persistHooks> | null): void {
-  Object.assign(persistHooks, { lock: withFileLock, write: writeFile, rename, baseMs: PERSIST_BASE_MS }, h ?? {})
+  Object.assign(persistHooks, { lock: withFileLock, write: writeFileSynced, rename: renameSynced, baseMs: PERSIST_BASE_MS }, h ?? {})
 }
 function persistSoon(): void {
   persistDirty = true

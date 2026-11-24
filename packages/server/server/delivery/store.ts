@@ -13,7 +13,7 @@
  *     offered to the callers (a half-read delivery would let a phase be skipped) but it is kept VERBATIM in
  *     `preserved` and written back with the rest.
  */
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { GuardBusy, GuardLockOrderError, withGuardLocks } from './guard-locks'
 import { inGuardTransaction, peekRuleA, serializeGuardWrite } from './guard-transaction'
@@ -21,6 +21,7 @@ import { deliveryRaises, deliveryTamper, phaseRank, GuardRefused, type GuardCont
 import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from './guard-host'
 import { withFileLock } from '../sessions/file-lock'
 import { isPhase, isPureAdoption, type DeliveryRecord } from './machine'
+import { durableWrite } from '../durable-file'
 import { createGuardsStore, type GuardsDoc, type GuardsStore } from './guards-store'
 import { deliveryReadRule, deliveryHasJournal } from './activation'
 import type { TamperView } from './guard'
@@ -94,10 +95,10 @@ export interface DeliveryStore {
   get(subtaskId: string): Promise<DeliveryRecord | null>
   /** Read-modify-write under the lock. `fn` returns the value to hand back; mutations to `doc` are persisted. Throws `DeliveryStoreUnreadable` when the file cannot be read. */
   /**
-   * `guard` (S2a, optional): who is asking. A write that RAISES a record's phase rank (revisao_lider and beyond) without one is
-   * refused by the store when the guarantee is on (`GuardRefused`, before a byte lands).
+   * `guard` (S2c, REQUIRED): who is asking. A write that RAISES a record's phase rank (revisao_lider and beyond) from a principal the
+   * rule does not accept is refused by the store when the guarantee is on (`GuardRefused`, before a byte lands). The compiler is the inventory.
    */
-  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>, options?: { evidence?: boolean; guardsPath?: string; guard?: GuardContext; stamp?: ActivityStamp | readonly ActivityStamp[] }): Promise<T>
+  update<T>(fn: (doc: DeliveryDoc) => T | Promise<T>, options: { evidence?: boolean; guardsPath?: string; guard: GuardContext; stamp?: ActivityStamp | readonly ActivityStamp[] }): Promise<T>
 }
 
 export function defaultDeliveriesPath(): string {
@@ -108,9 +109,7 @@ export function defaultDeliveriesPath(): string {
 }
 
 async function materializeDelivery(path: string, serialized: string): Promise<void> {
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
-  await writeFile(tmp, serialized, { mode: 0o600 })
-  await rename(tmp, path)
+  await durableWrite(path, serialized, 0o600)
 }
 
 /** Caller holds deliveries → guards. A rule move must resolve this commit before moving the rule. */
