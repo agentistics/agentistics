@@ -7,7 +7,8 @@
  */
 
 import { join } from 'node:path'
-import { buildLive, legacyReviewShaPieces, type ShaPiece, prepareForecastHistory, FORECAST_BUCKET_MS, FORECAST_METHOD_VERSION, type ForecastHistory } from './task-live'
+import { estimateDueDay, estimatedDueNotice, needsEstimate } from './task-estimated-due'
+import { estimateUnstartedAtMs, buildLive, legacyReviewShaPieces, type ShaPiece, prepareForecastHistory, FORECAST_BUCKET_MS, FORECAST_METHOD_VERSION, type ForecastHistory } from './task-live'
 import { readForecastAnchors, saveForecastAnchors } from './task-forecast-cache'
 import { dirsForShas } from './release-repos'
 import { firstTagContaining, publishedAmong, tagDateIn } from './release-tags'
@@ -50,7 +51,7 @@ import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './
 import { withEvidenceDeletion } from '../delivery/evidence-delete'
 import type { TaskDetail, TaskListRow } from './task-report'
 import { onBookWrite } from './task-store'
-import { GuardRefused, type GuardContext } from '../delivery/guard'
+import { GuardRefused, unattributedContext, type GuardContext } from '../delivery/guard'
 import { GuardBusy } from '../delivery/guard-locks'
 import { JOURNAL_STAMPS_PATH, MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
 
@@ -83,6 +84,8 @@ type LiveBuildCache = { key: string; builtAtMs: number; reply: Awaited<ReturnTyp
 let liveBuildCache: LiveBuildCache | null = null
 let liveBuildInFlight: { key: string; promise: Promise<LiveBuildCache> } | null = null
 let forecastHistoryCache: { key: string; history: ForecastHistory } | null = null
+/** The cohorts the last Live build prepared (none before the first build): the estimate for a piece filed without a due day reads them. */
+const estimatedDue = (): string => estimateDueDay(Date.now(), ms => estimateUnstartedAtMs(ms, forecastHistoryCache?.history.cohorts))
 const LIVE_REPLY_MAX_AGE_MS = 5_000
 
 /** Background ownership of persistence: GET only fills the in-memory projection. */
@@ -486,7 +489,7 @@ const ORPHAN_SWEEP_EVERY_MS = 10 * 60_000
 let lastOrphanSweepMs = 0
 
 /** Create a task. Title is required; a description is not — a task nobody described is a task. */
-export async function createTask(o: { title: string; detail?: string; type?: string; /** urgent | high | medium | low; absent = low. FLUXO.AVISOS 9. */ priority?: string }): Promise<Task | null> {
+export async function createTask(o: { title: string; detail?: string; type?: string; /** urgent | high | medium | low; absent = low. FLUXO.AVISOS 9. */ priority?: string; dueDate?: string; /** The write came from a verified SESSION: a missing due day is estimated and flagged. */ bySession?: boolean }): Promise<Task | null> {
   const title = o.title.trim()
   if (!title) return null
   const w = await loadTaskWorld()
@@ -509,8 +512,11 @@ export async function createTask(o: { title: string; detail?: string; type?: str
     ...(o.detail?.trim() ? { detail: o.detail.trim() } : {}),
     // Only a KNOWN type sticks — an unknown one is dropped, like a task nobody classified.
     ...(o.type && isKnownTypeId(o.type, w.book.types) ? { type: o.type } : {}),
+    // A typed day wins; a session's write with none gets an ESTIMATED one (flagged), a person's is never forced.
+    ...(o.dueDate?.trim() ? { dueDate: o.dueDate.trim() }
+      : needsEstimate({ bySession: o.bySession === true, dueDate: undefined }) ? { dueDate: estimatedDue(), dueEstimated: true } : {}),
   }
-  await w.store.upsertTask(task)
+  await w.store.upsertTask(task, unattributedContext())
   return task
 }
 
@@ -528,7 +534,11 @@ export async function editTask(
     /** The task's repository (`owner/name` or a git URL); `''` clears it. An unusable one refuses the whole edit. */
     repo?: string
     actor?: string
+    /** The write came from a verified SESSION: a task left with no due day gets an ESTIMATED one. */
+    bySession?: boolean
   },
+  /** Filled with the estimated due day when the server estimated one, so the door can tell the session. */
+  report?: { estimatedDue?: string },
 ): Promise<boolean> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
@@ -543,6 +553,13 @@ export async function editTask(
   // An unknown type is refused (nothing written) — a type is a vocabulary entry, not free text.
   const nextType = patch.type !== undefined ? patch.type.trim() : undefined
   if (nextType && !isKnownTypeId(nextType, w.book.types)) return false
+  // A typed day wins and clears the estimate flag; a session's edit that leaves the task with NO day gets an estimated one.
+  const typedDue = patch.dueDate !== undefined ? patch.dueDate.trim() : undefined
+  const standing = typedDue !== undefined ? typedDue : task.dueDate
+  const estimate = needsEstimate({ bySession: patch.bySession === true, dueDate: standing || undefined, closed: task.status === 'done' })
+  if (estimate && report) report.estimatedDue = estimatedDue()
+  const dueColumns = estimate ? { dueDate: report?.estimatedDue ?? estimatedDue(), dueEstimated: true }
+    : typedDue !== undefined ? { dueDate: typedDue, dueEstimated: false } : {}
   const ok = await w.store.patchTask(task.id, {
     ...(nextType !== undefined ? { type: nextType } : {}),
     ...(patch.title?.trim() ? { title: patch.title.trim() } : {}),
@@ -551,7 +568,7 @@ export async function editTask(
     // an empty string CLEARS, an absent key leaves the value alone.
     ...(patch.detail !== undefined ? { detail: patch.detail.trim() } : {}),
     ...(priority !== undefined ? { priority } : {}),
-    ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate.trim() } : {}),
+    ...dueColumns,
     ...(patch.startDate !== undefined ? { startDate: patch.startDate.trim() } : {}),
     // A repository written by an EDIT is said by somebody on purpose: provenance `explicit`, and the session it may once
     // have been copied from is forgotten. Only an explicit repository counts for leading (`leadOp`).
@@ -560,7 +577,7 @@ export async function editTask(
       ? { labels: patch.labels.map(l => l.trim()).filter(Boolean) }
       : {}),
     updatedAt: now,
-  })
+  }, { guard: unattributedContext() })
   if (!ok) return false
   const changes: TaskEvent[] = []
   const actor = patch.actor?.trim() || 'you'
@@ -891,8 +908,15 @@ export async function removeComment(commentId: string): Promise<boolean> {
  * (`patchSubtask({ parentGroupId })`), which a bare boolean could not carry.
  */
 export async function addSubtask(
-  ref: string, title: string, o: { isGroup?: boolean } = {},
+  ref: string, title: string, o: { isGroup?: boolean; dueDate?: string; bySession?: boolean } = {},
 ): Promise<string | null> {
+  return (await addSubtaskDetailed(ref, title, o))?.id ?? null
+}
+
+/** `addSubtask`, answering with the due day the piece ended up with — typed, or ESTIMATED when a session filed it with none. */
+export async function addSubtaskDetailed(
+  ref: string, title: string, o: { isGroup?: boolean; dueDate?: string; bySession?: boolean; guard?: GuardContext } = {},
+): Promise<{ id: string; dueDate?: string; dueEstimated?: boolean } | null> {
   const t = title.trim()
   if (!t) return null
   const w = await loadTaskWorld()
@@ -900,12 +924,18 @@ export async function addSubtask(
   if (!task) return null
   const now = new Date().toISOString()
   const id = newSubtaskId()
+  const typed = o.dueDate?.trim() || undefined
+  const dueDate = typed ?? (needsEstimate({ bySession: o.bySession === true, dueDate: undefined }) ? estimatedDue() : undefined)
+  const dueEstimated = typed === undefined && dueDate !== undefined
+  const guard = o.guard ?? unattributedContext()
   await w.store.upsertSubtask({
     id, taskId: task.id, title: t,
     status: 'todo', done: false, createdAt: now, updatedAt: now,
     ...(o.isGroup === true ? { isGroup: true } : {}),
-  })
-  return id
+    ...(dueDate ? { dueDate } : {}),
+    ...(dueEstimated ? { dueEstimated: true } : {}),
+  }, guard)
+  return { id, ...(dueDate ? { dueDate } : {}), ...(dueEstimated ? { dueEstimated: true } : {}) }
 }
 
 /**
@@ -1008,6 +1038,8 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
   startDate?: string
   sessionId?: string
   notes?: string
+  /** The write came from a verified SESSION: a subtask left with no due day gets an ESTIMATED one (flagged `dueEstimated`). */
+  bySession?: boolean
   /** Sanitized against this subtask's OWN siblings — see `sanitizeSubtaskBlockedBy`. */
   blockedBy?: string[]
   /**
@@ -1028,6 +1060,8 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
 }): Promise<
   {
     ok: true
+    /** Set when the server ESTIMATED the due day for this write (a session left the piece with none). */
+    dueEstimated?: true; dueDate?: string; notice?: string
   } | {
     ok: false
     message:
@@ -1134,6 +1168,9 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
   const startsNow = !found.startedAt && marksStart(found.status, status)
   const finishesNow = !found.deliveredAt && subtaskDone(status) && !subtaskDone(found.status)
 
+  // A typed day wins and clears the flag; a session's edit that leaves the piece with NO day gets an estimated one.
+  const standingDue = patch.dueDate !== undefined ? patch.dueDate.trim() : found.dueDate
+  const subtaskDue = { estimated: needsEstimate({ bySession: patch.bySession === true, dueDate: standingDue || undefined, closed: subtaskDone(status) }) ? estimatedDue() : undefined }
   await w.store.upsertSubtask({
     ...found,
     ...(patch.title?.trim() ? { title: patch.title.trim() } : {}),
@@ -1143,7 +1180,8 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
     // An empty string CLEARS the column — that is how a date is removed, and it is why these are
     // not filtered out the way an empty title is. `startedAt`/`deliveredAt` are NEVER taken from
     // the caller (there is no field for either above) — only ever stamped here, by the system.
-    ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate } : {}),
+    ...(subtaskDue.estimated ? { dueDate: subtaskDue.estimated, dueEstimated: true }
+      : patch.dueDate !== undefined ? { dueDate: patch.dueDate, dueEstimated: undefined } : {}),
     ...(patch.startDate !== undefined ? { startDate: patch.startDate } : {}),
     ...(startsNow ? { startedAt: now } : {}),
     ...(finishesNow ? { deliveredAt: now } : {}),
@@ -1217,7 +1255,7 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
     await (await import('../delivery/host')).deliveryService().foldGroupMember(subtaskId)
       .catch(() => { console.warn('[delivery] group queue fold pending; the minute tick will retry') })
   }
-  return { ok: true }
+  return { ok: true, ...(subtaskDue.estimated ? estimatedDueNotice(subtaskDue.estimated) : {}) }
 }
 
 type PlaceholderReply = { ok: true } | { ok: false; reason: 'placeholder_protected' | 'not_a_placeholder' | 'no_such_subtask' | 'member_accepted' | 'owner_proof_required'; message: string }

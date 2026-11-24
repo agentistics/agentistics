@@ -2477,8 +2477,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(found)
     }
     if (url.pathname === '/api/tasks' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string; priority?: string }
+      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string; priority?: string; dueDate?: string; session?: { id?: unknown } | null }
       const { createTask } = await import('./sessions/task-web')
+      // CALENDARIO.PRAZO-OBRIGATORIO: a verified SESSION's create with no due day gets an ESTIMATED one (the 403 screen above already refused a forged proof).
+      const bySession = !!body.session && typeof body.session === 'object' && typeof body.session.id === 'string'
       // FLUXO.AVISOS 9: an unknown priority word is refused, never silently stored as `low`.
       if (body.priority !== undefined && !['urgent', 'high', 'medium', 'low'].includes(body.priority)) return json({ error: 'bad_priority', message: 'priority must be urgent | high | medium | low' }, 400)
       const made = await createTask({
@@ -2486,9 +2488,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         ...(body.detail !== undefined ? { detail: body.detail } : {}),
         ...(typeof body.type === 'string' ? { type: body.type } : {}),
         ...(body.priority !== undefined ? { priority: body.priority } : {}),
+        ...(typeof body.dueDate === 'string' ? { dueDate: body.dueDate } : {}),
+        ...(bySession ? { bySession: true } : {}),
       })
       if (!made) return json({ error: 'title_required' }, 400)
-      return json({ task: made })
+      const { estimatedDueNotice } = await import('./sessions/task-estimated-due')
+      return json({ task: made, ...(made.dueEstimated && made.dueDate ? estimatedDueNotice(made.dueDate) : {}) })
     }
 
     // A task file, by its own id. Separate from the task routes because a download is addressed by
@@ -2872,6 +2877,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             ...(typeof body.title === 'string' ? { title: body.title } : {}),
             ...(typeof body.status === 'string' ? { status: body.status as never } : {}),
             ...(typeof body.dueDate === 'string' ? { dueDate: body.dueDate } : {}),
+            ...(sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string' ? { bySession: true } : {}),
             ...(typeof body.startDate === 'string' ? { startDate: body.startDate } : {}),
             ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
             ...(typeof body.notes === 'string' ? { notes: body.notes } : {}),
@@ -2917,10 +2923,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // back so a caller minting a group (rather than an ordinary subtask) can join members to
         // it in the same flow — a bare `{ ok }` gave the "create a group with…" gesture nothing to
         // join against.
-        const newId = await mod.addSubtask(ref, String(body.title ?? ''), {
+        const made = await mod.addSubtaskDetailed(ref, String(body.title ?? ''), {
           ...(body.isGroup === true ? { isGroup: true } : {}),
+          ...(typeof body.dueDate === 'string' ? { dueDate: body.dueDate } : {}),
+          ...(sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string' ? { bySession: true } : {}),
         })
-        return json({ ok: newId !== null, id: newId }, newId !== null ? 200 : 400)
+        const { estimatedDueNotice } = await import('./sessions/task-estimated-due')
+        return json({ ok: made !== null, id: made?.id ?? null, ...(made?.dueEstimated && made.dueDate ? estimatedDueNotice(made.dueDate) : {}) }, made !== null ? 200 : 400)
       }
       if (verb === 'claim') {
         // `release: true` gives it back; anything else takes it. One verb, because a caller holding
@@ -2976,14 +2985,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           })
           if (refused) return json(refused.body, refused.status)
         }
+        const estimateReport: { estimatedDue?: string } = {}
         const ok = await mod.editTask(ref, {
           ...Object.fromEntries(FIELDS.filter(f => typeof body[f] === 'string').map(f => [f, body[f] as string])),
           ...(Array.isArray(body.labels)
             ? { labels: body.labels.filter((v): v is string => typeof v === 'string') }
             : {}),
           ...(typeof body.actor === 'string' ? { actor: body.actor } : {}),
-        })
-        return json({ ok }, ok ? 200 : 404)
+          ...(sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string' ? { bySession: true } : {}),
+        }, estimateReport)
+        const { estimatedDueNotice } = await import('./sessions/task-estimated-due')
+        return json({ ok, ...(estimateReport.estimatedDue ? estimatedDueNotice(estimateReport.estimatedDue) : {}) }, ok ? 200 : 404)
       }
       // Blockers ALONE. With a `status` beside them the two belong to one move — "this is blocked,
       // and here is what by" — and answering it here would set the blockers and silently drop the

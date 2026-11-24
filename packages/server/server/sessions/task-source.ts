@@ -5,6 +5,8 @@
  * about which sessions a task holds. The arithmetic on top of it is the pure `task-report.ts`.
  */
 
+import { planDueBackfill } from './task-estimated-due'
+import { estimateUnstartedAtMs } from './task-live'
 import { TASKS_FILE } from '../config'
 import { ensureStatusStages } from './status-stage-sync'
 import { loadConsolidated } from '../consolidate'
@@ -133,6 +135,17 @@ async function ensureInReview(store: TaskStore, book: TaskBook): Promise<boolean
   return true
 }
 
+/**
+ * CALENDARIO.PRAZO-OBRIGATORIO: every OPEN subtask with no due day gets an ESTIMATED one, once per book. The flag on the
+ * book is what makes it idempotent — a later person-made subtask without a day is not this pass's business.
+ */
+async function ensureEstimatedDues(store: TaskStore, book: TaskBook): Promise<boolean> {
+  if (book.dueBackfilled) return false
+  const plan = planDueBackfill(book.subtasks, Date.now(), ms => estimateUnstartedAtMs(ms))
+  await store.backfillEstimatedDue(plan)
+  return true
+}
+
 /** Seed the TYPE list once (CORE) and run the one-time core-status → type migration. Same shape as above. */
 async function ensureTypesSeeded(store: TaskStore, book: TaskBook): Promise<boolean> {
   let wrote = false
@@ -167,6 +180,7 @@ async function readSeededBook(store: TaskStore, registryRows: readonly ManagedSe
     b => ensureStatusStages(store, b, TASKS_FILE),
     b => ensureInReview(store, b),
     b => ensureTypesSeeded(store, b),
+    b => ensureEstimatedDues(store, b),
   ]
   for (const pass of passes) {
     if (await pass(book)) book = await store.read()

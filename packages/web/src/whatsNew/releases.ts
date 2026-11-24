@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.228.0': {
+    features: [
+      {
+        pt: 'Calendário: tarefa ou subtarefa criada por uma sessão sem prazo agora ganha um prazo estimado, marcado como "estimado"; informar o prazo substitui a estimativa.',
+        en: 'Calendar: a task or subtask a session files without a due date now gets an estimated one, marked "estimated"; setting the date replaces the estimate.',
+      },
+    ],
+    fixes: [],
+  },
   '2.226.0': {
     features: [
       {

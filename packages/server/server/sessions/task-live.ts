@@ -446,6 +446,11 @@ function projectDistribution(d: Distribution, o: EstimateOptions, general: Distr
     ...(overrunAnchorAtMs !== undefined ? { overrunAnchorAtMs } : {}) }
 }
 
+/** The instant the forecast puts publication at for a piece that has not started (what a due day is estimated from). */
+export function estimateUnstartedAtMs(nowMs: number, cohorts?: ForecastCohorts): number {
+  return estimateEta({ nowMs, startedAtMs: null, harness: null, model: null, ...(cohorts ? { cohorts } : { samples: [] }) }).atMs
+}
+
 /** PURE: an approximation always exists, including cold starts and overruns. */
 export function estimateEta(o: EstimateOptions): ForecastEstimate {
   const c = o.cohorts ?? buildForecastCohorts(o.samples ?? [], o.nowMs)
