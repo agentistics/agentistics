@@ -7,6 +7,7 @@ import { createTaskStore } from '../sessions/task-store'
 import { buildTaskDetail } from '../sessions/task-report'
 import { buildLive } from '../sessions/task-live'
 import { registerComposerTask, type ComposerTaskDeps } from './composer-task'
+import { unattributedContext } from '../delivery/guard'
 
 const dirs: string[] = []
 afterEach(async () => { await Promise.all(dirs.splice(0).map(d => rm(d, { recursive: true, force: true }))) })
@@ -15,7 +16,7 @@ async function world() {
   const file = join(dir, 'tasks.json')
   const store = createTaskStore(file)
   const task = { id: 't1', title: 'Delivery', status: 'in_progress', createdAt: '2026-11-09T10:00:00Z', updatedAt: '2026-11-09T10:00:00Z' }
-  await store.upsertTask(task)
+  await store.upsertTask(task, unattributedContext())
   const pedidos = new Map<string, { state: string; linkedSubtaskIds: string[] }>()
   const emitted: string[] = []
   const d: ComposerTaskDeps = {
@@ -82,7 +83,7 @@ test('automatic placement already linked the pedido: preserve and enrich its car
     emit: async event => {
       const p = event.payload
       pedidoId = `p-${createHash('sha256').update(`${p.conversationId}\0${p.at}\0${p.text}`).digest('hex').slice(0, 12)}`
-      await x.store.upsertSubtask({ id: 's-placed', taskId: 't1', title: `Owner request · ${pedidoId}`, status: 'todo', done: false, createdAt: String(p.at), updatedAt: String(p.at) })
+      await x.store.upsertSubtask({ id: 's-placed', taskId: 't1', title: `Owner request · ${pedidoId}`, status: 'todo', done: false, createdAt: String(p.at), updatedAt: String(p.at) }, unattributedContext())
       return []
     },
     pedido: async () => ({ id: pedidoId, taskId: 't1', state: 'linked', linkedSubtaskIds: ['s-placed'] }),
@@ -92,8 +93,8 @@ test('automatic placement already linked the pedido: preserve and enrich its car
   const adoption = spyOn(x.store, 'registerComposerSubtask').mockImplementation(async card => {
     // A worker can file the engine's card after the caller read it but before the store's lock.
     const placed = (await x.store.read()).subtasks.find(s => s.id === 's-placed')!
-    await x.store.upsertSubtask({ ...placed, status: 'in_progress', assignee: 'worker' })
-    return register(card)
+    await x.store.upsertSubtask({ ...placed, status: 'in_progress', assignee: 'worker' }, unattributedContext())
+    return register(card, unattributedContext())
   })
   const result = await registerComposerTask(request, 'en', d)
   adoption.mockRestore()
@@ -106,7 +107,7 @@ test('automatic placement already linked the pedido: preserve and enrich its car
 test('a canonical link to an unrelated card is refused without changing or deleting it', async () => {
   const x = await world()
   const alien = { id: 's-alien', taskId: 't1', title: 'Unrelated work', status: 'in_progress', done: false, createdAt: '2026-11-09T10:00:00Z', updatedAt: '2026-11-09T10:00:00Z' }
-  await x.store.upsertSubtask(alien)
+  await x.store.upsertSubtask(alien, unattributedContext())
   const result = await registerComposerTask(request, 'en', { ...x.d, pedido: async () => ({ id: 'p-other', taskId: 't1', state: 'linked', linkedSubtaskIds: [alien.id] }) })
   expect(result.ok).toBe(false)
   expect((await x.store.read()).subtasks).toEqual([alien])
@@ -128,7 +129,7 @@ test('event rollback never removes an unrelated concurrent subtask', async () =>
   const alien = { id: 's-alien', taskId: 't1', title: 'Parallel work', status: 'todo' as const, done: false,
     createdAt: '2026-11-09T12:00:00.000Z', updatedAt: '2026-11-09T12:00:00.000Z' }
   const d = { ...x.d, emit: async () => {
-    await x.store.upsertSubtask(alien)
+    await x.store.upsertSubtask(alien, unattributedContext())
     throw new Error('event failed')
   } }
   expect((await registerComposerTask(request, 'en', d)).ok).toBe(false)
@@ -196,7 +197,7 @@ async function asyncEngineWorld(stepMs: number, linkWorks = true) {
       chain = chain.then(async () => {
         await new Promise(r => setTimeout(r, stepMs))
         await x.store.upsertSubtask({ id: `s-flow-${id}`, taskId: 't1', title: `Owner's request: ${String(event.payload.text)} [high priority] · ${id}`,
-          status: 'todo', done: false, createdAt: '2026-11-09T12:00:00.000Z', updatedAt: '2026-11-09T12:00:00.000Z' })
+          status: 'todo', done: false, createdAt: '2026-11-09T12:00:00.000Z', updatedAt: '2026-11-09T12:00:00.000Z' }, unattributedContext())
         done.add(id)
       })
       return { status: 'success' }
@@ -214,7 +215,7 @@ const mk = (n: number, text = `Task number ${n}`) => ({ ...request, messageId: `
 test('concurrent sends (3 at once, then the same text twice) each register exactly one linked subtask and leave no orphan card', async () => {
   const x = await asyncEngineWorld(30)
   const alien = { id: 's-alien', taskId: 't1', title: 'Parallel work', status: 'todo' as const, done: false, createdAt: '2026-11-09T12:00:00.000Z', updatedAt: '2026-11-09T12:00:00.000Z' }
-  await x.store.upsertSubtask(alien)
+  await x.store.upsertSubtask(alien, unattributedContext())
   const results = await Promise.all([1, 2, 3].map(n => registerComposerTask(mk(n), 'en', x.d)))
   expect(results.map(r => r.ok)).toEqual([true, true, true])
   await x.drain()
@@ -231,7 +232,7 @@ test('concurrent sends (3 at once, then the same text twice) each register exact
 test('a failed registration whose flow card lands late leaves zero cards of its own and never touches a foreign one', async () => {
   const x = await asyncEngineWorld(60, false)
   const alien = { id: 's-alien', taskId: 't1', title: 'Parallel work', status: 'todo' as const, done: false, createdAt: '2026-11-09T12:00:00.000Z', updatedAt: '2026-11-09T12:00:00.000Z' }
-  await x.store.upsertSubtask(alien)
+  await x.store.upsertSubtask(alien, unattributedContext())
   expect((await registerComposerTask(mk(1), 'en', x.d)).ok).toBe(false)
   await x.drain()
   expect((await x.store.read()).subtasks.map(s => s.id)).toEqual(['s-alien'])

@@ -54,10 +54,14 @@ test('a piece that finished without release proof stays in Tudo and never in que
   expect(v.view.counts).toMatchObject({ all: 1, queue: 0, published: 0 })
 })
 
-test('no-repos cannot borrow a matching commit from a different checkout to claim publication', () => {
+// LIVE.COLUNAS-PRESAS C1 (leader decision 23/11): the reconcile's "no repository is known" is about the PR lookup, not about
+// the commit — the git lookup behind `publishedShas` asks the clones agentistics knows. It vetoed 46 shipped pieces for weeks.
+test('no-repos never vetoes a commit a release tag holds; a commit no tag holds still proves nothing', () => {
   const extra = { unchecked: new Set(['s-a7e7d9df9f']), uncheckedWhy: new Map([['s-a7e7d9df9f', 'no-repos']]), publishedShas: new Set(['abc12345']) }
-  expect(view([detail([sub('s-a7e7d9df9f', { notes: 'sha abc12345' })])], extra).deliveries[0]).toMatchObject({ stage: 'leader', old: true })
-  expect(view([detail([sub('s-a7e7d9df9f', { status: 'done', notes: 'sha abc12345' })])], extra).deliveries[0]).toMatchObject({ stage: 'completed' })
+  const stageOf = (v: ReturnType<typeof view>) => [...v.deliveries].find(d => d.subtaskId === 's-a7e7d9df9f')?.stage
+  expect(stageOf(view([detail([sub('s-a7e7d9df9f', { notes: 'sha abc12345' })])], extra))).toBe('published')
+  expect(stageOf(view([detail([sub('s-a7e7d9df9f', { status: 'done', notes: 'sha abc12345' })])], extra))).toBe('published')
+  expect(view([detail([sub('s-a7e7d9df9f', { notes: 'sha def67890' })])], extra).deliveries[0]).toMatchObject({ stage: 'leader', old: true })
 })
 
 test('Engine task with open subtasks is not a second review card', () => {

@@ -5,7 +5,15 @@ import { carryingContext, missingContext, missingContextSites } from './guard-si
 import { historicInventory, inventoryGrowth } from './guard-inventory.testing'
 
 const PKGS = join(import.meta.dir, '..', '..', '..')
-describe('GuardContext call sites (pinned historical identities, only shrinking)', () => {
+describe('GuardContext call sites (S2c: the allowlist is EMPTY and stays empty)', () => {
+  test('the pinned allowlist holds no entry and no production site lacks its context', () => {
+    expect(historicInventory().contexts).toEqual({})
+    const missing: string[] = []
+    for (const rel of productionSources(join(PKGS, 'server'), PKGS).filter(r => !isBuildOutput(r))) {
+      for (const id of missingContextSites(read(PKGS, rel))) missing.push(`${rel}:${id}`)
+    }
+    expect(missing).toEqual([])
+  }, 30_000)
   test('every new or changed site must pass a context', () => {
     const actual: Record<string, string[]> = {}
     let carrying = 0

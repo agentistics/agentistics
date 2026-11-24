@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, describe, expect, test } from 'bun:test'
 import { buildCalendar, calendarToIcs, filterCalendar } from '@agentistics/core'
 import { answerCalendar, calendarFiltersOf, calendarFrom, releasesFromPieceTags, subtaskInputs } from './calendar'
 
@@ -85,6 +85,10 @@ describe('the Cronograma group level (parentGroupId)', () => {
 })
 
 describe('the app\'s own releases are not the user\'s versions', () => {
+  // `mock.module` outlives the file: the full run is ONE process, so every later file importing '../version' (version, upgrade,
+  // self-guard, restart-pending) would get the stub below. Capture the real module first and put it back when this block ends.
+  const realVersion = import('../version').then(m => ({ ...m }))
+  afterAll(async () => { const real = await realVersion; const { mock } = await import('bun:test'); mock.module('../version', () => real) })
   const APP_RELEASES = ['2.204.3', '2.205.0', '2.217.1'].map(v => ({ tag: `v${v}`, published_at: '2026-11-10T12:00:00.000Z' }))
   test('readCalendarSources never reads the update feed: app releases available, no records/tags -> 0 versions', async () => {
     const { mock } = await import('bun:test')

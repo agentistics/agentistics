@@ -19,7 +19,7 @@
  */
 
 import { mkdir, readFile, rename, stat } from 'node:fs/promises'
-import { alertQuarantined, durableWrite, hasQuarantine, readLastGood, recoverVanished, refreshLastGood } from '../durable-file'
+import { alertQuarantined, durableWrite, emptiesExistingLedger, hasQuarantine, readLastGood, recoverVanished, refreshLastGood, sweepStaleDurableTmps } from '../durable-file'
 import { dirname, join } from 'node:path'
 import { isStatusStage, isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import { inGuardTransaction, peekRuleA, RuleNoLongerOff, serializeGuardWrite, withGuardEnvelope } from '../delivery/guard-transaction'
@@ -94,11 +94,11 @@ export interface TaskStore {
   read(): Promise<TaskBook>
   /** True when this book was lost once (`<file>.corrupt-*` exists): an empty book is then not a fresh install. */
   wasQuarantined(): Promise<boolean>
-  /** `guard` (S2a, optional): who is asking — a write that RAISES a piece's rank without one is refused when the guarantee is on. */
-  upsertTask(task: Task, guard?: GuardContext): Promise<void>
+  /** `guard` (S2c, REQUIRED): who is asking — a write that RAISES a piece's rank from an unaccepted principal is refused when the guarantee is on. */
+  upsertTask(task: Task, guard: GuardContext): Promise<void>
   upsertAttempt(attempt: Attempt): Promise<void>
   /** False when no record carries that id — never a silent success. */
-  patchTask(id: string, patch: TaskPatch, o?: { allowOpenSubtasks?: boolean; guard?: GuardContext }): Promise<boolean>
+  patchTask(id: string, patch: TaskPatch, o: { allowOpenSubtasks?: boolean; guard: GuardContext }): Promise<boolean>
   patchAttempt(id: string, patch: AttemptPatch): Promise<boolean>
   addComment(c: TaskComment): Promise<void>
   /**
@@ -117,11 +117,11 @@ export interface TaskStore {
   upsertThread(t: TaskThread): Promise<void>
   updateThread(id: string, fn: (t: TaskThread) => TaskThread): Promise<boolean>
   updateComment(id: string, fn: (c: TaskComment) => TaskComment): Promise<boolean>
-  upsertSubtask(t: Subtask, guard?: GuardContext): Promise<void>
+  upsertSubtask(t: Subtask, guard: GuardContext): Promise<void>
   /** Atomic insert/adopt by message id; retries and adoption never overwrite progress. */
-  registerComposerSubtask(t: Subtask, guard?: GuardContext): Promise<Subtask | null>
+  registerComposerSubtask(t: Subtask, guard: GuardContext): Promise<Subtask | null>
   /** `dismissPlaceholder`: a leader/owner removing a guard placeholder (B4) — the write records the removal and raises nothing. */
-  removeSubtask(id: string, opts?: { dismissPlaceholder?: GuardContext; ownerRemoval?: GuardContext; guard?: GuardContext }): Promise<boolean>
+  removeSubtask(id: string, opts: { guard: GuardContext; dismissPlaceholder?: GuardContext; ownerRemoval?: GuardContext }): Promise<boolean>
   /** r3: the group this piece is an ACCEPTED (`done`) member of, per the sealed group checkpoint; null for any other piece (or an unreadable guards.json). */
   acceptedMemberOf(id: string): Promise<{ groupId: string; status: string } | null>
   /** B4 r2: the sweep's LEDGER record that makes this piece a placeholder (present, not dismissed), else null — the `restoredBy` flag alone is never authority. */
@@ -135,7 +135,7 @@ export interface TaskStore {
    * Sessions are NOT touched: a row's `taskId` becomes a dangling reference, which reads as
    * "no attempt named" rather than vanishing. Deleting a board entry must never delete work.
    */
-  removeTask(id: string, deletion?: TaskDeletionPort, opts?: { guard?: GuardContext }): Promise<boolean>
+  removeTask(id: string, deletion: TaskDeletionPort | undefined, opts: { guard: GuardContext }): Promise<boolean>
   /** Forget a tombstone, so a name the user deleted can be created again. */
   clearTombstone(id: string): Promise<void>
   /**
@@ -509,7 +509,22 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
     ...(normalizeStagedSession(t.stagedSession) ? { stagedSession: normalizeStagedSession(t.stagedSession)! } : {}),
     // FLUXO.ENTREGA-DSL — the delivery flow's CI signal; same whitelist reason as the fields above.
     ...(t.ci && typeof t.ci === 'object' ? { ci: sanitizeCi(t.ci) } : {}),
+    // LIVE.COLUNAS-PRESAS — where the piece's work lives (`SubtaskProvenance`); same whitelist reason.
+    ...(sanitizeProvenance(t.provenance) ? { provenance: sanitizeProvenance(t.provenance)! } : {}),
   }
+}
+
+/** A provenance with nothing in it, or with a malformed member, is dropped/filtered — never repaired into a claim. */
+function sanitizeProvenance(raw: unknown): Subtask['provenance'] | null {
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as Record<string, unknown>
+  const list = (v: unknown, ok: (s: string) => boolean) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && ok(x)) : [])
+  const repos = list(p.repos, s => /^[\w.-]+\/[\w.-]+$/.test(s))
+  const branches = list(p.branches, s => s.length > 0 && s.length <= 200)
+  const commits = list(p.commits, s => /^[0-9a-f]{40}$/.test(s))
+  const at = str(p.at)
+  if (!at || repos.length + branches.length + commits.length === 0) return null
+  return { repos, branches, commits, at }
 }
 
 /** A status entry with no `id`, no `label` or an invalid `color` is dropped outright — a half-read
@@ -625,6 +640,8 @@ export type TaskDeletionPort = (remove: () => Promise<boolean>, held: { tasks: b
 const directDeletion: TaskDeletionPort = remove => remove()
 
 export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}): TaskStore {
+  // Temp files a killed writer left beside the board (other pid, older than 10 min) are removed once per store.
+  void sweepStaleDurableTmps(dirname(file)).catch(() => {})
   // One in-process writer. Each mutation appends to this chain, so read-modify-write sequences run
   // strictly one after another even when several land at once.
   let queue: Promise<unknown> = Promise.resolve()
@@ -765,6 +782,21 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
     try { cps = (await createGuardsStore(anchor.paths.guards).read()).checkpoints } catch { return [] }
     return candidates.flatMap(s => cps[s.parentGroupId!]?.members?.[s.id]?.status === 'done' ? [{ id: s.id, groupId: s.parentGroupId! }] : [])
   }
+  /**
+   * S2c.2: under rule ON a DELETION needs a proven principal. The doors hand over `unattributed` for "no proof at all" and a
+   * missing context for "a door that forgot"; neither may remove a task or a piece. Rule off / shadow decide nothing here
+   * (`currentBase` = the rule was off when the mutation began), so deleting accepted work stays exactly as blocked as before.
+   */
+  async function requireProvenPrincipal(id: string): Promise<void> {
+    if (currentBase) return
+    if (currentGuard && currentGuard.principal.kind !== 'unattributed') return
+    if (await ruleAState(anchor.dir) !== 'on') return
+    throw new GuardRefused({
+      code: 'guard_context_required', piece: id, missing: ['a proven principal'],
+      message: `This write deletes ${id} but its caller could not prove who is asking, so the store refuses it — under the delivery guarantee a removal needs the owner or a verified session.`,
+      messagePt: `Esta escrita remove ${id} mas quem pediu não provou quem é, então o armazém recusa — com a garantia ligada, remover exige o dono ou uma sessão verificada.`,
+    })
+  }
   /** r7: only the owner whose proof is the vault may remove or reopen an ACCEPTED piece; every session, flow or header owner is refused HERE, at the write, so every door is covered. */
   const isVaultOwner = (g?: GuardContext): boolean => g?.principal.kind === 'owner' && g.principal.via === 'vault-credential'
   const acceptedRefusal = (code: 'accepted_members' | 'accepted_reopen', what: string, ids: string[]): GuardRefused => new GuardRefused({
@@ -868,8 +900,10 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
       corrupt = false
     }
     const text = JSON.stringify(book, null, 2)
+    const isEmpty = book.tasks.length === 0 && book.subtasks.length === 0
+    const removedAll = await emptiesExistingLedger(file, text, isEmpty)
     await durableWrite(file, text)
-    await refreshLastGood(file, text, Date.now(), undefined, book.tasks.length === 0 && book.subtasks.length === 0)
+    await refreshLastGood(file, text, Date.now(), undefined, isEmpty && !removedAll, removedAll)
     for (const fn of [...bookWriteListeners]) { try { fn() } catch { /* a listener never fails a write */ } }
   }
 
@@ -1033,16 +1067,17 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         const book = await read()
         if (!book.subtasks.some(t => t.id === id)) return false
         // B4 r2: only a piece the sweep's ledger names may be dismissed this way; the dismissal is marked in the ledger in the same locked section.
-        const ledger = opts?.dismissPlaceholder ? await readLedger() : null
-        if (opts?.dismissPlaceholder && !activePlaceholder(ledger ?? undefined, id)) return false
+        const ledger = opts.dismissPlaceholder ? await readLedger() : null
+        if (opts.dismissPlaceholder && !activePlaceholder(ledger ?? undefined, id)) return false
         // r7: a GROUP holding an accepted member goes only by the owner with a vault proof (its members would be orphaned from the acceptance).
         const acceptedInGroup = await acceptedMembers(book, t => t.parentGroupId === id)
-        if (acceptedInGroup.length && !isVaultOwner(opts?.ownerRemoval ?? opts?.guard)) throw acceptedRefusal('accepted_members', `Group ${id}`, acceptedInGroup.map(a => a.id))
+        if (acceptedInGroup.length && !isVaultOwner(opts.ownerRemoval ?? opts.guard)) throw acceptedRefusal('accepted_members', `Group ${id}`, acceptedInGroup.map(a => a.id))
         // r8 B: an individual ACCEPTED member goes only by the vault-proven owner too (with or without opts).
         const acceptedSelf = await acceptedMembers(book, t => t.id === id)
-        if (acceptedSelf.length && !isVaultOwner(opts?.ownerRemoval ?? opts?.guard)) throw acceptedRefusal('accepted_members', `Piece ${id}`, [id])
-        dismissing = !!opts?.dismissPlaceholder || !!opts?.ownerRemoval || (acceptedInGroup.length > 0) || (acceptedSelf.length > 0)
-        const removedGroup = opts?.ownerRemoval ? book.subtasks.find(t => t.id === id)?.parentGroupId : undefined
+        if (acceptedSelf.length && !isVaultOwner(opts.ownerRemoval ?? opts.guard)) throw acceptedRefusal('accepted_members', `Piece ${id}`, [id])
+        await requireProvenPrincipal(id)
+        dismissing = !!opts.dismissPlaceholder || !!opts.ownerRemoval || (acceptedInGroup.length > 0) || (acceptedSelf.length > 0)
+        const removedGroup = opts.ownerRemoval ? book.subtasks.find(t => t.id === id)?.parentGroupId : undefined
         try {
         // A GROUP's former MEMBERS become ordinary loose subtasks again — the natural fallback,
         // since a member without a group is exactly what a loose subtask is (§F.1). Done in the
@@ -1088,13 +1123,13 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         })
         // r3: an OWNER removal of an accepted member is recorded in the ledger (same locked section) so the sweep neither restores nor reports it.
         // With the rule off (`currentBase`) only the tasks lock is held and no sweep runs, so there is nothing to record.
-        if (opts?.ownerRemoval && removedGroup && !currentBase) {
+        if (opts.ownerRemoval && removedGroup && !currentBase) {
           const g = createGuardsStore(anchor.paths.guards)
           const doc = await g.read()
           await g.write({ ...doc, sweep: { ...(doc.sweep ?? { reverts: {} }), ownerRemoved: { ...(doc.sweep?.ownerRemoved ?? {}), [id]: { groupId: removedGroup, at: new Date().toISOString() } } } })
         }
         await recordOwnerRemoval([...acceptedInGroup, ...acceptedSelf])
-        if (opts?.dismissPlaceholder && !currentBase) {
+        if (opts.dismissPlaceholder && !currentBase) {
           const g = createGuardsStore(anchor.paths.guards)
           const doc = await g.read()
           const rec = doc.sweep?.placeholders?.[id]
@@ -1102,7 +1137,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         }
         return true
         } finally { dismissing = false }
-      }, opts?.dismissPlaceholder ?? opts?.ownerRemoval ?? opts?.guard)
+      }, opts.dismissPlaceholder ?? opts.ownerRemoval ?? opts.guard)
     },
     async acceptedMemberOf(id) {
       const group = (await read()).subtasks.find(t => t.id === id)?.parentGroupId
@@ -1127,13 +1162,15 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         return true
       }, { tasks: !held.contended }))
     },
-    removeTask(id, deletion = directDeletion, opts) {
-      return enqueue(held => deletion(async () => {
+    removeTask(id, deletion, opts) {
+      const run = deletion ?? directDeletion
+      return enqueue(held => run(async () => {
         const book = await read()
         if (!book.tasks.some(t => t.id === id)) return false
         // r7 (re-QA r5 F1): a task holding an ACCEPTED member is deleted only by the owner with a vault proof; the refusal is at the store write.
         const accepted = await acceptedMembers(book, s => s.taskId === id)
-        if (accepted.length && !isVaultOwner(opts?.guard)) throw acceptedRefusal('accepted_members', `Task ${id}`, accepted.map(a => a.id))
+        if (accepted.length && !isVaultOwner(opts.guard)) throw acceptedRefusal('accepted_members', `Task ${id}`, accepted.map(a => a.id))
+        await requireProvenPrincipal(id)
         await write({
           tasks: book.tasks.filter(t => t.id !== id),
           attempts: book.attempts.filter(a => a.taskId !== id),
@@ -1159,7 +1196,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         })
         await recordOwnerRemoval(accepted)
         return true
-      }, { tasks: !held.contended }))
+      }, { tasks: !held.contended }), opts.guard)
     },
     clearTombstone(id) {
       return enqueue(async () => {

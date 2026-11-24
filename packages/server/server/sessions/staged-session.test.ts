@@ -70,7 +70,7 @@ test('patchSubtask SETS a staged session draft and it round-trips through the st
     ${task('t1')}
     ${subtask('s1', 't1')}
     const draft = { prompt: 'Fix the flaky test', attachmentIds: ['f1'], harness: 'claude', cwd: '/repo' }
-    const result = await web.patchSubtask('s1', { stagedSession: draft })
+    const result = await web.patchSubtask('s1', { stagedSession: draft }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 's1')
     console.log(JSON.stringify({ result, stagedSession: row.stagedSession ?? null }))
@@ -85,7 +85,7 @@ test('patchSubtask SETS a bare-prompt draft — everything else is optional', as
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
-    const result = await web.patchSubtask('s1', { stagedSession: { prompt: 'do it' } })
+    const result = await web.patchSubtask('s1', { stagedSession: { prompt: 'do it' } }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 's1')
     console.log(JSON.stringify({ result, stagedSession: row.stagedSession ?? null }))
@@ -98,7 +98,7 @@ test('patchSubtask REFUSES setting a staged session on a group MEMBER — subtas
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
-    const result = await web.patchSubtask('m1', { stagedSession: { prompt: 'do it' } })
+    const result = await web.patchSubtask('m1', { stagedSession: { prompt: 'do it' } }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, stagedSession: row.stagedSession ?? null }))
@@ -110,7 +110,7 @@ test('patchSubtask ALLOWS setting a staged session on a GROUP itself — it may 
   const out = await run(`
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
-    const result = await web.patchSubtask('g1', { stagedSession: { prompt: 'do it' } })
+    const result = await web.patchSubtask('g1', { stagedSession: { prompt: 'do it' } }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ result }))
   `)
   expect(out).toEqual({ result: { ok: true } })
@@ -120,7 +120,7 @@ test('patchSubtask CLEARS a staged session with `stagedSession: null` — the ke
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1', "stagedSession: { prompt: 'do it' },")}
-    const result = await web.patchSubtask('s1', { stagedSession: null })
+    const result = await web.patchSubtask('s1', { stagedSession: null }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 's1')
     console.log(JSON.stringify({ result, hasKey: 'stagedSession' in row }))
@@ -133,7 +133,7 @@ test('CLEARING is never refused on a group MEMBER — a stale draft must still b
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1', stagedSession: { prompt: 'stale' },")}
-    const result = await web.patchSubtask('m1', { stagedSession: null })
+    const result = await web.patchSubtask('m1', { stagedSession: null }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, hasKey: 'stagedSession' in row }))
@@ -145,7 +145,7 @@ test('omitting stagedSession from the patch leaves an existing draft untouched',
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1', "stagedSession: { prompt: 'keep me' },")}
-    const result = await web.patchSubtask('s1', { title: 'renamed' })
+    const result = await web.patchSubtask('s1', { title: 'renamed' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 's1')
     console.log(JSON.stringify({ result, stagedSession: row.stagedSession ?? null }))

@@ -53,17 +53,71 @@ export function heavyReserveBytes(runningBytes: number, runningJobs = 1): number
   return Math.max(0, HEAVY_JOB_BYTES - Math.max(0, runningBytes))
 }
 
-export interface HeavyWaiter { pid: number; sinceMs: number; command: string }
+export interface HeavyWaiter {
+  pid: number; sinceMs: number; command: string
+  /** Started with bare flock rather than through the agentop queue. */
+  manual?: boolean
+  /** Blocking flock child, kept with its queued parent until the kernel grants the lock. */
+  flockPid?: number
+}
+
+export interface HeavyRunning extends HeavyWaiter {
+  slot: number
+  usedBytes: number | null
+}
+
+/** Associate a queued parent's blocking flock child with its actual kernel state. */
+export function mergeHeavyJobs(ours: readonly HeavyRunning[], queued: readonly HeavyWaiter[], manual: {
+  running: readonly HeavyRunning[]; waiting: readonly HeavyWaiter[]
+}): { running: HeavyRunning[]; waiting: HeavyWaiter[] } {
+  const ourPids = new Set(ours.map(r => r.pid))
+  const running = [...ours, ...manual.running.filter(r => !ourPids.has(r.pid)).map(r => {
+    const parent = queued.find(w => w.flockPid === r.pid)
+    return parent ? { ...r, command: parent.command, sinceMs: parent.sinceMs, manual: false } : r
+  })]
+  const waiting = [
+    ...queued.filter(w => !running.some(r => r.pid === w.flockPid)),
+    ...manual.waiting.filter(w => !queued.some(q => q.flockPid === w.pid)),
+  ].filter((w, i, all) => all.findIndex(x => x.pid === w.pid) === i)
+    .sort((a, b) => a.sinceMs - b.sinceMs || a.pid - b.pid)
+  return { running, waiting }
+}
 
 /** Position of `pid` in the queue (1-based) among waiters still alive — PURE. 0 = not queued. */
 export function queuePosition(waiters: HeavyWaiter[], pid: number, alive: (pid: number) => boolean): { position: number; of: number } {
-  const live = waiters.filter(w => alive(w.pid)).sort((a, b) => a.sinceMs - b.sinceMs || a.pid - b.pid)
+  const live = waiters.filter(w => !w.manual && alive(w.pid)).sort((a, b) => a.sinceMs - b.sinceMs || a.pid - b.pid)
   const i = live.findIndex(w => w.pid === pid)
   return { position: i + 1, of: live.length }
 }
 
 /** The exit code `flock -n -E <code>` returns when the slot is busy. Chosen high and unusual. */
 export const FLOCK_BUSY_CODE = 254
+
+/** The actual flock argv used by runHeavy, shared by quick probes and the blocking head. */
+export function heavyFlockArgs(attempt: { slot: number; blocking: boolean }, cmd: string[], lockDir = '/tmp'): string[] {
+  return [...(attempt.blocking ? [] : ['-n', '-E', String(FLOCK_BUSY_CODE)]), heavyLockPath(attempt.slot, lockDir), ...cmd]
+}
+
+/** Only the agentop head joins the kernel waiters after a quick pass over the allowed slots. */
+export function heavyAttempts(position: number, slots: number): { slot: number; blocking: boolean }[] {
+  if (position !== 1) return []
+  return [...Array.from({ length: slots }, (_, slot) => ({ slot, blocking: false })), { slot: 0, blocking: true }]
+}
+
+/** Queue text includes bare flock holders and waiters, without counting them in agentop order. */
+export function heavyWaitLine(state: {
+  slots: number; availableBytes: number | null
+  running: readonly { command: string; manual?: boolean }[]
+  waiting: readonly { manual?: boolean }[]
+}, position: number, of: number): string {
+  const avail = state.availableBytes === null ? '?' : `${(state.availableBytes / GB).toFixed(1)} GB`
+  const holder = state.running[0]
+  const manual = state.waiting.filter(w => w.manual).length
+  return `agentop heavy: waiting — position ${Math.max(1, position)} of ${Math.max(1, of)}, `
+    + `${state.running.length} running in ${state.slots} slot(s), ${avail} available`
+    + (holder ? ` (${holder.manual ? 'manual running' : 'running'}: ${holder.command.slice(0, 60)})` : '')
+    + (manual ? `, ${manual} manual waiter(s)` : '')
+}
 
 /**
  * Holders of an flock(2) lock on `inode`, out of `/proc/locks` — PURE. A line reads

@@ -215,7 +215,7 @@ test('deleteStatus on an unknown id is 404-shaped, not a silent success', async 
 test('markTask refuses a status this board does not have', async () => {
   const out = await run(`
     ${task('t1')}
-    const result = await web.markTask('t1', 'nonexistent_status')
+    const result = await web.markTask('t1', 'nonexistent_status', undefined, { guard: { principal: { kind: 'unattributed' } } })
     console.log(JSON.stringify(result))
   `)
   expect(out).toEqual({ ok: false, message: 'unknown_status' })
@@ -228,7 +228,7 @@ test('markTask still succeeds for a real, known status (regression: the four pro
       id: 'sess-1', harness: 'claude', cwd: '/tmp/x',
       createdAt: '2026-09-19T10:00:00.000Z', taskId: 't1',
     })
-    const result = await web.markTask('t1', 'done')
+    const result = await web.markTask('t1', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     console.log(JSON.stringify({ ok: result.ok }))
   `)
   expect(out).toEqual({ ok: true })
@@ -238,7 +238,7 @@ test('patchSubtask refuses a status this board does not have', async () => {
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
-    const result = await web.patchSubtask('s1', { status: 'nonexistent_status' })
+    const result = await web.patchSubtask('s1', { status: 'nonexistent_status' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify(result))
   `)
   expect(out).toEqual({ ok: false, message: 'unknown_status' })
@@ -248,7 +248,7 @@ test('patchSubtask still succeeds for a real, known status (regression)', async 
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
-    const result = await web.patchSubtask('s1', { status: 'in_progress' })
+    const result = await web.patchSubtask('s1', { status: 'in_progress' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify(result))
   `)
   expect(out).toEqual({ ok: true })
@@ -258,7 +258,7 @@ test('a custom status created via createStatus can then be used to mark a task',
   const out = await run(`
     ${task('t1')}
     const created = await web.createStatus({ label: 'Waiting on client', color: '#3b82f6' })
-    const result = await web.markTask('t1', created.status.id)
+    const result = await web.markTask('t1', created.status.id, undefined, { guard: { principal: { kind: 'unattributed' } } })
     const statuses = await web.listStatuses()
     console.log(JSON.stringify({
       ok: result.ok,

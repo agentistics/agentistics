@@ -50,7 +50,7 @@ import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './
 import { withEvidenceDeletion } from '../delivery/evidence-delete'
 import type { TaskDetail, TaskListRow } from './task-report'
 import { onBookWrite } from './task-store'
-import { GuardRefused, type GuardContext } from '../delivery/guard'
+import { GuardRefused, unattributedContext, type GuardContext } from '../delivery/guard'
 import { GuardBusy } from '../delivery/guard-locks'
 import { JOURNAL_STAMPS_PATH, MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
 
@@ -168,7 +168,7 @@ async function buildLiveReply(key: string): Promise<LiveBuildCache['reply']> {
     })()
     // Which clones to ask is per commit: the server does not run inside a checkout, so the repositories come from the
     // sessions' own directories, the task's repository and the repositories agentistics knows (`release-repos.ts`).
-    const pieces = legacyReviewShaPieces(details, w.book.events, deliveries)
+    const pieces = legacyReviewShaPieces(details, w.book.events, deliveries, id => stageById.get(id))
     const taskById = new Map(w.book.tasks.map(t => [t.id, t]))
     const dirsFor = dirsForShas({
       pieces,
@@ -460,6 +460,11 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
     const roles = rolesDoc.roles
     leaderIds = new Set(fleet.filter(r => roleOfRow(roles, r) === 'leader').map(r => r.id))
     leadsOf = new Map(leadsOfRows(rolesDoc, fleet))
+    // LIVE.COLUNAS-PRESAS C3: a live leader also leads what its predecessors (handoff chain) and the workers it started
+    // (parentSessionId, through the chain) were filed on. Read from the registry, ended rows included; nothing is written.
+    const [{ readRegistry }, { inheritedLeads, mergeLeads }, { isLiveState }] = await Promise.all([import('./registry'), import('./leader-succession'), import('@agentistics/core')])
+    const liveLeaders = new Set(fleet.filter(r => leaderIds.has(r.id) && isLiveState(r.state)).map(r => r.id))
+    leadsOf = mergeLeads(leadsOf, inheritedLeads(await readRegistry().catch(() => []), liveLeaders))
     if (rolesUnreadable || await registryUnreadable()) fleetRead = 'unknown'
   } catch { fleetRead = 'unknown' /* no fleet: preserve uncertainty; never claim a leader is absent */ }
   const reply = await replyPromise
@@ -510,7 +515,7 @@ export async function createTask(o: { title: string; detail?: string; type?: str
     // Only a KNOWN type sticks — an unknown one is dropped, like a task nobody classified.
     ...(o.type && isKnownTypeId(o.type, w.book.types) ? { type: o.type } : {}),
   }
-  await w.store.upsertTask(task)
+  await w.store.upsertTask(task, unattributedContext())
   return task
 }
 
@@ -560,7 +565,7 @@ export async function editTask(
       ? { labels: patch.labels.map(l => l.trim()).filter(Boolean) }
       : {}),
     updatedAt: now,
-  })
+  }, { guard: unattributedContext() })
   if (!ok) return false
   const changes: TaskEvent[] = []
   const actor = patch.actor?.trim() || 'you'
@@ -726,7 +731,7 @@ export async function subtaskPathCheck(ref: string, subtaskId: string): Promise<
   return found && found.taskId !== task.id ? 'wrong_task' : 'ok'
 }
 
-export async function deleteTask(ref: string, guard?: GuardContext): Promise<boolean> {
+export async function deleteTask(ref: string, guard: GuardContext): Promise<boolean> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
   if (!task) return false
@@ -734,7 +739,7 @@ export async function deleteTask(ref: string, guard?: GuardContext): Promise<boo
     const removed = await remove()
     if (removed) await deleteTaskFiles(task.id)
     return removed
-  }, held), guard ? { guard } : undefined)
+  }, held), { guard })
   if (!ok) return false
   // The bytes go with the record. The SESSIONS do not — see `TaskStore.removeTask`.
   // And the NAME leaves `preferences.finishedTasks`, which is the other place the migration reads
@@ -904,7 +909,7 @@ export async function addSubtask(
     id, taskId: task.id, title: t,
     status: 'todo', done: false, createdAt: now, updatedAt: now,
     ...(o.isGroup === true ? { isGroup: true } : {}),
-  })
+  }, unattributedContext())
   return id
 }
 
@@ -997,11 +1002,11 @@ async function guardedDoor<R>(run: () => Promise<R>): Promise<R | GuardReply> {
 }
 
 /** Every door's write goes through here so a refusal by the store is an ANSWER, never a thrown 500. */
-export async function patchSubtask(subtaskId: string, patch: Parameters<typeof patchSubtaskInner>[2], guard?: GuardContext) {
+export async function patchSubtask(subtaskId: string, patch: Parameters<typeof patchSubtaskInner>[2], guard: GuardContext) {
   return guardedDoor(() => patchSubtaskInner(subtaskId, guard, patch))
 }
 
-async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefined, patch: {
+async function patchSubtaskInner(subtaskId: string, guard: GuardContext, patch: {
   title?: string
   status?: TaskStatus
   dueDate?: string
@@ -1025,6 +1030,8 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
   parentGroupId?: string | null
   /** Set (a validated draft) or clear (`null`) the staged session — see this function's own note. */
   stagedSession?: StagedSessionDraft | null
+  /** LIVE.COLUNAS-PRESAS: where the piece's work lives, stamped by the HOST only (`piece-provenance.ts`); no REST/MCP body reaches it. */
+  provenance?: import('./task-model').SubtaskProvenance
 }): Promise<
   {
     ok: true
@@ -1165,6 +1172,7 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
     ...(patch.parentGroupId !== undefined ? { parentGroupId: nextParentGroupId } : {}),
     // `null` clears (the store drops the key, same convention as every other identity field here);
     // an object SETS it, already validated above. `undefined` leaves the column alone.
+    ...(patch.provenance ? { provenance: patch.provenance } : {}),
     ...(patch.stagedSession !== undefined
       ? { stagedSession: patch.stagedSession ?? undefined }
       : {}),
@@ -1179,7 +1187,7 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext | undefi
     // STATUS forward (below): a task already `in_progress` still needs its `startedAt` filled the
     // first time real work is actually observed anywhere under it.
     if (startsNow && !parent.startedAt) {
-      await w.store.patchTask(parent.id, { startedAt: now, updatedAt: now })
+      await w.store.patchTask(parent.id, { startedAt: now, updatedAt: now }, { guard: guard })
     }
 
     // See `statusAfterSubtaskProgress` — a subtask (or group member, §F.1) that actually STARTS
@@ -1234,7 +1242,7 @@ interface DismissDeps {
  * A piece is a placeholder ONLY when the sweep's ledger says so (`store.placeholderOf`); the `restoredBy` flag in tasks.json is a label.
  * Not a general remove: a real piece is refused (`not_a_placeholder`).
  */
-export async function dismissPlaceholder(subtaskId: string, guard?: GuardContext, deps: DismissDeps = {}): Promise<PlaceholderReply> {
+export async function dismissPlaceholder(subtaskId: string, guard: GuardContext, deps: DismissDeps = {}): Promise<PlaceholderReply> {
   const w = await (deps.world ?? loadTaskWorld)()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
   if (!found) return { ok: false, reason: 'no_such_subtask', message: `subtask ${subtaskId} does not exist` }
@@ -1250,7 +1258,7 @@ export async function dismissPlaceholder(subtaskId: string, guard?: GuardContext
     isTaskLeader: deps.isTaskLeader ?? (async (sid, tid) => isLeaderOfTask(w.registryRows.find(r => r.id === sid), tid, deps.roleOf ?? (async row => String(await (await import('./session-roles')).effectiveRole(row as never))))),
   })
   if (!may || !guard) return { ok: false, reason: 'placeholder_protected', message: PLACEHOLDER_PROTECTED_MESSAGE }
-  const done = await w.store.removeSubtask(subtaskId, { dismissPlaceholder: guard })
+  const done = await w.store.removeSubtask(subtaskId, { guard, dismissPlaceholder: guard })
   return done ? { ok: true } : { ok: false, reason: 'not_a_placeholder', message: NOT_A_PLACEHOLDER_MESSAGE }
 }
 
@@ -1262,7 +1270,7 @@ async function removeAcceptedMember(store: import('./task-store').TaskStore, sub
   if (guard?.principal.kind !== 'owner') return { ok: false, reason: 'member_accepted', message: MEMBER_ACCEPTED_MESSAGE }
   // r4 A1: the legacy-browser owner is two client-sent headers; for a piece that was ACCEPTED that is not proof.
   if (guard.principal.via !== 'vault-credential') return { ok: false, reason: 'owner_proof_required', message: OWNER_PROOF_REQUIRED_MESSAGE }
-  await store.removeSubtask(subtaskId, { ownerRemoval: guard })
+  await store.removeSubtask(subtaskId, { guard, ownerRemoval: guard })
   return null
 }
 
@@ -1270,7 +1278,7 @@ export const MEMBER_ACCEPTED_MESSAGE = 'This subtask is an accepted member of a 
 
 export const OWNER_PROOF_REQUIRED_MESSAGE = 'This subtask is an accepted member of a group: the piece was accepted, so only the owner may remove it, and the owner proof must come from the vault (a fresh grant, or the "required" owner-proof mode) — a browser header is not proof. Turn on the owner proof in Settings → Vault, or confirm the vault dialog, and retry.'
 
-export async function removeSubtask(subtaskId: string, guard?: GuardContext, deps: DismissDeps = {}): Promise<boolean | { ok: false; reason: 'placeholder_protected' | 'not_a_placeholder' | 'no_such_subtask' | 'member_accepted' | 'owner_proof_required'; message: string }> {
+export async function removeSubtask(subtaskId: string, guard: GuardContext, deps: DismissDeps = {}): Promise<boolean | { ok: false; reason: 'placeholder_protected' | 'not_a_placeholder' | 'no_such_subtask' | 'member_accepted' | 'owner_proof_required'; message: string }> {
   const w = await (deps.world ?? loadTaskWorld)()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
   if (!found) return false
@@ -1285,12 +1293,12 @@ export async function removeSubtask(subtaskId: string, guard?: GuardContext, dep
     const out = await dismissPlaceholder(subtaskId, guard, deps)
     return out.ok ? true : out
   }
-  await w.store.removeSubtask(subtaskId, guard ? { guard } : undefined)
+  await w.store.removeSubtask(subtaskId, { guard })
   return true
 }
 
 /** The tick, expressed as what it means: a move to `done`, or back to `todo`. */
-export async function setSubtaskDone(subtaskId: string, done: boolean, guard?: GuardContext): Promise<
+export async function setSubtaskDone(subtaskId: string, done: boolean, guard: GuardContext): Promise<
   {
     ok: true
   } | {
@@ -1395,7 +1403,7 @@ export async function setBlockedBy(ref: string, ids: readonly string[]): Promise
   if (!task) return false
   const known = new Set(w.book.tasks.map(t => t.id))
   const clean = [...new Set(ids)].filter(id => id !== task.id && known.has(id))
-  return await w.store.patchTask(task.id, { blockedBy: clean, updatedAt: new Date().toISOString() })
+  return await w.store.patchTask(task.id, { blockedBy: clean, updatedAt: new Date().toISOString() }, { guard: unattributedContext() })
 }
 
 /** Attach a link. Refused unless it is http(s) — see `sanitizeLink`. */
@@ -1416,7 +1424,7 @@ export async function addLink(
   return await w.store.patchTask(task.id, {
     links: [...(task.links ?? []), link],
     updatedAt: new Date().toISOString(),
-  })
+  }, { guard: unattributedContext() })
 }
 
 export async function removeLink(ref: string, linkId: string): Promise<boolean> {
@@ -1426,7 +1434,7 @@ export async function removeLink(ref: string, linkId: string): Promise<boolean> 
   return await w.store.patchTask(task.id, {
     links: (task.links ?? []).filter(l => l.id !== linkId),
     updatedAt: new Date().toISOString(),
-  })
+  }, { guard: unattributedContext() })
 }
 
 /**
@@ -1548,20 +1556,20 @@ export async function attachSession(
   // from the SAME `task` object resolved from `ref` above: attaching never renames or moves the
   // task itself, so it is still that task's current status.
   const advanced = statusAfterAttach(task.status)
-  if (advanced) await markTask(task.id, advanced, row.label || sessionId)
+  if (advanced) await markTask(task.id, advanced, row.label || sessionId, { guard: unattributedContext() })
   // The same forward-only nudge for the subtask the session is now filed on (never downgrades
   // done / in_review / blocked). `patchSubtask` also moves the parent task if still unstarted.
   if (plan.subtaskId) {
     const sub = w.book.subtasks.find(s => s.id === plan.subtaskId)
     const next = sub ? statusAfterAttach(sub.status) : null
-    if (next) await patchSubtask(plan.subtaskId, { status: next })
+    if (next) await patchSubtask(plan.subtaskId, { status: next }, unattributedContext())
     if (sub?.ownerRequest) {
       const { effectiveRole } = await import('./session-roles')
       const current = (await w.store.read()).subtasks.find(s => s.id === sub.id)
       if (current) {
         const now = new Date().toISOString()
         await w.store.upsertSubtask({ ...current, startedAt: current.startedAt ?? now, startDate: current.startDate ?? current.startedAt ?? now,
-          assignee: await effectiveRole(row) === 'worker' ? 'worker' : 'leader' })
+          assignee: await effectiveRole(row) === 'worker' ? 'worker' : 'leader' }, unattributedContext())
       }
     }
   }
@@ -1575,7 +1583,7 @@ export async function attachSession(
     const { repoFacts } = await import('./repo-facts')
     const facts = await repoFacts(row.cwd, row.repo).catch(() => null)
     const inherit = repoInheritancePatch(task, sessionId, facts?.repo)
-    if (inherit) await w.store.patchTask(task.id, { ...inherit, updatedAt: new Date().toISOString() })
+    if (inherit) await w.store.patchTask(task.id, { ...inherit, updatedAt: new Date().toISOString() }, { guard: unattributedContext() })
   }
   await w.store.logEvents([event(task.id, row.label || sessionId, 'session', {
     to: sessionId, detail: row.harness,
@@ -1676,7 +1684,7 @@ export async function attachConversation(
 
   const label = sessionLabel(conv.meta) || conversation
   const advanced = statusAfterAttach(task.status)
-  if (advanced) await markTask(task.id, advanced, label)
+  if (advanced) await markTask(task.id, advanced, label, { guard: unattributedContext() })
 
   // The meta names where the conversation ran, which is all a purged row would have told us. Live git
   // first (the directory may well still exist), then the store's own remote — the same order
@@ -1686,7 +1694,7 @@ export async function attachConversation(
     const facts = await repoFacts(conv.meta.project_path ?? '').catch(() => null)
     const repo = facts?.repo || (conv.meta.git_remote ? repoShortName(conv.meta.git_remote) : '')
     const inherit = repoInheritancePatch(task, conversation, repo)
-    if (inherit) await w.store.patchTask(task.id, { ...inherit, updatedAt: new Date().toISOString() })
+    if (inherit) await w.store.patchTask(task.id, { ...inherit, updatedAt: new Date().toISOString() }, { guard: unattributedContext() })
   }
   await w.store.logEvents([event(task.id, label, 'session', {
     to: conversation, detail: `${conv.harness} · historical`,
@@ -1791,13 +1799,13 @@ export async function fileNativeSession(o: {
     : undefined
   const label = link.label ?? o.sessionId
   const advanced = statusAfterAttach(task.status)
-  if (advanced) await markTask(task.id, advanced, label)
+  if (advanced) await markTask(task.id, advanced, label, { guard: unattributedContext() })
   if (plan.subtaskId) {
     const sub = w.book.subtasks.find(s => s.id === plan.subtaskId)
     if (sub?.ownerRequest) {
       const now = new Date().toISOString()
       await w.store.upsertSubtask({ ...sub, status: statusAfterAttach(sub.status) ?? sub.status,
-        startedAt: sub.startedAt ?? now, startDate: sub.startDate ?? now, assignee: 'worker', updatedAt: now })
+        startedAt: sub.startedAt ?? now, startDate: sub.startDate ?? now, assignee: 'worker', updatedAt: now }, unattributedContext())
     }
   }
   await w.store.logEvents([event(task.id, label, 'session', { to: o.sessionId, detail: 'agentistics · native' })])
@@ -1852,20 +1860,20 @@ export type MarkOptions = {
   allowOpenSubtasks?: boolean
   /** Blocking task ids to set as part of the same move — the other way to answer "why". */
   blockedBy?: readonly string[]
-  /** ENTREGA.GARANTIDA S2a: who is asking. Optional; without it a move that raises a piece's rank is refused when the guarantee is on. */
-  guard?: GuardContext
+  /** ENTREGA.GARANTIDA S2c: who is asking. REQUIRED — a door that cannot say passes `unattributedContext()`, and a move that raises a piece's rank from it is refused when the guarantee is on. */
+  guard: GuardContext
 }
 export type MarkResult = { ok: boolean; evidence?: DeliveryEvidence; message?: string; openSubtaskIds?: string[]; guard?: GuardInfo }
 
-export async function markTask(ref: string, to: TaskStatus, actor?: string, o: MarkOptions = {}): Promise<MarkResult> {
+export async function markTask(ref: string, to: TaskStatus, actor: string | undefined, o: MarkOptions): Promise<MarkResult> {
   return guardedDoor(() => markTaskInner(ref, to, actor, o))
 }
 
 async function markTaskInner(
   ref: string,
   to: TaskStatus,
-  actor?: string,
-  o: MarkOptions = {},
+  actor: string | undefined,
+  o: MarkOptions,
 ): Promise<MarkResult> {
   const w = await loadTaskWorld()
   const task = findTask(ref, w.book.tasks)
@@ -1905,7 +1913,7 @@ async function markTaskInner(
       await w.store.patchTask(task.id, {
         blockedBy: [...new Set(o.blockedBy.filter(id => id !== task.id))],
         updatedAt: now,
-      })
+      }, { guard: o.guard })
     }
   }
   /*
@@ -1941,7 +1949,7 @@ async function markTaskInner(
     // The reason belongs to THIS block. Leaving `blocked` clears it: a sentence that outlived its
     // block reads as current, which is worse than none.
     ...(to === 'blocked' ? { blockedReason: reason } : { blockedReason: '' }),
-  }, { allowOpenSubtasks: o.allowOpenSubtasks, ...(o.guard ? { guard: o.guard } : {}) })
+  }, { allowOpenSubtasks: o.allowOpenSubtasks, guard: o.guard })
   if (!moved) return { ok: false, message: to === 'in_review' ? 'open_subtasks' : 'no_such_task' }
   // Attempts only ever settle when the TASK settles. An in-progress task leaves them running.
   if (done || to === 'abandoned') {
@@ -2176,7 +2184,7 @@ export async function deleteType(id: string): Promise<
  * FLUXO.ENTREGA-DSL — the delivery flow writes the CI · publicando signal onto the subtask (`null` clears it).
  * Flow-only: no route lets a person set it, because the Live moves a card to Publicado on it.
  */
-export async function setSubtaskCi(subtaskId: string, ci: Subtask['ci'] | null, guard?: GuardContext): Promise<boolean> {
+export async function setSubtaskCi(subtaskId: string, ci: Subtask['ci'] | null, guard: GuardContext): Promise<boolean> {
   const w = await loadTaskWorld()
   const found = w.book.subtasks.find(t => t.id === subtaskId)
   if (!found) return false

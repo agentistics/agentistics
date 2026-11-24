@@ -67,7 +67,7 @@ export function defaultDeliveryBoard(): DeliveryBoard {
       const { normalizeStagedSession } = await import('@agentistics/core')
       const normalized = normalizeStagedSession(draft)
       if (!normalized) return { ok: false, message: 'bad_staged_session: a staged session needs a prompt (and an absolute cwd, when given)' }
-      const out = await (await web()).patchSubtask(subtaskId, { stagedSession: normalized })
+      const out = await (await web()).patchSubtask(subtaskId, { stagedSession: normalized }, flowContext())
       return out.ok ? { ok: true } : { ok: false, message: out.message }
     },
   }
@@ -199,15 +199,106 @@ async function boardReviewPieces(): Promise<import('./service').ReviewPiece[]> {
     else if (r.cwd) (cwds.get(sub) ?? cwds.set(sub, new Set()).get(sub)!).add(r.cwd)
   }
   const out: import('./service').ReviewPiece[] = []
+  const subById = new Map(book.subtasks.map(x => [x.id, x]))
+  const taskById = new Map(book.tasks.map(x => [x.id, x]))
+  const { pieceProofFacts } = await import('./piece-proof-facts')
   for (const s of subs) {
     const repos = new Set<string>(recorded.get(s.id) ?? [])
     for (const cwd of cwds.get(s.id) ?? []) { const slug = await slugOfCwd(cwd); if (slug) repos.add(slug) }
     const handbackAt = lastHandback.get(s.id)
     // What its delivery declared: its HANDBACKS only. Notes and every other comment are talk about the work, never a statement of what shipped (H1).
-    const hints = hintsFromHandbacks((handbacks.get(s.id) ?? []).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(c => ({ body: c.body, ...(Date.parse(c.createdAt) ? { atMs: Date.parse(c.createdAt) } : {}) })))
-    out.push({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, hasOpenChildren: s.hasOpenChildren, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}), ...(s.createdAt ? { createdAt: s.createdAt } : {}), ...(handbackAt ? { handbackAt } : {}), repos: [...repos], hints })
+    const ordered = (handbacks.get(s.id) ?? []).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    const hints = hintsFromHandbacks(ordered.map(c => ({ body: c.body, ...(Date.parse(c.createdAt) ? { atMs: Date.parse(c.createdAt) } : {}) })))
+    // LIVE.COLUNAS-PRESAS C1: the registry is not the only witness of where the work lives — the piece's own provenance
+    // (stamped at handback/kill), the task's repository and the commits its handback declared (resolved in the product clones).
+    const facts = pieceProofFacts({
+      repos: [...repos], hints,
+      provenance: subById.get(s.id)?.provenance,
+      taskRepo: taskById.get(s.taskId)?.repo,
+      declared: await resolveDeclaredCommits(ordered.map(c => c.body)),
+    })
+    out.push({ id: s.id, taskId: s.taskId, title: s.title, status: s.status, hasOpenChildren: s.hasOpenChildren, ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}), ...(s.createdAt ? { createdAt: s.createdAt } : {}), ...(handbackAt ? { handbackAt } : {}), repos: facts.repos, hints: facts.hints })
   }
   return out
+}
+
+/**
+ * LIVE.COLUNAS-PRESAS (flow side) — the IO of `sessions/piece-provenance.ts`: stamp the piece of this registry row with where its
+ * work lives, while the row is still there. Called at the worker's handback (`session-message.ts`) and just before any kill
+ * (`registry.ts` `killAndRetireSession`). Bounded in time, never throws; read through the task world, written through the
+ * guarded `patchSubtask` door as the in-process host (`flowContext`). A test run never reaches the real board through here.
+ */
+export async function stampProvenanceOfSession(id: string, timeoutMs = 8_000): Promise<void> {
+  if (process.env.AGENTISTICS_TEST_RUNNER_PID) return
+  const work = (async () => {
+    const [{ readRegistry }, { recordPieceProvenance }, { loadTaskWorld }, { deliveredShasIn }, { existsSync }] = await Promise.all([
+      import('../sessions/registry'), import('../sessions/piece-provenance'), import('../sessions/task-source'), import('../sessions/task-live'),
+      import('node:fs'),
+    ])
+    const row = (await readRegistry()).find(m => m.id === id)
+    if (!row?.subtaskId) return
+    // A leader row (spawned as one) files no piece of its own work; its stored role is not read here (no store reach from this door).
+    const role = (row as { leader?: boolean }).leader ? 'leader' : undefined
+    await recordPieceProvenance({ ...row, ...(role ? { role } : {}) }, {
+      exists: existsSync,
+      git: async (cwd, args) => { try { return (await execGit(cwd, args)).trim() } catch { return null } },
+      repoOf: async cwd => slugOfCwd(cwd),
+      subtask: async sid => (await loadTaskWorld()).book.subtasks.find(s => s.id === sid) ?? null,
+      handbacks: async sid => (await loadTaskWorld()).book.comments.filter(c => c.subtaskId === sid && c.kind === 'handback').sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(c => c.body),
+      declared: deliveredShasIn,
+      write: async (sid, provenance) => { await (await import('../sessions/task-web')).patchSubtask(sid, { provenance }, flowContext()) },
+      now: () => new Date().toISOString(),
+    })
+  })().catch(() => undefined)
+  await Promise.race([work, new Promise(r => setTimeout(r, timeoutMs))])
+}
+
+/** short sha -> where it resolved (memo: a positive answer is permanent, a miss is asked again after 10 minutes). */
+const declaredMemo = new Map<string, { repo: string; full: string } | { missAt: number }>()
+const DECLARED_MISS_MS = 10 * 60_000
+
+/**
+ * The commits the NEWEST handback naming any declared, resolved to full ids in the PRODUCT clones this machine has (found
+ * through the sessions store, the same way the Live's own lookup finds them). A commit no clone knows yields nothing.
+ */
+async function resolveDeclaredCommits(bodies: readonly string[]): Promise<Array<{ repo: string; full: string }>> {
+  const { deliveredShasIn } = await import('../sessions/task-live')
+  let shas: string[] = []
+  for (const b of bodies) { const d = deliveredShasIn(b); if (d.length) shas = d }
+  if (shas.length === 0) return []
+  const clones = await productClones()
+  const out: Array<{ repo: string; full: string }> = []
+  for (const sha of shas) {
+    const hit = declaredMemo.get(sha)
+    if (hit && 'repo' in hit) { out.push(hit); continue }
+    if (hit && Date.now() - hit.missAt < DECLARED_MISS_MS) continue
+    let found: { repo: string; full: string } | null = null
+    for (const [repo, dir] of clones) {
+      const full = (await execGit(dir, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]).catch(() => null))?.trim()
+      if (full && /^[0-9a-f]{40}$/.test(full)) { found = { repo, full }; break }
+    }
+    if (declaredMemo.size > 5000) declaredMemo.clear()
+    declaredMemo.set(sha, found ?? { missAt: Date.now() })
+    if (found) out.push(found)
+  }
+  return out
+}
+
+/** [repo, one local clone] for each product repository this machine holds a checkout of. */
+let clonesMemo: { at: number; list: Array<[string, string]> } | null = null
+async function productClones(): Promise<Array<[string, string]>> {
+  if (clonesMemo && Date.now() - clonesMemo.at < DECLARED_MISS_MS) return clonesMemo.list
+  const [{ loadTaskWorld }, { knownRepos }, { DEFAULT_RELEASE_REPO }, { ENGINE_REPO }, { existsSync }] = await Promise.all([
+    import('../sessions/task-source'), import('../sessions/release-repos'), import('./gates'), import('./batch-proof'), import('node:fs'),
+  ])
+  const { byRemote } = knownRepos((await loadTaskWorld()).metas.values())
+  const list: Array<[string, string]> = []
+  for (const repo of [DEFAULT_RELEASE_REPO, ENGINE_REPO]) {
+    const dir = (byRemote.get(`github.com/${repo}`) ?? []).find(d => existsSync(d))
+    if (dir) list.push([repo, dir])
+  }
+  clonesMemo = { at: Date.now(), list }
+  return list
 }
 
 /** `<dataDir>/delivery-proof-cache.json`: what gh already answered, so a restart resumes the reconcile instead of starting over. A cache: never a source of truth. */
@@ -295,6 +386,44 @@ export async function custodyProjectsOf(pieces: ReadonlyArray<{ taskId: string; 
     sessions: registry.map(r => ({ id: r.id, conversationId: r.conversationId, taskId: r.taskId, subtaskId: r.subtaskId, repo: r.repo?.repo })),
     groups: groups as never,
   })
+}
+
+/**
+ * ENTREGA.GARANTIDA S7b (§5.2.3–4) — what a SESSION reads of the custody: the check-in lists the pieces it holds and its project's
+ * queue, and a leader STARTING in a project discovers that queue in its SessionStart context. Two channels, deliberately apart:
+ *   DISCOVERY   computed once, at the session's start, from the store; information only, it grants nothing, and the context is
+ *               never changed afterwards;
+ *   ASSIGNMENT  the custody tick (`custody-tick.ts`) assigns the piece and MESSAGES the custodian. That is the authority `leads()`
+ *               and the wakes read; when the two disagree (the queue moved after the start), the assignment wins.
+ * Rule C `on` only: `off`/`shadow` and any read failure yield nothing. The decision is `custody.ts` (pure); this only reads (the
+ * records through the service, never a write). It lives here rather than in a module of its own because every importer of a
+ * store-capable module is pinned by the writer-ceiling lint (`doors.lint.test.ts`).
+ */
+export interface CustodyViewDeps {
+  /** Where `guarantees.json` lives (the data dir). Default: the delivery store's own directory. */
+  dataDir?: string
+  records?(): Promise<readonly DeliveryRecord[]>
+  /** The project resolver the tick uses (`custodyProjectsOf`). */
+  projectsOf?(pieces: ReadonlyArray<{ taskId: string; subtaskId: string }>): Promise<ReadonlyMap<string, string>>
+}
+/** The custody `sessionId` holds and the queue of its own task's project. `null` = rule C is not on, or nothing could be read. */
+export async function readCustodyView(who: { sessionId: string; taskId?: string }, deps: CustodyViewDeps = {}): Promise<import('./custody').CustodyView | null> {
+  try {
+    const [{ dirname }, { ruleCState }, { custodyViewFor }] = await Promise.all([import('node:path'), import('./guard-host'), import('./custody')])
+    const dataDir = deps.dataDir ?? dirname(createDeliveryStore().path)
+    if ((await ruleCState(dataDir)) !== 'on') return null
+    const records = deps.records ? await deps.records() : await deliveryService().list()
+    const projectsOf = deps.projectsOf ?? custodyProjectsOf
+    const project = who.taskId ? (await projectsOf([{ taskId: who.taskId, subtaskId: who.taskId }])).get(who.taskId) ?? '' : ''
+    return custodyViewFor(records, who.sessionId, new Set(project ? [project] : []))
+  } catch { return null }
+}
+/** S7b (§5.2.4): a LEADER's SessionStart context gains the queue of its project. Anything else, or nothing queued: unchanged. */
+export async function withCustodyDiscovery<T extends { sessionId?: string; role?: string; taskId?: string }>(i: T, deps: CustodyViewDeps = {}): Promise<T & { custodyQueue?: string }> {
+  if (i.role !== 'leader' || !i.taskId) return i
+  const view = await readCustodyView({ sessionId: i.sessionId ?? '', taskId: i.taskId }, deps)
+  const section = view ? (await import('./custody')).custodyDiscoverySection(view.queue) : ''
+  return section ? { ...i, custodyQueue: section } : i
 }
 
 let cached: DeliveryService | null = null

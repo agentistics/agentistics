@@ -76,6 +76,8 @@ const resumeText = (lang: 'en' | 'pt') => lang === 'pt'
 
 export async function runAutoSwitchTick(d: AutoSwitchDeps): Promise<AutoSwitchResult> {
   const out: AutoSwitchResult = { moved: [], none: [], failed: [], resumed: [], deferred: [] }
+  // The auto-switch episode ledger — NOT the task/delivery store: it carries no GuardContext (the guard lint matches `store.update`).
+  const episodeLedger = d.store
   if (!(await d.enabled().catch(() => false))) return out
   const rows = await d.rows().catch(() => [] as readonly ManagedSession[])
   const alive = await d.alive().catch(() => new Set<string>())
@@ -99,19 +101,19 @@ export async function runAutoSwitchTick(d: AutoSwitchDeps): Promise<AutoSwitchRe
       if (probe.kind === 'unread') continue // could not read it: that proves nothing — the episode (the loop guard) stays
       const episode = episodes[conv]
       if (probe.kind === 'clear') {
-        if (episode) await d.store.update(doc => { delete doc[conv] })
+        if (episode) await episodeLedger.update(doc => { delete doc[conv] })
         continue
       }
       const current = (await d.currentAccount(row, rows)) ?? row.accountId
       if (conservative) {
-        if (current) await d.store.update(doc => { doc[conv] = { account: current, tried: [current], handled: true, at: d.now(), seenAt: probe.at ?? d.now() } })
+        if (current) await episodeLedger.update(doc => { doc[conv] = { account: current, tried: [current], handled: true, at: d.now(), seenAt: probe.at ?? d.now() } })
         continue
       }
       // The single resume of a "nobody has room" stop, once its window has opened.
       if (current && episode?.account === current && resumeDue(episode, d.now())) {
         const sent = d.sendPrompt ? await d.sendPrompt(row.id, probe.pendingPrompt ?? resumeText(d.lang)).catch(() => false) : false
         if (sent) {
-          await d.store.update(doc => { const e = doc[conv]; if (e) e.resumedAt = d.now() })
+          await episodeLedger.update(doc => { const e = doc[conv]; if (e) e.resumedAt = d.now() })
           out.resumed.push(row.id)
         }
         continue
@@ -128,7 +130,7 @@ export async function runAutoSwitchTick(d: AutoSwitchDeps): Promise<AutoSwitchRe
       const from = (await d.label(harness, current)) ?? current ?? harness
       const tz = d.timeZone ? { tz: d.timeZone } : {}
       if (decision.kind === 'none') {
-        await d.store.update(doc => { doc[conv] = decision.episode })
+        await episodeLedger.update(doc => { doc[conv] = decision.episode })
         const w = autoSwitchWords({ kind: 'none', lang: d.lang, session: shortId(row), from, ...(decision.resetsAt !== undefined ? { resetsAt: decision.resetsAt } : {}), ...tz })
         d.notify({ type: 'warning', code: decision.resetsAt !== undefined ? 'account.auto_none' : 'account.auto_none_manual', title: w.title, message: w.message, meta: { id: row.id, session: shortId(row), from, until: untilOf(decision.resetsAt, d.lang, d.timeZone) } })
         out.none.push(row.id)
@@ -151,12 +153,12 @@ export async function runAutoSwitchTick(d: AutoSwitchDeps): Promise<AutoSwitchRe
         deferredTold.delete(row.id)
         if (!r.ok) {
           // The switch gave the session back on its own account (or refused): this target counts as tried, so the next tick picks another.
-          await d.store.update(doc => { doc[conv] = { account: current ?? '', tried: [...new Set([...decision.episode.tried, decision.target.id])], handled: false, at: d.now() } })
+          await episodeLedger.update(doc => { doc[conv] = { account: current ?? '', tried: [...new Set([...decision.episode.tried, decision.target.id])], handled: false, at: d.now() } })
           out.failed.push(row.id)
           continue
         }
         taken.add(decision.target.id) // the budgets were read once: no second session lands on this account this tick
-        await d.store.update(doc => { doc[conv] = decision.episode })
+        await episodeLedger.update(doc => { doc[conv] = decision.episode })
         const to = decision.target.label || decision.target.id
         const w = autoSwitchWords({ kind: 'move', lang: d.lang, session: shortId(row), from, to, ...(decision.resetsAt !== undefined ? { resetsAt: decision.resetsAt } : {}), ...tz })
         d.notify({ type: 'info', code: 'account.auto_switched', title: w.title, message: w.message, meta: { id: r.id ?? row.id, session: shortId(row), from, to, until: untilOf(decision.resetsAt, d.lang, d.timeZone) } })

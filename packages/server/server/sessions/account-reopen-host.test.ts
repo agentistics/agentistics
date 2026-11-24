@@ -81,7 +81,7 @@ describe('1 · group reopen carries the verified caller to every spawn', () => {
     await accounts(async store => {
       await store.bind(null, { harness: 'claude', key: 'org:home', label: 'home' })
       offId = (await store.bind(join(dir, 'r_off'), { harness: 'claude', key: 'org:off', label: 'off' })).account.id
-      await store.update(offId, { available: false })
+      await store.patchAccount(offId, { available: false })
     })
     const m = row({ accountId: offId, conversationId: 'c-off' })
     const s = cliStrings('en')

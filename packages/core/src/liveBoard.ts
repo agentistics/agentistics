@@ -63,7 +63,9 @@ export function liveTabMatches(tab: LiveTab, c: LiveTabbable, period: LivePeriod
     case 'active': return c.stage !== 'queue' && c.stage !== 'published' && c.stage !== 'completed' && !c.old
     case 'queue': return c.stage === 'queue'
     case 'published': return c.stage === 'published'
-    default: return true
+    // LIVE.COLUNAS-PRESAS C2: an "antiga" (legacy review nobody is on, no proof) is not drawn in Tudo's columns — 147 of them
+    // filled "Revisão do líder" / "Sem líder" there. It lives in the "Antigas" group only (the server still sends it, marked).
+    default: return !c.old
   }
 }
 

@@ -10,6 +10,69 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.228.0': {
+    features: [
+      {
+        pt: 'Navegador: ele sempre abre numa página inicial (por padrão, o Google; você muda em Ajustes → Navegador) — nada de tela vazia, e cada aba nova abre nela também.',
+        en: 'Browser: it always opens on a home page (Google by default; change it in Settings → Browser) — no more empty screen, and every new tab opens on it too.',
+      },
+      {
+        pt: 'Navegador: "Fechar navegador" fecha todas as abas e encerra o navegador; "Minimizar navegador" só o esconde — ele continua rodando e as abas estão lá quando você abrir de novo.',
+        en: 'Browser: "Close browser" closes every tab and shuts it down; "Minimize browser" only hides it — it keeps running and your tabs are there when you reopen.',
+      },
+      {
+        pt: 'Navegador minimizado por mais de 30 minutos é parado para poupar memória, mas a lista de abas é guardada: ao abrir, as abas voltam (recarregadas) e o aviso diz isso.',
+        en: 'A browser minimized for over 30 minutes is stopped to save memory, but its tab list is kept: when you reopen it the tabs come back (reloaded) and a notice says so.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Ambientes de teste isolados: o que foi gravado numa execução isolada agora persiste de forma confiável, e a medição do escopo ficou bem mais rápida.',
+        en: 'Isolated test runs: what a run saves now persists reliably, and measuring a run scope is much faster.',
+      },
+      {
+        pt: 'Desenvolvimento: a checagem antes de salvar o trabalho repete uma vez, isolado, o teste que falhou por demora da máquina, em vez de perder a rodada inteira.',
+        en: 'Development: the pre-commit check retries a test that failed under machine load once, alone, instead of throwing the whole run away.',
+      },
+      {
+        pt: 'Navegador da sessão: o cadeado abre direto, sem pedir o cofre — ele não guarda nada seu. O navegador pessoal continua pedindo.',
+        en: "Session browser: the padlock now opens right away, without asking for the vault — it holds nothing of yours. Your personal browser still asks.",
+      },
+      {
+        pt: 'Painel Live: uma peça que já saiu numa versão publicada sai sozinha de "Revisão do líder" e de "PR · merge", mesmo depois que a sessão que fez o trabalho foi fechada.',
+        en: 'Live board: a piece that already shipped in a published version leaves "Leader review" and "PR · merge" by itself, even after the session that did the work was closed.',
+      },
+      {
+        pt: 'Painel Live: o líder que assumiu de outro (ou que abriu as sessões de uma tarefa) passa a contar como líder dela, em vez de a tarefa aparecer "Sem líder".',
+        en: 'Live board: a leader who took over from another (or who started a task\'s sessions) now counts as that task\'s leader, instead of the task showing "No leader".',
+      },
+      {
+        pt: 'Painel Live: cartões parados em revisão dizem "esperando o líder" em vez de mostrar 0%, e as peças antigas ficam só no grupo "Antigas" na aba Tudo.',
+        en: 'Live board: cards waiting in review say "waiting for the leader" instead of showing 0%, and old pieces stay only in the "Old" group in the All tab.',
+      },
+      {
+        pt: 'A fila de testes pesados não deixa mais rodadas iniciadas pelo agentop esperando sem avançar e mostra quem ocupa a vaga manualmente.',
+        en: 'Heavy test queue no longer starves jobs started through agentop and shows manual lock holders.',
+      },
+    ],
+  },
+  '2.227.0': {
+    features: [
+      {
+        pt: 'Quadro e lista de sessões agora sobrevivem a uma queda do disco: o app guarda a última cópia boa e um backup.',
+        en: 'The board and the session list now survive a disk crash: the app keeps the last good copy and a backup.',
+      },
+      {
+        pt: 'Quando um líder some, a custódia passa para o próximo, que recebe os lembretes de retomada, bloqueio e revisão.',
+        en: 'When a leader vanishes, custody passes to the next one, which gets the wake, blocked and review reminders.',
+      },
+      {
+        pt: 'Toda alteração no quadro agora registra quem a fez.',
+        en: 'Every board change now records who made it.',
+      },
+    ],
+    fixes: [],
+  },
   '2.226.0': {
     features: [
       {

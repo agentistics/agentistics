@@ -8,12 +8,21 @@
  * means a file that still comes back unreadable costs minutes of work, not the whole history.
  */
 import { open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import * as fsp from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 
 let seq = 0
 
-/** The fs calls the ordering depends on, injectable so a test can SPY on the order (fsync before rename, dir after). */
-const realOps = { open, rename, rm }
+/**
+ * The fs calls the ordering depends on, injectable so a test can SPY on the order (fsync before rename, dir after).
+ * Resolved through the module namespace at CALL time, so a `spyOn(fs, 'rename')` elsewhere (the delivery guard
+ * sweep counts the board's renames) still observes a durable write.
+ */
+const realOps = {
+  open: (...a: Parameters<typeof open>) => fsp.open(...a),
+  rename: (...a: Parameters<typeof rename>) => fsp.rename(...a),
+  rm: (...a: Parameters<typeof rm>) => fsp.rm(...a),
+}
 let ops: typeof realOps = realOps
 export function __setDurableOpsForTest(o: Partial<typeof realOps> | null): void { ops = o ? { ...realOps, ...o } : realOps }
 
@@ -51,15 +60,17 @@ export function bakPath(file: string): string { return `${file}.bak` }
 /**
  * Refresh the last-good copy of `file` (already written and valid) when the current copy is older
  * than `everyMs`. A 20 MB board is therefore doubled at most once per interval, not per comment.
- * Never throws: a failed backup must not fail the write it protects.
+ * `isEmpty` guards an ACCIDENTAL empty list from replacing a fuller copy; `force` is the explicit-removal
+ * case and refreshes unconditionally. Never throws: a failed backup must not fail the write it protects.
  */
-export async function refreshLastGood(file: string, data: string, now = Date.now(), everyMs = BAK_EVERY_MS, isEmpty = false): Promise<boolean> {
+export async function refreshLastGood(file: string, data: string, now = Date.now(), everyMs = BAK_EVERY_MS, isEmpty = false, force = false): Promise<boolean> {
   try {
     const st = await stat(bakPath(file)).catch(() => null)
-    if (st && now - st.mtimeMs < everyMs) return false
+    // `force`: the ledger was emptied by an EXPLICIT removal, so the copy follows it at once; an older one would resurrect the removed rows.
+    if (!force && st && now - st.mtimeMs < everyMs) return false
     // An EMPTY state (nothing in it) never replaces a copy that holds data: that is how the one good
     // copy was lost once a read came back empty by mistake.
-    if (isEmpty && st && st.size > data.length) return false
+    if (!force && isEmpty && st && st.size > data.length) return false
     await durableWrite(bakPath(file), data)
     return true
   } catch (err) {
@@ -144,4 +155,14 @@ export async function sweepStaleDurableTmps(dir: string, maxAgeMs = 10 * 60_000,
     if (await rm(path, { force: true }).then(() => true, () => false)) removed++
   }
   return removed
+}
+
+/**
+ * True when writing `text` over `file` EMPTIES a ledger that held rows on disk (a bigger file, replaced by the
+ * empty document): that is an explicit removal, not a fault, so the last-good copy may follow it.
+ */
+export async function emptiesExistingLedger(file: string, text: string, isEmptyList: boolean): Promise<boolean> {
+  if (!isEmptyList) return false
+  const st = await stat(file).catch(() => null)
+  return !!st && st.size > text.length
 }

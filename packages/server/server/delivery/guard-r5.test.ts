@@ -15,6 +15,7 @@ import { scannedSources } from './guard-inventory.testing'
 import { makeWorld, shot, T } from './evidence-world.testing'
 import { execGit, forgetClassifyCache } from './classify-host'
 import { newDelivery } from './machine'
+import { unattributedContext } from './guard'
 
 const at = new Date(T).toISOString()
 const ctx = { principal: { kind: 'unattributed' as const } }
@@ -28,8 +29,8 @@ async function world(run: (s: any) => Promise<void>) {
     const deps = { sessions: async () => w.sessions, git: execGit }
     const tasks = createTaskStore(join(root, 'tasks.json'), { guard: { deps, now: () => T } })
     await tasks.seedStatuses([def('in_progress', 'running'), def('done', 'published'), def('shipped', 'published')])
-    await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: at, updatedAt: at } as never)
-    await tasks.upsertSubtask(sub('p1'))
+    await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: at, updatedAt: at } as never, unattributedContext())
+    await tasks.upsertSubtask(sub('p1'), unattributedContext())
     const g = createGuaranteesStore(join(root, 'guarantees.json'))
     const check = async () => ({ ok: true as const, via: 'legacy-browser' as const })
     const facts = (now: string): ActivationFacts => ({ now, build: 'test', capabilities: ['S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'], migrated: ['a'], unexplainedWouldRefuse: 0 })

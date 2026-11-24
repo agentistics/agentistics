@@ -20,7 +20,7 @@ export function inventoryGrowth(actual: Readonly<Record<string, readonly string[
 
 export function historicInventory(): Inventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory.fixture.json'), 'utf8')
-  if (digest(text) !== 'e5670f8578499142a4ab25ddc2948260abd350213b625af2ddae6f3e06271f6b') throw new Error('Historical guard inventory changed: the S2a ceiling is pinned to 1b1c8a941; migrate sites by supplying contexts, never enlarge the fixture')
+  if (digest(text) !== '5e323a3dffb59013d0fee04db262bc3bce73bf5cd078ee947977661f5a64286d') throw new Error('Historical guard inventory changed: the S2a ceiling is pinned to 1b1c8a941 and S2c emptied its context allowlist; supply contexts, never refill the fixture')
   return JSON.parse(text)
 }
 
@@ -33,7 +33,14 @@ export function historicInventory(): Inventory {
  *     may only shrink — deny by default: a retargeted call, or a new module handed a book path, grows it and fails.
  */
 export interface ReachInventory { base: string; writers: Record<string, string[]>; reach: Record<string, string[]> }
-export const R3_INVENTORY_DIGEST = '9b272007c0ef256b8496c631d0578d5401ecb0770afb5a04d73d80340cbcfb59'
+/**
+ * DURABILITY admission (2026-11-22, #1495, leader decision recorded on t-79061d4f20): after the disk crash of 2026-11-21
+ * zero-filled the board and the session registry, `server/durable-file.ts` (`durableWrite`: fsync file -> rename ->
+ * fsync dir) became the ONE primitive for non-regenerable state; 13 modules dropped their own writeFile+rename for it,
+ * so the repo-wide raw-writer count shrinks. Its own sites (and `sessions/native-notes.ts` as a new importer) are the
+ * only entries added; the ceiling stays shrink-only from here.
+ */
+export const R3_INVENTORY_DIGEST = '9178e5219e58b4c5f860fc55fa6a76a7be21e38e29806b78352cdcc6f06889f1'
 export function r3Inventory(): ReachInventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory-r3.fixture.json'), 'utf8')
   if (digest(text) !== R3_INVENTORY_DIGEST) throw new Error('Historical guard inventory changed: the S2a r3 ceiling is pinned; a writer or a book reference may disappear, never be added')

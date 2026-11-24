@@ -7,8 +7,9 @@
  * session — later calls update this card, it never moves. Full screen is the same card in a rectangle over
  * the session area (the conversation and the composer are covered); `Esc` leaves it.
  *
- * Unlocking is the person's: the padlock route with their single-use VAULT grant (S4b), never a second proof
- * path (`setBrowserLock` → `postWithOwnerProof`). A machine that cannot prove says so and offers the Vault.
+ * Unlocking is the person's: a plain request the server checks by the socket (the model's browser holds nothing
+ * personal, so no vault proof). Only a machine that cannot tell who calls (no /proc) falls back to the vault grant
+ * (`setBrowserLock` → `postWithOwnerProof`) and, if it cannot prove, offers the Vault.
  * Tabs: when the model opened more than one, the browser's tabs ride `TabStripView` — the session tabs' own
  * component, so they cannot look different — and picking one chooses which tab this card WATCHES (the
  * model's tabs are the model's to open and close).

@@ -619,10 +619,10 @@ test('a writer holding an id that was folded away writes to the survivor', async
   ] }))
   // Its own locked read performs the fold: the nickname still lands.
   const writer = createHarnessAccounts({ file })
-  expect((await writer.update('acc_gemlegacy0000', { nickname: 'Home' }))?.id).toBe('acc_gemroot00000')
+  expect((await writer.patchAccount('acc_gemlegacy0000', { nickname: 'Home' }))?.id).toBe('acc_gemroot00000')
   // Another store folded it long ago; this one still holds the old id.
   await createHarnessAccounts({ file }).readAccounts()
-  expect((await writer.update('acc_gemlegacy0000', { available: false }))?.available).toBe(false)
+  expect((await writer.patchAccount('acc_gemlegacy0000', { available: false }))?.available).toBe(false)
   await writer.startSegment('acc_gemlegacy0000', 77)
   expect((await writer.retire('acc_gemlegacy0000'))?.id).toBe('acc_gemroot00000')
   const disk = JSON.parse(await readFile(file, 'utf8'))
@@ -671,7 +671,7 @@ test('a bound root switching between two e-mails of one org rebinds, never relab
   const file = join(dir, 'accounts.json')
   await writeTeammates(file)
   const store = createHarnessAccounts({ file })
-  await store.update('acc_team_b000000', { nickname: 'Bia' })
+  await store.patchAccount('acc_team_b000000', { nickname: 'Bia' })
   // B's root now reports A's e-mail under the same org-only key: that is A, not B renamed.
   const toA = await store.bind('/tmp/tb', { harness: 'claude', key: TEAM_ORG, label: 'a@example.invalid' })
   expect(toA.account.id).toBe('acc_team_a000000')

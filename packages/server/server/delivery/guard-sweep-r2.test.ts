@@ -18,6 +18,7 @@ import { forbiddenCapabilities } from './guard-ast.testing'
 import { analyzeGuardIntegrity } from './owner-health'
 import { flowContext } from './guard'
 import { guardSweep } from './sweep'
+import { unattributedContext } from './guard'
 
 const T = Date.parse('2026-11-13T10:00:00Z')
 const ISO = new Date(T).toISOString()
@@ -39,9 +40,9 @@ async function world(rule: 'off' | 'shadow' | 'on', subs: Array<[string, Record<
   const deps = { sessions: async () => sessions, git: execGit }
   const tasks: TaskStore = createTaskStore(paths.tasks, { guard: { deps, now: () => clock.now } })
   await tasks.seedStatuses(DEFS)
-  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
-  for (const [id, extra] of subs) await tasks.upsertSubtask(subtask(id, extra))
-  for (let i = 0; i < 40; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
+  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
+  for (const [id, extra] of subs) await tasks.upsertSubtask(subtask(id, extra), unattributedContext())
+  for (let i = 0; i < 40; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
   const store = createDeliveryStore(paths.deliveries, { guard: { deps, now: () => clock.now } })
   const board: any = { comment: async () => undefined, subtaskFinished: async () => false, setPhaseStatus: async () => ({ ok: true }) }
   const logs: string[] = []

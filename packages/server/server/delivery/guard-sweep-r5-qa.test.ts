@@ -16,11 +16,11 @@ test('QA acceptance group with real evidence records every accepted member', asy
   const at=new Date(T).toISOString()
   const def=(id:string,stage:string,order:number)=>({id,label:id,stage,order,color:'#112233',protected:true}) as never
   await tasks.seedStatuses([def('todo','queue',0),def('in_progress','running',1),def('done','published',2),def('blocked','blocked',3),def('in_review','leader',4)])
-  await tasks.upsertTask({id:'t1',title:'t1',status:'in_progress',createdAt:at,updatedAt:at} as never)
+  await tasks.upsertTask({id:'t1',title:'t1',status:'in_progress',createdAt:at,updatedAt:at} as never, unattributedContext())
   const sub=(id:string,status:string,extra:any={})=>({id,taskId:'t1',title:id,status,done:status==='done',createdAt:at,updatedAt:at,...extra}) as never
-  await tasks.upsertSubtask(sub('p1','in_progress',{isGroup:true}))
-  await tasks.upsertSubtask(sub('m1','done',{parentGroupId:'p1'}))
-  await tasks.upsertSubtask(sub('m2','in_progress',{parentGroupId:'p1'}))
+  await tasks.upsertSubtask(sub('p1','in_progress',{isGroup:true}), unattributedContext())
+  await tasks.upsertSubtask(sub('m1','done',{parentGroupId:'p1'}), unattributedContext())
+  await tasks.upsertSubtask(sub('m2','in_progress',{parentGroupId:'p1'}), unattributedContext())
   const g=createGuaranteesStore(join(root,'guarantees.json'))
   const check=async()=>({ok:true as const,via:'legacy-browser' as const})
   const facts=(n:number): ActivationFacts=>({now:new Date(n).toISOString(),build:'qa',capabilities:['S0','S1','S2','S3'],migrated:['a'],unexplainedWouldRefuse:0})
@@ -42,6 +42,7 @@ test('QA acceptance group with real evidence records every accepted member', asy
 
 import { planSweep,emptyMemory } from './sweep-plan'
 import { guardSweep, type SweepDeps } from './sweep'
+import { unattributedContext } from './guard'
 const boundaryAt='2026-11-13T10:00:00.000Z'
 const statuses:any=[{id:'in_progress',stage:'running'},{id:'in_review',stage:'leader'},{id:'done',stage:'published'}]
 test('QA boundary recorded board equal current rank does not catch up',()=>{

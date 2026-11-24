@@ -237,7 +237,8 @@ export function describeLive(o: {
   const ofTask = all.filter(d => !leaderOnly(d)).map(asLeaderPiece).filter(d => !needle || d.taskId === f.task || d.taskTitle.toLowerCase().includes(needle))
   const counts = liveTabCounts(ofTask, period, o.nowMs)
   const deliveries = ofTask
-    .filter(d => liveTabMatches(tab, d, period, o.nowMs) && (!f.stage || (f.stage === 'no-leader' ? d.displayStage === 'no-leader' : d.stage === f.stage)) && (!f.stalledOnly || d.stalled))
+    // C2: Tudo does not COUNT or draw the antigas, but still carries them (marked `old`) for the "Antigas" group and the MCP.
+    .filter(d => (liveTabMatches(tab, d, period, o.nowMs) || (tab === 'all' && d.old === true)) && (!f.stage || (f.stage === 'no-leader' ? d.displayStage === 'no-leader' : d.stage === f.stage)) && (!f.stalledOnly || d.stalled))
     // Stage by stage, as the screen's columns are; within a stage the chosen order.
     .sort((a, b) => LIVE_STAGES.indexOf(a.stage) - LIVE_STAGES.indexOf(b.stage) || cmp(a, b))
 

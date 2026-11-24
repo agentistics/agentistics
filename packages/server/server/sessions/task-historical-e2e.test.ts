@@ -165,9 +165,9 @@ test('the done gate counts a historical link: the recovered subtask can now clos
     ${task('t1')}
     ${subtask('s1', 't1')}
     ${meta('c1')}
-    const refused = await web.setSubtaskDone('s1', true)
+    const refused = await web.setSubtaskDone('s1', true, { principal: { kind: 'unattributed' } })
     await web.attachConversation('t1', 'c1', { subtaskId: 's1' })
-    const allowed = await web.setSubtaskDone('s1', true)
+    const allowed = await web.setSubtaskDone('s1', true, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ refused, allowed, status: (await store.read()).subtasks[0].status }))
   `)
   expect(out.refused).toEqual({ ok: false, message: 'done_needs_session' })
@@ -182,11 +182,11 @@ test('markTask done counts a conversation filed on a subtask or on the delivery 
     ${subtask('s1', 't2')}
     ${meta('c1')}
     ${meta('c2')}
-    const refused = await web.markTask('t1', 'done')
+    const refused = await web.markTask('t1', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     await web.attachConversation('t1', 'c1')
     await web.attachConversation('t2', 'c2', { subtaskId: 's1' })
-    const direct = await web.markTask('t1', 'done')
-    const viaSubtask = await web.markTask('t2', 'done')
+    const direct = await web.markTask('t1', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
+    const viaSubtask = await web.markTask('t2', 'done', undefined, { guard: { principal: { kind: 'unattributed' } } })
     console.log(JSON.stringify({ refused: refused.message, direct: direct.ok, viaSubtask: viaSubtask.ok }))
   `)
   expect(out).toEqual({ refused: 'done_needs_session', direct: true, viaSubtask: true })
@@ -199,7 +199,7 @@ test('the group-join rule sees a historical link on the subtask (subtask_has_ses
     ${subtask('s1', 't1')}
     ${meta('c1')}
     await web.attachConversation('t1', 'c1', { subtaskId: 's1' })
-    console.log(JSON.stringify(await web.patchSubtask('s1', { parentGroupId: 'g1' })))
+    console.log(JSON.stringify(await web.patchSubtask('s1', { parentGroupId: 'g1' }, { principal: { kind: 'unattributed' } })))
   `)
   expect(out).toEqual({ ok: false, message: 'subtask_has_sessions' })
 })
