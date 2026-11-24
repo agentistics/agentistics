@@ -59,7 +59,7 @@ test('patchSubtask stamps a groupId on a subtask that had none', async () => {
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
-    const result = await web.patchSubtask('s1', { groupId: 'g-abc' })
+    const result = await web.patchSubtask('s1', { groupId: 'g-abc' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ result, groupId: ${groupOf('s1')} }))
   `)
@@ -71,8 +71,8 @@ test('two subtasks stamped with the same groupId end up in one group', async () 
     ${task('t1')}
     ${subtask('s1', 't1')}
     ${subtask('s2', 't1')}
-    await web.patchSubtask('s1', { groupId: 'g-abc' })
-    await web.patchSubtask('s2', { groupId: 'g-abc' })
+    await web.patchSubtask('s1', { groupId: 'g-abc' }, { principal: { kind: 'unattributed' } })
+    await web.patchSubtask('s2', { groupId: 'g-abc' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ one: ${groupOf('s1')}, two: ${groupOf('s2')} }))
   `)
@@ -83,7 +83,7 @@ test('`null` CLEARS the group — the key is gone from the record, not written a
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1', "groupId: 'g-abc',")}
-    const result = await web.patchSubtask('s1', { groupId: null })
+    const result = await web.patchSubtask('s1', { groupId: null }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 's1')
     console.log(JSON.stringify({ result, hasKey: 'groupId' in row, groupId: row.groupId ?? null }))
@@ -96,8 +96,8 @@ test('an empty or whitespace-only string clears too — a blank key would pass `
     ${task('t1')}
     ${subtask('s1', 't1', "groupId: 'g-abc',")}
     ${subtask('s2', 't1', "groupId: 'g-xyz',")}
-    await web.patchSubtask('s1', { groupId: '' })
-    await web.patchSubtask('s2', { groupId: '   ' })
+    await web.patchSubtask('s1', { groupId: '' }, { principal: { kind: 'unattributed' } })
+    await web.patchSubtask('s2', { groupId: '   ' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ one: ${groupOf('s1')}, two: ${groupOf('s2')} }))
   `)
@@ -109,8 +109,8 @@ test('a groupId is trimmed, so the same group typed with stray spaces is the sam
     ${task('t1')}
     ${subtask('s1', 't1')}
     ${subtask('s2', 't1')}
-    await web.patchSubtask('s1', { groupId: 'g-abc' })
-    await web.patchSubtask('s2', { groupId: '  g-abc  ' })
+    await web.patchSubtask('s1', { groupId: 'g-abc' }, { principal: { kind: 'unattributed' } })
+    await web.patchSubtask('s2', { groupId: '  g-abc  ' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     console.log(JSON.stringify({ same: ${groupOf('s1')} === ${groupOf('s2')}, key: ${groupOf('s2')} }))
   `)
@@ -121,7 +121,7 @@ test('a patch that does not mention groupId leaves it alone', async () => {
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1', "groupId: 'g-abc',")}
-    const result = await web.patchSubtask('s1', { notes: 'alguem' })
+    const result = await web.patchSubtask('s1', { notes: 'alguem' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 's1')
     console.log(JSON.stringify({ result, groupId: row.groupId ?? null, notes: row.notes }))
@@ -139,7 +139,7 @@ describe('groupId vs isGroup/parentGroupId — never both on one record (§F, th
     const out = await run(`
       ${task('t1')}
       ${subtask('g1', 't1', 'isGroup: true,')}
-      const result = await web.patchSubtask('g1', { groupId: 'g-abc' })
+      const result = await web.patchSubtask('g1', { groupId: 'g-abc' }, { principal: { kind: 'unattributed' } })
       const after = await store.read()
       const row = after.subtasks.find(s => s.id === 'g1')
       console.log(JSON.stringify({ result, groupId: row.groupId ?? null }))
@@ -152,7 +152,7 @@ describe('groupId vs isGroup/parentGroupId — never both on one record (§F, th
       ${task('t1')}
       ${subtask('g1', 't1', 'isGroup: true,')}
       ${subtask('m1', 't1', "parentGroupId: 'g1',")}
-      const result = await web.patchSubtask('m1', { groupId: 'g-abc' })
+      const result = await web.patchSubtask('m1', { groupId: 'g-abc' }, { principal: { kind: 'unattributed' } })
       const after = await store.read()
       const row = after.subtasks.find(s => s.id === 'm1')
       console.log(JSON.stringify({ result, groupId: row.groupId ?? null, parentGroupId: row.parentGroupId ?? null }))
@@ -167,7 +167,7 @@ describe('groupId vs isGroup/parentGroupId — never both on one record (§F, th
       ${task('t1')}
       ${subtask('g1', 't1', 'isGroup: true,')}
       ${subtask('s1', 't1', "groupId: 'g-abc',")}
-      const result = await web.patchSubtask('s1', { parentGroupId: 'g1' })
+      const result = await web.patchSubtask('s1', { parentGroupId: 'g1' }, { principal: { kind: 'unattributed' } })
       const after = await store.read()
       const row = after.subtasks.find(s => s.id === 's1')
       console.log(JSON.stringify({ result, groupId: row.groupId ?? null, parentGroupId: row.parentGroupId ?? null }))
@@ -181,7 +181,7 @@ describe('groupId vs isGroup/parentGroupId — never both on one record (§F, th
     const out = await run(`
       ${task('t1')}
       ${subtask('g1', 't1', 'isGroup: true,')}
-      const result = await web.patchSubtask('g1', { notes: 'alguem' })
+      const result = await web.patchSubtask('g1', { notes: 'alguem' }, { principal: { kind: 'unattributed' } })
       const after = await store.read()
       const row = after.subtasks.find(s => s.id === 'g1')
       console.log(JSON.stringify({ result, notes: row.notes }))
@@ -194,7 +194,7 @@ describe('groupId vs isGroup/parentGroupId — never both on one record (§F, th
       ${task('t1')}
       ${subtask('g1', 't1', 'isGroup: true,')}
       ${subtask('m1', 't1', "parentGroupId: 'g1', groupId: undefined,")}
-      const result = await web.patchSubtask('m1', { groupId: null })
+      const result = await web.patchSubtask('m1', { groupId: null }, { principal: { kind: 'unattributed' } })
       const after = await store.read()
       const row = after.subtasks.find(s => s.id === 'm1')
       console.log(JSON.stringify({ result, groupId: row.groupId ?? null, parentGroupId: row.parentGroupId ?? null }))

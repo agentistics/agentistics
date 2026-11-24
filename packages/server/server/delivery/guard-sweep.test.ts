@@ -18,6 +18,7 @@ import { flowContext } from './guard'
 import { newDelivery } from './machine'
 import { createTaskStore, type TaskStore } from '../sessions/task-store'
 import { planSweep, sweepWarnings } from './sweep-plan'
+import { unattributedContext } from './guard'
 
 const T = Date.parse('2026-11-13T10:00:00Z')
 const ISO = new Date(T).toISOString()
@@ -41,9 +42,9 @@ async function world(rule: 'off' | 'shadow' | 'on', pieces = ['p1']): Promise<Wo
   const deps = { sessions: async () => sessions, git: execGit }
   const tasks = createTaskStore(paths.tasks, { guard: { deps, now: () => clock.now } })
   await tasks.seedStatuses(DEFS)
-  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
-  for (const id of pieces) await tasks.upsertSubtask(subtask(id))
-  for (let i = 0; i < 40; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
+  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
+  for (const id of pieces) await tasks.upsertSubtask(subtask(id), unattributedContext())
+  for (let i = 0; i < 40; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
   const store = createDeliveryStore(paths.deliveries, { guard: { deps, now: () => clock.now } })
   const board = { catchUps: [] as string[], comments: [] as string[] }
   const logs: string[] = []

@@ -7,28 +7,49 @@
  * every reader ignores (and the next job sweeps).
  *
  * Running a job: wait until this job is at the HEAD of the queue, then try each slot that MemAvailable
- * allows with `flock -n -E 254 <lock> <cmd…>` — flock holds the lock for exactly as long as the
- * command runs and releases it however the command ends. A busy slot answers 254 at once and the
- * next slot is tried. Slot 0 is `/tmp/agentistics-heavy.lock`, the lock sessions already take by hand.
+ * allows without waiting, then join the blocking flock waiters on slot zero if all are busy.
+ * Slot 0 is `/tmp/agentistics-heavy.lock`, the lock sessions already take by hand.
  */
 
 import { hostWhich } from '../host-which'
+import { writeFileSynced } from '../durable-file'
 import { mkdir, readdir, readFile, readlink, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { FLOCK_BUSY_CODE, flockHolders, heavyLockPath, heavySlots, heavyTreePids, parseFlockArgv, queuePosition, type HeavyWaiter } from './heavy'
+import { FLOCK_BUSY_CODE, flockHolders, heavyAttempts, heavyFlockArgs, heavyWaitLine, heavyLockPath, heavySlots, heavyTreePids, mergeHeavyJobs, parseFlockArgv, queuePosition, type HeavyRunning, type HeavyWaiter } from './heavy'
 import { stat } from 'node:fs/promises'
 import { pidAlive, readProcTable, type ProcStatRow } from './proc-read'
 import { parseMeminfo } from '../sessions/memory-budget'
 
 export const HEAVY_DIR = join(AGENTISTICS_DATA_DIR, 'heavy')
 
-export interface HeavyRunning extends HeavyWaiter {
-  slot: number
-  usedBytes: number | null
-  /** Started with a bare `flock` on the slot's lock rather than through `agentop heavy`. */
-  manual?: boolean
-}
+// Exec keeps flock's PID (and therefore queue accounting). The detached group also contains this
+// watchdog and the wrapped command. Reparenting means the owner died without running its handlers; the
+// watchdog then removes the owner's queue files (an exit handler cannot do it: no sync unlink is inventoried) and kills the group.
+// The watchdog opens no lock FD; a normal flock exit lets it leave without holding the slot open.
+const PARENT_WATCHDOG = `
+owner=$1
+wait=$2
+run=$3
+shift 3
+group=$$
+(
+  while :; do
+    read -r pid comm state parent rest < /proc/$group/stat 2>/dev/null || exit 0
+    [ "$state" = Z ] && exit 0
+    if [ "$parent" != "$owner" ]; then
+      rm -f -- "$wait" "$run"
+      kill -KILL -"$group"
+      exit 0
+    fi
+    sleep 0.1
+  done
+) </dev/null >/dev/null 2>&1 &
+export AGENTISTICS_HEAVY_JOB=1
+exec "$@"
+`
+
+export type { HeavyRunning } from './heavy'
 export interface HeavyState {
   slots: number
   availableBytes: number | null
@@ -138,7 +159,7 @@ async function manualJobs(table: readonly ProcStatRow[], lockDir: string): Promi
     const parsed = parseFlockArgv(argv)
     if (!parsed || ![...inodes.values()].some(slot => heavyLockPath(slot, lockDir) === parsed.lock)) continue
     const st = await stat(`/proc/${row.pid}`).catch(() => null)
-    waiting.push({ pid: row.pid, sinceMs: st?.mtimeMs ?? Date.now(), command: parsed.command })
+    waiting.push({ pid: row.pid, sinceMs: st?.mtimeMs ?? Date.now(), command: parsed.command, manual: true })
   }
   return { running, waiting }
 }
@@ -146,80 +167,111 @@ async function manualJobs(table: readonly ProcStatRow[], lockDir: string): Promi
 /** What is running and waiting right now — dead entries dropped, manual `flock` jobs included. */
 export async function readHeavyState(dir = HEAVY_DIR, lockDir = '/tmp'): Promise<HeavyState> {
   const ours = (await readDirJson<HeavyRunning>(join(dir, 'running'))).filter(r => pidAlive(r.pid))
+  const queued = (await readDirJson<HeavyWaiter>(join(dir, 'waiting'))).filter(w => pidAlive(w.pid))
   const table = readProcTable(Date.now(), true) ?? []
   const manual = await manualJobs(table, lockDir)
-  // A job run through `agentop heavy` is ALSO a flock holder; keep our richer record, not both.
-  const ourPids = new Set(ours.map(r => r.pid))
-  const running = [...ours, ...manual.running.filter(r => !ourPids.has(r.pid))]
+  const { running, waiting } = mergeHeavyJobs(ours, queued, manual)
   const seen = new Set<number>()
   for (const r of running) r.usedBytes = await rssOf(r.pid, table, seen)
-  const waiting = [
-    ...(await readDirJson<HeavyWaiter>(join(dir, 'waiting'))).filter(w => pidAlive(w.pid)),
-    ...manual.waiting,
-  ].filter((w, i, all) => all.findIndex(x => x.pid === w.pid) === i)
-    .sort((a, b) => a.sinceMs - b.sinceMs || a.pid - b.pid)
   const availableBytes = await memAvailable()
   const runningBytes = running.reduce((n, r) => n + (r.usedBytes ?? 0), 0)
   return { slots: availableBytes === null ? 1 : heavySlots(availableBytes, runningBytes), availableBytes, running, waiting }
 }
 
-const GB = 1024 * 1024 * 1024
-
 /**
  * `agentop heavy [--] <cmd…>` — run one heavy job through the slot. Returns the command's exit code.
  * `say` prints the queue state to stderr (stdout belongs to the command).
  */
-export async function runHeavy(argv: string[], say: (line: string) => void, dir = HEAVY_DIR): Promise<number> {
-  const cmd = argv[0] === '--' ? argv.slice(1) : argv
-  if (cmd.length === 0) { say('usage: agentop heavy -- <command> [args…]'); return 2 }
+export async function runHeavy(argv: string[], say: (line: string) => void, dir = HEAVY_DIR, lockDir = '/tmp'): Promise<number> {
+  const job = argv[0] === '--' ? argv.slice(1) : argv
+  if (job.length === 0) { say('usage: agentop heavy -- <command> [args…]'); return 2 }
   const flock = hostWhich('flock')
-  const command = cmd.join(' ').slice(0, 200)
-  if (!flock || process.platform !== 'linux') {
-    say('agentop heavy: no flock here — running without the slot.')
-    return await Bun.spawn(cmd, { stdio: ['inherit', 'inherit', 'inherit'] }).exited
-  }
+  // setsid makes the child its own process group (same pid: it is not a group leader, so it execs, never forks).
+  const setsid = hostWhich('setsid')
+  const command = job.join(' ').slice(0, 200)
+  const slotted = Boolean(flock && setsid) && process.platform === 'linux'
+  if (!slotted) say('agentop heavy: no flock here — running without the slot.')
   const me: HeavyWaiter = { pid: process.pid, sinceMs: Date.now(), command }
-  await mkdir(join(dir, 'waiting'), { recursive: true })
-  await mkdir(join(dir, 'running'), { recursive: true })
   const waitFile = join(dir, 'waiting', `${process.pid}.json`)
   const runFile = join(dir, 'running', `${process.pid}.json`)
-  await writeFile(waitFile, JSON.stringify(me))
-  const cleanup = () => { void unlink(waitFile).catch(() => {}); void unlink(runFile).catch(() => {}) }
-  process.on('exit', cleanup)
+  if (slotted) {
+    await mkdir(join(dir, 'waiting'), { recursive: true })
+    await mkdir(join(dir, 'running'), { recursive: true })
+    await writeFile(waitFile, JSON.stringify(me))
+  }
+  let activeChild: ReturnType<typeof Bun.spawn> | undefined
+  let signalExit: number | undefined
+  const cleanup = () => {
+    if (activeChild) {
+      try { process.kill(-activeChild.pid, 'SIGKILL') } catch { /* already exited */ }
+    }
+    return Promise.all([unlink(waitFile).catch(() => {}), unlink(runFile).catch(() => {})])
+  }
+  const cancel = (code: number) => {
+    if (signalExit !== undefined) return
+    signalExit = code
+    // Reap our direct flock child and drop the queue files before exiting.
+    void Promise.all([cleanup(), Promise.resolve(activeChild?.exited)]).then(() => process.exit(code))
+  }
+  const onTerm = () => cancel(143)
+  const onInt = () => cancel(130)
+  const onHup = () => cancel(129)
+  process.on('SIGTERM', onTerm)
+  process.on('SIGINT', onInt)
+  process.on('SIGHUP', onHup)
   let lastLine = ''
+  const reportWaiting = (state: HeavyState) => {
+    const { position, of } = queuePosition(state.waiting, process.pid, pidAlive)
+    // Memory drifts every tick; only queue/holder changes warrant another line.
+    const key = JSON.stringify([position, of, state.slots, state.running.map(r => [r.pid, r.manual]), state.waiting.filter(w => w.manual).length])
+    if (key !== lastLine) { lastLine = key; say(heavyWaitLine(state, position, of)) }
+  }
   try {
     for (;;) {
-      const state = await readHeavyState(dir)
-      const { position, of } = queuePosition(state.waiting, process.pid, pidAlive)
-      if (position <= 1) {
-        // At the head: try every slot the machine allows right now.
-        for (let slot = 0; slot < state.slots; slot++) {
-          const child = Bun.spawn([flock, '-n', '-E', String(FLOCK_BUSY_CODE), heavyLockPath(slot), ...cmd], {
-            stdio: ['inherit', 'inherit', 'inherit'],
-            env: { ...process.env, AGENTISTICS_HEAVY_JOB: '1' },
-          })
+      const state = slotted ? await readHeavyState(dir, lockDir) : undefined
+      const { position } = state ? queuePosition(state.waiting, process.pid, pidAlive) : { position: 1 }
+      const attempts = state ? heavyAttempts(position, state.slots) : [{ slot: 0, blocking: false }]
+      for (const { slot, blocking } of attempts) {
+        if (blocking && state) reportWaiting(state)
+        // One spawn site for both paths: the slotted argv wraps the job in setsid + the parent watchdog + flock.
+        const cmd = slotted ? [setsid!, 'sh', '-c', PARENT_WATCHDOG, 'agentop-heavy-watch', String(process.pid), waitFile, runFile, flock!, ...heavyFlockArgs({ slot, blocking }, job, lockDir)] : job
+        const child = activeChild = Bun.spawn(cmd, { stdio: ['inherit', 'inherit', 'inherit'] })
+        if (blocking) {
+          // Keep the parent at the head until the child really acquires the lock. Readers use
+          // flockPid to identify our waiting child and the eventual holder without double counts.
+          me.flockPid = child.pid
+          await writeFileSynced(waitFile, JSON.stringify(me))
+          let finished = false
+          void child.exited.then(() => { finished = true })
+          while (!finished) {
+            await Promise.race([child.exited, Bun.sleep(2000)])
+            if (finished) break
+            const current = await readHeavyState(dir, lockDir)
+            if (current.running.some(r => r.pid === child.pid)) break
+            reportWaiting(current)
+          }
+        } else if (slotted) {
           await writeFile(runFile, JSON.stringify({ ...me, pid: child.pid, slot, usedBytes: null }))
           await unlink(waitFile).catch(() => {})
-          const code = await child.exited
-          if (code !== FLOCK_BUSY_CODE) return code
-          // Busy: back in the queue at the same place, and the next slot is tried.
-          await unlink(runFile).catch(() => {})
-          await writeFile(waitFile, JSON.stringify(me))
         }
+        const code = await child.exited
+        // Stop the watchdog even when flock already exited; wrapped descendants share this group.
+        try { process.kill(-child.pid, 'SIGKILL') } catch { /* group already gone */ }
+        activeChild = undefined
+        // A cancel's own cleanup is async; exiting here first would leave the queue files behind.
+        if (signalExit !== undefined) { await cleanup(); process.exit(signalExit) }
+        if (!slotted || blocking || code !== FLOCK_BUSY_CODE) return code
+        // Busy: back in the queue at the same place, and the next slot is tried.
+        await unlink(runFile).catch(() => {})
+        await writeFile(waitFile, JSON.stringify(me))
       }
-      const avail = state.availableBytes === null ? '?' : `${(state.availableBytes / GB).toFixed(1)} GB`
-      // Said again only when the QUEUE moves — available memory drifts every tick and is not news.
-      const key = `${position}/${of}/${state.running.length}/${state.slots}`
-      if (key !== lastLine) {
-        lastLine = key
-        const holder = state.running[0]
-        say(`agentop heavy: waiting — position ${Math.max(1, position)} of ${Math.max(1, of)}, `
-          + `${state.running.length} running in ${state.slots} slot(s), ${avail} available`
-          + (holder ? ` (running: ${holder.command.slice(0, 60)})` : ''))
-      }
+      if (state) reportWaiting(state)
       await Bun.sleep(2000)
     }
   } finally {
-    cleanup()
+    await cleanup()
+    process.off('SIGTERM', onTerm)
+    process.off('SIGINT', onInt)
+    process.off('SIGHUP', onHup)
   }
 }

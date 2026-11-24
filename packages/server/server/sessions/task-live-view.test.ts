@@ -66,8 +66,9 @@ describe('describeLive', () => {
     expect(keys({})).toEqual(keys({ tab: 'all' }))
     // The counts are the screen's tab numbers, and each equals the list that tab returns.
     const v = view({ tab: 'all', period: '7d' }).view
-    expect(v.counts).toEqual({ active: 2, queue: 1, published: 2, all: 6 })
-    for (const tab of ['active', 'queue', 'published', 'all'] as const) expect(view({ tab, period: '7d' }).deliveries).toHaveLength(v.counts[tab])
+    expect(v.counts).toEqual({ active: 2, queue: 1, published: 2, all: 5 })
+    // LIVE.COLUNAS-PRESAS C2: Tudo still CARRIES the antiga (for the Antigas group) but neither counts nor draws it.
+    for (const tab of ['active', 'queue', 'published', 'all'] as const) expect(view({ tab, period: '7d' }).deliveries.filter(x => !x.old)).toHaveLength(v.counts[tab])
     // The old review never counts as active work.
     expect(view({ tab: 'all' }).summary.deliveries).toBe(3)
   })

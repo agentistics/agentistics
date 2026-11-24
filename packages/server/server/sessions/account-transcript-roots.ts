@@ -136,3 +136,8 @@ export function __setAccountRootsForTest(next: AccountRootsSource | null): void 
   override = next ? async () => next : null
   cached = null
 }
+
+/** A transcript's mtime in ms (throws when it is missing) — the read-only stat reopen-by-account compares copies with. */
+export async function transcriptMtimeMs(path: string): Promise<number> {
+  return (await stat(path)).mtimeMs
+}

@@ -11,6 +11,7 @@ import { createDeliveryStore } from './store'
 import { newDelivery, type DeliveryRecord } from './machine'
 import { createTaskStore } from '../sessions/task-store'
 import { RULE_IDS, createGuaranteesStore, ruleState } from './activation'
+import { unattributedContext } from './guard'
 
 let dir: string
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 's0b-inert-')) })
@@ -25,14 +26,14 @@ describe('no guarantees.json → today\'s behaviour', () => {
   test('a delivery write and a board write land exactly as before and create NO guards/guarantees file', async () => {
     const dFile = join(dir, 'deliveries.json'); const tFile = join(dir, 'tasks.json')
     const rec: DeliveryRecord = newDelivery({ subtaskId: 's1', taskId: 't1', at: '2026-11-13T00:00:00Z' })
-    await createDeliveryStore(dFile).update(doc => { doc.deliveries.s1 = rec })
+    await createDeliveryStore(dFile).update(doc => { doc.deliveries.s1 = rec }, { guard: unattributedContext() })
     expect(JSON.parse(readFileSync(dFile, 'utf8'))).toEqual({ version: 1, deliveries: { s1: rec } })
     // even a rank-raising move (a record to a later phase) is not refused or intercepted
-    await createDeliveryStore(dFile).update(doc => { doc.deliveries.s1!.phase = 'publicado' as never })
+    await createDeliveryStore(dFile).update(doc => { doc.deliveries.s1!.phase = 'publicado' as never }, { guard: unattributedContext() })
     expect(JSON.parse(readFileSync(dFile, 'utf8')).deliveries.s1.phase).toBe('publicado')
 
     const ts = createTaskStore(tFile)
-    await ts.upsertTask({ id: 't1', title: 'T', status: 'done', createdAt: '2026-11-13T00:00:00Z', updatedAt: '2026-11-13T00:00:00Z' } as never)
+    await ts.upsertTask({ id: 't1', title: 'T', status: 'done', createdAt: '2026-11-13T00:00:00Z', updatedAt: '2026-11-13T00:00:00Z' } as never, unattributedContext())
     expect((await ts.read()).tasks[0]!.status).toBe('done')
 
     expect(readdirSync(dir).sort()).toEqual(['deliveries.json', 'tasks.json', 'tasks.json.bak'])

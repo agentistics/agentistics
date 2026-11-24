@@ -38,7 +38,7 @@ import { SPAWN_SPECS, planSpawn } from './spawn-spec'
 import { spawnCapabilities } from './codex-capabilities'
 import { readHarnessVersion } from './harness-version'
 import { spawnGate, UNPROVEN_SESSION, verifyBornRole } from './spawn-gate'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withCustodyQueue, withPassagem, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { isRenameNoop, renameInHarness, renameMessage, renameOutcomeRecord } from './rename'
@@ -81,6 +81,7 @@ import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, 
 import { ensureClaudeProjectTrusted } from './claude-trust'
 import type { BackendInitialPrompt, BackendSpawn, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 import { structuredOnlyNotice } from './spawn-error'
+import { unattributedContext } from '../delivery/guard'
 
 /**
  * The initial-prompt argument for `backend.spawn`, with the harness's screen RULES attached so the
@@ -590,7 +591,7 @@ export async function start(
   const relay = handoffParentRow
     ? await import('./handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
-  const ctx = buildSpawnContext(await withPassagem(await withOwnerRequests({ ...(relay ? { handoffRelay: relay.section } : {}), ...(cmd.handoff ? { handoffTakeover: true } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) }), !!cmd.handoff, cmd.handoffFile ? { handoffFile: cmd.handoffFile } : {}))
+  const ctx = buildSpawnContext(await withPassagem(await withCustodyQueue(await withOwnerRequests({ ...(relay ? { handoffRelay: relay.section } : {}), ...(cmd.handoff ? { handoffTakeover: true } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })), !!cmd.handoff, cmd.handoffFile ? { handoffFile: cmd.handoffFile } : {}))
   // PLAN.ACCOUNTS D3 — one decision for every door (`spawn-account.ts`). An agent is asking when
   // this command runs inside a pane that can prove its identity.
   const agentCaller = await callerHoldsIdentity(callerSessionId())
@@ -809,7 +810,7 @@ async function resolveTaskAndAttempts(
   if (!task) {
     // A task a batch is starting is `in_progress` by construction: sessions are about to run.
     task = { id: newTaskId(), title: cmd.task, status: 'in_progress', createdAt: now, updatedAt: now }
-    await store.upsertTask(task)
+    await store.upsertTask(task, unattributedContext())
   }
   const created: Task = task
 

@@ -25,6 +25,7 @@ import { gitSync } from './git-fixture.testing'
 import { T, makeWorld, shot } from './evidence-world.testing'
 import { createTaskStore } from '../sessions/task-store'
 import { createSessionRegistry } from '../sessions/registry'
+import { unattributedContext } from './guard'
 
 const SERVER_ROOT = join(import.meta.dir, '..', '..')
 const ISO = '2026-11-13T09:00:00.000Z'
@@ -56,9 +57,9 @@ async function boot(rule: 'on' | 'off'): Promise<Env> {
   const deps = { sessions: async () => world.sessions, git: execGit }
   const tasks = createTaskStore(join(root, 'tasks.json'), { guard: { deps, now: () => T } })
   await tasks.seedStatuses(DEFS)
-  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
-  await tasks.upsertTask({ id: 't2', title: 't2', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
-  for (const id of ['p1', 'p2', 'p3', 'p4']) await tasks.upsertSubtask(sub(id))
+  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
+  await tasks.upsertTask({ id: 't2', title: 't2', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
+  for (const id of ['p1', 'p2', 'p3', 'p4']) await tasks.upsertSubtask(sub(id), unattributedContext())
   // the registry the SERVER's guard reads its checkouts from: one session per piece, filed in the repository
   const registry = createSessionRegistry(join(root, 'managed-sessions.json'))
   for (const [id, taskId, subtaskId] of [['worker', 't1', 'p1'], ['worker2', 't1', 'p2'], ['worker3', 't1', 'p3'], ['worker4', 't1', 'p4'], ['worker-t2', 't2', undefined]] as const) {
@@ -253,7 +254,7 @@ describe('§3.5.6 flow phase qa → revisao_lider (APROVADO) needs the evidencia
     const head = gitSync(e.world.repo, 'rev-parse', 'HEAD')
     // the piece sits in qa at the verified head (the record's own fields; a rank-0 move, so the store lets it through)
     const store = (await import('./store')).createDeliveryStore(join(e.root, 'deliveries.json'))
-    await store.update(doc => { const r = doc.deliveries.p4!; r.phase = 'qa'; r.headSha = head; r.branch = 'feat/x' })
+    await store.update(doc => { const r = doc.deliveries.p4!; r.phase = 'qa'; r.headSha = head; r.branch = 'feat/x' }, { guard: unattributedContext() })
     const author = e.world.sessions.find(s => s.id === 'worker4')!
     Object.assign(author, { model: 'claude-sonnet-4' })
     e.world.sessions.push({ ...author, id: 'qa-p4', harness: 'codex', model: 'gpt-6', label: 'QA' } as never)

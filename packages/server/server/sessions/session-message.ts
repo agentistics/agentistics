@@ -68,6 +68,11 @@ export interface MessageDeps {
    * clean and saved). Best effort, never on the delivery path; absent / flows off = nothing.
    */
   handbackEvent?: (event: HandbackEvent) => Promise<unknown>
+  /**
+   * LIVE.COLUNAS-PRESAS (flow side): stamp the sender's piece with where its work lives (`piece-provenance.ts`) while the
+   * sender is still registered — `fechar-entregue` may end it right after this handback. Best effort; absent = nothing.
+   */
+  stampProvenance?: (senderId: string) => Promise<void>
   now: () => number
 }
 
@@ -170,6 +175,8 @@ export async function sendSessionMessage(
       message: { to: target.id, kind, ...(verdict.intermediate ? { intermediate: true } : {}) },
     }).catch(() => ({ ok: false }))
     mirrored = res.ok
+    // Awaited (bounded inside) BEFORE the handback event, which is what lets fechar-entregue close the sender.
+    if (kind === 'handback' && filed.subtaskId && deps.stampProvenance) await deps.stampProvenance(senderId).catch(() => undefined)
     if (kind === 'handback' && !verdict.intermediate && filed.subtaskId && deps.handbackSubtask) {
       // The comment is already recorded; a refusal by the store's guard HOLDS the move (the subtask stays where it was).
       const moved = await deps.handbackSubtask(filed.subtaskId, senderId).catch(() => undefined)
@@ -239,6 +246,7 @@ export async function defaultMessageDeps(): Promise<MessageDeps> {
       const { engine } = await import('../engine/load')
       return engine()?.flows?.emit?.(event)
     },
+    stampProvenance: async senderId => (await import('../delivery/host')).stampProvenanceOfSession(senderId),
     now: () => Date.now(),
   }
 }

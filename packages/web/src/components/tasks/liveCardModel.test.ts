@@ -32,6 +32,22 @@ describe('state words — a worker that is merely idle is not "waiting for you"'
   })
 })
 
+describe('LIVE.COLUNAS-PRESAS C4: a review / PR card nobody is on says it waits, never "0% · lendo as mudanças"', () => {
+  test('no agent and no observed step: no percent, and the reason line says who it waits for', () => {
+    const review = card({ stage: 'leader', status: 'in_review', step: null })
+    expect(cardPercent(review.d, true)).toBeNull()
+    expect(waitingReason(review, [], true)).toBe('esperando o líder')
+    expect(waitingReason(card({ stage: 'merge', status: 'pr_merge', step: null }), [], false)).toBe('waiting for the leader (PR / merge)')
+    // "Sem líder" already says it in its own line; an observed step keeps its percent and needs no second line.
+    expect(waitingReason({ ...review, displayStage: 'no-leader' }, [], true)).toBeNull()
+    expect(waitingReason(card({ stage: 'leader', status: 'in_review', step: 2 }), [], true)).toBeNull()
+  })
+  test('Tudo does not draw the antigas in its columns (C2)', () => {
+    const cards = [card({ key: 't/old', stage: 'leader', old: true }), card({ key: 't/new', stage: 'leader' })]
+    expect(filterCards(cards, { taskIds: [], tab: 'all', period: 'all', nowMs: NOW }).map(c => c.d.key)).toEqual(['t/new'])
+  })
+})
+
 describe('what a waiting card waits for (item i)', () => {
   test('review, QA, merge, queue, a dialog with its question, and honesty when unknown', () => {
     const f = [row('s', 'waiting')]

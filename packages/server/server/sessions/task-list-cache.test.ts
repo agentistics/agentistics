@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'bun:test'
 import { listOptionsOf } from './task-list-window'
 import { createTask, editTask, listTasks, markTask, addComment } from './task-web'
+import { unattributedContext } from '../delivery/guard'
 
 const titles = async (opts = {}) => (await listTasks(undefined, opts)).tasks.map(r => r.task.title)
 
@@ -19,7 +20,7 @@ describe('listTasks cache', () => {
   test('a status change is visible at once', async () => {
     const t = await createTask({ title: 'cache-status' })
     await listTasks()
-    await markTask(t!.id, 'in_progress')
+    await markTask(t!.id, 'in_progress', undefined, { guard: unattributedContext() })
     expect((await listTasks()).tasks.find(r => r.task.id === t!.id)?.task.status).toBe('in_progress')
   })
   test('a comment moves the count at once', async () => {
@@ -39,7 +40,7 @@ describe('listTasks cache', () => {
 describe('the split load', () => {
   test('both steps carry the same total and overview; step one is flagged partial', async () => {
     const t = await createTask({ title: 'split-done' })
-    await markTask(t!.id, 'in_progress')
+    await markTask(t!.id, 'in_progress', undefined, { guard: unattributedContext() })
     const whole = await listTasks(undefined, { clip: true })
     const first = await listTasks(undefined, { recent: true, clip: true })
     expect(first.partial).toBe(true)

@@ -104,20 +104,20 @@ describe('qa', () => {
 })
 
 describe('leader and merge read the delivery record only', () => {
-  test('without a record the board status is the only signal: step 1 (r2: every column shows a percent)', () => {
-    expect(deriveStep(facts({ stage: 'leader' }))).toEqual({ step: 1, signal: 'stage' })
-    expect(deriveStep(facts({ stage: 'merge' }))).toEqual({ step: 1, signal: 'stage' })
+  test('LIVE.COLUNAS-PRESAS C4: without a record nothing was observed — no step (the card says it waits for the leader, never 0%)', () => {
+    expect(deriveStep(facts({ stage: 'leader' }))).toBeNull()
+    expect(deriveStep(facts({ stage: 'merge' }))).toBeNull()
   })
-  test('leader: 1 stage · 2 deletions gate · 3 decision recorded', () => {
-    expect(deriveStep(facts({ stage: 'leader', rec: { phase: 'revisao_lider' } }))).toEqual({ step: 1, signal: 'stage' })
+  test('leader: nothing observed · 2 deletions gate · 3 decision recorded', () => {
+    expect(deriveStep(facts({ stage: 'leader', rec: { phase: 'revisao_lider' } }))).toBeNull()
     expect(deriveStep(facts({ stage: 'leader', rec: { phase: 'revisao_lider', gates: { delecoes: { ok: true, at: iso(NOW - 1000) } } } }))).toEqual({ step: 2, signal: 'deletions-gate' })
     expect(deriveStep(facts({ stage: 'leader', rec: { phase: 'revisao_lider', review: { at: iso(NOW - 1000) } } }))).toEqual({ step: 3, signal: 'review' })
   })
   test('a failed gate is not a step', () => {
-    expect(deriveStep(facts({ stage: 'leader', rec: { phase: 'revisao_lider', gates: { delecoes: { ok: false, at: iso(NOW - 1000) } } } }))).toEqual({ step: 1, signal: 'stage' })
+    expect(deriveStep(facts({ stage: 'leader', rec: { phase: 'revisao_lider', gates: { delecoes: { ok: false, at: iso(NOW - 1000) } } } }))).toBeNull()
   })
-  test('merge: 1 stage · 2 PR exists · 3 merged', () => {
-    expect(deriveStep(facts({ stage: 'merge', rec: { phase: 'pr_merge' } }))).toEqual({ step: 1, signal: 'stage' })
+  test('merge: nothing observed · 2 PR exists · 3 merged', () => {
+    expect(deriveStep(facts({ stage: 'merge', rec: { phase: 'pr_merge' } }))).toBeNull()
     expect(deriveStep(facts({ stage: 'merge', rec: { phase: 'pr_merge', pr: 12 } }))).toEqual({ step: 2, signal: 'pr' })
     expect(deriveStep(facts({ stage: 'merge', rec: { phase: 'pr_merge', pr: 12, mergeSha: 'abc' } }))).toEqual({ step: 3, signal: 'merged' })
   })
@@ -201,13 +201,12 @@ describe('buildLive: the card gets its percent from signals alone', () => {
     const comments = [{ id: 'c', taskId: 't1', subtaskId: 'a', author: 'x', body: 'old', kind: 'handback', createdAt: iso(NOW - 10 * H) }]
     expect(run([sess('s1', { activity: act({ edits: 1 }) })], { comments }).step).toBe(2)
   })
-  test('a legacy piece in review (no record): the board status IS the evidence — step 1 of its stage, so the card shows a percent (LIVE.LIDER r2)', () => {
+  test('a legacy piece in review (no record): entering the stage is not a step — no percent (LIVE.COLUNAS-PRESAS C4 supersedes LIVE.LIDER r2)', () => {
     const d = run([sess('s1', { endedAt: iso(NOW - H) })], { status: 'in_review' })
     expect(d.stage).toBe('leader')
-    expect(d.step).toBe(1)
-    expect(d.stepSource).toBe('signals')
-    expect(d.stepSignal).toBe('stage')
-    expect(cardPercent(d as never, true)).not.toBeNull()
+    expect(d.step).toBeNull()
+    expect(d.stepSource).toBeNull()
+    expect(cardPercent(d as never, true)).toBeNull()
   })
   test('the pieces filed sessions are offered as links even when they have ended (the card links to what is in the fleet)', () => {
     const d = run([sess('s1', { endedAt: iso(NOW - H) })], { status: 'in_review' })

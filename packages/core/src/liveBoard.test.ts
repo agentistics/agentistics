@@ -43,13 +43,13 @@ describe('the tabs and the Publicado period (filtros v2)', () => {
     expect(inPublishedPeriod(null, '30d', NOW)).toBe(false)
     expect(inPublishedPeriod(null, 'all', NOW)).toBe(true)
   })
-  test('counts: Tudo keeps the real column of everything, published only inside the period', () => {
+  test('counts: Tudo keeps the real column of everything except the antigas (LIVE.COLUNAS-PRESAS C2: they live in their group), published only inside the period', () => {
     const list = [
       c('queue'), c('running', { liveState: 'working' }), c('leader', { old: true }), c('blocked'),
       c('published', { deliveredAtMs: NOW - H }), c('published', { deliveredAtMs: NOW - 50 * H }),
     ]
-    expect(liveTabCounts(list, '24h', NOW)).toEqual({ active: 2, queue: 1, published: 1, all: 5 })
-    expect(liveTabCounts(list, '7d', NOW)).toEqual({ active: 2, queue: 1, published: 2, all: 6 })
+    expect(liveTabCounts(list, '24h', NOW)).toEqual({ active: 2, queue: 1, published: 1, all: 4 })
+    expect(liveTabCounts(list, '7d', NOW)).toEqual({ active: 2, queue: 1, published: 2, all: 5 })
   })
 })
 

@@ -12,6 +12,7 @@ import { createTaskStore, type TaskStore } from '../sessions/task-store'
 import { inGuardTransaction } from './guard-transaction'
 import { effectiveSubtasks } from '../sessions/task-report'
 import { SWEEP_NO_BASELINE_WARN_MS, sweepWarnings } from './sweep-plan'
+import { unattributedContext } from './guard'
 
 const T = Date.parse('2026-11-13T10:00:00Z')
 const ISO = new Date(T).toISOString()
@@ -34,9 +35,9 @@ async function world(subs: Array<[string, Record<string, unknown>?]> = [['p1']],
   const deps = { sessions: async () => sessions, git: execGit }
   const tasks: TaskStore = createTaskStore(paths.tasks, { guard: { deps, now: () => clock.now } })
   await tasks.seedStatuses(DEFS)
-  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
-  for (const [id, extra] of subs) await tasks.upsertSubtask(subtask(id, extra))
-  for (let i = 0; i < quiet; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
+  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
+  for (const [id, extra] of subs) await tasks.upsertSubtask(subtask(id, extra), unattributedContext())
+  for (let i = 0; i < quiet; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
   const store = createDeliveryStore(paths.deliveries, { guard: { deps, now: () => clock.now } })
   const board: any = { comment: async () => undefined, subtaskFinished: async () => false, setPhaseStatus: async () => ({ ok: true }) }
   const logs: string[] = []

@@ -87,7 +87,8 @@ function door(caller: CallerVerdict) {
   const relock = (owner: string) => browserRoute('POST', '/api/browser/lock', { owner, lock: 'locked' }, deps)
   return { unlock, relock, mode: (k: string) => locks.view(k).mode }
 }
-const PERSON: CallerVerdict = { kind: 'person', via: 'process', pid: 9 }
+// NAV.SEM-COFRE: a verified person needs no proof; the proof is what a caller the socket cannot identify still owes.
+const PERSON: CallerVerdict = { kind: 'unknown', reason: 'no-proc' }
 async function personGrant(id = 'aaa'): Promise<string> {
   const r = await withVaultPassword(PW, () => requireBrowserUnlockOwner(S, id))
   if (!r.ok || !r.grant) throw new Error(JSON.stringify(r))

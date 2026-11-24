@@ -93,7 +93,7 @@ test('patchSubtask joins a subtask to an existing group of the SAME task', async
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1')}
-    const result = await web.patchSubtask('m1', { parentGroupId: 'g1' })
+    const result = await web.patchSubtask('m1', { parentGroupId: 'g1' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, parentGroupId: row.parentGroupId ?? null }))
@@ -110,7 +110,7 @@ test('joining a staged member folds its delivery and prompt into the group throu
     const { newDelivery } = await import(${JSON.stringify(join(SESSIONS_DIR, '../delivery/machine.ts'))})
     const deliveries = createDeliveryStore()
     await deliveries.update(d => { d.deliveries.m1 = newDelivery({ subtaskId: 'm1', taskId: 't1', at: new Date().toISOString() }) })
-    const result = await web.patchSubtask('m1', { parentGroupId: 'g1' })
+    const result = await web.patchSubtask('m1', { parentGroupId: 'g1' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const records = await deliveries.read()
     console.log(JSON.stringify({ result, reason: records.deliveries.m1.dequeued?.reason, groupPhase: records.deliveries.g1?.phase, prompt: after.subtasks.find(s => s.id === 'g1').stagedSession?.prompt }))
@@ -125,7 +125,7 @@ test('patchSubtask refuses `invalid_group` when the id names no subtask', async 
   const out = await run(`
     ${task('t1')}
     ${subtask('m1', 't1')}
-    const result = await web.patchSubtask('m1', { parentGroupId: 'gone' })
+    const result = await web.patchSubtask('m1', { parentGroupId: 'gone' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, parentGroupId: row.parentGroupId ?? null }))
@@ -138,7 +138,7 @@ test('patchSubtask refuses `invalid_group` when the target is not actually a gro
     ${task('t1')}
     ${subtask('s1', 't1')}
     ${subtask('m1', 't1')}
-    const result = await web.patchSubtask('m1', { parentGroupId: 's1' })
+    const result = await web.patchSubtask('m1', { parentGroupId: 's1' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ result }))
   `)
   expect(out).toEqual({ result: { ok: false, message: 'invalid_group' } })
@@ -150,7 +150,7 @@ test('patchSubtask refuses `invalid_group` when the group belongs to a DIFFERENT
     ${task('t2')}
     ${subtask('g1', 't2', 'isGroup: true,')}
     ${subtask('m1', 't1')}
-    const result = await web.patchSubtask('m1', { parentGroupId: 'g1' })
+    const result = await web.patchSubtask('m1', { parentGroupId: 'g1' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ result }))
   `)
   expect(out).toEqual({ result: { ok: false, message: 'invalid_group' } })
@@ -161,7 +161,7 @@ test('patchSubtask refuses `invalid_group` when the subtask being patched is its
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('g2', 't1', 'isGroup: true,')}
-    const result = await web.patchSubtask('g2', { parentGroupId: 'g1' })
+    const result = await web.patchSubtask('g2', { parentGroupId: 'g1' }, { principal: { kind: 'unattributed' } })
     console.log(JSON.stringify({ result }))
   `)
   expect(out).toEqual({ result: { ok: false, message: 'invalid_group' } })
@@ -180,7 +180,7 @@ test('patchSubtask joins a group when the subtask has ZERO sessions filed on it'
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1')}
-    const result = await web.patchSubtask('m1', { parentGroupId: 'g1' })
+    const result = await web.patchSubtask('m1', { parentGroupId: 'g1' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, parentGroupId: row.parentGroupId ?? null }))
@@ -194,7 +194,7 @@ test('patchSubtask REFUSES joining a group when the subtask already has a sessio
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1')}
     ${session('sess1', "taskId: 't1', subtaskId: 'm1',")}
-    const result = await web.patchSubtask('m1', { parentGroupId: 'g1' })
+    const result = await web.patchSubtask('m1', { parentGroupId: 'g1' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, parentGroupId: row.parentGroupId ?? null }))
@@ -209,7 +209,7 @@ test('an empty string LEAVES the group — the key is gone from the record, not 
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
-    const result = await web.patchSubtask('m1', { parentGroupId: '' })
+    const result = await web.patchSubtask('m1', { parentGroupId: '' }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, hasKey: 'parentGroupId' in row }))
@@ -222,7 +222,7 @@ test('`null` LEAVES the group too', async () => {
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
-    const result = await web.patchSubtask('m1', { parentGroupId: null })
+    const result = await web.patchSubtask('m1', { parentGroupId: null }, { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const row = after.subtasks.find(s => s.id === 'm1')
     console.log(JSON.stringify({ result, hasKey: 'parentGroupId' in row }))
@@ -270,7 +270,7 @@ test('removeSubtask on a GROUP clears parentGroupId on its former members — th
     ${subtask('g1', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
     ${subtask('m2', 't1', "parentGroupId: 'g1',")}
-    const removed = await web.removeSubtask('g1')
+    const removed = await web.removeSubtask('g1', { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const ids = after.subtasks.map(s => s.id).sort()
     const m1 = after.subtasks.find(s => s.id === 'm1')
@@ -296,7 +296,7 @@ test('removeSubtask on a GROUP leaves an UNRELATED group\'s members alone', asyn
     ${subtask('g2', 't1', 'isGroup: true,')}
     ${subtask('m1', 't1', "parentGroupId: 'g1',")}
     ${subtask('m2', 't1', "parentGroupId: 'g2',")}
-    await web.removeSubtask('g1')
+    await web.removeSubtask('g1', { principal: { kind: 'unattributed' } })
     const after = await store.read()
     const m2 = after.subtasks.find(s => s.id === 'm2')
     console.log(JSON.stringify({ m2ParentGroupId: m2.parentGroupId ?? null }))

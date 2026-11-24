@@ -129,11 +129,11 @@ test('columns with cards are open, empty ones collapsed — and no column shows 
   expect(document.body.textContent).not.toContain('Nada nesta etapa')
 })
 
-test('an old legacy review is drawn only in "Tudo", marked "antiga", and is never "Em andamento"', async () => {
+test('an old legacy review is in NO column (LIVE.COLUNAS-PRESAS C2): Tudo offers it only through the "Antigas" group', async () => {
   const r = replyOf([piece('r', 'running', { sessionIds: ['s1'] }), piece('o', 'leader', { old: true })])
   await mount(props('pt', r))
-  expect(keysIn('leader')).toEqual(['o'])
-  expect(document.querySelector('[data-live-card="o"] [data-live-old]')!.textContent).toBe('antiga')
+  expect(keysIn('leader')).toEqual([])
+  expect(document.querySelector('[data-live-antigas-open]')!.textContent).toBe('Antigas · 1')
   await act(async () => tabBtn('Em andamento').click())
   expect(keysIn('leader')).toEqual([])
 })

@@ -102,6 +102,7 @@ import { HardwarePanel } from '../components/sessions/HardwarePanel'
 import { BrowserPanel } from '../components/browser/BrowserPanel'
 import { setBrowserDrawerOpen } from '../lib/browserDrawer'
 import { floatBrowser, updateBrowserWindows, useBrowserPlace } from '../lib/browserWindows'
+import { minimizePersonalBrowser } from '../lib/browserPersonal'
 import { UnsavedChangesGuard } from '../components/sessions/UnsavedChangesGuard'
 import { PanelFixedControls, PanelPinButton, PanelTileDropdown } from '../components/sessions/bandControls'
 import { ShellCloseStatus } from '../components/sessions/ShellCloseStatus'
@@ -1475,14 +1476,13 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   /** THE PERSON'S OWN BROWSER (NAVEGADOR S10): one element for the right slot (header trio folded in) and one for the bottom band. */
   // S11 "Flutuar": the browser leaves its slot for the app-level window (`BrowserWindows`, mounted in App).
   const floatPersonalBrowser = () => { updateBrowserWindows((s, vp) => floatBrowser(s, 'personal', vp, undefined, routeLocation.pathname)); closeSlotPanel('browser') }
-  const browserPaneEl = <BrowserPanel lang={pt ? 'pt' : 'en'} onClose={() => closeSlotPanel('browser')} hideCloseButton={!isMobile} onFloat={floatPersonalBrowser} />
+  const browserPaneEl = <BrowserPanel lang={pt ? 'pt' : 'en'} onClose={() => closeSlotPanel('browser')} onFloat={floatPersonalBrowser} />
   const browserPaneRightEl = (
     <BrowserPanel
       lang={pt ? 'pt' : 'en'}
       onClose={() => closeSlotPanel('browser')}
-      hideCloseButton={!isMobile}
       onFloat={floatPersonalBrowser}
-      controls={panelFixedControlsFor('browser', pt ? 'Navegador' : 'Browser', () => closeSlotPanel('browser'))}
+      controls={panelFixedControlsFor('browser', pt ? 'Navegador' : 'Browser', () => { void minimizePersonalBrowser(pt); closeSlotPanel('browser') })}
     />
   )
   const hardwarePaneRightEl = (
@@ -1919,7 +1919,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         <BrowserPanel
           lang={pt ? 'pt' : 'en'}
           onClose={() => dockBack('browser')}
-          hideCloseButton
           controls={dockControls('browser', panelTitle('browser', pt), true)}
         />
       )

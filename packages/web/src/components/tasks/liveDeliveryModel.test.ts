@@ -77,7 +77,7 @@ describe('filters, grouping, summary', () => {
     expect(filterCards(cards, f({ tab: 'all', taskIds: ['B'] })).map(c => c.d.key)).toEqual(['2'])
     expect(filterCards(cards, f({ tab: 'active', taskIds: ['B'] })).map(c => c.d.key)).toEqual(['2'])
   })
-  test('the tabs: Na fila is the queue, Publicado is its own period (24 h, 7 d, 30 d, all), an old review shows only in Tudo', () => {
+  test('the tabs: Na fila is the queue, Publicado is its own period (24 h, 7 d, 30 d, all), an old review is in NO tab columns (LIVE.COLUNAS-PRESAS C2: only the Antigas group)', () => {
     const H = 3600_000
     const mk = (key: string, stage: LiveDeliveryRecord['stage'], over: Partial<LiveDeliveryRecord> = {}) => rec({ key, stage, ...over })
     const all = joinLive([
@@ -92,7 +92,7 @@ describe('filters, grouping, summary', () => {
     expect(keys('published', '7d')).toEqual(['p1', 'p3'])
     expect(keys('published', '30d')).toEqual(['p1', 'p3'])
     expect(keys('published', 'all')).toEqual(['p1', 'p3', 'p40'])
-    expect(keys('all', '24h')).toEqual(['q', 'r', 'l', 'old', 'p1'])
+    expect(keys('all', '24h')).toEqual(['q', 'r', 'l', 'p1'])
   })
   test('THE COUNTS MATCH THE COLUMNS: each tab prints exactly the number of cards its columns hold, for every period and task filter', () => {
     const H = 3600_000
@@ -112,7 +112,7 @@ describe('filters, grouping, summary', () => {
         }
       }
     }
-    expect(tabCounts(all, { taskIds: [], period: '24h', nowMs: NOWMS })).toEqual({ active: 4, queue: 2, published: 1, all: 8 })
+    expect(tabCounts(all, { taskIds: [], period: '24h', nowMs: NOWMS })).toEqual({ active: 4, queue: 2, published: 1, all: 7 })
   })
   test('a queued piece NEVER has an agent and still belongs to "Na fila" and "Tudo"', () => {
     const q = joinLive([rec({ key: 'q', stage: 'queue', sessionIds: [] })], [])

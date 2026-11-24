@@ -11,6 +11,7 @@ import { makeWorld, T } from './evidence-world.testing'
 import { execGit, forgetClassifyCache } from './classify-host'
 import { forbiddenCapabilities, localImports, moduleCapabilities, rawWriters, testOnlyImports } from './guard-ast.testing'
 import { helperInventory } from './guard-inventory.testing'
+import { unattributedContext } from './guard'
 
 const at = new Date(T).toISOString()
 const ctx = { principal: { kind: 'unattributed' as const } }
@@ -28,8 +29,8 @@ async function setup(root: string) {
   const tasks = createTaskStore(join(root, 'tasks.json'), { guard: { deps, now: () => T } })
   const statuses = ['in_progress', 'shipped'].map((id, i) => ({ id, label: id, color: '#112233', order: i, protected: false, stage: i ? 'published' : 'running' }))
   await tasks.seedStatuses(statuses as never)
-  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: at, updatedAt: at } as never)
-  await tasks.upsertSubtask({ id: 'p1', taskId: 't1', title: 'p1', status: 'in_progress', done: false, createdAt: at, updatedAt: at })
+  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: at, updatedAt: at } as never, unattributedContext())
+  await tasks.upsertSubtask({ id: 'p1', taskId: 't1', title: 'p1', status: 'in_progress', done: false, createdAt: at, updatedAt: at }, unattributedContext())
   const g = createGuaranteesStore(join(root, 'guarantees.json'))
   const move = (to: 'off' | 'shadow' | 'on', now = T) => g.setState('a', to, { check, facts: facts(now) })
   expect(await move('shadow', T - 25 * 3600_000)).toEqual({ ok: true })
@@ -53,7 +54,7 @@ for (const state of ['on', 'shadow'] as const) test(`R5-1 J1/J2 journal from ${s
   expect(s.disk().p2.updatedAt).toBe('X1')
   expect((await s.deliveries.get('p2'))!.updatedAt).toBe('X1')
   expect(await s.w.svc.ensure('p3')).toMatchObject({ subtaskId: 'p3' })
-  await s.deliveries.update(d => { d.deliveries.p2!.updatedAt = 'X2' })
+  await s.deliveries.update(d => { d.deliveries.p2!.updatedAt = 'X2' }, { guard: unattributedContext() })
   expect(await s.move('shadow')).toEqual({ ok: true })
   expect(await s.deliveries.get('p3')).not.toBeNull()
   await s.deliveries.update(() => undefined, { guard: ctx })
@@ -71,7 +72,7 @@ for (const mode of ['ordinary', 'evidence', 'evidence-with-guards'] as const) te
   await s.guards.write({ ...g, pendingDelivery: journal })
   const stale = s.disk(); stale.p2.updatedAt = 'OLD'
   writeFileSync(s.path, JSON.stringify({ version: 1, deliveries: stale }))
-  await s.deliveries.update(d => { expect(d.deliveries.p2!.updatedAt).toBe('X1'); d.deliveries.p2!.updatedAt = 'X2' }, mode === 'ordinary' ? undefined : { evidence: true, ...(mode === 'evidence-with-guards' ? { guardsPath: s.guards.path } : {}) })
+  await s.deliveries.update(d => { expect(d.deliveries.p2!.updatedAt).toBe('X1'); d.deliveries.p2!.updatedAt = 'X2' }, { guard: unattributedContext(), ...(mode === 'ordinary' ? undefined : { evidence: true, ...(mode === 'evidence-with-guards' ? { guardsPath: s.guards.path } : {}) }) })
   expect((await s.guards.read()).pendingDelivery).toBeUndefined()
   expect(s.disk().p2.updatedAt).toBe('X2')
   expect(await s.move('shadow')).toEqual({ ok: true })
@@ -94,7 +95,7 @@ test('R5-2 R1 OFF restore re-seals floors with an audit and leaves a working led
   expect(await result(() => s.deliveries.update(() => undefined, { guard: ctx }))).toBe('WRITTEN')
   expect(await result(() => s.deliveries.update(d => { d.deliveries.p2!.updatedAt = 'X2' }, { guard: ctx }))).toBe('WRITTEN')
   expect(await s.w.svc.ensure('p3')).toMatchObject({ subtaskId: 'p3' })
-  expect(await result(() => s.deliveries.update(d => { d.deliveries.p1!.phase = 'revisao_lider' }))).toBe('guard_context_required')
+  expect(await result(() => s.deliveries.update(d => { d.deliveries.p1!.phase = 'revisao_lider' }, { guard: undefined as never }))).toBe('guard_context_required')
 }))
 
 test('R5-2 floors judge only changed records; unchanged records and phase downgrades never freeze the book', () => world(async s => {
@@ -119,7 +120,7 @@ test('R5-3 J3 unreadable guards warn and fall back for reads; writers refuse', (
   expect((await s.deliveries.read()).deliveries.p1).toBeDefined()
   expect((await s.deliveries.readStrict()).deliveries.p1).toBeDefined()
   expect(await s.deliveries.get('p1')).not.toBeNull()
-  expect(await result(() => s.deliveries.update(() => undefined))).toBe('guards_unreadable')
+  expect(await result(() => s.deliveries.update(() => undefined, { guard: unattributedContext() }))).toBe('guards_unreadable')
   expect(readFileSync(s.path, 'utf8')).toBe(bytes)
 }))
 

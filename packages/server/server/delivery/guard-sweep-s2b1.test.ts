@@ -19,6 +19,7 @@ import { analyzeGuardIntegrity } from './owner-health'
 const mayDismissPlaceholder = async (o: { principal: unknown; taskId: string; isTaskLeader: (s: string, t: string) => Promise<boolean> }) => (await import('../sessions/placeholder-dismiss')).mayDismissPlaceholder(o as never)
 import { planNext } from '../sessions/task-next'
 import { findTask } from '../sessions/task-report'
+import { flowContext, unattributedContext } from './guard'
 
 const T = Date.parse('2026-11-13T10:00:00Z')
 const ISO = new Date(T).toISOString()
@@ -41,9 +42,9 @@ async function world(subs: Array<[string, Record<string, unknown>?]> = [['p1']],
   const deps = { sessions: async () => sessions, git: execGit }
   const tasks: TaskStore = createTaskStore(paths.tasks, { guard: { deps, now: () => clock.now } })
   await tasks.seedStatuses(DEFS)
-  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
-  for (const [id, extra] of subs) await tasks.upsertSubtask(subtask(id, extra))
-  for (let i = 0; i < quiet; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
+  await tasks.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
+  for (const [id, extra] of subs) await tasks.upsertSubtask(subtask(id, extra), unattributedContext())
+  for (let i = 0; i < quiet; i++) await tasks.upsertTask({ id: `quiet-${i}`, title: 'quiet', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
   const store = createDeliveryStore(paths.deliveries, { guard: { deps, now: () => clock.now } })
   const board: any = { comment: async () => undefined, subtaskFinished: async () => false, setPhaseStatus: async () => ({ ok: true }) }
   const logs: string[] = []
@@ -146,7 +147,7 @@ test('B4 the task leader and the owner dismiss the placeholder; it is not re-cre
   for (const who of [LEADER, OWNER]) {
     const w = await restoredWorld()
     expect(await groupStatusNow(w)).toBe('todo')
-    const dismissed = await w.tasks.removeSubtask('m1', { dismissPlaceholder: who }).then(() => true, (e: unknown) => `refused: ${(e as { code?: string }).code}`)
+    const dismissed = await w.tasks.removeSubtask('m1', { guard: who, dismissPlaceholder: who }).then(() => true, (e: unknown) => `refused: ${(e as { code?: string }).code}`)
     expect(dismissed).toBe(true)
     const outs = await ticks(w, 3)
     expect(outs.flat()).toEqual([])
@@ -335,7 +336,7 @@ test('r2 a forged mark on a piece of the ledger-less board leaves it a real piec
   const { defaultGateFacts } = await import('./gates')
   const store = createTaskStore(TASKS_FILE)
   await store.seedStatuses(DEFS)
-  await store.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never)
+  await store.upsertTask({ id: 't1', title: 't1', status: 'in_progress', createdAt: ISO, updatedAt: ISO } as never, unattributedContext())
   const guards = createGuardsStore(join(TASKS_FILE, '..', 'guards.json'))
   const doc = await guards.read()
   await guards.write({ ...doc, sweep: { reverts: {}, placeholders: { ph: { groupId: 'g', taskId: 't1', restoredAt: ISO, restorationId: 'r-1' } } } })
@@ -458,7 +459,7 @@ test('r3 an owner removal of an OPEN accepted member (store call with the owner 
   const ms = [member('m0', 'done'), member('m1', 'in_progress')]
   const w = await world([['g', { isGroup: true }], ...ms], 3)
   await writeCp(w, cp0('g', { members: recordedAll(ms) } as never))
-  expect(await w.tasks.removeSubtask('m1', { ownerRemoval: VAULT_OWNER })).toBe(true)
+  expect(await w.tasks.removeSubtask('m1', { guard: VAULT_OWNER, ownerRemoval: VAULT_OWNER })).toBe(true)
   await writeCp(w, cp0('g', { members: recordedAll(ms) } as never))
   expect((await ticks(w, 3)).flat()).toEqual([])
   expect(await sub(w, 'm1')).toBeUndefined()
@@ -525,7 +526,8 @@ type RestDeps = { mode: 'legacy' | 'required'; grant?: string; browser?: { origi
 async function restRemove(w: W, id: string, d: RestDeps, body: Record<string, unknown> = {}) {
   const { removeSubtaskRequest } = await import('./web')
   return removeSubtaskRequest(id, { id, remove: true, ...body }, { principal: { kind: 'unattributed' } } as never, {
-    remove: (sid, ctx) => removeVia(w, sid, ctx),
+    // S2c.2: the door's retry on a refused unproven principal needs the store's GuardRefused to propagate, as it does in production.
+    remove: async (sid, ctx) => (await import('../sessions/task-web')).removeSubtask(sid, ctx, dismissDeps(w) as never),
     principalDeps: {
       verify: async () => null,
       mode: async () => d.mode,
@@ -743,9 +745,9 @@ const refusedWith = async (run: () => Promise<unknown>, code: string) => {
 test('r7 F1 store: deleting a task that holds an accepted member is refused for every non-owner-vault principal; nothing is deleted', async () => {
   const w = await acceptedWorld()
   for (const who of [LEADER, SESSION, OWNER, undefined, { principal: { kind: 'flow', engine: 'entrega' } } as never, { principal: { kind: 'unattributed' } } as never]) {
-    await refusedWith(() => w.tasks.removeTask('t1', undefined, who ? { guard: who } : undefined), 'accepted_members')
+    await refusedWith(() => w.tasks.removeTask('t1', undefined, { guard: who ?? unattributedContext() }), 'accepted_members')
   }
-  await refusedWith(() => w.tasks.removeTask('t1'), 'accepted_members')
+  await refusedWith(() => w.tasks.removeTask('t1', undefined, { guard: unattributedContext() }), 'accepted_members')
   expect((await w.tasks.read()).tasks.some(t => t.id === 't1')).toBe(true)
   expect(await sub(w, 'm0')).toBeTruthy()
   expect((await w.guards.read()).sweep?.ownerRemoved).toBeUndefined()
@@ -768,7 +770,7 @@ test('r7 F1 store: a task with no accepted member is still deleted by anyone (th
 
 test('r7 F1 store: deleting a GROUP that holds an accepted member is refused for sessions, header owner and no context; the vault owner may', async () => {
   const w = await acceptedWorld()
-  for (const who of [LEADER, SESSION, OWNER, undefined]) await refusedWith(() => w.tasks.removeSubtask('g', who ? { guard: who } : undefined), 'accepted_members')
+  for (const who of [LEADER, SESSION, OWNER, undefined]) await refusedWith(() => w.tasks.removeSubtask('g', { guard: who ?? unattributedContext() }), 'accepted_members')
   expect(await sub(w, 'g')).toBeTruthy()
   expect(await w.tasks.removeSubtask('g', { guard: VAULT_OWNER })).toBe(true)
   expect(await sub(w, 'g')).toBeUndefined()
@@ -806,7 +808,7 @@ test('r7 F1 doors: the index DELETE route, the MCP tool and every task delete fu
   const block = src.slice(at, src.indexOf("req.method === 'POST'", at))
   expect(block).toContain('deleteTaskRequest')
   const web = readFileSync(join(import.meta.dir, '..', 'sessions', 'task-web.ts'), 'utf8')
-  expect(web).toContain('}, held), guard ? { guard } : undefined)')
+  expect(web).toContain('}, held), { guard })')
   const mcp = readFileSync(join(import.meta.dir, '..', '..', '..', 'mcp', 'agentistics-mcp.ts'), 'utf8')
   expect(mcp).toContain('apiSend("DELETE", `/api/tasks/${encodeURIComponent(ref)}`)')
   // no other caller of the store delete exists outside the guarded door and the tests
@@ -873,7 +875,7 @@ test('r7 F4: a subtask is reachable only through its own task path (the route re
 // ══ r8: re-QA r7 findings ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 test('r8 B: removing an INDIVIDUAL accepted member at the store: refused with no opts, a session guard, the header owner; the vault owner removes and it is recorded', async () => {
   const w = await acceptedWorld()
-  await refusedWith(() => w.tasks.removeSubtask('m0'), 'accepted_members')
+  await refusedWith(() => w.tasks.removeSubtask('m0', { guard: unattributedContext() }), 'accepted_members')
   for (const who of [LEADER, SESSION, OWNER]) await refusedWith(() => w.tasks.removeSubtask('m0', { guard: who }), 'accepted_members')
   expect(await sub(w, 'm0')).toBeTruthy()
   expect(await w.tasks.removeSubtask('m0', { guard: VAULT_OWNER })).toBe(true)
@@ -883,7 +885,7 @@ test('r8 B: removing an INDIVIDUAL accepted member at the store: refused with no
 
 test('r8 B: the composer door removes the cards it just created (never accepted) without a guard', async () => {
   const w = await world([['g', { isGroup: true }], member('c1', 'in_progress')], 3)
-  expect(await w.tasks.removeSubtask('c1')).toBe(true)
+  expect(await w.tasks.removeSubtask('c1', { guard: flowContext() })).toBe(true)
 })
 
 test('r8 C: the vault owner reopens an accepted piece and moves it out of its group; a session and the header owner stay refused; the exemption covers ONLY accepted pieces', async () => {

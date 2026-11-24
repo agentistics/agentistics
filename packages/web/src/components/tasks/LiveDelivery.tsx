@@ -457,7 +457,7 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, slow, onRetr
   const answeredPeriod = replyPeriod ?? reply.view?.period
   const periodLoading = Boolean(answeredPeriod) && answeredPeriod !== period
   const showPublished = tab === 'all' || tab === 'published'
-  // "Antigas sem registro": filtros v2 keeps them in "Tudo", at the bottom of "Revisão do líder". That tab's bar opens the group: a button in
+  // "Antigas sem registro": not drawn in Tudo's columns any more (LIVE.COLUNAS-PRESAS C2) — only here. That tab's bar opens the group: a button in
   // that column's header sits off screen at 1280 px, behind the columns to its left.
   const oldCards = cards.filter(c => c.d.old && (taskIds.length === 0 || taskIds.includes(c.d.taskId)))
   const antigasTrigger = tab === 'all' && oldCards.length > 0 ? (
