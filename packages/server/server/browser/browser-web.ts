@@ -208,7 +208,11 @@ async function lockRoute(body: unknown, deps: RouteDeps): Promise<RouteAnswer> {
   if (d.mode === 'unlocked' && !deps.host.actionHost(key)) {
     return { status: 409, body: { ok: false, error: 'no_browser', sentence: 'This session has no browser open, so there is nothing to unlock.' } }
   }
-  if (d.mode === 'unlocked') {
+  // The MODEL's browser holds nothing of the person's (the agent profile has no personal cookies), so a request
+  // the socket PROVES comes from the person needs no vault proof (owner 23/11). Only a caller the socket cannot
+  // identify (no /proc: macOS, Windows) still owes it — a session that drops its inheritance looks like the person
+  // there. The person's OWN browser (personal profile) keeps its vault proof on its own doors.
+  if (d.mode === 'unlocked' && caller.kind !== 'person') {
     // Spent only once the unlock can happen (a 409 above leaves the grant for the retry).
     const proof: OwnerProofVerdict = deps.ownerProof
       ? await deps.ownerProof(d.managedId)

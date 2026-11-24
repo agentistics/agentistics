@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.227.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Navegador da sessão: o cadeado abre direto, sem pedir o cofre — ele não guarda nada seu. O navegador pessoal continua pedindo.',
+        en: "Session browser: the padlock now opens right away, without asking for the vault — it holds nothing of yours. Your personal browser still asks.",
+      },
+    ],
+  },
   '2.226.0': {
     features: [
       {
