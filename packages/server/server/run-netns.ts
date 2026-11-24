@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { createConnection, isIP } from 'node:net'
 import { homedir, networkInterfaces, userInfo } from 'node:os'
@@ -278,7 +278,7 @@ export function nodeModulesDirs(root: string, maxDepth = 4): string[] {
 /**
  * IO. The git work tree `cwd` is in and its common git dir, for the writable carve-out (a `git commit` in the worktree writes objects, refs,
  * the index and logs under the common dir). `hooks` and `config` of the common dir are masked read-only again: they are code / settings the
- * owner's next git command in that repo would run. Nothing when `cwd` is not in a repo, or when the repo root is the home (or above it).
+ * owner's next git command in that repo would run; `info` (grafts) and `refs/replace` rewrite history for every worktree. Nothing when `cwd` is not in a repo, or when the repo root is the home (or above it).
  */
 export function repoCarveOuts(cwd: string, home: string): { writable: string[]; masked: string[] } {
   const real = (p: string): string => { try { return realpathSync(p) } catch { return p } }
@@ -291,7 +291,13 @@ export function repoCarveOuts(cwd: string, home: string): { writable: string[]; 
   if (homeScope(home, real(top)) !== 'inside') return { writable: [], masked: [] } // the home itself (or a repo above it): opening it would defeat the guard
   const writable = [real(top), ...(commonAbs ? [commonAbs] : [])].filter(p => homeScope(home, p) === 'inside')
   // node_modules is the bun cache's hardlink farm (shared inodes): read-only, so no write reaches another worktree or the cache
-  return { writable, masked: [...(commonAbs ? [join(commonAbs, 'hooks'), join(commonAbs, 'config')].filter(existsSync) : []), ...nodeModulesDirs(real(top)).map(real)] }
+  // refs/replace and info/ (info/grafts) rewrite the history EVERY worktree of the repo sees: read-only too. refs/replace is created empty when
+  // absent (git tolerates it) because a path that does not exist cannot be bind-mounted, and git would create it on the first `git replace`.
+  // info/ is created the same way: a common dir without it (git init makes info/exclude, a hand-built or pruned one may not) would leave
+  // nothing to mask, and the run could create info/ and plant info/grafts in the writable common dir.
+  if (commonAbs) { for (const d of [join('refs', 'replace'), 'info']) { try { mkdirSync(join(commonAbs, d), { recursive: true }) } catch {} } }
+  const commonMasks = commonAbs ? ['hooks', 'config', 'info', join('refs', 'replace')].map(n => join(commonAbs, n)).filter(existsSync) : []
+  return { writable, masked: [...commonMasks, ...nodeModulesDirs(real(top)).map(real)] }
 }
 
 /**
