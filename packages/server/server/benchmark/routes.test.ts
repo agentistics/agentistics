@@ -402,6 +402,18 @@ describe('BENCHMARK.LACUNAS: archived sessions, model, handback time, review rou
     expect(piece('[ LEADER ] Engine')).toBe(false)
     expect(piece('worker spawn')).toBe(true)
   })
+  test('a leader whose row left the registry is still no author: the event inbox label holds it (handback on the piece + mirror on the task)', () => {
+    const comments = [
+      { sessionId: 'w-p', subtaskId: 'P', kind: 'handback', createdAt: iso(T0 + 5 * H) },
+      { sessionId: 'w-p', kind: 'handback', createdAt: iso(T0 + 5 * H + 20_000) },
+    ] as never
+    const piece = (eventLeaderIds?: ReadonlySet<string>) => buildObservedFromSources(full({
+      comments, conversations: archived.conversations, eventLeaderIds,
+      registry: [row('m-live', 'Q', { conversationId: 'c-q', model: 'claude-opus-5' })],
+    })).history!.tasks.flatMap(t => t.subtasks).some(x => x.id === 'P')
+    expect(piece(new Set(['w-p']))).toBe(false)
+    expect(piece()).toBe(true)
+  })
   test('without the comment the piece has no session and is not a piece of the history: nothing is invented', () => {
     const h = buildObservedFromSources(full({ conversations: archived.conversations })).history!
     expect(h.tasks.flatMap(t => t.subtasks).some(x => x.id === 'P')).toBe(false)

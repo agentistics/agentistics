@@ -27,6 +27,8 @@ export interface BenchmarkSources {
   }
   /** Managed session id -> conversation, for sessions that left the live registry (event inbox). */
   conversations?: ReadonlyMap<string, ArchivedConversation>
+  /** Managed ids the event inbox ever labelled "[ LÍDER ]"/"[ LEADER ]": a leader's row leaves the registry, its label stays here. */
+  eventLeaderIds?: ReadonlySet<string>
   /** `managed-sessions.json` rows (a subset of ManagedSession). */
   registry: readonly {
     id: string; harness: string; createdAt: string; conversationId?: string; subtaskId?: string; taskId?: string; model?: string; leader?: boolean; label?: string
@@ -68,6 +70,8 @@ const ADOPTION = /^\s*adotad/i
 
 interface Statement { conversationId: string | null; id: string; harness: string; subtaskId: string | null; at: number; ids: string[]; leader: boolean }
 
+const isLeaderLabel = (l?: string): boolean => !!l && /\[\s*(l[ií]der|leader)\s*\]/i.test(l)
+
 /** PURE: one session per conversation, filed where its NEWEST filing statement says (a row with an empty `taskId` un-files it). */
 function sessionStatements(s: BenchmarkSources): Statement[] {
   const out = new Map<string, Statement>()
@@ -92,8 +96,7 @@ function sessionStatements(s: BenchmarkSources): Statement[] {
     put(`c:${h.conversationId}`, { conversationId: h.conversationId, id: `hist:${h.conversationId}`, harness: h.harness, subtaskId: h.subtaskId ?? null, at: ms(h.linkedAt) ?? 0, ids: [], leader: false }, [], false)
   }
   // Sessions that LEFT the registry: filed where their own comments say, only when nothing live or historical already filed the conversation.
-  const isLeaderLabel = (l?: string): boolean => !!l && /\[\s*(l[ií]der|leader)\s*\]/i.test(l)
-  const leaderIds = new Set<string>([...s.registry.filter(r => r.leader || isLeaderLabel(r.label)).map(r => r.id), ...Object.values(s.deliveries).flatMap(d => d.leaderSessionId ? [d.leaderSessionId] : [])])
+  const leaderIds = new Set<string>([...(s.eventLeaderIds ?? []), ...s.registry.filter(r => r.leader || isLeaderLabel(r.label)).map(r => r.id), ...Object.values(s.deliveries).flatMap(d => d.leaderSessionId ? [d.leaderSessionId] : [])])
   const proofs: AuthorshipProof[] = Object.values(s.deliveries).flatMap(d => [d.authorSessionId, d.qaSessionId, ...(d.evidence ?? []).map(e => e.by)].flatMap(id => id ? [{ sessionId: id, subtaskId: d.subtaskId }] : []))
   for (const l of archivedLinks({
     comments: s.book.comments ?? [], conversations: s.conversations ?? new Map(), leaderIds, proofs, subtasks: new Set(s.book.subtasks.map(x => x.id)),
@@ -238,16 +241,20 @@ async function readSources(): Promise<BenchmarkSources> {
     byConversation.set(m.session_id, m)
     if (m.native_session_id && !byConversation.has(m.native_session_id)) byConversation.set(m.native_session_id, m)
   }
-  const conversations = await archivedConversations(registry)
-  return { nowMs: Date.now(), book: book as BenchmarkSources['book'], registry, metas: byConversation, deliveries: deliveries.deliveries as BenchmarkSources['deliveries'], conversations }
+  const { conversations, eventLeaderIds } = await archivedConversations(registry)
+  return { nowMs: Date.now(), book: book as BenchmarkSources['book'], registry, metas: byConversation, deliveries: deliveries.deliveries as BenchmarkSources['deliveries'], conversations, eventLeaderIds }
 }
 
 /** Managed id -> conversation: the event inbox (older lines first, so the newest wins), then every registry row. */
-async function archivedConversations(registry: BenchmarkSources['registry']): Promise<Map<string, ArchivedConversation>> {
+async function archivedConversations(registry: BenchmarkSources['registry']): Promise<{ conversations: Map<string, ArchivedConversation>; eventLeaderIds: Set<string> }> {
   const out = new Map<string, ArchivedConversation>()
-  for (const e of await readAllEvents().catch(() => [])) if (e.conversationId && e.id) out.set(e.id, { conversationId: e.conversationId, harness: e.harness ?? '' })
+  const eventLeaderIds = new Set<string>()
+  for (const e of await readAllEvents().catch(() => [])) {
+    if (e.conversationId && e.id) out.set(e.id, { conversationId: e.conversationId, harness: e.harness ?? '' })
+    if (e.id && isLeaderLabel(e.label)) eventLeaderIds.add(e.id)
+  }
   for (const r of registry) if (r.conversationId) out.set(r.id, { conversationId: r.conversationId, harness: r.harness })
-  return out
+  return { conversations: out, eventLeaderIds }
 }
 
 /** Reads only the local stores already used by the server. Missing usage remains unmeasured. */
