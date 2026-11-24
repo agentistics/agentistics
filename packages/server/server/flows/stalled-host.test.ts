@@ -15,6 +15,7 @@ function fixture() {
     snapshot: async () => ({ polledAtMs: now, sessions: [{ id: 'worker', cwd: rows[0]!.cwd, status: 'running', activity: 'waiting', attached: false, approvalDetection: false, searchFields: { name: '', folder: '', harness: '', note: '', task: '', prompt: '' }, lastLines: ['waiting'], chatTurns: [{ role: 'assistant', text: 'Ready for next phase', at: '2026-11-06T00:00:00Z' }] }] }),
     role: async r => r.id === 'worker' ? 'worker' : 'leader',
     dirty: async () => true,
+    heavyLock: async () => false,
     message: async (...args) => { notices.push(args); return { ok: true } },
     now: () => now,
   }
@@ -23,7 +24,7 @@ function fixture() {
 
 test('observes worker and current leader, bounded transcript text, dirty state and unknown account limit on macOS paths', async () => {
   const { d } = fixture()
-  expect(await stalledHostOps(d)['observar-sessao-parada']({ sessionId: 'worker' })).toMatchObject({ ok: true, leaderId: 'leader', state: 'waiting', lastText: 'Ready for next phase', dirty: true, accountLimit: null, taskId: 'task', subtaskId: 'sub' })
+  expect(await stalledHostOps(d)['observar-sessao-parada']({ sessionId: 'worker' })).toMatchObject({ ok: true, leaderId: 'leader', state: 'waiting', lastText: expect.stringContaining('Ready for next phase'), activeSignal: null, dirty: true, accountLimit: null, taskId: 'task', subtaskId: 'sub' })
 })
 
 test('refuses unknown, ended and leader targets; stale, failed and missing activity observations', async () => {
@@ -50,4 +51,40 @@ test('notices are block messages to freshly resolved parent, delivery refusal is
   expect(notices).toEqual([['worker', 'successor', 'Choose resume or save and close.']])
   d.message = async () => ({ ok: false, code: 'target_blocked', message: 'approval open' })
   expect(await op({ sessionId: 'worker', body: 'retry' })).toMatchObject({ refused: true, code: 'target_blocked' })
+})
+
+const turn = (extra: Record<string, unknown>) => ({ role: 'assistant' as const, text: '', at: '2026-11-23T10:00:00Z', ...extra })
+const withTurns = (f: ReturnType<typeof fixture>, chatTurns: unknown[]) => {
+  f.d.snapshot = async () => ({ polledAtMs: f.d.now(), sessions: [{ id: 'worker', cwd: f.rows[0]!.cwd, status: 'running', activity: 'waiting', attached: false, approvalDetection: false, searchFields: { name: '', folder: '', harness: '', note: '', task: '', prompt: '' }, lastLines: ['x'], chatTurns }] as never })
+}
+
+test('a tool call open for 40 minutes is activity: state working, never an idle reading', async () => {
+  const f = fixture()
+  withTurns(f, [turn({ pending: true, tools: [{ name: 'Bash' }] })])
+  const o = await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' }) as Record<string, unknown>
+  expect(o).toMatchObject({ ok: true, state: 'working', activeSignal: 'tool' })
+  const key = o.activityKey
+  f.advance(40 * 60_000)
+  withTurns(f, [turn({ pending: true, tools: [{ name: 'Bash' }] })])
+  expect(await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' })).toMatchObject({ state: 'working', activeSignal: 'tool' })
+  expect(key).toBeString()
+})
+
+test('a session waiting on the heavy lock is working, whatever the screen says', async () => {
+  const f = fixture()
+  f.d.heavyLock = async () => true
+  expect(await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' })).toMatchObject({ state: 'working', activeSignal: 'heavy-lock' })
+})
+
+test('a running background task is working', async () => {
+  const f = fixture()
+  withTurns(f, [turn({ task: { label: 'tests', running: true } }), turn({ text: 'done waiting' })])
+  expect(await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' })).toMatchObject({ state: 'working', activeSignal: 'task' })
+})
+
+test('truly idle: state stays waiting and the notice text names that no signal exists', async () => {
+  const f = fixture()
+  const o = await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' }) as Record<string, unknown>
+  expect(o).toMatchObject({ state: 'waiting', activeSignal: null })
+  expect(String(o.lastText)).toContain('no activity signal')
 })

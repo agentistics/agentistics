@@ -932,6 +932,10 @@ export interface ControlSession {
   rssBytes?: number | null
   /** Epoch ms of the user's last message, from an EXACT conversation link. Absent = unknown. */
   lastUserMessageAt?: number
+  /** Why this row is NOT idle (`sessionActivity.ts`): an open tool call, a background task, the heavy lock. Absent = none holds. */
+  activeSignal?: 'tool' | 'task' | 'heavy-lock' | 'output'
+  /** Epoch ms the `activeSignal` began, when the evidence says. */
+  activeSinceAt?: number
   /** The task id behind `task` (the label). */
   taskId?: string
   /** The managed id of the session that started this one. The title is resolved against the other rows. */

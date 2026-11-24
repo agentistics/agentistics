@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.228.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uma sessão com um comando em execução agora aparece como "rodando há X" na lista, em vez de "parada há X horas".',
+        en: 'A session with a command running now shows "running X" in the list instead of "idle for X hours".',
+      },
+      {
+        pt: 'O aviso de "sem atividade há 30 min" não dispara mais para quem está executando um comando, um teste longo ou esperando a fila de trabalho pesado.',
+        en: 'The "no activity for 30 min" alert no longer fires for a worker running a command, a long test or waiting in the heavy-job queue.',
+      },
+    ],
+  },
   '2.226.0': {
     features: [
       {

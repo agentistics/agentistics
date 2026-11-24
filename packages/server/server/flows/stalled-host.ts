@@ -2,7 +2,9 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { activeEvidence } from '@agentistics/core'
 import { gitEnv } from '../backup/repo-probe'
+import { managedIdOf } from '../browser/browser-caller-proc'
 import { detectLimit, limitRuleFor } from '../sessions/limit'
 import { currentLeaderId } from '../sessions/team-links'
 import type { ManagedSession } from '../sessions/types'
@@ -18,6 +20,8 @@ export interface StalledHostDeps {
   snapshot(): Promise<Pick<SessionSnapshot, 'sessions' | 'polledAtMs' | 'unavailable'>>
   role(row: ManagedSession): Promise<string | undefined>
   dirty(cwd: string): Promise<boolean | null>
+  /** A process of this session holds or waits on the heavy-job lock (default: a /proc scan). */
+  heavyLock(row: ManagedSession): Promise<boolean>
   message(from: string, to: string, body: string): Promise<{ ok: boolean; message?: string; code?: string }>
   now(): number
 }
@@ -30,9 +34,27 @@ export function defaultStalledHostDeps(): StalledHostDeps {
     dirty: async cwd => {
       try { return (await exec('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, 'status', '--porcelain=v1', '-z', '--untracked-files=all'], { timeout: 15_000, env: gitEnv() })).stdout.length > 0 } catch { return null }
     },
+    heavyLock: async row => sessionOnHeavyLock(row),
     message: async (from, to, body) => sendSessionMessage(from, { to, body, kind: 'block' }, await defaultMessageDeps()),
     now: Date.now,
   }
+}
+
+/**
+ * Is a process of this session running `flock …agentistics-heavy.lock …`? One `ps` listing, then the
+ * existing `managedIdOf` (the process's `AGENTOP_MANAGED_ID`, which a pane's children inherit). Linux
+ * /proc only; anywhere else, or on any error, it answers false — "cannot tell" never invents activity.
+ */
+export async function sessionOnHeavyLock(row: Pick<ManagedSession, 'id'>): Promise<boolean> {
+  try {
+    const out = (await exec('ps', ['-eo', 'pid=,args='], { timeout: 5_000, maxBuffer: 8 * 1024 * 1024 })).stdout
+    for (const line of out.split('\n')) {
+      const m = /^\s*(\d+)\s+(.*)$/.exec(line)
+      if (!m || !/(^|\/)flock\s.*agentistics-heavy(\.\d+)?\.lock/.test(m[2]!)) continue
+      if (managedIdOf(Number(m[1])) === row.id) return true
+    }
+  } catch { /* no ps */ }
+  return false
 }
 
 export function stalledHostOps(d: StalledHostDeps = defaultStalledHostDeps()) {
@@ -59,9 +81,14 @@ export function stalledHostOps(d: StalledHostDeps = defaultStalledHostDeps()) {
       const last = view.chatTurns?.at(-1)
       // Prefer transcript content: screen footers may repaint clocks without any agent activity.
       const text = (last?.text ?? view.lastLines?.join('\n') ?? '').slice(-2000)
+      // ONE activity source (`sessionActivity.ts`): an open tool call, a live background task or the
+      // heavy lock means the worker is DOING something, whatever the screen says.
+      const evidence = activeEvidence({ turns: view.chatTurns ?? [], heavyLock: await d.heavyLock(t.row) })
+      const state = evidence ? 'working' : view.activity
       return { ok: true, sessionId: t.row.id, leaderId: t.leader.id, observedAt: snap.polledAtMs,
-        state: view.activity, activityKey: createHash('sha256').update(last ? JSON.stringify([last.at, last.role, last.text, last.tools, last.pending]) : text).digest('hex'),
-        lastText: text, dirty: await d.dirty(t.row.cwd),
+        state, activeSignal: evidence?.signal ?? null,
+        activityKey: createHash('sha256').update((last ? JSON.stringify([last.at, last.role, last.text, last.tools, last.pending]) : text) + (evidence ? `|${evidence.signal}` : '')).digest('hex'),
+        lastText: evidence ? text : `[no activity signal: no open tool call, background task or heavy-lock process; last turn ${last?.at ?? 'unknown'}]\n${text}`.slice(-2000), dirty: await d.dirty(t.row.cwd),
         accountLimit: view.harness && view.lastLines && limitRuleFor(view.harness) ? detectLimit({ tail: view.lastLines, rule: limitRuleFor(view.harness), nowMs: snap.polledAtMs }) ?? false : null,
         ...(t.row.taskId ? { taskId: t.row.taskId } : {}), ...(t.row.subtaskId ? { subtaskId: t.row.subtaskId } : {}) }
     },
