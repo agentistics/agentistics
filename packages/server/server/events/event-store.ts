@@ -78,6 +78,15 @@ async function readSlice(file: string, from: number): Promise<string> {
   }
 }
 
+/** Every event still on disk, oldest first: the previous generation, then the current file. A reader of history (the benchmark's archived-session link) needs both. */
+export async function readAllEvents(file = EVENTS_FILE): Promise<SessionEvent[]> {
+  const out: SessionEvent[] = []
+  for (const f of [`${file}.1`, file]) {
+    try { out.push(...parseEvents(await readFile(f, 'utf8')).events) } catch { /* a generation that is not there */ }
+  }
+  return out
+}
+
 export interface EventStore {
   /** Append these events, stamping `seq`. Returns them as written. */
   append(events: readonly SessionEvent[]): Promise<SessionEvent[]>

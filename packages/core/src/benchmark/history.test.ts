@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { BUCKETS, SIZE_LINES, buildHistory, qaRoundsFromLabels, sizeOfLines, type HistoryPieceInput } from './history'
+import { BUCKETS, SIZE_LINES, buildHistory, modelFamily, qaRoundsFromLabels, reviewRoundsFromHistory, sizeOfLines, type HistoryPieceInput } from './history'
 
 const H = 3_600_000
 const piece = (id: string, taskId: string, o: Partial<HistoryPieceInput> = {}): HistoryPieceInput => ({
@@ -130,5 +130,34 @@ describe('QA rounds read from the labels of the QA sessions (indicative: the flo
     expect(qaRoundsFromLabels(['QA v2.103.2 · rodada 3 (Copilot)'])).toBe(3)
     expect(qaRoundsFromLabels(['QUAL.6 · re-QA r2 Agentask A (Copilot)'])).toBe(2)
     expect(qaRoundsFromLabels(['QA2 · Agentask proposta A (Codex)'])).toBe(2)
+  })
+})
+
+describe('BENCHMARK.LACUNAS — model, harness, acceptance, the task as a whole', () => {
+  test('modelFamily names only the families it knows', () => {
+    expect(['claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-5-5', 'gpt-6.1-sol', null].map(modelFamily)).toEqual(['opus', 'sonnet', 'haiku', null, null])
+  })
+  test('a piece takes the model and harness of its author, never of the leader or QA', () => {
+    const h = buildHistory({ pieces: [piece('a', 'T1', { sessions: [
+      { id: 'l', harness: 'claude', costUSD: 50, model: 'claude-opus-5-5', role: 'leader' },
+      { id: 'w', harness: 'codex', costUSD: 1, model: 'claude-sonnet-5', role: 'worker' },
+      { id: 'q', harness: 'claude', costUSD: 30, model: 'claude-opus-5-5', role: 'qa' },
+    ] })], tasks })
+    expect(h.tasks[0]!.subtasks[0]).toMatchObject({ model: 'sonnet', harness: 'codex' })
+  })
+  test('accepted follows the owner: done is validated, in_review is not yet (null)', () => {
+    const h = buildHistory({ pieces: [piece('a', 'T1'), piece('b', 'T1', { status: 'in_review' })], tasks })
+    expect(h.tasks[0]!.subtasks.map(s => s.accepted)).toEqual([true, null])
+  })
+  test('the task overall is the median over ALL pieces, even when no comparison side has one (2-4 sessions)', () => {
+    const three = (id: string, cost: number) => piece(id, 'T1', { sessions: [1, 2, 3].map(n => ({ id: `${id}${n}`, harness: 'claude', costUSD: cost / 3 })) })
+    const h = buildHistory({ pieces: [three('a', 3), three('b', 9)], tasks })
+    const t = h.tasks[0]!
+    expect(t.sides.sessions.costUSD).toEqual([null, null])
+    expect(t.overall).toMatchObject({ pieces: 2, sessions: 3, costUSD: 6, wallMs: 2 * H })
+  })
+  test('review rounds come from the phase history: each entry into review is a round; none = unknown', () => {
+    expect(reviewRoundsFromHistory([{ to: 'revisao_lider' }, { to: 'ajuste' }, { to: 'revisao_lider' }, { to: 'ci' }])).toBe(2)
+    expect(reviewRoundsFromHistory([{ to: 'executando' }])).toBeNull()
   })
 })

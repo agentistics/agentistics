@@ -13,6 +13,14 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.229.0': {
     features: [
       {
+        pt: 'Benchmark: Sonnet × Opus e "Entre harnesses" passam a ser calculados quando há peças suficientes em cada lado; quando faltam, o cartão diz quantas peças cada lado tem.',
+        en: 'Benchmark: Sonnet × Opus and "Between harnesses" are now computed when each side has enough pieces; when not, the card says how many pieces each side has.',
+      },
+      {
+        pt: 'Benchmark, por tarefa: quando nenhum dos dois lados tem peças, a linha mostra a mediana da tarefa inteira, marcada como "tarefa" (não é uma comparação).',
+        en: 'Benchmark, by task: when neither side has pieces, the row shows the whole task\'s median, marked "task" (it is not a comparison).',
+      },
+      {
         pt: 'Calendário: tarefa ou subtarefa criada por uma sessão sem prazo agora ganha um prazo estimado, marcado como "estimado"; informar o prazo substitui a estimativa.',
         en: 'Calendar: a task or subtask a session files without a due date now gets an estimated one, marked "estimated"; setting the date replaces the estimate.',
       },
@@ -22,6 +30,22 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       },
     ],
     fixes: [
+      {
+        pt: 'Benchmark: "Resultado firme" só aparece com pelo menos 3 das 4 dimensões medidas; com menos, o cartão diz "Só custo medido" e o veredito é "Sem dados suficientes".',
+        en: 'Benchmark: "Firm result" only appears with at least 3 of the 4 dimensions measured; with fewer, the card says "Only cost measured" and the verdict is "Not enough data".',
+      },
+      {
+        pt: 'Benchmark: as peças mantêm suas sessões mesmo depois que o worker é fechado, então mais entregas passam a ter custo, tempo e tamanho.',
+        en: 'Benchmark: pieces keep their sessions after the worker is closed, so more deliveries now have cost, time and size.',
+      },
+      {
+        pt: 'Benchmark: o tempo de uma peça em revisão conta até a entrega do worker, as rodadas de revisão vêm do histórico de fases e "Aceita" segue a validação do dono.',
+        en: 'Benchmark: the time of a piece in review counts up to the worker\'s handback, review rounds come from the phase history and "Accepted" follows the owner\'s validation.',
+      },
+      {
+        pt: 'Benchmark: colunas sem medição agora dizem, ao passar o mouse, por que não há dado.',
+        en: 'Benchmark: columns with no measurement now say, on hover, why there is no data.',
+      },
       {
         pt: 'Navegador da sessão: ao abrir, ao reabrir depois de fechar e ao criar uma aba nova, ele agora mostra a página inicial em vez de uma tela vazia (about:blank), igual ao seu navegador.',
         en: 'Session browser: when it opens, reopens after being closed, or gets a new tab, it now shows the home page instead of an empty screen (about:blank), like your own browser.',
