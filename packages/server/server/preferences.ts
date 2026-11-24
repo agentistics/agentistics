@@ -150,6 +150,12 @@ export interface Preferences {
    *  start. Absent reads as OFF. An explicit `AGENTISTICS_*` variable still wins either way. Read
    *  by `experimental-boot.ts` BEFORE config.ts loads, so it must stay a plain boolean key. */
   experimental?: boolean
+  /** DOCKER.AMBIENTES: the scoped backend choice (`EnvBackendPrefs`, @agentistics/core — session > project > all), written
+   *  only by `env-web.ts`. Absent = nobody chose; the decision then suggests, never switches. */
+  envBackend?: import('@agentistics/core').EnvBackendPrefs
+  envBackendChosenAt?: string
+  /** The Docker state a suggestion/refusal was last made against (`envOfferKey`); it holds until the state changes. */
+  envBackendOfferedFor?: string
   /** Optional composer hint only. Never authorizes automatic request/card creation. */
   taskMessageSuggestions?: boolean
   /** Opt-in for the repository explorer's read+write routes (`/api/fleet/tree*`). Absent reads as

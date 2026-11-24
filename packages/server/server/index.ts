@@ -1155,6 +1155,25 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await handleMemoryRequest(req, url, await liveMemoryDeps())
       return json(out.body, out.status)
     }
+    // DOCKER.AMBIENTES S1: backend decision, scoped choice, install hint (`env-web.ts`). `capability-guard.ts` has
+    // already refused it on an exposed profile; writes are the person's or a verified leader's.
+    if (url.pathname.startsWith('/api/env/')) {
+      const web = await import('./env-web')
+      // WHO is calling comes from the SOCKET (same reader the browser padlock uses), never the body: a request
+      // that merely omits `session` is not the person. `session` and `unknown` both refuse writes.
+      const envCaller = async (): Promise<'person' | 'session' | 'unknown'> => {
+        const [{ identifyCaller }, { processSessionHub }] = await Promise.all([import('./browser/browser-caller-proc'), import('./sessions/session-hub')])
+        const sessionPids = new Set<number>()
+        for (const r of processSessionHub()?.last()?.sessions ?? []) if (typeof r.pid === 'number') sessionPids.add(r.pid)
+        const ip = server.requestIP(req)
+        const verdict = await identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
+        // A remote peer is the person only with the owner's grant (the personal-browser padlock's own proof).
+        const [{ requestHasPersonalGrant }, { vaultHttpSession }] = await Promise.all([import('./browser/personal-doors'), import('./vault/http')])
+        return web.envCallerFrom(verdict, requestHasPersonalGrant(req, vaultHttpSession('local')))
+      }
+      const out = await web.handleEnvRequest(req, url, await (await import('./flows/host-ops')).defaultEnvDeps(envCaller))
+      if (out) return json(out.body, out.status)
+    }
     if (url.pathname === '/api/experimental' && (req.method === 'GET' || req.method === 'PUT')) {
       // GET: what this server booted with. PUT `{ enabled }`: the switch used by the `agentop experimental` command — it
       // persists the preference and applies it to this process WITHOUT a restart (`experimental-web.ts`).

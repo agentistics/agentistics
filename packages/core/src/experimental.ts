@@ -121,6 +121,16 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
       pt: 'Fluxos determinísticos experimentais para conferir workers e simular uma limpeza segura.',
     },
   },
+  {
+    id: 'docker-env',
+    env: 'AGENTISTICS_DOCKER_ENV',
+    // Opt-in like flows: Docker as a worker's environment is suggested, never started for anyone who did not ask.
+    isOn: raw => raw === '1',
+    description: {
+      en: 'Docker as the worker environment: detects Docker, suggests it (or its installation) and records the choice. Nothing runs in a container yet.',
+      pt: 'Docker como ambiente do worker: detecta o Docker, sugere usá-lo (ou instalá-lo) e guarda a escolha. Nada roda em contêiner ainda.',
+    },
+  },
 ]
 
 export type ExperimentalSource =
