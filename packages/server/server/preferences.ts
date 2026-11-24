@@ -139,6 +139,8 @@ export interface Preferences {
   /** NAVEGADOR: the person's switch for the built-in browser (`browser/browser-gate.ts`). Absent = on,
    *  subject to `CAPS.localShell`; an explicit `false` turns it off. */
   browserEnabled?: boolean
+  /** NAVEGADOR: the page the person's browser opens when it has no tab (and a new tab). http(s) only; absent = https://www.google.com. */
+  browserHomeUrl?: string
   /** The OpenCode subscription the person says they are on (`go` / `go-plus` / `go-teams` / `zen` / `none`) — no local file tells Go from Go Plus. Read by `opencode-usage.ts`. */
   opencodePlan?: string
   /** AUTONOMOUS MODE — the owner is out and sessions must not ask them (`server/away.ts`). Read through

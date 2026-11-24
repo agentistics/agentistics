@@ -255,10 +255,37 @@ describe('F1 — the padlock is the PERSON\'s, decided by the socket, never by t
   })
 })
 
-describe('S4b — an unlock owes the person\'s vault proof; who the process looks like is only a hint', () => {
+describe('NAV.SEM-COFRE — the model\'s browser needs no vault proof from a verified person', () => {
   const body = { owner: 'aaa', lock: 'unlocked' }
-  test('"the person" by /proc (a detached session with a clean env looks exactly like this) WITHOUT the proof is refused', async () => {
-    const f = fixture({ ownerProof: async () => ownerProofRefusal('grant-invalid', 'en', false) })
+  const refuse = async () => { throw new Error('the vault proof must not be asked of a verified person') }
+  test('a verified person unlocks with the vault locked/absent: no proof is asked, the unlock is audited', async () => {
+    for (const v of [{ kind: 'person', via: 'process', pid: 9 }, { kind: 'person', via: 'wsl-relay' }, { kind: 'person', via: 'remote' }] as const) {
+      const f = fixture({ caller: () => v, ownerProof: refuse })
+      await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+      expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 200, body: { ok: true, lock: 'unlocked' } })
+      expect(f.locks.view('s-aaa').mode).toBe('unlocked')
+      expect(f.audits).toEqual(['browser.unlock:aaa'])
+    }
+  })
+  test('with no proof wired at all a verified person still unlocks', async () => {
+    const f = fixture({ ownerProof: undefined })
+    await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+    expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 200, body: { lock: 'unlocked' } })
+  })
+  test('a session is refused even with a valid proof in hand — it never reaches the proof', async () => {
+    let asked = 0
+    const f = fixture({ caller: () => ({ kind: 'session', pid: 1, managedId: 'aaa' }), ownerProof: async () => { asked++; return { ok: true, grantId: 'g' } } })
+    await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
+    expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 403, body: { error: 'session_cannot_unlock' } })
+    expect(asked).toBe(0)
+    expect(f.locks.view('s-aaa').mode).toBe('locked')
+  })
+})
+
+describe('S4b — a caller the socket cannot identify still owes the person\'s vault proof', () => {
+  const body = { owner: 'aaa', lock: 'unlocked' }
+  test('an UNIDENTIFIABLE caller (no /proc) WITHOUT the proof is refused', async () => {
+    const f = fixture({ caller: () => ({ kind: 'unknown', reason: 'no-proc' }) as const, ownerProof: async () => ownerProofRefusal('grant-invalid', 'en', false) })
     await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
     const a = await browserRoute('POST', '/api/browser/lock', body, f.deps)
     expect(a).toMatchObject({ status: 403, body: { ok: false, error: 'owner_proof_required' } })
@@ -268,7 +295,7 @@ describe('S4b — an unlock owes the person\'s vault proof; who the process look
   })
 
   test('S4c: the browser closes WHILE the proof is checked ⇒ 409 no_browser, no unlock, no audit, padlock untouched', async () => {
-    const f = fixture({ ownerProof: async () => { f.live.delete('s-aaa'); return { ok: true, grantId: 'g' } } })
+    const f = fixture({ caller: () => ({ kind: 'unknown', reason: 'no-proc' }) as const, ownerProof: async () => { f.live.delete('s-aaa'); return { ok: true, grantId: 'g' } } })
     await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
     const a = await browserRoute('POST', '/api/browser/lock', body, f.deps)
     expect(a).toMatchObject({ status: 409, body: { ok: false, error: 'no_browser' } })
@@ -277,7 +304,7 @@ describe('S4b — an unlock owes the person\'s vault proof; who the process look
   })
 
   test('a door wired WITHOUT the proof refuses every unlock (absent = no proof possible, fail-closed)', async () => {
-    const f = fixture({ ownerProof: undefined })
+    const f = fixture({ caller: () => ({ kind: 'unknown', reason: 'no-proc' }) as const, ownerProof: undefined })
     await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
     expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 403, body: { error: 'owner_proof_required' } })
     expect(f.locks.view('s-aaa').mode).toBe('locked')
@@ -285,7 +312,7 @@ describe('S4b — an unlock owes the person\'s vault proof; who the process look
 
   test('the proof is asked for THAT browser, once per unlock; locking never asks it', async () => {
     const asked: string[] = []
-    const f = fixture({ ownerProof: async (id) => { asked.push(id); return { ok: true, grantId: 'g' } } })
+    const f = fixture({ caller: () => ({ kind: 'unknown', reason: 'no-proc' }) as const, ownerProof: async (id) => { asked.push(id); return { ok: true, grantId: 'g' } } })
     await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
     expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 200, body: { lock: 'unlocked' } })
     expect(await browserRoute('POST', '/api/browser/lock', { owner: 'aaa', lock: 'locked' }, f.deps)).toMatchObject({ status: 200, body: { lock: 'locked' } })
@@ -296,14 +323,14 @@ describe('S4b — an unlock owes the person\'s vault proof; who the process look
 
   test('no browser open → 409 and the grant is NOT spent (the retry can use it)', async () => {
     let spent = 0
-    const f = fixture({ ownerProof: async () => { spent++; return { ok: true, grantId: 'g' } } })
+    const f = fixture({ caller: () => ({ kind: 'unknown', reason: 'no-proc' }) as const, ownerProof: async () => { spent++; return { ok: true, grantId: 'g' } } })
     expect(await browserRoute('POST', '/api/browser/lock', body, f.deps)).toMatchObject({ status: 409, body: { error: 'no_browser' } })
     expect(spent).toBe(0)
   })
 
   test('the refusal carries the vault\'s words and, where the vault cannot ask anyone, the action that fixes it', async () => {
     for (const lang of ['en', 'pt'] as const) {
-      const f = fixture({ ownerProof: async () => ownerProofRefusal('grant-invalid', lang, true) })
+      const f = fixture({ caller: () => ({ kind: 'unknown', reason: 'no-proc' }) as const, ownerProof: async () => ownerProofRefusal('grant-invalid', lang, true) })
       await call(f, 'navigate', { session: proof('aaa'), url: 'http://x/' })
       const a = await browserRoute('POST', '/api/browser/lock', body, f.deps)
       expect(a).toMatchObject({ status: 403, body: { error: 'owner_proof_unavailable', action: { kind: 'open-vault', path: '/vault' } } })

@@ -9,6 +9,16 @@ import { CURRENT_VERSION } from './version'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
 import { blockedPorts, createCtlDir, netnsHardening, outsideNodeModules, persistenceGuard, hostAddresses, forwardPorts, netnsArgv, netnsNotice, pollHostAddresses, probeNetns, removeCtlDir, startSlirp, stopSlirp } from './run-netns'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
+import { scopeStatsLine, watchScope, type ScopeIo } from './run-scope-stats'
+
+/** The run's memory cap (systemd `MemoryMax`), as passed and in bytes for the closing stats line. */
+export const RUN_MEMORY_MAX = '2G'
+const RUN_MEMORY_MAX_BYTES = 2 * 1024 ** 3
+/** The read-only file access the closing stats line needs (see ScopeIo: run-scope-stats imports no fs itself). */
+const SCOPE_IO: ScopeIo = {
+  read: p => { try { return readFileSync(p, 'utf8') } catch { return undefined } },
+  dirs: p => { try { return readdirSync(p, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) } catch { return [] } },
+}
 
 export { SEED_ALLOW }
 const REAL_API_PORT = 47291
@@ -282,18 +292,21 @@ function usage(): string {
        Hidden inside: all of /run (the Docker/containerd/podman/system-bus sockets, the WSL interop channel, the user runtime dir with
        D-Bus / systemd --user / cc-socks / gpg: a socket recreated later cannot come back), the Windows directories of /mnt/<drive>, the
        real server's unix sockets and tmux dir, /tmp/ssh-* /.X11-unix, ~/.gnupg and ~/.ssh/agent; WSL .exe programs cannot be started;
-       the real data dir (~/.agentistics) is read-only; its pid is not visible.
+       the real agentistics data directory (under your home) is read-only; its pid is not visible.
        Persistence: the REAL home is read-only inside the run (writing ~/.claude/skills, ~/.local/bin, ~/.config/systemd/user, ~/.bashrc,
        ~/.ssh, ~/.gitconfig by absolute path fails with EROFS; the run's own HOME is a throwaway). Writable carve-outs, and why: the run's
-       own home and tmp (scratch), the git worktree you run from (or --cwd) with its common git dir (so git commit works; its hooks/ and
-       config stay read-only). bun's hardlinks: bun fills node_modules by HARDLINK from ~/.bun/install/cache, so one inode is named in the
+       own home and tmp (scratch), the git worktree you run from (or --cwd) with its common git dir (so git commit works; its hooks/, config, info/ (info/grafts) and
+       refs/replace stay read-only, because they rewrite or run for every worktree of the repo). bun's hardlinks: bun fills node_modules by HARDLINK from ~/.bun/install/cache, so one inode is named in the
        shared cache and in other worktrees; therefore the shared cache is read-only, every node_modules under the worktree is read-only, and
        BUN_INSTALL_CACHE_DIR points at a private cache in the run home. To install inside, do it in a fresh directory (a copy in the run
        home or /tmp) with \`bun install --backend=copyfile\`; \`bun install\` over the read-only node_modules finds it up to date or fails.
+       A node_modules farm of a repo OTHER than the one you run from (or --cwd) is NOT covered, wherever it is: only the farms of the run's own repo
+       are made read-only (inside the home and outside it); a farm elsewhere outside the home stays writable and shares inodes with the cache.
        Remaining surface: any OTHER writable file with several hard links (nlink>1) is shared with its other names (not scanned at launch).
        Anything else outside the home (/tmp/<name>) is unchanged.
        Not covered: another machine that proxies to the real server, a root-owned process outside the run, a socket created later in a NEW
-       directory under /tmp, files outside the home and inside the carve-outs above (the worktree's own files, e.g. .husky, package.json
+       directory under /tmp, files outside the home and inside the carve-outs above (the worktree's own files, e.g. .husky/_ is WRITABLE, like the rest of the worktree, and
+      core.hooksPath=.husky/_ makes those the hooks that actually run, so a hook planted there runs when the owner next commits; also package.json
        scripts, .claude/settings*.json hooks, and the husky "prepare" step, which prints a harmless "could not write config" because .git/config is
        read-only, run when the owner next uses it), and group-granted access that does not go through a socket (supplementary groups cannot be dropped in an unprivileged namespace). Without a systemd scope the 2G memory
        cap is off (said at launch). --serve ports are forwarded to the host's 127.0.0.1. Where namespaces are unavailable it falls
@@ -776,7 +789,7 @@ async function startRun(options: RunOptions): Promise<number> {
     const hard = netns.mode === 'netns' ? netnsHardening(realDataDir(), process.getuid!(), undefined, undefined, ctl && !ctl.covered ? [ctl.dir] : [], undefined, guards) : null
     if (hard) hard.hardening.readOnly = [...new Set([...(hard.hardening.readOnly ?? []), ...outsideNodeModules(runCwds, guards)])]
     const runArgv = hard ? netnsArgv(argv, process.getuid!(), process.getgid!(), blockedPorts(), hostAddresses(), hard.hide, hard.hardening) : argv
-    const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...runArgv] : runArgv
+    const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', `MemoryMax=${RUN_MEMORY_MAX}`, '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...runArgv] : runArgv
     child = spawn(systemd ? 'systemd-run' : runArgv[0]!, systemd ? childArgs : runArgv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
     state.pid = child.pid
     if (systemd) state.unit = unit
@@ -823,8 +836,15 @@ async function startRun(options: RunOptions): Promise<number> {
   let cleaning: Promise<void> | undefined
   const cleanup = () => (cleaning ??= slirpTask.then(() => stopState(state)))
   // The command's end is recorded in the log BEFORE any cleanup line, so whoever reads run.log (the ambiente flow) can name the exit code.
+  // RUN.LENTIDAO-SUITE: what the run cost (cpu over wall, memory peak vs the cap, cap hits, swap), said when it ends.
+  const startedMs = Date.now()
+  const scopeWatch = systemd && child.pid ? watchScope(unit, SCOPE_IO, 500) : null
   const childExit = new Promise<number>(resolve => {
-    child.once('exit', (status, sig) => { console.log(status !== null ? `exit ${status}` : `exit signal ${sig}`); resolve(status ?? (sig ? 1 : 0)) })
+    child.once('exit', (status, sig) => {
+      const stats = scopeStatsLine(scopeWatch?.stop() ?? null, Date.now() - startedMs, RUN_MEMORY_MAX_BYTES)
+      if (stats) console.error(stats)
+      console.log(status !== null ? `exit ${status}` : `exit signal ${sig}`); resolve(status ?? (sig ? 1 : 0))
+    })
     child.once('error', () => { console.log('exit 1'); resolve(1) })
   })
   const signal = async (sig: NodeJS.Signals) => { signalRun(sig); await childExit; await cleanup(); process.exit(128 + (sig === 'SIGINT' ? 2 : 15)) }
@@ -859,7 +879,7 @@ export function watchParent(initial: number, current: () => number, onGone: () =
 
 /** N5: the one line said when the memory cap could not be applied; null when there is nothing to say (scope ok, or no systemd at all). */
 export function scopeNotice(scope: 'ok' | 'absent' | 'failed'): string | null {
-  return scope === 'failed' ? 'agentop run: the systemd scope could not be created (probe failed or timed out): the 2G memory cap is OFF for this run; only the TTL timer bounds it.' : null
+  return scope === 'failed' ? `agentop run: the systemd scope could not be created (probe failed or timed out): the ${RUN_MEMORY_MAX} memory cap is OFF for this run; only the TTL timer bounds it.` : null
 }
 
 /** A scope can only be created when the user bus answers: inside a pid namespace (a nested run) systemd-run is installed but the bus refuses the peer. */

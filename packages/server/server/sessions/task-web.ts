@@ -168,7 +168,7 @@ async function buildLiveReply(key: string): Promise<LiveBuildCache['reply']> {
     })()
     // Which clones to ask is per commit: the server does not run inside a checkout, so the repositories come from the
     // sessions' own directories, the task's repository and the repositories agentistics knows (`release-repos.ts`).
-    const pieces = legacyReviewShaPieces(details, w.book.events, deliveries)
+    const pieces = legacyReviewShaPieces(details, w.book.events, deliveries, id => stageById.get(id))
     const taskById = new Map(w.book.tasks.map(t => [t.id, t]))
     const dirsFor = dirsForShas({
       pieces,
@@ -460,6 +460,11 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
     const roles = rolesDoc.roles
     leaderIds = new Set(fleet.filter(r => roleOfRow(roles, r) === 'leader').map(r => r.id))
     leadsOf = new Map(leadsOfRows(rolesDoc, fleet))
+    // LIVE.COLUNAS-PRESAS C3: a live leader also leads what its predecessors (handoff chain) and the workers it started
+    // (parentSessionId, through the chain) were filed on. Read from the registry, ended rows included; nothing is written.
+    const [{ readRegistry }, { inheritedLeads, mergeLeads }, { isLiveState }] = await Promise.all([import('./registry'), import('./leader-succession'), import('@agentistics/core')])
+    const liveLeaders = new Set(fleet.filter(r => leaderIds.has(r.id) && isLiveState(r.state)).map(r => r.id))
+    leadsOf = mergeLeads(leadsOf, inheritedLeads(await readRegistry().catch(() => []), liveLeaders))
     if (rolesUnreadable || await registryUnreadable()) fleetRead = 'unknown'
   } catch { fleetRead = 'unknown' /* no fleet: preserve uncertainty; never claim a leader is absent */ }
   const reply = await replyPromise
@@ -1025,6 +1030,8 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext, patch: 
   parentGroupId?: string | null
   /** Set (a validated draft) or clear (`null`) the staged session — see this function's own note. */
   stagedSession?: StagedSessionDraft | null
+  /** LIVE.COLUNAS-PRESAS: where the piece's work lives, stamped by the HOST only (`piece-provenance.ts`); no REST/MCP body reaches it. */
+  provenance?: import('./task-model').SubtaskProvenance
 }): Promise<
   {
     ok: true
@@ -1165,6 +1172,7 @@ async function patchSubtaskInner(subtaskId: string, guard: GuardContext, patch: 
     ...(patch.parentGroupId !== undefined ? { parentGroupId: nextParentGroupId } : {}),
     // `null` clears (the store drops the key, same convention as every other identity field here);
     // an object SETS it, already validated above. `undefined` leaves the column alone.
+    ...(patch.provenance ? { provenance: patch.provenance } : {}),
     ...(patch.stagedSession !== undefined
       ? { stagedSession: patch.stagedSession ?? undefined }
       : {}),

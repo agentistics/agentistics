@@ -193,7 +193,9 @@ const SUB_ID = /^[A-Za-z0-9_.:-]{1,120}$/
 const GATE_REFUSED = 'portao'
 
 /** Steps the Live's per-phase % reads, emitted on what the flow itself observes. */
-const STEP_ON_ENTER: Partial<Record<Phase, number>> = { executando: 1, qa: 1, ajuste: 1, revisao_lider: 1, pr_merge: 1 }
+// LIVE.COLUNAS-PRESAS C4: entering review or PR · merge is not a step of it (the card read "0% · lendo as mudanças" with nobody
+// reading); those phases report a step only when the flow observes an act (the deletions gate, the review, the merge).
+const STEP_ON_ENTER: Partial<Record<Phase, number>> = { executando: 1, qa: 1, ajuste: 1 }
 const STEP_ON_GATE: Partial<Record<`${Phase}:${GateName}`, number>> = {
   'executando:salvo': 4, 'ajuste:salvo': 3, 'qa:qa-modelo': 2, 'revisao_lider:delecoes': 2, 'pr_merge:delecoes': 2,
 }
@@ -319,8 +321,18 @@ export function createDeliveryService(deps: DeliveryDeps) {
   const custodyOn = async (): Promise<boolean> => (await ruleCState(dirname(d.store.path)).catch(() => 'off' as const)) === 'on'
   /** S7b (§5.2.2): the session holding custody of this piece, when rule C is on. */
   const custodianOf = async (r: DeliveryRecord): Promise<string | null> => (r.custody?.sessionId && (await custodyOn()) ? r.custody.sessionId : null)
+  /**
+   * S7b.1: the custodian only while its session is ALIVE. A custodian whose session ended stops being honoured at once — it does not
+   * wait for the next tick to reassign. A fleet that cannot be read, or a session the fleet does not list, is not alive (deny).
+   */
+  const liveCustodianOf = async (r: DeliveryRecord): Promise<string | null> => {
+    const c = await custodianOf(r)
+    if (!c) return null
+    const sessions = await d.facts.sessions().catch(() => [])
+    return sessions.some(x => x.id === c && x.alive) ? c : null
+  }
   /** S7b (§5.2.3): who is woken for a piece — the custodian while it holds custody, else the recorded leader. */
-  const wakeTarget = async (r: DeliveryRecord): Promise<string | undefined> => (await custodianOf(r)) ?? r.leaderSessionId
+  const wakeTarget = async (r: DeliveryRecord): Promise<string | undefined> => (await liveCustodianOf(r)) ?? r.leaderSessionId
 
   /** The owner (no session proof), the flow engine itself, the recorded leader, the piece's custodian, or a leader session of this delivery's task. */
   const leads = async (r: DeliveryRecord, actor: string): Promise<boolean> => {
@@ -331,8 +343,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
     if (r.leaderSessionId && actor === r.leaderSessionId) return true
     // S7b (§5.2.2): the custodian passes `leads()` for THIS piece — an authorization of the actor, never evidence or proof (the
     // store guard still binds every rank raise). Rule C on only.
-    if (r.custody?.sessionId && actor === r.custody.sessionId && (await custodyOn())) return true
     const sessions = await d.facts.sessions().catch(() => [])
+    if (r.custody?.sessionId && actor === r.custody.sessionId && (await custodyOn()) && sessions.some(x => x.id === actor && x.alive)) return true
     return sessions.some(x => x.id === actor && x.role === 'leader' && x.taskId === r.taskId)
   }
   /**
@@ -2314,7 +2326,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
     // S7b (§5.2.3): a blocked piece still in custody is chased at its custodian, never at the absent leader.
     const custodyTicking = await custodyOn()
     const enqueue = (r: DeliveryRecord, kind: 'wake' | 'defer' | 'convert', text: string) => {
-      const to = (custodyTicking && r.custody?.sessionId) || r.leaderSessionId
+      const custodian = custodyTicking && r.custody?.sessionId && sessions?.some(x => x.id === r.custody!.sessionId && x.alive) ? r.custody.sessionId : null
+      const to = custodian || r.leaderSessionId
       if (!to) { orphans.push({ r, kind }); return }
       const list = batches.get(to) ?? []
       list.push({ r, kind, text })

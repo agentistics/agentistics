@@ -125,6 +125,8 @@ interface Entry {
   startedAt: number
   lastActivityMs: number
   viewers: number
+  /** Personal only: when the person minimized it (null = on screen). A minimized one idles out on its own clock. */
+  minimizedAt: number | null
   cdp: CdpClient | null
   child: SpawnedBrowser | null
   tabs: Map<string, TabState>
@@ -167,6 +169,8 @@ export interface BrowserSummary {
   startedAt: number
   lastActivityMs: number
   viewers: number
+  /** Personal only: hidden by the person (Chromium and its tabs kept). */
+  minimized: boolean
   tabs: { targetId: string; url: string; title: string; active: boolean }[]
   memory: { basis: 'pss' | 'rss' | 'none'; bytes: number | null; action: 'ok' | 'trim' | 'kill' } | null
   /** The systemd MemoryMax scope HOLDS this browser (checked in its cgroup, not assumed). */
@@ -189,6 +193,8 @@ export interface BrowserStatus {
   scope: { available: boolean }
   /** The last few stops and why — what the card/panel says when a browser is gone. */
   recentStops: { key: string; reason: StopReason; at: number }[]
+  /** The person's tab list kept after a minimized browser was stopped (null = none). */
+  personalSaved: { tabs: number } | null
   lastSweep: { at: number; killed: number; removedDirs: number; keptForOtherHost: number } | null
 }
 
@@ -245,7 +251,7 @@ export class BrowserHost {
 
     const entry: Entry = {
       key, owner, phase: 'starting', pid: null, profileDir: profileDirFor(this.d.root, owner),
-      startedAt: this.d.now(), lastActivityMs: this.d.now(), viewers: 0, cdp: null, child: null,
+      startedAt: this.d.now(), lastActivityMs: this.d.now(), viewers: 0, minimizedAt: null, cdp: null, child: null,
       tabs: new Map(), activeTab: null, scope: false, scopeEscaped: false, sandbox: true, memory: null, stopping: null,
       tabSessions: new Map(), doomed: new Set(), sessionPage: new Map(), blocked: [], lastAction: null,
       eventListeners: new Set(), loading: new Set(),
@@ -572,11 +578,65 @@ export class BrowserHost {
 
   // --------------------------------------------------------------------------------------------- stop
 
+  /** The tab list of a personal browser stopped while minimized (urls only; nothing else of it survives — its profile is disposable). */
+  private savedTabs = new Map<string, { urls: string[]; at: number }>()
+
+  /** How many tabs a reopen would restore, or 0. */
+  savedTabCount(key: string): number { return this.savedTabs.get(key)?.urls.length ?? 0 }
+  forgetSavedTabs(key: string): void { this.savedTabs.delete(key) }
+
+  /** Hide it: Chromium and its tabs stay; from now on it idles out on the minimized clock. False when none is live. */
+  minimize(key: string): boolean {
+    const e = this.entries.get(key)
+    if (!e || e.phase !== 'live' || e.owner.kind !== 'personal') return false
+    e.minimizedAt = this.d.now()
+    return true
+  }
+
+  /**
+   * Reopening: bring the browser back — the live one as it was, or (stopped while minimized) a fresh one with the
+   * saved tabs reloaded. Nothing there and nothing saved opens `homeUrl`. `restored` is how many tabs came back
+   * from the saved list; `home` says the default page was opened.
+   */
+  async openPersonal(homeUrl: string): Promise<{ ok: true; restored: number; home: boolean; wasStopped: boolean } | { ok: false; reason: string; sentence: string }> {
+    const key = 'personal'
+    const saved = this.savedTabs.get(key)
+    const wasStopped = !this.entries.get(key) || this.entries.get(key)!.phase === 'stopping'
+    const started = await this.start({ kind: 'personal' })
+    if (!started.ok) return { ok: false, reason: started.reason, sentence: started.sentence }
+    const e = this.entries.get(key)
+    if (!e) return { ok: false, reason: 'start-failed', sentence: 'The browser could not be started.' }
+    e.minimizedAt = null
+    e.lastActivityMs = this.d.now()
+    let restored = 0
+    if (saved) {
+      this.savedTabs.delete(key)
+      for (const url of saved.urls) {
+        const r = await this.openTab(key, url)
+        if (r.ok) restored++
+      }
+    }
+    let home = false
+    if (restored === 0 && [...e.tabs.values()].every(t => !t.url || t.url === 'about:blank')) {
+      const r = await this.openTab(key, homeUrl)
+      home = r.ok
+    }
+    return { ok: true, restored, home, wasStopped }
+  }
+
   /** Stop one browser by its saved PID and delete its profile. Idempotent; concurrent calls share one stop. */
   stop(key: string, reason: StopReason): Promise<void> {
     const e = this.entries.get(key)
     if (!e) return Promise.resolve()
     if (e.stopping) return e.stopping
+    // The person's tab list outlives a minimized browser that was stopped for idleness or memory (or evicted for
+    // another browser): reopening restores it. An explicit close forgets it; so does a browser nobody minimized.
+    if (e.owner.kind === 'personal') {
+      if (e.minimizedAt !== null && (reason === 'idle' || reason === 'memory' || reason === 'evicted')) {
+        const urls = [...e.tabs.values()].map(t => t.url).filter(u => u && u !== 'about:blank')
+        if (urls.length) this.savedTabs.set(key, { urls, at: this.d.now() })
+      } else if (reason === 'requested' || reason === 'crashed' || reason === 'start-failed') this.savedTabs.delete(key)
+    }
     e.phase = 'stopping'
     e.stopping = (async () => {
       // The tree is captured BEFORE the kill: Chrome's helpers outlive the main process for a moment and
@@ -806,7 +866,7 @@ export class BrowserHost {
           await this.stop(e.key, 'session-ended')
           continue
         }
-        if (idleExpired({ owner: e.owner, viewers: e.viewers, lastActivityMs: e.lastActivityMs, now })) {
+        if (idleExpired({ owner: e.owner, viewers: e.viewers, lastActivityMs: e.lastActivityMs, minimizedAt: e.minimizedAt, now })) {
           await this.stop(e.key, 'idle')
           continue
         }
@@ -922,6 +982,7 @@ export class BrowserHost {
       profiles: { count: this.profileDirs().length },
       scope: { available: this.scopeOk() },
       recentStops: [...this.recentStops],
+      personalSaved: this.savedTabs.has('personal') ? { tabs: this.savedTabCount('personal') } : null,
       lastSweep: this.lastSweep,
     }
   }
@@ -929,7 +990,7 @@ export class BrowserHost {
   private summary(e: Entry): BrowserSummary {
     return {
       key: e.key, owner: e.owner, phase: e.phase, pid: e.pid, startedAt: e.startedAt,
-      lastActivityMs: e.lastActivityMs, viewers: e.viewers,
+      lastActivityMs: e.lastActivityMs, viewers: e.viewers, minimized: e.minimizedAt !== null,
       // S1 QA reservation c: status is a summary — origin+path, `data:` reduced to its type, a clean title.
       tabs: [...e.tabs.values()].map(t => ({ targetId: t.targetId, url: statusUrl(t.url), title: statusTitle(t.title), active: t.targetId === e.activeTab })),
       blocked: e.blocked.slice(0, 5).map(b => ({ url: b.url, reason: b.reason, resourceType: b.resourceType, redirect: b.redirect, at: b.at })),
@@ -942,7 +1003,7 @@ export class BrowserHost {
   private views(): LiveBrowserView[] {
     return [...this.entries.values()]
       .filter(e => e.phase !== 'stopping')
-      .map(e => ({ key: e.key, owner: e.owner, phase: e.phase === 'live' ? 'live' : 'starting', viewers: e.viewers, lastActivityMs: e.lastActivityMs }))
+      .map(e => ({ key: e.key, owner: e.owner, phase: e.phase === 'live' ? 'live' : 'starting', viewers: e.viewers, lastActivityMs: e.lastActivityMs, minimized: e.minimizedAt !== null }))
   }
 
   private scopeOk(): boolean {

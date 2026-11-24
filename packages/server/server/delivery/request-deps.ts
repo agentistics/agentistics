@@ -52,7 +52,7 @@ export async function guardContextOfRequest(
   const verify = io.verify ?? ((id: unknown, token: unknown) => verifySessionIdentity(id, token))
   const id = typeof claim === 'object' ? await verify(claim.id, claim.token) : null
   if (id) return { ok: true, ctx: { principal: { kind: 'session', id, via: 'token' } } }
-  return { ok: false, reply: { status: 403, body: { error: 'session_unverified', message: 'The session identity in this request could not be verified; the write was refused.' } } }
+  return { ok: false, reply: { status: 403, body: { error: 'unverified_sender', sentence: 'the session identity could not be verified' } } }
 }
 
 export type OpenKnown = 'keep' | { kind: 'session'; id: string; via: 'token' } | undefined

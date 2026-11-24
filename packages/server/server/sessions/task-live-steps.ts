@@ -114,18 +114,18 @@ export function deriveStep(f: StepFacts): DerivedStep | null {
       if (total(qa.map(s => s.activity?.tests)) > 0) return { step: 2, signal: 'tests' }
       return { step: 1, signal: 'session' }
     }
+    // LIVE.COLUNAS-PRESAS C4: entering a stage is not a step of it. "0% · passo 1 de 3: lendo as mudanças" was drawn on every
+    // review card whether or not anybody was reading anything; with no observed act the answer is null (no percent) and the
+    // card says what it really does — waits for the leader (`waitingReason`).
     case 'leader': {
-      // No record: the board status itself is the evidence the piece entered this stage (every column carries a percent).
-      if (!f.rec) return { step: 1, signal: 'stage' }
-      if (f.rec.review && since(f.rec.review.at, f.sinceMs)) return { step: 3, signal: 'review' }
+      if (f.rec?.review && since(f.rec.review.at, f.sinceMs)) return { step: 3, signal: 'review' }
       if (gateOk(f.rec, 'delecoes', f.sinceMs)) return { step: 2, signal: 'deletions-gate' }
-      return { step: 1, signal: 'stage' }
+      return null
     }
     case 'merge': {
-      if (!f.rec) return { step: 1, signal: 'stage' }
-      if (f.rec.mergeSha || gateOk(f.rec, 'mergeado', f.sinceMs)) return { step: 3, signal: 'merged' }
-      if (f.rec.pr) return { step: 2, signal: 'pr' }
-      return { step: 1, signal: 'stage' }
+      if (f.rec?.mergeSha || gateOk(f.rec, 'mergeado', f.sinceMs)) return { step: 3, signal: 'merged' }
+      if (f.rec?.pr) return { step: 2, signal: 'pr' }
+      return null
     }
     default: return null
   }

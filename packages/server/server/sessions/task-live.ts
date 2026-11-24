@@ -972,15 +972,20 @@ export function cleanDeliveryRecord<T extends { phase: string; dequeued?: unknow
 export interface ShaPiece { taskId: string; subtaskId: string | null; repo?: string }
 
 /** PURE: `legacyReviewShas`, with the pieces that named each commit — the caller needs them to know WHICH clones to ask. */
-export function legacyReviewShaPieces(details: readonly TaskDetail[], events: readonly TaskEvent[], deliveries?: ReadonlyMap<string, LiveDeliveryFacts>): Map<string, ShaPiece[]> {
+export function legacyReviewShaPieces(
+  details: readonly TaskDetail[], events: readonly TaskEvent[], deliveries?: ReadonlyMap<string, LiveDeliveryFacts>,
+  statusStage?: (id: string) => StatusStage | undefined,
+): Map<string, ShaPiece[]> {
   const { eventsBySubject } = indexEvents(details, events)
   const out = new Map<string, ShaPiece[]>()
   for (const d of details) for (const p of piecesOf(d)) {
-    if (!['in_review', 'done'].includes(p.status)) continue
+    const rec = cleanDeliveryRecord(deliveries?.get(p.sub ? p.sub.id : p.task.id), p.status)
+    // C5: a record-less piece the board put in PR · merge / CI is promoted by the same proof, so it is asked about too.
+    const late = !rec && (p.status === 'pr_merge' || ['merge', 'ci'].includes(stageOfPieceStatus(p.status, undefined, statusStage) ?? ''))
+    if (!['in_review', 'done'].includes(p.status) && !late) continue
     // A piece with a delivery record is asked about too when its record is still open in a late phase: the board says
     // it is in review (or done) and a release may already hold the commit (buildLive turns that into Publicado). Only
     // a `publicado` record, or an early phase (fila/executando…), has nothing to ask git.
-    const rec = cleanDeliveryRecord(deliveries?.get(p.sub ? p.sub.id : p.task.id), p.status)
     // buildLive promotes only `revisao_lider` (in_review) and any non-publicado record on a done piece; pr_merge/ci on an
     // in_review piece stay in their column whatever git says, so asking git for them would be a cost with no effect.
     if (rec && !((p.status === 'in_review' && rec.phase === 'revisao_lider') || (p.status === 'done' && rec.phase !== 'publicado'))) continue
@@ -1093,6 +1098,13 @@ export function buildLive(o: {
   const entry = (p: Piece, stage: LiveStage | null, reason: HiddenReason): LiveHidden =>
     ({ key: p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id, taskId: p.task.id, ...(p.sub ? { subtaskId: p.sub.id } : {}), title: p.sub?.title ?? p.task.title, stage, reason, atMs: ms(p.updatedAt) })
   const hide = (p: Piece, stage: LiveStage | null, reason: HiddenReason) => { hidden.push(entry(p, stage, reason)) }
+  // LIVE.COLUNAS-PRESAS C1: a record-less piece is Publicado when a release tag holds the commit it declared. Whether the
+  // reconcile found the piece's repository (`no-repos`) says nothing about that commit — the lookup behind `publishedShas`
+  // asks the clones agentistics knows — so it never vetoes the proof (it did: 46 shipped pieces sat in review for weeks).
+  const shaReleased = (p: Piece): boolean => {
+    const subject = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
+    return legacyShaGroups(p, eventsBySubject.get(subject)).some(g => g.length > 0 && g.every(sha => o.publishedShas?.has(sha)))
+  }
   for (const p of candidates) {
     // A task-level piece (a task with no subtasks) is keyed by its TASK id in the delivery book, exactly as a subtask is by its own.
     const stored = o.deliveries?.get(p.sub ? p.sub.id : p.task.id)
@@ -1102,11 +1114,7 @@ export function buildLive(o: {
     let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfPieceStatus(p.status, o.statusLabel, o.statusStage)
     const id = p.sub?.id ?? p.task.id
     // Board completion is not evidence of a public release. Preserve the card in Tudo, outside the queue.
-    if (p.status === 'done' && rec?.phase !== 'publicado') {
-      const subject = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
-      const released = o.uncheckedWhy?.get(id) !== 'no-repos' && legacyShaGroups(p, eventsBySubject.get(subject)).some(g => g.every(sha => o.publishedShas?.has(sha)))
-      stage = released ? 'published' : 'completed'
-    }
+    if (p.status === 'done' && rec?.phase !== 'publicado') stage = shaReleased(p) ? 'published' : 'completed'
     // THE BOARD STATUS OUTRANKS A STALE REVIEW RECORD (LIVE.STATUS-IGNORADO). A record parked in `revisao_lider` says
     // "waiting on the leader"; the board says whether that is still true. `abandoned` is closed (no active column),
     // `in_progress`/`todo` is a rework (the card follows the status: running with a live session, queued otherwise,
@@ -1121,10 +1129,7 @@ export function buildLive(o: {
       else if (lateOpen && (boardStage === 'running' || boardStage === 'queue')) { rec = undefined; stage = boardStage }
       else if (rec.phase === 'revisao_lider' && boardStage === 'merge') stage = 'merge' // approved, waiting publication: the board is ahead of a stale record
       else if (rec.phase === 'executando' && boardStage === 'merge') { rec = undefined; stage = 'merge' } // a stale "running" record must not hide a piece the board already sent to publication
-      else if (rec.phase === 'revisao_lider' && boardStage === 'leader') {
-        const subj = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
-        if (o.uncheckedWhy?.get(id) !== 'no-repos' && legacyShaGroups(p, eventsBySubject.get(subj)).some(g => g.every(sha => o.publishedShas?.has(sha)))) { rec = undefined; stage = 'published' }
-      }
+      else if (rec.phase === 'revisao_lider' && boardStage === 'leader' && shaReleased(p)) { rec = undefined; stage = 'published' }
     }
     // WAITING ON THE USER IS NOT WAITING ON THE LEADER. A piece in review whose open human gate or open queue question is
     // the owner's to answer shows in the EXISTING blocked state with the owner-decision reason (unlocker: owner), not in
@@ -1155,9 +1160,11 @@ export function buildLive(o: {
     }
     // LEGACY in-review work (no delivery record): published once a release tag contains the commit it names;
     // with no such commit and nothing alive for 72 h it is not review work any more — it is listed apart, never dropped.
+    // C5 (LIVE.COLUNAS-PRESAS): a record-less piece the board moved to PR · merge or CI waits for the same fact — a release
+    // tag holding its commit — and had no way to learn it, so it sat in its column after shipping.
+    if (!rec && (stage === 'merge' || stage === 'ci') && shaReleased(p)) stage = 'published'
     if (!rec && stage === 'leader' && p.status === 'in_review') {
-      const subj = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
-      if (o.uncheckedWhy?.get(id) !== 'no-repos' && legacyShaGroups(p, eventsBySubject.get(subj)).some(g => g.every(sha => o.publishedShas?.has(sha)))) stage = 'published'
+      if (shaReleased(p)) stage = 'published'
       else {
         // ONE rule with the reconcile (`delivery/antigas.ts`): age alone does not take a delivery still waiting on its leader out of the column.
         let handbackMs: number | null = null

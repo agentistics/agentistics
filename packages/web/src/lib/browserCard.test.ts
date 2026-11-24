@@ -132,6 +132,15 @@ describe('setBrowserLock', () => {
     expect(calls).toEqual([{ body: { owner: 'm1', lock: 'locked' }, grant: null }])
   })
 
+  test('unlock by a verified person: one plain request, the vault is never asked and no vault action appears', async () => {
+    serve([[200, { ok: true, lock: 'unlocked' }]])
+    let asked = 0
+    const r = await setBrowserLock('m1', 'unlocked', true, async () => { asked++; return { ok: true, grant: 'g' } })
+    expect(r).toEqual({ ok: true, lock: 'unlocked' })
+    expect(asked).toBe(0)
+    expect(calls).toEqual([{ body: { owner: 'm1', lock: 'unlocked' }, grant: null }])
+  })
+
   test('unlock: proof required ⇒ the vault grant for THIS browser, then the same request with it', async () => {
     serve([[403, { ok: false, error: 'owner_proof_required' }], [200, { ok: true, lock: 'unlocked' }]])
     const asked: string[] = []

@@ -23,7 +23,7 @@
  */
 
 import { mkdir, readFile, rename, stat } from 'node:fs/promises'
-import { alertQuarantined, durableWrite, readLastGood, recoverVanished, refreshLastGood, sweepStaleDurableTmps } from '../durable-file'
+import { alertQuarantined, durableWrite, emptiesExistingLedger, readLastGood, recoverVanished, refreshLastGood, sweepStaleDurableTmps } from '../durable-file'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { MANAGED_SESSIONS_FILE } from '../config'
@@ -462,8 +462,9 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
     // worst case degrades from a destroyed registry to one lost update — which the lock already
     // makes rare, and which the next poll repairs.
     const text = `${JSON.stringify(list, null, 2)}\n`
+    const removedAll = await emptiesExistingLedger(file, text, list.length === 0)
     await durableWrite(file, text)
-    await refreshLastGood(file, text, Date.now(), undefined, list.length === 0)
+    await refreshLastGood(file, text, Date.now(), undefined, list.length === 0 && !removedAll, removedAll)
   }
 
   // Chains `fn` behind whatever is already queued, so its read and write run as one atomic step
@@ -711,6 +712,9 @@ export async function killAndRetireSession(
     const hold = await (opts.observe ?? observeHoldNow)(row ?? { id })
     if (hold.state !== 'none') throw new HoldError(id, hold)
   }
+  // LIVE.COLUNAS-PRESAS (flow side): the piece learns where its work lives (repo, branch, commits) BEFORE its worker can leave
+  // the registry — fechar-entregue, a leader's retire and `session kill` all pass here. Bounded and best effort: never blocks the kill.
+  if (row?.subtaskId && !row.endedAt && registry === defaultRegistry) await import('../delivery/host').then(m => m.stampProvenanceOfSession(id)).catch(() => undefined)
   const previous = row?.endedAt
   await registry.patch(id, { endedAt: previous ?? new Date().toISOString() })
   try {

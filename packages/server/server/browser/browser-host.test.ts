@@ -528,3 +528,96 @@ describe('S12 — status carries the ceilings, and Delete profiles refuses while
     await h.stop('s-aaa', 'requested').catch(() => {})
   })
 })
+
+// NAVEGADOR.FECHAR-MINIMIZAR — the person's browser: close forgets, minimize keeps, idle stop keeps the TAB LIST.
+describe('personal browser: minimize, idle stop keeps the tab list, restore, close', () => {
+  const P = { kind: 'personal' } as const
+  const HOME = 'https://home.example/'
+  beforeEach(() => { env = makeEnv() })
+
+  test('opening with nothing open and nothing saved loads the default page', async () => {
+    const h = env.host()
+    const r = await h.openPersonal(HOME)
+    expect(r).toMatchObject({ ok: true, restored: 0, home: true })
+    expect(env.fakes[0]!.methods).toContain('Target.createTarget')
+    await h.stopAll()
+  })
+
+  test('minimize keeps Chromium and its tabs running; reopening is the SAME browser (nothing restarted)', async () => {
+    const h = env.host()
+    await h.openPersonal(HOME)
+    expect(h.minimize('personal')).toBe(true)
+    expect((await h.status()).live[0]).toMatchObject({ key: 'personal', minimized: true })
+    env.advance(5 * 60_000)
+    await h.tick()
+    expect(env.fakes.length).toBe(1)
+    const r = await h.openPersonal(HOME)
+    expect(r).toMatchObject({ ok: true, restored: 0, home: false, wasStopped: false })
+    expect(env.fakes.length).toBe(1)
+    expect((await h.status()).live[0]!.minimized).toBe(false)
+    await h.stopAll()
+  })
+
+  test('a minimized browser idle for 30 min is stopped but its tab list is kept; reopening restores the tabs', async () => {
+    const h = env.host()
+    await h.start(P)
+    await h.openTab('personal', 'https://a.example/')
+    await h.openTab('personal', 'https://b.example/')
+    h.minimize('personal')
+    env.advance(29 * 60_000)
+    await h.tick()
+    expect((await h.status()).live.length).toBe(1)
+    env.advance(2 * 60_000)
+    await h.tick()
+    const st = await h.status()
+    expect(st.live.length).toBe(0)
+    expect(st.recentStops[0]).toMatchObject({ key: 'personal', reason: 'idle' })
+    expect(st.personalSaved).toEqual({ tabs: 2 })
+    const r = await h.openPersonal(HOME)
+    expect(r).toMatchObject({ ok: true, restored: 2, home: false, wasStopped: true })
+    expect((await h.status()).personalSaved).toBeNull()
+    expect(env.fakes.length).toBe(2)
+    expect(env.fakes[1]!.methods.filter(m => m === 'Target.createTarget').length).toBe(2)
+    await h.stopAll()
+  })
+
+  test('a browser nobody minimized that idles out keeps no tab list', async () => {
+    const h = env.host()
+    await h.start(P)
+    await h.openTab('personal', 'https://a.example/')
+    env.advance(21 * 60_000)
+    await h.tick()
+    expect((await h.status()).personalSaved).toBeNull()
+  })
+
+  test('close stops Chromium, deletes the profile and clears every tab (and a saved list)', async () => {
+    const h = env.host()
+    await h.start(P)
+    await h.openTab('personal', 'https://a.example/')
+    h.minimize('personal')
+    await h.stop('personal', 'requested')
+    expect((await h.status()).live.length).toBe(0)
+    expect(existsSync(join(env.root, 'personal'))).toBe(false)
+    const r = await h.openPersonal(HOME)
+    expect(r).toMatchObject({ ok: true, restored: 0, home: true })
+    await h.stopAll()
+  })
+
+  test('short on memory, a session browser start stops the MINIMIZED personal one first — and keeps its tab list', async () => {
+    env = makeEnv({ mem: 1 * GB })
+    const h = env.host()
+    // personal started while memory was fine is simulated by a host with enough memory first
+    const ok = makeEnv()
+    const h2 = ok.host()
+    await h2.start(P)
+    await h2.openTab('personal', 'https://a.example/')
+    h2.minimize('personal')
+    ;(ok.deps as any).memAvailable = async () => 1 * GB
+    const r = await h2.start(S('zzz'))
+    expect(r).toMatchObject({ ok: true, evicted: 'personal' })
+    expect((await h2.status()).personalSaved).toEqual({ tabs: 1 })
+    await h2.stopAll()
+    rmSync(ok.root, { recursive: true, force: true })
+    void h
+  })
+})

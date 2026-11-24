@@ -21,6 +21,7 @@ import { IconButton, NayWindowFrame } from '../nay/NayWindowFrame'
 import { BrowserScreen } from './BrowserScreen'
 import { BrowserAddressBar } from './BrowserAddressBar'
 import { BrowserPanel } from './BrowserPanel'
+import { closePersonalBrowser, minimizePersonalBrowser } from '../../lib/browserPersonal'
 import { TabDot, TabStripView, type TabStripItem } from '../sessions/SessionTabStrip'
 import { useSessionBrowserCard, type SetLock } from '../../hooks/useSessionBrowserCard'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -103,7 +104,7 @@ export function BrowserWindows({ lang, openStream, setLock, personal }: BrowserW
         const managedId = managedIdOf(win.id)
         return managedId
           ? <SessionBrowserWindow key={win.id} {...common} managedId={managedId} title={win.title} openStream={openStream} setLock={setLock} />
-          : <PersonalBrowserWindow key={win.id} {...common} onClose={() => updateBrowserWindows(s => dockBrowser(s, win.id))} personal={personal} />
+          : <PersonalBrowserWindow key={win.id} {...common} onMinimize={() => { void minimizePersonalBrowser(pt, personal?.post); updateBrowserWindows(s => minimizeBrowser(s, win.id)) }} onClose={() => { void closePersonalBrowser(pt, personal?.post); updateBrowserWindows(s => dockBrowser(s, win.id)) }} personal={personal} />
       })}
       {minimized.length > 0 && (
         <div data-browser-minimized style={{
