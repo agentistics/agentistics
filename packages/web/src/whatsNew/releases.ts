@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.228.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Desenvolvimento: a checagem antes de salvar o trabalho repete uma vez, isolado, o teste que falhou por demora da máquina, em vez de perder a rodada inteira.',
+        en: 'Development: the pre-commit check retries a test that failed under machine load once, alone, instead of throwing the whole run away.',
+      },
+    ],
+  },
   '2.226.0': {
     features: [
       {
