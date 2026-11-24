@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { activeEvidence, activityApplies } from '@agentistics/core'
+import { activeEvidence, withoutClocks, activityApplies } from '@agentistics/core'
 import { gitEnv } from '../backup/repo-probe'
 import { detectLimit, limitRuleFor } from '../sessions/limit'
 import { managedIdOf } from '../browser/browser-caller-proc'
@@ -59,7 +59,7 @@ export async function sessionOnHeavyLock(row: Pick<ManagedSession, 'id'>): Promi
 
 /** What each observer last saw of a session's screen, per deps instance: "output moved since last time". */
 const screenSeen = new WeakMap<object, Map<string, string>>()
-const screenKey = (lines: readonly string[] | undefined): string => createHash('sha256').update((lines ?? []).join('\n')).digest('hex').slice(0, 16)
+const screenKey = (lines: readonly string[] | undefined): string => createHash('sha256').update(withoutClocks(lines ?? []).join('\n')).digest('hex').slice(0, 16)
 
 export function stalledHostOps(d: StalledHostDeps = defaultStalledHostDeps()) {
   const target = async (value: unknown) => {

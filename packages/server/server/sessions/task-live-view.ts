@@ -10,7 +10,7 @@
  */
 
 import {
-  humanizeAction, inPublishedPeriod, isLiveState, liveCapOmitted, type LiveCutFacts, liveComparator, LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, liveTabCounts, liveTabMatches, plainLeaderName,
+  activityState, type ActivitySignal, humanizeAction, inPublishedPeriod, isLiveState, liveCapOmitted, type LiveCutFacts, liveComparator, LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, liveTabCounts, liveTabMatches, plainLeaderName,
   type LiveLang, type LivePeriod, type LiveSortId, type LiveTab,
 } from '@agentistics/core'
 import { HISTORY_CAP, LIVE_STAGES, type LiveDelivery, type LiveReply, type LiveStage } from './task-live'
@@ -27,6 +27,8 @@ export interface FleetRowLite {
   effort?: string
   accountId?: string
   state: string
+  /** Why the row is not idle (`@agentistics/core` sessionActivity) — the same reading the sidebar and the alert use. */
+  activeSignal?: ActivitySignal
   parentSessionId?: string
   lastLines?: string[]
   /** The title of the task the row is filed on. */
@@ -44,7 +46,7 @@ export type LiveState = 'working' | 'waiting' | 'needs-you' | 'down' | 'none'
 
 const DOWN = new Set(['lost', 'unknown'])
 
-export interface LiveAgentView { id: string; harness: string; model: string | null; effort: string | null; accountId: string | null; state: string }
+export interface LiveAgentView { id: string; harness: string; model: string | null; effort: string | null; accountId: string | null; state: string; queued?: boolean }
 
 export interface LiveDeliveryView extends LiveDelivery {
   agents: LiveAgentView[]
@@ -191,7 +193,7 @@ export function describeLive(o: {
     const agents: LiveAgentView[] = d.sessionIds.flatMap(id => {
       const r = byId.get(id)
       return r && (isLiveState(r.state) || DOWN.has(r.state))
-        ? [{ id: r.id, harness: r.harness, model: r.observedModel ?? r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null, state: r.state }]
+        ? [(() => { const a = activityState(r.state, r.activeSignal); return { id: r.id, harness: r.harness, model: r.observedModel ?? r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null, state: a.state, ...(a.queued ? { queued: true } : {}) } })()]
         : []
     })
     const liveState = liveStateOf(agents)
@@ -257,13 +259,13 @@ export function describeLive(o: {
     const led = (o.leadsOf?.get(r.id) ?? []).map(id => ({ id, title: all.find(d => d.taskId === id)?.taskTitle ?? id }))
     return {
       id: r.id, ...(led.length ? { leads: led } : {}), title: r.title, harness: r.harness, model: r.observedModel ?? r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null,
-      state: r.state, createdMs: r.createdMs ?? null, taskId, taskTitle: r.task ?? null,
+      state: activityState(r.state, r.activeSignal).state, createdMs: r.createdMs ?? null, taskId, taskTitle: r.task ?? null,
       currentAction: lastLine(r.lastLines, lang, titleOf),
       publishEtaMs: pubs.length ? Math.max(...pubs) : null,
       workers: workers.map(w => {
         const d = pieceOf.get(w.id)
         return {
-          id: w.id, title: w.title, state: w.state, word: workerWord(w.state, d?.stage ?? null),
+          id: w.id, title: w.title, state: activityState(w.state, w.activeSignal).state, word: workerWord(activityState(w.state, w.activeSignal).state, d?.stage ?? null),
           stage: d?.stage ?? null, cardKey: d?.key ?? null, subtask: d?.subtaskId ? d.title : null, taskId: d?.taskId ?? null,
           stageSinceMs: d?.stageSinceMs ?? null, blockReason: d?.block?.reason ?? null, harness: w.harness, model: w.observedModel ?? w.model ?? null, effort: w.effort ?? null,
         }

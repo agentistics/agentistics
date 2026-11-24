@@ -16,7 +16,7 @@ import { initialRegistry, isInitialSnapshot, markInitialSnapshot } from './boot-
 import { dedupeRepeatedPrompt } from './prompt-dedupe'
 import { opencodeDbPath, readOpencodeActivity } from './opencode-store'
 import { anyGrant, scrubDeep, scrubTerminalLine } from '../vault/grants'
-import { canonicalOfTuiMode, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
+import { canonicalOfTuiMode, withoutClocks, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
 import { createLimiter } from '../utils'
 import { retainKeys } from '../prune-keys'
 import { statSync } from 'node:fs'
@@ -418,6 +418,8 @@ export function createSessionsPoller(o: {
   // Carried between polls: what each session's screen looked like, and what state it was in. The
   // first is how movement is detected; the second is what makes the bell a transition.
   let prevDigest = new Map<string, string>()
+  // Digest of the frame with its CLOCKS blanked (`withoutClocks`): what "output moved" is judged on, so a ticking timer is not output.
+  let prevOutput = new Map<string, string>()
   let prevActivity = new Map<string, SessionActivity>()
   // What only a SCREEN read carries, kept for the polls that skip the screen of an adapter-stated row
   // (`adapter-state.ts`): the mode chip and the raw tail stay what the last read said.
@@ -542,6 +544,7 @@ export function createSessionsPoller(o: {
       }
 
       const nextDigest = new Map<string, string>()
+      const nextOutput = new Map<string, string>()
       const activity = new Map<string, SessionActivity>()
       /** Rows whose reading is backed by more than movement — see `confirmActivities`. */
       const corroborated = new Set<string>()
@@ -724,9 +727,12 @@ export function createSessionsPoller(o: {
         }
         const frameDigest = digestFrame(frame)
         nextDigest.set(r.id, frameDigest)
+        const outputDigest = digestFrame(withoutClocks(frame))
+        nextOutput.set(r.id, outputDigest)
         {
           const prior = prevDigest.get(r.id)
-          if (prior !== undefined && prior !== frameDigest) outputMoved.add(r.id)
+          const priorOut = prevOutput.get(r.id)
+          if (prior !== undefined && priorOut !== undefined && priorOut !== outputDigest) outputMoved.add(r.id)
         }
         tails.set(r.id, anyGrant() ? frameTail(frame, TAIL_LINES).map(l => scrubTerminalLine(r.id, l)) : frameTail(frame, TAIL_LINES))
         if (adapter || tailFeed) {
@@ -1258,6 +1264,7 @@ export function createSessionsPoller(o: {
       const rang = bellTransitions(prevActivity, sessions)
 
       prevDigest = nextDigest
+      prevOutput = nextOutput
       tailFeed?.retain(new Set(nextDigest.keys()))
       for (const id of [...lastFrameFacts.keys()]) if (!nextDigest.has(id)) lastFrameFacts.delete(id)
       prevActivity = new Map(

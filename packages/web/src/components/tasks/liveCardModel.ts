@@ -42,6 +42,9 @@ export function workerWordOf(state: string, stage: LiveStage | null | undefined)
 /** The state word of a card. `waiting` is NEVER "esperando você" — only a dialog on a person is. */
 export function cardStateWord(c: LiveCard, pt: Pt): string {
   if (isQueued(c)) return pt ? 'na fila' : 'queued'
+  // Every working agent is waiting in the heavy-job queue: the sidebar says "na fila", so does the card.
+  const busy = c.agents.filter(a => a.state === 'working')
+  if (c.liveState === 'working' && busy.length > 0 && busy.every(a => a.queued)) return pt ? 'na fila' : 'queued'
   switch (c.liveState) {
     case 'working': return workerWordText('working', pt)
     case 'needs-you': return workerWordText('needs-you', pt)

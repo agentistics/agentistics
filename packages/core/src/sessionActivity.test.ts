@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { activeEvidence, activityApplies, runningLabel } from './sessionActivity'
+import { activeEvidence, activityApplies, activityState, runningLabel, withoutClocks } from './sessionActivity'
 
 const T = '2026-11-23T10:00:00Z'
 const span = (ms: number) => `${Math.floor(ms / 60_000)} min`
@@ -53,4 +53,16 @@ test('a finished session is never active, whatever its stale turns say', () => {
   for (const s of ['closed', 'exited', 'lost']) expect(activityApplies(s)).toBe(false)
   expect(activityApplies('running')).toBe(true)
   expect(activityApplies(undefined)).toBe(true)
+})
+
+test('withoutClocks blanks timers but keeps real output changes', () => {
+  expect(withoutClocks(['esc to interrupt · 1m 23s', 'at 12:34:05'])).toEqual(withoutClocks(['esc to interrupt · 2m 24s', 'at 12:35:06']))
+  expect(withoutClocks(['build 41 passed'])).not.toEqual(withoutClocks(['build 42 passed']))
+})
+
+test('activityState: evidence turns a prompt-idle row into working; heavy-lock is queued; others keep their state', () => {
+  expect(activityState('waiting', 'tool')).toEqual({ state: 'working', queued: false })
+  expect(activityState('idle', 'heavy-lock')).toEqual({ state: 'working', queued: true })
+  expect(activityState('waiting', null)).toEqual({ state: 'waiting', queued: false })
+  for (const s of ['waiting-approval', 'exited', 'lost', 'closed']) expect(activityState(s, 'tool').state).toBe(s)
 })

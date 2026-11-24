@@ -70,3 +70,27 @@ export function runningLabel(e: ActiveEvidence, now: number, pt: boolean, span: 
   if (queued) return pt ? `na fila há ${s}` : `queued ${s}`
   return pt ? `rodando há ${s}` : `running ${s}`
 }
+
+/**
+ * The state a LIVE surface (the Live board) draws for a row, from the row's own state and the same
+ * `activeSignal` the sidebar and the stall alert read. A row at its prompt (`waiting`/`idle`) with
+ * evidence of activity is `working`; one blocked on a person, ended or lost keeps its state. `queued`
+ * is the heavy-lock wait: it counts as working (it is not stalled) but is worded "na fila", never "rodando".
+ */
+export function activityState<S extends string>(state: S, signal: ActivitySignal | null | undefined): { state: S | 'working'; queued: boolean } {
+  if (!signal || (state !== 'waiting' && state !== 'idle')) return { state, queued: false }
+  return { state: 'working', queued: signal === 'heavy-lock' }
+}
+
+/**
+ * A terminal frame with its CLOCKS blanked: `12:34`, `1h 2m 3s`, `45s`, `3m`. A harness that repaints
+ * an elapsed-time counter on an idle screen moves the frame without producing anything, and "output
+ * moved" must not read that as work. Only time-shaped tokens are blanked — any other change still counts.
+ */
+export function withoutClocks(lines: readonly string[]): string[] {
+  return lines.map(l => l
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]m)?\b/gi, '#')
+    .replace(/\b\d+\s?h(?:\s?\d+\s?m)?(?:\s?\d+\s?s)?\b/g, '#')
+    .replace(/\b\d+\s?m(?:in)?(?:\s?\d+\s?s)?\b/g, '#')
+    .replace(/\b\d+(?:\.\d+)?\s?s\b/g, '#'))
+}
