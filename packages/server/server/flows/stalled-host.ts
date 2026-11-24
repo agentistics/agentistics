@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { activeEvidence, withoutClocks, activityApplies } from '@agentistics/core'
+import { activeEvidence, activityApplies, outputMovedSince, withoutClocks, type OutputReading } from '@agentistics/core'
 import { gitEnv } from '../backup/repo-probe'
 import { detectLimit, limitRuleFor } from '../sessions/limit'
 import { managedIdOf } from '../browser/browser-caller-proc'
@@ -57,9 +57,11 @@ export async function sessionOnHeavyLock(row: Pick<ManagedSession, 'id'>): Promi
   return (await heavyLockScanner.of(row.id)) !== false
 }
 
-/** What each observer last saw of a session's screen, per deps instance: "output moved since last time". */
-const screenSeen = new WeakMap<object, Map<string, string>>()
-const screenKey = (lines: readonly string[] | undefined): string => createHash('sha256').update(withoutClocks(lines ?? []).join('\n')).digest('hex').slice(0, 16)
+/** What each observer last saw of a session's screen and WHEN, per deps instance: "output moved since last time". */
+const screenSeen = new WeakMap<object, Map<string, OutputReading>>()
+const digest = (lines: readonly string[]): string => createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 16)
+/** The screen as the poller reads it (`outputMovedSince`): raw, plus with wall-clock times blanked to tell a ticking clock from content. */
+const screenReading = (lines: readonly string[] | undefined, atMs: number): OutputReading => ({ key: digest(lines ?? []), clockFree: digest(withoutClocks(lines ?? [])), atMs })
 
 export function stalledHostOps(d: StalledHostDeps = defaultStalledHostDeps()) {
   const target = async (value: unknown) => {
@@ -86,13 +88,13 @@ export function stalledHostOps(d: StalledHostDeps = defaultStalledHostDeps()) {
       const last = view.chatTurns?.at(-1)
       // Prefer transcript content for the notice text; the screen is the fallback.
       const text = (last?.text ?? view.lastLines?.join('\n') ?? '').slice(-2000)
-      // OUTPUT: did the screen move since this observer last looked? (the poller's own digest, when the
-      // view carries it, counts too). The first observation of a session has nothing to compare with.
+      // OUTPUT: did the screen move since this observer last looked (the poller's own reading, when the
+      // view carries it, counts too)? Same rule as the poller: changed content counts; a change in nothing
+      // but a time of day counts only against a recent look. The first observation has nothing to compare with.
       const seen = screenSeen.get(d) ?? screenSeen.set(d, new Map()).get(d)!
-      const key = screenKey(view.lastLines)
-      const prev = seen.get(t.row.id)
-      seen.set(t.row.id, key)
-      const outputMoved = view.outputMoved === true || (prev !== undefined && prev !== key)
+      const screen = screenReading(view.lastLines, snap.polledAtMs)
+      const outputMoved = view.outputMoved === true || outputMovedSince(seen.get(t.row.id), screen)
+      seen.set(t.row.id, screen)
       // ONE activity source (`sessionActivity.ts`), the same inputs the sidebar and Live read: an open
       // tool call, a live background task, the heavy lock (queued or holding), moving output.
       const evidence = activeEvidence({ turns: view.chatTurns ?? [], heavyLock: view.heavyLock ?? await d.heavyLock(t.row), outputMoved })
@@ -100,7 +102,9 @@ export function stalledHostOps(d: StalledHostDeps = defaultStalledHostDeps()) {
       const notice = evidence ? text : `[no activity signal: no open tool call, background task, heavy-lock process or moving output; last turn ${last?.at ?? 'unknown'}]\n`
       return { ok: true, sessionId: t.row.id, leaderId: t.leader.id, observedAt: snap.polledAtMs,
         state, activeSignal: evidence?.signal ?? null,
-        activityKey: createHash('sha256').update((last ? JSON.stringify([last.at, last.role, last.text, last.tools, last.pending]) : text) + `|screen:${key}` + (evidence ? `|${evidence.signal}` : '')).digest('hex'),
+        // The screen is NOT in the key: a screen that moved recently is already `state: working` above, and
+        // one that changed against a stale look is no activity — keying on it would reset the stall clock.
+        activityKey: createHash('sha256').update((last ? JSON.stringify([last.at, last.role, last.text, last.tools, last.pending]) : 'no-turn') + (evidence ? `|${evidence.signal}` : '')).digest('hex'),
         // The engine keeps the LAST 2000 characters of this field, so the attribution prefix is whole and the CONTENT is what gets cut.
         lastText: evidence ? text : notice + text.slice(-Math.max(0, 2000 - notice.length)), dirty: await d.dirty(t.row.cwd),
         accountLimit: view.harness && view.lastLines && limitRuleFor(view.harness) ? detectLimit({ tail: view.lastLines, rule: limitRuleFor(view.harness), nowMs: snap.polledAtMs }) ?? false : null,

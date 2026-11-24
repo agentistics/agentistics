@@ -146,3 +146,44 @@ test('the idle notice keeps the last-turn attribution when the text is long', as
   expect(String(o.lastText)).toContain('last turn 2026-11-23T10:00:00Z')
   expect(String(o.lastText).length).toBeLessThanOrEqual(2000)
 })
+
+const hhmmss = (ms: number) => new Date(ms).toISOString().slice(11, 19)
+
+// QA r3 adversarial: a worker whose command prints a timestamped log line every minute is WORKING for the whole
+// half hour — blanking the timestamp made it read idle and raised a false stall alert at 30 min.
+test('a timestamped log line printed every minute reads working at every observation for 30 min', async () => {
+  const f = fixture()
+  withView(f, { lastLines: [`Heartbeat received at ${hhmmss(f.d.now())}`] })
+  expect(await obs(f)).toMatchObject({ state: 'waiting', activeSignal: null })
+  for (let i = 0; i < 30; i++) {
+    f.advance(60_000)
+    withView(f, { lastLines: [`Heartbeat received at ${hhmmss(f.d.now())}`] })
+    expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'output' })
+  }
+})
+
+// QA r2/r3 clock probe: a clock repainted on an idle screen, seen half an hour apart, is no activity. The
+// engine's stall clock restarts on `state: working` or a changed `activityKey`, so BOTH must hold still.
+test('a screen whose only change across 30 min is a wall-clock time is idle, with a stable activity key', async () => {
+  const f = fixture()
+  const clock = () => withView(f, { lastLines: [`clock ${new Date(f.d.now()).toISOString()}`] })
+  clock()
+  const first = await obs(f)
+  expect(first).toMatchObject({ state: 'waiting', activeSignal: null })
+  for (const _ of [1, 2]) {
+    f.advance(30 * 60_000)
+    clock()
+    const o = await obs(f)
+    expect(o).toMatchObject({ state: 'waiting', activeSignal: null })
+    expect(o.activityKey).toBe(first.activityKey)
+  }
+})
+
+test('content that changed across 30 min (not only a time of day) is output', async () => {
+  const f = fixture()
+  withView(f, { lastLines: [`build output ${f.d.now()}`] })
+  await obs(f)
+  f.advance(30 * 60_000)
+  withView(f, { lastLines: [`build output ${f.d.now()}`] })
+  expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'output' })
+})

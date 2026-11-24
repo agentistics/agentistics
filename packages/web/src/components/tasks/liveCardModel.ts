@@ -21,6 +21,7 @@ type Pt = boolean
 
 const WORKER_WORD: Record<WorkerWord, { pt: string; en: string }> = {
   working: { pt: 'trabalhando', en: 'working' },
+  queued: { pt: 'na fila', en: 'queued' },
   'needs-you': { pt: 'precisa de você', en: 'needs you' },
   blocked: { pt: 'bloqueado', en: 'blocked' },
   delivered: { pt: 'entregou', en: 'delivered' },
@@ -214,7 +215,8 @@ export function leaderCounts(leaders: readonly { workers: readonly { id: string;
   const seen = new Map<string, WorkerWord>()
   for (const l of leaders) for (const w of l.workers) if (!seen.has(w.id)) seen.set(w.id, w.word ?? workerWordOf(w.state, w.stage))
   let working = 0, blocked = 0
-  for (const word of seen.values()) { if (word === 'working') working++; else if (word === 'blocked') blocked++ }
+  // A worker in the heavy-job queue is active (not stalled): it counts with the working ones.
+  for (const word of seen.values()) { if (word === 'working' || word === 'queued') working++; else if (word === 'blocked') blocked++ }
   return { working, blocked, waiting: seen.size - working - blocked, workers: seen.size }
 }
 

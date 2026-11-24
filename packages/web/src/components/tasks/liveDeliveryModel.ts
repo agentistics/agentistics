@@ -72,7 +72,7 @@ export interface LiveDeliveryRecord {
   /** FILA.PRIORIDADE (a queued piece only): the leader's `nao`/`agendar`, the open question, an approval waiting for a slot. */
   queue?: { hold: { kind: 'nao' | 'agendar'; reason: string; until: string | null; by: string; atMs: number | null } | null; asking: boolean; approved: boolean } | null
 }
-export type WorkerWord = 'working' | 'needs-you' | 'blocked' | 'delivered' | 'awaiting-review' | 'idle'
+export type WorkerWord = 'working' | 'queued' | 'needs-you' | 'blocked' | 'delivered' | 'awaiting-review' | 'idle'
 export interface LeaderWorker {
   id: string; title: string; state: string
   word?: WorkerWord; stage?: LiveStage | null; cardKey?: string | null; subtask?: string | null; taskId?: string | null
@@ -81,6 +81,8 @@ export interface LeaderWorker {
 /** Mirror of the server's `LeaderView` (`task-live-view.ts`). Leaders are never deliveries. */
 export interface LeaderRecord {
   id: string; title: string; harness: string; model: string | null; effort?: string | null; accountId?: string | null; state: string
+  /** The leader itself waits in the heavy-job queue: "na fila", as in the sidebar. */
+  queued?: boolean
   /** Tasks this leader declared it leads besides its own filing. */
   leads?: { id: string; title: string }[]
   createdMs?: number | null; taskId?: string | null; taskTitle?: string | null

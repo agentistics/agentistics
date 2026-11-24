@@ -20,15 +20,15 @@ function setup(ids: string[], heavyLocks?: any) {
   return { poller, deps, backend, advance: () => { now += 5000 }, frame: (v: string[]) => { frames = v }, now: () => now }
 }
 
-// Real flock processes + the shared ps scanner: order-dependent inside the whole-suite process, so it runs on request
-// (AGENTISTICS_REAL_FLOCK=1, alone). The mapping it proves is covered deterministically in live-activity.test.ts.
-test.skipIf(!process.env.AGENTISTICS_REAL_FLOCK)('QA real ps/proc → production options → poller → SessionView → sidebar/Live and alert', async () => {
-  // Other tests may have primed the process-wide 5 s cache before these real processes existed.
-  await Bun.sleep(5100)
+// Real flock processes + the shared ps scanner (process-wide, cached HEAVY_SCAN_TTL_MS). In the whole-suite process
+// other tests leave fleet pollers ticking, which can refill that cache right before these processes exist; the old
+// retry loop gave up after ~3 s, inside one 5 s cache life, and failed only there. It now waits until it SEES both
+// processes, for more than two cache lives, so a refill at any moment cannot make it fail.
+test('QA real ps/proc → production options → poller → SessionView → sidebar/Live and alert', async () => {
   const lock = `/tmp/agentistics-heavy.${process.pid}.lock`
   const ids = [`qa-r2-holder-${process.pid}`, `qa-r2-queued-${process.pid}`]
   const env = { ...process.env }; delete env.AGENTISTICS_FLOWS
-  const holder = spawn('flock', [lock, 'sleep', '14'], { env: {...env, AGENTOP_MANAGED_ID: ids[0]!} })
+  const holder = spawn('flock', [lock, 'sleep', '20'], { env: {...env, AGENTOP_MANAGED_ID: ids[0]!} })
   const holderDone = new Promise(r => holder.once('exit', r))
   await Bun.sleep(200)
   const waiter = spawn('flock', [lock, 'true'], { env: {...env, AGENTOP_MANAGED_ID: ids[1]!} })
@@ -39,9 +39,9 @@ test.skipIf(!process.env.AGENTISTICS_REAL_FLOCK)('QA real ps/proc → production
     const f = setup(ids)
     const production = sessionsPollerOptions(f.backend)
     const real = setup(ids, production.heavyLocks)
-    // The shared scanner caches ps for 5 s; another test in a full run may have filled it just before — poll until it sees our processes.
+    const seen = (s: Awaited<ReturnType<typeof real.poller.poll>>) => s.sessions.find(v => v.id === ids[0])?.heavyLock === 'holding' && s.sessions.find(v => v.id === ids[1])?.heavyLock === 'waiting'
     let snap = await real.poller.poll()
-    for (let t = 0; t < 2 && snap.sessions.find(v => v.id === ids[0])?.heavyLock !== 'holding'; t++) { await Bun.sleep(1500); snap = await real.poller.poll() }
+    for (const until = Date.now() + 15_000; !seen(snap) && Date.now() < until;) { await Bun.sleep(500); snap = await real.poller.poll() }
     for (let i = 0; i < ids.length; i++) {
       const v = snap.sessions.find(v => v.id === ids[i])!
       expect(v.heavyLock).toBe(i === 0 ? 'holding' : 'waiting')
@@ -54,8 +54,11 @@ test.skipIf(!process.env.AGENTISTICS_REAL_FLOCK)('QA real ps/proc → production
       const card = joinLive([{key:'t/s',taskId:'t',taskTitle:'T',subtaskId:'s',title:'S',status:'in_progress',stage:'running',stageSinceMs:0,startedAtMs:0,sessionIds:[ids[i]],blockedReason:null}] as any, [c] as any)[0]!
       expect(cardStateWord(card, true)).toBe(i === 0 ? 'trabalhando' : 'na fila')
     }
-  } finally { await Promise.all([holderDone, waiterDone]); await rm(lock, {force:true}) }
-}, 30000)
+  } finally {
+    // The holder's job ends by itself (20 s > the 15 s wait); the waiter then gets the lock and exits. Nothing is killed.
+    await Promise.all([holderDone, waiterDone]); await rm(lock, {force:true})
+  }
+}, 40000)
 
 test('QA real poller carries output movement into the same surfaces', async () => {
   const f = setup(['qa-output'], async () => new Map())
@@ -67,4 +70,34 @@ test('QA real poller carries output movement into the same surfaces', async () =
   expect(c.activeSignal).toBe('output')
   f.deps.snapshot = async () => snap
   expect(await stalledHostOps(f.deps)['observar-sessao-parada']({sessionId:'qa-output'})).toMatchObject({ok:true, activeSignal:'output', state:'working'})
+})
+
+// QA r3 adversarial: a timestamp a command PRINTS is output — it must never be blanked into "nothing moved".
+test('a log line whose only change is its timestamp counts as output in the poller and the alert', async () => {
+  const f = setup(['qa-clock'], async () => new Map())
+  f.frame(['Heartbeat received at 12:34:01', '❯ '])
+  const first = await f.poller.poll()
+  f.deps.snapshot = async () => first
+  expect(await stalledHostOps(f.deps)['observar-sessao-parada']({ sessionId: 'qa-clock' })).toMatchObject({ ok: true, activeSignal: null })
+  f.advance(); f.frame(['Heartbeat received at 12:34:06', '❯ '])
+  const snap = await f.poller.poll()
+  expect(snap.sessions[0]!.outputMoved).toBe(true)
+  f.deps.snapshot = async () => snap
+  expect(await stalledHostOps(f.deps)['observar-sessao-parada']({ sessionId: 'qa-clock' })).toMatchObject({ ok: true, state: 'working', activeSignal: 'output' })
+})
+
+test('a duration a command prints (test elapsed 45s → 46s) is output in the poller', async () => {
+  const f = setup(['qa-elapsed'], async () => new Map())
+  f.frame(['test elapsed 45s', '❯ '])
+  await f.poller.poll()
+  f.advance(); f.frame(['test elapsed 46s', '❯ '])
+  expect((await f.poller.poll()).sessions[0]!.outputMoved).toBe(true)
+})
+
+test('a frame identical between polls is not output', async () => {
+  const f = setup(['qa-still'], async () => new Map())
+  f.frame(['Heartbeat received at 12:34:01', '❯ '])
+  await f.poller.poll()
+  f.advance()
+  expect((await f.poller.poll()).sessions[0]!.outputMoved).toBeFalsy()
 })

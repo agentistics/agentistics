@@ -78,19 +78,48 @@ export function runningLabel(e: ActiveEvidence, now: number, pt: boolean, span: 
  * is the heavy-lock wait: it counts as working (it is not stalled) but is worded "na fila", never "rodando".
  */
 export function activityState<S extends string>(state: S, signal: ActivitySignal | null | undefined): { state: S | 'working'; queued: boolean } {
-  if (!signal || (state !== 'waiting' && state !== 'idle')) return { state, queued: false }
+  // Only a LIVE reading is re-worded: a dialog on a person, an ended or a lost row keeps its own state.
+  if (!signal || (state !== 'waiting' && state !== 'idle' && state !== 'working')) return { state, queued: false }
+  // The heavy-lock wait is "na fila" whatever the row's own reading was — the open Bash IS the `flock`,
+  // so a row the screen already reads as `working` is queued too (the sidebar says so; every surface must).
   return { state: 'working', queued: signal === 'heavy-lock' }
 }
 
 /**
- * A terminal frame with its CLOCKS blanked: `12:34`, `1h 2m 3s`, `45s`, `3m`. A harness that repaints
- * an elapsed-time counter on an idle screen moves the frame without producing anything, and "output
- * moved" must not read that as work. Only time-shaped tokens are blanked — any other change still counts.
+ * A terminal frame with its WALL-CLOCK times blanked (`2026-11-24T05:00:00.000Z`, `12:34`, `12:34:05`,
+ * `3:04 pm`) — used ONLY to tell "nothing but a time of day changed" from "the content changed". It is
+ * never the whole answer: a timestamp a command prints (`Heartbeat received at 12:34:06`) is real output,
+ * and `outputMovedSince` still counts such a change against a RECENT read. Durations (`45s`, `1m 23s`)
+ * are NOT blanked at all: `test elapsed 46s` is content, and a harness only paints its elapsed counter
+ * while it is working anyway.
  */
 export function withoutClocks(lines: readonly string[]): string[] {
   return lines.map(l => l
-    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]m)?\b/gi, '#')
-    .replace(/\b\d+\s?h(?:\s?\d+\s?m)?(?:\s?\d+\s?s)?\b/g, '#')
-    .replace(/\b\d+\s?m(?:in)?(?:\s?\d+\s?s)?\b/g, '#')
-    .replace(/\b\d+(?:\.\d+)?\s?s\b/g, '#'))
+    .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g, '#')
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s?[ap]m)?\b/gi, '#'))
+}
+
+/**
+ * How old the PREVIOUS observation may be for a change in nothing but a time of day to count as output
+ * moving NOW. A heartbeat line ticking from `12:34:01` to `12:34:06` between two reads seconds or a minute
+ * apart is a command printing; the same kind of change between reads half an hour apart is only "a clock
+ * moved at some point" — a repainted clock, no evidence of anything happening now — and must not hold off
+ * the stall alert. A change in any OTHER content counts whatever the gap.
+ */
+export const OUTPUT_BASELINE_MAX_MS = 5 * 60_000
+
+/** One observation of a screen: its raw digest, its digest with wall-clock times blanked, and when. */
+export interface OutputReading { key: string; clockFree: string; atMs: number }
+
+/**
+ * PURE: did the output move between `prev` and `next`? The first observation has nothing to compare
+ * with: `false`. Content that changed (beyond a time of day) always counts; a change confined to
+ * wall-clock times counts only against a baseline at most `OUTPUT_BASELINE_MAX_MS` old (and not in the
+ * future). Shared by the fleet poller (sidebar, Live) and the stalled-worker observer, so both agree.
+ */
+export function outputMovedSince(prev: OutputReading | undefined, next: OutputReading): boolean {
+  if (!prev || prev.key === next.key) return false
+  if (prev.clockFree !== next.clockFree) return true
+  const age = next.atMs - prev.atMs
+  return Number.isFinite(age) && age >= 0 && age <= OUTPUT_BASELINE_MAX_MS
 }
