@@ -468,7 +468,18 @@ export type TaskThread = TaskThreadRecord
  * still the fastest way to close one, and it stays in step with it: `done` is true exactly when
  * `status` is `done`. See docs/superpowers/specs/2026-09-10-task-session-hierarchy-design.md §4.2.
  */
+/**
+ * LIVE.COLUNAS-PRESAS (flow side): WHERE a piece's work lives, written onto the piece by the host while its worker is still
+ * registered — at the handback and again just before the session is ended. The proof of publication used to read the
+ * repository only from the LIVE session registry; the worker is closed after its handback and its row leaves, so 173 of 183
+ * review cards became "no repository is known" and could never be proven shipped. Facts only (never a verdict): the repository
+ * (`owner/name`), the branch the worktree stood on and the FULL commit ids the piece declared or stood at.
+ */
+export interface SubtaskProvenance { repos: string[]; branches: string[]; commits: string[]; at: string }
+
 export interface Subtask {
+  /** See `SubtaskProvenance`. Absent on every piece delivered before it existed. */
+  provenance?: SubtaskProvenance
   /** B4: set ONLY by the guard sweep on a placeholder it restored after a raw delete. Never work: no queue hands it out; a leader/owner dismisses it by removing it. */
   restoredBy?: 'guard'
   /** An external revert loop blocks the piece with an auditable reason. */

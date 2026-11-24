@@ -38,6 +38,18 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Navegador da sessão: o cadeado abre direto, sem pedir o cofre — ele não guarda nada seu. O navegador pessoal continua pedindo.',
         en: "Session browser: the padlock now opens right away, without asking for the vault — it holds nothing of yours. Your personal browser still asks.",
       },
+      {
+        pt: 'Painel Live: uma peça que já saiu numa versão publicada sai sozinha de "Revisão do líder" e de "PR · merge", mesmo depois que a sessão que fez o trabalho foi fechada.',
+        en: 'Live board: a piece that already shipped in a published version leaves "Leader review" and "PR · merge" by itself, even after the session that did the work was closed.',
+      },
+      {
+        pt: 'Painel Live: o líder que assumiu de outro (ou que abriu as sessões de uma tarefa) passa a contar como líder dela, em vez de a tarefa aparecer "Sem líder".',
+        en: 'Live board: a leader who took over from another (or who started a task\'s sessions) now counts as that task\'s leader, instead of the task showing "No leader".',
+      },
+      {
+        pt: 'Painel Live: cartões parados em revisão dizem "esperando o líder" em vez de mostrar 0%, e as peças antigas ficam só no grupo "Antigas" na aba Tudo.',
+        en: 'Live board: cards waiting in review say "waiting for the leader" instead of showing 0%, and old pieces stay only in the "Old" group in the All tab.',
+      },
     ],
   },
   '2.227.0': {

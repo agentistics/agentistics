@@ -193,7 +193,9 @@ const SUB_ID = /^[A-Za-z0-9_.:-]{1,120}$/
 const GATE_REFUSED = 'portao'
 
 /** Steps the Live's per-phase % reads, emitted on what the flow itself observes. */
-const STEP_ON_ENTER: Partial<Record<Phase, number>> = { executando: 1, qa: 1, ajuste: 1, revisao_lider: 1, pr_merge: 1 }
+// LIVE.COLUNAS-PRESAS C4: entering review or PR · merge is not a step of it (the card read "0% · lendo as mudanças" with nobody
+// reading); those phases report a step only when the flow observes an act (the deletions gate, the review, the merge).
+const STEP_ON_ENTER: Partial<Record<Phase, number>> = { executando: 1, qa: 1, ajuste: 1 }
 const STEP_ON_GATE: Partial<Record<`${Phase}:${GateName}`, number>> = {
   'executando:salvo': 4, 'ajuste:salvo': 3, 'qa:qa-modelo': 2, 'revisao_lider:delecoes': 2, 'pr_merge:delecoes': 2,
 }

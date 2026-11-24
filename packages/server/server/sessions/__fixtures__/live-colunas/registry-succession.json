@@ -1,0 +1,608 @@
+{
+ "capturedAt": "2026-11-23T12:40:41.128Z",
+ "note": "managed-sessions.json of the reporting machine, reduced to identity/filing/succession fields (labels dropped) (no cwd, no conversation, no account)",
+ "rows": [
+  {
+   "id": "cfd8c76796",
+   "taskId": "t-79061d4f20",
+   "handoffTo": "28cf6897ca",
+   "endedAt": "2026-11-22T17:59:36.795Z"
+  },
+  {
+   "id": "25a1ec328e",
+   "taskId": "t-e1dea7cd6f",
+   "handoffTo": "538e1e1278",
+   "endedAt": "2026-11-22T06:05:16.483Z"
+  },
+  {
+   "id": "a87044a877",
+   "taskId": "t-e3237b6cff",
+   "handoffTo": "5d4549f6a4",
+   "endedAt": "2026-11-22T06:03:17.713Z"
+  },
+  {
+   "id": "3a9b1bda68",
+   "taskId": "t-fafa9876d3",
+   "subtaskId": "s-24e2c072f7",
+   "endedAt": "2026-11-22T06:02:07.076Z"
+  },
+  {
+   "id": "2f1f8c6162",
+   "taskId": "t-031db3ed07",
+   "endedAt": "2026-11-22T14:30:36.185Z"
+  },
+  {
+   "id": "f4e4646a51",
+   "taskId": "t-3648b62bee",
+   "endedAt": "2026-11-23T02:29:37.900Z"
+  },
+  {
+   "id": "d88a342220",
+   "taskId": "t-79061d4f20",
+   "subtaskId": "s-85b3a5008c",
+   "parentSessionId": "28cf6897ca",
+   "endedAt": "2026-11-22T06:17:01.425Z"
+  },
+  {
+   "id": "5d4549f6a4",
+   "taskId": "t-e3237b6cff",
+   "handoffTo": "0ed38e70f0",
+   "endedAt": "2026-11-22T21:34:45.387Z"
+  },
+  {
+   "id": "7f130db214",
+   "taskId": "t-e3237b6cff",
+   "subtaskId": "s-125a4ea241",
+   "parentSessionId": "3fb06f9a15",
+   "endedAt": "2026-11-22T06:30:57.368Z"
+  },
+  {
+   "id": "538e1e1278",
+   "taskId": "t-e1dea7cd6f",
+   "handoffTo": "555605f5b8",
+   "endedAt": "2026-11-22T09:32:49.822Z"
+  },
+  {
+   "id": "2148028f13",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-33ec6c292a",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T06:11:25.072Z"
+  },
+  {
+   "id": "a5f3803e27",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-732f4adc47",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T06:44:33.107Z"
+  },
+  {
+   "id": "448af0816d",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-54e3126b52",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T06:45:46.021Z"
+  },
+  {
+   "id": "b496674b2a",
+   "taskId": "t-fafa9876d3",
+   "subtaskId": "s-24e2c072f7",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T06:27:39.588Z"
+  },
+  {
+   "id": "cc2276dcf9",
+   "taskId": "t-79061d4f20",
+   "subtaskId": "s-d7072ac2b8",
+   "parentSessionId": "28cf6897ca",
+   "endedAt": "2026-11-22T06:24:59.065Z"
+  },
+  {
+   "id": "2d7ef642c4",
+   "taskId": "t-79061d4f20",
+   "subtaskId": "s-85b3a5008c",
+   "parentSessionId": "28cf6897ca",
+   "endedAt": "2026-11-22T07:06:42.340Z"
+  },
+  {
+   "id": "bd7889938f",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-2abcbc7a3a",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T09:32:33.459Z"
+  },
+  {
+   "id": "37e9097527",
+   "taskId": "t-fafa9876d3",
+   "subtaskId": "s-24e2c072f7",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T06:36:57.491Z"
+  },
+  {
+   "id": "60933f3717",
+   "taskId": "t-e3237b6cff",
+   "subtaskId": "s-af46608070",
+   "parentSessionId": "3fb06f9a15",
+   "endedAt": "2026-11-22T06:55:15.950Z"
+  },
+  {
+   "id": "bb8638574f",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-732f4adc47",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T07:14:14.330Z"
+  },
+  {
+   "id": "b634f094f8",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-54e3126b52",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T07:09:52.210Z"
+  },
+  {
+   "id": "f7796440b0",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-33ec6c292a",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T08:38:01.113Z"
+  },
+  {
+   "id": "e8d8b57a59",
+   "taskId": "t-79061d4f20",
+   "subtaskId": "s-d7072ac2b8",
+   "parentSessionId": "28cf6897ca",
+   "endedAt": "2026-11-22T07:16:19.609Z"
+  },
+  {
+   "id": "7ca0b4bbec",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-732f4adc47",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T07:31:14.302Z"
+  },
+  {
+   "id": "ec25d783b7",
+   "taskId": "t-79061d4f20",
+   "subtaskId": "s-85b3a5008c",
+   "parentSessionId": "28cf6897ca",
+   "endedAt": "2026-11-22T07:54:06.638Z"
+  },
+  {
+   "id": "e9b4e8ee52",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-732f4adc47",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T07:36:02.578Z"
+  },
+  {
+   "id": "3da89e590e",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-54e3126b52",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T07:51:12.435Z"
+  },
+  {
+   "id": "50abc85b12",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-54e3126b52",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T08:10:01.843Z"
+  },
+  {
+   "id": "5acbbe519a",
+   "taskId": "t-79061d4f20",
+   "subtaskId": "s-d7072ac2b8",
+   "parentSessionId": "28cf6897ca",
+   "endedAt": "2026-11-22T08:05:34.223Z"
+  },
+  {
+   "id": "c9d1c93705",
+   "taskId": "t-79061d4f20",
+   "subtaskId": "s-85b3a5008c",
+   "parentSessionId": "28cf6897ca",
+   "endedAt": "2026-11-22T08:21:03.731Z"
+  },
+  {
+   "id": "89577679f4",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-54e3126b52",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T08:46:55.864Z"
+  },
+  {
+   "id": "cd8653f6d0",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-33ec6c292a",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T08:45:04.757Z"
+  },
+  {
+   "id": "e8c35b7544",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-33ec6c292a",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T14:08:24.539Z"
+  },
+  {
+   "id": "9bb6a578ff",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-93d12bb262",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T08:58:10.335Z"
+  },
+  {
+   "id": "860a0e1d19",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-93d12bb262",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T09:21:58.902Z"
+  },
+  {
+   "id": "0ab0d23b4f",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-93d12bb262",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T09:34:56.769Z"
+  },
+  {
+   "id": "555605f5b8",
+   "taskId": "t-e1dea7cd6f",
+   "handoffTo": "f5e5aee67a",
+   "endedAt": "2026-11-22T19:19:27.996Z"
+  },
+  {
+   "id": "bd02e718aa",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-f6ecdac4ec",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T15:24:17.294Z"
+  },
+  {
+   "id": "0bd74feae2",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-2abcbc7a3a",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T12:13:30.918Z"
+  },
+  {
+   "id": "9bfa0f3763",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-93d12bb262",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T10:19:11.138Z"
+  },
+  {
+   "id": "ae7e138b1e",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-0b47440636",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T03:08:52.153Z"
+  },
+  {
+   "id": "e44016a858",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-2abcbc7a3a",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T15:28:11.199Z"
+  },
+  {
+   "id": "a9dc0f446c",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-33ec6c292a",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T16:37:31.974Z"
+  },
+  {
+   "id": "2d71a85ebe",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-f6ecdac4ec",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T17:03:02.878Z"
+  },
+  {
+   "id": "563e09983d",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-2abcbc7a3a",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T16:06:17.391Z"
+  },
+  {
+   "id": "80c708999d",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-2abcbc7a3a",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-22T17:01:40.467Z"
+  },
+  {
+   "id": "b7b5bf6a94",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-8dc1b52a34",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T04:04:12.131Z"
+  },
+  {
+   "id": "2fe8ecf9fe",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-815e43acad",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T05:32:11.253Z"
+  },
+  {
+   "id": "28cf6897ca",
+   "taskId": "t-79061d4f20",
+   "subtaskId": "s-7ca4920716",
+   "endedAt": "2026-11-22T22:05:36.837Z"
+  },
+  {
+   "id": "f5e5aee67a",
+   "taskId": "t-e1dea7cd6f",
+   "handoffTo": "d17203308c",
+   "endedAt": "2026-11-23T05:41:29.918Z"
+  },
+  {
+   "id": "db8c7aba99",
+   "taskId": "t-e3237b6cff",
+   "subtaskId": "s-d2bd683c08",
+   "parentSessionId": "3fb06f9a15",
+   "endedAt": "2026-11-22T21:47:02.100Z"
+  },
+  {
+   "id": "bd63b96b7a",
+   "taskId": "t-e3237b6cff",
+   "subtaskId": "s-ad1caa91a5",
+   "parentSessionId": "3fb06f9a15",
+   "endedAt": "2026-11-23T03:47:26.472Z"
+  },
+  {
+   "id": "0ed38e70f0",
+   "taskId": "t-e3237b6cff",
+   "handoffTo": "96fab86bc2",
+   "endedAt": "2026-11-23T04:24:16.942Z"
+  },
+  {
+   "id": "ad849bd99a",
+   "taskId": "t-e3237b6cff",
+   "subtaskId": "s-28fc8f0099",
+   "parentSessionId": "3fb06f9a15",
+   "endedAt": "2026-11-23T04:04:28.619Z"
+  },
+  {
+   "id": "dd5f10227f",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-0b47440636",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T05:37:42.187Z"
+  },
+  {
+   "id": "58a730ec5a",
+   "taskId": "t-e3237b6cff",
+   "subtaskId": "s-77c14c056b",
+   "parentSessionId": "3fb06f9a15",
+   "endedAt": "2026-11-23T06:03:17.305Z"
+  },
+  {
+   "id": "540cfe3081",
+   "taskId": "t-79061d4f20",
+   "subtaskId": "s-7ca4920716",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T07:09:48.563Z"
+  },
+  {
+   "id": "d789330b89",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-8dc1b52a34",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T06:01:41.211Z"
+  },
+  {
+   "id": "96fab86bc2",
+   "taskId": "t-e3237b6cff",
+   "handoffTo": "3fb06f9a15",
+   "endedAt": "2026-11-23T11:52:44.187Z"
+  },
+  {
+   "id": "0c88c3588f",
+   "taskId": "t-e3237b6cff",
+   "subtaskId": "s-d5cfc4aaf9",
+   "parentSessionId": "3fb06f9a15",
+   "endedAt": "2026-11-23T06:04:35.567Z"
+  },
+  {
+   "id": "c23978365f",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-815e43acad",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T06:39:22.683Z"
+  },
+  {
+   "id": "d47274223e",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-072b26eace",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T06:06:50.395Z"
+  },
+  {
+   "id": "d17203308c",
+   "taskId": "t-e1dea7cd6f",
+   "handoffTo": "400fd19590",
+   "endedAt": "2026-11-23T11:06:16.872Z"
+  },
+  {
+   "id": "b3ca5e0c4f",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-8dc1b52a34",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T08:36:41.210Z"
+  },
+  {
+   "id": "17bd962ab1",
+   "taskId": "t-e3237b6cff",
+   "subtaskId": "s-c4d394450c",
+   "parentSessionId": "3fb06f9a15",
+   "endedAt": "2026-11-23T11:24:17.630Z"
+  },
+  {
+   "id": "e0d8ff939f",
+   "taskId": "t-e3237b6cff",
+   "subtaskId": "s-a9af6e868f",
+   "parentSessionId": "3fb06f9a15",
+   "endedAt": "2026-11-23T06:41:19.614Z"
+  },
+  {
+   "id": "b6d0e7b70f",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-072b26eace",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T06:10:58.866Z"
+  },
+  {
+   "id": "f1b734a1be",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-072b26eace",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T06:25:04.273Z"
+  },
+  {
+   "id": "e9a8e92d56",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-072b26eace",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T06:28:51.638Z"
+  },
+  {
+   "id": "23cd5befbc",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-072b26eace",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T06:38:46.161Z"
+  },
+  {
+   "id": "ae7eaa90cc",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-072b26eace",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T06:44:39.850Z"
+  },
+  {
+   "id": "9032c4c6cd",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-e970e621f5",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T11:23:05.905Z"
+  },
+  {
+   "id": "420f8173c7",
+   "taskId": "t-e3237b6cff",
+   "subtaskId": "s-43a88d97a7",
+   "parentSessionId": "3fb06f9a15",
+   "endedAt": "2026-11-23T11:31:13.778Z"
+  },
+  {
+   "id": "4f79cfb46e",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-072b26eace",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T06:46:49.343Z"
+  },
+  {
+   "id": "e8fdb67d0d",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-072b26eace",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T06:49:49.087Z"
+  },
+  {
+   "id": "95ba14eb83",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-8b0285ec45",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T10:48:51.495Z"
+  },
+  {
+   "id": "87540b5784",
+   "taskId": "t-79061d4f20",
+   "subtaskId": "s-7ca4920716",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T07:12:20.688Z"
+  },
+  {
+   "id": "7be553b6e8",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-0b47440636",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T11:21:05.426Z"
+  },
+  {
+   "id": "eac99f1033",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-8dc1b52a34",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T10:53:56.669Z"
+  },
+  {
+   "id": "0e79100ca3",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-8b0285ec45",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T11:28:23.889Z"
+  },
+  {
+   "id": "71de74a116",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-8dc1b52a34",
+   "parentSessionId": "400fd19590"
+  },
+  {
+   "id": "400fd19590",
+   "taskId": "t-e1dea7cd6f"
+  },
+  {
+   "id": "5968da4684",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-5e09bb3502",
+   "parentSessionId": "400fd19590"
+  },
+  {
+   "id": "9c80b2e1a0",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-e970e621f5",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T12:48:14.154Z"
+  },
+  {
+   "id": "9d0d22167e",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-6f262c369f",
+   "parentSessionId": "400fd19590",
+   "endedAt": "2026-11-23T12:26:21.252Z"
+  },
+  {
+   "id": "95af8b4868",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-84769660f4",
+   "parentSessionId": "400fd19590"
+  },
+  {
+   "id": "bc27202eef",
+   "taskId": "t-e3237b6cff",
+   "subtaskId": "s-3cfa71f11d",
+   "parentSessionId": "3fb06f9a15"
+  },
+  {
+   "id": "3fb06f9a15",
+   "taskId": "t-e3237b6cff"
+  },
+  {
+   "id": "9a34ca5570",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-6f262c369f",
+   "parentSessionId": "400fd19590"
+  },
+  {
+   "id": "246c95942c",
+   "taskId": "t-e1dea7cd6f",
+   "subtaskId": "s-0964f13626",
+   "parentSessionId": "400fd19590"
+  }
+ ]
+}

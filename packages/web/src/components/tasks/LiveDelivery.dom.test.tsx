@@ -350,7 +350,7 @@ test('MED 7: the last action is said in the UI language, not as `on subtask "<ti
   expect(document.querySelector('[data-live-last]')!.textContent).toBe('commented on the subtask')
 })
 
-test('old legacy reviews are no separate button: they sit in "Tudo" (counted), marked old, and are not "In progress"', async () => {
+test('old legacy reviews live in the "Antigas" group only (LIVE.COLUNAS-PRESAS C2): not counted in Tudo, not in a column, not "In progress"', async () => {
   localStorage.clear()
   const old = Array.from({ length: 3 }, (_, i) => ({ ...reply.deliveries[0]!, key: `t/o${i}`, subtaskId: `o${i}`, title: `Old review ${i}`, stage: 'leader', sessionIds: [], old: true }))
   const r = { ...reply, deliveries: old }
@@ -358,9 +358,9 @@ test('old legacy reviews are no separate button: they sit in "Tudo" (counted), m
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: r as never }))) })
   expect(document.querySelector('[data-live-archived-toggle]')).toBeNull()
   const tabs = Array.from(document.querySelectorAll('[data-live-tabs] [role="tab"]')).map(t => t.textContent)
-  expect(tabs).toEqual(['In progress0', 'Queued0', 'Published0', 'All3'])
+  expect(tabs).toEqual(['In progress0', 'Queued0', 'Published0', 'All0'])
   await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
-  expect(document.querySelectorAll('[data-live-column="leader"] [data-live-old]').length).toBe(3)
+  expect(document.querySelectorAll('[data-live-column="leader"] [data-live-old]').length).toBe(0)
   // Their home: the column's header opens the group, and every number on the screen is the number of pieces it lists.
   const open = document.querySelector('[data-live-antigas-open]') as HTMLElement
   expect(open.textContent).toBe('Old · 3')

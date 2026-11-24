@@ -712,6 +712,9 @@ export async function killAndRetireSession(
     const hold = await (opts.observe ?? observeHoldNow)(row ?? { id })
     if (hold.state !== 'none') throw new HoldError(id, hold)
   }
+  // LIVE.COLUNAS-PRESAS (flow side): the piece learns where its work lives (repo, branch, commits) BEFORE its worker can leave
+  // the registry — fechar-entregue, a leader's retire and `session kill` all pass here. Bounded and best effort: never blocks the kill.
+  if (row?.subtaskId && !row.endedAt && registry === defaultRegistry) await import('../delivery/host').then(m => m.stampProvenanceOfSession(id)).catch(() => undefined)
   const previous = row?.endedAt
   await registry.patch(id, { endedAt: previous ?? new Date().toISOString() })
   try {

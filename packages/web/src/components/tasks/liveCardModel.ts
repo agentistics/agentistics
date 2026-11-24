@@ -76,6 +76,11 @@ export function waitingReason(c: LiveCard, fleet: readonly FleetRow[], pt: Pt): 
     const q = questionOf(row)
     return pt ? `esperando resposta sua${q ? ` (pergunta: ${q})` : ''}` : `waiting for your answer${q ? ` (question: ${q})` : ''}`
   }
+  // LIVE.COLUNAS-PRESAS C4: a review / PR card with nobody on it and no observed step is waiting on its leader — said in words,
+  // never drawn as "0% · lendo as mudanças". "Sem líder" already says it in its own line.
+  if (c.liveState === 'none' && c.d.step == null && (c.d.stage === 'leader' || c.d.stage === 'merge') && c.displayStage !== 'no-leader') {
+    return c.d.stage === 'leader' ? (pt ? 'esperando o líder' : 'waiting for the leader') : (pt ? 'esperando o líder (PR / merge)' : 'waiting for the leader (PR / merge)')
+  }
   if (c.liveState !== 'waiting') return null
   switch (c.d.stage) {
     case 'leader': return pt ? 'esperando revisão do líder' : 'waiting for the leader\'s review'
