@@ -50,6 +50,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Painel Live: cartões parados em revisão dizem "esperando o líder" em vez de mostrar 0%, e as peças antigas ficam só no grupo "Antigas" na aba Tudo.',
         en: 'Live board: cards waiting in review say "waiting for the leader" instead of showing 0%, and old pieces stay only in the "Old" group in the All tab.',
       },
+      {
+        pt: 'A fila de testes pesados não deixa mais rodadas iniciadas pelo agentop esperando sem avançar e mostra quem ocupa a vaga manualmente.',
+        en: 'Heavy test queue no longer starves jobs started through agentop and shows manual lock holders.',
+      },
     ],
   },
   '2.227.0': {
