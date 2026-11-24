@@ -89,7 +89,11 @@ export interface RouteHost {
   actionHost(key: string): ActionHost | null
   status(): Promise<unknown>
   /** S12: remove the profile folders; refused (`browser_live`) while any browser is live. */
-  deleteProfiles?(): { ok: true; removed: number } | { ok: false; error: 'browser_live'; live: number; sentence: string }
+  /** The person's browser: hide it (kept running), reopen it (restoring a saved tab list / opening the home page), forget a saved list. */
+  minimize?(key: string): boolean
+  openPersonal?(homeUrl: string): Promise<{ ok: true; restored: number; home: boolean; wasStopped: boolean } | { ok: false; reason: string; sentence: string }>
+  forgetSavedTabs?(key: string): void
+  deleteProfiles?():{ ok: true; removed: number } | { ok: false; error: 'browser_live'; live: number; sentence: string }
 }
 
 export interface RouteDeps {
@@ -104,6 +108,8 @@ export interface RouteDeps {
   harnessOf?: (managedId: string) => HarnessId | undefined
   /** S3: `browser.lock` / `browser.unlock` audit (who, when, which session — never content). */
   audit?: (ev: { action: 'browser.lock' | 'browser.unlock'; managedId: string }) => void
+  /** The person's default page (`preferences.browserHomeUrl`); opened when their browser has no tab, and by a new tab. */
+  homeUrl?: () => string
   /** A session that has ended gets no browser (the watcher would stop it on its next tick anyway). */
   sessionLive?: (managedId: string) => boolean | undefined
   /**
@@ -182,7 +188,7 @@ function withoutPersonal(status: unknown, grantOk: boolean): unknown {
   if (grantOk) return { ...(status as object), personalAccess: true }
   const s = status as { live: Array<Record<string, unknown>>; recentStops?: unknown }
   const isPersonal = (o: unknown) => !!o && typeof o === 'object' && (o as { kind?: unknown }).kind === 'personal'
-  const out: Record<string, unknown> = { ...s, personalAccess: false, live: s.live.filter(e => !isPersonal(e.owner)) }
+  const out: Record<string, unknown> = { ...s, personalAccess: false, personalSaved: null, live: s.live.filter(e => !isPersonal(e.owner)) }
   if (Array.isArray(s.recentStops)) out.recentStops = s.recentStops.filter(e => !isPersonal((e as { owner?: unknown } | null)?.owner) && (e as { key?: unknown } | null)?.key !== 'personal')
   return out
 }
@@ -229,6 +235,15 @@ async function lockRoute(body: unknown, deps: RouteDeps): Promise<RouteAnswer> {
   const r = deps.locks.setLock(key, d.mode, 'person', pageOf(deps, key))
   if (r.changed) deps.audit?.({ action: d.mode === 'locked' ? 'browser.lock' : 'browser.unlock', managedId: d.managedId })
   return { status: 200, body: { ok: true, lock: r.view.mode, changed: r.changed, since: r.view.since } }
+}
+
+export const DEFAULT_HOME_URL = 'https://www.google.com'
+
+/** The default page from a stored preference: http(s) only, else the built-in default. */
+export function homeUrlOf(pref: unknown): string {
+  if (typeof pref !== 'string') return DEFAULT_HOME_URL
+  const t = pref.trim()
+  return /^https?:\/\/[^\s]+$/i.test(t) && t.length <= 2048 ? t : DEFAULT_HOME_URL
 }
 
 /** `null` = not a browser route this module serves (the caller answers 404). */
@@ -279,6 +294,21 @@ export async function browserRoute(method: string, pathname: string, body: unkno
     if (refused) return { status: refused.status, body: personalRefusalBody(refused) }
   }
 
+  // The person's own two verbs about the COMPONENT (not the page): hide it, and reopen it. Beyond the door above.
+  if (route === 'personal' && action === 'minimize') {
+    const done = deps.host.minimize?.('personal') === true
+    return { status: 200, body: { ok: true, minimized: done } }
+  }
+  if (route === 'personal' && action === 'open') {
+    if (!deps.host.openPersonal) return { status: 501, body: { ok: false, error: 'unsupported' } }
+    const r = await deps.host.openPersonal(deps.homeUrl?.() ?? DEFAULT_HOME_URL)
+    if (!r.ok) {
+      const status = r.reason === 'invalid-owner' ? 400 : r.reason === 'no-executable' ? 501 : 503
+      return { status, body: { ok: false, error: r.reason, sentence: r.sentence } }
+    }
+    return { status: 200, body: { ok: true, restored: r.restored, home: r.home, wasStopped: r.wasStopped } }
+  }
+
   const s = b.session as { id?: unknown; token?: unknown } | undefined
   const carriesSession = s !== undefined && s !== null
 
@@ -302,7 +332,9 @@ export async function browserRoute(method: string, pathname: string, body: unkno
   if (!isBrowserAction(action) || (route === 'personal' && !PERSONAL_ACTIONS.includes(action))) {
     return { status: 404, body: { ok: false, error: 'unknown_action', sentence: `No browser action "${action.slice(0, 40)}".` } }
   }
-  const parsed = parseActionArgs(action, b)
+  // A new tab of the person's browser opens their default page, never a blank one.
+  const body2 = route === 'personal' && action === 'tab_new' && (b.url === undefined || b.url === '') ? { ...b, url: deps.homeUrl?.() ?? DEFAULT_HOME_URL } : b
+  const parsed = parseActionArgs(action, body2)
   if (!parsed.ok) return { status: 400, body: { ok: false, error: parsed.error, sentence: parsed.sentence } }
 
   const owner = who.owner
@@ -318,6 +350,7 @@ export async function browserRoute(method: string, pathname: string, body: unkno
   if (action === 'close') {
     const live = deps.host.actionHost(key) !== null
     if (live) await deps.host.stop(key, 'requested')
+    if (route === 'personal') deps.host.forgetSavedTabs?.(key)
     return { status: 200, body: { ok: true, closed: live, sentence: live ? 'The browser of this session was closed.' : 'This session had no browser open.' } }
   }
   let h = deps.host.actionHost(key)
@@ -375,7 +408,7 @@ export function browserLocks(opts: BrowserWebOpts): BrowserLocks {
 export function browserRouteDeps(
   opts: BrowserWebOpts,
   verify: RouteDeps['verify'],
-  extra: { harnessOf?: RouteDeps['harnessOf']; audit?: RouteDeps['audit']; caller?: RouteDeps['caller']; ownerProof?: RouteDeps['ownerProof']; personalGrant?: RouteDeps['personalGrant']; profilesProof?: RouteDeps['profilesProof']; lang?: RouteDeps['lang'] } = {},
+  extra: { harnessOf?: RouteDeps['harnessOf']; audit?: RouteDeps['audit']; caller?: RouteDeps['caller']; ownerProof?: RouteDeps['ownerProof']; personalGrant?: RouteDeps['personalGrant']; profilesProof?: RouteDeps['profilesProof']; lang?: RouteDeps['lang']; homeUrl?: RouteDeps['homeUrl'] } = {},
 ): RouteDeps {
   const h = browserHost(opts)
   return {
@@ -389,6 +422,7 @@ export function browserRouteDeps(
     personalGrant: extra.personalGrant,
     profilesProof: extra.profilesProof,
     lang: extra.lang,
+    homeUrl: extra.homeUrl,
     sessionLive: opts.sessionLive,
     run: async (ah, args) => {
       const { runAction } = await import('./browser-actions')

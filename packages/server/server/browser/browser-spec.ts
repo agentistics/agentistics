@@ -62,6 +62,8 @@ export const EVICT_IDLE_MS = 2 * 60_000
 /** Idle shutdown: session browser after 10 min without an action AND without a viewer; personal 20. */
 export const IDLE_SESSION_MS = 10 * 60_000
 export const IDLE_PERSONAL_MS = 20 * 60_000
+/** A MINIMIZED personal browser nobody watches is stopped after this (its tab list is kept; reopening restores it). */
+export const IDLE_MINIMIZED_MS = 30 * 60_000
 export const WATCH_INTERVAL_MS = 10_000
 /** PSS per browser: above TRIM the oldest inactive tab is closed; above KILL the browser is stopped. */
 export const PSS_TRIM_BYTES = 900 * 1024 ** 2
@@ -342,12 +344,15 @@ export interface IdleInput {
   viewers: number
   /** Last model action, person interaction, or the moment the last viewer left — whichever is latest. */
   lastActivityMs: number
+  /** When the person minimized it (personal only); a minimized one idles out on `IDLE_MINIMIZED_MS`. */
+  minimizedAt?: number | null
   now: number
 }
 
 /** Should this browser be shut down for idleness? Never while somebody watches. */
 export function idleExpired(i: IdleInput): boolean {
   if (i.viewers > 0) return false
+  if (i.owner.kind === 'personal' && i.minimizedAt != null) return i.now - Math.max(i.lastActivityMs, i.minimizedAt) >= IDLE_MINIMIZED_MS
   const limit = i.owner.kind === 'personal' ? IDLE_PERSONAL_MS : IDLE_SESSION_MS
   return i.now - i.lastActivityMs >= limit
 }

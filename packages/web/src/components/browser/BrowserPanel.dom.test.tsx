@@ -113,7 +113,7 @@ const submit = () => act(() => { (q('[data-browser-address]') as HTMLFormElement
 describe('nothing open yet', () => {
   test('an honest empty state with a working address bar — no stream, no socket', () => {
     render({ live: false })
-    expect(q('[data-browser-empty]')?.textContent).toContain('Abrir uma página')
+    expect(q('[data-browser-empty]')?.textContent).toContain('ainda não abriu')
     expect(q('[data-browser-address]')).not.toBeNull()
     expect(FakeStream.all.length).toBe(0)
     expect(FakeWs.all.length).toBe(0)
@@ -149,10 +149,10 @@ describe('nothing open yet', () => {
     expect(q('[data-browser-refusal]')?.textContent).toBe('That address is blocked.')
   })
 
-  test('"nova aba em branco" opens one through tab_new', async () => {
+  test('"Abrir a página inicial" asks the server to open the browser (default page), never a blank tab', async () => {
     render({ live: false })
     await act(async () => { (q('[data-browser-empty] button') as HTMLButtonElement).click() })
-    expect(posts).toEqual([['/api/browser/personal/tab_new', {}]])
+    expect(posts).toEqual([['/api/browser/personal/open', {}]])
   })
 })
 
@@ -359,14 +359,14 @@ describe('F6 — after a link the address shows the URL, never the page title', 
 describe('F3 — the phone\'s close button is a 44px target', () => {
   test('on a phone the header close is 44×44; on a desktop it stays the compact 26×22', () => {
     render({ live: false })
-    const desk = host.querySelector('button[aria-label="Fechar o navegador"]') as HTMLElement
+    const desk = host.querySelector('button[aria-label="Fechar navegador"]') as HTMLElement
     expect([desk.style.width, desk.style.height]).toEqual(['26px', '22px'])
     act(() => root.unmount()); root = createRoot(host)
     const w = window.innerWidth
     Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true })
     try {
       render({ live: false })
-      const phone = host.querySelector('button[aria-label="Fechar o navegador"]') as HTMLElement
+      const phone = host.querySelector('button[aria-label="Fechar navegador"]') as HTMLElement
       expect([phone.style.width, phone.style.height]).toEqual(['44px', '44px'])
     } finally { Object.defineProperty(window, 'innerWidth', { value: w, configurable: true }) }
   })
@@ -472,10 +472,10 @@ describe('the panel header (b1-open)', () => {
     expect(host.querySelector('header')?.textContent).toContain('Navegador')
     expect(q('[data-globe-search]')).not.toBeNull()
     expect(host.textContent).not.toContain('Flutuar')
-    expect(host.querySelector('button[aria-label="Fechar o navegador"]')).not.toBeNull()
+    expect(host.querySelector('button[aria-label="Fechar navegador"]')).not.toBeNull()
     act(() => root.unmount()); root = createRoot(host)
     render({ live: false, hideCloseButton: true })
-    expect(host.querySelector('button[aria-label="Fechar o navegador"]')).toBeNull()
+    expect(host.querySelector('button[aria-label="Fechar navegador"]')).toBeNull()
   })
 
   test('the panel is NOT a session\'s browser: it never reads a session owner', () => {
@@ -498,7 +498,7 @@ describe('the phone drawer', () => {
       expect(d.style.position).toBe('fixed')
       expect(d.style.zIndex).toBe('660')
       expect(q('[data-browser-empty]')).not.toBeNull()
-      await act(async () => { (host.querySelector('button[aria-label="Fechar o navegador"]') as HTMLButtonElement).click() })
+      await act(async () => { (host.querySelector('button[aria-label="Fechar navegador"]') as HTMLButtonElement).click() })
       expect(q('[data-browser-drawer]')).toBeNull()
     } finally { Object.defineProperty(window, 'innerWidth', { value: w, configurable: true }) }
   })
@@ -507,5 +507,87 @@ describe('the phone drawer', () => {
     act(() => { root.render(createElement(Drawer, { lang: 'pt' })) })
     act(() => drawerStore.setBrowserDrawerOpen(true))
     expect(q('[data-browser-drawer]')).toBeNull()
+  })
+})
+
+describe('NAVEGADOR.FECHAR-MINIMIZAR — default page, Minimizar and Fechar', () => {
+  const click = (el: HTMLElement | null) => act(async () => { el!.click() })
+  const renderAuto = (o: { post: ReturnType<typeof post>; onClose?: () => void; onMinimize?: () => void; controls?: boolean }) => act(() => {
+    root.render(createElement(Panel, { lang: 'pt', onClose: o.onClose ?? (() => {}), onMinimize: o.onMinimize, openStream, post: o.post, ...(o.controls ? { controls: createElement('span', { 'data-fixed-controls': '' }) } : {}) }))
+  })
+
+  test('opening the browser asks the server to open it (the default page / the saved tabs) — never an empty state', async () => {
+    renderAuto({ post: post({ status: 200, body: { ok: true, restored: 0, home: true, wasStopped: true } }) })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    expect(posts.filter(p => p[0] === '/api/browser/personal/open')).toEqual([['/api/browser/personal/open', {}]])
+    expect(q('[data-browser-restored]')).toBeNull()
+  })
+
+  test('tabs restored after a long minimize are said in words', async () => {
+    renderAuto({ post: post({ status: 200, body: { ok: true, restored: 3, home: false, wasStopped: true } }) })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    expect(q('[data-browser-restored]')?.textContent).toContain('Reabri 3 abas')
+    expect(q('[data-browser-restored]')?.textContent).toContain('minimizado')
+    await click(q('[data-browser-restored] button'))
+    expect(q('[data-browser-restored]')).toBeNull()
+  })
+
+  test('Fechar navegador closes every tab on the server and then the component', async () => {
+    let closed = 0
+    renderAuto({ post: post(), onClose: () => { closed++ } })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    await click(q('[data-browser-close]'))
+    expect(posts.some(p => p[0] === '/api/browser/personal/close')).toBe(true)
+    expect(posts.some(p => p[0] === '/api/browser/personal/minimize')).toBe(false)
+    expect(closed).toBe(1)
+  })
+
+  test('Minimizar navegador keeps it running (minimize, never close) and hides the component', async () => {
+    let hidden = 0
+    renderAuto({ post: post(), onMinimize: () => { hidden++ } })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    await click(q('[data-browser-minimize]'))
+    expect(posts.some(p => p[0] === '/api/browser/personal/minimize')).toBe(true)
+    expect(posts.some(p => p[0] === '/api/browser/personal/close')).toBe(false)
+    expect(hidden).toBe(1)
+  })
+
+  test('when the slot already draws a minimize (its fixed controls), the panel draws no second one — only Fechar', async () => {
+    renderAuto({ post: post(), controls: true })
+    expect(q('[data-browser-minimize]')).toBeNull()
+    expect(q('[data-browser-close]')).not.toBeNull()
+  })
+
+  test('both buttons are 44px targets on a phone', () => {
+    const w = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true })
+    try {
+      render({ live: false })
+      for (const sel of ['[data-browser-minimize]', '[data-browser-close]']) {
+        const b = q(sel)!
+        expect([b.style.width, b.style.height]).toEqual(['44px', '44px'])
+      }
+    } finally { Object.defineProperty(window, 'innerWidth', { value: w, configurable: true }) }
+  })
+
+  test('the phone drawer: Minimizar hides it and keeps the browser; Fechar closes the browser too', async () => {
+    const w = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true })
+    const seen: string[] = []
+    ;(globalThis as { fetch?: unknown }).fetch = async (u: string) => { seen.push(String(u)); return new Response(JSON.stringify({ live: [], ok: true }), { status: 200, headers: { 'content-type': 'application/json' } }) }
+    try {
+      act(() => { root.render(createElement(Drawer, { lang: 'pt' })) })
+      act(() => drawerStore.setBrowserDrawerOpen(true))
+      await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+      await click(q('[data-browser-minimize]'))
+      expect(q('[data-browser-drawer]')).toBeNull()
+      expect(seen.some(u => u.endsWith('/personal/minimize'))).toBe(true)
+      expect(seen.some(u => u.endsWith('/personal/close'))).toBe(false)
+      act(() => drawerStore.setBrowserDrawerOpen(true))
+      await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+      await click(q('[data-browser-close]'))
+      expect(q('[data-browser-drawer]')).toBeNull()
+      expect(seen.some(u => u.endsWith('/personal/close'))).toBe(true)
+    } finally { Object.defineProperty(window, 'innerWidth', { value: w, configurable: true }) }
   })
 })

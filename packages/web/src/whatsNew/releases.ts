@@ -11,7 +11,20 @@ export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
   '2.228.0': {
-    features: [],
+    features: [
+      {
+        pt: 'Navegador: ele sempre abre numa página inicial (por padrão, o Google; você muda em Ajustes → Navegador) — nada de tela vazia, e cada aba nova abre nela também.',
+        en: 'Browser: it always opens on a home page (Google by default; change it in Settings → Browser) — no more empty screen, and every new tab opens on it too.',
+      },
+      {
+        pt: 'Navegador: "Fechar navegador" fecha todas as abas e encerra o navegador; "Minimizar navegador" só o esconde — ele continua rodando e as abas estão lá quando você abrir de novo.',
+        en: 'Browser: "Close browser" closes every tab and shuts it down; "Minimize browser" only hides it — it keeps running and your tabs are there when you reopen.',
+      },
+      {
+        pt: 'Navegador minimizado por mais de 30 minutos é parado para poupar memória, mas a lista de abas é guardada: ao abrir, as abas voltam (recarregadas) e o aviso diz isso.',
+        en: 'A browser minimized for over 30 minutes is stopped to save memory, but its tab list is kept: when you reopen it the tabs come back (reloaded) and a notice says so.',
+      },
+    ],
     fixes: [
       {
         pt: 'Ambientes de teste isolados: o que foi gravado numa execução isolada agora persiste de forma confiável, e a medição do escopo ficou bem mais rápida.',
