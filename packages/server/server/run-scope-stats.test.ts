@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { cgroupDirOf, scopeDirOf, watchScope, foldScopeSample, parseScopeSample, readScopeSample, scopeStatsLine, type ScopeSample } from './run-scope-stats'
+import { cgroupDirOf, resolveUnitDir, scopeDirOf, watchScope, foldScopeSample, parseScopeSample, readScopeSample, scopeStatsLine, type ScopeIo, type ScopeSample } from './run-scope-stats'
+
+const io: ScopeIo = {
+  read: p => { try { return readFileSync(p, 'utf8') } catch { return undefined } },
+  dirs: p => { try { return readdirSync(p, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) } catch { return [] } },
+}
 
 const MB = 1024 * 1024
 const GB = 1024 * MB
@@ -69,8 +74,8 @@ describe('RUN.LENTIDAO-SUITE — what a run cost, said at its end', () => {
       mkdirSync(scope)
       writeFileSync(join(scope, 'cpu.stat'), 'usage_usec 42\n')
       writeFileSync(join(scope, 'memory.current'), '1048576\n')
-      expect(readScopeSample(scope)).toEqual({ cpuUsec: 42, memoryPeakBytes: MB, capHits: null, oomKills: null, swapPeakBytes: null })
-      expect(readScopeSample(join(dir, 'gone.scope'))).toEqual(parseScopeSample({}))
+      expect(readScopeSample(scope, io)).toEqual({ cpuUsec: 42, memoryPeakBytes: MB, capHits: null, oomKills: null, swapPeakBytes: null })
+      expect(readScopeSample(join(dir, 'gone.scope'), io)).toEqual(parseScopeSample({}))
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 })
@@ -85,9 +90,22 @@ describe('the scope is resolved by UNIT NAME, never from the spawned child', () 
   })
   test('watchScope keeps asking until the unit answers, and an unreadable scope is null, not a throw', () => {
     let calls = 0
-    const w = watchScope('u-x.scope', 10_000, () => (++calls < 3 ? null : '/nonexistent/dir'))
+    const w = watchScope('u-x.scope', io, 10_000, () => (++calls < 3 ? null : '/nonexistent/dir'))
     expect(scopeStatsLine(w.stop(), 1000, 1 << 30)).toBeNull()
     expect(calls).toBeGreaterThanOrEqual(2)
-    expect(watchScope('u-y.scope', 10_000, () => null).stop()).toBeNull()
+    expect(watchScope('u-y.scope', io, 10_000, () => null).stop()).toBeNull()
+  })
+
+  test('resolveUnitDir finds a scope by NAME under the tree (nested slice too), bounded, null when absent', () => {
+    const root = mkdtempSync(join(tmpdir(), 'scope-tree-'))
+    try {
+      mkdirSync(join(root, 'app.slice', 'app-x.slice', 'u-deep.scope'), { recursive: true })
+      mkdirSync(join(root, 'app.slice', 'u-top.scope'), { recursive: true })
+      expect(resolveUnitDir('u-top.scope', io, root)).toBe(join(root, 'app.slice', 'u-top.scope'))
+      expect(resolveUnitDir('u-deep.scope', io, root)).toBe(join(root, 'app.slice', 'app-x.slice', 'u-deep.scope'))
+      expect(resolveUnitDir('u-deep.scope', io, root, 2)).toBeNull()
+      expect(resolveUnitDir('u-none.scope', io, root)).toBeNull()
+      expect(resolveUnitDir('u-top.scope', io, join(root, 'missing'))).toBeNull()
+    } finally { rmSync(root, { recursive: true, force: true }) }
   })
 })

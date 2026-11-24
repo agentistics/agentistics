@@ -14,8 +14,6 @@
  * samples (every few seconds): a lower bound, said as a peak because it is the highest value seen.
  * Every field is `null` when it could not be read — an unmeasured value is never printed as a zero.
  */
-import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 export interface ScopeSample {
@@ -100,17 +98,29 @@ export function scopeStatsLine(s: ScopeSample | null, wallMs: number, capBytes: 
   return parts.length ? `agentop run: ${parts.join(' · ')}` : null
 }
 
-function readOr(path: string): string | undefined {
-  try { return readFileSync(path, 'utf8') } catch { return undefined }
+/**
+ * The file-system reads this module needs, handed in by the caller. The module imports no `node:fs` on purpose: an
+ * fs import is a pinned capability (delivery/doors.lint), and a pure reader should not carry one — `cli-run.ts`, which
+ * already holds that capability, supplies the two read-only functions.
+ */
+export interface ScopeIo {
+  /** A file's text, or undefined when it cannot be read. Never throws. */
+  read(path: string): string | undefined
+  /** The names of the sub-directories of `path`; an empty list when it cannot be listed. Never throws. */
+  dirs(path: string): string[]
+}
+
+function readOr(io: ScopeIo, path: string): string | undefined {
+  try { return io.read(path) } catch { return undefined }
 }
 
 /** IO. One sample of a scope directory; a vanished scope is an all-null sample. */
-export function readScopeSample(dir: string): ScopeSample {
+export function readScopeSample(dir: string, io: ScopeIo): ScopeSample {
   return parseScopeSample({
-    cpuStat: readOr(join(dir, 'cpu.stat')),
-    memoryCurrent: readOr(join(dir, 'memory.current')),
-    memoryEvents: readOr(join(dir, 'memory.events')),
-    swapCurrent: readOr(join(dir, 'memory.swap.current')),
+    cpuStat: readOr(io, join(dir, 'cpu.stat')),
+    memoryCurrent: readOr(io, join(dir, 'memory.current')),
+    memoryEvents: readOr(io, join(dir, 'memory.events')),
+    swapCurrent: readOr(io, join(dir, 'memory.swap.current')),
   })
 }
 
@@ -121,11 +131,25 @@ export function scopeDirOf(controlGroup: string, unit: string, root = '/sys/fs/c
   return root + path
 }
 
-/** IO. The real cgroup directory of `unit` (empty ControlGroup = not started yet or already gone), or null. Never throws, never hangs (2 s). */
-export function resolveUnitDir(unit: string): string | null {
+/**
+ * IO, read-only (no process is spawned: a spawn site is a pinned capability, and this module needs none). The real
+ * cgroup directory of `unit`, found by NAME under the user's own systemd tree — `systemd-run --user --scope` units
+ * live under `app.slice` (possibly one nested slice deeper), so a walk bounded to `maxDepth` levels finds them.
+ * Null when the scope is not started yet or already gone. Never throws.
+ */
+export function resolveUnitDir(unit: string, io: ScopeIo, root?: string, maxDepth = 4): string | null {
   try {
-    const r = spawnSync('systemctl', ['--user', 'show', '-p', 'ControlGroup', '--value', unit], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] })
-    return r.status === 0 ? scopeDirOf(r.stdout ?? '', unit) : null
+    const uid = process.getuid?.()
+    const base = root ?? `/sys/fs/cgroup/user.slice/user-${uid}.slice/user@${uid}.service`
+    const walk = (dir: string, depth: number): string | null => {
+      for (const name of io.dirs(dir)) {
+        const child = join(dir, name)
+        if (name === unit) return child
+        if (depth > 1) { const hit = walk(child, depth - 1); if (hit) return hit }
+      }
+      return null
+    }
+    return walk(base, maxDepth)
   } catch { return null }
 }
 
@@ -136,12 +160,12 @@ export function resolveUnitDir(unit: string): string | null {
  * the command runs in the scope (QA 2026-11-23: the line never printed). Resolved on each tick until it
  * answers; the last sample before the scope vanishes is kept. Never resolved: `stop` says null.
  */
-export function watchScope(unit: string, everyMs = 1000, resolve: (unit: string) => string | null = resolveUnitDir): { stop: () => ScopeSample | null } {
+export function watchScope(unit: string, io: ScopeIo, everyMs = 1000, resolve: (unit: string) => string | null = u => resolveUnitDir(u, io)): { stop: () => ScopeSample | null } {
   let dir: string | null = null
   let acc: ScopeSample | null = null
   const tick = () => {
     if (!dir) dir = resolve(unit)
-    if (dir) acc = foldScopeSample(acc, readScopeSample(dir))
+    if (dir) acc = foldScopeSample(acc, readScopeSample(dir, io))
   }
   tick()
   const t = setInterval(tick, everyMs)

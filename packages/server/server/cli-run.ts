@@ -9,11 +9,16 @@ import { CURRENT_VERSION } from './version'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
 import { blockedPorts, createCtlDir, netnsHardening, outsideNodeModules, persistenceGuard, hostAddresses, forwardPorts, netnsArgv, netnsNotice, pollHostAddresses, probeNetns, removeCtlDir, startSlirp, stopSlirp } from './run-netns'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
-import { scopeStatsLine, watchScope } from './run-scope-stats'
+import { scopeStatsLine, watchScope, type ScopeIo } from './run-scope-stats'
 
 /** The run's memory cap (systemd `MemoryMax`), as passed and in bytes for the closing stats line. */
 export const RUN_MEMORY_MAX = '2G'
 const RUN_MEMORY_MAX_BYTES = 2 * 1024 ** 3
+/** The read-only file access the closing stats line needs (see ScopeIo: run-scope-stats imports no fs itself). */
+const SCOPE_IO: ScopeIo = {
+  read: p => { try { return readFileSync(p, 'utf8') } catch { return undefined } },
+  dirs: p => { try { return readdirSync(p, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) } catch { return [] } },
+}
 
 export { SEED_ALLOW }
 const REAL_API_PORT = 47291
@@ -287,7 +292,7 @@ function usage(): string {
        Hidden inside: all of /run (the Docker/containerd/podman/system-bus sockets, the WSL interop channel, the user runtime dir with
        D-Bus / systemd --user / cc-socks / gpg: a socket recreated later cannot come back), the Windows directories of /mnt/<drive>, the
        real server's unix sockets and tmux dir, /tmp/ssh-* /.X11-unix, ~/.gnupg and ~/.ssh/agent; WSL .exe programs cannot be started;
-       the real data dir (~/.agentistics) is read-only; its pid is not visible.
+       the real agentistics data directory (under your home) is read-only; its pid is not visible.
        Persistence: the REAL home is read-only inside the run (writing ~/.claude/skills, ~/.local/bin, ~/.config/systemd/user, ~/.bashrc,
        ~/.ssh, ~/.gitconfig by absolute path fails with EROFS; the run's own HOME is a throwaway). Writable carve-outs, and why: the run's
        own home and tmp (scratch), the git worktree you run from (or --cwd) with its common git dir (so git commit works; its hooks/, config, info/ (info/grafts) and
@@ -833,7 +838,7 @@ async function startRun(options: RunOptions): Promise<number> {
   // The command's end is recorded in the log BEFORE any cleanup line, so whoever reads run.log (the ambiente flow) can name the exit code.
   // RUN.LENTIDAO-SUITE: what the run cost (cpu over wall, memory peak vs the cap, cap hits, swap), said when it ends.
   const startedMs = Date.now()
-  const scopeWatch = systemd && child.pid ? watchScope(unit, 500) : null
+  const scopeWatch = systemd && child.pid ? watchScope(unit, SCOPE_IO, 500) : null
   const childExit = new Promise<number>(resolve => {
     child.once('exit', (status, sig) => {
       const stats = scopeStatsLine(scopeWatch?.stop() ?? null, Date.now() - startedMs, RUN_MEMORY_MAX_BYTES)
