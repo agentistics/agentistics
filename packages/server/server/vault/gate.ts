@@ -32,11 +32,11 @@ import { join } from 'node:path'
 import {
   FRESH_STEPUP, base32Encode, confirmPositions, confirmWords, durationWords, enrollPresence, entropyToWords, hasPresence,
   isPresenceId, isSilentId, judgeCode, matchTotp, mergeStepUpState, newRecoveryEntropy, openRecord, otpauthUri, parseAutoLockMinutes,
-  parseStepUpState, presenceCode, presenceSentence, presenceDetailWords, recoveryProtector, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, PRESENCE_GESTURES, effectiveUnlockPolicy, parseUnlockPolicy, unlockNeedsCode, unlockWindowEndsMs, type UnlockMode, setGestureListener, setupCodeCommand, setupCodeWhere, skewWords, wordsToEntropy, writePrivateAtomic, revealAsks,
+  parseStepUpState, presenceCode, presenceSentence, presenceDetailWords, recoveryProtector, parseVaultJson, writeRecoveryVerified, newDataKey, finishRetirement, RECOVERY_FILE, serializeVaultJson, PRESENCE_GESTURES, effectiveUnlockPolicy, parseUnlockPolicy, unlockNeedsCode, unlockWindowEndsMs, type UnlockMode, setGestureListener, setupCodeCommand, setupCodeWhere, skewWords, wordsToEntropy, writePrivateAtomic, revealAsks,
   type HeldPresence, type Protector, type ProtectorId, type StepUpState, type VaultJson, type WrapperRecord,
   ACTION_KINDS, ACTION_KINDS_ORDER, choiceFor, choicesFor, parseAuthPolicy, proofsFor, type ActionKind, type AuthPolicy, type ProofChoice, type VaultProofs,
 } from '@agentistics/vault'
-import { passwordFailure, withoutAuthenticator } from '@agentistics/vault'
+import { passwordFailure, withoutAuthenticator, logBridge, touchIdFailureSentence } from '@agentistics/vault'
 import { checkVaultPassword, vaultPasswordWeakSentence } from '@agentistics/core'
 import { readAuthPolicy, writeAuthPolicy, type AuthPolicyRead } from './auth-policy'
 import { currentVaultPassword } from './password-context'
@@ -1171,12 +1171,17 @@ async function writeVaultJson(v: VaultJson): Promise<void> {
 
 // ── §4.2 the recovery key: shown once, confirmed by three words, then written ─────────────────────
 
-let _recovery: { entropy: Uint8Array; words: string[]; positions: number[]; expiresMs: number } | null = null
+let _recovery: { entropy: Uint8Array; words: string[]; positions: number[]; expiresMs: number; presenceKid?: string } | null = null
 function dropRecovery(): void { _recovery?.entropy.fill(0); _recovery = null }
+let _presenceCommitActive = false
+function presenceCommitBusy(): Refusal {
+  return refused('enrol-busy', vaultLang() === 'pt' ? 'A configuração do cofre está sendo salva. Aguarde a conclusão antes de tentar de novo.' : 'Vault setup is being saved. Wait for it to finish before retrying.')
+}
 
 
 /** Generate the 24 words. The FIRST recovery key needs only the open vault; a rotation is gated. */
 export async function beginRecoveryKey(ctx: GateContext): Promise<{ ok: true; words: string[]; positions: number[] } | Refusal> {
+  if (_presenceCommitActive) return presenceCommitBusy()
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
   if (o.vault.wrappers.some(w => w.type === 'recovery') && !presenceHeldFor(ctx)) {
@@ -1195,15 +1200,19 @@ export async function beginRecoveryKey(ctx: GateContext): Promise<{ ok: true; wo
       if (!p.ok) return p
     }
   }
+  if (_presenceCommitActive) return presenceCommitBusy()
   dropRecovery()
   const entropy = newRecoveryEntropy()
   const words = entropyToWords(entropy)
-  _recovery = { entropy, words, positions: confirmPositions(), expiresMs: _now() + ENROL_TTL_MS }
+  _recovery = { entropy, words, positions: confirmPositions(), expiresMs: _now() + ENROL_TTL_MS,
+    ...(presenceHeldFor(ctx) && _heldPresence ? { presenceKid: _heldPresence.next.kid } : {}),
+  }
   return { ok: true, words, positions: _recovery.positions }
 }
 
 /** The three typed words; only then is `dek.recovery` written and the previous one replaced. */
 export async function confirmRecoveryKey(typed: readonly string[], ctx: { session: string } = { session: SOCKET_SESSION }): Promise<{ ok: true } | Refusal> {
+  if (_presenceCommitActive) return presenceCommitBusy()
   const r = _recovery
   if (!r || _now() > r.expiresMs) { dropRecovery(); return refused('no-recovery-pending', vaultLang() === 'pt' ? 'Nenhuma chave de recuperação está esperando confirmação.' : 'No recovery key is waiting to be confirmed.') }
   if (!confirmWords(r.words, r.positions, typed)) return refused('recovery-confirm-wrong', vaultLang() === 'pt' ? 'Essas não são as palavras daquelas posições. Confira o papel e tente de novo.' : 'Those are not the words at those positions. Check your copy and try again.')
@@ -1211,15 +1220,43 @@ export async function confirmRecoveryKey(typed: readonly string[], ctx: { sessio
   if (!o) return refused('locked', sentence('locked'))
   // Leader decision 2026-10-02: presence taken earlier in THIS wizard commits HERE, as the last step —
   // the silent wrapper is retired only now, after the words are confirmed.
+  if (_presenceCommitActive) return presenceCommitBusy()
+  if (_recovery !== r) return refused('no-recovery-pending', vaultLang() === 'pt' ? 'As palavras desta configuração mudaram. Guarde e confirme as novas palavras.' : 'The words for this setup changed. Save and confirm the new words.')
   const h = presenceHeldFor(ctx) ? _heldPresence : null
+  if (r.presenceKid && h?.next.kid !== r.presenceKid) {
+    dropRecovery()
+    return refused('presence-held-stale', vaultLang() === 'pt'
+      ? 'A confirmação pessoal desta configuração expirou ou mudou. Escolha a confirmação de novo ou use a senha do cofre e guarde as novas palavras. Nada foi alterado.'
+      : 'Personal confirmation for this setup expired or changed. Choose confirmation again or use the vault password and save the new words. Nothing was changed.')
+  }
   if (h) {
+    if (h.oldKid !== o.kid) {
+      dropHeldPresence({ removeCredential: true }); dropRecovery()
+      return refused('presence-held-stale', vaultLang() === 'pt' ? 'A chave do cofre mudou desde a etapa da confirmação pessoal. Nada foi alterado; ligue a confirmação pessoal de novo.' : 'The vault key changed since the presence step. Nothing was changed; turn presence on again.')
+    }
+    const epoch = _heldEpoch
+    // Detach during IO so a concurrent lock cannot zero keys partway through a disk transaction.
+    // The lock epoch still prevents restoring an old proof after the person has locked the vault.
     _heldPresence = null
-    try {
-      if (h.oldKid !== o.kid) return refused('presence-held-stale', vaultLang() === 'pt' ? 'A chave do cofre mudou desde a etapa da confirmação pessoal. Nada foi alterado; ligue a confirmação pessoal de novo.' : 'The vault key changed since the presence step. Nothing was changed; turn presence on again.')
-      const c = await commitHeldPresence(h, r.entropy, o)
-      if (!c.ok) return c
-      await retireAuthenticator(o)
-    } finally { dropRecovery() }
+    _presenceCommitActive = true
+    let c: Awaited<ReturnType<typeof commitHeldPresence>>
+    try { c = await commitHeldPresence(h, r.entropy, o) } finally { _presenceCommitActive = false }
+    // A pre-commit failure keeps the same bounded, session-owned proof AND recovery words. Retrying
+    // must commit both together; dropping them used to let a retry save recovery with only Keychain.
+    if (!c.ok) {
+      if (_heldEpoch === epoch && _now() <= h.until) _heldPresence = h
+      else {
+        dropRecovery()
+        h.next.dek.fill(0)
+        if (h.protector.discardHeld) await h.protector.discardHeld(h.held, h.next.kid).catch(() => {})
+        else h.held.kek.fill(0)
+      }
+      return c
+    }
+    if (_heldEpoch !== epoch) h.next.dek.fill(0) // the vault was locked while the authorized save finished
+    _heldPresence = null
+    dropRecovery()
+    await retireAuthenticator(o)
     recoveryStepDone('presence'); recoveryStepDone('recovery')
     dropUnlockWindow() // a protector change
     _flow = null
@@ -1282,6 +1319,7 @@ export async function recoverWithWords(words: string): Promise<{ ok: true; todo:
  * real unlock is the reproducibility check, owner decision 2026-10-02).
  */
 export async function enrolPresence(id: ProtectorId, ctx: GateContext): Promise<{ ok: true; removed: ProtectorId[]; recoveryOwed: boolean } | Refusal> {
+  if (_presenceCommitActive) return presenceCommitBusy()
   const lang = vaultLang()
   if (!isPresenceId(id)) return refused('bad-request', 'not a presence protector')
   const soon = presenceSoonRefusal(id)
@@ -1385,8 +1423,10 @@ let _heldPresence: {
   id: ProtectorId; protector: Protector; held: HeldPresence; next: { dek: Uint8Array; kid: string }
   oldKid: string; session: string; until: number; replacesRecovery: boolean
 } | null = null
+let _heldEpoch = 0
 
 function dropHeldPresence(opts: { removeCredential: boolean } = { removeCredential: false }): void {
+  _heldEpoch++
   const h = _heldPresence
   _heldPresence = null
   if (!h) return
@@ -1411,6 +1451,7 @@ export function presenceHeldFor(ctx: { session: string }): ProtectorId | null {
 async function maybeHoldPresence(
   id: ProtectorId, presence: Protector, o: { dek: Uint8Array; kid: string; vault: VaultJson }, ctx: GateContext,
 ): Promise<{ ok: true; removed: ProtectorId[]; recoveryOwed: boolean; held: true } | Refusal | null> {
+  if (_presenceCommitActive) return presenceCommitBusy()
   const lang = vaultLang()
   if (o.vault.wrappers.some(w => w.type === 'passphrase')) {
     return refused('presence-passphrase-wrapper', lang === 'pt'
@@ -1452,36 +1493,77 @@ async function commitHeldPresence(
   const all: Protector[] = [h.protector, ...o.vault.wrappers.map(w => protectorById(w.type)).filter((p): p is Protector => p !== null)]
   const recFile = join(vaultDir(), RECOVERY_FILE)
   let committed = false
+  // The presence wrapper file is written straight to its final name (not staged), so an abandoned
+  // attempt must put it back exactly as it was: remove it when there was none, restore a prior one.
+  const presenceFile = h.id === 'touchid' ? join(vaultDir(), 'dek.touchid') : null
+  // Only a missing file (readFile answers null for ENOENT) means "there was none"; any other read
+  // error refuses BEFORE anything is written, so abandon can never delete a prior valid wrapper.
+  let priorPresence: Uint8Array | null = null
+  if (presenceFile) {
+    try { priorPresence = await secretFs().readFile(presenceFile) } catch (err) {
+      return enrolFailure(h.id, 'presence-file-read-failed', (err as Error)?.message ?? 'read failed')
+    }
+  }
+  const restorePresenceFile = async () => {
+    if (!presenceFile) return
+    try {
+      if (priorPresence) await writePrivateAtomic(secretFs(), presenceFile, priorPresence)
+      else await realProtectorIo().removeFile(presenceFile)
+    } catch { /* best effort: the file is unreferenced by vault.json either way */ }
+  }
   const prep = await prepareRekey({ dek: o.dek, kid: o.kid }, h.next, [recFile])
-  if (!prep.ok) return enrolFailure(h.id, 'vault-write-failed')
+  if (!prep.ok) return enrolFailure(h.id, prep.code, prep.reason)
   const files = [...prep.files, recFile]
-  const abandon = async () => { await abandonRekey(files) }
+  const abandon = async () => { await abandonRekey(files); await restorePresenceFile() }
+  let stage = 'presence-file-write-failed'
   try {
     const w = await sealPresence(h.protector, h.held, h.next.dek, h.next.kid)
     if (!w.ok) { await abandon(); return enrolFailure(h.id, w.reason) }
+    stage = 'recovery-write-failed'
     const rp = recoveryProtector({ io: realProtectorIo(), vaultDir: vaultDir(), entropy, file: RECOVERY_FILE + REKEY_SUFFIX })
     const rw = await rp.wrap(h.next.dek, h.next.kid)
     const rb = rw.ok ? await rp.unwrap(rw.record, h.next.kid) : null
     const rsame = rb?.ok === true && timingSafeEqual(Buffer.from(rb.dek), Buffer.from(h.next.dek))
     if (rb?.ok) rb.dek.fill(0)
-    if (!rsame) { await h.protector.remove(w.record, h.next.kid).catch(() => {}); await abandon(); return enrolFailure(h.id, 'vault-write-failed') }
+    if (!rsame) { await abandon(); return enrolFailure(h.id, 'recovery-verify-failed', !rw.ok ? rw.reason : rb && !rb.ok ? rb.reason : 'recovery wrapper did not return the new data key') }
     const recRecord: VaultJson['wrappers'][number] = { type: 'recovery', createdAt: new Date(_now()).toISOString(), params: { file: RECOVERY_FILE } }
     const silent = o.vault.wrappers.filter(x => isSilentId(x.type)).map(x => ({ ...x, params: { ...(x.params ?? {}), kid: o.kid } }))
     const kept = o.vault.wrappers.filter(x => !isSilentId(x.type) && x.type !== h.protector.id && x.type !== 'recovery')
     const vault: VaultJson = { ...o.vault, v: 2, kid: h.next.kid, wrappers: [w.record, ...kept, recRecord], retired: [...(o.vault.retired ?? []), ...silent] }
+    stage = 'vault-write-failed'
     await writeVaultJson(vault)
     committed = true
-    await markCommitted({ oldKid: o.kid, newKid: h.next.kid, files })
+    const oldKid = o.kid
     const oldDek = o.dek
     o.dek = h.next.dek; o.kid = h.next.kid; o.vault = vault
     oldDek.fill(0)
+    await markCommitted({ oldKid, newKid: h.next.kid, files })
     await finishRekey(files)
     const done = await finishRetirement(realProtectorIo(), vaultDir(), vault, all)
     o.vault = done.vault
     return { ok: true, removed: done.removed }
+  } catch (err) {
+    // Once vault.json names the new kid, crash recovery must finish it; never say "nothing changed".
+    if (committed || String((err as Error)?.message).startsWith('injected crash')) throw err
+    // writeVaultJson can throw AFTER its rename (the directory sync failed): vault.json may already
+    // name the new kid and reference the files below. Never abandon on a guess — read it back.
+    let onDisk: string | null
+    try { onDisk = parseVaultJson(await realProtectorIo().readFile(join(vaultDir(), 'vault.json')))?.kid ?? null } catch { onDisk = null }
+    if (onDisk === h.next.kid) { committed = true; throw err } // crash recovery finishes this transaction
+    if (onDisk === null && stage === 'vault-write-failed') {
+      // Cannot tell: leave inert orphans rather than delete something vault.json may reference.
+      return enrolFailure(h.id, stage, (err as Error)?.message ?? 'write failed')
+    }
+    await abandon()
+    return enrolFailure(h.id, stage, (err as Error)?.message ?? 'write failed')
   } finally {
-    if (!committed) h.next.dek.fill(0)
-    h.held.kek.fill(0)
+    if (committed) {
+      h.held.kek.fill(0)
+      // A post-commit failure belongs to crash recovery. A later request must never reseal this
+      // transaction with an already-zeroed KEK, or reuse words for a transaction already committed.
+      if (_heldPresence === h) _heldPresence = null
+      dropRecovery()
+    }
   }
 }
 
@@ -1520,7 +1602,7 @@ async function enrolWithNewKey(
   let committed = false
   try {
     const prep = await prepareRekey({ dek: o.dek, kid: o.kid }, next, entropy ? [recFile] : [])
-    if (!prep.ok) return enrolFailure(id, 'vault-write-failed')
+    if (!prep.ok) return enrolFailure(id, prep.code, prep.reason)
     const files = entropy ? [...prep.files, recFile] : prep.files
     const abandon = async () => { await abandonRekey(files) }
     // Presence under the NEW key: create/make + ONE sign/assert, the seal checked in memory by the
@@ -1536,7 +1618,7 @@ async function enrolWithNewKey(
       const rb = rw.ok ? await rp.unwrap(rw.record, next.kid) : null
       const rsame = rb?.ok === true && timingSafeEqual(Buffer.from(rb.dek), Buffer.from(next.dek))
       if (rb?.ok) rb.dek.fill(0)
-      if (!rsame) { await presence.remove(w.record, next.kid).catch(() => {}); await abandon(); return enrolFailure(id, 'vault-write-failed') }
+      if (!rsame) { await presence.remove(w.record, next.kid).catch(() => {}); await abandon(); return enrolFailure(id, 'recovery-verify-failed', !rw.ok ? rw.reason : rb && !rb.ok ? rb.reason : 'recovery wrapper did not return the new data key') }
       recRecord = { type: 'recovery', createdAt: new Date(_now()).toISOString(), params: { file: RECOVERY_FILE } }
     }
     // COMMIT — the one write that makes the new key the vault's.
@@ -1571,19 +1653,36 @@ async function enrolWithNewKey(
  * fact for the code, never a sentence: the UI once showed
  * `presence-unavailable: System.Management.Automation.PSInvalidCastException` verbatim.
  */
-function enrolFailure(id: ProtectorId, reason: string): Refusal {
+function enrolFailure(id: ProtectorId, reason: string, raw = reason): Refusal {
+  // These reasons are generated stages, OS errors and paths, never key material or recovery words.
+  logBridge(`enrol ${id} ${reason}: ${raw}`)
   const lang = vaultLang()
   const word = presenceWord(id)
   const pw = passwordFailure(reason)
   if (pw === 'password-required') return passwordRequired()
   if (pw === 'password-weak') return refused('password-weak', vaultPasswordWeakSentence(checkVaultPassword(currentVaultPassword() ?? ''), lang))
   const code = presenceCode(reason)
-  if (code) return refused(code, presenceSentence(code, lang, word, reason))
+  if (code) return refused(code, id === 'touchid' ? touchIdFailureSentence(reason, lang) : presenceSentence(code, lang, word, reason))
+  const stages: Record<string, { en: string; pt: string }> = {
+    'rekey-read-failed': { en: 'A saved vault item could not be read.', pt: 'Não foi possível ler um item salvo no cofre.' },
+    'rekey-open-failed': { en: 'A saved vault item could not be opened with the current key.', pt: 'Um item salvo no cofre não abriu com a chave atual.' },
+    'rekey-verify-failed': { en: 'The new copy of a vault item could not be verified.', pt: 'Não foi possível conferir a nova cópia de um item do cofre.' },
+    'presence-file-read-failed': { en: 'The file for personal confirmation could not be read.', pt: 'Não foi possível ler o arquivo da confirmação pessoal.' },
+    'presence-file-write-failed': { en: 'The file for personal confirmation could not be saved.', pt: 'Não foi possível salvar o arquivo da confirmação pessoal.' },
+    'recovery-write-failed': { en: 'The recovery key could not be saved.', pt: 'Não foi possível salvar a chave de recuperação.' },
+    'recovery-verify-failed': { en: 'The saved recovery key could not be verified.', pt: 'Não foi possível conferir a chave de recuperação gravada.' },
+    'vault-write-failed': { en: 'The vault settings could not be saved.', pt: 'Não foi possível salvar a configuração do cofre.' },
+  }
+  const stage = stages[reason]
+  if (stage) return refused(reason, stage[lang] + (lang === 'pt'
+    ? ' Nada foi alterado. Confira se há espaço livre e permissão para gravar nesta conta e tente de novo.'
+    : ' Nothing was changed. Check free disk space and write permission for this account, then retry.'))
   if (reason.startsWith('no-hmac-secret')) {
     return refused('presence-no-hmac-secret', lang === 'pt'
       ? 'Esta chave de segurança não suporta hmac-secret, que o cofre exige. Use uma YubiKey 5, SoloKey 2, Nitrokey 3 ou outra chave que liste hmac-secret. Nada foi alterado.'
       : 'This security key does not support hmac-secret, which the vault needs. Use a YubiKey 5, SoloKey 2, Nitrokey 3 or another key that lists hmac-secret. Nothing was changed.')
   }
+  if (id === 'touchid') return refused('presence-enrol-failed', touchIdFailureSentence(reason, lang))
   return refused('presence-enrol-failed', lang === 'pt'
     ? `Não foi possível ligar ${word} (o cofre não pôde ser gravado). Nada foi alterado; o cofre continua como estava.`
     : `${word} could not be turned on (the vault could not be written). Nothing was changed; the vault is as it was.`)

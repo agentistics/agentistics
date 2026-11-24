@@ -28,6 +28,13 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       },
     ],
   },
+  '2.228.1': {
+    features: [],
+    fixes: [{
+      pt: 'Cofre no Mac: uma falha ao configurar a proteção explica o que aconteceu e permite tentar de novo ou continuar com a senha do cofre e palavras de recuperação, sem Touch ID.',
+      en: 'Vault on Mac: a setup failure explains what happened and lets you retry or continue with a vault password and recovery words, without Touch ID.',
+    }],
+  },
   '2.228.0': {
     features: [
       {
