@@ -13,7 +13,8 @@
  * `CliStrings`, so this module owns no copy of any sentence.
  */
 
-import { activeEvidence, contextFraction, conversationLinkOf, fmt, fmtCost, isNayCwd, nayTitle } from '@agentistics/core'
+import { activeEvidence, activityApplies, contextFraction, conversationLinkOf, fmt, fmtCost, isNayCwd, nayTitle } from '@agentistics/core'
+import type { ActivitySignal } from '@agentistics/core'
 import type { ControlSession, SessionState } from '@agentistics/tui/control'
 import type { CliStrings } from '../cli-i18n'
 import { approvalFor, canPick, isFreeTextOption } from './approval-spec'
@@ -334,8 +335,8 @@ export function toControlSession(
 }
 
 /** The ONE reading of "is it doing something" (`@agentistics/core` sessionActivity), carried to every surface. */
-function activeFields(v: SessionView): { activeSignal?: 'tool' | 'task' | 'heavy-lock' | 'output'; activeSinceAt?: number } {
-  if (v.status === 'closed' || v.status === 'exited' || v.status === 'lost') return {}
-  const e = activeEvidence({ turns: v.chatTurns ?? [] })
+function activeFields(v: SessionView): { activeSignal?: ActivitySignal; activeSinceAt?: number } {
+  if (!activityApplies(v.status)) return {}
+  const e = activeEvidence({ turns: v.chatTurns ?? [], ...(v.heavyLock ? { heavyLock: v.heavyLock } : {}), ...(v.outputMoved ? { outputMoved: true } : {}) })
   return e ? { activeSignal: e.signal, ...(e.sinceMs !== undefined ? { activeSinceAt: e.sinceMs } : {}) } : {}
 }

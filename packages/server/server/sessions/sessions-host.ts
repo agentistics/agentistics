@@ -396,6 +396,8 @@ export function createSessionsPoller(o: {
    * this poller exactly as it was. Read on every poll: the flag and the engine are runtime facts.
    */
   adapterState?: () => AdapterStateFeed | null
+  /** Which managed sessions wait in / hold the heavy-job lock — read once per tick, shared (`heavy-lock-scan.ts`). Absent = no heavy signal. */
+  heavyLocks?: () => Promise<ReadonlyMap<string, 'waiting' | 'holding'>>
   /**
    * ELSEWHERE: the memory for rows read off their own transcript tail (`tail-state.ts`) — only with the
    * `adapter-chat` flag on, so `null` (the default) keeps this poller exactly as it was.
@@ -565,6 +567,8 @@ export function createSessionsPoller(o: {
        */
       const dialogUnreadable = new Map<string, DialogUnreadable>()
       const chatTails = new Map<string, ChatTurn[]>()
+      /** Rows whose frame moved since the previous poll — one input of the shared activity reading. */
+      const outputMoved = new Set<string>()
 
       // The rows the HARNESS states (flag on): follow the new ones, release the gone ones.
       const adapter = o.adapterState?.() ?? null
@@ -720,6 +724,10 @@ export function createSessionsPoller(o: {
         }
         const frameDigest = digestFrame(frame)
         nextDigest.set(r.id, frameDigest)
+        {
+          const prior = prevDigest.get(r.id)
+          if (prior !== undefined && prior !== frameDigest) outputMoved.add(r.id)
+        }
         tails.set(r.id, anyGrant() ? frameTail(frame, TAIL_LINES).map(l => scrubTerminalLine(r.id, l)) : frameTail(frame, TAIL_LINES))
         if (adapter || tailFeed) {
           const mode = modes.get(r.id)
@@ -1214,6 +1222,10 @@ export function createSessionsPoller(o: {
         if (a) externalActivity.set(p.sessionId, a)
       }
 
+      // ONE process listing per tick for the whole fleet (shared with the stalled-worker alert).
+      const heavyLocks = new Map<string, 'waiting' | 'holding'>()
+      for (const [id, st] of (await o.heavyLocks?.().catch(() => null)) ?? []) heavyLocks.set(id, st)
+
       const sessions = buildSessionViews({
         reconciled,
         ...(externalActivity.size > 0 ? { externalActivity } : {}),
@@ -1222,6 +1234,8 @@ export function createSessionsPoller(o: {
         background,
         tails,
         chatTails,
+        ...(heavyLocks.size > 0 ? { heavyLocks } : {}),
+        ...(outputMoved.size > 0 ? { outputMoved } : {}),
         approvals,
         modes,
         modeChoices,

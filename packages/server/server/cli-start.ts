@@ -1645,6 +1645,8 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // ENGINE.MAP F1.2: the harness's own statement of its state, with the `adapter-chat` flag on only.
     adapterState: hostAdapterState,
     tailState: hostTailState,
+    // The heavy-lock queue/hold of each managed session: ONE listing per tick, shared with the alert.
+    heavyLocks: async () => (await import('./flows/stalled-host')).heavyLockScanner.states(),
   }
 }
 

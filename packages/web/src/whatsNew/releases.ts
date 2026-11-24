@@ -14,8 +14,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     features: [],
     fixes: [
       {
-        pt: 'Uma sessão com um comando em execução agora aparece como "rodando há X" na lista, em vez de "parada há X horas".',
-        en: 'A session with a command running now shows "running X" in the list instead of "idle for X hours".',
+        pt: 'Uma sessão com um comando em execução agora aparece como "rodando há X" na lista, em vez de "parada há X horas"; se estiver esperando a vez na fila de trabalho pesado, aparece "na fila".',
+        en: 'A session with a command running now shows "running X" in the list instead of "idle for X hours"; one waiting its turn in the heavy-job queue shows "queued".',
       },
       {
         pt: 'O aviso de "sem atividade há 30 min" não dispara mais para quem está executando um comando, um teste longo ou esperando a fila de trabalho pesado.',

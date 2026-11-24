@@ -316,3 +316,23 @@ describe('context gauge without a window', () => {
     expect(c.contextUsed).toBeUndefined()
   })
 })
+
+describe('the ONE activity source reaches the row (sidebar, Live)', () => {
+  const pendingTurn = [{ role: 'assistant' as const, text: 'Running Bash', pending: true, at: '2026-11-24T04:00:00.000Z' }]
+  it('carries the heavy-lock queue and holding states the alert reads', () => {
+    expect(toControlSession(view({ status: 'running', heavyLock: 'waiting' }), S, LIVE).activeSignal).toBe('heavy-lock')
+    expect(toControlSession(view({ status: 'running', heavyLock: 'holding' }), S, LIVE).activeSignal).toBe('heavy-hold')
+  })
+  it('the queue outranks the open Bash that IS the flock', () => {
+    expect(toControlSession(view({ status: 'running', heavyLock: 'waiting', chatTurns: pendingTurn }), S, LIVE))
+      .toMatchObject({ activeSignal: 'heavy-lock', activeSinceAt: Date.parse('2026-11-24T04:00:00.000Z') })
+  })
+  it('carries output that moved', () => {
+    expect(toControlSession(view({ status: 'running', outputMoved: true }), S, LIVE).activeSignal).toBe('output')
+  })
+  it('a finished row carries none, whatever stale turns or flags say', () => {
+    for (const status of ['exited', 'closed', 'lost'] as const) {
+      expect(toControlSession(view({ status, heavyLock: 'waiting', outputMoved: true, chatTurns: pendingTurn }), S, LIVE).activeSignal).toBeUndefined()
+    }
+  })
+})

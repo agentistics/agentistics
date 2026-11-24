@@ -177,5 +177,6 @@ test('liveAge: a row running a tool says "rodando há", not the age of the last 
   const base = { id: 'a', state: 'working' as const, title: 't', lastUserMessageAt: now - 3 * 3_600_000 }
   expect(liveAge(base, now, true)).toBe('3 h')
   expect(liveAge({ ...base, activeSignal: 'tool', activeSinceAt: now - 33 * 60_000 }, now, true)).toBe('rodando há 33 min')
-  expect(liveAge({ ...base, activeSignal: 'heavy-lock' }, now, false)).toBe('running')
+  expect(liveAge({ ...base, activeSignal: 'heavy-lock' }, now, false)).toBe('queued')
+  expect(liveAge({ ...base, activeSignal: 'heavy-hold' }, now, false)).toBe('running')
 })

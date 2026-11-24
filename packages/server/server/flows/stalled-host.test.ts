@@ -88,3 +88,61 @@ test('truly idle: state stays waiting and the notice text names that no signal e
   expect(o).toMatchObject({ state: 'waiting', activeSignal: null })
   expect(String(o.lastText)).toContain('no activity signal')
 })
+
+const obs = async (f: ReturnType<typeof fixture>) => await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' }) as Record<string, unknown>
+const withView = (f: ReturnType<typeof fixture>, extra: Record<string, unknown>) => {
+  f.d.snapshot = async () => ({ polledAtMs: f.d.now(), sessions: [{ id: 'worker', cwd: f.rows[0]!.cwd, status: 'running', activity: 'waiting', attached: false, approvalDetection: false, searchFields: { name: '', folder: '', harness: '', note: '', task: '', prompt: '' }, lastLines: ['x'], chatTurns: [turn({ text: 'last turn text' })], ...extra }] as never })
+}
+
+test('waiting in the heavy queue is its own signal; holding the lock is running', async () => {
+  const f = fixture()
+  f.d.heavyLock = async () => 'waiting'
+  expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'heavy-lock' })
+  f.d.heavyLock = async () => 'holding'
+  expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'heavy-hold' })
+})
+
+test('the fleet view\'s own heavy-lock reading (the one the sidebar draws) is what the alert reads', async () => {
+  const f = fixture()
+  withView(f, { heavyLock: 'waiting' })
+  expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'heavy-lock' })
+})
+
+test('output that moved since the previous observation is working; stable output is not', async () => {
+  const f = fixture()
+  withView(f, { lastLines: ['build 1'] })
+  const first = await obs(f)
+  expect(first).toMatchObject({ state: 'waiting', activeSignal: null })
+  withView(f, { lastLines: ['build 2'] })
+  const second = await obs(f)
+  expect(second).toMatchObject({ state: 'working', activeSignal: 'output' })
+  expect(second.activityKey).not.toBe(first.activityKey)
+  withView(f, { lastLines: ['build 2'] })
+  const third = await obs(f)
+  expect(third).toMatchObject({ state: 'waiting', activeSignal: null })
+})
+
+test('the poller\'s own outputMoved on the view counts too', async () => {
+  const f = fixture()
+  withView(f, { outputMoved: true })
+  expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'output' })
+})
+
+test('an exited or ended session never reads working, even with a stale open tool call', async () => {
+  for (const status of ['exited', 'closed', 'lost']) {
+    const f = fixture()
+    withView(f, { status, activity: 'waiting', chatTurns: [turn({ pending: true })] })
+    const o = await obs(f)
+    // no live reading at all: refused, never working.
+    expect(o.state).not.toBe('working')
+    expect(o.activeSignal ?? null).toBeNull()
+  }
+})
+
+test('the idle notice keeps the last-turn attribution when the text is long', async () => {
+  const f = fixture()
+  withView(f, { chatTurns: [turn({ text: 'x'.repeat(5000) })] })
+  const o = await obs(f)
+  expect(String(o.lastText)).toContain('last turn 2026-11-23T10:00:00Z')
+  expect(String(o.lastText).length).toBeLessThanOrEqual(2000)
+})

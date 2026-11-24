@@ -7,7 +7,7 @@
  * lets the whole surface be rewritten without changing a single behaviour.
  */
 
-import type { Baseline, CanonicalMode, HarnessId, ProjectKind, SessionConversationLink, SessionMode } from '@agentistics/core'
+import type { ActivitySignal, Baseline, CanonicalMode, HarnessId, ProjectKind, SessionConversationLink, SessionMode } from '@agentistics/core'
 import type { CliLang } from './lang'
 import type { GithubSection } from './backup'
 import type { SearchFields, SearchScope } from './search-scope'
@@ -933,7 +933,7 @@ export interface ControlSession {
   /** Epoch ms of the user's last message, from an EXACT conversation link. Absent = unknown. */
   lastUserMessageAt?: number
   /** Why this row is NOT idle (`sessionActivity.ts`): an open tool call, a background task, the heavy lock. Absent = none holds. */
-  activeSignal?: 'tool' | 'task' | 'heavy-lock' | 'output'
+  activeSignal?: ActivitySignal
   /** Epoch ms the `activeSignal` began, when the evidence says. */
   activeSinceAt?: number
   /** The task id behind `task` (the label). */
