@@ -10,7 +10,7 @@ import { noteFreshSpawn, resetHarnessSpawnability } from './sessions/harness-spa
 import { spawnOutcome } from './sessions/spawn-outcome'
 import { lockFile } from './sessions/file-lock'
 import {
-  __resetPlanLimitsForTest, __setLiveTranscriptPathForTest, foldAliasedLimits, __setManagedLookupForTest, __settleCodexRolloutsForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
+  __resetPlanLimitsForTest, __setLiveTranscriptPathForTest, foldAliasedLimits, __setManagedLookupForTest, __settleCodexRolloutsForTest, __settlePersistForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
   noteStructuredLine, launchConfigRoot, planLimitsPayload, planAccountKey, sampleLivePlanSessions, sessionAccountOf, setPlanLimitsSink, syncPlanLimitsFromFile,
   watchPlanLimitsFile, __setPersistHooksForTest,
 } from './plan-limits'
@@ -381,7 +381,7 @@ test('a process with no sink stores the record but judges no threshold', async (
   setPlanLimitsSink(null)
   const now = Date.now()
   await ingestPlanLimits({ harness: 'claude', account: 'default', windows: [{ kind: '5h', usedPct: 99, resetsAt: now + 3_600_000 }], updatedAt: now, source: 'claude-stream' })
-  await new Promise(r => setTimeout(r, 700)) // persistSoon
+  await __settlePersistForTest() // the scheduled persist has reached disk
   const disk = JSON.parse(readFileSync(file, 'utf8'))
   expect(Object.keys(disk.limits)).toEqual(['claude:default'])
   expect(disk.notices).toEqual({})
@@ -746,7 +746,7 @@ test('migration: a claude:default record and its notices move to the default roo
   setPlanLimitsSink({ changed: () => {}, notify: () => {} })
   const body = await planLimitsPayload(undefined, now)
   expect(body.limits.map(l => l.account)).toEqual([alice])
-  await new Promise(r => setTimeout(r, 700)) // persistSoon
+  await __settlePersistForTest() // the scheduled persist has reached disk
   const disk = JSON.parse(readFileSync(file, 'utf8'))
   expect(Object.keys(disk.limits)).toEqual([`claude:${alice}`])
   expect(disk.notices).toEqual({ [`claude:${alice}:week`]: { resetsAt: now + 72 * H, told: 75 } })
@@ -1266,7 +1266,7 @@ test('a newer reading published under a folded id while the move is pending is k
   disk.limits['claude:acc_old000000000'] = { harness: 'claude', account: 'acc_old000000000', plan: 'Claude Max 5x', source: 'claude-stream', updatedAt: now,
     windows: [{ kind: '5h', usedPct: 77, resetsAt: now + 3_600_000 }] }
   writeFileSync(limitsFile, JSON.stringify(disk))
-  await new Promise(r => setTimeout(r, 900))
+  await __settlePersistForTest()
   const after = JSON.parse(readFileSync(limitsFile, 'utf8')).limits
   expect(Object.keys(after).filter(k => k.startsWith('claude:'))).toEqual(['claude:acc_new000000000'])
   expect(after['claude:acc_new000000000'].windows[0].usedPct).toBe(77)
@@ -1318,7 +1318,7 @@ test('a reading another process publishes between this one\'s read and rename su
   // Q renames ITS file, built from a read that did not include P's reading, then releases.
   writeFileSync(limitsFile, JSON.stringify({ limits: { 'codex:acc_q00000000000': reading('acc_q00000000000', 22) }, notices: {} }))
   await q.release()
-  await new Promise(r => setTimeout(r, 900))
+  await __settlePersistForTest() // the retry after the contended lock has written
   const after = JSON.parse(readFileSync(limitsFile, 'utf8')).limits
   expect(after['codex:acc_q00000000000']?.windows[0].usedPct).toBe(22)
   expect(after['codex:acc_p00000000000']?.windows[0].usedPct).toBe(11)
