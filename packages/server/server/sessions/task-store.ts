@@ -57,6 +57,7 @@ export interface TaskPatch {
   links?: TaskLink[]
   priority?: TaskPriority
   dueDate?: string
+  dueEstimated?: boolean
   startDate?: string
   labels?: string[]
   type?: string
@@ -184,6 +185,8 @@ export interface TaskStore {
   seedStatuses(list: readonly TaskStatusDef[]): Promise<void>
   /** Once per book: append `def` to the status list unless it is there, and mark the book. */
   seedInReview(def: TaskStatusDef | null): Promise<void>
+  /** Once per book: write each ESTIMATED due day (`dueEstimated`) onto a subtask that still has none, and mark the book. */
+  backfillEstimatedDue(plan: ReadonlyMap<string, string>): Promise<void>
   /** Add a new status, or edit an existing one's label/color. The `id` is never rewritten by this —
    *  create mints a fresh entry, edit finds the existing one by `id` and replaces label/color only. */
   upsertStatus(def: TaskStatusDef): Promise<void>
@@ -284,6 +287,7 @@ function sanitizeTask(raw: unknown): Task | null {
     // reader sees the same word rather than each deciding what absence means.
     priority: migratePriority(t.priority),
     ...(typeof t.dueDate === 'string' && t.dueDate ? { dueDate: t.dueDate } : {}),
+    ...(t.dueEstimated === true && typeof t.dueDate === 'string' && t.dueDate ? { dueEstimated: true } : {}),
     ...(typeof t.startDate === 'string' && t.startDate ? { startDate: t.startDate } : {}),
     ...(Array.isArray(t.labels)
       ? { labels: t.labels.filter((v): v is string => typeof v === 'string' && v !== '') }
@@ -476,6 +480,7 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
     createdAt: str(t.createdAt) ?? new Date(0).toISOString(),
     updatedAt: str(t.updatedAt) ?? new Date(0).toISOString(),
     ...(str(t.dueDate) ? { dueDate: str(t.dueDate)! } : {}),
+    ...(t.dueEstimated === true && str(t.dueDate) ? { dueEstimated: true } : {}),
     ...(str(t.startDate) ? { startDate: str(t.startDate)! } : {}),
     ...(str(t.startedAt) ? { startedAt: str(t.startedAt)! } : {}),
     ...(str(t.deliveredAt) ? { deliveredAt: str(t.deliveredAt)! } : {}),
@@ -746,6 +751,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         types: arr(raw.types).map(sanitizeTypeDef).filter((s): s is TaskTypeDef => s !== null),
         ...(raw.typesSeeded === true || arr(raw.types).length > 0 ? { typesSeeded: true } : {}),
         ...(raw.inReviewSeeded === true ? { inReviewSeeded: true } : {}),
+        ...(raw.dueBackfilled === true ? { dueBackfilled: true } : {}),
       }
     }
   }
@@ -1191,6 +1197,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
           types: book.types,
           ...(book.typesSeeded ? { typesSeeded: true } : {}),
           ...(book.inReviewSeeded ? { inReviewSeeded: true } : {}),
+          ...(book.dueBackfilled ? { dueBackfilled: true } : {}),
           // Remembered as DELETED, or the legacy migration mints it again on the next read.
           tombstones: [...new Set([...book.tombstones, id])],
         })
@@ -1319,6 +1326,14 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         if (book.inReviewSeeded) return
         const add = def && !book.statuses.some(s => s.id === def.id) ? [def] : []
         await write({ ...book, statuses: [...book.statuses, ...add], inReviewSeeded: true })
+      })
+    },
+    backfillEstimatedDue(plan) {
+      return enqueue(async () => {
+        const book = await read()
+        if (book.dueBackfilled) return
+        await write({ ...book, dueBackfilled: true,
+          subtasks: book.subtasks.map(s => (!s.dueDate && plan.has(s.id) ? { ...s, dueDate: plan.get(s.id)!, dueEstimated: true } : s)) })
       })
     },
     upsertStatus(def) {

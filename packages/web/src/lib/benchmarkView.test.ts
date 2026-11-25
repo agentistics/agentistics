@@ -1,14 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 import { buildComparisons, taskSides, type HistorySubtaskRow, type Observed, type ObservedHistory } from '@agentistics/core/benchmark'
-import { entriesOf, heroOf, historyTaskRows } from './benchmarkView'
+import { entriesOf, heroOf, historyTaskRows, measuredBadge, comparisonScore } from './benchmarkView'
+import { pointTone } from './benchmarkScore'
 
 const H = 3_600_000
 const sub = (id: string, o: Partial<HistorySubtaskRow> = {}): HistorySubtaskRow => ({
-  id, title: id, status: 'done', size: 'M', sessions: 2, costUSD: 4, costPartial: false, wallMs: 2 * H, activeMs: null, qaRounds: 1, reworked: false, lines: 200, ...o,
+  id, title: id, status: 'done', size: 'M', sessions: 2, costUSD: 4, costPartial: false, wallMs: 2 * H, activeMs: null, qaRounds: 1, reworked: false, lines: 200, model: null, harness: null, accepted: null, ...o,
 })
 const history = (subs: HistorySubtaskRow[]): ObservedHistory => ({
   pieces: subs.length,
-  tasks: [{ id: 'T', title: 'Task', status: 'done', size: 'M', pieces: subs.length, sessions: subs.length * 2, costUSD: 40, costPartial: false, wallMs: 5 * H, activeMs: null, qaRounds: 4, reworkedPieces: 3, lines: 800, subtasks: subs, sides: { qa: taskSides(subs, 'qa'), sessions: taskSides(subs, 'sessions') } }],
+  tasks: [{ id: 'T', title: 'Task', status: 'done', size: 'M', pieces: subs.length, sessions: subs.length * 2, costUSD: 40, costPartial: false, wallMs: 5 * H, activeMs: null, qaRounds: 4, reworkedPieces: 3, lines: 800, subtasks: subs, overall: { pieces: subs.length, sessions: 2, costUSD: 4, costPartial: false, wallMs: 2 * H, qaRounds: 1 }, sides: { qa: taskSides(subs, 'qa'), sessions: taskSides(subs, 'sessions'), models: taskSides(subs, 'models'), harnesses: taskSides(subs, 'harnesses') } }],
   buckets: [], comparisons: buildComparisons(subs), coverage: { pieces: subs.length, withCost: subs.length, withWall: subs.length, withoutDuration: 0, withQa: subs.length, withSize: subs.length, withActive: 0, pctWithCost: 100, harnessesWithoutCost: ['codex'], harnessesPartialCost: [] },
 })
 const obs = (h: ObservedHistory | undefined): Observed => ({ deliveries: 5, metrics: { qaFirstRoundRejection: { value: 0.365, n: 192 } }, coverage: {}, history: h }) as unknown as Observed
@@ -53,12 +54,14 @@ describe('an observed comparison is read with the prototype\'s point rule (margi
   const subs = [...Array.from({ length: 4 }, (_, i) => sub(`o${i}`, { qaRounds: 1, costUSD: 100, wallMs: H, sessions: 1 })), ...Array.from({ length: 4 }, (_, i) => sub(`m${i}`, { qaRounds: 3, costUSD: 80, wallMs: H, sessions: 5 }))]
   const o = { history: history(subs) } as unknown as Observed
   const e = entriesOf(o, [], 'pt')[0]!
-  test('the hero and the list card say Compensou at 53,3', () => {
-    expect(e.score).toBeCloseTo(53.3, 0)
-    expect(e.tone).toBe('good')
-    const hero = heroOf(e, o, 'pt', { currency: 'USD' })
-    expect(hero.tone).toBe('good')
-    expect(hero.word).toBe('Compensou')
+  test('the point rule says "pays" at 53,3 — but with only cost and time measured the card carries no verdict', () => {
+    const sc = comparisonScore(comparisonsOf(o.history!, 'pt')[0]!).score!
+    expect(sc).toBeCloseTo(53.3, 0)
+    expect(pointTone(sc)).toBe('good')
+    expect(e).toMatchObject({ tone: 'none', word: 'sem dados suficientes' }); expect(e.score).toBeCloseTo(53.3, 0)
+    expect(heroOf(e, o, 'pt', { currency: 'USD' })).toMatchObject({ tone: 'none', word: 'Sem dados suficientes' })
+    // the approved hero structure stays: the PARTIAL score is carried, honestly, without a verdict tone
+    expect(heroOf(e, o, 'pt', { currency: 'USD' }).score).toBeCloseTo(sc, 6)
   })
 })
 
@@ -110,29 +113,29 @@ describe('observed comparisons the history already allows', () => {
     const es = entriesOf(obs(h), [], 'pt')
     expect(es.map(e => e.id)).toEqual(['qa', 'sessions', 'models', 'harnesses'])
     // 2.5× the cost and 4× the time on side B → ratios 0.4 and 0.25 → (30·nr(.4) + 20·nr(.25)) / 50
-    expect(es[0]!.score).toBeCloseTo((30 * (100 / 3.5) + 20 * 20) / 50, 5)
-    expect(es[0]).toMatchObject({ kind: 'comparison', tone: 'bad', word: 'Não compensou' })
+    expect(comparisonScore(comparisonsOf(h, 'pt')[0]!).score).toBeCloseTo((30 * (100 / 3.5) + 20 * 20) / 50, 5)
+    // only 2 of the 4 dimensions are measured: the partial score stays (as in the hero), with no verdict tone or word
+    expect(es[0]).toMatchObject({ kind: 'comparison', tone: 'none', word: 'sem dados suficientes' }); expect(es[0]!.score).not.toBeNull()
     expect(es.slice(2).every(e => e.kind === 'unmeasured' && e.score === null && e.word === 'sem medição' && !!e.reason)).toBe(true)
     expect(es.slice(2).every(e => e.kind === 'unmeasured' && e.score === null && e.word === 'sem medição' && !!e.reason)).toBe(true)
-    expect(entriesOf(obs(h), [], 'en')[0]!.word).toBe('Did not pay off')
+    expect(entriesOf(obs(h), [], 'en')[0]!.word).toBe('not enough data')
     expect(entriesOf(obs(undefined), [], 'pt')[0]!.id).toBe('observed')       // an older server: the single history entry
   })
 
   test('hero: the verdict word and N de 100, ONE sentence in the prototype mould, no caption, the rest behind a disclosure', () => {
     const e = entriesOf(obs(h), [], 'pt')[0]!
     const hero = heroOf(e, obs(h), 'pt', { currency: 'USD' })
-    expect(hero).toMatchObject({ word: 'Não compensou', tone: 'bad' })
+    expect(hero).toMatchObject({ word: 'Sem dados suficientes', tone: 'none' })
+    expect(hero.score).not.toBeNull()
     expect(hero.say).toBe('Com 2+ rodadas de QA: 2,5× mais custo, 4× mais tempo, 5× mais sessões.')
-    expect(hero.score).toBeCloseTo(25.1, 0)
     expect(hero.delta).toBeNull()
     expect(hero).not.toHaveProperty('caption')
     expect(hero.word).not.toContain('Indício')
     expect(hero.disclosure).toBe('Por que esse resultado?')
     // the approved prototype's disclosure: why the verdict, the firmness sentence, then "Baseado em" — exactly three, in this order
-    expect(hero.why).toHaveLength(3)
-    expect(hero.why[0]).toBe('A nota fica abaixo do empate.')
-    expect(hero.why[1]).toMatch(/pesos|Com outros pesos/)
-    expect(hero.why[2]).toContain('Baseado em indício observado, não em experimento: contra 1 rodada de QA · 4 × 4 peças')
+    expect(hero.why).toHaveLength(2)
+    expect(hero.why[0]).toContain('2 de 4 dimensões medidas')
+    expect(hero.why[1]).toContain('Baseado em indício observado, não em experimento: contra 1 rodada de QA · 4 × 4 peças')
     expect(hero.why.join('\n')).not.toMatch(/experimento controlado|Qualidade final|Cobertura por harness|rótulo das sessões/)
     expect(hero.facts).toBeUndefined()
     // L1: the disclosure carries no ratio of its own beyond the piece counts
@@ -140,13 +143,13 @@ describe('observed comparisons the history already allows', () => {
     const s = heroOf(entriesOf(obs(h), [], 'pt')[1]!, obs(h), 'pt', { currency: 'USD' })
     expect(s.say).toContain('retrabalho 0% → 100%')
     const en = heroOf(entriesOf(obs(h), [], 'en')[0]!, obs(h), 'en', { currency: 'USD' })
-    expect(en.word).toBe('Did not pay off')
+    expect(en.word).toBe('Not enough data')
     expect(en).not.toHaveProperty('caption')
     expect(en.say).toBe('With 2+ QA rounds: 2.5× more cost, 4× more time, 5× more sessions.')
     expect(en.disclosure).toBe('Why this result?')
-    expect(en.why).toHaveLength(3)
-    expect(en.why[0]).toBe('The score is below the tie.')
-    expect(en.why[2]).toMatch(/^Based on observed evidence, not an experiment: against /)
+    expect(en.why).toHaveLength(2)
+    expect(en.why[0]).toContain('2 of 4 dimensions measured')
+    expect(en.why[1]).toMatch(/^Based on observed evidence, not an experiment: against /)
   })
 
   test('L1: the sessions comparison carries no QA lines in its disclosure', () => {
@@ -211,5 +214,43 @@ describe('observed comparisons the history already allows', () => {
     expect(moneyText(3802.89 / 5.6461, 'pt', { currency: 'BRL', brlRate: 5.6461 })).toBe('R$ 3.802,89')
     expect(moneyText(3802.9 / 5.6461, 'pt', { currency: 'BRL', brlRate: 5.6461 })).toBe('R$ 3.802,90')
     expect(moneyText(19.8, 'en', { currency: 'USD' })).toBe('$19.80')
+  })
+})
+
+describe('BENCHMARK.LACUNAS: "firm" needs 3 of the 4 dimensions measured', () => {
+  const subs = [
+    ...Array.from({ length: 4 }, (_, i) => sub(`one${i}`, { sessions: 1, costUSD: 2, wallMs: null })),
+    ...Array.from({ length: 4 }, (_, i) => sub(`many${i}`, { sessions: 6, costUSD: 5, wallMs: null })),
+  ]
+  const o = obs(history(subs))
+  const sessionsEntry = () => entriesOf(o, [], 'pt').find(e => e.id === 'sessions')!
+  test('with only cost measured the verdict is "sem dados suficientes" and the badge says "só custo medido", never "Resultado firme"', () => {
+    const e = sessionsEntry()
+    expect(e.score).not.toBeNull(); expect(e.tone).toBe('none'); expect(e.word).toBe('sem dados suficientes')
+    const hero = heroOf(e, o, 'pt', { currency: 'USD' })
+    expect(hero.word).toBe('Sem dados suficientes'); expect(hero.score).not.toBeNull(); expect(hero.tone).toBe('none')
+    expect(hero.firm).toEqual({ ok: false, text: 'Só custo medido' })
+    expect(JSON.stringify(hero)).not.toContain('Resultado firme')
+    expect(hero.why.join('\n')).toContain('1 de 4 dimensões medidas')
+  })
+  test('cost and time are 2 of 4: still not enough, and the badge names both', () => {
+    const both = obs(history([...Array.from({ length: 4 }, (_, i) => sub(`a${i}`, { sessions: 1, costUSD: 2, wallMs: H })), ...Array.from({ length: 4 }, (_, i) => sub(`b${i}`, { sessions: 6, costUSD: 5, wallMs: 3 * H }))]))
+    const c = comparisonsOf(both.history!, 'pt').find(x => x.id === 'sessions')!
+    expect(measuredBadge(c, 'pt')).toBe('Só custo e tempo medidos')
+    expect(heroOf(entriesOf(both, [], 'pt').find(e => e.id === 'sessions')!, both, 'pt', { currency: 'USD' }).word).toBe('Sem dados suficientes')
+  })
+})
+
+describe('BENCHMARK.LACUNAS: Sonnet × Opus and Entre harnesses are computed when the pieces allow it', () => {
+  const mk = (n: number, o: Partial<HistorySubtaskRow>) => Array.from({ length: n }, (_, i) => sub(`${o.model ?? o.harness}${i}`, o))
+  test('with 3 + 3 pieces the model comparison is a card of its own, not a "sem medição" slot', () => {
+    const e = entriesOf(obs(history([...mk(3, { model: 'sonnet', costUSD: 2 }), ...mk(3, { model: 'opus', costUSD: 6 })])), [], 'pt')
+    expect(e.find(x => x.id === 'models')!.kind).toBe('comparison')
+  })
+  test('with too few pieces the slot stays, and says how many each side has and the minimum', () => {
+    const qaPair = [...mk(3, { qaRounds: 1, costUSD: 2 }), ...mk(3, { qaRounds: 3, costUSD: 5 })].map((x, i) => ({ ...x, id: `q${i}` }))
+    const e = entriesOf(obs(history([...qaPair, ...mk(2, { model: 'sonnet' }), ...mk(5, { model: 'opus' })])), [], 'pt')
+    const m = e.find(x => x.id === 'models')!
+    expect(m.kind).toBe('unmeasured'); expect(m.reason).toContain('Sonnet 2 × Opus 5'); expect(m.reason).toContain('mínimo 3')
   })
 })

@@ -324,6 +324,8 @@ export interface Task {
    * `startedAt`/`deliveredAt` do.
    */
   dueDate?: string
+  /** True when `dueDate` was ESTIMATED by the server (a session filed this without one), not typed. A typed `dueDate` replaces it and clears the flag. */
+  dueEstimated?: boolean
   startDate?: string
   /** Free-text labels. Filtering and grouping only; they carry no rule. */
   labels?: string[]
@@ -501,6 +503,8 @@ export interface Subtask {
    * round-tripped by `task-store.ts`, and no longer offered by any UI.
    */
   dueDate?: string
+  /** True when `dueDate` was ESTIMATED by the server (a session filed this without one), not typed. A typed `dueDate` replaces it and clears the flag. */
+  dueEstimated?: boolean
   startDate?: string
   /**
    * When real work actually began on THIS piece, ISO — system-stamped, never user-editable. Stamped
@@ -726,6 +730,8 @@ export interface TaskBook {
   typesSeeded?: boolean
   /** `in_review` was added to this book's status list once (see `planInReviewAdd`); never re-added after. */
   inReviewSeeded?: boolean
+  /** Open subtasks with no due day were given an ESTIMATED one once (`planDueBackfill`); never run again on this book. */
+  dueBackfilled?: boolean
   /**
    * The activity log, newest LAST, for every task at once.
    *

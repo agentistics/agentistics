@@ -4,7 +4,7 @@ import { Flag, Info } from 'lucide-react'
 import type { ComparisonKey, HistoryTaskRow } from '@agentistics/core/benchmark'
 import { TabStrip } from '../sessions/formBits'
 import { nf, type Lang, type Money } from '../../lib/benchmarkFormat'
-import { durationText, historyRowScore, historyTaskRows, matches, moneyText, sizeLabel, type HistorySortKey, type SizeFilter } from '../../lib/benchmarkView'
+import { acceptedText, durationText, historyRowScore, historyTaskRows, matches, moneyText, sizeLabel, type HistorySortKey, type SizeFilter } from '../../lib/benchmarkView'
 import { TaskVerdictCell } from './BenchTasks'
 import { BoardPager } from '../tasks/BoardPager'
 import { BOARD_PAGE_SIZES, DEFAULT_BOARD_PAGE_SIZE, resolveBoardPage } from '../tasks/boardPaging'
@@ -36,8 +36,17 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
   const ms = (v: number | null) => v === null ? dash : durationText(v, lang)
   const q = (v: number | null) => v === null ? dash : nf(v, lang, 0)
   /** The prototype's "um → outro": side A, then side B, "—" for a side with nothing measured. */
-  const noData = <UnmeasuredPill lang={lang} testId="benchmark-task-unmeasured" />
-  const pair = (v: readonly [number | null, number | null], f: (n: number | null, side: 0 | 1) => string) => v[0] === null && v[1] === null ? noData : `${f(v[0], 0)} → ${f(v[1], 1)}`
+  const noData = (why: string) => <UnmeasuredPill lang={lang} testId="benchmark-task-unmeasured" title={why} />
+  const whyPieces = pt ? 'Nenhuma peça desta tarefa tem esse número medido.' : 'No piece of this task has this figure measured.'
+  /** Both sides empty: show the task's own median (all its pieces), marked as NOT a comparison; only without even that does the column say nothing was measured. */
+  const pair = (v: readonly [number | null, number | null], f: (n: number | null, side: 0 | 1 | 2) => string, overall: number | null = null, why = whyPieces) => {
+    if (v[0] !== null || v[1] !== null) return `${f(v[0], 0)} → ${f(v[1], 1)}`
+    if (overall === null) return noData(why)
+    return <span data-testid="benchmark-task-overall" title={pt ? 'Mediana das peças da tarefa inteira. Não é uma comparação: nenhum dos dois lados tem peças medidas.' : 'Median of the whole task\'s pieces. Not a comparison: neither side has measured pieces.'}>{f(overall, 2)} <span style={{ ...muted, fontSize: 10.5 }}>{pt ? 'tarefa' : 'task'}</span></span>
+  }
+  const whyDefects = pt ? 'Defeitos ainda não são registrados: falta o registro estruturado do QA (defeito, gravidade, peça reaberta).' : 'Defects are not recorded yet: the structured QA record (defect, severity, reopened piece) does not exist.'
+  const whyAccepted = pt ? 'Aceita vem da validação do dono (subtarefa concluída): esta tarefa ainda não foi validada.' : 'Accepted comes from the owner\'s validation (subtask done): this task has not been validated yet.'
+  const whyQa = pt ? 'Nenhuma rodada de revisão registrada nas peças desta tarefa.' : 'No review round is recorded for this task\'s pieces.'
   const sz = (s: 'S' | 'M' | 'L' | null) => s === null ? dash : sizeLabel(s, lang)
   const head = (key: HistorySortKey, label: string, num = false) =>
     <th className={num ? 'bm-num' : undefined} aria-sort={sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
@@ -64,12 +73,12 @@ export function BenchHistoryTasks({ tasks, lang, money, sides = 'qa', initialOpe
               return <React.Fragment key={t.id}>
                 <tr className="bm-t" data-testid="benchmark-task-row" data-task={t.id} onClick={() => { setOpen(open === t.id ? null : t.id); setSubNeedle('') }} aria-expanded={open === t.id}>
                   <td><div className="bm-clamp" title={t.title}>{t.title}</div></td><td data-l={pt ? 'Tamanho' : 'Size'}>{sz(t.size)}</td>
-                  <td className="bm-num" data-l={pt ? 'Sessões' : 'Sessions'}>{pair(sd.sessions, q)}</td>
-                  <td className="bm-num" data-l={pt ? 'Custo' : 'Cost'}>{pair(sd.costUSD, (v, i) => cost(v, sd.costPartial[i]))}</td>
-                  <td className="bm-num" data-l={pt ? 'Tempo' : 'Time'}>{pair(sd.wallMs, ms)}</td>
-                  <td className="bm-num" data-l="QA">{pair(sd.qaRounds, q)}</td>
-                  <td className="bm-num" data-l={pt ? 'Defeitos' : 'Defects'}>{pair(sd.defects, q)}</td>
-                  <td data-l={pt ? 'Aceita' : 'Accepted'} style={{ whiteSpace: 'nowrap' }}>{pair([null, null], q)}</td>
+                  <td className="bm-num" data-l={pt ? 'Sessões' : 'Sessions'}>{pair(sd.sessions, q, t.overall?.sessions ?? null)}</td>
+                  <td className="bm-num" data-l={pt ? 'Custo' : 'Cost'}>{pair(sd.costUSD, (v, i) => cost(v, i === 2 ? (t.overall?.costPartial ?? false) : sd.costPartial[i]), t.overall?.costUSD ?? null)}</td>
+                  <td className="bm-num" data-l={pt ? 'Tempo' : 'Time'}>{pair(sd.wallMs, ms, t.overall?.wallMs ?? null)}</td>
+                  <td className="bm-num" data-l="QA">{pair(sd.qaRounds, q, t.overall?.qaRounds ?? null, whyQa)}</td>
+                  <td className="bm-num" data-l={pt ? 'Defeitos' : 'Defects'}>{pair(sd.defects, q, null, whyDefects)}</td>
+                  <td data-l={pt ? 'Aceita' : 'Accepted'} style={{ whiteSpace: 'nowrap' }}>{sd.accepted[0] === null && sd.accepted[1] === null ? noData(whyAccepted) : acceptedText(sd.accepted, lang)}</td>
                   <TaskVerdictCell score={historyRowScore(sd)} lang={lang} />
                 </tr>
                 {open === t.id && <tr className="bm-d" data-testid="benchmark-task-detail"><td className="bm-d" colSpan={9}>

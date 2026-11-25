@@ -1155,6 +1155,25 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await handleMemoryRequest(req, url, await liveMemoryDeps())
       return json(out.body, out.status)
     }
+    // DOCKER.AMBIENTES S1: backend decision, scoped choice, install hint (`env-web.ts`). `capability-guard.ts` has
+    // already refused it on an exposed profile; writes are the person's or a verified leader's.
+    if (url.pathname.startsWith('/api/env/')) {
+      const web = await import('./env-web')
+      // WHO is calling comes from the SOCKET (same reader the browser padlock uses), never the body: a request
+      // that merely omits `session` is not the person. `session` and `unknown` both refuse writes.
+      const envCaller = async (): Promise<'person' | 'session' | 'unknown'> => {
+        const [{ identifyCaller }, { processSessionHub }] = await Promise.all([import('./browser/browser-caller-proc'), import('./sessions/session-hub')])
+        const sessionPids = new Set<number>()
+        for (const r of processSessionHub()?.last()?.sessions ?? []) if (typeof r.pid === 'number') sessionPids.add(r.pid)
+        const ip = server.requestIP(req)
+        const verdict = await identifyCaller({ peer: ip ? { address: ip.address, port: ip.port } : null, serverPorts: [PORT, WEB_PORT], sessionPids })
+        // A remote peer is the person only with the owner's grant (the personal-browser padlock's own proof).
+        const [{ requestHasPersonalGrant }, { vaultHttpSession }] = await Promise.all([import('./browser/personal-doors'), import('./vault/http')])
+        return web.envCallerFrom(verdict, requestHasPersonalGrant(req, vaultHttpSession('local')))
+      }
+      const out = await web.handleEnvRequest(req, url, await (await import('./flows/host-ops')).defaultEnvDeps(envCaller))
+      if (out) return json(out.body, out.status)
+    }
     if (url.pathname === '/api/experimental' && (req.method === 'GET' || req.method === 'PUT')) {
       // GET: what this server booted with. PUT `{ enabled }`: the switch used by the `agentop experimental` command — it
       // persists the preference and applies it to this process WITHOUT a restart (`experimental-web.ts`).
@@ -2477,8 +2496,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(found)
     }
     if (url.pathname === '/api/tasks' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string; priority?: string }
+      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string; priority?: string; dueDate?: string; session?: { id?: unknown } | null }
       const { createTask } = await import('./sessions/task-web')
+      // CALENDARIO.PRAZO-OBRIGATORIO: a verified SESSION's create with no due day gets an ESTIMATED one (the 403 screen above already refused a forged proof).
+      const bySession = !!body.session && typeof body.session === 'object' && typeof body.session.id === 'string'
       // FLUXO.AVISOS 9: an unknown priority word is refused, never silently stored as `low`.
       if (body.priority !== undefined && !['urgent', 'high', 'medium', 'low'].includes(body.priority)) return json({ error: 'bad_priority', message: 'priority must be urgent | high | medium | low' }, 400)
       const made = await createTask({
@@ -2486,9 +2507,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         ...(body.detail !== undefined ? { detail: body.detail } : {}),
         ...(typeof body.type === 'string' ? { type: body.type } : {}),
         ...(body.priority !== undefined ? { priority: body.priority } : {}),
+        ...(typeof body.dueDate === 'string' ? { dueDate: body.dueDate } : {}),
+        ...(bySession ? { bySession: true } : {}),
       })
       if (!made) return json({ error: 'title_required' }, 400)
-      return json({ task: made })
+      const { estimatedDueNotice } = await import('./sessions/task-estimated-due')
+      return json({ task: made, ...(made.dueEstimated && made.dueDate ? estimatedDueNotice(made.dueDate) : {}) })
     }
 
     // A task file, by its own id. Separate from the task routes because a download is addressed by
@@ -2614,6 +2638,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const guardOut = await (await import('./delivery/request-deps')).guardContextOfRequest(body)
       if (!guardOut.ok) return json(guardOut.reply.body, guardOut.reply.status)
       const guardCtx: import('./delivery/guard').GuardContext = guardOut.ctx
+      // The claim only reaches here proven (a bad one was refused 403 above); it marks a move by a SESSION, which gets an estimated due day.
+      const sessionClaim = body.session as { id?: unknown } | undefined | null
       // S0d.6 (QA F6): a write that SPEAKS AS THE OWNER (an owner comment created/edited/removed, a thread sent "as the
       // person") needs the owner principal — the same resolution as `/api/deliveries` (grant → session → legacy browser).
       const ownerGate = async (pieceKey: string, move: string) => {
@@ -2850,7 +2876,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           // work this request cannot do, not a resource that is missing. `no_such_subtask` stays
           // 404: the id named nothing.
           if (typeof body.done === 'boolean' && Object.keys(body).filter(k => k !== 'session').length === 2) {
-            const result = await mod.setSubtaskDone(body.id, body.done, guardCtx)
+            const result = await mod.setSubtaskDone(body.id, body.done, guardCtx, !!sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string')
             return json(result, result.ok ? 200 : 'guard' in result ? result.guard.status : (result.message === 'done_needs_session' ? 422 : 404))
           }
           // A staged session draft (t-918cc82233): `null` clears, an object is validated HERE before
@@ -2869,6 +2895,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             ...(typeof body.title === 'string' ? { title: body.title } : {}),
             ...(typeof body.status === 'string' ? { status: body.status as never } : {}),
             ...(typeof body.dueDate === 'string' ? { dueDate: body.dueDate } : {}),
+            ...(sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string' ? { bySession: true } : {}),
             ...(typeof body.startDate === 'string' ? { startDate: body.startDate } : {}),
             ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
             ...(typeof body.notes === 'string' ? { notes: body.notes } : {}),
@@ -2914,10 +2941,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // back so a caller minting a group (rather than an ordinary subtask) can join members to
         // it in the same flow — a bare `{ ok }` gave the "create a group with…" gesture nothing to
         // join against.
-        const newId = await mod.addSubtask(ref, String(body.title ?? ''), {
+        const made = await mod.addSubtaskDetailed(ref, String(body.title ?? ''), {
           ...(body.isGroup === true ? { isGroup: true } : {}),
+          ...(typeof body.dueDate === 'string' ? { dueDate: body.dueDate } : {}),
+          ...(sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string' ? { bySession: true } : {}),
         })
-        return json({ ok: newId !== null, id: newId }, newId !== null ? 200 : 400)
+        const { estimatedDueNotice } = await import('./sessions/task-estimated-due')
+        return json({ ok: made !== null, id: made?.id ?? null, ...(made?.dueEstimated && made.dueDate ? estimatedDueNotice(made.dueDate) : {}) }, made !== null ? 200 : 400)
       }
       if (verb === 'claim') {
         // `release: true` gives it back; anything else takes it. One verb, because a caller holding
@@ -2973,14 +3003,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           })
           if (refused) return json(refused.body, refused.status)
         }
+        const estimateReport: { estimatedDue?: string } = {}
         const ok = await mod.editTask(ref, {
           ...Object.fromEntries(FIELDS.filter(f => typeof body[f] === 'string').map(f => [f, body[f] as string])),
           ...(Array.isArray(body.labels)
             ? { labels: body.labels.filter((v): v is string => typeof v === 'string') }
             : {}),
           ...(typeof body.actor === 'string' ? { actor: body.actor } : {}),
-        })
-        return json({ ok }, ok ? 200 : 404)
+          ...(sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string' ? { bySession: true } : {}),
+        }, estimateReport)
+        const { estimatedDueNotice } = await import('./sessions/task-estimated-due')
+        return json({ ok, ...(estimateReport.estimatedDue ? estimatedDueNotice(estimateReport.estimatedDue) : {}) }, ok ? 200 : 404)
       }
       // Blockers ALONE. With a `status` beside them the two belong to one move — "this is blocked,
       // and here is what by" — and answering it here would set the blockers and silently drop the
@@ -3004,6 +3037,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             ? { blockedBy: body.blockedBy.filter((v): v is string => typeof v === 'string') }
             : {}),
           guard: guardCtx,
+          ...(sessionClaim && typeof sessionClaim === 'object' && typeof sessionClaim.id === 'string' ? { bySession: true } : {}),
         },
       )
       // 400, not 404: `unknown_status` is the same class of error `bad_status` above already is —

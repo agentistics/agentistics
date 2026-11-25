@@ -343,7 +343,7 @@ describe('§3.5.5 the handback is HELD, never lost; and the other doors (engine 
 
   test('the doors pass a context (source wiring): index.ts, cli-task, the cockpit finish, the delivery host and the engine board', () => {
     const src = (rel: string) => readFileSync(join(SERVER_ROOT, rel), 'utf8')
-    expect(src('server/index.ts')).toMatch(/setSubtaskDone\(body\.id, body\.done, guardCtx\)/)
+    expect(src('server/index.ts')).toMatch(/setSubtaskDone\(body\.id, body\.done, guardCtx[,)]/)
     expect(src('server/index.ts')).toMatch(/guard: guardCtx/)
     expect(src('server/sessions/cli-task.ts')).toMatch(/guard: \{ principal: who\.principal \}/)
     expect(src('server/cli-start.ts')).toMatch(/guard: unattributedContext\(\)/)

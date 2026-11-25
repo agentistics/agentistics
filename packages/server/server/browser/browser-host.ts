@@ -608,6 +608,9 @@ export class BrowserHost {
     if (!e) return { ok: false, reason: 'start-failed', sentence: 'The browser could not be started.' }
     e.minimizedAt = null
     e.lastActivityMs = this.d.now()
+    // The browser starts with one blank tab. It becomes the default page / the first restored tab, never a
+    // stray "New tab" left beside it: the blank ones are closed once a real page is open.
+    const blanks = [...e.tabs.values()].filter(t => !t.url || t.url === 'about:blank').map(t => t.targetId)
     let restored = 0
     if (saved) {
       this.savedTabs.delete(key)
@@ -620,6 +623,14 @@ export class BrowserHost {
     if (restored === 0 && [...e.tabs.values()].every(t => !t.url || t.url === 'about:blank')) {
       const r = await this.openTab(key, homeUrl)
       home = r.ok
+    }
+    if (restored > 0 || home) {
+      for (const id of blanks) {
+        if (!e.tabs.has(id) || !e.cdp) continue
+        try { await e.cdp.send('Target.closeTarget', { targetId: id }) } catch { /* already gone */ }
+        e.tabs.delete(id)
+      }
+      if (!e.tabs.has(e.activeTab ?? '')) e.activeTab = [...e.tabs.keys()].pop() ?? null
     }
     return { ok: true, restored, home, wasStopped }
   }

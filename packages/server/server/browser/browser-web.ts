@@ -243,7 +243,15 @@ export const DEFAULT_HOME_URL = 'https://www.google.com'
 export function homeUrlOf(pref: unknown): string {
   if (typeof pref !== 'string') return DEFAULT_HOME_URL
   const t = pref.trim()
-  return /^https?:\/\/[^\s]+$/i.test(t) && t.length <= 2048 ? t : DEFAULT_HOME_URL
+  if (!/^https?:\/\/[^\s]+$/i.test(t) || t.length > 2048) return DEFAULT_HOME_URL
+  // The prefix alone accepts `https://[`, which the host then refuses as invalid and the tab stays
+  // about:blank — so the page must PARSE, as the browser host parses it, with a real host.
+  try {
+    const u = new URL(t)
+    return (u.protocol === 'http:' || u.protocol === 'https:') && u.hostname !== '' ? t : DEFAULT_HOME_URL
+  } catch {
+    return DEFAULT_HOME_URL
+  }
 }
 
 /** `null` = not a browser route this module serves (the caller answers 404). */
@@ -332,8 +340,11 @@ export async function browserRoute(method: string, pathname: string, body: unkno
   if (!isBrowserAction(action) || (route === 'personal' && !PERSONAL_ACTIONS.includes(action))) {
     return { status: 404, body: { ok: false, error: 'unknown_action', sentence: `No browser action "${action.slice(0, 40)}".` } }
   }
-  // A new tab of the person's browser opens their default page, never a blank one.
-  const body2 = route === 'personal' && action === 'tab_new' && (b.url === undefined || b.url === '') ? { ...b, url: deps.homeUrl?.() ?? DEFAULT_HOME_URL } : b
+  // A new tab opens the default page, never a blank one — the person's own browser and the model's alike
+  // (the person watches the model's; an agent that wants a specific page passes its url, which is untouched).
+  const homeUrl = deps.homeUrl?.() ?? DEFAULT_HOME_URL
+  const noUrl = b.url === undefined || b.url === ''
+  const body2 = action === 'tab_new' && noUrl ? { ...b, url: homeUrl } : b
   const parsed = parseActionArgs(action, body2)
   if (!parsed.ok) return { status: 400, body: { ok: false, error: parsed.error, sentence: parsed.sentence } }
 
@@ -367,6 +378,15 @@ export async function browserRoute(method: string, pathname: string, body: unkno
     }
     h = deps.host.actionHost(key)
     if (!h) return { status: 503, body: { ok: false, error: 'start-failed', sentence: 'The browser could not be started.' } }
+    // A browser that has just started holds one blank tab; the person watching must never see it. Anything but
+    // a navigate (which replaces it) first sends it to the default page; a url-less tab_new is that page itself.
+    if (action !== 'navigate') {
+      const home = parseActionArgs('navigate', { url: homeUrl })
+      if (home.ok) {
+        const first = await deps.run(h, home.args)
+        if (action === 'tab_new' && noUrl) return { status: 200, body: first }
+      }
+    }
   }
   return { status: 200, body: await deps.run(h, parsed.args) }
 }

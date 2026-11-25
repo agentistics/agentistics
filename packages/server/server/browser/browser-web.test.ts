@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import { browserAllowed, decideDriver } from './browser-gate'
-import { browserRoute, type RouteDeps, type RouteHost } from './browser-web'
+import { DEFAULT_HOME_URL, browserRoute, homeUrlOf, type RouteDeps, type RouteHost } from './browser-web'
 import type { ActionHost } from './browser-actions'
 import type { BrowserOwner } from './browser-spec'
 
@@ -60,7 +60,7 @@ describe('browserRoute', () => {
   test("another session's id in the body (owner/key/managedId) changes nothing: the proof decides", async () => {
     const f = fakeDeps()
     await browserRoute('POST', '/api/browser/session/click', { session: proof('aaa'), managedId: 'bbb', owner: { kind: 'session', managedId: 'bbb' }, key: 's-bbb', ref: 'e1' }, f.deps)
-    expect(f.ran.map(r => r.key)).toEqual(['s-aaa'])
+    expect([...new Set(f.ran.map(r => r.key))]).toEqual(['s-aaa'])
   })
 
   test('a forged or missing proof is refused before anything starts', async () => {
@@ -203,5 +203,60 @@ describe('browserRoute', () => {
     const f = fakeDeps()
     expect(await browserRoute('GET', '/api/browser/status', undefined, f.deps)).toEqual({ status: 200, body: { live: [], personalAccess: false, personalSaved: null } })
     expect((await browserRoute('POST', '/api/browser/status', {}, f.deps))?.status).toBe(405)
+  })
+})
+
+describe('the model\'s browser always shows the default page, never a blank one', () => {
+  const HOME = 'https://home.example/'
+  const withHome = () => fakeDeps({ homeUrl: () => HOME })
+
+  test('a new tab with no address opens the default page (the model asks too)', async () => {
+    const f = withHome()
+    f.live.add('s-aaa')
+    await browserRoute('POST', '/api/browser/session/tab_new', { session: proof('aaa') }, f.deps)
+    await browserRoute('POST', '/api/browser/session/tab_new', { session: proof('aaa'), url: 'https://x.example/' }, f.deps)
+    expect(f.ran.map(r => r.args)).toEqual([{ action: 'tab_new', url: HOME }, { action: 'tab_new', url: 'https://x.example/' }])
+  })
+
+  test('a malformed stored home page falls back to the default through the session route', async () => {
+    for (const bad of ['https://[', 'http://', 'https:// space', 'javascript:alert(1)', '']) {
+      const f = fakeDeps({ homeUrl: () => homeUrlOf(bad) })
+      f.live.add('s-aaa')
+      await browserRoute('POST', '/api/browser/session/tab_new', { session: proof('aaa') }, f.deps)
+      expect(f.ran.map(r => r.args)).toEqual([{ action: 'tab_new', url: DEFAULT_HOME_URL }])
+    }
+  })
+
+  test('first open by any verb but navigate: the starting blank tab is sent to the default page first', async () => {
+    const f = withHome()
+    await browserRoute('POST', '/api/browser/session/click', { session: proof('aaa'), ref: 'e1' }, f.deps)
+    expect(f.ran.map(r => r.args)).toEqual([{ action: 'navigate', url: HOME }, { action: 'click', ref: 'e1', button: 'left', double: false }])
+  })
+
+  test('first open with tab_new and no address is just the default page (no second tab)', async () => {
+    const f = withHome()
+    await browserRoute('POST', '/api/browser/session/tab_new', { session: proof('aaa') }, f.deps)
+    expect(f.ran.map(r => r.args)).toEqual([{ action: 'navigate', url: HOME }])
+  })
+
+  test('first open by navigate: nothing extra; an already-live browser: nothing extra', async () => {
+    const f = withHome()
+    await browserRoute('POST', '/api/browser/session/navigate', { session: proof('aaa'), url: 'https://x.example/' }, f.deps)
+    await browserRoute('POST', '/api/browser/session/click', { session: proof('aaa'), ref: 'e1' }, f.deps)
+    expect(f.ran.map(r => r.args)).toEqual([{ action: 'navigate', url: 'https://x.example/' }, { action: 'click', ref: 'e1', button: 'left', double: false }])
+  })
+
+  test('reopen after close starts on the default page again', async () => {
+    const f = withHome()
+    await browserRoute('POST', '/api/browser/session/navigate', { session: proof('aaa'), url: 'https://x.example/' }, f.deps)
+    await browserRoute('POST', '/api/browser/session/close', { session: proof('aaa') }, f.deps)
+    await browserRoute('POST', '/api/browser/session/reload', { session: proof('aaa') }, f.deps)
+    expect(f.ran.map(r => r.args.action + (r.args.url ? `:${r.args.url}` : ''))).toEqual(['navigate:https://x.example/', 'navigate:' + HOME, 'reload'])
+  })
+
+  test('without a configured home, the built-in default', async () => {
+    const f = fakeDeps()
+    await browserRoute('POST', '/api/browser/session/reload', { session: proof('aaa') }, f.deps)
+    expect(f.ran[0]!.args).toEqual({ action: 'navigate', url: 'https://www.google.com' })
   })
 })

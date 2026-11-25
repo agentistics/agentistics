@@ -15,6 +15,7 @@ function fixture() {
     snapshot: async () => ({ polledAtMs: now, sessions: [{ id: 'worker', cwd: rows[0]!.cwd, status: 'running', activity: 'waiting', attached: false, approvalDetection: false, searchFields: { name: '', folder: '', harness: '', note: '', task: '', prompt: '' }, lastLines: ['waiting'], chatTurns: [{ role: 'assistant', text: 'Ready for next phase', at: '2026-11-06T00:00:00Z' }] }] }),
     role: async r => r.id === 'worker' ? 'worker' : 'leader',
     dirty: async () => true,
+    heavyLock: async () => false,
     message: async (...args) => { notices.push(args); return { ok: true } },
     now: () => now,
   }
@@ -23,7 +24,7 @@ function fixture() {
 
 test('observes worker and current leader, bounded transcript text, dirty state and unknown account limit on macOS paths', async () => {
   const { d } = fixture()
-  expect(await stalledHostOps(d)['observar-sessao-parada']({ sessionId: 'worker' })).toMatchObject({ ok: true, leaderId: 'leader', state: 'waiting', lastText: 'Ready for next phase', dirty: true, accountLimit: null, taskId: 'task', subtaskId: 'sub' })
+  expect(await stalledHostOps(d)['observar-sessao-parada']({ sessionId: 'worker' })).toMatchObject({ ok: true, leaderId: 'leader', state: 'waiting', lastText: expect.stringContaining('Ready for next phase'), activeSignal: null, dirty: true, accountLimit: null, taskId: 'task', subtaskId: 'sub' })
 })
 
 test('refuses unknown, ended and leader targets; stale, failed and missing activity observations', async () => {
@@ -50,4 +51,139 @@ test('notices are block messages to freshly resolved parent, delivery refusal is
   expect(notices).toEqual([['worker', 'successor', 'Choose resume or save and close.']])
   d.message = async () => ({ ok: false, code: 'target_blocked', message: 'approval open' })
   expect(await op({ sessionId: 'worker', body: 'retry' })).toMatchObject({ refused: true, code: 'target_blocked' })
+})
+
+const turn = (extra: Record<string, unknown>) => ({ role: 'assistant' as const, text: '', at: '2026-11-23T10:00:00Z', ...extra })
+const withTurns = (f: ReturnType<typeof fixture>, chatTurns: unknown[]) => {
+  f.d.snapshot = async () => ({ polledAtMs: f.d.now(), sessions: [{ id: 'worker', cwd: f.rows[0]!.cwd, status: 'running', activity: 'waiting', attached: false, approvalDetection: false, searchFields: { name: '', folder: '', harness: '', note: '', task: '', prompt: '' }, lastLines: ['x'], chatTurns }] as never })
+}
+
+test('a tool call open for 40 minutes is activity: state working, never an idle reading', async () => {
+  const f = fixture()
+  withTurns(f, [turn({ pending: true, tools: [{ name: 'Bash' }] })])
+  const o = await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' }) as Record<string, unknown>
+  expect(o).toMatchObject({ ok: true, state: 'working', activeSignal: 'tool' })
+  const key = o.activityKey
+  f.advance(40 * 60_000)
+  withTurns(f, [turn({ pending: true, tools: [{ name: 'Bash' }] })])
+  expect(await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' })).toMatchObject({ state: 'working', activeSignal: 'tool' })
+  expect(key).toBeString()
+})
+
+test('a session waiting on the heavy lock is working, whatever the screen says', async () => {
+  const f = fixture()
+  f.d.heavyLock = async () => true
+  expect(await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' })).toMatchObject({ state: 'working', activeSignal: 'heavy-lock' })
+})
+
+test('a running background task is working', async () => {
+  const f = fixture()
+  withTurns(f, [turn({ task: { label: 'tests', running: true } }), turn({ text: 'done waiting' })])
+  expect(await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' })).toMatchObject({ state: 'working', activeSignal: 'task' })
+})
+
+test('truly idle: state stays waiting and the notice text names that no signal exists', async () => {
+  const f = fixture()
+  const o = await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' }) as Record<string, unknown>
+  expect(o).toMatchObject({ state: 'waiting', activeSignal: null })
+  expect(String(o.lastText)).toContain('no activity signal')
+})
+
+const obs = async (f: ReturnType<typeof fixture>) => await stalledHostOps(f.d)['observar-sessao-parada']({ sessionId: 'worker' }) as Record<string, unknown>
+const withView = (f: ReturnType<typeof fixture>, extra: Record<string, unknown>) => {
+  f.d.snapshot = async () => ({ polledAtMs: f.d.now(), sessions: [{ id: 'worker', cwd: f.rows[0]!.cwd, status: 'running', activity: 'waiting', attached: false, approvalDetection: false, searchFields: { name: '', folder: '', harness: '', note: '', task: '', prompt: '' }, lastLines: ['x'], chatTurns: [turn({ text: 'last turn text' })], ...extra }] as never })
+}
+
+test('waiting in the heavy queue is its own signal; holding the lock is running', async () => {
+  const f = fixture()
+  f.d.heavyLock = async () => 'waiting'
+  expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'heavy-lock' })
+  f.d.heavyLock = async () => 'holding'
+  expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'heavy-hold' })
+})
+
+test('the fleet view\'s own heavy-lock reading (the one the sidebar draws) is what the alert reads', async () => {
+  const f = fixture()
+  withView(f, { heavyLock: 'waiting' })
+  expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'heavy-lock' })
+})
+
+test('output that moved since the previous observation is working; stable output is not', async () => {
+  const f = fixture()
+  withView(f, { lastLines: ['build 1'] })
+  const first = await obs(f)
+  expect(first).toMatchObject({ state: 'waiting', activeSignal: null })
+  withView(f, { lastLines: ['build 2'] })
+  const second = await obs(f)
+  expect(second).toMatchObject({ state: 'working', activeSignal: 'output' })
+  expect(second.activityKey).not.toBe(first.activityKey)
+  withView(f, { lastLines: ['build 2'] })
+  const third = await obs(f)
+  expect(third).toMatchObject({ state: 'waiting', activeSignal: null })
+})
+
+test('the poller\'s own outputMoved on the view counts too', async () => {
+  const f = fixture()
+  withView(f, { outputMoved: true })
+  expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'output' })
+})
+
+test('an exited or ended session never reads working, even with a stale open tool call', async () => {
+  for (const status of ['exited', 'closed', 'lost']) {
+    const f = fixture()
+    withView(f, { status, activity: 'waiting', chatTurns: [turn({ pending: true })] })
+    const o = await obs(f)
+    // no live reading at all: refused, never working.
+    expect(o.state).not.toBe('working')
+    expect(o.activeSignal ?? null).toBeNull()
+  }
+})
+
+test('the idle notice keeps the last-turn attribution when the text is long', async () => {
+  const f = fixture()
+  withView(f, { chatTurns: [turn({ text: 'x'.repeat(5000) })] })
+  const o = await obs(f)
+  expect(String(o.lastText)).toContain('last turn 2026-11-23T10:00:00Z')
+  expect(String(o.lastText).length).toBeLessThanOrEqual(2000)
+})
+
+const hhmmss = (ms: number) => new Date(ms).toISOString().slice(11, 19)
+
+// QA r3 adversarial: a worker whose command prints a timestamped log line every minute is WORKING for the whole
+// half hour — blanking the timestamp made it read idle and raised a false stall alert at 30 min.
+test('a timestamped log line printed every minute reads working at every observation for 30 min', async () => {
+  const f = fixture()
+  withView(f, { lastLines: [`Heartbeat received at ${hhmmss(f.d.now())}`] })
+  expect(await obs(f)).toMatchObject({ state: 'waiting', activeSignal: null })
+  for (let i = 0; i < 30; i++) {
+    f.advance(60_000)
+    withView(f, { lastLines: [`Heartbeat received at ${hhmmss(f.d.now())}`] })
+    expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'output' })
+  }
+})
+
+// QA r2/r3 clock probe: a clock repainted on an idle screen, seen half an hour apart, is no activity. The
+// engine's stall clock restarts on `state: working` or a changed `activityKey`, so BOTH must hold still.
+test('a screen whose only change across 30 min is a wall-clock time is idle, with a stable activity key', async () => {
+  const f = fixture()
+  const clock = () => withView(f, { lastLines: [`clock ${new Date(f.d.now()).toISOString()}`] })
+  clock()
+  const first = await obs(f)
+  expect(first).toMatchObject({ state: 'waiting', activeSignal: null })
+  for (const _ of [1, 2]) {
+    f.advance(30 * 60_000)
+    clock()
+    const o = await obs(f)
+    expect(o).toMatchObject({ state: 'waiting', activeSignal: null })
+    expect(o.activityKey).toBe(first.activityKey)
+  }
+})
+
+test('content that changed across 30 min (not only a time of day) is output', async () => {
+  const f = fixture()
+  withView(f, { lastLines: [`build output ${f.d.now()}`] })
+  await obs(f)
+  f.advance(30 * 60_000)
+  withView(f, { lastLines: [`build output ${f.d.now()}`] })
+  expect(await obs(f)).toMatchObject({ state: 'working', activeSignal: 'output' })
 })
