@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.229.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Custos e Comparar harnesses: o total não sobe mais a cada vez que você recarrega a página. Uma sessão de outro harness que usou um modelo Claude era somada de novo a cada carga; agora os valores batem com a Visão geral, e um total já inflado se corrige sozinho na próxima carga.',
+        en: 'Costs and Compare harnesses: the total no longer climbs every time you reload the page. A session from another harness that used a Claude model was added again on each load; the figures now match the Overview, and an already inflated total fixes itself on the next load.',
+      },
+      {
+        pt: 'O texto de novidades da 2.229.0 sobre Ambientes foi corrigido: ainda não existe tela para escolher onde os ambientes rodam.',
+        en: 'The 2.229.0 notes about Environments were corrected: there is no screen yet to choose where environments run.',
+      },
+    ],
+  },
   '2.229.0': {
     features: [
       {
@@ -25,8 +38,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Calendar: a task or subtask a session files without a due date now gets an estimated one, marked "estimated"; setting the date replaces the estimate.',
       },
       {
-        pt: 'Ambientes (experimental, desligado por padrão): ao ativar o recurso, o agentistics detecta se o Docker está disponível, sugere usá-lo (ou como instalá-lo) e deixa você escolher onde os ambientes dos trabalhadores rodam — para uma sessão, um projeto ou tudo. Por enquanto só a escolha e as orientações; nada é instalado nem executado por você.',
-        en: 'Environments (experimental, off by default): when you turn the feature on, agentistics detects whether Docker is available, suggests using it (or how to install it) and lets you choose where workers\' environments run — for one session, one project or everything. For now only the choice and the guidance; nothing is installed or run for you.',
+        pt: 'Ambientes (experimental, desligado por padrão): a base que detecta se o Docker está disponível e orienta como instalá-lo. Ainda não há tela para isso — por enquanto só os assistentes e o terminal usam, com o recurso experimental ligado; a tela nas Configurações vem numa próxima versão. Nada é instalado nem executado por você.',
+        en: 'Environments (experimental, off by default): the groundwork that detects whether Docker is available and explains how to install it. There is no screen for it yet — for now only the assistants and the terminal use it, with the experimental feature on; the Settings screen comes in a later release. Nothing is installed or run for you.',
       },
     ],
     fixes: [

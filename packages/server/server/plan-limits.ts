@@ -315,6 +315,8 @@ let persistOff = false
 /** State not yet covered by a successful write: set on every change, cleared only by a write that covers it. */
 let persistDirty = false
 let persistFailures = 0
+/** The write running right now (from snapshot to rename), so a test can wait for it instead of sleeping. */
+let persistInFlight: Promise<void> | null = null
 const PERSIST_BASE_MS = 500
 const PERSIST_MAX_MS = 30_000
 /** Test seams: the lock, the file operations and the base delay (production uses the real ones). */
@@ -329,7 +331,7 @@ function persistSoon(): void {
   const delay = Math.min(persistHooks.baseMs * 2 ** persistFailures, Math.max(PERSIST_MAX_MS, persistHooks.baseMs))
   persistTimer = setTimeout(() => {
     persistTimer = null
-    void (async () => {
+    const run = (async () => {
       // Taken BEFORE the snapshot: a change arriving during the write sets it again and is retried.
       persistDirty = false
       let ok = false
@@ -360,6 +362,8 @@ function persistSoon(): void {
       persistFailures++
       persistSoon()
     })()
+    persistInFlight = run
+    void run.finally(() => { if (persistInFlight === run) persistInFlight = null })
   }, delay)
   persistTimer.unref?.()
 }
@@ -1101,6 +1105,21 @@ export async function planLimitsPayload(
   return { harnesses: publicHarnesses, limits, registered, budgets, unmeasured, hiddenFromAgents, readings, freeSlots, freeSlotsByHarness, freeSlotsByAccount, unassignedLive, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
 }
 
+/**
+ * Tests only: resolve once every scheduled persist has reached disk — no timer pending, no write in
+ * flight, nothing dirty — instead of sleeping a fixed time that a loaded machine can overrun.
+ * Throws past `ms` so a write that never lands fails the test loudly rather than reading stale disk.
+ */
+export async function __settlePersistForTest(ms = 15_000): Promise<void> {
+  const deadline = Date.now() + ms
+  for (;;) {
+    if (persistInFlight) { await persistInFlight; continue }
+    if (persistOff || (!persistTimer && !persistDirty)) return
+    if (Date.now() > deadline) throw new Error('plan-limits persist did not settle')
+    await new Promise(r => setTimeout(r, 10))
+  }
+}
+
 /** Tests only. */
 export function __resetPlanLimitsForTest(file: string | null = null): void {
   for (const t of codexPending.values()) clearTimeout(t)
@@ -1121,6 +1140,7 @@ export function __resetPlanLimitsForTest(file: string | null = null): void {
   persistTimer = null
   persistDirty = false
   persistFailures = 0
+  persistInFlight = null
   __setPersistHooksForTest(null)
   loaded = file ? null : Promise.resolve()
   persistOff = file === null
