@@ -370,11 +370,13 @@ test('docker-detectar: the op is read-only (only `docker version` / `docker info
   expect(d.calls.every(c => c[0] === 'version' || c[0] === 'info')).toBe(true)
 })
 
+// The real probe runs up to 4 sequential `docker` calls, each capped at 8 s by defaultDockerProbeDeps; a cold daemon
+// (CI runners) can exceed bun's 5 s default, so the test budget matches the probe's own worst case.
 test('docker-detectar: the real probe never throws on this machine', async () => {
   const r = await detectDocker()
   expect(typeof r.present).toBe('boolean')
   expect(['wsl2-desktop', 'desktop', 'native', 'none']).toContain(r.kind)
-})
+}, 4 * 8_000 + 5_000)
 
 // ── FECHAR.CWD-COMPARTILHADO (host): alvo-trabalho ────────────────────────────────────────────────────────────────
 import { workTarget, type WorkTargetDeps } from './host-ops'
