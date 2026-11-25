@@ -1923,7 +1923,11 @@ export function computeDerivedStats(
           if (globalModelUsage[m]) filteredModelUsage[m] = { ...globalModelUsage[m] }
         }
       } else {
-        filteredModelUsage = { ...globalModelUsage }
+        // EACH ENTRY is copied, never the map alone: the loop below `+=`s non-Claude sessions running
+        // a Claude model into these entries, and a shallow copy shares them with `data.statsCache` —
+        // every derivation of the same payload then added that session to Claude's cached history
+        // again (CUSTO.OSCILA: the Costs/Compare totals climbed by one session per load).
+        filteredModelUsage = Object.fromEntries(Object.entries(globalModelUsage).map(([m, u]) => [m, { ...u }]))
       }
       // Supplement with non-Claude sessions (unified view, no date filter)
       for (const sess of nonClaudeInRange) {
