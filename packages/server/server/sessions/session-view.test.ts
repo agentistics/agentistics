@@ -46,6 +46,19 @@ describe('buildSessionViews', () => {
     })
   })
 
+  it('carries the heavy-lock state and moved output of a LIVE row, and nothing on a finished one', () => {
+    const reconciled = [row('a'), row('b'), row('c', { status: 'lost' })]
+    const heavyLocks = new Map<string, 'waiting' | 'holding'>([['a', 'waiting'], ['c', 'holding']])
+    const outputMoved = new Set(['b', 'c'])
+    const [a, b, c] = buildSessionViews({ reconciled, activity: new Map(), processes: [], heavyLocks, outputMoved })
+    expect(a).toMatchObject({ heavyLock: 'waiting' })
+    expect(a!.outputMoved).toBeUndefined()
+    expect(b).toMatchObject({ outputMoved: true })
+    expect(b!.heavyLock).toBeUndefined()
+    expect(c!.heavyLock).toBeUndefined()
+    expect(c!.outputMoved).toBeUndefined()
+  })
+
   it('carries chat turns onto the view, keyed by session id — and leaves them off a session with none', () => {
     const reconciled = [row('a'), row('b')]
     const chatTails = new Map([

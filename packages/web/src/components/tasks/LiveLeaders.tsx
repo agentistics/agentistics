@@ -21,18 +21,19 @@ import { modelDisplay } from '../../lib/modelDisplay'
 import { fmtClock, fmtSpan, STAGE_LABEL, type LeaderRecord, type LeaderWorker, type RuntimeFacts, type WorkerWord } from './liveDeliveryModel'
 import { BLOCK_WORD, leaderCounts, readOpenLeaders, workerWordOf, workerWordText, writeOpenLeaders, type LocateAnswer } from './liveCardModel'
 
-const WORD_ORDER: readonly WorkerWord[] = ['needs-you', 'working', 'blocked', 'awaiting-review', 'delivered', 'idle']
+const WORD_ORDER: readonly WorkerWord[] = ['needs-you', 'working', 'queued', 'blocked', 'awaiting-review', 'delivered', 'idle']
 const GREEN = 'var(--accent-green, #3ecf8e)'
 const BLOCKED = 'rgb(194,65,12)'
 const MUTED = 'var(--text-tertiary)'
 const WORD_COLOR: Record<WorkerWord, string> = {
-  working: GREEN, blocked: BLOCKED, 'needs-you': 'var(--accent-red, #ff5f5f)',
+  working: GREEN, queued: GREEN, blocked: BLOCKED, 'needs-you': 'var(--accent-red, #ff5f5f)',
   'awaiting-review': MUTED, delivered: MUTED, idle: MUTED,
 }
 const LEADER_STATE: Record<string, { pt: string; en: string }> = {
   'waiting-approval': { pt: 'precisa da sua aprovação', en: 'needs your approval' },
   waiting: { pt: 'esperando', en: 'waiting' },
   working: { pt: 'trabalhando', en: 'working' },
+  queued: { pt: 'na fila', en: 'queued' },
   running: { pt: 'trabalhando', en: 'working' },
   lost: { pt: 'perdida', en: 'lost' },
   unknown: { pt: 'sem sinal', en: 'no signal' },
@@ -84,6 +85,7 @@ export function workerInfo(w: LeaderWorker, nowMs: number, pt: boolean): string 
   const stage = w.stage ? STAGE_LABEL[w.stage][pt ? 'pt' : 'en'].toLowerCase() : null
   switch (word) {
     case 'working': return w.stageSinceMs && stage ? `${fmtSpan(nowMs - w.stageSinceMs)} ${pt ? 'em' : 'in'} ${stage}` : ''
+    case 'queued': return pt ? 'na fila' : 'queued'
     case 'blocked': return w.blockReason ? BLOCK_WORD[w.blockReason][pt ? 'pt' : 'en'] : (pt ? 'bloqueado' : 'blocked')
     case 'awaiting-review': return pt ? 'revisão do líder' : 'leader review'
     case 'delivered': return pt ? 'entregou' : 'delivered'
@@ -202,7 +204,7 @@ function LeaderCard({ l, open, onToggle, runtime, accountLabels, nowMs, pt, titl
   const facts = [leaderRuntime(l, runtime, pt), account ? `${pt ? 'conta' : 'account'} ${account}` : null].filter(Boolean).join(' · ')
   return (
     <div data-live-leader={l.id} data-open={open ? '1' : '0'} style={{ ...surface, padding: '7px 10px', minWidth: 0 }}>
-      <button type="button" aria-expanded={open} onClick={onToggle} className="ag-tap" title={`${l.title} — ${leaderState(l.state, pt)}`}
+      <button type="button" aria-expanded={open} onClick={onToggle} className="ag-tap" title={`${l.title} — ${leaderState(l.queued ? 'queued' : l.state, pt)}`}
         style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: mobile ? 44 : undefined, background: 'none', border: 0, padding: 0, cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontSize: 12.5, textAlign: 'left', minWidth: 0 }}>
         <Dot color={dot} size={8} />
         <b style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}><Crown size={12} aria-hidden style={{ color: 'var(--accent-purple)', flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span></b>

@@ -66,6 +66,11 @@ export function vezes(r: number, lang: 'pt' | 'en'): string {
   return `${n}× ${r >= 1 ? (lang === 'pt' ? 'melhor' : 'better') : (lang === 'pt' ? 'pior' : 'worse')}`
 }
 
+/** A verdict on an observed comparison needs at least this many of the 4 types measured (Quality, Cost, Time, Reliability). */
+export const MIN_MEASURED_TYPES = 3
+/** The types a set of ratios actually measures: what the badge counts, in the score's own order. */
+export const measuredTypes = (ratios: Ratios): ScoreTypeKey[] => SCORE_TYPES.filter(k => usable(ratios[k]))
+
 /** Which alternative weightings would change the word; none = "firm". */
 export function firmness(ratios: Ratios): { changes: { weights: 'equal' | 'quality' | 'costTime'; tone: ScoreTone }[] } {
   const base = scoreOf(ratios).score

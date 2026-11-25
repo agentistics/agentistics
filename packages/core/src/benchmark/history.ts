@@ -6,7 +6,7 @@
  * and the coverage says how much of the pieces carry each figure. Observed and biased: no verdict here.
  */
 import { percentile } from '../deliveryMetrics'
-import { buildComparisons, taskSides, type ComparisonKey, type HistoryComparison, type TaskSides } from './comparisons'
+import { buildComparisons, taskSides, COMPARISON_KEYS, type ComparisonKey, type HistoryComparison, type TaskSides } from './comparisons'
 
 export type PieceSize = 'S' | 'M' | 'L'
 export const SIZE_LINES = { mediumFrom: 100, largeFrom: 500 } as const
@@ -18,7 +18,20 @@ export const BUCKETS = [
   { label: '1', min: 1, max: 1 }, { label: '2', min: 2, max: 2 }, { label: '3-4', min: 3, max: 4 }, { label: '5+', min: 5, max: null },
 ] as const
 
-export interface HistorySession { id: string; harness: string; costUSD: number | null }
+/** The model family a piece is compared under; any other model is `null` (not compared, never merged into a family it is not). */
+export type ModelFamily = 'sonnet' | 'opus' | 'haiku'
+export const modelFamily = (model: string | null | undefined): ModelFamily | null => {
+  const m = (model ?? '').toLowerCase()
+  return m.includes('opus') ? 'opus' : m.includes('sonnet') ? 'sonnet' : m.includes('haiku') ? 'haiku' : null
+}
+
+export interface HistorySession {
+  id: string; harness: string; costUSD: number | null
+  /** The model the session spent most on; null = no usage or no model recorded. */
+  model?: string | null
+  /** `leader` / `qa` sessions are not the piece's author: they never decide its model or harness. */
+  role?: string
+}
 export interface HistoryPieceInput {
   id: string; taskId: string; title: string; status: string
   sessions: HistorySession[]
@@ -34,6 +47,14 @@ export interface HistorySubtaskRow {
   id: string; title: string; status: string; size: PieceSize | null; sessions: number
   costUSD: number | null; costPartial: boolean; wallMs: number | null; activeMs: number | null
   qaRounds: number | null; reworked: boolean | null; lines: number | null
+  /** The author's model family and harness (leader and QA sessions left out); null = not known. */
+  model: ModelFamily | null; harness: string | null
+  /** Owner validation: the subtask is `done`. null while it is not (never a refusal). */
+  accepted: boolean | null
+}
+/** The task as a whole, over ALL its pieces, not one per side: what a row shows when a comparison leaves a side empty. NOT a comparison. */
+export interface TaskOverall {
+  pieces: number; sessions: number | null; costUSD: number | null; costPartial: boolean; wallMs: number | null; qaRounds: number | null
 }
 export interface HistoryTaskRow {
   id: string; title: string; status: string; size: PieceSize | null; pieces: number; sessions: number
@@ -42,6 +63,8 @@ export interface HistoryTaskRow {
   subtasks: HistorySubtaskRow[]
   /** The task as the prototype's "um → outro", once per comparison (side A, side B): HTTP, MCP and the screen read THIS. */
   sides: Record<ComparisonKey, TaskSides>
+  /** The median piece of the task, over all its pieces (cost, time, sessions, QA rounds). */
+  overall: TaskOverall
 }
 export interface HistoryBucket {
   label: string; pieces: number
@@ -74,13 +97,34 @@ const DONE = new Set(['done', 'in_review'])
 /** Start → delivery in ms, or null when there is no real duration (a bulk-closed piece stamps both at once: that is not "0 min"). */
 const realSpan = (p: HistoryPieceInput): number | null => p.startMs !== null && p.endMs !== null && p.endMs > p.startMs ? p.endMs - p.startMs : null
 
+/** Most frequent / costliest value among the author's sessions; ties go to the one seen first. */
+function dominant<T extends string>(items: readonly { v: T | null; w: number }[]): T | null {
+  const acc = new Map<T, number>()
+  for (const i of items) if (i.v !== null) acc.set(i.v, (acc.get(i.v) ?? 0) + i.w)
+  let best: T | null = null, bw = -1
+  for (const [k, w] of acc) if (w > bw) { best = k; bw = w }
+  return best
+}
+
 function subtaskRow(p: HistoryPieceInput): HistorySubtaskRow {
+  const authors = p.sessions.filter(s => s.role !== 'leader' && s.role !== 'qa')
   const priced = p.sessions.filter(s => s.costUSD !== null)
   return {
     id: p.id, title: p.title, status: p.status, size: sizeOfLines(p.lines), sessions: p.sessions.length,
     costUSD: priced.length ? sum(priced.map(s => s.costUSD!)) : null, costPartial: priced.length > 0 && priced.length < p.sessions.length,
     wallMs: realSpan(p), activeMs: p.activeMs,
     qaRounds: p.qaRounds, reworked: p.qaRounds === null ? null : p.qaRounds >= 2, lines: p.lines,
+    model: dominant(authors.map(s => ({ v: modelFamily(s.model), w: 1 + (s.costUSD ?? 0) }))),
+    harness: dominant(authors.map(s => ({ v: s.harness || null, w: 1 }))),
+    accepted: p.status === 'done' ? true : null,
+  }
+}
+
+const med = (v: readonly (number | null)[]): number | null => percentile(v.filter((x): x is number => x !== null), 0.5)
+function taskOverall(rs: readonly HistorySubtaskRow[]): TaskOverall {
+  return {
+    pieces: rs.length, sessions: med(rs.map(r => r.sessions)), costUSD: med(rs.map(r => r.costUSD)),
+    costPartial: rs.some(r => r.costPartial || r.costUSD === null), wallMs: med(rs.map(r => r.wallMs)), qaRounds: med(rs.map(r => r.qaRounds)),
   }
 }
 
@@ -111,7 +155,8 @@ export function buildHistory(input: { pieces: readonly HistoryPieceInput[]; task
       qaRounds: qa.length ? sum(qa.map(r => r.qaRounds!)) : null, reworkedPieces: qa.length ? qa.filter(r => r.reworked).length : null,
       lines: lines.length ? sum(lines.map(p => p.lines!)) : null,
       subtasks: rs,
-      sides: { qa: taskSides(rs, 'qa'), sessions: taskSides(rs, 'sessions') },
+      sides: Object.fromEntries(COMPARISON_KEYS.map(k => [k, taskSides(rs, k)])) as Record<ComparisonKey, TaskSides>,
+      overall: taskOverall(rs),
     }
   }).sort((a, b) => (b.costUSD ?? -1) - (a.costUSD ?? -1) || a.title.localeCompare(b.title))
 
@@ -159,4 +204,14 @@ export function qaRoundsFromLabels(labels: readonly string[]): number | null {
     return m ? Number(m[1]) : 0
   })
   return Math.max(qa.length, ...stated)
+}
+
+/**
+ * Review rounds read from the delivery flow's own phase history, for a piece with no QA outcome and no QA label: each entry into the
+ * leader's review (`revisao_lider`) or QA (`qa`) is one round, so a piece sent back to `ajuste` and reviewed again has two. A piece that
+ * never reached a review has none: null, never zero.
+ */
+export function reviewRoundsFromHistory(moves: readonly { to: string }[]): number | null {
+  const n = moves.filter(m => m.to === 'revisao_lider' || m.to === 'qa').length
+  return n > 0 ? n : null
 }

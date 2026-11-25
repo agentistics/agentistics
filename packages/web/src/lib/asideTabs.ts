@@ -15,6 +15,7 @@
  * session belongs to which team or which section.
  */
 
+import { runningLabel, type ActivitySignal } from '@agentistics/core'
 import type { SessionState } from '@agentistics/tui/control/session-fleet'
 
 export type AsideTab = 'active' | 'groups' | 'ended'
@@ -35,6 +36,9 @@ export interface TeamRow {
   startedAt?: number
   endedAt?: number
   lastUserMessageAt?: number
+  /** Why the row is not idle (an open tool call, a background task…). See `sessionActivity.ts`. */
+  activeSignal?: ActivitySignal
+  activeSinceAt?: number
 }
 
 const LIVE: ReadonlySet<SessionState> = new Set<SessionState>(['working', 'waiting', 'waiting-approval', 'idle', 'unknown'])
@@ -216,6 +220,10 @@ export function shortSpan(ms: number, pt: boolean): string {
  * the row carries neither — never a confident "agora" invented for it.
  */
 export function liveAge(row: TeamRow, now: number, pt: boolean): string | null {
+  // A session that is RUNNING something is not "stopped for X": say how long it has been running.
+  if (row.activeSignal && row.state !== 'waiting-approval') {
+    return runningLabel({ signal: row.activeSignal, ...(row.activeSinceAt !== undefined ? { sinceMs: row.activeSinceAt } : {}) }, now, pt, shortSpan)
+  }
   const at = row.lastUserMessageAt ?? row.startedAt
   return at === undefined ? null : shortSpan(now - at, pt)
 }

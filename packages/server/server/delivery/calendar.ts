@@ -44,9 +44,9 @@ export interface CalendarSources {
 }
 
 /** The board's subtasks as the calendar reads them — `parentGroupId` rides along: it is the Cronograma tree's middle level. */
-export function subtaskInputs(subtasks: readonly { id: string; taskId: string; title: string; status?: string; priority?: string; dueDate?: string; parentGroupId?: string }[]): CalSubtaskInput[] {
+export function subtaskInputs(subtasks: readonly { id: string; taskId: string; title: string; status?: string; priority?: string; dueDate?: string; dueEstimated?: boolean; parentGroupId?: string }[]): CalSubtaskInput[] {
   return subtasks.map(s => ({ id: s.id, taskId: s.taskId, title: s.title, ...(s.status ? { status: s.status } : {}),
-    ...(s.priority ? { priority: s.priority } : {}), ...(s.dueDate ? { dueDate: s.dueDate } : {}), ...(s.parentGroupId ? { parentGroupId: s.parentGroupId } : {}) }))
+    ...(s.priority ? { priority: s.priority } : {}), ...(s.dueDate ? { dueDate: s.dueDate } : {}), ...(s.dueDate && s.dueEstimated ? { dueEstimated: true } : {}), ...(s.parentGroupId ? { parentGroupId: s.parentGroupId } : {}) }))
 }
 
 export async function readCalendarSources(): Promise<CalendarSources> {
@@ -88,6 +88,7 @@ export async function readCalendarSources(): Promise<CalendarSources> {
       id: t.id, title: t.title, status: t.status,
       ...(t.priority ? { priority: t.priority } : {}),
       ...(t.dueDate ? { dueDate: t.dueDate } : {}),
+      ...(t.dueDate && t.dueEstimated ? { dueEstimated: true } : {}),
     })),
     subtasks: subtaskInputs(world.book.subtasks),
     resets: await readResets(nowMs).catch(() => []),

@@ -87,7 +87,7 @@ export function CalendarDetail({ selection, anchor, pieces, versions, marks, now
           [pick(TEXT.started, pt), p.startedAtMs !== null ? stamp(p.startedAtMs, pt) : '—'],
           [pick(TEXT.versionWord, pt), p.version ?? '—'],
           [pick(TEXT.model, pt), p.harness ? <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><HarnessBadges harnesses={[p.harness]} max={1} />{p.model}</span> : '—'],
-          ...(p.dueDate ? [[pick(TEXT.dueWord, pt), p.dueDate] as [string, React.ReactNode]] : []),
+          ...(p.dueDate ? [[pick(TEXT.dueWord, pt), p.dueEstimated ? `${p.dueDate} · ${pt ? 'estimado' : 'estimated'}` : p.dueDate] as [string, React.ReactNode]] : []),
         ]} />
       </>
     )

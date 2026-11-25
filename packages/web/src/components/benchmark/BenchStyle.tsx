@@ -52,8 +52,8 @@ const CSS = `
 }`
 
 /** The "not measured" seal the list's unmeasured slots wear — one component, so a column without data says it the same way. */
-export function UnmeasuredPill({ lang, testId = 'benchmark-seal', style, label }: { lang: 'pt' | 'en'; testId?: string; style?: React.CSSProperties; label?: string }) {
-  return <span data-testid={testId} className="bm-nw" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 9px', ...style }}>{label ?? (lang === 'pt' ? 'sem medição' : 'not measured')}</span>
+export function UnmeasuredPill({ lang, testId = 'benchmark-seal', style, label, title }: { lang: 'pt' | 'en'; testId?: string; style?: React.CSSProperties; label?: string; /** Why nothing was measured, in plain words, for the tooltip. */ title?: string }) {
+  return <span data-testid={testId} title={title} className="bm-nw" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 9px', ...style }}>{label ?? (lang === 'pt' ? 'sem medição' : 'not measured')}</span>
 }
 
 export function BenchStyle() { return <style>{CSS}</style> }

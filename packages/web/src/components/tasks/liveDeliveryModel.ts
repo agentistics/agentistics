@@ -8,7 +8,7 @@
  */
 
 import {
-  LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, LIVE_TAB_DEFAULT, liveComparator, liveTabCounts, liveTabMatches, isLiveState,
+  LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, LIVE_TAB_DEFAULT, liveComparator, liveTabCounts, liveTabMatches, isLiveState, activityState,
   type LiveCutFacts, type LivePeriod, type LiveSortId, type LiveTab, type LiveTabbable,
 } from '@agentistics/core'
 import type { FleetRow } from '../../lib/fleet'
@@ -72,7 +72,7 @@ export interface LiveDeliveryRecord {
   /** FILA.PRIORIDADE (a queued piece only): the leader's `nao`/`agendar`, the open question, an approval waiting for a slot. */
   queue?: { hold: { kind: 'nao' | 'agendar'; reason: string; until: string | null; by: string; atMs: number | null } | null; asking: boolean; approved: boolean } | null
 }
-export type WorkerWord = 'working' | 'needs-you' | 'blocked' | 'delivered' | 'awaiting-review' | 'idle'
+export type WorkerWord = 'working' | 'queued' | 'needs-you' | 'blocked' | 'delivered' | 'awaiting-review' | 'idle'
 export interface LeaderWorker {
   id: string; title: string; state: string
   word?: WorkerWord; stage?: LiveStage | null; cardKey?: string | null; subtask?: string | null; taskId?: string | null
@@ -81,6 +81,8 @@ export interface LeaderWorker {
 /** Mirror of the server's `LeaderView` (`task-live-view.ts`). Leaders are never deliveries. */
 export interface LeaderRecord {
   id: string; title: string; harness: string; model: string | null; effort?: string | null; accountId?: string | null; state: string
+  /** The leader itself waits in the heavy-job queue: "na fila", as in the sidebar. */
+  queued?: boolean
   /** Tasks this leader declared it leads besides its own filing. */
   leads?: { id: string; title: string }[]
   createdMs?: number | null; taskId?: string | null; taskTitle?: string | null
@@ -98,6 +100,8 @@ export interface LiveReply {
 export interface LiveAgent {
   id: string; harness: string; model: string | null; effort?: string | null; accountId: string | null
   state: FleetRow['state']; stateLabel: string
+  /** Waiting in the heavy-job queue (same evidence as the sidebar's "na fila"): counted as working, worded queued. */
+  queued?: boolean
 }
 
 /** What the card says about the agents, in one word's worth of state. */
@@ -131,7 +135,7 @@ export function joinLive(
     const agents: LiveAgent[] = d.sessionIds.flatMap(id => {
       const r = byId.get(id)
       return r && (isLiveState(r.state) || r.state === 'lost' || r.state === 'unknown')
-        ? [{ id: r.id, harness: r.harness, model: r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null, state: r.state, stateLabel: r.stateLabel }]
+        ? [(() => { const a = activityState(r.state, r.activeSignal); return { id: r.id, harness: r.harness, model: r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null, state: a.state, stateLabel: r.stateLabel, ...(a.queued ? { queued: true } : {}) } })()]
         : []
     })
     const liveState = liveStateOf(agents)
