@@ -668,7 +668,17 @@ async function readTurnsFromTail(
     const queued = extractQueuedEntry(e)
     if (queued) { add(userTurn(queued)); continue }
     const assistantText = extractAssistantText(e)
-    if (assistantText) { add({ role: 'assistant', text: assistantText }); continue }
+    if (assistantText) {
+      // The REAL Claude shape: one assistant event holding the text AND its `tool_use`. When it is the
+      // newest event the call is unanswered, so the marker goes in (the walk is newest-first and the
+      // list is reversed after, so it lands AFTER the text) — otherwise the call was invisible.
+      if (isNewest) {
+        const tools = extractToolActivity(e)
+        if (tools) add({ role: 'assistant', text: toolActivityLabel(tools), pending: true })
+      }
+      add({ role: 'assistant', text: assistantText })
+      continue
+    }
     if (isNewest) {
       const tools = extractToolActivity(e)
       if (tools) add({ role: 'assistant', text: toolActivityLabel(tools), pending: true })

@@ -25,7 +25,7 @@ import {
 import { createAgentAuditSink } from "./agent-audit.js";
 import { createEngineTools } from "./engine-tools.js";
 import { taskCommentRequest } from "./task-comment-args.js";
-import { sessionProof, withTaskWriteProof } from "./session-proof.js";
+import { ancestorSession, sessionProof, withTaskWriteProof } from "./session-proof.js";
 import { evidenceRequestOf } from "./evidence-args.js";
 import { bookTakeoverPayload } from "./book-takeover-payload.js";
 import { HARNESS_CAPABILITIES, contextReading, nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
@@ -319,6 +319,7 @@ const TOOLS: Tool[] = [
         detail: { type: "string" },
         priority: { type: "string", enum: ["urgent", "high", "medium", "low"], description: "Defaults to low. Decides the order of the queue and of the Live delivery line." },
         type: { type: "string", description: "A type id from agentistics_task_types (an unknown one is dropped)." },
+        dueDate: { type: "string", description: "yyyy-mm-dd. Omit it and the server ESTIMATES one (flagged dueEstimated, said in the reply) — pass it to fix the day." },
       },
       required: ["title"],
     },
@@ -437,7 +438,7 @@ const TOOLS: Tool[] = [
     name: "agentistics_task_subtask",
     description:
       "Joining a staged subtask to a group folds its queued delivery and brief into the group, keeping one queue card and an audit reason. " +
-      "Add a subtask, or change one. Pass `title` to add; pass `id` with `done`, `status`, `dueDate`, `startDate`, `blockedBy` or `parentGroupId` to edit one. `startedAt`/`deliveredAt` are system-stamped facts (when real work began / when this piece reached `done`) and are never set through this tool — they are read back on the subtask record. A subtask carries the same columns its parent does; its own cost, tokens, rounds and harness are rolled up from the sessions filed under it — the PARENT task's rollup is the sum of all its subtasks' sessions. A subtask CAN be blocked by another subtask of the SAME parent (pass `blockedBy` as the full list of sibling subtask ids that must be `done` first; a sibling outside this task, or the subtask itself, is dropped rather than accepted) — this is separate from agentistics_task_blocked_by, which blocks a whole TASK on other tasks. **`done` REQUIRES the subtask to have at least one session filed under it — or a VERIFIED report on it (agentistics_task_comment with its subtaskId) from a session of the same task, e.g. the leader that closed it; the report must carry `kind: \"handback\"` (a plain comment without a kind does not count)** — and is refused (422, `done_needs_session`) without one — EXCEPT for a group MEMBER (`parentGroupId` set), which can never hold a session of its own (see below) and therefore reaches `done` through this same edit with no session required; a GROUP itself (`isGroup: true`) and an ordinary loose subtask both still need one. **The moment every one of a task's top-level subtasks (loose subtasks and groups — a group's own members never count separately) reaches `done`, the parent task auto-delivers too.** To put a session ON a subtask use agentistics_task_session with `subtaskId` — a subtask holds ANY NUMBER of sessions, so the link lives on the session, not in a field here. **SUBTASK GROUPS are a real hierarchy level, not a label**: pass `isGroup: true` with `title` to create a GROUP — a peer row that CAN hold a session, exactly like a loose subtask. Pass `id` (a subtask) with `parentGroupId` (a group's own subtask id, from the SAME parent task) to make it a MEMBER of that group — join with the group's id, leave with `parentGroupId: ''`. A refused reference (the id names no subtask, names one that is not `isGroup: true`, names a different task, or the subtask being patched is itself a group) is refused as `invalid_group` (422). **Joining a group is ALSO refused (422, `subtask_has_sessions`) when the subtask already has a session filed on it** — a member gets no rollup bucket of its own, so that session's cost would silently drop out of every visible breakdown while the task's own total kept counting it; detach the session first. **A MEMBER can never hold a session of its own** — filing on one is refused by agentistics_task_session with `subtask_in_group` (422); only the group itself accounts for a session, and a member's own status/dates/comments still exist and feed the group's progress percentage.",
+      "Add a subtask, or change one. Pass `title` to add (with `dueDate` yyyy-mm-dd; omit it and the server ESTIMATES one, flags it `dueEstimated` and says so in the reply — pass `dueDate` to fix it); pass `id` with `done`, `status`, `dueDate`, `startDate`, `blockedBy` or `parentGroupId` to edit one. `startedAt`/`deliveredAt` are system-stamped facts (when real work began / when this piece reached `done`) and are never set through this tool — they are read back on the subtask record. A subtask carries the same columns its parent does; its own cost, tokens, rounds and harness are rolled up from the sessions filed under it — the PARENT task's rollup is the sum of all its subtasks' sessions. A subtask CAN be blocked by another subtask of the SAME parent (pass `blockedBy` as the full list of sibling subtask ids that must be `done` first; a sibling outside this task, or the subtask itself, is dropped rather than accepted) — this is separate from agentistics_task_blocked_by, which blocks a whole TASK on other tasks. **`done` REQUIRES the subtask to have at least one session filed under it — or a VERIFIED report on it (agentistics_task_comment with its subtaskId) from a session of the same task, e.g. the leader that closed it; the report must carry `kind: \"handback\"` (a plain comment without a kind does not count)** — and is refused (422, `done_needs_session`) without one — EXCEPT for a group MEMBER (`parentGroupId` set), which can never hold a session of its own (see below) and therefore reaches `done` through this same edit with no session required; a GROUP itself (`isGroup: true`) and an ordinary loose subtask both still need one. **The moment every one of a task's top-level subtasks (loose subtasks and groups — a group's own members never count separately) reaches `done`, the parent task auto-delivers too.** To put a session ON a subtask use agentistics_task_session with `subtaskId` — a subtask holds ANY NUMBER of sessions, so the link lives on the session, not in a field here. **SUBTASK GROUPS are a real hierarchy level, not a label**: pass `isGroup: true` with `title` to create a GROUP — a peer row that CAN hold a session, exactly like a loose subtask. Pass `id` (a subtask) with `parentGroupId` (a group's own subtask id, from the SAME parent task) to make it a MEMBER of that group — join with the group's id, leave with `parentGroupId: ''`. A refused reference (the id names no subtask, names one that is not `isGroup: true`, names a different task, or the subtask being patched is itself a group) is refused as `invalid_group` (422). **Joining a group is ALSO refused (422, `subtask_has_sessions`) when the subtask already has a session filed on it** — a member gets no rollup bucket of its own, so that session's cost would silently drop out of every visible breakdown while the task's own total kept counting it; detach the session first. **A MEMBER can never hold a session of its own** — filing on one is refused by agentistics_task_session with `subtask_in_group` (422); only the group itself accounts for a session, and a member's own status/dates/comments still exist and feed the group's progress percentage.",
     inputSchema: {
       type: "object",
       properties: {
@@ -917,6 +918,45 @@ const TOOLS: Tool[] = [
         target: { type: "string", description: "A session's managed id or conversation id: switch only that session's own autonomous mode (with `on`)." },
         notice: { type: "string", description: "While autonomous: a warning or decision that cannot wait, sent to the owner's bell/Nay as a notice (max 500 chars) instead of a question that blocks your turn. Leaders only; ignores the other fields." },
       },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_env_status",
+    description:
+      "Where a worker's environment would run, and why. Reports whether Docker is installed/running (`docker`, with its Engine API version), the operating system and whether Docker is validated there, the backend decision (`docker` or the isolated `namespace`, with `reason`, a plain-language `line` and an optional `suggest`: `use-docker` or `install-docker`), the choice that applied and the scope it came from (session > project > all), the catalogue image the project would use, and — only when Docker is missing — the install hint. Everything is behind the experimental `docker-env` flag (flag off = this tool is refused `flag_off`). Pass `session` and `project` (the main checkout's path or git remote) to read the answer for that session/project; `needs` lists tools the project requires in the image (e.g. [\"git\"]). Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        session: { type: "string", description: "A session's managed id: read the choice that applies to it." },
+        project: { type: "string", description: "A project key (main checkout path or normalized git remote)." },
+        needs: { type: "array", items: { type: "string" }, description: "Tools the project's image must carry, e.g. [\"git\"]." },
+        image: { type: "string", description: "The catalogue key the project's env.yml names." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_env_use",
+    description:
+      "Choose the backend that runs worker environments: `docker` or `namespace` (the isolated `agentop run --rm`, which is also what declining means). `scope` is `session` (only that session — omit `target` to mean your own), `project` (`target` = the project key) or `all` (default); the MOST SPECIFIC scope wins. Behind the experimental `docker-env` flag (refused `flag_off` otherwise). Only the person or a verified LEADER session may choose: a worker is refused (`leader_only`). It records a preference only — nothing is started, installed or removed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        backend: { type: "string", enum: ["docker", "namespace"] },
+        scope: { type: "string", enum: ["session", "project", "all"], description: "Default all." },
+        target: { type: "string", description: "Session id (scope=session) or project key (scope=project)." },
+      },
+      required: ["backend"],
+    },
+  },
+  {
+    name: "agentistics_env_install_hint",
+    description:
+      "How to install Docker on a given operating system: what to install, what it costs (estimates are marked as such), numbered steps, the official page and whether Docker is validated there yet. Defaults to this machine's system; `os` (linux | wsl2 | macos | windows) previews another. It NEVER installs anything or runs a command — it is the text and the link a person follows. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: { os: { type: "string", enum: ["linux", "wsl2", "macos", "windows"] } },
       required: [],
     },
   },
@@ -1465,6 +1505,7 @@ async function callTool(
           detail: a?.detail,
           ...(typeof a?.priority === "string" ? { priority: a.priority } : {}),
           ...(typeof a?.type === "string" ? { type: a.type } : {}),
+          ...(typeof a?.dueDate === "string" ? { dueDate: a.dueDate } : {}),
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
@@ -1576,7 +1617,7 @@ async function callTool(
             : { id: a.id, done: a?.done === true })
           // `isGroup: true` creates a GROUP (§F.1) instead of an ordinary subtask — creation only,
           // `addSubtask` offers no way to change it afterwards.
-          : { title: a?.title, ...(a?.isGroup === true ? { isGroup: true } : {}) };
+          : { title: a?.title, ...(a?.isGroup === true ? { isGroup: true } : {}), ...(typeof a?.dueDate === "string" ? { dueDate: a.dueDate } : {}) };
         const body = await apiSend("POST", `/api/tasks/${encodeURIComponent(String(a?.ref))}/subtasks`, payload);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
@@ -1849,6 +1890,37 @@ async function callTool(
           ...(a.maxWorkers !== undefined ? { maxWorkers: a.maxWorkers } : {}),
           ...(a.topCaps !== undefined ? { topCaps: a.topCaps } : {}),
           session: sessionProof(process.env),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_env_status": {
+        const a = args as any;
+        const q = new URLSearchParams();
+        if (typeof a?.session === "string") q.set("session", a.session);
+        if (typeof a?.project === "string") q.set("project", a.project);
+        if (Array.isArray(a?.needs)) q.set("needs", a.needs.join(","));
+        if (typeof a?.image === "string") q.set("image", a.image);
+        const body = await apiGet(`/api/env/status?${q}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_env_install_hint": {
+        const a = args as any;
+        const body = await apiGet(`/api/env/install-hint${typeof a?.os === "string" ? `?os=${encodeURIComponent(a.os)}` : ""}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_env_use": {
+        const a = args as any;
+        // FAIL CLOSED: inside a session whose proof cannot be produced (identity key unreadable), sending the
+        // request WITHOUT `session` would read to the server as "no claim" — refuse here instead.
+        const proof = sessionProof(process.env);
+        if (!proof && (process.env.AGENTOP_MANAGED_ID !== undefined || ancestorSession())) {
+          throw new Error("agentistics_env_use refused: this session could not prove who it is (its identity key is unavailable), so it cannot choose where environments run. Ask the person or a leader session.");
+        }
+        const body = await apiSend("POST", "/api/env/use", {
+          backend: a?.backend,
+          ...(a?.scope !== undefined ? { scope: a.scope } : {}),
+          ...(a?.target !== undefined ? { target: a.target } : {}),
+          ...(proof ? { session: proof } : {}),
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }

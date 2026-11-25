@@ -26,7 +26,7 @@ export interface Compared {
 }
 export interface HistoryComparison {
   /** Not `id`: the MCP tool strips every `id` key from the history, and this one is not an identifier of work. */
-  key: 'qa' | 'sessions'
+  key: ComparisonKey
   nA: number; nB: number
   cost: Compared | null; wall: Compared | null
   /** QA comparison: how many more sessions; sessions comparison: the rework rate of each side. */
@@ -35,11 +35,15 @@ export interface HistoryComparison {
 
 const med = (v: number[]) => percentile(v, 0.5)
 
-export type ComparisonKey = HistoryComparison['key']
+/** The four observed comparisons: QA rounds, sessions per piece, the model that wrote the piece, the harness that ran it. */
+export type ComparisonKey = 'qa' | 'sessions' | 'models' | 'harnesses'
+export const COMPARISON_KEYS: readonly ComparisonKey[] = ['qa', 'sessions', 'models', 'harnesses']
 /** Who is on side A and side B of each comparison: the ONE definition, read by `buildComparisons` and by the per-task pairs. */
 export const COMPARISON_SIDES: Record<ComparisonKey, { a: (s: HistorySubtaskRow) => boolean; b: (s: HistorySubtaskRow) => boolean }> = {
   qa: { a: s => s.qaRounds === 1, b: s => s.qaRounds !== null && s.qaRounds >= 2 },
   sessions: { a: s => s.sessions === 1, b: s => s.sessions >= 5 },
+  models: { a: s => s.model === 'sonnet', b: s => s.model === 'opus' },
+  harnesses: { a: s => s.harness === 'claude', b: s => s.harness === 'codex' },
 }
 
 export type Pair = [number | null, number | null]
@@ -50,7 +54,9 @@ export interface TaskSides {
   /** Some priced piece of that side had a session with no price. */
   costPartial: [boolean, boolean]
   /** Not recorded anywhere yet: always `[null, null]`, never a zero. */
-  defects: Pair; accepted: [boolean | null, boolean | null]
+  defects: Pair
+  /** Owner validation (the piece's subtask is `done`): true for a side whose pieces are all validated, null while any is not. Never false: nothing records a refusal. */
+  accepted: [boolean | null, boolean | null]
 }
 
 /** The two sides of one task under a comparison. Medians per piece, so a side with more pieces does not look bigger. */
@@ -63,9 +69,12 @@ export function taskSides(subs: readonly HistorySubtaskRow[], key: ComparisonKey
     key, nA: A.length, nB: B.length,
     sessions: pair(s => s.sessions), costUSD: pair(s => s.costUSD), wallMs: pair(s => s.wallMs), qaRounds: pair(s => s.qaRounds),
     costPartial: [A.some(s => s.costPartial), B.some(s => s.costPartial)],
-    defects: [null, null], accepted: [null, null],
+    defects: [null, null], accepted: [acceptedOf(A), acceptedOf(B)],
   }
 }
+
+/** The owner's validation of a side: true only when it has pieces and every one is `done`; anything else is "not validated yet" (null), never a no. */
+const acceptedOf = (g: readonly HistorySubtaskRow[]): boolean | null => g.length > 0 && g.every(s => s.accepted === true) ? true : null
 
 function matched(subs: readonly HistorySubtaskRow[], inA: (s: HistorySubtaskRow) => boolean, inB: (s: HistorySubtaskRow) => boolean, val: (s: HistorySubtaskRow) => number | null): Compared | null {
   const sizes: SizePair[] = [], per: { r: number; w: number }[] = []
@@ -91,17 +100,19 @@ const rate = (g: readonly HistorySubtaskRow[]): number | null => {
 
 /** The comparisons the history supports (none when no size has enough pieces on both sides). */
 export function buildComparisons(subs: readonly HistorySubtaskRow[]): HistoryComparison[] {
-  const mk = (key: 'qa' | 'sessions', inA: (s: HistorySubtaskRow) => boolean, inB: (s: HistorySubtaskRow) => boolean): HistoryComparison | null => {
+  const mk = (key: ComparisonKey, inA: (s: HistorySubtaskRow) => boolean, inB: (s: HistorySubtaskRow) => boolean): HistoryComparison | null => {
     const A = subs.filter(inA), B = subs.filter(inB)
     const cost = matched(subs, inA, inB, s => s.costUSD), wall = matched(subs, inA, inB, s => s.wallMs)
     if (!cost && !wall) return null
-    const third: HistoryComparison['third'] = key === 'qa'
-      ? { kind: 'sessions', sessions: matched(subs, inA, inB, s => s.sessions) }
-      : { kind: 'rework', rateA: rate(A), rateB: rate(B) }
+    const third: HistoryComparison['third'] = key === 'sessions'
+      ? { kind: 'rework', rateA: rate(A), rateB: rate(B) }
+      : { kind: 'sessions', sessions: matched(subs, inA, inB, s => s.sessions) }
     return { key, nA: A.length, nB: B.length, cost, wall, third }
   }
   return [
     mk('qa', COMPARISON_SIDES.qa.a, COMPARISON_SIDES.qa.b),
     mk('sessions', COMPARISON_SIDES.sessions.a, COMPARISON_SIDES.sessions.b),
+    mk('models', COMPARISON_SIDES.models.a, COMPARISON_SIDES.models.b),
+    mk('harnesses', COMPARISON_SIDES.harnesses.a, COMPARISON_SIDES.harnesses.b),
   ].filter((c): c is HistoryComparison => c !== null)
 }

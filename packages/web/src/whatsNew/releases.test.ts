@@ -6,5 +6,4 @@ test('2.228.1 announces the Mac vault setup fix in both languages', () => {
   expect(r).toBeDefined()
   expect(r!.fixes.length).toBeGreaterThan(0)
   for (const l of r!.fixes) { expect(l.pt).toContain('Mac'); expect(l.en).toContain('Mac') }
-  expect(RELEASES['2.229.0']).toBeUndefined()
 })

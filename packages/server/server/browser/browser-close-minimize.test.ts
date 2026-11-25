@@ -104,6 +104,18 @@ describe('personal routes', () => {
     await browserRoute('POST', '/api/browser/personal/tab_new', { url: 'https://x.example/' }, f.deps)
     expect(f.ran).toEqual([{ action: 'tab_new', url: 'https://home.example/' }, { action: 'tab_new', url: 'https://x.example/' }])
   })
+  test('a malformed stored home page falls back to the default through the routes (never about:blank)', async () => {
+    for (const bad of ['https://[', 'http://', 'https:// space', 'javascript:alert(1)', '']) {
+      expect(homeUrlOf(bad)).toBe(DEFAULT_HOME_URL)
+      const f = fake()
+      f.live.add('personal')
+      f.deps.homeUrl = () => homeUrlOf(bad)
+      await browserRoute('POST', '/api/browser/personal/tab_new', {}, f.deps)
+      await browserRoute('POST', '/api/browser/personal/open', {}, f.deps)
+      expect(f.ran).toEqual([{ action: 'tab_new', url: DEFAULT_HOME_URL }])
+      expect(f.calls).toEqual([`open:${DEFAULT_HOME_URL}`])
+    }
+  })
   test('a session cannot minimize or open the person\'s browser', async () => {
     const f = fake({})
     f.deps.personalGrant = () => false

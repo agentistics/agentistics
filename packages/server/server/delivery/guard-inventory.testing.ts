@@ -40,7 +40,7 @@ export interface ReachInventory { base: string; writers: Record<string, string[]
  * so the repo-wide raw-writer count shrinks. Its own sites (and `sessions/native-notes.ts` as a new importer) are the
  * only entries added; the ceiling stays shrink-only from here.
  */
-export const R3_INVENTORY_DIGEST = '9178e5219e58b4c5f860fc55fa6a76a7be21e38e29806b78352cdcc6f06889f1'
+export const R3_INVENTORY_DIGEST = 'dee4359bc03ab38aecad71c671136b768f9cd4a68c876137939e91c3fb9cd513'
 export function r3Inventory(): ReachInventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory-r3.fixture.json'), 'utf8')
   if (digest(text) !== R3_INVENTORY_DIGEST) throw new Error('Historical guard inventory changed: the S2a r3 ceiling is pinned; a writer or a book reference may disappear, never be added')

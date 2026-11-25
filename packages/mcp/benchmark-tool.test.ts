@@ -129,7 +129,7 @@ describe('agentistics_benchmark_observed — the comparisons are built on the se
     const http = await (await handleBenchmarkRequest(new Request(url), url, { observed: async f => buildObservedFromSources(cmpStore(), f), experiments: () => [] })).json() as { history: { tasks: { sides: Record<string, { nA: number; nB: number; wallMs: [number | null, number | null]; defects: unknown[] }> }[] } }
     const mcp = benchmarkObservedTool(http as never) as unknown as { history: { tasks: { sides: unknown }[] } }
     const sides = http.history.tasks[0]!.sides
-    expect(Object.keys(sides).sort()).toEqual(['qa', 'sessions'])
+    expect(Object.keys(sides).sort()).toEqual(['harnesses', 'models', 'qa', 'sessions'])
     expect(sides.qa!.wallMs).toEqual([2 * H, 8 * H])
     expect(sides.qa!.defects).toEqual([null, null])
     expect(mcp.history.tasks[0]!.sides).toEqual(sides)

@@ -4,7 +4,7 @@ import type { HistorySubtaskRow } from './history'
 
 const H = 3_600_000
 const sub = (id: string, o: Partial<HistorySubtaskRow> = {}): HistorySubtaskRow => ({
-  id, title: id, status: 'done', size: 'M', sessions: 2, costUSD: 4, costPartial: false, wallMs: 2 * H, activeMs: null, qaRounds: 1, reworked: false, lines: 200, ...o,
+  id, title: id, status: 'done', size: 'M', sessions: 2, costUSD: 4, costPartial: false, wallMs: 2 * H, activeMs: null, qaRounds: 1, reworked: false, lines: 200, model: null, harness: null, accepted: null, ...o,
 })
 const many = (n: number, f: (i: number) => HistorySubtaskRow) => Array.from({ length: n }, (_, i) => f(i))
 
@@ -75,5 +75,27 @@ describe('taskSides: one task as the prototype\'s "um → outro"', () => {
   test('buildComparisons and taskSides share one definition of the sides', () => {
     expect(COMPARISON_SIDES.qa.b(sub('x', { qaRounds: 2 }))).toBe(true)
     expect(COMPARISON_SIDES.qa.a(sub('x', { qaRounds: null }))).toBe(false)
+  })
+})
+
+describe('models and harnesses comparisons, and the owner\'s acceptance', () => {
+  const sonnet = (i: number) => sub(`s${i}`, { model: 'sonnet', harness: 'claude', costUSD: 2, wallMs: H })
+  const opus = (i: number) => sub(`o${i}`, { model: 'opus', harness: 'claude', costUSD: 6, wallMs: 3 * H })
+  test('Sonnet × Opus is built when each side has the minimum of pieces in one size, with B ÷ A ratios', () => {
+    const c = buildComparisons([...many(3, sonnet), ...many(3, opus)]).find(x => x.key === 'models')!
+    expect(c.nA).toBe(3); expect(c.nB).toBe(3)
+    expect(c.cost!.ratio).toBeCloseTo(3, 6); expect(c.wall!.ratio).toBeCloseTo(3, 6)
+  })
+  test('under the minimum there is no comparison — never a ratio from two pieces', () => {
+    expect(buildComparisons([...many(2, sonnet), ...many(3, opus)]).some(x => x.key === 'models')).toBe(false)
+  })
+  test('between harnesses reads the harness of the piece', () => {
+    const codex = (i: number) => sub(`x${i}`, { harness: 'codex', costUSD: 1, wallMs: H })
+    const c = buildComparisons([...many(3, i => sub(`c${i}`, { harness: 'claude', costUSD: 2, wallMs: H })), ...many(3, codex)]).find(x => x.key === 'harnesses')!
+    expect(c.cost!.ratio).toBeCloseTo(0.5, 6)
+  })
+  test('accepted: a side is validated only when every piece is done; in review it is "not validated", never a no', () => {
+    const t = taskSides([sub('a', { sessions: 1, accepted: true }), sub('b', { sessions: 1, accepted: null }), sub('c', { sessions: 6, accepted: true })], 'sessions')
+    expect(t.accepted).toEqual([null, true])
   })
 })

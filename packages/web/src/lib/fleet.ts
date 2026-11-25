@@ -88,6 +88,8 @@ export interface FleetRow {
   project: string
   state: 'working' | 'waiting' | 'waiting-approval' | 'idle' | 'exited' | 'lost' | 'unknown' | 'closed'
   stateLabel: string
+  /** Why the row is not idle — the one activity reading (`@agentistics/core` sessionActivity). */
+  activeSignal?: import("@agentistics/core").ActivitySignal
   actionable: boolean
   /** This row is one of the sessions the machine TOOK — see the server's `FleetRow.fell`. */
   fell?: boolean

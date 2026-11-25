@@ -881,3 +881,33 @@ describe('Claude per-tool failures', () => {
     expect(d).toContain('*** Add File: packages/a/src/y.ts')
   })
 })
+
+describe('a tool call that arrives WITH assistant text (the real Claude shape)', () => {
+  test('the newest event "text + unanswered tool_use" leaves the tool pending after the text', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'chat-tail-textool-'))
+    try {
+      const path = join(dir, 'session.jsonl')
+      await writeFile(path, line({
+        type: 'assistant', timestamp: '2026-11-24T04:00:00.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Running the long tests now' }, { type: 'tool_use', id: 'c1', name: 'Bash', input: { command: 'bun test' } }] },
+      }) + '\n')
+      const turns = await readRecentChatTurns(path)
+      expect(turns.map(t => t.text)).toEqual(['Running the long tests now', 'Running Bash'])
+      expect(turns.at(-1)).toMatchObject({ role: 'assistant', pending: true, at: '2026-11-24T04:00:00.000Z' })
+      expect(turns[0]!.pending).toBeUndefined()
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+
+  test('once the tool has a result the text turn is the last one and nothing is pending', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'chat-tail-textool-'))
+    try {
+      const path = join(dir, 'session.jsonl')
+      await writeFile(path, [
+        line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Running tests' }, { type: 'tool_use', id: 'c1', name: 'Bash', input: { command: 'bun test' } }] } }),
+        toolResultTurn(),
+      ].join('\n') + '\n')
+      const turns = await readRecentChatTurns(path)
+      expect(turns.some(t => t.pending)).toBe(false)
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+})

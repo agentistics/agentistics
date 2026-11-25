@@ -101,6 +101,10 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // (from S2) drives them — host power, the strictest capability, and a PREFIX so every browser route
   // is guarded by having been added at all. S1 serves only the read-only `status`.
   ['/api/browser', 'localShell'],
+  // DOCKER.AMBIENTES: which backend runs a worker's environment (status, scoped choice, install hint, grant).
+  // It reads what is installed on this machine and records a choice that later decides where commands run — host
+  // power, and a PREFIX so every `/api/env/*` verb added later is guarded by having been added.
+  ['/api/env', 'localShell'],
   // The task board reads the session registry and the local store, and its DELIVER verb runs git in
   // the directories those sessions ran in. That is host power, so it rides the same capability as
   // the fleet — and a prefix for the same reason: the next task route must be guarded by having

@@ -13,7 +13,8 @@
  * `CliStrings`, so this module owns no copy of any sentence.
  */
 
-import { contextFraction, conversationLinkOf, fmt, fmtCost, isNayCwd, nayTitle } from '@agentistics/core'
+import { activeEvidence, activityApplies, contextFraction, conversationLinkOf, fmt, fmtCost, isNayCwd, nayTitle } from '@agentistics/core'
+import type { ActivitySignal } from '@agentistics/core'
 import type { ControlSession, SessionState } from '@agentistics/tui/control'
 import type { CliStrings } from '../cli-i18n'
 import { approvalFor, canPick, isFreeTextOption } from './approval-spec'
@@ -193,6 +194,7 @@ export function toControlSession(
     ...(v.createdMs !== undefined ? { startedAt: v.createdMs } : {}),
     ...(v.endedMs !== undefined ? { endedAt: v.endedMs } : {}),
     ...(v.lastUserMessageMs !== undefined ? { lastUserMessageAt: v.lastUserMessageMs } : {}),
+    ...activeFields(v),
     ...(v.taskId ? { taskId: v.taskId } : {}),
     ...(v.parentSessionId ? { parentSessionId: v.parentSessionId } : {}),
     ...(v.parentConversationId ? { parentConversationId: v.parentConversationId } : {}),
@@ -330,4 +332,11 @@ export function toControlSession(
     ...(v.cpuPercent !== undefined ? { cpuPercent: v.cpuPercent } : {}),
     ...(v.rssBytes !== undefined ? { rssBytes: v.rssBytes } : {}),
   }
+}
+
+/** The ONE reading of "is it doing something" (`@agentistics/core` sessionActivity), carried to every surface. */
+function activeFields(v: SessionView): { activeSignal?: ActivitySignal; activeSinceAt?: number } {
+  if (!activityApplies(v.status)) return {}
+  const e = activeEvidence({ turns: v.chatTurns ?? [], ...(v.heavyLock ? { heavyLock: v.heavyLock } : {}), ...(v.outputMoved ? { outputMoved: true } : {}) })
+  return e ? { activeSignal: e.signal, ...(e.sinceMs !== undefined ? { activeSinceAt: e.sinceMs } : {}) } : {}
 }
