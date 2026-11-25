@@ -320,7 +320,7 @@ test('flowHostOps registers the two worktree ops', () => {
 })
 
 // ── F3 DOCKER.DETECTAR (host) ─────────────────────────────────────────────────────────────────────────────────────
-import { detectDocker, dockerHostOps, type DockerProbeDeps } from './host-ops'
+import { DOCKER_PROBE_DEADLINE_MS, detectDocker, dockerHostOps, type DockerProbeDeps } from './host-ops'
 
 /** A fake `docker`: answers by its argv; `null` models a binary that is not on PATH. */
 const fakeDocker = (o: { installed?: boolean; running?: boolean; os?: string; wsl?: boolean; mount?: boolean; api?: string }): DockerProbeDeps & { calls: string[][] } => {
@@ -370,13 +370,63 @@ test('docker-detectar: the op is read-only (only `docker version` / `docker info
   expect(d.calls.every(c => c[0] === 'version' || c[0] === 'info')).toBe(true)
 })
 
-// The real probe runs up to 4 sequential `docker` calls, each capped at 8 s by defaultDockerProbeDeps; a cold daemon
-// (CI runners) can exceed bun's 5 s default, so the test budget matches the probe's own worst case.
+// The real probe is bounded by DOCKER_PROBE_DEADLINE_MS as a whole (a cold or hung daemon on a CI runner can exceed
+// bun's 5 s default), so the test budget is that deadline plus slack, not 4 x the per-call 8 s timeout.
 test('docker-detectar: the real probe never throws on this machine', async () => {
   const r = await detectDocker()
   expect(typeof r.present).toBe('boolean')
   expect(['wsl2-desktop', 'desktop', 'native', 'none']).toContain(r.kind)
-}, 4 * 8_000 + 5_000)
+}, DOCKER_PROBE_DEADLINE_MS + 5_000)
+
+/** A `docker` whose calls after the first `answered` never settle — a daemon that hangs. */
+const hangingDocker = (answered: number, o: { wsl?: boolean; mount?: boolean } = {}): DockerProbeDeps & { calls: string[][] } => {
+  const calls: string[][] = []
+  return {
+    calls,
+    isWsl: () => o.wsl ?? false,
+    desktopMount: () => o.mount ?? false,
+    docker: args => {
+      calls.push(args)
+      if (calls.length > answered) return new Promise(() => { /* hung */ })
+      return Promise.resolve(args[2] === '{{.Client.Version}}' ? { code: 0, stdout: '27.3.1\n' } : { code: 0, stdout: '27.3.1\n' })
+    },
+  }
+}
+
+test('docker-detectar: a hung daemon is cut at the WHOLE-probe deadline and reported unreachable with a reason', async () => {
+  const d = hangingDocker(1)
+  const t0 = Date.now()
+  const r = await detectDocker(d, 50)
+  expect(Date.now() - t0).toBeLessThan(1_000)
+  expect(r).toMatchObject({ present: true, running: false, version: '27.3.1', kind: 'native', apiVersion: null })
+  expect(r.reason).toMatch(/did not answer/)
+  expect(d.calls).toHaveLength(2)
+})
+
+test('docker-detectar: the deadline bounds the sum of calls, not each call (slow but answering daemon)', async () => {
+  // Every call answers after 30 ms: four of them (120 ms) exceed an 80 ms total deadline even though none hangs.
+  const slow: DockerProbeDeps = {
+    isWsl: () => false, desktopMount: () => false,
+    docker: args => new Promise(res => setTimeout(() => res(args[2] === '{{.OperatingSystem}}' ? { code: 0, stdout: 'Ubuntu\n' } : { code: 0, stdout: '27.3.1\n' }), 30)),
+  }
+  const r = await detectDocker(slow, 80)
+  expect(r.running).toBe(false)
+  expect(r.reason).toMatch(/did not answer/)
+})
+
+test('docker-detectar: a client that never answers reads as absent with a reason; Desktop mount keeps its kind', async () => {
+  expect(await detectDocker(hangingDocker(0), 30)).toMatchObject({ present: false, running: false, kind: 'none', reason: expect.stringMatching(/did not answer/) })
+  expect((await detectDocker(hangingDocker(1, { wsl: true, mount: true }), 30)).kind).toBe('wsl2-desktop')
+})
+
+test('docker-detectar: a throwing dep never throws out of the probe', async () => {
+  const boom: DockerProbeDeps = { isWsl: () => false, desktopMount: () => false, docker: async () => { throw new Error('spawn exploded') } }
+  expect(await detectDocker(boom, 1_000)).toMatchObject({ present: false, running: false, kind: 'none', reason: expect.stringMatching(/failed/) })
+})
+
+test('docker-detectar: a probe that finishes in time carries no reason (the happy path is unchanged)', async () => {
+  expect('reason' in await detectDocker(fakeDocker({ running: true }), 1_000)).toBe(false)
+})
 
 // ── FECHAR.CWD-COMPARTILHADO (host): alvo-trabalho ────────────────────────────────────────────────────────────────
 import { workTarget, type WorkTargetDeps } from './host-ops'
