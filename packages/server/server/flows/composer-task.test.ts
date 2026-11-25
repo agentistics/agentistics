@@ -184,21 +184,29 @@ test('actual shared send registers once and still delivers the message plus syst
 })
 
 /** An engine like the real one: emit returns at once, one serial queue builds the pedido card (no ownerRequest) later. */
-async function asyncEngineWorld(stepMs: number, linkWorks = true) {
+async function asyncEngineWorld(stepMs: number, linkWorks = true, sleepWaitsForEngine = false) {
   const x = await world()
   let chain: Promise<unknown> = Promise.resolve()
   const done = new Set<string>()
+  let pending = 0
+  const waiters: (() => void)[] = []
   const pedidoOf = (p: Record<string, unknown>) => `p-${createHash('sha256').update(`${p.conversationId}\0${p.at}\0${p.text}`).digest('hex').slice(0, 12)}`
   const d: ComposerTaskDeps = {
     ...x.d,
-    sleep: () => new Promise(r => setTimeout(r, 25)),
+    // `sleepWaitsForEngine`: a retry pause lasts until the engine has processed everything emitted so far,
+    // instead of a fixed 25 ms that a loaded machine (a 30 ms timer plus a guarded store write) can outrun —
+    // which made the link retries expire and a registration fail by timing alone.
+    sleep: () => sleepWaitsForEngine ? (pending > 0 ? new Promise<void>(r => waiters.push(r)) : Promise.resolve()) : new Promise(r => setTimeout(r, 25)),
     emit: async event => {
       const id = pedidoOf(event.payload)
+      pending++
       chain = chain.then(async () => {
         await new Promise(r => setTimeout(r, stepMs))
         await x.store.upsertSubtask({ id: `s-flow-${id}`, taskId: 't1', title: `Owner's request: ${String(event.payload.text)} [high priority] · ${id}`,
           status: 'todo', done: false, createdAt: '2026-11-09T12:00:00.000Z', updatedAt: '2026-11-09T12:00:00.000Z' }, unattributedContext())
         done.add(id)
+        pending--
+        for (const w of waiters.splice(0)) w()
       })
       return { status: 'success' }
     },
@@ -213,7 +221,7 @@ async function asyncEngineWorld(stepMs: number, linkWorks = true) {
 const mk = (n: number, text = `Task number ${n}`) => ({ ...request, messageId: `msg-c${n}`, text })
 
 test('concurrent sends (3 at once, then the same text twice) each register exactly one linked subtask and leave no orphan card', async () => {
-  const x = await asyncEngineWorld(30)
+  const x = await asyncEngineWorld(30, true, true)
   const alien = { id: 's-alien', taskId: 't1', title: 'Parallel work', status: 'todo' as const, done: false, createdAt: '2026-11-09T12:00:00.000Z', updatedAt: '2026-11-09T12:00:00.000Z' }
   await x.store.upsertSubtask(alien, unattributedContext())
   const results = await Promise.all([1, 2, 3].map(n => registerComposerTask(mk(n), 'en', x.d)))

@@ -3,7 +3,7 @@
  * (delivery store), guards.json (sealed), guarantees.json; the real service `tick()` drives the sweep. A checkpoint is written
  * through the real guards store; the "forger" is a raw file write — what an older binary or a hand edit does.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test as bunTest } from 'bun:test'
 import * as fs from 'node:fs/promises'
 import { __setDurableOpsForTest } from '../durable-file'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -29,9 +29,29 @@ const DEFS = [def('todo', 'To do', 'queue', 0, true), def('in_progress', 'In pro
   def('in_review', 'In review', 'leader', 4), def('pr_merge', 'PR merge', 'merge', 5), def('ci', 'CI', 'ci', 6)]
 const subtask = (id: string, status = 'in_progress') => ({ id, taskId: 't1', title: id, done: false, status, createdAt: ISO, updatedAt: ISO }) as never
 
+/**
+ * Every test here builds REAL sealed stores (40+ guarded upserts) and runs the real tick, so under a
+ * loaded machine (the full pre-commit hook) one test can take several seconds. Two rules keep that
+ * from becoming a flake:
+ * - an explicit, realistic timeout per test (bun's 5 s default is below what a loaded run needs);
+ * - the teardown WAITS for the test body before deleting its temp dir. When bun times a test out it
+ *   runs `afterEach` while the body is still writing; removing the dir under it surfaced as
+ *   "errors outside any test" (and a still-installed `fs.rename` spy leaked into the next test).
+ */
+const WORLD_TIMEOUT_MS = 30_000
+const HEAVY_TIMEOUT_MS = 60_000
+let running: Promise<unknown> | null = null
+const test = (name: string, fn: () => Promise<void> | void, timeout = WORLD_TIMEOUT_MS) =>
+  bunTest(name, () => { const p = Promise.resolve().then(fn); running = p; return p }, timeout)
+
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'sweep-')) })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+afterEach(async () => {
+  const body = running
+  running = null
+  if (body) await body.catch(() => {}) // a timed-out body is still running: let it finish first
+  rmSync(root, { recursive: true, force: true })
+}, HEAVY_TIMEOUT_MS)
 
 interface World { svc: any; tasks: TaskStore; store: ReturnType<typeof createDeliveryStore>; guards: ReturnType<typeof createGuardsStore>; clock: { now: number }; board: { catchUps: string[]; comments: string[] }; logs: string[]; paths: { tasks: string; deliveries: string; guards: string } }
 
@@ -275,7 +295,7 @@ describe('bounded chunks, breaker, loop guard', () => {
     const book = await w.tasks.read()
     expect(book.subtasks.filter(s => s.status === 'in_progress')).toHaveLength(12)
     for (const id of ids) expect((await w.store.get(id))!.phase).toBe('executando')
-  })
+  }, HEAVY_TIMEOUT_MS)
 
   test('a piece reverted twice in 24 h is BLOCKED (externo), the WARN says how to release it (r4: no longer `guarantee off`), the third forge is not a silent revert', async () => {
     const w = await world('on')

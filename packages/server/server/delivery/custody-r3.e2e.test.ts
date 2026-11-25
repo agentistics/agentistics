@@ -2,7 +2,7 @@
  * S7a r3 — the independent QA's probes (N1–N3) and the two surviving mutants (Q4, Q6), against REAL stores in a temp dir.
  * Every negative runs after a positive in the same fixture (the control proves the fixture can do the thing).
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test as bunTest } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -23,9 +23,29 @@ const check = async () => ({ ok: true as const, via: 'legacy-browser' as const }
 const facts = (now: number): ActivationFacts => ({ now: iso(now), build: 'qa', capabilities: ['S0', 'S1', 'S2', 'S3', 'S7'], migrated: ['a', 'c'], unexplainedWouldRefuse: 0 })
 const PROJECT = new Map<string, string>([['p1', 'acme/app'], ['p2', 'acme/app'], ['p3', 'acme/app'], ['t-tl', 'acme/app']])
 
+/**
+ * Every scene here drives the REAL service through a dozen-plus ticks over sealed stores, so a loaded
+ * machine (the full pre-commit hook) can take well past bun's 5 s default. Two rules keep that from
+ * becoming a flake:
+ * - an explicit, realistic timeout per test;
+ * - the teardown WAITS for the test body before deleting its temp dir. When bun times a test out it
+ *   runs `afterEach` while the body is still ticking; removing the dir under it surfaced as ENOENT on
+ *   deliveries.json and "errors outside any test".
+ */
+const SCENE_TIMEOUT_MS = 30_000
+const LOCK_TIMEOUT_MS = 90_000
+let running: Promise<unknown> | null = null
+const test = (name: string, fn: () => Promise<void> | void, timeout = SCENE_TIMEOUT_MS) =>
+  bunTest(name, () => { const p = Promise.resolve().then(fn); running = p; return p }, timeout)
+
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'custody-r3-')) })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+afterEach(async () => {
+  const body = running
+  running = null
+  if (body) await body.catch(() => {}) // a timed-out body is still running: let it finish first
+  rmSync(root, { recursive: true, force: true })
+}, LOCK_TIMEOUT_MS)
 
 interface Row { id: string; role: string; taskId: string; alive: boolean; cwd: string; harness: string; worktree: boolean }
 const row = (id: string, taskId: string, alive = true, role = 'leader'): Row => ({ id, role, taskId, alive, cwd: '/nowhere', harness: 'claude', worktree: false })
@@ -102,7 +122,7 @@ describe('N1 — a door under rule C on is fail-closed whatever rule A says (§2
       expect(out.ok).toBe(false)
       expect(out.status).toBe(409)
       expect(out.code).toBe('guard_busy')
-    }, 30_000)
+    }, LOCK_TIMEOUT_MS)
   }
   test('C off / A off: the door keeps the old path (unchanged behaviour, no custody stamp)', async () => {
     const w = await world({ c: 'off' })
