@@ -28,7 +28,7 @@
  * also leaves the legacy figures.
  */
 import {
-  allMetricGroups, canonicalProjectPath, sumTokens, usageTokens,
+  accumulateUsageCost, allMetricGroups, calcCost, canonicalProjectPath, isUnpricedModel, sumTokens, unpricedTokens, usageTokenTotal, usageTokens,
   type Filters, type MetricsGroupLike, type MetricsParams, type MetricsQueryFn, type ModelUsage, type TokenBreakdown,
 } from '@agentistics/core'
 import { cacheFiguresOf, type BlendedRate } from './cacheFigures'
@@ -79,14 +79,42 @@ export function projectedScope(filters: Filters, activeOnly: boolean, range: { s
   return p
 }
 
-const usageOf = (g: MetricsGroupLike): ModelUsage => ({
-  inputTokens: g.metrics.tokens?.input ?? 0,
-  outputTokens: g.metrics.tokens?.output ?? 0,
-  cacheReadInputTokens: g.metrics.tokens?.cacheRead ?? 0,
-  cacheCreationInputTokens: g.metrics.tokens?.cacheWrite ?? 0,
-  webSearchRequests: 0,
-  costUSD: g.metrics.cost?.usd ?? 0,
-})
+/**
+ * One model row of the projection. Its cost is the figure the projection already PRICED — a harness's
+ * declared cost where it carried one (OpenCode), the table elsewhere — and `totalCostUSD` is the sum of
+ * these. So the row is marked settled (`costSource`): `calcCost`, which every by-model surface prices
+ * through (ModelBreakdown, `modelCostByHarness`, the PDF), returns it as is instead of repricing the
+ * same tokens from the table, which made the "Usage by model" rows disagree with the headline whenever a
+ * harness declared its cost (CUSTO.REGRA-UNICA). A row the projection could not price (cost 0, a model
+ * the table does not know) keeps its tokens reported as unpriced, exactly as before.
+ */
+const usageOf = (g: MetricsGroupLike, model: string): ModelUsage => {
+  const u: ModelUsage = {
+    inputTokens: g.metrics.tokens?.input ?? 0,
+    outputTokens: g.metrics.tokens?.output ?? 0,
+    cacheReadInputTokens: g.metrics.tokens?.cacheRead ?? 0,
+    cacheCreationInputTokens: g.metrics.tokens?.cacheWrite ?? 0,
+    webSearchRequests: 0,
+    costUSD: g.metrics.cost?.usd ?? 0,
+  }
+  return { ...u, costSource: 'mixed', unpricedTokens: u.costUSD === 0 && isUnpricedModel(model) ? usageTokenTotal(u) : 0 }
+}
+
+/**
+ * Adds one legacy row into a projected one under the SAME cost rule the legacy path accumulates with
+ * (`accumulateUsageCost`): each side keeps its own cost — settled or declared as given, table-priced
+ * otherwise — so the merged row still prices to the sum the headline adds.
+ */
+function mergeUsage(cur: ModelUsage, u: ModelUsage, model: string): ModelUsage {
+  const out: ModelUsage = { ...cur }
+  accumulateUsageCost(out, u, model)
+  out.inputTokens += u.inputTokens
+  out.outputTokens += u.outputTokens
+  out.cacheReadInputTokens += u.cacheReadInputTokens
+  out.cacheCreationInputTokens += u.cacheCreationInputTokens
+  out.webSearchRequests += u.webSearchRequests
+  return out
+}
 
 interface ToolsCellLike { byTool?: { name: string; calls: number }[]; calls?: number }
 const toolsOf = (g: MetricsGroupLike | undefined) => (g?.metrics as { tools?: ToolsCellLike } | undefined)?.tools
@@ -108,10 +136,11 @@ export async function projectedDerived(
   const modelUsage: Record<string, ModelUsage> = {}
   let totalCostUSD = 0
   for (const g of byModel.groups) {
-    const u = usageOf(g)
-    totalCostUSD += u.costUSD
     // A response with no model is spend all the same: it keeps its own row rather than vanishing.
-    modelUsage[g.key.model ?? 'unknown'] = u
+    const model = g.key.model ?? 'unknown'
+    const u = usageOf(g, model)
+    totalCostUSD += u.costUSD
+    modelUsage[model] = u
   }
   const tokenTotals = sumTokens(Object.values(modelUsage).map(usageTokens))
   const t = whole.groups[0]
@@ -193,12 +222,7 @@ function overlayProjectedFigures<D extends LegacyFigures>(legacy: D | null, over
   for (const d of parts) {
     for (const [m, u] of Object.entries(d.modelUsage)) {
       const cur = modelUsage[m]
-      modelUsage[m] = cur ? {
-        inputTokens: cur.inputTokens + u.inputTokens, outputTokens: cur.outputTokens + u.outputTokens,
-        cacheReadInputTokens: cur.cacheReadInputTokens + u.cacheReadInputTokens,
-        cacheCreationInputTokens: cur.cacheCreationInputTokens + u.cacheCreationInputTokens,
-        webSearchRequests: cur.webSearchRequests + u.webSearchRequests, costUSD: cur.costUSD + u.costUSD,
-      } : u
+      modelUsage[m] = cur ? mergeUsage(cur, u, m) : u
     }
   }
   const tokenTotals = sumTokens([overlay.tokenTotals, ...parts.map(d => d.tokenTotals)])
@@ -241,7 +265,12 @@ export function overlayProjected<D extends LegacyFigures>(legacy: D | null, over
   for (const d of missing) {
     for (const [m, u] of Object.entries(d.modelUsage)) {
       const cur = modelUsage[m]
-      if (cur) modelUsage[m] = { ...cur, costUSD: cur.costUSD + u.costUSD }
+      // The tokens are already in the projected row; only the cost the projection could not give is
+      // added (priced by the legacy rule: declared where declared), and those tokens stop being unpriced.
+      if (cur) {
+        const unpriced = Math.max(0, (cur.unpricedTokens ?? 0) - usageTokenTotal(u)) + unpricedTokens([[m, u]])
+        modelUsage[m] = { ...cur, costUSD: calcCost(cur, m) + calcCost(u, m), costSource: cur.costSource ?? 'mixed', unpricedTokens: unpriced }
+      }
     }
   }
   return { ...out, modelUsage, totalCostUSD: out.totalCostUSD + missing.reduce((a, d) => a + d.totalCostUSD, 0) }
