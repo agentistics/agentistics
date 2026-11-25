@@ -425,13 +425,21 @@ export async function showTask(
 }
 
 /**
+ * Test seam for `liveDeliveries`: the fleet rows the route maps. Only the FLEET is injected, so a test drives the real
+ * route (row mapping, roles, describeLive) and a regression in the mapping itself — not in `liveRowOf` — fails it.
+ */
+export interface LiveDeliveriesIo {
+  readFleet?: (lang: 'en') => Promise<Awaited<ReturnType<typeof import('./fleet-web')['readLiveFleet']>>>
+}
+
+/**
  * The LIVE DELIVERY line: active pieces, their stage and an ETA with its source (`task-live.ts`).
  * Built from the same detail the task page reads, so the line can never disagree with a task's own
  * page about which sessions it holds. Tasks that are `done` with no history to give are skipped
  * outright — only a done task can feed the ETA's samples, and one with no subtask or session
  * contributes nothing.
  */
-export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveView> {
+export async function liveDeliveries(filters: LiveFilters = {}, io: LiveDeliveriesIo = {}): Promise<LiveView> {
   const nowMs = Date.now()
   const replyPromise = liveReplyForBook()
   // The fleet and the stored roles are read WHERE the view is built, so the page and the MCP tool
@@ -444,7 +452,7 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
     const { readLiveFleet } = await import('./fleet-web')
     const { loadRoles, defaultRoleDeps, roleOfRow, rolesDocUnreadable, leadsOfRows } = await import('./session-roles')
     const { registryUnreadable } = await import('./registry')
-    const fleet = await readLiveFleet('en')
+    const fleet = await (io.readFleet ?? readLiveFleet)('en')
     rows = fleet.map(r => liveRowOf(r))
     // Checked BEFORE listRoles: loading a corrupt document rewrites it as an empty one, after which
     // the check would see a healthy file and a lost leader would read as "no leader".

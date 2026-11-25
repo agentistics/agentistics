@@ -262,7 +262,18 @@ export interface DockerProbeDeps {
   desktopMount(): boolean
 }
 export type DockerKind = 'wsl2-desktop' | 'desktop' | 'native' | 'none'
-export interface DockerState { present: boolean; running: boolean; version: string | null; kind: DockerKind; /** Engine API version, `null` while the daemon does not answer. */ apiVersion: string | null }
+export interface DockerState {
+  present: boolean; running: boolean; version: string | null; kind: DockerKind; /** Engine API version, `null` while the daemon does not answer. */ apiVersion: string | null
+  /** Set only when the probe was cut short by `DOCKER_PROBE_DEADLINE_MS`: why Docker is reported unreachable. */
+  reason?: string
+}
+
+/**
+ * The WHOLE probe's budget. Each `docker` call is capped at 8 s, and up to four run in sequence, so a hung daemon
+ * used to hold `GET /api/env` and `agentop env status` for ~32 s. Past this deadline Docker is reported unreachable
+ * (with `reason`), never thrown; the in-flight call is left to its own 8 s timeout.
+ */
+export const DOCKER_PROBE_DEADLINE_MS = 10_000
 
 export function defaultDockerProbeDeps(): DockerProbeDeps {
   return {
@@ -279,11 +290,31 @@ export function defaultDockerProbeDeps(): DockerProbeDeps {
 }
 
 /** Read-only: asks `docker` about itself and never installs, starts or stops anything. */
-export async function detectDocker(deps: DockerProbeDeps = defaultDockerProbeDeps()): Promise<DockerState> {
+export async function detectDocker(deps: DockerProbeDeps = defaultDockerProbeDeps(), deadlineMs: number = DOCKER_PROBE_DEADLINE_MS): Promise<DockerState> {
+  // What the probe has learnt so far, so an expired deadline still reports an installed client as present.
+  const seen: { clientVersion: string | null } = { clientVersion: null }
+  // Same kind rule as a stopped daemon below: the Desktop integration mount, else native.
+  const unreachable = (reason: string): DockerState => seen.clientVersion === null
+    ? { present: false, running: false, version: null, kind: 'none', apiVersion: null, reason }
+    : { present: true, running: false, version: seen.clientVersion || null, kind: (() => { try { return deps.desktopMount() ? (deps.isWsl() ? 'wsl2-desktop' : 'desktop') : 'native' } catch { return 'native' } })(), apiVersion: null, reason }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<DockerState>(resolve => {
+    timer = setTimeout(() => resolve(unreachable(`docker did not answer within ${Math.round(deadlineMs / 1000)} s; the daemon is treated as unreachable`)), deadlineMs)
+  })
+  try {
+    return await Promise.race([probeDocker(deps, seen), expired])
+  } catch {
+    // The probe never throws: a dep that does reads as an unreachable daemon, not a crash.
+    return unreachable('the docker probe failed; the daemon is treated as unreachable')
+  } finally { clearTimeout(timer) }
+}
+
+async function probeDocker(deps: DockerProbeDeps, seen: { clientVersion: string | null }): Promise<DockerState> {
   const client = await deps.docker(['version', '--format', '{{.Client.Version}}'])
   // A missing binary is the only "absent": an installed client with no daemon still answers with its own version.
   if (!client) return { present: false, running: false, version: null, kind: 'none', apiVersion: null }
   const clientVersion = client.stdout.trim()
+  seen.clientVersion = clientVersion
   const server = await deps.docker(['version', '--format', '{{.Server.Version}}'])
   const serverVersion = server && server.code === 0 ? server.stdout.trim() : ''
   const running = serverVersion.length > 0

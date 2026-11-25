@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.229.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Custos por modelo: quando o harness informa o próprio custo (como o OpenCode), a tabela por modelo usa esse mesmo valor em vez de recalcular pela tabela de preços, então a soma das linhas bate com o total do topo.',
+        en: 'Cost by model: when a harness reports its own cost (like OpenCode), the by-model table uses that same figure instead of repricing it from the price table, so the rows add up to the headline total.',
+      },
+      {
+        pt: 'A verificação do Docker responde em até 10 segundos mesmo quando o Docker trava; antes podia levar até 32 segundos. Se o prazo estourar, ela diz que o Docker não respondeu e o motivo.',
+        en: 'The Docker check now answers within 10 seconds even when Docker hangs; it could take up to 32 seconds before. If it times out, it says Docker did not respond and why.',
+      },
+    ],
+  },
   '2.229.1': {
     features: [],
     fixes: [
