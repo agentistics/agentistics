@@ -3,7 +3,7 @@ import { CLEAN_LOG_LIMIT, newCleanScan, scanEstimate, scanLog, wireCleanPlan } f
 import { planClean, type WorktreeFacts } from './clean-plan'
 
 const fact = (overrides: Partial<WorktreeFacts> = {}): WorktreeFacts => ({ repo: '/repo', path: '/repo/.worktrees/finished-name', branch: 'done', isMain: false,
-  missing: false, locked: false, merged: true, dirty: false, lastCommitMs: 1000, lastActivityMs: 2000, sizeBytes: 4096, nodeModulesBytes: 1024, ...overrides })
+  missing: false, locked: false, merged: true, pushed: true, dirty: false, lastCommitMs: 1000, lastActivityMs: 2000, sizeBytes: 4096, nodeModulesBytes: 1024, ...overrides })
 
 describe('live clean state', () => {
   test('starts with honest counters, no ETA and no stale log from another scan', () => {
@@ -49,7 +49,7 @@ describe('wire cleanup result', () => {
   })
   test('lastActivity is display metadata and does not change the old safety decisions', () => {
     const now = 40 * 86_400_000
-    const plan = wireCleanPlan(planClean([fact({ merged: false, lastCommitMs: 1000, lastActivityMs: now })], now), newCleanScan('scan', 0), now)
+    const plan = wireCleanPlan(planClean([fact({ merged: false, pushed: false, lastCommitMs: 1000, lastActivityMs: now })], now), newCleanScan('scan', 0), now)
     expect(plan.items[0]).toMatchObject({ kind: 'node-modules', name: 'finished-name/node_modules', lastActivityMs: now, bytes: 1024 })
   })
 })

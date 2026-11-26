@@ -1,16 +1,23 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
-import { applyClean, cwdInside, isRegenerable, openSessionCwds, parseDu, repoOf, worktreeFacts, WORKTREE_POOL_SIZE } from './clean-io'
+import { applyClean as realApplyClean, withCleanupLock, cwdInside, isRegenerable, openSessionCwds, parseDu, repoOf, worktreeFacts, WORKTREE_POOL_SIZE } from './clean-io'
 import { planClean } from './clean-plan'
 
 const dirs: string[] = []
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }) })
 const env = gitTestEnv()
 const g = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, env: gitTestEnv(), encoding: 'utf8' })
+const applyClean: typeof realApplyClean = (items, o = {}) => {
+  let time = Date.now()
+  return realApplyClean(items, { ...o, cleanup: {
+    lockPath: join(dirs[0]!, 'cleanup.lock'), health: async () => ({ level: 'ok', dirtyWriteback: 0 }),
+    heavyBusy: async () => false, now: () => time, sleep: async ms => { time += ms }, ...o.cleanup,
+  } })
+}
 
 function repo() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'clean-'))); dirs.push(root)
@@ -26,6 +33,8 @@ function repo() {
   // merged but dirty
   g(r, 'worktree', 'add', '-q', join(root, 'dirty'), '-b', 'dirty')
   writeFileSync(join(root, 'dirty', 'new'), 'x')
+  const bare = join(root, 'initial.git'); g(root, 'init', '-q', '--bare', bare); g(r, 'remote', 'add', 'origin', bare)
+  g(r, 'push', '-q', 'origin', 'done')
   return { root, r }
 }
 
@@ -55,7 +64,7 @@ describe('clean io (real git)', () => {
     expect(g(r, 'branch', '--list', 'done').trim()).toContain('done')
   })
 
-  test('squash-merged and pushed branches are removable; a local-only commit is not; a live cwd protects', async () => {
+  test('only pushed branches are removable; local squash-merges and local commits are kept; a live cwd protects', async () => {
     const { root, r } = repo()
     const commit = (wt: string, file: string) => { writeFileSync(join(wt, file), file); g(wt, 'add', '.'); g(wt, 'commit', '-qm', file) }
     // squash: same patch lands on main under another sha
@@ -63,7 +72,7 @@ describe('clean io (real git)', () => {
     writeFileSync(join(r, 'm'), 'm'); g(r, 'add', '.'); g(r, 'commit', '-qm', 'diverge')
     g(r, 'cherry-pick', g(join(root, 'squash'), 'rev-parse', 'HEAD').trim())
     // pushed: a bare remote holds the branch at the same commit
-    const bare = join(root, 'bare.git'); g(root, 'init', '-q', '--bare', bare); g(r, 'remote', 'add', 'origin', bare)
+    const bare = join(root, 'bare.git'); g(root, 'init', '-q', '--bare', bare); g(r, 'remote', 'set-url', 'origin', bare)
     g(r, 'worktree', 'add', '-q', join(root, 'pushed'), '-b', 'pushed'); commit(join(root, 'pushed'), 'p')
     g(join(root, 'pushed'), 'push', '-q', 'origin', 'pushed')
     // local only
@@ -74,7 +83,7 @@ describe('clean io (real git)', () => {
     expect(by('pushed')).toMatchObject({ merged: false, pushed: true })
     expect(by('local')).toMatchObject({ pushed: false, squashed: false })
     const kinds = Object.fromEntries(planClean(facts, Date.now()).map(i => [i.facts.path.split('/').pop(), i.action.kind]))
-    expect(kinds).toMatchObject({ squash: 'remove', pushed: 'remove', local: 'keep' })
+    expect(kinds).toMatchObject({ squash: 'keep', pushed: 'remove', local: 'keep' })
     expect(cwdInside(join(root, 'x'), [join(root, 'x', 'sub')])).toBe(true)
     expect(cwdInside(join(root, 'x'), [join(root, 'xy')])).toBe(false)
   })
@@ -92,7 +101,7 @@ describe('clean io (real git)', () => {
   const seamEnv = { env, managedCwds: [] as string[], processCwds: () => ({ cwds: [] as string[], known: true }) }
   const pushedWorktree = () => {
     const { root, r } = repo()
-    const bare = join(root, 'bare.git'); g(root, 'init', '-q', '--bare', bare); g(r, 'remote', 'add', 'origin', bare)
+    const bare = join(root, 'bare.git'); g(root, 'init', '-q', '--bare', bare); g(r, 'remote', 'set-url', 'origin', bare)
     g(r, 'worktree', 'add', '-q', join(root, 'pw'), '-b', 'pw')
     const wt = join(root, 'pw'); writeFileSync(join(wt, 'c'), 'c'); g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'c'); g(wt, 'push', '-q', 'origin', 'pw')
     return { root, r, wt }
@@ -187,6 +196,89 @@ describe('clean io (real git)', () => {
     // nothing changed: it goes
     rmSync(join(wt, 'late'))
     expect(await applyClean(plan, seamEnv)).toEqual([]); expect(existsSync(wt)).toBe(false)
+  })
+
+  test('applyClean uses throttledRemove batches and refuses dirty, unpushed and detached HEAD at apply time', async () => {
+    const { r, wt } = pushedWorktree()
+    const plan = planClean(await worktreeFacts(r, seamEnv), Date.now()).filter(i => i.facts.path === wt)
+    writeFileSync(join(wt, 'late'), 'not saved')
+    expect((await applyClean(plan, seamEnv)).join()).toContain('uncommitted changes')
+    g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'local only')
+    expect((await applyClean(plan, seamEnv)).join()).toContain('not committed and pushed')
+    g(wt, 'push', '-q', 'origin', 'pw'); g(wt, 'checkout', '--detach', '-q')
+    expect((await applyClean(plan, seamEnv)).join()).toContain('detached HEAD')
+    expect(existsSync(wt)).toBe(true)
+    g(wt, 'checkout', '-q', 'pw')
+    writeFileSync(join(wt, '.gitignore'), 'node_modules\n'); g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'ignore'); g(wt, 'push', '-q', 'origin', 'pw')
+    mkdirSync(join(wt, 'node_modules'))
+    for (let i = 0; i < 2100; i++) writeFileSync(join(wt, 'node_modules', `f${i}`), 'x')
+    const batches: number[] = []
+    expect(await applyClean(plan, { ...seamEnv, cleanup: { onBatch: n => batches.push(n) } })).toEqual([])
+    expect(batches).toEqual([2000, 101]); expect(existsSync(wt)).toBe(false)
+  })
+
+  test('two cleanups serialize under the same kernel lock and release it after errors', async () => {
+    const { root } = repo()
+    const o = { env, cleanup: { lockPath: join(root, 'serialize.lock') } }
+    const events: string[] = []
+    let release!: () => void, entered!: () => void
+    const inside = new Promise<void>(r => { entered = r })
+    const gate = new Promise<void>(r => { release = r })
+    const first = withCleanupLock(async () => { events.push('first'); entered(); await gate; events.push('released') }, o)
+    await inside
+    const second = withCleanupLock(async () => { events.push('second') }, o)
+    await new Promise(r => setTimeout(r, 30))
+    expect(events).toEqual(['first'])
+    release(); await Promise.all([first, second])
+    expect(events).toEqual(['first', 'released', 'second'])
+    await expect(withCleanupLock(async () => { throw new Error('test failure') }, o)).rejects.toThrow('test failure')
+    await withCleanupLock(async () => {}, o)
+  })
+
+  test('tight mid-tree leaves sources and remaining dependencies intact; symlinks never traverse outside', async () => {
+    const { root, r, wt } = pushedWorktree()
+    writeFileSync(join(wt, '.gitignore'), 'node_modules\n'); g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'ignore'); g(wt, 'push', '-q', 'origin', 'pw')
+    mkdirSync(join(wt, 'node_modules'))
+    for (let i = 0; i < 2100; i++) writeFileSync(join(wt, 'node_modules', `f${i}`), 'x')
+    const outside = join(root, 'outside'); mkdirSync(outside); writeFileSync(join(outside, 'saved'), 'keep')
+    symlinkSync(outside, join(wt, 'node_modules', 'outside'))
+    const plan = planClean(await worktreeFacts(r, seamEnv), Date.now()).filter(i => i.facts.path === wt)
+    const controller = new AbortController()
+    let tight = false
+    await expect(applyClean(plan, { ...seamEnv, signal: controller.signal, cleanup: {
+      health: async () => ({ level: tight ? 'tight' : 'ok', dirtyWriteback: 0 }),
+      onBatch: () => { tight = true }, onPause: () => { controller.abort() },
+    } })).rejects.toThrow()
+    expect(existsSync(join(wt, 'c'))).toBe(true)
+    expect(existsSync(join(wt, 'node_modules'))).toBe(true)
+    expect(existsSync(join(outside, 'saved'))).toBe(true)
+    expect(await applyClean(plan, seamEnv)).toEqual([])
+    expect(existsSync(wt)).toBe(false); expect(existsSync(join(outside, 'saved'))).toBe(true)
+  })
+
+  test('separate apply calls share rate reservations, and wait for a heavy holder before touching trees', async () => {
+    const { root, r } = repo()
+    const paths = ['one', 'two', 'three'].map(name => join(root, name))
+    for (const path of paths) {
+      const branch = path.split('/').at(-1)!
+      g(r, 'worktree', 'add', '-q', path, '-b', branch); g(r, 'push', '-q', 'origin', branch)
+    }
+    const plan = planClean(await worktreeFacts(r, seamEnv), Date.now()).filter(i => paths.includes(i.facts.path))
+    let now = 0, busy = true
+    const starts: number[] = [], reasons: string[] = []
+    const cleanup = {
+      lockPath: join(root, 'rate.lock'), now: () => now,
+      health: async () => ({ level: 'ok' as const, dirtyWriteback: 0 }),
+      heavyBusy: async () => busy, onPause: (reason: string) => reasons.push(reason),
+      sleep: async (ms: number) => { expect(existsSync(paths[0]!)).toBe(starts.length === 0); now += ms; busy = false },
+    }
+    for (const item of plan) {
+      expect(await applyClean([item], { ...seamEnv, cleanup })).toEqual([])
+      starts.push(now)
+    }
+    expect(starts).toEqual([1000, 121000, 241000])
+    expect(reasons).toContain('waiting for heavy jobs')
+    expect(reasons).toContain('waiting for cleanup rate limit')
   })
 
   test('a child that leaves stdout open cannot strand clean after the timeout', async () => {

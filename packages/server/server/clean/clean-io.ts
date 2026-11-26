@@ -4,11 +4,13 @@
  * dirty tree) or deletes exactly `<worktree>/node_modules`; nothing else is ever deleted.
  */
 import { hostWhich } from '../host-which'
-import { existsSync, readdirSync, readlinkSync, rmSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, readlinkSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import type { CleanItem, WorktreeFacts } from './clean-plan'
 import { MANAGED_SESSIONS_FILE } from '../config'
+import { CLEAN_HOUR_MS, CLEAN_LOCK, CLEAN_POLL_MS, removalWait, waitForCleanHealth, type CleanHealth } from './clean-pace'
+import { throttledRemove as removeBatches } from './throttled-remove'
 
 export interface CleanIoOpts {
   signal?: AbortSignal
@@ -28,6 +30,16 @@ export interface CleanIoOpts {
   processCwds?: () => CwdReading
   /** A sentence the caller should show: a source of "in use" could not be read. */
   onWarning?: (message: string) => void
+  /** Cleanup dependencies: production samples G1; tests supply a clock and throwaway lock. */
+  cleanup?: {
+    health?: () => Promise<CleanHealth>
+    sleep?: (ms: number) => Promise<void>
+    now?: () => number
+    lockPath?: string
+    heavyBusy?: () => Promise<boolean>
+    onBatch?: (entries: number) => void
+    onPause?: (reason: string) => void
+  }
 }
 
 /** Ceiling for one git/du call. */
@@ -43,9 +55,29 @@ function priority(): string[] {
   return prio
 }
 
-async function run(argv: string[], o: CleanIoOpts & { cwd?: string } = {}): Promise<{ code: number; out: string }> {
+async function run(argv: string[], o: CleanIoOpts & { cwd?: string; lease?: () => Promise<void> } = {}): Promise<{ code: number; out: string }> {
   o.signal?.throwIfAborted()
   const p = Bun.spawn(o.lowPriority ? [...priority(), ...argv] : argv, { cwd: o.cwd, env: (o.env ?? process.env) as Record<string, string>, stdout: 'pipe', stderr: 'ignore' })
+  // A no-fork flock execs sleep: this exact PID owns the lease, with no orphan child holding it.
+  if (o.lease) {
+    const reader = p.stdout.getReader()
+    const abortLease = () => { try { p.kill('SIGTERM') } catch { /* exited */ } }
+    o.signal?.addEventListener('abort', abortLease, { once: true })
+    try {
+      const ready = await reader.read()
+      o.signal?.throwIfAborted()
+      if (ready.done || new TextDecoder().decode(ready.value).trim() !== 'locked') throw new Error('cleanup lock could not be acquired')
+      // Once acquired, cancellation must finish unwinding the work before releasing exclusion.
+      o.signal?.removeEventListener('abort', abortLease)
+      await o.lease()
+      return { code: 0, out: '' }
+    } finally {
+      o.signal?.removeEventListener('abort', abortLease)
+      abortLease()
+      await p.exited
+      reader.releaseLock()
+    }
+  }
   let rejectAbort: ((reason: unknown) => void) | undefined
   const aborted = new Promise<never>((_, reject) => { rejectAbort = reject })
   const abort = () => {
@@ -258,9 +290,9 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
     let merged = false, pushed = false, squashed = false, dirty = false, lastCommitMs: number | null = null, sizeBytes = 0, nodeModulesBytes = 0, lastActivityMs: number | null = null, sizeUnknown = false, keepsIgnored = false
     if (!missing) {
       if (base && headSha) merged = (await git(['-C', repo, 'merge-base', '--is-ancestor', headSha, base], o)).code === 0
+      if (branch && headSha) pushed = (await git(['-C', repo, 'merge-base', '--is-ancestor', headSha, `refs/remotes/origin/${branch}`], o)).code === 0
       if (!merged && headSha) {
         // A squash/rebase merge leaves no ancestry: ask whether the commits survive elsewhere instead.
-        if (branch) pushed = (await git(['-C', repo, 'merge-base', '--is-ancestor', headSha, `refs/remotes/origin/${branch}`], o)).code === 0
         if (!pushed && base) {
           const c = await git(['-C', repo, 'cherry', base, headSha], o)
           const marks = c.out.split('\n').filter(Boolean)
@@ -298,31 +330,144 @@ async function changedSince(path: string, o: CleanIoOpts, removing: boolean): Pr
   const tree = await treeState(path, o)
   if (tree.dirty) return 'it has uncommitted changes now'
   if (tree.keepsIgnored) return 'it holds ignored files that cannot be regenerated'
+  const branch = await git(['-C', path, 'symbolic-ref', '-q', '--short', 'HEAD'], o)
+  if (branch.code !== 0 || !branch.out.trim()) return 'detached HEAD is not a pushed branch'
+  const pushed = await git(['-C', path, 'merge-base', '--is-ancestor', 'HEAD', `refs/remotes/origin/${branch.out.trim()}`], o)
+  if (pushed.code !== 0) return 'HEAD is not committed and pushed to origin on this branch'
   return null
 }
 
-/** Apply the plan's non-keep items; returns one sentence per item that could not be done. */
+/** A kernel flock, shared by CLI, web and the C2 host seam. Failure to lock fails closed. */
+export async function withCleanupLock<T>(body: () => Promise<T>, o: CleanIoOpts = {}): Promise<T> {
+  let value!: T
+  await run(['flock', '--no-fork', o.cleanup?.lockPath ?? CLEAN_LOCK, 'sh', '-c', 'printf "locked\\n"; exec sleep 2147483647'], {
+    ...o, lease: async () => { value = await body() },
+  })
+  return value
+}
+
+/** No symlink traversal, no recursive rm; directory entries follow their children. */
+async function* removalEntries(path: string): AsyncGenerator<string> {
+  let st
+  try { st = lstatSync(path) } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return; throw e }
+  if (st.isDirectory() && !st.isSymbolicLink()) {
+    for (const name of readdirSync(path)) yield* removalEntries(join(path, name))
+  }
+  yield path
+}
+
+function cleanupIo(o: CleanIoOpts) {
+  const sleep = async (ms: number) => {
+    o.signal?.throwIfAborted()
+    if (o.cleanup?.sleep) await o.cleanup.sleep(ms)
+    else await new Promise<void>((resolve, reject) => {
+      const abort = () => { clearTimeout(timer); reject(o.signal?.reason ?? new Error('cleanup cancelled')) }
+      const timer = setTimeout(() => { o.signal?.removeEventListener('abort', abort); resolve() }, ms)
+      o.signal?.addEventListener('abort', abort, { once: true })
+    })
+    o.signal?.throwIfAborted()
+  }
+  return {
+    sleep,
+    health: o.cleanup?.health ?? (async () => {
+      const { healthForApi } = await import('../resources/governor-daemon')
+      const h = await healthForApi()
+      return { level: h.level, dirtyWriteback: h.values.S10 ?? null }
+    }),
+    onPause: o.cleanup?.onPause,
+    onBatch: o.cleanup?.onBatch,
+    entries: removalEntries,
+    erase: async (paths: readonly string[]) => {
+      o.signal?.throwIfAborted()
+      const r = await run(['rm', '-d', '--', ...paths], { ...o, lowPriority: true })
+      if (r.code !== 0) throw new Error('paced unlink failed; remaining entries kept')
+    },
+  }
+}
+
+async function heavyBusy(o: CleanIoOpts): Promise<boolean> {
+  return o.cleanup?.heavyBusy ? o.cleanup.heavyBusy() : (await (await import('../resources/heavy-io')).readHeavyState()).running.length > 0
+}
+
+async function waitForIdle(o: CleanIoOpts, io: ReturnType<typeof cleanupIo>): Promise<void> {
+  for (;;) {
+    await waitForCleanHealth(io)
+    if (!(await heavyBusy(o))) return
+    io.onPause?.('waiting for heavy jobs')
+    await io.sleep(CLEAN_POLL_MS)
+  }
+}
+
+async function waitForRemoval(o: CleanIoOpts, io: ReturnType<typeof cleanupIo>): Promise<void> {
+  const now = o.cleanup?.now ?? Date.now
+  const history = `${o.cleanup?.lockPath ?? CLEAN_LOCK}.starts`
+  let starts: number[] = []
+  try {
+    starts = JSON.parse(await readFile(history, 'utf8')) as number[]
+    if (!Array.isArray(starts) || starts.some(t => !Number.isFinite(t))) throw new Error('invalid cleanup history')
+  } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e }
+  for (;;) {
+    await waitForCleanHealth(io)
+    const wait = removalWait(now(), starts)
+    const busy = await heavyBusy(o)
+    if (!wait && !busy) break
+    io.onPause?.(busy ? 'waiting for heavy jobs' : 'waiting for cleanup rate limit')
+    await io.sleep(busy ? CLEAN_POLL_MS : Math.min(wait, CLEAN_POLL_MS))
+  }
+  const at = now()
+  // Reserve BEFORE touching the tree. A failure/crash consumes a slot conservatively. Atomic rename
+  // is on a separate history inode; never replace the inode flock itself holds.
+  const text = JSON.stringify([...starts.filter(t => t > at - CLEAN_HOUR_MS), at])
+  const saved = await run(['sh', '-c', 'umask 077; printf "%s" "$2" > "$1.tmp" && mv -- "$1.tmp" "$1"', 'cleanup-history', history, text], o)
+  if (saved.code !== 0) throw new Error('could not reserve cleanup rate slot')
+}
+
+/** Shared host seam: the lock, admission, fresh safety checks, paced dependencies and git removal. */
+export async function throttledRemove(item: CleanItem, o: CleanIoOpts = {}): Promise<string | null> {
+  const { facts: f, action: a } = item
+  if (a.kind !== 'remove' && a.kind !== 'node-modules') throw new Error('not a directory removal')
+  return withCleanupLock(async () => {
+    if (f.isMain || f.locked || f.missing) return `${f.path}: skipped, main, locked or missing worktree`
+    const io = cleanupIo(o)
+    const before = await changedSince(f.path, o, a.kind === 'remove')
+    if (before) return `${f.path}: skipped, ${before}`
+    if (a.kind === 'remove') await waitForRemoval(o, io)
+    else await waitForIdle(o, io)
+    // Waiting may take hours: repeat the safety check after every admission wait.
+    const after = await changedSince(f.path, o, a.kind === 'remove')
+    if (after) return `${f.path}: skipped, ${after}`
+    await removeBatches(join(f.path, 'node_modules'), io)
+    if (a.kind === 'remove') {
+      await waitForIdle(o, io)
+      const why = await changedSince(f.path, o, true)
+      if (why) return `${f.path}: skipped, ${why}`
+      // No --force: git refuses a tree that changed since it was listed.
+      const r = await git(['-C', f.repo, 'worktree', 'remove', f.path], { ...o, lowPriority: true })
+      if (r.code !== 0) return `${f.path}: git refused to remove it (it changed since it was listed?)`
+    }
+    return null
+  }, o)
+}
+
+/** Apply non-keep items sequentially. All physical removal goes through the shared host seam. */
 export async function applyClean(items: readonly CleanItem[], o: CleanIoOpts = {}): Promise<string[]> {
   const problems: string[] = []
   const pruned = new Set<string>()
-  for (const { facts: f, action: a } of items) {
-    if (a.kind === 'remove' || a.kind === 'node-modules') {
-      // The plan may be minutes old: look again at THIS worktree right before touching it.
-      const why = await changedSince(f.path, o, a.kind === 'remove')
-      if (why) { problems.push(`${f.path}: skipped, ${why}`); continue }
-    }
-    if (a.kind === 'remove') {
-      // No --force: git refuses a tree that changed since it was listed.
-      const r = await git(['-C', f.repo, 'worktree', 'remove', f.path], o)
-      if (r.code !== 0) problems.push(`${f.path}: git refused to remove it (it changed since it was listed?)`)
-    } else if (a.kind === 'prune' && !pruned.has(f.repo)) {
-      pruned.add(f.repo)
-      await git(['-C', f.repo, 'worktree', 'prune'], o)
-    } else if (a.kind === 'node-modules') {
-      const nm = join(f.path, 'node_modules')
-      if (resolve(nm) !== resolve(f.path, 'node_modules') || !existsSync(nm)) continue
-      try { rmSync(nm, { recursive: true, force: true }) } catch (e) { problems.push(`${nm}: ${String(e)}`) }
-    }
+  for (const item of items) {
+    o.signal?.throwIfAborted()
+    const { facts: f, action: a } = item
+    try {
+      if (a.kind === 'remove' || a.kind === 'node-modules') {
+        const problem = await throttledRemove(item, o)
+        if (problem) problems.push(problem)
+      } else if (a.kind === 'prune' && !pruned.has(f.repo)) {
+        await withCleanupLock(async () => {
+          await waitForIdle(o, cleanupIo(o))
+          await git(['-C', f.repo, 'worktree', 'prune'], o)
+        }, o)
+        pruned.add(f.repo)
+      }
+    } catch (e) { if (o.signal?.aborted) throw e; problems.push(`${f.path}: ${String(e)}`) }
   }
   return problems
 }
