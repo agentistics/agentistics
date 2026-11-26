@@ -84,6 +84,9 @@ const CONFIDENCE_SET: ReadonlySet<string> = new Set<string>(CONFIDENCES)
 const ISO_INSTANT_RE =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/
 
+/** Exactly the shape `Date.prototype.toISOString()` produces for a four-digit year. */
+const CANONICAL_UTC_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+
 function isLeapYear(year: number): boolean {
   return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
 }
@@ -119,6 +122,11 @@ export function isIsoInstant(s: unknown): boolean {
   if (hour > 23) return false
   if (minute > 59) return false
   if (second > 59) return false
+  // The exact `toISOString` shape (a `Z` and three fraction digits) is the ECMAScript date-time
+  // format itself, which `Date.parse` is REQUIRED to accept for any calendar-valid four-digit year —
+  // so for it the backstop can only answer yes, and is skipped (most events carry this shape; the
+  // parse was about a third of this function's cost). Every other spelling still gets the backstop.
+  if (CANONICAL_UTC_RE.test(s)) return true
   return Number.isFinite(Date.parse(s))
 }
 
@@ -142,16 +150,22 @@ export const REJECTION_ORDER: readonly RejectionReason[] = [
 ]
 
 /**
- * Whether `data` is something the `data` column (JSON TEXT, NOT NULL) can actually hold. `data ===
- * undefined` is caught before this runs; what is left is a value JSON cannot represent at all (a
- * cycle throws, a BigInt throws) or one that stringifies to nothing (`JSON.stringify` of a bare
- * function or symbol returns `undefined` without throwing).
+ * `data` as the `data` column (JSON TEXT, NOT NULL) will hold it, or `undefined` when it cannot hold
+ * it at all: a value JSON cannot represent (a cycle throws, a BigInt throws) or one that stringifies
+ * to nothing (`JSON.stringify` of a bare function or symbol returns `undefined` without throwing).
+ * `data === undefined` is caught before this runs.
+ *
+ * It RETURNS the text rather than answering yes/no because the check and the row need the very same
+ * string: stringifying once to validate and again in `toRow` was measured at ~0.1 ms of every
+ * 100-event batch (research A1.7), a twentieth of the whole append budget spent producing a string
+ * that was thrown away.
  */
-function isSerializable(data: unknown): boolean {
+function serializeData(data: unknown): string | undefined {
   try {
-    return JSON.stringify(data) !== undefined
+    const json = JSON.stringify(data)
+    return typeof json === 'string' ? json : undefined
   } catch {
-    return false
+    return undefined
   }
 }
 
@@ -160,6 +174,16 @@ function isSerializable(data: unknown): boolean {
  * for the sequence and `types.ts` for what each reason names.
  */
 export function rejectionOf(e: AgentisticsEvent): RejectionReason | null {
+  const checked = checkEvent(e)
+  return typeof checked === 'string' ? checked : null
+}
+
+/**
+ * `rejectionOf`'s decision, handing back the serialized `data` when the event is accepted so
+ * `planAppend` can build the row without stringifying it a second time. The rules and their ORDER
+ * live here and only here.
+ */
+function checkEvent(e: AgentisticsEvent): RejectionReason | { data: string } {
   const ev = asLoose(e)
 
   if (typeof ev.eventId !== 'string' || ev.eventId.trim() === '') return 'missing-event-id'
@@ -195,12 +219,25 @@ export function rejectionOf(e: AgentisticsEvent): RejectionReason | null {
     typeof provenance.confidence !== 'string' || !CONFIDENCE_SET.has(provenance.confidence)
   ) return 'bad-provenance'
 
-  if (ev.data === undefined || !isSerializable(ev.data)) return 'bad-data'
+  if (ev.data === undefined) return 'bad-data'
+  const data = serializeData(ev.data)
+  if (data === undefined) return 'bad-data'
 
-  return null
+  return { data }
 }
 
 // ── Row mapping ─────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `s` as `new Date(s).toISOString()` spells it. A string ALREADY in that exact shape is returned as
+ * it is — for an instant `isIsoInstant` accepted, `toISOString` would hand back the identical
+ * characters, so re-parsing it only costs time (~0.13 ms per 100-event batch measured, research
+ * A1.7, for two timestamps an event almost always carries in this shape already). Anything else —
+ * an offset, a missing fraction, more than three fraction digits — goes through `Date`, unchanged.
+ */
+function toUtcInstant(s: string): string {
+  return CANONICAL_UTC_RE.test(s) ? s : new Date(s).toISOString()
+}
 
 /**
  * `e` → its row. Assumes `rejectionOf(e) === null` — every field this reads was already checked
@@ -212,14 +249,17 @@ export function rejectionOf(e: AgentisticsEvent): RejectionReason | null {
  * digits, so `toRow` is not perfectly invertible on the timestamp TEXT — identity is `eventId`,
  * never the timestamp string, and `rowToEvent(toRow(e))` reproduces the normalised instant rather
  * than whatever `e` originally spelled it as.
+ *
+ * `data` is the column's text; `planAppend` passes the string `checkEvent` already produced so a
+ * batch is stringified once, and a direct caller gets `JSON.stringify(e.data)` exactly as before.
  */
-export function toRow(e: AgentisticsEvent): JournalRow {
+export function toRow(e: AgentisticsEvent, data: string = JSON.stringify(e.data)): JournalRow {
   return {
     event_id: e.eventId,
     schema: e.schema,
     type: e.type,
-    occurred_at: new Date(e.occurredAt).toISOString(),
-    recorded_at: new Date(e.recordedAt).toISOString(),
+    occurred_at: toUtcInstant(e.occurredAt),
+    recorded_at: toUtcInstant(e.recordedAt),
     session_id: e.sessionId ?? null,
     run_id: e.runId ?? null,
     agent_id: e.agentId ?? null,
@@ -231,7 +271,7 @@ export function toRow(e: AgentisticsEvent): JournalRow {
     confidence: e.provenance.confidence,
     adapter_version: e.provenance.adapterVersion,
     source_ref: e.provenance.sourceRef ?? null,
-    data: JSON.stringify(e.data),
+    data,
   }
 }
 
@@ -291,12 +331,12 @@ export function planAppend(events: readonly AgentisticsEvent[]): AppendPlan {
   const rows: { index: number; row: JournalRow }[] = []
   const rejected: Rejection[] = []
   events.forEach((e, index) => {
-    const reason = rejectionOf(e)
-    if (reason === null) {
-      rows.push({ index, row: toRow(e) })
+    const checked = checkEvent(e)
+    if (typeof checked !== 'string') {
+      rows.push({ index, row: toRow(e, checked.data) })
       return
     }
-    const rejection: Rejection = { index, reason }
+    const rejection: Rejection = { index, reason: checked }
     const loose = asLoose(e)
     if (typeof loose.eventId === 'string' && loose.eventId.trim() !== '') rejection.eventId = loose.eventId
     rejected.push(rejection)

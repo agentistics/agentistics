@@ -141,14 +141,36 @@ const JOURNAL_MODE_PRAGMA = 'PRAGMA journal_mode = WAL'
 const SYNCHRONOUS_PRAGMA = 'PRAGMA synchronous = NORMAL'
 
 /**
+ * SQLite's in-COMMIT autocheckpoint, raised from its default of 1000 pages to a CEILING. The WAL is
+ * normally checkpointed by `journal.ts` on a deferred timer, outside every append; this only fires
+ * when that timer cannot run — a producer appending in a loop that never yields to the event loop —
+ * and exists so the WAL stays bounded even then (10 000 pages ≈ 40 MiB at the 4 KiB page size).
+ *
+ * Why 10 000 and not the default, MEASURED (research A1.7, 1 000 batches of 100 events growing the
+ * table to 100 000 rows, WSL2 ext4): a checkpoint's cost here is dominated by its fsyncs, which do
+ * not scale with the frames copied (~1 000 frames: median 14 ms synced, 1.2 ms with the syncs off).
+ * This schema writes ~146 WAL frames per 100-event batch at that size — the random-order
+ * `UNIQUE(event_id)` index dirties about one leaf page per row — so the default 1 000 paid that fixed
+ * cost in ~20 % of batches (commits over 5 ms: 197–202 of 1 000); 10 000 pays it in ~2 % (21–22 of
+ * 1 000) and does ~4x less checkpoint work in total (the run's summed COMMIT time 4.0–5.4 s → 1.1–
+ * 1.2 s). The trade is stated: an append that DOES hit the ceiling costs ~50–90 ms instead of ~14 ms,
+ * and under a burst that never yields the WAL file may reach ~40 MiB on disk (it keeps its high-water
+ * size until the last connection closes; the deferred checkpoint keeps it far smaller in normal use).
+ */
+export const WAL_AUTOCHECKPOINT_PAGES = 10_000
+const WAL_AUTOCHECKPOINT_PRAGMA = `PRAGMA wal_autocheckpoint = ${WAL_AUTOCHECKPOINT_PAGES}`
+
+/**
  * In this order, on EVERY connection, every time. `busy_timeout` first — see rule 1 in the header.
  * `synchronous = NORMAL` is safe against a process crash (measured: SIGKILL mid-transaction always
- * recovered clean) and trades only the last transaction(s) on an OS power loss.
+ * recovered clean) and trades only the last transaction(s) on an OS power loss. The autocheckpoint
+ * ceiling is per connection (SQLite does not persist it), so it is set here with the rest.
  */
 export const CONNECTION_PRAGMAS: readonly string[] = [
   BUSY_TIMEOUT_PRAGMA,
   JOURNAL_MODE_PRAGMA,
   SYNCHRONOUS_PRAGMA,
+  WAL_AUTOCHECKPOINT_PRAGMA,
 ]
 
 /** The part of a connection `configureConnection` needs — small, so the ORDER is testable with a fake. */

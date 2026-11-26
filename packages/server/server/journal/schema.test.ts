@@ -61,6 +61,7 @@ describe('connection pragmas', () => {
       'PRAGMA busy_timeout = 10000',
       'PRAGMA journal_mode = WAL',
       'PRAGMA synchronous = NORMAL',
+      'PRAGMA wal_autocheckpoint = 10000',
     ])
     const bt = CONNECTION_PRAGMAS.findIndex(s => s.includes('busy_timeout'))
     const jm = CONNECTION_PRAGMAS.findIndex(s => s.includes('journal_mode'))
@@ -76,6 +77,7 @@ describe('connection pragmas', () => {
       'exec:PRAGMA busy_timeout = 10000',
       'query:PRAGMA journal_mode = WAL',
       'exec:PRAGMA synchronous = NORMAL',
+      'exec:PRAGMA wal_autocheckpoint = 10000',
     ])
   })
 
@@ -88,6 +90,7 @@ describe('connection pragmas', () => {
     expect(reasonOf(() => configureConnection(conn))).toBe('wal-unavailable')
     // synchronous is never set on a connection that was refused
     expect(conn.calls.some(c => c.includes('synchronous'))).toBe(false)
+    expect(conn.calls.some(c => c.includes('wal_autocheckpoint'))).toBe(false)
   })
 
   test('a real bun:sqlite file ends up with the configured values', () => {
@@ -99,6 +102,7 @@ describe('connection pragmas', () => {
       expect(bt).toBe(10000)
       expect((db.query('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode).toBe('wal')
       expect((db.query('PRAGMA synchronous').get() as { synchronous: number }).synchronous).toBe(1)
+      expect((db.query('PRAGMA wal_autocheckpoint').get() as { wal_autocheckpoint: number }).wal_autocheckpoint).toBe(10000)
     } finally {
       db.close()
     }

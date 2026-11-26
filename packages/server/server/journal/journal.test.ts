@@ -12,7 +12,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentisticsEvent } from '@agentistics/core'
-import { isBusyError, openJournal, withRecoveryRetry } from './journal'
+import { CHECKPOINT_DELAY_MS, isBusyError, openJournal, withRecoveryRetry } from './journal'
 import type { PathProbe } from './schema'
 import { MAX_PAGE, type Journal } from './types'
 
@@ -101,6 +101,122 @@ describe('append', () => {
     j.close() // idempotent
     expect(await j.append([ev('x', 1)])).toEqual({ written: 0, duplicates: 0, rejected: [] })
     expect(j.status()).toMatchObject({ state: 'closed', counters: { dropped: 1 } })
+  })
+})
+
+describe('the deferred WAL checkpoint', () => {
+  /** A scheduler the test drives by hand: nothing fires until `fire()` is called. */
+  function manualScheduler() {
+    const pending: { run: () => void; delayMs: number; cancelled: boolean }[] = []
+    let cancels = 0
+    return {
+      pending,
+      get cancels() { return cancels },
+      schedule(run: () => void, delayMs: number) {
+        const entry = { run, delayMs, cancelled: false }
+        pending.push(entry)
+        return () => { entry.cancelled = true; cancels++ }
+      },
+      /** Fire the oldest live entry, as a timer would. */
+      fire() {
+        const e = pending.find(x => !x.cancelled)
+        if (!e) throw new Error('nothing scheduled')
+        e.cancelled = true
+        e.run()
+      },
+      live: () => pending.filter(x => !x.cancelled).length,
+    }
+  }
+
+  const mainSize = (path: string) => statSync(path).size
+
+  test('a write arms ONE checkpoint; it runs outside append and copies the WAL into the main file', async () => {
+    const path = fresh('ckpt')
+    const sched = manualScheduler()
+    const j = await openJournal({ path, probe: localProbe(), scheduleCheckpoint: sched.schedule.bind(sched) })
+    expect(sched.live()).toBe(0)
+
+    expect((await j.append(ids('c', 0, 200).map((id, i) => ev(id, i)))).written).toBe(200)
+    expect(sched.live()).toBe(1)
+    expect(sched.pending[0]!.delayMs).toBe(CHECKPOINT_DELAY_MS)
+    // A throttle, not a debounce: more writes before it fires do not arm (or push back) another.
+    expect((await j.append(ids('c', 200, 400).map((id, i) => ev(id, i)))).written).toBe(200)
+    expect(sched.live()).toBe(1)
+
+    // Nothing checkpointed yet: the rows live only in the WAL (the ceiling is far above 400 rows).
+    const before = mainSize(path)
+    expect(statSync(`${path}-wal`).size).toBeGreaterThan(0)
+    sched.fire()
+    expect(mainSize(path)).toBeGreaterThan(before)
+
+    // The next write arms again.
+    expect((await j.append([ev('c-after', 1)])).written).toBe(1)
+    expect(sched.live()).toBe(1)
+    expect((await j.stats()).rows).toBe(401)
+    j.close()
+  })
+
+  test('an all-duplicate or all-rejected batch arms nothing: it put no frame in the WAL', async () => {
+    const sched = manualScheduler()
+    const j = await openJournal({ path: fresh('ckpt'), probe: localProbe(), scheduleCheckpoint: sched.schedule.bind(sched) })
+    const batch = ids('d', 0, 10).map((id, i) => ev(id, i))
+    await j.append(batch)
+    sched.fire()
+    expect((await j.append(batch)).duplicates).toBe(10)
+    expect((await j.append([ev('', 1)])).rejected.length).toBe(1)
+    expect(sched.live()).toBe(0)
+    j.close()
+  })
+
+  test('close() cancels the pending checkpoint and checkpoints itself; the cancelled run is inert', async () => {
+    const path = fresh('ckpt')
+    const sched = manualScheduler()
+    const j = await openJournal({ path, probe: localProbe(), scheduleCheckpoint: sched.schedule.bind(sched) })
+    await j.append(ids('e', 0, 50).map((id, i) => ev(id, i)))
+    expect(sched.live()).toBe(1)
+    const before = mainSize(path)
+    j.close()
+    expect(sched.cancels).toBe(1)
+    expect(sched.live()).toBe(0)
+    // Even a timer that fired anyway (a cancel that lost a race) finds the journal closed.
+    expect(() => sched.pending[0]!.run()).not.toThrow()
+    // What the cancelled checkpoint would have copied was copied by close() itself.
+    expect(mainSize(path)).toBeGreaterThan(before)
+    const check = new Database(path, { readonly: true })
+    expect((check.query('SELECT COUNT(*) AS n FROM events').get() as { n: number }).n).toBe(50)
+    check.close()
+  })
+
+  test('close() with ANOTHER connection still open still leaves every committed frame in the main file', async () => {
+    const path = fresh('ckpt')
+    const sched = manualScheduler()
+    const j = await openJournal({ path, probe: localProbe(), scheduleCheckpoint: sched.schedule.bind(sched) })
+    const other = new Database(path) // keeps the WAL alive past j.close()
+    await j.append(ids('f', 0, 50).map((id, i) => ev(id, i)))
+    const before = mainSize(path)
+    j.close()
+    expect(mainSize(path)).toBeGreaterThan(before)
+    other.close()
+  })
+
+  test('a scheduler that throws costs the checkpoint, never the append', async () => {
+    const j = await openJournal({
+      path: fresh('ckpt'), probe: localProbe(),
+      scheduleCheckpoint: () => { throw new Error('no timers here') },
+    })
+    expect(await j.append([ev('g1', 1), ev('g2', 2)])).toEqual({ written: 2, duplicates: 0, rejected: [] })
+    expect(j.status().counters.failedAppends).toBe(0)
+    j.close()
+  })
+
+  test('the default scheduler checkpoints on its own, without keeping the process alive', async () => {
+    const path = fresh('ckpt')
+    const j = await openJournal({ path, probe: localProbe() })
+    await j.append(ids('h', 0, 100).map((id, i) => ev(id, i)))
+    const before = mainSize(path)
+    await new Promise(r => setTimeout(r, CHECKPOINT_DELAY_MS + 150))
+    expect(mainSize(path)).toBeGreaterThan(before)
+    j.close()
   })
 })
 
