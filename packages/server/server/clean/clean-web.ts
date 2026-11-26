@@ -1,6 +1,6 @@
 import { hostWhich } from '../host-which'
 import { readdirSync, readlinkSync, statfsSync } from 'node:fs'
-import { basename, join, resolve, sep } from 'node:path'
+import { basename, resolve, sep } from 'node:path'
 import { platform } from 'node:os'
 import { cleanRepos, collectCleanFacts } from '../cli-clean'
 import { applyClean } from './clean-io'
@@ -181,7 +181,7 @@ export async function applyCleanSelection(ids: readonly string[]): Promise<Clean
       const problems = await applyClean(items)
       errors.push(...problems)
       for (const item of items) {
-        if (item.action.kind !== 'keep' && !problems.some(problem => problem.startsWith((item.action.kind === 'node-modules' ? join(item.facts.path, 'node_modules') : item.facts.path) + ':'))) {
+        if (item.action.kind !== 'keep' && !problems.some(problem => problem.startsWith(item.facts.path + ':'))) {
           removed.push({ path: item.facts.path, kind: item.action.kind, bytes: item.action.frees })
         }
       }

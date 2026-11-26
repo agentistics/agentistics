@@ -24,7 +24,7 @@ export function wireCleanPlan(items: readonly CleanItem[], scan: Pick<CleanScanS
     const f = i.facts
     const protectedReason = protectedPaths.get(f.path)
     const kind = protectedReason ? 'keep' as const : i.action.kind
-    const reason = protectedReason ?? (i.action.kind === 'keep' ? i.action.reason : i.action.kind === 'remove' ? 'merged and clean' : i.action.kind === 'prune' ? 'directory is gone' : 'no commit in 30+ days')
+    const reason = protectedReason ?? (i.action.kind === 'keep' ? i.action.reason : i.action.kind === 'remove' ? 'committed and pushed, clean' : i.action.kind === 'prune' ? 'directory is gone' : 'no commit in 30+ days')
     return { id: `${f.repo}:${f.path}:${kind}`, repo: f.repo, project: basename(f.repo), path: f.path,
       name: basename(f.path) + (kind === 'node-modules' ? '/node_modules' : ''), kind,
       bytes: kind === 'keep' ? f.sizeBytes : i.action.kind === 'keep' ? 0 : i.action.frees,

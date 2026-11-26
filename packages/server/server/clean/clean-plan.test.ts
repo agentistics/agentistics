@@ -9,10 +9,10 @@ const wt = (o: Partial<WorktreeFacts>): WorktreeFacts => ({
 })
 
 describe('planClean', () => {
-  test('removes only a merged, clean, unlocked worktree that is not the main checkout', () => {
+  test('removes only a pushed, clean, unlocked worktree that is not the main checkout', () => {
     const p = planClean([
       wt({ isMain: true, merged: true, path: '/r' }),
-      wt({ merged: true }),
+      wt({ merged: true, pushed: true }),
       wt({ merged: true, dirty: true }),
       wt({ merged: true, locked: true }),
     ], NOW)
@@ -24,18 +24,18 @@ describe('planClean', () => {
     expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['node-modules', 'node-modules', 'unmerged', 'unmerged'])
   })
 
-  test('clean + pushed equal, or squash-merged (all patches on the base), is removed; local-only commits never are', () => {
-    const p = planClean([wt({ pushed: true }), wt({ squashed: true }), wt({ pushed: true, dirty: true }), wt({ pushed: false, squashed: false })], NOW)
-    expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['remove', 'remove', 'dirty', 'unmerged'])
+  test('requires a clean pushed branch; local merges, squash-merges and detached HEAD are kept', () => {
+    const p = planClean([wt({ pushed: true }), wt({ squashed: true }), wt({ pushed: true, dirty: true }), wt({ pushed: false, squashed: false }), wt({ merged: true }), wt({ branch: null, pushed: true })], NOW)
+    expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['remove', 'unmerged', 'dirty', 'unmerged', 'unmerged', 'unmerged'])
   })
 
   test('"in use" means a live process inside it, and it protects even a merged worktree', () => {
-    const p = planClean([wt({ merged: true, inUse: true }), wt({ lastCommitMs: NOW - 40 * DAY, inUse: true }), wt({ merged: true, inUse: false })], NOW)
+    const p = planClean([wt({ merged: true, inUse: true }), wt({ lastCommitMs: NOW - 40 * DAY, inUse: true }), wt({ merged: true, pushed: true, inUse: false })], NOW)
     expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['active', 'active', 'remove'])
   })
 
   test('a worktree whose directory is gone is pruned; the total counts what is freed', () => {
-    const p = planClean([wt({ missing: true }), wt({ merged: true, sizeBytes: 1024 ** 3 }), wt({ lastCommitMs: NOW - 40 * DAY })], NOW)
+    const p = planClean([wt({ missing: true }), wt({ merged: true, pushed: true, sizeBytes: 1024 ** 3 }), wt({ lastCommitMs: NOW - 40 * DAY })], NOW)
     expect(reclaimable(p)).toEqual({ bytes: 1024 ** 3 + 400 * 1024 ** 2, count: 3 })
     const lines = formatPlan(p, 'en', '/r')
     expect(lines[0]).toBe('~')

@@ -2,7 +2,7 @@
  * clean-plan.ts — what `agentop clean` would free, decided from facts only (PERF.1 step 5). Pure.
  *
  * A worktree is REMOVED only when everything says it is done: not the repository's main checkout,
- * its HEAD already contained in the default branch (merged), no uncommitted change, not locked.
+ * its HEAD contained in origin/<branch> (pushed), no uncommitted change, not locked.
  * A worktree whose directory is gone is PRUNED (git's own bookkeeping). A worktree that is not merged
  * but has had no commit for `staleDays` keeps its work and loses only its `node_modules`, which an
  * install regenerates. Everything else is KEPT, with the reason said. Branches are never deleted.
@@ -68,8 +68,9 @@ function decide(f: WorktreeFacts, now: number, staleDays: number): CleanAction {
   if (f.useUnknown) return { kind: 'keep', reason: 'unknown-use' }
   // Ignored files are invisible to `git worktree remove`; unlike node_modules they cannot be regenerated.
   if (f.keepsIgnored && (f.merged || f.pushed || f.squashed) && !f.dirty) return { kind: 'keep', reason: 'ignored' }
-  // Safe to drop when no commit exists only here: merged, squash-merged, or pushed with the remote equal.
-  if ((f.merged || f.pushed || f.squashed) && !f.dirty) return { kind: 'remove', frees: f.sizeBytes }
+  // A local merge is not an off-machine copy. Detached HEAD never proves a pushed branch.
+  if (f.branch && f.pushed && !f.dirty) return { kind: 'remove', frees: f.sizeBytes }
+  if ((f.merged || f.squashed) && !f.pushed && !f.dirty) return { kind: 'keep', reason: 'unmerged' }
   const stale = f.lastCommitMs !== null && now - f.lastCommitMs >= staleDays * DAY
   if (stale && f.nodeModulesBytes > 0) return { kind: 'node-modules', frees: f.nodeModulesBytes }
   if (f.dirty) return { kind: 'keep', reason: 'dirty' }
@@ -90,14 +91,14 @@ export function fmtBytes(n: number): string {
 
 const WORDS = {
   en: {
-    remove: 'remove (merged or pushed, clean)', prune: 'prune (directory is gone)', 'node-modules': 'remove node_modules only (no commit in 30+ days, not merged)',
-    main: 'keep: main checkout', locked: 'keep: locked', dirty: 'keep: uncommitted changes', active: 'keep: live process inside', 'unknown-use': 'keep: cannot tell whether it is in use (process list or session registry unreadable)', ignored: 'keep: ignored files that cannot be regenerated', unmerged: 'keep: not merged or pushed',
+    remove: 'remove (committed and pushed, clean)', prune: 'prune (directory is gone)', 'node-modules': 'remove node_modules only (no commit in 30+ days, not merged)',
+    main: 'keep: main checkout', locked: 'keep: locked', dirty: 'keep: uncommitted changes', active: 'keep: live process inside', 'unknown-use': 'keep: cannot tell whether it is in use (process list or session registry unreadable)', ignored: 'keep: ignored files that cannot be regenerated', unmerged: 'keep: HEAD is not on a pushed branch (a local merge is not a remote copy)',
     total: (b: string, n: number) => `${n} item${n === 1 ? '' : 's'} would free ${b}.`,
     nothing: 'Nothing to clean: every worktree is in use or holds unmerged or uncommitted work.',
   },
   pt: {
-    remove: 'remover (merged ou empurrado, limpo)', prune: 'podar (a pasta não existe mais)', 'node-modules': 'remover só node_modules (sem commit há 30+ dias, não merged)',
-    main: 'manter: checkout principal', locked: 'manter: travado', dirty: 'manter: mudanças não commitadas', active: 'manter: processo vivo dentro', 'unknown-use': 'manter: não dá para saber se está em uso (lista de processos ou registro de sessões ilegível)', ignored: 'manter: arquivos ignorados não regeneráveis', unmerged: 'manter: não merged nem empurrado',
+    remove: 'remover (commitado e enviado, limpo)', prune: 'podar (a pasta não existe mais)', 'node-modules': 'remover só node_modules (sem commit há 30+ dias, não merged)',
+    main: 'manter: checkout principal', locked: 'manter: travado', dirty: 'manter: mudanças não commitadas', active: 'manter: processo vivo dentro', 'unknown-use': 'manter: não dá para saber se está em uso (lista de processos ou registro de sessões ilegível)', ignored: 'manter: arquivos ignorados não regeneráveis', unmerged: 'manter: HEAD não está em branch enviada (merge local não é cópia remota)',
     total: (b: string, n: number) => `${n} ${n === 1 ? 'item liberaria' : 'itens liberariam'} ${b}.`,
     nothing: 'Nada a limpar: todo worktree está em uso ou guarda trabalho não merged ou não commitado.',
   },

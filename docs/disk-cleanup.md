@@ -7,6 +7,31 @@ the existing live-session/server/process protections and git's refusal to remove
 Branches remain intact. Dependencies are initially unchecked; missing-folder records can be
 selected even though they free zero bytes. Protected items remain visible with their reason.
 
+Worktree removal requires a named branch whose HEAD is contained in `origin/<branch>`, plus a
+clean working tree. A merge into a local default branch, or matching patches there, does not
+prove the work was pushed. Detached HEADs are kept. Apply checks these conditions and live use
+again after waiting and immediately before git removes the worktree, without `--force`.
+
+CLI and web cleanup hold `/tmp/agentistics-cleanup.lock` with kernel `flock`. Removals reserve
+their start in its adjacent `.starts` history: at least two minutes apart and at most six per
+rolling hour, including separate CLI invocations. Failed attempts conservatively consume a slot.
+Cleanup waits while a heavy job is running. The lock holder uses GNU `tail --pid` to watch the
+cleaner every 100 ms: if the cleaner exits or is killed, the holder exits and releases its kernel
+lock. Missing lock support or unreadable history refuses cleanup rather than bypassing the guard.
+The CLI prints a short pause reason
+while waiting for the lock, rate limit, machine health or heavy jobs, with repeated polling
+messages limited to one per 30 seconds. Failed or skipped dependency removals do not count as
+freed bytes in the web result.
+
+`clean/clean-pace.ts` owns the policy. `throttledRemove` walks `node_modules` depth first without
+following symlinks, removing at most 2,000 entries per batch (also bounded by argv size), with a
+250 ms pause per batch. Unlinks run under `nice -n19` and `ionice -c3` where available. Between
+batches G1 supplies the health level and S10: cleanup pauses at tight, critical or readonly and
+resumes automatically at ok. Dirty+Writeback above 1 GiB waits until below 512 MiB. While paused,
+only regenerable dependencies may be partially removed; source files remain intact. Cancellation
+also leaves the remaining entries in place. Only after dependencies are gone may git remove the
+small remaining tree. Engine cleanup integration is a separate C2 slice.
+
 The scan displays bytes found, candidate count, projects completed, three stages, an estimated
 remaining time and the last twenty activity lines (the dialog displays the latest eight). Progress
 is an estimate while repositories are still discovering worktrees, and never moves backwards.
