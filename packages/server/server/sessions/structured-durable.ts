@@ -463,6 +463,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
         else if (c.op === 'answer') session.answer({ ...(c.choice !== undefined ? { choice: c.choice } : {}), ...(c.text !== undefined ? { text: c.text } : {}), ...(c.requestId !== undefined ? { requestId: c.requestId } : {}) })
         // Not awaited: its answer is a recorded line still to be replayed after this call.
         else if (c.op === 'setMode') void session.setMode?.(c.id)
+        else if (c.op === 'setModel') void session.setModel?.(c.id)
         else session.cancel()
       }
 

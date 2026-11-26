@@ -17,6 +17,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join, delimiter } from 'node:path'
 import { HARNESS_ORDER, modelsFor, type HarnessId, type ModelOption } from '@agentistics/core'
 import { CODEX_DIR, HOME_DIR, KIMI_DIR } from './config'
+import { userSearchPath } from './sessions/user-path'
 import {
   parseAgyModels,
   parseClaudeModelCatalog,
@@ -55,8 +56,9 @@ async function readText(path: string): Promise<string | null> {
 async function runCli(argv: string[]): Promise<string | null> {
   try {
     const env = { ...process.env }
-    env.PATH = [process.env.PATH ?? '', join(HOME_DIR, '.local', 'bin'), join(HOME_DIR, '.bun', 'bin'), join(HOME_DIR, '.npm-global', 'bin')]
-      .filter(Boolean).join(delimiter)
+    // The SAME search path every harness lookup uses (`userSearchPath`: ~/.local/bin, bun, volta, kimi, opencode …) —
+    // a private list here missed `~/.opencode/bin`, so a service could START opencode and still list none of its models.
+    env.PATH = [userSearchPath(), join(HOME_DIR, '.npm-global', 'bin')].filter(Boolean).join(delimiter)
     const proc = Bun.spawn(argv, { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', env })
     const timer = setTimeout(() => proc.kill(), COMMAND_TIMEOUT_MS)
     const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])

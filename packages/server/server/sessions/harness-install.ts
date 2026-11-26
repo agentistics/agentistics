@@ -11,7 +11,7 @@ import {
   type HarnessInstallFacts, type HarnessInstallPlan,
 } from './harness-install-plan'
 
-type Harness = Extract<HarnessId, 'claude' | 'codex' | 'gemini' | 'copilot'>
+type Harness = Extract<HarnessId, 'claude' | 'codex' | 'gemini' | 'copilot' | 'opencode'>
 type Event = { type: 'progress' | 'done' | 'error'; message: string; version?: string }
 export type Runner = (argv: string[], onLine: (line: string, stream?: 'stdout' | 'stderr') => void, timeoutMs: number) => Promise<number>
 export interface InstallDeps {
@@ -131,8 +131,9 @@ export async function handleHarnessInstallRoute(
     ? { runner: deps, facts: realFacts }
     : { runner: deps.runner ?? defaultRunner, facts: deps.facts ?? realFacts, keepaliveMs: deps.keepaliveMs }
   const { runner } = resolved
-  const driver = Object.hasOwn(HARNESS_INSTALLERS, id) ? getChatDriver(id as Harness) : null
-  if (!driver) return json(404, { error: 'unknown_harness' })
+  // opencode has no chat driver (its sessions run over ACP) but has an installer: the table is what decides.
+  const known = Object.hasOwn(HARNESS_INSTALLERS, id) && (id === 'opencode' || !!getChatDriver(id as Exclude<Harness, 'opencode'>))
+  if (!known) return json(404, { error: 'unknown_harness' })
   const body = await req.json().catch(() => null) as { confirmed?: boolean; installNode?: boolean; lang?: string } | null
   if (body?.confirmed !== true) return json(400, { error: 'confirmation_required' })
   if (busy) return json(409, { error: 'install_in_progress' })
@@ -145,7 +146,7 @@ export async function handleHarnessInstallRoute(
   const say = SAY[lang]
   try {
     facts = await resolved.facts()
-    plan = planHarnessInstall(id as Harness, facts)
+    plan = planHarnessInstall(id as Harness, facts, operation)
     if (plan.reason === 'node-required' && wantsNode) {
       const node = planNodeInstall(facts)
       if (node.reason !== 'ok') { busy = false; return json(400, { error: node.reason }) }
@@ -197,7 +198,7 @@ export async function handleHarnessInstallRoute(
         yield { type: 'progress', message: say.node }
         const code = yield* run(planNodeInstall(facts).command!, 10 * 60_000)
         if (code !== 0) { yield failed(say.nodeFail, code); return }
-        current = planHarnessInstall(id as Harness, { ...facts, nodePresent: true, npmGlobalWritable: false })
+        current = planHarnessInstall(id as Harness, { ...facts, nodePresent: true, npmGlobalWritable: false }, operation)
       }
       yield { type: 'progress', message: operation === 'update' ? say.updating : say.installing }
       const code = yield* run(current.command!, 10 * 60_000)

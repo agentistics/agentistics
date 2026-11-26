@@ -20,6 +20,12 @@ describe('harness installer plan', () => {
     expect(planHarnessInstall('gemini', { ...base, nodePresent: false }).reason).toBe('node-required')
   })
 
+  test('opencode: the official curl installer, its own `opencode upgrade` to update, and no Node.js needed', () => {
+    expect(planHarnessInstall('opencode', { ...base, nodePresent: false }).command).toEqual(['/bin/sh', '-c', 'curl -fsSL https://opencode.ai/install | bash'])
+    expect(planHarnessInstall('opencode', { ...base, nodePresent: false }, 'update')).toMatchObject({ reason: 'ok', command: ['opencode', 'upgrade'], verify: ['opencode', '--version'] })
+    expect(planHarnessInstall('codex', base, 'update').command).toEqual(['npm', 'i', '-g', '--prefix', '/tmp/.local', '@openai/codex']) // no updater of its own: re-install
+  })
+
   test('supports Linux and macOS only', () => {
     expect(planHarnessInstall('claude', { ...base, platform: 'darwin' }).reason).toBe('ok')
     expect(planHarnessInstall('claude', { ...base, platform: 'win32' }).reason).toBe('unsupported-platform')
