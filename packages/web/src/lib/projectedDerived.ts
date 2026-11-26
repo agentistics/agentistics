@@ -32,6 +32,7 @@ import {
   type Filters, type MetricsGroupLike, type MetricsParams, type MetricsQueryFn, type ModelUsage, type TokenBreakdown,
 } from '@agentistics/core'
 import { cacheFiguresOf, type BlendedRate } from './cacheFigures'
+import { matchModelKey } from './modelKeyMatch'
 
 export interface ProjectedDerived {
   totalSessions: number
@@ -253,25 +254,44 @@ function overlayProjectedFigures<D extends LegacyFigures>(legacy: D | null, over
  * turned the Est. cost card into R$0,00 while the per-session read (cost declared by the harness, `costSource:
  * 'harness'`) held US$23,57. A covered harness at exactly 0 whose adapter sessions DO carry a cost contributes
  * that cost back, into the total and into the matching per-model rows.
+ *
+ * CUSTO.MODELO-OPENCODE (owner print 2521fdb5, 2.229.3): the correction is per ROW, not only per harness, and the
+ * legacy row is matched to the projected one by `matchModelKey`. The replay keys an OpenCode model by its raw id
+ * (`fable-5.1`) and records OpenCode's `cost: 0` as a declared zero; the legacy adapter keys it by its route
+ * (`upx/fable-5.1`) and prices it from the tokens. Matching only the identical key gave the cost to the TOTAL and to
+ * no row: the headline was right and every "Usage by model" row read R$0,00. Now a cost is added ONLY where it
+ * lands in a row, so the rows always add up to the headline; a model no source can price stays unpriced.
  */
 export function overlayProjected<D extends LegacyFigures>(legacy: D | null, overlay: ProjectedDerived | null, coverage?: OverlayCoverage<D>): D | null {
   const out = overlayProjectedFigures(legacy, overlay, coverage)
   if (!out || !overlay || !coverage || out === legacy || !overlay.costByHarness || !overlay.coveredHarnesses) return out
-  const missing = coverage.candidates
-    .filter(h => overlay.coveredHarnesses!.includes(h) && (overlay.costByHarness![h] ?? 0) === 0)
-    .map(h => coverage.legacyFor(h)).filter((d): d is D => d !== null && d.totalCostUSD > 0)
-  if (missing.length === 0) return out
+  const covered = coverage.candidates
+    .filter(h => overlay.coveredHarnesses!.includes(h))
+    .map(h => ({ harnessZero: (overlay.costByHarness![h] ?? 0) === 0, d: coverage.legacyFor(h) }))
+    .filter((c): c is { harnessZero: boolean; d: D } => c.d !== null && c.d.totalCostUSD > 0)
+  if (covered.length === 0) return out
   const modelUsage: Record<string, ModelUsage> = { ...out.modelUsage }
-  for (const d of missing) {
+  // Decided on the projection's OWN rows, before any correction: a second harness must not read the first one's.
+  const projectedZero = (k: string) => (overlay.modelUsage[k]?.costUSD ?? 0) === 0
+  let added = 0
+  for (const { harnessZero, d } of covered) {
     for (const [m, u] of Object.entries(d.modelUsage)) {
-      const cur = modelUsage[m]
-      // The tokens are already in the projected row; only the cost the projection could not give is
-      // added (priced by the legacy rule: declared where declared), and those tokens stop being unpriced.
-      if (cur) {
-        const unpriced = Math.max(0, (cur.unpricedTokens ?? 0) - usageTokenTotal(u)) + unpricedTokens([[m, u]])
-        modelUsage[m] = { ...cur, costUSD: calcCost(cur, m) + calcCost(u, m), costSource: cur.costSource ?? 'mixed', unpricedTokens: unpriced }
-      }
+      // The legacy adapter keys a model by its route (`upx/fable-5.1`), the projection by the raw id
+      // (`fable-5.1`): find the projected row the legacy one is (CUSTO.MODELO-OPENCODE).
+      const k = matchModelKey(m, Object.keys(modelUsage))
+      const cur = k ? modelUsage[k] : undefined
+      // The projection gave this row no price — the whole harness at 0, or this model at 0 (OpenCode's `cost: 0` on a
+      // gateway/subscription route, which the replay records as a DECLARED zero). Its tokens are already in the
+      // projected row; only the cost is added, by the legacy rule (declared where declared, the table otherwise),
+      // and those tokens stop being unpriced. Cost and total move together, so the rows always add up to the top.
+      if (!k || !cur || !(harnessZero || projectedZero(k))) continue
+      const cost = calcCost(u, m)
+      if (cost <= 0 && unpricedTokens([[m, u]]) === 0) continue
+      const unpriced = Math.max(0, (cur.unpricedTokens ?? 0) - usageTokenTotal(u)) + unpricedTokens([[m, u]])
+      modelUsage[k] = { ...cur, costUSD: calcCost(cur, k) + cost, costSource: cur.costSource ?? 'mixed', unpricedTokens: unpriced }
+      added += cost
     }
   }
-  return { ...out, modelUsage, totalCostUSD: out.totalCostUSD + missing.reduce((a, d) => a + d.totalCostUSD, 0) }
+  if (added === 0) return out
+  return { ...out, modelUsage, totalCostUSD: out.totalCostUSD + added }
 }

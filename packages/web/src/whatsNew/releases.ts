@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.229.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uso por modelo: com o filtro do OpenCode, cada modelo voltou a mostrar o próprio custo, e a soma da tabela agora bate com o total do topo. Antes o topo estava certo e todas as linhas apareciam com R$0,00. Um modelo sem preço conhecido continua aparecendo como "desconhecido".',
+        en: 'Model usage: with the OpenCode filter, each model shows its own cost again, and the table now adds up to the total at the top. Before, the top was right and every row read $0.00. A model with no known price still shows as "unknown".',
+      },
+      {
+        pt: 'A tabela de uso por modelo agora aparece toda em português quando o app está em português (cabeçalhos, busca, botões de ordenação e a nota de rodapé).',
+        en: 'The model usage table is now fully in Portuguese when the app is set to Portuguese (headers, search, sort buttons and the footnote).',
+      },
+    ],
+  },
   '2.229.3': {
     features: [],
     fixes: [

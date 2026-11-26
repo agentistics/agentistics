@@ -12,6 +12,7 @@
  * forgotten will be.
  */
 import { calcCost, planAllocation, sessionModelUsage, type AggregatePlanBasis, type CostBasis, type HarnessId, type ModelUsage, type SessionMeta } from '@agentistics/core'
+import { matchModelKey } from './modelKeyMatch'
 
 export interface CostView {
   usd: number
@@ -230,11 +231,16 @@ export function modelCostByHarness(
 ): Record<string, Record<string, number>> {
   const out: Record<string, Record<string, number>> = {}
   const nonClaude: Record<string, number> = {}
+  const tableKeys = Object.keys(modelUsage)
   for (const session of sessions) {
     const harness = session.harness ?? 'claude'
     if (harness === 'claude') continue
-    for (const [model, usage] of sessionModelUsage(session)) {
-      const cost = calcCost(usage, model)
+    for (const [id, usage] of sessionModelUsage(session)) {
+      // A projected table keys an OpenCode model by its raw id (`fable-5.1`) while the session keys it by its
+      // route (`upx/fable-5.1`): file the session's cost under the row the table actually shows, or it is
+      // subtracted from nothing and the whole row lands on Claude (CUSTO.MODELO-OPENCODE).
+      const model = id in modelUsage ? id : matchModelKey(id, tableKeys) ?? id
+      const cost = calcCost(usage, id)
       nonClaude[model] = (nonClaude[model] ?? 0) + cost
       const byHarness = (out[model] ??= {})
       byHarness[harness] = (byHarness[harness] ?? 0) + cost
