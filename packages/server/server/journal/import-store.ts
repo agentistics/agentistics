@@ -16,7 +16,8 @@
  *   set carries none: `ModelCompletedData.costUSD` exists only for a cost the SOURCE stated
  *   (event.ts), so a table price has no field to travel in. The projection prices the counters
  *   through `calcCost` and marks THAT result as the table's, exactly as it does for a replayed
- *   event. `coarseConfidence` is the one place the rule is written, so a future priced field cannot
+ *   event. A cost the HARNESS declared (a `model_usage` row with `costSource: 'harness'`) IS a
+ *   source-stated figure and travels as `costUSD` + `costSource: 'harness'`, verbatim. `coarseConfidence` is the one place the rule is written, so a future priced field cannot
  *   be added without choosing.
  * - **Absent, never 0 (D21).** A counter the store does not hold is absent. Where the harness's
  *   capability for tokens is `partial`, a stored `0` is indistinguishable from "not read" (the
@@ -50,8 +51,11 @@ import {
 } from '@agentistics/core'
 
 /** `adapterVersion` on every coarse event. Bump it when the mapping below changes.
- *  1.0.0 — first version: lifecycle + one `model.completed` per model. */
-export const IMPORT_STORE_ADAPTER_VERSION = '1.0.0'
+ *  1.0.0 — first version: lifecycle + one `model.completed` per model.
+ *  1.1.0 — a model row whose cost the HARNESS declared (`costSource: 'harness'`, OpenCode) carries
+ *          that figure as `costUSD` + `costSource: 'harness'`; it was dropped, and the projection
+ *          repriced the tokens from the table (CUSTO.DECLARADO-TOPO). */
+export const IMPORT_STORE_ADAPTER_VERSION = '1.1.0'
 
 /** `source.id` on every coarse event — how the import's own rows are told apart in the journal. */
 export const IMPORT_STORE_SOURCE_ID = 'agentistics-import'
@@ -117,23 +121,38 @@ function usageOf(
   return out
 }
 
+/**
+ * The cost a record's model row DECLARES, when the harness stated it (`costSource: 'harness'` — what
+ * `accumulateUsageCost` / `calcCost` take as given on every legacy surface). It travels as stated, so
+ * the projection uses it instead of repricing the tokens. A `'mixed'` row (declared AND table-priced
+ * parts summed together) cannot say which tokens the declared part paid for, so it carries none and
+ * the projection prices the row from the table, as before.
+ */
+function declaredCostOf(u: Record<string, unknown>): number | undefined {
+  if (u.costSource !== 'harness') return undefined
+  const v = u.costUSD
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined
+}
+
 /** The per-model usage the record states: `model_usage` when present, else one row for `model`. */
-function modelRows(meta: SessionMeta, tokens: CapabilityState): { model: string; usage: ModelUsageCounters }[] {
+function modelRows(meta: SessionMeta, tokens: CapabilityState): { model: string; usage: ModelUsageCounters; costUSD?: number }[] {
   // The source stated no usage (`tokens_unavailable`): a stored 0 is the ABSENCE of a measurement, and a
   // `model.completed` carrying it would be read as a measured $0 for that model.
   if (meta.tokens_unavailable && !(meta.model_usage && Object.keys(meta.model_usage).length > 0)) return []
-  const rows: { model: string; usage: ModelUsageCounters }[] = []
+  const rows: { model: string; usage: ModelUsageCounters; costUSD?: number }[] = []
   const mu = meta.model_usage
   if (mu && typeof mu === 'object' && Object.keys(mu).length > 0) {
     for (const model of Object.keys(mu).sort()) {
       const u = mu[model] as unknown as Record<string, unknown> | undefined
       if (!u) continue
+      const declared = declaredCostOf(u)
       rows.push({
         model,
         usage: usageOf({
           input: u.inputTokens, output: u.outputTokens,
           cacheRead: u.cacheReadInputTokens, cacheWrite: u.cacheCreationInputTokens,
         }, tokens),
+        ...(declared !== undefined ? { costUSD: declared } : {}),
       })
     }
   } else {
@@ -210,6 +229,7 @@ export function storeSessionEvents(meta: SessionMeta, ctx: StoreEventContext): S
       usage: row.usage,
       status: 'completed',
     }
+    if (row.costUSD !== undefined) { data.costUSD = row.costUSD; data.costSource = 'harness' }
     // The context gauge is the LAST turn's; it belongs to the session's own model, and only there.
     if (row.model !== '' && row.model === meta.model) {
       if (typeof meta.context_tokens === 'number' && meta.context_tokens > 0) data.contextTokens = meta.context_tokens
