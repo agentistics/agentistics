@@ -10,6 +10,11 @@ import { __setHarnessAccountsForTest, createHarnessAccounts } from '../harness-a
 import { batch, start } from './cli-session'
 import { readRegistry } from './registry'
 import type { ManagedSession, SessionBackend } from './types'
+import { isolateAgentEnv } from './agent-env.testing'
+
+// A spawn door reads AGENTOP_*/AGENTISTICS_* from the shell it runs in (inside a managed session: the caller's identity and the feature
+// switches): every test starts from a bare agent environment and gets it back.
+isolateAgentEnv({ AGENTISTICS_MULTI_ACCOUNT: '1' }) // the one switch this file sets (beforeAll), re-applied after each clearing
 
 for (const k of Object.keys(process.env)) if (k.startsWith('GIT_') && k !== 'GIT_TERMINAL_PROMPT') delete process.env[k]
 
