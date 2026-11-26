@@ -43,7 +43,10 @@ test('a covered harness the projection could not price keeps the cost its sessio
 
 test('a projection that did price the harness is left alone', () => {
   const legacy = computeDerivedStats(data, filters)!
-  const priced = { ...projection(), totalCostUSD: 5, costByHarness: { opencode: 5 } }
+  // Coherent like `projectedDerived`'s own answer: the total IS the sum of the model rows. (A row at 0 under a
+  // priced total cannot come out of the projection, and since CUSTO.MODELO-OPENCODE a 0 row is corrected per row.)
+  const p = projection()
+  const priced = { ...p, totalCostUSD: 5, costByHarness: { opencode: 5 }, modelUsage: { [model]: { ...p.modelUsage[model]!, costUSD: 5, costSource: 'mixed' as const } } }
   const out = overlayProjected(legacy, priced, {
     candidates: ['opencode'], blendedOf: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }) as never,
     legacyFor: h => computeDerivedStats(data, { ...filters, harnesses: [h] as Filters['harnesses'] }),

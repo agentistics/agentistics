@@ -318,6 +318,7 @@ export default function HomePage() {
           planFactors={costBasis === 'plan' && planBasis.basis ? planAllocation(planBasis.basis).byHarness : null}
           costByHarness={modelCostByHarness(d.modelUsage, d.filteredSessions)}
           brlRate={brlRate}
+          lang={lang}
           fallbackInputTokens={filters.projects.length > 0 ? derived.inputTokens : undefined}
           fallbackOutputTokens={filters.projects.length > 0 ? derived.outputTokens : undefined}
           fallbackCostUSD={filters.projects.length > 0 ? derived.totalCostUSD : undefined}
