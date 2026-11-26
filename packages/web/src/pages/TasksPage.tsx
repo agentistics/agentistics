@@ -83,7 +83,7 @@ function EmptyNotice({ error, lang }: { error: TasksError; lang?: string }) {
     ? (pt ? 'O quadro de tarefas é um armazenamento local, e esta instância não hospeda um.' : 'The task board is a local store, and this instance does not host one.')
     : error === 'down'
       ? (pt ? 'O servidor não respondeu. Nada é afirmado sobre as suas tarefas.' : 'The server did not answer. Nothing is claimed about your tasks either way.')
-      : (pt ? 'Ainda não há tarefas. Crie uma acima, ou vincule sessões a uma com agentop session batch.' : 'No tasks yet. Create one above, or file sessions under one with agentop session batch.')
+      : (pt ? 'Ainda não há tarefas. Crie a primeira no campo acima.' : 'No tasks yet. Create your first one in the field above.')
   return (
     <div style={{ ...surface, padding: 16, color: 'var(--text-tertiary)', display: 'flex', gap: 10, alignItems: 'center', fontSize: 12.5 }}>
       <ClipboardList size={16} /> {text}
