@@ -24,6 +24,18 @@ export interface HarnessAccount {
    * placeholder account that does not exist.
    */
   signedOut?: true
+  /**
+   * Stored. The harness REFUSED this login while running (Claude's `authentication_failed`, Codex's
+   * `unauthorized`): the login on disk expired or was revoked. The binding is kept — WHERE the account
+   * lives is still true — so a re-login in the same folder re-binds the SAME id. Cleared by `adopt`
+   * (any confirmed re-bind) and by `clearLoginExpired` (the harness answered again after it).
+   */
+  loginExpiredAt?: number
+  /**
+   * Stored. When a sign-in FINISHED on this account (`bind`). A refusal in a transcript that is not
+   * newer than this is the old token's last word, not a new expiry: it neither marks nor raises a bar.
+   */
+  loginRenewedAt?: number
   available: boolean
   firstSeen: number
   lastSeen: number
@@ -501,7 +513,7 @@ export function createHarnessAccounts(options: {
       throw error
     }
   }
-  function adopt(data: AccountsFile, harness: HarnessId, root: string | null, detected: AccountIdentity) {
+  function adopt(data: AccountsFile, harness: HarnessId, root: string | null, detected: AccountIdentity, fresh = false) {
     const key = bindingKey(harness, root)
     const previous = data.accounts.find(a => a.id === data.bindings[key])
     let account = matchIdentity(data, harness, root, detected)
@@ -518,6 +530,9 @@ export function createHarnessAccounts(options: {
     if (detected.plan) account.plan = detected.plan
     account.lastSeen = now()
     account.retired = undefined
+    // A sign-in that just FINISHED (`bind`) replaced whatever expired. A routine re-probe (`current`)
+    // proves nothing: an expired token still names its owner, so the mark survives it.
+    if (fresh) { delete account.loginExpiredAt; account.loginRenewedAt = now() }
     data.bindings[key] = account.id
     const folded = previous && previous.id !== account.id && foldPlaceholder(data, account, previous)
     if (!folded) foldPlaceholder(data, account)
@@ -586,7 +601,7 @@ export function createHarnessAccounts(options: {
     async bind(root: string | null, detected: AccountIdentity & { harness: HarnessId }) {
       return serial(async () => {
         const data = await read()
-        const result = adopt(data, detected.harness, normRoot(root), detected)
+        const result = adopt(data, detected.harness, normRoot(root), detected, true)
         await write(data)
         return result
       })
@@ -618,6 +633,35 @@ export function createHarnessAccounts(options: {
       })
     },
     setNickname: (id: string, nickname: string) => update(id, { nickname }),
+    /** The harness refused this login at `at`. Idempotent (a mark already there is kept, no write); a refusal not newer than the last finished sign-in is ignored. */
+    async markLoginExpired(id: string, at: number): Promise<HarnessAccount | null> {
+      const seen = await snapshot()
+      const known = seen.accounts.find(a => a.id === canonicalAccountId(seen, id))
+      const stale = (a: HarnessAccount) => a.loginExpiredAt !== undefined || (a.loginRenewedAt !== undefined && at <= a.loginRenewedAt)
+      if (!known || stale(known)) return known ?? null
+      return serial(async () => {
+        const data = await read()
+        const account = data.accounts.find(a => a.id === canonicalAccountId(data, id))
+        if (!account || stale(account)) return account ?? null
+        account.loginExpiredAt = at
+        await write(data)
+        return account
+      })
+    },
+    /** The harness answered again after the mark (a `/login` inside the session): the login works. */
+    async clearLoginExpired(id: string): Promise<HarnessAccount | null> {
+      const seen = await snapshot()
+      const known = seen.accounts.find(a => a.id === canonicalAccountId(seen, id))
+      if (!known || known.loginExpiredAt === undefined) return known ?? null
+      return serial(async () => {
+        const data = await read()
+        const account = data.accounts.find(a => a.id === canonicalAccountId(data, id))
+        if (!account || account.loginExpiredAt === undefined) return account ?? null
+        delete account.loginExpiredAt
+        await write(data)
+        return account
+      })
+    },
     async list(harnesses: readonly HarnessId[] = HARNESS_ORDER): Promise<HarnessAccount[]> {
       const currentAccounts = await current(harnesses)
       const accounts = (await snapshot()).accounts
@@ -652,6 +696,24 @@ export const listHarnessAccounts = (harnesses?: readonly HarnessId[]) => store.l
 export const setAccountAvailable = (harness: HarnessId, key: string, available: boolean) => store.setAvailable(harness, key, available)
 export const retireAccount = (id: string) => store.retire(id)
 export const updateAccount = (id: string, patch: { available?: boolean; nickname?: string }) => store.update(id, patch)
+export const markLoginExpired = (id: string, at: number) => store.markLoginExpired(id, at)
+export const clearLoginExpired = (id: string) => store.clearLoginExpired(id)
+
+/**
+ * PURE. Can this account take work right now, in one word the screens share:
+ * `expired` — the harness refused its login while running (re-login in the same folder fixes it);
+ * `signed_out` — no binding names it, or the harness answered that its folder holds no login;
+ * `ok` otherwise. A retired account is `undefined`: it is removed, not signed out.
+ */
+export type AccountLoginState = 'ok' | 'expired' | 'signed_out'
+export function accountLoginState(
+  a: Pick<HarnessAccount, 'retired' | 'loginExpiredAt' | 'signedOut'>, bound: boolean,
+): AccountLoginState | undefined {
+  if (a.retired) return undefined
+  if (a.loginExpiredAt !== undefined) return 'expired'
+  if (!bound || a.signedOut) return 'signed_out'
+  return 'ok'
+}
 
 /** Tests install an isolated registry and probes; never read the owner's login. */
 export function __setHarnessAccountsForTest(next: ReturnType<typeof createHarnessAccounts>): void { store = next }

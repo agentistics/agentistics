@@ -12,7 +12,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { Navigate, useLocation, useOutletContext } from 'react-router-dom'
 import { signedOutHiddenStore } from '../../lib/appFlags'
 import { accountSignInStore } from '../../lib/accountSignIn'
-import { Pencil, Trash2, AlertTriangle, Sparkles } from 'lucide-react'
+import { Pencil, Trash2, AlertTriangle, Sparkles, KeyRound } from 'lucide-react'
 import {
   findPlan,
   sortPeriods,
@@ -53,7 +53,9 @@ import {
   type PeriodDraft,
 } from './billingForm'
 import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
-import { BillingAccountList, type BillingRowView } from './AccountRow'
+import { BillingAccountList, loginOff, type BillingRowView } from './AccountRow'
+import { ReloginModal } from './ReloginModal'
+import { AUTH_COPY } from '../../lib/accountRelogin'
 import {
   accountsNeedingPlan, billingRows, closeBefore, defaultStart, limitsForRow, planOptionsFor, detectedPlanId, planDraftWrites, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
   orphanTimelines, unknownPeriod, upcomingPeriod, withScopePeriods, withoutOrphan, type BillingAccount, type BillingRow, type OrphanTimeline, type SaveError,
@@ -118,6 +120,7 @@ export function BillingAccountsPanel() {
     fetch(`/api/accounts/${encodeURIComponent(id)}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     }))).current
+  const [relogin, setRelogin] = useState<{ id: string; harness: HarnessId; who: string } | null>(null)
   const [accountsReload, setAccountsReload] = useState(0)
   const reloadAccounts = useCallback(() => setAccountsReload(n => n + 1), [])
   useEffect(() => {
@@ -393,7 +396,12 @@ export function BillingAccountsPanel() {
       <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
         selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow}
         onSignIn={signIn} signingIn={null} signInError={signInError}
-        hiddenSignedOut={hiddenSignedOut} onHideSignedOut={hideSignedOut} />
+        hiddenSignedOut={hiddenSignedOut} onHideSignedOut={hideSignedOut}
+        onRelogin={r => { if (r.account) setRelogin({ id: r.account.id, harness: r.harness, who: r.title }) }} />
+      {relogin && (
+        <ReloginModal accountId={relogin.id} harness={relogin.harness} who={relogin.who} lang={pt ? 'pt' : 'en'}
+          onClose={() => { setRelogin(null); reloadAccounts() }} onDone={() => reloadAccounts()} />
+      )}
       <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
       {removeError && <div role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--accent-red)' }}>{removeError}</div>}
 
@@ -453,6 +461,26 @@ export function BillingAccountsPanel() {
               <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sub || row.title}</span>
             </div>
             {errPlace === 'drawer' && saveError && <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>}
+            {row.account && loginOff(row) && (() => {
+              const a = AUTH_COPY(pt)
+              const acct = row.account
+              return (
+                <div role="alert" data-account-drawer-login={acct.login} style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16, padding: '12px 14px', borderRadius: 'var(--radius-lg)', border: '1px solid color-mix(in srgb, var(--accent-red) 45%, var(--border))', background: 'color-mix(in srgb, var(--accent-red) 8%, var(--bg-card))' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 700, color: 'var(--accent-red)' }}>
+                    <KeyRound size={15} aria-hidden />{acct.login === 'expired' ? a.expired(row.title) : a.signedOut(row.title)}
+                  </div>
+                  <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                    {acct.relogin ? (acct.login === 'expired' ? a.drawerExpired : a.drawerSignedOut) : a.drawerNoRelogin}
+                  </p>
+                  {acct.relogin && (
+                    <button type="button" data-account-drawer-relogin onClick={() => setRelogin({ id: acct.id, harness: row.harness, who: row.title })}
+                      style={{ ...dialogButtonStyle('primary', isMobile), alignSelf: isMobile ? 'stretch' : 'flex-start', gap: 8 }}>
+                      <KeyRound size={15} aria-hidden />{a.relogin}
+                    </button>
+                  )}
+                </div>
+              )
+            })()}
             {row.account && (
               <div data-account-agents style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, minHeight: isMobile ? 44 : undefined }}>
                 <span style={L}>{pt ? 'Uso por agentes' : 'Agent use'}</span>

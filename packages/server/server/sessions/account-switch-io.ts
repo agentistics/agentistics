@@ -10,11 +10,11 @@
 import { copyFile, cp, mkdir, readdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
-import { defaultHarnessRoot, readAccounts } from '../harness-accounts'
+import { byId, clearLoginExpired, defaultHarnessRoot, markLoginExpired, readAccounts } from '../harness-accounts'
 import { readTailBytes, windowLines } from './transcript-window'
 import {
-  SWITCH_LAYOUT, allSwitchOptions, unavailableSwitchTargets, claudeProjectDir, claudeSidecarOf, detectLimitInTail, isCodexRolloutOf,
-  type LimitState, type SourceFiles, type SwitchAccountMeta, type SwitchCopy, type SwitchOption, type SwitchUnavailable,
+  SWITCH_LAYOUT, AUTH_REFUSAL_SOURCES, allSwitchOptions, unavailableSwitchTargets, claudeProjectDir, claudeSidecarOf, detectLimitInTail, detectAuthInTail, isCodexRolloutOf,
+  type AuthState, type LimitState, type SourceFiles, type SwitchAccountMeta, type SwitchCopy, type SwitchOption, type SwitchUnavailable,
 } from './account-switch'
 import { spawnAccountContext, spawnAccountRows } from './spawn-account-io'
 import { decideRecordedAccount } from './spawn-account'
@@ -91,11 +91,19 @@ export async function readLimitState(o: { harness: HarnessId; conversationId: st
  * first) and the tail is re-read only when the file's mtime changed.
  */
 export type LimitProbe = { kind: 'limited'; state: LimitState } | { kind: 'clear' } | { kind: 'unread' }
-export interface LimitProbeCache { entries: Map<string, { path: string; mtimeMs: number; result: LimitProbe }> }
+/** One tail read, both answers: the usage limit (`limit`) and a refused login (`auth`, HOTFIX.LOGIN-EXPIRADO). */
+export interface TailProbe { limit: LimitProbe; auth: AuthState | null; answeredAt?: number }
+export interface LimitProbeCache { entries: Map<string, { path: string; mtimeMs: number; result: TailProbe }> }
 export const newLimitProbeCache = (): LimitProbeCache => ({ entries: new Map() })
 
 export async function readLimitProbe(o: { harness: HarnessId; conversationId: string; cwd: string; accountId?: string }, cache?: LimitProbeCache): Promise<LimitProbe> {
-  if (!SWITCH_LAYOUT[o.harness]) return { kind: 'unread' }
+  return (await readTailProbe(o, cache)).limit
+}
+
+const UNREAD: TailProbe = { limit: { kind: 'unread' }, auth: null }
+
+export async function readTailProbe(o: { harness: HarnessId; conversationId: string; cwd: string; accountId?: string }, cache?: LimitProbeCache): Promise<TailProbe> {
+  if (!SWITCH_LAYOUT[o.harness] && !AUTH_REFUSAL_SOURCES[o.harness]) return UNREAD
   const key = `${o.harness}:${o.accountId ?? ''}:${o.conversationId}`
   const hit = cache?.entries.get(key)
   let path = hit?.path
@@ -108,14 +116,34 @@ export async function readLimitProbe(o: { harness: HarnessId; conversationId: st
     const root = await rootOfAccount(o.harness, o.accountId)
     path = (await findSourceFiles(o.harness, root, o.conversationId, o.cwd)).transcript
   }
-  if (!path) return { kind: 'unread' }
+  if (!path) return UNREAD
   const st = await stat(path).catch(() => null)
   const tail = await readTailBytes(path, 256 * 1024)
-  if (!st || !tail) return { kind: 'unread' }
-  const state = detectLimitInTail(o.harness, windowLines(tail))
-  const result: LimitProbe = state ? { kind: 'limited', state } : { kind: 'clear' }
+  if (!st || !tail) return UNREAD
+  const lines = windowLines(tail)
+  const state = SWITCH_LAYOUT[o.harness] ? detectLimitInTail(o.harness, lines) : null
+  const { auth, answeredAt } = detectAuthInTail(o.harness, lines)
+  const result: TailProbe = {
+    limit: SWITCH_LAYOUT[o.harness] ? (state ? { kind: 'limited', state } : { kind: 'clear' }) : { kind: 'unread' },
+    auth, ...(answeredAt !== undefined ? { answeredAt } : {}),
+  }
   cache?.entries.set(key, { path, mtimeMs: st.mtimeMs, result })
   return result
+}
+
+/**
+ * Keep the registry's mark in step with what the session's transcript says (HOTFIX.LOGIN-EXPIRADO):
+ * a refusal still in force marks the account; a real reply NEWER than the mark clears it (the person
+ * ran `/login` inside the session). Best effort: a registry that cannot be written changes nothing.
+ */
+export async function syncLoginExpiry(accountId: string | undefined, probe: Pick<TailProbe, 'auth' | 'answeredAt'>, now = Date.now()): Promise<void> {
+  if (!accountId) return
+  try {
+    if (probe.auth) { await markLoginExpired(accountId, probe.auth.at ?? now); return }
+    if (probe.answeredAt === undefined) return
+    const account = await byId(accountId)
+    if (account?.loginExpiredAt !== undefined && probe.answeredAt > account.loginExpiredAt) await clearLoginExpired(accountId)
+  } catch { /* the bar still reads the transcript; the registry catches up on the next read */ }
 }
 
 /** The harnesses a hand-off could start here: spec'd and on PATH. A blind PATH offers none. */

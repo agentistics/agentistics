@@ -1,7 +1,8 @@
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { installedLoginHarnesses } from './account-login'
-import { accountRoots, type AccountRootsDeps } from './account-roots'
-import { listHarnessAccounts, setAccountAvailable, updateAccount } from './harness-accounts'
+import { accountRoots, reloginRoot, reloginSupported, type AccountRootsDeps } from './account-roots'
+import { accountLoginState, listHarnessAccounts, readAccounts, setAccountAvailable, updateAccount, type HarnessAccount } from './harness-accounts'
+import { spawnRowsOf } from './sessions/spawn-account-io'
 
 /** Mounted after the same capability, CSRF and auth gates as billing detection. */
 export async function handleAccountsRequest(
@@ -13,6 +14,33 @@ export async function handleAccountsRequest(
   if (path === '/api/accounts/roots' || path.startsWith('/api/accounts/roots/')) {
     const roots = accountRoots(rootsDeps)
     if (!roots.flagOn()) return json({ error: 'Not found' }, 404)
+    // HOTFIX.LOGIN-EXPIRADO — sign an existing account in again, in the folder it lives in (same id).
+    // Under `/api/accounts/roots` so the capability guard's `localShell` prefix covers it: it starts a CLI.
+    const reloginMatch = /^\/api\/accounts\/roots\/relogin\/([^/]+)(\/code)?$/.exec(path)
+    if (reloginMatch) {
+      let id: string
+      try { id = decodeURIComponent(reloginMatch[1]!) } catch { return json({ error: 'Invalid request' }, 400) }
+      if (reloginMatch[2]) {
+        if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
+        if (!(req.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) return json({ error: 'Expected application/json' }, 415)
+        // Never logged, persisted or returned: the pasted authorization code.
+        let body: { code?: unknown } | null
+        try { body = await req.json() } catch { return json({ error: 'invalid_code' }, 400) }
+        const out = await roots.reloginCode(id, body?.code)
+        return out.ok ? json({ ok: true }) : json({ error: out.reason, message: out.message }, out.reason === 'not_found' ? 404 : 400)
+      }
+      if (req.method === 'GET') {
+        await roots.pollRelogins().catch(() => [])
+        const status = roots.reloginStatus(id)
+        return status ? json(status) : json({ error: 'not_found', message: 'No sign-in is running for this account.' }, 404)
+      }
+      if (req.method === 'DELETE') return json({ ok: true, cancelled: await roots.cancelRelogin(id) })
+      if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
+      const out = await roots.relogin(id, req.signal)
+      if (out.ok) return json(out)
+      const status = out.reason === 'not_found' ? 404 : out.reason === 'disabled' ? 404 : out.reason === 'unsupported' || out.reason === 'unsafe_path' || out.reason === 'retired' ? 422 : 502
+      return json({ error: out.reason, message: out.message }, status)
+    }
     if (path === '/api/accounts/roots') {
       if (req.method === 'GET') { roots.ensurePoller(); return json({ roots: await roots.list(), installed: (rootsDeps?.installed ?? installedLoginHarnesses)() }) }
       if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
@@ -51,7 +79,7 @@ export async function handleAccountsRequest(
     const out = await roots.removeRoot(decodeURIComponent(m[1]!), confirm === undefined ? {} : { confirm })
     return out.ok ? json(out) : json({ error: out.reason, message: out.message }, out.status)
   }
-  if (path === '/api/accounts' && req.method === 'GET') return json({ accounts: await listHarnessAccounts(harnesses) })
+  if (path === '/api/accounts' && req.method === 'GET') return json({ accounts: withLoginState(await listHarnessAccounts(harnesses), await readAccounts().catch(() => null)) })
   const idMatch = /^\/api\/accounts\/([^/]+)$/.exec(path)
   if (idMatch) {
     if (req.method !== 'PATCH') return json({ error: 'Method not allowed' }, 405)
@@ -82,4 +110,22 @@ export async function handleAccountsRequest(
   }
   const account = await setAccountAvailable(harness, key, (body as { available: boolean }).available)
   return account ? json({ account }) : json({ error: 'Account not found' }, 404)
+}
+
+/**
+ * Each account with the state the screens share (`login`) and whether "Sign in again" can run for it
+ * (`relogin`). Read from the SAME registry snapshot the spawn rules read, so the list and the session
+ * bar can never disagree about an account.
+ */
+export function withLoginState(
+  accounts: readonly HarnessAccount[], file: { accounts: HarnessAccount[]; bindings: Record<string, string> } | null,
+): Array<HarnessAccount & { login?: 'ok' | 'expired' | 'signed_out'; relogin?: boolean }> {
+  if (!file) return [...accounts]
+  const rows = spawnRowsOf(file)
+  return accounts.map(a => {
+    if (!a.id) return a
+    const login = accountLoginState(a, rows.find(r => r.id === a.id)?.bound ?? false)
+    if (!login) return a
+    return { ...a, login, ...(login !== 'ok' ? { relogin: reloginSupported({ ...a, root: reloginRoot(file, a) }) } : {}) }
+  })
 }
