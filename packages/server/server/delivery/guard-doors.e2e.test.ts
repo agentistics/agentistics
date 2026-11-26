@@ -219,6 +219,21 @@ describe('rule OFF (the default) — nothing a user does today changes, at every
     expect((await mcp(e, 'agentistics_task_status', { ref: 't2', status: 'shipped' })).isError).toBe(false)
     expect((await mcp(e, 'agentistics_task_subtask', { ref: 't1', id: 'p3', status: 'in_review' })).isError).toBe(false)
   })
+  test('r9 D: the MCP tick {id, done} really changes the piece status and is idempotent (done:true, again, done:false, again)', async () => {
+    const statusOf = async () => ((await (await fetch(`${e.base}/api/tasks/t1`)).json()) as any).task.subtasks.find((s: any) => s.id === 'p1').status
+    const first = await mcp(e, 'agentistics_task_subtask', { ref: 't1', id: 'p1', done: true })
+    expect(first.isError, first.text).toBe(false)
+    const afterFirst = await statusOf()
+    expect(afterFirst).toBe('done')
+    const again = await mcp(e, 'agentistics_task_subtask', { ref: 't1', id: 'p1', done: true })
+    expect(again.isError, again.text).toBe(false)
+    expect(await statusOf()).toBe('done')
+    const off = await mcp(e, 'agentistics_task_subtask', { ref: 't1', id: 'p1', done: false })
+    expect(off.isError, off.text).toBe(false)
+    expect(await statusOf()).toBe('todo')
+    expect((await mcp(e, 'agentistics_task_subtask', { ref: 't1', id: 'p1', done: false })).isError).toBe(false)
+    expect(await statusOf()).toBe('todo')
+  })
   test('CLI: agentop task deliver succeeds with no evidence (exit 0)', async () => {
     const r = await cli(e, 'task', 'deliver', 't2')
     expect(r.code, r.err).toBe(0)

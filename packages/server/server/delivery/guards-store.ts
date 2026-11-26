@@ -92,7 +92,7 @@ export function parseGuards(text: string): GuardsDoc {
     const reverts: Record<string, string[]> = {}
     for (const [k, v] of Object.entries(raw.sweep.reverts)) { if (!Array.isArray(v) || v.some(s => typeof s !== 'string')) throw new Error(`sweep memory ${k} is malformed`); reverts[k] = v as string[] }
     sweep = { reverts }
-    for (const field of ['plans', 'catchUpFailures', 'noBaselineSince'] as const) {
+    for (const field of ['plans', 'catchUpFailures', 'noBaselineSince', 'unacceptedSince'] as const) {
       const value = raw.sweep[field]
       if (value !== undefined) {
         if (!isRec(value) || Object.values(value).some(v => typeof v !== 'string')) throw new Error(`sweep ${field} is malformed`)
@@ -102,7 +102,25 @@ export function parseGuards(text: string): GuardsDoc {
     if (raw.sweep.memberAlerts !== undefined) {
       const value = raw.sweep.memberAlerts
       if (!isRec(value) || Object.values(value).some(v => !isRec(v) || typeof v.at !== 'string' || typeof v.text !== 'string')) throw new Error('sweep memberAlerts is malformed')
-      sweep.memberAlerts = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, { at: (v as { at: string }).at, text: (v as { text: string }).text }]))
+      if (Object.values(value).some(v => (v as { actions?: unknown }).actions !== undefined && (!Array.isArray((v as { actions?: unknown }).actions) || ((v as { actions: unknown[] }).actions).some(x => typeof x !== 'string')))) throw new Error('sweep memberAlerts is malformed')
+      sweep.memberAlerts = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, { at: (v as { at: string }).at, text: (v as { text: string }).text, ...((v as { actions?: string[] }).actions ? { actions: (v as { actions: string[] }).actions } : {}) }]))
+    }
+    if (raw.sweep.forgedMarks !== undefined) {
+      const value = raw.sweep.forgedMarks
+      if (!isRec(value) || Object.values(value).some(v => typeof v !== 'string')) throw new Error('sweep forgedMarks is malformed')
+      sweep.forgedMarks = value as Record<string, string>
+    }
+    if (raw.sweep.placeholders !== undefined) {
+      const value = raw.sweep.placeholders
+      if (!isRec(value) || Object.values(value).some(v => !isRec(v) || typeof v.groupId !== 'string' || typeof v.taskId !== 'string' || typeof v.restoredAt !== 'string' || typeof v.restorationId !== 'string' || (v.dismissedAt !== undefined && typeof v.dismissedAt !== 'string'))) throw new Error('sweep placeholders is malformed')
+      sweep.placeholders = value as NonNullable<SweepMemory['placeholders']>
+    }
+    for (const field of ['ownerRemoved', 'acceptedMissing'] as const) {
+      const value = raw.sweep[field]
+      if (value !== undefined) {
+        if (!isRec(value) || Object.values(value).some(v => !isRec(v) || typeof v.groupId !== 'string' || typeof v.at !== 'string')) throw new Error(`sweep ${field} is malformed`)
+        sweep[field] = value as NonNullable<SweepMemory['ownerRemoved']>
+      }
     }
     if (raw.sweep.warning !== undefined) {
       if (typeof raw.sweep.warning !== 'string') throw new Error('sweep warning is malformed')

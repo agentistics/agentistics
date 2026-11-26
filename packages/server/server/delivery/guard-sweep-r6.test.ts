@@ -166,7 +166,7 @@ test('R5-1 a deleted member whose accepted status is done is not recreated (it c
   await writeCp(w, cp0('g', { members: recordedAll(ms) } as never))
   dropBoard(w, s => s.id === 'm0' || s.id === 'm2')
   const outs = await ticks(w, 1)
-  expect(outs[0]).toEqual(['sweep-revert m2: member_removed'])
+  expect(outs[0]).toEqual(['sweep report m0: accepted_member_missing', 'sweep-revert m2: member_removed']) // r3: a deleted accepted member is reported, never restored
   expect(await sub(w, 'm0')).toBeUndefined()
 })
 

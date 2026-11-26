@@ -94,6 +94,8 @@ export interface GuardedWriteOptions {
   memberChanges?: readonly { key: string; id: string; status?: string; removed?: true; moved?: { fromGroup?: string; rank: number } }[]
   retreats?: readonly { key: string; rank: number; fromPhase?: string; fromBoardStatus?: string; boardStatus?: string; boardStage?: string; /** The members of a group whose own rank is within the retreat's. */ members?: Record<string, string> }[]
   ctx: GuardContext | undefined
+  /** r8 C: keys of pieces the VAULT-PROVEN owner is retreating/moving out of an accepted state: not re-classified (the caller proved the principal). */
+  exemptClassification?: ReadonlySet<string>
   paths: GuardLockPaths
   /** Locks still needed by the caller; empty when its store/transaction already holds the complete set. */
   locks: readonly GuardLockName[]
@@ -141,8 +143,9 @@ export async function guardedWrite(o: GuardedWriteOptions): Promise<void> {
       const covered = o.ctx.principal.kind === 'flow' && checkpoint && !st.phase && rec?.phase === checkpoint.phase
         && r.rank <= checkpointRank(checkpoint, [{ id: checkpoint.boardStatus, stage: checkpoint.boardStage }])
         && (rec?.revision ?? 0) === checkpoint.revision
-      outcomes[r.key] = covered
-        ? { ok: true, ids: [], sha256: [], headSha: checkpoint.headSha, category: checkpoint.classification?.category ?? 'non-code', grandfathered: true }
+      const exempt = o.ctx.principal.kind === 'owner' && o.ctx.principal.via === 'vault-credential' && !!o.exemptClassification?.has(r.key)
+      outcomes[r.key] = covered || exempt
+        ? { ok: true, ids: [], sha256: [], headSha: checkpoint?.headSha ?? '', category: checkpoint?.classification?.category ?? 'non-code', grandfathered: true }
         : await reviewOutcome({ deps, raised: r, record: rec, checkpoint })
     }
     const decision = decideGuard({ rule, raised: o.raised, ctx: o.ctx, outcomes })

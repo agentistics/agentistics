@@ -32,7 +32,7 @@ export function analyzeOwnerModeTamper(tampered: string | undefined, issues: Hea
  * S0d.2: `guards.json` / `guarantees.json` are not what agentop sealed (QA F2: deleting or editing them used to turn the
  * rules off in silence), plus §2.7's `guarantee-off: <rule>, by <via>` for every rule the owner turned off.
  */
-export function analyzeGuardIntegrity(f: { guaranteesWarn?: string; guardsTamper?: string; offWarnings: readonly string[] }, issues: HealthIssue[]): void {
+export function analyzeGuardIntegrity(f: { guaranteesWarn?: string; guardsTamper?: string; offWarnings: readonly string[]; sweepIssues?: ReadonlyArray<{ id: string; title: string; text: string; guide: string }> }, issues: HealthIssue[]): void {
   if (f.guardsTamper) {
     issues.push({
       id: 'guards-tampered', severity: 'warning',
@@ -49,13 +49,15 @@ export function analyzeGuardIntegrity(f: { guaranteesWarn?: string; guardsTamper
       guide: 'Set the rule again as the owner (`agentop flow guarantee <off|shadow|activate> <rule>` with the vault proof) — that re-seals the file.',
     })
   }
+  // B6: the sweep's WARNs carry a structured id and are not rendered under the owner-turned-off frame.
+  for (const i of f.sweepIssues ?? []) issues.push({ id: i.id, severity: 'warning', title: i.title, description: i.text, guide: i.guide })
   for (const w of f.offWarnings) {
     if (w.startsWith('sweep-breaker:')) {
-      issues.push({ id: 'sweep-breaker', severity: 'warning', title: 'The delivery sweep breaker tripped / O disjuntor da varredura disparou', description: w, guide: 'agentop flow guarantee off a' })
+      issues.push({ id: 'sweep-breaker', severity: 'warning', title: 'The delivery sweep breaker tripped / O disjuntor da varredura disparou', description: w, guide: 'The sweep is report-only until the burst stops; find which writer rewrote the board in bulk.' })
       continue
     }
     if (w.startsWith('sweep-loop:') || w.startsWith('sweep-skipped:')) {
-      issues.push({ id: w.startsWith('sweep-loop:') ? 'sweep-loop' : 'sweep-skipped', severity: 'warning', title: w.startsWith('sweep-loop:') ? 'The delivery sweep blocked repeated external moves' : 'The delivery sweep is report-only', description: w, guide: 'agentop flow guarantee off a' })
+      issues.push({ id: w.startsWith('sweep-loop:') ? 'sweep-loop' : 'sweep-skipped', severity: 'warning', title: w.startsWith('sweep-loop:') ? 'The delivery sweep blocked repeated external moves' : 'The delivery sweep is report-only', description: w, guide: w.startsWith('sweep-loop:') ? 'A person sets the blocked piece back on the board; find which writer keeps moving it.' : 'Run the guard migration (agentop flow guarantee-migrate) so the sweep can start.' })
       continue
     }
     issues.push({ id: `guarantee-off:${w.split(':')[1]?.split(',')[0]?.trim() ?? ''}`, severity: 'warning', title: w, description: `${w}. The owner turned this delivery rule off; it stays WARNed until it is back on.`, guide: 'agentop flow guarantee shadow <rule>' })

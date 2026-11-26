@@ -209,7 +209,7 @@ test('R2-3 breaker has its own bilingual health warning and one deduped leader n
   const warnings = sweepWarnings((await w.guards.read()).sweep, T)
   const issues: any[] = []
   analyzeGuardIntegrity({ offWarnings: warnings }, issues)
-  expect(issues.find(i => i.id === 'sweep-breaker')?.guide).toBe('agentop flow guarantee off a')
+  expect(issues.find(i => i.id === 'sweep-breaker')?.guide).not.toContain('guarantee off') // r3: per-kind guide, never "turn the guard off"
   expect(warnings.join(' ')).toContain('varredura')
   expect(w.logs.filter(l => l.startsWith('notice:') && l.includes('breaker'))).toHaveLength(1)
   expect(w.logs).not.toContain('notice-held:true')

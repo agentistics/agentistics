@@ -14,14 +14,15 @@
  *   5. LOOP GUARD       a piece reverted twice in 24 h is moved to `blocked` (`externo: an unknown writer keeps moving this piece`).
  *
  * Rule `off`: this module does NOTHING (no read, no lock). Rule `shadow`: report-only (`would-revert`, `would-recover-intent`),
- * nothing is written. Every revert names the escape — `agentop flow guarantee off a` — in both languages.
+ * nothing is written. Every revert says, in both languages, that only raw writes are reverted and how to make the change properly.
  *
  * Everything with side effects is INJECTED by the service (which already holds the stores): this module imports no store, lock
  * or file module, so the writer inventories (`doors.lint`) see it as the pure logic it is.
  */
+import { randomUUID } from 'node:crypto'
 import { boardPieces, phaseRank, type BoardSlice } from './guard'
 import { planBlock, type DeliveryRecord } from './machine'
-import { LOOP_BLOCK_TEXT, SWEEP_ESCAPE, SWEEP_ESCAPE_PT, emptyMemory, planSweep, type PieceCheckpointLike, type PieceView, type SweepMemory, type SweepRevert } from './sweep-plan'
+import { LOOP_BLOCK_TEXT, SWEEP_ESCAPE, SWEEP_ESCAPE_PT, activePlaceholder, emptyMemory, planSweep, type PieceCheckpointLike, type PieceView, type SweepMemory, type SweepRevert } from './sweep-plan'
 
 export const SWEEP_CHUNK_SIZE = 4
 /** Reverts that have a checkpoint behind them are always repaired; more than this in one tick is report-only (a wholesale rewrite, not a forgery). */
@@ -39,7 +40,7 @@ export interface SweepDeps {
   statusStages: () => Promise<Record<string, string> | undefined>
   tasks: {
     read(): Promise<BoardBook>
-    applyBoardReverts(batch: { at: string; reverts: Array<{ key: string; subtaskId?: string; to: string; clearCi: boolean; parentGroupId?: string; placeholder?: { taskId: string; title: string } }>; comments: never[]; events: never[] }): Promise<void>
+    applyBoardReverts(batch: { at: string; reverts: Array<{ key: string; subtaskId?: string; to: string; clearCi: boolean; parentGroupId?: string; groupTaskId?: string; placeholder?: { taskId: string; title: string; description: string } }>; comments: never[]; events: never[] }): Promise<void>
   }
   store: { read(): Promise<{ deliveries: Record<string, DeliveryRecord> }>; update(fn: (doc: { deliveries: Record<string, DeliveryRecord> }) => void, opts: { guard: unknown }): Promise<unknown> }
   /** The flow engine's context: a revert only lowers a rank, but every delivery write says who is asking. */
@@ -144,6 +145,9 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
   const at = new Date(d.now()).toISOString()
   const plan = planSweep({ pieces: views, checkpoints: doc.checkpoints, statuses, memory: doc.sweep ?? emptyMemory(), now: d.now() })
   actions.push(...plan.reports)
+  // B4 r2: a `restoredBy: 'guard'` mark with no ledger record behind it is NOT authority — reported every tick, treated as a real piece.
+  const forgedIds = (subtasks: BoardBook['subtasks'], memory: SweepMemory | undefined) => (subtasks as unknown as ReadonlyArray<{ id: string; restoredBy?: string }>).filter(s => s.restoredBy === 'guard' && !activePlaceholder(memory, s.id)).map(s => s.id)
+  for (const id of forgedIds(initial.book.subtasks, doc.sweep)) actions.push(`sweep report ${id}: forged_restore_mark`)
   if (rule === 'shadow') {
     actions.push(...recoveryActions.map(a => a.replace('sweep-intent-', 'sweep would-recover-intent-')))
     for (const r of plan.reverts) actions.push(`sweep would-revert ${r.key}: ${r.reason}`)
@@ -165,7 +169,7 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
       return
     }
     const count = skipped === 'checkpoint_ceiling' ? checkpointed.length : revertCount
-    const warning = `sweep-breaker: ${count}/${views.length} pieces need a revert; the sweep is report-only for ${skipped === 'checkpoint_ceiling' ? 'this tick' : 'the pieces with no checkpoint'}. A varredura está apenas relatando ${skipped === 'checkpoint_ceiling' ? 'neste tick' : 'as peças sem checkpoint'}: ${count}/${views.length} peças precisam de reversão. agentop flow guarantee off a`
+    const warning = `sweep-breaker: ${count}/${views.length} pieces need a revert; the sweep is report-only for ${skipped === 'checkpoint_ceiling' ? 'this tick' : 'the pieces with no checkpoint'}. A varredura está apenas relatando ${skipped === 'checkpoint_ceiling' ? 'neste tick' : 'as peças sem checkpoint'}: ${count}/${views.length} peças precisam de reversão. Descubra quem escreve cru no tasks.json; ${SWEEP_ESCAPE_PT}`
     tripWarning = warning
     let notify = false
     await d.envelope(async () => {
@@ -238,12 +242,20 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
       for (const r of reverts) {
         comments.push({ id: d.ids.comment(), taskId: r.taskId, ...(r.subtaskId ? { subtaskId: r.subtaskId } : {}), author: 'flow:entrega', body: textOf(r), createdAt: at })
         const oldDeliveredAt = fresh.book.subtasks.find(s => s.id === r.key) as { deliveredAt?: string } | undefined
-        events.push({ id: d.ids.event(), taskId: r.taskId, ...(r.subtaskId ? { subtaskId: r.subtaskId } : {}), at, actor: ACTOR, kind: 'status', detail: `sweep revert: ${r.reason}${oldDeliveredAt?.deliveredAt ? `; previous deliveredAt: ${oldDeliveredAt.deliveredAt}` : ''}`, ...(r.board ? { to: r.loop ? 'blocked' : r.board.to } : {}) })
+        events.push({ id: d.ids.event(), taskId: r.taskId, ...(r.subtaskId ? { subtaskId: r.subtaskId } : {}), at, actor: ACTOR, kind: 'status', detail: `sweep revert: ${r.reason}${r.restore?.crossTask ? '; crossTask: true' : ''}${oldDeliveredAt?.deliveredAt ? `; previous deliveredAt: ${oldDeliveredAt.deliveredAt}` : ''}`, ...(r.board ? { to: r.loop ? 'blocked' : r.board.to } : {}) })
+      }
+      // B4 r2: the ledger is written BEFORE the placeholder lands, under the same lock set, so no placeholder ever exists unrecorded.
+      const created = reverts.filter(r => r.restore?.placeholder && !fresh.book.subtasks.some(s => s.id === r.key))
+      if (created.length) {
+        const before = await d.guards.read()
+        const placeholders = { ...(before.sweep?.placeholders ?? {}) }
+        for (const r of created) placeholders[r.key] = { groupId: r.restore!.parentGroupId, taskId: r.restore!.placeholder!.taskId, restoredAt: at, restorationId: randomUUID() }
+        await d.guards.write({ ...before, sweep: { ...(before.sweep ?? emptyMemory()), placeholders } })
       }
       await d.tasks.applyBoardReverts({
         at, reverts: reverts.filter(r => r.board).map(r => ({
           key: r.key, ...(r.subtaskId ? { subtaskId: r.subtaskId } : {}), to: r.loop ? 'blocked' : r.board!.to, clearCi: r.board!.clearCi,
-          ...(r.restore ? { parentGroupId: r.restore.parentGroupId, ...(r.restore.placeholder ? { placeholder: r.restore.placeholder } : {}) } : {}),
+          ...(r.restore ? { parentGroupId: r.restore.parentGroupId, groupTaskId: r.restore.taskId, ...(r.restore.placeholder ? { placeholder: r.restore.placeholder } : {}) } : {}),
         })),
         comments: comments as never[], events: events as never[],
       })
@@ -257,7 +269,7 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
         if (r.restore) {
           const g = r.restore.parentGroupId
           restored.set(g, [...(restored.get(g) ?? []), `${r.key} ${r.reason}`])
-          memory.memberAlerts = { ...(memory.memberAlerts ?? {}), [g]: { at, text: memberAlertText(g, restored.get(g)!) } }
+          memory.memberAlerts = { ...(memory.memberAlerts ?? {}), [g]: { at, text: memberAlertText(g, restored.get(g)!), actions: restored.get(g)!.map(x => x.split(' ')[1]!) } }
         }
       }
       await d.guards.write({ ...current, sweep: memory })
@@ -301,7 +313,11 @@ export async function guardSweep(d: SweepDeps, actions: string[]): Promise<void>
     const memory = planSweep({ pieces: [], checkpoints: {}, statuses, memory: current.sweep ?? emptyMemory(), now: d.now() }).memory
     if (Object.keys(failures).length) memory.catchUpFailures = failures
     if (tripWarning) memory.warning = tripWarning
+    if (plan.memory.acceptedMissing) memory.acceptedMissing = plan.memory.acceptedMissing
     if (plan.memory.noBaselineSince) memory.noBaselineSince = plan.memory.noBaselineSince
+    if (plan.memory.unacceptedSince) memory.unacceptedSince = plan.memory.unacceptedSince
+    const forgedNow = forgedIds((await d.tasks.read()).subtasks, current.sweep)
+    if (forgedNow.length) memory.forgedMarks = { ...(memory.forgedMarks ?? {}), ...Object.fromEntries(forgedNow.map(id => [id, memory.forgedMarks?.[id] ?? at])) }
     // R3-1: record what the guard accepts for each group member (only when this tick's plan says something changed). The plan is
     // re-derived from a fresh snapshot under the lock, so a write that landed since is judged as it is NOW.
     let checkpoints = current.checkpoints

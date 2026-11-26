@@ -33,9 +33,11 @@ import type {
   TaskEvent, TaskFile, TaskLink, TaskPriority, TaskStatus, TaskThread,
 } from './task-model'
 import { isCommentKind, type ThreadDelivery, type ThreadParticipant } from '@agentistics/core'
-import { boardRaises, boardPieces, memberStatuses, subRank, type BoardSlice, type GuardContext } from '../delivery/guard'
+import { GuardRefused, boardRaises, boardPieces, memberStatuses, subRank, type BoardSlice, type GuardContext } from '../delivery/guard'
 import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from '../delivery/guard-host'
 import { GuardBusy } from '../delivery/guard-locks'
+import { createGuardsStore } from '../delivery/guards-store'
+import { activePlaceholder, type PlaceholderRecord, type SweepMemory } from '../delivery/sweep-plan'
 import { createDeliveryStore } from '../delivery/store'
 import { effectiveSubtasks } from './task-report'
 
@@ -113,7 +115,12 @@ export interface TaskStore {
   upsertSubtask(t: Subtask, guard?: GuardContext): Promise<void>
   /** Atomic insert/adopt by message id; retries and adoption never overwrite progress. */
   registerComposerSubtask(t: Subtask, guard?: GuardContext): Promise<Subtask | null>
-  removeSubtask(id: string): Promise<boolean>
+  /** `dismissPlaceholder`: a leader/owner removing a guard placeholder (B4) — the write records the removal and raises nothing. */
+  removeSubtask(id: string, opts?: { dismissPlaceholder?: GuardContext; ownerRemoval?: GuardContext; guard?: GuardContext }): Promise<boolean>
+  /** r3: the group this piece is an ACCEPTED (`done`) member of, per the sealed group checkpoint; null for any other piece (or an unreadable guards.json). */
+  acceptedMemberOf(id: string): Promise<{ groupId: string; status: string } | null>
+  /** B4 r2: the sweep's LEDGER record that makes this piece a placeholder (present, not dismissed), else null — the `restoredBy` flag alone is never authority. */
+  placeholderOf(id: string): Promise<PlaceholderRecord | null>
   addFile(f: TaskFile): Promise<void>
   /** Removes the RECORD. The bytes on disk are the caller's to unlink — see `task-files.ts`. */
   removeFile(id: string, deletion?: TaskDeletionPort): Promise<boolean>
@@ -123,7 +130,7 @@ export interface TaskStore {
    * Sessions are NOT touched: a row's `taskId` becomes a dangling reference, which reads as
    * "no attempt named" rather than vanishing. Deleting a board entry must never delete work.
    */
-  removeTask(id: string, deletion?: TaskDeletionPort): Promise<boolean>
+  removeTask(id: string, deletion?: TaskDeletionPort, opts?: { guard?: GuardContext }): Promise<boolean>
   /** Forget a tombstone, so a name the user deleted can be created again. */
   clearTombstone(id: string): Promise<void>
   /**
@@ -157,7 +164,7 @@ export interface TaskStore {
    * R5-1: a revert carrying `parentGroupId` puts an accepted member back in its group; with a `placeholder` and no subtask under that
    * id, it writes one carrying only the accepted record (id, status, group) — the group's status is derived from its members.
    */
-  applyBoardReverts(batch: { at: string; reverts: ReadonlyArray<{ key: string; subtaskId?: string; to: string; clearCi: boolean; parentGroupId?: string; placeholder?: { taskId: string; title: string } }>; comments: readonly TaskComment[]; events: readonly TaskEvent[] }): Promise<void>
+  applyBoardReverts(batch: { at: string; reverts: ReadonlyArray<{ key: string; subtaskId?: string; to: string; clearCi: boolean; parentGroupId?: string; groupTaskId?: string; placeholder?: { taskId: string; title: string; description: string } }>; comments: readonly TaskComment[]; events: readonly TaskEvent[] }): Promise<void>
   /** Append to the activity log. Never throws on a task that has since gone. */
   logEvents(events: readonly TaskEvent[]): Promise<void>
 
@@ -485,6 +492,8 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
     // never exists. `isGroup` is kept only when `true` — absent means "not a group," and a stray
     // `false` written by an older client is read the same as absent rather than as a distinct value.
     ...(t.isGroup === true ? { isGroup: true } : {}),
+    // B4: the mark the guard sweep puts on a placeholder it restored; carried or the next `read()` drops it and the placeholder reads as work.
+    ...(t.restoredBy === 'guard' ? { restoredBy: 'guard' as const } : {}),
     ...(str(t.parentGroupId) ? { parentGroupId: str(t.parentGroupId)! } : {}),
     // A staged session draft (t-918cc82233) — same reason the hierarchy fields above are carried
     // here explicitly: written by `patchSubtask` and dropped silently by the next `read()` unless
@@ -698,6 +707,10 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
   let currentContended = false
   /** `base`: rule A was off when this mutation started, so it holds ONLY the tasks file lock (the base's semantics, N2). */
   let currentBase = false
+  /** B4: the mutation is the DISMISSAL of a guard placeholder by a leader/owner: the write records the member's removal and raises nothing. */
+  let dismissing = false
+  /** r8 C: set only inside one upsertSubtask by the vault-proven owner (serialised by the queue). */
+  let classifyExempt: ReadonlySet<string> | undefined
   const anchor = guardPathsOf({ tasksFile: file })
   /** The authenticated mirror of each status's stored stage (the guard's and the sweep's one reader of it). */
   const stageMirror = async () => (await createGuaranteesStore(join(anchor.dir, 'guarantees.json')).read()).doc.statusStages
@@ -708,7 +721,46 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
    * ladder rank is decided by `guardedWrite` BEFORE a byte lands; with the rule `off` (the default, and every machine that
    * never turned it on) this is one diff of references and three `stat`s, and the write is exactly what it always was.
    */
-  async function write(book: TaskBook): Promise<void> {
+  /** The sweep's memory (the placeholder ledger) from the sealed guards.json; null when it cannot be read (then nothing is stripped or believed). */
+  const readLedger = async (): Promise<SweepMemory | null> => {
+    try { return (await createGuardsStore(anchor.paths.guards).read()).sweep ?? { reverts: {} } } catch { return null }
+  }
+  /** r7: the pieces of `book` that are ACCEPTED members (`done` in their group's sealed checkpoint) and match `pred`; [] when guards.json cannot be read (the write itself then refuses). */
+  async function acceptedMembers(book: TaskBook, pred: (s: TaskBook['subtasks'][number]) => boolean): Promise<Array<{ id: string; groupId: string }>> {
+    const candidates = book.subtasks.filter(s => s.parentGroupId && pred(s))
+    if (!candidates.length) return []
+    let cps: Record<string, { members?: Record<string, { status: string }> }>
+    try { cps = (await createGuardsStore(anchor.paths.guards).read()).checkpoints } catch { return [] }
+    return candidates.flatMap(s => cps[s.parentGroupId!]?.members?.[s.id]?.status === 'done' ? [{ id: s.id, groupId: s.parentGroupId! }] : [])
+  }
+  /** r7: only the owner whose proof is the vault may remove or reopen an ACCEPTED piece; every session, flow or header owner is refused HERE, at the write, so every door is covered. */
+  const isVaultOwner = (g?: GuardContext): boolean => g?.principal.kind === 'owner' && g.principal.via === 'vault-credential'
+  const acceptedRefusal = (code: 'accepted_members' | 'accepted_reopen', what: string, ids: string[]): GuardRefused => new GuardRefused({
+    code, piece: ids[0] ?? '', missing: ['an owner proof from the vault'],
+    message: `${what} holds ${ids.length} accepted piece(s) (${ids.join(', ')}); a session may not remove or reopen accepted work — only the owner, with a vault proof, may.`,
+    messagePt: `${what} tem ${ids.length} peça(s) aceita(s) (${ids.join(', ')}); uma sessão não pode remover nem reabrir trabalho aceito — só o dono, com prova do cofre.`,
+  })
+  /** r7: the owner's removal of accepted pieces is recorded in the ledger (same locked section) and WARNed, so the sweep neither restores nor reports them. */
+  async function recordOwnerRemoval(accepted: ReadonlyArray<{ id: string; groupId: string }>): Promise<void> {
+    if (!accepted.length) return
+    console.warn(`[guard] owner removed accepted piece(s): ${accepted.map(a => a.id).join(', ')}`)
+    if (currentBase) return
+    const g = createGuardsStore(anchor.paths.guards)
+    const doc = await g.read()
+    const at = new Date().toISOString()
+    await g.write({ ...doc, sweep: { ...(doc.sweep ?? { reverts: {} }), ownerRemoved: { ...(doc.sweep?.ownerRemoved ?? {}), ...Object.fromEntries(accepted.map(a => [a.id, { groupId: a.groupId, at }])) } } })
+  }
+  /** B4 r2: a `restoredBy: 'guard'` mark with no active ledger record is a forged label — dropped from the next write (the sweep reports it). */
+  async function stripForgedMarks(book: TaskBook): Promise<TaskBook> {
+    if (!book.subtasks.some(s => s.restoredBy === 'guard')) return book
+    const ledger = await readLedger()
+    if (!ledger) return book
+    if (book.subtasks.every(s => s.restoredBy !== 'guard' || activePlaceholder(ledger, s.id))) return book
+    return { ...book, subtasks: book.subtasks.map(s => { if (s.restoredBy !== 'guard' || activePlaceholder(ledger, s.id)) return s; const { restoredBy: _forged, ...rest } = s; return rest }) }
+  }
+
+  async function write(input: TaskBook): Promise<void> {
+    const book = await stripForgedMarks(input)
     // The production memo is mutable. Only persisted bytes may describe the guarded before image.
     if (!currentBase) bookMemo.delete(file)
     const before = currentBase ? await read() : await readUncached()
@@ -723,7 +775,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
       prior = { ...prior, statuses: before.statuses.map(s => ({ ...s, stage: s.stage ?? doc.statusStages?.[s.id] })) }
       after = { ...after, statuses: book.statuses.map(s => ({ ...s, stage: s.stage ?? doc.statusStages?.[s.id] })) }
     }
-    const raised = boardRaises(prior, after)
+    const raised = dismissing ? [] : boardRaises(prior, after)
     const groupKeys = new Set(after.subtasks.flatMap(s => s.parentGroupId ? [s.parentGroupId] : []))
     const isGroupKey = (key: string) => groupKeys.has(key)
     const beforePieces = new Map(boardPieces(prior).map(p => [p.key, p]))
@@ -761,7 +813,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
     const tasks = new Map(book.tasks.map(t => [t.id, t] as const))
     const stageOf = (status: string) => after.statuses.find(d => d.id === status)?.stage ?? 'none'
     await guardedWrite({
-      raised, retreats, memberChanges, ctx: currentGuard, paths: anchor.paths, wiring: opts.guard,
+      raised, retreats, memberChanges, ctx: currentGuard, ...(classifyExempt ? { exemptClassification: classifyExempt } : {}), paths: anchor.paths, wiring: opts.guard,
       locks: [], alreadyHeld: ['tasks', 'deliveries', 'guards'],
       recordOf: async key => (await createDeliveryStore(anchor.paths.deliveries).read()).deliveries[key] ?? null,
       stateOf: r => { const status = (r.subtaskId ? subs.get(r.key)?.status : tasks.get(r.key)?.status) ?? ''; return { boardStatus: status, boardStage: stageOf(status), phase: null, ...(isGroupKey(r.key) ? { members: memberStatuses(after, r.key) } : {}) } },
@@ -920,13 +972,37 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         const book = await read()
         const next = { ...t }
         if (next.status !== 'blocked') delete next.blockedReason
-        await write({ ...book, subtasks: [...book.subtasks.filter(x => x.id !== t.id), next] })
+        // r7 (re-QA r5 F2 + F3): an ACCEPTED member is not reopened (done -> anything else) and does not leave its group
+        // (`parentGroupId` cleared or changed) except by the owner with a vault proof; judged here so no door can bypass it.
+        const prior = book.subtasks.find(x => x.id === t.id)
+        let exempt: string | undefined
+        if (prior && ((prior.status === 'done' && next.status !== 'done') || next.parentGroupId !== prior.parentGroupId)) {
+          const accepted = await acceptedMembers(book, x => x.id === prior.id)
+          if (accepted.length) {
+            if (!isVaultOwner(guard)) throw acceptedRefusal('accepted_reopen', `Piece ${prior.id}`, [prior.id])
+            exempt = prior.id // r8 C: the vault-proven owner is not stopped by guard A's classification for this one operation
+          }
+        }
+        classifyExempt = exempt ? new Set([exempt]) : undefined
+        try { await write({ ...book, subtasks: [...book.subtasks.filter(x => x.id !== t.id), next] }) } finally { classifyExempt = undefined }
       }, guard)
     },
-    removeSubtask(id) {
+    removeSubtask(id, opts) {
       return enqueue(async () => {
         const book = await read()
         if (!book.subtasks.some(t => t.id === id)) return false
+        // B4 r2: only a piece the sweep's ledger names may be dismissed this way; the dismissal is marked in the ledger in the same locked section.
+        const ledger = opts?.dismissPlaceholder ? await readLedger() : null
+        if (opts?.dismissPlaceholder && !activePlaceholder(ledger ?? undefined, id)) return false
+        // r7: a GROUP holding an accepted member goes only by the owner with a vault proof (its members would be orphaned from the acceptance).
+        const acceptedInGroup = await acceptedMembers(book, t => t.parentGroupId === id)
+        if (acceptedInGroup.length && !isVaultOwner(opts?.ownerRemoval ?? opts?.guard)) throw acceptedRefusal('accepted_members', `Group ${id}`, acceptedInGroup.map(a => a.id))
+        // r8 B: an individual ACCEPTED member goes only by the vault-proven owner too (with or without opts).
+        const acceptedSelf = await acceptedMembers(book, t => t.id === id)
+        if (acceptedSelf.length && !isVaultOwner(opts?.ownerRemoval ?? opts?.guard)) throw acceptedRefusal('accepted_members', `Piece ${id}`, [id])
+        dismissing = !!opts?.dismissPlaceholder || !!opts?.ownerRemoval || (acceptedInGroup.length > 0) || (acceptedSelf.length > 0)
+        const removedGroup = opts?.ownerRemoval ? book.subtasks.find(t => t.id === id)?.parentGroupId : undefined
+        try {
         // A GROUP's former MEMBERS become ordinary loose subtasks again — the natural fallback,
         // since a member without a group is exactly what a loose subtask is (§F.1). Done in the
         // SAME write as the deletion, under the same lock, or a crash between the two could leave a
@@ -969,9 +1045,33 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
             return rest
           }),
         })
+        // r3: an OWNER removal of an accepted member is recorded in the ledger (same locked section) so the sweep neither restores nor reports it.
+        // With the rule off (`currentBase`) only the tasks lock is held and no sweep runs, so there is nothing to record.
+        if (opts?.ownerRemoval && removedGroup && !currentBase) {
+          const g = createGuardsStore(anchor.paths.guards)
+          const doc = await g.read()
+          await g.write({ ...doc, sweep: { ...(doc.sweep ?? { reverts: {} }), ownerRemoved: { ...(doc.sweep?.ownerRemoved ?? {}), [id]: { groupId: removedGroup, at: new Date().toISOString() } } } })
+        }
+        await recordOwnerRemoval([...acceptedInGroup, ...acceptedSelf])
+        if (opts?.dismissPlaceholder && !currentBase) {
+          const g = createGuardsStore(anchor.paths.guards)
+          const doc = await g.read()
+          const rec = doc.sweep?.placeholders?.[id]
+          if (rec) await g.write({ ...doc, sweep: { ...(doc.sweep ?? { reverts: {} }), placeholders: { ...doc.sweep!.placeholders, [id]: { ...rec, dismissedAt: new Date().toISOString() } } } })
+        }
         return true
-      })
+        } finally { dismissing = false }
+      }, opts?.dismissPlaceholder ?? opts?.ownerRemoval ?? opts?.guard)
     },
+    async acceptedMemberOf(id) {
+      const group = (await read()).subtasks.find(t => t.id === id)?.parentGroupId
+      if (!group) return null
+      try {
+        const status = (await createGuardsStore(anchor.paths.guards).read()).checkpoints[group]?.members?.[id]?.status
+        return status === 'done' ? { groupId: group, status } : null
+      } catch { return null }
+    },
+    async placeholderOf(id) { return activePlaceholder((await readLedger()) ?? undefined, id) },
     addFile(f) {
       return enqueue(async () => {
         const book = await read()
@@ -986,10 +1086,13 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         return true
       }, { tasks: !held.contended }))
     },
-    removeTask(id, deletion = directDeletion) {
+    removeTask(id, deletion = directDeletion, opts) {
       return enqueue(held => deletion(async () => {
         const book = await read()
         if (!book.tasks.some(t => t.id === id)) return false
+        // r7 (re-QA r5 F1): a task holding an ACCEPTED member is deleted only by the owner with a vault proof; the refusal is at the store write.
+        const accepted = await acceptedMembers(book, s => s.taskId === id)
+        if (accepted.length && !isVaultOwner(opts?.guard)) throw acceptedRefusal('accepted_members', `Task ${id}`, accepted.map(a => a.id))
         await write({
           tasks: book.tasks.filter(t => t.id !== id),
           attempts: book.attempts.filter(a => a.taskId !== id),
@@ -1013,6 +1116,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
           // Remembered as DELETED, or the legacy migration mints it again on the next read.
           tombstones: [...new Set([...book.tombstones, id])],
         })
+        await recordOwnerRemoval(accepted)
         return true
       }, { tasks: !held.contended }))
     },
@@ -1090,7 +1194,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
         const subtasks = book.subtasks.map(s => {
           const r = bySub.get(s.id)
           if (!r) return s
-          const next = { ...s, status: r.to, done: r.to === 'done', updatedAt: batch.at, ...(r.parentGroupId ? { parentGroupId: r.parentGroupId } : {}) }
+          const next = { ...s, status: r.to, done: r.to === 'done', updatedAt: batch.at, ...(r.parentGroupId ? { parentGroupId: r.parentGroupId } : {}), ...(r.parentGroupId && r.groupTaskId ? { taskId: r.groupTaskId } : {}) }
           if (r.clearCi) delete next.ci
           if (r.to === 'blocked') next.blockedReason = 'externo: an unknown writer keeps moving this piece'
           else delete next.blockedReason
@@ -1101,7 +1205,7 @@ export function createTaskStore(file: string, opts: { guard?: GuardWiring } = {}
           if (!r.subtaskId || !r.placeholder || !r.parentGroupId || present.has(r.subtaskId)) continue
           if (!book.subtasks.some(s => s.id === r.parentGroupId)) continue
           subtasks.push({
-            id: r.subtaskId, taskId: r.placeholder.taskId, title: r.placeholder.title, parentGroupId: r.parentGroupId, status: r.to, done: r.to === 'done',
+            id: r.subtaskId, taskId: r.placeholder.taskId, title: r.placeholder.title, notes: r.placeholder.description, restoredBy: 'guard', parentGroupId: r.parentGroupId, status: r.to, done: r.to === 'done',
             createdAt: batch.at, updatedAt: batch.at, ...(r.to === 'blocked' ? { blockedReason: 'externo: an unknown writer keeps moving this piece' } : {}),
           })
         }
