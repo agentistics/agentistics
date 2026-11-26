@@ -108,6 +108,8 @@ export function rowWindows(limits: PlanLimits): PlanLimitWindow[] {
 }
 
 function Usage({ r, now, lang, t, ready = true }: { r: BillingRowView; now: number; lang: Lang; t: ReturnType<typeof T>; ready?: boolean }) {
+  // USO.CARREGANDO: why the plan-limits answer has not arrived, when the store knows (a refusal ends the wait).
+  const { failure } = usePlanLimits()
   if (r.signedOut) return <span data-signed-out style={{ fontSize: 11.5, color: 'var(--text-tertiary)', maxWidth: 260 }}>{t.signIn}</span>
   if (r.limits) return (
     <span data-billing-usage data-plan-limits={r.limits.harness} style={{ display: 'inline-flex', gap: 10 }}>
@@ -124,7 +126,10 @@ function Usage({ r, now, lang, t, ready = true }: { r: BillingRowView; now: numb
       })}
     </span>
   )
-  if (!ready && r.account) return <span aria-busy="true" style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>…</span>
+  // Before the first answer EVERY row waits — an assistant row with no identified account included: saying
+  // "No reading yet" then is a claim nobody could make yet. A refusal is final: "not reported" here.
+  if (!ready && (failure === 'unauthorized' || failure === 'unavailable')) return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{t.noMeter}</span>
+  if (!ready) return <span aria-busy="true" data-usage-waiting style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>…</span>
   return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{REPORTS_LIMITS.has(r.harness) ? t.noMeterYet : t.noMeter}</span>
 }
 
