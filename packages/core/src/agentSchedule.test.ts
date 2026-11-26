@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { foldDayUsage, parseAgentSchedule, resolveAgentUse, scheduleVerdict, toggleAgentUse, type AgentSchedule } from './agentSchedule'
+import { agentUseSettings, foldDayUsage, parseAgentSchedule, resolveAgentUse, scheduleVerdict, type AgentSchedule } from './agentSchedule'
 
 // 2026-11-02 is a Monday. Local clock, like the evaluator.
 const at = (day: number, h: number, m = 0) => new Date(2026, 10, day, h, m)
@@ -37,37 +37,66 @@ describe('scheduleVerdict', () => {
   })
 })
 
-describe('resolveAgentUse — manual wins, then returns to the schedule', () => {
-  test('no schedule: plain switch, untouched', () => {
-    expect(resolveAgentUse(undefined, undefined, null)).toBeNull()
-    expect(resolveAgentUse({ ...sched, enabled: false }, 'on', scheduleVerdict(sched, at(2, 14), 0))).toBeNull()
+describe('resolveAgentUse — available = enabled && (override || schedule on)', () => {
+  const inside = scheduleVerdict(sched, at(2, 10), 0)   // schedule says ON
+  const outside = scheduleVerdict(sched, at(2, 14), 0)  // schedule says OFF
+  test('all four switch combinations, inside and outside the window', () => {
+    // enabled, no override: the schedule rules
+    expect(resolveAgentUse({ enabled: true, override: false }, sched, inside)).toEqual({ available: true, reason: 'in-window' })
+    expect(resolveAgentUse({ enabled: true, override: false }, sched, outside)).toEqual({ available: false, reason: 'outside-window' })
+    // enabled + override: free at any hour, agenda ignored
+    expect(resolveAgentUse({ enabled: true, override: true }, sched, outside)).toEqual({ available: true, reason: 'override-on' })
+    expect(resolveAgentUse({ enabled: true, override: true }, sched, inside)).toEqual({ available: true, reason: 'override-on' })
+    // agenda off: nothing releases it, override included
+    expect(resolveAgentUse({ enabled: false, override: false }, sched, inside)).toEqual({ available: false, reason: 'agenda-off' })
+    expect(resolveAgentUse({ enabled: false, override: true }, sched, inside)).toEqual({ available: false, reason: 'agenda-off' })
   })
-  test('manual on outside the schedule wins', () => {
-    const v = scheduleVerdict(sched, at(2, 14), 0)
-    expect(resolveAgentUse(sched, 'on', v)).toEqual({ available: true, manual: 'on', reason: 'manual-on' })
+  test('no active schedule: an enabled account is simply available', () => {
+    expect(resolveAgentUse({ enabled: true, override: false }, undefined, null)).toEqual({ available: true, reason: 'no-schedule' })
+    expect(resolveAgentUse({ enabled: true, override: false }, { ...sched, enabled: false }, outside)).toEqual({ available: true, reason: 'no-schedule' })
+    expect(resolveAgentUse({ enabled: false, override: false }, undefined, null)).toEqual({ available: false, reason: 'agenda-off' })
   })
-  test('manual on is cleared once the schedule agrees, so the window close turns it off', () => {
-    const opened = resolveAgentUse(sched, 'on', scheduleVerdict(sched, at(2, 9, 30), 0))!
-    expect(opened).toEqual({ available: true, manual: undefined, reason: 'in-window' })
-    expect(resolveAgentUse(sched, opened.manual, scheduleVerdict(sched, at(2, 12, 1), 0))).toMatchObject({ available: false, reason: 'outside-window' })
+  test('override beats the daily and weekly ceilings, agenda-off beats the override', () => {
+    expect(resolveAgentUse({ enabled: true, override: true }, sched, scheduleVerdict(sched, at(2, 10), 50))).toMatchObject({ available: true, reason: 'override-on' })
+    expect(resolveAgentUse({ enabled: false, override: true }, sched, scheduleVerdict(sched, at(2, 10), 50))).toMatchObject({ available: false })
   })
-  test('manual off inside a window wins until the window closes', () => {
-    expect(resolveAgentUse(sched, 'off', scheduleVerdict(sched, at(2, 10), 0))).toMatchObject({ available: false, manual: 'off' })
-    expect(resolveAgentUse(sched, 'off', scheduleVerdict(sched, at(2, 13), 0))).toMatchObject({ available: false, manual: undefined, reason: 'outside-window' })
-  })
-  test('manual on overrides the daily ceiling too', () => {
-    expect(resolveAgentUse(sched, 'on', scheduleVerdict(sched, at(2, 10), 50))).toMatchObject({ available: true, reason: 'manual-on' })
+  test('the override is STICKY: it does not clear itself when the schedule agrees', () => {
+    const s = { enabled: true, override: true }
+    expect(resolveAgentUse(s, sched, inside).reason).toBe('override-on')
+    expect(resolveAgentUse(s, sched, outside).reason).toBe('override-on')
   })
 })
 
-describe('toggleAgentUse', () => {
-  test('no schedule: the plain flag', () => {
-    expect(toggleAgentUse(undefined, false, null)).toEqual({ available: false, manual: undefined })
+describe('agentUseSettings — migration of records written before the two switches', () => {
+  test('stored fields win', () => {
+    expect(agentUseSettings({ available: false, agentUseEnabled: true, agentOverride: true, agentManual: 'off' })).toEqual({ enabled: true, override: true })
+    expect(agentUseSettings({ available: true, agentUseEnabled: false })).toEqual({ enabled: false, override: false })
   })
-  test('turning on outside a window records manual on; turning it off returns to the schedule', () => {
-    const v = scheduleVerdict(sched, at(2, 14), 0)
-    expect(toggleAgentUse(sched, true, v)).toEqual({ available: true, manual: 'on' })
-    expect(toggleAgentUse(sched, false, v)).toEqual({ available: false, manual: undefined })
+  test("agentManual 'on' becomes an override, 'off' a disabled account", () => {
+    expect(agentUseSettings({ available: true, agentManual: 'on', agentSchedule: sched })).toEqual({ enabled: true, override: true })
+    expect(agentUseSettings({ available: false, agentManual: 'off', agentSchedule: sched })).toEqual({ enabled: false, override: false })
+  })
+  test('no manual choice: a schedule means enabled, a plain account keeps its flag', () => {
+    expect(agentUseSettings({ available: false, agentSchedule: sched })).toEqual({ enabled: true, override: false })
+    expect(agentUseSettings({ available: true })).toEqual({ enabled: true, override: false })
+    expect(agentUseSettings({ available: false })).toEqual({ enabled: false, override: false })
+  })
+})
+
+describe('the day runs 00:00-23:59 — an end of 23:59 is the end of the day, with no gap', () => {
+  const late: AgentSchedule = { enabled: true, days: { mon: { windows: [{ from: '09:00', to: '23:59' }] } } }
+  const whole: AgentSchedule = { enabled: true, days: { mon: { windows: [{ from: '00:00', to: '23:59' }] } } }
+  test('the last minute (23:59) is inside, the next midnight is not', () => {
+    expect(scheduleVerdict(late, at(2, 23, 58), 0).on).toBe(true)
+    expect(scheduleVerdict(late, at(2, 23, 59), 0)).toMatchObject({ on: true, reason: 'in-window' })
+    expect(scheduleVerdict(late, at(3, 0, 0), 0).on).toBe(false) // Tuesday: the window does not run past 23:59
+  })
+  test('00:00-23:59 covers every minute of the day', () => {
+    for (const [h, m] of [[0, 0], [0, 1], [12, 0], [23, 58], [23, 59]] as const) expect(scheduleVerdict(whole, at(2, h, m), 0).on).toBe(true)
+    expect(scheduleVerdict(whole, at(3, 0, 0), 0).on).toBe(false)
+  })
+  test('an ordinary end stays exclusive', () => {
+    expect(scheduleVerdict(sched, at(2, 12, 0), 0).on).toBe(false)
   })
 })
 
@@ -130,9 +159,9 @@ describe('weekly ceiling', () => {
   test('no weekly reading never blocks', () => {
     expect(scheduleVerdict(w, at(2, 10), null, null).on).toBe(true)
   })
-  test('manual ON still wins over the weekly ceiling', () => {
+  test('override still wins over the weekly ceiling', () => {
     const v = scheduleVerdict(w, at(2, 10), 0, 90)
-    expect(resolveAgentUse(w, 'on', v)).toMatchObject({ available: true, reason: 'manual-on' })
+    expect(resolveAgentUse({ enabled: true, override: true }, w, v)).toMatchObject({ available: true, reason: 'override-on' })
   })
   test('parse validates and round-trips', () => {
     expect(parseAgentSchedule(w)!.maxWeeklyPct).toBe(60)

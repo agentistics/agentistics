@@ -1,11 +1,11 @@
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { installedLoginHarnesses } from './account-login'
 import { accountRoots, reloginRoot, reloginSupported, type AccountRootsDeps } from './account-roots'
-import { accountLoginState, listHarnessAccounts, readAccounts, setAccountAvailable, updateAccount, type HarnessAccount } from './harness-accounts'
+import { accountLoginState, listHarnessAccounts, readAccounts, setAccountAvailable, type HarnessAccount } from './harness-accounts'
 import { spawnRowsOf } from './sessions/spawn-account-io'
 import { accountCredentialBroken } from './account-credentials'
 import { parseAgentSchedule, type AgentSchedule, type PlanLimits } from '@agentistics/core'
-import { agentUseView, setAccountAgentSchedule, toggleAccountAgentUse, type AgentUseView } from './agent-schedule-host'
+import { agentUseView, setAccountAgentUse, toggleAccountAgentUse, type AgentUseView } from './agent-schedule-host'
 
 const agentLimits = async (): Promise<readonly PlanLimits[]> =>
   (await import('./plan-limits')).storedPlanLimits().catch(() => [])
@@ -99,24 +99,32 @@ export async function handleAccountsRequest(
   const idMatch = /^\/api\/accounts\/([^/]+)$/.exec(path)
   if (idMatch) {
     if (req.method !== 'PATCH') return json({ error: 'Method not allowed' }, 405)
-    let id: string, body: { available?: unknown; nickname?: unknown; agentSchedule?: unknown } | null
+    let id: string, body: { available?: unknown; nickname?: unknown; agentSchedule?: unknown; agentUseEnabled?: unknown; agentOverride?: unknown } | null
     try {
       id = decodeURIComponent(idMatch[1]!)
       body = await req.json()
     } catch { return json({ error: 'Invalid request' }, 400) }
-    if (!body || Array.isArray(body) || (body.available === undefined && body.nickname === undefined && body.agentSchedule === undefined)
+    const known = ['available', 'nickname', 'agentSchedule', 'agentUseEnabled', 'agentOverride'] as const
+    if (!body || Array.isArray(body) || typeof body !== 'object' || !known.some(k => body![k] !== undefined)
       || (body.available !== undefined && typeof body.available !== 'boolean')
+      || (body.agentUseEnabled !== undefined && typeof body.agentUseEnabled !== 'boolean')
+      || (body.agentOverride !== undefined && typeof body.agentOverride !== 'boolean')
       || (body.nickname !== undefined && typeof body.nickname !== 'string')) {
-      return json({ error: 'Expected boolean available, string nickname or an agentSchedule' }, 400)
+      return json({ error: 'Expected boolean agentUseEnabled / agentOverride / available, string nickname or an agentSchedule' }, 400)
     }
     let schedule: AgentSchedule | null | undefined
     if (body.agentSchedule !== undefined) {
       schedule = body.agentSchedule === null ? null : parseAgentSchedule(body.agentSchedule)
       if (schedule === null && body.agentSchedule !== null) return json({ error: 'Invalid agentSchedule' }, 400)
     }
-    let account = body.nickname !== undefined ? await updateAccount(id, { nickname: body.nickname as string }) : null
-    if (schedule !== undefined) account = await setAccountAgentSchedule(id, schedule)
-    if (typeof body.available === 'boolean') account = await toggleAccountAgentUse(id, body.available)
+    // `available` is the old name of the "Agenda" master switch; the explicit field wins.
+    const enabled = typeof body.agentUseEnabled === 'boolean' ? body.agentUseEnabled : typeof body.available === 'boolean' ? body.available : undefined
+    // ONE request, ONE write: the drawer's single Save sends every changed field together.
+    const account = await setAccountAgentUse(id, {
+      ...(enabled !== undefined ? { agentUseEnabled: enabled } : {}),
+      ...(typeof body.agentOverride === 'boolean' ? { agentOverride: body.agentOverride } : {}),
+      ...(schedule !== undefined ? { agentSchedule: schedule } : {}),
+    }, typeof body.nickname === 'string' ? { nickname: body.nickname } : {})
     if (!account) return json({ error: 'Account not found' }, 404)
     return json({ account: withAgentUse(account, await agentLimits(), new Date()) })
   }

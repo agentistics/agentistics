@@ -46,7 +46,11 @@ export interface HarnessAccount {
   available: boolean
   /** Stored. When agents may use the account (`@agentistics/core` agentSchedule.ts). */
   agentSchedule?: AgentSchedule
-  /** Stored. A person flipped the switch against the schedule; cleared when the schedule agrees. */
+  /** Stored. The "Agenda" master switch (CONTAS.AGENDA-SALVAR). Absent on old records: `agentUseSettings` migrates. */
+  agentUseEnabled?: boolean
+  /** Stored. "Sobrescrever a agenda": sticky, free at any hour while on. */
+  agentOverride?: boolean
+  /** LEGACY, read only by the migration: the old self-clearing manual override. Dropped on the first write. */
   agentManual?: AgentManual
   /** Stored. The weekly reading today's spend is measured from (local day). */
   agentDayBaseline?: AgentDayBaseline
@@ -70,7 +74,9 @@ export interface AccountPatch {
   nickname?: string
   /** `null` removes the schedule. */
   agentSchedule?: AgentSchedule | null
-  /** `null` clears the manual override. */
+  agentUseEnabled?: boolean
+  agentOverride?: boolean
+  /** `null` drops the legacy manual override (the migration's input). */
   agentManual?: AgentManual | null
   agentDayBaseline?: AgentDayBaseline
 }
@@ -331,6 +337,8 @@ function foldAccount(data: AccountsFile, keep: HarnessAccount, drop: HarnessAcco
   if (!keep.nickname && drop.nickname) keep.nickname = drop.nickname
   if (!keep.plan && drop.plan) keep.plan = drop.plan
   keep.available = keep.available && drop.available
+  // A switch one of the two had turned OFF stays off (the evaluator rewrites `available` from it).
+  if (keep.agentUseEnabled === false || drop.agentUseEnabled === false) keep.agentUseEnabled = false
   if (keep.retired && !drop.retired) keep.retired = undefined
   for (const [k, v] of Object.entries(data.bindings)) if (v === drop.id) data.bindings[k] = keep.id
   if (drop.id in data.segments) {
@@ -631,6 +639,8 @@ export function createHarnessAccounts(options: {
         if (patch.agentSchedule === null) delete account.agentSchedule
         else account.agentSchedule = patch.agentSchedule
       }
+      if (patch.agentUseEnabled !== undefined) account.agentUseEnabled = patch.agentUseEnabled
+      if (patch.agentOverride !== undefined) account.agentOverride = patch.agentOverride
       if (patch.agentManual !== undefined) {
         if (patch.agentManual === null) delete account.agentManual
         else account.agentManual = patch.agentManual
@@ -727,6 +737,7 @@ export function createHarnessAccounts(options: {
         const account = data.accounts.find(a => a.harness === harness && a.key === key)
         if (!account) return null
         account.available = available
+        account.agentUseEnabled = available
         await write(data)
         return account
       })

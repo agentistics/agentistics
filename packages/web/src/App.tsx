@@ -15,7 +15,7 @@ import {
   Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
   Clock, Code2, Cpu, Download,
   FileCode, FileDown, Flame, FolderOpen, FolderTree, GitBranch,
-  GitCommit, Globe, Home, KeyRound,
+  GitCommit, Gauge, Globe, Home, KeyRound,
   LogOut, Maximize2, MessageSquare, MessagesSquare, Moon,
   PanelLeft, Server, Settings, ShieldCheck,
   SlidersHorizontal, Sun, Target, TerminalSquare,
@@ -142,7 +142,8 @@ import { useFleet, useFleetIndex, type FleetActionId } from './lib/fleet'
 import { BandSegment, BandSegmentTab } from './components/sessions/bandControls'
 import { SessionActions } from './components/sessions/SessionActions'
 import { HARNESS_LABELS } from './lib/harness'
-import { PlanUsageFootButton } from './components/PlanUsageFootButton'
+import { PlanUsageFootButton, PlanUsagePhoneSheet } from './components/PlanUsageFootButton'
+import { requestPlanUsagePopup } from './lib/planUsagePopupRequests'
 import { format, parseISO, parse } from 'date-fns'
 import { fleetFilterOptions, filterFleet, SESSION_FILTER_DIMS } from './lib/fleetFilter'
 import { NO_RUNNING_IDS, runningConversationIds, stableRunningIds } from './lib/activeConversations'
@@ -4279,6 +4280,7 @@ export default function AppLayout() {
           its own back arrow in the top bar, which is the way out and the only one a reader needs
           while they are in it. The root's height drops the matching subtraction — see its note.
  */}
+      {isMobile && <PlanUsagePhoneSheet lang={lang} />}
       {isMobile && !sessionOpen && (
         <MobileAreaBar
           lang={lang}
@@ -4295,6 +4297,7 @@ export default function AppLayout() {
               description: lang === 'pt' ? 'Nova versão disponível — leva alguns segundos' : 'New version available — takes a few seconds',
               badge: lang === 'pt' ? 'NOVO' : 'NEW',
             }] : []),
+            { key: 'plan-usage', label: lang === 'pt' ? 'Uso dos planos' : 'Plan usage', icon: Gauge, onClick: requestPlanUsagePopup },
             { key: 'hardware', label: 'Hardware', icon: Cpu, onClick: () => setHardwareOpen(true) },
             { key: 'theme', label: lang === 'pt' ? 'Tema' : 'Theme', icon: theme === 'dark' ? Sun : Moon, value: theme === 'dark' ? (lang === 'pt' ? 'Escuro' : 'Dark') : (lang === 'pt' ? 'Claro' : 'Light'),
               onClick: () => setTheme(theme === 'dark' ? 'light' : 'dark'), keepOpen: true },

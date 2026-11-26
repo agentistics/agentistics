@@ -70,13 +70,13 @@ async function mount(lang: 'pt' | 'en' = 'en') {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 }
 const switches = () => Array.from(document.querySelectorAll<HTMLButtonElement>('button[role="switch"]'))
-const workSwitch = () => switches().find(b => b.getAttribute('aria-label')?.includes('Work'))!
+const workSwitch = () => switches().find(b => /^(Agenda|Schedule)/.test(b.getAttribute('aria-label') ?? '') && b.getAttribute('aria-label')?.includes('Work'))!
 
 describe('Plan usage account availability', () => {
   test('renders registry availability, including hidden accounts and pending plans; omits legacy readings', async () => {
     available = false
     await mount()
-    expect(switches()).toHaveLength(2)
+    expect(switches()).toHaveLength(4) // Agenda + Sobrescrever, per account
     expect(workSwitch().getAttribute('aria-checked')).toBe('false')
     expect(document.querySelectorAll('[data-plan-usage-card]')).toHaveLength(3)
     expect(document.body.textContent).toContain("Agents won't use this account")
@@ -90,7 +90,7 @@ describe('Plan usage account availability', () => {
     const button = workSwitch()
     expect(button.getAttribute('aria-checked')).toBe('true')
     await act(async () => button.click())
-    expect(patches).toEqual([{ path: '/api/accounts/acc_work', body: { available: false } }])
+    expect(patches).toEqual([{ path: '/api/accounts/acc_work', body: { agentUseEnabled: false } }])
     expect(button.getAttribute('aria-checked')).toBe('false')
     expect(button.disabled).toBe(true)
     expect(document.querySelectorAll('[data-plan-usage-card]')).toHaveLength(3)
@@ -98,7 +98,7 @@ describe('Plan usage account availability', () => {
     expect(workSwitch().getAttribute('aria-checked')).toBe('false')
     expect(workSwitch().disabled).toBe(false)
     await act(async () => workSwitch().click())
-    expect(patches.at(-1)).toEqual({ path: '/api/accounts/acc_work', body: { available: true } })
+    expect(patches.at(-1)).toEqual({ path: '/api/accounts/acc_work', body: { agentUseEnabled: true } })
     await act(async () => finishPatch(Response.json({ account })))
     expect(workSwitch().getAttribute('aria-checked')).toBe('true')
   })
@@ -118,7 +118,7 @@ describe('Plan usage account availability', () => {
     available = false
     await mount()
     await act(async () => workSwitch().click())
-    expect(patches).toEqual([{ path: '/api/accounts/acc_work', body: { available: true } }])
+    expect(patches).toEqual([{ path: '/api/accounts/acc_work', body: { agentUseEnabled: true } }])
     expect(workSwitch().getAttribute('aria-checked')).toBe('true')
     await act(async () => finishPatch(Response.json({}, { status: 403 })))
     expect(workSwitch().getAttribute('aria-checked')).toBe('false')
@@ -129,7 +129,7 @@ describe('Plan usage account availability', () => {
     available = true
     try {
       await mount('pt')
-      expect(workSwitch().getAttribute('aria-label')).toBe('Uso por agentes · Claude Code · Work')
+      expect(workSwitch().getAttribute('aria-label')).toBe('Agenda · Claude Code · Work')
       expect(workSwitch().style.padding).toBe('13px 6px')
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 })
