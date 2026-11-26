@@ -12,12 +12,17 @@
  * The code never looks at an arm id or label except to tell the two apart.
  */
 import type { SizeBucket, VerdictResult } from './contract'
-import { computeScore, verdictOfScore, type RunSample } from './score'
+import { SCORE_TYPES, computeScore, verdictOfScore, type RunSample } from './score'
 import { bootstrapRatio } from './stats'
 
 export const MIN_SAMPLE = { tasks: 8, repsPerTask: 2, acceptedPerArm: 5 } as const
 export const DEFAULT_DELTA = 0.1
 export const DEFAULT_RESAMPLES = 10_000
+/**
+ * Candidate rule, NOT adopted (DECISAO-METODO.md §5): on an otherwise tie, no type clearly better and at least one
+ * clearly worse → does_not_pay; the mirror → pays. Off until the power table shows the false verdicts stay ≤ 8%.
+ */
+export const DOMINANCE_RULE = false
 export const SCOPE_NOTE = 'Não inclui o contexto acumulado de um líder longo.'
 
 /** A run reduced to what the verdict reads; optional fields feed the score and the secondary figures. */
@@ -36,6 +41,8 @@ export interface VerdictInput {
   resamples?: number
   /** The experiment stopped on its cost cap; cells skipped. The verdict is then insufficient with this reason. */
   cap?: { skippedCells: number } | null
+  /** Override of DOMINANCE_RULE (analysis and tests). */
+  dominance?: boolean
 }
 
 const mean = (v: readonly number[]): number | null => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : null)
@@ -134,6 +141,15 @@ export function verdict(input: VerdictInput): VerdictResult {
   if (v === 'pays') return mk('pays', 'Compensou.')
   if (v === 'does_not_pay') return mk('does_not_pay', 'Não compensou.')
   const rc = accC / runsOf(candidate).length, rr = accR / runsOf(reference).length
+  // Candidate dominance rule (default OFF): only on an otherwise tie, after the minimum sample and the
+  // symmetric gate (a verdict the gate would block stays a tie).
+  if (input.dominance ?? DOMINANCE_RULE) {
+    const cert = SCORE_TYPES.map(t => score.types[t].certainty)
+    const anyCand = cert.includes('candidate_clear'), anyRef = cert.includes('reference_clear')
+    const candFewer = rc < rr / (1 + delta), refFewer = rr < rc / (1 + delta)
+    if (!anyCand && anyRef && !refFewer) return mk('does_not_pay', 'Não compensou: nenhum tipo ficou claramente melhor e ao menos um ficou claramente pior.')
+    if (!anyRef && anyCand && !candFewer) return mk('pays', 'Compensou: nenhum tipo ficou claramente pior e ao menos um ficou claramente melhor.')
+  }
   const blocked = score.gateBlocked
     ? ` O lado que levaria a melhor aceitou menos entregas (${rc < rr ? candidate : reference}: ${pct(Math.min(rc, rr))} contra ${pct(Math.max(rc, rr))}); sem "Compensou" nem "Não compensou" nesse caso.`
     : ''

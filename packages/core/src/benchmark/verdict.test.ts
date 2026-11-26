@@ -134,6 +134,35 @@ describe('verdict — symmetry and invariance', () => {
     }
 }, 120_000)
 
+  test('certainty and detectable mirror on swap; the dominance rule (ON) mirrors too and only touches ties', () => {
+    const rng = mulberry32(555)
+    const flip = { candidate_clear: 'reference_clear', reference_clear: 'candidate_clear', unclear: 'unclear' } as const
+    let changed = 0
+    for (let i = 0; i < 120; i++) {
+      const s = makeSamples({
+        tasks: 8 + Math.floor(rng() * 6), reps: 2 + Math.floor(rng() * 2), seed: i + 1, taskSpread: rng() * 0.5,
+        arms: [
+          { id: A, cost: 0.5 + rng() * 2.5, acceptRate: 0.5 + rng() * 0.5, noise: rng() * 0.6, wallMs: 60_000 * (0.5 + rng() * 2) },
+          { id: B, cost: 0.5 + rng() * 2.5, acceptRate: 0.5 + rng() * 0.5, noise: rng() * 0.6 },
+        ],
+      })
+      const off = run(s, A, B, { dominance: false })
+      const fwd = run(s, A, B, { dominance: true }), rev = run(s, B, A, { dominance: true })
+      expect(rev.verdict).toBe(mirrorOf(fwd.verdict))
+      if (off.verdict !== 'tie') expect(fwd.verdict).toBe(off.verdict)
+      if (off.verdict !== fwd.verdict) { changed++; expect(off.verdict).toBe('tie') }
+      if (!fwd.score || !rev.score) continue
+      for (const t of ['quality', 'cost', 'time', 'reliability'] as const) {
+        const c = fwd.score.types[t].certainty, r = rev.score.types[t].certainty
+        expect(r).toBe(c === null ? null : flip[c])
+        const d = fwd.score.detectable.types[t], e = rev.score.detectable.types[t]
+        expect(e?.points ?? null).toBeCloseTo(d?.points ?? 0, 8)
+      }
+      expect(rev.score.detectable.final?.points ?? 0).toBeCloseTo(fwd.score.detectable.final?.points ?? 0, 8)
+    }
+    console.log(`[dominance] changed ${changed} of 120 ties`)
+  }, 120_000)
+
   test('relabelling and reordering arms changes nothing', () => {
     const base = makeSamples(recipe({ arms: [{ id: A, cost: 1.6, acceptRate: 0.9, noise: 0.1 }, { id: B, cost: 1, acceptRate: 0.4, noise: 0.1 }] }))
     const v0 = run(base)
