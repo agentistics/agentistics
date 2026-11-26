@@ -111,6 +111,24 @@ describe('a hand-off-book passage through the real spawn path', () => {
     expect((await readRegistry()).find(r => r.id === 'bp-roll')!.retire).toBeUndefined()
   }, 60_000)
 
+  test('3b (item 0): the book host moves the old leader\'s live workers to the confirmed successor (real registry)', async () => {
+    await addLeader('bp-rp-old')
+    await addLeader('bp-rp-new')
+    const now = new Date().toISOString()
+    await addSession({ id: 'bp-rp-w1', harness: 'claude', cwd: process.cwd(), createdAt: now, label: 'W1', parentSessionId: 'bp-rp-old' } as ManagedSession)
+    await addSession({ id: 'bp-rp-w2', harness: 'claude', cwd: process.cwd(), createdAt: now, label: 'W2', parentSessionId: 'bp-rp-other' } as ManagedSession)
+    const host = createBookHost({
+      registry: readRegistry, spawn: async () => ({ ok: false, message: 'unused' }),
+      kill: async () => ({ ok: true }), requestRetire: async () => true, verify: async () => null,
+    })
+    expect(await host.reparentWorkers!('bp-rp-old', 'bp-rp-new')).toEqual({ moved: 1 })
+    const rows = await readRegistry()
+    expect(rows.find(r => r.id === 'bp-rp-w1')!.parentSessionId).toBe('bp-rp-new')
+    expect(rows.find(r => r.id === 'bp-rp-w2')!.parentSessionId).toBe('bp-rp-other')
+    // Neither leader is re-rooted or retired by the move itself.
+    expect(rows.find(r => r.id === 'bp-rp-old')!.retire).toBeUndefined()
+  }, 60_000)
+
   test('a confirm (retire) clears the OLD leader\'s role under both keys and nobody else\'s (real clearRole)', async () => {
     await addLeader('bp-a')
     await addLeader('bp-b')
@@ -122,6 +140,85 @@ describe('a hand-off-book passage through the real spawn path', () => {
     expect(await host.retire('bp-a', 'succ')).toEqual({ retired: true })
     expect(await storedRoleFor(['conv-bp-a', 'bp-a'])).toBeUndefined()
     expect(await storedRoleFor(['conv-bp-b', 'bp-b'])).toBe('leader')
+  }, 60_000)
+})
+
+describe('LIVRO.SEAMS 3b (M1): the engine spawn gate is told the task the successor is filed on', () => {
+  test('a book-passage successor spawn hands `portao-de-spawn` the predecessor\'s task id', async () => {
+    const load = await import('../engine/load')
+    const { makeFakeEngine } = await import('../engine/fixtures/fake-engine')
+    const asked: Array<Record<string, unknown>> = []
+    const create = async (h: never) => ({
+      ...(await makeFakeEngine()(h)),
+      flows: {
+        list: () => ['portao-de-spawn'],
+        run: async (name: string, inputs?: Record<string, unknown>) => {
+          if (name === 'portao-de-spawn') asked.push(inputs ?? {})
+          // Refusing keeps the test from starting anything: what matters is what the gate was asked.
+          return { runId: 'r-1', status: 'refused', refusal: { reason: 'stopped by the test gate' } }
+        },
+        status: async () => null,
+      },
+    })
+    const prevFlows = process.env.AGENTISTICS_FLOWS
+    load.resetEngineForTests()
+    try {
+      await load.loadEngine({ create: create as never, host: () => ({}) as never, env: {}, log: () => {} })
+      process.env.AGENTISTICS_FLOWS = '1'
+      await addLeader('bp-gate')
+      const taskId = (await readRegistry()).find(r => r.id === 'bp-gate')!.taskId
+      __setSessionBackendForTest(mkBackend())
+      const host = createControlHost('en', { suspend: async (f: () => unknown) => f() } as never)
+      const r = await quiet(() => host.spawnSession!({
+        harness: 'claude', cwd: process.cwd(), attach: false, origin: 'background', prompt: 'x', force: true,
+        parentSessionId: 'bp-gate', parentVerified: true, handoff: true, bookPassage: true,
+      } as never))
+      expect(r.ok).toBe(false)
+      expect(r.message).toContain('stopped by the test gate')
+      expect(asked).toHaveLength(1)
+      expect(asked[0]).toMatchObject({ door: 'handoff', taskId })
+    } finally {
+      if (prevFlows === undefined) delete process.env.AGENTISTICS_FLOWS; else process.env.AGENTISTICS_FLOWS = prevFlows
+      load.resetEngineForTests()
+    }
+  }, 60_000)
+
+  test('an explicit `gateTaskId` outranks the task the spawn is filed on', async () => {
+    const load = await import('../engine/load')
+    const { makeFakeEngine } = await import('../engine/fixtures/fake-engine')
+    const asked: Array<Record<string, unknown>> = []
+    const create = async (h: never) => ({
+      ...(await makeFakeEngine()(h)),
+      flows: {
+        list: () => ['portao-de-spawn'],
+        run: async (name: string, inputs?: Record<string, unknown>) => {
+          if (name === 'portao-de-spawn') asked.push(inputs ?? {})
+          return { runId: 'r-2', status: 'refused', refusal: { reason: 'stopped by the test gate' } }
+        },
+        status: async () => null,
+      },
+    })
+    const prevFlows = process.env.AGENTISTICS_FLOWS
+    load.resetEngineForTests()
+    try {
+      await load.loadEngine({ create: create as never, host: () => ({}) as never, env: {}, log: () => {} })
+      process.env.AGENTISTICS_FLOWS = '1'
+      await addLeader('bp-gate2')
+      const filedOn = (await readRegistry()).find(r => r.id === 'bp-gate2')!.taskId
+      __setSessionBackendForTest(mkBackend())
+      const host = createControlHost('en', { suspend: async (f: () => unknown) => f() } as never)
+      await quiet(() => host.spawnSession!({
+        harness: 'claude', cwd: process.cwd(), attach: false, origin: 'background', prompt: 'x', force: true,
+        parentSessionId: 'bp-gate2', parentVerified: true, handoff: true, bookPassage: true,
+        taskId: filedOn, gateTaskId: 'explicit-gate-task',
+      } as never))
+      expect(asked).toHaveLength(1)
+      expect(filedOn).not.toBe('explicit-gate-task')
+      expect(asked[0]!.taskId).toBe('explicit-gate-task')
+    } finally {
+      if (prevFlows === undefined) delete process.env.AGENTISTICS_FLOWS; else process.env.AGENTISTICS_FLOWS = prevFlows
+      load.resetEngineForTests()
+    }
   }, 60_000)
 })
 

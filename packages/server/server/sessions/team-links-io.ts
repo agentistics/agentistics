@@ -64,6 +64,21 @@ export async function completeLeaderHandoff(
   return { moved, retireRequested }
 }
 
+/** Move an existing leader's live workers without the spawn-time root/retire side effects. */
+export async function reparentLeaderWorkers(
+  predecessorId: string,
+  successorId: string,
+  deps?: HandoffDeps,
+): Promise<number> {
+  const d = deps ?? await defaultHandoffDeps()
+  const rows = await d.read().catch(() => [] as ManagedSession[])
+  const pred = rows.find(r => r.id === predecessorId)
+  const succ = rows.find(r => r.id === successorId)
+  if (!pred || !succ) return 0
+  const plan = planHandoffReparent(rows, pred, succ)
+  return plan.children.length ? await d.patchMany(plan.children, plan.childPatch).catch(() => 0) : 0
+}
+
 /** After a reopen replaced `replacedId` with `freshId`: its team follows the new row. Never throws. */
 export async function completeReopenReparent(replacedId: string, freshId: string, deps?: HandoffDeps): Promise<number> {
   const d = deps ?? await defaultHandoffDeps()

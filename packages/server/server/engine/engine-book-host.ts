@@ -14,7 +14,7 @@
  * `parentVerified: true` is the SERVER's statement here: the engine only calls this from a passage a verified
  * leader started for its own task (`/api/book/passagem` checks the proof, the role and `taskOf`).
  */
-import type { EngineBookHost } from '@agentistics/engine-api'
+import type { EngineBookHost, EngineBookWorkState } from '@agentistics/engine-api'
 import type { FleetSpawnBody } from '../sessions/fleet-spawn'
 
 interface RegistryRow {
@@ -22,7 +22,10 @@ interface RegistryRow {
   harness: string
   cwd: string
   taskId?: string
+  subtaskId?: string
+  conversationId?: string
   endedAt?: string
+  retire?: { deadlineAt: string; expiredAt?: string }
 }
 
 export interface BookHostDeps {
@@ -49,6 +52,7 @@ export function createBookHost(d: BookHostDeps): EngineBookHost {
         callerVerified: true,
         handoff: true,
         bookPassage: true,
+        taskId: req.taskId,
         prompt: req.prompt,
         ...(req.model ? { model: req.model } : {}),
         ...(req.account ? { account: req.account } : {}),
@@ -67,6 +71,39 @@ export function createBookHost(d: BookHostDeps): EngineBookHost {
       const retired = await d.requestRetire(predecessorId, successorId).catch(() => false)
       if (retired && d.clearRole) await d.clearRole(predecessorId).catch(() => {})
       return { retired }
+    },
+    async reparentWorkers(predecessorId, successorId) {
+      const { reparentLeaderWorkers } = await import('../sessions/team-links-io')
+      return { moved: await reparentLeaderWorkers(predecessorId, successorId) }
+    },
+    async workState(taskId): Promise<EngineBookWorkState | undefined> {
+      const [{ loadTaskWorld }, { storedRoleFor }] = await Promise.all([
+        import('../sessions/task-source'), import('../sessions/session-roles'),
+      ])
+      const world = await loadTaskWorld().catch(() => undefined)
+      if (!world) return undefined
+      const subtasks = world.book.subtasks.filter(s => s.taskId === taskId)
+      const current = subtasks.filter(s => s.status === 'in_progress').sort((a, b) =>
+        (a.updatedAt ?? '').localeCompare(b.updatedAt ?? '') || a.id.localeCompare(b.id))[0]
+      const queued = subtasks.filter(s => s.status === 'staged' || s.status === 'todo')
+        .sort((a, b) => (a.updatedAt ?? '').localeCompare(b.updatedAt ?? '') || a.id.localeCompare(b.id))[0]
+      const rows = (await d.registry().catch(() => [] as RegistryRow[])).filter(r => r.taskId === taskId)
+      const sessions: Array<{ id: string; role: 'leader' | 'worker'; state: string; subtaskId?: string; harness: string }> = []
+      for (const row of rows) {
+        const role = await storedRoleFor([row.conversationId, row.id])
+        if (role !== 'leader' && role !== 'worker') continue
+        sessions.push({ id: row.id, role, state: row.endedAt ? 'exited' : 'running', harness: row.harness, ...(row.subtaskId ? { subtaskId: row.subtaskId } : {}) })
+      }
+      const comments = world.book.comments.filter(c => c.taskId === taskId && c.kind === 'handback')
+      const waits = rows.filter(r => r.retire && !r.retire.expiredAt).map(r => ({ id: `retire:${r.id}`, until: r.retire!.deadlineAt, on: `retire:${r.id}` }))
+      const leader = sessions.find(s => s.role === 'leader')
+      return {
+        currentWork: current ? { source: 'board', subtaskId: current.id, pageIds: [] } : waits[0] ? { source: 'wait', pageIds: [] } : leader ? { source: 'session', pageIds: [] } : { source: 'idle', pageIds: [] },
+        nextStep: queued ? { source: 'queue', id: queued.id, pageIds: [] } : waits[0] ? { source: 'wait', id: waits[0].id, pageIds: [] } : leader ? { source: 'takeover', id: leader.id, pageIds: [] } : { source: 'none', pageIds: [] },
+        lastHandbacks: comments.filter(c => c.role === 'session' && c.sessionId).slice(-20).map(c => ({ sessionId: c.sessionId!, pageId: c.id, at: c.createdAt })),
+        open: { sessions, waits, queue: queued ? [{ subtaskId: queued.id, title: queued.title, phase: 'fila' }] : [], unsaved: [] },
+        source: 'host',
+      }
     },
     async isAlive(sessionId) {
       const r = await row(sessionId)
