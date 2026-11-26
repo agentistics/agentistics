@@ -320,8 +320,8 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     en: { title: 'Could not open the summary', message: 'Please try again shortly.' },
   },
   'away.digest_login': {
-    pt: { title: 'A Nay precisa de login', message: 'Abra a conversa da Nay e entre na sua conta para ela escrever o resumo.' },
-    en: { title: 'Nay needs you to sign in', message: 'Open Nay’s conversation and sign in so it can write the summary.' },
+    pt: { title: 'A Nay está esperando você', message: 'Abra a conversa da Nay e responda ao diálogo (login ou confiar na pasta) para ela escrever o resumo.' },
+    en: { title: 'Nay is waiting for you', message: 'Open Nay’s conversation and answer the dialog (sign in or trust the folder) so it can write the summary.' },
   },
   'away.digest_stale': {
     pt: { title: 'Oferta de resumo expirada', message: 'Esta oferta não está mais disponível.' },

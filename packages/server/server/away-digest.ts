@@ -250,7 +250,7 @@ export async function answerAwayDigest(
 
 /** What one fleet row says about Nay's answer: `started`, still `waiting`, or `gone` (it ended first). */
 /** The fields of a fleet row (`SessionView`) this reads. */
-export interface NayAnswerRow { id: string; status: string; activity?: string; lastLines?: readonly string[]; approvalLines?: readonly string[]; chatTurns?: readonly { role: string; text: string; pending?: boolean }[] }
+export interface NayAnswerRow { id: string; status: string; activity?: string; state?: string; lastLines?: readonly string[]; approvalLines?: readonly string[]; chatTurns?: readonly { role: string; text: string; pending?: boolean }[] }
 
 /** The screens a harness shows before it can answer at all: not signed in, or asking to trust the folder. */
 const LOGIN_SCREEN = /\b(log ?in|sign ?in|select login method|paste (?:code|your) |oauth|authenticat|api key|trust the files|do you trust)\b/i
@@ -260,7 +260,8 @@ export function nayAnswerProgress(row: Omit<NayAnswerRow, 'id'> | undefined): 's
   if (row.status === 'exited' || row.status === 'lost' || row.status === 'closed' || row.activity === 'exited') return 'gone'
   const said = row.chatTurns?.some(t => t.role === 'assistant' && !t.pending && t.text.trim() !== '') ?? false
   if (said) return 'started'
-  // Nothing said yet: a login/trust screen is a problem to report, never "writing" (its banner repaints too).
+  // Nothing said yet: a dialog (login, "trust this folder") is a problem to report, never "writing" (its banner repaints too).
+  if (row.state === 'waiting-approval' || (row.approvalLines?.length ?? 0) > 0) return 'login'
   if ([...(row.approvalLines ?? []), ...(row.lastLines ?? [])].some(l => LOGIN_SCREEN.test(l))) return 'login'
   if (row.chatTurns) return 'waiting'
   // A row whose turns the poll cannot read: working with something on screen is the most that can be observed.
