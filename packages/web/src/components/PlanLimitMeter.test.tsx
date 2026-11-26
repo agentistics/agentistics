@@ -90,6 +90,21 @@ test('compact indicator maps 5h to the upper arc and week to the lower arc indep
   expect(html).toContain('5 h 1%')
 })
 
+test('compact indicator: both arcs start on the same (left) side and fill toward the right', () => {
+  const html = renderToStaticMarkup(<PlanUsageIndicator limits={{ ...live, windows: [{ kind: 'week', usedPct: 40, resetsAt: now + 3 * day }, { kind: '5h', usedPct: 20, resetsAt: now + H }] }} now={now} lang="pt" />)
+  const start = (kind: string) => {
+    const g = html.match(new RegExp(`data-plan-indicator-arc="${kind}"[\\s\\S]*?d="M ([\\d.]+) [\\d.]+ A [\\d.]+ [\\d.]+ 0 0 [01] ([\\d.]+) [\\d.]+"`))
+    if (!g) throw new Error(`no arc path for ${kind}`)
+    return { from: Number(g[1]), to: Number(g[2]) }
+  }
+  const fiveHour = start('5h')
+  const week = start('week')
+  // The dash fill is drawn from the path's first point: the same starting x means the same side.
+  expect(week.from).toBe(fiveHour.from)
+  expect(fiveHour.from).toBeLessThan(fiveHour.to)
+  expect(week.from).toBeLessThan(week.to)
+})
+
 test('compact indicator preserves scoped readings and unknown windows', () => {
   const html = renderToStaticMarkup(<PlanUsageIndicator limits={{ ...live, windows: [{ kind: 'week', usedPct: 80, resetsAt: now + day, scope: { id: 'a', label: 'Group A', models: [], providers: [] } }, { kind: 'week', usedPct: 20, resetsAt: now + day, scope: { id: 'b', label: 'Group B', models: [], providers: [] } }] }} now={now} lang="en" />)
   expect(html).toContain('Group A')
