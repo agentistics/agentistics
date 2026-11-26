@@ -6,7 +6,7 @@ import { sessionsPollerOptions } from '../cli-start'
 import { stalledHostOps } from '../flows/stalled-host'
 import { toControlSession } from './control-session'
 import { cliStrings } from '../cli-i18n'
-import { liveAge } from '../../../web/src/lib/asideTabs'
+import { lineStatusKind } from '../../../web/src/lib/lineStatus'
 import { joinLive } from '../../../web/src/components/tasks/liveDeliveryModel'
 import { cardStateWord } from '../../../web/src/components/tasks/liveCardModel'
 
@@ -47,10 +47,10 @@ test('QA real ps/proc → production options → poller → SessionView → side
       expect(v.heavyLock).toBe(i === 0 ? 'holding' : 'waiting')
       const c = toControlSession(v, cliStrings('pt'))
       expect(c.activeSignal).toBe(i === 0 ? 'heavy-hold' : 'heavy-lock')
-      expect(liveAge(c, real.now(), true)).toBe(i === 0 ? 'rodando' : 'na fila')
+      expect(lineStatusKind(c.state, c.activeSignal)).toBe(i === 0 ? 'cmd' : 'queue')
       real.deps.snapshot = async () => snap
       expect(await stalledHostOps(real.deps)['observar-sessao-parada']({ sessionId: ids[i] })).toMatchObject({ok:true, state:'working', activeSignal: c.activeSignal})
-      console.log(`real flock ${ids[i]}: ${v.heavyLock} → ${c.activeSignal} → ${liveAge(c, real.now(), true)}`)
+      console.log(`real flock ${ids[i]}: ${v.heavyLock} → ${c.activeSignal} → ${lineStatusKind(c.state, c.activeSignal)}`)
       const card = joinLive([{key:'t/s',taskId:'t',taskTitle:'T',subtaskId:'s',title:'S',status:'in_progress',stage:'running',stageSinceMs:0,startedAtMs:0,sessionIds:[ids[i]],blockedReason:null}] as any, [c] as any)[0]!
       expect(cardStateWord(card, true)).toBe(i === 0 ? 'trabalhando' : 'na fila')
     }

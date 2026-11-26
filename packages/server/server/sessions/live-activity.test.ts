@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test'
 import { toControlSession } from './control-session'
 import { cliStrings } from '../cli-i18n'
-import { liveAge } from '../../../web/src/lib/asideTabs'
+import { lineStatusKind } from '../../../web/src/lib/lineStatus'
 import { joinLive } from '../../../web/src/components/tasks/liveDeliveryModel'
 import { cardStateWord, leaderCounts, workerWordText } from '../../../web/src/components/tasks/liveCardModel'
 import { workerInfo } from '../../../web/src/components/tasks/LiveLeaders'
@@ -14,7 +14,7 @@ for (const signal of ['tool', 'heavy-lock', 'output']) test(`QA Live consumes th
   expect(c.activeSignal).toBe(signal as any)
   const d: any = {key:'t/s',taskId:'t',taskTitle:'T',subtaskId:'s',title:'S',status:'in_progress',stage:'running',stageSinceMs:0,startedAtMs:0,sessionIds:['w'],blockedReason:null}
   const card = joinLive([d], [c] as any)[0]!
-  console.log(`QA ${signal}: sidebar=${liveAge(c,Date.now(),true)}; fleet.state=${c.state}; Live=${cardStateWord(card,true)}; liveState=${card.liveState}`)
+  console.log(`QA ${signal}: sidebar=${lineStatusKind(c.state, c.activeSignal)}; fleet.state=${c.state}; Live=${cardStateWord(card,true)}; liveState=${card.liveState}`)
   expect(cardStateWord(card,true)).toBe(signal === 'heavy-lock' ? 'na fila' : 'trabalhando')
 })
 
@@ -26,7 +26,8 @@ test('a session ALREADY working that waits on the heavy lock is "na fila" in the
   const c = toControlSession(view({ activity: 'working', heavyLock: 'waiting' }), cliStrings('pt'))
   expect(c.state).toBe('working')
   expect(c.activeSignal).toBe('heavy-lock')
-  expect(liveAge(c, Date.now(), true)).toBe('na fila')
+  // The sidebar shows the state as the row's icon (its tooltip says "na fila"): the kind is the contract.
+  expect(lineStatusKind(c.state, c.activeSignal)).toBe('queue')
   const card = joinLive([piece], [c] as any)[0]!
   expect(card.agents[0]!.queued).toBe(true)
   expect(cardStateWord(card, true)).toBe('na fila')
@@ -80,6 +81,6 @@ test('the /api/tasks/live row mapping keeps activeSignal: SessionView → Contro
   const word = Object.fromEntries(out.leaders[0]!.workers.map(w => [w.id, w.word]))
   expect(word).toEqual({ q: 'queued', r: 'working', i: 'idle' })
   // The sidebar reads the same ControlSession: the three surfaces agree on each row.
-  const side = Object.fromEntries(views.map(v => { const c = toControlSession(v, s); return [v.id, liveAge(c, Date.now(), true)] }))
-  expect(side.q).toBe('na fila')
+  const side = Object.fromEntries(views.map(v => { const c = toControlSession(v, s); return [v.id, lineStatusKind(c.state, c.activeSignal)] }))
+  expect(side.q).toBe('queue')
 })
