@@ -40,12 +40,21 @@ import type { TagDef } from '../lib/tagMatch'
 mock.module('react', () => ({
   ...React,
   default: (React as { default?: unknown }).default ?? React,
+  // `useMemo` and NOTHING ELSE. `useDerivedStats` is one `useMemo` and no other hook, so the four
+  // that used to be here — `useState`, `useEffect`, `useCallback`, `useRef` — were defensive, and
+  // being defensive in a process-wide replacement is how this file kept breaking suites it has
+  // never heard of. It is on its third: StatCard and splitInlinedHistory (above), then every Ink
+  // surface rendered at a width of `undefined` (also above), and then the cockpit's own component
+  // tests, which mount `ControlCenter` and drive it by keystroke — with `useEffect` a no-op the
+  // screen never polls its host, and with a no-op `setState` no keystroke can change anything, so
+  // they timed out waiting for a fleet that could never arrive. In CI only, and only in a full
+  // run, which is the most expensive way for a test to be wrong.
+  //
+  // This one override is the only one this file needs AND the only one that is faithful to the
+  // hook it replaces: `useMemo(fn)` returning `fn()` recomputes where React would have cached,
+  // which is a performance difference and never a behavioural one. Anything that runs after this
+  // file can survive that. It could not survive the other four.
   useMemo: <T>(fn: () => T) => fn(),
-  useState: <T>(init: T | (() => T)) =>
-    [typeof init === 'function' ? (init as () => T)() : init, () => {}],
-  useEffect: () => {},
-  useCallback: <T>(fn: T) => fn,
-  useRef: <T>(init: T) => ({ current: init }),
 }))
 
 const { useDerivedStats } = await import('./useData')

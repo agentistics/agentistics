@@ -1919,6 +1919,22 @@ Unit tests cover the critical pure functions:
 
 Do not mock the filesystem — the tested functions are pure and have no side effects.
 
+**`mock.module` is PROCESS-WIDE and never unwinds — stub the one thing you need and nothing else.**
+`bun test` runs every file in one process, so a module replaced in any test file is what every file
+loaded after it sees; an `afterAll` that re-registers the real module does not help, because
+whatever imported the stub is already bound to it. `useData.scope.test.ts` replaces `react` to run
+one `useMemo` body eagerly, and each time it stubbed a hook it did not need, it broke a suite it had
+never heard of: `StatCard`/`splitInlinedHistory` (a missing `createContext`), then every Ink surface
+rendering at a width of `undefined` (a `useState` that dropped lazy initializers), then the
+cockpit's component tests (a no-op `useEffect` meant the screen never polled its host and a no-op
+`setState` meant no keystroke could change anything — they timed out on a fleet that could never
+arrive, in CI only, in a full run only). The rule that falls out: replace only what the file under
+test actually calls, and prefer an override that is FAITHFUL — `useMemo(fn) => fn()` recomputes
+where React would cache, which is a performance difference and never a behavioural one, so a later
+file can survive it. A test that mounts a component and drives it by keystroke is the thing that
+notices first, so if one starts failing only in a full run, look for a `mock.module` upstream of it
+before you look at timing.
+
 ## Git hooks (husky)
 
 - **pre-commit**: `bun tsc --noEmit` + `bun test`
