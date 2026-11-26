@@ -909,8 +909,8 @@ packages/web/src/ (React + Vite, port 47292 in dev)
   │                          479 sessions compacted at all. `subagents` keys off `_source ===
   │                          'jsonl'` because `agentMetrics` is absent both when nothing ran and
   │                          when nothing was measured. Receives `now`; the day rule is UTC
-  │                          (`start_time.slice(0,10)`), the one `tagSessionDay` and the billing
-  │                          basis use
+  │                          (`start_time.slice(0,10)`), the one `tagSessionDay` uses (the billing
+  │                          basis reads the LOCAL day since `localDayFromMs`)
   ├── format.ts             → shared display helpers: fmt(), fmtCost(), fmtDuration()
   ├── i18n.ts               → PT/EN translations
   ├── otel.ts               → OpenTelemetry helpers
@@ -1514,9 +1514,10 @@ actually pays.
   `null`; an unconvertible BRL price uncovers its days rather than yielding `Infinity`. `viewCost`
   refuses too: asking for the plan basis with no usable factor returns the API figure flagged
   `unavailable`, never a silent zero under a plan label.
-- **Two day rules exist in this repo; billing uses `start_time.slice(0, 10)` (UTC)**, matching
-  `tagSessionDay` — not the local-clock `format(parseISO(...))` used for the session-gap count. At
-  UTC-3 the two disagree, and mixing them drifts a session across a period boundary.
+- **The plan window is cut on the LOCAL calendar** (`localDayFromMs`, `today` included), because
+  `apiCostByDay` is keyed by local activity day and the date filter runs local midnight to local
+  midnight. Reading those instants as UTC priced one day too many in every non-UTC zone. Tags still
+  use the UTC `start_time.slice(0, 10)` rule (`tagSessionDay`).
 - **`apiCostByDay.undatedCostUSD` is real spend with no day.** In the unfiltered view Claude's
   total comes from the cumulative `statsCache.modelUsage` while the only day series
   (`dailyModelTokens`) does not sum to it, so a per-day A that closes on the headline does not

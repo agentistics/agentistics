@@ -107,12 +107,13 @@ The calendar's "today" means *up to and including today*; the **`Today` button b
 whose only recorded activity is a few seconds ahead of the browser's clock is not excluded — every
 other preset already ends there.
 
-### The day rule is UTC
+### The activity day is local
 
-`start_time.slice(0, 10)`, matching `tagSessionDay`, `stats-cache.json`'s own day series and the
-parser that wrote `daily`. **Two day rules exist in this repo** — the other is the local-clock
-`format(parseISO(...))` used for the session-gap count — and mixing them drifts a session across a
-boundary. At UTC-3 the two disagree for roughly 15% of sessions.
+Date filters, `daily` keys, per-day cost series and the plan-basis window use the **local** calendar
+(`sessionDay` / `localDayFromMs`): the server's zone where a transcript is parsed, the browser's in
+the dashboard. **Tags are the exception** and keep the UTC `start_time.slice(0, 10)` rule
+(`tagSessionDay`). Mixing the two drifts a day across a boundary: at UTC-3 they disagree for roughly
+15% of sessions.
 
 ## What "project" means
 

@@ -45,7 +45,8 @@ function allNumbersFinite(value: unknown): boolean {
   return true
 }
 
-const ms = (day: string) => Date.parse(`${day}T00:00:00.000Z`)
+// LOCAL noon (no `Z`): a filter instant is read on the local calendar.
+const ms = (day: string) => Date.parse(`${day}T12:00:00.000`)
 
 // ── day arithmetic ───────────────────────────────────────────────────────────────────────────
 
