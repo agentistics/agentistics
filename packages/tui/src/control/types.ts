@@ -2016,6 +2016,11 @@ export interface SpawnSessionRequest {
   accountDecided?: boolean
   /** PLAN.ACCOUNTS D3: the request carries a VERIFIED session identity — an agent is asking. */
   callerVerified?: boolean
+  /** DSL.TIPO-SESSAO — the spawn door when it is not the person's (`engine`: an agent's delegation through the engine). */
+  spawnDoor?: 'engine'
+  /** The task/subtask the spawn gate judges the spawn for, when the session is filed only after it starts (the delegate). */
+  gateTaskId?: string
+  gateSubtaskId?: string
   /**
    * CONTA.TROCA v2 — the managed id this session REPLACES on another harness. It inherits that row's
    * filing, folder, pin, mute and note exactly as a hand-off successor does (`handoffOf` +
