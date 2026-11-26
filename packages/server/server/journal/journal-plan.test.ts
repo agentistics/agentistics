@@ -263,6 +263,56 @@ describe('toRow', () => {
     const row = toRow(validEvent({ data: { a: 1 } as never }))
     expect(row.data).toBe('{"a":1}')
   })
+
+  // The canonical-UTC fast path skips `new Date(x).toISOString()` for a string already in that
+  // shape. It is only sound if the two always agree — so every shape is checked against Date itself.
+  test.each([
+    '2026-09-25T10:00:00.000Z',
+    '2024-02-29T23:59:59.999Z',
+    '0001-01-01T00:00:00.000Z',
+    '2026-09-25T10:00:00Z',
+    '2026-09-25T10:00Z',
+    '2026-09-25T10:00:00.1Z',
+    '2026-09-25T10:00:00.123456Z',
+    '2026-09-25T10:00:00.000+00:00',
+    '2026-09-25T23:30:00.000-03:00',
+  ])('the stored timestamp is exactly new Date(%p).toISOString()', (at) => {
+    const row = toRow(validEvent({ occurredAt: at, recordedAt: at }))
+    expect(row.occurred_at).toBe(new Date(at).toISOString())
+    expect(row.recorded_at).toBe(new Date(at).toISOString())
+  })
+})
+
+describe('planAppend serializes data once', () => {
+  test('the row carries exactly JSON.stringify(data), the same text toRow alone produces', () => {
+    const data = { usage: { input: 3, output: 50 }, tags: ['a', 'b'], note: 'é "quoted"' }
+    const e = validEvent({ data: data as never })
+    const plan = planAppend([e])
+    expect(plan.rejected).toEqual([])
+    expect(plan.rows[0]!.row.data).toBe(JSON.stringify(data))
+    expect(plan.rows[0]!.row).toEqual(toRow(e))
+  })
+
+  test('JSON.stringify runs once per accepted event, not twice', () => {
+    const e = validEvent({ data: { a: 1 } as never })
+    let calls = 0
+    const orig = JSON.stringify
+    JSON.stringify = ((...args: Parameters<typeof orig>) => { calls++; return orig(...args) }) as typeof orig
+    try {
+      planAppend([e, e, e])
+    } finally {
+      JSON.stringify = orig
+    }
+    expect(calls).toBe(3)
+  })
+
+  test('a data value JSON cannot hold is still bad-data, through the single serialization', () => {
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+    expect(planAppend([validEvent({ data: cyclic as never })]).rejected).toEqual([{ index: 0, reason: 'bad-data', eventId: validEvent().eventId }])
+    expect(planAppend([validEvent({ data: (() => 1) as never })]).rejected[0]!.reason).toBe('bad-data')
+    expect(planAppend([validEvent({ data: 10n as never })]).rejected[0]!.reason).toBe('bad-data')
+  })
 })
 
 describe('round-trip', () => {

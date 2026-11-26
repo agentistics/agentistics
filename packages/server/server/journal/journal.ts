@@ -34,6 +34,21 @@
  *   is not a non-negative safe integer: that is a caller bug, not a runtime condition, and silently
  *   answering it would hand a poller a page from the wrong place.
  * - **Reads are pages, never "everything"** — clamped to `MAX_PAGE` whatever the caller asks for.
+ * - **The WAL checkpoint runs AFTER an append, never inside one** (research A1.7). A checkpoint copies
+ *   the WAL into the main file and then fsyncs both, and on this machine the fsyncs are the cost: a
+ *   PASSIVE checkpoint of ~1000 frames took a median 14 ms with `synchronous = NORMAL` against
+ *   1.2 ms with the syncs switched off. SQLite's default autocheckpoint (1000 pages) ran it INSIDE
+ *   the COMMIT of whichever batch crossed the threshold — 12–20 % of the benchmark's batches, every
+ *   one of them far over the 2 ms budget. So a successful write arms ONE deferred `wal_checkpoint(PASSIVE)`
+ *   (`CHECKPOINT_DELAY_MS` later, on a timer that never keeps the process alive) and the append
+ *   returns. PASSIVE never waits on a reader or a writer and never throws out of here; a busy or
+ *   failed one is retried by the next arm. SQLite's autocheckpoint stays on as a CEILING
+ *   (`WAL_AUTOCHECKPOINT_PAGES`, schema.ts), so a producer that never yields to the event loop — a
+ *   tight loop of appends, in which no timer can fire — still has a bounded WAL, paying the
+ *   checkpoint in an append only once per ceiling's worth of frames. `close()` cancels the timer and
+ *   checkpoints before closing. One cost is NOT moved, on purpose: the first commit after a
+ *   checkpoint restarts the WAL and, under `synchronous = NORMAL`, fsyncs its new header (~1.3 ms
+ *   measured) — that sync is what keeps the WAL consistent across a power loss.
  */
 import { dirname } from 'node:path'
 import { existsSync, mkdirSync, statSync } from 'node:fs'
@@ -70,9 +85,33 @@ export interface OpenJournalOptions {
   loadSqlite?: () => Promise<typeof import('bun:sqlite')>
   /** Default a real timer. Injected so the recovery retry is testable without waiting. */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * Default an `unref`'d `setTimeout`. Runs the deferred WAL checkpoint `delayMs` later and returns a
+   * function that cancels it. Injected so a test can decide when (or whether) the timer fires.
+   */
+  scheduleCheckpoint?: (run: () => void, delayMs: number) => () => void
 }
 
-/** The 17 columns, in the order the INSERT binds them. The rowid is the cursor and is never bound. */
+/**
+ * How long after the first write of a quiet period the deferred PASSIVE checkpoint runs. The timer is
+ * armed once and not re-armed by later appends (a THROTTLE, not a debounce), so a producer appending
+ * every few milliseconds still gets a checkpoint every `CHECKPOINT_DELAY_MS`, between its appends —
+ * a debounce would never fire under a steady stream and leave everything to the in-append ceiling.
+ */
+export const CHECKPOINT_DELAY_MS = 250
+
+const realScheduleCheckpoint = (run: () => void, delayMs: number): (() => void) => {
+  const t = setTimeout(run, delayMs)
+  // A pending checkpoint must never keep a one-shot CLI process alive; close() checkpoints anyway.
+  ;(t as { unref?: () => void }).unref?.()
+  return () => clearTimeout(t)
+}
+
+/**
+ * The 17 columns, in the order the INSERT binds them. The rowid is the cursor and is never bound.
+ * `insertRow` below spells the same order out by hand — `journal.test.ts` round-trips every column,
+ * so a drift between the two fails there.
+ */
 const COLUMNS = [
   'event_id', 'schema', 'type', 'occurred_at', 'recorded_at',
   'session_id', 'run_id', 'agent_id', 'task_id',
@@ -208,16 +247,29 @@ function safePlan(
   }
 }
 
-function bindRow(row: JournalRow): (string | number | null)[] {
-  return COLUMNS.map(c => {
-    const v = row[c] as string | number | null | undefined
-    return v === undefined ? null : v
-  })
+type InsertStmt = { run(...args: (string | number | null)[]): { changes: number } }
+
+/**
+ * One row through the prepared INSERT, its values passed positionally in `COLUMNS` order. Written out
+ * rather than `insert.run(...COLUMNS.map(c => row[c] ?? null))`: that built a closure and a 17-slot
+ * array per row, ~0.1 ms of every 100-event batch (research A1.7). Every optional column of a
+ * `JournalRow` is already `string | null` (`toRow` maps absence to `null`), so no `undefined` can be
+ * bound here.
+ */
+function insertRow(insert: InsertStmt, r: JournalRow): number {
+  return insert.run(
+    r.event_id, r.schema, r.type, r.occurred_at, r.recorded_at,
+    r.session_id, r.run_id, r.agent_id, r.task_id,
+    r.source_kind, r.source_id, r.source_version,
+    r.mode, r.confidence, r.adapter_version, r.source_ref,
+    r.data,
+  ).changes
 }
 
 export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journal> {
   const path = opts.path ?? JOURNAL_PATH
   const sleep = opts.sleep ?? realSleep
+  const scheduleCheckpoint = opts.scheduleCheckpoint ?? realScheduleCheckpoint
   const where: Where = { path, pathKind: 'unknown' }
 
   try {
@@ -258,13 +310,12 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
     let pageStmt: ReturnType<Database['query']>
     let statsStmt: ReturnType<Database['query']>
     try {
-      const insert = db.prepare(INSERT_SQL)
+      const insert = db.prepare(INSERT_SQL) as unknown as InsertStmt
       insertTx = db.transaction((rows: JournalRow[]) => {
         let written = 0
         let duplicates = 0
         for (const row of rows) {
-          const { changes } = insert.run(...bindRow(row))
-          if (changes === 1) written++
+          if (insertRow(insert, row) === 1) written++
           else duplicates++
         }
         return { written, duplicates }
@@ -283,6 +334,32 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
     const counters = emptyCounters()
     let state: 'open' | 'closed' = 'open'
 
+    // ── The deferred checkpoint (see the header) ──
+    let checkpointStmt: ReturnType<Database['query']> | null = null
+    let cancelCheckpoint: (() => void) | null = null
+    /** PASSIVE: copies what it can without waiting on anyone. Never throws out of here. */
+    const checkpointNow = (): void => {
+      try {
+        checkpointStmt ??= db.query('PRAGMA wal_checkpoint(PASSIVE)')
+        checkpointStmt.get()
+      } catch {
+        // BUSY or I/O: nothing is lost — the frames stay in the WAL, the next arm (or the ceiling)
+        // copies them.
+      }
+    }
+    const armCheckpoint = (): void => {
+      if (cancelCheckpoint !== null || state === 'closed') return
+      try {
+        cancelCheckpoint = scheduleCheckpoint(() => {
+          cancelCheckpoint = null
+          if (state === 'open') checkpointNow()
+        }, CHECKPOINT_DELAY_MS)
+      } catch {
+        // A scheduler that throws leaves the ceiling in charge; the append already succeeded.
+        cancelCheckpoint = null
+      }
+    }
+
     const journal: Journal = {
       async append(events): Promise<AppendResult> {
         const plan = safePlan(events, counters)
@@ -299,6 +376,8 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
           recoveryPending = false
           counters.written += res.written
           counters.duplicates += res.duplicates
+          // Only a write puts frames in the WAL; an all-duplicate batch commits nothing to copy.
+          if (res.written > 0) armCheckpoint()
           return { written: res.written, duplicates: res.duplicates, rejected }
         } catch {
           // The transaction rolled back whole: nothing of this batch is in the table.
@@ -355,8 +434,15 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
 
       close(): void {
         if (state === 'closed') return
+        // A pending deferred checkpoint must not run against a closed handle: cancel it, then
+        // checkpoint here, so what it would have copied is copied now. (The last connection to close
+        // also checkpoints and removes the WAL; this covers the case where another is still open.)
+        if (cancelCheckpoint !== null) {
+          try { cancelCheckpoint() } catch { /* a timer that cannot be cleared finds state closed */ }
+          cancelCheckpoint = null
+        }
+        checkpointNow()
         state = 'closed'
-        // The last connection to close checkpoints the WAL into the main file.
         try { db.close() } catch { /* already gone */ }
       },
     }
