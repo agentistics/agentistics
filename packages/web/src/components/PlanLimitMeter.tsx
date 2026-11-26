@@ -147,7 +147,9 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
   const apis = useApiUsage().items ?? []
   const sectioned = apis.length > 0
   return <div data-plan-usage-summary style={{ width: '100%', boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4, ...(embedded ? {} : { minHeight: 0, flex: '1 1 auto' }) }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>{!embedded && <>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span></>}<span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
+    {embedded
+      ? <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}><span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
+      : <div data-plan-usage-head style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '2px 4px 8px', fontWeight: 650, color: 'var(--text-primary)' }}><span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span><span style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--text-tertiary)' }}>{lang === 'pt' ? 'muda na hora' : 'changes instantly'}</span></div>}
     <PlanUsageScroll lang={lang} embedded={embedded}>
     {sectioned && <SectionTitle>{accountsSectionTitle(lang)}</SectionTitle>}
     {rows.map((row, i) => {
@@ -172,7 +174,7 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
     {sectioned && <><SectionTitle>{apiSectionTitle(lang)}</SectionTitle><ApiUsageRows items={apis} now={now} lang={lang} /></>}
     {rows.some(r => r.limits?.windows.some(w => currentUsedPct(w, now) >= 75)) && <div style={{ padding: '7px 4px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{rows.flatMap(r => (r.limits?.windows ?? []).filter(w => currentUsedPct(w, now) >= 75).slice(0, 1).map(w => <span key={`${r.harness}:${windowKey(w)}`} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><LimitLevelIcon pct={currentUsedPct(w, now)} lang={lang} />{HARNESS_LABELS[r.harness]}: {windowLabel(w.kind, lang, w.scope)} {lang === 'pt' ? 'em' : 'at'} {Math.round(currentUsedPct(w, now))}% · {lang === 'pt' ? 'renova' : 'resets'} {fmtWhen(w.resetsAt, now, lang)}</span>))}</div>}
     </PlanUsageScroll>
-    <div style={{ borderTop: '1px solid var(--border)', padding: '8px 4px 4px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>{lang === 'pt' ? 'Clique para ver tudo' : 'Click to see everything'} <button type="button" data-plan-usage-open onClick={onOpen} style={{ float: 'right', border: 0, background: 'transparent', padding: 0, font: 'inherit', fontWeight: 700, color: 'var(--anthropic-orange)', cursor: 'pointer' }}>{lang === 'pt' ? 'Abrir ›' : 'Open ›'}</button></div>
+    <div data-plan-usage-foot style={{ borderTop: '1px solid var(--border)', padding: '8px 4px 4px', fontSize: 12, color: 'var(--text-tertiary)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}><span>{lang === 'pt' ? 'Dias e horários: na conta' : 'Days and hours: on the account'}</span><button type="button" data-plan-usage-open onClick={onOpen} style={{ border: 0, background: 'transparent', padding: 0, font: 'inherit', fontWeight: 700, color: 'var(--anthropic-orange)', cursor: 'pointer' }}>{lang === 'pt' ? 'Abrir contas ›' : 'Open accounts ›'}</button></div>
   </div>
 }
 

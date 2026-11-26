@@ -1,4 +1,6 @@
 /** Usage → Accounts: the pencil opens the one editor, it saves through the existing APIs, and every old route lands here. */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { act, createElement as h } from 'react'
@@ -324,6 +326,45 @@ describe('the agent use in the account editor (CONTAS.AGENDA-SALVAR)', () => {
     expect(patches).toEqual([{ url: '/api/accounts/c1', body: { agentUseEnabled: false } }])
   })
 
+  test('U4: the drawer footer is Discard + Save (this drawer only); Discard closes without writing', async () => {
+    const dialog = await openEditor()
+    const footer = Array.from((dialog.querySelector('[data-drawer-discard]') as HTMLElement).parentElement!.querySelectorAll('button')).map(b => b.textContent)
+    expect(footer).toEqual(['Discard', 'Save'])
+    const foot = dialog.querySelector('[data-drawer-footer]') as HTMLElement
+    expect(foot.style.flexDirection).toBe('row') // Discard then Save, side by side, also at 390
+    act(() => sw(dialog, 'Schedule').click())
+    await flush()
+    act(() => (dialog.querySelector('[data-drawer-discard]') as HTMLButtonElement).click())
+    await flush()
+    expect(patches).toEqual([])
+    expect(await drawerClosed()).toBe(true)
+  })
+
+  test('U4: the shared Drawer keeps its own footer slot — no hard-coded "Discard" label', () => {
+    const src = readFileSync(join(import.meta.dir, '../../components/Drawer.tsx'), 'utf8')
+    expect(src).not.toContain('data-drawer-discard')
+  })
+
+  test('U5/U6: the leave dialog reads title, list, buttons, THEN the Esc hint, with no icon by the title', async () => {
+    const dialog = await openEditor()
+    act(() => sw(dialog, 'Schedule').click())
+    await flush()
+    act(() => (dialog.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click())
+    await flush()
+    const panel = (document.querySelector('[data-leave-changes]') as HTMLElement).closest('[role="dialog"]') as HTMLElement
+    const kids = Array.from(panel.querySelectorAll('[data-confirm-main] > *, [data-leave-changes], [data-leave-discard], [data-dialog-hint]'))
+    const order = (el: Element | null) => kids.indexOf(el!)
+    const list = panel.querySelector('[data-leave-changes]')
+    const discard = panel.querySelector('[data-leave-discard]')
+    const hint = panel.querySelector('[data-dialog-hint]')
+    expect(hint?.textContent).toBe('Esc goes back to editing.')
+    expect(order(list)).toBeLessThan(order(discard))
+    expect(discard!.compareDocumentPosition(hint!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // U6: the title row holds only the title text — no icon chip
+    const titleRow = panel.querySelector('[id]')!.parentElement!
+    expect(titleRow.querySelector('svg')).toBeNull()
+  })
+
   test('with nothing changed, closing asks nothing', async () => {
     const dialog = await openEditor()
     act(() => (dialog.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click())
@@ -336,5 +377,92 @@ describe('the agent use in the account editor (CONTAS.AGENDA-SALVAR)', () => {
     account = { ...account, available: false, agentSchedule: { enabled: true, days: {} }, agentUse: { reason: 'day-off', on: false, enabled: true, override: false, dayUsedPct: null, weekUsedPct: null } }
     const dialog = await openEditor()
     expect(dialog.querySelector('[data-agent-now-pill]')?.textContent).toContain('Day not scheduled')
+  })
+})
+
+describe('the account drawer geometry and folds (CONTAS.AGENDA-SALVAR r4 · N2 + N3)', () => {
+  const openEditor = async () => {
+    const el = mount('/usage')
+    await flush()
+    act(() => (el.querySelector('button[aria-label="Set plan · me@example.test"]') as HTMLButtonElement).click())
+    await flush()
+    return document.querySelector('[role=dialog]') as HTMLElement
+  }
+  const folds = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[data-drawer-fold]'))
+
+  test('N2: at 1280 the drawer is 460px wide and starts BELOW the top bar', async () => {
+    const dialog = await openEditor()
+    expect(dialog.style.width).toBe('460px')
+    expect((dialog.parentElement as HTMLElement).style.top).toBe('var(--ag-topbar-h, 44px)')
+  })
+
+  test('N2: at 390 the drawer is unchanged (full width, from the very top)', async () => {
+    const prev = window.innerWidth
+    ;(window as { innerWidth: number }).innerWidth = 390
+    try {
+      const dialog = await openEditor()
+      expect(dialog.style.width).toBe('100%')
+      expect((dialog.parentElement as HTMLElement).style.top).toBe('0px')
+    } finally { (window as { innerWidth: number }).innerWidth = prev }
+  })
+
+  test('N2: the shared Drawer default is untouched for other screens (680px, top 0)', async () => {
+    const src = readFileSync(join(import.meta.dir, '../../components/Drawer.tsx'), 'utf8')
+    expect(src).toContain('min(680px')
+    expect(src).toMatch(/variant\??: 'account'/)
+  })
+
+  test('N3: three folds — spend limits, plan, nickname — closed by default, in that order', async () => {
+    await openEditor()
+    expect(folds().map(f => f.getAttribute('data-drawer-fold'))).toEqual(['limits', 'plan', 'nickname'])
+    for (const f of folds()) {
+      expect(f.getAttribute('aria-expanded')).toBe('false')
+      expect(document.getElementById(f.getAttribute('aria-controls')!)!.hidden).toBe(true)
+    }
+    expect(folds()[1]!.textContent).toContain('Plan')
+  })
+
+  test('N3: a click opens a fold (aria-expanded) and a second click closes it; it is a real button, so Enter activates it', async () => {
+    await openEditor()
+    const plan = folds()[1]!
+    expect(plan.tagName).toBe('BUTTON')
+    expect(plan.type).toBe('button')
+    act(() => plan.click())
+    expect(plan.getAttribute('aria-expanded')).toBe('true')
+    const body = document.getElementById(plan.getAttribute('aria-controls')!)!
+    expect(body.hidden).toBe(false)
+    expect(body.textContent).toContain('Started on')
+    expect(body.textContent).toContain('I still pay for this plan')
+    expect(folds()[0]!.getAttribute('aria-expanded')).toBe('false')
+    act(() => plan.click())
+    expect(plan.getAttribute('aria-expanded')).toBe('false')
+    expect(body.hidden).toBe(true)
+  })
+
+  test('N3: no field is lost — nickname lives in its fold, plan fields in the plan fold', async () => {
+    await openEditor()
+    const nick = document.getElementById(folds()[2]!.getAttribute('aria-controls')!)!
+    expect(nick.querySelector('input[maxlength="40"]')).not.toBeNull()
+    const plan = document.getElementById(folds()[1]!.getAttribute('aria-controls')!)!
+    expect(plan.textContent).toContain('Started on')
+    expect(plan.textContent).toContain('I still pay for this plan')
+    const limits = document.getElementById(folds()[0]!.getAttribute('aria-controls')!)!
+    expect(limits).not.toBeNull()
+  })
+
+  test('N3: a plan error opens the plan fold by itself — a failed Save is never hidden behind a closed fold', async () => {
+    await openEditor()
+    const plan = folds()[1]!
+    act(() => plan.click()) // open, change something that needs a plan, fold it again
+    const body = document.getElementById(plan.getAttribute('aria-controls')!)!
+    act(() => (Array.from(body.querySelectorAll('label,button,span')).find(x => x.textContent === 'I still pay for this plan') as HTMLElement).click())
+    await flush()
+    act(() => plan.click())
+    expect(plan.getAttribute('aria-expanded')).toBe('false')
+    act(() => (Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Save') as HTMLButtonElement).click())
+    await flush()
+    expect(plan.getAttribute('aria-expanded')).toBe('true') // forced open by the error
+    expect(body.hidden).toBe(false)
+    expect(body.textContent).toMatch(/plan|date|price/i)
   })
 })
