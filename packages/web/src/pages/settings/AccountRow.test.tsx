@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { PlanLimits } from '@agentistics/core'
 import { BillingAccountList, type BillingAccountListProps, type BillingRowView } from './AccountRow'
-import { __setPlanLimitsForTest } from '../../lib/planLimits'
+import * as store from '../../lib/planLimits'
+const { __setPlanLimitsFailureForTest, __setPlanLimitsForTest } = store
 import { usageColors } from '../../lib/usageColors'
 import { billingRows, type BillingAccount } from './accountBilling'
 
@@ -226,5 +227,32 @@ describe('CONTA.SEM.PLANO — a detected, unsaved plan', () => {
   test('with nothing detected the row still says "No plan"', () => {
     const h = renderToStaticMarkup(<BillingAccountList {...view([acc('c1')], ['claude'], () => ({ plan: null }))} />)
     expect(text(h)).toContain('No plan')
+  })
+})
+
+describe('USO.CARREGANDO: before the first plan-limits answer no row claims "No reading yet"', () => {
+  // An assistant row with no identified account (the row the loading print showed saying "No reading yet").
+  const noAccount = (lang: 'en' | 'pt') => {
+    const rows = billingRows([], { profiles: {} }, ['claude'] as never, L as never, lang === 'pt').map(r => ({ ...r, plan: null, problem: false, limits: null }))
+    return { ...view([]), lang, rows, limitsReady: false }
+  }
+  for (const lang of ['en', 'pt'] as const) test(`while loading every row waits (${lang})`, () => {
+    const h = renderToStaticMarkup(<BillingAccountList {...noAccount(lang)} />)
+    expect(h).toContain('data-usage-waiting')
+    expect(text(h)).not.toContain(lang === 'pt' ? 'Sem leitura ainda' : 'No reading yet')
+  })
+  test('a refusal ends the wait: "not reported", never a spinner and never "no reading yet"', () => {
+    __setPlanLimitsFailureForTest('unavailable')
+    try {
+      const h = renderToStaticMarkup(<BillingAccountList {...noAccount('pt')} />)
+      expect(h).not.toContain('data-usage-waiting')
+      expect(text(h)).toContain('Não informado')
+      expect(text(h)).not.toContain('Sem leitura ainda')
+    } finally { __setPlanLimitsFailureForTest(null) }
+  })
+  test('after the answer the row says what it knows', () => {
+    const h = renderToStaticMarkup(<BillingAccountList {...{ ...noAccount('en'), limitsReady: true }} />)
+    expect(h).not.toContain('data-usage-waiting')
+    expect(text(h)).toContain('No reading yet')
   })
 })
