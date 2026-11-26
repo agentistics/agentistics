@@ -41,3 +41,9 @@ test('only the message body (and the drawer) scroll; header and actions never sh
 test('the tail stays OUTSIDE the clipping shell (it sits past the card edge)', () => {
   expect(src.indexOf('showTail &&')).toBeLessThan(src.indexOf('data-nay-shell'))
 })
+
+test('the turn card draws the leader RoleIcon in its name row, as the chat tab strip does (QA r3 A)', () => {
+  const row = between('{!vault && !ck && <div data-rise', '<span style={{ overflow')
+  expect(row).toContain('<div title={alertName}')
+  expect(row).toMatch(/alertLeader && <RoleIcon kind="leader"/)
+})

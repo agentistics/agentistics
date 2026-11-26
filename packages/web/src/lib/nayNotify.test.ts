@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  alertStillTrue, cardAnswerActions, cardPlacement, cardWidth, formatSpan, formatWaiting, NAY_ANIMATIONS, parseNayAnimation, parseSnooze,
+  alertModelLabel, alertShowsLeader, alertStillTrue, cardAnswerActions, cardPlacement, cardWidth, formatSpan, formatWaiting, NAY_ANIMATIONS, parseNayAnimation, parseSnooze,
   snoozeError, SNOOZE_PRESETS, staleDue, STALE_OPTIONS_MIN,
 } from './nayNotify'
+
+describe('alertModelLabel (the card names the model like every session card)', () => {
+  it('reads a Claude transcript id', () => expect(alertModelLabel({ harness: 'claude', model: 'claude-sonnet-5-5' })).toBe('Sonnet 5.5'))
+  it('keeps an id no label knows exactly as recorded', () => expect(alertModelLabel({ harness: 'codex', model: 'gpt-x-unknown' })).toBe('gpt-x-unknown'))
+  it('draws no chip without a model', () => expect(alertModelLabel({ harness: 'claude' })).toBeUndefined())
+})
+
+describe('alertShowsLeader (the stripped prefix keeps its role as the crown)', () => {
+  it('crowns a leader-titled session', () => expect(alertShowsLeader('[ LÍDER ] - Checkout novo', undefined)).toBe(true))
+  it('crowns an English leader title', () => expect(alertShowsLeader('[ LEADER ] - Engine', undefined)).toBe(true))
+  it('crowns a session whose recorded role is leader', () => expect(alertShowsLeader('Checkout novo', 'leader')).toBe(true))
+  it('a recorded worker role wins over the title, like the tab', () => expect(alertShowsLeader('[ LÍDER ] - x', 'worker')).toBe(false))
+  it('no crown for an ordinary session', () => expect(alertShowsLeader('Checkout novo', undefined)).toBe(false))
+})
 
 describe('the snooze a person types', () => {
   const ms = (s: string) => { const r = parseSnooze(s); return r.ok ? r.ms : r.reason }

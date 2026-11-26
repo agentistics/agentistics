@@ -45,6 +45,15 @@ test('the busy line has no left inset of its own, like the tool-activity row (ev
   }
 })
 
+test('a tool is named by the shared label map, never by its raw wire name', () => {
+  act(() => root.render(createElement(mods.WorkingNote, { lang: 'pt', tools: [{ name: 'mcp__agentistics__agentistics_task_subtask' }, { name: 'agentistics_summary' }] })))
+  const text = host.querySelector<HTMLElement>('[role="status"]')!.textContent ?? ''
+  expect(text).toContain('agentistics task subtask')
+  expect(text).toContain('Reading metrics')
+  expect(text).not.toContain('agentistics_task_subtask')
+  expect(text).not.toContain('mcp__')
+})
+
 test('the busy line and the tool row share one left edge', () => {
   const group = { key: 'k', steps: mods.stepsOfTurn({ role: 'assistant', text: '', tools: [{ name: 'Bash' }] }), running: false }
   act(() => root.render(createElement('div', null,
