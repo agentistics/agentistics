@@ -136,10 +136,17 @@ export function cloneModelFold(s: ModelFoldState): ModelFoldState {
   }
 }
 
-function invokedData(model: string, providerRequestId: string | undefined): ModelInvokedData {
-  const data: ModelInvokedData = { provider: 'anthropic', model }
-  if (providerRequestId) data.providerRequestId = providerRequestId
-  return data
+/**
+ * `model.invoked` carries NO `providerRequestId` (since adapter 1.2.0). A replayed response emits its
+ * `model.invoked` and `model.completed` TOGETHER, from the same line, and the id is already in the
+ * completed event's payload — so on the invoked one it was the same ~30 bytes written twice per
+ * response (A1.7, measured: 100,715 responses on this machine's store). No projection reads the
+ * invoked event's payload at all (`projections/session-meta.ts` has no `model.invoked` case). The id
+ * still KEYS both events (`makeEvent`'s `providerRequestId` option feeds `deriveEventId`, O-8): only
+ * the payload copy is gone, never the identity.
+ */
+function invokedData(model: string): ModelInvokedData {
+  return { provider: 'anthropic', model }
 }
 
 function completedData(u: RawUsage, model: string, providerRequestId: string | undefined): ModelCompletedData {
@@ -176,7 +183,7 @@ function emitResponse(
     ...(id ? { providerRequestId: id } : {}),
     ...(harnessVersion ? { harnessVersion } : {}),
   }
-  emit(makeEvent(ctx, 'model.invoked', invokedData(model, id), opts))
+  emit(makeEvent(ctx, 'model.invoked', invokedData(model), opts))
   emit(makeEvent(ctx, 'model.completed', completedData(usage, model, id), opts))
 }
 

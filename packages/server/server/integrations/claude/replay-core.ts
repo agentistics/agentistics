@@ -38,8 +38,12 @@ import {
  * - 1.0.0 — session/run/agent lifecycle, model invocations, tool executions.
  * - 1.1.0 — adds `context.compacted`. A transcript replayed at 1.0.0 carries no compaction events,
  *   which a projection must read as "not recorded by this version", never as "never compacted".
+ * - 1.2.0 — `model.invoked`'s payload no longer repeats `providerRequestId` (A1.7, journal size): it
+ *   is in the paired `model.completed` from the same line, and no projection reads the invoked
+ *   payload. The event ids are unchanged — the id still keys both events. A 1.1.0 `model.invoked`
+ *   carries the copy, a 1.2.0 one does not; nothing else differs.
  */
-export const CLAUDE_ADAPTER_VERSION = '1.1.0'
+export const CLAUDE_ADAPTER_VERSION = '1.2.0'
 
 /** `source.id` on every event. */
 export const CLAUDE_SOURCE_ID = 'claude'
