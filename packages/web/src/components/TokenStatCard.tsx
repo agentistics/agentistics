@@ -32,6 +32,15 @@ import { valueFontSize } from '../lib/statCardSize'
  * — that zero is measured, not missing. Capability gating belongs to `HARNESS_CAPABILITIES` and
  * happens before this card is given a breakdown.
  */
+/** The narrowest a counter row can be with its label whole: "Leitura de cache" / "Entrada (nova)"
+ *  at 11px plus the figure and its share. */
+export const TOK_PART_MIN = 168
+
+/** The counters' grid: two columns where both fit whole, one otherwise — never more than two. */
+export function tokPartsColumns(): string {
+  return `repeat(auto-fit, minmax(max(${TOK_PART_MIN}px, calc(50% - 18px)), 1fr))`
+}
+
 interface Props {
   tokens: TokenBreakdown
   lang: Lang
@@ -130,7 +139,10 @@ export function TokenStatCard({
         className="ag-tok-parts"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          // Two columns only while each can hold a label whole ("Leitura de cache" + its figure);
+          // in a narrower card (one KPI cell, ~1/4 of the row) they stack, rather than cut every
+          // label to "Leit…". `max(…, 50% - gap)` caps it at two columns on a wide card.
+          gridTemplateColumns: tokPartsColumns(),
           gap: isMobile ? '6px 12px' : '6px 18px',
           marginTop: 'auto',
         }}

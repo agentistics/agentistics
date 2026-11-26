@@ -15,6 +15,7 @@
  */
 
 import { NA } from './board'
+import { modelDisplay } from '../../lib/modelDisplay'
 import type { TaskSessionRow } from '../../lib/tasks'
 
 /** The distinct, non-null models among these sessions, in first-seen order. */
@@ -26,9 +27,25 @@ export function modelsOf(sessions: readonly TaskSessionRow[]): string[] {
   return out
 }
 
+/**
+ * The distinct models as a person reads them — `harness · Sonnet 5.5`, the very shape the Live card's
+ * runtime pill draws (`cardPills` in `liveDeliveryModel.ts`, through the shared `modelDisplay`), so one
+ * session never reads "claude-sonnet-5-5" here and "claude · Sonnet 5.5" there. `modelsOf` stays the
+ * raw ids: the model FILTER matches on what was recorded.
+ */
+export function modelLabelsOf(sessions: readonly TaskSessionRow[]): string[] {
+  const out: string[] = []
+  for (const s of sessions) {
+    if (!s.model) continue
+    const label = `${s.harness} · ${modelDisplay(s.harness, s.model) ?? s.model}`
+    if (!out.includes(label)) out.push(label)
+  }
+  return out
+}
+
 export function ModelCellView({ sessions }: { sessions: readonly TaskSessionRow[] }) {
   if (sessions.length === 0) return null
-  const models = modelsOf(sessions)
+  const models = modelLabelsOf(sessions)
   if (models.length === 0) {
     return <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{NA}</span>
   }

@@ -104,6 +104,13 @@ export function summaryTitle(lang: 'pt' | 'en'): string {
   return lang === 'pt' ? 'No modo autônomo…' : 'In autonomous mode…'
 }
 
+/** Whether a need's SUBJECT is drawn above its text: only when it says something the text does not
+ *  (an empty subject, or one that merely repeats the text, would be the same line twice). */
+export function checkinSubjectShown(need: Pick<CheckinNeed, 'subject' | 'text'>): boolean {
+  const s = need.subject.trim()
+  return s !== '' && s.toLowerCase() !== need.text.trim().toLowerCase()
+}
+
 // --- one round -----------------------------------------------------------------------------------
 
 export interface RoundPlan {
