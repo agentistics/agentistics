@@ -15,10 +15,13 @@ import { memoryAlarmStep, type MemAlarmState } from './mem-guard'
 import { buildInventory, DEFAULT_TEMP_ROOTS, type AgentopProcess } from './inventory'
 import { tmpdir } from 'node:os'
 import { planGovernor, type Alert, type Kill } from './governor'
-import { readHelpers, mutateHelpers, pruneHelpers, type HelperRecord } from './helpers'
+import { readHelpers, mutateHelpers, pruneHelpers, HELPERS_FILE, type HelperRecord } from './helpers'
 import { readHeavyState, type HeavyState } from './heavy-io'
 import { registeredSpawnQueue } from '../sessions/spawn-queue'
 import { reaperState, startSessionReaper, type ReaperState } from '../sessions/session-reaper-io'
+import { dirname, join } from 'node:path'
+import { evaluateHealth, healthBlock, HEALTH_TICK_MS, type HealthBlock, type HealthState } from './machine-health'
+import { createHealthApiCache, createHealthReader, createSampleLog, type HealthApiCache, type HealthIo, type HealthReader, type SampleLog } from './machine-health-io'
 
 export const TICK_MS = 30_000
 export const KILL_GRACE_MS = 5_000
@@ -187,10 +190,102 @@ function mbText(bytes: number | null): string {
   return bytes === null ? '?' : `${Math.round(bytes / (1024 * 1024))} MB`
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Machine health guard (spec 2026-11-26-machine-health-guard §1, slice G1: OBSERVE ONLY — no gate, no notice).
+// Its own 10 s tick: the hysteresis counts in machine-health.ts are in 10 s ticks, the governor's pass is 30 s.
+
+/**
+ * The data directory, read off a path that is defined to live in it — `helpers.json` is
+ * `join(<data dir>, 'helpers.json')` — so this module does not name the data directory itself (the delivery
+ * guard pins which modules may reference it: delivery/doors.lint.test.ts).
+ */
+const HEALTH_DATA_DIR = dirname(HELPERS_FILE)
+export const HEALTH_SAMPLES_DIR = join(HEALTH_DATA_DIR, 'health')
+
+let healthState: HealthState | null = null
+/** Monotonic time `healthState` was sampled at — its freshness is never judged on the wall clock. */
+let healthStateMono = 0
+let healthTimer: ReturnType<typeof setInterval> | null = null
+let healthRunning: Promise<HealthState> | null = null
+let healthReader: HealthReader | null = null
+let sampleLog: SampleLog | null = null
+/** The route's own memoized single-sample reader (see `createHealthApiCache`); separate from the tick's, which carries history. */
+let apiCache: Promise<HealthApiCache> | null = null
+const monoNow = (): number => performance.now()
+
+/** The real primitives, from modules that already hold the capability (see machine-health-io.ts header). */
+async function realHealthIo(): Promise<HealthIo> {
+  const probe = await import('../hardware-probe')
+  return {
+    platform: process.platform,
+    env: process.env,
+    dataDir: HEALTH_DATA_DIR,
+    now: () => Date.now(),
+    mono: monoNow,
+    readText: probe.readTextOrNull,
+    statfs: probe.readFsFacts,
+    // The one bounded "run argv, collect lines, kill at the deadline" runner the server already has.
+    run: async (argv, timeoutMs) => {
+      const { defaultRunner } = await import('../sessions/harness-install')
+      const out: string[] = []
+      try {
+        const code = await defaultRunner(argv, (line, stream) => { if (stream !== 'stderr') out.push(line) }, timeoutMs)
+        return { code, stdout: out.join('\n') }
+      } catch {
+        return null
+      }
+    },
+  }
+}
+
+/** One health tick: sample, evaluate against the last state, record. Concurrent callers share the tick. */
+export function healthTick(): Promise<HealthState> {
+  if (healthRunning) return healthRunning
+  healthRunning = (async () => {
+    if (!healthReader) healthReader = createHealthReader(await realHealthIo())
+    if (!sampleLog) {
+      const probe = await import('../hardware-probe')
+      const { durableWrite } = await import('../durable-file')
+      sampleLog = createSampleLog({ dir: HEALTH_SAMPLES_DIR, readText: probe.readTextOrNull, ensureDir: probe.ensureDirectory, write: (p, t) => durableWrite(p, t, 0o600) })
+    }
+    const sample = await healthReader.sample()
+    const step = evaluateHealth(sample, healthState ?? undefined)
+    healthState = step.state
+    healthStateMono = sample.monoMs
+    await sampleLog.record(step.state, step.transition)
+    return step.state
+  })().finally(() => { healthRunning = null })
+  return healthRunning
+}
+
+/**
+ * The `health` block for `/api/hardware-resources`: the governor's state when it is fresh, otherwise ONE sample
+ * read now and evaluated with no history (`basis: 'single-sample'` says so) — a darwin/win32 server, or a process
+ * whose governor is not running, still answers, with every signal `unavailable` where it cannot read. That sample
+ * is memoized (`HEALTH_API_FRESH_MS`) and concurrent GETs share one read, so a burst of requests never runs
+ * `dmesg`/`powershell.exe` once each; `ageMs` says how old the answer is.
+ */
+export async function healthForApi(): Promise<HealthBlock> {
+  const now = monoNow()
+  if (healthState && now - healthStateMono < 3 * HEALTH_TICK_MS) return healthBlock(healthState, 'governor', now - healthStateMono)
+  apiCache ??= realHealthIo().then(io => createHealthApiCache(createHealthReader(io), monoNow))
+  const { state, ageMs } = await (await apiCache).get()
+  return healthBlock(state, 'single-sample', ageMs)
+}
+
+function startHealthWatch(log: (line: string) => void): void {
+  if (healthTimer) return
+  const tick = () => { void healthTick().catch(e => log(`[health] tick failed: ${String(e)}`)) }
+  tick()
+  healthTimer = setInterval(tick, HEALTH_TICK_MS)
+  healthTimer.unref?.()
+}
+
 export function startGovernor(deps: GovernorDeps): void {
   if (timer || process.platform !== 'linux') return
   // Closed sessions' leftover processes: boot + periodic (or the coletor-processos flow, flows on).
   startSessionReaper(deps.log)
+  startHealthWatch(deps.log)
   void governorTick(deps).catch(e => deps.log(`[governor] tick failed: ${String(e)}`))
   timer = setInterval(() => {
     void governorTick(deps).catch(e => deps.log(`[governor] tick failed: ${String(e)}`))
