@@ -822,6 +822,18 @@ button:hover .ag-row-pin,
 button:focus-within .ag-row-pin,
 .ag-row-pin:focus-visible { opacity: 1 !important; }
 
+/* A session row's title: ONE line with "…", never broken inside a word (owner, 2026-11-26). */
+.ag-line-title-one { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The row's state icon (`LineStatusIcon`): a tab stop whose focus opens its tooltip. A command
+   running spins, a turn being written pulses — and neither moves for someone who asked for less. */
+.ag-line-status:focus-visible { outline: 2px solid var(--anthropic-orange); }
+.ag-ls-spin { transform-origin: 50% 50%; animation: ag-ls-spin 1.4s linear infinite; }
+.ag-ls-pulse { animation: ag-ls-pulse 1.6s ease-in-out infinite; }
+@keyframes ag-ls-spin { to { transform: rotate(360deg); } }
+@keyframes ag-ls-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .ag-ls-spin, .ag-ls-pulse { animation: none; } }
+
 /* ---------------------------------------------------------------------------
    Elevation and scrim, per theme.
 

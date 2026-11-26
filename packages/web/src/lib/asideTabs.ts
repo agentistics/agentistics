@@ -15,7 +15,7 @@
  * session belongs to which team or which section.
  */
 
-import { runningLabel, type ActivitySignal } from '@agentistics/core'
+import type { ActivitySignal } from '@agentistics/core'
 import type { SessionState } from '@agentistics/tui/control/session-fleet'
 
 export type AsideTab = 'active' | 'groups' | 'ended'
@@ -220,9 +220,12 @@ export function shortSpan(ms: number, pt: boolean): string {
  * the row carries neither — never a confident "agora" invented for it.
  */
 export function liveAge(row: TeamRow, now: number, pt: boolean): string | null {
-  // A session that is RUNNING something is not "stopped for X": say how long it has been running.
+  // A session that is RUNNING something is not "stopped for X": say how long it has been in THAT
+  // state. Only the short span — the state itself is the row's icon, and its full sentence ("rodando
+  // há 1 min", "na fila") is the icon's tooltip (`lineStatus.ts`): a word here squeezed the title
+  // into two lines (owner, 2026-11-26). Unknown start = no time, never the last message's age.
   if (row.activeSignal && row.state !== 'waiting-approval') {
-    return runningLabel({ signal: row.activeSignal, ...(row.activeSinceAt !== undefined ? { sinceMs: row.activeSinceAt } : {}) }, now, pt, shortSpan)
+    return row.activeSinceAt === undefined ? null : shortSpan(now - row.activeSinceAt, pt)
   }
   const at = row.lastUserMessageAt ?? row.startedAt
   return at === undefined ? null : shortSpan(now - at, pt)

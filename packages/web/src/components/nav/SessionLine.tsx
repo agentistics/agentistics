@@ -1,32 +1,37 @@
 /**
- * SessionLine — one session, on one line: title, then time, then the state dot.
+ * SessionLine — one session, on one line: title, then time, then the state ICON.
  *
  * The approved list design ("A + C + D", 2026-10-23) draws every session the same way in all three
  * tabs: no harness, model or task line (those stay in the open session's header), and the state is
- * said ONCE — the dot carries the state and the text beside it carries the TIME, never the state
+ * said ONCE — the icon carries the state and the text beside it carries the TIME, never the state
  * word again. The full card (`SessionRow`) remains for the surfaces that still want it.
+ *
+ * The state is a coloured ICON with a tooltip (option A of `leader/estado-icones`, owner 2026-11-26):
+ * an activity WORD there ("rodando há 1 min", "na fila") squeezed the title into two lines and broke
+ * it mid-word ("Moto / r"). The full sentence is the icon's tooltip and accessible name
+ * (`LineStatusIcon`, `lib/lineStatus.ts`).
  *
  * Everything a row could do before is still here: open, right-click / long-press menu with the
  * row's own verbs, pin, reopen, the "go to session" button of the Nay dock, the muted mark and the
- * reopening status. A title takes at most TWO lines and ends in "…" past that (owner, 2026-11-06: a
-long one used to run to six lines and break mid-word); the whole title is in the row's `title`
-(hover) and in the open session's header, so nothing is lost. Lines break at word boundaries and at
-the marks a title is built from (`titleBreaks.ts`), never in the middle of a word.
+ * reopening status. The title is ONE line and ends in "…" (owner, 2026-11-26 — superseding the
+ * two-line clamp of 2026-11-06); it never wraps, so it can never break inside a word, and the whole
+ * title is in the row's `title` (hover) and in the open session's header, so nothing is lost.
  */
 
-import { createContext, Fragment, useContext, useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { RoleIcon, type RoleIconKind } from './RoleIcon'
 import { BellOff, MoreVertical, Pin, RotateCcw, SquareArrowOutUpRight } from 'lucide-react'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
 import { sessionDisplayTitle, hasLeaderTitle } from '../../lib/sessionDisplayTitle'
 import { sessionIdentityKey } from '../../lib/sessionIdentity'
-import { titlePieces } from '../../lib/titleBreaks'
+import { lineStatusKind, lineStatusText } from '../../lib/lineStatus'
+import { LineStatusIcon } from './LineStatusIcon'
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { registerSessionRoleAlias, useSessionRole } from '../../lib/sessionRoles'
 import { reopeningLabel, useReopening } from '../../lib/reopeningStore'
 import { endingLabel, useEnding, useEndingTimedOut } from '../../lib/endingSessions'
-import { isLive, isWaitingState } from '../../lib/asideTabs'
+import { isWaitingState } from '../../lib/asideTabs'
 import type { RowVerb } from '../../lib/rowMenu'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { IconButton } from '../sessions/RepoSearchView'
@@ -37,13 +42,6 @@ import { IconButton } from '../sessions/RepoSearchView'
  */
 export const GoToSessionContext = createContext<((id: string) => void) | null>(null)
 
-/** The dot a state earns: filled for the two states that mean something is happening, outlined otherwise. */
-export function lineDot(state: ControlSession['state'], fell = false): { background: string; border: string } {
-  if (fell) return { background: STATE_COLOR.lost, border: 'none' }
-  if (state === 'working' || isWaitingState(state)) return { background: STATE_COLOR[state], border: 'none' }
-  return { background: 'transparent', border: '1px solid var(--border)' }
-}
-
 export interface SessionLineProps {
   session: ControlSession
   selected: boolean
@@ -51,7 +49,7 @@ export interface SessionLineProps {
   tap?: number
   /** The right-hand time ("4 min", "13:51"). Absent draws nothing. */
   time?: string | null
-  /** The machine says this one fell — the dot and the time take the fell colour. */
+  /** The machine says this one fell — the state icon and the title take the fell colour. */
   fell?: boolean
   /** Bold, slightly taller — the leader line of a team. */
   lead?: boolean
@@ -78,15 +76,14 @@ export interface SessionLineProps {
 const TITLE_LINE_PX = 17.5
 
 /**
- * At most two lines, then "…". `-webkit-line-clamp` is the one form every engine ships (Chromium,
- * Firefox and WebKit/Safari all honour the prefixed pair; the unprefixed `line-clamp` rides along for
- * the day they all do). `overflow-wrap: break-word` only ever splits a token that cannot fit a whole
- * line on its own — `anywhere` also shrinks the min-content and split every long title mid-word.
+ * ONE line, then "…" (owner, 2026-11-26). A title that never wraps can never break inside a word;
+ * the full text is the open button's `title` (hover). The class `ag-line-title-one` carries the same
+ * three rules, so the shape is checkable by class as well as by style.
  */
-export const TITLE_CLAMP: CSSProperties = {
-  display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, lineClamp: 2,
-  overflow: 'hidden', whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'normal',
-} as CSSProperties
+export const TITLE_ONE_LINE: CSSProperties = {
+  display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+}
+export const TITLE_ONE_LINE_CLASS = 'ag-line-title-one'
 
 export function SessionLine({
   session, selected, tap, time, fell = false, lead = false, summary, facts, leading, pinned = false, onPin, onOpen, openLabel,
@@ -104,7 +101,7 @@ export function SessionLine({
   const ending = endingMark && !endingTimedOut
   const goTo = useContext(GoToSessionContext)
   const waiting = isWaitingState(session.state)
-  const dot = lineDot(session.state, fell)
+  const statusKind = lineStatusKind(session.state, session.activeSignal, fell)
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null)
   const clearLongPress = () => { if (longPress.current !== null) { clearTimeout(longPress.current); longPress.current = null } }
   const canMenu = !!verbs && verbs.length > 0 && !!onOpenMenu
@@ -170,17 +167,14 @@ export function SessionLine({
         {/* Title and the folded team's summary share one wrapping box: the summary drops under the
             name when the line is short, instead of crushing the name to a letter per line. */}
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 1 }}>
-          {/* While a status label (reopening / ending) takes the trailing room, the title keeps one
-              line and truncates instead of breaking into a word per line. */}
-          <span data-line-title style={{
-            flex: '0 1 auto', minWidth: 0, lineHeight: `${TITLE_LINE_PX}px`,
-            ...(ending || reopening
-              ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
-              : TITLE_CLAMP),
+          {/* One line, truncated with "…": it never wraps, so it never breaks inside a word. */}
+          <span data-line-title className={TITLE_ONE_LINE_CLASS} style={{
+            flex: '1 1 auto', minWidth: 0, lineHeight: `${TITLE_LINE_PX}px`,
+            ...TITLE_ONE_LINE,
             fontSize: 13, fontWeight: lead || waiting ? 600 : 500,
             color: fell ? STATE_COLOR.lost : undefined,
           }}>
-            {titlePieces(title).map((piece, i) => <Fragment key={i}>{i > 0 && <wbr />}{piece}</Fragment>)}
+            {title}
           </span>
           {summary && (
             <span data-team-summary style={{ flexBasis: '100%', minWidth: 0, fontSize: 11, lineHeight: 1.35, color: 'var(--text-tertiary)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{summary}</span>
@@ -190,7 +184,7 @@ export function SessionLine({
           )}
         </span>
         </span>
-        {/* Muted sits with the title, not in the trailing columns, so time and dot keep their x. */}
+        {/* Muted sits with the title, not in the trailing columns, so time and icon keep their x. */}
         {muted && (
           <span role="img" aria-label={mutedTooltip(pt)} title={mutedTooltip(pt)}
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 14, color: 'var(--text-tertiary)' }}>
@@ -213,11 +207,14 @@ export function SessionLine({
         {time && (
           <span data-line-time style={{
             flexShrink: 0, fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-            color: waiting && isLive(session.state) ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+            color: 'var(--text-tertiary)',
           }}>{time}</span>
         )}
-        <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, boxSizing: 'border-box', ...dot }} />
       </button>
+      {/* The state, as the dot used to be: last of the row's own columns. Outside the open button —
+          it is a tab stop of its own (the tooltip opens on focus), and a focusable inside a button is
+          invalid HTML. */}
+      <LineStatusIcon kind={statusKind} text={lineStatusText(statusKind, time, pt)} {...(tap ? { tap } : {})} />
       {onReopen && reopenVerb && (
         <IconButton
           label={!reopenVerb.enabled && reopenVerb.reason ? reopenVerb.reason : (pt ? 'Reabrir' : 'Reopen')}
@@ -239,11 +236,12 @@ export function SessionLine({
         </button>
       )}
       {/*
-        * THE TRAILING COLUMNS ARE ONE GRID: time, dot, then (on a phone) the ⋮ slot, then the pin slot —
-        * reserved on EVERY row, empty where the row has nothing to put there, so leaders, members,
-        * loose rows and folder rows line up column for column.
+        * THE TRAILING COLUMNS: time, state icon, then (on a phone) the ⋮, then the pin. On desktop the
+        * pin slot is reserved on EVERY row, empty where the row has nothing to put there, so leaders,
+        * members, loose rows and folder rows line up column for column. On a phone an empty slot takes
+        * NO width: the state icon ends the row (option A) and the title gets the space.
         */}
-      {tap && (canMenu ? (
+      {tap && canMenu && (
         <button type="button"
           aria-label={pt ? `Opções de ${title}` : `Options for ${title}`}
           aria-haspopup="menu"
@@ -252,7 +250,7 @@ export function SessionLine({
         >
           <MoreVertical size={13} />
         </button>
-      ) : <span aria-hidden data-slot="menu" style={{ width: iconSize, flexShrink: 0 }} />)}
+      )}
       {/* The pin: a leader shows it faint until set (prototype); any other row shows it when pinned,
           and on desktop on hover/focus. On a phone a non-leader pins from its ⋮ menu instead. */}
       {onPin && (lead || pinned || !tap) ? (
@@ -270,7 +268,7 @@ export function SessionLine({
         >
           <Pin size={12} fill={pinned ? 'currentColor' : 'none'} />
         </button>
-      ) : <span aria-hidden data-slot="pin" style={{ width: iconSize, flexShrink: 0 }} />}
+      ) : tap ? null : <span aria-hidden data-slot="pin" style={{ width: iconSize, flexShrink: 0 }} />}
     </div>
   )
 }

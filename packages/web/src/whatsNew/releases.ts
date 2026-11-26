@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.229.6': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Lista de sessões: o que a sessão está fazendo agora aparece como um ícone colorido à direita (rodando, na fila, trabalhando, esperando você…), ao lado de um tempo curto como "1 min". Passe o mouse, toque ou navegue com o teclado até o ícone para ler a frase completa, como "rodando há 1 min".',
+        en: 'Session list: what a session is doing now shows as a coloured icon on the right (running, queued, working, waiting for you…), next to a short time such as "1 min". Hover, tap or tab to the icon to read the full sentence, like "running for 1 min".',
+      },
+      {
+        pt: 'O nome da sessão ocupa uma linha só e termina em "…" quando não cabe, sem quebrar palavras no meio; o nome inteiro aparece ao passar o mouse.',
+        en: 'The session name takes a single line and ends in "…" when it does not fit, without breaking words in the middle; the full name shows on hover.',
+      },
+    ],
+  },
   '2.229.5': {
     features: [],
     fixes: [
