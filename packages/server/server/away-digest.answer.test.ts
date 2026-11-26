@@ -206,6 +206,9 @@ describe('away digest progress', () => {
   test('a login dialog is reported as needing login, never as writing started', () => {
     const banner = ['Welcome to Claude Code', 'Select login method:', '1. Claude account']
     expect(nayAnswerProgress({ status: 'running', activity: 'working', lastLines: banner })).toBe('login')
+    const trust = ['Quick safety check: Is this a project you created or one you trust?', '❯ No, exit', '  Yes, I trust this folder']
+    expect(nayAnswerProgress({ status: 'running', state: 'waiting-approval', approvalLines: trust })).toBe('login')
+    expect(nayAnswerProgress({ status: 'running', approvalLines: trust, lastLines: ['welcome'] })).toBe('login')
     expect(nayAnswerProgress({ status: 'running', activity: 'working', chatTurns: [], lastLines: ['Do you trust the files in this folder?'] })).toBe('login')
     expect(nayAnswerProgress({ status: 'running', activity: 'working', chatTurns: [{ role: 'assistant', text: 'Please log in to the site' }], lastLines: banner })).toBe('started')
   })
