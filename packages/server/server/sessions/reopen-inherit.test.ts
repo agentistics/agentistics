@@ -79,11 +79,12 @@ describe('spawnManaged writes the registry row before the session exists', () =>
   it('addSession precedes backend.spawn, and a failed launch removes the row', async () => {
     const src = await Bun.file(new URL('../cli-start.ts', import.meta.url)).text()
     const fn = src.slice(src.indexOf('async function spawnManaged('))
-    const add = fn.indexOf('await addSession(rootIfLeader(await spawnRow(')
+    const add = fn.indexOf('await addSession(withSupersedes(rootIfLeader(await spawnRow(') // DSL.TIPO-SESSAO F8: supersedes in the row
     const spawn = fn.indexOf('await backend.spawn(')
     expect(add).toBeGreaterThan(0)
     expect(add).toBeLessThan(spawn)
-    expect(fn.match(/await abandon\(\)/g)?.length).toBe(2)
+    // A failed launch, a harness that died at once, and (DSL.TIPO-SESSAO) a row whose role could not be recorded.
+    expect(fn.match(/await abandon\(\)/g)?.length).toBe(3)
   })
 })
 

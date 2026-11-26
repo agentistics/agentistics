@@ -56,6 +56,8 @@ export interface ContextInput {
   usageRulesSaved?: boolean
   /** ORQ.H1: the owner's open requests on this leader's task (`PEDIDOS ABERTOS DO DONO`), always on top. */
   ownerRequests?: string
+  /** ORQ.H2: the hand-off GENERATED from the board for this successor, delivered as a system item. */
+  passagem?: string
 }
 
 /** One line, stated once: who wins when two instructions disagree. */
@@ -156,6 +158,8 @@ export function contextText(i: ContextInput): string {
   }
   if (i.handoffTakeover || i.handoffRelay) lines.push(HANDOFF_TAKEOVER_LINE)
   if (i.handoffRelay) lines.push(i.handoffRelay)
+  // ORQ.H2 — a system item (never an owner message: NOT_OWNER skips `[from agentistics`), read FIRST by the successor.
+  if (i.passagem) lines.push(`[from agentistics · passagem]\n${i.passagem}`)
   if (i.harnesses && i.harnesses.length > 0) lines.push(`Harnesses installed on this machine: ${i.harnesses.join(', ')}.`)
   if (i.specSkills && i.specSkills.length > 0) lines.push(`Specification skills installed for this harness: ${i.specSkills.join(', ')}`)
   lines.push(

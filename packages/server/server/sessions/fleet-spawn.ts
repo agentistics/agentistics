@@ -62,6 +62,11 @@ export interface FleetSpawnBody {
   /** Board ids of the task / subtask the session is created for (context only; the client files it). */
   taskId?: unknown
   subtaskId?: unknown
+  /** DSL.TIPO-SESSAO — `engine`: an agent's delegation (in process), judged by the spawn gate as an agent, never the owner. */
+  door?: unknown
+  /** The task/subtask the spawn gate judges it for, when the caller files it only after the start. */
+  gateTaskId?: unknown
+  gateSubtaskId?: unknown
   /** The managed id of the session that is starting this one (a verified-by-lookup session id, see `planFleetSpawn`). */
   parent?: unknown
   /** SET BY THE SERVER ONLY (the route overwrites it): the caller proved it is `parent`. */
@@ -260,6 +265,9 @@ export function planFleetSpawn(
       ...(mode ? { mode } : {}),
       ...(label ? { label } : {}),
       ...(role ? { role } : {}),
+      ...(body.door === 'engine' ? { spawnDoor: 'engine' as const } : {}),
+      ...(text(body.gateTaskId) ? { gateTaskId: text(body.gateTaskId)! } : {}),
+      ...(text(body.gateSubtaskId) ? { gateSubtaskId: text(body.gateSubtaskId)! } : {}),
       ...(away !== undefined ? { away } : {}),
       ...(force ? { force: true } : {}),
       ...(account.account ? { accountId: account.account.id } : {}),
