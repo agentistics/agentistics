@@ -1,17 +1,16 @@
 /**
- * AgentScheduleEditor — when an account may be used by AGENTS (CONTAS.AGENDA-AGENTICA): weekdays,
- * hour windows per day and a daily ceiling. ONE component, drawn in the plan-usage modal (Nay's
- * Limits tab, `manageAgentUse`) and in Settings → Accounts (the account drawer), both writing the
- * same server record (`PATCH /api/accounts/:id {agentSchedule}`). The popup ("Uso dos planos") never
- * draws it: there, only the on/off switch and "Sign in again".
+ * AgentScheduleEditor — WHEN agents may use an account (CONTAS.AGENDA-AGENTICA): weekdays, hour
+ * windows per day and the usage ceilings. A CONTROLLED part of the account drawer
+ * (CONTAS.AGENDA-SALVAR): it owns no draft, no Save and no master switch — the drawer holds ONE
+ * draft (`lib/agentUseDraft.ts`), saves it with its single footer Save in ONE `PATCH
+ * /api/accounts/:id`, and the "Agenda" / "Sobrescrever a agenda" switches live in
+ * `AgentUseSwitches`. The popup ("Uso dos planos") never draws it.
  */
-import { useEffect, useRef, useState } from 'react'
-import { AGENT_DAYS, defaultAgentSchedule, type AgentDay, type AgentSchedule } from '@agentistics/core'
+import { useState } from 'react'
+import { AGENT_DAYS, type AgentDay, type AgentSchedule } from '@agentistics/core'
 import { Plus, X } from 'lucide-react'
-import { ToggleSwitch } from './ToggleSwitch'
-import { dialogButtonStyle } from '../pages/settings/primitives'
 import {
-  addWindow, agentUseReasonText, copyToSelected, DAY_SHORT, dailyUsageText, scheduleSummaryText, dayReadingHint, removeWindow, sameSchedule, scheduleProblem,
+  addWindow, agentUseReasonText, copyToSelected, DAY_SHORT, dailyUsageText, scheduleSummaryText, dayReadingHint, removeWindow, scheduleProblem,
   setAllDay, setDailyCap, setWeeklyCap, setWindow, toggleDay, weekReadingHint, type AgentUseView,
 } from '../lib/agentScheduleView'
 
@@ -29,80 +28,40 @@ export function AgentUseBadge({ view, lang }: { view: AgentUseView; lang: Lang }
   </div>
 }
 
-export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMobile = false, onSaved, showBadge = true }: {
-  /** The plan-usage card already shows the badge right above; drawing it twice is noise. */
-  showBadge?: boolean
-  accountId: string
+/** Soft, tinted field — never `--bg-base` (the black inputs the owner rejected). */
+export const SCHEDULE_FIELD: React.CSSProperties = { background: 'var(--ag-tint-3)', border: '1px solid var(--ag-line, var(--border))', color: 'var(--text-primary)', borderRadius: 8, padding: '4px 8px', colorScheme: 'dark light', minWidth: 0, flex: '1 1 0', maxWidth: 140 }
+
+export function AgentScheduleEditor({ draft, onChange, who, view, lang, isMobile = false, muted = false }: {
   /** The account's name as the screen shows it, for labels. */
   who: string
-  schedule?: AgentSchedule
+  draft: AgentSchedule
+  onChange: (next: AgentSchedule) => void
   view?: AgentUseView
   lang: Lang
   isMobile?: boolean
-  /** The server's answer after a save (the account with its new `available`/`agentUse`). */
-  onSaved?: (account: unknown) => void
+  /** Agenda off, or override on: the schedule is kept but does not decide — drawn dimmed. */
+  muted?: boolean
 }) {
   const pt = lang === 'pt'
-  const [draft, setDraft] = useState<AgentSchedule>(() => schedule ?? defaultAgentSchedule())
   const [focusDay, setFocusDay] = useState<AgentDay | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  // A newer server copy replaces the draft only while nothing is being edited.
-  const saved = schedule ?? defaultAgentSchedule()
-  const dirty = !sameSchedule(draft, saved)
-  const savedKey = JSON.stringify(saved)
-  const prevSaved = useRef(saved)
-  useEffect(() => {
-    const before = prevSaved.current
-    prevSaved.current = saved
-    // Follow the server copy unless the person had unsaved edits against the previous one.
-    setDraft(d => sameSchedule(d, before) ? saved : d)
-  }, [savedKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const problem = scheduleProblem(draft, lang)
   const tap = isMobile ? 44 : undefined
-  const btn = (kind: 'primary' | 'secondary', disabled = false) => ({ ...dialogButtonStyle(kind, isMobile, disabled), ...(isMobile ? {} : { padding: '5px 12px', fontSize: 12.5 }) })
-  const time: React.CSSProperties = { background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 6, padding: '4px 6px', minHeight: tap, colorScheme: 'dark light', minWidth: 0, flex: '1 1 0', maxWidth: 140 }
+  const setDraft: React.Dispatch<React.SetStateAction<AgentSchedule>> = next => onChange(typeof next === 'function' ? next(draft) : next)
+  const field: React.CSSProperties = { ...SCHEDULE_FIELD, minHeight: tap }
+  const summary = scheduleSummaryText(draft, lang)
 
-  const save = async () => {
-    if (problem || busy) return
-    setBusy(true); setError(null)
-    try {
-      const r = await fetch(`/api/accounts/${encodeURIComponent(accountId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentSchedule: draft }) })
-      if (!r.ok) { setError(pt ? 'Não foi possível salvar a agenda. Tente novamente.' : 'Could not save the schedule. Try again.'); return }
-      onSaved?.((await r.json() as { account: unknown }).account)
-    } catch {
-      setError(pt ? 'Não foi possível salvar a agenda. Tente novamente.' : 'Could not save the schedule. Try again.')
-    } finally { setBusy(false) }
-  }
-
-  return <div data-agent-schedule={accountId} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: tap }}>
-      <span style={{ fontSize: 13, fontWeight: 600 }}>{pt ? 'Agenda de uso por agentes' : 'Agent-use schedule'}</span>
-      <ToggleSwitch on={draft.enabled} onToggle={() => setDraft(d => ({ ...d, enabled: !d.enabled }))} tap={tap}
-        label={`${pt ? 'Agenda de uso por agentes' : 'Agent-use schedule'} · ${who}`} />
-    </div>
-    {draft.enabled && scheduleSummaryText(draft, lang) && <span data-agent-schedule-line style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>{scheduleSummaryText(draft, lang)}</span>}
-    {showBadge && view && !dirty && <AgentUseBadge view={view} lang={lang} />}
-    <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
-      {draft.enabled
-        ? (pt ? 'Fora destes horários a conta fica desligada para agentes. Ligar à mão vence a agenda; desligar à mão volta ao que a agenda manda. Uma sessão já rodando não é encerrada.'
-          : 'Outside these hours the account is off for agents. Turning it on by hand overrides the schedule; turning it off returns to the schedule. A session already running is not stopped.')
-        : (pt ? 'Desligada: o interruptor "Uso por agentes" decide sozinho, como antes.' : 'Off: the "Agent use" switch alone decides, as before.')}
-    </p>
-    <label data-agent-weekly-cap style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-secondary)', opacity: draft.enabled ? 1 : 0.6 }}>
+  return <div data-agent-schedule data-agent-schedule-who={who} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, opacity: muted ? 0.45 : 1 }}>
+    {summary && <span data-agent-schedule-line style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>{summary}</span>}
+    <label data-agent-weekly-cap style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-secondary)' }}>
       {pt ? 'Parar os agentes quando a semana chegar a' : 'Stop agents when the week reaches'}
       <input type="number" inputMode="decimal" min={1} max={100} step={1} placeholder="—" aria-label={pt ? 'Teto da semana (% de uso semanal)' : 'Weekly ceiling (% of weekly usage)'}
         value={draft.maxWeeklyPct ?? ''} onChange={e => { const v = e.target.value.trim(); setDraft(s => setWeeklyCap(s, v === '' ? undefined : Number(v))) }}
-        style={{ ...time, width: 64 }} />
+        style={{ ...field, width: 64, flex: '0 0 auto' }} />
       %
       {weekReadingHint(view, lang) && <span data-agent-week-hint style={{ color: 'var(--text-tertiary)', fontSize: 11.5 }}>{weekReadingHint(view, lang)}</span>}
     </label>
     <AgentScheduleDays draft={draft} setDraft={setDraft} focusDay={focusDay} setFocusDay={setFocusDay} view={view} lang={lang} isMobile={isMobile} />
-    {(dirty || error) && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-      {(problem || error) && <span role="alert" style={{ fontSize: 12, color: 'var(--accent-red)', marginRight: 'auto' }}>{problem ?? error}</span>}
-      <button type="button" disabled={busy} onClick={() => { setDraft(saved); setError(null) }} style={btn('secondary', busy)}>{pt ? 'Descartar' : 'Discard'}</button>
-      <button type="button" data-agent-schedule-save disabled={busy || !!problem || !dirty} onClick={() => { void save() }} style={btn('primary', busy || !!problem || !dirty)}>{busy ? (pt ? 'Salvando…' : 'Saving…') : (pt ? 'Salvar agenda' : 'Save schedule')}</button>
-    </div>}
+    {problem && <span role="alert" data-agent-schedule-problem style={{ fontSize: 12, color: 'var(--accent-red)' }}>{problem}</span>}
   </div>
 }
 
@@ -126,7 +85,7 @@ export function AgentScheduleDays({ draft, setDraft, focusDay, setFocusDay, view
   const pt = lang === 'pt'
   const tap = isMobile ? 44 : undefined
   const small: React.CSSProperties = { border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 8, padding: '4px 9px', fontSize: 12, cursor: 'pointer', minHeight: tap, display: 'inline-flex', alignItems: 'center', gap: 4 }
-  const time: React.CSSProperties = { background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 6, padding: '4px 6px', minHeight: tap, colorScheme: 'dark light', minWidth: 0, flex: '1 1 0', maxWidth: 140 }
+  const time: React.CSSProperties = { ...SCHEDULE_FIELD, minHeight: tap }
   const selected = AGENT_DAYS.filter(d => draft.days[d])
   return <>
     <div role="group" aria-label={pt ? 'Dias da semana' : 'Weekdays'} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, opacity: draft.enabled ? 1 : 0.6 }}>
@@ -135,7 +94,7 @@ export function AgentScheduleDays({ draft, setDraft, focusDay, setFocusDay, view
         return <button key={d} type="button" aria-pressed={on} data-agent-day={d}
           onClick={() => { setDraft(s => toggleDay(s, d, focusDay ?? selected[0])); setFocusDay(on ? null : d) }}
           style={{ minWidth: isMobile ? 44 : 40, minHeight: tap ?? 28, borderRadius: 99, padding: '3px 10px', fontSize: 12.5, cursor: 'pointer',
-            border: `1px solid ${on ? 'var(--anthropic-orange)' : 'var(--border)'}`, background: on ? 'var(--anthropic-orange)' : 'transparent', color: on ? '#000' : 'var(--text-secondary)', fontWeight: on ? 650 : 500 }}>
+            border: `1px solid ${on ? 'var(--anthropic-orange)' : 'var(--ag-line, var(--border))'}`, background: on ? 'var(--anthropic-orange-dim)' : 'transparent', color: on ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)', fontWeight: on ? 650 : 500 }}>
           {DAY_SHORT[d][lang]}
         </button>
       })}
@@ -147,7 +106,7 @@ export function AgentScheduleDays({ draft, setDraft, focusDay, setFocusDay, view
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <b style={{ fontSize: 12.5 }}>{DAY_SHORT[d][lang]}</b>
           <button type="button" aria-pressed={!!day.allDay} data-agent-allday={d} onClick={() => { setFocusDay(d); setDraft(s => setAllDay(s, d, !day.allDay)) }}
-            style={{ ...small, borderRadius: 99, ...(day.allDay ? { border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange)', color: '#000', fontWeight: 650 } : {}) }}>
+            style={{ ...small, borderRadius: 99, ...(day.allDay ? { border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange-light)', fontWeight: 650 } : {}) }}>
             {pt ? 'Dia inteiro' : 'All day'}
           </button>
         </div>
