@@ -18,7 +18,7 @@ import { usePlanLimits } from '../../lib/planLimits'
 import { accountDisplayName, defaultPick, pickerRows } from '../../lib/accountPicker'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
-  canSwitch, fetchSwitchInfo, harnessName, noticeTitle, postSwitch, resetPhrase, showLimitNotice, type SwitchInfo,
+  canSwitch, fetchSwitchInfo, harnessName, heldPhrase, noticeTitle, postSwitch, resetPhrase, showLimitNotice, type SwitchInfo,
 } from '../../lib/accountSwitch'
 import { pushNotification } from '../../lib/notifications'
 import { reopenSession } from '../../lib/reopeningStore'
@@ -309,7 +309,8 @@ export function AccountLimitBand({ sessionId, lang, onSwitched }: { sessionId: s
   const [open, setOpen] = useState(false)
   // A dismissal holds for THIS limit only: the next one (a new reset time) shows again. It is kept
   // per session in localStorage so a reload or re-entering the session does not bring it back.
-  const key = info?.limit ? `${info.limit.resetsAt ?? ''}:${info.limit.pendingPreview ?? ''}` : ''
+  const key = info?.limit ? `${info.limit.resetsAt ?? ''}:${info.limit.pendingPreview ?? ''}`
+    : info?.held ? `held:${info.held.reason}:${info.held.note.en}` : ''
   const storeKey = `agentistics.accountLimitDismissed.${sessionId}`
   const [dismissed, setDismissedState] = useState<string | null>(() => {
     try { return localStorage.getItem(storeKey) } catch { return null }
@@ -326,10 +327,10 @@ export function AccountLimitBand({ sessionId, lang, onSwitched }: { sessionId: s
           <div className="handoff-band" role="status" style={{ '--handoff-tone': 'var(--anthropic-orange)' } as CSSProperties}>
             <div className="handoff-band-copy">
               <strong>{info ? noticeTitle(info, pt) : ''}</strong>
-              <span>{[info?.current?.label, resetPhrase(info?.limit?.resetsAt, pt)].filter(Boolean).join(' · ') || (pt ? 'Escolha a conta e o assistente para continuar.' : 'Choose the account and assistant to carry on.')}</span>
+              <span>{[info?.current?.label, info?.limit ? resetPhrase(info.limit.resetsAt, pt) : heldPhrase(info, pt)].filter(Boolean).join(' · ') || (pt ? 'Escolha a conta e o assistente para continuar.' : 'Choose the account and assistant to carry on.')}</span>
             </div>
             <div className="handoff-actions">
-              <button type="button" className="primary" onClick={() => setOpen(true)}>{pt ? 'Continuar na outra conta' : 'Continue on the other account'}</button>
+              {(info?.options.length ?? 0) > 0 && <button type="button" className="primary" onClick={() => setOpen(true)}>{pt ? 'Continuar na outra conta' : 'Continue on the other account'}</button>}
               <button type="button" className="icon" aria-label={pt ? 'Dispensar' : 'Dismiss'} onClick={() => setDismissed(key)}><X size={16} /></button>
             </div>
           </div>

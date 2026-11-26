@@ -1289,6 +1289,7 @@ export interface ActionResult {
  */
 export type AccountRefusalCode =
   | 'accounts_disabled' | 'unknown_account' | 'account_unavailable' | 'account_retired' | 'account_signed_out'
+  | 'account_outside_schedule' | 'account_over_cap'
 
 /** What `ControlHost.selfCheck` answered. `message` is localized and present on every non-`none`. */
 export type SelfCheck =

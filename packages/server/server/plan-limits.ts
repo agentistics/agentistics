@@ -18,7 +18,7 @@ import { watch as fsWatch } from 'node:fs'
 import {
   agentVisible, alternativeWithRoom, harnessAggregate, HARNESS_LABELS, HARNESS_ORDER, meterDiscontinuity, newerLimits, parseClaudeRateLimitEvent,
   parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel, resetNoticesFor, withPlanLabel, yieldStaleRows,
-  type HarnessId,
+  type AccountAgenda, type HarnessId,
   type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
 } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR, CLAUDE_DIR, CODEX_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, KIMI_DIR, OPENCODE_DIR } from './config'
@@ -28,6 +28,7 @@ import {
 import { withFileLock } from './sessions/file-lock'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
+import { agendaVerdictsOf, type AgendaView } from './account-agenda'
 
 let filePath: string | null = null
 const FILE = (): string => filePath ?? join(AGENTISTICS_DATA_DIR, 'plan-limits.json')
@@ -464,6 +465,12 @@ async function accountSwitch(l: PlanLimits): Promise<string | null> {
  * through `ingestPlanLimits`, so the owner raises its notices and tells the browser. Cheap when
  * nothing changed (one `stat`). Returns how many records were new.
  */
+/** CONTA.AGENDA: every stored meter (stale included), after syncing with the file. */
+export async function storedPlanLimits(): Promise<PlanLimits[]> {
+  await syncPlanLimitsFromFile()
+  return Object.values(state.limits)
+}
+
 export async function syncPlanLimitsFromFile(): Promise<number> {
   await load()
   let m = 0
@@ -700,7 +707,11 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
   }
 }
 
-export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string; yieldsTo?: string }
+export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & {
+  account: string; accountLabel: string; yieldsTo?: string
+  /** CONTA.AGENDA: present when the account has an agenda; a blocked one is `hold` with no free slot. */
+  agenda?: AgendaView
+}
 
 export interface PlanLimitsPayload {
   /** Which harnesses can be spawned here; a harness hidden from agents is absent. */
@@ -726,6 +737,8 @@ export async function planLimitsPayload(
   billingIn: Parameters<typeof withPlanLabel>[1],
   nowMs = Date.now(),
   liveSessions: readonly LivePlanSession[] = [],
+  /** CONTA.AGENDA: the stored agendas (`sanitizeAgendas(prefs.accountAgenda)`); absent = none. */
+  agendas: Record<string, AccountAgenda> = {},
 ): Promise<PlanLimitsPayload> {
   await syncPlanLimitsFromFile()
   const registry = await readAccounts().catch((): AccountsFile => ({ version: 2, accounts: [], bindings: {}, segments: {} }))
@@ -799,15 +812,22 @@ export async function planLimitsPayload(
   }
   const belongsTo = (s: LivePlanSession, l: PlanLimits) =>
     (!s.harness || s.harness === l.harness) && s.account === l.account
+  // The verdict reads every stored meter (stale ones too) under the account's canonical id.
+  const verdicts = Object.keys(agendas).length ? agendaVerdictsOf(agendas, stored, registry, nowMs) : {}
   const allBudgets: AccountBudgetRow[] = limits.map(l => {
     const budget = planBudget(l, nowMs)
     // Only measured sessions enter planSlots' per-session average. Working sessions with no
     // billed tokens remain in the public live summary, without diluting the measured burn.
     const planSessions = resolvedSessions.filter(s => s.burnPctPerHour > 0 && belongsTo(s, l))
     const availability = spawnability[l.harness]!
+    const agenda = verdicts[canonicalAccountId(registry, l.account)] ?? verdicts[l.account]
+    const held = agenda && !agenda.allowed
     return { ...budget, ...planPace(l, nowMs, history.get(meterKey.get(l) ?? keyOf(l)) ?? [], planSessions, segmentOf(l.account)), ...availability,
       ...(!availability.spawnable ? { freeSlots: 0, suggestedParallel: 0 } : {}),
+      // An account its agenda keeps agents off is on hold for routing, whatever its plan has left.
+      ...(held ? { status: 'hold' as const, freeSlots: 0, suggestedParallel: 0 } : {}),
       account: l.account, accountLabel: labelOf(l.harness, l.account),
+      ...(agenda ? { agenda } : {}),
     }
   })
   // Several rows of one harness must be told apart: the bare harness name (a meter of no known

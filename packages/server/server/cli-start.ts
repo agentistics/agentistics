@@ -2114,7 +2114,7 @@ export async function spawnManaged(req: {
     const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
     const { spawnAccountMessage } = await import('./sessions/spawn-account')
     const decided = await recordedSpawnAccount(accountId, { agentCaller: req.callerVerified === true, harness: req.harness })
-    if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', !!req.inherit), accountRefusal: decided.reason }
+    if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', !!req.inherit, decided.note), accountRefusal: decided.reason }
     accountRoot = decided.account?.root ?? null
   }
 
@@ -2956,7 +2956,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
       const { spawnAccountMessage } = await import('./sessions/spawn-account')
       const decided = await recordedSpawnAccount(recordedAccountId, { agentCaller: req.callerVerified === true, harness })
-      if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', true), accountRefusal: decided.reason }
+      if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', true, decided.note), accountRefusal: decided.reason }
     }
     if (plan.kind === 'takeover') {
       // A pid is not an identity — see `isAssistantPid`. Confirmed against the live scan in the

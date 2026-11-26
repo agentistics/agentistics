@@ -529,7 +529,7 @@ export async function start(
     agentCaller: await callerHoldsIdentity(callerSessionId()),
     context: await spawnAccountContext(cmd.account ? [] : [cmd.harness]),
   })
-  if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, lang === 'pt' ? 'pt' : 'en')); return 1 }
+  if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, lang === 'pt' ? 'pt' : 'en', false, account.note)); return 1 }
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: launch.model, effort: launch.effort, mode: launch.mode,
     ...(logFile ? { logFile } : {}),
@@ -838,7 +838,7 @@ export async function batch(
     const account = decideSpawnAccount({
       harness: spec.harness, ...(spec.account ? { requested: spec.account } : {}), agentCaller, context: accountContext,
     })
-    if (!account.ok) { failed.push({ harness: spec.harness, reason: spawnAccountMessage(account.reason, account.detail, lang === 'pt' ? 'pt' : 'en') }); continue }
+    if (!account.ok) { failed.push({ harness: spec.harness, reason: spawnAccountMessage(account.reason, account.detail, lang === 'pt' ? 'pt' : 'en', false, account.note) }); continue }
     const planned = planSpawn({
       harness: spec.harness,
       cwd,
@@ -1021,7 +1021,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
       // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
       const account = await recordedSpawnAccount(m.accountId, { agentCaller, harness: m.harness })
-      if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); return }
+      if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true, account.note)}`); skipped.push(m.id); return }
       const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
       if (!planned.ok) { skipped.push(m.id); return }
       await addSession({
@@ -1380,7 +1380,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
     // holder is closed: a removed account must refuse while the user still has their assistant.
     const previous = newestRowOfConversation(await readRegistry(), live.sessionId)
     const account = await recordedSpawnAccount(previous?.accountId, { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
-    if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
+    if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true, account.note)); return 1 }
     const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...inheritedLaunch(previous, live.harness), ...(logFile ? { logFile } : {}), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
     if (planned.ok && planned.plan.modeNeedsProtocol) { console.error(`Cannot reopen ${live.sessionId}: terminal cannot apply ${planned.plan.modeNeedsProtocol} approval mode`); return 1 }
     const plan = planTakeover({

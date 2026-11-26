@@ -16,6 +16,7 @@ import { readRegistry } from './registry'
 import { readAccounts } from '../harness-accounts'
 import { accountLabel, listSwitchTargets, readLimitState } from './account-switch-io'
 import type { SwitchUnavailableReason } from './account-switch'
+import { spawnAccountRows } from './spawn-account-io'
 import { fleetLang, hostForFleet, kickFleet } from './fleet-web'
 
 
@@ -26,14 +27,25 @@ export interface SwitchInfo {
   current?: { id?: string; label?: string; harness?: string; plan?: string }
   options: { id: string; harness: string; label: string; plan?: string; recommended?: boolean }[]
   /** Every other live account, NOT a target, with the reason in a code the browser words (CONTA.LIMITES). */
-  unavailable: { id: string; harness: string; label: string; plan?: string; reason: SwitchUnavailableReason }[]
+  unavailable: { id: string; harness: string; label: string; plan?: string; reason: SwitchUnavailableReason; note?: { pt: string; en: string } }[]
   limit: { resetsAt?: number; message?: string; pendingPreview?: string } | null
+  /** CONTA.AGENDA: the session's own account is held by its agenda right now (outside its schedule / at its cap). */
+  held?: { reason: 'outside_schedule' | 'over_cap'; note: { pt: string; en: string } }
 }
 
 /** The plan the registry holds for the session's own account, for the picker's "current" row. */
 async function accountPlan(accountId: string | undefined): Promise<string | undefined> {
   if (!accountId) return undefined
   try { return (await readAccounts()).accounts.find(a => a.id === accountId)?.plan } catch { return undefined }
+}
+
+/** The agenda hold on the session's account (no account recorded: the default root's login). */
+async function heldAccount(harness: HarnessId, accountId: string | undefined): Promise<SwitchInfo['held']> {
+  try {
+    const rows = await spawnAccountRows()
+    const own = accountId ? rows.find(r => r.id === accountId) : rows.find(r => r.harness === harness && r.bound && r.root === null)
+    return own?.agentBlock
+  } catch { return undefined }
 }
 
 const PREVIEW = 160
@@ -51,13 +63,14 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
     const row = (await readRegistry()).find(m => m.id === id || (m.conversationId === id && !m.endedAt))
     if (!row || row.endedAt) return json(none)
     const harness = row.harness as HarnessId
-    const [{ options, unavailable }, label, limit, plan] = await Promise.all([
+    const [{ options, unavailable }, label, limit, plan, held] = await Promise.all([
       listSwitchTargets({ harness, ...(row.accountId ? { accountId: row.accountId } : {}), agentCaller: false }),
       accountLabel(harness, row.accountId),
       row.conversationId
         ? readLimitState({ harness, conversationId: row.conversationId, cwd: row.cwd, ...(row.accountId ? { accountId: row.accountId } : {}) }).catch(() => null)
         : Promise.resolve(null),
       accountPlan(row.accountId),
+      heldAccount(harness, row.accountId),
     ])
     const info: SwitchInfo = {
       ok: true,
@@ -72,6 +85,7 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
           ...(limit.pendingPrompt ? { pendingPreview: preview(limit.pendingPrompt) } : {}),
         }
         : null,
+      ...(held ? { held } : {}),
     }
     return json(info)
   }

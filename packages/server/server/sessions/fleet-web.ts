@@ -1,5 +1,5 @@
 import { readPreferences, updatePreferences } from '../preferences'
-import { normalizeHandoffConfig, handoffCut } from '@agentistics/core'
+import { normalizeHandoffConfig, handoffCut, sanitizeAgendas } from '@agentistics/core'
 /**
  * fleet-web.ts — the WEB dashboard's window onto the session fleet.
  *
@@ -470,7 +470,7 @@ async function sampleHandoffQuotas(raw: SessionSnapshot): Promise<Map<string, Ha
   quotaSampling = (async () => {
     const [registry, prefs, conversations, accountRegistry] = await Promise.all([readRegistry(), readPreferences(), loadConversations(), readAccounts()])
     const { planLimitsPayload, planAccountKey } = await import('../plan-limits')
-    const limits = await planLimitsPayload(prefs.billing)
+    const limits = await planLimitsPayload(prefs.billing, undefined, undefined, sanitizeAgendas(prefs.accountAgenda))
     const { engineIntegrations } = await import('../engine/load')
     const replies = await refreshArtifactReplies(await readBilledReplies(accountRegistry, registry, limits.limits), engineIntegrations(), accountRegistry, registry, limits.limits)
     billedReplyCounts = countBilledReplies(replies)
@@ -518,7 +518,7 @@ export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?:
   if (!view || !managed || view.status === 'closed' || view.activity === 'exited' || !isLeaderRow({ title: managed.label ?? '', leader: managed.leader })) return null
   const { computeHandoffPanel } = await import('./handoff-panel')
   const { planLimitsPayload } = await import('../plan-limits')
-  const limits = await planLimitsPayload(prefs.billing)
+  const limits = await planLimitsPayload(prefs.billing, undefined, undefined, sanitizeAgendas(prefs.accountAgenda))
   const accounts = limits.limits.filter(l => l.harness === view.harness)
   const limit = handoffSessionLimit(view.harness ?? managed.harness, managed, accountRegistry, limits.limits)
   const rates = await sampleHandoffQuotas(raw)
@@ -1398,7 +1398,7 @@ export async function runFleetSpawn(
       : decision.reason === 'unknown_effort' ? s.spawnUnknownEffort(detail)
       : decision.reason === 'unknown_mode' ? s.spawnUnknownMode(detail)
       : decision.reason === 'bad_away' ? (lang === 'pt' ? `"away" aceita true, false ou "inherit", não "${detail}".` : `"away" takes true, false or "inherit", not "${detail}".`)
-      : isAccountRefusal(decision.reason) ? spawnAccountMessage(decision.reason, detail, lang === 'pt' ? 'pt' : 'en')
+      : isAccountRefusal(decision.reason) ? spawnAccountMessage(decision.reason, detail, lang === 'pt' ? 'pt' : 'en', false, decision.note)
       : s.spawnModelUnsupported(detail)
     return { ok: false, message, ...(isAccountRefusal(decision.reason) ? { code: decision.reason } : {}) }
   }

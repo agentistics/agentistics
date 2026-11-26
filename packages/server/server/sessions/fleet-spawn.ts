@@ -143,7 +143,7 @@ export type FleetSpawnRefusal =
 export type FleetSpawnDecision =
   | { ok: true; plan: FleetSpawnPlan }
   /** `detail` is the offending value, so the sentence can name it. */
-  | { ok: false; reason: FleetSpawnRefusal; detail?: string }
+  | { ok: false; reason: FleetSpawnRefusal; detail?: string; note?: { pt: string; en: string } }
 
 /**
  * A string field, read the way every other text field in this product is read: trimmed, and an
@@ -230,7 +230,7 @@ export function planFleetSpawn(
     agentCaller: body.callerVerified === true,
     context: accounts,
   })
-  if (!account.ok) return { ok: false, reason: account.reason, detail: account.detail }
+  if (!account.ok) return { ok: false, reason: account.reason, detail: account.detail, ...(account.note ? { note: account.note } : {}) }
 
   const task = text(body.task)
   const taskId = text(body.taskId)
