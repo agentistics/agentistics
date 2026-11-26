@@ -92,6 +92,15 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Uso do plano caiu de repente', message: 'O uso caiu bruscamente — contando do zero para esta conta.' },
     en: { title: 'Plan usage dropped sharply', message: 'Usage dropped sharply — counting from zero for this account.' },
   },
+  // CONTA.AGENDA — an account left agent use; `{name}` is the account's own name.
+  'account.agenda_schedule': {
+    pt: { title: 'Conta fora da agenda dos agentes', message: '{name} saiu da agenda: nenhuma sessão nova de agente nela. As que estão rodando podem trocar de conta pela faixa no chat.' },
+    en: { title: 'Account outside its agent schedule', message: '{name} left its schedule: no new agent sessions on it. Running ones can switch accounts from the band in their chat.' },
+  },
+  'account.agenda_cap': {
+    pt: { title: 'Conta no teto dos agentes', message: '{name} atingiu o teto de uso dos agentes: nenhuma sessão nova de agente nela. As que estão rodando podem trocar de conta pela faixa no chat.' },
+    en: { title: 'Account at its agent cap', message: '{name} reached its agent usage cap: no new agent sessions on it. Running ones can switch accounts from the band in their chat.' },
+  },
   'telemetry.first_use': {
     pt: { title: 'Uso anônimo do Agentistics', message: 'Enviar um sinal anônimo de uso (um número aleatório, a versão e o sistema) uma vez por dia, para sabermos quantas pessoas usam o Agentistics. Nada do seu trabalho é enviado.' },
     en: { title: 'Anonymous Agentistics usage', message: 'Send an anonymous usage signal (a random number, the version, and the system) once a day, so we can know how many people use Agentistics. None of your work is sent.' },

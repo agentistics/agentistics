@@ -1,7 +1,7 @@
 import { join, dirname } from 'path'
 import { mkdir, rename, writeFile, open, unlink, stat, readFile, utimes, chmod } from 'node:fs/promises'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR, CLAUDE_DIR } from './config'
-import type { AccessibilityPrefs, AwayState, BillingSettings, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
+import type { AccessibilityPrefs, AccountAgenda, AwayState, BillingSettings, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
 import { migrateTeamConfig } from '@agentistics/core'
 import { injectSealedTokens, plaintextTokenCount, stripAndSealTokens, withoutTokenFields } from './vault/prefs-tokens'
 import { registerVaultMigrator, sentence as vaultSentence, type MigrationReport } from './vault/service'
@@ -216,6 +216,12 @@ export interface Preferences {
    *  and the writes go through the same shallow merge as every other field, so the settings screen
    *  must always PUT the complete object rather than a partial one. */
   billing?: BillingSettings
+  /**
+   * CONTA.AGENDA — per account id, WHEN and HOW MUCH agents may use it (`@agentistics/core`'s
+   * `accountAgenda.ts`). A machine fact like the account registry, never personal and never sent to a
+   * central. Read only through `sanitizeAgendas`: the file is hand-editable. The whole map is PUT.
+   */
+  accountAgenda?: Record<string, AccountAgenda>
   /** Saved comparisons — N filter scopes the user asks about repeatedly, and which of them are
    *  pinned to the Home page. Local only, same as `billing`. */
   comparisons?: SavedComparison[]

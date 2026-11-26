@@ -9,7 +9,7 @@ import { readFleet as realReadFleet, runFleetAction as realRunFleetAction } from
 import { loadTaskWorld as realLoadTaskWorld } from './sessions/task-source'
 import { newEventId as realNewEventId, type TaskEvent } from './sessions/task-model'
 import { sseEncoder, sseClients as realSseClients } from './sse'
-import { awayActive, planBudget, planPace, parseAwayState, windowRenewed, type HarnessId, type PlanLimits, type PlanBudget, type PlanPace } from '@agentistics/core'
+import { awayActive, planBudget, sanitizeAgendas, planPace, parseAwayState, windowRenewed, type HarnessId, type PlanLimits, type PlanBudget, type PlanPace } from '@agentistics/core'
 import { harnessEnabled } from './adapters/types'
 import { createHash } from 'node:crypto'
 import { isClosedRow } from './sessions/fleet-events'
@@ -90,7 +90,8 @@ const defaultDeps: CheckinDeps = {
   readCheckinActivity: defaultCheckinActivity,
   readCheckinLimits: async now => {
     const { planLimitsPayload } = await import('./plan-limits')
-    const { limits, registered, budgets } = await planLimitsPayload((await deps.readPreferences()).billing, now)
+    const prefs = await deps.readPreferences()
+    const { limits, registered, budgets } = await planLimitsPayload(prefs.billing, now, undefined, sanitizeAgendas(prefs.accountAgenda))
     return { registered, limits: checkinAccountLimits(limits, budgets, now) }
   },
   readCheckinRelease: async () => {

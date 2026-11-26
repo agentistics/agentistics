@@ -10,9 +10,15 @@ import { HARNESS_LABELS } from '@agentistics/core'
 export interface SwitchOption { id: string; harness: string; label: string; plan?: string; recommended?: boolean }
 
 /** Why an account is not a target (the server's code; `accountPicker.ts` words it). */
-export type SwitchUnavailableReason = 'not_agentic' | 'signed_out' | 'cant_carry' | 'harness_unavailable' | 'unavailable'
+export type SwitchUnavailableReason =
+  | 'not_agentic' | 'signed_out' | 'cant_carry' | 'harness_unavailable' | 'unavailable'
+  | 'outside_schedule' | 'over_cap'
 
-export interface SwitchUnavailable { id: string; harness: string; label: string; plan?: string; reason: SwitchUnavailableReason }
+export interface SwitchUnavailable {
+  id: string; harness: string; label: string; plan?: string; reason: SwitchUnavailableReason
+  /** CONTA.AGENDA: the server's words for an agenda hold, with when the account returns. */
+  note?: { pt: string; en: string }
+}
 
 export interface SwitchInfo {
   ok: boolean
@@ -24,6 +30,8 @@ export interface SwitchInfo {
   unavailable?: SwitchUnavailable[]
   /** The conversation's last turn was refused by the account's usage limit. */
   limit: { resetsAt?: number; message?: string; pendingPreview?: string } | null
+  /** CONTA.AGENDA: the session's own account is held by its agenda now; `note` says why and until when. */
+  held?: { reason: 'outside_schedule' | 'over_cap'; note: { pt: string; en: string } }
 }
 
 /** `ended` + `endedId`: the session WAS ended and could not be given back — the row to Reopen. */
@@ -72,8 +80,12 @@ export function switchHarnesses(info: SwitchInfo): string[] {
 export const isHandoff = (info: SwitchInfo, harness: string | undefined): boolean =>
   !!harness && !!info.current?.harness && harness !== info.current.harness
 
-/** The notice is shown only when there is somewhere to go. */
-export const showLimitNotice = (info: SwitchInfo | null): boolean => !!info?.supported && !!info.limit && info.options.length > 0
+/**
+ * The notice is shown only when there is somewhere to go — except for an agenda hold, which is said
+ * even with no allowed account left (the band then says so, with no button).
+ */
+export const showLimitNotice = (info: SwitchInfo | null): boolean =>
+  !!info?.supported && ((!!info.limit && info.options.length > 0) || !!info.held)
 
 /** The menu item exists only when there is somewhere to go. */
 export const canSwitch = (info: SwitchInfo | null): boolean => !!info?.supported && info.options.length > 0
@@ -89,9 +101,25 @@ export function resetPhrase(resetsAt: number | undefined, pt: boolean, now = Dat
 }
 
 export function noticeTitle(info: SwitchInfo, pt: boolean): string {
+  if (info.held && !info.limit) {
+    const where0 = info.options.find(o => o.id === defaultTarget(info.options))
+    if (!info.options.length) {
+      return pt ? 'Esta conta saiu do uso por agentes e nenhuma outra está liberada agora' : 'This account left agent use and no other account is allowed right now'
+    }
+    const at = info.options.length === 1 && where0
+      ? `${where0.label}${isHandoff(info, where0.harness) ? ` (${harnessName(where0.harness)})` : ''}`
+      : (pt ? 'outra conta' : 'another account')
+    return pt ? `Esta conta saiu do uso por agentes — continuar na ${at}?` : `This account left agent use — continue on ${at}?`
+  }
   const target = info.options.find(o => o.id === defaultTarget(info.options))
   const where = info.options.length === 1 && target
     ? `${target.label}${isHandoff(info, target.harness) ? ` (${harnessName(target.harness)})` : ''}`
     : (pt ? 'outra conta' : 'another account')
   return pt ? `Esta conta bateu o limite — continuar na ${where}?` : `This account hit its limit — continue on ${where}?`
+}
+
+/** The band's second line for an agenda hold: the agenda's own words ("Fora da agenda dos agentes — volta qui 15:00"). */
+export function heldPhrase(info: SwitchInfo | null, pt: boolean): string {
+  const t = info?.held?.note[pt ? 'pt' : 'en'] ?? ''
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : ''
 }

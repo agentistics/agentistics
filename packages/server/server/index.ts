@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises'
 import { PORT, WEB_PORT, TEAM_CENTRAL, TEAM_PASSWORD, TEAM_ORG, INGEST_ONLY } from './config'
 import type { Server, ServerWebSocket } from 'bun'
 import type { LiveProcess, LiveUnavailableReason, SessionMeta } from '@agentistics/core'
-import { featureOn } from '@agentistics/core'
+import { featureOn, sanitizeAgendas } from '@agentistics/core'
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { sendTelemetry } from './telemetry'
@@ -274,6 +274,8 @@ if (!TEAM_CENTRAL) {
     })
     // A record another agentop process wrote (it holds no sink) reaches the browser through the file.
     pl.watchPlanLimitsFile()
+    // CONTA.AGENDA: ring the bell when an account leaves agent use (outside its schedule / at its cap).
+    void import('./account-agenda').then(m => m.startAgendaWatch(n => sse.broadcastNotification({ type: 'warning', code: n.code, meta: n.meta }))).catch(() => {})
     // TUI claude sessions emit no stream-json: read the subscription usage Claude Code's /usage reads.
     void import('./claude-usage').then(m => m.startClaudeUsagePoll()).catch(() => {})
     return pl.seedPlanLimits(sd.STRUCTURED_DIR)
@@ -800,7 +802,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           .flatMap(s => [s.id, ...(s.conversationId ? [s.conversationId] : []), ...(s.conversationStoreId ? [s.conversationStoreId] : [])]))
         liveSessions = await sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByAccount, working)
       }
-      const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, freeSlotsByAccount: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
+      const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, freeSlotsByAccount: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions, sanitizeAgendas(prefs.accountAgenda))
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {

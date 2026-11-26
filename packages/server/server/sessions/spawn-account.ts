@@ -40,6 +40,12 @@ export interface SpawnAccountRow {
   available: boolean
   retired?: boolean
   firstSeen?: number
+  /**
+   * CONTA.AGENDA: set when the account's agenda keeps AGENTS off it right now (outside its schedule,
+   * or at its usage cap). Binds agents only, exactly like `available: false`; the words are the
+   * already-composed reason (`agendaReasonText`) for both languages.
+   */
+  agentBlock?: { reason: 'outside_schedule' | 'over_cap'; note: { pt: string; en: string } }
 }
 
 /** The account a spawn runs on. `root: null` adds nothing to the spawn. */
@@ -47,10 +53,11 @@ export interface SpawnAccount { id: string; root: string | null }
 
 export type SpawnAccountRefusal =
   | 'accounts_disabled' | 'unknown_account' | 'account_unavailable' | 'account_retired' | 'account_signed_out'
+  | 'account_outside_schedule' | 'account_over_cap'
 
 export type SpawnAccountDecision =
   | { ok: true; account?: SpawnAccount }
-  | { ok: false; reason: SpawnAccountRefusal; detail: string }
+  | { ok: false; reason: SpawnAccountRefusal; detail: string; note?: { pt: string; en: string } }
 
 export interface SpawnAccountContext {
   /** `featureOn('multi-account')`. */
@@ -62,6 +69,7 @@ export interface SpawnAccountContext {
 
 const REFUSALS: readonly string[] = [
   'accounts_disabled', 'unknown_account', 'account_unavailable', 'account_retired', 'account_signed_out',
+  'account_outside_schedule', 'account_over_cap',
 ] satisfies SpawnAccountRefusal[]
 // The tui's structural copy (`AccountRefusalCode`) must stay the same set, in both directions.
 const _sameRefusals: [SpawnAccountRefusal, AccountRefusalCode] = [] as unknown as [AccountRefusalCode, SpawnAccountRefusal]
@@ -69,7 +77,13 @@ void _sameRefusals
 export const isAccountRefusal = (reason: string): reason is SpawnAccountRefusal => REFUSALS.includes(reason)
 
 const visible = (a: SpawnAccountRow) => a.available && !a.retired
-const usable = (a: SpawnAccountRow) => visible(a) && a.bound
+/** May an agent take this account NOW: visible and not held by its agenda. */
+const agentOk = (a: SpawnAccountRow) => visible(a) && !a.agentBlock
+/** The refusal an agenda hold produces for an agent. */
+const agendaRefusal = (a: SpawnAccountRow): SpawnAccountDecision => ({
+  ok: false, reason: a.agentBlock!.reason === 'over_cap' ? 'account_over_cap' : 'account_outside_schedule', detail: a.id, note: a.agentBlock!.note,
+})
+const usable = (a: SpawnAccountRow) => agentOk(a) && a.bound
 const at = (a: SpawnAccountRow): SpawnAccount => ({ id: a.id, root: a.root })
 /** The account signed in to the harness's DEFAULT root, if the registry knows it. */
 const homeOf = (mine: readonly SpawnAccountRow[]) => mine.find(a => a.bound && a.root === null && !a.retired)
@@ -87,7 +101,8 @@ const defaultLoginOf = (mine: readonly SpawnAccountRow[]) => mine.find(a => a.bo
  */
 function defaultRootCheck(mine: readonly SpawnAccountRow[], agentCaller: boolean): SpawnAccountDecision {
   const login = defaultLoginOf(mine)
-  return agentCaller && login && !visible(login) ? { ok: false, reason: 'account_unavailable', detail: login.id } : { ok: true }
+  if (agentCaller && login && !visible(login)) return { ok: false, reason: 'account_unavailable', detail: login.id }
+  return agentCaller && login?.agentBlock ? agendaRefusal(login) : { ok: true }
 }
 
 /**
@@ -111,6 +126,7 @@ export function decideSpawnAccount(input: {
     if (agentCaller && !visible(found)) return { ok: false, reason: 'account_unavailable', detail: requested }
     if (found.retired) return { ok: false, reason: 'account_retired', detail: requested }
     if (!found.bound) return { ok: false, reason: 'account_signed_out', detail: requested }
+    if (agentCaller && found.agentBlock) return agendaRefusal(found)
     return { ok: true, account: at(found) }
   }
   const live = mine.filter(a => !a.retired)
@@ -119,7 +135,7 @@ export function decideSpawnAccount(input: {
   const routed = picked ? live.find(a => a.id === picked && usable(a)) : undefined
   if (routed) return { ok: true, account: at(routed) }
   const home = homeOf(live)
-  if (home && visible(home)) return { ok: true, account: at(home) }
+  if (home && agentOk(home)) return { ok: true, account: at(home) }
   // A visible account signed in to a SECONDARY root comes before an unregistered (or hidden) default.
   const other = live.filter(usable).sort((a, b) => (a.firstSeen ?? 0) - (b.firstSeen ?? 0))[0]
   if (other) return { ok: true, account: at(other) }
@@ -130,11 +146,12 @@ export function decideSpawnAccount(input: {
   // NO binding names the default root's login: that root runs exactly as before accounts existed.
   // Refusing here blocked every agent spawn of that harness (2.140.5). A default root another
   // (hidden) login holds is still refused below.
-  const signedOut = live.find(visible)
+  const signedOut = live.find(a => agentOk(a) && !a.bound)
   if (signedOut && !defaultLoginOf(mine)) return { ok: true }
-  return signedOut
-    ? { ok: false, reason: 'account_signed_out', detail: signedOut.id }
-    : { ok: false, reason: 'account_unavailable', detail: (home ?? live[0]!).id }
+  if (signedOut) return { ok: false, reason: 'account_signed_out', detail: signedOut.id }
+  // Every visible account is held by its agenda: say the agenda (the one that reopens soonest first).
+  const held = (home && visible(home) && home.agentBlock ? home : undefined) ?? live.find(a => visible(a) && a.agentBlock)
+  return held ? agendaRefusal(held) : { ok: false, reason: 'account_unavailable', detail: (home ?? live[0]!).id }
 }
 
 /**
@@ -156,6 +173,7 @@ export function decideRecordedAccount(
   if (found.retired) return { ok: false, reason: 'account_retired', detail: accountId }
   if (agentCaller && !found.available) return { ok: false, reason: 'account_unavailable', detail: accountId }
   if (!found.bound) return { ok: false, reason: 'account_signed_out', detail: accountId }
+  if (agentCaller && found.agentBlock) return agendaRefusal(found)
   return { ok: true, account: at(found) }
 }
 
@@ -178,13 +196,23 @@ export function routerPicks(budgets: readonly AccountBudget[]): Partial<Record<H
 
 /** HTTP status of a refusal: an agent kept off an account is 403, the rest are the caller's input. */
 export function spawnAccountStatus(reason: SpawnAccountRefusal): 403 | 409 | 422 {
-  return reason === 'account_unavailable' ? 403 : reason === 'account_retired' || reason === 'account_signed_out' ? 409 : 422
+  return reason === 'account_unavailable' || reason === 'account_outside_schedule' || reason === 'account_over_cap' ? 403 : reason === 'account_retired' || reason === 'account_signed_out' ? 409 : 422
 }
 
 /** The sentence for a refusal, in the caller's language. */
-export function spawnAccountMessage(reason: SpawnAccountRefusal, detail: string, lang: 'en' | 'pt', reopen = false): string {
+export function spawnAccountMessage(reason: SpawnAccountRefusal, detail: string, lang: 'en' | 'pt', reopen = false, note?: { pt: string; en: string }): string {
   const pt = lang === 'pt'
   switch (reason) {
+    case 'account_outside_schedule':
+    case 'account_over_cap': {
+      const why = note?.[lang] ?? (reason === 'account_over_cap'
+        ? (pt ? 'no teto de uso dos agentes' : 'at its agent usage cap')
+        : (pt ? 'fora da agenda dos agentes' : 'outside its agent schedule'))
+      const tail = reopen
+        ? (pt ? ' Só o dono pode reabrir esta conversa nela agora.' : ' Only the owner can reopen this conversation on it now.')
+        : (pt ? ' Escolha outra conta ou deixe o roteador escolher.' : ' Pick another account or let the router choose.')
+      return (pt ? `A conta "${detail}" está ${why}.` : `Account "${detail}" is ${why}.`) + tail
+    }
     case 'accounts_disabled':
       return pt ? `Várias contas não estão ativadas nesta máquina, então a conta "${detail}" não pode ser escolhida.`
         : `Multiple accounts are not enabled on this machine, so account "${detail}" cannot be chosen.`

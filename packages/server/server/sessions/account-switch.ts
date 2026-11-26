@@ -122,7 +122,7 @@ export function switchOptions(o: {
   for (const a of o.context.accounts) {
     if (a.harness !== o.harness || a.id === current) continue
     const ok = decideSpawnAccount({ harness: o.harness, requested: a.id, agentCaller: o.agentCaller, context: o.context })
-    if (!ok.ok || !a.available) continue
+    if (!ok.ok || !a.available || a.agentBlock) continue
     const m = o.meta.find(x => x.id === a.id)
     out.push({ id: a.id, harness: o.harness, label: m?.label ?? a.id, ...(m?.plan ? { plan: m.plan } : {}), ...(picked === a.id ? { recommended: true } : {}) })
   }
@@ -156,7 +156,7 @@ export function allSwitchOptions(o: {
     const picked = o.context.picks?.[h]
     const mine: SwitchOption[] = []
     for (const a of o.context.accounts) {
-      if (a.harness !== h || a.retired || !a.bound || !a.available) continue
+      if (a.harness !== h || a.retired || !a.bound || !a.available || a.agentBlock) continue
       const ok = decideSpawnAccount({ harness: h, requested: a.id, agentCaller: o.agentCaller, context: o.context })
       if (!ok.ok) continue
       const m = o.meta.find(x => x.id === a.id)
@@ -168,9 +168,15 @@ export function allSwitchOptions(o: {
 }
 
 /** Why an account of this machine is NOT among a session's switch targets (CONTA.LIMITES). */
-export type SwitchUnavailableReason = 'not_agentic' | 'signed_out' | 'cant_carry' | 'harness_unavailable' | 'unavailable'
+export type SwitchUnavailableReason =
+  | 'not_agentic' | 'signed_out' | 'cant_carry' | 'harness_unavailable' | 'unavailable'
+  | 'outside_schedule' | 'over_cap'
 
-export interface SwitchUnavailable extends Omit<SwitchOption, 'recommended'> { reason: SwitchUnavailableReason }
+export interface SwitchUnavailable extends Omit<SwitchOption, 'recommended'> {
+  reason: SwitchUnavailableReason
+  /** CONTA.AGENDA: the agenda's own words for `outside_schedule` / `over_cap` (when it returns). */
+  note?: { pt: string; en: string }
+}
 
 /**
  * Every live account that `allSwitchOptions` did NOT offer, each with the one reason a person can act
@@ -198,9 +204,13 @@ export function unavailableSwitchTargets(o: {
         : a.harness !== o.harness && !o.startable.includes(a.harness) ? 'harness_unavailable'
           : !a.available ? 'not_agentic'
             : !a.bound ? 'signed_out'
-              : 'unavailable'
+              : a.agentBlock ? a.agentBlock.reason
+                : 'unavailable'
     const m = o.meta.find(x => x.id === a.id)
-    out.push({ id: a.id, harness: a.harness, label: m?.label ?? a.id, ...(m?.plan ? { plan: m.plan } : {}), reason })
+    out.push({
+      id: a.id, harness: a.harness, label: m?.label ?? a.id, ...(m?.plan ? { plan: m.plan } : {}), reason,
+      ...(reason === a.agentBlock?.reason ? { note: a.agentBlock.note } : {}),
+    })
   }
   return out.sort((x, y) => rank(x.harness) - rank(y.harness) || (firstSeen(o.context.accounts, x.id) - firstSeen(o.context.accounts, y.id)))
 }
@@ -230,6 +240,8 @@ export function decideCrossSwitch(o: {
   if (!target.ok) return { ok: false, reason: target.reason, detail: target.detail }
   if (!target.account) return { ok: false, reason: 'unknown_account', detail: o.requested }
   if (o.context.accounts.find(a => a.id === o.requested)?.available === false) return { ok: false, reason: 'account_unavailable', detail: o.requested }
+  const held = o.context.accounts.find(a => a.id === o.requested)?.agentBlock
+  if (held) return { ok: false, reason: held.reason === 'over_cap' ? 'account_over_cap' : 'account_outside_schedule', detail: o.requested }
   return { ok: true, target: target.account }
 }
 
@@ -346,6 +358,9 @@ export function decideSwitch(o: {
   // An account switched OFF is refused for the owner too: the switch moves running work onto it, and
   // "off" is the owner's own statement that work should not land there.
   if (o.context.accounts.find(a => a.id === o.requested)?.available === false) return { ok: false, reason: 'account_unavailable', detail: o.requested }
+  // CONTA.AGENDA: the same holds for an account its agenda keeps agents off right now.
+  const held = o.context.accounts.find(a => a.id === o.requested)?.agentBlock
+  if (held) return { ok: false, reason: held.reason === 'over_cap' ? 'account_over_cap' : 'account_outside_schedule', detail: o.requested }
   // The row's own root: its recorded account must still resolve to a place on disk to copy FROM.
   const source = decideRecordedAccount(o.currentAccountId, o.context.accounts)
   if (!source.ok && source.reason !== 'account_unavailable') return { ok: false, reason: source.reason, detail: source.detail }
@@ -356,7 +371,7 @@ export function decideSwitch(o: {
 
 /** HTTP status of a switch refusal. */
 export function switchStatus(reason: SwitchRefusal): 403 | 404 | 409 | 422 {
-  if (reason === 'account_unavailable') return 403
+  if (reason === 'account_unavailable' || reason === 'account_outside_schedule' || reason === 'account_over_cap') return 403
   if (reason === 'no_target') return 404
   if (reason === 'account_retired' || reason === 'account_signed_out' || reason === 'not_running_here' || reason === 'no_transcript') return 409
   return 422

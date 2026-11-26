@@ -1,6 +1,6 @@
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { accountRoots, type AccountRootsDeps } from './account-roots'
-import { listHarnessAccounts, setAccountAvailable, updateAccount } from './harness-accounts'
+import { listHarnessAccounts, readAccounts, setAccountAvailable, updateAccount } from './harness-accounts'
 
 /** Mounted after the same capability, CSRF and auth gates as billing detection. */
 export async function handleAccountsRequest(
@@ -45,6 +45,31 @@ export async function handleAccountsRequest(
     return out.ok ? json(out) : json({ error: out.reason, message: out.message }, out.status)
   }
   if (path === '/api/accounts' && req.method === 'GET') return json({ accounts: await listHarnessAccounts(harnesses) })
+  // CONTA.AGENDA — when and how much agents may use each account. GET: every stored agenda and its
+  // verdict now; PUT /api/accounts/<id>/agenda: replace one account's agenda (`null` removes it).
+  if (path === '/api/accounts/agenda') {
+    if (req.method !== 'GET') return json({ error: 'Method not allowed' }, 405)
+    const { readAgendas, currentAgendaVerdicts } = await import('./account-agenda')
+    const registry = await readAccounts().catch(() => null)
+    return json({ agendas: await readAgendas(), verdicts: await currentAgendaVerdicts(registry), now: Date.now() })
+  }
+  const agendaMatch = /^\/api\/accounts\/([^/]+)\/agenda$/.exec(path)
+  if (agendaMatch) {
+    if (req.method !== 'PUT') return json({ error: 'Method not allowed' }, 405)
+    if (!(req.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) return json({ error: 'Expected application/json' }, 415)
+    let id: string, body: { agenda?: unknown } | null
+    try {
+      id = decodeURIComponent(agendaMatch[1]!)
+      body = await req.json()
+    } catch { return json({ error: 'Invalid request' }, 400) }
+    if (!body || typeof body !== 'object' || Array.isArray(body) || !('agenda' in body)) return json({ error: 'Expected { agenda }' }, 400)
+    const registry = await readAccounts().catch(() => null)
+    if (!registry?.accounts.some(a => a.id === id)) return json({ error: 'Account not found' }, 404)
+    const { writeAgenda, currentAgendaVerdicts } = await import('./account-agenda')
+    const agenda = await writeAgenda(id, body.agenda ?? null)
+    const verdict = (await currentAgendaVerdicts(registry))[id] ?? null
+    return json({ agenda, verdict })
+  }
   const idMatch = /^\/api\/accounts\/([^/]+)$/.exec(path)
   if (idMatch) {
     if (req.method !== 'PATCH') return json({ error: 'Method not allowed' }, 405)

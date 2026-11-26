@@ -315,3 +315,25 @@ describe('start failure sentences', () => {
     expect(switchFallbackMessage('', 'pt')).toBe('A sessão não iniciou na outra conta; ela continua na conta de antes.')
   })
 })
+
+describe('CONTA.AGENDA in the switch', () => {
+  const note = { pt: 'fora da agenda dos agentes — volta qui 15:00', en: 'outside its agent schedule — back Thu 15:00' }
+  const held = row({ id: 'acc_b', root: '/r/b', firstSeen: 2, agentBlock: { reason: 'outside_schedule', note } })
+  const capped = row({ id: 'acc_c', root: '/r/c', firstSeen: 3, agentBlock: { reason: 'over_cap', note } })
+  const accounts = [row({ id: 'acc_a', root: null }), held, capped]
+  const base = { harness: 'claude' as const, currentAccountId: 'acc_a', meta: [], agentCaller: false }
+
+  test('a held account is never offered, even to the owner (a switch moves agent work)', () => {
+    expect(switchOptions({ ...base, context: ctx(accounts) })).toEqual([])
+    expect(allSwitchOptions({ ...base, context: ctx(accounts), startable: ['claude'] })).toEqual([])
+  })
+  test('it is listed as unavailable with the agenda reason and its words', () => {
+    const out = unavailableSwitchTargets({ ...base, context: ctx(accounts), startable: ['claude'], offered: [] })
+    expect(out.map(o => [o.id, o.reason])).toEqual([['acc_b', 'outside_schedule'], ['acc_c', 'over_cap']])
+    expect(out[0]!.note).toEqual(note)
+  })
+  test('a switch onto it is refused 403', () => {
+    const d = decideSwitch({ harness: 'claude', conversationId: 'c1', running: true, currentAccountId: 'acc_a', requested: 'acc_c', agentCaller: false, context: ctx(accounts) })
+    expect(d).toEqual({ ok: false, reason: 'account_over_cap', detail: 'acc_c' })
+  })
+})

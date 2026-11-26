@@ -35,7 +35,11 @@ const REASON: Record<SwitchUnavailableReason, { pt: string; en: string }> = {
   cant_carry: { pt: 'Este assistente não leva a conversa para outra conta', en: "This assistant can't carry the conversation to another account" },
   harness_unavailable: { pt: 'Não encontrado neste computador', en: 'Not found on this computer' },
   unavailable: { pt: 'Indisponível agora', en: 'Unavailable right now' },
+  outside_schedule: { pt: 'Fora da agenda dos agentes', en: 'Outside its agent schedule' },
+  over_cap: { pt: 'No teto de uso dos agentes', en: 'At its agent usage cap' },
 }
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 export const unavailableReason = (r: SwitchUnavailableReason, lang: Lang): string => (REASON[r] ?? REASON.unavailable)[lang]
 
@@ -109,7 +113,7 @@ export function pickerRows(info: SwitchInfo, limits: readonly PlanLimits[] | nul
     const plan = planDisplayName(u.harness, u.plan, l)
     rows.push({
       key: `${u.harness}:${u.id}`, id: u.id, harness: u.harness, label: nameOf(u.id, u.label), ...(plan ? { plan } : {}), limits: l,
-      kind: 'disabled', reason: unavailableReason(u.reason, lang), handoff: isHandoff(info, u.harness),
+      kind: 'disabled', reason: u.note?.[lang] ? capitalize(u.note[lang]) : unavailableReason(u.reason, lang), handoff: isHandoff(info, u.harness),
     })
   }
   return rows

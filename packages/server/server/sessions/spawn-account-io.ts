@@ -4,7 +4,7 @@
  * plan-limits budgets. Every door (`/api/fleet/new`, `agentop session start|batch`, every reopen)
  * reads its context here, so none of them can grow a second idea of which accounts exist.
  */
-import { featureOn, type HarnessId } from '@agentistics/core'
+import { featureOn, sanitizeAgendas, type HarnessId } from '@agentistics/core'
 import { readAccounts, type AccountsFile } from '../harness-accounts'
 import {
   decideRecordedAccount, decideSpawnAccount, routerPicks, spawnAccountMessage, type SpawnAccountContext, type SpawnAccountDecision, type SpawnAccountRefusal, type SpawnAccountRow,
@@ -44,8 +44,17 @@ export function newestRowOfConversation<T extends { conversationId?: string; har
 }
 
 /** The registry as spawn rows. An unreadable registry is NO accounts (the default root), never a throw. */
-export async function spawnAccountRows(): Promise<SpawnAccountRow[]> {
-  try { return spawnRowsOf(await readAccounts()) } catch { return [] }
+export async function spawnAccountRows(nowMs = Date.now()): Promise<SpawnAccountRow[]> {
+  let file: AccountsFile
+  try { file = await readAccounts() } catch { return [] }
+  const rows = spawnRowsOf(file)
+  // CONTA.AGENDA: an account its agenda keeps agents off right now carries the block (agents only).
+  const { agentBlockOf, currentAgendaVerdicts } = await import('../account-agenda')
+  const verdicts = await currentAgendaVerdicts(file, nowMs).catch(() => ({}))
+  return rows.map(r => {
+    const block = agentBlockOf((verdicts as Record<string, Parameters<typeof agentBlockOf>[0]>)[r.id], nowMs)
+    return block ? { ...r, agentBlock: block } : r
+  })
 }
 
 /**
@@ -63,7 +72,8 @@ export async function spawnAccountContext(
   if (!several.length) return { enabled: true, accounts }
   try {
     const [{ planLimitsPayload }, { readPreferences }] = await Promise.all([import('../plan-limits'), import('../preferences')])
-    const payload = await planLimitsPayload((await readPreferences()).billing)
+    const prefs = await readPreferences()
+    const payload = await planLimitsPayload(prefs.billing, undefined, undefined, sanitizeAgendas(prefs.accountAgenda))
     return { enabled: true, accounts, picks: routerPicks(payload.budgets) }
   } catch {
     return { enabled: true, accounts }
@@ -100,6 +110,6 @@ export async function hostSpawnAccount(req: {
   const decided = decideSpawnAccount({
     harness: req.harness, agentCaller: req.callerVerified === true, context: await spawnAccountContext([req.harness]),
   })
-  if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang), reason: decided.reason }
+  if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang, false, decided.note), reason: decided.reason }
   return { ok: true, ...(decided.account ? { accountId: decided.account.id } : {}) }
 }

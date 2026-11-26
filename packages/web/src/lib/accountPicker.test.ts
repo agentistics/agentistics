@@ -88,3 +88,15 @@ describe('names shared with the plan list (CONTA.P3)', () => {
     expect(accountDisplayName('claude', 'acc_z', undefined, {})).toBe('Claude Code')
   })
 })
+
+describe('CONTA.AGENDA', () => {
+  const note = { pt: 'fora da agenda dos agentes — volta qui 15:00', en: 'outside its agent schedule — back Thu 15:00' }
+  const held: SwitchInfo = { ...info, unavailable: [{ id: 'acc_n', harness: 'claude', label: 'Nayara', reason: 'outside_schedule', note }] }
+  test('a held account is a disabled row that says why and when it returns', () => {
+    const row = pickerRows(held, [], now, 'pt').find(r => r.id === 'acc_n')!
+    expect(row).toMatchObject({ kind: 'disabled', reason: 'Fora da agenda dos agentes — volta qui 15:00' })
+  })
+  test('without the server words the reason code still reads', () => {
+    expect(unavailableReason('over_cap', 'en')).toBe('At its agent usage cap')
+  })
+})
