@@ -86,16 +86,32 @@ export function HandoffMeter({ id, pt, act }: { id: string; pt: boolean; act: Se
     return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', closePopover, true) }
   }, [id, state.popover])
   if (!p) return null
-  const collapsed = state.collapsed && (p.level === 'due' || p.level === 'overdue') && p.config.warnings[p.level]
+  // The crown always answers: it opens the panel (and brings a dismissed band back). It used to only expand a dismissed
+  // band, and while a hand-off was in progress it set `open` on a panel gated off — the owner's click did nothing.
   return <>
-    <LeaderMeterButton panel={p} pt={pt} buttonRef={anchor} onClick={() => collapsed ? actions.expand(id) : actions.open(id)} />
+    <LeaderMeterButton panel={p} pt={pt} buttonRef={anchor} onClick={() => { if (state.collapsed) actions.expand(id); actions.open(id) }} />
     {state.popover && !p.handoff && createPortal(<div className="handoff-popover" role="status" style={{ top: position.top, left: position.left, '--handoff-tone': LEADER_METER_TONE[leaderMeterState(p.level, p.contextTokens)] } as CSSProperties}>
       <strong>{handoffPanelLabel(p, pt)}</strong>
       <HandoffPopoverCopy panel={p} pt={pt} />
       <div className="handoff-actions"><button type="button" className="primary" onClick={() => actions.open(id)}>{pt ? 'Ver as contas' : 'See the numbers'}</button><button type="button" onClick={closePopover}>Ok</button></div>
     </div>, document.body)}
-    <HandoffLivePanel panel={p} open={state.open && !p.handoff} pt={pt} act={act} />
+    <HandoffLivePanel panel={p} open={state.open} pt={pt} act={act} />
   </>
+}
+
+export function handoffStageLabel(stage: NonNullable<HandoffPanel['handoff']>['stage'], pt: boolean): string {
+  return ({ preparing: pt ? 'Preparando a passagem' : 'Preparing the handoff', 'successor-open': pt ? 'Sucessor aberto' : 'Successor opened', 'taken-over': pt ? 'Sucessor assumiu' : 'Successor took over', closing: pt ? 'Encerrando este líder' : 'Closing this leader' })[stage]
+}
+
+/** The hand-off in progress, inside the panel: the same stage words and bar as the composer band, and the successor. */
+function HandoffProgress({ handoff: h, pt }: { handoff: NonNullable<HandoffPanel['handoff']>; pt: boolean }) {
+  // The panel's title already says "hand-off in progress"; the block leads with the stage.
+  return <div className="handoff-progress-status" role="status">
+    <strong>{handoffStageLabel(h.stage, pt)}</strong>
+    <div className="handoff-progress-track"><ProgressBar percent={h.progress * 100} label={pt ? 'Passagem em andamento' : 'Handoff in progress'} height={5} color="var(--anthropic-orange)" /></div>
+    {h.stage === 'preparing' && <p>{pt ? 'O líder recebeu o pedido e ainda não abriu o sucessor. Se ele não reagiu, peça de novo.' : 'The leader got the request and has not opened the successor yet. If it did not react, ask again.'}</p>}
+    {h.successorId && <Link className="handoff-successor" to={sessionPath(h.successorId)}>{pt ? 'Ver sucessor' : 'View successor'}</Link>}
+  </div>
 }
 
 export function HandoffBand({ id, pt }: { id: string; pt: boolean }) {
@@ -113,7 +129,7 @@ export function HandoffBandView({ id, panel: p, collapsed = false, pt }: { id: s
       {p?.handoff ? <>
         <div className="handoff-band-copy" role="status">
           <strong>{pt ? 'Passagem em andamento' : 'Handoff in progress'}</strong>
-          <span>{({ preparing: pt ? 'Preparando a passagem' : 'Preparing the handoff', 'successor-open': pt ? 'Sucessor aberto' : 'Successor opened', 'taken-over': pt ? 'Sucessor assumiu' : 'Successor took over', closing: pt ? 'Encerrando este líder' : 'Closing this leader' })[p.handoff.stage]}</span>
+          <span>{handoffStageLabel(p.handoff.stage, pt)}</span>
           <div className="handoff-progress-track"><ProgressBar percent={p.handoff.progress * 100} label={pt ? 'Passagem em andamento' : 'Handoff in progress'} height={5} color="var(--handoff-tone)" /></div>
         </div>
         {p.handoff.successorId && <Link className="handoff-successor" to={sessionPath(p.handoff.successorId)}>{pt ? 'Ver sucessor' : 'View successor'}</Link>}
@@ -141,6 +157,11 @@ export function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPa
     return () => window.removeEventListener('agentistics:handoff-confirm', ask)
   }, [p.sessionId])
   useEffect(() => { if (!open) { setConfirm(false); setError('') } }, [open])
+  // The successor opened while the owner was confirming: there is nothing left to confirm.
+  const canAsk = !p.handoff || p.handoff.stage === 'preparing'
+  useEffect(() => { if (!canAsk) setConfirm(false) }, [canAsk])
+  const running = !!p.handoff
+  const noReading = p.contextTokens === null
   async function handoff() {
     setSending(true); setError('')
     try {
@@ -156,11 +177,18 @@ export function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPa
   }
   const labels = { continue: pt ? 'Continuar aqui' : 'Continue here', extra: pt ? `Continuar +${p.config.extraPercent}%` : `Continue +${p.config.extraPercent}%`, handoff: pt ? 'Passar para uma sessão nova' : 'Hand off to a new session' }
   return createPortal(<ConfirmModal focusPanel className="handoff-dialog" open={open} maxWidth={640} mobileSheet tone="default" icon={<ArrowRightLeft size={18} />}
-    title={pt ? 'Continuar ou passar o líder?' : 'Continue or hand off the leader?'}
-    message={handoffPanelLabel(p, pt)} confirmLabel="" cancelLabel="" onConfirm={() => {}} onCancel={() => actions.close(p.sessionId)}
-    footer={<div className="handoff-panel-footer">{confirm && <p role="status">{pt ? 'O líder vai preparar a passagem e abrir o sucessor pelo fluxo existente. O trabalho em andamento será registrado no arquivo de passagem.' : 'The leader will prepare the handoff and open the successor through the existing flow. Work in flight will be recorded in the handoff file.'}</p>}<div className="handoff-actions"><button type="button" onClick={() => actions.close(p.sessionId)} disabled={sending}>{pt ? 'Fechar' : 'Close'}</button><button type="button" onClick={() => actions.dismiss(p.sessionId, true)} disabled={sending || p.contextTokens === null}>{pt ? 'Lembrar em +50 mil' : 'Remind me in +50k'}</button><button type="button" className="primary" disabled={sending || p.contextTokens === null} onClick={() => confirm ? void handoff() : setConfirm(true)}>{sending ? (pt ? 'Solicitando…' : 'Requesting…') : confirm ? (pt ? 'Confirmar passagem' : 'Confirm handoff') : (pt ? 'Passar agora' : 'Hand off now')}</button></div></div>}>
+    title={running ? (pt ? 'Passagem em andamento' : 'Handoff in progress') : (pt ? 'Continuar ou passar o líder?' : 'Continue or hand off the leader?')}
+    // The state line is the context level; during a hand-off the stage block says it, and with no reading the paragraph below does.
+    message={running || noReading ? '' : handoffPanelLabel(p, pt)} confirmLabel="" cancelLabel="" onConfirm={() => {}} onCancel={() => actions.close(p.sessionId)}
+    footer={<div className="handoff-panel-footer">{confirm && canAsk && <p role="status">{pt ? 'O líder vai preparar a passagem e abrir o sucessor pelo fluxo existente. O trabalho em andamento será registrado no arquivo de passagem.' : 'The leader will prepare the handoff and open the successor through the existing flow. Work in flight will be recorded in the handoff file.'}</p>}
+      {/* "Hand off now" is the one action that needs the context reading (its cost numbers); asking again and the reminder do not. */}
+      {noReading && !running && <p role="note">{pt ? '“Passar agora” fica disponível quando houver uma leitura de contexto.' : '“Hand off now” becomes available once there is a context reading.'}</p>}
+      <div className="handoff-actions"><button type="button" onClick={() => actions.close(p.sessionId)} disabled={sending}>{pt ? 'Fechar' : 'Close'}</button>
+        {!running && <button type="button" onClick={() => actions.dismiss(p.sessionId, true)} disabled={sending}>{pt ? 'Lembrar em +50 mil' : 'Remind me in +50k'}</button>}
+        {canAsk && <button type="button" className="primary" disabled={sending || (!running && noReading)} onClick={() => confirm ? void handoff() : setConfirm(true)}>{sending ? (pt ? 'Solicitando…' : 'Requesting…') : confirm ? (pt ? 'Confirmar passagem' : 'Confirm handoff') : running ? (pt ? 'Pedir de novo' : 'Ask again') : (pt ? 'Passar agora' : 'Hand off now')}</button>}</div></div>}>
     <div className="handoff-live-panel">
-      {p.contextTokens === null ? <HandoffNoReading pt={pt} /> : <>
+      {p.handoff && <HandoffProgress handoff={p.handoff} pt={pt} />}
+      {running ? null : noReading ? <HandoffNoReading pt={pt} /> : <>
       <div className="handoff-summary">
         <div><small>{pt ? 'Conversa agora' : 'Context now'}</small><strong>{tokens(p.contextTokens, pt)}</strong><small>{pt ? 'corte: ' : 'cut: '}{tokens(p.cutTokens, pt)}</small></div>
         <div><small>{pt ? 'Já gasto nesta sessão' : 'Spent this session'}</small><strong>{money(p.spentUSD)}</strong><small>{p.replies ?? '—'} {pt ? 'respostas' : 'replies'}</small></div>

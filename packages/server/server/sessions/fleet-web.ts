@@ -532,13 +532,7 @@ export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?:
   }
   const conversations = await loadConversations()
   const file = await findHandoffFile(view.cwd)
-  const successorId = managed.retire?.successorId ?? managed.handoffTo
-  const successor = registry.find(r => r.id === successorId)
-  const successorView = raw.sessions.find(r => r.id === successorId)
-  // A successor may be born between the hub poll and the registry read. Allow its birth grace.
-  const successorGone = !!successorId && !raw.unavailable && (successorView
-    ? ['closed', 'lost', 'exited'].includes(successorView.status) || successorView.activity === 'exited'
-    : !!successor && Date.now() > Date.parse(successor.createdAt) + 30_000)
+  const lifecycle = handoffLifecycleOf(registry, raw, managed)
   return computeHandoffPanel(handoffMetrics({
     harness: view.harness, conversationId: view.conversationId ?? managed.conversationId,
     id, title: managed.label ?? '', leader: true,
@@ -548,10 +542,31 @@ export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?:
     ...(file ? { handoffPath: file.path, handoffBytes: file.bytes } : {}),
     workInFlight: [...(view.activity === 'working' ? ['main-response'] : []), ...(view.background ? ['background-work'] : [])],
   }, conversations), extraPercent !== undefined && Number.isInteger(extraPercent) && extraPercent >= 0 && extraPercent <= 100
-    ? { ...normalizeHandoffConfig(prefs.handoffConfig), extraPercent } : prefs.handoffConfig, quota, Date.now(), {
-    session: managed,
-    successor, successorGone,
-  })
+    ? { ...normalizeHandoffConfig(prefs.handoffConfig), extraPercent } : prefs.handoffConfig, quota, Date.now(), lifecycle)
+}
+
+/** The lifecycle facts the panel and the second-request guard both read: the row, its successor, whether that successor is gone. */
+function handoffLifecycleOf(registry: readonly ManagedSession[], raw: { sessions: readonly { id: string; status?: string; activity?: string }[]; unavailable?: unknown }, managed: ManagedSession): import('./handoff-panel').HandoffLifecycle {
+  const successorId = managed.retire?.successorId ?? managed.handoffTo
+  const successor = registry.find(r => r.id === successorId)
+  const successorView = raw.sessions.find(r => r.id === successorId)
+  // A successor may be born between the hub poll and the registry read. Allow its birth grace.
+  const successorGone = !!successorId && !raw.unavailable && (successorView
+    ? ['closed', 'lost', 'exited'].includes(successorView.status ?? '') || successorView.activity === 'exited'
+    : !!successor && Date.now() > Date.parse(successor.createdAt) + 30_000)
+  return { session: managed, successor, successorGone }
+}
+
+let handoffRawForTest: { sessions: readonly { id: string; status?: string; activity?: string }[]; unavailable?: unknown } | null = null
+/** Test seam: the fleet snapshot the second-request guard reads (the real hub has no process behind a test's rows). */
+export function __setHandoffRawForTest(raw: typeof handoffRawForTest): void { handoffRawForTest = raw }
+/** True when `id` is a leader whose hand-off already has a live successor: a second `handoff:true` prompt would start another. */
+async function handoffAlreadyRunning(id: string): Promise<boolean> {
+  const [registry, raw] = await Promise.all([readRegistry().catch(() => [] as ManagedSession[]), handoffRawForTest ?? fleetSessionHub().then(h => h.read()).catch(() => null)])
+  const managed = registry.find(r => r.id === id)
+  if (!managed) return false
+  const { handoffRunning } = await import('./handoff-panel')
+  return handoffRunning(handoffLifecycleOf(registry, raw ?? { sessions: [] }, managed), Date.now())
 }
 
 /**
@@ -726,6 +741,9 @@ async function runFleetActionOnce(
       // here (`external-continue.ts`): asked once, then the existing takeover ends the process and the
       // same id is resumed with this message as its first prompt.
       if (isExternalRowId(req.id)) return continueExternal(lang, req, text)
+      // A second hand-off request while the first has a live successor would start another successor. While it is only
+      // `preparing` the request can still be repeated — that is how an ignoring leader is asked again.
+      if (req.handoff === true && await handoffAlreadyRunning(req.id)) return { ok: false, message: s.sessionsHandoffRunning }
       // Taken BEFORE the message is typed, so the record can never be stamped later than the turn
       // the harness writes for it — the resolver refuses a record from after the turn it is asked
       // about, and a submit that waits on the pane takes hundreds of milliseconds.
