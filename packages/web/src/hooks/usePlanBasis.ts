@@ -15,6 +15,7 @@ import {
   aggregatePlanBasis,
   computePlanCost,
   localDayFromMs,
+  monthlyCommitment,
   type PlanAccountRef,
   resolvePlanBasis,
   resolveWindow,
@@ -128,6 +129,14 @@ export function computePlanBasisView(args: {
 
   if (parts.length === 0) return { basis: null, window, blocked: 'no-window' }
   return { basis: aggregatePlanBasis(parts), window, blocked: null }
+}
+
+/** What the registered plans commit to the calendar month `nowMs` falls in. */
+export function currentMonthCommitment(
+  args: Omit<Parameters<typeof monthlyCommitment>[0], 'month'>,
+  nowMs: number = Date.now(),
+): ReturnType<typeof monthlyCommitment> {
+  return monthlyCommitment({ ...args, month: localDayFromMs(nowMs)! })
 }
 
 export function usePlanBasis(args: {

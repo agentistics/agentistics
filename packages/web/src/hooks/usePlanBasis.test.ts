@@ -1,5 +1,5 @@
 import { describe, test, expect, setSystemTime } from 'bun:test'
-import { computePlanBasisView } from './usePlanBasis'
+import { computePlanBasisView, currentMonthCommitment } from './usePlanBasis'
 import { AVG_DAYS_PER_MONTH, type ApiCostByDay, type BillingSettings, type Filters } from '@agentistics/core'
 
 const filters: Filters = { dateRange: 'all', customStart: '', customEnd: '', projects: [], models: [] }
@@ -151,6 +151,29 @@ function inZone(zone: string, fn: () => void, now?: string): void {
     process.env.TZ = previous
   }
 }
+
+// The month a budget is set against is the one on the person's calendar, not the UTC one.
+describe('currentMonthCommitment reads the local month', () => {
+  const price = (amount: number) => ({ amount, currency: 'USD' as const })
+  const profiles: BillingSettings['profiles'] = { claude: { periods: [
+    { id: 'nov', mode: 'subscription', planId: 'anthropic-max-5x', price: price(100), from: '2020-01-01', to: '2026-11-30' },
+    { id: 'dec', mode: 'subscription', planId: 'anthropic-max-5x', price: price(200), from: '2026-12-01' },
+  ] } }
+  const november = (100 * 30) / AVG_DAYS_PER_MONTH
+  const december = (200 * 31) / AVG_DAYS_PER_MONTH
+
+  for (const [zone, instant, expected] of [
+    // 30/11 21:30 in Brazil — already December in UTC.
+    ['America/Sao_Paulo', '2026-12-01T00:30:00Z', november],
+    // 01/12 05:00 in Japan — still November in UTC.
+    ['Asia/Tokyo', '2026-11-30T20:00:00Z', december],
+    ['UTC', '2026-11-30T23:30:00Z', november],
+  ] as const) {
+    test(`the last night of a month (${zone})`, () => inZone(zone, () => {
+      expect(currentMonthCommitment({ profiles, brlRate: 5.5 }, Date.parse(instant))!.usd).toBeCloseTo(expected, 9)
+    }))
+  }
+})
 
 // `apiCostByDay` is keyed by LOCAL day, so the window must be cut on the local calendar too.
 describe('computePlanBasisView follows the local calendar', () => {
