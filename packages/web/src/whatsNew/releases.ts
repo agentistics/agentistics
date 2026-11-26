@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.229.5': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Comparação com o plano: o período medido agora é exatamente o que você escolheu no filtro de datas. Fora do fuso UTC ele podia contar um dia a mais, e perto da meia-noite o preset "Hoje" podia usar o dia errado.',
+        en: 'Plan comparison: the measured period is now exactly what you picked in the date filter. Outside UTC it could count one extra day, and near midnight the "Today" preset could use the wrong day.',
+      },
+    ],
+  },
   '2.229.4': {
     features: [],
     fixes: [

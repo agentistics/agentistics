@@ -14,6 +14,7 @@ import { useMemo } from 'react'
 import {
   aggregatePlanBasis,
   computePlanCost,
+  localDayFromMs,
   type PlanAccountRef,
   resolvePlanBasis,
   resolveWindow,
@@ -46,7 +47,7 @@ export interface PlanBasisView {
 const EMPTY: PlanBasisView = { basis: null, window: null, blocked: 'no-window' }
 
 /**
- * @param today injected for tests; defaults to the real UTC day.
+ * @param today injected for tests; defaults to the current local day.
  */
 export function computePlanBasisView(args: {
   apiCostByDay: ApiCostByDay
@@ -58,7 +59,7 @@ export function computePlanBasisView(args: {
   accounts?: readonly PlanAccountRef[]
 }): PlanBasisView {
   const { apiCostByDay, billing, brlRate, filters } = args
-  const today = args.today ?? new Date().toISOString().slice(0, 10)
+  const today = args.today ?? localDayFromMs(Date.now())!
 
   // A NEGATIVE residue means the day series accounts for more than the cumulative total it
   // decomposes. That used to withhold the basis, on the reading that the two local sources were

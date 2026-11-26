@@ -143,12 +143,28 @@ describe('activeInWindow', () => {
   })
 })
 
+/** Run `fn` with the runtime in `zone`. NEVER restore by deleting `TZ`: see tzRestore.lint.test.ts. */
+function inZone(zone: string, fn: () => void): void {
+  const previous = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  process.env.TZ = zone
+  try { fn() } finally { process.env.TZ = previous }
+}
+
 describe('dayKeyOfMs', () => {
-  it('uses the same local rule as `dayKey`', () => {
-    expect(dayKeyOfMs(Date.parse('2026-09-06T23:59:59.999'))).toBe('2026-09-06')
-    expect(dayKeyOfMs(0)).toBe('1970-01-01')
-    expect(dayKeyOfMs(Number.NaN)).toBe('')
-  })
+  // [zone, local day of the epoch, local day of 2026-09-06T23:59:59.999Z]
+  for (const [zone, epoch, lateUtc] of [
+    ['UTC', '1970-01-01', '2026-09-06'],
+    ['America/Sao_Paulo', '1969-12-31', '2026-09-06'],
+    ['Asia/Tokyo', '1970-01-01', '2026-09-07'],
+  ] as const) {
+    it(`uses the same local rule as \`dayKey\` in ${zone}`, () => inZone(zone, () => {
+      expect(dayKeyOfMs(Date.parse('2026-09-06T23:59:59.999'))).toBe('2026-09-06')
+      expect(dayKeyOfMs(Date.parse('2026-09-06T23:59:59.999Z'))).toBe(lateUtc)
+      expect(dayKeyOfMs(0)).toBe(epoch)
+      expect(dayKey('1970-01-01T00:00:00.000Z')).toBe(epoch)
+      expect(dayKeyOfMs(Number.NaN)).toBe('')
+    }))
+  }
 })
 
 describe('the hours a session worked INSIDE the range', () => {

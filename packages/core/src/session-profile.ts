@@ -43,7 +43,7 @@ export const PROFILE_WINDOW_DAYS = 30
 /**
  * The day a session belongs to — UTC, from `start_time`.
  *
- * The same rule `tagSessionDay` and the billing basis use. The repo has two day rules and the other
+ * The same rule `tagSessionDay` uses (the billing basis reads the local day: `localDayFromMs` in billing.ts). The repo has two day rules and the other
  * one is the local clock; at UTC-3 they disagree, which would move a session in or out of the
  * window depending on the machine reading it.
  */
