@@ -75,6 +75,15 @@ export type ExperimentalSource =
   | 'preference'
   /** No variable, no preference. */
   | 'default'
+  /**
+   * The variable is set, and a process that applied the preference EARLIER wrote it (the
+   * `EXPERIMENTAL_APPLIED_ENV` marker came down with it), but the preference no longer asks for it.
+   * It is still IN EFFECT for this process — every module reads the raw variable — so it is reported
+   * as on, never as "off by default". Measured 2026-10-04: the agentop tmux server, started while the
+   * preference was on, handed `AGENTISTICS_PROVIDER=1` + the marker to every session and `agentop mcp`
+   * it spawned, and `status` read the marker as "the preference set this" and printed "off".
+   */
+  | 'inherited'
 
 export interface ExperimentalStatus {
   id: string
@@ -106,6 +115,9 @@ export function resolveExperimental(preference: boolean | undefined, env: Env): 
       const on = f.isOn(raw)
       return { id: f.id, env: f.env, on, source: 'env' as const, overridden: preference === true && !on, envValue: raw }
     }
+    if (writtenByUs && preference !== true) {
+      return { id: f.id, env: f.env, on: f.isOn(raw), source: 'inherited' as const, overridden: false, envValue: raw }
+    }
     return preference === true
       ? { id: f.id, env: f.env, on: true, source: 'preference' as const, overridden: false, envValue: undefined }
       : { id: f.id, env: f.env, on: f.defaultOn === true, source: 'default' as const, overridden: false, envValue: undefined }
@@ -125,12 +137,30 @@ export function featureOn(id: string, env: Env = process.env): boolean {
 }
 
 /**
+ * Remove what an EARLIER application of the preference left in an inherited environment: every
+ * variable the marker names that still reads `1`, and the marker itself. A variable somebody exported
+ * by hand carries no marker entry and is never touched. Mutates `env`; returns the ids it removed.
+ */
+export function clearInheritedExperimental(env: Env): string[] {
+  const ids = appliedIds(env)
+  if (ids.length === 0 && env[EXPERIMENTAL_APPLIED_ENV] === undefined) return []
+  const cleared: string[] = []
+  for (const f of EXPERIMENTAL_FEATURES) {
+    if (ids.includes(f.id) && env[f.env] === '1') { delete env[f.env]; cleared.push(f.id) }
+  }
+  delete env[EXPERIMENTAL_APPLIED_ENV]
+  return cleared
+}
+
+/**
  * Write the variable of every feature the preference turns on and no explicit variable decides.
- * Mutates `env` and returns the ids it set. With the preference off or absent it touches NOTHING —
- * the byte-identical-when-off guarantee lives here.
+ * Mutates `env` and returns the ids it set. With the preference off or absent it writes NOTHING —
+ * it only removes what an earlier application of the preference left behind in an INHERITED
+ * environment (`clearInheritedExperimental`), so a process started from a shell that once had the
+ * flag on does not run with it on after it was turned off. With no marker, off touches nothing.
  */
 export function applyExperimental(preference: boolean | undefined, env: Env): string[] {
-  if (preference !== true) return []
+  if (preference !== true) { clearInheritedExperimental(env); return [] }
   const applied: string[] = []
   for (const f of EXPERIMENTAL_FEATURES) {
     if (explicit(env[f.env]) && !appliedIds(env).includes(f.id)) continue
