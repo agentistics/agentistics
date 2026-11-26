@@ -7,7 +7,8 @@
  * 3. Degrades to `null` or N/A on non-Linux or unreadable metrics.
  */
 
-import { readFile, statfs } from 'node:fs/promises'
+import { mkdir, readFile, statfs } from 'node:fs/promises'
+import type { FsFacts, HealthBlock } from './resources/machine-health'
 import { readFileSync } from 'node:fs'
 import { loadavg, totalmem, freemem, cpus } from 'node:os'
 import { HOME_DIR } from './config'
@@ -87,6 +88,8 @@ export interface HardwareResourcesSnapshot {
    */
   sessions: ManagedSessionsSnapshot
   sampledAtMs: number
+  /** The machine health guard's state (resources/machine-health.ts, slice G1: observed, never enforced). */
+  health?: HealthBlock
 }
 
 /** Read raw /proc/<pid>/stat and parse it into a sample. In line, not through the thread pool: a
@@ -124,6 +127,30 @@ export async function readDiskMetrics(path = HOME_DIR): Promise<DiskUsage> {
       available: false,
     }
   }
+}
+
+/**
+ * The machine health guard's three primitive reads (resources/machine-health-io.ts takes them injected).
+ * They live HERE because this module already holds the fs capability they need — a new module importing
+ * `node:fs` would grow the delivery guard's pinned capability inventory (delivery/doors.lint.test.ts).
+ */
+export async function readTextOrNull(path: string): Promise<string | null> {
+  try { return await readFile(path, 'utf8') } catch { return null }
+}
+
+/** `statfs` of a path as bytes + inode counts; `null` when it cannot be read. */
+export async function readFsFacts(path: string): Promise<FsFacts | null> {
+  try {
+    const s = await statfs(path)
+    return { totalBytes: s.blocks * s.bsize, freeBytes: s.bavail * s.bsize, files: s.files, freeFiles: s.ffree }
+  } catch {
+    return null
+  }
+}
+
+/** `mkdir -p`; returns whether the directory exists afterwards. */
+export async function ensureDirectory(dir: string): Promise<boolean> {
+  try { await mkdir(dir, { recursive: true, mode: 0o700 }); return true } catch { return false }
 }
 
 /** Read host CPU load, RAM, and Disk metrics. */

@@ -779,6 +779,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // is never a reason to create or wake the hub — see `hardware-sessions.ts`.
         const { processSessionHub } = await import('./sessions/session-hub')
         const snapshot = await getHardwareSnapshot(serverProcStatsMap, () => processSessionHub()?.last())
+        // Machine health guard (G1, observe only): the governor's last state, or one sample read now.
+        const { healthForApi } = await import('./resources/governor-daemon')
+        snapshot.health = await healthForApi().catch(() => undefined)
         return new Response(JSON.stringify(snapshot), {
           status: 200,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
