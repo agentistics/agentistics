@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
@@ -226,13 +226,61 @@ describe('clean io (real git)', () => {
     const gate = new Promise<void>(r => { release = r })
     const first = withCleanupLock(async () => { events.push('first'); entered(); await gate; events.push('released') }, o)
     await inside
-    const second = withCleanupLock(async () => { events.push('second') }, o)
-    await new Promise(r => setTimeout(r, 30))
+    const pauses: string[] = []
+    const second = withCleanupLock(async () => { events.push('second') }, { ...o, cleanup: { ...o.cleanup, onPause: reason => pauses.push(reason) } })
+    await new Promise(r => setTimeout(r, 350))
     expect(events).toEqual(['first'])
     release(); await Promise.all([first, second])
+    expect(pauses).toContain('waiting for cleanup lock')
     expect(events).toEqual(['first', 'released', 'second'])
     await expect(withCleanupLock(async () => { throw new Error('test failure') }, o)).rejects.toThrow('test failure')
     await withCleanupLock(async () => {}, o)
+  })
+
+  test.skipIf(process.platform !== 'linux')('SIGKILL of the cleaner releases its lock within one second', async () => {
+    const { root } = repo()
+    const lockPath = join(root, 'killed-cleaner.lock')
+    const source = `import { withCleanupLock } from ${JSON.stringify(join(import.meta.dir, 'clean-io.ts'))};
+      import { readFileSync } from 'node:fs';
+      await withCleanupLock(async () => {
+        console.log(readFileSync('/proc/' + process.pid + '/task/' + process.pid + '/children', 'utf8').trim());
+        await new Promise(() => {});
+      }, { cleanup: { lockPath: ${JSON.stringify(lockPath)} } });`
+    const cleaner = Bun.spawn([process.execPath, '-e', source], { stdout: 'pipe', stderr: 'pipe' })
+    const reader = cleaner.stdout.getReader()
+    let holders: number[] = []
+    try {
+      const ready = await reader.read()
+      expect(ready.done).toBe(false)
+      holders = new TextDecoder().decode(ready.value).trim().split(/\s+/).map(Number)
+      expect(holders.every(pid => pid > 0)).toBe(true)
+      cleaner.kill('SIGKILL'); await cleaner.exited
+      const started = Date.now()
+      await withCleanupLock(async () => {}, { signal: AbortSignal.timeout(1000), cleanup: { lockPath } })
+      expect(Date.now() - started).toBeLessThan(1000)
+    } finally {
+      cleaner.kill('SIGKILL'); await cleaner.exited
+      // Only PIDs recorded as this cleaner's children; also clean up the pre-fix orphan.
+      for (const pid of holders) { try { process.kill(pid, 'SIGKILL') } catch { /* already exited */ } }
+      reader.releaseLock()
+    }
+  })
+
+  test('a new unpushed commit during dependency removal prevents the final worktree removal', async () => {
+    const { r, wt } = pushedWorktree()
+    writeFileSync(join(wt, '.gitignore'), 'node_modules\n'); g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'ignore'); g(wt, 'push', '-q', 'origin', 'pw')
+    mkdirSync(join(wt, 'node_modules')); writeFileSync(join(wt, 'node_modules', 'dep'), 'x')
+    const plan = planClean(await worktreeFacts(r, seamEnv), Date.now()).filter(i => i.facts.path === wt)
+    let committed = false
+    const problems = await applyClean(plan, { ...seamEnv, cleanup: { onBatch: () => {
+      expect(existsSync(join(wt, 'node_modules'))).toBe(false)
+      writeFileSync(join(wt, 'late-commit'), 'keep me')
+      g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'late local commit')
+      committed = true
+    } } })
+    expect(committed).toBe(true)
+    expect(problems.join('\n')).toContain('not committed and pushed')
+    expect(existsSync(join(wt, 'late-commit'))).toBe(true)
   })
 
   test('tight mid-tree leaves sources and remaining dependencies intact; symlinks never traverse outside', async () => {

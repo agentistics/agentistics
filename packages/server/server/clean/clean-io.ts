@@ -58,13 +58,16 @@ function priority(): string[] {
 async function run(argv: string[], o: CleanIoOpts & { cwd?: string; lease?: () => Promise<void> } = {}): Promise<{ code: number; out: string }> {
   o.signal?.throwIfAborted()
   const p = Bun.spawn(o.lowPriority ? [...priority(), ...argv] : argv, { cwd: o.cwd, env: (o.env ?? process.env) as Record<string, string>, stdout: 'pipe', stderr: 'ignore' })
-  // A no-fork flock execs sleep: this exact PID owns the lease, with no orphan child holding it.
+  // The no-fork holder watches the cleaner PID, so SIGKILL/OOM releases the lock too,
+  // when the parent's finally cannot run. It owns no long-lived child inheriting the lock.
   if (o.lease) {
     const reader = p.stdout.getReader()
     const abortLease = () => { try { p.kill('SIGTERM') } catch { /* exited */ } }
+    const waiting = setTimeout(() => o.cleanup?.onPause?.('waiting for cleanup lock'), 250)
     o.signal?.addEventListener('abort', abortLease, { once: true })
     try {
       const ready = await reader.read()
+      clearTimeout(waiting)
       o.signal?.throwIfAborted()
       if (ready.done || new TextDecoder().decode(ready.value).trim() !== 'locked') throw new Error('cleanup lock could not be acquired')
       // Once acquired, cancellation must finish unwinding the work before releasing exclusion.
@@ -72,6 +75,7 @@ async function run(argv: string[], o: CleanIoOpts & { cwd?: string; lease?: () =
       await o.lease()
       return { code: 0, out: '' }
     } finally {
+      clearTimeout(waiting)
       o.signal?.removeEventListener('abort', abortLease)
       abortLease()
       await p.exited
@@ -340,7 +344,7 @@ async function changedSince(path: string, o: CleanIoOpts, removing: boolean): Pr
 /** A kernel flock, shared by CLI, web and the C2 host seam. Failure to lock fails closed. */
 export async function withCleanupLock<T>(body: () => Promise<T>, o: CleanIoOpts = {}): Promise<T> {
   let value!: T
-  await run(['flock', '--no-fork', o.cleanup?.lockPath ?? CLEAN_LOCK, 'sh', '-c', 'printf "locked\\n"; exec sleep 2147483647'], {
+  await run(['flock', '--no-fork', o.cleanup?.lockPath ?? CLEAN_LOCK, 'sh', '-c', 'printf "locked\\n"; exec tail --pid="$1" --sleep-interval=0.1 -f /dev/null', 'cleanup-holder', String(process.pid)], {
     ...o, lease: async () => { value = await body() },
   })
   return value

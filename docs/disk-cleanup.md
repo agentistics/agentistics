@@ -15,8 +15,13 @@ again after waiting and immediately before git removes the worktree, without `--
 CLI and web cleanup hold `/tmp/agentistics-cleanup.lock` with kernel `flock`. Removals reserve
 their start in its adjacent `.starts` history: at least two minutes apart and at most six per
 rolling hour, including separate CLI invocations. Failed attempts conservatively consume a slot.
-Cleanup waits while a heavy job is running. Missing lock support or unreadable history refuses
-cleanup rather than bypassing the guard.
+Cleanup waits while a heavy job is running. The lock holder uses GNU `tail --pid` to watch the
+cleaner every 100 ms: if the cleaner exits or is killed, the holder exits and releases its kernel
+lock. Missing lock support or unreadable history refuses cleanup rather than bypassing the guard.
+The CLI prints a short pause reason
+while waiting for the lock, rate limit, machine health or heavy jobs, with repeated polling
+messages limited to one per 30 seconds. Failed or skipped dependency removals do not count as
+freed bytes in the web result.
 
 `clean/clean-pace.ts` owns the policy. `throttledRemove` walks `node_modules` depth first without
 following symlinks, removing at most 2,000 entries per batch (also bounded by argv size), with a

@@ -78,7 +78,13 @@ export async function runClean(argv: string[]): Promise<void> {
     if (!process.stdin.isTTY) console.log(lang === 'pt' ? 'Nada removido (use --yes para remover).' : 'Nothing removed (pass --yes to remove).')
     return
   }
-  const problems = await applyClean(plan)
+  let lastPause = '', lastPauseAt = 0
+  const problems = await applyClean(plan, { cleanup: { onPause: reason => {
+    const now = Date.now()
+    if (reason === lastPause && now - lastPauseAt < 30_000) return
+    process.stderr.write(`[clean] ${reason}\n`)
+    lastPause = reason; lastPauseAt = now
+  } } })
   for (const p of problems) console.error(p)
   console.log(lang === 'pt' ? `Feito.${problems.length ? ` ${problems.length} item(ns) não removido(s).` : ''}` : `Done.${problems.length ? ` ${problems.length} item(s) not removed.` : ''}`)
 }
