@@ -417,6 +417,9 @@ maybeSpawnWatcher()
 // the first request that happens to reach a reserved prefix. `loadEngine` never throws.
 void loadEngine().then(st => {
   if (st.present) console.log(`[engine] ${st.manifest.name} ${st.manifest.version} (api ${st.manifest.apiVersion})`)
+  // Event-triggered flows (DSL.GATILHOS): their timers run in the SERVER process only, never in a CLI
+  // that loads the engine. The engine starts nothing while AGENTISTICS_FLOWS is off.
+  try { engine()?.flows?.start?.() } catch (err) { console.warn('[flows] triggers failed to start:', err instanceof Error ? err.message : String(err)) }
 })
 // Periodic best-effort re-check so a long-running daemon surfaces new releases
 // without a page reload (broadcasts an SSE notification when an update appears).
@@ -1380,7 +1383,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       if (url.pathname === '/api/flows/run' && req.method === 'POST') {
         const body = await req.json().catch(() => ({})) as { name?: unknown; inputs?: unknown }
         if (typeof body.name !== 'string') return json({ error: 'bad_request', sentence: 'flow name is required' }, 400)
-        try { return json(await flowApi.run(body.name, body.inputs && typeof body.inputs === 'object' ? body.inputs as Record<string, unknown> : {})) }
+        const inputs = body.inputs && typeof body.inputs === 'object' ? { ...body.inputs as Record<string, unknown> } : {}
+        // A gate override is the owner's direct order, given at the CLI outside any session; the HTTP/MCP
+        // path (which a session can reach) never carries one.
+        delete inputs.override; delete inputs.overrideBy; delete inputs.overrideReason
+        try { return json(await flowApi.run(body.name, inputs)) }
         catch (error) { return json({ error: 'flow_failed', sentence: String(error) }, 400) }
       }
       if (url.pathname.startsWith('/api/flows/status/') && req.method === 'GET') {
@@ -2944,6 +2951,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         await markCallerVerified(body.value, verifySessionIdentity)
         const out = await runFleetAction(fleetLang(url.searchParams.get('lang')), body.value)
+        // ORQ.H1: the OWNER's composer message (no verified session caller) → `owner.message` for the flows.
+        if (out.ok && body.value.action === 'prompt' && (body.value as { callerVerified?: unknown }).callerVerified !== true) {
+          void import('./flows/owner-message').then(m => m.emitOwnerMessage(body.value, m.defaultOwnerMessageDeps())).catch(() => {})
+        }
         // An account refusal (reopen, group reopen, external continuation) keeps its status.
         const { spawnAccountStatus } = await import('./sessions/spawn-account')
         return new Response(JSON.stringify(out), {

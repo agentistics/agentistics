@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, markParentVerified, markCallerVerified, roleOp, roleStatus, writeRolesDoc, type RoleDeps,
+  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, markParentVerified, markCallerVerified, roleOp, roleStatus, writeRolesDoc, gateAnswerOf, handoffGateViaServer, type RoleDeps,
 } from './session-roles'
 
 let dir = ''
@@ -501,6 +501,40 @@ describe('LIDER.KILL: a new leader retires its predecessor', () => {
       return { out: await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, s.deps), retired: s.retired }
     })
   })
+  test('ORQ.H3: dirty worktrees on the task refuse the retire, with the list; a passing gate retires', async () => {
+    await pred()
+    const retired: Array<[string, string]> = []
+    const asked: string[] = []
+    const f = fake([live('old', 'Old'), live('new', 'New')], {
+      taskOf: async id => ({ old: 't1', new: 't1' } as Record<string, string>)[id],
+      requestRetire: async (p, s) => { retired.push([p, s]); return true },
+      handoffGate: async taskId => { asked.push(taskId); return { ok: false, reason: 'hand-off refused: uncommitted work', blocking: ['/w/a (feat/a, 40 min)'], runId: 'r-1' } },
+    })
+    const out = await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, f.deps)
+    expect(out).toMatchObject({ ok: true, role: 'leader', retire: { ok: false, code: 'dirty_worktrees', blocking: ['/w/a (feat/a, 40 min)'], runId: 'r-1' } })
+    expect(out.ok && out.message).toContain('/w/a (feat/a, 40 min)')
+    expect(asked).toEqual(['t1'])
+    expect(retired).toEqual([])
+    await pred()
+    const g = fake([live('old', 'Old'), live('new', 'New')], {
+      taskOf: async id => ({ old: 't1', new: 't1' } as Record<string, string>)[id],
+      requestRetire: async (p, s) => { retired.push([p, s]); return true },
+      handoffGate: async () => ({ ok: true }),
+    })
+    expect(await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, g.deps)).toMatchObject({ retire: { ok: true } })
+    expect(retired).toEqual([['old', 'new']])
+  })
+  test('QA3: a gate that throws keeps the predecessor (fail closed)', async () => {
+    await pred()
+    const retired: Array<[string, string]> = []
+    const f = fake([live('old', 'Old'), live('new', 'New')], {
+      taskOf: async id => ({ old: 't1', new: 't1' } as Record<string, string>)[id],
+      requestRetire: async (p, s) => { retired.push([p, s]); return true },
+      handoffGate: async () => { throw new Error('store unreadable') },
+    })
+    expect(await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, f.deps)).toMatchObject({ retire: { ok: false, code: 'dirty_worktrees', reason: expect.stringContaining('store unreadable') } })
+    expect(retired).toEqual([])
+  })
   test('a refused retire keeps the live-leader warning', async () => {
     await pred()
     const s = setup([live('old', 'Old'), live('new', 'New')], { old: 't2', new: 't1' })
@@ -538,5 +572,31 @@ describe('LIDER.KILL: a new leader retires its predecessor', () => {
     const s = setup([live('old', 'Old'), live('new', 'New')], { old: 't1', new: 't1' })
     const out = await roleOp('new', { role: 'leader' }, s.deps)
     expect(out.ok && out.retire).toBeUndefined()
+  })
+})
+
+describe('ORQ.H3 hand-off gate answers', () => {
+  test('QA3: only a success passes; failed, interrupted and unreadable answers refuse', () => {
+    expect(gateAnswerOf({ status: 'success' })).toEqual({ ok: true })
+    expect(gateAnswerOf({ status: 'refused', runId: 'r', refusal: { reason: 'dirty', missing: ['/w (b, 40 min)'] } })).toEqual({ ok: false, reason: 'dirty', blocking: ['/w (b, 40 min)'], runId: 'r' })
+    for (const bad of [{ status: 'failed' }, { status: 'interrupted' }, {}, null, 'x']) expect(gateAnswerOf(bad).ok).toBe(false)
+  })
+  test('QA2: the CLI asks the SERVER — its own AGENTISTICS_FLOWS is never read; an unreachable server refuses', async () => {
+    const prev = process.env.AGENTISTICS_FLOWS
+    process.env.AGENTISTICS_FLOWS = '0'
+    try {
+      const answer = (status: number, body: unknown) => (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch
+      const asked: string[] = []
+      const spy = (async (url: string, init: RequestInit) => { asked.push(`${url} ${init.body}`); return new Response(JSON.stringify({ status: 'refused', runId: 'r1', refusal: { reason: 'dirty', missing: ['/w'] } }), { status: 200 }) }) as unknown as typeof fetch
+      expect(await handoffGateViaServer('t-1', { fetch: spy, port: 1 })).toEqual({ ok: false, reason: 'dirty', blocking: ['/w'], runId: 'r1' })
+      expect(asked).toEqual(['http://127.0.0.1:1/api/flows/run {"name":"passagem-sem-sujo","inputs":{"taskId":"t-1"}}'])
+      expect(await handoffGateViaServer('t-1', { fetch: answer(200, { status: 'success' }), port: 1 })).toEqual({ ok: true })
+      expect(await handoffGateViaServer('t-1', { fetch: answer(403, { error: 'experimental' }), port: 1 })).toEqual({ ok: true })
+      expect(await handoffGateViaServer('t-1', { fetch: answer(501, { error: 'official_build' }), port: 1 })).toEqual({ ok: true })
+      expect((await handoffGateViaServer('t-1', { fetch: answer(500, { error: 'x' }), port: 1 })).ok).toBe(false)
+      expect((await handoffGateViaServer('t-1', { fetch: answer(200, { status: 'failed' }), port: 1 })).ok).toBe(false)
+      const down = (async () => { throw new Error('ECONNREFUSED') }) as unknown as typeof fetch
+      expect(await handoffGateViaServer('t-1', { fetch: down, port: 1 })).toMatchObject({ ok: false, reason: expect.stringContaining('ECONNREFUSED') })
+    } finally { if (prev === undefined) delete process.env.AGENTISTICS_FLOWS; else process.env.AGENTISTICS_FLOWS = prev }
   })
 })
