@@ -46,14 +46,14 @@
     },
     "packages/agentop": {
       "name": "@agentistics/agentop",
-      "version": "2.72.0",
+      "version": "2.103.1",
       "bin": {
         "agentop": "bin/agentop.js",
       },
     },
     "packages/core": {
       "name": "@agentistics/core",
-      "version": "2.72.0",
+      "version": "2.103.1",
       "dependencies": {
         "@opentelemetry/api": "^1.9.1",
         "date-fns": "^4.1.0",
@@ -75,7 +75,7 @@
     },
     "packages/mcp": {
       "name": "@agentistics/mcp",
-      "version": "2.72.0",
+      "version": "2.103.1",
       "bin": {
         "agentistics-mcp": "dist/agentistics-mcp.js",
       },
@@ -85,7 +85,7 @@
     },
     "packages/server": {
       "name": "@agentistics/server",
-      "version": "2.72.0",
+      "version": "2.103.1",
       "dependencies": {
         "@agentistics/core": "workspace:*",
         "@agentistics/tui": "workspace:*",
@@ -95,7 +95,7 @@
     },
     "packages/tui": {
       "name": "@agentistics/tui",
-      "version": "2.72.0",
+      "version": "2.103.1",
       "dependencies": {
         "@agentistics/core": "workspace:*",
         "@agentistics/engine-api": "workspace:*",
@@ -125,7 +125,7 @@
     },
     "packages/web": {
       "name": "@agentistics/web",
-      "version": "2.72.0",
+      "version": "2.103.1",
       "dependencies": {
         "@agentistics/core": "workspace:*",
         "@agentistics/tui": "workspace:*",
