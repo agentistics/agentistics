@@ -32,12 +32,12 @@ import { createLimiter } from '../utils'
 import { openJournal } from './journal'
 import { openJournalIndex, type JournalIndex } from './import-journal-index'
 import {
-  LEGACY_RECORD_VERSION, batches, bump, emptyHalf, parseImportState, planArtifacts, planStore, selectedHarnesses, sourceKey,
+  LEGACY_RECORD_VERSION, STORE_LEGACY_VERSION, batches, bump, emptyHalf, parseImportState, planArtifacts, planStore, selectedHarnesses, sourceKey,
   stampBytes, startsOnOrAfter,
   type ArtifactFailReason, type HarnessReport, type ImportReport, type ImportState, type StoreEntry,
   type StoreFailReason,
 } from './import-plan'
-import { storeSessionEvents, type HarnessEntityIds } from './import-store'
+import { IMPORT_STORE_ADAPTER_VERSION, storeReplaceNeeded, storeSessionEvents, type HarnessEntityIds } from './import-store'
 import { claudeStamps, type JournalRegistry, type SourceStamp } from './shadow'
 import type { Journal } from './types'
 
@@ -398,7 +398,7 @@ export async function runImport(opts: ImportOptions = {}): Promise<ImportResult>
         entries.filter((e): e is Extract<StoreEntry, { ok: true }> => e.ok),
         discoveredBy.get(harness) ?? null,
         ids ? ids.runIdOf : null,
-        replayedRuns, state, opts.from,
+        replayedRuns, state, opts.from, IMPORT_STORE_ADAPTER_VERSION,
       )
       for (const [k, n] of Object.entries(plan.skipped)) bump(h.store.skipped, k as keyof typeof plan.skipped, n)
       if (!ids) continue
@@ -415,11 +415,24 @@ export async function runImport(opts: ImportOptions = {}): Promise<ImportResult>
             bump(h.store.failed, 'unreadable'); example('unreadable', ref); continue
           }
           normalizeSessionTimes(meta)
+          // A record imported under an older store mapping: replaced when its events changed (its old ones
+          // would otherwise survive `UNIQUE(event_id)`), only re-stamped when they did not.
+          const key = sourceKey(harness, e.sessionId)
+          const prior = state.store[key]
+          const priorVersion = prior ? prior.version ?? STORE_LEGACY_VERSION : undefined
+          const upgrade = priorVersion !== undefined && priorVersion !== IMPORT_STORE_ADAPTER_VERSION
+          const replace = upgrade && storeReplaceNeeded(meta, priorVersion)
+          if (upgrade && !replace && prior!.stamp === e.stamp) {
+            if (!dryRun) state.store[key] = { ...prior!, version: IMPORT_STORE_ADAPTER_VERSION }
+            bump(h.store.skipped, 'unchanged')
+            continue
+          }
           const mapped = storeSessionEvents(meta, { harness, ids, tokens: CAPABILITY_STATES[harness].tokens, sourceRef: ref, recordedAt })
           if (!mapped.ok) { bump(h.store.failed, mapped.reason); example(mapped.reason, ref); continue }
           h.store.processed++
-          const accepted = await append(mapped.events, h.store, ref)
-          if (accepted && !dryRun) state.store[sourceKey(harness, e.sessionId)] = { stamp: e.stamp, importedAtMs: now() }
+          if (replace) h.store.replaced = (h.store.replaced ?? 0) + 1
+          const accepted = await append(mapped.events, h.store, ref, replace ? ref : undefined)
+          if (accepted && !dryRun) state.store[key] = { stamp: e.stamp, importedAtMs: now(), version: IMPORT_STORE_ADAPTER_VERSION }
         }
         done += batch.length
         await persist()
