@@ -237,7 +237,7 @@ for (const width of [1280, 390]) test(`sleeping and pinned leader names wrap, ba
       const pin = card.querySelector<HTMLButtonElement>('[aria-label="Desafixar"]')!
       expect(open.textContent).toContain(name)
       expect(open.textContent).not.toContain('[ LÍDER ]')
-      expect(open.textContent).toContain('Líder')
+      expect(open.querySelector('[data-role-icon="leader"]')).not.toBeNull()
       expect(pin.tagName).toBe('BUTTON')
       expect(pin.parentElement).toBe(open.parentElement)
       expect(card.querySelector('button button, button [role="button"]')).toBeNull()
@@ -249,7 +249,7 @@ for (const width of [1280, 390]) test(`sleeping and pinned leader names wrap, ba
       await click(resume)
       await act(async () => markReopening(session.id))
       expect(open.textContent).toContain('Reabrindo…')
-      const badge = Array.from(open.querySelectorAll<HTMLElement>('span')).find(el => el.textContent === 'Líder' && el.style.whiteSpace === 'nowrap')!
+      const badge = open.querySelector<HTMLElement>('[data-role-icon="leader"]')!
       expect(badge.style.flexShrink).toBe('0')
       expect(card.style.flexWrap).toBe(compact ? 'nowrap' : 'wrap')
       await act(async () => clearReopening(session.id))
