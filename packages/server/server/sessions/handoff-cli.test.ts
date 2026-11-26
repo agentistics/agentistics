@@ -10,6 +10,11 @@ import { passPinForKill } from './handoff-relay-io'
 import { __setHarnessAgentsReaderForTest } from './harness-agents-io'
 import { readPreferences, updatePreferences } from '../preferences'
 import type { ManagedSession, SessionBackend, StructuredIntent } from './types'
+import { isolateAgentEnv } from './agent-env.testing'
+
+// A spawn door reads AGENTOP_*/AGENTISTICS_* from the shell it runs in (inside a managed session: the caller's identity and the feature
+// switches): every test starts from a bare agent environment and gets it back.
+isolateAgentEnv()
 
 const saved = process.env.AGENTOP_MANAGED_ID
 // The CLI flow asks `claude agents --json`; the machine's real CLI is not part of this test.
