@@ -107,6 +107,7 @@ export interface SessionPatch {
   handoffHintLevel?: number
   handoffHintTokens?: number
   handoffTo?: string
+  supersedes?: string | null
   handoffFrom?: string
   handoffSeq?: number
   handoffRelayClosing?: string
