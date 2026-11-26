@@ -374,6 +374,8 @@ export interface ManagedSession {
    * On the SUCCESSOR: the predecessor's managed id (`handoffFrom`). See `handoff-relay.ts`.
    */
   handoffTo?: string
+  /** DSL.TIPO-SESSAO — the row this one REPLACED by a reopen (a new managed id for the same work): a leader's team follows it. */
+  supersedes?: string
   handoffFrom?: string
   /** The SUCCESSOR's generation (predecessor's + 1), shown in the ⓘ panel — the title never carries it. */
   handoffSeq?: number

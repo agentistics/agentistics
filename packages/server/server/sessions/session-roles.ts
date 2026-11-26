@@ -207,9 +207,16 @@ const fail = (code: string, matches?: string[]): RoleReply => ({
 export async function loadRoles(deps: Pick<RoleDeps, 'dataDir' | 'legacyPref'>): Promise<RolesDoc> {
   const doc = await readRolesDoc(deps.dataDir)
   if (doc.migrated) return doc
-  const next = migrateLegacyRoles(doc, await deps.legacyPref().catch(() => undefined))
-  await writeRolesDoc(deps.dataDir, next).catch(() => {})
-  return next
+  // The one-time migration write is a read-modify-write too: inside a `serial` body the lock is already held;
+  // outside one (listRoles, storedRoleFor, …) it takes the lock and re-reads, so it never erases a locked writer's role.
+  const migrate = async (): Promise<RolesDoc> => {
+    const latest = await readRolesDoc(deps.dataDir)
+    if (latest.migrated) return latest
+    const next = migrateLegacyRoles(latest, await deps.legacyPref().catch(() => undefined))
+    await writeRolesDoc(deps.dataDir, next).catch(() => {})
+    return next
+  }
+  return holdingRolesLock > 0 ? migrate() : withFileLock(join(deps.dataDir, SESSION_ROLES_FILE), migrate)
 }
 
 /** Serialise writes inside this process: read-modify-write of one small file. */
@@ -222,8 +229,13 @@ export async function loadRoles(deps: Pick<RoleDeps, 'dataDir' | 'legacyPref'>):
  * the document INSIDE the lock. NOT reentrant: never call `serial` from inside a `serial` body.
  */
 let chain: Promise<unknown> = Promise.resolve()
+/** >0 while a `serial` body holds the roles lock in this process (it is not reentrant). */
+let holdingRolesLock = 0
 const serial = <T>(dataDir: string | Promise<string>, fn: () => Promise<T>): Promise<T> => {
-  const locked = async () => withFileLock(join(await dataDir, SESSION_ROLES_FILE), () => fn())
+  const locked = async () => withFileLock(join(await dataDir, SESSION_ROLES_FILE), async () => {
+    holdingRolesLock++
+    try { return await fn() } finally { holdingRolesLock-- }
+  })
   const run = chain.then(locked, locked)
   chain = run.catch(() => {})
   return run

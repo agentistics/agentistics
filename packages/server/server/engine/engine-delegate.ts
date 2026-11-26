@@ -21,7 +21,7 @@ export interface DelegateDeps {
   startable(): Promise<readonly string[]>
   /** `preferences.delegation.harnesses`, read fresh each time (a person may revoke between calls). */
   allowed(): Promise<readonly string[]>
-  spawn(body: { harness: string; cwd: string; prompt: string; model: string; effort?: string; label: string; callerVerified?: true }): Promise<{ ok: boolean; message: string; id?: string; code?: string }>
+  spawn(body: { harness: string; cwd: string; prompt: string; model: string; effort?: string; label: string; callerVerified?: true; door?: 'engine'; gateTaskId?: string; gateSubtaskId?: string }): Promise<{ ok: boolean; message: string; id?: string; code?: string }>
   file(taskId: string, sessionId: string, subtaskId?: string): Promise<{ ok: boolean; reason?: string }>
   kill(id: string): Promise<void>
   chat(id: string): Promise<{ turns: Array<{ role: 'user' | 'assistant'; text: string }>; live: boolean; unavailable?: unknown }>
@@ -58,6 +58,10 @@ export function createDelegateMembers(d: DelegateDeps): DelegateMembers {
         // PLAN.ACCOUNTS D3: a delegation is an AGENT starting a session, always — never the owner's
         // privilege to start on an account that is off for agents.
         callerVerified: true,
+        // DSL.TIPO-SESSAO — the spawn gate judges it as the ENGINE's (an agent), with the task it will be filed on.
+        door: 'engine',
+        ...(req.taskId ? { gateTaskId: req.taskId } : {}),
+        ...(req.subtaskId ? { gateSubtaskId: req.subtaskId } : {}),
       })
       if (!out.ok || !out.id) {
         return refused(out.code === 'memory_budget' ? 'memory_budget' : 'refused', out.message)

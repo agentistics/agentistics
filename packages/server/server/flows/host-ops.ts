@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { readRawFleetSnapshot } from '../cli-start'
+import { sessaoComPapelHostOp } from '../sessions/spawn-gate'
 
 const exec = promisify(execFile)
 /** Bound every git probe and suppress index refreshes, fsmonitor hooks and credential prompts. */
@@ -98,6 +99,8 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps())
 /** The host operation registry: the v1 read-only gates plus the trigger layer's two host ops. */
 export function flowHostOps(triggerDeps?: TriggerHostDeps) {
   return {
+    // DSL.TIPO-SESSAO op 1, called by the engine's `portao-de-spawn` flow — the same decision the host applies without it.
+    'sessao-com-papel': sessaoComPapelHostOp(),
     ...triggerHostOps(triggerDeps),
     'sessao-parada': async (value: unknown) => {
       const id = sessionOf(value)
