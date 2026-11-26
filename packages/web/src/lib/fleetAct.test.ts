@@ -50,3 +50,9 @@ test('a failed pane write carries its classified recovery action', () => {
 test('an unconfirmed send keeps its failure kind so the composer does not hand the words back', () => {
   expect(parseActResult({ ok: false, message: 'check its screen', failure: 'unconfirmed' }, 'en').failure).toBe('unconfirmed')
 })
+
+test('an update the harness\'s own version asks for is carried on (OPENCODE.CORREÇÕES), junk is not', () => {
+  expect(parseActResult({ ok: false, message: 'm', action: { kind: 'update-harness', harness: 'opencode', need: '1.18.0' } }, 'pt'))
+    .toEqual({ ok: false, message: 'm', action: { kind: 'update-harness', harness: 'opencode', need: '1.18.0' } })
+  expect(parseActResult({ ok: false, message: 'm', action: { kind: 'rm -rf' } }, 'pt')).toEqual({ ok: false, message: 'm' })
+})

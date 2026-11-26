@@ -163,6 +163,7 @@ export function toControlSession(
     ...(v.accountId ? { accountId: v.accountId } : {}),
     ...(v.mode ? { mode: v.mode } : {}),
     ...(v.modeChoices ? { modeChoices: v.modeChoices } : {}),
+    ...(v.modelChoices ? { modelChoices: v.modelChoices } : {}),
     ...(v.structured ? { structured: true as const } : {}),
     ...(v.note ? { note: v.note } : {}),
     state,

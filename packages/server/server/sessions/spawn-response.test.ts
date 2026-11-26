@@ -13,3 +13,9 @@ describe('spawnResponse — the CLI status line never rides on a refusal', () =>
     expect(spawnResponse({ ok: false, message: 'Started s2 in the background.' }, 'en').message).toBe('Started s2 in the background.')
   })
 })
+
+test('a start the harness\'s own version refused carries the update it offers (OPENCODE.CORREÇÕES)', () => {
+  const action = { kind: 'update-harness' as const, harness: 'opencode', need: '1.18.0' }
+  expect(spawnResponse({ ok: false, message: 'O OpenCode precisa ser atualizado.', action }, 'pt').action).toEqual(action)
+  expect(spawnResponse({ ok: true, id: 's', message: 'ok', action }, 'pt').action).toBeUndefined()
+})

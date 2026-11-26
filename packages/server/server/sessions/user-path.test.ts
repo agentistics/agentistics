@@ -13,3 +13,8 @@ test('per-user installer dirs are appended only when they exist, never ahead of 
   expect(userSearchPath('/home/u/.volta/bin:/usr/bin', '/home/u', has)).toBe('/home/u/.local/bin:/home/u/.volta/bin:/usr/bin:/home/u/.bun/bin')
   expect(userSearchPath('/usr/bin', '/home/u', () => false)).toBe('/home/u/.local/bin:/usr/bin')
 })
+
+test('opencode\'s official installer dir (~/.opencode/bin) is found by a service with a minimal PATH (OPENCODE.CORREÇÕES)', () => {
+  const has = (d: string) => d === '/home/u/.opencode/bin'
+  expect(userSearchPath('/usr/bin', '/home/u', has)).toBe('/home/u/.local/bin:/usr/bin:/home/u/.opencode/bin')
+})

@@ -168,7 +168,14 @@
  * `StructuredDeclaration.fork`, and `StructuredStart`'s `blocked` (a refusal the harness's own version causes,
  * which the host tells the person instead of falling back). An engine built against 1.17 never sets them.
  */
-export const ENGINE_API_VERSION = '1.18.0'
+/**
+ * 1.19.0 — a structured session's MODEL mid-conversation and a STALLED turn (OpenCode parity, optional):
+ * `StructuredSession.models()` / `model()` / `setModel(id)` (the protocol's own switch, answered with a
+ * `StructuredSetModel`), `stalled()` (a read the host acts on by cancelling the turn, never the driver), and
+ * `StructuredSpawn.lang` (the screen's language for the sentences a driver writes into the chat). An engine
+ * built against 1.18 never calls them; one built against 1.19 is refused by an older host, like every minor bump.
+ */
+export const ENGINE_API_VERSION = '1.19.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

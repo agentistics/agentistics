@@ -152,4 +152,13 @@ describe('harness install failures are never silent (macOS report, 2.159.3)', ()
       expect(lines).toContainEqual(['boom', 'stderr'])
     } finally { process.env.PATH = saved }
   })
+
+  test('OPENCODE.CORREÇÕES — "update" runs opencode\'s own updater, needs no Node, and reads the new version back', async () => {
+    const calls: string[][] = []
+    const res = await handleHarnessInstallRoute(post(ok), 'opencode', 'update', { runner: fake({ calls, verify: '1.19.5' }), facts: facts({ nodePresent: false }) })
+    const text = await res.text()
+    expect(calls).toEqual([['opencode', 'upgrade'], ['opencode', '--version']])
+    expect(text).toContain('"type":"done"')
+    expect(text).toContain('"version":"1.19.5"')
+  })
 })

@@ -265,6 +265,9 @@ export function NewSessionModal({
    * an edited attempt.
    */
   const [forceable, setForceable] = useState(false)
+  /** A start refused by the harness's OWN version (opencode < 1.18.0 on its free tier): the update it offers, in one click. */
+  const [updateOffer, setUpdateOffer] = useState<string | null>(null)
+  const [updating, setUpdating] = useState(false)
 
   /** Which question is on screen. The ORDER and the gating are `wizardSteps.ts`'s, not this file's. */
   const [step, setStep] = useState<StepId>(restored?.step ?? 'assistant')
@@ -656,7 +659,8 @@ export function NewSessionModal({
           ...(force ? { force: true as const } : {}),
         }),
       })
-      const json = await res.json() as { ok: boolean; message: string; id?: string; queued?: { id: string; position: number } }
+      const json = await res.json() as { ok: boolean; message: string; id?: string; queued?: { id: string; position: number }; action?: { kind: string; harness: string } }
+      setUpdateOffer(!json.ok && json.action?.kind === 'update-harness' ? json.action.harness : null)
       if (json.ok) {
         // Forced through despite the budget — surfaced through the persisted notification store
         // (never silently), the same "already-localized sentence, meta-carried" pattern
@@ -1218,6 +1222,28 @@ export function NewSessionModal({
               * gets submitted next. Same secondary (bordered) shape the Back button already uses, so
               * "Start session" stays the one button that reads as the ordinary, unconditional action.
               */}
+            {updateOffer && (
+              <button
+                type="button"
+                onClick={() => setUpdating(true)}
+                disabled={busy}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '9px 14px', borderRadius: 9, cursor: busy ? 'default' : 'pointer',
+                  minHeight: isMobile ? 44 : undefined, boxSizing: 'border-box',
+                  border: '1px solid var(--anthropic-orange)', background: 'transparent',
+                  color: 'var(--anthropic-orange)', fontFamily: 'inherit', fontSize: 13,
+                }}
+              >
+                {pt ? `Atualizar o ${(HARNESS_LABELS as Record<string, string>)[updateOffer] ?? updateOffer}` : `Update ${(HARNESS_LABELS as Record<string, string>)[updateOffer] ?? updateOffer}`}
+              </button>
+            )}
+            <HarnessInstallDialog
+              target={updating && updateOffer ? { id: updateOffer, label: (HARNESS_LABELS as Record<string, string>)[updateOffer] ?? updateOffer, installed: true } : null}
+              pt={pt}
+              onClose={() => setUpdating(false)}
+              onDone={() => { setUpdateOffer(null); setNotice(pt ? 'Atualizado. Agora é só iniciar a sessão.' : 'Updated. You can start the session now.'); retry() }}
+            />
             {forceable && (
               <button
                 onClick={() => void start(true)}
