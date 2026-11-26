@@ -1141,7 +1141,6 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
       await writeConsolidated(sessions).catch(err => console.warn('[repo] store git_remote heal failed:', String(err)))
       // The healed sessions now differ (git_remote added) → nudge the uploader to re-push so the
       // central links them without a manual sent-state reset. No-op if not a running member.
-      import('./team-uploader').then(m => m.notifyDataChanged()).catch(() => {})
     }
 
     // Sort sessions by start_time descending (most recent first)
@@ -1496,4 +1495,3 @@ export async function buildApiResponseStream(onProgress: ProgressFn): Promise<Ap
   _progressListeners.add(onProgress)
   return startFirstBuild()
 }
-
