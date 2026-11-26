@@ -4,6 +4,7 @@ import { ActivityPercentChart } from '../../components/ActivityChart'
 import { WeekHourHeatmap } from '../../components/charts/WeekHourHeatmap'
 import { UsageHourlyBars } from '../../components/charts/UsageHourlyBars'
 import { SegmentedTabs } from '../../components/nav/SegmentedTabs'
+import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 import { Section } from '../../components/Section'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { HARNESS_LABELS } from '../../lib/harness'
@@ -26,13 +27,17 @@ const T = {
     fiveDesc: 'Quanto do limite de 5 horas cada conta já usou; uma renovação começa outro trecho.',
     weekDesc: 'Quanto do limite semanal cada conta já usou; a linha recomeça quando o limite renova.',
     harnessDesc: 'Por harness, mostramos a maior porcentagem entre suas contas em cada leitura.',
+    loading: 'Carregando o histórico de limites…',
+    slow: 'O servidor ainda não respondeu com os limites — tentando de novo…',
+    unauthorized: 'Sua sessão no agentistics expirou: entre de novo para ver os limites.',
+    unavailable: 'Os limites não estão disponíveis neste computador (o acesso aos dados locais está desligado aqui).',
     none: 'Ainda não há histórico de uso registrado.', noWindow: 'Sem leituras suficientes desta janela.', noMsgs: 'Sem mensagens no período.', noPeaks: 'Sem aumento observado no período.',
     noReading: 'sem leitura de limites', omitted: (n: string) => `Sem janela de 5 h (omitido): ${n}.`,
     perDay: 'Mensagens por dia da semana e hora (14 dias)', hoursDesc: 'Mensagens enviadas nos últimos 14 dias, agrupadas pelo horário local.',
     peaks: 'Quando o limite subiu mais rápido', peaksDesc: 'Os momentos em que uma conta gastou mais do seu limite em pouco tempo.',
     barsTitle: 'Uso do limite por hora',
     bars: 'Quanto do limite de 5 h foi usado em cada hora. Aumentos entre leituras são distribuídos pelo intervalo observado.',
-    messagePeaks: 'Horários com mais mensagens', messagePeaksDesc: 'Sem leituras de limites, os horários de maior atividade vêm das mensagens.',
+    messagePeaks: 'Horários com mais mensagens', messagePeaksPending: 'Os horários de maior atividade vêm das mensagens enquanto os limites não chegam.', messagePeaksDesc: 'Sem leituras de limites, os horários de maior atividade vêm das mensagens.',
     messages: 'mensagens', used: 'gastou', of: 'do limite de', in: 'em', min: 'min', weekly: 'uma semana',
   },
   en: {
@@ -41,21 +46,39 @@ const T = {
     fiveDesc: 'How much of each account’s 5-hour limit has been used; a renewal starts a new segment.',
     weekDesc: 'How much of each account’s weekly limit has been used; the line restarts when the limit renews.',
     harnessDesc: 'For each harness, we show the highest percentage across its accounts at each reading.',
+    loading: 'Loading limit history…',
+    slow: 'The server has not answered with the limits yet — trying again…',
+    unauthorized: 'Your agentistics session expired: sign in again to see the limits.',
+    unavailable: 'Limits are not available on this computer (access to local data is off here).',
     none: 'No usage history recorded yet.', noWindow: 'Not enough readings for this window.', noMsgs: 'No messages in the period.', noPeaks: 'No observed increase in the period.',
     noReading: 'no limit readings', omitted: (n: string) => `No 5 h window (omitted): ${n}.`,
     perDay: 'Messages by weekday and hour (14 days)', hoursDesc: 'Messages sent in the last 14 days, grouped by local time.',
     peaks: 'When the limit was used fastest', peaksDesc: 'The moments when an account used more of its limit in a short time.',
     barsTitle: 'Limit usage by hour',
     bars: 'How much of the 5 h limit was used each hour. Increases between readings are spread over the observed interval.',
-    messagePeaks: 'Hours with the most messages', messagePeaksDesc: 'Without limit readings, the busiest hours come from messages.',
+    messagePeaks: 'Hours with the most messages', messagePeaksPending: 'The busiest hours come from the messages while the limits have not arrived.', messagePeaksDesc: 'Without limit readings, the busiest hours come from messages.',
     messages: 'messages', used: 'used', of: 'of the', in: 'in', min: 'min', weekly: 'one week',
   },
 } as const
 
 /** One filter selects both plan readings and message activity. Accounts remain below this panel. */
-export function UsageChartsPanel({ budgets, readings, sessions, harnesses: available = [], lang, now = Date.now() }: {
+/**
+ * Where the `/api/plan-limits` answer stands (USO.CARREGANDO). Anything but `ready` replaces ONLY the
+ * limit charts — the message charts below come from `sessions` and always draw.
+ */
+export type UsageLimitsStatus = 'ready' | 'loading' | 'slow' | 'unauthorized' | 'unavailable'
+
+/** PURE. The panel's status from the store's snapshot: no answer yet is loading, unless the store said why. */
+export function usageLimitsStatus(limits: readonly unknown[] | null, failure: Exclude<UsageLimitsStatus, 'ready' | 'loading'> | null): UsageLimitsStatus {
+  if (limits !== null) return 'ready'
+  return failure ?? 'loading'
+}
+
+export function UsageChartsPanel({ budgets, readings, sessions, harnesses: available = [], lang, now = Date.now(), status = 'ready' }: {
   budgets: readonly UsageBudgetRow[]; readings: readonly PlanReadings[]; sessions: readonly SessionMeta[];
   harnesses?: readonly SurfaceHarnessId[]; lang: Lang; now?: number
+  /** Where the `/api/plan-limits` answer stands; not `ready` = say so instead of "no history" / "no readings". */
+  status?: UsageLimitsStatus
 }) {
   const t = T[lang], isMobile = useIsMobile()
   const [mode, setMode] = useState<UsageScopeMode>('accounts')
@@ -104,7 +127,10 @@ export function UsageChartsPanel({ budgets, readings, sessions, harnesses: avail
     <div style={{ minWidth: 0 }}>{heading(t.week)}{description(t.weekDesc)}{lineChart('week', week)}</div>
   </div>
   const date = (at: number) => new Date(at).toLocaleString(lang === 'pt' ? 'pt-BR' : 'en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-  const hasLimits = view.five.series.length + view.week.series.length > 0
+  const ready = status === 'ready'
+  const hasLimits = ready && view.five.series.length + view.week.series.length > 0
+  const waiting = status === 'loading' || status === 'slow'
+  const statusText = status === 'ready' ? '' : t[status]
 
   return <Section title={t.limits} contentStyle={{ minWidth: 0 }}>
     <style>{`.usage-view-tabs [role=tablist] { flex-wrap: wrap; } .usage-view-tabs [role=tab] { flex-basis: 140px !important; } @media (max-width: 767px) { .usage-view-tabs [role=tab] { min-height: 44px !important; } }`}</style>
@@ -117,6 +143,11 @@ export function UsageChartsPanel({ budgets, readings, sessions, harnesses: avail
     </div>
     <div style={{ display: 'grid', gap: 24, minWidth: 0 }}>
       <div data-usage-chart="limits">
+        {!ready && <div data-usage-loading={status} role={waiting ? 'status' : 'alert'} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '20px 0', color: waiting ? 'var(--text-secondary)' : 'var(--text-primary)', fontSize: 13.5, lineHeight: 1.5 }}>
+          {waiting ? <AgentisticsLoader size={28} accent="var(--anthropic-orange)" label={statusText} style={{ flexShrink: 0 }} /> : null}
+          <span>{statusText}</span>
+        </div>}
+        {ready && <>
         {mode === 'harnesses' && description(t.harnessDesc)}
         {mode === 'accounts' ? accounts.map(account => <div key={account.value} data-usage-account={account.value} style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginBottom: 12 }}>
           <h3 style={{ fontSize: 13, margin: '0 0 12px', color: color(account.value) }}>{account.label}</h3>
@@ -125,13 +156,14 @@ export function UsageChartsPanel({ budgets, readings, sessions, harnesses: avail
         {!hasLimits && description(t.none)}
         {view.five.omitted.length > 0 && description(t.omitted(view.five.omitted.join(', ')))}
         {view.missing.map(h => <p key={h} style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{HARNESS_LABELS[h as SurfaceHarnessId] ?? h} — {t.noReading}</p>)}
+        </>}
       </div>
       <div data-usage-chart="hours">
         {heading(t.hours)}{description(t.hoursDesc)}
         {view.msgs.total === 0 ? description(t.noMsgs) : <>{heading(t.perDay)}<WeekHourHeatmap cells={view.msgs.cells} lang={lang} /></>}
       </div>
       <div data-usage-chart="peaks">
-        {heading(hasLimits ? t.peaks : t.messagePeaks)}{description(hasLimits ? t.peaksDesc : t.messagePeaksDesc)}
+        {heading(hasLimits ? t.peaks : t.messagePeaks)}{description(hasLimits ? t.peaksDesc : waiting ? t.messagePeaksPending : t.messagePeaksDesc)}
         {hasLimits ? <>
           {view.peaks.length === 0 ? description(t.noPeaks) : <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))', gap: 8, marginBottom: 12 }}>
             {view.peaks.map(p => <p key={`${p.key}:${p.kind}:${p.at}`} style={{ margin: 0, borderLeft: `3px solid ${color(p.key)}`, padding: '10px 12px', fontSize: 13, lineHeight: 1.5, background: 'var(--bg-elevated)', borderRadius: 6 }}>
