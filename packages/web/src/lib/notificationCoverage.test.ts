@@ -20,7 +20,7 @@ const SERVER = join(import.meta.dir, '../../../server/server')
 // retirePredecessor refusal codes: returned to the calling tool (session-roles.ts), never notified.
 const PLAN_CODES = new Set([
   'handoff_pending', 'working',
-  'not_own', 'not_leader_target', 'different_task', 'not_live', 'no_task', 'self', 'no_such_session', 'not_wired',
+  'not_own', 'not_leader_target', 'different_task', 'not_live', 'no_task', 'self', 'no_such_session', 'not_wired', 'dirty_worktrees',
 ])
 
 const FIXTURES = new Set(['a', 'b', 'c', 'x', 'custom', 'ambiguous', 'missing_field', 'some.new_code_nobody_scoped'])

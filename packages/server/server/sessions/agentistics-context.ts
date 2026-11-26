@@ -54,6 +54,8 @@ export interface ContextInput {
   handoffTakeover?: boolean
   /** The owner's saved usage rules exist, so the model is not told to ask for them. */
   usageRulesSaved?: boolean
+  /** ORQ.H1: the owner's open requests on this leader's task (`PEDIDOS ABERTOS DO DONO`), always on top. */
+  ownerRequests?: string
 }
 
 /** One line, stated once: who wins when two instructions disagree. */
@@ -108,6 +110,7 @@ export function contextText(i: ContextInput): string {
   const planLimits = i.toolNames?.includes(PLAN_LIMITS_TOOL) === true
   const lines = [
     CONTEXT_HEADER,
+    ...(i.ownerRequests && i.role === 'leader' ? [i.ownerRequests] : []),
     `You are running inside agentistics, an app that manages and measures coding-assistant sessions. Session: ${i.sessionId}. Project folder: ${i.cwd}.`,
     PRECEDENCE_LINE,
     'Tools — the "agentistics" MCP server gives you:',
