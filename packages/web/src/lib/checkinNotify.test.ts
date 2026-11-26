@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  inQuietHours, markSummaryGiven, mergeHeld, needIsNews, planRound, readQuietHours, splitForSilence, summaryDue,
+  checkinSubjectShown, inQuietHours, markSummaryGiven, mergeHeld, needIsNews, planRound, readQuietHours, splitForSilence, summaryDue,
   DEFAULT_QUIET_HOURS, type CheckinNeed, type SubjectMemory,
 } from './checkinNotify'
 
 const at = (h: number, m = 0, day = 12) => new Date(2026, 9, day, h, m).getTime()
 const need = (subject: string, text = 't', critical = false): CheckinNeed => ({ subject, text, ...(critical ? { critical } : {}) })
 const mem = (text: string, critical: boolean, when: number): SubjectMemory => ({ text, critical, at: when })
+
+describe('checkinSubjectShown (the card names what a need is about)', () => {
+  it('shows a subject that adds to the text', () => expect(checkinSubjectShown(need('Checkout novo', 'PR pronto para revisão'))).toBe(true))
+  it('hides an empty subject', () => expect(checkinSubjectShown(need('  ', 'PR pronto'))).toBe(false))
+  it('hides a subject that only repeats the text', () => expect(checkinSubjectShown(need('PR pronto', ' pr pronto '))).toBe(false))
+})
 
 describe('needIsNews (dedup by subject)', () => {
   it('announces a subject never seen', () => expect(needIsNews(need('a'), undefined, at(10))).toBe(true))

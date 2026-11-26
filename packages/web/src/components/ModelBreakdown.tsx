@@ -5,6 +5,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { resolveProvider, providerOrder } from '@agentistics/core'
 import { MetricNote } from './MetricNote'
 import { planCostOf } from '../lib/topUsage'
+import { modelTableLabels, type ModelTableColumn } from '../lib/modelTableLabels'
 
 type SortKey = 'cost' | 'tokens' | 'model'
 
@@ -43,6 +44,8 @@ const GRID_MOBILE = 'minmax(100px,1fr) 56px 70px 88px'
 export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1, fallbackInputTokens, fallbackOutputTokens, fallbackCostUSD, planFactor, costByHarness, planFactors, lang = "en" }: Props) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
+  const L = modelTableLabels(lang)
+  const head = (c: ModelTableColumn, right = true) => <span title={c.full} style={right ? { ...COL, textAlign: 'right', whiteSpace: 'nowrap' } : COL}>{c.short}</span>
   const [query, setQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('cost')
   const [byProvider, setByProvider] = useState(false)
@@ -82,26 +85,26 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
     if (!hasFallback) {
       return (
         <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic', textAlign: 'center', padding: 24 }}>
-          {note ?? 'No model data available'}
+          {note ?? L.empty}
         </div>
       )
     }
     return (
       <div style={{ background: 'var(--bg-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '8px 14px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-card)' }}>
-          <span style={COL}>Model</span>
-          <span style={{ ...COL, textAlign: 'right' }}>Input</span>
-          <span style={{ ...COL, textAlign: 'right' }}>Output</span>
-          <span style={{ ...COL, textAlign: 'right' }}>C.Read</span>
-          <span style={{ ...COL, textAlign: 'right' }}>C.Write</span>
-          <span style={{ ...COL, textAlign: 'right' }}>Cost</span>
+          {head(L.model, false)}
+          {head(L.input)}
+          {head(L.output)}
+          {head(L.cacheRead)}
+          {head(L.cacheWrite)}
+          {head(L.cost)}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '10px 14px', alignItems: 'center' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--text-tertiary)', flexShrink: 0 }} />
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', lineHeight: 1 }}>
-                All models (blended)
+                {L.blended}
               </span>
             </div>
             <div style={{ height: 2, background: 'var(--bg-card)', borderRadius: 1 }}>
@@ -127,7 +130,7 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
           </div>
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontStyle: 'italic', textAlign: 'center', padding: '8px 14px', borderTop: '1px solid var(--border-subtle)' }}>
-          {note ?? '* Cost and tokens estimated via blended rate — sessions do not record the model used individually.'}
+          {note ?? L.blendedNote}
         </div>
       </div>
     )
@@ -207,12 +210,12 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
         borderBottom: '1px solid var(--border-subtle)',
         background: 'var(--bg-card)',
       }}>
-        <span style={COL}>Model</span>
-        <span style={{ ...COL, textAlign: 'right' }}>Input</span>
-        <span style={{ ...COL, textAlign: 'right' }}>Output</span>
-        {!isMobile && <span style={{ ...COL, textAlign: 'right' }}>C.Read</span>}
-        {!isMobile && <span style={{ ...COL, textAlign: 'right' }}>C.Write</span>}
-        <span style={{ ...COL, textAlign: 'right' }}>Cost</span>
+        {head(L.model, false)}
+        {head(L.input)}
+        {head(L.output)}
+        {!isMobile && head(L.cacheRead)}
+        {!isMobile && head(L.cacheWrite)}
+        {head(L.cost)}
       </div>
 
       {/* Rows */}
@@ -302,7 +305,7 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              {showAlloc ? (pt ? 'Total do plano' : 'Plan total') : 'Estimated Total'}
+              {showAlloc ? (pt ? 'Total do plano' : 'Plan total') : L.estimatedTotal}
             </span>
             <span style={{ fontSize: 10, color: 'var(--text-tertiary)', marginLeft: 'auto', flexShrink: 0 }}>100%</span>
           </div>

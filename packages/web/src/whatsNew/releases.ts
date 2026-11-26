@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.229.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Custos: o total no topo agora bate com a tabela por harness quando o harness informa o próprio custo (como o OpenCode). A 2.229.2 acertou a tabela por modelo, mas o topo ainda podia mostrar outro valor; agora isso vale também em máquinas que já tinham esses dados guardados.',
+        en: 'Costs: the total at the top now matches the per-harness table when a harness reports its own cost (like OpenCode). 2.229.2 fixed the by-model table, but the top could still show a different figure; this now also holds on machines that already had that data stored.',
+      },
+      {
+        pt: 'Ao filtrar por dias, o custo informado pelo próprio harness é recortado junto com os tokens daquele período, em vez de aparecer inteiro.',
+        en: 'When you filter by days, the cost a harness reports itself is cut together with that period\'s tokens instead of showing in full.',
+      },
+      {
+        pt: 'Nomes mais claros de modelos, sessões e ferramentas em alguns cartões, e rótulos de tokens que não são mais cortados no meio.',
+        en: 'Clearer names for models, sessions and tools in a few cards, and token labels that are no longer cut in the middle.',
+      },
+    ],
+  },
   '2.229.2': {
     features: [],
     fixes: [
