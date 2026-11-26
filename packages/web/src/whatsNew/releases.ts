@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.169.0': {
+    features: [
+      {
+        pt: 'OpenCode: se ele estiver instalado, aparece como opção ao abrir uma sessão, com o chat ao vivo, a retomada de conversas e o modo de planejar.',
+        en: 'OpenCode: when it is installed, it shows up as a choice when you open a session, with live chat, resuming conversations and plan mode.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Quando a versão instalada de um assistente é antiga demais para o que você pediu, a sessão avisa em palavras simples o que atualizar, em vez de abrir sem dizer nada.',
+        en: 'When the installed version of an assistant is too old for what you asked, the session says in plain words what to update instead of opening silently.',
+      },
+    ],
+  },
   '2.168.0': {
     features: [
       {
