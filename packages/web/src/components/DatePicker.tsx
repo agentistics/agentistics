@@ -286,11 +286,15 @@ function DayButton({ date, disabled, selected, inRange, isToday, onSelect, mobil
   else if (inRange) bg = 'rgba(217,119,6,0.15)'
   else if (hovered && !disabled) bg = 'var(--bg-elevated)'
 
-  let color = '#fff'
+  // A plain day is TEXT on the calendar's own surface, which follows the theme — a literal white was
+  // invisible on the light one. White stays only on the selected day, which sits on solid orange.
+  let color = 'var(--text-primary)'
   if (selected) color = '#fff'
+  // Disabled is the muted token ALONE: it used to be faded by opacity on top, which left an
+  // unreadable ghost on the light theme.
+  else if (disabled) color = 'var(--text-tertiary)'
   else if (isToday) color = 'var(--accent-green)'
   else if (inRange) color = 'var(--anthropic-orange)'
-  else if (disabled) color = 'var(--text-tertiary)'
 
   return (
     <button
@@ -307,7 +311,6 @@ function DayButton({ date, disabled, selected, inRange, isToday, onSelect, mobil
         fontWeight: selected || isToday ? 700 : 400,
         padding: '6px 0',
         cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.28 : 1,
         textAlign: 'center',
         transition: 'background 0.12s ease, color 0.12s ease',
         outline: 'none',
