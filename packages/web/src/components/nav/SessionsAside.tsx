@@ -64,6 +64,7 @@ import { NOTIFY_TOGGLE, mutedTooltip, notifyMenuExtras, useMutedKeys } from '../
 import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { mutedSessionRows } from '../../lib/mutedSessionList'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
+import { OPEN_BESIDE, PIN_TOGGLE, cascadeRowMenu } from '../../lib/rowMenuCascade'
 import { rowMenuEntries, taskMenuEntries, LINK_TASK, UNLINK_TASK, type MenuEntry, type RowVerb } from '../../lib/rowMenu'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
 import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
@@ -111,10 +112,10 @@ import {
 import { toggleFoldedTeam, useAsideTab, useFoldedTeams } from '../../lib/sessionsAsidePrefs'
 
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
-const OPEN_BESIDE = '__open_beside__'
+// OPEN_BESIDE / PIN_TOGGLE live in lib/rowMenuCascade.ts (the grouping reads them too).
 const SLEEPING_PINS = 'pinned:sleeping'
 /** The row menu's client-side pin toggle. */
-const PIN_TOGGLE = '__pin_toggle__'
+
 const ROOT_ENDED_FOLDERS = 'folders:root-ended'
 
 export interface SessionsAsideExtraTab {
@@ -2102,7 +2103,7 @@ export function SessionsAside({
       {menu && (
         <SessionRowMenu
           x={menu.x} y={menu.y}
-          entries={withUndockEntry(rowMenuEntries(
+          entries={cascadeRowMenu(withUndockEntry(rowMenuEntries(
             menu.verbs, menu.state,
             [
               // The split view (desktop only, and only where this list opens sessions itself —
@@ -2130,7 +2131,11 @@ export function SessionsAside({
               ...notifyExtras(rows.find(r => r.id === menu.id), mutedKeys, pt),
             ],
             menu.endedAt,
-          ), pt, !isMobile)}
+          ), pt, !isMobile), {
+            pt,
+            task: rows.find(r => r.id === menu.id)?.task,
+            isLeader: (() => { const r = rows.find(x => x.id === menu.id); return r ? isLeaderRow(r) : false })(),
+          })}
           onPick={pickMenuAction}
           onClose={() => setMenu(null)}
         />
