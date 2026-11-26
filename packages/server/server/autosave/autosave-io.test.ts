@@ -6,6 +6,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { join, relative } from 'node:path'
 import { createAutosaver, resolveWindowsProfile, type AutosaveIo, type GitOptions, type TreeOutcome } from './autosave-io'
 import { autosaveSlug } from './autosave-plan'
@@ -19,7 +20,7 @@ const ENV = { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME, GIT_CONFIG_NOSYST
 
 async function gitRaw(cwd: string, args: readonly string[], opts?: GitOptions) {
   const p = Bun.spawn(['git', ...args], {
-    cwd, env: { ...ENV, ...(opts?.env ?? {}) },
+    cwd, env: { ...gitTestEnv(ENV), ...(opts?.env ?? {}) },
     stdin: opts?.stdin !== undefined ? new TextEncoder().encode(opts.stdin) : 'ignore', stdout: 'pipe', stderr: 'pipe',
   })
   const [stdout, stderr, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited])
