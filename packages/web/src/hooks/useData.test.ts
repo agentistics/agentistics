@@ -1594,6 +1594,59 @@ describe('a day range prices only its own cache writes (cutSessionUsage)', () =>
   })
 })
 
+describe('a day range cuts a DECLARED cost with its tokens (cutSessionUsage)', () => {
+  // THE DEFECT: the cut scaled the tokens but kept the harness-declared `costUSD` at its lifetime
+  // value, and a declared cost is taken as given — so one day of an OpenCode session cost all of it.
+  const ocModel = 'opencode-go/glm-5.3'
+  const opencode: SessionMeta = {
+    session_id: 'oc', harness: 'opencode', project_path: '/p', model: ocModel,
+    start_time: '2026-09-03T10:00:00.000Z',
+    input_tokens: 60, output_tokens: 40, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+    user_message_count: 2, assistant_message_count: 2,
+    model_usage: { [ocModel]: { inputTokens: 60, outputTokens: 40, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0.25, costSource: 'harness' } },
+    daily: {
+      '2026-09-03': { input_tokens: 30, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, messages: 2 },
+      '2026-09-05': { input_tokens: 30, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, messages: 2 },
+    },
+  } as unknown as SessionMeta
+  const claude: SessionMeta = {
+    session_id: 'cl', harness: 'claude', project_path: '/p', model: 'claude-sonnet-5-5',
+    start_time: '2026-09-03T10:00:00.000Z',
+    input_tokens: 400_000, output_tokens: 40_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+    user_message_count: 2, assistant_message_count: 2,
+    daily: {
+      '2026-09-03': { input_tokens: 300_000, output_tokens: 30_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, messages: 2 },
+      '2026-09-05': { input_tokens: 100_000, output_tokens: 10_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, messages: 2 },
+    },
+  } as unknown as SessionMeta
+  const data = {
+    statsCache: { version: 1, lastComputedDate: '2026-08-01', dailyActivity: [], dailyModelTokens: [], modelUsage: {}, totalSessions: 0, totalMessages: 0, hourCounts: {} },
+    sessions: [opencode, claude], allSessions: [], projects: [], harnesses: ['claude', 'opencode'],
+  } as unknown as import('@agentistics/core').AppData
+  // A project scope, so the totals are built from the (cut) sessions.
+  const oneDay = { dateRange: 'custom', customStart: '2026-09-05', customEnd: '2026-09-05', projects: ['/p'], models: [] } as unknown as import('@agentistics/core').Filters
+  const all = { dateRange: 'all', customStart: '', customEnd: '', projects: ['/p'], models: [] } as unknown as import('@agentistics/core').Filters
+
+  test('declared cost = declared x cut share; the table-priced session is its own cut; total = model rows = harness split', async () => {
+    const { modelCostByHarness } = await import('../lib/costBasis')
+    const whole = computeDerivedStats(data, all)!
+    const d = computeDerivedStats(data, oneDay)!
+    const claudeWhole = calcCost({ inputTokens: 400_000, outputTokens: 40_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0 }, 'claude-sonnet-5-5')
+    const claudeDay = calcCost({ inputTokens: 100_000, outputTokens: 10_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0 }, 'claude-sonnet-5-5')
+    expect(whole.totalCostUSD).toBeCloseTo(claudeWhole + 0.25, 10)
+    // Declared: half of its tokens fell on the 5th, so half of its declared cost.
+    expect(d.totalCostUSD).toBeCloseTo(claudeDay + 0.125, 10)
+    // The by-model rows add up to the same total.
+    const rows = Object.entries(d.modelUsage).map(([m, u]) => calcCost(u, m))
+    expect(rows.reduce((a, b) => a + b, 0)).toBeCloseTo(d.totalCostUSD, 10)
+    expect(calcCost(d.modelUsage[ocModel]!, ocModel)).toBeCloseTo(0.125, 10)
+    // The per-harness split agrees with both.
+    const split = modelCostByHarness(d.modelUsage, d.filteredSessions)
+    expect(split[ocModel]?.opencode).toBeCloseTo(0.125, 10)
+    expect(split['claude-sonnet-5-5']?.claude).toBeCloseTo(claudeDay, 10)
+  })
+})
+
 describe('the activity calendar counts the days a session WORKED', () => {
   // "Estou há alguns dias trabalhando e dia 4 foi pulado." It was: the day filter learned to read
   // `SessionMeta.daily` and the calendar did not, so a conversation open since Tuesday drew one
