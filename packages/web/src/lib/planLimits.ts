@@ -43,9 +43,18 @@ export interface PlanLimitsSnapshot {
   accountLabels: Record<string, string>
   /** A clock that ticks once a minute while anything is subscribed, for "in X min" / "X min ago". */
   now: number
+  /**
+   * Why there is still no answer, when there is a reason (USO.CARREGANDO). `null` while the first
+   * request is simply in flight, and once an answer landed.
+   * - `slow`: a request failed or ran past `FETCH_TIMEOUT_MS`; the store keeps retrying.
+   * - `unauthorized` (401) / `unavailable` (403/404): the server refused; retrying cannot change that,
+   *   so the store STOPS and the screens say so instead of spinning.
+   */
+  failure: PlanLimitsFailure | null
 }
+export type PlanLimitsFailure = 'slow' | 'unauthorized' | 'unavailable'
 
-let snap: PlanLimitsSnapshot = { limits: null, registered: [], budgets: [], readings: [], accountLabels: {}, now: Date.now() }
+let snap: PlanLimitsSnapshot = { limits: null, registered: [], budgets: [], readings: [], accountLabels: {}, now: Date.now(), failure: null }
 const listeners = new Set<() => void>()
 let stop: (() => void) | null = null
 
@@ -54,10 +63,43 @@ function emit(next: Partial<PlanLimitsSnapshot>): void {
   for (const l of listeners) l()
 }
 
+/** Backoff for a first answer that has not arrived: 1 s, 2 s, 4 s … capped at 15 s. Stops on success or when nothing is subscribed. */
+export const retryDelayMs = (attempt: number): number => Math.min(15_000, 1_000 * 2 ** attempt)
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+let attempts = 0
+/** One request may not hang the screen: past this it is abandoned and retried with the backoff. */
+export const FETCH_TIMEOUT_MS = 10_000
+
+/** PURE. What a non-OK answer means: a refusal that retrying cannot change, or a failure worth retrying. */
+export function failureOfStatus(status: number): PlanLimitsFailure {
+  return status === 401 ? 'unauthorized' : status === 403 || status === 404 ? 'unavailable' : 'slow'
+}
+
+/** A refusal is final until something reconnects (`connected`) or the page subscribes again. */
+const terminal = (f: PlanLimitsFailure | null): boolean => f === 'unauthorized' || f === 'unavailable'
+
+function clearRetry(): void {
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+}
+
+function retryLater(): void {
+  if (snap.limits !== null || retryTimer || listeners.size === 0 || terminal(snap.failure)) return
+  retryTimer = setTimeout(() => { retryTimer = null; void refresh() }, retryDelayMs(attempts++))
+}
+
 async function refresh(): Promise<void> {
   try {
-    const r = await fetch('/api/plan-limits', { cache: 'no-store' })
-    if (!r.ok) return
+    const r = await fetch('/api/plan-limits', { cache: 'no-store', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+    if (!r.ok) {
+      // Only before the first answer: a later failed refresh keeps what is on screen, as before.
+      if (snap.limits === null) {
+        const failure = failureOfStatus(r.status)
+        if (terminal(failure)) clearRetry()
+        emit({ failure })
+      }
+      retryLater()
+      return
+    }
     const body = await r.json() as { limits?: PlanLimits[]; registered?: RegisteredPlan[]; budgets?: UsageBudgetRow[]; hiddenFromAgents?: UsageBudgetRow[]; readings?: PlanReadings[] }
     const budgets = [...(body.budgets ?? []), ...(body.hiddenFromAgents ?? [])]
     const accountLabels: Record<string, string> = {}
@@ -70,16 +112,28 @@ async function refresh(): Promise<void> {
       limits: Array.isArray(body.limits) ? body.limits : [],
       registered: Array.isArray(body.registered) ? body.registered : [],
       now: Date.now(),
+      failure: null,
     })
-  } catch { /* keep what is on screen */ }
+    clearRetry()
+    attempts = 0
+  } catch {
+    // A timeout, a dropped connection or an unreadable body: say "still trying" and retry. Keep what is on screen.
+    if (snap.limits === null && !terminal(snap.failure)) emit({ failure: 'slow' })
+    retryLater()
+  }
 }
 
 function start(): () => void {
   void refresh()
   const offChange = subscribeEvent('plan-limits', () => { void refresh() })
-  const offConnected = subscribeEvent('connected', () => { void refresh() })
+  // A reconnect is a fresh chance: a refusal recorded before it (signed out, server restarted) is retried once.
+  const offConnected = subscribeEvent('connected', () => { if (terminal(snap.failure)) emit({ failure: null }); void refresh() })
   const tick = setInterval(() => emit({ now: Date.now() }), 60_000)
-  return () => { offChange(); offConnected(); clearInterval(tick) }
+  return () => {
+    offChange(); offConnected(); clearInterval(tick); clearRetry()
+    attempts = 0
+    if (terminal(snap.failure)) snap = { ...snap, failure: null }
+  }
 }
 
 function subscribe(l: () => void): () => void {
@@ -102,8 +156,11 @@ export function usePlanLimits(): PlanLimitsSnapshot {
 /** Tests / fixtures: put a snapshot in place without the network. */
 export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.now(), registered: PlanLimitsSnapshot['registered'] = [], budgets: UsageBudgetRow[] = [], readings: PlanReadings[] = []): void {
   const accountLabels = Object.fromEntries([...registered, ...budgets].flatMap(r => r.account && r.accountLabel ? [[accountLabelKey(r.harness, r.account), r.accountLabel]] : []))
-  emit({ limits, registered, budgets, readings, now, accountLabels })
+  emit({ limits, registered, budgets, readings, now, accountLabels, failure: null })
 }
+
+/** Tests: put a failure in place (the panel's and the rows' wording for it). */
+export function __setPlanLimitsFailureForTest(failure: PlanLimitsFailure | null): void { emit({ failure }) }
 
 // ─── Words ────────────────────────────────────────────────────────────────────────────────────
 
