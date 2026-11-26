@@ -12,6 +12,7 @@
  */
 
 import { Loader } from 'lucide-react'
+import { formatToolName } from '@agentistics/core'
 
 /** Left inset of the busy line. Zero: it starts where the chat's tool-activity rows start. */
 export const WORKING_NOTE_INSET = 0
@@ -31,7 +32,9 @@ export interface WorkingNoteProps {
 
 export function WorkingNote({ lang, tools, thinking, composing }: WorkingNoteProps) {
   const pt = lang === 'pt'
-  const names = (tools ?? []).map(t => t.name)
+  // A person reads "agentistics task subtask", not the wire's `mcp__agentistics__agentistics_task_subtask`:
+  // the shared tool-label map (`formatToolName`, `@agentistics/core`'s chatUtils) names the tool.
+  const names = (tools ?? []).map(t => formatToolName(t.name))
 
   const what = composing === 'question'
     ? (pt ? 'formulando perguntas…' : 'formulating questions…')

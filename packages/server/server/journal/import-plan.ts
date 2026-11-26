@@ -138,6 +138,14 @@ export interface StoreRecord {
   /** `size:mtime` of the store file that was imported. */
   stamp: string
   importedAtMs: number
+  /**
+   * `IMPORT_STORE_ADAPTER_VERSION` when this record was imported; absent = written before the field
+   * existed, i.e. under `STORE_LEGACY_VERSION`. A record imported under another mapping than the running
+   * one is revisited even when its file is unchanged (`planStore`), and the import decides from the
+   * record itself whether its events changed (`storeReplaceNeeded`) — `UNIQUE(event_id)` would otherwise
+   * keep the old, wrong events forever (CUSTO.DECLARADO-TOPO).
+   */
+  version?: string
 }
 
 export interface ImportState {
@@ -182,7 +190,10 @@ export function parseImportState(text: string | null, identity: string): ImportS
     out.sources[k] = rec
   }
   for (const [k, s] of Object.entries(r.store)) {
-    if (s && typeof s.stamp === 'string' && typeof s.importedAtMs === 'number') out.store[k] = { stamp: s.stamp, importedAtMs: s.importedAtMs }
+    if (s && typeof s.stamp === 'string' && typeof s.importedAtMs === 'number') {
+      out.store[k] = { stamp: s.stamp, importedAtMs: s.importedAtMs }
+      if (typeof s.version === 'string' && s.version !== '') out.store[k].version = s.version
+    }
   }
   return out
 }
@@ -262,6 +273,11 @@ export function planStore(
   replayedRuns: ReadonlySet<string>,
   state: ImportState,
   from: string | undefined,
+  /**
+   * The running store mapping (`IMPORT_STORE_ADAPTER_VERSION`); `undefined` = unknown, and an unchanged
+   * file is then always skipped. A record imported under another version is NOT skipped as unchanged.
+   */
+  currentStoreVersion?: string,
 ): StorePlan {
   const plan: StorePlan = { import: [], skipped: {} }
   for (const e of entries) {
@@ -273,11 +289,15 @@ export function planStore(
     if (!startsOnOrAfter(e.start, from)) { bump(plan.skipped, 'before-from'); continue }
     if (replayedRuns.has(runIdOf(e.sessionId))) { bump(plan.skipped, 'already-in-journal'); continue }
     const rec = state.store[sourceKey(e.harness, e.sessionId)]
-    if (rec && rec.stamp === e.stamp) { bump(plan.skipped, 'unchanged'); continue }
+    const sameMapping = currentStoreVersion === undefined || (rec?.version ?? STORE_LEGACY_VERSION) === currentStoreVersion
+    if (rec && rec.stamp === e.stamp && sameMapping) { bump(plan.skipped, 'unchanged'); continue }
     plan.import.push(e)
   }
   return plan
 }
+
+/** The store mapping a `StoreRecord` without `version` was imported under (the first one). */
+export const STORE_LEGACY_VERSION = '1.0.0'
 
 /** PURE. `items` in consecutive slices of `size` (≥ 1). */
 export function batches<T>(items: readonly T[], size: number): T[][] {
@@ -410,6 +430,7 @@ export function renderImportReport(r: ImportReport): string {
     }
     const s = h.store
     lines.push(`  store: ${fmtN(s.considered)} entries, ${fmtN(s.processed)} orphans imported · ${fmtN(s.events)} events · ${fmtN(s.written)} ${verb} · ${fmtN(s.duplicates)} already present`)
+    if (s.replaced) lines.push(`    ${fmtN(s.replaced)} re-imported because the store mapping changed (their old events are ${r.dryRun ? 'replaced when not a dry run' : 'replaced'})`)
     lines.push(...reasons(s.skipped, k => `skipped: ${SKIP_TEXT[k as StoreSkipReason]}`, '    '))
     lines.push(...reasons(s.failed, k => `could not read: ${failText(k)}`, '    '))
     tEvents += h.artifacts.events + s.events

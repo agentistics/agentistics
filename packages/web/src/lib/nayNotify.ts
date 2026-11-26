@@ -12,6 +12,8 @@
  * A notification never approves anything by itself: nothing in this module produces an action, and
  * the card's approve control only lists the options the SERVER read off the session's screen.
  */
+import { modelDisplay } from './modelDisplay'
+import { hasLeaderTitle } from './sessionDisplayTitle'
 
 /** What a card is about. Each maps to one row of the notification settings. */
 export type NayAlertKind = 'turn' | 'approval' | 'stale' | 'limit' | 'checkin' | 'clean' | 'vault-expiry'
@@ -58,6 +60,19 @@ export interface NayAlert {
 
 export function alertKey(kind: NayAlertKind, sessionId: string, sinceMs: number): string {
   return `${kind}:${sessionId}:${sinceMs}`
+}
+
+/** The card's model chip, worded as every session card words it (`modelDisplay`: "Sonnet 5.5", never
+ *  the transcript's raw "claude-sonnet-5-5"); an id no label knows stays exactly as recorded. */
+/** Whether the card wears the leader's crown before the (prefix-stripped) name — the same rule the session
+ *  tab applies (`SessionTabStrip`'s `RoleIcon`): the recorded role, else a `[ LÍDER ] - ` title. Stripping
+ *  the prefix must not take the role with it. */
+export function alertShowsLeader(name: string, role: 'leader' | 'worker' | undefined): boolean {
+  return role ? role === 'leader' : hasLeaderTitle(name)
+}
+
+export function alertModelLabel(alert: Pick<NayAlert, 'harness' | 'model'>): string | undefined {
+  return alert.model ? modelDisplay(alert.harness ?? '', alert.model) ?? alert.model : undefined
 }
 
 // --- animations ----------------------------------------------------------------------------------
