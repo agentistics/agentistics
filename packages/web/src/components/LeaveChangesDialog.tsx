@@ -4,7 +4,6 @@
  * backdrop) goes back to editing. The list comes from the caller (`lib/agentUseDraft.ts` for the
  * account drawer) — this component draws it and decides nothing.
  */
-import { Save } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { ConfirmModal, dialogButtonStyle } from '../pages/settings/primitives'
 
@@ -22,7 +21,8 @@ export function LeaveChangesDialog({ open, lang, who, changes, onKeep, onDiscard
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
   return <ConfirmModal
-    open={open} tone="default" icon={<Save size={17} />} mobileSheet focusCancel
+    open={open} tone="default" noIcon mobileSheet focusCancel placement="top" maxWidth={440}
+    footerHint={pt ? 'Esc volta para a edição.' : 'Esc goes back to editing.'}
     title={pt ? 'Sair sem salvar?' : 'Leave without saving?'}
     message={who ? (pt ? `Você alterou isto em ${who}:` : `You changed this in ${who}:`) : (pt ? 'Você alterou isto:' : 'You changed this:')}
     confirmLabel={pt ? 'Salvar' : 'Save'} cancelLabel={pt ? 'Descartar' : 'Discard'}
@@ -37,6 +37,5 @@ export function LeaveChangesDialog({ open, lang, who, changes, onKeep, onDiscard
         <span aria-hidden style={{ position: 'absolute', left: 12, color: 'var(--anthropic-orange-light)' }}>•</span>{c}
       </li>)}
     </ul>
-    <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', textAlign: 'right' }}>{pt ? 'Esc volta para a edição.' : 'Esc goes back to editing.'}</div>
   </ConfirmModal>
 }

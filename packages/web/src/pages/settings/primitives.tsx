@@ -32,7 +32,13 @@ const splitBodyMax = (mobileSheet: boolean) => `calc(${dialogMaxHeight(mobileShe
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction, closeLabel, aside, splitFrom = 900, lockCancel = false, layer }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction, closeLabel, aside, splitFrom = 900, lockCancel = false, layer, noIcon = false, footerHint, placement = 'center' }: {
+  /** Where the panel sits on a wide screen: `center` (default) or `top` — near the top edge, under the header of whatever it was opened from (the leave dialog). A phone sheet ignores it. */
+  placement?: 'center' | 'top'
+  /** Title with no icon chip beside it (the leave dialog). */
+  noIcon?: boolean
+  /** A muted line UNDER the answer buttons (e.g. "Esc goes back"). */
+  footerHint?: React.ReactNode
   /** Optional wider content and phone bottom-sheet presentation; defaults preserve confirmations. */
   maxWidth?: number
   mobileSheet?: boolean
@@ -130,10 +136,11 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   if (!open) return null
   const dialog = (
     <div className={className ? `${className}-backdrop` : undefined} onClick={cancel} style={{
-      position: 'fixed', inset: 0, zIndex: layer ?? 2000, display: 'flex', alignItems: mobileSheet && isMobile ? 'flex-end' : 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: mobileSheet && isMobile ? 0 : 16,
+      position: 'fixed', inset: 0, zIndex: layer ?? 2000, display: 'flex', alignItems: mobileSheet && isMobile ? 'flex-end' : placement === 'top' ? 'flex-start' : 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: mobileSheet && isMobile ? 0 : placement === 'top' ? '24px 16px 16px' : 16,
     }}>
       <div className={className} ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+        data-confirm-placement={mobileSheet && isMobile ? 'sheet' : placement}
         data-confirm-layout={aside ? (split ? 'split' : 'stacked') : undefined}
         onClick={e => e.stopPropagation()} style={{ outline: 'none',
         width: '100%', maxWidth: mobileSheet && isMobile ? '100%' : maxWidth, ...(mobileSheet ? { boxSizing: 'border-box' as const } : {}), maxHeight: dialogMaxHeight(mobileSheet), overflowY: aside ? 'hidden' : 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)',
@@ -145,11 +152,11 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
         {split && <div data-confirm-aside style={{ gridColumn: 2, gridRow: 1, minWidth: 0, minHeight: 0, maxHeight: splitBodyMax(mobileSheet), overflowY: 'auto', overscrollBehavior: 'contain' }}>{aside}</div>}
         <div data-confirm-main style={split ? { gridColumn: 1, gridRow: 1, display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0, minHeight: 0, maxHeight: splitBodyMax(mobileSheet), overflowY: 'auto' } : { display: 'contents' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          <span style={tone === 'danger'
+          {!noIcon && <span style={tone === 'danger'
             ? { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'color-mix(in srgb, #ef4444 15%, transparent)', color: '#ef4444' }
             : { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}>
             {icon ?? (tone === 'danger' ? <AlertTriangle size={17} /> : <Download size={17} />)}
-          </span>
+          </span>}
           <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>{title}</span>
           {headerAction}
           {closeLabel && <button type="button" aria-label={closeLabel} onClick={onCancel} style={{ ...dialogButtonStyle('secondary', isMobile), width: isMobile ? 44 : undefined, minWidth: isMobile ? 44 : undefined }}>×</button>}
@@ -188,6 +195,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
           <button type="button" autoFocus={focusCancel} onClick={cancel} disabled={locked} style={dialogButtonStyle('secondary', isMobile, locked)}>{cancelLabel}</button>
           <button type="button" onClick={() => { if (armed) onConfirm() }} disabled={!armed} style={dialogButtonStyle(tone === 'danger' ? 'danger' : 'primary', isMobile, !armed)}>{confirmLabel}</button>
         </div>}
+        {footerHint && <div data-dialog-hint style={{ fontSize: 11.5, color: 'var(--text-tertiary)', textAlign: 'right', marginTop: -4 }}>{footerHint}</div>}
         </div>
       </div>
     </div>
