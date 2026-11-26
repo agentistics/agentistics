@@ -83,6 +83,14 @@ describe('BillingAccountList — every fact once', () => {
     expect(h).toContain('Not reported')
   })
 
+  test('OpenCode states it has no plan quota, in both languages — never a percentage or "waiting"', () => {
+    const props = view([acc('', { harness: 'opencode', label: 'Conta padrão' })], ['opencode'])
+    const en = renderToStaticMarkup(<BillingAccountList {...props} lang="en" />)
+    expect(en).toContain('No plan quota for OpenCode')
+    expect(en).not.toContain('Not reported')
+    expect(renderToStaticMarkup(<BillingAccountList {...props} lang="pt" />)).toContain('Sem cota de plano no OpenCode')
+  })
+
   test('a broken timeline says so on the row and offers Review', () => {
     const h = renderToStaticMarkup(<BillingAccountList {...view([acc('c1')], ['claude'], () => ({ problem: true }))} />)
     expect(h).toContain('Periods need fixing')

@@ -42,6 +42,7 @@ import { createTranscriptPathMemo, resolveMemoizedPath } from './transcript-path
 import { newestTranscript } from './account-transcript-roots'
 import { parseChatName } from './gemini-family'
 import { listGeminiFamilies } from './gemini-family-io'
+import { opencodeDbPath, opencodeSessionExists, opencodeTranscriptRef, readOpencodeTurns, splitOpencodeRef } from './opencode-store'
 
 /** Everything a reader is told about the session whose conversation is wanted. */
 export interface TranscriptRef {
@@ -541,6 +542,26 @@ const CLAUDE: HarnessTranscript = {
  * the adapter's newest session was from 2026-04-10. Both sources are read, through one `id`-keyed
  * gate, because a resumed session carries the same turn in each.
  */
+/**
+ * OpenCode: the "path" is `<opencode.db>#<ses_…>` (`opencode-store.ts`) — one SQLite store holds every
+ * session, so there is no file to name. The link rule is unchanged: only an exact conversation id (a
+ * session the store holds) resolves; nothing is guessed from the cwd. A poll re-reads the session whole —
+ * a session is rows in a WAL database, not an append-only file with a tail to seek.
+ */
+const OPENCODE: HarnessTranscript = {
+  async resolve(ref) {
+    return opencodeSessionExists(opencodeDbPath(), ref.conversationId) ? opencodeTranscriptRef(opencodeDbPath(), ref.conversationId) : null
+  },
+  async read(path, max) {
+    const r = splitOpencodeRef(path)
+    return r ? windowed(readOpencodeTurns(r.dbPath, r.sessionId), max) : { turns: [], older: false }
+  },
+  async readRecent(path, max) {
+    const r = splitOpencodeRef(path)
+    return r ? readOpencodeTurns(r.dbPath, r.sessionId).slice(-max) : []
+  },
+}
+
 export const HARNESS_TRANSCRIPTS: Record<HarnessId, HarnessTranscript | null> = {
   claude: CLAUDE,
   antigravity: ANTIGRAVITY,
@@ -548,11 +569,7 @@ export const HARNESS_TRANSCRIPTS: Record<HarnessId, HarnessTranscript | null> = 
   copilot: COPILOT,
   kimi: KIMI,
   gemini: GEMINI,
-  // No legacy adapter (CLAUDE.md step 4, skipped by scope) and therefore no ManagedSession can ever
-  // carry an opencode conversationId — the LINK half this table's own header distinguishes from the
-  // format half. A `null` reader here is refused IN WORDS by the caller, naming the harness, exactly
-  // as this file's own rule requires.
-  opencode: null,
+  opencode: OPENCODE,
 }
 
 /**
