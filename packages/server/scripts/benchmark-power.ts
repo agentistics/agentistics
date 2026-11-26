@@ -61,31 +61,52 @@ function gen(tasks: number, reps: number, sc: Scenario, rng: () => number): Verd
 }
 
 const median = (v: number[]) => { const s = [...v].sort((a, b) => a - b); return s.length ? s[Math.floor((s.length - 1) / 2)]! : NaN }
-const pct = (n: number) => `${((n / EXPERIMENTS) * 100).toFixed(0)}%`.padStart(4)
+/** (f) is the false-verdict figure and needs a firm count: at least 1000 experiments. */
+const runsFor = (sc: Scenario) => (sc.key === 'f' ? Math.max(EXPERIMENTS, 1000) : EXPERIMENTS)
+const pct = (n: number, of: number) => `${((n / of) * 100).toFixed(0)}%`.padStart(4)
 
-function tally(tasks: number, reps: number, sc: Scenario, seed: number): Record<Verdict, number> {
+type Tally = Record<Verdict, number>
+/** Same samples and seeds for both variants. The rule only acts on a tie, so ON is evaluated only there. */
+function tally(tasks: number, reps: number, sc: Scenario, seed: number): { off: Tally; on: Tally; n: number } {
   const rng = mulberry32(seed)
-  const t: Record<Verdict, number> = { pays: 0, does_not_pay: 0, tie: 0, insufficient: 0 }
-  for (let e = 0; e < EXPERIMENTS; e++) {
+  const n = runsFor(sc)
+  const off: Tally = { pays: 0, does_not_pay: 0, tie: 0, insufficient: 0 }
+  const on: Tally = { ...off }
+  for (let e = 0; e < n; e++) {
     const samples = gen(tasks, reps, sc, rng)
-    t[verdict({ samples, candidate: 'cand', reference: 'ref', size: 'M', seed: e + 1, resamples: RESAMPLES }).verdict]++
+    const base = { samples, candidate: 'cand', reference: 'ref', size: 'M' as const, seed: e + 1, resamples: RESAMPLES }
+    const v0 = verdict({ ...base, dominance: false }).verdict
+    off[v0]++
+    on[v0 === 'tie' ? verdict({ ...base, dominance: true }).verdict : v0]++
   }
-  return t
+  return { off, on, n }
 }
+const cell = (t: Tally, n: number) => `${pct(t.pays, n)} / ${pct(t.does_not_pay, n)} / ${pct(t.tie, n)} / ${pct(t.insufficient, n)}`
 
 console.log(`# Power check — ${EXPERIMENTS} experiments per cell, ${RESAMPLES} resamples (default in production: 10000)`)
 console.log(`Noise: cost ±${NOISE * 100}% per run, task spread exp(±${SPREAD}); wall time ±${NOISE * 100}%. Defects: accepted 20% one; rejected 1-2, severe 40%.`)
-console.log('Cells: pays / does_not_pay / tie / insufficient.\n')
+console.log('Cells: pays / does_not_pay / tie / insufficient. Each design shows the dominance rule OFF, then ON (same samples and seeds).')
+console.log('Scenario (f) runs max(experiments, 1000) per cell.\n')
 console.log('## Verdict rates')
-console.log(`| scenario | ${DESIGNS.map(([t, r]) => `${t}×${r}`).join(' | ')} |`)
-console.log(`|---|${DESIGNS.map(() => '---').join('|')}|`)
+console.log(`| scenario | ${DESIGNS.map(([t, r]) => `${t}×${r} OFF | ${t}×${r} ON`).join(' | ')} |`)
+console.log(`|---|${DESIGNS.map(() => '---|---').join('|')}|`)
+const falseRows: string[] = []
 for (const sc of SCENARIOS) {
-  const cols = DESIGNS.map(([tasks, reps], i) => {
-    const t = tally(tasks, reps, sc, 7000 + 100 * tasks + 10 * reps + i + sc.key.charCodeAt(0))
-    return `${pct(t.pays)} / ${pct(t.does_not_pay)} / ${pct(t.tie)} / ${pct(t.insufficient)}`
+  const cols: string[] = []
+  DESIGNS.forEach(([tasks, reps], i) => {
+    const { off, on, n } = tally(tasks, reps, sc, 7000 + 100 * tasks + 10 * reps + i + sc.key.charCodeAt(0))
+    cols.push(cell(off, n), cell(on, n))
+    if (sc.key === 'f') {
+      const f = (t: Tally) => { const p = (t.pays + t.does_not_pay) / n; return `${(p * 100).toFixed(1)}% ± ${(196 * Math.sqrt(p * (1 - p) / n)).toFixed(1)}` }
+      falseRows.push(`| ${tasks}×${reps} | ${n} | ${f(off)} | ${f(on)} |`)
+    }
   })
   console.log(`| (${sc.key}) ${sc.label} | ${cols.join(' | ')} |`)
 }
+console.log('\n## (f) total false verdicts (pays + does_not_pay), % ± 95% interval in points')
+console.log('| design | experiments | rule OFF | rule ON |')
+console.log('|---|---|---|---|')
+for (const r of falseRows) console.log(r)
 
 // ---------------------------------------------------------------------------------------------- width drivers
 console.log('\n## What drives the width (12×3) — median width in points')

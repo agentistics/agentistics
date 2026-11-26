@@ -11,7 +11,7 @@
  * a type with no measurable metric makes the final null.
  */
 import type {
-  CpaSample, ScoreMetricResult, ScoreResult, ScoreSensitivityRow, ScoreType, ScoreTypeResult, ScoreTypeStatus, Verdict,
+  CpaSample, ScoreMetricResult, ScoreResult, ScoreSensitivityRow, ScoreType, Detectable, TypeCertainty, ScoreTypeResult, ScoreTypeStatus, Verdict,
 } from './contract'
 import { mulberry32 } from './stats'
 
@@ -181,6 +181,31 @@ export function geoMean(ratios: readonly number[]): number {
 /** r/(r+1) — the share of a type's maximum the candidate earns. */
 export const share = (r: number): number => (r === Infinity ? 1 : r === 0 ? 0 : r / (r + 1))
 
+/**
+ * Certainty of one type, from its own interval: the candidate is clearly better when the whole interval is
+ * above half of the type's max (lo > max/2), clearly worse when it is all below (hi < max/2), else unclear.
+ * Swapping the arms maps (lo, hi) to (max − hi, max − lo), so the certainty mirrors exactly.
+ */
+export function certaintyOf(max: number, lo: number | null, hi: number | null): TypeCertainty | null {
+  if (lo === null || hi === null) return null
+  return lo > max / 2 ? 'candidate_clear' : hi < max / 2 ? 'reference_clear' : 'unclear'
+}
+
+/**
+ * Smallest difference this run could detect. A point estimate d points away from the even point (max/2) has an
+ * interval that excludes it only when d exceeds the distance from the point to the nearer end; with the interval
+ * width w = hi − lo of THIS run, the distance is estimated as w/2 (the interval is roughly centred on the point).
+ * No threshold is invented: the figure is the run's own half-width, so a tie on a narrower run means less.
+ * `ratio` re-expresses it in the score's own scale: the r with share(r) = 1/2 + d/max (Infinity when d ≥ max/2).
+ * Width is the same in both directions, so the figure is identical on swap.
+ */
+export function detectableOf(max: number, lo: number | null, hi: number | null): Detectable | null {
+  if (lo === null || hi === null) return null
+  const points = (hi - lo) / 2
+  const s = 0.5 + points / max
+  return { points, ratio: s >= 1 ? Infinity : s / (1 - s) }
+}
+
 export const statusOf = (r: number | null): ScoreTypeStatus => (r === null ? 'missing' : r > TIE_BAND.hi ? 'better' : r < TIE_BAND.lo ? 'worse' : 'tie')
 
 // ---------------------------------------------------------------------------------------------- score
@@ -245,7 +270,7 @@ export function computeScore(input: ScoreInput): ScoreResult {
   for (const t of SCORE_TYPES) {
     const ms = metrics.filter(m => m.type === t)
     types[t] = {
-      max: WEIGHTS_V1[t], ratio: ratio[t], status: statusOf(ratio[t]),
+      max: WEIGHTS_V1[t], ratio: ratio[t], status: statusOf(ratio[t]), certainty: null,
       points: ratio[t] === null ? null : WEIGHTS_V1[t] * share(ratio[t]!), lo: null, hi: null, displayPoints: null,
       metrics: ms, missing: ms.filter(m => m.ratio === null).map(m => m.id),
     }
@@ -267,6 +292,7 @@ export function computeScore(input: ScoreInput): ScoreResult {
 
   const empty: ScoreResult = {
     methodVersion: METHOD_VERSION, types, rework, gateBlocked: false,
+    detectable: { types: { quality: null, cost: null, time: null, reliability: null }, final: null },
     final: { value: null, lo: null, hi: null, display: null, nullReason: null },
     sensitivity: { result: null, rows: [] },
   }
@@ -298,6 +324,8 @@ export function computeScore(input: ScoreInput): ScoreResult {
   for (const t of SCORE_TYPES) {
     const iv = interval(typeDraws[t])
     if (iv) { types[t].lo = iv.lo; types[t].hi = iv.hi }
+    types[t].certainty = certaintyOf(WEIGHTS_V1[t], types[t].lo, types[t].hi)
+    empty.detectable.types[t] = detectableOf(WEIGHTS_V1[t], types[t].lo, types[t].hi)
   }
 
   // acceptance gate, symmetric: the side the score would declare the winner may not have fewer accepted
@@ -320,6 +348,8 @@ export function computeScore(input: ScoreInput): ScoreResult {
   const sens = rows.slice(1)
   const allKnown = rows.every(r => r.verdict !== null)
   const gateBlocked = main.lo !== null && main.hi !== null && blocks(verdictOfScore(main.lo, main.hi))
+  const fd = detectableOf(100, main.lo, main.hi)
+  empty.detectable.final = fd && { ...fd, toVerdict: fd.points + (PAYS_ABOVE - 50) }
   return {
     ...empty, gateBlocked,
     final: { value: finalPoint, lo: main.lo, hi: main.hi, display, nullReason: main.lo === null ? 'Não foi possível calcular a margem.' : null },

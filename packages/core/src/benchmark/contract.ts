@@ -96,6 +96,16 @@ export interface ScoreMetricResult {
   missing: string | null
 }
 
+export type TypeCertainty = 'candidate_clear' | 'reference_clear' | 'unclear'
+
+/** Smallest difference this run's sample could detect: see `detectableOf` in score.ts for the formula. */
+export interface Detectable {
+  /** Points away from the even point (max/2) at which this interval would just exclude it. */
+  points: number
+  /** The same distance as a ratio (candidate better by this factor; its inverse is the mirror). Infinity when no ratio reaches it. */
+  ratio: number
+}
+
 export interface ScoreTypeResult {
   max: number
   points: number | null
@@ -107,6 +117,8 @@ export interface ScoreTypeResult {
   /** Geometric mean of the type's measured metric ratios. */
   ratio: number | null
   status: ScoreTypeStatus
+  /** Certainty from this type's own interval against half of its max. Null = no interval (type unmeasured). */
+  certainty: TypeCertainty | null
   metrics: ScoreMetricResult[]
   /** Ids of metrics left out because they could not be measured (never counted as 0). */
   missing: string[]
@@ -132,6 +144,12 @@ export interface ScoreResult {
   sensitivity: { result: 'firm' | 'depends_on_weights' | null; rows: ScoreSensitivityRow[] }
   /** The acceptance gate blocked the winner the score would declare (the side that would win accepted fewer runs than the other beyond the margin), in either direction. */
   gateBlocked: boolean
+  /** What this sample could detect, from the interval widths of this run. Null where there is no interval. */
+  detectable: {
+    types: Record<ScoreType, Detectable | null>
+    /** Final score: distance from 50 that excludes 50, and the distance from 50 that clears the verdict threshold (52/48). */
+    final: (Detectable & { toVerdict: number }) | null
+  }
 }
 
 export interface VerdictResult {
