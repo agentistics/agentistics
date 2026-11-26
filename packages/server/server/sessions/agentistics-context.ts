@@ -47,6 +47,8 @@ export interface ContextInput {
   /** HANDOFF.RELAY: a leader hand-off's successor is told what the owner said to its predecessor and
    *  the predecessor's last reply (`handoff-relay.ts`'s `relaySection`). */
   handoffRelay?: string
+  /** ORQ.H1: the owner's open requests on this leader's task (`PEDIDOS ABERTOS DO DONO`), always on top. */
+  ownerRequests?: string
 }
 
 /** The block is fenced so the chat UI can recognise it and render it collapsed. */
@@ -92,6 +94,7 @@ export const CONTEXT_TOOL_NAMES = Object.values(TOOL_GROUPS).flat()
 export function contextText(i: ContextInput): string {
   const lines = [
     CONTEXT_HEADER,
+    ...(i.ownerRequests && i.role === 'leader' ? [i.ownerRequests] : []),
     `You are running inside agentistics, an app that manages and measures coding-assistant sessions. Session: ${i.sessionId}. Project folder: ${i.cwd}.`,
     'Tools — the "agentistics" MCP server gives you:',
     `- Tasks (Agentask): ${TOOL_GROUPS.Tasks.join(', ')} — plan, claim, edit, link, comment, coordinate, and close work.`,
