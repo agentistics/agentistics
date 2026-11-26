@@ -8,7 +8,8 @@ import type { Filters } from '@agentistics/core'
 let createRoot: typeof import('react-dom/client').createRoot
 let MemoryRouter: typeof import('react-router-dom').MemoryRouter
 let SessionsAside: typeof import('./SessionsAside').SessionsAside
-let TITLE_CLAMP: typeof import('./SessionLine').TITLE_CLAMP
+let TITLE_ONE_LINE: typeof import('./SessionLine').TITLE_ONE_LINE
+let TITLE_ONE_LINE_CLASS: string
 let loadSharedPrefs: typeof import('../../lib/sharedPref').loadSharedPrefs
 let writePrefs: typeof import('../../lib/sessionsAsidePrefs').writeAsideGroupPrefs
 let readPrefs: typeof import('../../lib/sessionsAsidePrefs').readAsideGroupPrefs
@@ -60,7 +61,7 @@ beforeAll(async () => {
   createRoot = (await import('react-dom/client')).createRoot
   MemoryRouter = (await import('react-router-dom')).MemoryRouter
   SessionsAside = (await import('./SessionsAside')).SessionsAside
-  TITLE_CLAMP = (await import('./SessionLine')).TITLE_CLAMP
+  ;({ TITLE_ONE_LINE, TITLE_ONE_LINE_CLASS } = await import('./SessionLine'))
   loadSharedPrefs = (await import('../../lib/sharedPref')).loadSharedPrefs
   const asidePrefs = await import('../../lib/sessionsAsidePrefs')
   writePrefs = asidePrefs.writeAsideGroupPrefs
@@ -218,7 +219,9 @@ for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) for (
     expect(banner.querySelector<HTMLButtonElement>('[data-fell-reopen]')!.title).toBe(sentence)
     const section = host.querySelector<HTMLElement>('[data-ended-section="fell"]')!
     for (let i = 0; i < count; i++) expect(section.textContent).toContain(`Fallen ${i}`)
-    for (const el of Array.from(host.querySelectorAll<HTMLElement>('[data-tab-body] *'))) expect(el.style.textOverflow).not.toBe('ellipsis')
+    // Nothing but a session TITLE truncates — the title is one line with "…" by the owner's decision
+    // of 2026-11-26 (SESSAO.ESTADO-ICONE), its full text on hover.
+    for (const el of Array.from(host.querySelectorAll<HTMLElement>('[data-tab-body] *:not([data-line-title])'))) expect(el.style.textOverflow).not.toBe('ellipsis')
   })
 }
 
@@ -549,20 +552,18 @@ for (const width of [1280, 390]) test(`Encerradas headings fold, show a count wh
   expect(endedHead('sleeping')!.getAttribute('type')).toBe('button')
 })
 
-// ROW.TITLE-CLAMP — a long title takes at most two lines and ends in "…", never split mid-word.
-for (const width of [1280, 390]) test(`a long session title is clamped to two lines with its full text on hover (${width}px)`, async () => {
+// SESSAO.ESTADO-ICONE (owner 2026-11-26) — a long title is ONE line ending in "…", never split mid-word.
+for (const width of [1280, 390]) test(`a long session title is one line with "…" and its full text on hover (${width}px)`, async () => {
   act(() => writePrefs({ tab: 'active', foldedTeams: [] }))
   const long = 'MODO.AUTONOMO-SIMPLES · só liga/desliga + agenda igual à de uso (Sonnet high) e mais um pedaço grande de texto'
   await render([{ ...row('long-one', 'working'), title: long }], width, 'pt')
   const title = host.querySelector<HTMLElement>('[data-line-title]')!
   expect(title).not.toBeNull()
-  // happy-dom drops the prefixed pair from `style`; the browsers get it from this very object.
-  expect(TITLE_CLAMP).toMatchObject({ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, lineClamp: 2 })
-  expect(title.style.cssText).toContain('line-clamp: 2')
-  expect(title.style.overflow).toBe('hidden')
-  expect(title.style.overflowWrap).toBe('break-word') // never `anywhere`: that split words in the middle
-  // The whole title stays reachable (hover) and copyable: the break opportunities add no characters.
+  expect(title.classList.contains(TITLE_ONE_LINE_CLASS)).toBe(true)
+  expect(TITLE_ONE_LINE).toMatchObject({ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' })
+  expect(title.style.whiteSpace).toBe('nowrap')
+  expect(title.style.textOverflow).toBe('ellipsis')
+  // The whole title stays reachable (hover) and copyable.
   expect(title.closest('[data-session-open]')!.getAttribute('title')).toBe(long)
   expect(title.textContent).toBe(long)
-  expect(title.querySelectorAll('wbr').length).toBeGreaterThan(0)
 })
