@@ -113,9 +113,25 @@ export const LIMIT_RULES: Record<HarnessId, LimitRule | null> = {
   copilot: null,
   antigravity: null,
   kimi: null,
-  // No spawn-spec support (CLAUDE.md step 4, skipped by scope): agentop cannot drive an opencode
-  // session, so no limit banner has ever been probed.
-  opencode: null,
+  // opencode has NO quota endpoint and no reset time, so only the error text it prints can say a
+  // session is blocked, and `resetAt` is deliberately absent (a reset nobody printed is a guess).
+  // Strings MEASURED in the opencode 1.19.5 binary (provider-error handling), not invented:
+  //   - FreeUsageLimitError -> "Free usage exceeded, subscribe to Go" / toast title "Free limit reached"
+  //   - GoUsageLimitError   -> toast title "Go limit reached"
+  //   - insufficient_quota  -> "Quota exceeded. Check your plan and billing details."
+  //   - HTTP 429 default    -> "Rate limit exceeded"
+  // A bare "rate limit"/"429" is NOT matched mid-line: opencode retries those itself, so a frame
+  // quoting one is usually a session that is still working.
+  opencode: {
+    probed: 'opencode 1.19.5, 2026-10-31 (strings read from the binary)',
+    banner: [
+      /Free\s+usage\s+exceeded/i,
+      /Free\s+limit\s+reached/i,
+      /Go\s+limit\s+reached/i,
+      /Quota\s+exceeded\.\s+Check\s+your\s+plan\s+and\s+billing/i,
+      /^\s*(?:Error:\s*)?Rate\s+limit\s+exceeded\b/i,
+    ],
+  },
 }
 
 /** The rules for a harness, or `undefined` when it was never probed. */
