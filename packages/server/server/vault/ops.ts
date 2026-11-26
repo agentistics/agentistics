@@ -116,29 +116,6 @@ async function opSeal(ctx: OpContext): Promise<OpResult> {
   }
 }
 
-// ── preferences tokens ──────────────────────────────────────────────────────────────────────
-
-/** A path the service will write a sealed map beside: the data directory and nothing else. */
-function inDataDir(p: string): boolean {
-  const abs = resolve(p)
-  return abs === resolve(AGENTISTICS_DATA_DIR) || abs.startsWith(resolve(AGENTISTICS_DATA_DIR) + sep)
-}
-
-async function opPrefsTokens(h: Record<string, unknown>): Promise<OpResult> {
-  const { prefsFile, next, previous } = h
-  if (!str(prefsFile) || !inDataDir(prefsFile) || basename(prefsFile) !== 'preferences.json') return bad()
-  if (!next || typeof next !== 'object' || Array.isArray(next)) return bad()
-  if (previous !== null && (typeof previous !== 'object' || Array.isArray(previous))) return bad()
-  const { stripAndSealTokens } = await import('./prefs-tokens')
-  try {
-    const stripped = await stripAndSealTokens(prefsFile, next as Record<string, unknown>, previous as Record<string, unknown> | null)
-    return { reply: { ok: true, stripped } }
-  } catch (err) {
-    const e = err as { code?: string; message?: string }
-    return { reply: refused(e.code ?? 'failed', e.message ?? 'the tokens could not be stored') }
-  }
-}
-
 // ── GitHub backup ───────────────────────────────────────────────────────────────────────────
 
 async function opGithubConfig(): Promise<OpResult> {
@@ -558,7 +535,6 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
     case 'lock': return opLock(h)
     case 'unlock': return opUnlock(h)
     case 'seal': return opSeal(ctx)
-    case 'prefs-tokens': return opPrefsTokens(h)
     case 'github-config': return opGithubConfig()
     case 'github-fetch': return opGithubFetch(ctx, deps.fetch)
     case 'central-mongo-kind': return opCentralMongoKind(h)
@@ -585,7 +561,7 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
  */
 export const VAULT_OPS = [
   'status', 'lock', 'unlock', 'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm',
-  'recovery-begin', 'recovery-confirm', 'setup-code', 'presence-enroll', 'set-auto-lock', 'activity', 'seal', 'prefs-tokens', 'github-config', 'github-fetch', 'central-mongo-kind',
+  'recovery-begin', 'recovery-confirm', 'setup-code', 'presence-enroll', 'set-auto-lock', 'activity', 'seal', 'github-config', 'github-fetch', 'central-mongo-kind',
   'central-compose', 'central-native-tool', 'central-env-write', 'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
   'personal-refs', 'personal-ref', 'personal-scrub', 'vault-bundle', 'vault-stage-bundle',
 ] as const
@@ -605,4 +581,3 @@ export function installVaultOps(): void {
   _installed = true
 }
 export function opsInstalled(): boolean { installVaultOps(); return _installed }
-
