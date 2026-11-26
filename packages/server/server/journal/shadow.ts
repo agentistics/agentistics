@@ -97,6 +97,16 @@ export interface ShadowRun {
   rejected: number
   dropped: number
   ms: number
+  /**
+   * Where `ms` went (A1.7), so a missed budget can be attributed off a live machine instead of
+   * re-profiled. The stamp scan and `discover()` run together, so they are one wall figure (`scanMs`).
+   * `appendMs` is EXACT: `append` is synchronous SQLite, so no other work interleaves with it.
+   * `replayMs` is the sum of every replay call's wall time — with `CONCURRENCY` replays in flight it
+   * can exceed the run's own `ms`, and it includes the appends of other conversations that ran while
+   * a replay was waiting on the disk. Read off `performance.now()`, not the injected clock: they are
+   * durations for a person, never an input to a decision. Optional: a file written before A1.7 has none.
+   */
+  phases?: { scanMs: number; replayMs: number; appendMs: number }
 }
 
 export type ShadowResult = ({ status: 'ran' } & ShadowRun) | { status: 'off' | 'busy' | 'failed' }
@@ -303,10 +313,16 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
     const stampsPath = deps.stampsPath === undefined ? `${j.status().path}.stamps.json` : deps.stampsPath
     committed ??= stampsPath === null ? new Map() : loadStamps(stampsPath, identity)
     const known = committed
-    const current = readStamps ? await readStamps() : new Map<string, SourceStamp>()
+    // Independent reads of the same directories: taken together rather than one after the other.
+    const scan0 = performance.now()
+    const [current, discovered] = await Promise.all([
+      readStamps ? readStamps() : Promise.resolve(new Map<string, SourceStamp>()),
+      replay.discover(),
+    ])
+    const scanMs = Math.round(performance.now() - scan0)
 
     const wanted = new Set(sessions.filter(isClaude).map(s => s.session_id))
-    const found = (await replay.discover()).filter(src => wanted.has(src.sessionId))
+    const found = discovered.filter(src => wanted.has(src.sessionId))
     const sources = found.filter(src => !canSkip(known.get(src.sessionId), current.get(src.sessionId)))
     const skipped = found.length - sources.length
     // A transcript that is gone from disk has nothing left to replay; forget its cursor and stamp.
@@ -318,15 +334,21 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
     let written = 0
     let duplicates = 0
     let rejected = 0
+    let replayMs = 0
+    let appendMs = 0
 
     const limit = createLimiter(concurrency)
     await Promise.all(sources.map(src => limit(async () => {
       try {
+        const r0 = performance.now()
         const batch = await replay.replay(src, cursors.get(src.sessionId) ?? null)
+        replayMs += performance.now() - r0
         const droppedBefore = j.status().counters.dropped
         for (let i = 0; i < batch.events.length; i += flushEvents) {
           const slice: AgentisticsEvent[] = batch.events.slice(i, i + flushEvents)
+          const a0 = performance.now()
           const res = await j.append(slice)
+          appendMs += performance.now() - a0
           events += slice.length
           written += res.written
           duplicates += res.duplicates
@@ -350,6 +372,7 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
     const result: ShadowResult = {
       status: 'ran', sources: sources.length, skipped, events, written, duplicates, rejected,
       dropped: after.dropped - before.dropped, ms: now() - started,
+      phases: { scanMs, replayMs: Math.round(replayMs), appendMs: Math.round(appendMs) },
     }
     const { status: _s, ...ran } = result as { status: 'ran' } & ShadowRun
     lastRun = ran
