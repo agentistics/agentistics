@@ -767,6 +767,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
   const stage = async (subtaskId: string, draft: Record<string, unknown>, actor: string, opts: { leaderSessionId?: string; versionTarget?: string; pedidoId?: string; pedidoIds?: readonly string[] } = {}): Promise<DeliveryReply> => {
     const sub = await d.facts.subtask(subtaskId)
     if (!sub) return fail(404, 'no_such_subtask', `subtask ${subtaskId} does not exist on the board`)
+    if (sub.restoredBy === 'guard') return fail(422, 'guard_placeholder', 'this subtask is a placeholder the guard sweep restored after a raw delete; it is not work and is never staged — the task leader or the owner dismisses it by removing it')
     if (sub.groupMember) return fail(422, 'subtask_in_group', 'stage the group, not its member')
     const merged = { ...(sub.staged ?? {}), ...draft }
     const written = await d.board.stage(subtaskId, merged)
@@ -1075,7 +1076,7 @@ export function createDeliveryService(deps: DeliveryDeps) {
     for (const rec of Object.values((await d.store.read()).deliveries)) {
       if (rec.phase !== 'fila' || rec.dequeued) continue
       const sub = await d.facts.subtask(rec.subtaskId).catch(() => null)
-      if (!sub || sub.groupMember || ['in_review', 'done', 'abandoned', 'blocked'].includes(sub.status)) continue
+      if (!sub || sub.groupMember || sub.restoredBy === 'guard' || ['in_review', 'done', 'abandoned', 'blocked'].includes(sub.status)) continue
       out.push({ subtaskId: rec.subtaskId, taskId: rec.taskId, title: sub.title, priority: sub.priority ?? 'low', since: rec.createdAt, ...(rec.queueHold ? { hold: rec.queueHold } : {}), ...(rec.queueAsk ? { ask: rec.queueAsk } : {}), rec, sub })
     }
     return orderQueue(out)

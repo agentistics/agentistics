@@ -87,6 +87,7 @@ const sub = async (w: W, id: string) => (await w.tasks.read()).subtasks.find(s =
 const sweepLines = (a: string[]) => a.filter(x => x.startsWith('sweep'))
 const OWNER = { principal: { kind: 'owner', via: 'legacy-browser' } } as never
 const SESSION = { principal: { kind: 'session', id: 'worker-1', via: 'token' } } as never
+const VAULT_OWNER = { principal: { kind: 'owner', via: 'vault-credential', grantId: 'g-1' } } as never
 const UNATTRIBUTED = { principal: { kind: 'unattributed' } } as never
 const member = (id: string, status: string) => [id, { parentGroupId: 'g', status, done: status === 'done' }] as [string, Record<string, unknown>]
 const at = { status: 'done', at: ISO }
@@ -122,7 +123,11 @@ test('R3-1 the guard records the member statuses it accepts when the owner retre
   const w = await world([['g', { isGroup: true }], member('m1', 'done'), member('m2', 'done')])
   await writeCp(w, cp('g', { rank: 4, boardStatus: 'done', boardStage: 'published', phase: null, members: { m1: { status: 'done', at: ISO }, m2: { status: 'done', at: ISO } } } as never))
   // the group is done (rank 4); the owner reopens ONE member: a guarded retreat that accepts only that member's new status
-  await w.tasks.upsertSubtask({ ...(await sub(w, 'm1')), status: 'in_progress', done: false }, OWNER)
+  // r8 A: the LEGACY owner (headers, no vault proof) is refused (accepted_reopen) and the piece stays; the owner WITH vault proof reopens
+  const refused = await w.tasks.upsertSubtask({ ...(await sub(w, 'm1')), status: 'in_progress', done: false }, OWNER).then(() => null, (e: any) => e?.code)
+  expect(refused).toBe('accepted_reopen')
+  expect((await sub(w, 'm1')).status).toBe('done')
+  await w.tasks.upsertSubtask({ ...(await sub(w, 'm1')), status: 'in_progress', done: false }, VAULT_OWNER)
   const c = (await w.guards.read()).checkpoints.g!
   expect(Object.fromEntries(Object.entries(c.members as any).map(([k, v]: any) => [k, v.status]))).toEqual({ m1: 'in_progress', m2: 'done' })
   w.clock.now += 60_000

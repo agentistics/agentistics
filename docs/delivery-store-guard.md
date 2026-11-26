@@ -111,8 +111,8 @@ busy file skips the tick with a named line, never proceeds unguarded):
    reverted; a divergence is reported as `sweep would-revert <id>: no_member_baseline`. Only a quiet tick, with no
    divergence signal and the aggregate rank inside the checkpoint's authority, writes the group's first record, whole.
    That is the only record the sweep ever writes; once a group has one it is never rewritten from the board, so a lateral,
-   lower or higher divergence is never consolidated. A report that persists for more than 60 ticks of the minute tick
-   (`SWEEP_NO_BASELINE_WARN_MS`, one hour) raises a health WARN `sweep no_member_baseline: <ids>` until it stops.
+   lower or higher divergence is never consolidated. A report that persists for 60 minutes of consecutive unaccepted reports
+   (`SWEEP_NO_BASELINE_WARN_MS`, a clock, not a tick count) raises a health WARN `sweep no_member_baseline: <ids>` until it stops.
    Residual migration risk (declared): a raw writer active before the upgrade can leave a forgery that a quiet migration
    tick accepts as its initial baseline, and a group forged above its checkpoint before the upgrade is reported (and,
    after an hour, WARNed) but never repaired by the sweep. This is intentional: migration must never undo legitimate
@@ -127,6 +127,51 @@ busy file skips the tick with a named line, never proceeds unguarded):
    status back to its checkpoint for the board and for release. Only members whose accepted status can lower the derived
    status are restored (a `done` or non-real one never can). Both leave a revert comment, count toward the loop guard and
    raise a health WARN `sweep members: group <id> lost accepted members …` for 24 h. Shadow only reports them.
+   **Restored placeholder (S2b.1, B4; r2).** A piece is a placeholder ONLY when the sweep's own LEDGER says so. Every restoration is
+   recorded in the sealed `guards.json` (`sweep.placeholders[<subtask>]`: group, task, `restoredAt`, a random restoration id), written by
+   the sweep under the guards lock BEFORE the placeholder lands; the `restoredBy: 'guard'` flag in `tasks.json` is a label and is never
+   trusted on its own. Everything that treats a placeholder specially (the delivery facts behind `stage` → `guard_placeholder` and the
+   delivery queue, the dismissal door and its `placeholder_protected` refusal) asks the ledger. A piece carrying the flag with NO
+   ledger record is a real piece: normal rules apply, the dismissal door refuses it (`not_a_placeholder`), the sweep reports it every
+   tick (`forged_restore_mark`, health WARN `sweep-forged-restore-mark:<id>` for 24 h) and the flag is stripped on the next write.
+   The placeholder says plainly that a raw write deleted it, that it is NOT work, and how to dismiss it. It has no delivery record, and
+   `task_next` and `task_claim` act on tasks only. The task leader (a proven session that leads THAT task; a leader of another task is
+   refused) or the owner dismisses it through the placeholder-only door — MCP `agentistics_task_subtask` with `dismissPlaceholder: true`
+   and `id`, CLI `agentop task subtask dismiss <task> <subtask> [--owner]`, REST `POST /api/tasks/<task>/subtasks {id, dismissPlaceholder:
+   true}` (the board's remove button reaches the same rule) — never a general remove. The write raises nothing, needs no
+   classification, takes the member out of the accepted record and marks the ledger record dismissed in the same locked section, so
+   the sweep does not bring it back. Any other actor is refused (`placeholder_protected`, 422).
+   **Removing an accepted member (r3).** The general removal door (`remove: true` / `removeSubtask`, REST, MCP, CLI) refuses a group
+   member that carries an acceptance checkpoint (its status `done` in the group's accepted record) for EVERY session principal — leader
+   or worker, of any task: 422 `member_accepted` ("the piece was accepted, so only the owner may remove it"). The OWNER path is
+   explicit: `remove: true` from a caller with no session (loopback / the browser, proving ownership) removes it, and the removal is
+   recorded in the guard ledger (`sweep.ownerRemoved[<id>]`) in the same locked section, so the sweep neither restores it nor raises
+   the group's derived status. An accepted (`done`) member that disappears WITHOUT that record (a raw write) can never be restored
+   (`done` never returns): it is reported every tick (`sweep report <id>: accepted_member_missing`, health WARN
+   `sweep-accepted-member-missing:<id>`) and the group's status is never raised because of it. Open members keep the old door.
+   Every sweep WARN carries its own `guide` (none points at turning the guard off).
+   **The owner's proof is not a browser header (r4).** Removing an ACCEPTED member needs an owner proof that does not come from the
+   client: the vault grant (a fresh `delivery` grant, scope `subtask:dismiss`) or the `required` owner-proof mode with a verified owner.
+   In the default `legacy` mode the `legacy-browser` heuristic (own `Origin` + `Sec-Fetch-Site: same-origin`) is NOT enough for this
+   one move — any process on the machine can send those two headers — and is refused 403 `owner_proof_required` with a sentence
+   saying the piece was accepted and how the owner removes it (turn on the owner proof, or use the grant); the member stays. Other
+   legacy-browser moves are unchanged. The service door repeats the rule (`owner_proof_required`), so no adapter can skip it.
+   **The placeholder door obeys the same rule (r5).** `dismissPlaceholder` (REST `dismissPlaceholder: true`, MCP, CLI) judges an ACCEPTED member
+   BEFORE its placeholder branch: a session (leader or worker) gets 422 `member_accepted`, a header-only owner 403 `owner_proof_required`, and only the
+   vault-proven owner removes it, recorded as `sweep.ownerRemoved` exactly like `remove`. The index keeps no legacy-browser fallback of its own for it.
+   Removing an open member goes through the same door with the caller's guard context; a guard refusal is a 422 with its sentence,
+   never a 500.
+   **The owner-removal ledger exists only while the rule is on (r4).** `sweep.ownerRemoved` is written inside the guarded section, so
+   with the rule `off` an owner removal leaves no record (there is no sweep to keep quiet). If the rule is turned on afterwards, the
+   removed accepted member still has a `done` entry in its group's checkpoint and appears as `accepted_member_missing` (a WARN, never
+   a restore); the owner sees it once, resolves it by re-checking the group, and nothing is raised.
+   **Moved to another task (B3).** A member a raw writer moved out of its group into ANOTHER task comes back to the group AND
+   to the group's task (`member_moved_out`, event detail `crossTask: true`). Declared limit: only an OPEN member comes back — a
+   `done` member moved out is never restored (`done` never returns), and it is lowered at its destination by `no_checkpoint`.
+   **Forge carried by a guarded write (B2, declared residual risk).** A member forged to a higher status and then carried
+   to another group by a guarded SESSION write is not reverted unless it lifts that group: it is reported every tick
+   (`unaccepted_member`), and after 60 minutes of consecutive unaccepted reports (`SWEEP_UNACCEPTED_WARN_MS`: a clock, not a tick count, so a gap in the ticks can bring it earlier) a health WARN
+   `sweep-unaccepted-member` asks a person to check and repair it by hand.
    No checkpoint means rank 0
    (`no_checkpoint`) only after both safety locks below pass. Rank ≥ 1 whose evidence ids/hashes are gone, point at other bytes, belong to an earlier capture round, or
    whose record HEAD moved goes back to rank 0 (`evidence_stale`: board `in_progress`, phase `ajuste`, a new round). The
@@ -149,13 +194,16 @@ busy file skips the tick with a named line, never proceeds unguarded):
 5. **Loop guard.** The second revert of a piece inside 24 h also moves it to `blocked` (`externo: an unknown writer keeps
    moving this piece`), logs a WARN and shows it in health until a quiet day. Memory lives in `guards.json` (`sweep.reverts`),
    written after the documents and pruned on quiet ticks. Board-only loops also block an existing delivery record. The board
-   carries `blockedReason: 'externo: an unknown writer keeps moving this piece'`. Health shows ONE aggregated `sweep-loop`
-   WARN with full piece ids, its own EN/PT sentence, and the guide `agentop flow guarantee off a`.
+   carries `blockedReason: 'externo: an unknown writer keeps moving this piece'`. **Why a whole group can show as `blocked`
+   (B1):** a restored placeholder reverted twice in 24 h is blocked like any piece, and a group's status is derived from its
+   members, so the group is `blocked` too. The sweep never unblocks it: a person sets the status back on the board; the
+   health WARN says so in both languages. Health ids are STRUCTURED (B6): `sweep-loop`, `sweep-breaker`, `sweep-members:<group>:<actions>`, `sweep-no-member-baseline`, `sweep-unaccepted-member`, never parsed from the text, and they are not rendered under the "owner turned this rule off" frame. Health shows ONE aggregated `sweep-loop`
+   WARN with full piece ids, its own EN/PT sentence, and a guide that says how to release it (no text or guide cites turning the guard off, r4).
    Leaving `blocked` clears the stale reason on both normal subtask writes and sweep repairs.
 6. **An `owner` / `override` checkpoint is never reverted**, whatever its `via`. `by.kind: owner` is also exempt; the guarded
    writer records `{kind: 'owner', via}` when the requesting principal is the owner (the initial evidence gate still applies).
 
-Every revert comment and the loop WARN name the escape: `agentop flow guarantee off a`. S10 writes grandfathered checkpoints
+Every revert comment and the loop WARN say that only raw writes are reverted and to make the change through the board, MCP or CLI (r4: they no longer point at turning the guard off). S10 writes grandfathered checkpoints
 and a sealed `guards.json` migration stamp: `migrations: { a: { version: 1, at: <ISO timestamp> } }`. Caller-supplied activation
 facts never create that stamp. With A on and no stamp, the sweep reports `sweep-skipped: migration_missing` + WARN and writes
 nothing. Even with the stamp, more than 20 `no_checkpoint` reverts OR (more than 5% of all pieces AND more than five candidates) in a tick trips
@@ -165,7 +213,7 @@ compatibility action remains `sweep-skipped: no_checkpoint_breaker`; the checkpo
 while the checkpointed repairs of the same tick still land. The checkpointed reverts have their own absolute ceiling
 (`SWEEP_CHECKPOINT_CEILING` = 100 per tick, `sweep-skipped: checkpoint_ceiling`, a wholesale rewrite rather than a forgery):
 past it nothing is repaired in that tick. Only the sealed `sweep.warning` is updated. Health shows its own `sweep-breaker` WARN with the count,
-an EN/PT explanation and guide `agentop flow guarantee off a`. The first tick of an episode logs it and notifies each affected
+an EN/PT explanation and a guide that tells the person to find who writes the file raw and to make the change through the board, MCP or CLI (r5: never `guarantee off`). The first tick of an episode logs it and notifies each affected
 task's leader (deduped across leaders); repeated ticks do neither. A normal tick clears the warning. Intent recovery is
 planned first but persisted only after the safety checks pass. Shadow writes no document, including intents or loop memory.
 
@@ -212,3 +260,17 @@ Assignment destructuring (`({ constructor: C } = x)`) is refused too, including 
 reflection with a safe key remain allowed.
 This includes `Reflect.construct`/`Reflect.apply` with `Function` as the target. Other runtime-built strings and data-URL
 imports remain outside this round's threat model. Exemptions remain fixed by exact path and digest.
+
+## Accepted pieces: delete and reopen (S2b.1 r7)
+
+Enforced at the store write (`task-store.ts`), so REST, MCP, CLI and a direct store call are all covered:
+
+- Deleting a task, or a group, that holds an ACCEPTED member (`done` in the group's sealed checkpoint) answers 422 `accepted_members` for every session (leader, worker, other task, legacy header, forged) and for any principal that is not the owner with a vault proof. Nothing is deleted. The vault-proven owner deletes it; each accepted member is recorded in the ledger (`ownerRemoved`) and a WARN is logged.
+- Reopening an accepted piece (`done` to any other status) or taking it out of its group (`parentGroupId` cleared or changed) answers 422 `accepted_reopen` unless the owner has a vault proof. This is checked by the store itself, independent of the classification guard.
+- `POST /api/tasks/<ref>/subtasks` refuses (422 `subtask_not_in_task`) a subtask id that belongs to another task than `<ref>`.
+
+### r8 (re-QA r7)
+
+- An individual ACCEPTED member is removed only by the vault-proven owner (`removeSubtask`, with or without opts).
+- The vault-proven owner reopening an accepted piece, or moving it out of its group, is exempt from guard A classification for that one operation (`exemptClassification`; never a session, never the legacy header).
+- A malformed %-escape on a task path answers 400 `bad_path`; the MCP tick (`{id, done, session}`) now works instead of a silent no-op.

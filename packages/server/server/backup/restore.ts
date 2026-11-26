@@ -45,8 +45,8 @@ const run = promisify(execFile)
 export const isGuardedBook = (target: string): boolean => { const name = basename(target); return name === 'tasks.json' || name === 'deliveries.json' }
 export const GUARD_RESTORE_REFUSED = 'guard_restore_refused'
 export const GUARD_RESTORE_REFUSAL = {
-  en: 'Nothing was restored: the delivery guarantee (rule A) is on, and a backup cannot replace the task board or the delivery records — that would bring back progress nobody authorized here. Turn the guarantee off first, restore, then turn it back on.',
-  pt: 'Nada foi restaurado: a garantia de entrega (regra A) está ligada, e um backup não pode substituir o quadro de tarefas nem os registros de entrega — isso traria de volta um avanço que ninguém autorizou aqui. Desligue a garantia antes, restaure e ligue de novo.',
+  en: 'Nothing was restored: the delivery guarantee (rule A) is on, and a backup cannot replace the task board or the delivery records — that would bring back progress nobody authorized here. Restore the other files from the backup and re-create the board or delivery records through the board, MCP or CLI (the guarantee guide for this refusal lives in docs/delivery-store-guard.md).',
+  pt: 'Nada foi restaurado: a garantia de entrega (regra A) está ligada, e um backup não pode substituir o quadro de tarefas nem os registros de entrega — isso traria de volta um avanço que ninguém autorizou aqui. Restaure os demais arquivos do backup e recrie o quadro ou os registros de entrega pelo quadro, MCP ou CLI (o guia desta recusa está em docs/delivery-store-guard.md).',
 } as const
 /** The failure sentence in the reader's language (the same sentence on every door: CLI, web job, API). */
 export function restoreReason(r: { reason: string; reasonPt?: string }, lang: 'en' | 'pt'): string {
