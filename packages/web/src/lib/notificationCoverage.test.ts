@@ -21,6 +21,8 @@ const SERVER = join(import.meta.dir, '../../../server/server')
 const PLAN_CODES = new Set([
   'handoff_pending', 'working',
   'not_own', 'not_leader_target', 'different_task', 'not_live', 'no_task', 'self', 'no_such_session', 'not_wired', 'dirty_worktrees',
+  // DSL.TIPO-SESSAO spawn-gate refusals: returned to the spawning door in plain words, never notified.
+  'gate_failed', 'gate_refused',
 ])
 
 const FIXTURES = new Set(['a', 'b', 'c', 'x', 'custom', 'ambiguous', 'missing_field', 'some.new_code_nobody_scoped'])
