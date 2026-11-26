@@ -40,7 +40,7 @@ import type { FleetState } from '../../lib/fleet'
 import { versionedAsset } from '../../lib/brand'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import {
-  cardAnswerActions, cardPlacement, cardWidth, formatSpan, formatWaiting, parseSnooze, snoozeError, SNOOZE_PRESETS, type CardPlacement, type NayAlert,
+  alertModelLabel, alertShowsLeader, cardAnswerActions, cardPlacement, cardWidth, formatSpan, formatWaiting, parseSnooze, snoozeError, SNOOZE_PRESETS, type CardPlacement, type NayAlert,
 } from '../../lib/nayNotify'
 import { echoOpacities, followSettled, initFollow, landImpulse, NO_FADE, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { NAY_NOTIFY_CARD_Z } from '../../lib/zLayers'
@@ -52,9 +52,12 @@ import { dismissAlert, snoozeAlert, useNayAlerts, useNayShock } from '../../lib/
 import { playEnter, playExit, type EnterHandle, playShock, prefersReducedMotion } from '../../lib/nayNotifyAnim'
 import { getNotificationSettings, subscribeNotificationSettings, type NotificationSettings } from '../../lib/sessionNotifications'
 import { NayEndSession } from './NayEndSession'
-import { needsTitle, summaryTitle } from '../../lib/checkinNotify'
+import { checkinSubjectShown, needsTitle, summaryTitle } from '../../lib/checkinNotify'
 import { muteSessionWithToast } from '../../lib/notifyMenu'
 import { sessionIdentityKey } from '../../lib/sessionIdentity'
+import { sessionDisplayTitle } from '../../lib/sessionDisplayTitle'
+import { RoleIcon } from '../nav/RoleIcon'
+import { useSessionRole } from '../../lib/sessionRoles'
 
 type Drawer = null | 'approve' | 'snooze' | 'snooze-custom' | 'end'
 
@@ -212,6 +215,12 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
   const kickRef = useRef<() => void>(() => {})
 
   const row = alert ? rows.find(r => r.id === alert.sessionId) : undefined
+  // The session's name as the chat header draws it: the leader's role is a badge there, never a
+  // "[ LÍDER ] - " prefix spelled out in the title (`sessionDisplayTitle`, the helper SessionFacts uses).
+  const alertName = alert ? sessionDisplayTitle(alert.name) : ''
+  // ...and the crown the session tab draws keeps saying it is a leader (`alertShowsLeader`).
+  const alertRole = useSessionRole(alert ? sessionIdentityKey(row ?? { id: alert.sessionId }) : '')
+  const alertLeader = !!alert && alertShowsLeader(alert.name, alertRole)
   // A check-in alert names its leader by conversation id (the agenda's key); the fleet row gives the title.
   const ckLeaderRow = alert?.checkin ? rows.find(r => r.conversationId === alert.checkin!.leader || r.id === alert.checkin!.leader) : undefined
   const reduced = prefersReducedMotion()
@@ -515,7 +524,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
       key={`${alert.key}:${embedded}`}
       data-nay-notice={alert.kind}
       role="dialog"
-      aria-label={pt ? `Notificação: ${alert.name}` : `Notification: ${alert.name}`}
+      aria-label={pt ? `Notificação: ${alertName}` : `Notification: ${alertName}`}
       aria-live="polite"
       onPointerEnter={() => setEngaged(true)}
       onPointerLeave={() => setEngaged(false)}
@@ -566,7 +575,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
         {ck && (
           // Whose round this is, by the name the fleet gives it — never the bare conversation id.
           <div data-rise style={{ ...hint, marginTop: -6 }}>
-            {pt ? 'Check-in do líder' : 'Check-in by leader'} <b style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{ckLeaderRow?.title ?? ck.leader.slice(0, 8)}</b> · {hhmm(alert.sinceMs)}
+            {pt ? 'Check-in do líder' : 'Check-in by leader'} <b style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{ckLeaderRow ? sessionDisplayTitle(ckLeaderRow.title) : ck.leader.slice(0, 8)}</b> · {hhmm(alert.sinceMs)}
           </div>
         )}
 
@@ -574,32 +583,43 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
           <div key={item.subject} data-rise style={{ border: `1px solid ${item.critical ? 'color-mix(in srgb, var(--accent-red) 50%, transparent)' : 'var(--border)'}`, borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 8, background: 'var(--bg-surface)' }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, lineHeight: 1.4 }}>
               <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 5, flexShrink: 0, background: item.critical ? 'var(--accent-red)' : 'var(--anthropic-orange)' }} />
-              <span style={{ overflowWrap: 'anywhere' }}>{item.text}{item.critical && <b style={{ marginLeft: 6, color: 'var(--accent-red)', fontSize: 11 }}>{pt ? 'crítico' : 'critical'}</b>}</span>
+              <span style={{ overflowWrap: 'anywhere', display: 'grid', gap: 2 }}>
+                {/* The SUBJECT the leader filed the need under names what it is about; the text says what is needed. */}
+                {checkinSubjectShown(item) && <b style={{ fontWeight: 600 }}>{item.subject}</b>}
+                <span>{item.text}{item.critical && <b style={{ marginLeft: 6, color: 'var(--accent-red)', fontSize: 11 }}>{pt ? 'crítico' : 'critical'}</b>}</span>
+              </span>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {item.link && (
+            {item.link && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(checkinLinkPath(item.link!)) })}>
                   {item.link.kind === 'session' ? (pt ? 'Abrir a sessão' : 'Open the session') : (pt ? 'Abrir a tarefa' : 'Open the task')}
                 </button>
-              )}
-              {ckLeaderRow && (
-                <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onReply(ckLeaderRow.id) })}>
-                  {pt ? 'Responder ao líder' : 'Reply to the leader'}
-                </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         ))}
-        {ck && <span data-rise style={hint}>{pt ? 'Não aviso de novo sobre isso, a não ser que piore.' : 'I will not bring this up again unless it gets worse.'}</span>}
+        {/* ONE reply for the whole round: every item is from the same leader, so the same button under
+            each of them said the same thing N times. */}
+        {ck && ckLeaderRow && (
+          <div data-rise style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onReply(ckLeaderRow.id) })}>
+              {pt ? 'Responder ao líder' : 'Reply to the leader'}
+            </button>
+          </div>
+        )}
+        {ck && <span data-rise style={hint}>{pt ? 'Não vou avisar de novo sobre isso, a não ser que piore.' : 'I will not bring this up again unless it gets worse.'}</span>}
         {!vault && !ck && <div data-rise style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 6, background: 'var(--bg-surface)' }}>
-          <div title={alert.name} style={{ fontWeight: 650, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{alert.limit ? (harnessLabel ?? alert.name) : alert.name}</div>
+          <div title={alertName} style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 650, fontSize: 13.5, minWidth: 0 }}>
+            {!alert.limit && alertLeader && <RoleIcon kind="leader" size={13} pt={pt} />}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{alert.limit ? (harnessLabel ?? alertName) : alertName}</span>
+          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
             {harnessLabel && (
               <span style={chipStyle}>
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: harnessColor ?? undefined }} />{harnessLabel}
               </span>
             )}
-            {alert.model && <span style={chipStyle}>{alert.model}</span>}
+            {alert.model && <span style={chipStyle} title={alert.model}>{alertModelLabel(alert)}</span>}
             <span style={{ ...chipStyle, border: 'none', background: chip.bg, color: chip.fg }}>{chip[lang]}</span>
           </div>
           {alert.clean ? (
@@ -671,7 +691,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
               title={pt ? 'Silenciar esta sessão' : 'Mute this session'}
               style={{ ...btn, padding: isMobile ? '8px 10px' : '5px 8px' }}
               onClick={() => void close(() => {
-                muteSessionWithToast(sessionIdentityKey(row ?? { id: alert.sessionId }), { name: alert.name, harness: alert.harness ?? '' })
+                muteSessionWithToast(sessionIdentityKey(row ?? { id: alert.sessionId }), { name: alertName, harness: alert.harness ?? '' })
                 dismissAlert(alert.key)
               })}
             >
